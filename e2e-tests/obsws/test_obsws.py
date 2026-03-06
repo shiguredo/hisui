@@ -397,6 +397,22 @@ async def _expect_input_settings_changed_event(
     return event
 
 
+async def _expect_input_name_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    input_name: str,
+    old_input_name: str,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="InputNameChanged",
+        event_intent=OBSWS_EVENT_SUB_INPUTS,
+    )
+    assert event["d"]["eventData"]["inputName"] == input_name
+    assert event["d"]["eventData"]["oldInputName"] == old_input_name
+    return event
+
+
 async def _expect_scene_item_enable_state_changed_event(
     ws: aiohttp.ClientWebSocketResponse,
     *,
@@ -3335,19 +3351,72 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
             )
             assert create_event["d"]["eventData"]["inputName"] == "input-event-camera"
 
+            set_input_name_response = await _send_obsws_request(
+                ws,
+                request_type="SetInputName",
+                request_id="req-set-input-name-events",
+                request_data={
+                    "inputName": "input-event-camera",
+                    "newInputName": "input-event-camera-renamed",
+                },
+            )
+            assert set_input_name_response["d"]["requestStatus"]["result"] is True
+            input_name_changed_event = await _expect_input_name_changed_event(
+                ws,
+                input_name="input-event-camera-renamed",
+                old_input_name="input-event-camera",
+            )
+            assert input_name_changed_event["d"]["eventData"]["inputUuid"] == create_event["d"][
+                "eventData"
+            ]["inputUuid"]
+
+            create_input_response_2 = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-events-2",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "input-event-camera-2",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response_2["d"]["requestStatus"]["result"] is True
+            create_event_2 = await _expect_obsws_event(
+                ws,
+                event_type="InputCreated",
+                event_intent=OBSWS_EVENT_SUB_INPUTS,
+            )
+            assert create_event_2["d"]["eventData"]["inputName"] == "input-event-camera-2"
+
+            invalid_set_input_name_response = await _send_obsws_request(
+                ws,
+                request_type="SetInputName",
+                request_id="req-set-input-name-events-invalid",
+                request_data={
+                    "inputName": "input-event-camera-renamed",
+                    "newInputName": "input-event-camera-2",
+                },
+            )
+            invalid_set_input_name_status = invalid_set_input_name_response["d"]["requestStatus"]
+            assert invalid_set_input_name_status["result"] is False
+            assert invalid_set_input_name_status["code"] == 602
+            await _assert_no_message_within(ws, timeout=0.5)
+
             set_input_settings_response = await _send_obsws_request(
                 ws,
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-events",
                 request_data={
-                    "inputName": "input-event-camera",
+                    "inputName": "input-event-camera-renamed",
                     "inputSettings": {"file": str(updated_image_path)},
                 },
             )
             assert set_input_settings_response["d"]["requestStatus"]["result"] is True
             input_settings_changed_event = await _expect_input_settings_changed_event(
                 ws,
-                input_name="input-event-camera",
+                input_name="input-event-camera-renamed",
             )
             assert input_settings_changed_event["d"]["eventData"]["inputKind"] == "image_source"
             assert input_settings_changed_event["d"]["eventData"]["inputSettings"] == {
@@ -3359,7 +3428,7 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-events-invalid",
                 request_data={
-                    "inputName": "input-event-camera",
+                    "inputName": "input-event-camera-renamed",
                     "inputSettings": {"file": 1},
                 },
             )
@@ -3374,7 +3443,7 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 ws,
                 request_type="RemoveInput",
                 request_id="req-remove-input-events",
-                request_data={"inputName": "input-event-camera"},
+                request_data={"inputName": "input-event-camera-renamed"},
             )
             assert remove_input_response["d"]["requestStatus"]["result"] is True
             remove_event = await _expect_obsws_event(
@@ -3382,7 +3451,7 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 event_type="InputRemoved",
                 event_intent=OBSWS_EVENT_SUB_INPUTS,
             )
-            assert remove_event["d"]["eventData"]["inputName"] == "input-event-camera"
+            assert remove_event["d"]["eventData"]["inputName"] == "input-event-camera-renamed"
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):

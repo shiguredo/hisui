@@ -53,6 +53,7 @@
 - [x] `InputCreated`: Input 作成を通知する
 - [x] `InputRemoved`: Input 削除を通知する
 - [x] `InputSettingsChanged`: Input 設定変更を通知する
+- [x] `InputNameChanged`: Input 名変更を通知する
 - [x] `SceneItemEnableStateChanged`: Scene Item の有効状態変更を通知する
 - [x] `SceneItemCreated`: Scene Item の作成を通知する
 - [x] `SceneItemRemoved`: Scene Item の削除を通知する
@@ -146,6 +147,7 @@
   - NOTE: 対象が存在しない場合は not found エラーを返す
 - [x] `SetInputName`: 入力名を変更する
   - NOTE: `inputName` または `inputUuid` のいずれかで対象 Input を指定する
+  - NOTE: 成功時は Inputs 購読中セッションへ `InputNameChanged` を配信する
 - [x] `GetInputDefaultSettings`: 入力の既定設定を取得する
   - NOTE: 現在は `image_source` / `video_capture_device` の既定設定を返す
 - [x] `GetInputSettings`: 入力設定を取得する

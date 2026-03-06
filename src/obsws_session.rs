@@ -525,6 +525,12 @@ impl ObswsSession {
                 .await;
             return Self::build_execution_from_action(action);
         }
+        if request_type == "SetInputName" {
+            let action = self
+                .handle_set_input_name_request(&request_id, request.request_data.as_ref())
+                .await;
+            return Self::build_execution_from_action(action);
+        }
         if request_type == "CreateSceneItem" {
             let action = self
                 .handle_create_scene_item_request(&request_id, request.request_data.as_ref())
@@ -1108,6 +1114,65 @@ impl ObswsSession {
             &updated_input.input_uuid,
             updated_input.input.kind_name(),
             &updated_input.input.settings,
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_set_input_name_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let mut input_registry = self.input_registry.write().await;
+        let requested_input_lookup = Self::parse_input_lookup_fields(request_data);
+        let old_input = requested_input_lookup
+            .as_ref()
+            .and_then(|(input_uuid, input_name)| {
+                input_registry
+                    .find_input(input_uuid.as_deref(), input_name.as_deref())
+                    .cloned()
+            });
+        let response_text = crate::obsws_response_builder::build_set_input_name_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let Some(old_input) = old_input else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        let Some(updated_input) = input_registry
+            .find_input(Some(&old_input.input_uuid), None)
+            .cloned()
+        else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
+        if old_input.input_name == updated_input.input_name {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        let event_text = crate::obsws_response_builder::build_input_name_changed_event(
+            &updated_input.input_name,
+            &old_input.input_name,
+            &updated_input.input_uuid,
         );
         SessionAction::SendTexts {
             messages: vec![
@@ -1989,6 +2054,7 @@ mod tests {
         OBSWS_CLOSE_NOT_IDENTIFIED, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_INPUTS,
         OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
         REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+        REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
     };
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -2459,6 +2525,106 @@ mod tests {
         let (result, code) = parse_request_status(&text);
         assert!(!result);
         assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+    }
+
+    #[tokio::test]
+    async fn set_input_name_with_input_subscription_sends_event() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-1","inputKind":"video_capture_device","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { .. } = create_action else {
+            panic!("must be SendTexts");
+        };
+
+        let set_request_data = nojson::RawJsonOwned::parse(
+            r#"{"inputName":"camera-1","newInputName":"camera-1-renamed"}"#,
+        )
+        .expect("requestData must be valid json");
+        let set_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-input-name".to_owned()),
+                request_type: Some("SetInputName".to_owned()),
+                request_data: Some(set_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = set_action else {
+            panic!("must be SendTexts");
+        };
+        let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(event_type, "InputNameChanged");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
+    }
+
+    #[tokio::test]
+    async fn set_input_name_with_input_subscription_does_not_send_event_on_error() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data_a = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-1","inputKind":"video_capture_device","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_action_a = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input-a".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_request_data_a),
+            })
+            .await;
+        let SessionAction::SendTexts { .. } = create_action_a else {
+            panic!("must be SendTexts");
+        };
+
+        let create_request_data_b = nojson::RawJsonOwned::parse(
+            r#"{"sceneName":"Scene","inputName":"camera-2","inputKind":"video_capture_device","inputSettings":{},"sceneItemEnabled":true}"#,
+        )
+        .expect("requestData must be valid json");
+        let create_action_b = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-input-b".to_owned()),
+                request_type: Some("CreateInput".to_owned()),
+                request_data: Some(create_request_data_b),
+            })
+            .await;
+        let SessionAction::SendTexts { .. } = create_action_b else {
+            panic!("must be SendTexts");
+        };
+
+        let set_request_data =
+            nojson::RawJsonOwned::parse(r#"{"inputName":"camera-1","newInputName":"camera-2"}"#)
+                .expect("requestData must be valid json");
+        let set_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-input-name-duplicate".to_owned()),
+                request_type: Some("SetInputName".to_owned()),
+                request_data: Some(set_request_data),
+            })
+            .await;
+        let SessionAction::SendText { text, .. } = set_action else {
+            panic!("must be SendText");
+        };
+        let (result, code) = parse_request_status(&text);
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS);
     }
 
     #[tokio::test]

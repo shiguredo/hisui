@@ -765,6 +765,32 @@ pub fn build_input_settings_changed_event(
     .to_string()
 }
 
+pub fn build_input_name_changed_event(
+    input_name: &str,
+    old_input_name: &str,
+    input_uuid: &str,
+) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "InputNameChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("oldInputName", old_input_name)?;
+                        f.member("inputUuid", input_uuid)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_scene_item_enable_state_changed_event(
     scene_name: &str,
     scene_item_id: i64,
@@ -2983,6 +3009,37 @@ mod tests {
         assert_eq!(input_name, "camera-source");
         assert_eq!(input_kind, "video_capture_device");
         assert_eq!(device_id, "camera-1");
+    }
+
+    #[test]
+    fn build_input_name_changed_event_contains_expected_fields() {
+        let event =
+            build_input_name_changed_event("camera-renamed", "camera-before", "input-uuid-4");
+        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let event_type: String = json
+            .value()
+            .to_path_member(&["d", "eventType"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("eventType must be string");
+        let input_name: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputName"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("inputName must be string");
+        let old_input_name: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "oldInputName"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("oldInputName must be string");
+        let input_uuid: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "inputUuid"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("inputUuid must be string");
+        assert_eq!(event_type, "InputNameChanged");
+        assert_eq!(input_name, "camera-renamed");
+        assert_eq!(old_input_name, "camera-before");
+        assert_eq!(input_uuid, "input-uuid-4");
     }
 
     #[test]
