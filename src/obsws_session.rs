@@ -98,16 +98,6 @@ impl RequestExecutionResult {
     }
 }
 
-struct CreateSceneItemRequestFields {
-    scene_name: Option<String>,
-    scene_uuid: Option<String>,
-}
-
-struct DuplicateSceneItemRequestFields {
-    to_scene_name: Option<String>,
-    to_scene_uuid: Option<String>,
-}
-
 pub struct ObswsSession {
     state: ObswsSessionState,
     negotiated_rpc_version: Option<u32>,
@@ -754,49 +744,6 @@ impl ObswsSession {
             .ok()
     }
 
-    fn parse_create_scene_item_fields(
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> Option<CreateSceneItemRequestFields> {
-        let (scene_name, scene_uuid) =
-            Self::parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
-        let request_data = request_data?;
-        let source_name: Option<String> = request_data
-            .value()
-            .to_member("sourceName")
-            .ok()?
-            .try_into()
-            .ok()?;
-        let source_uuid: Option<String> = request_data
-            .value()
-            .to_member("sourceUuid")
-            .ok()?
-            .try_into()
-            .ok()?;
-        let source_name = source_name.filter(|value| !value.is_empty());
-        let source_uuid = source_uuid.filter(|value| !value.is_empty());
-        if source_name.is_none() && source_uuid.is_none() {
-            return None;
-        }
-        Some(CreateSceneItemRequestFields {
-            scene_name,
-            scene_uuid,
-        })
-    }
-
-    fn parse_duplicate_scene_item_fields(
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> Option<DuplicateSceneItemRequestFields> {
-        let (_from_scene_name, _from_scene_uuid) =
-            Self::parse_scene_lookup_fields(request_data, "fromSceneName", "fromSceneUuid")?;
-        let (to_scene_name, to_scene_uuid) =
-            Self::parse_scene_lookup_fields(request_data, "toSceneName", "toSceneUuid")?;
-        let _scene_item_id = Self::parse_scene_item_id_request_field(request_data, "sceneItemId")?;
-        Some(DuplicateSceneItemRequestFields {
-            to_scene_name,
-            to_scene_uuid,
-        })
-    }
-
     fn parse_response_data_i64_field(text: &str, field_name: &str) -> Option<i64> {
         let json = nojson::RawJson::parse(text).ok()?;
         json.value()
@@ -1122,10 +1069,11 @@ impl ObswsSession {
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
         let target_scene_name =
-            Self::parse_create_scene_item_fields(request_data).and_then(|fields| {
-                input_registry
-                    .resolve_scene_name(fields.scene_name.as_deref(), fields.scene_uuid.as_deref())
-            });
+            Self::parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid").and_then(
+                |(scene_name, scene_uuid)| {
+                    input_registry.resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
+                },
+            );
         let response_text = crate::obsws_response_builder::build_create_scene_item_response(
             request_id,
             request_data,
@@ -1312,12 +1260,11 @@ impl ObswsSession {
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
         let target_scene_name =
-            Self::parse_duplicate_scene_item_fields(request_data).and_then(|fields| {
-                input_registry.resolve_scene_name(
-                    fields.to_scene_name.as_deref(),
-                    fields.to_scene_uuid.as_deref(),
-                )
-            });
+            Self::parse_scene_lookup_fields(request_data, "toSceneName", "toSceneUuid").and_then(
+                |(scene_name, scene_uuid)| {
+                    input_registry.resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
+                },
+            );
         let response_text = crate::obsws_response_builder::build_duplicate_scene_item_response(
             request_id,
             request_data,
