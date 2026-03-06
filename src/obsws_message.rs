@@ -182,6 +182,18 @@ pub fn handle_request_message(
             request.request_data.as_ref(),
             input_registry,
         ),
+        "GetSceneItemList" => crate::obsws_response_builder::build_get_scene_item_list_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetSceneItemSource" => {
+            crate::obsws_response_builder::build_get_scene_item_source_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetSceneItemEnabled" => {
             crate::obsws_response_builder::build_get_scene_item_enabled_response(
                 &request_id,
@@ -189,6 +201,11 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
+        "GetSceneItemIndex" => crate::obsws_response_builder::build_get_scene_item_index_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
             &request_id,
             input_registry,
@@ -466,17 +483,11 @@ mod tests {
             .expect("authentication must exist");
         let challenge: String = authentication
             .to_member("challenge")
-            .expect("challenge member access must succeed")
-            .required()
-            .expect("challenge must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("challenge must be string");
         let salt: String = authentication
             .to_member("salt")
-            .expect("salt member access must succeed")
-            .required()
-            .expect("salt must exist")
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .expect("salt must be string");
         assert_eq!(challenge, "test-challenge");
         assert_eq!(salt, "test-salt");
@@ -515,6 +526,11 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
         assert!(available_requests.iter().any(|r| r == "RemoveScene"));
         assert!(available_requests.iter().any(|r| r == "GetSceneItemId"));
+        assert!(available_requests.iter().any(|r| r == "GetSceneItemList"));
+        assert!(available_requests.iter().any(|r| r == "CreateSceneItem"));
+        assert!(available_requests.iter().any(|r| r == "RemoveSceneItem"));
+        assert!(available_requests.iter().any(|r| r == "DuplicateSceneItem"));
+        assert!(available_requests.iter().any(|r| r == "GetSceneItemSource"));
         assert!(
             available_requests
                 .iter()
@@ -525,6 +541,8 @@ mod tests {
                 .iter()
                 .any(|r| r == "SetSceneItemEnabled")
         );
+        assert!(available_requests.iter().any(|r| r == "GetSceneItemIndex"));
+        assert!(available_requests.iter().any(|r| r == "SetSceneItemIndex"));
         assert!(
             available_requests
                 .iter()
@@ -812,7 +830,11 @@ mod tests {
             "RemoveScene",
             "CreateInput",
             "RemoveInput",
+            "CreateSceneItem",
+            "RemoveSceneItem",
+            "DuplicateSceneItem",
             "SetSceneItemEnabled",
+            "SetSceneItemIndex",
         ];
 
         for request_type in request_types {

@@ -33,7 +33,10 @@ fn parse_signaling_message(data: &[u8]) -> Option<SignalingMessage> {
     let text = std::str::from_utf8(data).ok()?;
     let json = nojson::RawJson::parse(text).ok()?;
     let v = json.value();
-    let msg_type: String = v.to_member("type").ok()?.required().ok()?.try_into().ok()?;
+    let msg_type: String = v
+        .to_member("type")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
     let sdp: Option<String> = v.to_member("sdp").ok()?.try_into().ok()?;
     Some(SignalingMessage { msg_type, sdp })
 }
