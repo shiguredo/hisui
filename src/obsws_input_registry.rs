@@ -524,16 +524,16 @@ impl ObswsInputRegistry {
             .insert(entry.input_name.clone(), input_uuid);
         self.inputs_by_uuid
             .insert(entry.input_uuid.clone(), entry.clone());
-        if scene_item_enabled {
-            let scene_item_id = self.next_scene_item_id();
-            if let Some(scene) = self.scenes_by_name.get_mut(scene_name) {
-                scene.items.push(ObswsSceneItemState {
-                    scene_item_id,
-                    input_uuid: entry.input_uuid.clone(),
-                    enabled: true,
-                });
-            }
-        }
+        let scene_item_id = self.next_scene_item_id();
+        let scene = self
+            .scenes_by_name
+            .get_mut(scene_name)
+            .expect("BUG: scene must exist after validation");
+        scene.items.push(ObswsSceneItemState {
+            scene_item_id,
+            input_uuid: entry.input_uuid.clone(),
+            enabled: scene_item_enabled,
+        });
 
         Ok(entry)
     }
@@ -1500,6 +1500,27 @@ mod tests {
     }
 
     #[test]
+    fn create_input_with_scene_item_disabled_creates_disabled_scene_item() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, false)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+            .expect("scene item id must exist");
+
+        let scene_item_enabled = registry
+            .get_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, scene_item_id)
+            .expect("scene item state must be retrievable");
+        assert!(!scene_item_enabled);
+    }
+
+    #[test]
     fn get_scene_item_enabled_returns_not_found_errors() {
         let mut registry = ObswsInputRegistry::new_for_test();
         let input = ObswsInput::from_kind_and_settings(
@@ -1531,6 +1552,9 @@ mod tests {
     #[test]
     fn create_scene_item_and_list_scene_items_succeed() {
         let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
         let input = ObswsInput::from_kind_and_settings(
             "video_capture_device",
             parse_owned_json("{}").value(),
@@ -1541,17 +1565,12 @@ mod tests {
             .expect("input creation must succeed");
 
         let created_scene_item = registry
-            .create_scene_item(
-                OBSWS_DEFAULT_SCENE_NAME,
-                Some(&created_input.input_uuid),
-                None,
-                true,
-            )
+            .create_scene_item("Scene B", Some(&created_input.input_uuid), None, true)
             .expect("scene item creation must succeed");
-        assert_eq!(created_scene_item.scene_item.scene_item_id, 1);
+        assert_eq!(created_scene_item.scene_name, "Scene B");
 
         let scene_items = registry
-            .list_scene_items(OBSWS_DEFAULT_SCENE_NAME)
+            .list_scene_items("Scene B")
             .expect("scene items must be listed");
         assert_eq!(scene_items.len(), 1);
         assert_eq!(scene_items[0].source_name, "camera-1");
@@ -1561,6 +1580,9 @@ mod tests {
     #[test]
     fn remove_scene_item_and_set_scene_item_index_succeed() {
         let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
         let input_1 = ObswsInput::from_kind_and_settings(
             "video_capture_device",
             parse_owned_json("{}").value(),
@@ -1579,42 +1601,31 @@ mod tests {
             .expect("input creation must succeed");
 
         let first_scene_item = registry
-            .create_scene_item(
-                OBSWS_DEFAULT_SCENE_NAME,
-                Some(&created_input_1.input_uuid),
-                None,
-                true,
-            )
+            .create_scene_item("Scene B", Some(&created_input_1.input_uuid), None, true)
             .expect("scene item creation must succeed");
         let second_scene_item = registry
-            .create_scene_item(
-                OBSWS_DEFAULT_SCENE_NAME,
-                Some(&created_input_2.input_uuid),
-                None,
-                true,
-            )
+            .create_scene_item("Scene B", Some(&created_input_2.input_uuid), None, true)
             .expect("scene item creation must succeed");
 
         let set_index_result = registry
-            .set_scene_item_index(
-                OBSWS_DEFAULT_SCENE_NAME,
-                second_scene_item.scene_item.scene_item_id,
-                0,
-            )
+            .set_scene_item_index("Scene B", second_scene_item.scene_item.scene_item_id, 0)
             .expect("set scene item index must succeed");
         assert!(set_index_result.changed);
-        assert_eq!(set_index_result.scene_items[0].scene_item_id, 2);
-        assert_eq!(set_index_result.scene_items[1].scene_item_id, 1);
+        assert_eq!(
+            set_index_result.scene_items[0].scene_item_id,
+            second_scene_item.scene_item.scene_item_id
+        );
+        assert_eq!(
+            set_index_result.scene_items[1].scene_item_id,
+            first_scene_item.scene_item.scene_item_id
+        );
 
         let removed_scene_item = registry
-            .remove_scene_item(
-                OBSWS_DEFAULT_SCENE_NAME,
-                first_scene_item.scene_item.scene_item_id,
-            )
+            .remove_scene_item("Scene B", first_scene_item.scene_item.scene_item_id)
             .expect("scene item removal must succeed");
         assert_eq!(removed_scene_item.scene_item.source_name, "camera-1");
         let scene_items = registry
-            .list_scene_items(OBSWS_DEFAULT_SCENE_NAME)
+            .list_scene_items("Scene B")
             .expect("scene items must be listed");
         assert_eq!(scene_items.len(), 1);
         assert_eq!(scene_items[0].source_name, "camera-2");
