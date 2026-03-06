@@ -1271,17 +1271,13 @@ pub fn build_get_scene_item_list_response(
         Ok(scene_name) => scene_name,
         Err(response) => return response,
     };
-    let scene_items = match input_registry.list_scene_items(&scene_name) {
-        Ok(scene_items) => scene_items,
-        Err(GetSceneItemListError::SceneNotFound) => {
-            return build_request_response_error(
-                "GetSceneItemList",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene not found",
-            );
-        }
-    };
+    let scene_items = input_registry
+        .list_scene_items(&scene_name)
+        .unwrap_or_else(|error| match error {
+            GetSceneItemListError::SceneNotFound => {
+                unreachable!("resolved scene name must exist in input registry")
+            }
+        });
 
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
@@ -1338,14 +1334,6 @@ pub fn build_create_scene_item_response(
         fields.scene_item_enabled,
     ) {
         Ok(created) => created,
-        Err(CreateSceneItemError::SceneNotFound) => {
-            return build_request_response_error(
-                "CreateSceneItem",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene not found",
-            );
-        }
         Err(CreateSceneItemError::SourceNotFound) => {
             return build_request_response_error(
                 "CreateSceneItem",
@@ -1353,6 +1341,9 @@ pub fn build_create_scene_item_response(
                 REQUEST_STATUS_RESOURCE_NOT_FOUND,
                 "Source not found",
             );
+        }
+        Err(CreateSceneItemError::SceneNotFound) => {
+            unreachable!("resolved scene name must exist in input registry")
         }
     };
 
@@ -1561,14 +1552,6 @@ pub fn build_get_scene_item_source_response(
     let (source_name, source_uuid) =
         match input_registry.get_scene_item_source(&scene_name, fields.scene_item_id) {
             Ok(source) => source,
-            Err(GetSceneItemSourceError::SceneNotFound) => {
-                return build_request_response_error(
-                    "GetSceneItemSource",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene not found",
-                );
-            }
             Err(GetSceneItemSourceError::SceneItemNotFound) => {
                 return build_request_response_error(
                     "GetSceneItemSource",
@@ -1576,6 +1559,9 @@ pub fn build_get_scene_item_source_response(
                     REQUEST_STATUS_RESOURCE_NOT_FOUND,
                     "Scene item not found",
                 );
+            }
+            Err(GetSceneItemSourceError::SceneNotFound) => {
+                unreachable!("resolved scene name must exist in input registry")
             }
         };
 
@@ -1633,14 +1619,6 @@ pub fn build_get_scene_item_index_response(
     let scene_item_index =
         match input_registry.get_scene_item_index(&scene_name, fields.scene_item_id) {
             Ok(scene_item_index) => scene_item_index,
-            Err(GetSceneItemIndexError::SceneNotFound) => {
-                return build_request_response_error(
-                    "GetSceneItemIndex",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene not found",
-                );
-            }
             Err(GetSceneItemIndexError::SceneItemNotFound) => {
                 return build_request_response_error(
                     "GetSceneItemIndex",
@@ -1648,6 +1626,9 @@ pub fn build_get_scene_item_index_response(
                     REQUEST_STATUS_RESOURCE_NOT_FOUND,
                     "Scene item not found",
                 );
+            }
+            Err(GetSceneItemIndexError::SceneNotFound) => {
+                unreachable!("resolved scene name must exist in input registry")
             }
         };
 
@@ -1719,12 +1700,6 @@ pub fn execute_set_scene_item_index(
         Ok(set_result) => set_result,
         Err(error) => {
             let response_text = match error {
-                SetSceneItemIndexError::SceneNotFound => build_request_response_error(
-                    "SetSceneItemIndex",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene not found",
-                ),
                 SetSceneItemIndexError::SceneItemNotFound => build_request_response_error(
                     "SetSceneItemIndex",
                     request_id,
@@ -1737,6 +1712,9 @@ pub fn execute_set_scene_item_index(
                     REQUEST_STATUS_INVALID_REQUEST_FIELD,
                     "Invalid sceneItemIndex field",
                 ),
+                SetSceneItemIndexError::SceneNotFound => {
+                    unreachable!("resolved scene name must exist in input registry")
+                }
             };
             return SetSceneItemIndexExecution {
                 response_text,
