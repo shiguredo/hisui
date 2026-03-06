@@ -750,10 +750,7 @@ impl ObswsSession {
         request_data
             .value()
             .to_member(field_name)
-            .ok()?
-            .required()
-            .ok()?
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .ok()
     }
 
@@ -804,10 +801,7 @@ impl ObswsSession {
         let json = nojson::RawJson::parse(text).ok()?;
         json.value()
             .to_path_member(&["d", "responseData", field_name])
-            .ok()?
-            .required()
-            .ok()?
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .ok()
     }
 
@@ -828,18 +822,12 @@ impl ObswsSession {
         let scene_item_id: i64 = request_data
             .value()
             .to_member("sceneItemId")
-            .ok()?
-            .required()
-            .ok()?
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .ok()?;
         let scene_item_enabled: bool = request_data
             .value()
             .to_member("sceneItemEnabled")
-            .ok()?
-            .required()
-            .ok()?
-            .try_into()
+            .and_then(|v| v.required()?.try_into())
             .ok()?;
         Some((scene_name, scene_item_id, scene_item_enabled))
     }
