@@ -693,14 +693,6 @@ fn parse_scene_item_transform_patch(
         crop_to_bounds: raw_scene_item_transform
             .to_member("cropToBounds")?
             .try_into()?,
-        source_width: raw_scene_item_transform
-            .to_member("sourceWidth")?
-            .try_into()?,
-        source_height: raw_scene_item_transform
-            .to_member("sourceHeight")?
-            .try_into()?,
-        width: raw_scene_item_transform.to_member("width")?.try_into()?,
-        height: raw_scene_item_transform.to_member("height")?.try_into()?,
     })
 }
 

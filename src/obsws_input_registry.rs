@@ -362,10 +362,6 @@ pub struct ObswsSceneItemTransformPatch {
     pub crop_left: Option<i64>,
     pub crop_right: Option<i64>,
     pub crop_to_bounds: Option<bool>,
-    pub source_width: Option<f64>,
-    pub source_height: Option<f64>,
-    pub width: Option<f64>,
-    pub height: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1390,14 +1386,6 @@ impl ObswsInputRegistry {
             &mut updated.crop_to_bounds,
             patch.crop_to_bounds,
         );
-        apply_transform_patch_value(&mut changed, &mut updated.source_width, patch.source_width);
-        apply_transform_patch_value(
-            &mut changed,
-            &mut updated.source_height,
-            patch.source_height,
-        );
-        apply_transform_patch_value(&mut changed, &mut updated.width, patch.width);
-        apply_transform_patch_value(&mut changed, &mut updated.height, patch.height);
 
         if changed {
             scene_item.transform = updated.clone();
@@ -2441,8 +2429,6 @@ mod tests {
                     position_x: Some(123.0),
                     position_y: Some(45.0),
                     bounds_type: Some("OBS_BOUNDS_STRETCH".to_owned()),
-                    width: Some(640.0),
-                    height: Some(360.0),
                     ..Default::default()
                 },
             )
@@ -2455,8 +2441,8 @@ mod tests {
         assert_eq!(updated_transform.position_x, 123.0);
         assert_eq!(updated_transform.position_y, 45.0);
         assert_eq!(updated_transform.bounds_type, "OBS_BOUNDS_STRETCH");
-        assert_eq!(updated_transform.width, 640.0);
-        assert_eq!(updated_transform.height, 360.0);
+        assert_eq!(updated_transform.width, 0.0);
+        assert_eq!(updated_transform.height, 0.0);
     }
 
     #[test]
