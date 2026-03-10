@@ -373,6 +373,7 @@ async def _expect_record_state_changed_event(
     ws: aiohttp.ClientWebSocketResponse,
     *,
     output_active: bool,
+    output_paused: bool | None = None,
 ):
     event = await _expect_obsws_event(
         ws,
@@ -380,6 +381,8 @@ async def _expect_record_state_changed_event(
         event_intent=OBSWS_EVENT_SUB_OUTPUTS,
     )
     assert event["d"]["eventData"]["outputActive"] is output_active
+    if output_paused is not None:
+        assert event["d"]["eventData"]["outputPaused"] is output_paused
     return event
 
 
@@ -887,6 +890,9 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "StartRecord" in response_data["availableRequests"]
         assert "ToggleRecord" in response_data["availableRequests"]
         assert "StopRecord" in response_data["availableRequests"]
+        assert "PauseRecord" in response_data["availableRequests"]
+        assert "ResumeRecord" in response_data["availableRequests"]
+        assert "ToggleRecordPause" in response_data["availableRequests"]
         supported_image_formats = response_data["supportedImageFormats"]
         assert isinstance(supported_image_formats, list)
         assert "png" in supported_image_formats
@@ -1871,6 +1877,7 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
             assert start_record_response["d"]["responseData"]["outputActive"] is True
+            assert start_record_response["d"]["responseData"]["outputPaused"] is False
 
             stop_record_response = await _send_obsws_request(
                 ws,
@@ -2664,6 +2671,109 @@ def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
         asyncio.run(_run_toggle_record_flow())
 
 
+def test_obsws_pause_resume_record_request(binary_path: Path, tmp_path: Path):
+    """obsws が PauseRecord / ResumeRecord request を処理できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    image_path = tmp_path / "pause-resume-record-input.png"
+    _write_test_png(image_path)
+
+    async def _run_pause_resume_record_flow(server: ObswsServer):
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-pause-resume-record-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "pause-resume-record-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            start_record_response = await _send_obsws_request(
+                ws,
+                request_type="StartRecord",
+                request_id="req-start-record-for-pause-resume",
+            )
+            assert start_record_response["d"]["requestStatus"]["result"] is True
+            assert start_record_response["d"]["responseData"]["outputActive"] is True
+            assert start_record_response["d"]["responseData"]["outputPaused"] is False
+
+            pause_record_response = await _send_obsws_request(
+                ws,
+                request_type="PauseRecord",
+                request_id="req-pause-record",
+            )
+            assert pause_record_response["d"]["requestStatus"]["result"] is True
+            assert pause_record_response["d"]["responseData"]["outputActive"] is True
+            assert pause_record_response["d"]["responseData"]["outputPaused"] is True
+
+            for _ in range(20):
+                record_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetRecordStatus",
+                    request_id="req-get-record-status-paused",
+                )
+                if record_status_response["d"]["responseData"]["outputPaused"] is True:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("record did not become paused after PauseRecord")
+
+            resume_record_response = await _send_obsws_request(
+                ws,
+                request_type="ResumeRecord",
+                request_id="req-resume-record",
+            )
+            assert resume_record_response["d"]["requestStatus"]["result"] is True
+            assert resume_record_response["d"]["responseData"]["outputActive"] is True
+            assert resume_record_response["d"]["responseData"]["outputPaused"] is False
+
+            for _ in range(20):
+                record_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetRecordStatus",
+                    request_id="req-get-record-status-resumed",
+                )
+                if record_status_response["d"]["responseData"]["outputPaused"] is False:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("record did not resume after ResumeRecord")
+
+            await asyncio.sleep(0.3)
+            status, body, _ = await _http_get(
+                f"http://{server.http_host}:{server.http_port}/metrics"
+            )
+            assert status == 200
+            assert "hisui_total_keyframe_wait_dropped_audio_sample_count" in body
+            assert "hisui_total_keyframe_wait_dropped_video_frame_count" in body
+
+            stop_record_response = await _send_obsws_request(
+                ws,
+                request_type="StopRecord",
+                request_id="req-stop-record-after-pause-resume",
+            )
+            assert stop_record_response["d"]["requestStatus"]["result"] is True
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False) as server:
+        asyncio.run(_run_pause_resume_record_flow(server))
+
+
 def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Path):
     """obsws で image_source を作成し StartStream で RTMP 配信できることを確認する"""
     host = "127.0.0.1"
@@ -3151,6 +3261,7 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
             await _expect_record_state_changed_event(
                 ws,
                 output_active=True,
+                output_paused=False,
             )
 
             stop_record_response = await _send_obsws_request(
@@ -3162,6 +3273,7 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
             stop_event = await _expect_record_state_changed_event(
                 ws,
                 output_active=False,
+                output_paused=False,
             )
             assert stop_event["d"]["eventData"]["outputPath"]
             await ws.close()
@@ -3216,6 +3328,7 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
             await _expect_record_state_changed_event(
                 ws,
                 output_active=True,
+                output_paused=False,
             )
 
             stop_response = await _send_obsws_request(
@@ -3227,6 +3340,126 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
             stop_event = await _expect_record_state_changed_event(
                 ws,
                 output_active=False,
+                output_paused=False,
+            )
+            assert stop_event["d"]["eventData"]["outputPath"]
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_record_pause_events_are_sent_when_outputs_subscription_enabled(
+    binary_path: Path, tmp_path: Path
+):
+    """obsws が Outputs 購読時に Pause/Resume 系イベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    image_path = tmp_path / "pause-record-event-input.png"
+    _write_test_png(image_path)
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_OUTPUTS,
+            )
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-pause-record-event-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "pause-record-event-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            start_response = await _send_obsws_request(
+                ws,
+                request_type="StartRecord",
+                request_id="req-start-record-pause-events",
+            )
+            assert start_response["d"]["requestStatus"]["result"] is True
+            await _expect_record_state_changed_event(
+                ws,
+                output_active=True,
+                output_paused=False,
+            )
+
+            toggle_pause_on_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleRecordPause",
+                request_id="req-toggle-record-pause-events-on",
+            )
+            assert toggle_pause_on_response["d"]["requestStatus"]["result"] is True
+            assert toggle_pause_on_response["d"]["responseData"]["outputPaused"] is True
+            await _expect_record_state_changed_event(
+                ws,
+                output_active=True,
+                output_paused=True,
+            )
+
+            toggle_pause_off_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleRecordPause",
+                request_id="req-toggle-record-pause-events-off",
+            )
+            assert toggle_pause_off_response["d"]["requestStatus"]["result"] is True
+            assert toggle_pause_off_response["d"]["responseData"]["outputPaused"] is False
+            await _expect_record_state_changed_event(
+                ws,
+                output_active=True,
+                output_paused=False,
+            )
+
+            pause_response = await _send_obsws_request(
+                ws,
+                request_type="PauseRecord",
+                request_id="req-pause-record-events",
+            )
+            assert pause_response["d"]["requestStatus"]["result"] is True
+            assert pause_response["d"]["responseData"]["outputPaused"] is True
+            await _expect_record_state_changed_event(
+                ws,
+                output_active=True,
+                output_paused=True,
+            )
+
+            resume_response = await _send_obsws_request(
+                ws,
+                request_type="ResumeRecord",
+                request_id="req-resume-record-events",
+            )
+            assert resume_response["d"]["requestStatus"]["result"] is True
+            assert resume_response["d"]["responseData"]["outputPaused"] is False
+            await _expect_record_state_changed_event(
+                ws,
+                output_active=True,
+                output_paused=False,
+            )
+
+            stop_response = await _send_obsws_request(
+                ws,
+                request_type="StopRecord",
+                request_id="req-stop-record-pause-events",
+            )
+            assert stop_response["d"]["requestStatus"]["result"] is True
+            stop_event = await _expect_record_state_changed_event(
+                ws,
+                output_active=False,
+                output_paused=False,
             )
             assert stop_event["d"]["eventData"]["outputPath"]
             await ws.close()

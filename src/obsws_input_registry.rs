@@ -303,6 +303,9 @@ struct ObswsStreamRuntimeState {
 struct ObswsRecordRuntimeState {
     active: bool,
     started_at: Option<Instant>,
+    paused: bool,
+    paused_at: Option<Instant>,
+    total_paused_duration: Duration,
     run: Option<ObswsRecordRun>,
 }
 
@@ -449,6 +452,18 @@ pub enum ActivateStreamError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivateRecordError {
     AlreadyActive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseRecordError {
+    RecordNotActive,
+    AlreadyPaused,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeRecordError {
+    RecordNotActive,
+    NotPaused,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1102,6 +1117,9 @@ impl ObswsInputRegistry {
         }
         self.record_runtime.active = true;
         self.record_runtime.started_at = Some(Instant::now());
+        self.record_runtime.paused = false;
+        self.record_runtime.paused_at = None;
+        self.record_runtime.total_paused_duration = Duration::ZERO;
         self.record_runtime.run = Some(run);
         Ok(())
     }
@@ -1110,6 +1128,9 @@ impl ObswsInputRegistry {
         let run = self.record_runtime.run.take();
         self.record_runtime.active = false;
         self.record_runtime.started_at = None;
+        self.record_runtime.paused = false;
+        self.record_runtime.paused_at = None;
+        self.record_runtime.total_paused_duration = Duration::ZERO;
         run
     }
 
@@ -1117,15 +1138,51 @@ impl ObswsInputRegistry {
         self.record_runtime.active
     }
 
+    pub fn is_record_paused(&self) -> bool {
+        self.record_runtime.paused
+    }
+
+    pub fn pause_record(&mut self) -> Result<(), PauseRecordError> {
+        if !self.record_runtime.active {
+            return Err(PauseRecordError::RecordNotActive);
+        }
+        if self.record_runtime.paused {
+            return Err(PauseRecordError::AlreadyPaused);
+        }
+        self.record_runtime.paused = true;
+        self.record_runtime.paused_at = Some(Instant::now());
+        Ok(())
+    }
+
+    pub fn resume_record(&mut self) -> Result<(), ResumeRecordError> {
+        if !self.record_runtime.active {
+            return Err(ResumeRecordError::RecordNotActive);
+        }
+        if !self.record_runtime.paused {
+            return Err(ResumeRecordError::NotPaused);
+        }
+        if let Some(paused_at) = self.record_runtime.paused_at.take() {
+            self.record_runtime.total_paused_duration += paused_at.elapsed();
+        }
+        self.record_runtime.paused = false;
+        Ok(())
+    }
+
     pub fn record_run(&self) -> Option<ObswsRecordRun> {
         self.record_runtime.run.clone()
     }
 
     pub fn record_uptime(&self) -> Duration {
-        self.record_runtime
-            .started_at
-            .map(|started_at| started_at.elapsed())
-            .unwrap_or(Duration::ZERO)
+        let Some(started_at) = self.record_runtime.started_at else {
+            return Duration::ZERO;
+        };
+        let mut total_paused_duration = self.record_runtime.total_paused_duration;
+        if self.record_runtime.paused
+            && let Some(paused_at) = self.record_runtime.paused_at
+        {
+            total_paused_duration += paused_at.elapsed();
+        }
+        started_at.elapsed().saturating_sub(total_paused_duration)
     }
 
     pub fn record_output_path(&self) -> Option<&Path> {
@@ -2177,6 +2234,70 @@ mod tests {
         registry.deactivate_stream();
         assert!(!registry.is_stream_active());
         assert_eq!(registry.stream_uptime(), Duration::ZERO);
+    }
+
+    #[test]
+    fn record_runtime_state_changes_on_activate_pause_resume_and_deactivate() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        assert!(!registry.is_record_active());
+        assert!(!registry.is_record_paused());
+        assert_eq!(registry.record_uptime(), Duration::ZERO);
+
+        registry
+            .activate_record(ObswsRecordRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                writer_processor_id: "writer".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+                output_path: PathBuf::from("recordings-for-test/output.mp4"),
+            })
+            .expect("record activation must succeed");
+        assert!(registry.is_record_active());
+        assert!(!registry.is_record_paused());
+
+        registry.pause_record().expect("record pause must succeed");
+        assert!(registry.is_record_paused());
+
+        registry
+            .resume_record()
+            .expect("record resume must succeed");
+        assert!(!registry.is_record_paused());
+
+        registry.deactivate_record();
+        assert!(!registry.is_record_active());
+        assert!(!registry.is_record_paused());
+        assert_eq!(registry.record_uptime(), Duration::ZERO);
+    }
+
+    #[test]
+    fn record_pause_resume_returns_expected_errors() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        assert_eq!(
+            registry.pause_record(),
+            Err(PauseRecordError::RecordNotActive)
+        );
+        assert_eq!(
+            registry.resume_record(),
+            Err(ResumeRecordError::RecordNotActive)
+        );
+
+        registry
+            .activate_record(ObswsRecordRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                writer_processor_id: "writer".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+                output_path: PathBuf::from("recordings-for-test/output.mp4"),
+            })
+            .expect("record activation must succeed");
+        assert_eq!(registry.resume_record(), Err(ResumeRecordError::NotPaused));
+        registry.pause_record().expect("record pause must succeed");
+        assert_eq!(
+            registry.pause_record(),
+            Err(PauseRecordError::AlreadyPaused)
+        );
     }
 
     #[test]

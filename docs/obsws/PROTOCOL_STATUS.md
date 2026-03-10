@@ -284,11 +284,18 @@
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す
 - [x] `StopRecord`: 録画を停止する
   - NOTE: 内部で起動した record 用 processor を停止する
-- [ ] `ToggleRecordPause`: 録画一時停止をトグルする
-- [ ] `PauseRecord`: 録画を一時停止する
-- [ ] `ResumeRecord`: 録画を再開する
+- [x] `ToggleRecordPause`: 録画一時停止をトグルする
+  - NOTE: 成功時の `responseData` には `outputActive` と `outputPaused` を返す
+- [x] `PauseRecord`: 録画を一時停止する
+  - NOTE: pause 区間は録画タイムラインに含めない（ OBS 互換 ）
+- [x] `ResumeRecord`: 録画を再開する
+  - NOTE: resume 時は keyframe 要求を送信し、最初の keyframe 到着まで映像をドロップする
+  - NOTE: keyframe 待機中の drop 数は `hisui_total_keyframe_wait_dropped_video_frame_count`（映像）と `hisui_total_keyframe_wait_dropped_audio_sample_count`（音声）で確認できる
 - [ ] `SplitRecordFile`: 録画ファイルを分割する
 - [ ] `CreateRecordChapter`: 録画チャプターを作成する
+- [ ] 配信 / 録画の encoder 共有構成
+- [x] 配信 / 録画の encoder 非共有構成（ 配信用・録画用で別 encoder を生成 ）
+- NOTE: encoder 共有 / 非共有の識別は obsws の request / event だけでは直接判断しにくいため、検証時は設定値・ログ・メトリクスを併用する
 
 ### Media Inputs
 
