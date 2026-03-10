@@ -1677,6 +1677,7 @@ pub fn build_get_scene_transition_list_response(
                     "responseData",
                     nojson::object(|f| {
                         f.member("currentSceneTransitionName", current_transition_name)?;
+                        f.member("currentSceneTransitionKind", current_transition_name)?;
                         f.member("transitions", &transitions)
                     }),
                 )

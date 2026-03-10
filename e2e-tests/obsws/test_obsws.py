@@ -1064,6 +1064,10 @@ def test_obsws_transition_requests(binary_path: Path):
             transition_list_response["d"]["responseData"]["currentSceneTransitionName"]
             == "Cut"
         )
+        assert (
+            transition_list_response["d"]["responseData"]["currentSceneTransitionKind"]
+            == "Cut"
+        )
 
         set_transition_response = asyncio.run(
             _connect_identify_and_request(
