@@ -3352,7 +3352,7 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
 def test_obsws_record_pause_events_are_sent_when_outputs_subscription_enabled(
     binary_path: Path, tmp_path: Path
 ):
-    """obsws が Outputs 購読時に PauseRecord / ResumeRecord のイベントを送ることを確認する"""
+    """obsws が Outputs 購読時に Pause/Resume 系イベントを送ることを確認する"""
     host = "127.0.0.1"
     ws_port, ws_sock = reserve_ephemeral_port()
     ws_sock.close()
@@ -3398,6 +3398,32 @@ def test_obsws_record_pause_events_are_sent_when_outputs_subscription_enabled(
                 output_paused=False,
             )
 
+            toggle_pause_on_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleRecordPause",
+                request_id="req-toggle-record-pause-events-on",
+            )
+            assert toggle_pause_on_response["d"]["requestStatus"]["result"] is True
+            assert toggle_pause_on_response["d"]["responseData"]["outputPaused"] is True
+            await _expect_record_state_changed_event(
+                ws,
+                output_active=True,
+                output_paused=True,
+            )
+
+            toggle_pause_off_response = await _send_obsws_request(
+                ws,
+                request_type="ToggleRecordPause",
+                request_id="req-toggle-record-pause-events-off",
+            )
+            assert toggle_pause_off_response["d"]["requestStatus"]["result"] is True
+            assert toggle_pause_off_response["d"]["responseData"]["outputPaused"] is False
+            await _expect_record_state_changed_event(
+                ws,
+                output_active=True,
+                output_paused=False,
+            )
+
             pause_response = await _send_obsws_request(
                 ws,
                 request_type="PauseRecord",
@@ -3413,8 +3439,8 @@ def test_obsws_record_pause_events_are_sent_when_outputs_subscription_enabled(
 
             resume_response = await _send_obsws_request(
                 ws,
-                request_type="ToggleRecordPause",
-                request_id="req-toggle-record-pause-events",
+                request_type="ResumeRecord",
+                request_id="req-resume-record-events",
             )
             assert resume_response["d"]["requestStatus"]["result"] is True
             assert resume_response["d"]["responseData"]["outputPaused"] is False
