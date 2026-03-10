@@ -547,14 +547,28 @@ impl ObswsSession {
                 self.handle_pause_record(&request_id).await
             };
             let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                events.push(
-                    crate::obsws_response_builder::build_record_state_changed_event(
-                        true,
-                        !was_paused,
-                        None,
-                    ),
-                );
+            if self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                if outcome.success {
+                    events.push(
+                        crate::obsws_response_builder::build_record_state_changed_event(
+                            true,
+                            !was_paused,
+                            None,
+                        ),
+                    );
+                } else if outcome.output_path.is_some() {
+                    // [NOTE]
+                    // ToggleRecordPause が resume 経路で内部復旧に失敗して
+                    // 録画停止へフォールバックした場合は、request 自体は失敗でも
+                    // 出力状態の遷移（ inactive ）を通知する。
+                    events.push(
+                        crate::obsws_response_builder::build_record_state_changed_event(
+                            false,
+                            false,
+                            outcome.output_path.as_deref(),
+                        ),
+                    );
+                }
             }
             let response_text = Self::build_toggle_response_from_outcome(
                 "ToggleRecordPause",
