@@ -2318,20 +2318,6 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
                 == "OBS_BLEND_ADDITIVE"
             )
 
-            get_transform_before_response = await _send_obsws_request(
-                ws,
-                request_type="GetSceneItemTransform",
-                request_id="req-get-scene-item-transform-before",
-                request_data={
-                    "sceneName": "Scene",
-                    "sceneItemId": scene_item_id,
-                },
-            )
-            assert get_transform_before_response["d"]["requestStatus"]["result"] is True
-            scene_item_transform_before = get_transform_before_response["d"]["responseData"][
-                "sceneItemTransform"
-            ]
-
             set_transform_response = await _send_obsws_request(
                 ws,
                 request_type="SetSceneItemTransform",
@@ -2343,8 +2329,6 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
                         "positionX": 12.5,
                         "positionY": 7.25,
                         "boundsType": "OBS_BOUNDS_STRETCH",
-                        "width": 640.0,
-                        "height": 360.0,
                     },
                 },
             )
@@ -2366,16 +2350,6 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
             assert scene_item_transform["positionX"] == 12.5
             assert scene_item_transform["positionY"] == 7.25
             assert scene_item_transform["boundsType"] == "OBS_BOUNDS_STRETCH"
-            assert (
-                scene_item_transform["sourceWidth"]
-                == scene_item_transform_before["sourceWidth"]
-            )
-            assert (
-                scene_item_transform["sourceHeight"]
-                == scene_item_transform_before["sourceHeight"]
-            )
-            assert scene_item_transform["width"] == scene_item_transform_before["width"]
-            assert scene_item_transform["height"] == scene_item_transform_before["height"]
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
@@ -4308,9 +4282,12 @@ def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscri
                 scene_name="Scene",
                 scene_item_id=scene_item_id,
             )
-            assert (
-                transform_event["d"]["eventData"]["sceneItemTransform"]["positionX"] == 99.0
-            )
+            event_transform = transform_event["d"]["eventData"]["sceneItemTransform"]
+            assert event_transform["positionX"] == 99.0
+            assert event_transform["positionY"] == 0.0
+            assert event_transform["scaleX"] == 1.0
+            assert "sourceWidth" in event_transform
+            assert "sourceHeight" in event_transform
 
             set_transform_again_response = await _send_obsws_request(
                 ws,

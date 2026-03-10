@@ -986,5 +986,4 @@ hisui 対応状況: 対応済み（ `Get/SetSceneItemLocked` / `Get/SetSceneItem
 6. `S -> C` Event ( `op: 5`, `eventType = "SceneItemTransformChanged"` )
 
 NOTE: `SetSceneItemTransform` はパッチ更新で、`sceneItemTransform` に含めたフィールドのみ更新する  
-NOTE: `sourceWidth` / `sourceHeight` / `width` / `height` は read-only のため、指定しても更新しない  
 NOTE: hisui では現時点で `SetSceneItemBlendMode` に対応する専用イベントは送信しない

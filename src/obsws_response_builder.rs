@@ -658,6 +658,28 @@ fn parse_scene_item_transform_patch(
             .required()?
             .invalid("Invalid sceneItemTransform.boundsType field"));
     }
+    let alignment: Option<i64> = raw_scene_item_transform
+        .to_member("alignment")?
+        .try_into()?;
+    if let Some(alignment) = alignment
+        && !is_valid_scene_item_alignment(alignment)
+    {
+        return Err(raw_scene_item_transform
+            .to_member("alignment")?
+            .required()?
+            .invalid("Invalid sceneItemTransform.alignment field"));
+    }
+    let bounds_alignment: Option<i64> = raw_scene_item_transform
+        .to_member("boundsAlignment")?
+        .try_into()?;
+    if let Some(bounds_alignment) = bounds_alignment
+        && !is_valid_scene_item_alignment(bounds_alignment)
+    {
+        return Err(raw_scene_item_transform
+            .to_member("boundsAlignment")?
+            .required()?
+            .invalid("Invalid sceneItemTransform.boundsAlignment field"));
+    }
 
     Ok(ObswsSceneItemTransformPatch {
         position_x: raw_scene_item_transform
@@ -669,13 +691,9 @@ fn parse_scene_item_transform_patch(
         rotation: raw_scene_item_transform.to_member("rotation")?.try_into()?,
         scale_x: raw_scene_item_transform.to_member("scaleX")?.try_into()?,
         scale_y: raw_scene_item_transform.to_member("scaleY")?.try_into()?,
-        alignment: raw_scene_item_transform
-            .to_member("alignment")?
-            .try_into()?,
+        alignment,
         bounds_type,
-        bounds_alignment: raw_scene_item_transform
-            .to_member("boundsAlignment")?
-            .try_into()?,
+        bounds_alignment,
         bounds_width: raw_scene_item_transform
             .to_member("boundsWidth")?
             .try_into()?,
@@ -694,6 +712,12 @@ fn parse_scene_item_transform_patch(
             .to_member("cropToBounds")?
             .try_into()?,
     })
+}
+
+fn is_valid_scene_item_alignment(alignment: i64) -> bool {
+    // OBS の alignment は bitmask（left=1, right=2, top=4, bottom=8）として扱う。
+    // 有効値: center(0), left/right, top/bottom, およびそれらの組み合わせ。
+    matches!(alignment, 0 | 1 | 2 | 4 | 5 | 6 | 8 | 9 | 10)
 }
 
 fn parse_set_stream_service_settings_fields(
@@ -4289,6 +4313,49 @@ mod tests {
             .and_then(|v| v.required()?.try_into())
             .expect("positionX must be f64");
         assert_eq!(position_x, 321.0);
+    }
+
+    #[test]
+    fn execute_set_scene_item_transform_rejects_invalid_alignment_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "image_source",
+            nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
+                .expect("settings must be valid json")
+                .value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input("Scene", "input-1", input, true)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id("Scene", "input-1", 0)
+            .expect("scene item id must exist");
+        let request_data = nojson::RawJsonOwned::parse(format!(
+            r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemTransform":{{"alignment":3}}}}"#,
+            scene_item_id
+        ))
+        .expect("request data must be valid json");
+
+        let response = execute_set_scene_item_transform(
+            "req-set-scene-item-transform-invalid-alignment",
+            Some(&request_data),
+            &mut registry,
+        )
+        .response_text;
+        let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+        let result: bool = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("result must be bool");
+        let code: i64 = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "code"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("code must be i64");
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
     }
 
     #[test]

@@ -213,7 +213,7 @@
 - [x] `GetSceneItemTransform`: シーンアイテム変形情報を取得する
 - [x] `SetSceneItemTransform`: シーンアイテム変形情報を設定する
   - NOTE: `sceneItemTransform` はパッチ更新として扱い、指定フィールドのみ更新する
-  - NOTE: `sourceWidth` / `sourceHeight` / `width` / `height` は read-only として扱い、指定されても更新しない
+  - NOTE: `sourceWidth` / `sourceHeight` / `width` / `height` は更新対象外
 - [x] `GetSceneItemEnabled`: シーンアイテム有効状態を取得する
 - [x] `SetSceneItemEnabled`: シーンアイテム有効状態を設定する
 - [x] `GetSceneItemLocked`: シーンアイテムロック状態を取得する
