@@ -44,6 +44,21 @@ enum ObswsSessionState {
     Identified,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RecordWriterRpcOperation {
+    Pause,
+    Resume,
+}
+
+impl RecordWriterRpcOperation {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+        }
+    }
+}
+
 struct RequestOutcome {
     response_text: String,
     success: bool,
@@ -2256,39 +2271,20 @@ impl ObswsSession {
     }
 
     async fn pause_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
-        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            return Err(crate::Error::new(
-                "BUG: obsws pipeline handle is not initialized",
-            ));
-        };
-
-        let writer_processor_id = crate::ProcessorId::new(run.writer_processor_id.clone());
-        let writer_rpc_sender = pipeline_handle
-            .get_rpc_sender::<
-                tokio::sync::mpsc::UnboundedSender<crate::writer_mp4::Mp4WriterRpcMessage>,
-            >(&writer_processor_id)
+        self.send_record_writer_rpc(run, RecordWriterRpcOperation::Pause)
             .await
-            .map_err(|e| {
-                crate::Error::new(format!(
-                    "failed to get record writer RPC sender ({writer_processor_id}): {e}"
-                ))
-            })?;
-
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        writer_rpc_sender
-            .send(crate::writer_mp4::Mp4WriterRpcMessage::Pause { reply_tx })
-            .map_err(|_| {
-                crate::Error::new(format!(
-                    "failed to send pause RPC to record writer: {}",
-                    run.writer_processor_id
-                ))
-            })?;
-        reply_rx.await.map_err(|_| {
-            crate::Error::new("failed to receive pause RPC response from record writer")
-        })?
     }
 
     async fn resume_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
+        self.send_record_writer_rpc(run, RecordWriterRpcOperation::Resume)
+            .await
+    }
+
+    async fn send_record_writer_rpc(
+        &self,
+        run: &ObswsRecordRun,
+        operation: RecordWriterRpcOperation,
+    ) -> crate::Result<()> {
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
             return Err(crate::Error::new(
                 "BUG: obsws pipeline handle is not initialized",
@@ -2308,16 +2304,26 @@ impl ObswsSession {
             })?;
 
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        writer_rpc_sender
-            .send(crate::writer_mp4::Mp4WriterRpcMessage::Resume { reply_tx })
-            .map_err(|_| {
-                crate::Error::new(format!(
-                    "failed to send resume RPC to record writer: {}",
-                    run.writer_processor_id
-                ))
-            })?;
+        let rpc_message = match operation {
+            RecordWriterRpcOperation::Pause => {
+                crate::writer_mp4::Mp4WriterRpcMessage::Pause { reply_tx }
+            }
+            RecordWriterRpcOperation::Resume => {
+                crate::writer_mp4::Mp4WriterRpcMessage::Resume { reply_tx }
+            }
+        };
+        writer_rpc_sender.send(rpc_message).map_err(|_| {
+            crate::Error::new(format!(
+                "failed to send {} RPC to record writer: {}",
+                operation.as_str(),
+                run.writer_processor_id
+            ))
+        })?;
         reply_rx.await.map_err(|_| {
-            crate::Error::new("failed to receive resume RPC response from record writer")
+            crate::Error::new(format!(
+                "failed to receive {} RPC response from record writer",
+                operation.as_str(),
+            ))
         })?
     }
 
