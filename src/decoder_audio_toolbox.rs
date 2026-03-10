@@ -45,13 +45,17 @@ impl AudioToolboxDecoder {
             tracing::debug!(
                 "Audio Toolbox AAC decoder configuration: sample_rate={sample_rate}Hz, channels={channels}"
             );
-            let channel_layout = Channels::from_u8(channels.get())?;
+            let input_channel_layout = Channels::from_u8(channels.get())?;
             self.inner = Some(shiguredo_audio_toolbox::Decoder::new(
-                sample_rate,
-                channels,
+                shiguredo_audio_toolbox::DecoderConfig {
+                    codec: shiguredo_audio_toolbox::DecoderCodec::AacLc,
+                    input_sample_rate: sample_rate,
+                    input_channels: input_channel_layout.get(),
+                },
             )?);
             self.sample_rate = Some(SampleRate::from_u32(sample_rate)?);
-            self.channels = Some(channel_layout);
+            // Audio Toolbox デコーダーの出力は常にステレオになる。
+            self.channels = Some(Channels::STEREO);
         }
 
         let sample_rate_for_tracking = self.sample_rate.unwrap_or(frame.sample_rate);
@@ -90,12 +94,12 @@ impl AudioToolboxDecoder {
 
     /// デコード済みデータを AudioFrame に変換する共通処理
     fn build_audio_frame(&mut self) -> crate::Result<AudioFrame> {
-        let mut decoded_samples = Vec::new();
+        let mut decoded_samples: Vec<i16> = Vec::new();
         let inner = self
             .inner
             .as_mut()
             .ok_or_else(|| crate::Error::new("audio toolbox decoder is not initialized"))?;
-        while let Some(samples) = inner.next_decoded_data()? {
+        while let Some(samples) = inner.next_frame()? {
             decoded_samples.extend(samples);
         }
 

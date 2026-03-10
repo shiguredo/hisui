@@ -63,7 +63,7 @@ shiguredo_svt_av1 = { version = "=2025.1.0", path = "crates/shiguredo_svt_av1/" 
 shiguredo_websocket = "=2026.1.0-canary.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-shiguredo_audio_toolbox = { version = "=2025.1.0", path = "crates/shiguredo_audio_toolbox/" }
+shiguredo_audio_toolbox = { version = "=2026.1.0-canary.0" }
 shiguredo_video_toolbox = { version = "=2026.1.0-canary.0" }
 
 [dev-dependencies]
@@ -71,7 +71,6 @@ tempfile = "3.18.0"
 
 [workspace]
 members = [
-    "crates/shiguredo_audio_toolbox",
     "crates/shiguredo_dav1d",
     "crates/shiguredo_fdk_aac",
     "crates/shiguredo_libyuv",

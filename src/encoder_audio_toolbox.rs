@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, time::Duration};
+use std::{collections::VecDeque, num::NonZeroUsize, time::Duration};
 
 use shiguredo_mp4::{
     Uint,
@@ -11,27 +11,37 @@ use crate::audio::{self, AudioFormat, AudioFrame, Channels, SampleRate};
 #[derive(Debug)]
 pub struct AudioToolboxEncoder {
     inner: shiguredo_audio_toolbox::Encoder,
+    buffered_frames: VecDeque<shiguredo_audio_toolbox::EncodedFrame>,
     sample_entry: Option<SampleEntry>,
     total_encoded_samples: u64,
 }
 
 impl AudioToolboxEncoder {
     pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
-        let inner = shiguredo_audio_toolbox::Encoder::new(bitrate.get())?;
+        let bitrate_u32 = u32::try_from(bitrate.get())
+            .map_err(|_| crate::Error::new("audio encoder bitrate does not fit into u32"))?;
+        let inner =
+            shiguredo_audio_toolbox::Encoder::new(shiguredo_audio_toolbox::EncoderConfig {
+                codec: shiguredo_audio_toolbox::EncoderCodec::AacLc,
+                sample_rate: SampleRate::HZ_48000.get(),
+                channels: Channels::STEREO.get(),
+                bitrate: Some(bitrate_u32),
+                bitrate_control_mode: None,
+                codec_quality: None,
+                vbr_quality: None,
+            })?;
         let sample_entry = Some(sample_entry(bitrate));
         Ok(Self {
             inner,
+            buffered_frames: VecDeque::new(),
             sample_entry,
             total_encoded_samples: 0,
         })
     }
 
     pub fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
-        if let Some(encoded) = self.inner.finish()? {
-            Ok(Some(self.handle_encoded_frame(encoded)))
-        } else {
-            Ok(None)
-        }
+        self.inner.finish()?;
+        self.dequeue_encoded_frame()
     }
 
     pub fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Option<AudioFrame>> {
@@ -46,7 +56,18 @@ impl AudioToolboxEncoder {
         }
 
         let input = frame.interleaved_stereo_samples()?.collect::<Vec<_>>();
-        let Some(encoded) = self.inner.encode(&input)? else {
+        self.inner.encode(&input)?;
+        self.dequeue_encoded_frame()
+    }
+
+    fn dequeue_encoded_frame(&mut self) -> crate::Result<Option<AudioFrame>> {
+        if self.buffered_frames.is_empty() {
+            while let Some(encoded) = self.inner.next_frame() {
+                self.buffered_frames.push_back(encoded);
+            }
+        }
+
+        let Some(encoded) = self.buffered_frames.pop_front() else {
             return Ok(None);
         };
         Ok(Some(self.handle_encoded_frame(encoded)))
