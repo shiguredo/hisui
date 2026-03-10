@@ -72,6 +72,21 @@ impl RequestOutcome {
             error_comment: Some(error_comment.into()),
         }
     }
+
+    fn failure_with_output_path(
+        response_text: String,
+        error_code: i64,
+        error_comment: impl Into<String>,
+        output_path: String,
+    ) -> Self {
+        Self {
+            response_text,
+            success: false,
+            output_path: Some(output_path),
+            error_code: Some(error_code),
+            error_comment: Some(error_comment.into()),
+        }
+    }
 }
 
 struct RequestExecutionResult {
@@ -502,12 +517,25 @@ impl ObswsSession {
         if request_type == "ResumeRecord" {
             let outcome = self.handle_resume_record(&request_id).await;
             let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                events.push(
-                    crate::obsws_response_builder::build_record_state_changed_event(
-                        true, false, None,
-                    ),
-                );
+            if self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                if outcome.success {
+                    events.push(
+                        crate::obsws_response_builder::build_record_state_changed_event(
+                            true, false, None,
+                        ),
+                    );
+                } else if outcome.output_path.is_some() {
+                    // [NOTE]
+                    // ResumeRecord の内部復旧で録画停止へフォールバックした場合は、
+                    // request 自体は失敗でも出力状態の遷移（ inactive ）を通知する。
+                    events.push(
+                        crate::obsws_response_builder::build_record_state_changed_event(
+                            false,
+                            false,
+                            outcome.output_path.as_deref(),
+                        ),
+                    );
+                }
             }
             return Self::build_execution_from_outcome("ResumeRecord", outcome, events);
         }
@@ -1989,6 +2017,49 @@ impl ObswsSession {
                     "failed to rollback record resume after keyframe request failure: {}",
                     rollback_error.display()
                 );
+                match self.stop_record_processors(&run).await {
+                    Ok(()) => {
+                        let mut input_registry = self.input_registry.write().await;
+                        if input_registry.deactivate_record().is_none() {
+                            tracing::warn!(
+                                "record runtime was already deactivated during resume fallback stop"
+                            );
+                        }
+                        let output_path = run.output_path.display().to_string();
+                        let error_comment = format!(
+                            "Failed to request record resume keyframe: {}; rollback pause failed: {}; record was forcibly stopped",
+                            e.display(),
+                            rollback_error.display(),
+                        );
+                        return RequestOutcome::failure_with_output_path(
+                            Self::build_internal_error_response(
+                                "ResumeRecord",
+                                request_id,
+                                &error_comment,
+                            ),
+                            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            error_comment,
+                            output_path,
+                        );
+                    }
+                    Err(stop_error) => {
+                        let error_comment = format!(
+                            "Failed to request record resume keyframe: {}; rollback pause failed: {}; forced stop failed: {}",
+                            e.display(),
+                            rollback_error.display(),
+                            stop_error.display(),
+                        );
+                        return RequestOutcome::failure(
+                            Self::build_internal_error_response(
+                                "ResumeRecord",
+                                request_id,
+                                &error_comment,
+                            ),
+                            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            error_comment,
+                        );
+                    }
+                }
             }
             let error_comment =
                 format!("Failed to request record resume keyframe: {}", e.display());
