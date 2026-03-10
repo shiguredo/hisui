@@ -79,6 +79,7 @@ pub struct Mp4WriterStats {
     total_video_sample_data_byte_size: crate::stats::StatsCounter,
     total_audio_track_duration: crate::stats::StatsDuration,
     total_video_track_duration: crate::stats::StatsDuration,
+    total_keyframe_wait_dropped_audio_sample_count: crate::stats::StatsCounter,
     total_keyframe_wait_dropped_video_frame_count: crate::stats::StatsCounter,
     error: crate::stats::StatsFlag,
 }
@@ -98,6 +99,8 @@ impl Mp4WriterStats {
         let total_audio_sample_count = stats.counter("total_audio_sample_count");
         let total_audio_sample_data_byte_size = stats.counter("total_audio_sample_data_byte_size");
         let total_audio_track_duration = stats.duration("total_audio_track_seconds");
+        let total_keyframe_wait_dropped_audio_sample_count =
+            stats.counter("total_keyframe_wait_dropped_audio_sample_count");
         let total_keyframe_wait_dropped_video_frame_count =
             stats.counter("total_keyframe_wait_dropped_video_frame_count");
         let error = stats.flag("error");
@@ -115,6 +118,7 @@ impl Mp4WriterStats {
             total_video_sample_data_byte_size,
             total_audio_track_duration,
             total_video_track_duration,
+            total_keyframe_wait_dropped_audio_sample_count,
             total_keyframe_wait_dropped_video_frame_count,
             error,
         }
@@ -158,6 +162,10 @@ impl Mp4WriterStats {
 
     fn add_keyframe_wait_dropped_video_frame(&self) {
         self.total_keyframe_wait_dropped_video_frame_count.inc();
+    }
+
+    fn add_keyframe_wait_dropped_audio_sample(&self) {
+        self.total_keyframe_wait_dropped_audio_sample_count.inc();
     }
 
     pub fn audio_codec(&self) -> Option<CodecName> {
@@ -210,6 +218,10 @@ impl Mp4WriterStats {
 
     pub fn total_keyframe_wait_dropped_video_frame_count(&self) -> u64 {
         self.total_keyframe_wait_dropped_video_frame_count.get()
+    }
+
+    pub fn total_keyframe_wait_dropped_audio_sample_count(&self) -> u64 {
+        self.total_keyframe_wait_dropped_audio_sample_count.get()
     }
 }
 
@@ -359,6 +371,7 @@ impl Mp4Writer {
             return None;
         }
         if self.resume_waiting_for_keyframe {
+            self.stats.add_keyframe_wait_dropped_audio_sample();
             return None;
         }
         self.maybe_apply_pause_offset(sample.timestamp);

@@ -290,7 +290,7 @@
   - NOTE: pause 区間は録画タイムラインに含めない（ OBS 互換 ）
 - [x] `ResumeRecord`: 録画を再開する
   - NOTE: resume 時は keyframe 要求を送信し、最初の keyframe 到着まで映像をドロップする
-  - NOTE: `hisui_total_keyframe_wait_dropped_video_frame_count` で keyframe 待機中の drop 数を確認できる
+  - NOTE: keyframe 待機中の drop 数は `hisui_total_keyframe_wait_dropped_video_frame_count`（映像）と `hisui_total_keyframe_wait_dropped_audio_sample_count`（音声）で確認できる
 - [ ] `SplitRecordFile`: 録画ファイルを分割する
 - [ ] `CreateRecordChapter`: 録画チャプターを作成する
 - [ ] 配信 / 録画の encoder 共有構成

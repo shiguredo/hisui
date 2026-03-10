@@ -2759,6 +2759,7 @@ def test_obsws_pause_resume_record_request(binary_path: Path, tmp_path: Path):
                 f"http://{server.http_host}:{server.http_port}/metrics"
             )
             assert status == 200
+            assert "hisui_total_keyframe_wait_dropped_audio_sample_count" in body
             assert "hisui_total_keyframe_wait_dropped_video_frame_count" in body
 
             stop_record_response = await _send_obsws_request(
