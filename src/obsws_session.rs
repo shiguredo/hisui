@@ -18,7 +18,8 @@ use crate::obsws_protocol::{
     OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
     REQUEST_STATUS_OUTPUT_NOT_RUNNING, REQUEST_STATUS_OUTPUT_RUNNING,
-    REQUEST_STATUS_STREAM_NOT_RUNNING, REQUEST_STATUS_STREAM_RUNNING,
+    REQUEST_STATUS_REQUEST_PROCESSING_FAILED, REQUEST_STATUS_STREAM_NOT_RUNNING,
+    REQUEST_STATUS_STREAM_RUNNING,
 };
 
 pub enum SessionAction {
@@ -164,14 +165,10 @@ impl ObswsSession {
         request_id: &str,
         message: &str,
     ) -> String {
-        // [NOTE]
-        // 現在 hisui が実装している obsws requestStatus code では、
-        // サーバー内部エラー専用のコードを定義していない。
-        // そのため互換性を保ったまま 400 を内部エラーにも流用している。
         crate::obsws_response_builder::build_request_response_error(
             request_type,
             request_id,
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
             message,
         )
     }
@@ -1674,7 +1671,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to start stream: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("StartStream", request_id, &error_comment),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 error_comment,
             );
         }
@@ -1708,7 +1705,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to stop stream: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("StopStream", request_id, &error_comment),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 error_comment,
             );
         }
@@ -1808,7 +1805,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to create record directory: {e}");
             return RequestOutcome::failure(
                 Self::build_internal_error_response("StartRecord", request_id, &error_comment),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 error_comment,
             );
         }
@@ -1827,7 +1824,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to start record: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("StartRecord", request_id, &error_comment),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 error_comment,
             );
         }
@@ -1861,7 +1858,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to stop record: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("StopRecord", request_id, &error_comment),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 error_comment,
             );
         }
@@ -1912,7 +1909,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to pause record: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("PauseRecord", request_id, &error_comment),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 error_comment,
             );
         }
@@ -1982,7 +1979,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to resume record: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("ResumeRecord", request_id, &error_comment),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 error_comment,
             );
         }
@@ -1997,7 +1994,7 @@ impl ObswsSession {
                 format!("Failed to request record resume keyframe: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("ResumeRecord", request_id, &error_comment),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 error_comment,
             );
         }
