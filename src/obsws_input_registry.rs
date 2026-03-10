@@ -1176,9 +1176,6 @@ impl ObswsInputRegistry {
         let Some(started_at) = self.record_runtime.started_at else {
             return Duration::ZERO;
         };
-        if !self.record_runtime.active {
-            return Duration::ZERO;
-        }
         let mut total_paused_duration = self.record_runtime.total_paused_duration;
         if self.record_runtime.paused
             && let Some(paused_at) = self.record_runtime.paused_at
