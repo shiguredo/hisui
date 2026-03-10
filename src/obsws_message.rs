@@ -177,6 +177,43 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
+        "GetTransitionKindList" => {
+            crate::obsws_response_builder::build_get_transition_kind_list_response(
+                &request_id,
+                input_registry,
+            )
+        }
+        "GetSceneTransitionList" => {
+            crate::obsws_response_builder::build_get_scene_transition_list_response(
+                &request_id,
+                input_registry,
+            )
+        }
+        "GetCurrentSceneTransition" => {
+            crate::obsws_response_builder::build_get_current_scene_transition_response(
+                &request_id,
+                input_registry,
+            )
+        }
+        "SetCurrentSceneTransition" => {
+            crate::obsws_response_builder::build_set_current_scene_transition_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "SetCurrentSceneTransitionDuration" => {
+            crate::obsws_response_builder::build_set_current_scene_transition_duration_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetCurrentSceneTransitionCursor" => {
+            crate::obsws_response_builder::build_get_current_scene_transition_cursor_response(
+                &request_id,
+            )
+        }
         "GetSceneItemId" => crate::obsws_response_builder::build_get_scene_item_id_response(
             &request_id,
             request.request_data.as_ref(),
@@ -563,6 +600,36 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "RemoveInput"));
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
         assert!(available_requests.iter().any(|r| r == "RemoveScene"));
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetTransitionKindList")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetSceneTransitionList")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetCurrentSceneTransition")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetCurrentSceneTransition")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetCurrentSceneTransitionDuration")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetCurrentSceneTransitionCursor")
+        );
         assert!(available_requests.iter().any(|r| r == "GetSceneItemId"));
         assert!(available_requests.iter().any(|r| r == "GetSceneItemList"));
         assert!(available_requests.iter().any(|r| r == "CreateSceneItem"));

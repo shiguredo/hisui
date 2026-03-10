@@ -987,3 +987,27 @@ hisui 対応状況: 対応済み（ `Get/SetSceneItemLocked` / `Get/SetSceneItem
 
 NOTE: `SetSceneItemTransform` はパッチ更新で、`sceneItemTransform` に含めたフィールドのみ更新する  
 NOTE: hisui では現時点で `SetSceneItemBlendMode` に対応する専用イベントは送信しない
+NOTE: `Get/SetSceneItemLocked` / `Get/SetSceneItemIndex` / `Get/SetSceneItemBlendMode` / `Get/SetSceneItemTransform` は現時点で状態保持と `Event` 配信のみ対応し、実際の映像出力には反映しない
+
+---
+
+## 例 15: Transition の取得と更新
+
+目的: 現在の Transition 設定（ 種別 / 時間 ）を取得・更新する  
+hisui 対応状況: 対応済み（ `GetTransitionKindList` / `GetSceneTransitionList` / `GetCurrentSceneTransition` / `SetCurrentSceneTransition` / `SetCurrentSceneTransitionDuration` / `GetCurrentSceneTransitionCursor` ）
+
+1. `C -> S` GetTransitionKindList
+2. `S -> C` RequestResponse（ `responseData.transitionKinds = ["Cut", "Fade"]` ）
+3. `C -> S` SetCurrentSceneTransition（ `transitionName = "Fade"` ）
+4. `S -> C` RequestResponse（ success ）
+5. `C -> S` SetCurrentSceneTransitionDuration（ `transitionDuration = 500` ）
+6. `S -> C` RequestResponse（ success ）
+7. `C -> S` GetCurrentSceneTransition
+8. `S -> C` RequestResponse（ `transitionName = "Fade"`, `transitionDuration = 500` ）
+9. `C -> S` GetCurrentSceneTransitionCursor
+10. `S -> C` RequestResponse（ `transitionCursor = 0.0` ）
+
+NOTE: hisui の Transition は現時点で API の状態保持のみ対応し、実際の映像切り替え描画には反映しない  
+NOTE: 現時点の対応遷移は `Cut` / `Fade` のみで、それ以外は not found エラーを返す  
+NOTE: `SetCurrentSceneTransitionDuration.transitionDuration` は `50..=20000` のみ受理する  
+NOTE: `GetCurrentSceneTransitionCursor.transitionCursor` は `0.0` 固定

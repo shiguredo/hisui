@@ -916,6 +916,12 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
         assert "GetSceneList" in response_data["availableRequests"]
+        assert "GetTransitionKindList" in response_data["availableRequests"]
+        assert "GetSceneTransitionList" in response_data["availableRequests"]
+        assert "GetCurrentSceneTransition" in response_data["availableRequests"]
+        assert "SetCurrentSceneTransition" in response_data["availableRequests"]
+        assert "SetCurrentSceneTransitionDuration" in response_data["availableRequests"]
+        assert "GetCurrentSceneTransitionCursor" in response_data["availableRequests"]
         assert "GetSceneItemId" in response_data["availableRequests"]
         assert "GetSceneItemEnabled" in response_data["availableRequests"]
         assert "SetSceneItemEnabled" in response_data["availableRequests"]
@@ -1020,6 +1026,129 @@ def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path:
         assert get_response_after_update["d"]["responseData"]["recordDirectory"] == str(
             updated_record_dir
         )
+
+
+def test_obsws_transition_requests(binary_path: Path):
+    """obsws が Transition 関連 request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        kind_list_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetTransitionKindList",
+                request_id="req-get-transition-kind-list",
+            )
+        )
+        assert kind_list_response["d"]["requestStatus"]["result"] is True
+        transition_kinds = kind_list_response["d"]["responseData"]["transitionKinds"]
+        assert "Cut" in transition_kinds
+        assert "Fade" in transition_kinds
+
+        transition_list_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetSceneTransitionList",
+                request_id="req-get-scene-transition-list",
+            )
+        )
+        assert transition_list_response["d"]["requestStatus"]["result"] is True
+        assert (
+            transition_list_response["d"]["responseData"]["currentSceneTransitionName"]
+            == "Cut"
+        )
+        assert (
+            transition_list_response["d"]["responseData"]["currentSceneTransitionKind"]
+            == "Cut"
+        )
+        transition_entries = transition_list_response["d"]["responseData"]["transitions"]
+        cut_transition = next(
+            t for t in transition_entries if t["transitionName"] == "Cut"
+        )
+        fade_transition = next(
+            t for t in transition_entries if t["transitionName"] == "Fade"
+        )
+        assert cut_transition["transitionFixed"] is True
+        assert fade_transition["transitionFixed"] is False
+
+        set_transition_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetCurrentSceneTransition",
+                request_id="req-set-current-scene-transition",
+                request_data={"transitionName": "Fade"},
+            )
+        )
+        assert set_transition_response["d"]["requestStatus"]["result"] is True
+
+        set_transition_duration_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetCurrentSceneTransitionDuration",
+                request_id="req-set-current-scene-transition-duration",
+                request_data={"transitionDuration": 500},
+            )
+        )
+        assert set_transition_duration_response["d"]["requestStatus"]["result"] is True
+
+        get_current_transition_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetCurrentSceneTransition",
+                request_id="req-get-current-scene-transition",
+            )
+        )
+        assert get_current_transition_response["d"]["requestStatus"]["result"] is True
+        assert (
+            get_current_transition_response["d"]["responseData"]["transitionName"]
+            == "Fade"
+        )
+        assert (
+            get_current_transition_response["d"]["responseData"]["transitionDuration"]
+            == 500
+        )
+        assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is False
+
+        get_transition_cursor_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetCurrentSceneTransitionCursor",
+                request_id="req-get-current-scene-transition-cursor",
+            )
+        )
+        assert get_transition_cursor_response["d"]["requestStatus"]["result"] is True
+        assert (
+            get_transition_cursor_response["d"]["responseData"]["transitionCursor"] == 0.0
+        )
+
+        invalid_transition_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetCurrentSceneTransition",
+                request_id="req-set-current-scene-transition-invalid-name",
+                request_data={"transitionName": "Swipe"},
+            )
+        )
+        assert invalid_transition_response["d"]["requestStatus"]["result"] is False
+        assert invalid_transition_response["d"]["requestStatus"]["code"] == 601
+
+        invalid_duration_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetCurrentSceneTransitionDuration",
+                request_id="req-set-current-scene-transition-invalid-duration",
+                request_data={"transitionDuration": 0},
+            )
+        )
+        assert invalid_duration_response["d"]["requestStatus"]["result"] is False
+        assert invalid_duration_response["d"]["requestStatus"]["code"] == 400
 
 
 def test_obsws_get_record_status_request(binary_path: Path):
