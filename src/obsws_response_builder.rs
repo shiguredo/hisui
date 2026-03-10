@@ -8,11 +8,10 @@ use crate::obsws_input_registry::{
     ObswsSceneItemTransform, ObswsSceneItemTransformPatch, ObswsStreamServiceSettings,
     ParseInputSettingsError, RemoveSceneError, RemoveSceneItemError, SetCurrentPreviewSceneError,
     SetCurrentProgramSceneError, SetCurrentSceneTransitionDurationError,
-    SetCurrentSceneTransitionError, SetCurrentSceneTransitionSettingsError, SetInputNameError,
-    SetInputSettingsError, SetSceneItemBlendModeError, SetSceneItemEnabledError,
-    SetSceneItemIndexError, SetSceneItemIndexResult, SetSceneItemLockedError,
-    SetSceneItemLockedResult, SetSceneItemTransformError, SetSceneItemTransformResult,
-    SetTBarPositionError,
+    SetCurrentSceneTransitionError, SetInputNameError, SetInputSettingsError,
+    SetSceneItemBlendModeError, SetSceneItemEnabledError, SetSceneItemIndexError,
+    SetSceneItemIndexResult, SetSceneItemLockedError, SetSceneItemLockedResult,
+    SetSceneItemTransformError, SetSceneItemTransformResult, SetTBarPositionError,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
@@ -1996,16 +1995,9 @@ pub fn build_set_current_scene_transition_settings_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    if let Err(SetCurrentSceneTransitionSettingsError::InvalidTransitionSettings) =
-        input_registry.set_current_scene_transition_settings(fields.transition_settings)
-    {
-        return build_request_response_error(
-            "SetCurrentSceneTransitionSettings",
-            request_id,
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            "Invalid transitionSettings field",
-        );
-    }
+    input_registry
+        .set_current_scene_transition_settings(fields.transition_settings)
+        .expect("BUG: parser must validate transitionSettings as object");
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
