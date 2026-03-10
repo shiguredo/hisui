@@ -293,7 +293,9 @@
   - NOTE: `hisui_total_keyframe_wait_dropped_video_frame_count` で keyframe 待機中の drop 数を確認できる
 - [ ] `SplitRecordFile`: 録画ファイルを分割する
 - [ ] `CreateRecordChapter`: 録画チャプターを作成する
-- NOTE: 配信と録画の encoder 共有 / 非共有は出力設定依存で、obsws の request / event だけでは直接識別しない。検証時は設定値・ログ・メトリクスを併用する
+- [ ] 配信 / 録画の encoder 共有構成
+- [x] 配信 / 録画の encoder 非共有構成（ 配信用・録画用で別 encoder を生成 ）
+- NOTE: encoder 共有 / 非共有の識別は obsws の request / event だけでは直接判断しにくいため、検証時は設定値・ログ・メトリクスを併用する
 
 ### Media Inputs
 
