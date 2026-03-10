@@ -198,6 +198,10 @@ impl nojson::DisplayJson for ObswsSceneTransitionEntry {
     }
 }
 
+fn is_fixed_transition(transition_name: &str) -> bool {
+    matches!(transition_name, "Cut")
+}
+
 #[derive(Debug, Clone)]
 pub struct RequestBatchResult {
     pub request_type: String,
@@ -1653,7 +1657,7 @@ pub fn build_get_scene_transition_list_response(
         .map(|name| ObswsSceneTransitionEntry {
             transition_name: (*name).to_owned(),
             transition_kind: (*name).to_owned(),
-            transition_fixed: true,
+            transition_fixed: is_fixed_transition(name),
             transition_configurable: false,
         })
         .collect();
@@ -1712,7 +1716,10 @@ pub fn build_get_current_scene_transition_response(
                     nojson::object(|f| {
                         f.member("transitionName", current_transition_name)?;
                         f.member("transitionKind", current_transition_name)?;
-                        f.member("transitionFixed", true)?;
+                        f.member(
+                            "transitionFixed",
+                            is_fixed_transition(current_transition_name),
+                        )?;
                         f.member("transitionConfigurable", false)?;
                         f.member("transitionSettings", nojson::object(|_| Ok(())))?;
                         f.member("transitionDuration", current_transition_duration_ms)

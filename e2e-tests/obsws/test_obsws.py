@@ -1068,6 +1068,15 @@ def test_obsws_transition_requests(binary_path: Path):
             transition_list_response["d"]["responseData"]["currentSceneTransitionKind"]
             == "Cut"
         )
+        transition_entries = transition_list_response["d"]["responseData"]["transitions"]
+        cut_transition = next(
+            t for t in transition_entries if t["transitionName"] == "Cut"
+        )
+        fade_transition = next(
+            t for t in transition_entries if t["transitionName"] == "Fade"
+        )
+        assert cut_transition["transitionFixed"] is True
+        assert fade_transition["transitionFixed"] is False
 
         set_transition_response = asyncio.run(
             _connect_identify_and_request(
@@ -1105,6 +1114,7 @@ def test_obsws_transition_requests(binary_path: Path):
             get_current_transition_response["d"]["responseData"]["transitionDuration"]
             == 500
         )
+        assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is False
 
         get_transition_cursor_response = asyncio.run(
             _connect_identify_and_request(
