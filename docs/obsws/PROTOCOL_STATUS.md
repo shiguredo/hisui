@@ -180,15 +180,17 @@
 
 - [ ] 遷移種別に応じた実際の映像切り替え動作（ 例: `Fade` の補間描画 ）
 - [ ] 遷移実行の時間進行（ 開始 / 進行 / 完了 ）に応じた出力制御
-- [ ] `GetTransitionKindList`: 遷移種別一覧を取得する
-- [ ] `GetSceneTransitionList`: 遷移一覧を取得する
-- [ ] `GetCurrentSceneTransition`: 現在の遷移情報を取得する
-- [ ] `SetCurrentSceneTransition`: 現在の遷移を設定する
-- [ ] `SetCurrentSceneTransitionDuration`: 遷移時間を設定する
+- [x] `GetTransitionKindList`: 遷移種別一覧を取得する
+- [x] `GetSceneTransitionList`: 遷移一覧を取得する
+- [x] `GetCurrentSceneTransition`: 現在の遷移情報を取得する
+- [x] `SetCurrentSceneTransition`: 現在の遷移を設定する
+- [x] `SetCurrentSceneTransitionDuration`: 遷移時間を設定する
 - [ ] `SetCurrentSceneTransitionSettings`: 遷移設定を更新する
-- [ ] `GetCurrentSceneTransitionCursor`: 遷移カーソル位置を取得する
+- [x] `GetCurrentSceneTransitionCursor`: 遷移カーソル位置を取得する
 - [ ] `SetTBarPosition`: TBar 位置を設定する
-  - NOTE: 現時点の hisui では Transition は request / 実描画ともに未対応
+  - NOTE: `Get/SetCurrentSceneTransition*` は API の状態保持として実装し、実描画は未対応
+  - NOTE: 現時点の対応遷移は `Cut` / `Fade` のみ
+  - NOTE: `GetCurrentSceneTransitionCursor.transitionCursor` は現時点で `0.0` 固定
 
 ### Filters
 

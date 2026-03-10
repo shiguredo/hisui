@@ -5,9 +5,12 @@ use std::time::{Duration, Instant};
 use crate::obsws_protocol::OBSWS_DEFAULT_SCENE_NAME;
 
 const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 2] = ["image_source", "video_capture_device"];
+const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
 const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
+const OBSWS_DEFAULT_TRANSITION_NAME: &str = "Cut";
+const OBSWS_DEFAULT_TRANSITION_DURATION_MS: i64 = 300;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInputEntry {
@@ -454,6 +457,21 @@ struct ObswsRecordRuntimeState {
     run: Option<ObswsRecordRun>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ObswsTransitionRuntimeState {
+    current_transition_name: String,
+    current_transition_duration_ms: i64,
+}
+
+impl Default for ObswsTransitionRuntimeState {
+    fn default() -> Self {
+        Self {
+            current_transition_name: OBSWS_DEFAULT_TRANSITION_NAME.to_owned(),
+            current_transition_duration_ms: OBSWS_DEFAULT_TRANSITION_DURATION_MS,
+        }
+    }
+}
+
 fn parse_optional_string_setting(
     settings: nojson::RawJsonValue<'_, '_>,
     key: &str,
@@ -581,6 +599,16 @@ pub enum CreateSceneError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetCurrentProgramSceneError {
     SceneNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetCurrentSceneTransitionError {
+    TransitionNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetCurrentSceneTransitionDurationError {
+    InvalidTransitionDuration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -743,6 +771,7 @@ pub struct ObswsInputRegistry {
     next_stream_run_id: u64,
     next_record_run_id: u64,
     stream_service_settings: ObswsStreamServiceSettings,
+    transition_runtime: ObswsTransitionRuntimeState,
     stream_runtime: ObswsStreamRuntimeState,
     record_directory: PathBuf,
     record_runtime: ObswsRecordRuntimeState,
@@ -770,6 +799,7 @@ impl ObswsInputRegistry {
             next_stream_run_id: 0,
             next_record_run_id: 0,
             stream_service_settings: ObswsStreamServiceSettings::default(),
+            transition_runtime: ObswsTransitionRuntimeState::default(),
             stream_runtime: ObswsStreamRuntimeState::default(),
             record_directory,
             record_runtime: ObswsRecordRuntimeState::default(),
@@ -931,6 +961,40 @@ impl ObswsInputRegistry {
             return Err(SetCurrentProgramSceneError::SceneNotFound);
         }
         self.current_program_scene_name = scene_name.to_owned();
+        Ok(())
+    }
+
+    pub fn supported_transition_kinds(&self) -> &'static [&'static str] {
+        &OBSWS_SUPPORTED_TRANSITION_KINDS
+    }
+
+    pub fn current_scene_transition_name(&self) -> &str {
+        &self.transition_runtime.current_transition_name
+    }
+
+    pub fn current_scene_transition_duration_ms(&self) -> i64 {
+        self.transition_runtime.current_transition_duration_ms
+    }
+
+    pub fn set_current_scene_transition(
+        &mut self,
+        transition_name: &str,
+    ) -> Result<(), SetCurrentSceneTransitionError> {
+        if !OBSWS_SUPPORTED_TRANSITION_KINDS.contains(&transition_name) {
+            return Err(SetCurrentSceneTransitionError::TransitionNotFound);
+        }
+        self.transition_runtime.current_transition_name = transition_name.to_owned();
+        Ok(())
+    }
+
+    pub fn set_current_scene_transition_duration_ms(
+        &mut self,
+        transition_duration_ms: i64,
+    ) -> Result<(), SetCurrentSceneTransitionDurationError> {
+        if transition_duration_ms < 0 {
+            return Err(SetCurrentSceneTransitionDurationError::InvalidTransitionDuration);
+        }
+        self.transition_runtime.current_transition_duration_ms = transition_duration_ms;
         Ok(())
     }
 
@@ -2677,6 +2741,53 @@ mod tests {
                 .map(|scene| scene.scene_name),
             Some("Scene B".to_owned())
         );
+    }
+
+    #[test]
+    fn transition_runtime_defaults_to_cut_and_300ms() {
+        let registry = ObswsInputRegistry::new_for_test();
+        assert_eq!(registry.current_scene_transition_name(), "Cut");
+        assert_eq!(registry.current_scene_transition_duration_ms(), 300);
+        assert_eq!(registry.supported_transition_kinds(), ["Cut", "Fade"]);
+    }
+
+    #[test]
+    fn set_current_scene_transition_updates_transition_name() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .set_current_scene_transition("Fade")
+            .expect("setting transition to Fade must succeed");
+        assert_eq!(registry.current_scene_transition_name(), "Fade");
+    }
+
+    #[test]
+    fn set_current_scene_transition_rejects_unknown_transition() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let error = registry
+            .set_current_scene_transition("Swipe")
+            .expect_err("unknown transition must be rejected");
+        assert_eq!(error, SetCurrentSceneTransitionError::TransitionNotFound);
+    }
+
+    #[test]
+    fn set_current_scene_transition_duration_rejects_negative_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let error = registry
+            .set_current_scene_transition_duration_ms(-1)
+            .expect_err("negative transition duration must be rejected");
+        assert_eq!(
+            error,
+            SetCurrentSceneTransitionDurationError::InvalidTransitionDuration
+        );
+    }
+
+    #[test]
+    fn set_current_scene_transition_duration_updates_runtime_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .set_current_scene_transition_duration_ms(500)
+            .expect("transition duration update must succeed");
+        assert_eq!(registry.current_scene_transition_duration_ms(), 500);
     }
 
     #[test]
