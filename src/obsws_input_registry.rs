@@ -224,11 +224,163 @@ pub struct ObswsRecordRun {
     pub output_path: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObswsSceneItemBlendMode {
+    Normal,
+    Additive,
+    Subtract,
+    Screen,
+    Multiply,
+    Lighten,
+    Darken,
+}
+
+impl ObswsSceneItemBlendMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "OBS_BLEND_NORMAL",
+            Self::Additive => "OBS_BLEND_ADDITIVE",
+            Self::Subtract => "OBS_BLEND_SUBTRACT",
+            Self::Screen => "OBS_BLEND_SCREEN",
+            Self::Multiply => "OBS_BLEND_MULTIPLY",
+            Self::Lighten => "OBS_BLEND_LIGHTEN",
+            Self::Darken => "OBS_BLEND_DARKEN",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "OBS_BLEND_NORMAL" => Some(Self::Normal),
+            "OBS_BLEND_ADDITIVE" => Some(Self::Additive),
+            "OBS_BLEND_SUBTRACT" => Some(Self::Subtract),
+            "OBS_BLEND_SCREEN" => Some(Self::Screen),
+            "OBS_BLEND_MULTIPLY" => Some(Self::Multiply),
+            "OBS_BLEND_LIGHTEN" => Some(Self::Lighten),
+            "OBS_BLEND_DARKEN" => Some(Self::Darken),
+            _ => None,
+        }
+    }
+}
+
+impl Default for ObswsSceneItemBlendMode {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+impl nojson::DisplayJson for ObswsSceneItemBlendMode {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObswsSceneItemTransform {
+    pub position_x: f64,
+    pub position_y: f64,
+    pub rotation: f64,
+    pub scale_x: f64,
+    pub scale_y: f64,
+    pub alignment: i64,
+    pub bounds_type: String,
+    pub bounds_alignment: i64,
+    pub bounds_width: f64,
+    pub bounds_height: f64,
+    pub crop_top: i64,
+    pub crop_bottom: i64,
+    pub crop_left: i64,
+    pub crop_right: i64,
+    pub crop_to_bounds: bool,
+    pub source_width: f64,
+    pub source_height: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl Default for ObswsSceneItemTransform {
+    fn default() -> Self {
+        Self {
+            position_x: 0.0,
+            position_y: 0.0,
+            rotation: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            alignment: 0,
+            bounds_type: "OBS_BOUNDS_NONE".to_owned(),
+            bounds_alignment: 0,
+            bounds_width: 0.0,
+            bounds_height: 0.0,
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
+            crop_to_bounds: false,
+            source_width: 0.0,
+            source_height: 0.0,
+            width: 0.0,
+            height: 0.0,
+        }
+    }
+}
+
+impl nojson::DisplayJson for ObswsSceneItemTransform {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("positionX", self.position_x)?;
+            f.member("positionY", self.position_y)?;
+            f.member("rotation", self.rotation)?;
+            f.member("scaleX", self.scale_x)?;
+            f.member("scaleY", self.scale_y)?;
+            f.member("alignment", self.alignment)?;
+            f.member("boundsType", &self.bounds_type)?;
+            f.member("boundsAlignment", self.bounds_alignment)?;
+            f.member("boundsWidth", self.bounds_width)?;
+            f.member("boundsHeight", self.bounds_height)?;
+            f.member("cropTop", self.crop_top)?;
+            f.member("cropBottom", self.crop_bottom)?;
+            f.member("cropLeft", self.crop_left)?;
+            f.member("cropRight", self.crop_right)?;
+            f.member("cropToBounds", self.crop_to_bounds)?;
+            f.member("sourceWidth", self.source_width)?;
+            f.member("sourceHeight", self.source_height)?;
+            f.member("width", self.width)?;
+            f.member("height", self.height)
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ObswsSceneItemTransformPatch {
+    pub position_x: Option<f64>,
+    pub position_y: Option<f64>,
+    pub rotation: Option<f64>,
+    pub scale_x: Option<f64>,
+    pub scale_y: Option<f64>,
+    pub alignment: Option<i64>,
+    pub bounds_type: Option<String>,
+    pub bounds_alignment: Option<i64>,
+    pub bounds_width: Option<f64>,
+    pub bounds_height: Option<f64>,
+    pub crop_top: Option<i64>,
+    pub crop_bottom: Option<i64>,
+    pub crop_left: Option<i64>,
+    pub crop_right: Option<i64>,
+    pub crop_to_bounds: Option<bool>,
+    pub source_width: Option<f64>,
+    pub source_height: Option<f64>,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+}
+
 #[derive(Debug, Clone)]
 struct ObswsSceneItemState {
     scene_item_id: i64,
     input_uuid: String,
     enabled: bool,
+    locked: bool,
+    blend_mode: ObswsSceneItemBlendMode,
+    transform: ObswsSceneItemTransform,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,6 +390,7 @@ pub struct ObswsSceneItemEntry {
     pub source_uuid: String,
     pub scene_item_enabled: bool,
     pub scene_item_locked: bool,
+    pub scene_item_blend_mode: String,
     pub scene_item_index: i64,
     pub is_group: bool,
 }
@@ -250,6 +403,7 @@ impl nojson::DisplayJson for ObswsSceneItemEntry {
             f.member("sourceUuid", &self.source_uuid)?;
             f.member("sceneItemEnabled", self.scene_item_enabled)?;
             f.member("sceneItemLocked", self.scene_item_locked)?;
+            f.member("sceneItemBlendMode", &self.scene_item_blend_mode)?;
             f.member("sceneItemIndex", self.scene_item_index)?;
             f.member("isGroup", self.is_group)
         })
@@ -480,6 +634,58 @@ pub enum GetSceneItemEnabledError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneItemLockedError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSceneItemLockedError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetSceneItemLockedResult {
+    pub changed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneItemBlendModeError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSceneItemBlendModeError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetSceneItemBlendModeResult {
+    pub changed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneItemTransformError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSceneItemTransformError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetSceneItemTransformResult {
+    pub changed: bool,
+    pub scene_item_transform: ObswsSceneItemTransform,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GetSceneItemListError {
     SceneNotFound,
 }
@@ -625,6 +831,9 @@ impl ObswsInputRegistry {
             scene_item_id,
             input_uuid: entry.input_uuid.clone(),
             enabled: scene_item_enabled,
+            locked: false,
+            blend_mode: ObswsSceneItemBlendMode::default(),
+            transform: ObswsSceneItemTransform::default(),
         });
 
         Ok(entry)
@@ -822,6 +1031,9 @@ impl ObswsInputRegistry {
             scene_item_id,
             input_uuid: input_entry.input_uuid.clone(),
             enabled: scene_item_enabled,
+            locked: false,
+            blend_mode: ObswsSceneItemBlendMode::default(),
+            transform: ObswsSceneItemTransform::default(),
         });
         let scene_item_index = scene.items.len().saturating_sub(1) as i64;
         Ok(ObswsSceneItemRef {
@@ -833,6 +1045,7 @@ impl ObswsInputRegistry {
                 source_uuid: input_entry.input_uuid,
                 scene_item_enabled,
                 scene_item_locked: false,
+                scene_item_blend_mode: ObswsSceneItemBlendMode::default().as_str().to_owned(),
                 scene_item_index,
                 is_group: false,
             },
@@ -869,7 +1082,8 @@ impl ObswsInputRegistry {
                 source_name: input_entry.input_name.clone(),
                 source_uuid: input_entry.input_uuid.clone(),
                 scene_item_enabled: removed.enabled,
-                scene_item_locked: false,
+                scene_item_locked: removed.locked,
+                scene_item_blend_mode: removed.blend_mode.as_str().to_owned(),
                 scene_item_index: position as i64,
                 is_group: false,
             },
@@ -882,7 +1096,7 @@ impl ObswsInputRegistry {
         to_scene_name: &str,
         scene_item_id: i64,
     ) -> Result<ObswsSceneItemRef, DuplicateSceneItemError> {
-        let (input_uuid, enabled) = {
+        let (input_uuid, enabled, locked, blend_mode, transform) = {
             let from_scene = self
                 .scenes_by_name
                 .get(from_scene_name)
@@ -894,7 +1108,13 @@ impl ObswsInputRegistry {
             else {
                 return Err(DuplicateSceneItemError::SourceSceneItem);
             };
-            (from_item.input_uuid.clone(), from_item.enabled)
+            (
+                from_item.input_uuid.clone(),
+                from_item.enabled,
+                from_item.locked,
+                from_item.blend_mode,
+                from_item.transform.clone(),
+            )
         };
         let input_entry = self
             .inputs_by_uuid
@@ -910,6 +1130,9 @@ impl ObswsInputRegistry {
             scene_item_id: new_scene_item_id,
             input_uuid: input_uuid.clone(),
             enabled,
+            locked,
+            blend_mode,
+            transform,
         });
         let scene_item_index = to_scene.items.len().saturating_sub(1) as i64;
         Ok(ObswsSceneItemRef {
@@ -920,7 +1143,8 @@ impl ObswsInputRegistry {
                 source_name: input_entry.input_name,
                 source_uuid: input_entry.input_uuid,
                 scene_item_enabled: enabled,
-                scene_item_locked: false,
+                scene_item_locked: locked,
+                scene_item_blend_mode: blend_mode.as_str().to_owned(),
                 scene_item_index,
                 is_group: false,
             },
@@ -1043,6 +1267,151 @@ impl ObswsInputRegistry {
             return Err(GetSceneItemEnabledError::SceneItemNotFound);
         };
         Ok(scene_item.enabled)
+    }
+
+    pub fn get_scene_item_locked(
+        &self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<bool, GetSceneItemLockedError> {
+        let scene_item = self
+            .find_scene_item(scene_name, scene_item_id)
+            .map_err(|error| match error {
+                FindSceneItemError::SceneNotFound => GetSceneItemLockedError::SceneNotFound,
+                FindSceneItemError::SceneItemNotFound => GetSceneItemLockedError::SceneItemNotFound,
+            })?;
+        Ok(scene_item.locked)
+    }
+
+    pub fn set_scene_item_locked(
+        &mut self,
+        scene_name: &str,
+        scene_item_id: i64,
+        locked: bool,
+    ) -> Result<SetSceneItemLockedResult, SetSceneItemLockedError> {
+        let scene_item = self
+            .find_scene_item_mut(scene_name, scene_item_id)
+            .map_err(|error| match error {
+                FindSceneItemError::SceneNotFound => SetSceneItemLockedError::SceneNotFound,
+                FindSceneItemError::SceneItemNotFound => SetSceneItemLockedError::SceneItemNotFound,
+            })?;
+        let changed = scene_item.locked != locked;
+        scene_item.locked = locked;
+        Ok(SetSceneItemLockedResult { changed })
+    }
+
+    pub fn get_scene_item_blend_mode(
+        &self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<ObswsSceneItemBlendMode, GetSceneItemBlendModeError> {
+        let scene_item = self
+            .find_scene_item(scene_name, scene_item_id)
+            .map_err(|error| match error {
+                FindSceneItemError::SceneNotFound => GetSceneItemBlendModeError::SceneNotFound,
+                FindSceneItemError::SceneItemNotFound => {
+                    GetSceneItemBlendModeError::SceneItemNotFound
+                }
+            })?;
+        Ok(scene_item.blend_mode)
+    }
+
+    pub fn set_scene_item_blend_mode(
+        &mut self,
+        scene_name: &str,
+        scene_item_id: i64,
+        blend_mode: ObswsSceneItemBlendMode,
+    ) -> Result<SetSceneItemBlendModeResult, SetSceneItemBlendModeError> {
+        let scene_item = self
+            .find_scene_item_mut(scene_name, scene_item_id)
+            .map_err(|error| match error {
+                FindSceneItemError::SceneNotFound => SetSceneItemBlendModeError::SceneNotFound,
+                FindSceneItemError::SceneItemNotFound => {
+                    SetSceneItemBlendModeError::SceneItemNotFound
+                }
+            })?;
+        let changed = scene_item.blend_mode != blend_mode;
+        scene_item.blend_mode = blend_mode;
+        Ok(SetSceneItemBlendModeResult { changed })
+    }
+
+    pub fn get_scene_item_transform(
+        &self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<ObswsSceneItemTransform, GetSceneItemTransformError> {
+        let scene_item = self
+            .find_scene_item(scene_name, scene_item_id)
+            .map_err(|error| match error {
+                FindSceneItemError::SceneNotFound => GetSceneItemTransformError::SceneNotFound,
+                FindSceneItemError::SceneItemNotFound => {
+                    GetSceneItemTransformError::SceneItemNotFound
+                }
+            })?;
+        Ok(scene_item.transform.clone())
+    }
+
+    pub fn set_scene_item_transform(
+        &mut self,
+        scene_name: &str,
+        scene_item_id: i64,
+        patch: ObswsSceneItemTransformPatch,
+    ) -> Result<SetSceneItemTransformResult, SetSceneItemTransformError> {
+        let scene_item = self
+            .find_scene_item_mut(scene_name, scene_item_id)
+            .map_err(|error| match error {
+                FindSceneItemError::SceneNotFound => SetSceneItemTransformError::SceneNotFound,
+                FindSceneItemError::SceneItemNotFound => {
+                    SetSceneItemTransformError::SceneItemNotFound
+                }
+            })?;
+        let mut updated = scene_item.transform.clone();
+        let mut changed = false;
+
+        apply_transform_patch_value(&mut changed, &mut updated.position_x, patch.position_x);
+        apply_transform_patch_value(&mut changed, &mut updated.position_y, patch.position_y);
+        apply_transform_patch_value(&mut changed, &mut updated.rotation, patch.rotation);
+        apply_transform_patch_value(&mut changed, &mut updated.scale_x, patch.scale_x);
+        apply_transform_patch_value(&mut changed, &mut updated.scale_y, patch.scale_y);
+        apply_transform_patch_value(&mut changed, &mut updated.alignment, patch.alignment);
+        apply_transform_patch_value(&mut changed, &mut updated.bounds_type, patch.bounds_type);
+        apply_transform_patch_value(
+            &mut changed,
+            &mut updated.bounds_alignment,
+            patch.bounds_alignment,
+        );
+        apply_transform_patch_value(&mut changed, &mut updated.bounds_width, patch.bounds_width);
+        apply_transform_patch_value(
+            &mut changed,
+            &mut updated.bounds_height,
+            patch.bounds_height,
+        );
+        apply_transform_patch_value(&mut changed, &mut updated.crop_top, patch.crop_top);
+        apply_transform_patch_value(&mut changed, &mut updated.crop_bottom, patch.crop_bottom);
+        apply_transform_patch_value(&mut changed, &mut updated.crop_left, patch.crop_left);
+        apply_transform_patch_value(&mut changed, &mut updated.crop_right, patch.crop_right);
+        apply_transform_patch_value(
+            &mut changed,
+            &mut updated.crop_to_bounds,
+            patch.crop_to_bounds,
+        );
+        apply_transform_patch_value(&mut changed, &mut updated.source_width, patch.source_width);
+        apply_transform_patch_value(
+            &mut changed,
+            &mut updated.source_height,
+            patch.source_height,
+        );
+        apply_transform_patch_value(&mut changed, &mut updated.width, patch.width);
+        apply_transform_patch_value(&mut changed, &mut updated.height, patch.height);
+
+        if changed {
+            scene_item.transform = updated.clone();
+        }
+
+        Ok(SetSceneItemTransformResult {
+            changed,
+            scene_item_transform: updated,
+        })
     }
 
     pub fn stream_service_settings(&self) -> &ObswsStreamServiceSettings {
@@ -1366,7 +1735,8 @@ impl ObswsInputRegistry {
                     source_name: input_entry.input_name.clone(),
                     source_uuid: input_entry.input_uuid.clone(),
                     scene_item_enabled: item.enabled,
-                    scene_item_locked: false,
+                    scene_item_locked: item.locked,
+                    scene_item_blend_mode: item.blend_mode.as_str().to_owned(),
                     scene_item_index: index as i64,
                     is_group: false,
                 })
@@ -1388,6 +1758,32 @@ impl ObswsInputRegistry {
             .iter()
             .find(|item| item.scene_item_id == scene_item_id)
             .ok_or(FindSceneItemError::SceneItemNotFound)
+    }
+
+    fn find_scene_item_mut(
+        &mut self,
+        scene_name: &str,
+        scene_item_id: i64,
+    ) -> Result<&mut ObswsSceneItemState, FindSceneItemError> {
+        let scene = self
+            .scenes_by_name
+            .get_mut(scene_name)
+            .ok_or(FindSceneItemError::SceneNotFound)?;
+        scene
+            .items
+            .iter_mut()
+            .find(|item| item.scene_item_id == scene_item_id)
+            .ok_or(FindSceneItemError::SceneItemNotFound)
+    }
+}
+
+fn apply_transform_patch_value<T: PartialEq>(changed: &mut bool, dst: &mut T, value: Option<T>) {
+    let Some(value) = value else {
+        return;
+    };
+    if *dst != value {
+        *changed = true;
+        *dst = value;
     }
 }
 
@@ -1962,6 +2358,113 @@ mod tests {
     }
 
     #[test]
+    fn set_and_get_scene_item_locked_succeeds() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+            .expect("scene item id must exist");
+
+        let initial_locked = registry
+            .get_scene_item_locked(OBSWS_DEFAULT_SCENE_NAME, scene_item_id)
+            .expect("scene item lock state must be retrievable");
+        assert!(!initial_locked);
+
+        let set_result = registry
+            .set_scene_item_locked(OBSWS_DEFAULT_SCENE_NAME, scene_item_id, true)
+            .expect("set scene item locked must succeed");
+        assert!(set_result.changed);
+
+        let updated_locked = registry
+            .get_scene_item_locked(OBSWS_DEFAULT_SCENE_NAME, scene_item_id)
+            .expect("scene item lock state must be retrievable");
+        assert!(updated_locked);
+    }
+
+    #[test]
+    fn set_and_get_scene_item_blend_mode_succeeds() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+            .expect("scene item id must exist");
+
+        let initial_blend_mode = registry
+            .get_scene_item_blend_mode(OBSWS_DEFAULT_SCENE_NAME, scene_item_id)
+            .expect("scene item blend mode must be retrievable");
+        assert_eq!(initial_blend_mode, ObswsSceneItemBlendMode::Normal);
+
+        let set_result = registry
+            .set_scene_item_blend_mode(
+                OBSWS_DEFAULT_SCENE_NAME,
+                scene_item_id,
+                ObswsSceneItemBlendMode::Multiply,
+            )
+            .expect("set scene item blend mode must succeed");
+        assert!(set_result.changed);
+
+        let updated_blend_mode = registry
+            .get_scene_item_blend_mode(OBSWS_DEFAULT_SCENE_NAME, scene_item_id)
+            .expect("scene item blend mode must be retrievable");
+        assert_eq!(updated_blend_mode, ObswsSceneItemBlendMode::Multiply);
+    }
+
+    #[test]
+    fn set_and_get_scene_item_transform_succeeds() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            parse_owned_json("{}").value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+            .expect("input creation must succeed");
+        let scene_item_id = registry
+            .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+            .expect("scene item id must exist");
+
+        let set_result = registry
+            .set_scene_item_transform(
+                OBSWS_DEFAULT_SCENE_NAME,
+                scene_item_id,
+                ObswsSceneItemTransformPatch {
+                    position_x: Some(123.0),
+                    position_y: Some(45.0),
+                    bounds_type: Some("OBS_BOUNDS_STRETCH".to_owned()),
+                    width: Some(640.0),
+                    height: Some(360.0),
+                    ..Default::default()
+                },
+            )
+            .expect("set scene item transform must succeed");
+        assert!(set_result.changed);
+
+        let updated_transform = registry
+            .get_scene_item_transform(OBSWS_DEFAULT_SCENE_NAME, scene_item_id)
+            .expect("scene item transform must be retrievable");
+        assert_eq!(updated_transform.position_x, 123.0);
+        assert_eq!(updated_transform.position_y, 45.0);
+        assert_eq!(updated_transform.bounds_type, "OBS_BOUNDS_STRETCH");
+        assert_eq!(updated_transform.width, 640.0);
+        assert_eq!(updated_transform.height, 360.0);
+    }
+
+    #[test]
     fn create_scene_item_and_list_scene_items_succeed() {
         let mut registry = ObswsInputRegistry::new_for_test();
         registry
@@ -2060,6 +2563,26 @@ mod tests {
         let scene_item_id = registry
             .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
             .expect("scene item id must exist");
+        registry
+            .set_scene_item_locked(OBSWS_DEFAULT_SCENE_NAME, scene_item_id, true)
+            .expect("set scene item locked must succeed");
+        registry
+            .set_scene_item_blend_mode(
+                OBSWS_DEFAULT_SCENE_NAME,
+                scene_item_id,
+                ObswsSceneItemBlendMode::Screen,
+            )
+            .expect("set scene item blend mode must succeed");
+        registry
+            .set_scene_item_transform(
+                OBSWS_DEFAULT_SCENE_NAME,
+                scene_item_id,
+                ObswsSceneItemTransformPatch {
+                    position_x: Some(77.0),
+                    ..Default::default()
+                },
+            )
+            .expect("set scene item transform must succeed");
 
         let duplicated = registry
             .duplicate_scene_item(OBSWS_DEFAULT_SCENE_NAME, "Scene B", scene_item_id)
@@ -2067,12 +2590,23 @@ mod tests {
         assert!(duplicated.scene_item.scene_item_id > scene_item_id);
         assert_eq!(duplicated.scene_name, "Scene B");
         assert_eq!(duplicated.scene_item.source_name, "camera-1");
+        assert!(duplicated.scene_item.scene_item_locked);
+        assert_eq!(
+            duplicated.scene_item.scene_item_blend_mode,
+            "OBS_BLEND_SCREEN"
+        );
 
         let scene_b_items = registry
             .list_scene_items("Scene B")
             .expect("scene items must be listed");
         assert_eq!(scene_b_items.len(), 1);
         assert_eq!(scene_b_items[0].source_name, "camera-1");
+        assert_eq!(scene_b_items[0].scene_item_blend_mode, "OBS_BLEND_SCREEN");
+
+        let duplicated_transform = registry
+            .get_scene_item_transform("Scene B", duplicated.scene_item.scene_item_id)
+            .expect("duplicated scene item transform must be retrievable");
+        assert_eq!(duplicated_transform.position_x, 77.0);
     }
 
     #[test]

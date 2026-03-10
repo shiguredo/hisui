@@ -898,3 +898,92 @@ hisui 対応状況: 対応済み（ `SetSceneItemIndex` と `SceneItemListReinde
 3. `S -> C` Event ( `op: 5`, `eventType = "SceneItemListReindexed"` )
 
 NOTE: hisui では `SetSceneItemIndex` 成功時、`RequestResponse` の後に `SceneItemListReindexed` を送信する
+
+---
+
+## 例 14: Scene Item の lock / blend / transform 制御
+
+目的: `Scene Item` のロック状態・合成モード・変形情報を更新する  
+hisui 対応状況: 対応済み（ `Get/SetSceneItemLocked` / `Get/SetSceneItemBlendMode` / `Get/SetSceneItemTransform` ）
+
+前提:
+
+- `Identify` または `Reidentify` で `eventSubscriptions` に `OBSWS_EVENT_SUB_SCENES` を含めると、lock / transform 変更イベントを受信できる
+
+1. `C -> S` GetSceneItemLocked
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "GetSceneItemLocked",
+    "requestId": "req-901",
+    "requestData": {
+      "sceneName": "Scene",
+      "sceneItemId": 5
+    }
+  }
+}
+```
+
+2. `C -> S` SetSceneItemLocked
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetSceneItemLocked",
+    "requestId": "req-902",
+    "requestData": {
+      "sceneName": "Scene",
+      "sceneItemId": 5,
+      "sceneItemLocked": true
+    }
+  }
+}
+```
+
+3. `S -> C` Event ( `op: 5`, `eventType = "SceneItemLockStateChanged"` )
+
+4. `C -> S` SetSceneItemBlendMode
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetSceneItemBlendMode",
+    "requestId": "req-903",
+    "requestData": {
+      "sceneName": "Scene",
+      "sceneItemId": 5,
+      "sceneItemBlendMode": "OBS_BLEND_ADDITIVE"
+    }
+  }
+}
+```
+
+5. `C -> S` SetSceneItemTransform
+
+```json
+{
+  "op": 6,
+  "d": {
+    "requestType": "SetSceneItemTransform",
+    "requestId": "req-904",
+    "requestData": {
+      "sceneName": "Scene",
+      "sceneItemId": 5,
+      "sceneItemTransform": {
+        "positionX": 64.0,
+        "positionY": 32.0,
+        "boundsType": "OBS_BOUNDS_STRETCH"
+      }
+    }
+  }
+}
+```
+
+6. `S -> C` Event ( `op: 5`, `eventType = "SceneItemTransformChanged"` )
+
+NOTE: `SetSceneItemTransform` はパッチ更新で、`sceneItemTransform` に含めたフィールドのみ更新する  
+NOTE: hisui では現時点で `SetSceneItemBlendMode` に対応する専用イベントは送信しない

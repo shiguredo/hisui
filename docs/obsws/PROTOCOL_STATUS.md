@@ -55,6 +55,8 @@
 - [x] `InputSettingsChanged`: Input 設定変更を通知する
 - [x] `InputNameChanged`: Input 名変更を通知する
 - [x] `SceneItemEnableStateChanged`: Scene Item の有効状態変更を通知する
+- [x] `SceneItemLockStateChanged`: Scene Item のロック状態変更を通知する
+- [x] `SceneItemTransformChanged`: Scene Item の変形状態変更を通知する
 - [x] `SceneItemCreated`: Scene Item の作成を通知する
 - [x] `SceneItemRemoved`: Scene Item の削除を通知する
 - [x] `SceneItemListReindexed`: Scene Item の並び順変更を通知する
@@ -208,16 +210,18 @@
 - [x] `CreateSceneItem`: シーンアイテムを作成する
 - [x] `RemoveSceneItem`: シーンアイテムを削除する
 - [x] `DuplicateSceneItem`: シーンアイテムを複製する
-- [ ] `GetSceneItemTransform`: シーンアイテム変形情報を取得する
-- [ ] `SetSceneItemTransform`: シーンアイテム変形情報を設定する
+- [x] `GetSceneItemTransform`: シーンアイテム変形情報を取得する
+- [x] `SetSceneItemTransform`: シーンアイテム変形情報を設定する
+  - NOTE: `sceneItemTransform` はパッチ更新として扱い、指定フィールドのみ更新する
 - [x] `GetSceneItemEnabled`: シーンアイテム有効状態を取得する
 - [x] `SetSceneItemEnabled`: シーンアイテム有効状態を設定する
-- [ ] `GetSceneItemLocked`: シーンアイテムロック状態を取得する
-- [ ] `SetSceneItemLocked`: シーンアイテムロック状態を設定する
+- [x] `GetSceneItemLocked`: シーンアイテムロック状態を取得する
+- [x] `SetSceneItemLocked`: シーンアイテムロック状態を設定する
 - [x] `GetSceneItemIndex`: シーンアイテム順序を取得する
 - [x] `SetSceneItemIndex`: シーンアイテム順序を設定する
-- [ ] `GetSceneItemBlendMode`: シーンアイテム合成モードを取得する
-- [ ] `SetSceneItemBlendMode`: シーンアイテム合成モードを設定する
+- [x] `GetSceneItemBlendMode`: シーンアイテム合成モードを取得する
+- [x] `SetSceneItemBlendMode`: シーンアイテム合成モードを設定する
+  - NOTE: 現時点では blend mode 変更イベントは配信しない
 
 ### Outputs
 
