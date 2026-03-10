@@ -2004,6 +2004,10 @@ impl ObswsSession {
         };
 
         if let Err(e) = self.resume_record_processors(&run).await {
+            // [NOTE]
+            // ResumeRecord は「writer 側の再開成功 -> registry の paused 解除」の
+            // 2 段階で扱う。writer 側の再開に失敗した時点では registry は更新せず、
+            // paused 状態のまま失敗応答を返して整合性を保つ。
             let error_comment = format!("Failed to resume record: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("ResumeRecord", request_id, &error_comment),
@@ -2071,6 +2075,8 @@ impl ObswsSession {
         }
 
         let mut input_registry = self.input_registry.write().await;
+        // [NOTE]
+        // writer 側の再開と keyframe 要求が完了した後に registry の paused を解除する。
         match input_registry.resume_record() {
             Ok(()) => RequestOutcome::success(
                 crate::obsws_response_builder::build_resume_record_response(request_id),
