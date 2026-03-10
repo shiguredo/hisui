@@ -11,6 +11,8 @@ const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
 const OBSWS_DEFAULT_TRANSITION_NAME: &str = "Cut";
 const OBSWS_DEFAULT_TRANSITION_DURATION_MS: i64 = 300;
+const OBSWS_MIN_TRANSITION_DURATION_MS: i64 = 50;
+const OBSWS_MAX_TRANSITION_DURATION_MS: i64 = 20_000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInputEntry {
@@ -991,7 +993,9 @@ impl ObswsInputRegistry {
         &mut self,
         transition_duration_ms: i64,
     ) -> Result<(), SetCurrentSceneTransitionDurationError> {
-        if transition_duration_ms < 0 {
+        if !(OBSWS_MIN_TRANSITION_DURATION_MS..=OBSWS_MAX_TRANSITION_DURATION_MS)
+            .contains(&transition_duration_ms)
+        {
             return Err(SetCurrentSceneTransitionDurationError::InvalidTransitionDuration);
         }
         self.transition_runtime.current_transition_duration_ms = transition_duration_ms;
@@ -2775,6 +2779,30 @@ mod tests {
         let error = registry
             .set_current_scene_transition_duration_ms(-1)
             .expect_err("negative transition duration must be rejected");
+        assert_eq!(
+            error,
+            SetCurrentSceneTransitionDurationError::InvalidTransitionDuration
+        );
+    }
+
+    #[test]
+    fn set_current_scene_transition_duration_rejects_zero_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let error = registry
+            .set_current_scene_transition_duration_ms(0)
+            .expect_err("zero transition duration must be rejected");
+        assert_eq!(
+            error,
+            SetCurrentSceneTransitionDurationError::InvalidTransitionDuration
+        );
+    }
+
+    #[test]
+    fn set_current_scene_transition_duration_rejects_too_large_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let error = registry
+            .set_current_scene_transition_duration_ms(20_001)
+            .expect_err("too large transition duration must be rejected");
         assert_eq!(
             error,
             SetCurrentSceneTransitionDurationError::InvalidTransitionDuration

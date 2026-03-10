@@ -191,6 +191,7 @@
   - NOTE: `Get/SetCurrentSceneTransition*` は API の状態保持として実装し、実描画は未対応
   - NOTE: 現時点の対応遷移は `Cut` / `Fade` のみ
   - NOTE: `transitionFixed` は `Cut=true` / `Fade=false` を返す
+  - NOTE: `SetCurrentSceneTransitionDuration.transitionDuration` は `50..=20000` のみ受理する
   - NOTE: `GetCurrentSceneTransitionCursor.transitionCursor` は現時点で `0.0` 固定
 
 ### Filters

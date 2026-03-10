@@ -1009,4 +1009,5 @@ hisui 対応状況: 対応済み（ `GetTransitionKindList` / `GetSceneTransitio
 
 NOTE: hisui の Transition は現時点で API の状態保持のみ対応し、実際の映像切り替え描画には反映しない  
 NOTE: 現時点の対応遷移は `Cut` / `Fade` のみで、それ以外は not found エラーを返す  
+NOTE: `SetCurrentSceneTransitionDuration.transitionDuration` は `50..=20000` のみ受理する  
 NOTE: `GetCurrentSceneTransitionCursor.transitionCursor` は `0.0` 固定

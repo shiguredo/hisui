@@ -1144,7 +1144,7 @@ def test_obsws_transition_requests(binary_path: Path):
                 f"ws://{host}:{port}/",
                 request_type="SetCurrentSceneTransitionDuration",
                 request_id="req-set-current-scene-transition-invalid-duration",
-                request_data={"transitionDuration": -1},
+                request_data={"transitionDuration": 0},
             )
         )
         assert invalid_duration_response["d"]["requestStatus"]["result"] is False
