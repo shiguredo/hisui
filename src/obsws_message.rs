@@ -177,6 +177,12 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
+        "GetCurrentPreviewScene" => {
+            crate::obsws_response_builder::build_get_current_preview_scene_response(
+                &request_id,
+                input_registry,
+            )
+        }
         "GetTransitionKindList" => {
             crate::obsws_response_builder::build_get_transition_kind_list_response(
                 &request_id,
@@ -209,11 +215,24 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
+        "SetCurrentSceneTransitionSettings" => {
+            crate::obsws_response_builder::build_set_current_scene_transition_settings_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetCurrentSceneTransitionCursor" => {
             crate::obsws_response_builder::build_get_current_scene_transition_cursor_response(
                 &request_id,
+                input_registry,
             )
         }
+        "SetTBarPosition" => crate::obsws_response_builder::build_set_tbar_position_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetSceneItemId" => crate::obsws_response_builder::build_get_scene_item_id_response(
             &request_id,
             request.request_data.as_ref(),
@@ -599,6 +618,16 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "CreateInput"));
         assert!(available_requests.iter().any(|r| r == "RemoveInput"));
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetCurrentPreviewScene")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetCurrentPreviewScene")
+        );
         assert!(available_requests.iter().any(|r| r == "RemoveScene"));
         assert!(
             available_requests
@@ -628,8 +657,14 @@ mod tests {
         assert!(
             available_requests
                 .iter()
+                .any(|r| r == "SetCurrentSceneTransitionSettings")
+        );
+        assert!(
+            available_requests
+                .iter()
                 .any(|r| r == "GetCurrentSceneTransitionCursor")
         );
+        assert!(available_requests.iter().any(|r| r == "SetTBarPosition"));
         assert!(available_requests.iter().any(|r| r == "GetSceneItemId"));
         assert!(available_requests.iter().any(|r| r == "GetSceneItemList"));
         assert!(available_requests.iter().any(|r| r == "CreateSceneItem"));
@@ -1190,6 +1225,7 @@ mod tests {
         let session_stats = ObswsSessionStats::default();
         let request_types = [
             "SetCurrentProgramScene",
+            "SetCurrentPreviewScene",
             "CreateScene",
             "RemoveScene",
             "CreateInput",

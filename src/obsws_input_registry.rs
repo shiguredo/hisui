@@ -11,8 +11,12 @@ const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
 const OBSWS_DEFAULT_TRANSITION_NAME: &str = "Cut";
 const OBSWS_DEFAULT_TRANSITION_DURATION_MS: i64 = 300;
+const OBSWS_DEFAULT_TRANSITION_SETTINGS_JSON: &str = "{}";
+const OBSWS_DEFAULT_TBAR_POSITION: f64 = 0.0;
 const OBSWS_MIN_TRANSITION_DURATION_MS: i64 = 50;
 const OBSWS_MAX_TRANSITION_DURATION_MS: i64 = 20_000;
+const OBSWS_MIN_TBAR_POSITION: f64 = 0.0;
+const OBSWS_MAX_TBAR_POSITION: f64 = 1.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInputEntry {
@@ -459,10 +463,12 @@ struct ObswsRecordRuntimeState {
     run: Option<ObswsRecordRun>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct ObswsTransitionRuntimeState {
     current_transition_name: String,
     current_transition_duration_ms: i64,
+    current_transition_settings: nojson::RawJsonOwned,
+    current_tbar_position: f64,
 }
 
 impl Default for ObswsTransitionRuntimeState {
@@ -470,6 +476,11 @@ impl Default for ObswsTransitionRuntimeState {
         Self {
             current_transition_name: OBSWS_DEFAULT_TRANSITION_NAME.to_owned(),
             current_transition_duration_ms: OBSWS_DEFAULT_TRANSITION_DURATION_MS,
+            current_transition_settings: nojson::RawJsonOwned::parse(
+                OBSWS_DEFAULT_TRANSITION_SETTINGS_JSON,
+            )
+            .expect("BUG: default transition settings json must be valid"),
+            current_tbar_position: OBSWS_DEFAULT_TBAR_POSITION,
         }
     }
 }
@@ -604,6 +615,11 @@ pub enum SetCurrentProgramSceneError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetCurrentPreviewSceneError {
+    SceneNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetCurrentSceneTransitionError {
     TransitionNotFound,
 }
@@ -611,6 +627,16 @@ pub enum SetCurrentSceneTransitionError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetCurrentSceneTransitionDurationError {
     InvalidTransitionDuration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetCurrentSceneTransitionSettingsError {
+    InvalidTransitionSettings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SetTBarPositionError {
+    InvalidTBarPosition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -767,6 +793,7 @@ pub struct ObswsInputRegistry {
     scenes_by_name: BTreeMap<String, ObswsSceneState>,
     scene_order: Vec<String>,
     current_program_scene_name: String,
+    current_preview_scene_name: String,
     next_input_id: u64,
     next_scene_id: u64,
     next_scene_item_id: i64,
@@ -795,6 +822,7 @@ impl ObswsInputRegistry {
             scenes_by_name,
             scene_order: vec![OBSWS_DEFAULT_SCENE_NAME.to_owned()],
             current_program_scene_name: OBSWS_DEFAULT_SCENE_NAME.to_owned(),
+            current_preview_scene_name: OBSWS_DEFAULT_SCENE_NAME.to_owned(),
             next_input_id: 0,
             next_scene_id: 1,
             next_scene_item_id: 1,
@@ -917,6 +945,14 @@ impl ObswsInputRegistry {
                 .clone();
             self.current_program_scene_name = new_scene_name;
         }
+        if self.current_preview_scene_name == scene_name {
+            let new_scene_name = self
+                .scene_order
+                .first()
+                .expect("infallible: at least one scene remains after scene deletion")
+                .clone();
+            self.current_preview_scene_name = new_scene_name;
+        }
 
         Ok(ObswsSceneEntry {
             scene_index,
@@ -966,6 +1002,31 @@ impl ObswsInputRegistry {
         Ok(())
     }
 
+    pub fn current_preview_scene(&self) -> Option<ObswsSceneEntry> {
+        let scene_name = &self.current_preview_scene_name;
+        let scene = self.scenes_by_name.get(scene_name)?;
+        let scene_index = self
+            .scene_order
+            .iter()
+            .position(|name| name == scene_name)?;
+        Some(ObswsSceneEntry {
+            scene_index,
+            scene_name: scene_name.clone(),
+            scene_uuid: scene.scene_uuid.clone(),
+        })
+    }
+
+    pub fn set_current_preview_scene(
+        &mut self,
+        scene_name: &str,
+    ) -> Result<(), SetCurrentPreviewSceneError> {
+        if !self.scenes_by_name.contains_key(scene_name) {
+            return Err(SetCurrentPreviewSceneError::SceneNotFound);
+        }
+        self.current_preview_scene_name = scene_name.to_owned();
+        Ok(())
+    }
+
     pub fn supported_transition_kinds(&self) -> &'static [&'static str] {
         &OBSWS_SUPPORTED_TRANSITION_KINDS
     }
@@ -976,6 +1037,14 @@ impl ObswsInputRegistry {
 
     pub fn current_scene_transition_duration_ms(&self) -> i64 {
         self.transition_runtime.current_transition_duration_ms
+    }
+
+    pub fn current_scene_transition_settings(&self) -> &nojson::RawJsonOwned {
+        &self.transition_runtime.current_transition_settings
+    }
+
+    pub fn current_tbar_position(&self) -> f64 {
+        self.transition_runtime.current_tbar_position
     }
 
     pub fn set_current_scene_transition(
@@ -999,6 +1068,27 @@ impl ObswsInputRegistry {
             return Err(SetCurrentSceneTransitionDurationError::InvalidTransitionDuration);
         }
         self.transition_runtime.current_transition_duration_ms = transition_duration_ms;
+        Ok(())
+    }
+
+    pub fn set_current_scene_transition_settings(
+        &mut self,
+        transition_settings: nojson::RawJsonOwned,
+    ) -> Result<(), SetCurrentSceneTransitionSettingsError> {
+        if transition_settings.value().kind() != nojson::JsonValueKind::Object {
+            return Err(SetCurrentSceneTransitionSettingsError::InvalidTransitionSettings);
+        }
+        self.transition_runtime.current_transition_settings = transition_settings;
+        Ok(())
+    }
+
+    pub fn set_tbar_position(&mut self, tbar_position: f64) -> Result<(), SetTBarPositionError> {
+        if !tbar_position.is_finite()
+            || !(OBSWS_MIN_TBAR_POSITION..=OBSWS_MAX_TBAR_POSITION).contains(&tbar_position)
+        {
+            return Err(SetTBarPositionError::InvalidTBarPosition);
+        }
+        self.transition_runtime.current_tbar_position = tbar_position;
         Ok(())
     }
 
@@ -2748,10 +2838,34 @@ mod tests {
     }
 
     #[test]
+    fn create_scene_and_set_current_preview_scene_succeeds() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let created = registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+        assert_eq!(created.scene_name, "Scene B");
+
+        registry
+            .set_current_preview_scene("Scene B")
+            .expect("setting current preview scene must succeed");
+        assert_eq!(
+            registry
+                .current_preview_scene()
+                .map(|scene| scene.scene_name),
+            Some("Scene B".to_owned())
+        );
+    }
+
+    #[test]
     fn transition_runtime_defaults_to_cut_and_300ms() {
         let registry = ObswsInputRegistry::new_for_test();
         assert_eq!(registry.current_scene_transition_name(), "Cut");
         assert_eq!(registry.current_scene_transition_duration_ms(), 300);
+        assert_eq!(
+            registry.current_scene_transition_settings().value().kind(),
+            nojson::JsonValueKind::Object
+        );
+        assert_eq!(registry.current_tbar_position(), 0.0);
         assert_eq!(registry.supported_transition_kinds(), ["Cut", "Fade"]);
     }
 
@@ -2819,6 +2933,55 @@ mod tests {
     }
 
     #[test]
+    fn set_current_scene_transition_settings_updates_runtime_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let transition_settings = nojson::RawJsonOwned::parse(r#"{"speed":2,"style":"smooth"}"#)
+            .expect("transition settings must be valid json");
+        registry
+            .set_current_scene_transition_settings(transition_settings)
+            .expect("transition settings update must succeed");
+        let speed: i64 = registry
+            .current_scene_transition_settings()
+            .value()
+            .to_member("speed")
+            .and_then(|v| v.required()?.try_into())
+            .expect("transition settings speed must exist");
+        assert_eq!(speed, 2);
+    }
+
+    #[test]
+    fn set_current_scene_transition_settings_rejects_non_object_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let transition_settings =
+            nojson::RawJsonOwned::parse(r#""invalid""#).expect("json must be valid");
+        let error = registry
+            .set_current_scene_transition_settings(transition_settings)
+            .expect_err("non-object transition settings must be rejected");
+        assert_eq!(
+            error,
+            SetCurrentSceneTransitionSettingsError::InvalidTransitionSettings
+        );
+    }
+
+    #[test]
+    fn set_tbar_position_updates_runtime_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .set_tbar_position(0.25)
+            .expect("tbar position update must succeed");
+        assert_eq!(registry.current_tbar_position(), 0.25);
+    }
+
+    #[test]
+    fn set_tbar_position_rejects_out_of_range_value() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let error = registry
+            .set_tbar_position(1.5)
+            .expect_err("out-of-range tbar position must be rejected");
+        assert_eq!(error, SetTBarPositionError::InvalidTBarPosition);
+    }
+
+    #[test]
     fn remove_scene_removes_non_current_scene() {
         let mut registry = ObswsInputRegistry::new_for_test();
         registry
@@ -2854,6 +3017,27 @@ mod tests {
         assert_eq!(
             registry
                 .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some(OBSWS_DEFAULT_SCENE_NAME.to_owned())
+        );
+    }
+
+    #[test]
+    fn remove_scene_switches_current_preview_scene_when_current_is_removed() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+        registry
+            .set_current_preview_scene("Scene B")
+            .expect("setting preview scene must succeed");
+
+        registry
+            .remove_scene("Scene B")
+            .expect("scene removal must succeed");
+        assert_eq!(
+            registry
+                .current_preview_scene()
                 .map(|scene| scene.scene_name),
             Some(OBSWS_DEFAULT_SCENE_NAME.to_owned())
         );
