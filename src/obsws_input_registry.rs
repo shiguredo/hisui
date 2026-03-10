@@ -224,8 +224,9 @@ pub struct ObswsRecordRun {
     pub output_path: PathBuf,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObswsSceneItemBlendMode {
+    #[default]
     Normal,
     Additive,
     Subtract,
@@ -259,12 +260,6 @@ impl ObswsSceneItemBlendMode {
             "OBS_BLEND_DARKEN" => Some(Self::Darken),
             _ => None,
         }
-    }
-}
-
-impl Default for ObswsSceneItemBlendMode {
-    fn default() -> Self {
-        Self::Normal
     }
 }
 
