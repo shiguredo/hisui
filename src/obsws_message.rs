@@ -201,11 +201,32 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
+        "GetSceneItemLocked" => {
+            crate::obsws_response_builder::build_get_scene_item_locked_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetSceneItemIndex" => crate::obsws_response_builder::build_get_scene_item_index_response(
             &request_id,
             request.request_data.as_ref(),
             input_registry,
         ),
+        "GetSceneItemBlendMode" => {
+            crate::obsws_response_builder::build_get_scene_item_blend_mode_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetSceneItemTransform" => {
+            crate::obsws_response_builder::build_get_scene_item_transform_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
             &request_id,
             input_registry,
@@ -558,8 +579,30 @@ mod tests {
                 .iter()
                 .any(|r| r == "SetSceneItemEnabled")
         );
+        assert!(available_requests.iter().any(|r| r == "GetSceneItemLocked"));
+        assert!(available_requests.iter().any(|r| r == "SetSceneItemLocked"));
         assert!(available_requests.iter().any(|r| r == "GetSceneItemIndex"));
         assert!(available_requests.iter().any(|r| r == "SetSceneItemIndex"));
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetSceneItemBlendMode")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetSceneItemBlendMode")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetSceneItemTransform")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetSceneItemTransform")
+        );
         assert!(
             available_requests
                 .iter()
@@ -917,6 +960,116 @@ mod tests {
     }
 
     #[test]
+    fn handle_request_message_returns_get_scene_item_locked_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-scene-item-locked".to_owned()),
+            request_type: Some("GetSceneItemLocked".to_owned()),
+            request_data: Some(request_data(r#"{"sceneName":"Scene","sceneItemId":1}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            request_data(r#"{}"#).value(),
+        )
+        .expect("input settings must be valid");
+        input_registry
+            .create_input("Scene", "camera-1", input, true)
+            .expect("input creation must succeed");
+        input_registry
+            .set_scene_item_locked("Scene", 1, true)
+            .expect("set scene item locked must succeed");
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let scene_item_locked: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneItemLocked"])?
+            .required()?
+            .try_into()?;
+        assert!(scene_item_locked);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_scene_item_blend_mode_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-scene-item-blend-mode".to_owned()),
+            request_type: Some("GetSceneItemBlendMode".to_owned()),
+            request_data: Some(request_data(r#"{"sceneName":"Scene","sceneItemId":1}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            request_data(r#"{}"#).value(),
+        )
+        .expect("input settings must be valid");
+        input_registry
+            .create_input("Scene", "camera-1", input, true)
+            .expect("input creation must succeed");
+        input_registry
+            .set_scene_item_blend_mode(
+                "Scene",
+                1,
+                crate::obsws_input_registry::ObswsSceneItemBlendMode::Additive,
+            )
+            .expect("set scene item blend mode must succeed");
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let scene_item_blend_mode: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneItemBlendMode"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(scene_item_blend_mode, "OBS_BLEND_ADDITIVE");
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_scene_item_transform_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-scene-item-transform".to_owned()),
+            request_type: Some("GetSceneItemTransform".to_owned()),
+            request_data: Some(request_data(r#"{"sceneName":"Scene","sceneItemId":1}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let input = ObswsInput::from_kind_and_settings(
+            "video_capture_device",
+            request_data(r#"{}"#).value(),
+        )
+        .expect("input settings must be valid");
+        input_registry
+            .create_input("Scene", "camera-1", input, true)
+            .expect("input creation must succeed");
+        input_registry
+            .set_scene_item_transform(
+                "Scene",
+                1,
+                crate::obsws_input_registry::ObswsSceneItemTransformPatch {
+                    position_x: Some(123.0),
+                    ..Default::default()
+                },
+            )
+            .expect("set scene item transform must succeed");
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let position_x: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneItemTransform", "positionX"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(position_x, 123.0);
+        Ok(())
+    }
+
+    #[test]
     fn handle_request_message_returns_error_when_get_input_settings_is_missing_lookup_fields()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = RequestMessage {
@@ -978,7 +1131,10 @@ mod tests {
             "RemoveSceneItem",
             "DuplicateSceneItem",
             "SetSceneItemEnabled",
+            "SetSceneItemLocked",
             "SetSceneItemIndex",
+            "SetSceneItemBlendMode",
+            "SetSceneItemTransform",
             "StartStream",
             "ToggleStream",
             "StopStream",

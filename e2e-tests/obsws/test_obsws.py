@@ -436,6 +436,44 @@ async def _expect_scene_item_enable_state_changed_event(
     return event
 
 
+async def _expect_scene_item_lock_state_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    scene_name: str,
+    scene_item_id: int,
+    scene_item_locked: bool,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="SceneItemLockStateChanged",
+        event_intent=OBSWS_EVENT_SUB_SCENES,
+    )
+    assert event["d"]["eventData"]["sceneName"] == scene_name
+    assert isinstance(event["d"]["eventData"]["sceneUuid"], str)
+    assert event["d"]["eventData"]["sceneUuid"] != ""
+    assert event["d"]["eventData"]["sceneItemId"] == scene_item_id
+    assert event["d"]["eventData"]["sceneItemLocked"] is scene_item_locked
+    return event
+
+
+async def _expect_scene_item_transform_changed_event(
+    ws: aiohttp.ClientWebSocketResponse,
+    *,
+    scene_name: str,
+    scene_item_id: int,
+):
+    event = await _expect_obsws_event(
+        ws,
+        event_type="SceneItemTransformChanged",
+        event_intent=OBSWS_EVENT_SUB_SCENES,
+    )
+    assert event["d"]["eventData"]["sceneName"] == scene_name
+    assert isinstance(event["d"]["eventData"]["sceneUuid"], str)
+    assert event["d"]["eventData"]["sceneUuid"] != ""
+    assert event["d"]["eventData"]["sceneItemId"] == scene_item_id
+    return event
+
+
 async def _expect_obsws_event(
     ws: aiohttp.ClientWebSocketResponse,
     *,
@@ -881,6 +919,12 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "GetSceneItemId" in response_data["availableRequests"]
         assert "GetSceneItemEnabled" in response_data["availableRequests"]
         assert "SetSceneItemEnabled" in response_data["availableRequests"]
+        assert "GetSceneItemLocked" in response_data["availableRequests"]
+        assert "SetSceneItemLocked" in response_data["availableRequests"]
+        assert "GetSceneItemBlendMode" in response_data["availableRequests"]
+        assert "SetSceneItemBlendMode" in response_data["availableRequests"]
+        assert "GetSceneItemTransform" in response_data["availableRequests"]
+        assert "SetSceneItemTransform" in response_data["availableRequests"]
         assert "SetStreamServiceSettings" in response_data["availableRequests"]
         assert "StartStream" in response_data["availableRequests"]
         assert "ToggleStream" in response_data["availableRequests"]
@@ -2148,6 +2192,164 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 "sceneItemId"
             ]
             assert duplicated_scene_item_id != second_scene_item_id
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path):
+    """obsws の Scene Item の lock / blend mode / transform request が動作することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-extra-requests",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-extra-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            get_scene_item_id_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemId",
+                request_id="req-get-scene-item-id-scene-item-extra-requests",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceName": "scene-item-extra-input",
+                    "searchOffset": 0,
+                },
+            )
+            assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
+            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+
+            get_locked_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemLocked",
+                request_id="req-get-scene-item-locked-before",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_locked_response["d"]["requestStatus"]["result"] is True
+            assert get_locked_response["d"]["responseData"]["sceneItemLocked"] is False
+
+            set_locked_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemLocked",
+                request_id="req-set-scene-item-locked-true",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemLocked": True,
+                },
+            )
+            assert set_locked_response["d"]["requestStatus"]["result"] is True
+
+            get_locked_after_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemLocked",
+                request_id="req-get-scene-item-locked-after",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_locked_after_response["d"]["requestStatus"]["result"] is True
+            assert get_locked_after_response["d"]["responseData"]["sceneItemLocked"] is True
+
+            get_blend_mode_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemBlendMode",
+                request_id="req-get-scene-item-blend-mode-before",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_blend_mode_response["d"]["requestStatus"]["result"] is True
+            assert (
+                get_blend_mode_response["d"]["responseData"]["sceneItemBlendMode"]
+                == "OBS_BLEND_NORMAL"
+            )
+
+            set_blend_mode_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemBlendMode",
+                request_id="req-set-scene-item-blend-mode",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemBlendMode": "OBS_BLEND_ADDITIVE",
+                },
+            )
+            assert set_blend_mode_response["d"]["requestStatus"]["result"] is True
+
+            get_blend_mode_after_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemBlendMode",
+                request_id="req-get-scene-item-blend-mode-after",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_blend_mode_after_response["d"]["requestStatus"]["result"] is True
+            assert (
+                get_blend_mode_after_response["d"]["responseData"]["sceneItemBlendMode"]
+                == "OBS_BLEND_ADDITIVE"
+            )
+
+            set_transform_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemTransform",
+                request_id="req-set-scene-item-transform",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemTransform": {
+                        "positionX": 12.5,
+                        "positionY": 7.25,
+                        "boundsType": "OBS_BOUNDS_STRETCH",
+                    },
+                },
+            )
+            assert set_transform_response["d"]["requestStatus"]["result"] is True
+
+            get_transform_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemTransform",
+                request_id="req-get-scene-item-transform-after",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                },
+            )
+            assert get_transform_response["d"]["requestStatus"]["result"] is True
+            scene_item_transform = get_transform_response["d"]["responseData"][
+                "sceneItemTransform"
+            ]
+            assert scene_item_transform["positionX"] == 12.5
+            assert scene_item_transform["positionY"] == 7.25
+            assert scene_item_transform["boundsType"] == "OBS_BOUNDS_STRETCH"
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
@@ -3977,6 +4179,130 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 event_intent=OBSWS_EVENT_SUB_SCENES,
             )
             assert created_event_3["d"]["eventData"]["sceneItemId"] == duplicated_scene_item_id
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+        asyncio.run(_run())
+
+
+def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscription_enabled(
+    binary_path: Path,
+):
+    """obsws が Scenes 購読時に Scene Item lock / transform イベントを送ることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(
+                ws,
+                None,
+                event_subscriptions=OBSWS_EVENT_SUB_SCENES,
+            )
+
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-input-scene-item-lock-transform-events",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "scene-item-lock-transform-events-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            get_scene_item_id_response = await _send_obsws_request(
+                ws,
+                request_type="GetSceneItemId",
+                request_id="req-get-scene-item-id-lock-transform-events",
+                request_data={
+                    "sceneName": "Scene",
+                    "sourceName": "scene-item-lock-transform-events-input",
+                    "searchOffset": 0,
+                },
+            )
+            assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
+            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+
+            set_locked_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemLocked",
+                request_id="req-set-scene-item-locked-event",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemLocked": True,
+                },
+            )
+            assert set_locked_response["d"]["requestStatus"]["result"] is True
+            await _expect_scene_item_lock_state_changed_event(
+                ws,
+                scene_name="Scene",
+                scene_item_id=scene_item_id,
+                scene_item_locked=True,
+            )
+
+            set_locked_again_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemLocked",
+                request_id="req-set-scene-item-locked-event-again",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemLocked": True,
+                },
+            )
+            assert set_locked_again_response["d"]["requestStatus"]["result"] is True
+            await _assert_no_message_within(ws, timeout=0.5)
+
+            set_transform_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemTransform",
+                request_id="req-set-scene-item-transform-event",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemTransform": {
+                        "positionX": 99.0,
+                    },
+                },
+            )
+            assert set_transform_response["d"]["requestStatus"]["result"] is True
+            transform_event = await _expect_scene_item_transform_changed_event(
+                ws,
+                scene_name="Scene",
+                scene_item_id=scene_item_id,
+            )
+            event_transform = transform_event["d"]["eventData"]["sceneItemTransform"]
+            assert event_transform["positionX"] == 99.0
+            assert event_transform["positionY"] == 0.0
+            assert event_transform["scaleX"] == 1.0
+            assert "sourceWidth" in event_transform
+            assert "sourceHeight" in event_transform
+
+            set_transform_again_response = await _send_obsws_request(
+                ws,
+                request_type="SetSceneItemTransform",
+                request_id="req-set-scene-item-transform-event-again",
+                request_data={
+                    "sceneName": "Scene",
+                    "sceneItemId": scene_item_id,
+                    "sceneItemTransform": {
+                        "positionX": 99.0,
+                    },
+                },
+            )
+            assert set_transform_again_response["d"]["requestStatus"]["result"] is True
+            await _assert_no_message_within(ws, timeout=0.5)
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
