@@ -987,3 +987,4 @@ hisui 対応状況: 対応済み（ `Get/SetSceneItemLocked` / `Get/SetSceneItem
 
 NOTE: `SetSceneItemTransform` はパッチ更新で、`sceneItemTransform` に含めたフィールドのみ更新する  
 NOTE: hisui では現時点で `SetSceneItemBlendMode` に対応する専用イベントは送信しない
+NOTE: `Get/SetSceneItemLocked` / `Get/SetSceneItemIndex` / `Get/SetSceneItemBlendMode` / `Get/SetSceneItemTransform` は現時点で状態保持と `Event` 配信のみ対応し、実際の映像出力には反映しない

@@ -178,6 +178,8 @@
 
 ### Transitions
 
+- [ ] 遷移種別に応じた実際の映像切り替え動作（ 例: `Fade` の補間描画 ）
+- [ ] 遷移実行の時間進行（ 開始 / 進行 / 完了 ）に応じた出力制御
 - [ ] `GetTransitionKindList`: 遷移種別一覧を取得する
 - [ ] `GetSceneTransitionList`: 遷移一覧を取得する
 - [ ] `GetCurrentSceneTransition`: 現在の遷移情報を取得する
@@ -186,6 +188,7 @@
 - [ ] `SetCurrentSceneTransitionSettings`: 遷移設定を更新する
 - [ ] `GetCurrentSceneTransitionCursor`: 遷移カーソル位置を取得する
 - [ ] `SetTBarPosition`: TBar 位置を設定する
+  - NOTE: 現時点の hisui では Transition は request / 実描画ともに未対応
 
 ### Filters
 
@@ -202,6 +205,10 @@
 
 ### Scene Items
 
+- [ ] `Scene Item` の実描画合成（ 複数 `Scene Item` の合成描画 ）
+- [ ] `sceneItemIndex` の実描画順序への反映
+- [ ] `sceneItemBlendMode` の実描画への反映
+- [ ] `sceneItemTransform` の実描画への反映
 - [x] `GetSceneItemList`: シーン内アイテム一覧を取得する
 - [ ] `GetGroupSceneItemList`: グループ内アイテム一覧を取得する
 - [x] `GetSceneItemId`: ソース名からシーンアイテム ID を取得する
@@ -223,6 +230,7 @@
 - [x] `GetSceneItemBlendMode`: シーンアイテム合成モードを取得する
 - [x] `SetSceneItemBlendMode`: シーンアイテム合成モードを設定する
   - NOTE: 現時点では blend mode 変更イベントは配信しない
+  - NOTE: `Get/SetSceneItemLocked` / `Get/SetSceneItemIndex` / `Get/SetSceneItemBlendMode` / `Get/SetSceneItemTransform` は現時点で状態保持と `Event` 配信のみ対応し、実際の映像出力には反映しない
 
 ### Outputs
 
