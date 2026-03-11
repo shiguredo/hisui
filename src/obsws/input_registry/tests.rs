@@ -879,6 +879,55 @@ fn create_scene_and_set_current_preview_scene_succeeds() {
 }
 
 #[test]
+fn set_scene_name_updates_scene_and_current_scene_names() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .create_scene("Scene B")
+        .expect("scene creation must succeed");
+    registry
+        .set_current_program_scene("Scene B")
+        .expect("setting current scene must succeed");
+    registry
+        .set_current_preview_scene("Scene B")
+        .expect("setting current preview scene must succeed");
+
+    let renamed = registry
+        .set_scene_name("Scene B", "Scene Renamed")
+        .expect("scene rename must succeed");
+    assert_eq!(renamed.scene_name, "Scene Renamed");
+    assert!(
+        registry
+            .list_scenes()
+            .iter()
+            .any(|scene| scene.scene_name == "Scene Renamed")
+    );
+    assert_eq!(
+        registry
+            .current_program_scene()
+            .map(|scene| scene.scene_name),
+        Some("Scene Renamed".to_owned())
+    );
+    assert_eq!(
+        registry
+            .current_preview_scene()
+            .map(|scene| scene.scene_name),
+        Some("Scene Renamed".to_owned())
+    );
+}
+
+#[test]
+fn set_scene_name_rejects_duplicate_scene_name() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .create_scene("Scene B")
+        .expect("scene creation must succeed");
+    let error = registry
+        .set_scene_name(OBSWS_DEFAULT_SCENE_NAME, "Scene B")
+        .expect_err("duplicate scene rename must fail");
+    assert_eq!(error, SetSceneNameError::SceneNameAlreadyExists);
+}
+
+#[test]
 fn transition_runtime_defaults_to_cut_and_300ms() {
     let registry = ObswsInputRegistry::new_for_test();
     assert_eq!(registry.current_scene_transition_name(), "Cut");

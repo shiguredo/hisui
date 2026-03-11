@@ -38,6 +38,11 @@ struct CreateSceneFields {
     scene_name: String,
 }
 
+struct SetSceneNameFields {
+    scene_name: String,
+    new_scene_name: String,
+}
+
 struct SetCurrentProgramSceneFields {
     scene_name: String,
 }
@@ -326,6 +331,17 @@ fn parse_create_scene_fields(
 ) -> Result<CreateSceneFields, nojson::JsonParseError> {
     let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
     Ok(CreateSceneFields { scene_name })
+}
+
+fn parse_set_scene_name_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetSceneNameFields, nojson::JsonParseError> {
+    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    let new_scene_name = required_non_empty_string_member(request_data, "newSceneName")?;
+    Ok(SetSceneNameFields {
+        scene_name,
+        new_scene_name,
+    })
 }
 
 fn parse_set_current_program_scene_fields(

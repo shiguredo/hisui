@@ -167,6 +167,7 @@ pub fn handle_request_message(
         "GetCanvasList" => {
             crate::obsws_response_builder::build_get_canvas_list_response(&request_id)
         }
+        "GetGroupList" => crate::obsws_response_builder::build_get_group_list_response(&request_id),
         "GetSceneList" => crate::obsws_response_builder::build_get_scene_list_response(
             &request_id,
             input_registry,
@@ -229,6 +230,11 @@ pub fn handle_request_message(
             )
         }
         "SetTBarPosition" => crate::obsws_response_builder::build_set_tbar_position_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "SetSceneName" => crate::obsws_response_builder::build_set_scene_name_response(
             &request_id,
             request.request_data.as_ref(),
             input_registry,
@@ -617,7 +623,14 @@ mod tests {
         assert!(supported_image_formats.iter().any(|f| f == "png"));
         assert!(available_requests.iter().any(|r| r == "CreateInput"));
         assert!(available_requests.iter().any(|r| r == "RemoveInput"));
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "BroadcastCustomEvent")
+        );
+        assert!(available_requests.iter().any(|r| r == "GetGroupList"));
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
+        assert!(available_requests.iter().any(|r| r == "SetSceneName"));
         assert!(
             available_requests
                 .iter()
@@ -721,6 +734,65 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "PauseRecord"));
         assert!(available_requests.iter().any(|r| r == "ResumeRecord"));
         assert!(available_requests.iter().any(|r| r == "ToggleRecordPause"));
+        assert!(available_requests.iter().any(|r| r == "Sleep"));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_group_list_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-group-list".to_owned()),
+            request_type: Some("GetGroupList".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let mut groups = json
+            .value()
+            .to_path_member(&["d", "responseData", "groups"])?
+            .required()?
+            .to_array()?;
+        assert!(groups.next().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_scene_name_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-set-scene-name".to_owned()),
+            request_type: Some("SetSceneName".to_owned()),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","newSceneName":"Scene Renamed"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let scene_name: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneName"])?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        assert_eq!(scene_name, "Scene Renamed");
+        assert_eq!(
+            input_registry
+                .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some("Scene Renamed".to_owned())
+        );
         Ok(())
     }
 

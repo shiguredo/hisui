@@ -31,9 +31,12 @@ pub fn build_get_version_response(request_id: &str) -> String {
                             [
                                 "GetVersion",
                                 "GetStats",
+                                "BroadcastCustomEvent",
+                                "GetGroupList",
                                 "GetCanvasList",
                                 "GetSceneList",
                                 "CreateScene",
+                                "SetSceneName",
                                 "RemoveScene",
                                 "GetCurrentProgramScene",
                                 "SetCurrentProgramScene",
@@ -86,6 +89,7 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "ToggleRecordPause",
                                 "PauseRecord",
                                 "ResumeRecord",
+                                "Sleep",
                             ],
                         )?;
                         f.member("supportedImageFormats", OBSWS_SUPPORTED_IMAGE_FORMATS)?;
@@ -172,6 +176,75 @@ pub fn build_get_canvas_list_response(request_id: &str) -> String {
                         )
                     }),
                 )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_group_list_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetGroupList")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| f.member("groups", nojson::array(|_| Ok(())))),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_broadcast_custom_event_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "BroadcastCustomEvent")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_sleep_response(request_id: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "Sleep")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
             }),
         )
     })

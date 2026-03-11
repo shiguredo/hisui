@@ -125,6 +125,67 @@ impl ObswsInputRegistry {
         })
     }
 
+    pub fn set_scene_name(
+        &mut self,
+        scene_name: &str,
+        new_scene_name: &str,
+    ) -> Result<ObswsSceneEntry, SetSceneNameError> {
+        if !self.scenes_by_name.contains_key(scene_name) {
+            return Err(SetSceneNameError::SceneNotFound);
+        }
+        if scene_name != new_scene_name && self.scenes_by_name.contains_key(new_scene_name) {
+            return Err(SetSceneNameError::SceneNameAlreadyExists);
+        }
+        if scene_name == new_scene_name {
+            let scene_index = self
+                .scene_order
+                .iter()
+                .position(|name| name == scene_name)
+                .expect("BUG: scene order must contain the scene");
+            let scene_uuid = self
+                .scenes_by_name
+                .get(scene_name)
+                .map(|scene| scene.scene_uuid.clone())
+                .expect("BUG: scene must exist");
+            return Ok(ObswsSceneEntry {
+                scene_index,
+                scene_name: scene_name.to_owned(),
+                scene_uuid,
+            });
+        }
+
+        let scene = self
+            .scenes_by_name
+            .remove(scene_name)
+            .expect("BUG: scene must exist after validation");
+        self.scenes_by_name.insert(new_scene_name.to_owned(), scene);
+
+        let scene_index = self
+            .scene_order
+            .iter()
+            .position(|name| name == scene_name)
+            .expect("BUG: scene order must contain the scene");
+        self.scene_order[scene_index] = new_scene_name.to_owned();
+
+        if self.current_program_scene_name == scene_name {
+            self.current_program_scene_name = new_scene_name.to_owned();
+        }
+        if self.current_preview_scene_name == scene_name {
+            self.current_preview_scene_name = new_scene_name.to_owned();
+        }
+
+        let scene_uuid = self
+            .scenes_by_name
+            .get(new_scene_name)
+            .map(|scene| scene.scene_uuid.clone())
+            .expect("BUG: renamed scene must exist");
+        Ok(ObswsSceneEntry {
+            scene_index,
+            scene_name: new_scene_name.to_owned(),
+            scene_uuid,
+        })
+    }
+
     pub fn remove_scene(&mut self, scene_name: &str) -> Result<ObswsSceneEntry, RemoveSceneError> {
         if !self.scenes_by_name.contains_key(scene_name) {
             return Err(RemoveSceneError::SceneNotFound);

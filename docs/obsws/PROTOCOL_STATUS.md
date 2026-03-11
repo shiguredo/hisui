@@ -39,7 +39,7 @@
   - NOTE: 成功時は `Identified (op=2)` を返す
   - NOTE: `eventSubscriptions` は保持し、対応済みイベントの配信判定に利用する
 - [x] Event 配信（ `op=5` ）基盤: サーバーイベントを push 配信する
-  - NOTE: 現在は `eventSubscriptions` の Outputs / Scenes / Inputs ビット購読時に対応イベントを配信する
+  - NOTE: 現在は `eventSubscriptions` の General / Outputs / Scenes / Inputs ビット購読時に対応イベントを配信する
 - [x] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
   - NOTE: 現時点で `executionType = 0` のみ対応し、`haltOnFailure` を反映する
 
@@ -54,6 +54,7 @@
 - [x] `InputRemoved`: Input 削除を通知する
 - [x] `InputSettingsChanged`: Input 設定変更を通知する
 - [x] `InputNameChanged`: Input 名変更を通知する
+- [x] `CustomEvent`: カスタムイベントを通知する
 - [x] `SceneItemEnableStateChanged`: Scene Item の有効状態変更を通知する
 - [x] `SceneItemLockStateChanged`: Scene Item のロック状態変更を通知する
 - [x] `SceneItemTransformChanged`: Scene Item の変形状態変更を通知する
@@ -80,12 +81,13 @@
   - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す
   - [x] `webSocketSessionOutgoingMessages`: 現在セッションの送信メッセージ数を返す
-- [ ] `BroadcastCustomEvent`: カスタムイベントを配信する
+- [x] `BroadcastCustomEvent`: カスタムイベントを配信する
 - [ ] `CallVendorRequest`: ベンダー拡張リクエストを実行する
 - [ ] `GetHotkeyList`: ホットキー一覧を取得する
 - [ ] `TriggerHotkeyByName`: 名前指定でホットキーを発火する
 - [ ] `TriggerHotkeyByKeySequence`: キーシーケンス指定でホットキーを発火する
-- [ ] `Sleep`: 指定時間だけ処理を待機する
+- [x] `Sleep`: 指定時間だけ処理を待機する
+  - NOTE: `sleepMillis >= 0` のみ受理する
 
 ### Config
 
@@ -121,7 +123,8 @@
 ### Scenes
 
 - [x] `GetSceneList`: シーン一覧を取得する
-- [ ] `GetGroupList`: グループ一覧を取得する
+- [x] `GetGroupList`: グループ一覧を取得する
+  - NOTE: 現時点では group 非対応のため空配列を返す
 - [x] `GetCurrentProgramScene`: 現在の Program Scene を取得する
 - [x] `SetCurrentProgramScene`: Program Scene を切り替える
 - [x] `GetCurrentPreviewScene`: 現在の Preview Scene を取得する
@@ -130,7 +133,8 @@
 - [x] `RemoveScene`: シーンを削除する
   - NOTE: 最後の 1 Scene は削除不可
   - NOTE: 現在 Program / Preview Scene を削除した場合は残存 Scene へ自動切替する
-- [ ] `SetSceneName`: シーン名を変更する
+- [x] `SetSceneName`: シーン名を変更する
+  - NOTE: 現在 Program / Preview Scene を rename した場合は内部状態も同時に更新する
 - [ ] `GetSceneSceneTransitionOverride`: シーン遷移上書き設定を取得する
 - [ ] `SetSceneSceneTransitionOverride`: シーン遷移上書き設定を更新する
 

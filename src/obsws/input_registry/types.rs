@@ -608,6 +608,12 @@ pub enum CreateSceneError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSceneNameError {
+    SceneNotFound,
+    SceneNameAlreadyExists,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetCurrentProgramSceneError {
     SceneNotFound,
 }

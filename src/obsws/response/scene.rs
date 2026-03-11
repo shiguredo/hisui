@@ -1,6 +1,7 @@
 use crate::obsws_input_registry::{
     CreateSceneError, ObswsInputRegistry, SetCurrentPreviewSceneError, SetCurrentProgramSceneError,
-    SetCurrentSceneTransitionDurationError, SetCurrentSceneTransitionError, SetTBarPositionError,
+    SetCurrentSceneTransitionDurationError, SetCurrentSceneTransitionError, SetSceneNameError,
+    SetTBarPositionError,
 };
 use crate::obsws_protocol::{
     OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
@@ -12,7 +13,8 @@ use super::{
     parse_create_scene_fields, parse_remove_scene_fields, parse_request_data_or_error_response,
     parse_set_current_preview_scene_fields, parse_set_current_program_scene_fields,
     parse_set_current_scene_transition_duration_fields, parse_set_current_scene_transition_fields,
-    parse_set_current_scene_transition_settings_fields, parse_set_tbar_position_fields,
+    parse_set_current_scene_transition_settings_fields, parse_set_scene_name_fields,
+    parse_set_tbar_position_fields,
 };
 
 struct ObswsSceneTransitionEntry {
@@ -634,6 +636,67 @@ pub fn build_remove_scene_response(
                     }),
                 )?;
                 f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_scene_name_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetSceneName",
+        request_id,
+        request_data,
+        parse_set_scene_name_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    let renamed = match input_registry.set_scene_name(&fields.scene_name, &fields.new_scene_name) {
+        Ok(renamed) => renamed,
+        Err(SetSceneNameError::SceneNotFound) => {
+            return super::build_request_response_error(
+                "SetSceneName",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene not found",
+            );
+        }
+        Err(SetSceneNameError::SceneNameAlreadyExists) => {
+            return super::build_request_response_error(
+                "SetSceneName",
+                request_id,
+                REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+                "Scene already exists",
+            );
+        }
+    };
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetSceneName")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("sceneName", &renamed.scene_name)?;
+                        f.member("sceneUuid", &renamed.scene_uuid)
+                    }),
+                )
             }),
         )
     })

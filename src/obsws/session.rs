@@ -14,8 +14,8 @@ use crate::obsws_input_registry::{
 use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
-    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
-    OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS,
+    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
     REQUEST_STATUS_OUTPUT_NOT_RUNNING, REQUEST_STATUS_OUTPUT_RUNNING,
     REQUEST_STATUS_REQUEST_PROCESSING_FAILED, REQUEST_STATUS_STREAM_NOT_RUNNING,
@@ -601,6 +601,18 @@ impl ObswsSession {
             )?;
             return Self::build_execution_from_response_text(response_text, events);
         }
+        if request_type == "BroadcastCustomEvent" {
+            let action = self
+                .handle_broadcast_custom_event_request(&request_id, request.request_data.as_ref())
+                .await;
+            return Self::build_execution_from_action(action);
+        }
+        if request_type == "Sleep" {
+            let action = self
+                .handle_sleep_request(&request_id, request.request_data.as_ref())
+                .await;
+            return Self::build_execution_from_action(action);
+        }
         if request_type == "SetCurrentProgramScene" {
             let action = self
                 .handle_set_current_program_scene_request(
@@ -875,5 +887,81 @@ impl ObswsSession {
             ),
             message_name: "request response message",
         }
+    }
+
+    async fn handle_broadcast_custom_event_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let Some(request_data) = request_data else {
+            return Self::build_missing_request_data_error_action(
+                "BroadcastCustomEvent",
+                request_id,
+            );
+        };
+        let event_data = match Self::parse_custom_event_request_data(request_data) {
+            Ok(event_data) => event_data,
+            Err(error) => {
+                return Self::build_parse_error_action("BroadcastCustomEvent", request_id, &error);
+            }
+        };
+
+        let response_text =
+            crate::obsws_response_builder::build_broadcast_custom_event_response(request_id);
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_GENERAL) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let event_text = crate::obsws_response_builder::build_custom_event(&event_data);
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
+    async fn handle_sleep_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let Some(request_data) = request_data else {
+            return Self::build_missing_request_data_error_action("Sleep", request_id);
+        };
+        let sleep_millis = match Self::parse_sleep_millis_request_field(request_data) {
+            Ok(sleep_millis) => sleep_millis,
+            Err(error) => return Self::build_parse_error_action("Sleep", request_id, &error),
+        };
+        tokio::time::sleep(Duration::from_millis(sleep_millis)).await;
+        SessionAction::SendText {
+            text: crate::obsws_response_builder::build_sleep_response(request_id),
+            message_name: "request response message",
+        }
+    }
+
+    fn parse_custom_event_request_data(
+        request_data: &nojson::RawJsonOwned,
+    ) -> Result<nojson::RawJsonOwned, nojson::JsonParseError> {
+        let event_data = request_data.value().to_member("eventData")?.required()?;
+        if event_data.kind() != nojson::JsonValueKind::Object {
+            return Err(event_data.invalid("object is required"));
+        }
+        nojson::RawJsonOwned::try_from(event_data)
+    }
+
+    fn parse_sleep_millis_request_field(
+        request_data: &nojson::RawJsonOwned,
+    ) -> Result<u64, nojson::JsonParseError> {
+        let raw_sleep_millis = request_data.value().to_member("sleepMillis")?.required()?;
+        let sleep_millis: i64 = raw_sleep_millis.try_into()?;
+        if sleep_millis < 0 {
+            return Err(raw_sleep_millis.invalid("sleepMillis must be greater than or equal to 0"));
+        }
+        Ok(sleep_millis as u64)
     }
 }

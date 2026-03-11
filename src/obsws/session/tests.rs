@@ -3,8 +3,8 @@ use crate::obsws_auth::build_authentication_response;
 use crate::obsws_message::RequestMessage;
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
-    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
-    OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS,
+    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
 };
@@ -146,6 +146,67 @@ async fn on_request_before_identify_returns_close_action() {
     };
     assert_eq!(code, OBSWS_CLOSE_NOT_IDENTIFIED);
     assert_eq!(reason, "identify is required");
+}
+
+#[tokio::test]
+async fn broadcast_custom_event_returns_event_when_general_subscription_enabled() {
+    let mut session = ObswsSession::new(None, input_registry(), None);
+    let identified = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":1}}"#)
+        .await;
+    assert!(identified.is_ok());
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-custom-event".to_owned()),
+            request_type: Some("BroadcastCustomEvent".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"eventData":{"message":"hello"}}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let SessionAction::SendTexts { messages } = action else {
+        panic!("must be SendTexts");
+    };
+    assert_eq!(messages.len(), 2);
+
+    let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+    let event_json = nojson::RawJson::parse(&messages[1].0).expect("event must be valid json");
+    let message: String = event_json
+        .value()
+        .to_path_member(&["d", "eventData", "message"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("message must be string");
+    assert_eq!(event_type, "CustomEvent");
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_GENERAL);
+    assert_eq!(message, "hello");
+}
+
+#[tokio::test]
+async fn sleep_request_returns_success_response() {
+    let mut session = ObswsSession::new(None, input_registry(), None);
+    let identified = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .await;
+    assert!(identified.is_ok());
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-sleep".to_owned()),
+            request_type: Some("Sleep".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"sleepMillis":0}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let SessionAction::SendText { text, .. } = action else {
+        panic!("must be SendText");
+    };
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
 }
 
 #[tokio::test]
