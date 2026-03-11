@@ -336,6 +336,14 @@ pub fn handle_request_message(
             &request_id,
             input_registry,
         ),
+        "GetOutputList" => {
+            crate::obsws_response_builder::build_get_output_list_response(&request_id)
+        }
+        "GetOutputStatus" => crate::obsws_response_builder::build_get_output_status_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetRecordDirectory" => crate::obsws_response_builder::build_get_record_directory_response(
             &request_id,
             input_registry,
@@ -723,6 +731,8 @@ mod tests {
                 .iter()
                 .any(|r| r == "SetStreamServiceSettings")
         );
+        assert!(available_requests.iter().any(|r| r == "GetOutputList"));
+        assert!(available_requests.iter().any(|r| r == "GetOutputStatus"));
         assert!(available_requests.iter().any(|r| r == "StartStream"));
         assert!(available_requests.iter().any(|r| r == "ToggleStream"));
         assert!(available_requests.iter().any(|r| r == "GetRecordDirectory"));
@@ -757,6 +767,60 @@ mod tests {
             .required()?
             .to_array()?;
         assert!(groups.next().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_output_list_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-output-list".to_owned()),
+            request_type: Some("GetOutputList".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let outputs = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputs"])?
+            .required()?;
+        let output_names: Vec<String> = outputs
+            .to_array()?
+            .map(|output| output.to_member("outputName")?.required()?.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+        assert!(output_names.iter().any(|name| name == "stream"));
+        assert!(output_names.iter().any(|name| name == "record"));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_output_status_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-output-status".to_owned()),
+            request_type: Some("GetOutputStatus".to_owned()),
+            request_data: Some(request_data(r#"{"outputName":"stream"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let output_active: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputActive"])?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        assert!(!output_active);
         Ok(())
     }
 

@@ -253,8 +253,10 @@
 - [ ] `StopReplayBuffer`: Replay Buffer を停止する
 - [ ] `SaveReplayBuffer`: Replay Buffer を保存する
 - [ ] `GetLastReplayBufferReplay`: 最後の Replay Buffer ファイル情報を取得する
-- [ ] `GetOutputList`: 出力一覧を取得する
-- [ ] `GetOutputStatus`: 出力状態を取得する
+- [x] `GetOutputList`: 出力一覧を取得する
+  - NOTE: 現時点では `stream` / `record` の 2 出力を返す
+- [x] `GetOutputStatus`: 出力状態を取得する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
 - [ ] `ToggleOutput`: 出力をトグルする
 - [ ] `StartOutput`: 出力を開始する
 - [ ] `StopOutput`: 出力を停止する

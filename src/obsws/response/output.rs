@@ -2,13 +2,35 @@ use std::path::PathBuf;
 
 use crate::obsws_input_registry::{ObswsInputRegistry, ObswsStreamServiceSettings};
 use crate::obsws_protocol::{
-    OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_SUCCESS,
+    OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
 };
 
 use super::{
-    parse_request_data_or_error_response, parse_set_record_directory_fields,
-    parse_set_stream_service_settings_fields,
+    parse_get_output_status_fields, parse_request_data_or_error_response,
+    parse_set_record_directory_fields, parse_set_stream_service_settings_fields,
 };
+
+const OBSWS_STREAM_OUTPUT_NAME: &str = "stream";
+const OBSWS_RECORD_OUTPUT_NAME: &str = "record";
+const OBSWS_STREAM_OUTPUT_KIND: &str = "rtmp_output";
+const OBSWS_RECORD_OUTPUT_KIND: &str = "mp4_output";
+
+#[derive(Debug, Clone, Copy)]
+struct ObswsOutputEntry {
+    output_name: &'static str,
+    output_kind: &'static str,
+}
+
+impl nojson::DisplayJson for ObswsOutputEntry {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("outputName", self.output_name)?;
+            f.member("outputKind", self.output_kind)
+        })
+        .fmt(f)
+    }
+}
 
 pub fn build_get_stream_service_settings_response(
     request_id: &str,
@@ -96,6 +118,41 @@ pub fn build_get_stream_status_response(
                         f.member("outputSkippedFrames", 0)?;
                         f.member("outputTotalFrames", 0)
                     }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_output_list_response(request_id: &str) -> String {
+    let outputs = [
+        ObswsOutputEntry {
+            output_name: OBSWS_STREAM_OUTPUT_NAME,
+            output_kind: OBSWS_STREAM_OUTPUT_KIND,
+        },
+        ObswsOutputEntry {
+            output_name: OBSWS_RECORD_OUTPUT_NAME,
+            output_kind: OBSWS_RECORD_OUTPUT_KIND,
+        },
+    ];
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetOutputList")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| f.member("outputs", outputs)),
                 )
             }),
         )
@@ -209,6 +266,37 @@ pub fn build_get_record_status_response(
         )
     })
     .to_string()
+}
+
+pub fn build_get_output_status_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "GetOutputStatus",
+        request_id,
+        request_data,
+        parse_get_output_status_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    match fields.output_name.as_str() {
+        OBSWS_STREAM_OUTPUT_NAME => {
+            build_get_stream_status_as_output_response(request_id, input_registry)
+        }
+        OBSWS_RECORD_OUTPUT_NAME => {
+            build_get_record_status_as_output_response(request_id, input_registry)
+        }
+        _ => super::build_request_response_error(
+            "GetOutputStatus",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Output not found",
+        ),
+    }
 }
 
 fn build_output_active_response(
@@ -361,6 +449,101 @@ fn format_timecode(duration: std::time::Duration) -> String {
     let minutes = total_minutes % 60;
     let hours = total_minutes / 60;
     format!("{hours:02}:{minutes:02}:{secs:02}.{millis:03}")
+}
+
+fn build_get_stream_status_as_output_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let active = input_registry.is_stream_active();
+    let duration = if active {
+        input_registry.stream_uptime()
+    } else {
+        std::time::Duration::ZERO
+    };
+    let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+    let output_timecode = format_timecode(duration);
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetOutputStatus")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputActive", active)?;
+                        f.member("outputReconnecting", false)?;
+                        f.member("outputTimecode", &output_timecode)?;
+                        f.member("outputDuration", output_duration)?;
+                        f.member("outputCongestion", 0.0)?;
+                        f.member("outputBytes", 0)?;
+                        f.member("outputSkippedFrames", 0)?;
+                        f.member("outputTotalFrames", 0)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn build_get_record_status_as_output_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let active = input_registry.is_record_active();
+    let paused = input_registry.is_record_paused();
+    let duration = if active {
+        input_registry.record_uptime()
+    } else {
+        std::time::Duration::ZERO
+    };
+    let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+    let output_timecode = format_timecode(duration);
+    let output_path = input_registry
+        .record_output_path()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetOutputStatus")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputActive", active)?;
+                        f.member("outputPaused", paused)?;
+                        f.member("outputTimecode", &output_timecode)?;
+                        f.member("outputDuration", output_duration)?;
+                        f.member("outputBytes", 0)?;
+                        f.member("outputSkippedFrames", 0)?;
+                        f.member("outputTotalFrames", 0)?;
+                        f.member("outputPath", &output_path)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
 }
 
 fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, String> {

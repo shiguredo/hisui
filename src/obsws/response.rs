@@ -183,6 +183,10 @@ struct SetRecordDirectoryFields {
     record_directory: String,
 }
 
+struct GetOutputStatusFields {
+    output_name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct RequestBatchResult {
     pub request_type: String,
@@ -811,6 +815,13 @@ fn parse_set_record_directory_fields(
 ) -> Result<SetRecordDirectoryFields, nojson::JsonParseError> {
     let record_directory = required_non_empty_string_member(request_data, "recordDirectory")?;
     Ok(SetRecordDirectoryFields { record_directory })
+}
+
+fn parse_get_output_status_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<GetOutputStatusFields, nojson::JsonParseError> {
+    let output_name = required_non_empty_string_member(request_data, "outputName")?;
+    Ok(GetOutputStatusFields { output_name })
 }
 
 fn required_non_empty_string_member(
