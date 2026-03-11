@@ -116,7 +116,7 @@ pub fn build_get_stream_status_response(
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
                         f.member("outputCongestion", 0.0)?;
-                        f.member("outputBytes", 0)?;
+                        f.member("outputBytes", output_stats.stream_output_bytes)?;
                         f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
                         f.member("outputTotalFrames", output_stats.stream_total_frames)
                     }),
@@ -497,7 +497,7 @@ fn build_get_stream_status_as_output_response(
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
                         f.member("outputCongestion", 0.0)?;
-                        f.member("outputBytes", 0)?;
+                        f.member("outputBytes", output_stats.stream_output_bytes)?;
                         f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
                         f.member("outputTotalFrames", output_stats.stream_total_frames)
                     }),

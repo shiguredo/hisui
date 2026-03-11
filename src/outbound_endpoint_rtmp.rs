@@ -40,6 +40,30 @@ pub struct RtmpOutboundEndpoint {
     pub options: RtmpOutboundEndpointOptions,
 }
 
+#[derive(Debug, Clone)]
+struct RtmpOutboundEndpointStats {
+    total_sent_bytes: crate::stats::StatsCounter,
+    total_waiting_keyframe_dropped_video_frame_count: crate::stats::StatsCounter,
+}
+
+impl RtmpOutboundEndpointStats {
+    fn new(stats: &mut crate::stats::Stats) -> Self {
+        Self {
+            total_sent_bytes: stats.counter("total_sent_bytes"),
+            total_waiting_keyframe_dropped_video_frame_count: stats
+                .counter("total_waiting_keyframe_dropped_video_frame_count"),
+        }
+    }
+
+    fn add_sent_bytes(&self, value: usize) {
+        self.total_sent_bytes.add(value as u64);
+    }
+
+    fn add_waiting_keyframe_dropped_video_frame(&self) {
+        self.total_waiting_keyframe_dropped_video_frame_count.inc();
+    }
+}
+
 impl nojson::DisplayJson for RtmpOutboundEndpoint {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
@@ -129,6 +153,8 @@ impl RtmpOutboundEndpoint {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         let pipeline_handle = handle.pipeline_handle();
         let endpoint_processor_id = handle.processor_id().clone();
+        let mut stats = handle.stats();
+        let endpoint_stats = RtmpOutboundEndpointStats::new(&mut stats);
         let mut audio_rx = self
             .input_audio_track_id
             .clone()
@@ -153,6 +179,7 @@ impl RtmpOutboundEndpoint {
                 options: server_options,
                 pipeline_handle,
                 endpoint_processor_id,
+                stats: endpoint_stats,
             };
 
             if let Err(e) = server.run().await {
@@ -294,6 +321,7 @@ struct RtmpPlayServer {
     options: RtmpOutboundEndpointOptions,
     pipeline_handle: crate::MediaPipelineHandle,
     endpoint_processor_id: crate::ProcessorId,
+    stats: RtmpOutboundEndpointStats,
 }
 
 impl RtmpPlayServer {
@@ -364,6 +392,7 @@ impl RtmpPlayServer {
         let expected_stream_name = self.url.stream_name.clone();
         let pipeline_handle = self.pipeline_handle.clone();
         let endpoint_processor_id = self.endpoint_processor_id.clone();
+        let stats = self.stats.clone();
 
         tokio::spawn(async move {
             match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await {
@@ -378,6 +407,7 @@ impl RtmpPlayServer {
                         expected_stream_name,
                         pipeline_handle,
                         endpoint_processor_id,
+                        stats,
                     );
 
                     if let Err(e) = handler.run().await {
@@ -419,6 +449,7 @@ struct RtmpClientHandler {
     pipeline_handle: crate::MediaPipelineHandle,
     endpoint_processor_id: crate::ProcessorId,
     initial_waiting_keyframe_request_sent: bool,
+    stats: RtmpOutboundEndpointStats,
 }
 
 impl RtmpClientHandler {
@@ -429,6 +460,7 @@ impl RtmpClientHandler {
         expected_stream_name: String,
         pipeline_handle: crate::MediaPipelineHandle,
         endpoint_processor_id: crate::ProcessorId,
+        stats: RtmpOutboundEndpointStats,
     ) -> Self {
         Self {
             stream,
@@ -441,6 +473,7 @@ impl RtmpClientHandler {
             pipeline_handle,
             endpoint_processor_id,
             initial_waiting_keyframe_request_sent: false,
+            stats,
         }
     }
 
@@ -553,6 +586,9 @@ impl RtmpClientHandler {
                     self.initial_waiting_keyframe_request_sent = true;
                     self.request_video_keyframe("initial_non_keyframe");
                 }
+                if self.frame_handler.is_waiting_for_keyframe() && !video.keyframe {
+                    self.stats.add_waiting_keyframe_dropped_video_frame();
+                }
                 if let Some((seq_frame, video_frame)) = self
                     .frame_handler
                     .prepare_video_frame(video)
@@ -601,6 +637,7 @@ impl RtmpClientHandler {
         while !self.connection.send_buf().is_empty() {
             let send_data = self.connection.send_buf();
             self.stream.write_all(send_data).await?;
+            self.stats.add_sent_bytes(send_data.len());
             self.connection.advance_send_buf(send_data.len());
         }
         Ok(())

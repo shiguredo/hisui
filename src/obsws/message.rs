@@ -964,6 +964,70 @@ mod tests {
     }
 
     #[test]
+    fn handle_request_message_returns_stream_output_runtime_stats_in_status_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-output-status-runtime".to_owned()),
+            request_type: Some("GetOutputStatus".to_owned()),
+            request_data: Some(request_data(r#"{"outputName":"stream"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        input_registry
+            .activate_stream(ObswsStreamRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                endpoint_processor_id: "endpoint".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            })
+            .expect("stream activation must succeed");
+        let pipeline = crate::MediaPipeline::new().expect("pipeline creation must succeed");
+        let pipeline_handle = pipeline.handle();
+        set_processor_counter(
+            &pipeline_handle,
+            "encoder",
+            "total_output_video_frame_count",
+            11,
+        );
+        set_processor_counter(
+            &pipeline_handle,
+            "endpoint",
+            "total_waiting_keyframe_dropped_video_frame_count",
+            2,
+        );
+        set_processor_counter(&pipeline_handle, "endpoint", "total_sent_bytes", 1234);
+
+        let response = handle_request_message_with_pipeline_handle(
+            request,
+            &session_stats,
+            &mut input_registry,
+            Some(&pipeline_handle),
+        );
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let output_bytes: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputBytes"])?
+            .required()?
+            .try_into()?;
+        let output_skipped_frames: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputSkippedFrames"])?
+            .required()?
+            .try_into()?;
+        let output_total_frames: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputTotalFrames"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_bytes, 1234);
+        assert_eq!(output_skipped_frames, 2);
+        assert_eq!(output_total_frames, 11);
+        Ok(())
+    }
+
+    #[test]
     fn handle_request_message_returns_record_output_bytes_in_status_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = tempfile::tempdir()?;
@@ -1157,6 +1221,13 @@ mod tests {
             "total_output_video_frame_count",
             11,
         );
+        set_processor_counter(&pipeline_handle, "endpoint", "total_sent_bytes", 1234);
+        set_processor_counter(
+            &pipeline_handle,
+            "endpoint",
+            "total_waiting_keyframe_dropped_video_frame_count",
+            2,
+        );
         set_processor_counter(&pipeline_handle, "writer", "total_video_sample_count", 7);
         set_processor_counter(
             &pipeline_handle,
@@ -1183,8 +1254,14 @@ mod tests {
             .to_path_member(&["d", "responseData", "outputTotalFrames"])?
             .required()?
             .try_into()?;
-        assert_eq!(output_skipped_frames, 3);
+        let active_fps: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "activeFps"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_skipped_frames, 5);
         assert_eq!(output_total_frames, 18);
+        assert!(active_fps >= 0.0);
         Ok(())
     }
 

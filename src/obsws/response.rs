@@ -13,6 +13,7 @@ use crate::obsws_protocol::{
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ObswsOutputRuntimeStats {
+    pub(crate) stream_output_bytes: u64,
     pub(crate) stream_total_frames: u64,
     pub(crate) stream_skipped_frames: u64,
     pub(crate) record_total_frames: u64,
@@ -1041,6 +1042,20 @@ pub(crate) fn collect_output_runtime_stats(
             )
         })
         .unwrap_or(0);
+    let stream_output_bytes = input_registry
+        .stream_run()
+        .map(|run| find_counter_metric(&entries, &run.endpoint_processor_id, "total_sent_bytes"))
+        .unwrap_or(0);
+    let stream_skipped_frames = input_registry
+        .stream_run()
+        .map(|run| {
+            find_counter_metric(
+                &entries,
+                &run.endpoint_processor_id,
+                "total_waiting_keyframe_dropped_video_frame_count",
+            )
+        })
+        .unwrap_or(0);
     let (record_total_frames, record_skipped_frames) = input_registry
         .record_run()
         .map(|run| {
@@ -1060,8 +1075,9 @@ pub(crate) fn collect_output_runtime_stats(
         .unwrap_or((0, 0));
 
     ObswsOutputRuntimeStats {
+        stream_output_bytes,
         stream_total_frames,
-        stream_skipped_frames: 0,
+        stream_skipped_frames,
         record_total_frames,
         record_skipped_frames,
     }
