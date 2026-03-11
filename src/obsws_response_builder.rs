@@ -1046,7 +1046,13 @@ pub fn build_request_response_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::obsws_input_registry::ObswsInputRegistry;
+    use crate::obsws_input_registry::{
+        ObswsInputRegistry, ObswsInputSettings, ObswsSceneItemTransform,
+    };
+    use crate::obsws_protocol::{
+        OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
+        REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_SUCCESS,
+    };
 
     #[test]
     fn build_stream_state_changed_event_contains_expected_fields() {
