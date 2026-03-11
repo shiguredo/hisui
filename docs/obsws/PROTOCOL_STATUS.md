@@ -87,7 +87,6 @@
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す
   - [x] `webSocketSessionOutgoingMessages`: 現在セッションの送信メッセージ数を返す
 - [x] `BroadcastCustomEvent`: カスタムイベントを配信する
-- [ ] `CallVendorRequest`: ベンダー拡張リクエストを実行する
 - [x] `Sleep`: 指定時間だけ処理を待機する
   - NOTE: `sleepMillis` は `0..=50000` のみ受理する
 
@@ -182,8 +181,6 @@
 - [ ] `SetInputDeinterlaceMode`: デインターレースモードを設定する
 - [ ] `GetInputDeinterlaceFieldOrder`: デインターレースフィールド順を取得する
 - [ ] `SetInputDeinterlaceFieldOrder`: デインターレースフィールド順を設定する
-- [ ] `GetInputPropertiesListPropertyItems`: リスト型プロパティ項目を取得する
-- [ ] `PressInputPropertiesButton`: 入力プロパティのボタンを押下する
 
 ### Transitions
 
@@ -367,6 +364,13 @@
   - `OpenSourceProjector`: ソースプロジェクターを開く
   - `TriggerStudioModeTransition`: Studio Mode の遷移を実行する
   - NOTE: OBS 本体の GUI 状態（ Studio Mode / Dialog / Projector ）、ホットキー設定、および OS の入力 / ディスプレイ統合に依存するため、hisui の現行アーキテクチャでは対応対象外とする
+- OBS source properties 依存機能
+  - `GetInputPropertiesListPropertyItems`: 入力プロパティのリスト型項目を取得する
+  - `PressInputPropertiesButton`: 入力プロパティのボタンを押下する
+  - NOTE: OBS source properties の動的定義と UI 操作に依存し、hisui の現行 input モデルでは自然に表現できないため、対応対象外とする
+- vendor 拡張 request
+  - `CallVendorRequest`: ベンダー拡張リクエストを実行する
+  - NOTE: hisui では plugin / vendor namespace を導入する前提を取らないため、対応対象外とする
 
 ## 未対応 Request の扱い
 
