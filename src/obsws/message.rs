@@ -374,7 +374,7 @@ mod tests {
     use super::*;
     use crate::obsws_auth::{ObswsAuthentication, build_authentication_response};
     use crate::obsws_input_registry::{
-        ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings,
+        ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings, ObswsRecordRun,
         ObswsVideoCaptureDeviceSettings,
     };
     use crate::obsws_protocol::{
@@ -823,6 +823,42 @@ mod tests {
             .try_into()?;
         assert!(result);
         assert!(!output_active);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_record_output_bytes_in_status_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let output_path = temp_dir.path().join("record.mp4");
+        std::fs::write(&output_path, [0u8; 16])?;
+
+        let request = RequestMessage {
+            request_id: Some("req-record-status".to_owned()),
+            request_type: Some("GetRecordStatus".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        input_registry
+            .activate_record(ObswsRecordRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                writer_processor_id: "writer".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+                output_path: output_path.clone(),
+            })
+            .expect("record activation must succeed");
+
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let output_bytes: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputBytes"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_bytes, 16);
         Ok(())
     }
 

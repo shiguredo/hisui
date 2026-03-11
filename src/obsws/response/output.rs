@@ -235,6 +235,10 @@ pub fn build_get_record_status_response(
         .record_output_path()
         .map(|path| path.display().to_string())
         .unwrap_or_default();
+    let output_bytes = input_registry
+        .record_output_path()
+        .map(read_file_size_bytes)
+        .unwrap_or(0);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -256,7 +260,7 @@ pub fn build_get_record_status_response(
                         f.member("outputPaused", paused)?;
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
-                        f.member("outputBytes", 0)?;
+                        f.member("outputBytes", output_bytes)?;
                         f.member("outputSkippedFrames", 0)?;
                         f.member("outputTotalFrames", 0)?;
                         f.member("outputPath", &output_path)
@@ -513,6 +517,10 @@ fn build_get_record_status_as_output_response(
         .record_output_path()
         .map(|path| path.display().to_string())
         .unwrap_or_default();
+    let output_bytes = input_registry
+        .record_output_path()
+        .map(read_file_size_bytes)
+        .unwrap_or(0);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -534,7 +542,7 @@ fn build_get_record_status_as_output_response(
                         f.member("outputPaused", paused)?;
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
-                        f.member("outputBytes", 0)?;
+                        f.member("outputBytes", output_bytes)?;
                         f.member("outputSkippedFrames", 0)?;
                         f.member("outputTotalFrames", 0)?;
                         f.member("outputPath", &output_path)
@@ -549,4 +557,10 @@ fn build_get_record_status_as_output_response(
 fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, String> {
     std::path::absolute(record_directory)
         .map_err(|e| format!("Failed to resolve absolute record directory path: {e}"))
+}
+
+fn read_file_size_bytes(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
 }
