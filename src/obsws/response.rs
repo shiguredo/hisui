@@ -932,25 +932,19 @@ pub fn build_identified_message(negotiated_rpc_version: u32) -> String {
     .to_string()
 }
 
-#[path = "obsws_response_event.rs"]
-mod obsws_response_event;
-#[path = "obsws_response_general.rs"]
-mod obsws_response_general;
-#[path = "obsws_response_input.rs"]
-mod obsws_response_input;
-#[path = "obsws_response_output.rs"]
-mod obsws_response_output;
-#[path = "obsws_response_scene.rs"]
-mod obsws_response_scene;
-#[path = "obsws_response_scene_item.rs"]
-mod obsws_response_scene_item;
+mod event;
+mod general;
+mod input;
+mod output;
+mod scene;
+mod scene_item;
 
-pub use obsws_response_event::*;
-pub use obsws_response_general::*;
-pub use obsws_response_input::*;
-pub use obsws_response_output::*;
-pub use obsws_response_scene::*;
-pub use obsws_response_scene_item::*;
+pub use event::*;
+pub use general::*;
+pub use input::*;
+pub use output::*;
+pub use scene::*;
+pub use scene_item::*;
 
 pub fn build_request_batch_response(request_id: &str, results: &[RequestBatchResult]) -> String {
     nojson::object(|f| {
@@ -1044,5 +1038,5 @@ pub fn build_request_response_error(
 }
 
 #[cfg(test)]
-#[path = "obsws_response_builder_tests.rs"]
+#[path = "response/tests.rs"]
 mod tests;

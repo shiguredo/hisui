@@ -1,4 +1,16 @@
-include!("obsws_input_registry_types.rs");
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use crate::obsws_protocol::OBSWS_DEFAULT_SCENE_NAME;
+
+mod scene_item;
+#[cfg(test)]
+#[path = "input_registry/tests.rs"]
+mod tests;
+mod types;
+
+pub(crate) use self::types::*;
 
 impl ObswsInputRegistry {
     pub fn new(record_directory: PathBuf) -> Self {
@@ -686,8 +698,6 @@ impl ObswsInputRegistry {
     }
 }
 
-include!("obsws_input_registry_scene_item.rs");
-
 fn apply_transform_patch_value<T: PartialEq>(changed: &mut bool, dst: &mut T, value: Option<T>) {
     let Some(value) = value else {
         return;
@@ -703,6 +713,3 @@ enum FindSceneItemError {
     SceneNotFound,
     SceneItemNotFound,
 }
-
-#[cfg(test)]
-include!("obsws_input_registry_tests.rs");

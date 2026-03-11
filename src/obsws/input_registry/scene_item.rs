@@ -1,3 +1,5 @@
+use super::*;
+
 impl ObswsInputRegistry {
     pub fn get_scene_item_id(
         &self,

@@ -22,16 +22,12 @@ use crate::obsws_protocol::{
     REQUEST_STATUS_STREAM_RUNNING,
 };
 
-#[path = "obsws_session_input.rs"]
-mod obsws_session_input;
-#[path = "obsws_session_output.rs"]
-mod obsws_session_output;
-#[path = "obsws_session_scene.rs"]
-mod obsws_session_scene;
-#[path = "obsws_session_scene_item.rs"]
-mod obsws_session_scene_item;
+mod input;
+mod output;
+mod scene;
+mod scene_item;
 #[cfg(test)]
-#[path = "obsws_session_tests.rs"]
+#[path = "session/tests.rs"]
 mod tests;
 
 pub enum SessionAction {

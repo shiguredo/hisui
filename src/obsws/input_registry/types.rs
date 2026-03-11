@@ -1,22 +1,20 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::obsws_protocol::OBSWS_DEFAULT_SCENE_NAME;
-
-const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 2] = ["image_source", "video_capture_device"];
-const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
-const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
-const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
-const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
-const OBSWS_DEFAULT_TRANSITION_NAME: &str = "Cut";
-const OBSWS_DEFAULT_TRANSITION_DURATION_MS: i64 = 300;
-const OBSWS_DEFAULT_TRANSITION_SETTINGS_JSON: &str = "{}";
-const OBSWS_DEFAULT_TBAR_POSITION: f64 = 0.0;
-const OBSWS_MIN_TRANSITION_DURATION_MS: i64 = 50;
-const OBSWS_MAX_TRANSITION_DURATION_MS: i64 = 20_000;
-const OBSWS_MIN_TBAR_POSITION: f64 = 0.0;
-const OBSWS_MAX_TBAR_POSITION: f64 = 1.0;
+pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 2] = ["image_source", "video_capture_device"];
+pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
+pub(crate) const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
+pub(crate) const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
+pub(crate) const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
+pub(crate) const OBSWS_DEFAULT_TRANSITION_NAME: &str = "Cut";
+pub(crate) const OBSWS_DEFAULT_TRANSITION_DURATION_MS: i64 = 300;
+pub(crate) const OBSWS_DEFAULT_TRANSITION_SETTINGS_JSON: &str = "{}";
+pub(crate) const OBSWS_DEFAULT_TBAR_POSITION: f64 = 0.0;
+pub(crate) const OBSWS_MIN_TRANSITION_DURATION_MS: i64 = 50;
+pub(crate) const OBSWS_MAX_TRANSITION_DURATION_MS: i64 = 20_000;
+pub(crate) const OBSWS_MIN_TBAR_POSITION: f64 = 0.0;
+pub(crate) const OBSWS_MAX_TBAR_POSITION: f64 = 1.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInputEntry {
@@ -374,13 +372,13 @@ pub struct ObswsSceneItemTransformPatch {
 }
 
 #[derive(Debug, Clone)]
-struct ObswsSceneItemState {
-    scene_item_id: i64,
-    input_uuid: String,
-    enabled: bool,
-    locked: bool,
-    blend_mode: ObswsSceneItemBlendMode,
-    transform: ObswsSceneItemTransform,
+pub(crate) struct ObswsSceneItemState {
+    pub(crate) scene_item_id: i64,
+    pub(crate) input_uuid: String,
+    pub(crate) enabled: bool,
+    pub(crate) locked: bool,
+    pub(crate) blend_mode: ObswsSceneItemBlendMode,
+    pub(crate) transform: ObswsSceneItemTransform,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -441,34 +439,34 @@ impl nojson::DisplayJson for ObswsSceneItemIndexEntry {
 }
 
 #[derive(Debug, Clone)]
-struct ObswsSceneState {
-    scene_uuid: String,
-    items: Vec<ObswsSceneItemState>,
+pub(crate) struct ObswsSceneState {
+    pub(crate) scene_uuid: String,
+    pub(crate) items: Vec<ObswsSceneItemState>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ObswsStreamRuntimeState {
-    active: bool,
-    started_at: Option<Instant>,
-    run: Option<ObswsStreamRun>,
+pub(crate) struct ObswsStreamRuntimeState {
+    pub(crate) active: bool,
+    pub(crate) started_at: Option<Instant>,
+    pub(crate) run: Option<ObswsStreamRun>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct ObswsRecordRuntimeState {
-    active: bool,
-    started_at: Option<Instant>,
-    paused: bool,
-    paused_at: Option<Instant>,
-    total_paused_duration: Duration,
-    run: Option<ObswsRecordRun>,
+pub(crate) struct ObswsRecordRuntimeState {
+    pub(crate) active: bool,
+    pub(crate) started_at: Option<Instant>,
+    pub(crate) paused: bool,
+    pub(crate) paused_at: Option<Instant>,
+    pub(crate) total_paused_duration: Duration,
+    pub(crate) run: Option<ObswsRecordRun>,
 }
 
 #[derive(Debug, Clone)]
-struct ObswsTransitionRuntimeState {
-    current_transition_name: String,
-    current_transition_duration_ms: i64,
-    current_transition_settings: nojson::RawJsonOwned,
-    current_tbar_position: f64,
+pub(crate) struct ObswsTransitionRuntimeState {
+    pub(crate) current_transition_name: String,
+    pub(crate) current_transition_duration_ms: i64,
+    pub(crate) current_transition_settings: nojson::RawJsonOwned,
+    pub(crate) current_tbar_position: f64,
 }
 
 impl Default for ObswsTransitionRuntimeState {
@@ -788,21 +786,20 @@ pub struct SetSceneItemEnabledResult {
 
 #[derive(Debug, Clone)]
 pub struct ObswsInputRegistry {
-    inputs_by_uuid: BTreeMap<String, ObswsInputEntry>,
-    uuids_by_name: BTreeMap<String, String>,
-    scenes_by_name: BTreeMap<String, ObswsSceneState>,
-    scene_order: Vec<String>,
-    current_program_scene_name: String,
-    current_preview_scene_name: String,
-    next_input_id: u64,
-    next_scene_id: u64,
-    next_scene_item_id: i64,
-    next_stream_run_id: u64,
-    next_record_run_id: u64,
-    stream_service_settings: ObswsStreamServiceSettings,
-    transition_runtime: ObswsTransitionRuntimeState,
-    stream_runtime: ObswsStreamRuntimeState,
-    record_directory: PathBuf,
-    record_runtime: ObswsRecordRuntimeState,
+    pub(crate) inputs_by_uuid: BTreeMap<String, ObswsInputEntry>,
+    pub(crate) uuids_by_name: BTreeMap<String, String>,
+    pub(crate) scenes_by_name: BTreeMap<String, ObswsSceneState>,
+    pub(crate) scene_order: Vec<String>,
+    pub(crate) current_program_scene_name: String,
+    pub(crate) current_preview_scene_name: String,
+    pub(crate) next_input_id: u64,
+    pub(crate) next_scene_id: u64,
+    pub(crate) next_scene_item_id: i64,
+    pub(crate) next_stream_run_id: u64,
+    pub(crate) next_record_run_id: u64,
+    pub(crate) stream_service_settings: ObswsStreamServiceSettings,
+    pub(crate) transition_runtime: ObswsTransitionRuntimeState,
+    pub(crate) stream_runtime: ObswsStreamRuntimeState,
+    pub(crate) record_directory: PathBuf,
+    pub(crate) record_runtime: ObswsRecordRuntimeState,
 }
-
