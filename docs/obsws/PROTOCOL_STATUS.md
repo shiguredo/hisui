@@ -39,7 +39,7 @@
   - NOTE: 成功時は `Identified (op=2)` を返す
   - NOTE: `eventSubscriptions` は保持し、対応済みイベントの配信判定に利用する
 - [x] Event 配信（ `op=5` ）基盤: サーバーイベントを push 配信する
-  - NOTE: 現在は `eventSubscriptions` の Outputs / Scenes / Inputs ビット購読時に対応イベントを配信する
+  - NOTE: 現在は `eventSubscriptions` の General / Outputs / Scenes / Inputs ビット購読時に対応イベントを配信する
 - [x] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
   - NOTE: 現時点で `executionType = 0` のみ対応し、`haltOnFailure` を反映する
 
@@ -54,6 +54,7 @@
 - [x] `InputRemoved`: Input 削除を通知する
 - [x] `InputSettingsChanged`: Input 設定変更を通知する
 - [x] `InputNameChanged`: Input 名変更を通知する
+- [x] `CustomEvent`: カスタムイベントを通知する
 - [x] `SceneItemEnableStateChanged`: Scene Item の有効状態変更を通知する
 - [x] `SceneItemLockStateChanged`: Scene Item のロック状態変更を通知する
 - [x] `SceneItemTransformChanged`: Scene Item の変形状態変更を通知する
@@ -70,8 +71,10 @@
   - [x] `supportedImageFormats`: 対応画像フォーマット一覧を返す
 - [x] `GetStats`: 実行統計情報を返す
   - [ ] `cpuUsage`: CPU 使用率を返す（ 現状は `0.0` 固定 ）
-  - [ ] `memoryUsage`: メモリ使用量を返す（ 現状は `0.0` 固定 ）
-  - [ ] `availableDiskSpace`: 空きディスク容量を返す（ 現状は `0.0` 固定 ）
+  - [x] `memoryUsage`: メモリ使用量を返す
+    - NOTE: 現在プロセスの最大 RSS を MB 単位で返す
+  - [x] `availableDiskSpace`: 空きディスク容量を返す
+    - NOTE: 現在の録画ディレクトリが属するファイルシステムの空き容量を MB 単位で返す
   - [ ] `activeFps`: 現在の FPS を返す（ 現状は `0.0` 固定 ）
   - [ ] `averageFrameRenderTime`: 平均レンダー時間を返す（ 現状は `0.0` 固定 ）
   - [ ] `renderSkippedFrames`: レンダーでスキップしたフレーム数を返す（ 現状は `0` 固定 ）
@@ -80,12 +83,10 @@
   - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す
   - [x] `webSocketSessionOutgoingMessages`: 現在セッションの送信メッセージ数を返す
-- [ ] `BroadcastCustomEvent`: カスタムイベントを配信する
+- [x] `BroadcastCustomEvent`: カスタムイベントを配信する
 - [ ] `CallVendorRequest`: ベンダー拡張リクエストを実行する
-- [ ] `GetHotkeyList`: ホットキー一覧を取得する
-- [ ] `TriggerHotkeyByName`: 名前指定でホットキーを発火する
-- [ ] `TriggerHotkeyByKeySequence`: キーシーケンス指定でホットキーを発火する
-- [ ] `Sleep`: 指定時間だけ処理を待機する
+- [x] `Sleep`: 指定時間だけ処理を待機する
+  - NOTE: `sleepMillis` は `0..=50000` のみ受理する
 
 ### Config
 
@@ -110,7 +111,8 @@
 
 ### Sources
 
-- [ ] `GetSourceActive`: ソースのアクティブ状態を取得する
+- [x] `GetSourceActive`: ソースのアクティブ状態を取得する
+  - NOTE: 現在の Program Scene に有効な Scene Item として存在する場合に `videoActive = true` を返す
 - [ ] `GetSourceScreenshot`: ソースのスクリーンショットを取得する
 - [ ] `SaveSourceScreenshot`: ソースのスクリーンショットをファイル保存する
 
@@ -121,7 +123,8 @@
 ### Scenes
 
 - [x] `GetSceneList`: シーン一覧を取得する
-- [ ] `GetGroupList`: グループ一覧を取得する
+- [x] `GetGroupList`: グループ一覧を取得する
+  - NOTE: 現時点では group 非対応のため空配列を返す
 - [x] `GetCurrentProgramScene`: 現在の Program Scene を取得する
 - [x] `SetCurrentProgramScene`: Program Scene を切り替える
 - [x] `GetCurrentPreviewScene`: 現在の Preview Scene を取得する
@@ -130,9 +133,12 @@
 - [x] `RemoveScene`: シーンを削除する
   - NOTE: 最後の 1 Scene は削除不可
   - NOTE: 現在 Program / Preview Scene を削除した場合は残存 Scene へ自動切替する
-- [ ] `SetSceneName`: シーン名を変更する
-- [ ] `GetSceneSceneTransitionOverride`: シーン遷移上書き設定を取得する
-- [ ] `SetSceneSceneTransitionOverride`: シーン遷移上書き設定を更新する
+- [x] `SetSceneName`: シーン名を変更する
+  - NOTE: 現在 Program / Preview Scene を rename した場合は内部状態も同時に更新する
+- [x] `GetSceneSceneTransitionOverride`: シーン遷移上書き設定を取得する
+- [x] `SetSceneSceneTransitionOverride`: シーン遷移上書き設定を更新する
+  - NOTE: `transitionName` / `transitionDuration` の state のみ保持し、実描画には反映しない
+  - NOTE: `transitionName = null` かつ `transitionDuration = null` で override を解除する
 
 ### Inputs
 
@@ -249,8 +255,10 @@
 - [ ] `StopReplayBuffer`: Replay Buffer を停止する
 - [ ] `SaveReplayBuffer`: Replay Buffer を保存する
 - [ ] `GetLastReplayBufferReplay`: 最後の Replay Buffer ファイル情報を取得する
-- [ ] `GetOutputList`: 出力一覧を取得する
-- [ ] `GetOutputStatus`: 出力状態を取得する
+- [x] `GetOutputList`: 出力一覧を取得する
+  - NOTE: 現時点では `stream` / `record` の 2 出力を返す
+- [x] `GetOutputStatus`: 出力状態を取得する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
 - [ ] `ToggleOutput`: 出力をトグルする
 - [ ] `StartOutput`: 出力を開始する
 - [ ] `StopOutput`: 出力を停止する
@@ -327,6 +335,9 @@
 - MessagePack: WebSocket の MessagePack サブプロトコル対応
   - NOTE: 現状は `obswebsocket.json` のみを対象とする
 - UI / Studio Mode 依存機能
+  - `GetHotkeyList`: ホットキー一覧を取得する
+  - `TriggerHotkeyByName`: 名前指定でホットキーを発火する
+  - `TriggerHotkeyByKeySequence`: キーシーケンス指定でホットキーを発火する
   - `GetStudioModeEnabled`: Studio Mode の有効状態を取得する
   - `SetStudioModeEnabled`: Studio Mode の有効状態を設定する
   - `OpenInputPropertiesDialog`: 入力プロパティダイアログを開く
@@ -336,7 +347,7 @@
   - `OpenVideoMixProjector`: 映像ミックスのプロジェクターを開く
   - `OpenSourceProjector`: ソースプロジェクターを開く
   - `TriggerStudioModeTransition`: Studio Mode の遷移を実行する
-  - NOTE: OBS 本体の GUI 状態（ Studio Mode / Dialog / Projector ）および OS のディスプレイ統合に依存するため、hisui の現行アーキテクチャでは対応対象外とする
+  - NOTE: OBS 本体の GUI 状態（ Studio Mode / Dialog / Projector ）、ホットキー設定、および OS の入力 / ディスプレイ統合に依存するため、hisui の現行アーキテクチャでは対応対象外とする
 
 ## 未対応 Request の扱い
 

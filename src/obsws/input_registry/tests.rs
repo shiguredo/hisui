@@ -879,6 +879,111 @@ fn create_scene_and_set_current_preview_scene_succeeds() {
 }
 
 #[test]
+fn set_scene_name_updates_scene_and_current_scene_names() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .create_scene("Scene B")
+        .expect("scene creation must succeed");
+    registry
+        .set_current_program_scene("Scene B")
+        .expect("setting current scene must succeed");
+    registry
+        .set_current_preview_scene("Scene B")
+        .expect("setting current preview scene must succeed");
+
+    let renamed = registry
+        .set_scene_name("Scene B", "Scene Renamed")
+        .expect("scene rename must succeed");
+    assert_eq!(renamed.scene_name, "Scene Renamed");
+    assert!(
+        registry
+            .list_scenes()
+            .iter()
+            .any(|scene| scene.scene_name == "Scene Renamed")
+    );
+    assert_eq!(
+        registry
+            .current_program_scene()
+            .map(|scene| scene.scene_name),
+        Some("Scene Renamed".to_owned())
+    );
+    assert_eq!(
+        registry
+            .current_preview_scene()
+            .map(|scene| scene.scene_name),
+        Some("Scene Renamed".to_owned())
+    );
+    let override_entry = registry
+        .get_scene_transition_override("Scene Renamed")
+        .expect("transition override lookup must succeed");
+    assert_eq!(override_entry.transition_name, None);
+    assert_eq!(override_entry.transition_duration, None);
+}
+
+#[test]
+fn set_scene_name_rejects_duplicate_scene_name() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .create_scene("Scene B")
+        .expect("scene creation must succeed");
+    let error = registry
+        .set_scene_name(OBSWS_DEFAULT_SCENE_NAME, "Scene B")
+        .expect_err("duplicate scene rename must fail");
+    assert_eq!(error, SetSceneNameError::SceneNameAlreadyExists);
+}
+
+#[test]
+fn is_source_active_returns_true_when_source_is_enabled_in_program_scene() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let input = ObswsInput::from_kind_and_settings(
+        "video_capture_device",
+        parse_owned_json(r#"{}"#).value(),
+    )
+    .expect("input settings must be valid");
+    let created = registry
+        .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+        .expect("input creation must succeed");
+    let active = registry
+        .is_source_active(Some(&created.input_uuid), None)
+        .expect("source lookup must succeed");
+    assert!(active);
+}
+
+#[test]
+fn scene_transition_override_round_trip_succeeds() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let override_entry = registry
+        .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("Fade"), Some(500))
+        .expect("transition override update must succeed");
+    assert_eq!(override_entry.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(override_entry.transition_duration, Some(500));
+
+    let fetched = registry
+        .get_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME)
+        .expect("transition override lookup must succeed");
+    assert_eq!(fetched.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(fetched.transition_duration, Some(500));
+}
+
+#[test]
+fn set_scene_name_moves_scene_transition_override_to_new_scene_name() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("Fade"), Some(500))
+        .expect("transition override update must succeed");
+
+    registry
+        .set_scene_name(OBSWS_DEFAULT_SCENE_NAME, "Scene Renamed")
+        .expect("scene rename must succeed");
+
+    let renamed_override = registry
+        .get_scene_transition_override("Scene Renamed")
+        .expect("renamed scene override lookup must succeed");
+    assert_eq!(renamed_override.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(renamed_override.transition_duration, Some(500));
+}
+
+#[test]
 fn transition_runtime_defaults_to_cut_and_300ms() {
     let registry = ObswsInputRegistry::new_for_test();
     assert_eq!(registry.current_scene_transition_name(), "Cut");

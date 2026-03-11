@@ -29,6 +29,7 @@ impl ObswsInputRegistry {
             scene_order: vec![OBSWS_DEFAULT_SCENE_NAME.to_owned()],
             current_program_scene_name: OBSWS_DEFAULT_SCENE_NAME.to_owned(),
             current_preview_scene_name: OBSWS_DEFAULT_SCENE_NAME.to_owned(),
+            scene_transition_overrides: BTreeMap::new(),
             next_input_id: 0,
             next_scene_id: 1,
             next_scene_item_id: 1,
@@ -121,6 +122,72 @@ impl ObswsInputRegistry {
         Ok(ObswsSceneEntry {
             scene_index: self.scene_order.len().saturating_sub(1),
             scene_name: scene_name.to_owned(),
+            scene_uuid,
+        })
+    }
+
+    pub fn set_scene_name(
+        &mut self,
+        scene_name: &str,
+        new_scene_name: &str,
+    ) -> Result<ObswsSceneEntry, SetSceneNameError> {
+        if !self.scenes_by_name.contains_key(scene_name) {
+            return Err(SetSceneNameError::SceneNotFound);
+        }
+        if scene_name != new_scene_name && self.scenes_by_name.contains_key(new_scene_name) {
+            return Err(SetSceneNameError::SceneNameAlreadyExists);
+        }
+        if scene_name == new_scene_name {
+            let scene_index = self
+                .scene_order
+                .iter()
+                .position(|name| name == scene_name)
+                .expect("BUG: scene order must contain the scene");
+            let scene_uuid = self
+                .scenes_by_name
+                .get(scene_name)
+                .map(|scene| scene.scene_uuid.clone())
+                .expect("BUG: scene must exist");
+            return Ok(ObswsSceneEntry {
+                scene_index,
+                scene_name: scene_name.to_owned(),
+                scene_uuid,
+            });
+        }
+
+        let scene = self
+            .scenes_by_name
+            .remove(scene_name)
+            .expect("BUG: scene must exist after validation");
+        self.scenes_by_name.insert(new_scene_name.to_owned(), scene);
+
+        let scene_index = self
+            .scene_order
+            .iter()
+            .position(|name| name == scene_name)
+            .expect("BUG: scene order must contain the scene");
+        self.scene_order[scene_index] = new_scene_name.to_owned();
+
+        if let Some(override_entry) = self.scene_transition_overrides.remove(scene_name) {
+            self.scene_transition_overrides
+                .insert(new_scene_name.to_owned(), override_entry);
+        }
+
+        if self.current_program_scene_name == scene_name {
+            self.current_program_scene_name = new_scene_name.to_owned();
+        }
+        if self.current_preview_scene_name == scene_name {
+            self.current_preview_scene_name = new_scene_name.to_owned();
+        }
+
+        let scene_uuid = self
+            .scenes_by_name
+            .get(new_scene_name)
+            .map(|scene| scene.scene_uuid.clone())
+            .expect("BUG: renamed scene must exist");
+        Ok(ObswsSceneEntry {
+            scene_index,
+            scene_name: new_scene_name.to_owned(),
             scene_uuid,
         })
     }
@@ -231,6 +298,72 @@ impl ObswsInputRegistry {
         }
         self.current_preview_scene_name = scene_name.to_owned();
         Ok(())
+    }
+
+    pub fn is_source_active(
+        &self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Result<bool, GetSourceActiveError> {
+        let input = self
+            .find_input(input_uuid, input_name)
+            .ok_or(GetSourceActiveError::SourceNotFound)?;
+        let Some(scene) = self.scenes_by_name.get(&self.current_program_scene_name) else {
+            return Ok(false);
+        };
+        Ok(scene
+            .items
+            .iter()
+            .any(|item| item.enabled && item.input_uuid == input.input_uuid))
+    }
+
+    pub fn get_scene_transition_override(
+        &self,
+        scene_name: &str,
+    ) -> Result<ObswsSceneTransitionOverride, GetSceneSceneTransitionOverrideError> {
+        if !self.scenes_by_name.contains_key(scene_name) {
+            return Err(GetSceneSceneTransitionOverrideError::SceneNotFound);
+        }
+        Ok(self
+            .scene_transition_overrides
+            .get(scene_name)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    pub fn set_scene_transition_override(
+        &mut self,
+        scene_name: &str,
+        transition_name: Option<&str>,
+        transition_duration: Option<i64>,
+    ) -> Result<ObswsSceneTransitionOverride, SetSceneSceneTransitionOverrideError> {
+        if !self.scenes_by_name.contains_key(scene_name) {
+            return Err(SetSceneSceneTransitionOverrideError::SceneNotFound);
+        }
+        if let Some(transition_name) = transition_name
+            && !OBSWS_SUPPORTED_TRANSITION_KINDS.contains(&transition_name)
+        {
+            return Err(SetSceneSceneTransitionOverrideError::TransitionNotFound);
+        }
+        if let Some(transition_duration) = transition_duration
+            && !(OBSWS_MIN_TRANSITION_DURATION_MS..=OBSWS_MAX_TRANSITION_DURATION_MS)
+                .contains(&transition_duration)
+        {
+            return Err(SetSceneSceneTransitionOverrideError::InvalidTransitionDuration);
+        }
+
+        if transition_name.is_none() && transition_duration.is_none() {
+            self.scene_transition_overrides.remove(scene_name);
+            return Ok(ObswsSceneTransitionOverride::default());
+        }
+
+        let entry = self
+            .scene_transition_overrides
+            .entry(scene_name.to_owned())
+            .or_default();
+        entry.transition_name = transition_name.map(ToOwned::to_owned);
+        entry.transition_duration = transition_duration;
+        Ok(entry.clone())
     }
 
     pub fn supported_transition_kinds(&self) -> &'static [&'static str] {

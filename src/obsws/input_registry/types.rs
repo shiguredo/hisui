@@ -163,6 +163,22 @@ pub struct ObswsSceneEntry {
     pub scene_uuid: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsSceneTransitionOverride {
+    pub transition_name: Option<String>,
+    pub transition_duration: Option<i64>,
+}
+
+impl nojson::DisplayJson for ObswsSceneTransitionOverride {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("transitionName", &self.transition_name)?;
+            f.member("transitionDuration", self.transition_duration)
+        })
+        .fmt(f)
+    }
+}
+
 impl nojson::DisplayJson for ObswsSceneEntry {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
@@ -608,6 +624,12 @@ pub enum CreateSceneError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSceneNameError {
+    SceneNotFound,
+    SceneNameAlreadyExists,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetCurrentProgramSceneError {
     SceneNotFound,
 }
@@ -615,6 +637,23 @@ pub enum SetCurrentProgramSceneError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetCurrentPreviewSceneError {
     SceneNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSourceActiveError {
+    SourceNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetSceneSceneTransitionOverrideError {
+    SceneNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetSceneSceneTransitionOverrideError {
+    SceneNotFound,
+    TransitionNotFound,
+    InvalidTransitionDuration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -792,6 +831,7 @@ pub struct ObswsInputRegistry {
     pub(crate) scene_order: Vec<String>,
     pub(crate) current_program_scene_name: String,
     pub(crate) current_preview_scene_name: String,
+    pub(crate) scene_transition_overrides: BTreeMap<String, ObswsSceneTransitionOverride>,
     pub(crate) next_input_id: u64,
     pub(crate) next_scene_id: u64,
     pub(crate) next_scene_item_id: i64,

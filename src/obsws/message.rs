@@ -161,12 +161,15 @@ pub fn handle_request_message(
 
     let message = match request_type.as_str() {
         "GetVersion" => crate::obsws_response_builder::build_get_version_response(&request_id),
-        "GetStats" => {
-            crate::obsws_response_builder::build_get_stats_response(&request_id, session_stats)
-        }
+        "GetStats" => crate::obsws_response_builder::build_get_stats_response(
+            &request_id,
+            session_stats,
+            input_registry,
+        ),
         "GetCanvasList" => {
             crate::obsws_response_builder::build_get_canvas_list_response(&request_id)
         }
+        "GetGroupList" => crate::obsws_response_builder::build_get_group_list_response(&request_id),
         "GetSceneList" => crate::obsws_response_builder::build_get_scene_list_response(
             &request_id,
             input_registry,
@@ -180,6 +183,20 @@ pub fn handle_request_message(
         "GetCurrentPreviewScene" => {
             crate::obsws_response_builder::build_get_current_preview_scene_response(
                 &request_id,
+                input_registry,
+            )
+        }
+        "GetSceneSceneTransitionOverride" => {
+            crate::obsws_response_builder::build_get_scene_scene_transition_override_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "SetSceneSceneTransitionOverride" => {
+            crate::obsws_response_builder::build_set_scene_scene_transition_override_response(
+                &request_id,
+                request.request_data.as_ref(),
                 input_registry,
             )
         }
@@ -229,6 +246,11 @@ pub fn handle_request_message(
             )
         }
         "SetTBarPosition" => crate::obsws_response_builder::build_set_tbar_position_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "SetSceneName" => crate::obsws_response_builder::build_set_scene_name_response(
             &request_id,
             request.request_data.as_ref(),
             input_registry,
@@ -291,6 +313,11 @@ pub fn handle_request_message(
             &request_id,
             input_registry,
         ),
+        "GetSourceActive" => crate::obsws_response_builder::build_get_source_active_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetInputSettings" => crate::obsws_response_builder::build_get_input_settings_response(
             &request_id,
             request.request_data.as_ref(),
@@ -330,6 +357,14 @@ pub fn handle_request_message(
             &request_id,
             input_registry,
         ),
+        "GetOutputList" => {
+            crate::obsws_response_builder::build_get_output_list_response(&request_id)
+        }
+        "GetOutputStatus" => crate::obsws_response_builder::build_get_output_status_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetRecordDirectory" => crate::obsws_response_builder::build_get_record_directory_response(
             &request_id,
             input_registry,
@@ -358,7 +393,7 @@ mod tests {
     use super::*;
     use crate::obsws_auth::{ObswsAuthentication, build_authentication_response};
     use crate::obsws_input_registry::{
-        ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings,
+        ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings, ObswsRecordRun,
         ObswsVideoCaptureDeviceSettings,
     };
     use crate::obsws_protocol::{
@@ -617,7 +652,15 @@ mod tests {
         assert!(supported_image_formats.iter().any(|f| f == "png"));
         assert!(available_requests.iter().any(|r| r == "CreateInput"));
         assert!(available_requests.iter().any(|r| r == "RemoveInput"));
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "BroadcastCustomEvent")
+        );
+        assert!(available_requests.iter().any(|r| r == "GetGroupList"));
+        assert!(available_requests.iter().any(|r| r == "GetSourceActive"));
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
+        assert!(available_requests.iter().any(|r| r == "SetSceneName"));
         assert!(
             available_requests
                 .iter()
@@ -627,6 +670,16 @@ mod tests {
             available_requests
                 .iter()
                 .any(|r| r == "SetCurrentPreviewScene")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetSceneSceneTransitionOverride")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetSceneSceneTransitionOverride")
         );
         assert!(available_requests.iter().any(|r| r == "RemoveScene"));
         assert!(
@@ -710,6 +763,8 @@ mod tests {
                 .iter()
                 .any(|r| r == "SetStreamServiceSettings")
         );
+        assert!(available_requests.iter().any(|r| r == "GetOutputList"));
+        assert!(available_requests.iter().any(|r| r == "GetOutputStatus"));
         assert!(available_requests.iter().any(|r| r == "StartStream"));
         assert!(available_requests.iter().any(|r| r == "ToggleStream"));
         assert!(available_requests.iter().any(|r| r == "GetRecordDirectory"));
@@ -721,6 +776,238 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "PauseRecord"));
         assert!(available_requests.iter().any(|r| r == "ResumeRecord"));
         assert!(available_requests.iter().any(|r| r == "ToggleRecordPause"));
+        assert!(available_requests.iter().any(|r| r == "Sleep"));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_group_list_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-group-list".to_owned()),
+            request_type: Some("GetGroupList".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let mut groups = json
+            .value()
+            .to_path_member(&["d", "responseData", "groups"])?
+            .required()?
+            .to_array()?;
+        assert!(groups.next().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_source_active_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-source-active".to_owned()),
+            request_type: Some("GetSourceActive".to_owned()),
+            request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        input_registry
+            .create_scene_item("Scene", Some("input-uuid-1"), None, true)
+            .expect("scene item creation must succeed");
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let video_active: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "videoActive"])?
+            .required()?
+            .try_into()?;
+        assert!(video_active);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_scene_transition_override_responses()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+
+        let set_response = handle_request_message(
+            RequestMessage {
+                request_id: Some("req-set-override".to_owned()),
+                request_type: Some("SetSceneSceneTransitionOverride".to_owned()),
+                request_data: Some(request_data(
+                    r#"{"sceneName":"Scene","transitionName":"Fade","transitionDuration":500}"#,
+                )),
+            },
+            &session_stats,
+            &mut input_registry,
+        );
+        let set_json = nojson::RawJson::parse(&set_response.message)?;
+        let transition_name: Option<String> = set_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionName"])?
+            .try_into()?;
+        let transition_duration: Option<i64> = set_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionDuration"])?
+            .try_into()?;
+        assert_eq!(transition_name.as_deref(), Some("Fade"));
+        assert_eq!(transition_duration, Some(500));
+
+        let get_response = handle_request_message(
+            RequestMessage {
+                request_id: Some("req-get-override".to_owned()),
+                request_type: Some("GetSceneSceneTransitionOverride".to_owned()),
+                request_data: Some(request_data(r#"{"sceneName":"Scene"}"#)),
+            },
+            &session_stats,
+            &mut input_registry,
+        );
+        let get_json = nojson::RawJson::parse(&get_response.message)?;
+        let get_transition_name: Option<String> = get_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionName"])?
+            .try_into()?;
+        let get_transition_duration: Option<i64> = get_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionDuration"])?
+            .try_into()?;
+        assert_eq!(get_transition_name.as_deref(), Some("Fade"));
+        assert_eq!(get_transition_duration, Some(500));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_output_list_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-output-list".to_owned()),
+            request_type: Some("GetOutputList".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let outputs = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputs"])?
+            .required()?;
+        let output_names: Vec<String> = outputs
+            .to_array()?
+            .map(|output| output.to_member("outputName")?.required()?.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+        assert!(output_names.iter().any(|name| name == "stream"));
+        assert!(output_names.iter().any(|name| name == "record"));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_output_status_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-output-status".to_owned()),
+            request_type: Some("GetOutputStatus".to_owned()),
+            request_data: Some(request_data(r#"{"outputName":"stream"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let output_active: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputActive"])?
+            .required()?
+            .try_into()?;
+        let output_congestion: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputCongestion"])?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        assert!(!output_active);
+        assert_eq!(output_congestion, 0.0);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_record_output_bytes_in_status_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let output_path = temp_dir.path().join("record.mp4");
+        std::fs::write(&output_path, [0u8; 16])?;
+
+        let request = RequestMessage {
+            request_id: Some("req-record-status".to_owned()),
+            request_type: Some("GetRecordStatus".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        input_registry
+            .activate_record(ObswsRecordRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                writer_processor_id: "writer".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+                output_path: output_path.clone(),
+            })
+            .expect("record activation must succeed");
+
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let output_bytes: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputBytes"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_bytes, 16);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_scene_name_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-set-scene-name".to_owned()),
+            request_type: Some("SetSceneName".to_owned()),
+            request_data: Some(request_data(
+                r#"{"sceneName":"Scene","newSceneName":"Scene Renamed"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let scene_name: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneName"])?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        assert_eq!(scene_name, "Scene Renamed");
+        assert_eq!(
+            input_registry
+                .current_program_scene()
+                .map(|scene| scene.scene_name),
+            Some("Scene Renamed".to_owned())
+        );
         Ok(())
     }
 
@@ -769,6 +1056,43 @@ mod tests {
         let first_input = inputs.next().expect("first input must exist");
         let input_name: String = first_input.to_member("inputName")?.required()?.try_into()?;
         assert_eq!(input_name, "input-name-1");
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_stats_response() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let request = RequestMessage {
+            request_id: Some("req-stats".to_owned()),
+            request_type: Some("GetStats".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats {
+            incoming_messages: 12,
+            outgoing_messages: 34,
+        };
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let memory_usage: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "memoryUsage"])?
+            .required()?
+            .try_into()?;
+        let available_disk_space: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "availableDiskSpace"])?
+            .required()?
+            .try_into()?;
+        let outgoing_messages: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "webSocketSessionOutgoingMessages"])?
+            .required()?
+            .try_into()?;
+        assert!(memory_usage >= 0.0);
+        assert!(available_disk_space >= 0.0);
+        assert_eq!(outgoing_messages, 35);
         Ok(())
     }
 

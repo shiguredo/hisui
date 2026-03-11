@@ -3,7 +3,7 @@ use crate::obsws_input_registry::{
     ObswsInputRegistry, ObswsInputSettings, ObswsSceneItemTransform,
 };
 use crate::obsws_protocol::{
-    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
+    OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_SUCCESS,
 };
 
@@ -126,6 +126,32 @@ fn build_current_preview_scene_changed_event_contains_expected_fields() {
         .expect("sceneName must be string");
     assert_eq!(event_type, "CurrentPreviewSceneChanged");
     assert_eq!(scene_name, "Scene P");
+}
+
+#[test]
+fn build_custom_event_contains_expected_fields() {
+    let event = build_custom_event(
+        &nojson::RawJsonOwned::parse(r#"{"message":"hello"}"#).expect("eventData must be valid"),
+    );
+    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let event_type: String = json
+        .value()
+        .to_path_member(&["d", "eventType"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("eventType must be string");
+    let event_intent: u32 = json
+        .value()
+        .to_path_member(&["d", "eventIntent"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("eventIntent must be u32");
+    let message: String = json
+        .value()
+        .to_path_member(&["d", "eventData", "message"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("message must be string");
+    assert_eq!(event_type, "CustomEvent");
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_GENERAL);
+    assert_eq!(message, "hello");
 }
 
 #[test]

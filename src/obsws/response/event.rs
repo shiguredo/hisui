@@ -2,7 +2,8 @@ use crate::obsws_input_registry::{
     ObswsInputSettings, ObswsSceneItemIndexEntry, ObswsSceneItemTransform,
 };
 use crate::obsws_protocol::{
-    OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
+    OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
+    OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
 };
 
 pub fn build_stream_state_changed_event(output_active: bool) -> String {
@@ -230,6 +231,21 @@ pub fn build_input_name_changed_event(
                         f.member("inputUuid", input_uuid)
                     }),
                 )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_custom_event(event_data: &nojson::RawJsonOwned) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "CustomEvent")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_GENERAL)?;
+                f.member("eventData", event_data)
             }),
         )
     })
