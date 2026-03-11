@@ -1047,12 +1047,7 @@ impl ObswsSession {
                 "StopOutput" => {
                     crate::obsws_response_builder::build_stop_output_response(request_id)
                 }
-                _ => crate::obsws_response_builder::build_request_response_error(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Unknown output request type",
-                ),
+                _ => unreachable!("BUG: unsupported output request type: {request_type}"),
             };
         }
 
