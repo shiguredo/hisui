@@ -184,13 +184,13 @@ fn convert_captured_frame_to_i420(
             let (y_plane, rest) = i420_data.split_at_mut(y_size);
             let (u_plane, v_plane) = rest.split_at_mut(uv_size);
 
-            let src = shiguredo_libyuv::Nv12Planes {
+            let src = shiguredo_libyuv::Nv12Image {
                 y: &frame.data,
                 y_stride,
                 uv: uv_data,
                 uv_stride,
             };
-            let mut dst = shiguredo_libyuv::I420PlanesMut {
+            let mut dst = shiguredo_libyuv::I420ImageMut {
                 y: y_plane,
                 y_stride: width,
                 u: u_plane,

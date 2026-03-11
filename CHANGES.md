@@ -178,6 +178,9 @@
 - [UPDATE] shiguredo_libvpx のバージョンを 2026.1.0-canary.0 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが https://github.com/shiguredo/libvpx-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
+- [UPDATE] shiguredo_libyuv のバージョンを 2026.1.0-canary.0 にあげる
+  - このバージョンから shiguredo_libyuv crate のリポジトリが https://github.com/shiguredo/libyuv-rs に独立したので、hisui のワークスペースからは削除されている
+  - @sile
 - [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.0-canary.0 にあげる
   - このバージョンから shiguredo_video_toolbox crate のリポジトリが https://github.com/shiguredo/video-toolbox-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile

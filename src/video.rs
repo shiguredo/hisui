@@ -601,7 +601,7 @@ impl VideoFrame {
         let (dst_u, dst_v) = rest.split_at_mut(new_uv_size);
 
         // libyuv でリサイズ実行
-        let src = shiguredo_libyuv::I420Planes {
+        let src = shiguredo_libyuv::I420Image {
             y: src_y,
             y_stride: src_width, // 実際の幅をストライドとして使用
             u: src_u,
@@ -610,7 +610,7 @@ impl VideoFrame {
             v_stride: src_uv_width, // V プレーンのストライド
         };
 
-        let mut dst = shiguredo_libyuv::I420PlanesMut {
+        let mut dst = shiguredo_libyuv::I420ImageMut {
             y: dst_y,
             y_stride: dst_width, // 出力 Y プレーンのストライド
             u: dst_u,

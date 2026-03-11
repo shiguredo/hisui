@@ -182,14 +182,14 @@ impl NvcodecDecoder {
             let (u_plane, v_plane) = rest.split_at_mut(uv_size);
 
             // libyuv を使って NV12 から I420 に変換
-            let src = shiguredo_libyuv::Nv12Planes {
+            let src = shiguredo_libyuv::Nv12Image {
                 y: nv12_frame.y_plane(),
                 y_stride: nv12_frame.y_stride(),
                 uv: nv12_frame.uv_plane(),
                 uv_stride: nv12_frame.uv_stride(),
             };
 
-            let mut dst = shiguredo_libyuv::I420PlanesMut {
+            let mut dst = shiguredo_libyuv::I420ImageMut {
                 y: y_plane,
                 y_stride: width,
                 u: u_plane,

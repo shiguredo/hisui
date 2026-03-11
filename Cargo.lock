@@ -1101,6 +1101,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "shiguredo_cmake"
+version = "4.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9607158f5993fb23f69624846dbdf2e11106d6ab68094b7ea10ca8b0375a0f9"
+dependencies = [
+ "cmake",
+ "sha2",
+ "shiguredo_toml",
+]
+
+[[package]]
 name = "shiguredo_dav1d"
 version = "2025.1.0"
 dependencies = [
@@ -1133,11 +1144,13 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_libyuv"
-version = "2025.2.0"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb9a67579047fe25144dbcc0519aa691744ca9a5042518fa7382428cf0887e5"
 dependencies = [
  "bindgen",
- "cmake",
- "toml",
+ "shiguredo_cmake",
+ "shiguredo_toml",
 ]
 
 [[package]]
