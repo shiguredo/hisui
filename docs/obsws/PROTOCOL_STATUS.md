@@ -124,12 +124,12 @@
 - [ ] `GetGroupList`: グループ一覧を取得する
 - [x] `GetCurrentProgramScene`: 現在の Program Scene を取得する
 - [x] `SetCurrentProgramScene`: Program Scene を切り替える
-- [ ] `GetCurrentPreviewScene`: 現在の Preview Scene を取得する
-- [ ] `SetCurrentPreviewScene`: Preview Scene を切り替える
+- [x] `GetCurrentPreviewScene`: 現在の Preview Scene を取得する
+- [x] `SetCurrentPreviewScene`: Preview Scene を切り替える
 - [x] `CreateScene`: シーンを作成する
 - [x] `RemoveScene`: シーンを削除する
   - NOTE: 最後の 1 Scene は削除不可
-  - NOTE: 現在 Program Scene を削除した場合は残存 Scene へ自動切替する
+  - NOTE: 現在 Program / Preview Scene を削除した場合は残存 Scene へ自動切替する
 - [ ] `SetSceneName`: シーン名を変更する
 - [ ] `GetSceneSceneTransitionOverride`: シーン遷移上書き設定を取得する
 - [ ] `SetSceneSceneTransitionOverride`: シーン遷移上書き設定を更新する
@@ -185,14 +185,15 @@
 - [x] `GetCurrentSceneTransition`: 現在の遷移情報を取得する
 - [x] `SetCurrentSceneTransition`: 現在の遷移を設定する
 - [x] `SetCurrentSceneTransitionDuration`: 遷移時間を設定する
-- [ ] `SetCurrentSceneTransitionSettings`: 遷移設定を更新する
+- [x] `SetCurrentSceneTransitionSettings`: 遷移設定を更新する
 - [x] `GetCurrentSceneTransitionCursor`: 遷移カーソル位置を取得する
-- [ ] `SetTBarPosition`: TBar 位置を設定する
+- [x] `SetTBarPosition`: TBar 位置を設定する
   - NOTE: `Get/SetCurrentSceneTransition*` は API の状態保持として実装し、実描画は未対応
   - NOTE: 現時点の対応遷移は `Cut` / `Fade` のみ
   - NOTE: `transitionFixed` は `Cut=true` / `Fade=false` を返す
   - NOTE: `SetCurrentSceneTransitionDuration.transitionDuration` は `50..=20000` のみ受理する
-  - NOTE: `GetCurrentSceneTransitionCursor.transitionCursor` は現時点で `0.0` 固定
+  - NOTE: `SetCurrentSceneTransitionSettings.transitionSettings` は object のみ受理する
+  - NOTE: `SetTBarPosition.position` は `0.0..=1.0` のみ受理する
 
 ### Filters
 

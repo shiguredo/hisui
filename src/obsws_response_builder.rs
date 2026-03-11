@@ -6,11 +6,12 @@ use crate::obsws_input_registry::{
     GetSceneItemSourceError, GetSceneItemTransformError, ObswsInput, ObswsInputRegistry,
     ObswsInputSettings, ObswsSceneItemBlendMode, ObswsSceneItemIndexEntry, ObswsSceneItemRef,
     ObswsSceneItemTransform, ObswsSceneItemTransformPatch, ObswsStreamServiceSettings,
-    ParseInputSettingsError, RemoveSceneError, RemoveSceneItemError, SetCurrentProgramSceneError,
-    SetCurrentSceneTransitionDurationError, SetCurrentSceneTransitionError, SetInputNameError,
-    SetInputSettingsError, SetSceneItemBlendModeError, SetSceneItemEnabledError,
-    SetSceneItemIndexError, SetSceneItemIndexResult, SetSceneItemLockedError,
-    SetSceneItemLockedResult, SetSceneItemTransformError, SetSceneItemTransformResult,
+    ParseInputSettingsError, RemoveSceneError, RemoveSceneItemError, SetCurrentPreviewSceneError,
+    SetCurrentProgramSceneError, SetCurrentSceneTransitionDurationError,
+    SetCurrentSceneTransitionError, SetInputNameError, SetInputSettingsError,
+    SetSceneItemBlendModeError, SetSceneItemEnabledError, SetSceneItemIndexError,
+    SetSceneItemIndexResult, SetSceneItemLockedError, SetSceneItemLockedResult,
+    SetSceneItemTransformError, SetSceneItemTransformResult, SetTBarPositionError,
 };
 use crate::obsws_message::ObswsSessionStats;
 use crate::obsws_protocol::{
@@ -55,12 +56,24 @@ struct SetCurrentProgramSceneFields {
     scene_name: String,
 }
 
+struct SetCurrentPreviewSceneFields {
+    scene_name: String,
+}
+
 struct SetCurrentSceneTransitionFields {
     transition_name: String,
 }
 
 struct SetCurrentSceneTransitionDurationFields {
     transition_duration: i64,
+}
+
+struct SetCurrentSceneTransitionSettingsFields {
+    transition_settings: nojson::RawJsonOwned,
+}
+
+struct SetTBarPositionFields {
+    position: f64,
 }
 
 struct RemoveSceneFields {
@@ -359,6 +372,13 @@ fn parse_set_current_program_scene_fields(
     Ok(SetCurrentProgramSceneFields { scene_name })
 }
 
+fn parse_set_current_preview_scene_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetCurrentPreviewSceneFields, nojson::JsonParseError> {
+    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    Ok(SetCurrentPreviewSceneFields { scene_name })
+}
+
 fn parse_set_current_scene_transition_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetCurrentSceneTransitionFields, nojson::JsonParseError> {
@@ -376,6 +396,25 @@ fn parse_set_current_scene_transition_duration_fields(
     Ok(SetCurrentSceneTransitionDurationFields {
         transition_duration,
     })
+}
+
+fn parse_set_current_scene_transition_settings_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetCurrentSceneTransitionSettingsFields, nojson::JsonParseError> {
+    let transition_settings = request_data.to_member("transitionSettings")?.required()?;
+    if transition_settings.kind() != nojson::JsonValueKind::Object {
+        return Err(transition_settings.invalid("object is required"));
+    }
+    Ok(SetCurrentSceneTransitionSettingsFields {
+        transition_settings: nojson::RawJsonOwned::try_from(transition_settings)?,
+    })
+}
+
+fn parse_set_tbar_position_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetTBarPositionFields, nojson::JsonParseError> {
+    let position: f64 = request_data.to_member("position")?.required()?.try_into()?;
+    Ok(SetTBarPositionFields { position })
 }
 
 fn parse_remove_scene_fields(
@@ -998,6 +1037,27 @@ pub fn build_current_program_scene_changed_event(scene_name: &str, scene_uuid: &
     .to_string()
 }
 
+pub fn build_current_preview_scene_changed_event(scene_name: &str, scene_uuid: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "CurrentPreviewSceneChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SCENES)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("sceneName", scene_name)?;
+                        f.member("sceneUuid", scene_uuid)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_scene_created_event(scene_name: &str, scene_uuid: &str) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
@@ -1344,12 +1404,16 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "RemoveScene",
                                 "GetCurrentProgramScene",
                                 "SetCurrentProgramScene",
+                                "GetCurrentPreviewScene",
+                                "SetCurrentPreviewScene",
                                 "GetTransitionKindList",
                                 "GetSceneTransitionList",
                                 "GetCurrentSceneTransition",
                                 "SetCurrentSceneTransition",
                                 "SetCurrentSceneTransitionDuration",
+                                "SetCurrentSceneTransitionSettings",
                                 "GetCurrentSceneTransitionCursor",
+                                "SetTBarPosition",
                                 "GetSceneItemId",
                                 "GetSceneItemList",
                                 "CreateSceneItem",
@@ -1487,11 +1551,20 @@ pub fn build_get_scene_list_response(
 ) -> String {
     let scenes = input_registry.list_scenes();
     let current_program_scene = input_registry.current_program_scene();
+    let current_preview_scene = input_registry.current_preview_scene();
     let current_program_scene_name = current_program_scene
         .as_ref()
         .map(|scene| scene.scene_name.as_str())
         .unwrap_or_default();
     let current_program_scene_uuid = current_program_scene
+        .as_ref()
+        .map(|scene| scene.scene_uuid.as_str())
+        .unwrap_or_default();
+    let current_preview_scene_name = current_preview_scene
+        .as_ref()
+        .map(|scene| scene.scene_name.as_str())
+        .unwrap_or_default();
+    let current_preview_scene_uuid = current_preview_scene
         .as_ref()
         .map(|scene| scene.scene_uuid.as_str())
         .unwrap_or_default();
@@ -1514,9 +1587,8 @@ pub fn build_get_scene_list_response(
                     nojson::object(|f| {
                         f.member("currentProgramSceneName", current_program_scene_name)?;
                         f.member("currentProgramSceneUuid", current_program_scene_uuid)?;
-                        // 現時点は preview scene を独立管理していないため、program scene と同じ値を返す。
-                        f.member("currentPreviewSceneName", current_program_scene_name)?;
-                        f.member("currentPreviewSceneUuid", current_program_scene_uuid)?;
+                        f.member("currentPreviewSceneName", current_preview_scene_name)?;
+                        f.member("currentPreviewSceneUuid", current_preview_scene_uuid)?;
                         f.member("scenes", &scenes)
                     }),
                 )
@@ -1599,6 +1671,94 @@ pub fn build_set_current_program_scene_response(
             "d",
             nojson::object(|f| {
                 f.member("requestType", "SetCurrentProgramScene")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_current_preview_scene_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let current_preview_scene = input_registry.current_preview_scene();
+    let scene_name = current_preview_scene
+        .as_ref()
+        .map(|scene| scene.scene_name.as_str())
+        .unwrap_or_default();
+    let scene_uuid = current_preview_scene
+        .as_ref()
+        .map(|scene| scene.scene_uuid.as_str())
+        .unwrap_or_default();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetCurrentPreviewScene")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("sceneName", scene_name)?;
+                        f.member("sceneUuid", scene_uuid)?;
+                        // 互換目的で currentPreviewSceneName/currentPreviewSceneUuid も返す。
+                        f.member("currentPreviewSceneName", scene_name)?;
+                        f.member("currentPreviewSceneUuid", scene_uuid)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_current_preview_scene_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetCurrentPreviewScene",
+        request_id,
+        request_data,
+        parse_set_current_preview_scene_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    if let Err(SetCurrentPreviewSceneError::SceneNotFound) =
+        input_registry.set_current_preview_scene(&fields.scene_name)
+    {
+        return build_request_response_error(
+            "SetCurrentPreviewScene",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Scene not found",
+        );
+    }
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetCurrentPreviewScene")?;
                 f.member("requestId", request_id)?;
                 f.member(
                     "requestStatus",
@@ -1697,6 +1857,7 @@ pub fn build_get_current_scene_transition_response(
 ) -> String {
     let current_transition_name = input_registry.current_scene_transition_name();
     let current_transition_duration_ms = input_registry.current_scene_transition_duration_ms();
+    let transition_settings = input_registry.current_scene_transition_settings();
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -1721,7 +1882,7 @@ pub fn build_get_current_scene_transition_response(
                             is_fixed_transition(current_transition_name),
                         )?;
                         f.member("transitionConfigurable", false)?;
-                        f.member("transitionSettings", nojson::object(|_| Ok(())))?;
+                        f.member("transitionSettings", transition_settings)?;
                         f.member("transitionDuration", current_transition_duration_ms)
                     }),
                 )
@@ -1821,7 +1982,49 @@ pub fn build_set_current_scene_transition_duration_response(
     .to_string()
 }
 
-pub fn build_get_current_scene_transition_cursor_response(request_id: &str) -> String {
+pub fn build_set_current_scene_transition_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetCurrentSceneTransitionSettings",
+        request_id,
+        request_data,
+        parse_set_current_scene_transition_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    input_registry
+        .set_current_scene_transition_settings(fields.transition_settings)
+        .expect("BUG: parser must validate transitionSettings as object");
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetCurrentSceneTransitionSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_get_current_scene_transition_cursor_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let transition_cursor = input_registry.current_tbar_position();
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -1838,8 +2041,53 @@ pub fn build_get_current_scene_transition_cursor_response(request_id: &str) -> S
                 )?;
                 f.member(
                     "responseData",
-                    nojson::object(|f| f.member("transitionCursor", 0.0)),
+                    nojson::object(|f| f.member("transitionCursor", transition_cursor)),
                 )
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_tbar_position_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetTBarPosition",
+        request_id,
+        request_data,
+        parse_set_tbar_position_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    if let Err(SetTBarPositionError::InvalidTBarPosition) =
+        input_registry.set_tbar_position(fields.position)
+    {
+        return build_request_response_error(
+            "SetTBarPosition",
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "Invalid position field",
+        );
+    }
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetTBarPosition")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|_| Ok(())))
             }),
         )
     })
@@ -4113,6 +4361,118 @@ mod tests {
             assert_eq!(event_type, expected_type);
             assert_eq!(scene_name, expected_name);
         }
+    }
+
+    #[test]
+    fn build_current_preview_scene_changed_event_contains_expected_fields() {
+        let event = build_current_preview_scene_changed_event("Scene P", "scene-uuid-p");
+        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let event_type: String = json
+            .value()
+            .to_path_member(&["d", "eventType"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("eventType must be string");
+        let scene_name: String = json
+            .value()
+            .to_path_member(&["d", "eventData", "sceneName"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("sceneName must be string");
+        assert_eq!(event_type, "CurrentPreviewSceneChanged");
+        assert_eq!(scene_name, "Scene P");
+    }
+
+    #[test]
+    fn build_get_and_set_current_preview_scene_response_succeeds() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        registry
+            .create_scene("Scene B")
+            .expect("scene creation must succeed");
+        let set_request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+            .expect("requestData must be valid json");
+        let set_response = build_set_current_preview_scene_response(
+            "req-set-preview-scene",
+            Some(&set_request_data),
+            &mut registry,
+        );
+        let set_json = nojson::RawJson::parse(&set_response).expect("response must be valid json");
+        let set_result: bool = set_json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("result must be bool");
+        assert!(set_result);
+
+        let get_response =
+            build_get_current_preview_scene_response("req-get-preview-scene", &registry);
+        let get_json = nojson::RawJson::parse(&get_response).expect("response must be valid json");
+        let scene_name: String = get_json
+            .value()
+            .to_path_member(&["d", "responseData", "sceneName"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("sceneName must be string");
+        assert_eq!(scene_name, "Scene B");
+    }
+
+    #[test]
+    fn build_set_current_scene_transition_settings_and_tbar_position_responses_succeed() {
+        let mut registry = ObswsInputRegistry::new_for_test();
+        let set_transition_settings_request_data =
+            nojson::RawJsonOwned::parse(r#"{"transitionSettings":{"curve":"ease","power":2}}"#)
+                .expect("requestData must be valid json");
+        let set_transition_settings_response = build_set_current_scene_transition_settings_response(
+            "req-set-transition-settings",
+            Some(&set_transition_settings_request_data),
+            &mut registry,
+        );
+        let set_transition_settings_json =
+            nojson::RawJson::parse(&set_transition_settings_response)
+                .expect("response must be valid json");
+        let set_transition_settings_result: bool = set_transition_settings_json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("result must be bool");
+        assert!(set_transition_settings_result);
+
+        let get_current_transition_response =
+            build_get_current_scene_transition_response("req-get-current-transition", &registry);
+        let get_current_transition_json = nojson::RawJson::parse(&get_current_transition_response)
+            .expect("response must be valid json");
+        let transition_power: i64 = get_current_transition_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionSettings", "power"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("power must be i64");
+        assert_eq!(transition_power, 2);
+
+        let set_tbar_position_request_data = nojson::RawJsonOwned::parse(r#"{"position":0.75}"#)
+            .expect("requestData must be valid json");
+        let set_tbar_position_response = build_set_tbar_position_response(
+            "req-set-tbar-position",
+            Some(&set_tbar_position_request_data),
+            &mut registry,
+        );
+        let set_tbar_position_json = nojson::RawJson::parse(&set_tbar_position_response)
+            .expect("response must be valid json");
+        let set_tbar_position_result: bool = set_tbar_position_json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("result must be bool");
+        assert!(set_tbar_position_result);
+
+        let get_transition_cursor_response = build_get_current_scene_transition_cursor_response(
+            "req-get-transition-cursor",
+            &registry,
+        );
+        let get_transition_cursor_json = nojson::RawJson::parse(&get_transition_cursor_response)
+            .expect("response must be valid json");
+        let transition_cursor: f64 = get_transition_cursor_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionCursor"])
+            .and_then(|v| v.required()?.try_into())
+            .expect("transitionCursor must be f64");
+        assert_eq!(transition_cursor, 0.75);
     }
 
     #[test]

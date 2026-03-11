@@ -993,8 +993,8 @@ NOTE: `Get/SetSceneItemLocked` / `Get/SetSceneItemIndex` / `Get/SetSceneItemBlen
 
 ## 例 15: Transition の取得と更新
 
-目的: 現在の Transition 設定（ 種別 / 時間 ）を取得・更新する  
-hisui 対応状況: 対応済み（ `GetTransitionKindList` / `GetSceneTransitionList` / `GetCurrentSceneTransition` / `SetCurrentSceneTransition` / `SetCurrentSceneTransitionDuration` / `GetCurrentSceneTransitionCursor` ）
+目的: 現在の Transition 設定（ 種別 / 時間 / 設定 / カーソル ）を取得・更新する  
+hisui 対応状況: 対応済み（ `GetTransitionKindList` / `GetSceneTransitionList` / `GetCurrentSceneTransition` / `SetCurrentSceneTransition` / `SetCurrentSceneTransitionDuration` / `SetCurrentSceneTransitionSettings` / `GetCurrentSceneTransitionCursor` / `SetTBarPosition` ）
 
 1. `C -> S` GetTransitionKindList
 2. `S -> C` RequestResponse（ `responseData.transitionKinds = ["Cut", "Fade"]` ）
@@ -1002,12 +1002,41 @@ hisui 対応状況: 対応済み（ `GetTransitionKindList` / `GetSceneTransitio
 4. `S -> C` RequestResponse（ success ）
 5. `C -> S` SetCurrentSceneTransitionDuration（ `transitionDuration = 500` ）
 6. `S -> C` RequestResponse（ success ）
-7. `C -> S` GetCurrentSceneTransition
-8. `S -> C` RequestResponse（ `transitionName = "Fade"`, `transitionDuration = 500` ）
-9. `C -> S` GetCurrentSceneTransitionCursor
-10. `S -> C` RequestResponse（ `transitionCursor = 0.0` ）
+7. `C -> S` SetCurrentSceneTransitionSettings（ `transitionSettings = {"curve":"ease_in_out","power":2}` ）
+8. `S -> C` RequestResponse（ success ）
+9. `C -> S` SetTBarPosition（ `position = 0.25` ）
+10. `S -> C` RequestResponse（ success ）
+11. `C -> S` GetCurrentSceneTransition
+12. `S -> C` RequestResponse（ `transitionName = "Fade"`, `transitionDuration = 500`, `transitionSettings = {"curve":"ease_in_out","power":2}` ）
+13. `C -> S` GetCurrentSceneTransitionCursor
+14. `S -> C` RequestResponse（ `transitionCursor = 0.25` ）
 
 NOTE: hisui の Transition は現時点で API の状態保持のみ対応し、実際の映像切り替え描画には反映しない  
 NOTE: 現時点の対応遷移は `Cut` / `Fade` のみで、それ以外は not found エラーを返す  
 NOTE: `SetCurrentSceneTransitionDuration.transitionDuration` は `50..=20000` のみ受理する  
-NOTE: `GetCurrentSceneTransitionCursor.transitionCursor` は `0.0` 固定
+NOTE: `SetCurrentSceneTransitionSettings.transitionSettings` は object のみ受理する  
+NOTE: `SetTBarPosition.position` は `0.0..=1.0` のみ受理する
+
+---
+
+## 例 16: Preview Scene の取得と切り替え
+
+目的: `Preview Scene` を `Program Scene` と独立して取得・切り替えする  
+hisui 対応状況: 対応済み（ `GetCurrentPreviewScene` / `SetCurrentPreviewScene` / `CurrentPreviewSceneChanged` ）
+
+前提:
+
+- `Identify` または `Reidentify` で `eventSubscriptions` に `OBSWS_EVENT_SUB_SCENES` を含めると、`CurrentPreviewSceneChanged` を受信できる
+
+1. `C -> S` CreateScene（ `sceneName = "Scene B"` ）
+2. `S -> C` RequestResponse（ success ）
+3. `C -> S` GetCurrentPreviewScene
+4. `S -> C` RequestResponse（ `sceneName = "Scene"` ）
+5. `C -> S` SetCurrentPreviewScene（ `sceneName = "Scene B"` ）
+6. `S -> C` RequestResponse（ success ）
+7. `S -> C` Event（ `op: 5`, `eventType = "CurrentPreviewSceneChanged"` ）
+8. `C -> S` GetSceneList
+9. `S -> C` RequestResponse（ `currentProgramSceneName = "Scene"` かつ `currentPreviewSceneName = "Scene B"` ）
+
+NOTE: 現時点の hisui は Program / Preview Scene の状態を独立保持する  
+NOTE: 現在 Program / Preview Scene を削除した場合は残存 Scene へ自動切替する

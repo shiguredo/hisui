@@ -602,6 +602,15 @@ impl ObswsSession {
                 .await;
             return Self::build_execution_from_action(action);
         }
+        if request_type == "SetCurrentPreviewScene" {
+            let action = self
+                .handle_set_current_preview_scene_request(
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await;
+            return Self::build_execution_from_action(action);
+        }
         if request_type == "CreateScene" {
             let action = self
                 .handle_create_scene_request(&request_id, request.request_data.as_ref())
@@ -905,6 +914,50 @@ impl ObswsSession {
         }
     }
 
+    async fn handle_set_current_preview_scene_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> SessionAction {
+        let mut input_registry = self.input_registry.write().await;
+        let previous_scene_name = input_registry
+            .current_preview_scene()
+            .map(|scene| scene.scene_name);
+        let response_text = crate::obsws_response_builder::build_set_current_preview_scene_response(
+            request_id,
+            request_data,
+            &mut input_registry,
+        );
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+        // SetCurrentPreviewScene の成功・失敗いずれの経路でも、
+        // registry には常に少なくとも 1 つの scene が存在する。
+        let current_scene = input_registry.current_preview_scene().unwrap_or_else(|| {
+            unreachable!("BUG: current preview scene must exist in input registry")
+        });
+        if previous_scene_name.as_deref() == Some(current_scene.scene_name.as_str()) {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let event_text = crate::obsws_response_builder::build_current_preview_scene_changed_event(
+            &current_scene.scene_name,
+            &current_scene.scene_uuid,
+        );
+        SessionAction::SendTexts {
+            messages: vec![
+                (response_text, "request response message"),
+                (event_text, "event message"),
+            ],
+        }
+    }
+
     async fn handle_create_scene_request(
         &self,
         request_id: &str,
@@ -982,6 +1035,9 @@ impl ObswsSession {
         let previous_current_scene_name = input_registry
             .current_program_scene()
             .map(|scene| scene.scene_name);
+        let previous_current_preview_scene_name = input_registry
+            .current_preview_scene()
+            .map(|scene| scene.scene_name);
         let response_text = crate::obsws_response_builder::build_remove_scene_response(
             request_id,
             request_data,
@@ -1025,6 +1081,17 @@ impl ObswsSession {
         {
             messages.push((
                 crate::obsws_response_builder::build_current_program_scene_changed_event(
+                    &current_scene.scene_name,
+                    &current_scene.scene_uuid,
+                ),
+                "event message",
+            ));
+        }
+        if previous_current_preview_scene_name.as_deref() == Some(removed_scene.scene_name.as_str())
+            && let Some(current_scene) = input_registry.current_preview_scene()
+        {
+            messages.push((
+                crate::obsws_response_builder::build_current_preview_scene_changed_event(
                     &current_scene.scene_name,
                     &current_scene.scene_uuid,
                 ),
@@ -2932,7 +2999,67 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remove_current_scene_with_scene_subscription_sends_scene_and_program_events() {
+    async fn set_current_preview_scene_with_scene_subscription_returns_preview_event() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let create_request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+            .expect("requestData must be valid json");
+        let create_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-create-scene-preview".to_owned()),
+                request_type: Some("CreateScene".to_owned()),
+                request_data: Some(create_request_data),
+            })
+            .await;
+        assert!(matches!(create_action, SessionAction::SendTexts { .. }));
+
+        let set_preview_scene_request_data =
+            nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+                .expect("requestData must be valid json");
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-preview-scene".to_owned()),
+                request_type: Some("SetCurrentPreviewScene".to_owned()),
+                request_data: Some(set_preview_scene_request_data),
+            })
+            .await;
+        let SessionAction::SendTexts { messages } = action else {
+            panic!("must be SendTexts");
+        };
+        assert_eq!(messages.len(), 2);
+        let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
+        assert_eq!(event_type, "CurrentPreviewSceneChanged");
+        assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    }
+
+    #[tokio::test]
+    async fn set_current_preview_scene_to_same_scene_returns_response_only() {
+        let mut session = ObswsSession::new(None, input_registry(), None);
+        let identify_action = session
+            .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+            .await
+            .expect("identify must succeed");
+        assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+        let request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene"}"#)
+            .expect("requestData must be valid json");
+        let action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-preview-scene-same".to_owned()),
+                request_type: Some("SetCurrentPreviewScene".to_owned()),
+                request_data: Some(request_data),
+            })
+            .await;
+        assert!(matches!(action, SessionAction::SendText { .. }));
+    }
+
+    #[tokio::test]
+    async fn remove_current_scene_with_scene_subscription_sends_scene_program_and_preview_events() {
         let mut session = ObswsSession::new(None, input_registry(), None);
         let identify_action = session
             .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
@@ -2962,6 +3089,21 @@ mod tests {
             .await;
         assert!(matches!(set_scene_action, SessionAction::SendTexts { .. }));
 
+        let set_preview_scene_request_data =
+            nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+                .expect("requestData must be valid json");
+        let set_preview_scene_action = session
+            .handle_request(RequestMessage {
+                request_id: Some("req-set-preview-scene".to_owned()),
+                request_type: Some("SetCurrentPreviewScene".to_owned()),
+                request_data: Some(set_preview_scene_request_data),
+            })
+            .await;
+        assert!(matches!(
+            set_preview_scene_action,
+            SessionAction::SendTexts { .. }
+        ));
+
         let remove_request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
             .expect("requestData must be valid json");
         let remove_action = session
@@ -2974,13 +3116,16 @@ mod tests {
         let SessionAction::SendTexts { messages } = remove_action else {
             panic!("must be SendTexts");
         };
-        assert_eq!(messages.len(), 3);
+        assert_eq!(messages.len(), 4);
         let (_, event_type_1, event_intent_1) = parse_event_type_and_intent(&messages[1].0);
         let (_, event_type_2, event_intent_2) = parse_event_type_and_intent(&messages[2].0);
+        let (_, event_type_3, event_intent_3) = parse_event_type_and_intent(&messages[3].0);
         assert_eq!(event_type_1, "SceneRemoved");
         assert_eq!(event_intent_1, OBSWS_EVENT_SUB_SCENES);
         assert_eq!(event_type_2, "CurrentProgramSceneChanged");
         assert_eq!(event_intent_2, OBSWS_EVENT_SUB_SCENES);
+        assert_eq!(event_type_3, "CurrentPreviewSceneChanged");
+        assert_eq!(event_intent_3, OBSWS_EVENT_SUB_SCENES);
     }
 
     #[tokio::test]

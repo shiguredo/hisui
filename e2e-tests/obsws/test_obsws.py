@@ -916,12 +916,16 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
         assert "GetSceneList" in response_data["availableRequests"]
+        assert "GetCurrentPreviewScene" in response_data["availableRequests"]
+        assert "SetCurrentPreviewScene" in response_data["availableRequests"]
         assert "GetTransitionKindList" in response_data["availableRequests"]
         assert "GetSceneTransitionList" in response_data["availableRequests"]
         assert "GetCurrentSceneTransition" in response_data["availableRequests"]
         assert "SetCurrentSceneTransition" in response_data["availableRequests"]
         assert "SetCurrentSceneTransitionDuration" in response_data["availableRequests"]
+        assert "SetCurrentSceneTransitionSettings" in response_data["availableRequests"]
         assert "GetCurrentSceneTransitionCursor" in response_data["availableRequests"]
+        assert "SetTBarPosition" in response_data["availableRequests"]
         assert "GetSceneItemId" in response_data["availableRequests"]
         assert "GetSceneItemEnabled" in response_data["availableRequests"]
         assert "SetSceneItemEnabled" in response_data["availableRequests"]
@@ -1115,6 +1119,33 @@ def test_obsws_transition_requests(binary_path: Path):
             == 500
         )
         assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is False
+        assert get_current_transition_response["d"]["responseData"][
+            "transitionSettings"
+        ] == {}
+
+        set_transition_settings_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetCurrentSceneTransitionSettings",
+                request_id="req-set-current-scene-transition-settings",
+                request_data={"transitionSettings": {"curve": "ease_in_out", "power": 2}},
+            )
+        )
+        assert set_transition_settings_response["d"]["requestStatus"]["result"] is True
+
+        get_current_transition_response_after_settings = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetCurrentSceneTransition",
+                request_id="req-get-current-scene-transition-after-settings",
+            )
+        )
+        assert (
+            get_current_transition_response_after_settings["d"]["responseData"][
+                "transitionSettings"
+            ]
+            == {"curve": "ease_in_out", "power": 2}
+        )
 
         get_transition_cursor_response = asyncio.run(
             _connect_identify_and_request(
@@ -1126,6 +1157,31 @@ def test_obsws_transition_requests(binary_path: Path):
         assert get_transition_cursor_response["d"]["requestStatus"]["result"] is True
         assert (
             get_transition_cursor_response["d"]["responseData"]["transitionCursor"] == 0.0
+        )
+
+        set_tbar_position_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetTBarPosition",
+                request_id="req-set-tbar-position",
+                request_data={"position": 0.25},
+            )
+        )
+        assert set_tbar_position_response["d"]["requestStatus"]["result"] is True
+
+        get_transition_cursor_after_tbar_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetCurrentSceneTransitionCursor",
+                request_id="req-get-current-scene-transition-cursor-after-tbar",
+            )
+        )
+        assert get_transition_cursor_after_tbar_response["d"]["requestStatus"]["result"] is True
+        assert (
+            get_transition_cursor_after_tbar_response["d"]["responseData"][
+                "transitionCursor"
+            ]
+            == 0.25
         )
 
         invalid_transition_response = asyncio.run(
@@ -1149,6 +1205,84 @@ def test_obsws_transition_requests(binary_path: Path):
         )
         assert invalid_duration_response["d"]["requestStatus"]["result"] is False
         assert invalid_duration_response["d"]["requestStatus"]["code"] == 400
+
+        invalid_tbar_position_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetTBarPosition",
+                request_id="req-set-tbar-position-invalid",
+                request_data={"position": 1.5},
+            )
+        )
+        assert invalid_tbar_position_response["d"]["requestStatus"]["result"] is False
+        assert invalid_tbar_position_response["d"]["requestStatus"]["code"] == 400
+
+
+def test_obsws_preview_scene_requests(binary_path: Path):
+    """obsws が Preview Scene 関連 request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        create_scene_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateScene",
+                request_id="req-create-preview-scene",
+                request_data={"sceneName": "Scene B"},
+            )
+        )
+        assert create_scene_response["d"]["requestStatus"]["result"] is True
+
+        get_preview_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetCurrentPreviewScene",
+                request_id="req-get-current-preview-scene-initial",
+            )
+        )
+        assert get_preview_response["d"]["requestStatus"]["result"] is True
+        assert get_preview_response["d"]["responseData"]["sceneName"] == "Scene"
+
+        set_preview_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetCurrentPreviewScene",
+                request_id="req-set-current-preview-scene",
+                request_data={"sceneName": "Scene B"},
+            )
+        )
+        assert set_preview_response["d"]["requestStatus"]["result"] is True
+
+        get_preview_after_set_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetCurrentPreviewScene",
+                request_id="req-get-current-preview-scene-after-set",
+            )
+        )
+        assert get_preview_after_set_response["d"]["requestStatus"]["result"] is True
+        assert get_preview_after_set_response["d"]["responseData"]["sceneName"] == "Scene B"
+
+        get_scene_list_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetSceneList",
+                request_id="req-get-scene-list-after-preview-set",
+            )
+        )
+        assert get_scene_list_response["d"]["requestStatus"]["result"] is True
+        assert get_scene_list_response["d"]["responseData"]["currentProgramSceneName"] == "Scene"
+        assert (
+            get_scene_list_response["d"]["responseData"]["currentPreviewSceneName"]
+            == "Scene B"
+        )
 
 
 def test_obsws_get_record_status_request(binary_path: Path):
@@ -3847,6 +3981,20 @@ def test_obsws_scene_events_are_sent_when_scenes_subscription_enabled(
             )
             assert set_scene_event["d"]["eventData"]["sceneName"] == "Scene B"
 
+            set_preview_scene_response = await _send_obsws_request(
+                ws,
+                request_type="SetCurrentPreviewScene",
+                request_id="req-set-current-preview-scene-events",
+                request_data={"sceneName": "Scene B"},
+            )
+            assert set_preview_scene_response["d"]["requestStatus"]["result"] is True
+            set_preview_scene_event = await _expect_obsws_event(
+                ws,
+                event_type="CurrentPreviewSceneChanged",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert set_preview_scene_event["d"]["eventData"]["sceneName"] == "Scene B"
+
             remove_scene_response = await _send_obsws_request(
                 ws,
                 request_type="RemoveScene",
@@ -3866,6 +4014,12 @@ def test_obsws_scene_events_are_sent_when_scenes_subscription_enabled(
                 event_intent=OBSWS_EVENT_SUB_SCENES,
             )
             assert current_scene_event["d"]["eventData"]["sceneName"] == "Scene"
+            current_preview_scene_event = await _expect_obsws_event(
+                ws,
+                event_type="CurrentPreviewSceneChanged",
+                event_intent=OBSWS_EVENT_SUB_SCENES,
+            )
+            assert current_preview_scene_event["d"]["eventData"]["sceneName"] == "Scene"
             await ws.close()
 
     with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
