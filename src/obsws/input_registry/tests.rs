@@ -913,6 +913,11 @@ fn set_scene_name_updates_scene_and_current_scene_names() {
             .map(|scene| scene.scene_name),
         Some("Scene Renamed".to_owned())
     );
+    let override_entry = registry
+        .get_scene_transition_override("Scene Renamed")
+        .expect("transition override lookup must succeed");
+    assert_eq!(override_entry.transition_name, None);
+    assert_eq!(override_entry.transition_duration, None);
 }
 
 #[test]
@@ -958,6 +963,24 @@ fn scene_transition_override_round_trip_succeeds() {
         .expect("transition override lookup must succeed");
     assert_eq!(fetched.transition_name.as_deref(), Some("Fade"));
     assert_eq!(fetched.transition_duration, Some(500));
+}
+
+#[test]
+fn set_scene_name_moves_scene_transition_override_to_new_scene_name() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("Fade"), Some(500))
+        .expect("transition override update must succeed");
+
+    registry
+        .set_scene_name(OBSWS_DEFAULT_SCENE_NAME, "Scene Renamed")
+        .expect("scene rename must succeed");
+
+    let renamed_override = registry
+        .get_scene_transition_override("Scene Renamed")
+        .expect("renamed scene override lookup must succeed");
+    assert_eq!(renamed_override.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(renamed_override.transition_duration, Some(500));
 }
 
 #[test]

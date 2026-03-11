@@ -168,6 +168,11 @@ impl ObswsInputRegistry {
             .expect("BUG: scene order must contain the scene");
         self.scene_order[scene_index] = new_scene_name.to_owned();
 
+        if let Some(override_entry) = self.scene_transition_overrides.remove(scene_name) {
+            self.scene_transition_overrides
+                .insert(new_scene_name.to_owned(), override_entry);
+        }
+
         if self.current_program_scene_name == scene_name {
             self.current_program_scene_name = new_scene_name.to_owned();
         }
