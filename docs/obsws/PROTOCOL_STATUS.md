@@ -262,9 +262,15 @@
   - NOTE: 現時点では `stream` / `record` の 2 出力を返す
 - [x] `GetOutputStatus`: 出力状態を取得する
   - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
-- [ ] `ToggleOutput`: 出力をトグルする
-- [ ] `StartOutput`: 出力を開始する
-- [ ] `StopOutput`: 出力を停止する
+- [x] `ToggleOutput`: 出力をトグルする
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: 内部では `ToggleStream` / `ToggleRecord` 相当の処理を実行する
+- [x] `StartOutput`: 出力を開始する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: 内部では `StartStream` / `StartRecord` 相当の処理を実行する
+- [x] `StopOutput`: 出力を停止する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: 内部では `StopStream` / `StopRecord` 相当の処理を実行する
 - [ ] `GetOutputSettings`: 出力設定を取得する
 - [ ] `SetOutputSettings`: 出力設定を更新する
 

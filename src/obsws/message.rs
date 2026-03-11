@@ -789,6 +789,9 @@ mod tests {
         );
         assert!(available_requests.iter().any(|r| r == "GetOutputList"));
         assert!(available_requests.iter().any(|r| r == "GetOutputStatus"));
+        assert!(available_requests.iter().any(|r| r == "StartOutput"));
+        assert!(available_requests.iter().any(|r| r == "ToggleOutput"));
+        assert!(available_requests.iter().any(|r| r == "StopOutput"));
         assert!(available_requests.iter().any(|r| r == "StartStream"));
         assert!(available_requests.iter().any(|r| r == "ToggleStream"));
         assert!(available_requests.iter().any(|r| r == "GetRecordDirectory"));
@@ -1734,6 +1737,9 @@ mod tests {
             "StartStream",
             "ToggleStream",
             "StopStream",
+            "StartOutput",
+            "ToggleOutput",
+            "StopOutput",
             "StartRecord",
             "ToggleRecord",
             "StopRecord",

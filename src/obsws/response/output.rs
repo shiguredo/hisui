@@ -397,12 +397,24 @@ pub fn build_start_stream_response(request_id: &str, output_active: bool) -> Str
     build_output_active_response("StartStream", request_id, output_active)
 }
 
+pub fn build_start_output_response(request_id: &str, output_active: bool) -> String {
+    build_output_active_response("StartOutput", request_id, output_active)
+}
+
 pub fn build_toggle_stream_response(request_id: &str, output_active: bool) -> String {
     build_output_active_response("ToggleStream", request_id, output_active)
 }
 
+pub fn build_toggle_output_response(request_id: &str, output_active: bool) -> String {
+    build_output_active_response("ToggleOutput", request_id, output_active)
+}
+
 pub fn build_stop_stream_response(request_id: &str) -> String {
     empty_success_response("StopStream", request_id)
+}
+
+pub fn build_stop_output_response(request_id: &str) -> String {
+    empty_success_response("StopOutput", request_id)
 }
 
 pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> String {
