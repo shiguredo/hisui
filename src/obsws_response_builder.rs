@@ -1718,6 +1718,7 @@ pub fn build_get_current_preview_scene_response(
                     nojson::object(|f| {
                         f.member("sceneName", scene_name)?;
                         f.member("sceneUuid", scene_uuid)?;
+                        // 互換目的で currentPreviewSceneName/currentPreviewSceneUuid も返す。
                         f.member("currentPreviewSceneName", scene_name)?;
                         f.member("currentPreviewSceneUuid", scene_uuid)
                     }),
