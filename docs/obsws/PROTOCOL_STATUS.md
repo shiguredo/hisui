@@ -85,9 +85,6 @@
   - [x] `webSocketSessionOutgoingMessages`: 現在セッションの送信メッセージ数を返す
 - [x] `BroadcastCustomEvent`: カスタムイベントを配信する
 - [ ] `CallVendorRequest`: ベンダー拡張リクエストを実行する
-- [ ] `GetHotkeyList`: ホットキー一覧を取得する
-- [ ] `TriggerHotkeyByName`: 名前指定でホットキーを発火する
-- [ ] `TriggerHotkeyByKeySequence`: キーシーケンス指定でホットキーを発火する
 - [x] `Sleep`: 指定時間だけ処理を待機する
   - NOTE: `sleepMillis >= 0` のみ受理する
 
@@ -338,6 +335,9 @@
 - MessagePack: WebSocket の MessagePack サブプロトコル対応
   - NOTE: 現状は `obswebsocket.json` のみを対象とする
 - UI / Studio Mode 依存機能
+  - `GetHotkeyList`: ホットキー一覧を取得する
+  - `TriggerHotkeyByName`: 名前指定でホットキーを発火する
+  - `TriggerHotkeyByKeySequence`: キーシーケンス指定でホットキーを発火する
   - `GetStudioModeEnabled`: Studio Mode の有効状態を取得する
   - `SetStudioModeEnabled`: Studio Mode の有効状態を設定する
   - `OpenInputPropertiesDialog`: 入力プロパティダイアログを開く
@@ -347,7 +347,7 @@
   - `OpenVideoMixProjector`: 映像ミックスのプロジェクターを開く
   - `OpenSourceProjector`: ソースプロジェクターを開く
   - `TriggerStudioModeTransition`: Studio Mode の遷移を実行する
-  - NOTE: OBS 本体の GUI 状態（ Studio Mode / Dialog / Projector ）および OS のディスプレイ統合に依存するため、hisui の現行アーキテクチャでは対応対象外とする
+  - NOTE: OBS 本体の GUI 状態（ Studio Mode / Dialog / Projector ）、ホットキー設定、および OS の入力 / ディスプレイ統合に依存するため、hisui の現行アーキテクチャでは対応対象外とする
 
 ## 未対応 Request の扱い
 
