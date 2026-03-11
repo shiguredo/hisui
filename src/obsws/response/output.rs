@@ -7,7 +7,8 @@ use crate::obsws_protocol::{
 };
 
 use super::{
-    parse_get_output_status_fields, parse_request_data_or_error_response,
+    parse_get_output_settings_fields, parse_get_output_status_fields,
+    parse_request_data_or_error_response, parse_set_output_settings_fields,
     parse_set_record_directory_fields, parse_set_stream_service_settings_fields,
 };
 
@@ -83,6 +84,7 @@ pub fn build_set_stream_service_settings_response(
 pub fn build_get_stream_status_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let active = input_registry.is_stream_active();
     let duration = if active {
@@ -92,6 +94,7 @@ pub fn build_get_stream_status_response(
     };
     let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
     let output_timecode = format_timecode(duration);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -114,9 +117,9 @@ pub fn build_get_stream_status_response(
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
                         f.member("outputCongestion", 0.0)?;
-                        f.member("outputBytes", 0)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)
+                        f.member("outputBytes", output_stats.stream_output_bytes)?;
+                        f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
+                        f.member("outputTotalFrames", output_stats.stream_total_frames)
                     }),
                 )
             }),
@@ -158,6 +161,110 @@ pub fn build_get_output_list_response(request_id: &str) -> String {
         )
     })
     .to_string()
+}
+
+pub fn build_get_output_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "GetOutputSettings",
+        request_id,
+        request_data,
+        parse_get_output_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    match fields.output_name.as_str() {
+        OBSWS_STREAM_OUTPUT_NAME => {
+            build_stream_output_settings_response(request_id, input_registry)
+        }
+        OBSWS_RECORD_OUTPUT_NAME => {
+            build_record_output_settings_response(request_id, input_registry)
+        }
+        _ => super::build_request_response_error(
+            "GetOutputSettings",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Output not found",
+        ),
+    }
+}
+
+pub fn build_set_output_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetOutputSettings",
+        request_id,
+        request_data,
+        parse_set_output_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    match fields.output_name.as_str() {
+        OBSWS_STREAM_OUTPUT_NAME => {
+            let settings = match super::parse_set_stream_service_settings_fields(
+                fields.output_settings.value(),
+            ) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    return super::build_request_response_error(
+                        "SetOutputSettings",
+                        request_id,
+                        super::request_status_code_for_parse_error(&error),
+                        &error.to_string(),
+                    );
+                }
+            };
+            input_registry.set_stream_service_settings(ObswsStreamServiceSettings {
+                stream_service_type: settings.stream_service_type,
+                server: Some(settings.server),
+                key: settings.key,
+            });
+            empty_success_response("SetOutputSettings", request_id)
+        }
+        OBSWS_RECORD_OUTPUT_NAME => {
+            let settings =
+                match super::parse_set_record_directory_fields(fields.output_settings.value()) {
+                    Ok(settings) => settings,
+                    Err(error) => {
+                        return super::build_request_response_error(
+                            "SetOutputSettings",
+                            request_id,
+                            super::request_status_code_for_parse_error(&error),
+                            &error.to_string(),
+                        );
+                    }
+                };
+            let record_directory = match resolve_record_directory_path(&settings.record_directory) {
+                Ok(path) => path,
+                Err(e) => {
+                    return super::build_request_response_error(
+                        "SetOutputSettings",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        &e,
+                    );
+                }
+            };
+            input_registry.set_record_directory(record_directory);
+            empty_success_response("SetOutputSettings", request_id)
+        }
+        _ => super::build_request_response_error(
+            "SetOutputSettings",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Output not found",
+        ),
+    }
 }
 
 pub fn build_get_record_directory_response(
@@ -221,6 +328,7 @@ pub fn build_set_record_directory_response(
 pub fn build_get_record_status_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let active = input_registry.is_record_active();
     let paused = input_registry.is_record_paused();
@@ -239,6 +347,7 @@ pub fn build_get_record_status_response(
         .record_output_path()
         .map(read_file_size_bytes)
         .unwrap_or(0);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -262,8 +371,8 @@ pub fn build_get_record_status_response(
                         f.member("outputDuration", output_duration)?;
                         f.member("outputCongestion", 0.0)?;
                         f.member("outputBytes", output_bytes)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)?;
+                        f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
+                        f.member("outputTotalFrames", output_stats.record_total_frames)?;
                         f.member("outputPath", &output_path)
                     }),
                 )
@@ -277,6 +386,7 @@ pub fn build_get_output_status_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let fields = match parse_request_data_or_error_response(
         "GetOutputStatus",
@@ -290,10 +400,10 @@ pub fn build_get_output_status_response(
 
     match fields.output_name.as_str() {
         OBSWS_STREAM_OUTPUT_NAME => {
-            build_get_stream_status_as_output_response(request_id, input_registry)
+            build_get_stream_status_as_output_response(request_id, input_registry, pipeline_handle)
         }
         OBSWS_RECORD_OUTPUT_NAME => {
-            build_get_record_status_as_output_response(request_id, input_registry)
+            build_get_record_status_as_output_response(request_id, input_registry, pipeline_handle)
         }
         _ => super::build_request_response_error(
             "GetOutputStatus",
@@ -366,6 +476,75 @@ fn build_record_output_state_response(
     .to_string()
 }
 
+fn build_stream_output_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let settings = input_registry.stream_service_settings();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetOutputSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputName", OBSWS_STREAM_OUTPUT_NAME)?;
+                        f.member("outputKind", OBSWS_STREAM_OUTPUT_KIND)?;
+                        f.member("outputSettings", settings)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn build_record_output_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let record_directory = input_registry.record_directory().display().to_string();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetOutputSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputName", OBSWS_RECORD_OUTPUT_NAME)?;
+                        f.member("outputKind", OBSWS_RECORD_OUTPUT_KIND)?;
+                        f.member(
+                            "outputSettings",
+                            nojson::object(|f| f.member("recordDirectory", &record_directory)),
+                        )
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 fn empty_success_response(request_type: &str, request_id: &str) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
@@ -392,12 +571,24 @@ pub fn build_start_stream_response(request_id: &str, output_active: bool) -> Str
     build_output_active_response("StartStream", request_id, output_active)
 }
 
+pub fn build_start_output_response(request_id: &str, output_active: bool) -> String {
+    build_output_active_response("StartOutput", request_id, output_active)
+}
+
 pub fn build_toggle_stream_response(request_id: &str, output_active: bool) -> String {
     build_output_active_response("ToggleStream", request_id, output_active)
 }
 
+pub fn build_toggle_output_response(request_id: &str, output_active: bool) -> String {
+    build_output_active_response("ToggleOutput", request_id, output_active)
+}
+
 pub fn build_stop_stream_response(request_id: &str) -> String {
     empty_success_response("StopStream", request_id)
+}
+
+pub fn build_stop_output_response(request_id: &str) -> String {
+    empty_success_response("StopOutput", request_id)
 }
 
 pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> String {
@@ -459,6 +650,7 @@ fn format_timecode(duration: std::time::Duration) -> String {
 fn build_get_stream_status_as_output_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let active = input_registry.is_stream_active();
     let duration = if active {
@@ -468,6 +660,7 @@ fn build_get_stream_status_as_output_response(
     };
     let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
     let output_timecode = format_timecode(duration);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -490,9 +683,9 @@ fn build_get_stream_status_as_output_response(
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
                         f.member("outputCongestion", 0.0)?;
-                        f.member("outputBytes", 0)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)
+                        f.member("outputBytes", output_stats.stream_output_bytes)?;
+                        f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
+                        f.member("outputTotalFrames", output_stats.stream_total_frames)
                     }),
                 )
             }),
@@ -504,6 +697,7 @@ fn build_get_stream_status_as_output_response(
 fn build_get_record_status_as_output_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let active = input_registry.is_record_active();
     let paused = input_registry.is_record_paused();
@@ -522,6 +716,7 @@ fn build_get_record_status_as_output_response(
         .record_output_path()
         .map(read_file_size_bytes)
         .unwrap_or(0);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -543,9 +738,10 @@ fn build_get_record_status_as_output_response(
                         f.member("outputPaused", paused)?;
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
+                        f.member("outputCongestion", 0.0)?;
                         f.member("outputBytes", output_bytes)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)?;
+                        f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
+                        f.member("outputTotalFrames", output_stats.record_total_frames)?;
                         f.member("outputPath", &output_path)
                     }),
                 )

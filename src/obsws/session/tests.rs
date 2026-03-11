@@ -1446,6 +1446,90 @@ async fn toggle_record_without_image_input_returns_toggle_request_type_error() {
 }
 
 #[tokio::test]
+async fn start_output_with_unknown_name_returns_not_found() {
+    let mut session = ObswsSession::new(None, input_registry(), None);
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-output".to_owned()),
+            request_type: Some("StartOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"unknown"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let SessionAction::SendText { text, .. } = action else {
+        panic!("must be SendText");
+    };
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
+    assert_eq!(parse_request_type(&text), "StartOutput");
+}
+
+#[tokio::test]
+async fn toggle_output_without_image_input_returns_toggle_request_type_error() {
+    let mut session = ObswsSession::new(None, input_registry(), None);
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-toggle-output".to_owned()),
+            request_type: Some("ToggleOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"stream"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let SessionAction::SendText { text, .. } = action else {
+        panic!("must be SendText");
+    };
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+    assert_eq!(parse_request_type(&text), "ToggleOutput");
+}
+
+#[tokio::test]
+async fn stop_output_when_record_is_inactive_returns_output_request_type_error() {
+    let mut session = ObswsSession::new(None, input_registry(), None);
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-stop-output".to_owned()),
+            request_type: Some("StopOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"record"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let SessionAction::SendText { text, .. } = action else {
+        panic!("must be SendText");
+    };
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_OUTPUT_NOT_RUNNING);
+    assert_eq!(parse_request_type(&text), "StopOutput");
+}
+
+#[tokio::test]
 async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session

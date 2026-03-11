@@ -85,6 +85,11 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "SetStreamServiceSettings",
                                 "GetOutputList",
                                 "GetOutputStatus",
+                                "ToggleOutput",
+                                "StartOutput",
+                                "StopOutput",
+                                "GetOutputSettings",
+                                "SetOutputSettings",
                                 "GetStreamStatus",
                                 "ToggleStream",
                                 "StartStream",
@@ -119,9 +124,12 @@ pub fn build_get_stats_response(
     request_id: &str,
     session_stats: &ObswsSessionStats,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let outgoing_messages = session_stats.outgoing_messages.saturating_add(1);
     let runtime_stats = collect_runtime_stats(input_registry);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
+    let active_fps = calculate_active_fps(input_registry, &output_stats);
 
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
@@ -143,12 +151,22 @@ pub fn build_get_stats_response(
                         f.member("cpuUsage", 0.0)?;
                         f.member("memoryUsage", runtime_stats.memory_usage_mb)?;
                         f.member("availableDiskSpace", runtime_stats.available_disk_space_mb)?;
-                        f.member("activeFps", 0.0)?;
+                        f.member("activeFps", active_fps)?;
                         f.member("averageFrameRenderTime", 0.0)?;
                         f.member("renderSkippedFrames", 0)?;
                         f.member("renderTotalFrames", 0)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)?;
+                        f.member(
+                            "outputSkippedFrames",
+                            output_stats
+                                .stream_skipped_frames
+                                .saturating_add(output_stats.record_skipped_frames),
+                        )?;
+                        f.member(
+                            "outputTotalFrames",
+                            output_stats
+                                .stream_total_frames
+                                .saturating_add(output_stats.record_total_frames),
+                        )?;
                         f.member(
                             "webSocketSessionIncomingMessages",
                             session_stats.incoming_messages,
@@ -172,6 +190,33 @@ fn collect_runtime_stats(input_registry: &ObswsInputRegistry) -> ObswsRuntimeSta
         memory_usage_mb: current_process_memory_usage_mb(),
         available_disk_space_mb: available_disk_space_mb(input_registry.record_directory()),
     }
+}
+
+fn calculate_active_fps(
+    input_registry: &ObswsInputRegistry,
+    output_stats: &super::ObswsOutputRuntimeStats,
+) -> f64 {
+    if input_registry.is_stream_active() {
+        return frames_per_second(
+            output_stats.stream_total_frames,
+            input_registry.stream_uptime(),
+        );
+    }
+    if input_registry.is_record_active() {
+        return frames_per_second(
+            output_stats.record_total_frames,
+            input_registry.record_uptime(),
+        );
+    }
+    0.0
+}
+
+fn frames_per_second(total_frames: u64, duration: std::time::Duration) -> f64 {
+    let seconds = duration.as_secs_f64();
+    if seconds <= 0.0 {
+        return 0.0;
+    }
+    total_frames as f64 / seconds
 }
 
 #[cfg(unix)]

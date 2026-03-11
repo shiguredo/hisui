@@ -135,6 +135,15 @@ pub fn handle_request_message(
     session_stats: &ObswsSessionStats,
     input_registry: &mut ObswsInputRegistry,
 ) -> RequestResponsePayload {
+    handle_request_message_with_pipeline_handle(request, session_stats, input_registry, None)
+}
+
+pub fn handle_request_message_with_pipeline_handle(
+    request: RequestMessage,
+    session_stats: &ObswsSessionStats,
+    input_registry: &mut ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
+) -> RequestResponsePayload {
     let request_id = request.request_id.unwrap_or_default();
     let request_type = request.request_type.unwrap_or_default();
     if request_id.is_empty() {
@@ -165,6 +174,7 @@ pub fn handle_request_message(
             &request_id,
             session_stats,
             input_registry,
+            pipeline_handle,
         ),
         "GetCanvasList" => {
             crate::obsws_response_builder::build_get_canvas_list_response(&request_id)
@@ -356,11 +366,23 @@ pub fn handle_request_message(
         "GetStreamStatus" => crate::obsws_response_builder::build_get_stream_status_response(
             &request_id,
             input_registry,
+            pipeline_handle,
         ),
         "GetOutputList" => {
             crate::obsws_response_builder::build_get_output_list_response(&request_id)
         }
         "GetOutputStatus" => crate::obsws_response_builder::build_get_output_status_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+            pipeline_handle,
+        ),
+        "GetOutputSettings" => crate::obsws_response_builder::build_get_output_settings_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "SetOutputSettings" => crate::obsws_response_builder::build_set_output_settings_response(
             &request_id,
             request.request_data.as_ref(),
             input_registry,
@@ -377,6 +399,7 @@ pub fn handle_request_message(
         "GetRecordStatus" => crate::obsws_response_builder::build_get_record_status_response(
             &request_id,
             input_registry,
+            pipeline_handle,
         ),
         _ => crate::obsws_response_builder::build_request_response_error(
             &request_type,
@@ -394,7 +417,7 @@ mod tests {
     use crate::obsws_auth::{ObswsAuthentication, build_authentication_response};
     use crate::obsws_input_registry::{
         ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings, ObswsRecordRun,
-        ObswsVideoCaptureDeviceSettings,
+        ObswsStreamRun, ObswsVideoCaptureDeviceSettings,
     };
     use crate::obsws_protocol::{
         OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
@@ -417,6 +440,17 @@ mod tests {
 
     fn request_data(json: &str) -> nojson::RawJsonOwned {
         nojson::RawJsonOwned::parse(json).expect("requestData must be valid json")
+    }
+
+    fn set_processor_counter(
+        pipeline_handle: &crate::MediaPipelineHandle,
+        processor_id: &str,
+        metric_name: &'static str,
+        value: u64,
+    ) {
+        let mut stats = pipeline_handle.stats();
+        stats.set_default_label("processor_id", processor_id);
+        stats.counter(metric_name).add(value);
     }
 
     #[test]
@@ -765,6 +799,11 @@ mod tests {
         );
         assert!(available_requests.iter().any(|r| r == "GetOutputList"));
         assert!(available_requests.iter().any(|r| r == "GetOutputStatus"));
+        assert!(available_requests.iter().any(|r| r == "StartOutput"));
+        assert!(available_requests.iter().any(|r| r == "ToggleOutput"));
+        assert!(available_requests.iter().any(|r| r == "StopOutput"));
+        assert!(available_requests.iter().any(|r| r == "GetOutputSettings"));
+        assert!(available_requests.iter().any(|r| r == "SetOutputSettings"));
         assert!(available_requests.iter().any(|r| r == "StartStream"));
         assert!(available_requests.iter().any(|r| r == "ToggleStream"));
         assert!(available_requests.iter().any(|r| r == "GetRecordDirectory"));
@@ -940,6 +979,131 @@ mod tests {
     }
 
     #[test]
+    fn handle_request_message_returns_get_output_settings_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-output-settings".to_owned()),
+            request_type: Some("GetOutputSettings".to_owned()),
+            request_data: Some(request_data(r#"{"outputName":"record"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry =
+            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let output_kind: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputKind"])?
+            .required()?
+            .try_into()?;
+        let record_directory: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputSettings", "recordDirectory"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_kind, "mp4_output");
+        assert_eq!(record_directory, "/tmp/hisui-obsws-recordings");
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_output_settings_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let request = RequestMessage {
+            request_id: Some("req-set-output-settings".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"outputName":"stream","outputSettings":{"streamServiceType":"rtmp_custom","streamServiceSettings":{"server":"rtmp://127.0.0.1:1935/live","key":"stream-main"}}}"#,
+            )),
+        };
+
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        assert!(result);
+        assert_eq!(
+            input_registry.stream_service_settings().server.as_deref(),
+            Some("rtmp://127.0.0.1:1935/live")
+        );
+        assert_eq!(
+            input_registry.stream_service_settings().key.as_deref(),
+            Some("stream-main")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_stream_output_runtime_stats_in_status_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-output-status-runtime".to_owned()),
+            request_type: Some("GetOutputStatus".to_owned()),
+            request_data: Some(request_data(r#"{"outputName":"stream"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        input_registry
+            .activate_stream(ObswsStreamRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                endpoint_processor_id: "endpoint".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            })
+            .expect("stream activation must succeed");
+        let pipeline = crate::MediaPipeline::new().expect("pipeline creation must succeed");
+        let pipeline_handle = pipeline.handle();
+        set_processor_counter(
+            &pipeline_handle,
+            "encoder",
+            "total_output_video_frame_count",
+            11,
+        );
+        set_processor_counter(
+            &pipeline_handle,
+            "endpoint",
+            "total_waiting_keyframe_dropped_video_frame_count",
+            2,
+        );
+        set_processor_counter(&pipeline_handle, "endpoint", "total_sent_bytes", 1234);
+
+        let response = handle_request_message_with_pipeline_handle(
+            request,
+            &session_stats,
+            &mut input_registry,
+            Some(&pipeline_handle),
+        );
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let output_bytes: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputBytes"])?
+            .required()?
+            .try_into()?;
+        let output_skipped_frames: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputSkippedFrames"])?
+            .required()?
+            .try_into()?;
+        let output_total_frames: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputTotalFrames"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_bytes, 1234);
+        assert_eq!(output_skipped_frames, 2);
+        assert_eq!(output_total_frames, 11);
+        Ok(())
+    }
+
+    #[test]
     fn handle_request_message_returns_record_output_bytes_in_status_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = tempfile::tempdir()?;
@@ -1093,6 +1257,87 @@ mod tests {
         assert!(memory_usage >= 0.0);
         assert!(available_disk_space >= 0.0);
         assert_eq!(outgoing_messages, 35);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_stats_response_with_output_runtime_stats()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-stats-runtime".to_owned()),
+            request_type: Some("GetStats".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        input_registry
+            .activate_stream(ObswsStreamRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                endpoint_processor_id: "endpoint".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            })
+            .expect("stream activation must succeed");
+        input_registry
+            .activate_record(ObswsRecordRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder-record".to_owned(),
+                writer_processor_id: "writer".to_owned(),
+                source_track_id: "record-source-track".to_owned(),
+                encoded_track_id: "record-encoded-track".to_owned(),
+                output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
+            })
+            .expect("record activation must succeed");
+        let pipeline = crate::MediaPipeline::new().expect("pipeline creation must succeed");
+        let pipeline_handle = pipeline.handle();
+        set_processor_counter(
+            &pipeline_handle,
+            "encoder",
+            "total_output_video_frame_count",
+            11,
+        );
+        set_processor_counter(&pipeline_handle, "endpoint", "total_sent_bytes", 1234);
+        set_processor_counter(
+            &pipeline_handle,
+            "endpoint",
+            "total_waiting_keyframe_dropped_video_frame_count",
+            2,
+        );
+        set_processor_counter(&pipeline_handle, "writer", "total_video_sample_count", 7);
+        set_processor_counter(
+            &pipeline_handle,
+            "writer",
+            "total_keyframe_wait_dropped_video_frame_count",
+            3,
+        );
+
+        let response = handle_request_message_with_pipeline_handle(
+            request,
+            &session_stats,
+            &mut input_registry,
+            Some(&pipeline_handle),
+        );
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let output_skipped_frames: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputSkippedFrames"])?
+            .required()?
+            .try_into()?;
+        let output_total_frames: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputTotalFrames"])?
+            .required()?
+            .try_into()?;
+        let active_fps: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "activeFps"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_skipped_frames, 5);
+        assert_eq!(output_total_frames, 18);
+        assert!(active_fps >= 0.0);
         Ok(())
     }
 
@@ -1565,6 +1810,9 @@ mod tests {
             "StartStream",
             "ToggleStream",
             "StopStream",
+            "StartOutput",
+            "ToggleOutput",
+            "StopOutput",
             "StartRecord",
             "ToggleRecord",
             "StopRecord",
@@ -1700,6 +1948,60 @@ mod tests {
             .try_into()?;
         assert!(!output_active);
         assert!(!output_paused);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_record_status_response_with_runtime_stats()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        input_registry
+            .activate_record(ObswsRecordRun {
+                source_processor_id: "source".to_owned(),
+                encoder_processor_id: "encoder".to_owned(),
+                writer_processor_id: "writer".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+                output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
+            })
+            .expect("record activation must succeed");
+        let pipeline = crate::MediaPipeline::new().expect("pipeline creation must succeed");
+        let pipeline_handle = pipeline.handle();
+        set_processor_counter(&pipeline_handle, "writer", "total_video_sample_count", 7);
+        set_processor_counter(
+            &pipeline_handle,
+            "writer",
+            "total_keyframe_wait_dropped_video_frame_count",
+            3,
+        );
+        let request = RequestMessage {
+            request_id: Some("req-get-record-status-runtime".to_owned()),
+            request_type: Some("GetRecordStatus".to_owned()),
+            request_data: None,
+        };
+
+        let response = handle_request_message_with_pipeline_handle(
+            request,
+            &session_stats,
+            &mut input_registry,
+            Some(&pipeline_handle),
+        );
+        let json = nojson::RawJson::parse(&response.message)?;
+        let response_data = json
+            .value()
+            .to_path_member(&["d", "responseData"])?
+            .required()?;
+        let output_skipped_frames: u64 = response_data
+            .to_member("outputSkippedFrames")?
+            .required()?
+            .try_into()?;
+        let output_total_frames: u64 = response_data
+            .to_member("outputTotalFrames")?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_skipped_frames, 3);
+        assert_eq!(output_total_frames, 7);
         Ok(())
     }
 }

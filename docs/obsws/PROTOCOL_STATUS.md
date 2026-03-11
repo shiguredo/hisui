@@ -75,12 +75,15 @@
     - NOTE: 現在プロセスの最大 RSS を MB 単位で返す
   - [x] `availableDiskSpace`: 空きディスク容量を返す
     - NOTE: 現在の録画ディレクトリが属するファイルシステムの空き容量を MB 単位で返す
-  - [ ] `activeFps`: 現在の FPS を返す（ 現状は `0.0` 固定 ）
+  - [x] `activeFps`: 現在の FPS を返す
+    - NOTE: 現在アクティブな stream または record 出力の総フレーム数と稼働時間から算出する
   - [ ] `averageFrameRenderTime`: 平均レンダー時間を返す（ 現状は `0.0` 固定 ）
   - [ ] `renderSkippedFrames`: レンダーでスキップしたフレーム数を返す（ 現状は `0` 固定 ）
   - [ ] `renderTotalFrames`: レンダー総フレーム数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputSkippedFrames`: 出力でスキップしたフレーム数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
+  - [x] `outputSkippedFrames`: 出力でスキップしたフレーム数を返す
+    - NOTE: 現在アクティブな stream / record 出力の keyframe 待機ドロップ数を合算して返す
+  - [x] `outputTotalFrames`: 出力総フレーム数を返す
+    - NOTE: 現在アクティブな stream / record 出力のフレーム数を合算して返す
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す
   - [x] `webSocketSessionOutgoingMessages`: 現在セッションの送信メッセージ数を返す
 - [x] `BroadcastCustomEvent`: カスタムイベントを配信する
@@ -259,11 +262,21 @@
   - NOTE: 現時点では `stream` / `record` の 2 出力を返す
 - [x] `GetOutputStatus`: 出力状態を取得する
   - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
-- [ ] `ToggleOutput`: 出力をトグルする
-- [ ] `StartOutput`: 出力を開始する
-- [ ] `StopOutput`: 出力を停止する
-- [ ] `GetOutputSettings`: 出力設定を取得する
-- [ ] `SetOutputSettings`: 出力設定を更新する
+- [x] `ToggleOutput`: 出力をトグルする
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: 内部では `ToggleStream` / `ToggleRecord` 相当の処理を実行する
+- [x] `StartOutput`: 出力を開始する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: 内部では `StartStream` / `StartRecord` 相当の処理を実行する
+- [x] `StopOutput`: 出力を停止する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: 内部では `StopStream` / `StopRecord` 相当の処理を実行する
+- [x] `GetOutputSettings`: 出力設定を取得する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ返す
+- [x] `SetOutputSettings`: 出力設定を更新する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ更新する
 
 ### Stream
 
@@ -273,10 +286,13 @@
   - [x] `outputTimecode`: 出力タイムコードを返す
   - [x] `outputDuration`: 出力継続時間を返す
   - [ ] `outputCongestion`: 出力混雑度を返す（ 現状は `0.0` 固定 ）
-  - [ ] `outputBytes`: 出力バイト数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputSkippedFrames`: 出力スキップフレーム数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
-  - NOTE: 固定値項目は 実測値連携を TODO として追跡する
+  - [x] `outputBytes`: 出力バイト数を返す
+    - NOTE: RTMP outbound endpoint の送信バイト数を返す
+  - [x] `outputSkippedFrames`: 出力スキップフレーム数を返す
+    - NOTE: 接続直後の keyframe 待機中に drop した映像フレーム数を返す
+  - [x] `outputTotalFrames`: 出力総フレーム数を返す
+    - NOTE: stream encoder の `total_output_video_frame_count` を返す
+  - NOTE: `outputCongestion` は引き続き固定値
 - [x] `ToggleStream`: 配信をトグルする
   - NOTE: 現在状態に応じて `StartStream` または `StopStream` 相当の処理を内部で実行する
   - NOTE: 成功時の `responseData` には `outputActive` を返す
@@ -296,9 +312,12 @@
   - [x] `outputPaused`: 録画一時停止状態を返す
   - [x] `outputTimecode`: 録画タイムコードを返す
   - [x] `outputDuration`: 録画継続時間を返す
-  - [ ] `outputBytes`: 出力バイト数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputSkippedFrames`: 出力スキップフレーム数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
+  - [x] `outputBytes`: 出力バイト数を返す
+    - NOTE: 現在の録画ファイルサイズを返す
+  - [x] `outputSkippedFrames`: 出力スキップフレーム数を返す
+    - NOTE: keyframe 待機中に drop した映像フレーム数を返す
+  - [x] `outputTotalFrames`: 出力総フレーム数を返す
+    - NOTE: MP4 writer の `total_video_sample_count` を返す
   - [x] `outputPath`: 録画ファイルパスを返す
 - [x] `ToggleRecord`: 録画をトグルする
   - NOTE: 現在状態に応じて `StartRecord` または `StopRecord` 相当の処理を内部で実行する
