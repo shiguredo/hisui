@@ -210,6 +210,32 @@ async fn sleep_request_returns_success_response() {
 }
 
 #[tokio::test]
+async fn sleep_request_rejects_too_large_sleep_millis() {
+    let mut session = ObswsSession::new(None, input_registry(), None);
+    let identified = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .await;
+    assert!(identified.is_ok());
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-sleep-invalid".to_owned()),
+            request_type: Some("Sleep".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"sleepMillis":50001}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let SessionAction::SendText { text, .. } = action else {
+        panic!("must be SendText");
+    };
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
 async fn duplicate_identify_returns_already_identified_close() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let first = session

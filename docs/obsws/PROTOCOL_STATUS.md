@@ -86,7 +86,7 @@
 - [x] `BroadcastCustomEvent`: カスタムイベントを配信する
 - [ ] `CallVendorRequest`: ベンダー拡張リクエストを実行する
 - [x] `Sleep`: 指定時間だけ処理を待機する
-  - NOTE: `sleepMillis >= 0` のみ受理する
+  - NOTE: `sleepMillis` は `0..=50000` のみ受理する
 
 ### Config
 

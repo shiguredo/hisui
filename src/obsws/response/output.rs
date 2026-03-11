@@ -260,6 +260,7 @@ pub fn build_get_record_status_response(
                         f.member("outputPaused", paused)?;
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
+                        f.member("outputCongestion", 0.0)?;
                         f.member("outputBytes", output_bytes)?;
                         f.member("outputSkippedFrames", 0)?;
                         f.member("outputTotalFrames", 0)?;

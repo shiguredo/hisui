@@ -962,6 +962,9 @@ impl ObswsSession {
         if sleep_millis < 0 {
             return Err(raw_sleep_millis.invalid("sleepMillis must be greater than or equal to 0"));
         }
+        if sleep_millis > 50_000 {
+            return Err(raw_sleep_millis.invalid("sleepMillis must be less than or equal to 50000"));
+        }
         Ok(sleep_millis as u64)
     }
 }

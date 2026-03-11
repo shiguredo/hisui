@@ -928,8 +928,14 @@ mod tests {
             .to_path_member(&["d", "responseData", "outputActive"])?
             .required()?
             .try_into()?;
+        let output_congestion: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputCongestion"])?
+            .required()?
+            .try_into()?;
         assert!(result);
         assert!(!output_active);
+        assert_eq!(output_congestion, 0.0);
         Ok(())
     }
 
