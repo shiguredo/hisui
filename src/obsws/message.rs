@@ -1120,10 +1120,13 @@ mod tests {
         input_registry
             .activate_record(ObswsRecordRun {
                 source_processor_id: "source".to_owned(),
-                encoder_processor_id: "encoder".to_owned(),
+                video_encoder_processor_id: Some("encoder".to_owned()),
+                audio_encoder_processor_id: None,
                 writer_processor_id: "writer".to_owned(),
-                source_track_id: "source-track".to_owned(),
-                encoded_track_id: "encoded-track".to_owned(),
+                source_video_track_id: Some("source-track".to_owned()),
+                source_audio_track_id: None,
+                encoded_video_track_id: Some("encoded-track".to_owned()),
+                encoded_audio_track_id: None,
                 output_path: output_path.clone(),
             })
             .expect("record activation must succeed");
@@ -1282,10 +1285,13 @@ mod tests {
         input_registry
             .activate_record(ObswsRecordRun {
                 source_processor_id: "source".to_owned(),
-                encoder_processor_id: "encoder-record".to_owned(),
+                video_encoder_processor_id: Some("encoder-record".to_owned()),
+                audio_encoder_processor_id: None,
                 writer_processor_id: "writer".to_owned(),
-                source_track_id: "record-source-track".to_owned(),
-                encoded_track_id: "record-encoded-track".to_owned(),
+                source_video_track_id: Some("record-source-track".to_owned()),
+                source_audio_track_id: None,
+                encoded_video_track_id: Some("record-encoded-track".to_owned()),
+                encoded_audio_track_id: None,
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
             .expect("record activation must succeed");
@@ -1367,6 +1373,7 @@ mod tests {
                 .iter()
                 .any(|kind| kind == "video_capture_device")
         );
+        assert!(input_kinds.iter().any(|kind| kind == "mp4_file_input"));
         Ok(())
     }
 
@@ -1516,6 +1523,39 @@ mod tests {
             default_input_settings.to_member("device_id")?.try_into()?;
         assert_eq!(input_kind, "video_capture_device");
         assert_eq!(device_id, None);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_mp4_input_default_settings_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-default-mp4-input-settings".to_owned()),
+            request_type: Some("GetInputDefaultSettings".to_owned()),
+            request_data: Some(request_data(r#"{"inputKind":"mp4_file_input"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let input_kind: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "inputKind"])?
+            .required()?
+            .try_into()?;
+        let default_input_settings = json
+            .value()
+            .to_path_member(&["d", "responseData", "defaultInputSettings"])?
+            .required()?;
+        let path: Option<String> = default_input_settings.to_member("path")?.try_into()?;
+        let loop_playback: bool = default_input_settings
+            .to_member("loopPlayback")?
+            .required()?
+            .try_into()?;
+        assert_eq!(input_kind, "mp4_file_input");
+        assert_eq!(path, None);
+        assert!(!loop_playback);
         Ok(())
     }
 
@@ -1959,10 +1999,13 @@ mod tests {
         input_registry
             .activate_record(ObswsRecordRun {
                 source_processor_id: "source".to_owned(),
-                encoder_processor_id: "encoder".to_owned(),
+                video_encoder_processor_id: Some("encoder".to_owned()),
+                audio_encoder_processor_id: None,
                 writer_processor_id: "writer".to_owned(),
-                source_track_id: "source-track".to_owned(),
-                encoded_track_id: "encoded-track".to_owned(),
+                source_video_track_id: Some("source-track".to_owned()),
+                source_audio_track_id: None,
+                encoded_video_track_id: Some("encoded-track".to_owned()),
+                encoded_audio_track_id: None,
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
             .expect("record activation must succeed");
