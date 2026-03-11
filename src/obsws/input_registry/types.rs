@@ -680,21 +680,12 @@ impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsMp4FileInputSettings {
     // OBS 互換ではなく hisui 独自 input として扱うため、path 未指定も保持可能にする。
     // 実行時には path 必須とする。
     pub path: Option<String>,
     pub loop_playback: bool,
-}
-
-impl Default for ObswsMp4FileInputSettings {
-    fn default() -> Self {
-        Self {
-            path: None,
-            loop_playback: false,
-        }
-    }
 }
 
 impl nojson::DisplayJson for ObswsMp4FileInputSettings {
