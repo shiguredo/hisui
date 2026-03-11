@@ -19,6 +19,7 @@ pub(crate) struct ObswsOutputRuntimeStats {
     pub(crate) record_total_frames: u64,
     pub(crate) record_skipped_frames: u64,
 }
+
 struct CreateInputFields {
     scene_name: String,
     input_name: String,
