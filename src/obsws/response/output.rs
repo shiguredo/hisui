@@ -83,6 +83,7 @@ pub fn build_set_stream_service_settings_response(
 pub fn build_get_stream_status_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let active = input_registry.is_stream_active();
     let duration = if active {
@@ -92,6 +93,7 @@ pub fn build_get_stream_status_response(
     };
     let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
     let output_timecode = format_timecode(duration);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -115,8 +117,8 @@ pub fn build_get_stream_status_response(
                         f.member("outputDuration", output_duration)?;
                         f.member("outputCongestion", 0.0)?;
                         f.member("outputBytes", 0)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)
+                        f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
+                        f.member("outputTotalFrames", output_stats.stream_total_frames)
                     }),
                 )
             }),
@@ -221,6 +223,7 @@ pub fn build_set_record_directory_response(
 pub fn build_get_record_status_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let active = input_registry.is_record_active();
     let paused = input_registry.is_record_paused();
@@ -239,6 +242,7 @@ pub fn build_get_record_status_response(
         .record_output_path()
         .map(read_file_size_bytes)
         .unwrap_or(0);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -262,8 +266,8 @@ pub fn build_get_record_status_response(
                         f.member("outputDuration", output_duration)?;
                         f.member("outputCongestion", 0.0)?;
                         f.member("outputBytes", output_bytes)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)?;
+                        f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
+                        f.member("outputTotalFrames", output_stats.record_total_frames)?;
                         f.member("outputPath", &output_path)
                     }),
                 )
@@ -277,6 +281,7 @@ pub fn build_get_output_status_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let fields = match parse_request_data_or_error_response(
         "GetOutputStatus",
@@ -290,10 +295,10 @@ pub fn build_get_output_status_response(
 
     match fields.output_name.as_str() {
         OBSWS_STREAM_OUTPUT_NAME => {
-            build_get_stream_status_as_output_response(request_id, input_registry)
+            build_get_stream_status_as_output_response(request_id, input_registry, pipeline_handle)
         }
         OBSWS_RECORD_OUTPUT_NAME => {
-            build_get_record_status_as_output_response(request_id, input_registry)
+            build_get_record_status_as_output_response(request_id, input_registry, pipeline_handle)
         }
         _ => super::build_request_response_error(
             "GetOutputStatus",
@@ -459,6 +464,7 @@ fn format_timecode(duration: std::time::Duration) -> String {
 fn build_get_stream_status_as_output_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let active = input_registry.is_stream_active();
     let duration = if active {
@@ -468,6 +474,7 @@ fn build_get_stream_status_as_output_response(
     };
     let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
     let output_timecode = format_timecode(duration);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -491,8 +498,8 @@ fn build_get_stream_status_as_output_response(
                         f.member("outputDuration", output_duration)?;
                         f.member("outputCongestion", 0.0)?;
                         f.member("outputBytes", 0)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)
+                        f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
+                        f.member("outputTotalFrames", output_stats.stream_total_frames)
                     }),
                 )
             }),
@@ -504,6 +511,7 @@ fn build_get_stream_status_as_output_response(
 fn build_get_record_status_as_output_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> String {
     let active = input_registry.is_record_active();
     let paused = input_registry.is_record_paused();
@@ -522,6 +530,7 @@ fn build_get_record_status_as_output_response(
         .record_output_path()
         .map(read_file_size_bytes)
         .unwrap_or(0);
+    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -543,9 +552,10 @@ fn build_get_record_status_as_output_response(
                         f.member("outputPaused", paused)?;
                         f.member("outputTimecode", &output_timecode)?;
                         f.member("outputDuration", output_duration)?;
+                        f.member("outputCongestion", 0.0)?;
                         f.member("outputBytes", output_bytes)?;
-                        f.member("outputSkippedFrames", 0)?;
-                        f.member("outputTotalFrames", 0)?;
+                        f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
+                        f.member("outputTotalFrames", output_stats.record_total_frames)?;
                         f.member("outputPath", &output_path)
                     }),
                 )

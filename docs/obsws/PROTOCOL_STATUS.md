@@ -79,8 +79,10 @@
   - [ ] `averageFrameRenderTime`: 平均レンダー時間を返す（ 現状は `0.0` 固定 ）
   - [ ] `renderSkippedFrames`: レンダーでスキップしたフレーム数を返す（ 現状は `0` 固定 ）
   - [ ] `renderTotalFrames`: レンダー総フレーム数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputSkippedFrames`: 出力でスキップしたフレーム数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
+  - [x] `outputSkippedFrames`: 出力でスキップしたフレーム数を返す
+    - NOTE: 現在は record 出力の keyframe 待機ドロップ数のみ反映する
+  - [x] `outputTotalFrames`: 出力総フレーム数を返す
+    - NOTE: 現在アクティブな stream / record 出力のフレーム数を合算して返す
   - [x] `webSocketSessionIncomingMessages`: 現在セッションの受信メッセージ数を返す
   - [x] `webSocketSessionOutgoingMessages`: 現在セッションの送信メッセージ数を返す
 - [x] `BroadcastCustomEvent`: カスタムイベントを配信する
@@ -275,7 +277,8 @@
   - [ ] `outputCongestion`: 出力混雑度を返す（ 現状は `0.0` 固定 ）
   - [ ] `outputBytes`: 出力バイト数を返す（ 現状は `0` 固定 ）
   - [ ] `outputSkippedFrames`: 出力スキップフレーム数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
+  - [x] `outputTotalFrames`: 出力総フレーム数を返す
+    - NOTE: stream encoder の `total_output_video_frame_count` を返す
   - NOTE: 固定値項目は 実測値連携を TODO として追跡する
 - [x] `ToggleStream`: 配信をトグルする
   - NOTE: 現在状態に応じて `StartStream` または `StopStream` 相当の処理を内部で実行する
@@ -296,9 +299,12 @@
   - [x] `outputPaused`: 録画一時停止状態を返す
   - [x] `outputTimecode`: 録画タイムコードを返す
   - [x] `outputDuration`: 録画継続時間を返す
-  - [ ] `outputBytes`: 出力バイト数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputSkippedFrames`: 出力スキップフレーム数を返す（ 現状は `0` 固定 ）
-  - [ ] `outputTotalFrames`: 出力総フレーム数を返す（ 現状は `0` 固定 ）
+  - [x] `outputBytes`: 出力バイト数を返す
+    - NOTE: 現在の録画ファイルサイズを返す
+  - [x] `outputSkippedFrames`: 出力スキップフレーム数を返す
+    - NOTE: keyframe 待機中に drop した映像フレーム数を返す
+  - [x] `outputTotalFrames`: 出力総フレーム数を返す
+    - NOTE: MP4 writer の `total_video_sample_count` を返す
   - [x] `outputPath`: 録画ファイルパスを返す
 - [x] `ToggleRecord`: 録画をトグルする
   - NOTE: 現在状態に応じて `StartRecord` または `StopRecord` 相当の処理を内部で実行する

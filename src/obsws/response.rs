@@ -10,6 +10,14 @@ use crate::obsws_protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
     REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ObswsOutputRuntimeStats {
+    pub(crate) stream_total_frames: u64,
+    pub(crate) stream_skipped_frames: u64,
+    pub(crate) record_total_frames: u64,
+    pub(crate) record_skipped_frames: u64,
+}
 struct CreateInputFields {
     scene_name: String,
     input_name: String,
@@ -1011,6 +1019,68 @@ pub use input::*;
 pub use output::*;
 pub use scene::*;
 pub use scene_item::*;
+
+pub(crate) fn collect_output_runtime_stats(
+    input_registry: &ObswsInputRegistry,
+    pipeline_handle: Option<&crate::MediaPipelineHandle>,
+) -> ObswsOutputRuntimeStats {
+    let Some(pipeline_handle) = pipeline_handle else {
+        return ObswsOutputRuntimeStats::default();
+    };
+    let Ok(entries) = pipeline_handle.stats().entries() else {
+        return ObswsOutputRuntimeStats::default();
+    };
+
+    let stream_total_frames = input_registry
+        .stream_run()
+        .map(|run| {
+            find_counter_metric(
+                &entries,
+                &run.encoder_processor_id,
+                "total_output_video_frame_count",
+            )
+        })
+        .unwrap_or(0);
+    let (record_total_frames, record_skipped_frames) = input_registry
+        .record_run()
+        .map(|run| {
+            (
+                find_counter_metric(
+                    &entries,
+                    &run.writer_processor_id,
+                    "total_video_sample_count",
+                ),
+                find_counter_metric(
+                    &entries,
+                    &run.writer_processor_id,
+                    "total_keyframe_wait_dropped_video_frame_count",
+                ),
+            )
+        })
+        .unwrap_or((0, 0));
+
+    ObswsOutputRuntimeStats {
+        stream_total_frames,
+        stream_skipped_frames: 0,
+        record_total_frames,
+        record_skipped_frames,
+    }
+}
+
+fn find_counter_metric(
+    entries: &[crate::stats::StatsEntry],
+    processor_id: &str,
+    metric_name: &'static str,
+) -> u64 {
+    entries
+        .iter()
+        .find(|entry| {
+            entry.metric_name == metric_name
+                && entry.labels.get("processor_id").map(String::as_str) == Some(processor_id)
+        })
+        .and_then(|entry| entry.value.as_counter())
+        .unwrap_or(0)
+}
 
 pub fn build_request_batch_response(request_id: &str, results: &[RequestBatchResult]) -> String {
     nojson::object(|f| {

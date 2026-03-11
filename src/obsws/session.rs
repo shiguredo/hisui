@@ -720,8 +720,12 @@ impl ObswsSession {
         }
 
         let mut input_registry = self.input_registry.write().await;
-        let response =
-            crate::obsws_message::handle_request_message(request, &self.stats, &mut input_registry);
+        let response = crate::obsws_message::handle_request_message_with_pipeline_handle(
+            request,
+            &self.stats,
+            &mut input_registry,
+            self.pipeline_handle.as_ref(),
+        );
         Self::build_execution_from_response_text(response.message, Vec::new())
     }
 
