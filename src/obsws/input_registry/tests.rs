@@ -928,6 +928,39 @@ fn set_scene_name_rejects_duplicate_scene_name() {
 }
 
 #[test]
+fn is_source_active_returns_true_when_source_is_enabled_in_program_scene() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let input = ObswsInput::from_kind_and_settings(
+        "video_capture_device",
+        parse_owned_json(r#"{}"#).value(),
+    )
+    .expect("input settings must be valid");
+    let created = registry
+        .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+        .expect("input creation must succeed");
+    let active = registry
+        .is_source_active(Some(&created.input_uuid), None)
+        .expect("source lookup must succeed");
+    assert!(active);
+}
+
+#[test]
+fn scene_transition_override_round_trip_succeeds() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let override_entry = registry
+        .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("Fade"), Some(500))
+        .expect("transition override update must succeed");
+    assert_eq!(override_entry.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(override_entry.transition_duration, Some(500));
+
+    let fetched = registry
+        .get_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME)
+        .expect("transition override lookup must succeed");
+    assert_eq!(fetched.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(fetched.transition_duration, Some(500));
+}
+
+#[test]
 fn transition_runtime_defaults_to_cut_and_300ms() {
     let registry = ObswsInputRegistry::new_for_test();
     assert_eq!(registry.current_scene_transition_name(), "Cut");

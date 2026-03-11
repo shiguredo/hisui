@@ -114,7 +114,8 @@
 
 ### Sources
 
-- [ ] `GetSourceActive`: ソースのアクティブ状態を取得する
+- [x] `GetSourceActive`: ソースのアクティブ状態を取得する
+  - NOTE: 現在の Program Scene に有効な Scene Item として存在する場合に `videoActive = true` を返す
 - [ ] `GetSourceScreenshot`: ソースのスクリーンショットを取得する
 - [ ] `SaveSourceScreenshot`: ソースのスクリーンショットをファイル保存する
 
@@ -137,8 +138,10 @@
   - NOTE: 現在 Program / Preview Scene を削除した場合は残存 Scene へ自動切替する
 - [x] `SetSceneName`: シーン名を変更する
   - NOTE: 現在 Program / Preview Scene を rename した場合は内部状態も同時に更新する
-- [ ] `GetSceneSceneTransitionOverride`: シーン遷移上書き設定を取得する
-- [ ] `SetSceneSceneTransitionOverride`: シーン遷移上書き設定を更新する
+- [x] `GetSceneSceneTransitionOverride`: シーン遷移上書き設定を取得する
+- [x] `SetSceneSceneTransitionOverride`: シーン遷移上書き設定を更新する
+  - NOTE: `transitionName` / `transitionDuration` の state のみ保持し、実描画には反映しない
+  - NOTE: `transitionName = null` かつ `transitionDuration = null` で override を解除する
 
 ### Inputs
 

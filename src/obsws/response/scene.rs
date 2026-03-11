@@ -1,7 +1,8 @@
 use crate::obsws_input_registry::{
-    CreateSceneError, ObswsInputRegistry, SetCurrentPreviewSceneError, SetCurrentProgramSceneError,
+    CreateSceneError, GetSceneSceneTransitionOverrideError, ObswsInputRegistry,
+    SetCurrentPreviewSceneError, SetCurrentProgramSceneError,
     SetCurrentSceneTransitionDurationError, SetCurrentSceneTransitionError, SetSceneNameError,
-    SetTBarPositionError,
+    SetSceneSceneTransitionOverrideError, SetTBarPositionError,
 };
 use crate::obsws_protocol::{
     OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
@@ -10,11 +11,12 @@ use crate::obsws_protocol::{
 };
 
 use super::{
-    parse_create_scene_fields, parse_remove_scene_fields, parse_request_data_or_error_response,
+    parse_create_scene_fields, parse_get_scene_scene_transition_override_fields,
+    parse_remove_scene_fields, parse_request_data_or_error_response,
     parse_set_current_preview_scene_fields, parse_set_current_program_scene_fields,
     parse_set_current_scene_transition_duration_fields, parse_set_current_scene_transition_fields,
     parse_set_current_scene_transition_settings_fields, parse_set_scene_name_fields,
-    parse_set_tbar_position_fields,
+    parse_set_scene_scene_transition_override_fields, parse_set_tbar_position_fields,
 };
 
 struct ObswsSceneTransitionEntry {
@@ -332,6 +334,63 @@ pub fn build_get_current_scene_transition_response(
     .to_string()
 }
 
+pub fn build_get_scene_scene_transition_override_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "GetSceneSceneTransitionOverride",
+        request_id,
+        request_data,
+        parse_get_scene_scene_transition_override_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    let scene_name = match super::resolve_scene_name_or_error(
+        "GetSceneSceneTransitionOverride",
+        request_id,
+        input_registry,
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
+    ) {
+        Ok(scene_name) => scene_name,
+        Err(response) => return response,
+    };
+    let override_entry = match input_registry.get_scene_transition_override(&scene_name) {
+        Ok(override_entry) => override_entry,
+        Err(GetSceneSceneTransitionOverrideError::SceneNotFound) => {
+            return super::build_request_response_error(
+                "GetSceneSceneTransitionOverride",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene not found",
+            );
+        }
+    };
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetSceneSceneTransitionOverride")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", &override_entry)
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_set_current_scene_transition_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
@@ -454,6 +513,83 @@ pub fn build_set_current_scene_transition_settings_response(
                     }),
                 )?;
                 f.member("responseData", nojson::object(|_| Ok(())))
+            }),
+        )
+    })
+    .to_string()
+}
+
+pub fn build_set_scene_scene_transition_override_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetSceneSceneTransitionOverride",
+        request_id,
+        request_data,
+        parse_set_scene_scene_transition_override_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    let scene_name = match super::resolve_scene_name_or_error(
+        "SetSceneSceneTransitionOverride",
+        request_id,
+        input_registry,
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
+    ) {
+        Ok(scene_name) => scene_name,
+        Err(response) => return response,
+    };
+    let override_entry = match input_registry.set_scene_transition_override(
+        &scene_name,
+        fields.transition_name.as_deref(),
+        fields.transition_duration,
+    ) {
+        Ok(override_entry) => override_entry,
+        Err(SetSceneSceneTransitionOverrideError::SceneNotFound) => {
+            return super::build_request_response_error(
+                "SetSceneSceneTransitionOverride",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene not found",
+            );
+        }
+        Err(SetSceneSceneTransitionOverrideError::TransitionNotFound) => {
+            return super::build_request_response_error(
+                "SetSceneSceneTransitionOverride",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Transition not found",
+            );
+        }
+        Err(SetSceneSceneTransitionOverrideError::InvalidTransitionDuration) => {
+            return super::build_request_response_error(
+                "SetSceneSceneTransitionOverride",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Invalid transitionDuration field",
+            );
+        }
+    };
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SetSceneSceneTransitionOverride")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", &override_entry)
             }),
         )
     })

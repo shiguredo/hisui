@@ -186,6 +186,20 @@ pub fn handle_request_message(
                 input_registry,
             )
         }
+        "GetSceneSceneTransitionOverride" => {
+            crate::obsws_response_builder::build_get_scene_scene_transition_override_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "SetSceneSceneTransitionOverride" => {
+            crate::obsws_response_builder::build_set_scene_scene_transition_override_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetTransitionKindList" => {
             crate::obsws_response_builder::build_get_transition_kind_list_response(
                 &request_id,
@@ -297,6 +311,11 @@ pub fn handle_request_message(
         ),
         "GetInputKindList" => crate::obsws_response_builder::build_get_input_kind_list_response(
             &request_id,
+            input_registry,
+        ),
+        "GetSourceActive" => crate::obsws_response_builder::build_get_source_active_response(
+            &request_id,
+            request.request_data.as_ref(),
             input_registry,
         ),
         "GetInputSettings" => crate::obsws_response_builder::build_get_input_settings_response(
@@ -639,6 +658,7 @@ mod tests {
                 .any(|r| r == "BroadcastCustomEvent")
         );
         assert!(available_requests.iter().any(|r| r == "GetGroupList"));
+        assert!(available_requests.iter().any(|r| r == "GetSourceActive"));
         assert!(available_requests.iter().any(|r| r == "GetSceneList"));
         assert!(available_requests.iter().any(|r| r == "SetSceneName"));
         assert!(
@@ -650,6 +670,16 @@ mod tests {
             available_requests
                 .iter()
                 .any(|r| r == "SetCurrentPreviewScene")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "GetSceneSceneTransitionOverride")
+        );
+        assert!(
+            available_requests
+                .iter()
+                .any(|r| r == "SetSceneSceneTransitionOverride")
         );
         assert!(available_requests.iter().any(|r| r == "RemoveScene"));
         assert!(
@@ -769,6 +799,83 @@ mod tests {
             .required()?
             .to_array()?;
         assert!(groups.next().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_source_active_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-source-active".to_owned()),
+            request_type: Some("GetSourceActive".to_owned()),
+            request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        input_registry
+            .create_scene_item("Scene", Some("input-uuid-1"), None, true)
+            .expect("scene item creation must succeed");
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let video_active: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "videoActive"])?
+            .required()?
+            .try_into()?;
+        assert!(video_active);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_scene_transition_override_responses()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+
+        let set_response = handle_request_message(
+            RequestMessage {
+                request_id: Some("req-set-override".to_owned()),
+                request_type: Some("SetSceneSceneTransitionOverride".to_owned()),
+                request_data: Some(request_data(
+                    r#"{"sceneName":"Scene","transitionName":"Fade","transitionDuration":500}"#,
+                )),
+            },
+            &session_stats,
+            &mut input_registry,
+        );
+        let set_json = nojson::RawJson::parse(&set_response.message)?;
+        let transition_name: Option<String> = set_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionName"])?
+            .try_into()?;
+        let transition_duration: Option<i64> = set_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionDuration"])?
+            .try_into()?;
+        assert_eq!(transition_name.as_deref(), Some("Fade"));
+        assert_eq!(transition_duration, Some(500));
+
+        let get_response = handle_request_message(
+            RequestMessage {
+                request_id: Some("req-get-override".to_owned()),
+                request_type: Some("GetSceneSceneTransitionOverride".to_owned()),
+                request_data: Some(request_data(r#"{"sceneName":"Scene"}"#)),
+            },
+            &session_stats,
+            &mut input_registry,
+        );
+        let get_json = nojson::RawJson::parse(&get_response.message)?;
+        let get_transition_name: Option<String> = get_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionName"])?
+            .try_into()?;
+        let get_transition_duration: Option<i64> = get_json
+            .value()
+            .to_path_member(&["d", "responseData", "transitionDuration"])?
+            .try_into()?;
+        assert_eq!(get_transition_name.as_deref(), Some("Fade"));
+        assert_eq!(get_transition_duration, Some(500));
         Ok(())
     }
 

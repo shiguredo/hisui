@@ -126,6 +126,58 @@ pub fn build_get_input_settings_response(
     .to_string()
 }
 
+pub fn build_get_source_active_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let (input_uuid, input_name) = match parse_request_data_or_error_response(
+        "GetSourceActive",
+        request_id,
+        request_data,
+        parse_input_lookup_fields,
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+
+    let source_active =
+        match input_registry.is_source_active(input_uuid.as_deref(), input_name.as_deref()) {
+            Ok(source_active) => source_active,
+            Err(crate::obsws_input_registry::GetSourceActiveError::SourceNotFound) => {
+                return super::build_request_response_error(
+                    "GetSourceActive",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Source not found",
+                );
+            }
+        };
+
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetSourceActive")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| f.member("videoActive", source_active)),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
 pub fn build_set_input_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,

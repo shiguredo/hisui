@@ -51,6 +51,18 @@ struct SetCurrentPreviewSceneFields {
     scene_name: String,
 }
 
+struct GetSceneSceneTransitionOverrideFields {
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
+}
+
+struct SetSceneSceneTransitionOverrideFields {
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
+    transition_name: Option<String>,
+    transition_duration: Option<i64>,
+}
+
 struct SetCurrentSceneTransitionFields {
     transition_name: String,
 }
@@ -360,6 +372,33 @@ fn parse_set_current_preview_scene_fields(
 ) -> Result<SetCurrentPreviewSceneFields, nojson::JsonParseError> {
     let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
     Ok(SetCurrentPreviewSceneFields { scene_name })
+}
+
+fn parse_get_scene_scene_transition_override_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<GetSceneSceneTransitionOverrideFields, nojson::JsonParseError> {
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
+    Ok(GetSceneSceneTransitionOverrideFields {
+        scene_name,
+        scene_uuid,
+    })
+}
+
+fn parse_set_scene_scene_transition_override_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetSceneSceneTransitionOverrideFields, nojson::JsonParseError> {
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
+    let transition_name = optional_non_empty_string_member(request_data, "transitionName")?;
+    let transition_duration: Option<i64> =
+        request_data.to_member("transitionDuration")?.try_into()?;
+    Ok(SetSceneSceneTransitionOverrideFields {
+        scene_name,
+        scene_uuid,
+        transition_name,
+        transition_duration,
+    })
 }
 
 fn parse_set_current_scene_transition_fields(
