@@ -71,8 +71,10 @@
   - [x] `supportedImageFormats`: 対応画像フォーマット一覧を返す
 - [x] `GetStats`: 実行統計情報を返す
   - [ ] `cpuUsage`: CPU 使用率を返す（ 現状は `0.0` 固定 ）
-  - [ ] `memoryUsage`: メモリ使用量を返す（ 現状は `0.0` 固定 ）
-  - [ ] `availableDiskSpace`: 空きディスク容量を返す（ 現状は `0.0` 固定 ）
+  - [x] `memoryUsage`: メモリ使用量を返す
+    - NOTE: 現在プロセスの最大 RSS を MB 単位で返す
+  - [x] `availableDiskSpace`: 空きディスク容量を返す
+    - NOTE: 現在の録画ディレクトリが属するファイルシステムの空き容量を MB 単位で返す
   - [ ] `activeFps`: 現在の FPS を返す（ 現状は `0.0` 固定 ）
   - [ ] `averageFrameRenderTime`: 平均レンダー時間を返す（ 現状は `0.0` 固定 ）
   - [ ] `renderSkippedFrames`: レンダーでスキップしたフレーム数を返す（ 現状は `0` 固定 ）

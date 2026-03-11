@@ -4,6 +4,10 @@ use crate::obsws_protocol::{
     OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
     REQUEST_STATUS_SUCCESS,
 };
+#[cfg(unix)]
+use std::ffi::CString;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 
 pub fn build_get_version_response(request_id: &str) -> String {
     nojson::object(|f| {
@@ -108,8 +112,13 @@ pub fn build_get_version_response(request_id: &str) -> String {
     .to_string()
 }
 
-pub fn build_get_stats_response(request_id: &str, session_stats: &ObswsSessionStats) -> String {
+pub fn build_get_stats_response(
+    request_id: &str,
+    session_stats: &ObswsSessionStats,
+    input_registry: &ObswsInputRegistry,
+) -> String {
     let outgoing_messages = session_stats.outgoing_messages.saturating_add(1);
+    let runtime_stats = collect_runtime_stats(input_registry);
 
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
@@ -129,8 +138,8 @@ pub fn build_get_stats_response(request_id: &str, session_stats: &ObswsSessionSt
                     "responseData",
                     nojson::object(|f| {
                         f.member("cpuUsage", 0.0)?;
-                        f.member("memoryUsage", 0.0)?;
-                        f.member("availableDiskSpace", 0.0)?;
+                        f.member("memoryUsage", runtime_stats.memory_usage_mb)?;
+                        f.member("availableDiskSpace", runtime_stats.available_disk_space_mb)?;
                         f.member("activeFps", 0.0)?;
                         f.member("averageFrameRenderTime", 0.0)?;
                         f.member("renderSkippedFrames", 0)?;
@@ -148,6 +157,66 @@ pub fn build_get_stats_response(request_id: &str, session_stats: &ObswsSessionSt
         )
     })
     .to_string()
+}
+
+struct ObswsRuntimeStats {
+    memory_usage_mb: f64,
+    available_disk_space_mb: f64,
+}
+
+fn collect_runtime_stats(input_registry: &ObswsInputRegistry) -> ObswsRuntimeStats {
+    ObswsRuntimeStats {
+        memory_usage_mb: current_process_memory_usage_mb(),
+        available_disk_space_mb: available_disk_space_mb(input_registry.record_directory()),
+    }
+}
+
+#[cfg(unix)]
+fn current_process_memory_usage_mb() -> f64 {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // 現在プロセスの最大 RSS を取得する。
+    let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if rc != 0 {
+        return 0.0;
+    }
+    let usage = unsafe { usage.assume_init() };
+    #[cfg(target_os = "linux")]
+    let rss_bytes = (usage.ru_maxrss as i128).saturating_mul(1024);
+    #[cfg(not(target_os = "linux"))]
+    let rss_bytes = usage.ru_maxrss as i128;
+    if rss_bytes <= 0 {
+        return 0.0;
+    }
+    rss_bytes as f64 / (1024.0 * 1024.0)
+}
+
+#[cfg(not(unix))]
+fn current_process_memory_usage_mb() -> f64 {
+    0.0
+}
+
+#[cfg(unix)]
+fn available_disk_space_mb(path: &std::path::Path) -> f64 {
+    let path_bytes = path.as_os_str().as_bytes();
+    let Ok(path_cstr) = CString::new(path_bytes) else {
+        return 0.0;
+    };
+    let mut stat = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // 録画先ディレクトリが属するファイルシステムの空き容量を取得する。
+    let rc = unsafe { libc::statfs(path_cstr.as_ptr(), stat.as_mut_ptr()) };
+    if rc != 0 {
+        return 0.0;
+    }
+    let stat = unsafe { stat.assume_init() };
+    let block_size = stat.f_bsize as u128;
+    let available_blocks = stat.f_bavail as u128;
+    let available_bytes = available_blocks.saturating_mul(block_size);
+    available_bytes as f64 / (1024.0 * 1024.0)
+}
+
+#[cfg(not(unix))]
+fn available_disk_space_mb(_path: &std::path::Path) -> f64 {
+    0.0
 }
 
 pub fn build_get_canvas_list_response(request_id: &str) -> String {

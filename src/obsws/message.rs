@@ -161,9 +161,11 @@ pub fn handle_request_message(
 
     let message = match request_type.as_str() {
         "GetVersion" => crate::obsws_response_builder::build_get_version_response(&request_id),
-        "GetStats" => {
-            crate::obsws_response_builder::build_get_stats_response(&request_id, session_stats)
-        }
+        "GetStats" => crate::obsws_response_builder::build_get_stats_response(
+            &request_id,
+            session_stats,
+            input_registry,
+        ),
         "GetCanvasList" => {
             crate::obsws_response_builder::build_get_canvas_list_response(&request_id)
         }
@@ -905,6 +907,43 @@ mod tests {
         let first_input = inputs.next().expect("first input must exist");
         let input_name: String = first_input.to_member("inputName")?.required()?.try_into()?;
         assert_eq!(input_name, "input-name-1");
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_stats_response() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let request = RequestMessage {
+            request_id: Some("req-stats".to_owned()),
+            request_type: Some("GetStats".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats {
+            incoming_messages: 12,
+            outgoing_messages: 34,
+        };
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let memory_usage: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "memoryUsage"])?
+            .required()?
+            .try_into()?;
+        let available_disk_space: f64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "availableDiskSpace"])?
+            .required()?
+            .try_into()?;
+        let outgoing_messages: u64 = json
+            .value()
+            .to_path_member(&["d", "responseData", "webSocketSessionOutgoingMessages"])?
+            .required()?
+            .try_into()?;
+        assert!(memory_usage >= 0.0);
+        assert!(available_disk_space >= 0.0);
+        assert_eq!(outgoing_messages, 35);
         Ok(())
     }
 

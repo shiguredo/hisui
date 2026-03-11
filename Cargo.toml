@@ -51,6 +51,7 @@ shiguredo_video_device = "=2026.1.0-canary.0"
 mpeg2ts = "=0.6.0"
 png = "=0.18.1"
 aws-lc-rs = "=1.16.1"
+libc = "=0.2.182"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_fdk_aac = { version = "=2025.1.1", path = "crates/shiguredo_fdk_aac/", optional = true }

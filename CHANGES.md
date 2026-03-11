@@ -18,6 +18,9 @@
   - `video_mixer` では `output_video_resolution` が削除され、`output_video_width` / `output_video_height` が追加される
   - `webm_audio_reader` / `webm_video_reader` では `input_files` が削除され、`current_input_file` / `total_sample_count` が追加される
   - @sile
+- [UPDATE] `libc` を direct dependency に追加する
+  - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
+  - @sile
 - [ADD] server サブコマンドの JSON-RPC で Video Device source を作成できるようにする
   - JSON-RPC に `createVideoDeviceSource` メソッドを追加する
   - `outputVideoTrackId` にカメラ映像を配信できる
