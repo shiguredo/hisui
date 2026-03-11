@@ -208,6 +208,15 @@ struct GetOutputStatusFields {
     output_name: String,
 }
 
+struct GetOutputSettingsFields {
+    output_name: String,
+}
+
+struct SetOutputSettingsFields {
+    output_name: String,
+    output_settings: nojson::RawJsonOwned,
+}
+
 #[derive(Debug, Clone)]
 pub struct RequestBatchResult {
     pub request_type: String,
@@ -870,6 +879,27 @@ fn parse_get_output_status_fields(
 ) -> Result<GetOutputStatusFields, nojson::JsonParseError> {
     let output_name = required_non_empty_string_member(request_data, "outputName")?;
     Ok(GetOutputStatusFields { output_name })
+}
+
+fn parse_get_output_settings_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<GetOutputSettingsFields, nojson::JsonParseError> {
+    let output_name = required_non_empty_string_member(request_data, "outputName")?;
+    Ok(GetOutputSettingsFields { output_name })
+}
+
+fn parse_set_output_settings_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetOutputSettingsFields, nojson::JsonParseError> {
+    let output_name = required_non_empty_string_member(request_data, "outputName")?;
+    let output_settings = request_data.to_member("outputSettings")?.required()?;
+    if output_settings.kind() != nojson::JsonValueKind::Object {
+        return Err(output_settings.invalid("object is required"));
+    }
+    Ok(SetOutputSettingsFields {
+        output_name,
+        output_settings: nojson::RawJsonOwned::try_from(output_settings)?,
+    })
 }
 
 fn required_non_empty_string_member(

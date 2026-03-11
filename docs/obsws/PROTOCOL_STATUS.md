@@ -271,8 +271,12 @@
 - [x] `StopOutput`: 出力を停止する
   - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
   - NOTE: 内部では `StopStream` / `StopRecord` 相当の処理を実行する
-- [ ] `GetOutputSettings`: 出力設定を取得する
-- [ ] `SetOutputSettings`: 出力設定を更新する
+- [x] `GetOutputSettings`: 出力設定を取得する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ返す
+- [x] `SetOutputSettings`: 出力設定を更新する
+  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ更新する
 
 ### Stream
 

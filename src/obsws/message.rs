@@ -377,6 +377,16 @@ pub fn handle_request_message_with_pipeline_handle(
             input_registry,
             pipeline_handle,
         ),
+        "GetOutputSettings" => crate::obsws_response_builder::build_get_output_settings_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "SetOutputSettings" => crate::obsws_response_builder::build_set_output_settings_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetRecordDirectory" => crate::obsws_response_builder::build_get_record_directory_response(
             &request_id,
             input_registry,
@@ -792,6 +802,8 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "StartOutput"));
         assert!(available_requests.iter().any(|r| r == "ToggleOutput"));
         assert!(available_requests.iter().any(|r| r == "StopOutput"));
+        assert!(available_requests.iter().any(|r| r == "GetOutputSettings"));
+        assert!(available_requests.iter().any(|r| r == "SetOutputSettings"));
         assert!(available_requests.iter().any(|r| r == "StartStream"));
         assert!(available_requests.iter().any(|r| r == "ToggleStream"));
         assert!(available_requests.iter().any(|r| r == "GetRecordDirectory"));
@@ -963,6 +975,67 @@ mod tests {
         assert!(result);
         assert!(!output_active);
         assert_eq!(output_congestion, 0.0);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_output_settings_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-output-settings".to_owned()),
+            request_type: Some("GetOutputSettings".to_owned()),
+            request_data: Some(request_data(r#"{"outputName":"record"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry =
+            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(&response.message)?;
+        let output_kind: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputKind"])?
+            .required()?
+            .try_into()?;
+        let record_directory: String = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputSettings", "recordDirectory"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_kind, "mp4_output");
+        assert_eq!(record_directory, "/tmp/hisui-obsws-recordings");
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_set_output_settings_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let request = RequestMessage {
+            request_id: Some("req-set-output-settings".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"outputName":"stream","outputSettings":{"streamServiceType":"rtmp_custom","streamServiceSettings":{"server":"rtmp://127.0.0.1:1935/live","key":"stream-main"}}}"#,
+            )),
+        };
+
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(&response.message)?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        assert!(result);
+        assert_eq!(
+            input_registry.stream_service_settings().server.as_deref(),
+            Some("rtmp://127.0.0.1:1935/live")
+        );
+        assert_eq!(
+            input_registry.stream_service_settings().key.as_deref(),
+            Some("stream-main")
+        );
         Ok(())
     }
 

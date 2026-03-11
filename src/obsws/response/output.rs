@@ -7,7 +7,8 @@ use crate::obsws_protocol::{
 };
 
 use super::{
-    parse_get_output_status_fields, parse_request_data_or_error_response,
+    parse_get_output_settings_fields, parse_get_output_status_fields,
+    parse_request_data_or_error_response, parse_set_output_settings_fields,
     parse_set_record_directory_fields, parse_set_stream_service_settings_fields,
 };
 
@@ -160,6 +161,110 @@ pub fn build_get_output_list_response(request_id: &str) -> String {
         )
     })
     .to_string()
+}
+
+pub fn build_get_output_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "GetOutputSettings",
+        request_id,
+        request_data,
+        parse_get_output_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    match fields.output_name.as_str() {
+        OBSWS_STREAM_OUTPUT_NAME => {
+            build_stream_output_settings_response(request_id, input_registry)
+        }
+        OBSWS_RECORD_OUTPUT_NAME => {
+            build_record_output_settings_response(request_id, input_registry)
+        }
+        _ => super::build_request_response_error(
+            "GetOutputSettings",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Output not found",
+        ),
+    }
+}
+
+pub fn build_set_output_settings_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> String {
+    let fields = match parse_request_data_or_error_response(
+        "SetOutputSettings",
+        request_id,
+        request_data,
+        parse_set_output_settings_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    match fields.output_name.as_str() {
+        OBSWS_STREAM_OUTPUT_NAME => {
+            let settings = match super::parse_set_stream_service_settings_fields(
+                fields.output_settings.value(),
+            ) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    return super::build_request_response_error(
+                        "SetOutputSettings",
+                        request_id,
+                        super::request_status_code_for_parse_error(&error),
+                        &error.to_string(),
+                    );
+                }
+            };
+            input_registry.set_stream_service_settings(ObswsStreamServiceSettings {
+                stream_service_type: settings.stream_service_type,
+                server: Some(settings.server),
+                key: settings.key,
+            });
+            empty_success_response("SetOutputSettings", request_id)
+        }
+        OBSWS_RECORD_OUTPUT_NAME => {
+            let settings =
+                match super::parse_set_record_directory_fields(fields.output_settings.value()) {
+                    Ok(settings) => settings,
+                    Err(error) => {
+                        return super::build_request_response_error(
+                            "SetOutputSettings",
+                            request_id,
+                            super::request_status_code_for_parse_error(&error),
+                            &error.to_string(),
+                        );
+                    }
+                };
+            let record_directory = match resolve_record_directory_path(&settings.record_directory) {
+                Ok(path) => path,
+                Err(e) => {
+                    return super::build_request_response_error(
+                        "SetOutputSettings",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        &e,
+                    );
+                }
+            };
+            input_registry.set_record_directory(record_directory);
+            empty_success_response("SetOutputSettings", request_id)
+        }
+        _ => super::build_request_response_error(
+            "SetOutputSettings",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Output not found",
+        ),
+    }
 }
 
 pub fn build_get_record_directory_response(
@@ -363,6 +468,75 @@ fn build_record_output_state_response(
                     nojson::object(|f| {
                         f.member("outputActive", output_active)?;
                         f.member("outputPaused", output_paused)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn build_stream_output_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let settings = input_registry.stream_service_settings();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetOutputSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputName", OBSWS_STREAM_OUTPUT_NAME)?;
+                        f.member("outputKind", OBSWS_STREAM_OUTPUT_KIND)?;
+                        f.member("outputSettings", settings)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn build_record_output_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> String {
+    let record_directory = input_registry.record_directory().display().to_string();
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetOutputSettings")?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member(
+                    "responseData",
+                    nojson::object(|f| {
+                        f.member("outputName", OBSWS_RECORD_OUTPUT_NAME)?;
+                        f.member("outputKind", OBSWS_RECORD_OUTPUT_KIND)?;
+                        f.member(
+                            "outputSettings",
+                            nojson::object(|f| f.member("recordDirectory", &record_directory)),
+                        )
                     }),
                 )
             }),

@@ -88,6 +88,8 @@ pub fn build_get_version_response(request_id: &str) -> String {
                                 "ToggleOutput",
                                 "StartOutput",
                                 "StopOutput",
+                                "GetOutputSettings",
+                                "SetOutputSettings",
                                 "GetStreamStatus",
                                 "ToggleStream",
                                 "StartStream",
