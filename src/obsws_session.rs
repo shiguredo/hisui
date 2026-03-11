@@ -934,12 +934,11 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        let Some(current_scene) = input_registry.current_preview_scene() else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
+        // SetCurrentPreviewScene の成功・失敗いずれの経路でも、
+        // registry には常に少なくとも 1 つの scene が存在する。
+        let current_scene = input_registry.current_preview_scene().unwrap_or_else(|| {
+            unreachable!("BUG: current preview scene must exist in input registry")
+        });
         if previous_scene_name.as_deref() == Some(current_scene.scene_name.as_str()) {
             return SessionAction::SendText {
                 text: response_text,
