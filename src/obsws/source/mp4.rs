@@ -1,10 +1,10 @@
 use crate::obsws::source::{
     BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
 };
-use crate::obsws_input_registry::ObswsMp4FileInputSettings;
+use crate::obsws_input_registry::ObswsMp4FileSourceSettings;
 
 pub(super) fn build_record_source_plan(
-    settings: &ObswsMp4FileInputSettings,
+    settings: &ObswsMp4FileSourceSettings,
     run_id: u64,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(path) = settings.path.as_deref() else {

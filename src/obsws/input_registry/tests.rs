@@ -109,7 +109,7 @@ fn parse_mp4_file_source_settings_reads_path_and_loop_playback() {
     assert_eq!(input.kind_name(), "mp4_file_source");
     assert_eq!(
         input.settings,
-        ObswsInputSettings::Mp4FileInput(ObswsMp4FileInputSettings {
+        ObswsInputSettings::Mp4FileSource(ObswsMp4FileSourceSettings {
             path: Some("/tmp/input.mp4".to_owned()),
             loop_playback: true,
         })
@@ -359,7 +359,7 @@ fn get_input_default_settings_returns_default_object_per_kind() {
         .expect("mp4_file_source defaults must be available");
     assert_eq!(
         mp4_default,
-        ObswsInputSettings::Mp4FileInput(ObswsMp4FileInputSettings::default())
+        ObswsInputSettings::Mp4FileSource(ObswsMp4FileSourceSettings::default())
     );
 }
 

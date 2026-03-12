@@ -77,7 +77,7 @@ impl ObswsInput {
 pub enum ObswsInputSettings {
     ImageSource(ObswsImageSourceSettings),
     VideoCaptureDevice(ObswsVideoCaptureDeviceSettings),
-    Mp4FileInput(ObswsMp4FileInputSettings),
+    Mp4FileSource(ObswsMp4FileSourceSettings),
 }
 
 impl ObswsInputSettings {
@@ -87,7 +87,7 @@ impl ObswsInputSettings {
             "video_capture_device" => Ok(Self::VideoCaptureDevice(
                 ObswsVideoCaptureDeviceSettings::default(),
             )),
-            "mp4_file_source" => Ok(Self::Mp4FileInput(ObswsMp4FileInputSettings::default())),
+            "mp4_file_source" => Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings::default())),
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -116,7 +116,7 @@ impl ObswsInputSettings {
             "mp4_file_source" => {
                 let path = parse_optional_string_setting(input_settings, "path")?;
                 let loop_playback = parse_optional_bool_setting(input_settings, "loopPlayback")?;
-                Ok(Self::Mp4FileInput(ObswsMp4FileInputSettings {
+                Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings {
                     path,
                     loop_playback: loop_playback.unwrap_or(false),
                 }))
@@ -131,7 +131,7 @@ impl ObswsInputSettings {
             // TODO: `video_capture_device` は将来的に `video_device_source` へ rename して、
             // `*_source` 命名へ統一する。今回は既存 API 影響を避けるため据え置く。
             Self::VideoCaptureDevice(_) => "video_capture_device",
-            Self::Mp4FileInput(_) => "mp4_file_source",
+            Self::Mp4FileSource(_) => "mp4_file_source",
         }
     }
 
@@ -157,14 +157,14 @@ impl ObswsInputSettings {
                     device_id,
                 }))
             }
-            Self::Mp4FileInput(existing) => {
+            Self::Mp4FileSource(existing) => {
                 let path = parse_overlay_string_setting(input_settings, "path", &existing.path)?;
                 let loop_playback = parse_overlay_bool_setting(
                     input_settings,
                     "loopPlayback",
                     existing.loop_playback,
                 )?;
-                Ok(Self::Mp4FileInput(ObswsMp4FileInputSettings {
+                Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings {
                     path,
                     loop_playback,
                 }))
@@ -178,7 +178,7 @@ impl nojson::DisplayJson for ObswsInputSettings {
         match self {
             Self::ImageSource(settings) => settings.fmt(f),
             Self::VideoCaptureDevice(settings) => settings.fmt(f),
-            Self::Mp4FileInput(settings) => settings.fmt(f),
+            Self::Mp4FileSource(settings) => settings.fmt(f),
         }
     }
 }
@@ -683,14 +683,14 @@ impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ObswsMp4FileInputSettings {
+pub struct ObswsMp4FileSourceSettings {
     // OBS 互換ではなく hisui 独自 input として扱うため、path 未指定も保持可能にする。
     // 実行時には path 必須とする。
     pub path: Option<String>,
     pub loop_playback: bool,
 }
 
-impl nojson::DisplayJson for ObswsMp4FileInputSettings {
+impl nojson::DisplayJson for ObswsMp4FileSourceSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if let Some(path) = &self.path {

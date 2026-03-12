@@ -41,7 +41,7 @@ pub fn build_record_source_plan(
         ObswsInputSettings::ImageSource(settings) => {
             image::build_record_source_plan(settings, run_id)
         }
-        ObswsInputSettings::Mp4FileInput(settings) => {
+        ObswsInputSettings::Mp4FileSource(settings) => {
             mp4::build_record_source_plan(settings, run_id)
         }
         ObswsInputSettings::VideoCaptureDevice(_) => Err(
