@@ -2069,7 +2069,7 @@ def test_obsws_get_scene_item_id_request(binary_path: Path):
     port, sock = reserve_ephemeral_port()
     sock.close()
 
-    async def _run(server: ObswsServer):
+    async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -2124,7 +2124,7 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
     image_path = tmp_path / "set-scene-item-enabled-input.png"
     _write_test_png(image_path)
 
-    async def _run(server: ObswsServer):
+    async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -2221,7 +2221,7 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
     port, sock = reserve_ephemeral_port()
     sock.close()
 
-    async def _run(server: ObswsServer):
+    async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -2304,7 +2304,7 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
     port, sock = reserve_ephemeral_port()
     sock.close()
 
-    async def _run(server: ObswsServer):
+    async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -3265,7 +3265,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
     sock.close()
     input_path = Path(__file__).resolve().parents[2] / "testdata" / "beep-aac-audio.mp4"
 
-    async def _run(server: ObswsServer):
+    async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(

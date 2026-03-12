@@ -1,4 +1,7 @@
 /target
 
+# test
+/recordings
+
 # macos
 .DS_Store
