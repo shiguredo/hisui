@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 2] = ["image_source", "video_capture_device"];
+pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 3] =
+    ["image_source", "video_capture_device", "mp4_file_source"];
 pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
 pub(crate) const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
@@ -76,6 +77,7 @@ impl ObswsInput {
 pub enum ObswsInputSettings {
     ImageSource(ObswsImageSourceSettings),
     VideoCaptureDevice(ObswsVideoCaptureDeviceSettings),
+    Mp4FileSource(ObswsMp4FileSourceSettings),
 }
 
 impl ObswsInputSettings {
@@ -85,6 +87,7 @@ impl ObswsInputSettings {
             "video_capture_device" => Ok(Self::VideoCaptureDevice(
                 ObswsVideoCaptureDeviceSettings::default(),
             )),
+            "mp4_file_source" => Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings::default())),
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -110,6 +113,14 @@ impl ObswsInputSettings {
                     device_id,
                 }))
             }
+            "mp4_file_source" => {
+                let path = parse_optional_string_setting(input_settings, "path")?;
+                let loop_playback = parse_optional_bool_setting(input_settings, "loopPlayback")?;
+                Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings {
+                    path,
+                    loop_playback: loop_playback.unwrap_or(false),
+                }))
+            }
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -117,7 +128,10 @@ impl ObswsInputSettings {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::ImageSource(_) => "image_source",
+            // TODO: `video_capture_device` は将来的に `video_device_source` へ rename して、
+            // `*_source` 命名へ統一する。今回は既存 API 影響を避けるため据え置く。
             Self::VideoCaptureDevice(_) => "video_capture_device",
+            Self::Mp4FileSource(_) => "mp4_file_source",
         }
     }
 
@@ -143,6 +157,18 @@ impl ObswsInputSettings {
                     device_id,
                 }))
             }
+            Self::Mp4FileSource(existing) => {
+                let path = parse_overlay_string_setting(input_settings, "path", &existing.path)?;
+                let loop_playback = parse_overlay_bool_setting(
+                    input_settings,
+                    "loopPlayback",
+                    existing.loop_playback,
+                )?;
+                Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings {
+                    path,
+                    loop_playback,
+                }))
+            }
         }
     }
 }
@@ -152,6 +178,7 @@ impl nojson::DisplayJson for ObswsInputSettings {
         match self {
             Self::ImageSource(settings) => settings.fmt(f),
             Self::VideoCaptureDevice(settings) => settings.fmt(f),
+            Self::Mp4FileSource(settings) => settings.fmt(f),
         }
     }
 }
@@ -240,11 +267,17 @@ pub struct ObswsStreamRun {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsRecordRun {
     pub source_processor_id: String,
-    pub encoder_processor_id: String,
+    pub video: Option<ObswsRecordTrackRun>,
+    pub audio: Option<ObswsRecordTrackRun>,
     pub writer_processor_id: String,
+    pub output_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsRecordTrackRun {
+    pub encoder_processor_id: String,
     pub source_track_id: String,
     pub encoded_track_id: String,
-    pub output_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -558,6 +591,64 @@ fn parse_overlay_string_setting(
     Ok(Some(value))
 }
 
+fn parse_optional_bool_setting(
+    settings: nojson::RawJsonValue<'_, '_>,
+    key: &str,
+) -> Result<Option<bool>, ParseInputSettingsError> {
+    let Some(value) = settings
+        .to_member(key)
+        .map_err(|e| {
+            ParseInputSettingsError::InvalidInputSettings(format!(
+                "Invalid inputSettings field: {e}"
+            ))
+        })?
+        .optional()
+    else {
+        return Ok(None);
+    };
+
+    if value.kind() != nojson::JsonValueKind::Boolean {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: boolean is required"
+        )));
+    }
+    let value: bool = value.try_into().map_err(|e| {
+        ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: {e}"
+        ))
+    })?;
+    Ok(Some(value))
+}
+
+fn parse_overlay_bool_setting(
+    settings: nojson::RawJsonValue<'_, '_>,
+    key: &str,
+    current: bool,
+) -> Result<bool, ParseInputSettingsError> {
+    let Some(value) = settings
+        .to_member(key)
+        .map_err(|e| {
+            ParseInputSettingsError::InvalidInputSettings(format!(
+                "Invalid inputSettings field: {e}"
+            ))
+        })?
+        .optional()
+    else {
+        return Ok(current);
+    };
+
+    if value.kind() != nojson::JsonValueKind::Boolean {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: boolean is required"
+        )));
+    }
+    value.try_into().map_err(|e| {
+        ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: {e}"
+        ))
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsImageSourceSettings {
     // OBS 互換のため、image_source は file 未指定の状態も有効として扱う
@@ -589,6 +680,26 @@ impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
                 f.member("device_id", device_id)?;
             }
             Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsMp4FileSourceSettings {
+    // OBS 互換ではなく hisui 独自 input として扱うため、path 未指定も保持可能にする。
+    // 実行時には path 必須とする。
+    pub path: Option<String>,
+    pub loop_playback: bool,
+}
+
+impl nojson::DisplayJson for ObswsMp4FileSourceSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(path) = &self.path {
+                f.member("path", path)?;
+            }
+            f.member("loopPlayback", self.loop_playback)
         })
         .fmt(f)
     }

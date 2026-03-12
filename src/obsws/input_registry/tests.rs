@@ -45,6 +45,11 @@ fn supported_input_kinds_contains_expected_values() {
             .supported_input_kinds()
             .contains(&"video_capture_device")
     );
+    assert!(
+        registry
+            .supported_input_kinds()
+            .contains(&"mp4_file_source")
+    );
 }
 
 #[test]
@@ -92,6 +97,21 @@ fn parse_video_capture_device_settings_reads_device_id() {
         input.settings,
         ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-1".to_owned()),
+        })
+    );
+}
+
+#[test]
+fn parse_mp4_file_source_settings_reads_path_and_loop_playback() {
+    let settings = parse_owned_json(r#"{"path":"/tmp/input.mp4","loopPlayback":true}"#);
+    let input = ObswsInput::from_kind_and_settings("mp4_file_source", settings.value())
+        .expect("mp4_file_source settings must be accepted");
+    assert_eq!(input.kind_name(), "mp4_file_source");
+    assert_eq!(
+        input.settings,
+        ObswsInputSettings::Mp4FileSource(ObswsMp4FileSourceSettings {
+            path: Some("/tmp/input.mp4".to_owned()),
+            loop_playback: true,
         })
     );
 }
@@ -332,6 +352,14 @@ fn get_input_default_settings_returns_default_object_per_kind() {
     assert_eq!(
         device_default,
         ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings::default())
+    );
+
+    let mp4_default = registry
+        .get_input_default_settings("mp4_file_source")
+        .expect("mp4_file_source defaults must be available");
+    assert_eq!(
+        mp4_default,
+        ObswsInputSettings::Mp4FileSource(ObswsMp4FileSourceSettings::default())
     );
 }
 
@@ -1211,10 +1239,13 @@ fn record_runtime_state_changes_on_activate_pause_resume_and_deactivate() {
     registry
         .activate_record(ObswsRecordRun {
             source_processor_id: "source".to_owned(),
-            encoder_processor_id: "encoder".to_owned(),
+            video: Some(ObswsRecordTrackRun {
+                encoder_processor_id: "encoder".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            }),
+            audio: None,
             writer_processor_id: "writer".to_owned(),
-            source_track_id: "source-track".to_owned(),
-            encoded_track_id: "encoded-track".to_owned(),
             output_path: PathBuf::from("recordings-for-test/output.mp4"),
         })
         .expect("record activation must succeed");
@@ -1250,10 +1281,13 @@ fn record_pause_resume_returns_expected_errors() {
     registry
         .activate_record(ObswsRecordRun {
             source_processor_id: "source".to_owned(),
-            encoder_processor_id: "encoder".to_owned(),
+            video: Some(ObswsRecordTrackRun {
+                encoder_processor_id: "encoder".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            }),
+            audio: None,
             writer_processor_id: "writer".to_owned(),
-            source_track_id: "source-track".to_owned(),
-            encoded_track_id: "encoded-track".to_owned(),
             output_path: PathBuf::from("recordings-for-test/output.mp4"),
         })
         .expect("record activation must succeed");
