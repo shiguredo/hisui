@@ -831,16 +831,14 @@ impl ObswsSession {
     }
 
     pub(super) async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
-        let mut processor_ids = vec![
-            crate::ProcessorId::new(run.writer_processor_id.clone()),
-            crate::ProcessorId::new(run.source_processor_id.clone()),
-        ];
+        let mut processor_ids = vec![crate::ProcessorId::new(run.writer_processor_id.clone())];
         if let Some(video_encoder_processor_id) = &run.video_encoder_processor_id {
             processor_ids.push(crate::ProcessorId::new(video_encoder_processor_id.clone()));
         }
         if let Some(audio_encoder_processor_id) = &run.audio_encoder_processor_id {
             processor_ids.push(crate::ProcessorId::new(audio_encoder_processor_id.clone()));
         }
+        processor_ids.push(crate::ProcessorId::new(run.source_processor_id.clone()));
         self.stop_processors(&processor_ids).await
     }
 
