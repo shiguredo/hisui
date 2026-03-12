@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     ActivateRecordError, ActivateStreamError, ObswsInputRegistry, ObswsInputSettings,
-    ObswsRecordRun, ObswsStreamRun, PauseRecordError, ResumeRecordError,
+    ObswsRecordRun, ObswsRecordTrackRun, ObswsStreamRun, PauseRecordError, ResumeRecordError,
 };
 use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{

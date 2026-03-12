@@ -417,7 +417,7 @@ mod tests {
     use crate::obsws_auth::{ObswsAuthentication, build_authentication_response};
     use crate::obsws_input_registry::{
         ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings, ObswsRecordRun,
-        ObswsStreamRun, ObswsVideoCaptureDeviceSettings,
+        ObswsRecordTrackRun, ObswsStreamRun, ObswsVideoCaptureDeviceSettings,
     };
     use crate::obsws_protocol::{
         OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
@@ -1120,13 +1120,13 @@ mod tests {
         input_registry
             .activate_record(ObswsRecordRun {
                 source_processor_id: "source".to_owned(),
-                video_encoder_processor_id: Some("encoder".to_owned()),
-                audio_encoder_processor_id: None,
+                video: Some(ObswsRecordTrackRun {
+                    encoder_processor_id: "encoder".to_owned(),
+                    source_track_id: "source-track".to_owned(),
+                    encoded_track_id: "encoded-track".to_owned(),
+                }),
+                audio: None,
                 writer_processor_id: "writer".to_owned(),
-                source_video_track_id: Some("source-track".to_owned()),
-                source_audio_track_id: None,
-                encoded_video_track_id: Some("encoded-track".to_owned()),
-                encoded_audio_track_id: None,
                 output_path: output_path.clone(),
             })
             .expect("record activation must succeed");
@@ -1285,13 +1285,13 @@ mod tests {
         input_registry
             .activate_record(ObswsRecordRun {
                 source_processor_id: "source".to_owned(),
-                video_encoder_processor_id: Some("encoder-record".to_owned()),
-                audio_encoder_processor_id: None,
+                video: Some(ObswsRecordTrackRun {
+                    encoder_processor_id: "encoder-record".to_owned(),
+                    source_track_id: "record-source-track".to_owned(),
+                    encoded_track_id: "record-encoded-track".to_owned(),
+                }),
+                audio: None,
                 writer_processor_id: "writer".to_owned(),
-                source_video_track_id: Some("record-source-track".to_owned()),
-                source_audio_track_id: None,
-                encoded_video_track_id: Some("record-encoded-track".to_owned()),
-                encoded_audio_track_id: None,
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
             .expect("record activation must succeed");
@@ -1999,13 +1999,13 @@ mod tests {
         input_registry
             .activate_record(ObswsRecordRun {
                 source_processor_id: "source".to_owned(),
-                video_encoder_processor_id: Some("encoder".to_owned()),
-                audio_encoder_processor_id: None,
+                video: Some(ObswsRecordTrackRun {
+                    encoder_processor_id: "encoder".to_owned(),
+                    source_track_id: "source-track".to_owned(),
+                    encoded_track_id: "encoded-track".to_owned(),
+                }),
+                audio: None,
                 writer_processor_id: "writer".to_owned(),
-                source_video_track_id: Some("source-track".to_owned()),
-                source_audio_track_id: None,
-                encoded_video_track_id: Some("encoded-track".to_owned()),
-                encoded_audio_track_id: None,
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
             .expect("record activation must succeed");

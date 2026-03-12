@@ -267,14 +267,17 @@ pub struct ObswsStreamRun {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsRecordRun {
     pub source_processor_id: String,
-    pub video_encoder_processor_id: Option<String>,
-    pub audio_encoder_processor_id: Option<String>,
+    pub video: Option<ObswsRecordTrackRun>,
+    pub audio: Option<ObswsRecordTrackRun>,
     pub writer_processor_id: String,
-    pub source_video_track_id: Option<String>,
-    pub source_audio_track_id: Option<String>,
-    pub encoded_video_track_id: Option<String>,
-    pub encoded_audio_track_id: Option<String>,
     pub output_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsRecordTrackRun {
+    pub encoder_processor_id: String,
+    pub source_track_id: String,
+    pub encoded_track_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

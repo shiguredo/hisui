@@ -211,23 +211,23 @@ impl ObswsSession {
                     "At least one audio or video track is required for StartRecord",
                 );
             }
-            let video_encoder_processor_id = source_plan
-                .source_video_track_id
-                .as_ref()
-                .map(|_| format!("obsws:record:{run_id}:video_encoder"));
-            let audio_encoder_processor_id = source_plan
-                .source_audio_track_id
-                .as_ref()
-                .map(|_| format!("obsws:record:{run_id}:audio_encoder"));
             let writer_processor_id = format!("obsws:record:{run_id}:mp4_writer");
-            let encoded_video_track_id = source_plan
+            let video = source_plan
                 .source_video_track_id
                 .as_ref()
-                .map(|_| format!("obsws:record:{run_id}:encoded_video"));
-            let encoded_audio_track_id = source_plan
+                .map(|source_track_id| ObswsRecordTrackRun {
+                    encoder_processor_id: format!("obsws:record:{run_id}:video_encoder"),
+                    source_track_id: source_track_id.clone(),
+                    encoded_track_id: format!("obsws:record:{run_id}:encoded_video"),
+                });
+            let audio = source_plan
                 .source_audio_track_id
                 .as_ref()
-                .map(|_| format!("obsws:record:{run_id}:encoded_audio"));
+                .map(|source_track_id| ObswsRecordTrackRun {
+                    encoder_processor_id: format!("obsws:record:{run_id}:audio_encoder"),
+                    source_track_id: source_track_id.clone(),
+                    encoded_track_id: format!("obsws:record:{run_id}:encoded_audio"),
+                });
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
@@ -237,13 +237,9 @@ impl ObswsSession {
                 .join(format!("obsws-record-{timestamp}.mp4"));
             let run = ObswsRecordRun {
                 source_processor_id: source_plan.source_processor_id.clone(),
-                video_encoder_processor_id,
-                audio_encoder_processor_id,
+                video,
+                audio,
                 writer_processor_id,
-                source_video_track_id: source_plan.source_video_track_id.clone(),
-                source_audio_track_id: source_plan.source_audio_track_id.clone(),
-                encoded_video_track_id,
-                encoded_audio_track_id,
                 output_path: output_path.clone(),
             };
             if let Err(ActivateRecordError::AlreadyActive) =
@@ -448,7 +444,7 @@ impl ObswsSession {
                 error_comment,
             );
         }
-        if run.encoded_video_track_id.is_some()
+        if run.video.is_some()
             && let Err(e) = self.request_record_resume_keyframe(&run).await
         {
             if let Err(rollback_error) = self.pause_record_processors(&run).await {
@@ -610,15 +606,7 @@ impl ObswsSession {
         output_path: &std::path::Path,
         run: &ObswsRecordRun,
     ) -> crate::Result<()> {
-        if let (
-            Some(source_video_track_id),
-            Some(encoded_video_track_id),
-            Some(video_encoder_processor_id),
-        ) = (
-            run.source_video_track_id.as_ref(),
-            run.encoded_video_track_id.as_ref(),
-            run.video_encoder_processor_id.as_ref(),
-        ) {
+        if let Some(video) = &run.video {
             let video_encoder_request = nojson::object(|f| {
                 f.member("jsonrpc", "2.0")?;
                 f.member("id", 1)?;
@@ -626,12 +614,12 @@ impl ObswsSession {
                 f.member(
                     "params",
                     nojson::object(|f| {
-                        f.member("inputTrackId", source_video_track_id)?;
-                        f.member("outputTrackId", encoded_video_track_id)?;
+                        f.member("inputTrackId", &video.source_track_id)?;
+                        f.member("outputTrackId", &video.encoded_track_id)?;
                         f.member("codec", "H264")?;
                         f.member("bitrateBps", 2_000_000)?;
                         f.member("frameRate", 30)?;
-                        f.member("processorId", video_encoder_processor_id)
+                        f.member("processorId", &video.encoder_processor_id)
                     }),
                 )
             })
@@ -640,15 +628,7 @@ impl ObswsSession {
                 .await?;
         }
 
-        if let (
-            Some(source_audio_track_id),
-            Some(encoded_audio_track_id),
-            Some(audio_encoder_processor_id),
-        ) = (
-            run.source_audio_track_id.as_ref(),
-            run.encoded_audio_track_id.as_ref(),
-            run.audio_encoder_processor_id.as_ref(),
-        ) {
+        if let Some(audio) = &run.audio {
             let audio_encoder_request = nojson::object(|f| {
                 f.member("jsonrpc", "2.0")?;
                 f.member("id", 1)?;
@@ -656,11 +636,11 @@ impl ObswsSession {
                 f.member(
                     "params",
                     nojson::object(|f| {
-                        f.member("inputTrackId", source_audio_track_id)?;
-                        f.member("outputTrackId", encoded_audio_track_id)?;
+                        f.member("inputTrackId", &audio.source_track_id)?;
+                        f.member("outputTrackId", &audio.encoded_track_id)?;
                         f.member("codec", "OPUS")?;
                         f.member("bitrateBps", 128_000)?;
-                        f.member("processorId", audio_encoder_processor_id)
+                        f.member("processorId", &audio.encoder_processor_id)
                     }),
                 )
             })
@@ -677,11 +657,11 @@ impl ObswsSession {
                 "params",
                 nojson::object(|f| {
                     f.member("outputPath", output_path.display().to_string())?;
-                    if let Some(encoded_audio_track_id) = &run.encoded_audio_track_id {
-                        f.member("inputAudioTrackId", encoded_audio_track_id)?;
+                    if let Some(audio) = &run.audio {
+                        f.member("inputAudioTrackId", &audio.encoded_track_id)?;
                     }
-                    if let Some(encoded_video_track_id) = &run.encoded_video_track_id {
-                        f.member("inputVideoTrackId", encoded_video_track_id)?;
+                    if let Some(video) = &run.video {
+                        f.member("inputVideoTrackId", &video.encoded_track_id)?;
                     }
                     f.member("processorId", &run.writer_processor_id)
                 }),
@@ -766,10 +746,10 @@ impl ObswsSession {
             ));
         };
 
-        let Some(video_encoder_processor_id) = run.video_encoder_processor_id.as_ref() else {
+        let Some(video) = run.video.as_ref() else {
             return Ok(());
         };
-        let encoder_processor_id = crate::ProcessorId::new(video_encoder_processor_id.clone());
+        let encoder_processor_id = crate::ProcessorId::new(video.encoder_processor_id.clone());
         let encoder_rpc_sender = pipeline_handle
             .get_rpc_sender::<
                 tokio::sync::mpsc::UnboundedSender<crate::encoder::VideoEncoderRpcMessage>,
@@ -785,7 +765,7 @@ impl ObswsSession {
             .map_err(|_| {
                 crate::Error::new(format!(
                     "failed to send keyframe request to record encoder: {}",
-                    video_encoder_processor_id
+                    video.encoder_processor_id
                 ))
             })
     }
@@ -832,11 +812,11 @@ impl ObswsSession {
 
     pub(super) async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
         let mut processor_ids = vec![crate::ProcessorId::new(run.writer_processor_id.clone())];
-        if let Some(video_encoder_processor_id) = &run.video_encoder_processor_id {
-            processor_ids.push(crate::ProcessorId::new(video_encoder_processor_id.clone()));
+        if let Some(video) = &run.video {
+            processor_ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
         }
-        if let Some(audio_encoder_processor_id) = &run.audio_encoder_processor_id {
-            processor_ids.push(crate::ProcessorId::new(audio_encoder_processor_id.clone()));
+        if let Some(audio) = &run.audio {
+            processor_ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
         }
         processor_ids.push(crate::ProcessorId::new(run.source_processor_id.clone()));
         self.stop_processors(&processor_ids).await

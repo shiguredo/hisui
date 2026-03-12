@@ -1239,13 +1239,13 @@ fn record_runtime_state_changes_on_activate_pause_resume_and_deactivate() {
     registry
         .activate_record(ObswsRecordRun {
             source_processor_id: "source".to_owned(),
-            video_encoder_processor_id: Some("encoder".to_owned()),
-            audio_encoder_processor_id: None,
+            video: Some(ObswsRecordTrackRun {
+                encoder_processor_id: "encoder".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            }),
+            audio: None,
             writer_processor_id: "writer".to_owned(),
-            source_video_track_id: Some("source-track".to_owned()),
-            source_audio_track_id: None,
-            encoded_video_track_id: Some("encoded-track".to_owned()),
-            encoded_audio_track_id: None,
             output_path: PathBuf::from("recordings-for-test/output.mp4"),
         })
         .expect("record activation must succeed");
@@ -1281,13 +1281,13 @@ fn record_pause_resume_returns_expected_errors() {
     registry
         .activate_record(ObswsRecordRun {
             source_processor_id: "source".to_owned(),
-            video_encoder_processor_id: Some("encoder".to_owned()),
-            audio_encoder_processor_id: None,
+            video: Some(ObswsRecordTrackRun {
+                encoder_processor_id: "encoder".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            }),
+            audio: None,
             writer_processor_id: "writer".to_owned(),
-            source_video_track_id: Some("source-track".to_owned()),
-            source_audio_track_id: None,
-            encoded_video_track_id: Some("encoded-track".to_owned()),
-            encoded_audio_track_id: None,
             output_path: PathBuf::from("recordings-for-test/output.mp4"),
         })
         .expect("record activation must succeed");
