@@ -1479,6 +1479,133 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
 }
 
 #[tokio::test]
+async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
+        temp_dir.path().to_path_buf(),
+    )));
+    {
+        let mut registry = input_registry.write().await;
+        for input_name in ["audio-file-1", "audio-file-2"] {
+            let input = ObswsInput::from_kind_and_settings(
+                "mp4_file_source",
+                nojson::RawJsonOwned::parse(
+                    r#"{"path":"testdata/beep-aac-audio.mp4","loopPlayback":true}"#,
+                )
+                .expect("requestData must be valid json")
+                .value(),
+            )
+            .expect("input settings must be valid");
+            registry
+                .create_input("Scene", input_name, input, true)
+                .expect("input creation must succeed");
+        }
+    }
+
+    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    let pipeline_task = tokio::spawn(pipeline.run());
+    let started = pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+    assert!(started);
+
+    let mut session =
+        ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    let start_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-record-audio-mixer".to_owned()),
+            request_type: Some("StartRecord".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let SessionAction::SendText { text, .. } = start_action else {
+        panic!("must be SendText");
+    };
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let live_processors = pipeline_handle
+        .list_processors()
+        .await
+        .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
+    assert!(
+        live_processors
+            .iter()
+            .any(|id| id.get() == "obsws:record:0:audio_mixer")
+    );
+
+    let stop_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-stop-record-audio-mixer".to_owned()),
+            request_type: Some("StopRecord".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let SessionAction::SendText { text, .. } = stop_action else {
+        panic!("must be SendText");
+    };
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    pipeline_task.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn start_record_with_multiple_video_inputs_returns_error_response() {
+    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()));
+    {
+        let mut registry = input_registry.write().await;
+        for input_name in ["image-1", "image-2"] {
+            let input = ObswsInput::from_kind_and_settings(
+                "image_source",
+                nojson::RawJsonOwned::parse(r#"{"file":"dummy.png"}"#)
+                    .expect("requestData must be valid json")
+                    .value(),
+            )
+            .expect("input settings must be valid");
+            registry
+                .create_input("Scene", input_name, input, true)
+                .expect("input creation must succeed");
+        }
+    }
+
+    let mut session = ObswsSession::new(None, input_registry, None);
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-record-multiple-video".to_owned()),
+            request_type: Some("StartRecord".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let SessionAction::SendText { text, .. } = action else {
+        panic!("must be SendText");
+    };
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
 async fn toggle_stream_without_image_input_returns_toggle_request_type_error() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session

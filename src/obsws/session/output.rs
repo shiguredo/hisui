@@ -45,7 +45,8 @@ impl ObswsSession {
             }
             let input = &scene_inputs[0];
             let run_id = input_registry.next_stream_run_id();
-            let source_plan = match crate::obsws::source::build_record_source_plan(input, run_id) {
+            let source_plan = match crate::obsws::source::build_record_source_plan(input, run_id, 0)
+            {
                 Ok(source_plan) => source_plan,
                 Err(error) => {
                     let error_comment = error.message();
@@ -179,42 +180,57 @@ impl ObswsSession {
     }
 
     pub(super) async fn handle_start_record(&self, request_id: &str) -> RequestOutcome {
-        let (source_plan, output_path, run) = {
+        let (source_plans, output_path, run) = {
             let mut input_registry = self.input_registry.write().await;
             let scene_inputs = input_registry.list_current_program_scene_inputs();
-            if scene_inputs.len() != 1 {
+            if scene_inputs.is_empty() {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
                         "StartRecord",
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        "Exactly one enabled input is required in the current program scene",
+                        "At least one enabled input is required in the current program scene",
                     ),
                     REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Exactly one enabled input is required in the current program scene",
+                    "At least one enabled input is required in the current program scene",
                 );
             }
-            let input = &scene_inputs[0];
             let run_id = input_registry.next_record_run_id();
-            let source_plan = match crate::obsws::source::build_record_source_plan(input, run_id) {
-                Ok(source_plan) => source_plan,
-                Err(error) => {
-                    let error_comment = error.message();
-                    return RequestOutcome::failure(
-                        crate::obsws_response_builder::build_request_response_error(
-                            "StartRecord",
-                            request_id,
+            let mut source_plans = Vec::with_capacity(scene_inputs.len());
+            for (source_index, input) in scene_inputs.iter().enumerate() {
+                let source_plan = match crate::obsws::source::build_record_source_plan(
+                    input,
+                    run_id,
+                    source_index,
+                ) {
+                    Ok(source_plan) => source_plan,
+                    Err(error) => {
+                        let error_comment = error.message();
+                        return RequestOutcome::failure(
+                            crate::obsws_response_builder::build_request_response_error(
+                                "StartRecord",
+                                request_id,
+                                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                                &error_comment,
+                            ),
                             REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                            &error_comment,
-                        ),
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        error_comment,
-                    );
-                }
-            };
-            if source_plan.source_video_track_id.is_none()
-                && source_plan.source_audio_track_id.is_none()
-            {
+                            error_comment,
+                        );
+                    }
+                };
+                source_plans.push(source_plan);
+            }
+
+            let audio_track_ids = source_plans
+                .iter()
+                .filter_map(|plan| plan.source_audio_track_id.clone())
+                .collect::<Vec<_>>();
+            let video_track_ids = source_plans
+                .iter()
+                .filter_map(|plan| plan.source_video_track_id.clone())
+                .collect::<Vec<_>>();
+
+            if audio_track_ids.is_empty() && video_track_ids.is_empty() {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
                         "StartRecord",
@@ -226,17 +242,34 @@ impl ObswsSession {
                     "At least one audio or video track is required for StartRecord",
                 );
             }
+            if video_track_ids.len() > 1 {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        "StartRecord",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "At most one video input is supported for StartRecord",
+                    ),
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "At most one video input is supported for StartRecord",
+                );
+            }
             let writer_processor_id = format!("obsws:record:{run_id}:mp4_writer");
-            let video = source_plan
-                .source_video_track_id
-                .as_ref()
+            let video = video_track_ids
+                .first()
                 .map(|source_track_id| ObswsRecordTrackRun {
                     encoder_processor_id: format!("obsws:record:{run_id}:video_encoder"),
                     source_track_id: source_track_id.clone(),
                     encoded_track_id: format!("obsws:record:{run_id}:encoded_video"),
                 });
-            let audio = source_plan
-                .source_audio_track_id
+            let audio_mixer_processor_id =
+                (audio_track_ids.len() > 1).then(|| format!("obsws:record:{run_id}:audio_mixer"));
+            let audio_input_track_id = if audio_track_ids.len() > 1 {
+                Some(format!("obsws:record:{run_id}:mixed_audio"))
+            } else {
+                audio_track_ids.first().cloned()
+            };
+            let audio = audio_input_track_id
                 .as_ref()
                 .map(|source_track_id| ObswsRecordTrackRun {
                     encoder_processor_id: format!("obsws:record:{run_id}:audio_encoder"),
@@ -251,9 +284,13 @@ impl ObswsSession {
                 .record_directory()
                 .join(format!("obsws-record-{timestamp}.mp4"));
             let run = ObswsRecordRun {
-                source_processor_id: source_plan.source_processor_id.clone(),
+                source_processor_ids: source_plans
+                    .iter()
+                    .map(|plan| plan.source_processor_id.clone())
+                    .collect(),
                 video,
                 audio,
+                audio_mixer_processor_id,
                 writer_processor_id,
                 output_path: output_path.clone(),
             };
@@ -271,7 +308,7 @@ impl ObswsSession {
                     "Record is already active",
                 );
             }
-            (source_plan, output_path, run)
+            (source_plans, output_path, run)
         };
 
         if let Some(parent) = output_path.parent()
@@ -287,7 +324,7 @@ impl ObswsSession {
         }
 
         let start_result = self
-            .start_record_processors(&source_plan, &output_path, &run)
+            .start_record_processors(&source_plans, &output_path, &run)
             .await;
         if let Err(e) = start_result {
             let _ = self.input_registry.write().await.deactivate_record();
@@ -634,10 +671,50 @@ impl ObswsSession {
 
     pub(super) async fn start_record_processors(
         &self,
-        source_plan: &crate::obsws::source::ObswsRecordSourcePlan,
+        source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
         output_path: &std::path::Path,
         run: &ObswsRecordRun,
     ) -> crate::Result<()> {
+        if let (Some(audio), Some(audio_mixer_processor_id)) =
+            (&run.audio, &run.audio_mixer_processor_id)
+        {
+            let audio_mixer_request = nojson::object(|f| {
+                f.member("jsonrpc", "2.0")?;
+                f.member("id", 1)?;
+                f.member("method", "createAudioMixer")?;
+                f.member(
+                    "params",
+                    nojson::object(|f| {
+                        f.member("sampleRate", 48_000)?;
+                        f.member("channels", 2)?;
+                        f.member("frameDurationMs", 20)?;
+                        f.member("timestampRebaseThresholdMs", 100)?;
+                        f.member("terminateOnInputEos", true)?;
+                        f.member(
+                            "inputTracks",
+                            nojson::array(|f| {
+                                for source_plan in source_plans {
+                                    if let Some(source_audio_track_id) =
+                                        &source_plan.source_audio_track_id
+                                    {
+                                        f.element(nojson::object(|f| {
+                                            f.member("trackId", source_audio_track_id)
+                                        }))?;
+                                    }
+                                }
+                                Ok(())
+                            }),
+                        )?;
+                        f.member("outputTrackId", &audio.source_track_id)?;
+                        f.member("processorId", audio_mixer_processor_id)
+                    }),
+                )
+            })
+            .to_string();
+            self.send_pipeline_rpc_request("createAudioMixer", &audio_mixer_request)
+                .await?;
+        }
+
         if let Some(video) = &run.video {
             let video_encoder_request = nojson::object(|f| {
                 f.member("jsonrpc", "2.0")?;
@@ -703,9 +780,11 @@ impl ObswsSession {
         self.send_pipeline_rpc_request("createMp4Writer", &writer_request)
             .await?;
 
-        for request in &source_plan.requests {
-            self.send_pipeline_rpc_request(request.method, &request.request_text)
-                .await?;
+        for source_plan in source_plans {
+            for request in &source_plan.requests {
+                self.send_pipeline_rpc_request(request.method, &request.request_text)
+                    .await?;
+            }
         }
 
         Ok(())
@@ -853,7 +932,12 @@ impl ObswsSession {
         if let Some(audio) = &run.audio {
             processor_ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
         }
-        processor_ids.push(crate::ProcessorId::new(run.source_processor_id.clone()));
+        if let Some(audio_mixer_processor_id) = &run.audio_mixer_processor_id {
+            processor_ids.push(crate::ProcessorId::new(audio_mixer_processor_id.clone()));
+        }
+        for source_processor_id in &run.source_processor_ids {
+            processor_ids.push(crate::ProcessorId::new(source_processor_id.clone()));
+        }
         self.stop_processors(&processor_ids).await
     }
 

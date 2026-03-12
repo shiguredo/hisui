@@ -39,13 +39,14 @@ impl BuildObswsRecordSourcePlanError {
 pub fn build_record_source_plan(
     input: &ObswsInputEntry,
     run_id: u64,
+    source_index: usize,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     match &input.input.settings {
         ObswsInputSettings::ImageSource(settings) => {
-            image::build_record_source_plan(settings, run_id)
+            image::build_record_source_plan(settings, run_id, source_index)
         }
         ObswsInputSettings::Mp4FileSource(settings) => {
-            mp4::build_record_source_plan(settings, run_id)
+            mp4::build_record_source_plan(settings, run_id, source_index)
         }
         ObswsInputSettings::VideoCaptureDevice(_) => Err(
             BuildObswsRecordSourcePlanError::UnsupportedInputKind("video_capture_device"),

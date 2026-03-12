@@ -265,9 +265,10 @@ pub struct ObswsStreamRun {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsRecordRun {
-    pub source_processor_id: String,
+    pub source_processor_ids: Vec<String>,
     pub video: Option<ObswsRecordTrackRun>,
     pub audio: Option<ObswsRecordTrackRun>,
+    pub audio_mixer_processor_id: Option<String>,
     pub writer_processor_id: String,
     pub output_path: PathBuf,
 }

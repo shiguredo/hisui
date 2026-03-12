@@ -6,6 +6,7 @@ use crate::obsws_input_registry::ObswsMp4FileSourceSettings;
 pub(super) fn build_record_source_plan(
     settings: &ObswsMp4FileSourceSettings,
     run_id: u64,
+    source_index: usize,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(path) = settings.path.as_deref() else {
         return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
@@ -13,15 +14,27 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let source_processor_id = format!("obsws:record:{run_id}:mp4_source");
+    let source_processor_id = if source_index == 0 {
+        format!("obsws:record:{run_id}:mp4_source")
+    } else {
+        format!("obsws:record:{run_id}:source:{source_index}:mp4_source")
+    };
     let availability = crate::file_reader_mp4::probe_mp4_track_availability(path)
         .map_err(|e| BuildObswsRecordSourcePlanError::InvalidInput(e.display()))?;
-    let source_video_track_id = availability
-        .has_video
-        .then(|| format!("obsws:record:{run_id}:raw_video"));
-    let source_audio_track_id = availability
-        .has_audio
-        .then(|| format!("obsws:record:{run_id}:raw_audio"));
+    let source_video_track_id = availability.has_video.then(|| {
+        if source_index == 0 {
+            format!("obsws:record:{run_id}:raw_video")
+        } else {
+            format!("obsws:record:{run_id}:source:{source_index}:raw_video")
+        }
+    });
+    let source_audio_track_id = availability.has_audio.then(|| {
+        if source_index == 0 {
+            format!("obsws:record:{run_id}:raw_audio")
+        } else {
+            format!("obsws:record:{run_id}:source:{source_index}:raw_audio")
+        }
+    });
     let request_text = nojson::object(|f| {
         f.member("jsonrpc", "2.0")?;
         f.member("id", 1)?;
@@ -68,6 +81,7 @@ mod tests {
                 loop_playback: true,
             },
             1,
+            0,
         )
         .expect("audio-only mp4 source plan must succeed");
         assert_eq!(
@@ -94,6 +108,7 @@ mod tests {
                 loop_playback: false,
             },
             2,
+            0,
         )
         .expect("video-only mp4 source plan must succeed");
         assert_eq!(plan.source_audio_track_id, None);

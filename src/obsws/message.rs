@@ -1122,13 +1122,14 @@ mod tests {
         let mut input_registry = ObswsInputRegistry::new_for_test();
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_id: "source".to_owned(),
+                source_processor_ids: vec!["source".to_owned()],
                 video: Some(ObswsRecordTrackRun {
                     encoder_processor_id: "encoder".to_owned(),
                     source_track_id: "source-track".to_owned(),
                     encoded_track_id: "encoded-track".to_owned(),
                 }),
                 audio: None,
+                audio_mixer_processor_id: None,
                 writer_processor_id: "writer".to_owned(),
                 output_path: output_path.clone(),
             })
@@ -1290,13 +1291,14 @@ mod tests {
             .expect("stream activation must succeed");
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_id: "source".to_owned(),
+                source_processor_ids: vec!["source".to_owned()],
                 video: Some(ObswsRecordTrackRun {
                     encoder_processor_id: "encoder-record".to_owned(),
                     source_track_id: "record-source-track".to_owned(),
                     encoded_track_id: "record-encoded-track".to_owned(),
                 }),
                 audio: None,
+                audio_mixer_processor_id: None,
                 writer_processor_id: "writer".to_owned(),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
@@ -2004,13 +2006,14 @@ mod tests {
         let mut input_registry = input_registry();
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_id: "source".to_owned(),
+                source_processor_ids: vec!["source".to_owned()],
                 video: Some(ObswsRecordTrackRun {
                     encoder_processor_id: "encoder".to_owned(),
                     source_track_id: "source-track".to_owned(),
                     encoded_track_id: "encoded-track".to_owned(),
                 }),
                 audio: None,
+                audio_mixer_processor_id: None,
                 writer_processor_id: "writer".to_owned(),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })

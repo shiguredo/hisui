@@ -6,6 +6,7 @@ use crate::obsws_input_registry::ObswsImageSourceSettings;
 pub(super) fn build_record_source_plan(
     settings: &ObswsImageSourceSettings,
     run_id: u64,
+    source_index: usize,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(path) = settings.file.as_deref() else {
         return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
@@ -13,8 +14,16 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let source_processor_id = format!("obsws:record:{run_id}:png_source");
-    let source_video_track_id = format!("obsws:record:{run_id}:raw_video");
+    let source_processor_id = if source_index == 0 {
+        format!("obsws:record:{run_id}:png_source")
+    } else {
+        format!("obsws:record:{run_id}:source:{source_index}:png_source")
+    };
+    let source_video_track_id = if source_index == 0 {
+        format!("obsws:record:{run_id}:raw_video")
+    } else {
+        format!("obsws:record:{run_id}:source:{source_index}:raw_video")
+    };
     let request_text = nojson::object(|f| {
         f.member("jsonrpc", "2.0")?;
         f.member("id", 1)?;
