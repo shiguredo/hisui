@@ -36,6 +36,12 @@ pub struct Mp4FileReader {
     emitted_in_loop: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mp4FileTrackAvailability {
+    pub has_audio: bool,
+    pub has_video: bool,
+}
+
 impl Mp4FileReader {
     pub fn new<P: AsRef<Path>>(path: P, options: Mp4FileReaderOptions) -> Result<Self> {
         Ok(Self {
@@ -273,6 +279,22 @@ impl Mp4FileReader {
             sender.send_eos();
         }
     }
+}
+
+pub fn probe_mp4_track_availability<P: AsRef<Path>>(path: P) -> Result<Mp4FileTrackAvailability> {
+    let path = path.as_ref();
+    let mut file = File::open(path)
+        .map_err(|e| Error::new(format!("Cannot open file {}: {e}", path.display())))?;
+    let mut demuxer = Mp4FileDemuxer::new();
+    initialize_mp4_demuxer(&mut file, &mut demuxer, path)?;
+
+    let has_audio = select_audio_track(demuxer.clone())?.is_some();
+    let has_video = select_video_track(demuxer)?.is_some();
+
+    Ok(Mp4FileTrackAvailability {
+        has_audio,
+        has_video,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -592,4 +614,48 @@ fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
         esds_box.es.dec_config_descr.object_type_indication,
         0x40..=0x43
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_mp4_track_availability_detects_audio_only_file() -> Result<()> {
+        let availability = probe_mp4_track_availability("testdata/beep-aac-audio.mp4")?;
+        assert_eq!(
+            availability,
+            Mp4FileTrackAvailability {
+                has_audio: true,
+                has_video: false,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn probe_mp4_track_availability_detects_video_only_file() -> Result<()> {
+        let availability = probe_mp4_track_availability("testdata/archive-red-320x320-h264.mp4")?;
+        assert_eq!(
+            availability,
+            Mp4FileTrackAvailability {
+                has_audio: false,
+                has_video: true,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn probe_mp4_track_availability_detects_av_file() -> Result<()> {
+        let availability = probe_mp4_track_availability("testdata/red-320x320-h264-aac.mp4")?;
+        assert_eq!(
+            availability,
+            Mp4FileTrackAvailability {
+                has_audio: true,
+                has_video: true,
+            }
+        );
+        Ok(())
+    }
 }

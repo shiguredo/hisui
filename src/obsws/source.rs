@@ -15,9 +15,11 @@ pub struct ObswsRecordSourcePlan {
     pub requests: Vec<ObswsSourceRpcRequest>,
 }
 
+#[derive(Debug)]
 pub enum BuildObswsRecordSourcePlanError {
     UnsupportedInputKind(&'static str),
     MissingRequiredField(&'static str),
+    InvalidInput(String),
 }
 
 impl BuildObswsRecordSourcePlanError {
@@ -29,6 +31,7 @@ impl BuildObswsRecordSourcePlanError {
             Self::MissingRequiredField(field_name) => {
                 format!("inputSettings.{field_name} is required")
             }
+            Self::InvalidInput(message) => message.clone(),
         }
     }
 }
