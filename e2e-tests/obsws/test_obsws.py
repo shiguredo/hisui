@@ -2069,7 +2069,7 @@ def test_obsws_get_scene_item_id_request(binary_path: Path):
     port, sock = reserve_ephemeral_port()
     sock.close()
 
-    async def _run():
+    async def _run(server: ObswsServer):
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -2124,7 +2124,7 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
     image_path = tmp_path / "set-scene-item-enabled-input.png"
     _write_test_png(image_path)
 
-    async def _run():
+    async def _run(server: ObswsServer):
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -2221,7 +2221,7 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
     port, sock = reserve_ephemeral_port()
     sock.close()
 
-    async def _run():
+    async def _run(server: ObswsServer):
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -2304,7 +2304,7 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
     port, sock = reserve_ephemeral_port()
     sock.close()
 
-    async def _run():
+    async def _run(server: ObswsServer):
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -3253,6 +3253,95 @@ def test_obsws_pause_resume_record_request(binary_path: Path, tmp_path: Path):
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False) as server:
         asyncio.run(_run_pause_resume_record_flow(server))
+
+
+def test_obsws_start_record_with_multiple_audio_inputs(
+    binary_path: Path,
+    tmp_path: Path,
+):
+    """obsws が複数音声入力を合成して録画できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_path = Path(__file__).resolve().parents[2] / "testdata" / "beep-aac-audio.mp4"
+
+    async def _run(server: ObswsServer):
+        timeout = aiohttp.ClientTimeout(total=20.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            for index in range(2):
+                create_input_response = await _send_obsws_request(
+                    ws,
+                    request_type="CreateInput",
+                    request_id=f"req-create-audio-input-{index}",
+                    request_data={
+                        "sceneName": "Scene",
+                        "inputName": f"audio-input-{index}",
+                        "inputKind": "mp4_file_source",
+                        "inputSettings": {
+                            "path": str(input_path),
+                            "loopPlayback": True,
+                        },
+                        "sceneItemEnabled": True,
+                    },
+                )
+                assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            start_record_response = await _send_obsws_request(
+                ws,
+                request_type="StartRecord",
+                request_id="req-start-record-multi-audio",
+            )
+            assert start_record_response["d"]["requestStatus"]["result"] is True
+            assert start_record_response["d"]["responseData"]["outputActive"] is True
+            assert start_record_response["d"]["responseData"]["outputPaused"] is False
+
+            for _ in range(20):
+                status, body, _ = await _http_get(
+                    f"http://{server.http_host}:{server.http_port}/metrics"
+                )
+                assert status == 200
+                if (
+                    'hisui_total_audio_sample_count{processor_id="obsws:record:0:mp4_writer",processor_type="mp4_writer"}'
+                    in body
+                ):
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("record writer did not expose audio sample metric in time")
+
+            await asyncio.sleep(1.0)
+
+            stop_record_response = await _send_obsws_request(
+                ws,
+                request_type="StopRecord",
+                request_id="req-stop-record-multi-audio",
+            )
+            assert stop_record_response["d"]["requestStatus"]["result"] is True
+            output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+            assert output_path.exists()
+            assert output_path.stat().st_size > 0
+
+            await ws.close()
+            return output_path
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        default_record_dir=tmp_path,
+        use_env=False,
+    ) as server:
+        output_path = asyncio.run(_run(server))
+
+    inspect_output = _inspect_mp4(binary_path, output_path)
+    assert inspect_output["format"] == "mp4"
+    assert output_path.stat().st_size > 0
 
 
 def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Path):
