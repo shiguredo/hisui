@@ -1,10 +1,11 @@
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
+    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
 };
 use crate::obsws_input_registry::ObswsMp4FileSourceSettings;
 
 pub(super) fn build_record_source_plan(
     settings: &ObswsMp4FileSourceSettings,
+    output_kind: ObswsOutputKind,
     run_id: u64,
     source_index: usize,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
@@ -15,24 +16,33 @@ pub(super) fn build_record_source_plan(
     };
 
     let source_processor_id = if source_index == 0 {
-        format!("obsws:record:{run_id}:mp4_source")
+        format!("obsws:{}:{run_id}:mp4_source", output_kind.as_str())
     } else {
-        format!("obsws:record:{run_id}:source:{source_index}:mp4_source")
+        format!(
+            "obsws:{}:{run_id}:source:{source_index}:mp4_source",
+            output_kind.as_str()
+        )
     };
     let availability = crate::file_reader_mp4::probe_mp4_track_availability(path)
         .map_err(|e| BuildObswsRecordSourcePlanError::InvalidInput(e.display()))?;
     let source_video_track_id = availability.has_video.then(|| {
         if source_index == 0 {
-            format!("obsws:record:{run_id}:raw_video")
+            format!("obsws:{}:{run_id}:raw_video", output_kind.as_str())
         } else {
-            format!("obsws:record:{run_id}:source:{source_index}:raw_video")
+            format!(
+                "obsws:{}:{run_id}:source:{source_index}:raw_video",
+                output_kind.as_str()
+            )
         }
     });
     let source_audio_track_id = availability.has_audio.then(|| {
         if source_index == 0 {
-            format!("obsws:record:{run_id}:raw_audio")
+            format!("obsws:{}:{run_id}:raw_audio", output_kind.as_str())
         } else {
-            format!("obsws:record:{run_id}:source:{source_index}:raw_audio")
+            format!(
+                "obsws:{}:{run_id}:source:{source_index}:raw_audio",
+                output_kind.as_str()
+            )
         }
     });
     let request_text = nojson::object(|f| {
@@ -80,6 +90,7 @@ mod tests {
                 path: Some("testdata/beep-aac-audio.mp4".to_owned()),
                 loop_playback: true,
             },
+            ObswsOutputKind::Record,
             1,
             0,
         )
@@ -107,6 +118,7 @@ mod tests {
                 path: Some("testdata/archive-red-320x320-h264.mp4".to_owned()),
                 loop_playback: false,
             },
+            ObswsOutputKind::Record,
             2,
             0,
         )

@@ -257,9 +257,10 @@ impl nojson::DisplayJson for ObswsStreamServiceSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsStreamRun {
-    pub source_processor_id: String,
+    pub source_processor_ids: Vec<String>,
     pub video: Option<ObswsRecordTrackRun>,
     pub audio: Option<ObswsRecordTrackRun>,
+    pub audio_mixer_processor_id: Option<String>,
     pub publisher_processor_id: String,
 }
 

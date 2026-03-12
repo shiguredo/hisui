@@ -3,6 +3,21 @@ use crate::obsws_input_registry::{ObswsInputEntry, ObswsInputSettings};
 mod image;
 mod mp4;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObswsOutputKind {
+    Stream,
+    Record,
+}
+
+impl ObswsOutputKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stream => "stream",
+            Self::Record => "record",
+        }
+    }
+}
+
 pub struct ObswsSourceRpcRequest {
     pub method: &'static str,
     pub request_text: String,
@@ -38,15 +53,16 @@ impl BuildObswsRecordSourcePlanError {
 
 pub fn build_record_source_plan(
     input: &ObswsInputEntry,
+    output_kind: ObswsOutputKind,
     run_id: u64,
     source_index: usize,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     match &input.input.settings {
         ObswsInputSettings::ImageSource(settings) => {
-            image::build_record_source_plan(settings, run_id, source_index)
+            image::build_record_source_plan(settings, output_kind, run_id, source_index)
         }
         ObswsInputSettings::Mp4FileSource(settings) => {
-            mp4::build_record_source_plan(settings, run_id, source_index)
+            mp4::build_record_source_plan(settings, output_kind, run_id, source_index)
         }
         ObswsInputSettings::VideoCaptureDevice(_) => Err(
             BuildObswsRecordSourcePlanError::UnsupportedInputKind("video_capture_device"),
