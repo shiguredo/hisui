@@ -2,7 +2,7 @@ use super::*;
 
 impl ObswsSession {
     pub(super) async fn handle_start_stream(&self, request_id: &str) -> RequestOutcome {
-        let (output_url, stream_name, image_path, run) = {
+        let (output_url, stream_name, source_plan, run) = {
             let mut input_registry = self.input_registry.write().await;
             let stream_service_settings = input_registry.stream_service_settings().clone();
             if stream_service_settings.stream_service_type != "rtmp_custom" {
@@ -44,43 +44,58 @@ impl ObswsSession {
                 );
             }
             let input = &scene_inputs[0];
-            let ObswsInputSettings::ImageSource(settings) = &input.input.settings else {
-                return RequestOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
-                        "StartStream",
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        "Only image_source is supported for StartStream",
-                    ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Only image_source is supported for StartStream",
-                );
-            };
-            let Some(image_path) = settings.file.clone() else {
-                return RequestOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
-                        "StartStream",
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        "inputSettings.file is required for image_source",
-                    ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "inputSettings.file is required for image_source",
-                );
-            };
-
             let run_id = input_registry.next_stream_run_id();
-            let source_processor_id = format!("obsws:stream:{run_id}:png_source");
-            let encoder_processor_id = format!("obsws:stream:{run_id}:video_encoder");
-            let endpoint_processor_id = format!("obsws:stream:{run_id}:rtmp_outbound");
-            let source_track_id = format!("obsws:stream:{run_id}:raw_video");
-            let encoded_track_id = format!("obsws:stream:{run_id}:encoded_video");
+            let source_plan = match crate::obsws::source::build_record_source_plan(input, run_id) {
+                Ok(source_plan) => source_plan,
+                Err(error) => {
+                    let error_comment = error.message();
+                    return RequestOutcome::failure(
+                        crate::obsws_response_builder::build_request_response_error(
+                            "StartStream",
+                            request_id,
+                            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                            &error_comment,
+                        ),
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        error_comment,
+                    );
+                }
+            };
+            if source_plan.source_video_track_id.is_none()
+                && source_plan.source_audio_track_id.is_none()
+            {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        "StartStream",
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "At least one audio or video track is required for StartStream",
+                    ),
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "At least one audio or video track is required for StartStream",
+                );
+            }
+            let video = source_plan
+                .source_video_track_id
+                .as_ref()
+                .map(|source_track_id| ObswsRecordTrackRun {
+                    encoder_processor_id: format!("obsws:stream:{run_id}:video_encoder"),
+                    source_track_id: source_track_id.clone(),
+                    encoded_track_id: format!("obsws:stream:{run_id}:encoded_video"),
+                });
+            let audio = source_plan
+                .source_audio_track_id
+                .as_ref()
+                .map(|source_track_id| ObswsRecordTrackRun {
+                    encoder_processor_id: format!("obsws:stream:{run_id}:audio_encoder"),
+                    source_track_id: source_track_id.clone(),
+                    encoded_track_id: format!("obsws:stream:{run_id}:encoded_audio"),
+                });
             let run = ObswsStreamRun {
-                source_processor_id: source_processor_id.clone(),
-                encoder_processor_id: encoder_processor_id.clone(),
-                endpoint_processor_id: endpoint_processor_id.clone(),
-                source_track_id: source_track_id.clone(),
-                encoded_track_id: encoded_track_id.clone(),
+                source_processor_id: source_plan.source_processor_id.clone(),
+                video,
+                audio,
+                publisher_processor_id: format!("obsws:stream:{run_id}:rtmp_publisher"),
             };
             if let Err(ActivateStreamError::AlreadyActive) =
                 input_registry.activate_stream(run.clone())
@@ -97,11 +112,11 @@ impl ObswsSession {
                 );
             }
 
-            (output_url, stream_service_settings.key, image_path, run)
+            (output_url, stream_service_settings.key, source_plan, run)
         };
 
         let start_result = self
-            .start_stream_processors(&image_path, &output_url, stream_name.as_deref(), &run)
+            .start_stream_processors(&source_plan, &output_url, stream_name.as_deref(), &run)
             .await;
 
         if let Err(e) = start_result {
@@ -536,35 +551,58 @@ impl ObswsSession {
 
     pub(super) async fn start_stream_processors(
         &self,
-        image_path: &str,
+        source_plan: &crate::obsws::source::ObswsRecordSourcePlan,
         output_url: &str,
         stream_name: Option<&str>,
         run: &ObswsStreamRun,
     ) -> crate::Result<()> {
-        let video_encoder_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createVideoEncoder")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("inputTrackId", &run.source_track_id)?;
-                    f.member("outputTrackId", &run.encoded_track_id)?;
-                    f.member("codec", "H264")?;
-                    f.member("bitrateBps", 2_000_000)?;
-                    f.member("frameRate", 30)?;
-                    f.member("processorId", &run.encoder_processor_id)
-                }),
-            )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
-            .await?;
+        if let Some(video) = &run.video {
+            let video_encoder_request = nojson::object(|f| {
+                f.member("jsonrpc", "2.0")?;
+                f.member("id", 1)?;
+                f.member("method", "createVideoEncoder")?;
+                f.member(
+                    "params",
+                    nojson::object(|f| {
+                        f.member("inputTrackId", &video.source_track_id)?;
+                        f.member("outputTrackId", &video.encoded_track_id)?;
+                        f.member("codec", "H264")?;
+                        f.member("bitrateBps", 2_000_000)?;
+                        f.member("frameRate", 30)?;
+                        f.member("processorId", &video.encoder_processor_id)
+                    }),
+                )
+            })
+            .to_string();
+            self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
+                .await?;
+        }
+
+        if let Some(audio) = &run.audio {
+            let audio_encoder_request = nojson::object(|f| {
+                f.member("jsonrpc", "2.0")?;
+                f.member("id", 1)?;
+                f.member("method", "createAudioEncoder")?;
+                f.member(
+                    "params",
+                    nojson::object(|f| {
+                        f.member("inputTrackId", &audio.source_track_id)?;
+                        f.member("outputTrackId", &audio.encoded_track_id)?;
+                        f.member("codec", "AAC")?;
+                        f.member("bitrateBps", 128_000)?;
+                        f.member("processorId", &audio.encoder_processor_id)
+                    }),
+                )
+            })
+            .to_string();
+            self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
+                .await?;
+        }
 
         let rtmp_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
             f.member("id", 1)?;
-            f.member("method", "createRtmpOutboundEndpoint")?;
+            f.member("method", "createRtmpPublisher")?;
             f.member(
                 "params",
                 nojson::object(|f| {
@@ -572,32 +610,26 @@ impl ObswsSession {
                     if let Some(stream_name) = stream_name {
                         f.member("streamName", stream_name)?;
                     }
-                    f.member("inputVideoTrackId", &run.encoded_track_id)?;
-                    f.member("processorId", &run.endpoint_processor_id)
+                    if let Some(audio) = &run.audio {
+                        f.member("inputAudioTrackId", &audio.encoded_track_id)?;
+                    }
+                    if let Some(video) = &run.video {
+                        f.member("inputVideoTrackId", &video.encoded_track_id)?;
+                    }
+                    f.member("processorId", &run.publisher_processor_id)
                 }),
             )
         })
         .to_string();
-        self.send_pipeline_rpc_request("createRtmpOutboundEndpoint", &rtmp_request)
+        self.send_pipeline_rpc_request("createRtmpPublisher", &rtmp_request)
             .await?;
 
-        let png_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createPngFileSource")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("path", image_path)?;
-                    f.member("frameRate", 30)?;
-                    f.member("outputVideoTrackId", &run.source_track_id)?;
-                    f.member("processorId", &run.source_processor_id)
-                }),
-            )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createPngFileSource", &png_request)
-            .await
+        for request in &source_plan.requests {
+            self.send_pipeline_rpc_request(request.method, &request.request_text)
+                .await?;
+        }
+
+        Ok(())
     }
 
     pub(super) async fn start_record_processors(
@@ -802,12 +834,15 @@ impl ObswsSession {
     }
 
     pub(super) async fn stop_stream_processors(&self, run: &ObswsStreamRun) -> crate::Result<()> {
-        self.stop_processors(&[
-            crate::ProcessorId::new(run.endpoint_processor_id.clone()),
-            crate::ProcessorId::new(run.encoder_processor_id.clone()),
-            crate::ProcessorId::new(run.source_processor_id.clone()),
-        ])
-        .await
+        let mut processor_ids = vec![crate::ProcessorId::new(run.publisher_processor_id.clone())];
+        if let Some(video) = &run.video {
+            processor_ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+        }
+        if let Some(audio) = &run.audio {
+            processor_ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+        }
+        processor_ids.push(crate::ProcessorId::new(run.source_processor_id.clone()));
+        self.stop_processors(&processor_ids).await
     }
 
     pub(super) async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {

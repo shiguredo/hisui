@@ -1052,10 +1052,13 @@ mod tests {
         input_registry
             .activate_stream(ObswsStreamRun {
                 source_processor_id: "source".to_owned(),
-                encoder_processor_id: "encoder".to_owned(),
-                endpoint_processor_id: "endpoint".to_owned(),
-                source_track_id: "source-track".to_owned(),
-                encoded_track_id: "encoded-track".to_owned(),
+                video: Some(ObswsRecordTrackRun {
+                    encoder_processor_id: "encoder".to_owned(),
+                    source_track_id: "source-track".to_owned(),
+                    encoded_track_id: "encoded-track".to_owned(),
+                }),
+                audio: None,
+                publisher_processor_id: "publisher".to_owned(),
             })
             .expect("stream activation must succeed");
         let pipeline = crate::MediaPipeline::new().expect("pipeline creation must succeed");
@@ -1068,11 +1071,11 @@ mod tests {
         );
         set_processor_counter(
             &pipeline_handle,
-            "endpoint",
+            "publisher",
             "total_waiting_keyframe_dropped_video_frame_count",
             2,
         );
-        set_processor_counter(&pipeline_handle, "endpoint", "total_sent_bytes", 1234);
+        set_processor_counter(&pipeline_handle, "publisher", "total_sent_bytes", 1234);
 
         let response = handle_request_message_with_pipeline_handle(
             request,
@@ -1276,10 +1279,13 @@ mod tests {
         input_registry
             .activate_stream(ObswsStreamRun {
                 source_processor_id: "source".to_owned(),
-                encoder_processor_id: "encoder".to_owned(),
-                endpoint_processor_id: "endpoint".to_owned(),
-                source_track_id: "source-track".to_owned(),
-                encoded_track_id: "encoded-track".to_owned(),
+                video: Some(ObswsRecordTrackRun {
+                    encoder_processor_id: "encoder".to_owned(),
+                    source_track_id: "source-track".to_owned(),
+                    encoded_track_id: "encoded-track".to_owned(),
+                }),
+                audio: None,
+                publisher_processor_id: "publisher".to_owned(),
             })
             .expect("stream activation must succeed");
         input_registry
@@ -1303,10 +1309,10 @@ mod tests {
             "total_output_video_frame_count",
             11,
         );
-        set_processor_counter(&pipeline_handle, "endpoint", "total_sent_bytes", 1234);
+        set_processor_counter(&pipeline_handle, "publisher", "total_sent_bytes", 1234);
         set_processor_counter(
             &pipeline_handle,
-            "endpoint",
+            "publisher",
             "total_waiting_keyframe_dropped_video_frame_count",
             2,
         );

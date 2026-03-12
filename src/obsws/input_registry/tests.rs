@@ -1216,10 +1216,13 @@ fn stream_runtime_state_changes_on_activate_and_deactivate() {
     registry
         .activate_stream(ObswsStreamRun {
             source_processor_id: "source".to_owned(),
-            encoder_processor_id: "encoder".to_owned(),
-            endpoint_processor_id: "endpoint".to_owned(),
-            source_track_id: "source-track".to_owned(),
-            encoded_track_id: "encoded-track".to_owned(),
+            video: Some(ObswsRecordTrackRun {
+                encoder_processor_id: "encoder".to_owned(),
+                source_track_id: "source-track".to_owned(),
+                encoded_track_id: "encoded-track".to_owned(),
+            }),
+            audio: None,
+            publisher_processor_id: "publisher".to_owned(),
         })
         .expect("stream activation must succeed");
     assert!(registry.is_stream_active());
