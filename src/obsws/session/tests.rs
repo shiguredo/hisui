@@ -1398,7 +1398,7 @@ async fn start_record_without_image_input_returns_error_response() {
 }
 
 #[tokio::test]
-async fn start_record_with_mp4_file_input_can_start_and_stop() -> crate::Result<()> {
+async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
         temp_dir.path().to_path_buf(),
@@ -1406,7 +1406,7 @@ async fn start_record_with_mp4_file_input_can_start_and_stop() -> crate::Result<
     {
         let mut registry = input_registry.write().await;
         let input = ObswsInput::from_kind_and_settings(
-            "mp4_file_input",
+            "mp4_file_source",
             nojson::RawJsonOwned::parse(
                 r#"{"path":"testdata/beep-aac-audio.mp4","loopPlayback":true}"#,
             )

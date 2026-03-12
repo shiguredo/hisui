@@ -159,7 +159,7 @@
   - NOTE: `inputName` または `inputUuid` のいずれかで対象 Input を指定する
   - NOTE: 成功時は Inputs 購読中セッションへ `InputNameChanged` を配信する
 - [x] `GetInputDefaultSettings`: 入力の既定設定を取得する
-  - NOTE: 現在は `image_source` / `video_capture_device` の既定設定を返す
+  - NOTE: 現在は `image_source` / `video_capture_device` / `mp4_file_source` の既定設定を返す
 - [x] `GetInputSettings`: 入力設定を取得する
 - [x] `SetInputSettings`: 入力設定を更新する
   - NOTE: `overlay` 未指定時は `true` として扱う

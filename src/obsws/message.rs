@@ -1373,7 +1373,7 @@ mod tests {
                 .iter()
                 .any(|kind| kind == "video_capture_device")
         );
-        assert!(input_kinds.iter().any(|kind| kind == "mp4_file_input"));
+        assert!(input_kinds.iter().any(|kind| kind == "mp4_file_source"));
         Ok(())
     }
 
@@ -1527,12 +1527,12 @@ mod tests {
     }
 
     #[test]
-    fn handle_request_message_returns_mp4_input_default_settings_response()
+    fn handle_request_message_returns_mp4_source_default_settings_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = RequestMessage {
             request_id: Some("req-get-default-mp4-input-settings".to_owned()),
             request_type: Some("GetInputDefaultSettings".to_owned()),
-            request_data: Some(request_data(r#"{"inputKind":"mp4_file_input"}"#)),
+            request_data: Some(request_data(r#"{"inputKind":"mp4_file_source"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
         let mut input_registry = input_registry();
@@ -1553,7 +1553,7 @@ mod tests {
             .to_member("loopPlayback")?
             .required()?
             .try_into()?;
-        assert_eq!(input_kind, "mp4_file_input");
+        assert_eq!(input_kind, "mp4_file_source");
         assert_eq!(path, None);
         assert!(!loop_playback);
         Ok(())

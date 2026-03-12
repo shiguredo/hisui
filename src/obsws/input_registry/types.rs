@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 3] =
-    ["image_source", "video_capture_device", "mp4_file_input"];
+    ["image_source", "video_capture_device", "mp4_file_source"];
 pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
 pub(crate) const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
@@ -87,7 +87,7 @@ impl ObswsInputSettings {
             "video_capture_device" => Ok(Self::VideoCaptureDevice(
                 ObswsVideoCaptureDeviceSettings::default(),
             )),
-            "mp4_file_input" => Ok(Self::Mp4FileInput(ObswsMp4FileInputSettings::default())),
+            "mp4_file_source" => Ok(Self::Mp4FileInput(ObswsMp4FileInputSettings::default())),
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -113,7 +113,7 @@ impl ObswsInputSettings {
                     device_id,
                 }))
             }
-            "mp4_file_input" => {
+            "mp4_file_source" => {
                 let path = parse_optional_string_setting(input_settings, "path")?;
                 let loop_playback = parse_optional_bool_setting(input_settings, "loopPlayback")?;
                 Ok(Self::Mp4FileInput(ObswsMp4FileInputSettings {
@@ -128,8 +128,10 @@ impl ObswsInputSettings {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::ImageSource(_) => "image_source",
+            // TODO: `video_capture_device` は将来的に `video_device_source` へ rename して、
+            // `*_source` 命名へ統一する。今回は既存 API 影響を避けるため据え置く。
             Self::VideoCaptureDevice(_) => "video_capture_device",
-            Self::Mp4FileInput(_) => "mp4_file_input",
+            Self::Mp4FileInput(_) => "mp4_file_source",
         }
     }
 
