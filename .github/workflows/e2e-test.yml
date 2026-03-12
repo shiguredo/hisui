@@ -23,7 +23,7 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake libx11-dev ffmpeg
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake libx11-dev ffmpeg libfdk-aac-dev
       - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
           os: ubuntu-24.04
@@ -36,7 +36,7 @@ jobs:
           curl -fL -o "${OPENH264_ARCHIVE}" "${OPENH264_URL}"
           bzip2 -d "${OPENH264_ARCHIVE}"
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
-      - run: cargo build
+      - run: cargo build --features fdk-aac
       - uses: astral-sh/setup-uv@v7
       - name: Run e2e tests
         env:
