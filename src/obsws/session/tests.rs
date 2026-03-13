@@ -1533,17 +1533,32 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
     assert!(result);
     assert_eq!(code, 100);
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let live_processors = pipeline_handle
-        .list_processors()
+    let record_run = input_registry
+        .read()
         .await
-        .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
-    assert!(
-        live_processors
+        .record_run()
+        .expect("active record must have run state");
+    assert_eq!(
+        record_run.audio_mixer_processor_id.as_deref(),
+        Some("obsws:record:0:audio_mixer")
+    );
+
+    let mut found_audio_mixer = false;
+    for _ in 0..20 {
+        let live_processors = pipeline_handle
+            .list_processors()
+            .await
+            .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
+        if live_processors
             .iter()
             .any(|id| id.get() == "obsws:record:0:audio_mixer")
-    );
+        {
+            found_audio_mixer = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(found_audio_mixer);
 
     let stop_action = session
         .handle_request(RequestMessage {
