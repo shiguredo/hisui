@@ -66,6 +66,7 @@ class ObswsServer:
 
         cmd = [str(self.binary_path), "--verbose", "--experimental", "obsws"]
         env = os.environ.copy()
+        openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
             env["HISUI_OBSWS_HOST"] = self.host
             env["HISUI_OBSWS_PORT"] = str(self.port)
@@ -92,6 +93,8 @@ class ObswsServer:
                 cmd.extend(["--password", self.password])
             if self.default_record_dir is not None:
                 cmd.extend(["--default-record-dir", str(self.default_record_dir)])
+            if openh264_path:
+                cmd.extend(["--openh264", openh264_path])
 
         self._process = subprocess.Popen(cmd, env=env)
         self._wait_until_listening()
