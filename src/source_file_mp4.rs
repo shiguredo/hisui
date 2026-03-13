@@ -98,6 +98,7 @@ impl Mp4FileSource {
         inner_handle: MediaPipelineHandle,
         outer_processor: &ProcessorHandle,
     ) -> Result<()> {
+        let openh264_lib = outer_processor.config().openh264_lib.clone();
         let mut options = Mp4FileReaderOptions {
             realtime: self.realtime,
             loop_playback: self.loop_playback,
@@ -124,8 +125,13 @@ impl Mp4FileSource {
         // 映像トラックがあるならデコーダーを起動する＆結果を外側に転送する
         if let Some(id) = self.video_track_id.clone() {
             let inner_id = TrackId::new(format!("{id}_encoded"));
-            let decoder =
-                VideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
+            let decoder = VideoDecoder::new(
+                VideoDecoderOptions {
+                    openh264_lib,
+                    ..Default::default()
+                },
+                crate::stats::Stats::new(),
+            );
 
             options.video_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;
