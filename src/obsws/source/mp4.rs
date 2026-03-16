@@ -15,35 +15,23 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let source_processor_id = if source_index == 0 {
-        format!("obsws:{}:{run_id}:mp4_source", output_kind.as_str())
-    } else {
-        format!(
-            "obsws:{}:{run_id}:source:{source_index}:mp4_source",
-            output_kind.as_str()
-        )
-    };
+    let source_processor_id = format!(
+        "obsws:{}:{run_id}:source:{source_index}:mp4_source",
+        output_kind.as_str()
+    );
     let availability = crate::file_reader_mp4::probe_mp4_track_availability(path)
         .map_err(|e| BuildObswsRecordSourcePlanError::InvalidInput(e.display()))?;
     let source_video_track_id = availability.has_video.then(|| {
-        if source_index == 0 {
-            format!("obsws:{}:{run_id}:raw_video", output_kind.as_str())
-        } else {
-            format!(
-                "obsws:{}:{run_id}:source:{source_index}:raw_video",
-                output_kind.as_str()
-            )
-        }
+        format!(
+            "obsws:{}:{run_id}:source:{source_index}:raw_video",
+            output_kind.as_str()
+        )
     });
     let source_audio_track_id = availability.has_audio.then(|| {
-        if source_index == 0 {
-            format!("obsws:{}:{run_id}:raw_audio", output_kind.as_str())
-        } else {
-            format!(
-                "obsws:{}:{run_id}:source:{source_index}:raw_audio",
-                output_kind.as_str()
-            )
-        }
+        format!(
+            "obsws:{}:{run_id}:source:{source_index}:raw_audio",
+            output_kind.as_str()
+        )
     });
     let request_text = nojson::object(|f| {
         f.member("jsonrpc", "2.0")?;
@@ -97,7 +85,7 @@ mod tests {
         .expect("audio-only mp4 source plan must succeed");
         assert_eq!(
             plan.source_audio_track_id.as_deref(),
-            Some("obsws:record:1:raw_audio")
+            Some("obsws:record:1:source:0:raw_audio")
         );
         assert_eq!(plan.source_video_track_id, None);
 
@@ -105,7 +93,10 @@ mod tests {
         let params = json.value().to_member("params")?.required()?;
         let audio_track_id: Option<String> = params.to_member("audioTrackId")?.try_into()?;
         let video_track_id: Option<String> = params.to_member("videoTrackId")?.try_into()?;
-        assert_eq!(audio_track_id.as_deref(), Some("obsws:record:1:raw_audio"));
+        assert_eq!(
+            audio_track_id.as_deref(),
+            Some("obsws:record:1:source:0:raw_audio")
+        );
         assert_eq!(video_track_id, None);
         Ok(())
     }
@@ -126,7 +117,7 @@ mod tests {
         assert_eq!(plan.source_audio_track_id, None);
         assert_eq!(
             plan.source_video_track_id.as_deref(),
-            Some("obsws:record:2:raw_video")
+            Some("obsws:record:2:source:0:raw_video")
         );
 
         let json = nojson::RawJson::parse(&plan.requests[0].request_text)?;
@@ -134,7 +125,10 @@ mod tests {
         let audio_track_id: Option<String> = params.to_member("audioTrackId")?.try_into()?;
         let video_track_id: Option<String> = params.to_member("videoTrackId")?.try_into()?;
         assert_eq!(audio_track_id, None);
-        assert_eq!(video_track_id.as_deref(), Some("obsws:record:2:raw_video"));
+        assert_eq!(
+            video_track_id.as_deref(),
+            Some("obsws:record:2:source:0:raw_video")
+        );
         Ok(())
     }
 }

@@ -15,22 +15,14 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let source_processor_id = if source_index == 0 {
-        format!("obsws:{}:{run_id}:png_source", output_kind.as_str())
-    } else {
-        format!(
-            "obsws:{}:{run_id}:source:{source_index}:png_source",
-            output_kind.as_str()
-        )
-    };
-    let source_video_track_id = if source_index == 0 {
-        format!("obsws:{}:{run_id}:raw_video", output_kind.as_str())
-    } else {
-        format!(
-            "obsws:{}:{run_id}:source:{source_index}:raw_video",
-            output_kind.as_str()
-        )
-    };
+    let source_processor_id = format!(
+        "obsws:{}:{run_id}:source:{source_index}:png_source",
+        output_kind.as_str()
+    );
+    let source_video_track_id = format!(
+        "obsws:{}:{run_id}:source:{source_index}:raw_video",
+        output_kind.as_str()
+    );
     let request_text = nojson::object(|f| {
         f.member("jsonrpc", "2.0")?;
         f.member("id", 1)?;
