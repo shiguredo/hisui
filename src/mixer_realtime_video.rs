@@ -1892,6 +1892,99 @@ mod tests {
     }
 
     #[test]
+    fn compose_frame_skips_layer_when_scale_results_in_zero_size() -> crate::Result<()> {
+        let track_id = TrackId::new("tiny-scale");
+        let input_track = InputTrack {
+            track_id: track_id.clone(),
+            x: 0,
+            y: 0,
+            z: 0,
+            width: None,
+            height: None,
+            // 極小スケール: 2 * 0.001 = 0.002 → round → 0
+            scale_x: PositiveFiniteF64::new(0.001),
+            scale_y: PositiveFiniteF64::new(0.001),
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
+        };
+        let mut state = InputTrackState::new(input_track)?;
+        state.current_frame = Some(PendingVideoFrame {
+            timestamp: Duration::ZERO,
+            frame: RawVideoFrame::from_video_frame(Arc::new(dummy_frame(Duration::ZERO)))
+                .expect("infallible"),
+        });
+
+        let draw_order = vec![DrawOrder {
+            track_id: track_id.clone(),
+            z: 0,
+            index: 0,
+        }];
+        let mut states = HashMap::new();
+        states.insert(track_id, state);
+
+        let mut stats_registry = crate::stats::Stats::new();
+        let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
+
+        // エラーにならずスキップされ、黒キャンバスが返ること
+        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, Some(&stats))?;
+        assert_eq!(frame.format, VideoFormat::I420);
+        // Y プレーンが黒 (0) のままであること
+        assert!(frame.data[..64 * 64].iter().all(|&b| b == 0));
+        // リサイズスキップカウンターがインクリメントされていること
+        assert_eq!(stats.total_resize_skipped_draw_count.get(), 1);
+        assert_eq!(stats.total_crop_skipped_draw_count.get(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn compose_frame_skips_layer_when_crop_exceeds_frame() -> crate::Result<()> {
+        let track_id = TrackId::new("over-crop");
+        let input_track = InputTrack {
+            track_id: track_id.clone(),
+            x: 0,
+            y: 0,
+            z: 0,
+            width: None,
+            height: None,
+            scale_x: None,
+            scale_y: None,
+            // フレームサイズ 64x64 に対してクロップ量が過大
+            crop_top: 32,
+            crop_bottom: 33,
+            crop_left: 0,
+            crop_right: 0,
+        };
+        let mut state = InputTrackState::new(input_track)?;
+        state.current_frame = Some(PendingVideoFrame {
+            timestamp: Duration::ZERO,
+            frame: RawVideoFrame::from_video_frame(Arc::new(dummy_frame(Duration::ZERO)))
+                .expect("infallible"),
+        });
+
+        let draw_order = vec![DrawOrder {
+            track_id: track_id.clone(),
+            z: 0,
+            index: 0,
+        }];
+        let mut states = HashMap::new();
+        states.insert(track_id, state);
+
+        let mut stats_registry = crate::stats::Stats::new();
+        let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
+
+        // エラーにならずスキップされ、黒キャンバスが返ること
+        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, Some(&stats))?;
+        assert_eq!(frame.format, VideoFormat::I420);
+        assert!(frame.data[..64 * 64].iter().all(|&b| b == 0));
+        // クロップスキップカウンターがインクリメントされていること
+        assert_eq!(stats.total_crop_skipped_draw_count.get(), 1);
+        assert_eq!(stats.total_resize_skipped_draw_count.get(), 0);
+        Ok(())
+    }
+
+    #[test]
     fn catch_up_output_frame_index_skips_late_frames() {
         let now = Duration::from_millis(120);
         let index = catch_up_output_frame_index(FrameRate::FPS_25, 0, now);
