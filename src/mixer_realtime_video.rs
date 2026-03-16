@@ -387,7 +387,7 @@ impl VideoRealtimeMixerRunner {
             timestamp,
             &self.draw_order,
             &self.states,
-            Some(&self.stats),
+            &self.stats,
         )?;
 
         if !self.output_tx.send_video(frame) {
@@ -882,7 +882,7 @@ fn compose_frame(
     timestamp: Duration,
     draw_order: &[DrawOrder],
     states: &HashMap<TrackId, InputTrackState>,
-    stats: Option<&VideoRealtimeMixerStats>,
+    stats: &VideoRealtimeMixerStats,
 ) -> crate::Result<VideoFrame> {
     let mut canvas = RealtimeI420Canvas::new(canvas_width, canvas_height);
 
@@ -903,9 +903,7 @@ fn compose_frame(
             cropped
         } else if has_crop(&state.input_track) {
             // クロップ量が過大でクロップ後サイズが不正 → 描画をスキップ
-            if let Some(stats) = stats {
-                stats.total_crop_skipped_draw_count.inc();
-            }
+            stats.total_crop_skipped_draw_count.inc();
             continue;
         } else {
             &current.frame
@@ -940,9 +938,7 @@ fn compose_frame(
         let resize_height = EvenUsize::truncating_new(target_height);
         if resize_width.get() == 0 || resize_height.get() == 0 {
             // スケール後サイズが 0 → 描画をスキップ
-            if let Some(stats) = stats {
-                stats.total_resize_skipped_draw_count.inc();
-            }
+            stats.total_resize_skipped_draw_count.inc();
             continue;
         }
 
@@ -1858,7 +1854,10 @@ mod tests {
         let mut states = HashMap::new();
         states.insert(track_id, state);
 
-        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states, None)?;
+        let mut stats_registry = crate::stats::Stats::new();
+        let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
+
+        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states, &stats)?;
 
         assert_eq!(frame.format, VideoFormat::I420);
         assert_eq!(frame.data[0], 100);
@@ -1928,7 +1927,7 @@ mod tests {
         let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
 
         // エラーにならずスキップされ、黒キャンバスが返ること
-        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, Some(&stats))?;
+        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, &stats)?;
         assert_eq!(frame.format, VideoFormat::I420);
         // Y プレーンが黒 (0) のままであること
         assert!(frame.data[..64 * 64].iter().all(|&b| b == 0));
@@ -1975,7 +1974,7 @@ mod tests {
         let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
 
         // エラーにならずスキップされ、黒キャンバスが返ること
-        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, Some(&stats))?;
+        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, &stats)?;
         assert_eq!(frame.format, VideoFormat::I420);
         assert!(frame.data[..64 * 64].iter().all(|&b| b == 0));
         // クロップスキップカウンターがインクリメントされていること
