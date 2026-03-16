@@ -176,9 +176,11 @@ pub fn handle_request_message_with_pipeline_handle(
             input_registry,
             pipeline_handle,
         ),
-        "GetCanvasList" => {
-            crate::obsws_response_builder::build_get_canvas_list_response(&request_id)
-        }
+        "GetCanvasList" => crate::obsws_response_builder::build_get_canvas_list_response(
+            &request_id,
+            input_registry.canvas_width(),
+            input_registry.canvas_height(),
+        ),
         "GetGroupList" => crate::obsws_response_builder::build_get_group_list_response(&request_id),
         "GetSceneList" => crate::obsws_response_builder::build_get_scene_list_response(
             &request_id,
@@ -988,8 +990,12 @@ mod tests {
             request_data: Some(request_data(r#"{"outputName":"record"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry =
-            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let mut input_registry = ObswsInputRegistry::new(
+            std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
+            crate::types::EvenUsize::new(1920).unwrap(),
+            crate::types::EvenUsize::new(1080).unwrap(),
+            crate::video::FrameRate::FPS_30,
+        );
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(&response.message)?;
@@ -1060,6 +1066,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 publisher_processor_id: ProcessorId::new("publisher"),
             })
             .expect("stream activation must succeed");
@@ -1132,6 +1139,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: output_path.clone(),
             })
@@ -1289,6 +1297,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 publisher_processor_id: ProcessorId::new("publisher"),
             })
             .expect("stream activation must succeed");
@@ -1302,6 +1311,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
@@ -1923,8 +1933,12 @@ mod tests {
     fn handle_request_message_returns_get_record_directory_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry =
-            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let mut input_registry = ObswsInputRegistry::new(
+            std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
+            crate::types::EvenUsize::new(1920).unwrap(),
+            crate::types::EvenUsize::new(1080).unwrap(),
+            crate::video::FrameRate::FPS_30,
+        );
         let request = RequestMessage {
             request_id: Some("req-get-record-directory".to_owned()),
             request_type: Some("GetRecordDirectory".to_owned()),
@@ -1948,8 +1962,12 @@ mod tests {
     fn handle_request_message_returns_set_record_directory_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry =
-            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let mut input_registry = ObswsInputRegistry::new(
+            std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
+            crate::types::EvenUsize::new(1920).unwrap(),
+            crate::types::EvenUsize::new(1080).unwrap(),
+            crate::video::FrameRate::FPS_30,
+        );
         let request = RequestMessage {
             request_id: Some("req-set-record-directory".to_owned()),
             request_type: Some("SetRecordDirectory".to_owned()),
@@ -2017,6 +2035,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })

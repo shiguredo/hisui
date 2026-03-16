@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Error, MediaFrame, Message, ProcessorHandle, TrackId,
-    types::EvenUsize,
+    types::{EvenUsize, PositiveFiniteF64},
     video::{FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
@@ -137,6 +137,12 @@ pub struct InputTrack {
     pub z: isize,
     pub width: Option<EvenUsize>,
     pub height: Option<EvenUsize>,
+    pub scale_x: Option<PositiveFiniteF64>,
+    pub scale_y: Option<PositiveFiniteF64>,
+    pub crop_top: usize,
+    pub crop_bottom: usize,
+    pub crop_left: usize,
+    pub crop_right: usize,
 }
 
 impl nojson::DisplayJson for InputTrack {
@@ -151,6 +157,24 @@ impl nojson::DisplayJson for InputTrack {
             }
             if let Some(height) = self.height {
                 f.member("height", height)?;
+            }
+            if let Some(scale_x) = self.scale_x {
+                f.member("scaleX", scale_x)?;
+            }
+            if let Some(scale_y) = self.scale_y {
+                f.member("scaleY", scale_y)?;
+            }
+            if self.crop_top != 0 {
+                f.member("cropTop", self.crop_top)?;
+            }
+            if self.crop_bottom != 0 {
+                f.member("cropBottom", self.crop_bottom)?;
+            }
+            if self.crop_left != 0 {
+                f.member("cropLeft", self.crop_left)?;
+            }
+            if self.crop_right != 0 {
+                f.member("cropRight", self.crop_right)?;
             }
             Ok(())
         })
@@ -169,6 +193,12 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
         let z: Option<isize> = value.to_member("z")?.try_into()?;
         let width: Option<EvenUsize> = value.to_member("width")?.try_into()?;
         let height: Option<EvenUsize> = value.to_member("height")?.try_into()?;
+        let scale_x: Option<PositiveFiniteF64> = value.to_member("scaleX")?.try_into()?;
+        let scale_y: Option<PositiveFiniteF64> = value.to_member("scaleY")?.try_into()?;
+        let crop_top: Option<usize> = value.to_member("cropTop")?.try_into()?;
+        let crop_bottom: Option<usize> = value.to_member("cropBottom")?.try_into()?;
+        let crop_left: Option<usize> = value.to_member("cropLeft")?.try_into()?;
+        let crop_right: Option<usize> = value.to_member("cropRight")?.try_into()?;
 
         Ok(Self {
             track_id,
@@ -177,6 +207,12 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
             z: z.unwrap_or_default(),
             width,
             height,
+            scale_x,
+            scale_y,
+            crop_top: crop_top.unwrap_or_default(),
+            crop_bottom: crop_bottom.unwrap_or_default(),
+            crop_left: crop_left.unwrap_or_default(),
+            crop_right: crop_right.unwrap_or_default(),
         })
     }
 }
@@ -263,6 +299,8 @@ struct VideoRealtimeMixerStats {
     current_canvas_height: crate::stats::StatsGauge,
     current_frame_rate_numerator: crate::stats::StatsGauge,
     current_frame_rate_denumerator: crate::stats::StatsGauge,
+    total_crop_skipped_draw_count: crate::stats::StatsCounter,
+    total_resize_skipped_draw_count: crate::stats::StatsCounter,
 }
 
 impl VideoRealtimeMixerStats {
@@ -273,6 +311,8 @@ impl VideoRealtimeMixerStats {
             current_canvas_height: stats.gauge("current_canvas_height"),
             current_frame_rate_numerator: stats.gauge("current_frame_rate_numerator"),
             current_frame_rate_denumerator: stats.gauge("current_frame_rate_denumerator"),
+            total_crop_skipped_draw_count: stats.counter("total_crop_skipped_draw_count"),
+            total_resize_skipped_draw_count: stats.counter("total_resize_skipped_draw_count"),
         }
     }
 
@@ -347,6 +387,7 @@ impl VideoRealtimeMixerRunner {
             timestamp,
             &self.draw_order,
             &self.states,
+            &self.stats,
         )?;
 
         if !self.output_tx.send_video(frame) {
@@ -471,6 +512,8 @@ struct InputTrackState {
     input_track: InputTrack,
     target_width: Option<EvenUsize>,
     target_height: Option<EvenUsize>,
+    scale_x: Option<PositiveFiniteF64>,
+    scale_y: Option<PositiveFiniteF64>,
     first_input_sample_timestamp: Option<Duration>,
     first_input_elapsed: Option<Duration>,
     pending_frames: VecDeque<PendingVideoFrame>,
@@ -482,11 +525,15 @@ impl InputTrackState {
     fn new(input_track: InputTrack) -> crate::Result<Self> {
         let target_width = input_track.width;
         let target_height = input_track.height;
+        let scale_x = input_track.scale_x;
+        let scale_y = input_track.scale_y;
 
         Ok(Self {
             input_track,
             target_width,
             target_height,
+            scale_x,
+            scale_y,
             first_input_sample_timestamp: None,
             first_input_elapsed: None,
             pending_frames: VecDeque::new(),
@@ -531,6 +578,8 @@ impl InputTrackState {
     fn update_input_track(&mut self, input_track: InputTrack) {
         self.target_width = input_track.width;
         self.target_height = input_track.height;
+        self.scale_x = input_track.scale_x;
+        self.scale_y = input_track.scale_y;
         self.input_track = input_track;
     }
 
@@ -683,12 +732,164 @@ fn handle_track_event(
     Ok(())
 }
 
+/// ソースフレームにクロップを適用する。
+/// 以下の場合は `None` を返す:
+/// - クロップ値がすべて 0 の場合（元フレームをそのまま使用）
+/// - クロップ後のサイズが 2 未満になる場合（描画スキップ対象）
+///
+/// I420 のクロマサブサンプリング制約のため、全クロップ値を偶数に切り下げる。
+fn apply_crop(
+    frame: &RawVideoFrame,
+    input_track: &InputTrack,
+) -> crate::Result<Option<RawVideoFrame>> {
+    let crop_top = input_track.crop_top;
+    let crop_bottom = input_track.crop_bottom;
+    let crop_left = input_track.crop_left;
+    let crop_right = input_track.crop_right;
+
+    if crop_top == 0 && crop_bottom == 0 && crop_left == 0 && crop_right == 0 {
+        return Ok(None);
+    }
+
+    let size = frame.size();
+
+    // I420 のクロマサブサンプリング制約のため偶数に丸める
+    let crop_left = crop_left & !1;
+    let crop_top = crop_top & !1;
+    let crop_right = crop_right & !1;
+    let crop_bottom = crop_bottom & !1;
+
+    let effective_width = size
+        .width
+        .saturating_sub(crop_left.saturating_add(crop_right));
+    let effective_height = size
+        .height
+        .saturating_sub(crop_top.saturating_add(crop_bottom));
+
+    // クロップ後のサイズが不正な場合はスキップ
+    if effective_width < 2 || effective_height < 2 {
+        return Ok(None);
+    }
+
+    // 偶数に切り下げ
+    let effective_width = effective_width & !1;
+    let effective_height = effective_height & !1;
+
+    let video_frame = frame.as_video_frame();
+    let (src_y, src_u, src_v, src_a) = match video_frame.format {
+        VideoFormat::I420 => {
+            let (y, u, v) = video_frame
+                .as_yuv_planes()
+                .ok_or_else(|| Error::new("invalid I420 frame size"))?;
+            (y, u, v, None)
+        }
+        VideoFormat::I420A => {
+            let (y, u, v, a) = video_frame
+                .as_i420a_planes()
+                .ok_or_else(|| Error::new("invalid I420A frame size"))?;
+            (y, u, v, Some(a))
+        }
+        _ => {
+            return Err(Error::new(format!(
+                "unsupported video format for crop: expected I420 or I420A, got {}",
+                video_frame.format
+            )));
+        }
+    };
+
+    let src_width = size.width;
+    let src_uv_width = src_width.div_ceil(2);
+
+    // Y プレーンのクロップ
+    let mut y_plane = Vec::with_capacity(effective_width * effective_height);
+    for row in 0..effective_height {
+        let src_row = crop_top + row;
+        let src_offset = src_row * src_width + crop_left;
+        y_plane.extend_from_slice(&src_y[src_offset..src_offset + effective_width]);
+    }
+
+    // U/V プレーンのクロップ
+    let eff_uv_width = effective_width.div_ceil(2);
+    let eff_uv_height = effective_height.div_ceil(2);
+    let crop_uv_left = crop_left / 2;
+    let crop_uv_top = crop_top / 2;
+
+    let mut u_plane = Vec::with_capacity(eff_uv_width * eff_uv_height);
+    let mut v_plane = Vec::with_capacity(eff_uv_width * eff_uv_height);
+    for row in 0..eff_uv_height {
+        let src_row = crop_uv_top + row;
+        let src_offset = src_row * src_uv_width + crop_uv_left;
+        u_plane.extend_from_slice(&src_u[src_offset..src_offset + eff_uv_width]);
+        v_plane.extend_from_slice(&src_v[src_offset..src_offset + eff_uv_width]);
+    }
+
+    // A プレーンのクロップ（I420A の場合）
+    let mut a_plane = if let Some(src_a) = src_a {
+        let mut a = Vec::with_capacity(effective_width * effective_height);
+        for row in 0..effective_height {
+            let src_row = crop_top + row;
+            let src_offset = src_row * src_width + crop_left;
+            a.extend_from_slice(&src_a[src_offset..src_offset + effective_width]);
+        }
+        Some(a)
+    } else {
+        None
+    };
+
+    let format = video_frame.format;
+    let mut data = Vec::with_capacity(
+        y_plane.len() + u_plane.len() + v_plane.len() + a_plane.as_ref().map_or(0, |a| a.len()),
+    );
+    data.append(&mut y_plane);
+    data.append(&mut u_plane);
+    data.append(&mut v_plane);
+    if let Some(ref mut a) = a_plane {
+        data.append(a);
+    }
+
+    let cropped_frame = VideoFrame {
+        sample_entry: None,
+        keyframe: true,
+        format,
+        timestamp: video_frame.timestamp,
+        size: Some(VideoFrameSize {
+            width: effective_width,
+            height: effective_height,
+        }),
+        data,
+    };
+
+    Ok(Some(RawVideoFrame::from_video_frame(Arc::new(
+        cropped_frame,
+    ))?))
+}
+
+/// クロップ値が指定されているかどうかを判定する
+fn has_crop(input_track: &InputTrack) -> bool {
+    input_track.crop_top != 0
+        || input_track.crop_bottom != 0
+        || input_track.crop_left != 0
+        || input_track.crop_right != 0
+}
+
+/// ソースフレームサイズにスケール係数を乗算して偶数に丸める
+fn scale_to_even(source_size: usize, scale: f64) -> usize {
+    let scaled = (source_size as f64 * scale).round() as usize;
+    // 偶数に切り上げ
+    if scaled.is_multiple_of(2) {
+        scaled
+    } else {
+        scaled + 1
+    }
+}
+
 fn compose_frame(
     canvas_width: usize,
     canvas_height: usize,
     timestamp: Duration,
     draw_order: &[DrawOrder],
     states: &HashMap<TrackId, InputTrackState>,
+    stats: &VideoRealtimeMixerStats,
 ) -> crate::Result<VideoFrame> {
     let mut canvas = RealtimeI420Canvas::new(canvas_width, canvas_height);
 
@@ -702,32 +903,53 @@ fn compose_frame(
 
         let x = state.input_track.x;
         let y = state.input_track.y;
-        let target_width = state
-            .target_width
-            .map(EvenUsize::get)
-            .unwrap_or(current.frame.size().width);
-        let target_height = state
-            .target_height
-            .map(EvenUsize::get)
-            .unwrap_or(current.frame.size().height);
 
-        let size = current.frame.size();
+        // クロップ適用: ソースフレームからクロップ領域を切り出す
+        let source_frame = apply_crop(&current.frame, &state.input_track)?;
+        let source_frame_ref = if let Some(ref cropped) = source_frame {
+            cropped
+        } else if has_crop(&state.input_track) {
+            // クロップ量が過大でクロップ後サイズが不正 → 描画をスキップ
+            stats.total_crop_skipped_draw_count.inc();
+            continue;
+        } else {
+            &current.frame
+        };
+
+        // ターゲットサイズの決定:
+        // 1. width/height が明示されていればそれを使う
+        // 2. scale_x/scale_y が指定されていればソースフレームサイズに乗算する
+        // 3. どちらもなければソースフレームの元サイズを使う
+        let target_width = if let Some(w) = state.target_width {
+            w.get()
+        } else if let Some(sx) = state.scale_x {
+            scale_to_even(source_frame_ref.size().width, sx.get())
+        } else {
+            source_frame_ref.size().width
+        };
+        let target_height = if let Some(h) = state.target_height {
+            h.get()
+        } else if let Some(sy) = state.scale_y {
+            scale_to_even(source_frame_ref.size().height, sy.get())
+        } else {
+            source_frame_ref.size().height
+        };
+
+        let size = source_frame_ref.size();
         if size.width == target_width && size.height == target_height {
-            canvas.draw_frame_clipped(x, y, &current.frame)?;
+            canvas.draw_frame_clipped(x, y, source_frame_ref)?;
             continue;
         }
 
         let resize_width = EvenUsize::truncating_new(target_width);
         let resize_height = EvenUsize::truncating_new(target_height);
         if resize_width.get() == 0 || resize_height.get() == 0 {
-            return Err(Error::new(format!(
-                "invalid target size: width={} height={}",
-                target_width, target_height
-            )));
+            // スケール後サイズが 0 → 描画をスキップ
+            stats.total_resize_skipped_draw_count.inc();
+            continue;
         }
 
-        let resized = current
-            .frame
+        let resized = source_frame_ref
             .as_video_frame()
             .resize(
                 resize_width,
@@ -1271,6 +1493,12 @@ mod tests {
                     z: 0,
                     width: Some(EvenUsize::new(160).expect("infallible")),
                     height: Some(EvenUsize::new(120).expect("infallible")),
+                    scale_x: None,
+                    scale_y: None,
+                    crop_top: 0,
+                    crop_bottom: 0,
+                    crop_left: 0,
+                    crop_right: 0,
                 },
                 InputTrack {
                     track_id: input_track_id_2.clone(),
@@ -1279,6 +1507,12 @@ mod tests {
                     z: 1,
                     width: Some(EvenUsize::new(160).expect("infallible")),
                     height: Some(EvenUsize::new(120).expect("infallible")),
+                    scale_x: None,
+                    scale_y: None,
+                    crop_top: 0,
+                    crop_bottom: 0,
+                    crop_left: 0,
+                    crop_right: 0,
                 },
             ],
             output_track_id: output_track_id.clone(),
@@ -1477,6 +1711,12 @@ mod tests {
             z: 0,
             width: None,
             height: None,
+            scale_x: None,
+            scale_y: None,
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
         };
         let mut state = InputTrackState::new(input_track)?;
 
@@ -1511,6 +1751,12 @@ mod tests {
             z: 0,
             width: None,
             height: None,
+            scale_x: None,
+            scale_y: None,
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
         };
         let mut state = InputTrackState::new(input_track)?;
 
@@ -1531,6 +1777,12 @@ mod tests {
             z: 0,
             width: Some(EvenUsize::new(160).expect("infallible")),
             height: Some(EvenUsize::new(120).expect("infallible")),
+            scale_x: None,
+            scale_y: None,
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
         };
         let mut state = InputTrackState::new(input_track)?;
         state.current_frame = Some(PendingVideoFrame {
@@ -1555,6 +1807,12 @@ mod tests {
             z: 3,
             width: Some(EvenUsize::new(320).expect("infallible")),
             height: Some(EvenUsize::new(180).expect("infallible")),
+            scale_x: None,
+            scale_y: None,
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
         });
 
         assert_eq!(state.input_track.x, 100);
@@ -1577,6 +1835,12 @@ mod tests {
             z: 0,
             width: None,
             height: None,
+            scale_x: None,
+            scale_y: None,
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
         };
         let mut state = InputTrackState::new(input_track)?;
         state.current_frame = Some(PendingVideoFrame {
@@ -1597,7 +1861,10 @@ mod tests {
         let mut states = HashMap::new();
         states.insert(track_id, state);
 
-        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states)?;
+        let mut stats_registry = crate::stats::Stats::new();
+        let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
+
+        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states, &stats)?;
 
         assert_eq!(frame.format, VideoFormat::I420);
         assert_eq!(frame.data[0], 100);
@@ -1628,6 +1895,99 @@ mod tests {
             timestamp,
             data: vec![y, y, y, y, 200, 200, alpha, alpha, alpha, alpha],
         }
+    }
+
+    #[test]
+    fn compose_frame_skips_layer_when_scale_results_in_zero_size() -> crate::Result<()> {
+        let track_id = TrackId::new("tiny-scale");
+        let input_track = InputTrack {
+            track_id: track_id.clone(),
+            x: 0,
+            y: 0,
+            z: 0,
+            width: None,
+            height: None,
+            // 極小スケール: 2 * 0.001 = 0.002 → round → 0
+            scale_x: PositiveFiniteF64::new(0.001),
+            scale_y: PositiveFiniteF64::new(0.001),
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
+        };
+        let mut state = InputTrackState::new(input_track)?;
+        state.current_frame = Some(PendingVideoFrame {
+            timestamp: Duration::ZERO,
+            frame: RawVideoFrame::from_video_frame(Arc::new(dummy_frame(Duration::ZERO)))
+                .expect("infallible"),
+        });
+
+        let draw_order = vec![DrawOrder {
+            track_id: track_id.clone(),
+            z: 0,
+            index: 0,
+        }];
+        let mut states = HashMap::new();
+        states.insert(track_id, state);
+
+        let mut stats_registry = crate::stats::Stats::new();
+        let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
+
+        // エラーにならずスキップされ、黒キャンバスが返ること
+        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, &stats)?;
+        assert_eq!(frame.format, VideoFormat::I420);
+        // Y プレーンが黒 (0) のままであること
+        assert!(frame.data[..64 * 64].iter().all(|&b| b == 0));
+        // リサイズスキップカウンターがインクリメントされていること
+        assert_eq!(stats.total_resize_skipped_draw_count.get(), 1);
+        assert_eq!(stats.total_crop_skipped_draw_count.get(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn compose_frame_skips_layer_when_crop_exceeds_frame() -> crate::Result<()> {
+        let track_id = TrackId::new("over-crop");
+        let input_track = InputTrack {
+            track_id: track_id.clone(),
+            x: 0,
+            y: 0,
+            z: 0,
+            width: None,
+            height: None,
+            scale_x: None,
+            scale_y: None,
+            // フレームサイズ 64x64 に対してクロップ量が過大
+            crop_top: 32,
+            crop_bottom: 33,
+            crop_left: 0,
+            crop_right: 0,
+        };
+        let mut state = InputTrackState::new(input_track)?;
+        state.current_frame = Some(PendingVideoFrame {
+            timestamp: Duration::ZERO,
+            frame: RawVideoFrame::from_video_frame(Arc::new(dummy_frame(Duration::ZERO)))
+                .expect("infallible"),
+        });
+
+        let draw_order = vec![DrawOrder {
+            track_id: track_id.clone(),
+            z: 0,
+            index: 0,
+        }];
+        let mut states = HashMap::new();
+        states.insert(track_id, state);
+
+        let mut stats_registry = crate::stats::Stats::new();
+        let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
+
+        // エラーにならずスキップされ、黒キャンバスが返ること
+        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, &stats)?;
+        assert_eq!(frame.format, VideoFormat::I420);
+        assert!(frame.data[..64 * 64].iter().all(|&b| b == 0));
+        // クロップスキップカウンターがインクリメントされていること
+        assert_eq!(stats.total_crop_skipped_draw_count.get(), 1);
+        assert_eq!(stats.total_resize_skipped_draw_count.get(), 0);
+        Ok(())
     }
 
     #[test]

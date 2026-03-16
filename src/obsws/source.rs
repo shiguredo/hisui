@@ -57,10 +57,11 @@ pub fn build_record_source_plan(
     output_kind: ObswsOutputKind,
     run_id: u64,
     source_index: usize,
+    frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     match &input.input.settings {
         ObswsInputSettings::ImageSource(settings) => {
-            image::build_record_source_plan(settings, output_kind, run_id, source_index)
+            image::build_record_source_plan(settings, output_kind, run_id, source_index, frame_rate)
         }
         ObswsInputSettings::Mp4FileSource(settings) => {
             mp4::build_record_source_plan(settings, output_kind, run_id, source_index)

@@ -267,7 +267,11 @@ fn available_disk_space_mb(_path: &std::path::Path) -> f64 {
     0.0
 }
 
-pub fn build_get_canvas_list_response(request_id: &str) -> String {
+pub fn build_get_canvas_list_response(
+    request_id: &str,
+    canvas_width: crate::types::EvenUsize,
+    canvas_height: crate::types::EvenUsize,
+) -> String {
     nojson::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
@@ -289,8 +293,8 @@ pub fn build_get_canvas_list_response(request_id: &str) -> String {
                             "canvases",
                             [nojson::object(|f| {
                                 f.member("canvasName", "hisui-main")?;
-                                f.member("canvasWidth", 0)?;
-                                f.member("canvasHeight", 0)
+                                f.member("canvasWidth", canvas_width)?;
+                                f.member("canvasHeight", canvas_height)
                             })],
                         )
                     }),

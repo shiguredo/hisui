@@ -9,6 +9,7 @@ pub(super) fn build_record_source_plan(
     output_kind: ObswsOutputKind,
     run_id: u64,
     source_index: usize,
+    frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(path) = settings.file.as_deref() else {
         return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
@@ -32,7 +33,7 @@ pub(super) fn build_record_source_plan(
             "params",
             nojson::object(|f| {
                 f.member("path", path)?;
-                f.member("frameRate", 30)?;
+                f.member("frameRate", frame_rate)?;
                 f.member("outputVideoTrackId", &source_video_track_id)?;
                 f.member("processorId", &source_processor_id)
             }),

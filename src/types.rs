@@ -393,6 +393,15 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for EvenUsize {
     }
 }
 
+impl std::str::FromStr for EvenUsize {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let n: usize = s.parse().map_err(|e| format!("{e}"))?;
+        Self::new(n).ok_or_else(|| format!("expected even number, got {n}"))
+    }
+}
+
 impl std::ops::Add for EvenUsize {
     type Output = Self;
 
@@ -428,6 +437,64 @@ impl std::ops::Mul<usize> for EvenUsize {
 
     fn mul(self, rhs: usize) -> Self::Output {
         Self(self.0 * rhs)
+    }
+}
+
+/// 正の有限な f64 のための構造体
+///
+/// 正の有限値のみを保持するため、NaN や無限が存在せず全順序が成立する。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PositiveFiniteF64(f64);
+
+// 正の有限値のみを保持するため、PartialEq の反射律が成立する
+impl Eq for PositiveFiniteF64 {}
+
+impl Ord for PositiveFiniteF64 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+impl PartialOrd for PositiveFiniteF64 {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PositiveFiniteF64 {
+    pub const ONE: Self = Self(1.0);
+
+    pub fn new(n: f64) -> Option<Self> {
+        if n.is_finite() && n > 0.0 {
+            Some(Self(n))
+        } else {
+            None
+        }
+    }
+
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl nojson::DisplayJson for PositiveFiniteF64 {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.0)
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PositiveFiniteF64 {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let n: f64 = value.try_into()?;
+        Self::new(n).ok_or_else(|| value.invalid("expected positive finite number"))
+    }
+}
+
+impl std::fmt::Display for PositiveFiniteF64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

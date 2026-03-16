@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
 pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 3] =
@@ -18,6 +19,13 @@ pub(crate) const OBSWS_MIN_TRANSITION_DURATION_MS: i64 = 50;
 pub(crate) const OBSWS_MAX_TRANSITION_DURATION_MS: i64 = 20_000;
 pub(crate) const OBSWS_MIN_TBAR_POSITION: f64 = 0.0;
 pub(crate) const OBSWS_MAX_TBAR_POSITION: f64 = 1.0;
+
+#[derive(Debug, Clone)]
+pub struct ObswsSceneInputEntry {
+    pub input: ObswsInputEntry,
+    pub scene_item_index: usize,
+    pub transform: ObswsSceneItemTransform,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInputEntry {
@@ -263,6 +271,7 @@ pub struct ObswsStreamRun {
     pub video: Option<ObswsRecordTrackRun>,
     pub audio: Option<ObswsRecordTrackRun>,
     pub audio_mixer_processor_id: Option<ProcessorId>,
+    pub video_mixer_processor_id: Option<ProcessorId>,
     pub publisher_processor_id: ProcessorId,
 }
 
@@ -272,6 +281,7 @@ pub struct ObswsRecordRun {
     pub video: Option<ObswsRecordTrackRun>,
     pub audio: Option<ObswsRecordTrackRun>,
     pub audio_mixer_processor_id: Option<ProcessorId>,
+    pub video_mixer_processor_id: Option<ProcessorId>,
     pub writer_processor_id: ProcessorId,
     pub output_path: PathBuf,
 }
@@ -333,8 +343,8 @@ pub struct ObswsSceneItemTransform {
     pub position_x: f64,
     pub position_y: f64,
     pub rotation: f64,
-    pub scale_x: f64,
-    pub scale_y: f64,
+    pub scale_x: PositiveFiniteF64,
+    pub scale_y: PositiveFiniteF64,
     pub alignment: i64,
     pub bounds_type: String,
     pub bounds_alignment: i64,
@@ -357,8 +367,8 @@ impl Default for ObswsSceneItemTransform {
             position_x: 0.0,
             position_y: 0.0,
             rotation: 0.0,
-            scale_x: 1.0,
-            scale_y: 1.0,
+            scale_x: PositiveFiniteF64::ONE,
+            scale_y: PositiveFiniteF64::ONE,
             alignment: 0,
             bounds_type: "OBS_BOUNDS_NONE".to_owned(),
             bounds_alignment: 0,
@@ -409,8 +419,8 @@ pub struct ObswsSceneItemTransformPatch {
     pub position_x: Option<f64>,
     pub position_y: Option<f64>,
     pub rotation: Option<f64>,
-    pub scale_x: Option<f64>,
-    pub scale_y: Option<f64>,
+    pub scale_x: Option<PositiveFiniteF64>,
+    pub scale_y: Option<PositiveFiniteF64>,
     pub alignment: Option<i64>,
     pub bounds_type: Option<String>,
     pub bounds_alignment: Option<i64>,
@@ -956,4 +966,7 @@ pub struct ObswsInputRegistry {
     pub(crate) stream_runtime: ObswsStreamRuntimeState,
     pub(crate) record_directory: PathBuf,
     pub(crate) record_runtime: ObswsRecordRuntimeState,
+    pub(crate) canvas_width: crate::types::EvenUsize,
+    pub(crate) canvas_height: crate::types::EvenUsize,
+    pub(crate) frame_rate: crate::video::FrameRate,
 }

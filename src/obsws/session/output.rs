@@ -30,12 +30,18 @@ impl ObswsSession {
                 );
             };
 
-            let scene_inputs = input_registry.list_current_program_scene_inputs();
+            let scene_inputs = input_registry.list_current_program_scene_input_entries();
             let run_id = input_registry.next_stream_run_id();
+            let canvas_width = input_registry.canvas_width();
+            let canvas_height = input_registry.canvas_height();
+            let frame_rate = input_registry.frame_rate();
             let output_plan = match crate::obsws::output_plan::build_composed_output_plan(
                 &scene_inputs,
                 crate::obsws::source::ObswsOutputKind::Stream,
                 run_id,
+                canvas_width,
+                canvas_height,
+                frame_rate,
             ) {
                 Ok(output_plan) => output_plan,
                 Err(error) => {
@@ -81,6 +87,7 @@ impl ObswsSession {
                 video,
                 audio,
                 audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
+                video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
                 publisher_processor_id: crate::ProcessorId::new(format!(
                     "obsws:stream:{run_id}:rtmp_publisher"
                 )),
@@ -104,12 +111,7 @@ impl ObswsSession {
         };
 
         let start_result = self
-            .start_stream_processors(
-                &output_plan.source_plans,
-                &output_url,
-                stream_name.as_deref(),
-                &run,
-            )
+            .start_stream_processors(&output_plan, &output_url, stream_name.as_deref(), &run)
             .await;
 
         if let Err(e) = start_result {
@@ -172,14 +174,20 @@ impl ObswsSession {
     }
 
     pub(super) async fn handle_start_record(&self, request_id: &str) -> RequestOutcome {
-        let (source_plans, output_path, run) = {
+        let (output_plan, output_path, run) = {
             let mut input_registry = self.input_registry.write().await;
-            let scene_inputs = input_registry.list_current_program_scene_inputs();
+            let scene_inputs = input_registry.list_current_program_scene_input_entries();
             let run_id = input_registry.next_record_run_id();
+            let canvas_width = input_registry.canvas_width();
+            let canvas_height = input_registry.canvas_height();
+            let frame_rate = input_registry.frame_rate();
             let output_plan = match crate::obsws::output_plan::build_composed_output_plan(
                 &scene_inputs,
                 crate::obsws::source::ObswsOutputKind::Record,
                 run_id,
+                canvas_width,
+                canvas_height,
+                frame_rate,
             ) {
                 Ok(output_plan) => output_plan,
                 Err(error) => {
@@ -234,6 +242,7 @@ impl ObswsSession {
                 video,
                 audio,
                 audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
+                video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
                 writer_processor_id,
                 output_path: output_path.clone(),
             };
@@ -251,7 +260,7 @@ impl ObswsSession {
                     "Record is already active",
                 );
             }
-            (output_plan.source_plans, output_path, run)
+            (output_plan, output_path, run)
         };
 
         if let Some(parent) = output_path.parent()
@@ -267,7 +276,7 @@ impl ObswsSession {
         }
 
         let start_result = self
-            .start_record_processors(&source_plans, &output_path, &run)
+            .start_record_processors(&output_plan, &output_path, &run)
             .await;
         if let Err(e) = start_result {
             let _ = self.input_registry.write().await.deactivate_record();
@@ -529,6 +538,72 @@ impl ObswsSession {
         }
     }
 
+    /// createVideoMixer リクエストを生成して送信する
+    async fn send_create_video_mixer_request(
+        &self,
+        output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
+        video: &ObswsRecordTrackRun,
+        video_mixer_processor_id: &crate::ProcessorId,
+    ) -> crate::Result<()> {
+        let video_mixer_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createVideoMixer")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("canvasWidth", output_plan.canvas_width)?;
+                    f.member("canvasHeight", output_plan.canvas_height)?;
+                    f.member("frameRate", output_plan.frame_rate)?;
+                    f.member(
+                        "inputTracks",
+                        nojson::array(|f| {
+                            for input_track in &output_plan.video_mixer_input_tracks {
+                                f.element(nojson::object(|f| {
+                                    f.member("trackId", &input_track.track_id)?;
+                                    f.member("x", input_track.x)?;
+                                    f.member("y", input_track.y)?;
+                                    f.member("z", input_track.z)?;
+                                    if let Some(width) = input_track.width {
+                                        f.member("width", width)?;
+                                    }
+                                    if let Some(height) = input_track.height {
+                                        f.member("height", height)?;
+                                    }
+                                    if let Some(scale_x) = input_track.scale_x {
+                                        f.member("scaleX", scale_x)?;
+                                    }
+                                    if let Some(scale_y) = input_track.scale_y {
+                                        f.member("scaleY", scale_y)?;
+                                    }
+                                    if input_track.crop_top != 0 {
+                                        f.member("cropTop", input_track.crop_top)?;
+                                    }
+                                    if input_track.crop_bottom != 0 {
+                                        f.member("cropBottom", input_track.crop_bottom)?;
+                                    }
+                                    if input_track.crop_left != 0 {
+                                        f.member("cropLeft", input_track.crop_left)?;
+                                    }
+                                    if input_track.crop_right != 0 {
+                                        f.member("cropRight", input_track.crop_right)?;
+                                    }
+                                    Ok(())
+                                }))?;
+                            }
+                            Ok(())
+                        }),
+                    )?;
+                    f.member("outputTrackId", &video.source_track_id)?;
+                    f.member("processorId", video_mixer_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createVideoMixer", &video_mixer_request)
+            .await
+    }
+
     /// createAudioMixer リクエストを生成して送信する
     async fn send_create_audio_mixer_request(
         &self,
@@ -575,7 +650,7 @@ impl ObswsSession {
 
     pub(super) async fn start_stream_processors(
         &self,
-        source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
+        output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
         output_url: &str,
         stream_name: Option<&str>,
         run: &ObswsStreamRun,
@@ -583,7 +658,18 @@ impl ObswsSession {
         if let (Some(audio), Some(audio_mixer_processor_id)) =
             (&run.audio, &run.audio_mixer_processor_id)
         {
-            self.send_create_audio_mixer_request(source_plans, audio, audio_mixer_processor_id)
+            self.send_create_audio_mixer_request(
+                &output_plan.source_plans,
+                audio,
+                audio_mixer_processor_id,
+            )
+            .await?;
+        }
+
+        if let (Some(video), Some(video_mixer_processor_id)) =
+            (&run.video, &run.video_mixer_processor_id)
+        {
+            self.send_create_video_mixer_request(output_plan, video, video_mixer_processor_id)
                 .await?;
         }
 
@@ -599,7 +685,7 @@ impl ObswsSession {
                         f.member("outputTrackId", &video.encoded_track_id)?;
                         f.member("codec", "H264")?;
                         f.member("bitrateBps", 2_000_000)?;
-                        f.member("frameRate", 30)?;
+                        f.member("frameRate", output_plan.frame_rate)?;
                         f.member("processorId", &video.encoder_processor_id)
                     }),
                 )
@@ -655,7 +741,7 @@ impl ObswsSession {
         self.send_pipeline_rpc_request("createRtmpPublisher", &rtmp_request)
             .await?;
 
-        for source_plan in source_plans {
+        for source_plan in &output_plan.source_plans {
             for request in &source_plan.requests {
                 self.send_pipeline_rpc_request(request.method, &request.request_text)
                     .await?;
@@ -667,14 +753,25 @@ impl ObswsSession {
 
     pub(super) async fn start_record_processors(
         &self,
-        source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
+        output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
         output_path: &std::path::Path,
         run: &ObswsRecordRun,
     ) -> crate::Result<()> {
         if let (Some(audio), Some(audio_mixer_processor_id)) =
             (&run.audio, &run.audio_mixer_processor_id)
         {
-            self.send_create_audio_mixer_request(source_plans, audio, audio_mixer_processor_id)
+            self.send_create_audio_mixer_request(
+                &output_plan.source_plans,
+                audio,
+                audio_mixer_processor_id,
+            )
+            .await?;
+        }
+
+        if let (Some(video), Some(video_mixer_processor_id)) =
+            (&run.video, &run.video_mixer_processor_id)
+        {
+            self.send_create_video_mixer_request(output_plan, video, video_mixer_processor_id)
                 .await?;
         }
 
@@ -690,7 +787,7 @@ impl ObswsSession {
                         f.member("outputTrackId", &video.encoded_track_id)?;
                         f.member("codec", "H264")?;
                         f.member("bitrateBps", 2_000_000)?;
-                        f.member("frameRate", 30)?;
+                        f.member("frameRate", output_plan.frame_rate)?;
                         f.member("processorId", &video.encoder_processor_id)
                     }),
                 )
@@ -743,7 +840,7 @@ impl ObswsSession {
         self.send_pipeline_rpc_request("createMp4Writer", &writer_request)
             .await?;
 
-        for source_plan in source_plans {
+        for source_plan in &output_plan.source_plans {
             for request in &source_plan.requests {
                 self.send_pipeline_rpc_request(request.method, &request.request_text)
                     .await?;
@@ -880,9 +977,18 @@ impl ObswsSession {
         // 1. ソースを停止
         self.stop_processors(&run.source_processor_ids).await?;
 
-        // 2. ミキサーを停止
-        if let Some(mixer_id) = &run.audio_mixer_processor_id {
-            self.stop_processors(std::slice::from_ref(mixer_id)).await?;
+        // 2. 音声ミキサー + 映像ミキサーを停止
+        {
+            let mut mixer_ids = Vec::new();
+            if let Some(mixer_id) = &run.audio_mixer_processor_id {
+                mixer_ids.push(mixer_id.clone());
+            }
+            if let Some(mixer_id) = &run.video_mixer_processor_id {
+                mixer_ids.push(mixer_id.clone());
+            }
+            if !mixer_ids.is_empty() {
+                self.stop_processors(&mixer_ids).await?;
+            }
         }
 
         // 3. エンコーダーを停止
@@ -913,9 +1019,18 @@ impl ObswsSession {
         // 1. ソースを停止（データ生産を止める）
         self.stop_processors(&run.source_processor_ids).await?;
 
-        // 2. ミキサーを停止（EOS をエンコーダーに伝播）
-        if let Some(mixer_id) = &run.audio_mixer_processor_id {
-            self.stop_processors(std::slice::from_ref(mixer_id)).await?;
+        // 2. 音声ミキサー + 映像ミキサーを停止（EOS をエンコーダーに伝播）
+        {
+            let mut mixer_ids = Vec::new();
+            if let Some(mixer_id) = &run.audio_mixer_processor_id {
+                mixer_ids.push(mixer_id.clone());
+            }
+            if let Some(mixer_id) = &run.video_mixer_processor_id {
+                mixer_ids.push(mixer_id.clone());
+            }
+            if !mixer_ids.is_empty() {
+                self.stop_processors(&mixer_ids).await?;
+            }
         }
 
         // 3. エンコーダーを停止（EOS をライターに伝播）
