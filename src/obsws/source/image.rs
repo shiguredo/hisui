@@ -2,6 +2,7 @@ use crate::obsws::source::{
     BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
 };
 use crate::obsws_input_registry::ObswsImageSourceSettings;
+use crate::{ProcessorId, TrackId};
 
 pub(super) fn build_record_source_plan(
     settings: &ObswsImageSourceSettings,
@@ -15,14 +16,14 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let source_processor_id = format!(
+    let source_processor_id = ProcessorId::new(format!(
         "obsws:{}:{run_id}:source:{source_index}:png_source",
         output_kind.as_str()
-    );
-    let source_video_track_id = format!(
+    ));
+    let source_video_track_id = TrackId::new(format!(
         "obsws:{}:{run_id}:source:{source_index}:raw_video",
         output_kind.as_str()
-    );
+    ));
     let request_text = nojson::object(|f| {
         f.member("jsonrpc", "2.0")?;
         f.member("id", 1)?;

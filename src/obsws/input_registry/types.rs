@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::{ProcessorId, TrackId};
+
 pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 3] =
     ["image_source", "video_capture_device", "mp4_file_source"];
 pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
@@ -257,28 +259,28 @@ impl nojson::DisplayJson for ObswsStreamServiceSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsStreamRun {
-    pub source_processor_ids: Vec<String>,
+    pub source_processor_ids: Vec<ProcessorId>,
     pub video: Option<ObswsRecordTrackRun>,
     pub audio: Option<ObswsRecordTrackRun>,
-    pub audio_mixer_processor_id: Option<String>,
-    pub publisher_processor_id: String,
+    pub audio_mixer_processor_id: Option<ProcessorId>,
+    pub publisher_processor_id: ProcessorId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsRecordRun {
-    pub source_processor_ids: Vec<String>,
+    pub source_processor_ids: Vec<ProcessorId>,
     pub video: Option<ObswsRecordTrackRun>,
     pub audio: Option<ObswsRecordTrackRun>,
-    pub audio_mixer_processor_id: Option<String>,
-    pub writer_processor_id: String,
+    pub audio_mixer_processor_id: Option<ProcessorId>,
+    pub writer_processor_id: ProcessorId,
     pub output_path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsRecordTrackRun {
-    pub encoder_processor_id: String,
-    pub source_track_id: String,
-    pub encoded_track_id: String,
+    pub encoder_processor_id: ProcessorId,
+    pub source_track_id: TrackId,
+    pub encoded_track_id: TrackId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -56,24 +56,34 @@ impl ObswsSession {
                 .source_video_track_id
                 .as_ref()
                 .map(|source_track_id| ObswsRecordTrackRun {
-                    encoder_processor_id: format!("obsws:stream:{run_id}:video_encoder"),
+                    encoder_processor_id: crate::ProcessorId::new(format!(
+                        "obsws:stream:{run_id}:video_encoder"
+                    )),
                     source_track_id: source_track_id.clone(),
-                    encoded_track_id: format!("obsws:stream:{run_id}:encoded_video"),
+                    encoded_track_id: crate::TrackId::new(format!(
+                        "obsws:stream:{run_id}:encoded_video"
+                    )),
                 });
             let audio = output_plan
                 .source_audio_track_id
                 .as_ref()
                 .map(|source_track_id| ObswsRecordTrackRun {
-                    encoder_processor_id: format!("obsws:stream:{run_id}:audio_encoder"),
+                    encoder_processor_id: crate::ProcessorId::new(format!(
+                        "obsws:stream:{run_id}:audio_encoder"
+                    )),
                     source_track_id: source_track_id.clone(),
-                    encoded_track_id: format!("obsws:stream:{run_id}:encoded_audio"),
+                    encoded_track_id: crate::TrackId::new(format!(
+                        "obsws:stream:{run_id}:encoded_audio"
+                    )),
                 });
             let run = ObswsStreamRun {
                 source_processor_ids: output_plan.source_processor_ids.clone(),
                 video,
                 audio,
                 audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
-                publisher_processor_id: format!("obsws:stream:{run_id}:rtmp_publisher"),
+                publisher_processor_id: crate::ProcessorId::new(format!(
+                    "obsws:stream:{run_id}:rtmp_publisher"
+                )),
             };
             if let Err(ActivateStreamError::AlreadyActive) =
                 input_registry.activate_stream(run.clone())
@@ -186,22 +196,31 @@ impl ObswsSession {
                     );
                 }
             };
-            let writer_processor_id = format!("obsws:record:{run_id}:mp4_writer");
+            let writer_processor_id =
+                crate::ProcessorId::new(format!("obsws:record:{run_id}:mp4_writer"));
             let video = output_plan
                 .source_video_track_id
                 .as_ref()
                 .map(|source_track_id| ObswsRecordTrackRun {
-                    encoder_processor_id: format!("obsws:record:{run_id}:video_encoder"),
+                    encoder_processor_id: crate::ProcessorId::new(format!(
+                        "obsws:record:{run_id}:video_encoder"
+                    )),
                     source_track_id: source_track_id.clone(),
-                    encoded_track_id: format!("obsws:record:{run_id}:encoded_video"),
+                    encoded_track_id: crate::TrackId::new(format!(
+                        "obsws:record:{run_id}:encoded_video"
+                    )),
                 });
             let audio = output_plan
                 .source_audio_track_id
                 .as_ref()
                 .map(|source_track_id| ObswsRecordTrackRun {
-                    encoder_processor_id: format!("obsws:record:{run_id}:audio_encoder"),
+                    encoder_processor_id: crate::ProcessorId::new(format!(
+                        "obsws:record:{run_id}:audio_encoder"
+                    )),
                     source_track_id: source_track_id.clone(),
-                    encoded_track_id: format!("obsws:record:{run_id}:encoded_audio"),
+                    encoded_track_id: crate::TrackId::new(format!(
+                        "obsws:record:{run_id}:encoded_audio"
+                    )),
                 });
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -515,7 +534,7 @@ impl ObswsSession {
         &self,
         source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
         audio: &ObswsRecordTrackRun,
-        audio_mixer_processor_id: &str,
+        audio_mixer_processor_id: &crate::ProcessorId,
     ) -> crate::Result<()> {
         let audio_mixer_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
@@ -755,7 +774,7 @@ impl ObswsSession {
             ));
         };
 
-        let writer_processor_id = crate::ProcessorId::new(run.writer_processor_id.clone());
+        let writer_processor_id = run.writer_processor_id.clone();
         let writer_rpc_sender = pipeline_handle
             .get_rpc_sender::<
                 tokio::sync::mpsc::UnboundedSender<crate::writer_mp4::Mp4WriterRpcMessage>,
@@ -804,7 +823,7 @@ impl ObswsSession {
         let Some(video) = run.video.as_ref() else {
             return Ok(());
         };
-        let encoder_processor_id = crate::ProcessorId::new(video.encoder_processor_id.clone());
+        let encoder_processor_id = video.encoder_processor_id.clone();
         let encoder_rpc_sender = pipeline_handle
             .get_rpc_sender::<
                 tokio::sync::mpsc::UnboundedSender<crate::encoder::VideoEncoderRpcMessage>,
@@ -859,29 +878,21 @@ impl ObswsSession {
     /// ソース → ミキサー → エンコーダー → パブリッシャーの順に段階的に停止する。
     pub(super) async fn stop_stream_processors(&self, run: &ObswsStreamRun) -> crate::Result<()> {
         // 1. ソースを停止
-        {
-            let ids: Vec<_> = run
-                .source_processor_ids
-                .iter()
-                .map(|id| crate::ProcessorId::new(id.clone()))
-                .collect();
-            self.stop_processors(&ids).await?;
-        }
+        self.stop_processors(&run.source_processor_ids).await?;
 
         // 2. ミキサーを停止
         if let Some(mixer_id) = &run.audio_mixer_processor_id {
-            self.stop_processors(&[crate::ProcessorId::new(mixer_id.clone())])
-                .await?;
+            self.stop_processors(&[mixer_id.clone()]).await?;
         }
 
         // 3. エンコーダーを停止
         {
             let mut ids = Vec::new();
             if let Some(video) = &run.video {
-                ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+                ids.push(video.encoder_processor_id.clone());
             }
             if let Some(audio) = &run.audio {
-                ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+                ids.push(audio.encoder_processor_id.clone());
             }
             if !ids.is_empty() {
                 self.stop_processors(&ids).await?;
@@ -889,7 +900,7 @@ impl ObswsSession {
         }
 
         // 4. パブリッシャーを停止
-        self.stop_processors(&[crate::ProcessorId::new(run.publisher_processor_id.clone())])
+        self.stop_processors(&[run.publisher_processor_id.clone()])
             .await?;
 
         Ok(())
@@ -900,29 +911,21 @@ impl ObswsSession {
     /// MP4 writer の finalize が確実に完了するようにする。
     pub(super) async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
         // 1. ソースを停止（データ生産を止める）
-        {
-            let ids: Vec<_> = run
-                .source_processor_ids
-                .iter()
-                .map(|id| crate::ProcessorId::new(id.clone()))
-                .collect();
-            self.stop_processors(&ids).await?;
-        }
+        self.stop_processors(&run.source_processor_ids).await?;
 
         // 2. ミキサーを停止（EOS をエンコーダーに伝播）
         if let Some(mixer_id) = &run.audio_mixer_processor_id {
-            self.stop_processors(&[crate::ProcessorId::new(mixer_id.clone())])
-                .await?;
+            self.stop_processors(&[mixer_id.clone()]).await?;
         }
 
         // 3. エンコーダーを停止（EOS をライターに伝播）
         {
             let mut ids = Vec::new();
             if let Some(video) = &run.video {
-                ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+                ids.push(video.encoder_processor_id.clone());
             }
             if let Some(audio) = &run.audio {
-                ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+                ids.push(audio.encoder_processor_id.clone());
             }
             if !ids.is_empty() {
                 self.stop_processors(&ids).await?;
@@ -930,7 +933,7 @@ impl ObswsSession {
         }
 
         // 4. ライターを停止（finalize を完了させる）
-        self.stop_processors(&[crate::ProcessorId::new(run.writer_processor_id.clone())])
+        self.stop_processors(&[run.writer_processor_id.clone()])
             .await?;
 
         Ok(())

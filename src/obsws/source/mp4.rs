@@ -2,6 +2,7 @@ use crate::obsws::source::{
     BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
 };
 use crate::obsws_input_registry::ObswsMp4FileSourceSettings;
+use crate::{ProcessorId, TrackId};
 
 pub(super) fn build_record_source_plan(
     settings: &ObswsMp4FileSourceSettings,
@@ -15,23 +16,23 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let source_processor_id = format!(
+    let source_processor_id = ProcessorId::new(format!(
         "obsws:{}:{run_id}:source:{source_index}:mp4_source",
         output_kind.as_str()
-    );
+    ));
     let availability = crate::file_reader_mp4::probe_mp4_track_availability(path)
         .map_err(|e| BuildObswsRecordSourcePlanError::InvalidInput(e.display()))?;
     let source_video_track_id = availability.has_video.then(|| {
-        format!(
+        TrackId::new(format!(
             "obsws:{}:{run_id}:source:{source_index}:raw_video",
             output_kind.as_str()
-        )
+        ))
     });
     let source_audio_track_id = availability.has_audio.then(|| {
-        format!(
+        TrackId::new(format!(
             "obsws:{}:{run_id}:source:{source_index}:raw_audio",
             output_kind.as_str()
-        )
+        ))
     });
     let request_text = nojson::object(|f| {
         f.member("jsonrpc", "2.0")?;
@@ -84,7 +85,7 @@ mod tests {
         )
         .expect("audio-only mp4 source plan must succeed");
         assert_eq!(
-            plan.source_audio_track_id.as_deref(),
+            plan.source_audio_track_id.as_ref().map(|t| t.get()),
             Some("obsws:record:1:source:0:raw_audio")
         );
         assert_eq!(plan.source_video_track_id, None);
@@ -116,7 +117,7 @@ mod tests {
         .expect("video-only mp4 source plan must succeed");
         assert_eq!(plan.source_audio_track_id, None);
         assert_eq!(
-            plan.source_video_track_id.as_deref(),
+            plan.source_video_track_id.as_ref().map(|t| t.get()),
             Some("obsws:record:2:source:0:raw_video")
         );
 

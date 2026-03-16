@@ -1121,14 +1121,14 @@ pub(crate) fn collect_output_runtime_stats(
 
 fn find_counter_metric(
     entries: &[crate::stats::StatsEntry],
-    processor_id: &str,
+    processor_id: &crate::ProcessorId,
     metric_name: &'static str,
 ) -> u64 {
     entries
         .iter()
         .find(|entry| {
             entry.metric_name == metric_name
-                && entry.labels.get("processor_id").map(String::as_str) == Some(processor_id)
+                && entry.labels.get("processor_id").map(String::as_str) == Some(processor_id.get())
         })
         .and_then(|entry| entry.value.as_counter())
         .unwrap_or(0)

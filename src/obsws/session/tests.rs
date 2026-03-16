@@ -1539,7 +1539,10 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .record_run()
         .expect("active record must have run state");
     assert_eq!(
-        record_run.audio_mixer_processor_id.as_deref(),
+        record_run
+            .audio_mixer_processor_id
+            .as_ref()
+            .map(|id| id.get()),
         Some("obsws:record:0:audio_mixer")
     );
 
@@ -1683,7 +1686,10 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .stream_run()
         .expect("active stream must have run state");
     assert_eq!(
-        stream_run.audio_mixer_processor_id.as_deref(),
+        stream_run
+            .audio_mixer_processor_id
+            .as_ref()
+            .map(|id| id.get()),
         Some("obsws:stream:0:audio_mixer")
     );
 

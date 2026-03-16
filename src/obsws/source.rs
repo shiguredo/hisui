@@ -1,4 +1,5 @@
 use crate::obsws_input_registry::{ObswsInputEntry, ObswsInputSettings};
+use crate::{ProcessorId, TrackId};
 
 mod image;
 mod mp4;
@@ -24,9 +25,9 @@ pub struct ObswsSourceRpcRequest {
 }
 
 pub struct ObswsRecordSourcePlan {
-    pub source_processor_id: String,
-    pub source_video_track_id: Option<String>,
-    pub source_audio_track_id: Option<String>,
+    pub source_processor_id: ProcessorId,
+    pub source_video_track_id: Option<TrackId>,
+    pub source_audio_track_id: Option<TrackId>,
     pub requests: Vec<ObswsSourceRpcRequest>,
 }
 

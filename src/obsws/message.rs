@@ -423,6 +423,7 @@ mod tests {
         OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
         REQUEST_STATUS_SUCCESS,
     };
+    use crate::{ProcessorId, TrackId};
 
     fn input_registry() -> ObswsInputRegistry {
         let mut registry = ObswsInputRegistry::new_for_test();
@@ -1051,15 +1052,15 @@ mod tests {
         let mut input_registry = input_registry();
         input_registry
             .activate_stream(ObswsStreamRun {
-                source_processor_ids: vec!["source".to_owned()],
+                source_processor_ids: vec![ProcessorId::new("source")],
                 video: Some(ObswsRecordTrackRun {
-                    encoder_processor_id: "encoder".to_owned(),
-                    source_track_id: "source-track".to_owned(),
-                    encoded_track_id: "encoded-track".to_owned(),
+                    encoder_processor_id: ProcessorId::new("encoder"),
+                    source_track_id: TrackId::new("source-track"),
+                    encoded_track_id: TrackId::new("encoded-track"),
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
-                publisher_processor_id: "publisher".to_owned(),
+                publisher_processor_id: ProcessorId::new("publisher"),
             })
             .expect("stream activation must succeed");
         let pipeline = crate::MediaPipeline::new().expect("pipeline creation must succeed");
@@ -1123,15 +1124,15 @@ mod tests {
         let mut input_registry = ObswsInputRegistry::new_for_test();
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_ids: vec!["source".to_owned()],
+                source_processor_ids: vec![ProcessorId::new("source")],
                 video: Some(ObswsRecordTrackRun {
-                    encoder_processor_id: "encoder".to_owned(),
-                    source_track_id: "source-track".to_owned(),
-                    encoded_track_id: "encoded-track".to_owned(),
+                    encoder_processor_id: ProcessorId::new("encoder"),
+                    source_track_id: TrackId::new("source-track"),
+                    encoded_track_id: TrackId::new("encoded-track"),
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
-                writer_processor_id: "writer".to_owned(),
+                writer_processor_id: ProcessorId::new("writer"),
                 output_path: output_path.clone(),
             })
             .expect("record activation must succeed");
@@ -1280,28 +1281,28 @@ mod tests {
         let mut input_registry = input_registry();
         input_registry
             .activate_stream(ObswsStreamRun {
-                source_processor_ids: vec!["source".to_owned()],
+                source_processor_ids: vec![ProcessorId::new("source")],
                 video: Some(ObswsRecordTrackRun {
-                    encoder_processor_id: "encoder".to_owned(),
-                    source_track_id: "source-track".to_owned(),
-                    encoded_track_id: "encoded-track".to_owned(),
+                    encoder_processor_id: ProcessorId::new("encoder"),
+                    source_track_id: TrackId::new("source-track"),
+                    encoded_track_id: TrackId::new("encoded-track"),
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
-                publisher_processor_id: "publisher".to_owned(),
+                publisher_processor_id: ProcessorId::new("publisher"),
             })
             .expect("stream activation must succeed");
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_ids: vec!["source".to_owned()],
+                source_processor_ids: vec![ProcessorId::new("source")],
                 video: Some(ObswsRecordTrackRun {
-                    encoder_processor_id: "encoder-record".to_owned(),
-                    source_track_id: "record-source-track".to_owned(),
-                    encoded_track_id: "record-encoded-track".to_owned(),
+                    encoder_processor_id: ProcessorId::new("encoder-record"),
+                    source_track_id: TrackId::new("record-source-track"),
+                    encoded_track_id: TrackId::new("record-encoded-track"),
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
-                writer_processor_id: "writer".to_owned(),
+                writer_processor_id: ProcessorId::new("writer"),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
             .expect("record activation must succeed");
@@ -2008,15 +2009,15 @@ mod tests {
         let mut input_registry = input_registry();
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_ids: vec!["source".to_owned()],
+                source_processor_ids: vec![ProcessorId::new("source")],
                 video: Some(ObswsRecordTrackRun {
-                    encoder_processor_id: "encoder".to_owned(),
-                    source_track_id: "source-track".to_owned(),
-                    encoded_track_id: "encoded-track".to_owned(),
+                    encoder_processor_id: ProcessorId::new("encoder"),
+                    source_track_id: TrackId::new("source-track"),
+                    encoded_track_id: TrackId::new("encoded-track"),
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
-                writer_processor_id: "writer".to_owned(),
+                writer_processor_id: ProcessorId::new("writer"),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
             .expect("record activation must succeed");

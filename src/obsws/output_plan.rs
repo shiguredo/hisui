@@ -1,12 +1,13 @@
 use crate::obsws::source::{self, ObswsOutputKind, ObswsRecordSourcePlan};
 use crate::obsws_input_registry::ObswsInputEntry;
+use crate::{ProcessorId, TrackId};
 
 pub struct ObswsComposedOutputPlan {
     pub source_plans: Vec<ObswsRecordSourcePlan>,
-    pub source_processor_ids: Vec<String>,
-    pub source_video_track_id: Option<String>,
-    pub source_audio_track_id: Option<String>,
-    pub audio_mixer_processor_id: Option<String>,
+    pub source_processor_ids: Vec<ProcessorId>,
+    pub source_video_track_id: Option<TrackId>,
+    pub source_audio_track_id: Option<TrackId>,
+    pub audio_mixer_processor_id: Option<ProcessorId>,
 }
 
 #[derive(Debug)]
@@ -68,15 +69,19 @@ pub fn build_composed_output_plan(
     }
 
     let source_audio_track_id = if audio_track_ids.len() > 1 {
-        Some(format!(
+        Some(TrackId::new(format!(
             "obsws:{}:{run_id}:mixed_audio",
             output_kind.as_str()
-        ))
+        )))
     } else {
         audio_track_ids.first().cloned()
     };
-    let audio_mixer_processor_id = (audio_track_ids.len() > 1)
-        .then(|| format!("obsws:{}:{run_id}:audio_mixer", output_kind.as_str()));
+    let audio_mixer_processor_id = (audio_track_ids.len() > 1).then(|| {
+        ProcessorId::new(format!(
+            "obsws:{}:{run_id}:audio_mixer",
+            output_kind.as_str()
+        ))
+    });
 
     Ok(ObswsComposedOutputPlan {
         source_processor_ids: source_plans
