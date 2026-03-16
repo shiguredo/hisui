@@ -759,8 +759,12 @@ fn apply_crop(
     let crop_right = crop_right & !1;
     let crop_bottom = crop_bottom & !1;
 
-    let effective_width = size.width.saturating_sub(crop_left + crop_right);
-    let effective_height = size.height.saturating_sub(crop_top + crop_bottom);
+    let effective_width = size
+        .width
+        .saturating_sub(crop_left.saturating_add(crop_right));
+    let effective_height = size
+        .height
+        .saturating_sub(crop_top.saturating_add(crop_bottom));
 
     // クロップ後のサイズが不正な場合はスキップ
     if effective_width < 2 || effective_height < 2 {
