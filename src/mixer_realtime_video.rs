@@ -194,7 +194,23 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
         let width: Option<EvenUsize> = value.to_member("width")?.try_into()?;
         let height: Option<EvenUsize> = value.to_member("height")?.try_into()?;
         let scale_x: Option<f64> = value.to_member("scaleX")?.try_into()?;
+        if let Some(sx) = scale_x {
+            if !sx.is_finite() || sx <= 0.0 {
+                return Err(value
+                    .to_member("scaleX")?
+                    .required()?
+                    .invalid("scaleX must be a positive finite number"));
+            }
+        }
         let scale_y: Option<f64> = value.to_member("scaleY")?.try_into()?;
+        if let Some(sy) = scale_y {
+            if !sy.is_finite() || sy <= 0.0 {
+                return Err(value
+                    .to_member("scaleY")?
+                    .required()?
+                    .invalid("scaleY must be a positive finite number"));
+            }
+        }
         let crop_top: Option<usize> = value.to_member("cropTop")?.try_into()?;
         let crop_bottom: Option<usize> = value.to_member("cropBottom")?.try_into()?;
         let crop_left: Option<usize> = value.to_member("cropLeft")?.try_into()?;
@@ -852,6 +868,14 @@ fn apply_crop(
     ))?))
 }
 
+/// クロップ値が指定されているかどうかを判定する
+fn has_crop(input_track: &InputTrack) -> bool {
+    input_track.crop_top != 0
+        || input_track.crop_bottom != 0
+        || input_track.crop_left != 0
+        || input_track.crop_right != 0
+}
+
 /// ソースフレームサイズにスケール係数を乗算して偶数に丸める
 fn scale_to_even(source_size: usize, scale: f64) -> usize {
     let scaled = (source_size as f64 * scale).round() as usize;
@@ -885,7 +909,14 @@ fn compose_frame(
 
         // クロップ適用: ソースフレームからクロップ領域を切り出す
         let source_frame = apply_crop(&current.frame, &state.input_track)?;
-        let source_frame_ref = source_frame.as_ref().unwrap_or(&current.frame);
+        let source_frame_ref = if let Some(ref cropped) = source_frame {
+            cropped
+        } else if has_crop(&state.input_track) {
+            // クロップ量が過大でクロップ後サイズが不正 → 描画をスキップ
+            continue;
+        } else {
+            &current.frame
+        };
 
         // ターゲットサイズの決定:
         // 1. width/height が明示されていればそれを使う
