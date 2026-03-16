@@ -299,6 +299,8 @@ struct VideoRealtimeMixerStats {
     current_canvas_height: crate::stats::StatsGauge,
     current_frame_rate_numerator: crate::stats::StatsGauge,
     current_frame_rate_denumerator: crate::stats::StatsGauge,
+    total_crop_skipped_draw_count: crate::stats::StatsCounter,
+    total_resize_skipped_draw_count: crate::stats::StatsCounter,
 }
 
 impl VideoRealtimeMixerStats {
@@ -309,6 +311,8 @@ impl VideoRealtimeMixerStats {
             current_canvas_height: stats.gauge("current_canvas_height"),
             current_frame_rate_numerator: stats.gauge("current_frame_rate_numerator"),
             current_frame_rate_denumerator: stats.gauge("current_frame_rate_denumerator"),
+            total_crop_skipped_draw_count: stats.counter("total_crop_skipped_draw_count"),
+            total_resize_skipped_draw_count: stats.counter("total_resize_skipped_draw_count"),
         }
     }
 
@@ -383,6 +387,7 @@ impl VideoRealtimeMixerRunner {
             timestamp,
             &self.draw_order,
             &self.states,
+            Some(&self.stats),
         )?;
 
         if !self.output_tx.send_video(frame) {
@@ -877,6 +882,7 @@ fn compose_frame(
     timestamp: Duration,
     draw_order: &[DrawOrder],
     states: &HashMap<TrackId, InputTrackState>,
+    stats: Option<&VideoRealtimeMixerStats>,
 ) -> crate::Result<VideoFrame> {
     let mut canvas = RealtimeI420Canvas::new(canvas_width, canvas_height);
 
@@ -897,6 +903,9 @@ fn compose_frame(
             cropped
         } else if has_crop(&state.input_track) {
             // クロップ量が過大でクロップ後サイズが不正 → 描画をスキップ
+            if let Some(stats) = stats {
+                stats.total_crop_skipped_draw_count.inc();
+            }
             continue;
         } else {
             &current.frame
@@ -930,10 +939,11 @@ fn compose_frame(
         let resize_width = EvenUsize::truncating_new(target_width);
         let resize_height = EvenUsize::truncating_new(target_height);
         if resize_width.get() == 0 || resize_height.get() == 0 {
-            return Err(Error::new(format!(
-                "invalid target size: width={} height={}",
-                target_width, target_height
-            )));
+            // スケール後サイズが 0 → 描画をスキップ
+            if let Some(stats) = stats {
+                stats.total_resize_skipped_draw_count.inc();
+            }
+            continue;
         }
 
         let resized = source_frame_ref
@@ -1848,7 +1858,7 @@ mod tests {
         let mut states = HashMap::new();
         states.insert(track_id, state);
 
-        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states)?;
+        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states, None)?;
 
         assert_eq!(frame.format, VideoFormat::I420);
         assert_eq!(frame.data[0], 100);
