@@ -443,7 +443,7 @@ impl std::ops::Mul<usize> for EvenUsize {
 /// 正の有限な f64 のための構造体
 ///
 /// 正の有限値のみを保持するため、NaN や無限が存在せず全順序が成立する。
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PositiveFiniteF64(f64);
 
 // 正の有限値のみを保持するため、PartialEq の反射律が成立する
@@ -452,6 +452,12 @@ impl Eq for PositiveFiniteF64 {}
 impl Ord for PositiveFiniteF64 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0.total_cmp(&other.0)
+    }
+}
+
+impl PartialOrd for PositiveFiniteF64 {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
