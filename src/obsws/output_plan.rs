@@ -1,5 +1,6 @@
 use crate::obsws::source::{self, ObswsOutputKind, ObswsRecordSourcePlan};
 use crate::obsws_input_registry::ObswsSceneInputEntry;
+use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
 pub struct ObswsComposedOutputPlan {
@@ -21,8 +22,8 @@ pub struct ObswsVideoMixerInputTrack {
     pub z: i64,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    pub scale_x: Option<f64>,
-    pub scale_y: Option<f64>,
+    pub scale_x: Option<PositiveFiniteF64>,
+    pub scale_y: Option<PositiveFiniteF64>,
     pub crop_top: u32,
     pub crop_bottom: u32,
     pub crop_left: u32,
@@ -135,12 +136,12 @@ pub fn build_composed_output_plan(
                         None
                     };
                     // scale_x / scale_y は 1.0 以外の場合のみミキサーに渡す
-                    let scale_x = if transform.scale_x != 1.0 {
+                    let scale_x = if transform.scale_x != PositiveFiniteF64::ONE {
                         Some(transform.scale_x)
                     } else {
                         None
                     };
-                    let scale_y = if transform.scale_y != 1.0 {
+                    let scale_y = if transform.scale_y != PositiveFiniteF64::ONE {
                         Some(transform.scale_y)
                     } else {
                         None

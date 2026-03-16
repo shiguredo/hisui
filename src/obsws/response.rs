@@ -820,8 +820,8 @@ fn parse_scene_item_transform_patch(
             .to_member("positionY")?
             .try_into()?,
         rotation: raw_scene_item_transform.to_member("rotation")?.try_into()?,
-        scale_x: validate_positive_finite(raw_scene_item_transform, "scaleX")?,
-        scale_y: validate_positive_finite(raw_scene_item_transform, "scaleY")?,
+        scale_x: raw_scene_item_transform.to_member("scaleX")?.try_into()?,
+        scale_y: raw_scene_item_transform.to_member("scaleY")?.try_into()?,
         alignment,
         bounds_type,
         bounds_alignment,
@@ -843,25 +843,6 @@ fn parse_scene_item_transform_patch(
             .to_member("cropToBounds")?
             .try_into()?,
     })
-}
-
-/// scaleX / scaleY のバリデーション: 正の有限値のみ許可する
-fn validate_positive_finite(
-    transform: nojson::RawJsonValue<'_, '_>,
-    field_name: &str,
-) -> Result<Option<f64>, nojson::JsonParseError> {
-    let value: Option<f64> = transform.to_member(field_name)?.try_into()?;
-    if let Some(v) = value {
-        if !v.is_finite() || v <= 0.0 {
-            return Err(transform
-                .to_member(field_name)?
-                .required()?
-                .invalid(format!(
-                    "Invalid sceneItemTransform.{field_name} field: must be a positive finite number"
-                )));
-        }
-    }
-    Ok(value)
 }
 
 fn is_valid_scene_item_alignment(alignment: i64) -> bool {

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
 pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 3] =
@@ -342,8 +343,8 @@ pub struct ObswsSceneItemTransform {
     pub position_x: f64,
     pub position_y: f64,
     pub rotation: f64,
-    pub scale_x: f64,
-    pub scale_y: f64,
+    pub scale_x: PositiveFiniteF64,
+    pub scale_y: PositiveFiniteF64,
     pub alignment: i64,
     pub bounds_type: String,
     pub bounds_alignment: i64,
@@ -366,8 +367,8 @@ impl Default for ObswsSceneItemTransform {
             position_x: 0.0,
             position_y: 0.0,
             rotation: 0.0,
-            scale_x: 1.0,
-            scale_y: 1.0,
+            scale_x: PositiveFiniteF64::ONE,
+            scale_y: PositiveFiniteF64::ONE,
             alignment: 0,
             bounds_type: "OBS_BOUNDS_NONE".to_owned(),
             bounds_alignment: 0,
@@ -418,8 +419,8 @@ pub struct ObswsSceneItemTransformPatch {
     pub position_x: Option<f64>,
     pub position_y: Option<f64>,
     pub rotation: Option<f64>,
-    pub scale_x: Option<f64>,
-    pub scale_y: Option<f64>,
+    pub scale_x: Option<PositiveFiniteF64>,
+    pub scale_y: Option<PositiveFiniteF64>,
     pub alignment: Option<i64>,
     pub bounds_type: Option<String>,
     pub bounds_alignment: Option<i64>,

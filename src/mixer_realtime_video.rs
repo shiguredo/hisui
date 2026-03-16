@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     Error, MediaFrame, Message, ProcessorHandle, TrackId,
-    types::EvenUsize,
+    types::{EvenUsize, PositiveFiniteF64},
     video::{FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
@@ -137,8 +137,8 @@ pub struct InputTrack {
     pub z: isize,
     pub width: Option<EvenUsize>,
     pub height: Option<EvenUsize>,
-    pub scale_x: Option<f64>,
-    pub scale_y: Option<f64>,
+    pub scale_x: Option<PositiveFiniteF64>,
+    pub scale_y: Option<PositiveFiniteF64>,
     pub crop_top: usize,
     pub crop_bottom: usize,
     pub crop_left: usize,
@@ -193,24 +193,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
         let z: Option<isize> = value.to_member("z")?.try_into()?;
         let width: Option<EvenUsize> = value.to_member("width")?.try_into()?;
         let height: Option<EvenUsize> = value.to_member("height")?.try_into()?;
-        let scale_x: Option<f64> = value.to_member("scaleX")?.try_into()?;
-        if let Some(sx) = scale_x {
-            if !sx.is_finite() || sx <= 0.0 {
-                return Err(value
-                    .to_member("scaleX")?
-                    .required()?
-                    .invalid("scaleX must be a positive finite number"));
-            }
-        }
-        let scale_y: Option<f64> = value.to_member("scaleY")?.try_into()?;
-        if let Some(sy) = scale_y {
-            if !sy.is_finite() || sy <= 0.0 {
-                return Err(value
-                    .to_member("scaleY")?
-                    .required()?
-                    .invalid("scaleY must be a positive finite number"));
-            }
-        }
+        let scale_x: Option<PositiveFiniteF64> = value.to_member("scaleX")?.try_into()?;
+        let scale_y: Option<PositiveFiniteF64> = value.to_member("scaleY")?.try_into()?;
         let crop_top: Option<usize> = value.to_member("cropTop")?.try_into()?;
         let crop_bottom: Option<usize> = value.to_member("cropBottom")?.try_into()?;
         let crop_left: Option<usize> = value.to_member("cropLeft")?.try_into()?;
@@ -523,8 +507,8 @@ struct InputTrackState {
     input_track: InputTrack,
     target_width: Option<EvenUsize>,
     target_height: Option<EvenUsize>,
-    scale_x: Option<f64>,
-    scale_y: Option<f64>,
+    scale_x: Option<PositiveFiniteF64>,
+    scale_y: Option<PositiveFiniteF64>,
     first_input_sample_timestamp: Option<Duration>,
     first_input_elapsed: Option<Duration>,
     pending_frames: VecDeque<PendingVideoFrame>,
@@ -925,14 +909,14 @@ fn compose_frame(
         let target_width = if let Some(w) = state.target_width {
             w.get()
         } else if let Some(sx) = state.scale_x {
-            scale_to_even(source_frame_ref.size().width, sx)
+            scale_to_even(source_frame_ref.size().width, sx.get())
         } else {
             source_frame_ref.size().width
         };
         let target_height = if let Some(h) = state.target_height {
             h.get()
         } else if let Some(sy) = state.scale_y {
-            scale_to_even(source_frame_ref.size().height, sy)
+            scale_to_even(source_frame_ref.size().height, sy.get())
         } else {
             source_frame_ref.size().height
         };
