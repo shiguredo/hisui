@@ -968,4 +968,5 @@ pub struct ObswsInputRegistry {
     pub(crate) record_runtime: ObswsRecordRuntimeState,
     pub(crate) canvas_width: crate::types::EvenUsize,
     pub(crate) canvas_height: crate::types::EvenUsize,
+    pub(crate) frame_rate: crate::video::FrameRate,
 }

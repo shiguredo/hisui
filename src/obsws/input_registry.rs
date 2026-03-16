@@ -17,6 +17,7 @@ impl ObswsInputRegistry {
         record_directory: PathBuf,
         canvas_width: crate::types::EvenUsize,
         canvas_height: crate::types::EvenUsize,
+        frame_rate: crate::video::FrameRate,
     ) -> Self {
         let mut scenes_by_name = BTreeMap::new();
         scenes_by_name.insert(
@@ -46,6 +47,7 @@ impl ObswsInputRegistry {
             record_runtime: ObswsRecordRuntimeState::default(),
             canvas_width,
             canvas_height,
+            frame_rate,
         }
     }
 
@@ -55,6 +57,7 @@ impl ObswsInputRegistry {
             PathBuf::from("recordings-for-test"),
             crate::types::EvenUsize::new(1920).unwrap(),
             crate::types::EvenUsize::new(1080).unwrap(),
+            crate::video::FrameRate::FPS_30,
         )
     }
 
@@ -479,6 +482,10 @@ impl ObswsInputRegistry {
 
     pub fn canvas_height(&self) -> crate::types::EvenUsize {
         self.canvas_height
+    }
+
+    pub fn frame_rate(&self) -> crate::video::FrameRate {
+        self.frame_rate
     }
 
     pub fn resolve_scene_name(

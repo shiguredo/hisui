@@ -1404,6 +1404,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
         temp_dir.path().to_path_buf(),
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
+        crate::video::FrameRate::FPS_30,
     )));
     {
         let mut registry = input_registry.write().await;
@@ -1487,6 +1488,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         temp_dir.path().to_path_buf(),
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
+        crate::video::FrameRate::FPS_30,
     )));
     {
         let mut registry = input_registry.write().await;

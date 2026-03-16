@@ -994,6 +994,7 @@ mod tests {
             std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
             crate::types::EvenUsize::new(1920).unwrap(),
             crate::types::EvenUsize::new(1080).unwrap(),
+            crate::video::FrameRate::FPS_30,
         );
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
@@ -1936,6 +1937,7 @@ mod tests {
             std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
             crate::types::EvenUsize::new(1920).unwrap(),
             crate::types::EvenUsize::new(1080).unwrap(),
+            crate::video::FrameRate::FPS_30,
         );
         let request = RequestMessage {
             request_id: Some("req-get-record-directory".to_owned()),
@@ -1964,6 +1966,7 @@ mod tests {
             std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
             crate::types::EvenUsize::new(1920).unwrap(),
             crate::types::EvenUsize::new(1080).unwrap(),
+            crate::video::FrameRate::FPS_30,
         );
         let request = RequestMessage {
             request_id: Some("req-set-record-directory".to_owned()),

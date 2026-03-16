@@ -13,6 +13,7 @@ pub struct ObswsComposedOutputPlan {
     pub video_mixer_input_tracks: Vec<ObswsVideoMixerInputTrack>,
     pub canvas_width: crate::types::EvenUsize,
     pub canvas_height: crate::types::EvenUsize,
+    pub frame_rate: crate::video::FrameRate,
 }
 
 pub struct ObswsVideoMixerInputTrack {
@@ -63,6 +64,7 @@ pub fn build_composed_output_plan(
     run_id: u64,
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
+    frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsComposedOutputPlan, BuildObswsComposedOutputPlanError> {
     if scene_inputs.is_empty() {
         return Err(BuildObswsComposedOutputPlanError::NoEnabledInputs);
@@ -70,9 +72,14 @@ pub fn build_composed_output_plan(
 
     let mut source_plans = Vec::with_capacity(scene_inputs.len());
     for (source_index, scene_input) in scene_inputs.iter().enumerate() {
-        let source_plan =
-            source::build_record_source_plan(&scene_input.input, output_kind, run_id, source_index)
-                .map_err(BuildObswsComposedOutputPlanError::Source)?;
+        let source_plan = source::build_record_source_plan(
+            &scene_input.input,
+            output_kind,
+            run_id,
+            source_index,
+            frame_rate,
+        )
+        .map_err(BuildObswsComposedOutputPlanError::Source)?;
         source_plans.push(source_plan);
     }
 
@@ -185,5 +192,6 @@ pub fn build_composed_output_plan(
         video_mixer_input_tracks,
         canvas_width,
         canvas_height,
+        frame_rate,
     })
 }

@@ -43,6 +43,7 @@ pub async fn run_server(
     pipeline_config: crate::MediaPipelineConfig,
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
+    frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
     let ws_listen_addr = SocketAddr::new(ws_host, ws_port);
     let ws_listener = TcpListener::bind(ws_listen_addr)
@@ -59,6 +60,7 @@ pub async fn run_server(
         default_record_dir,
         canvas_width,
         canvas_height,
+        frame_rate,
     )));
 
     let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;

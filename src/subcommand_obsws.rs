@@ -62,6 +62,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .default("1080")
         .take(&mut args)
         .then(|o| o.value().parse())?;
+    let frame_rate: crate::video::FrameRate = noargs::opt("frame-rate")
+        .ty("FRAME_RATE")
+        .env("HISUI_OBSWS_FRAME_RATE")
+        .doc("映像のフレームレート")
+        .default("30")
+        .take(&mut args)
+        .then(|o| o.value().parse())?;
 
     if let Some(help) = args.finish()? {
         print!("{help}");
@@ -78,6 +85,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         openh264,
         canvas_width,
         canvas_height,
+        frame_rate,
     )
     .map_err(noargs::Error::from)
 }
@@ -93,6 +101,7 @@ fn run_internal(
     openh264: Option<PathBuf>,
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
+    frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
@@ -115,6 +124,7 @@ fn run_internal(
             pipeline_config,
             canvas_width,
             canvas_height,
+            frame_rate,
         )
         .await
     })

@@ -34,12 +34,14 @@ impl ObswsSession {
             let run_id = input_registry.next_stream_run_id();
             let canvas_width = input_registry.canvas_width();
             let canvas_height = input_registry.canvas_height();
+            let frame_rate = input_registry.frame_rate();
             let output_plan = match crate::obsws::output_plan::build_composed_output_plan(
                 &scene_inputs,
                 crate::obsws::source::ObswsOutputKind::Stream,
                 run_id,
                 canvas_width,
                 canvas_height,
+                frame_rate,
             ) {
                 Ok(output_plan) => output_plan,
                 Err(error) => {
@@ -178,12 +180,14 @@ impl ObswsSession {
             let run_id = input_registry.next_record_run_id();
             let canvas_width = input_registry.canvas_width();
             let canvas_height = input_registry.canvas_height();
+            let frame_rate = input_registry.frame_rate();
             let output_plan = match crate::obsws::output_plan::build_composed_output_plan(
                 &scene_inputs,
                 crate::obsws::source::ObswsOutputKind::Record,
                 run_id,
                 canvas_width,
                 canvas_height,
+                frame_rate,
             ) {
                 Ok(output_plan) => output_plan,
                 Err(error) => {
@@ -550,7 +554,7 @@ impl ObswsSession {
                 nojson::object(|f| {
                     f.member("canvasWidth", output_plan.canvas_width)?;
                     f.member("canvasHeight", output_plan.canvas_height)?;
-                    f.member("frameRate", 30)?;
+                    f.member("frameRate", output_plan.frame_rate)?;
                     f.member(
                         "inputTracks",
                         nojson::array(|f| {
@@ -681,7 +685,7 @@ impl ObswsSession {
                         f.member("outputTrackId", &video.encoded_track_id)?;
                         f.member("codec", "H264")?;
                         f.member("bitrateBps", 2_000_000)?;
-                        f.member("frameRate", 30)?;
+                        f.member("frameRate", output_plan.frame_rate)?;
                         f.member("processorId", &video.encoder_processor_id)
                     }),
                 )
@@ -783,7 +787,7 @@ impl ObswsSession {
                         f.member("outputTrackId", &video.encoded_track_id)?;
                         f.member("codec", "H264")?;
                         f.member("bitrateBps", 2_000_000)?;
-                        f.member("frameRate", 30)?;
+                        f.member("frameRate", output_plan.frame_rate)?;
                         f.member("processorId", &video.encoder_processor_id)
                     }),
                 )
