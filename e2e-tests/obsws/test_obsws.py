@@ -3344,6 +3344,8 @@ def test_obsws_start_record_with_multiple_audio_inputs(
 
     inspect_output = _inspect_mp4(binary_path, output_path)
     assert inspect_output["format"] == "mp4"
+    assert inspect_output["audio_codec"] == "AAC"
+    assert inspect_output["audio_sample_count"] > 0
     assert output_path.stat().st_size > 0
 
 
