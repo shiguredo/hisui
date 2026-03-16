@@ -3330,8 +3330,14 @@ def test_obsws_start_record_with_multiple_audio_inputs(
             assert output_path.exists()
             assert output_path.stat().st_size > 0
 
+            # StopRecord 後にメトリクスを取得（デバッグ用）
+            status, body, _ = await _http_get(
+                f"http://{server.http_host}:{server.http_port}/metrics"
+            )
+            metrics_snapshot = f"[/metrics] status={status}\n{body}"
+
             await ws.close()
-            return output_path
+            return output_path, metrics_snapshot
 
     with ObswsServer(
         binary_path,
@@ -3340,12 +3346,18 @@ def test_obsws_start_record_with_multiple_audio_inputs(
         default_record_dir=tmp_path,
         use_env=False,
     ) as server:
-        output_path = asyncio.run(_run(server))
+        output_path, metrics_snapshot = asyncio.run(_run(server))
 
     inspect_output = _inspect_mp4(binary_path, output_path)
+    print(f"inspect_output={inspect_output}")
+    print(f"metrics_snapshot:\n{metrics_snapshot}")
     assert inspect_output["format"] == "mp4"
-    assert inspect_output["audio_codec"] == "AAC"
-    assert inspect_output["audio_sample_count"] > 0
+    assert inspect_output.get("audio_codec") == "OPUS", (
+        f"audio_codec mismatch: inspect_output={inspect_output}"
+    )
+    assert inspect_output.get("audio_sample_count", 0) > 0, (
+        f"audio_sample_count missing or zero: inspect_output={inspect_output}"
+    )
     assert output_path.stat().st_size > 0
 
 

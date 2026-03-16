@@ -856,38 +856,84 @@ impl ObswsSession {
         Ok(())
     }
 
+    /// ソース → ミキサー → エンコーダー → パブリッシャーの順に段階的に停止する。
     pub(super) async fn stop_stream_processors(&self, run: &ObswsStreamRun) -> crate::Result<()> {
-        let mut processor_ids = vec![crate::ProcessorId::new(run.publisher_processor_id.clone())];
-        if let Some(video) = &run.video {
-            processor_ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+        // 1. ソースを停止
+        {
+            let ids: Vec<_> = run
+                .source_processor_ids
+                .iter()
+                .map(|id| crate::ProcessorId::new(id.clone()))
+                .collect();
+            self.stop_processors(&ids).await?;
         }
-        if let Some(audio) = &run.audio {
-            processor_ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+
+        // 2. ミキサーを停止
+        if let Some(mixer_id) = &run.audio_mixer_processor_id {
+            self.stop_processors(&[crate::ProcessorId::new(mixer_id.clone())])
+                .await?;
         }
-        if let Some(audio_mixer_processor_id) = &run.audio_mixer_processor_id {
-            processor_ids.push(crate::ProcessorId::new(audio_mixer_processor_id.clone()));
+
+        // 3. エンコーダーを停止
+        {
+            let mut ids = Vec::new();
+            if let Some(video) = &run.video {
+                ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+            }
+            if let Some(audio) = &run.audio {
+                ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+            }
+            if !ids.is_empty() {
+                self.stop_processors(&ids).await?;
+            }
         }
-        for source_processor_id in &run.source_processor_ids {
-            processor_ids.push(crate::ProcessorId::new(source_processor_id.clone()));
-        }
-        self.stop_processors(&processor_ids).await
+
+        // 4. パブリッシャーを停止
+        self.stop_processors(&[crate::ProcessorId::new(run.publisher_processor_id.clone())])
+            .await?;
+
+        Ok(())
     }
 
+    /// ソース → ミキサー → エンコーダー → ライターの順に段階的に停止する。
+    /// EOS がパイプラインを伝播してから次の段階を停止することで、
+    /// MP4 writer の finalize が確実に完了するようにする。
     pub(super) async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
-        let mut processor_ids = vec![crate::ProcessorId::new(run.writer_processor_id.clone())];
-        if let Some(video) = &run.video {
-            processor_ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+        // 1. ソースを停止（データ生産を止める）
+        {
+            let ids: Vec<_> = run
+                .source_processor_ids
+                .iter()
+                .map(|id| crate::ProcessorId::new(id.clone()))
+                .collect();
+            self.stop_processors(&ids).await?;
         }
-        if let Some(audio) = &run.audio {
-            processor_ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+
+        // 2. ミキサーを停止（EOS をエンコーダーに伝播）
+        if let Some(mixer_id) = &run.audio_mixer_processor_id {
+            self.stop_processors(&[crate::ProcessorId::new(mixer_id.clone())])
+                .await?;
         }
-        if let Some(audio_mixer_processor_id) = &run.audio_mixer_processor_id {
-            processor_ids.push(crate::ProcessorId::new(audio_mixer_processor_id.clone()));
+
+        // 3. エンコーダーを停止（EOS をライターに伝播）
+        {
+            let mut ids = Vec::new();
+            if let Some(video) = &run.video {
+                ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+            }
+            if let Some(audio) = &run.audio {
+                ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+            }
+            if !ids.is_empty() {
+                self.stop_processors(&ids).await?;
+            }
         }
-        for source_processor_id in &run.source_processor_ids {
-            processor_ids.push(crate::ProcessorId::new(source_processor_id.clone()));
-        }
-        self.stop_processors(&processor_ids).await
+
+        // 4. ライターを停止（finalize を完了させる）
+        self.stop_processors(&[crate::ProcessorId::new(run.writer_processor_id.clone())])
+            .await?;
+
+        Ok(())
     }
 
     pub(super) async fn stop_processors(
