@@ -32,6 +32,7 @@ fn request_path(uri: &str) -> &str {
     uri.split_once('?').map_or(uri, |(path, _)| path)
 }
 
+#[expect(clippy::too_many_arguments)]
 pub async fn run_server(
     ws_host: IpAddr,
     ws_port: u16,
@@ -40,6 +41,8 @@ pub async fn run_server(
     password: Option<String>,
     default_record_dir: PathBuf,
     pipeline_config: crate::MediaPipelineConfig,
+    canvas_width: u32,
+    canvas_height: u32,
 ) -> crate::Result<()> {
     let ws_listen_addr = SocketAddr::new(ws_host, ws_port);
     let ws_listener = TcpListener::bind(ws_listen_addr)
@@ -52,7 +55,11 @@ pub async fn run_server(
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws http listener: {e}")))?;
     tracing::info!("obsws http server listening on http://{http_listen_addr}");
-    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(default_record_dir)));
+    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
+        default_record_dir,
+        canvas_width,
+        canvas_height,
+    )));
 
     let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
     let pipeline_handle = pipeline.handle();

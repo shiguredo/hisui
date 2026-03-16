@@ -216,10 +216,11 @@
 
 ### Scene Items
 
-- [ ] `Scene Item` の実描画合成（ 複数 `Scene Item` の合成描画 ）
-- [ ] `sceneItemIndex` の実描画順序への反映
+- [x] `Scene Item` の実描画合成（ 複数 `Scene Item` の合成描画 ）
+  - NOTE: `position` と `scale`（width/height）のみ対応。`rotation`, `crop` は未対応
+- [x] `sceneItemIndex` の実描画順序への反映
 - [ ] `sceneItemBlendMode` の実描画への反映
-- [ ] `sceneItemTransform` の実描画への反映
+- [ ] `sceneItemTransform` の実描画への反映（rotation / crop 部分）
 - [x] `GetSceneItemList`: シーン内アイテム一覧を取得する
 - [ ] `GetGroupSceneItemList`: グループ内アイテム一覧を取得する
 - [x] `GetSceneItemId`: ソース名からシーンアイテム ID を取得する
@@ -241,7 +242,8 @@
 - [x] `GetSceneItemBlendMode`: シーンアイテム合成モードを取得する
 - [x] `SetSceneItemBlendMode`: シーンアイテム合成モードを設定する
   - NOTE: 現時点では blend mode 変更イベントは配信しない
-  - NOTE: `Get/SetSceneItemLocked` / `Get/SetSceneItemIndex` / `Get/SetSceneItemBlendMode` / `Get/SetSceneItemTransform` は現時点で状態保持と `Event` 配信のみ対応し、実際の映像出力には反映しない
+  - NOTE: `Get/SetSceneItemLocked` / `Get/SetSceneItemBlendMode` は現時点で状態保持と `Event` 配信のみ対応し、実際の映像出力には反映しない
+  - NOTE: `sceneItemTransform` の `rotation` / `crop` および `sceneItemBlendMode` は状態保持のみで実映像出力には未反映
 
 ### Outputs
 
@@ -294,9 +296,10 @@
   - NOTE: 現在状態に応じて `StartStream` または `StopStream` 相当の処理を内部で実行する
   - NOTE: 成功時の `responseData` には `outputActive` を返す
 - [x] `StartStream`: 配信を開始する
-  - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
-  - NOTE: 現時点の入力対応は `image_source` のみ
+  - NOTE: 複数映像入力に対応（`position` と `scale` のみ。`rotation`, `crop`, `blend mode` は未対応）
+  - NOTE: 現時点の入力対応は `image_source` と `mp4_file_source`
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を起動する
+  - NOTE: 複数映像入力時は `createVideoMixer` を追加で起動する
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す
 - [x] `StopStream`: 配信を停止する
   - NOTE: 内部で起動した stream 用 processor を停止する
@@ -320,9 +323,10 @@
   - NOTE: 現在状態に応じて `StartRecord` または `StopRecord` 相当の処理を内部で実行する
   - NOTE: 成功時の `responseData` には `outputActive` を返す
 - [x] `StartRecord`: 録画を開始する
-  - NOTE: 現時点は Program Scene の有効入力が 1 つのときのみ開始できる
-  - NOTE: 現時点の入力対応は `image_source` のみ
+  - NOTE: 複数映像入力に対応（`position` と `scale` のみ。`rotation`, `crop`, `blend mode` は未対応）
+  - NOTE: 現時点の入力対応は `image_source` と `mp4_file_source`
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createMp4Writer` を起動する
+  - NOTE: 複数映像入力時は `createVideoMixer` を追加で起動する
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す
 - [x] `StopRecord`: 録画を停止する
   - NOTE: 内部で起動した record 用 processor を停止する

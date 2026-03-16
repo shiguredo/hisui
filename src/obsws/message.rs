@@ -988,8 +988,11 @@ mod tests {
             request_data: Some(request_data(r#"{"outputName":"record"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry =
-            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let mut input_registry = ObswsInputRegistry::new(
+            std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
+            1920,
+            1080,
+        );
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(&response.message)?;
@@ -1060,6 +1063,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 publisher_processor_id: ProcessorId::new("publisher"),
             })
             .expect("stream activation must succeed");
@@ -1132,6 +1136,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: output_path.clone(),
             })
@@ -1289,6 +1294,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 publisher_processor_id: ProcessorId::new("publisher"),
             })
             .expect("stream activation must succeed");
@@ -1302,6 +1308,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
@@ -1923,8 +1930,11 @@ mod tests {
     fn handle_request_message_returns_get_record_directory_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry =
-            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let mut input_registry = ObswsInputRegistry::new(
+            std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
+            1920,
+            1080,
+        );
         let request = RequestMessage {
             request_id: Some("req-get-record-directory".to_owned()),
             request_type: Some("GetRecordDirectory".to_owned()),
@@ -1948,8 +1958,11 @@ mod tests {
     fn handle_request_message_returns_set_record_directory_response()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry =
-            ObswsInputRegistry::new(std::path::PathBuf::from("/tmp/hisui-obsws-recordings"));
+        let mut input_registry = ObswsInputRegistry::new(
+            std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
+            1920,
+            1080,
+        );
         let request = RequestMessage {
             request_id: Some("req-set-record-directory".to_owned()),
             request_type: Some("SetRecordDirectory".to_owned()),
@@ -2017,6 +2030,7 @@ mod tests {
                 }),
                 audio: None,
                 audio_mixer_processor_id: None,
+                video_mixer_processor_id: None,
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })

@@ -1402,6 +1402,8 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
     let temp_dir = tempfile::tempdir()?;
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
         temp_dir.path().to_path_buf(),
+        1920,
+        1080,
     )));
     {
         let mut registry = input_registry.write().await;
@@ -1483,6 +1485,8 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
     let temp_dir = tempfile::tempdir()?;
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
         temp_dir.path().to_path_buf(),
+        1920,
+        1080,
     )));
     {
         let mut registry = input_registry.write().await;
@@ -1583,7 +1587,8 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
 }
 
 #[tokio::test]
-async fn start_record_with_multiple_video_inputs_returns_error_response() {
+async fn start_record_with_multiple_video_inputs_builds_plan_successfully() {
+    // 複数映像入力は受理されるが、パイプラインがないため実行時エラーになる
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()));
     {
         let mut registry = input_registry.write().await;
@@ -1619,8 +1624,9 @@ async fn start_record_with_multiple_video_inputs_returns_error_response() {
         panic!("must be SendText");
     };
     let (result, code) = parse_request_status(&text);
+    // プラン構築は成功するが、パイプラインがないため実行時エラーになる
     assert!(!result);
-    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+    assert_eq!(code, REQUEST_STATUS_REQUEST_PROCESSING_FAILED);
 }
 
 #[tokio::test]
@@ -1713,7 +1719,8 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
 }
 
 #[tokio::test]
-async fn start_stream_with_multiple_video_inputs_returns_error_response() {
+async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
+    // 複数映像入力は受理されるが、パイプラインがないため実行時エラーになる
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()));
     {
         let mut registry = input_registry.write().await;
@@ -1754,8 +1761,9 @@ async fn start_stream_with_multiple_video_inputs_returns_error_response() {
         panic!("must be SendText");
     };
     let (result, code) = parse_request_status(&text);
+    // プラン構築は成功するが、パイプラインがないため実行時エラーになる
     assert!(!result);
-    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+    assert_eq!(code, REQUEST_STATUS_REQUEST_PROCESSING_FAILED);
 }
 
 #[tokio::test]

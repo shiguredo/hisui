@@ -48,6 +48,20 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
+    let canvas_width: u32 = noargs::opt("canvas-width")
+        .ty("WIDTH")
+        .env("HISUI_OBSWS_CANVAS_WIDTH")
+        .doc("映像ミキサーのキャンバス幅")
+        .default("1920")
+        .take(&mut args)
+        .then(|o| o.value().parse())?;
+    let canvas_height: u32 = noargs::opt("canvas-height")
+        .ty("HEIGHT")
+        .env("HISUI_OBSWS_CANVAS_HEIGHT")
+        .doc("映像ミキサーのキャンバス高さ")
+        .default("1080")
+        .take(&mut args)
+        .then(|o| o.value().parse())?;
 
     if let Some(help) = args.finish()? {
         print!("{help}");
@@ -62,10 +76,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         password,
         resolve_default_record_dir(default_record_dir)?,
         openh264,
+        canvas_width,
+        canvas_height,
     )
     .map_err(noargs::Error::from)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_internal(
     ws_host: IpAddr,
     ws_port: u16,
@@ -74,6 +91,8 @@ fn run_internal(
     password: Option<String>,
     default_record_dir: PathBuf,
     openh264: Option<PathBuf>,
+    canvas_width: u32,
+    canvas_height: u32,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
@@ -94,6 +113,8 @@ fn run_internal(
             password,
             default_record_dir,
             pipeline_config,
+            canvas_width,
+            canvas_height,
         )
         .await
     })

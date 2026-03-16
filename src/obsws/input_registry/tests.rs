@@ -1224,6 +1224,7 @@ fn stream_runtime_state_changes_on_activate_and_deactivate() {
             }),
             audio: None,
             audio_mixer_processor_id: None,
+            video_mixer_processor_id: None,
             publisher_processor_id: ProcessorId::new("publisher"),
         })
         .expect("stream activation must succeed");
@@ -1251,6 +1252,7 @@ fn record_runtime_state_changes_on_activate_pause_resume_and_deactivate() {
             }),
             audio: None,
             audio_mixer_processor_id: None,
+            video_mixer_processor_id: None,
             writer_processor_id: ProcessorId::new("writer"),
             output_path: PathBuf::from("recordings-for-test/output.mp4"),
         })
@@ -1294,6 +1296,7 @@ fn record_pause_resume_returns_expected_errors() {
             }),
             audio: None,
             audio_mixer_processor_id: None,
+            video_mixer_processor_id: None,
             writer_processor_id: ProcessorId::new("writer"),
             output_path: PathBuf::from("recordings-for-test/output.mp4"),
         })

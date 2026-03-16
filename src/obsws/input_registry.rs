@@ -13,7 +13,7 @@ mod types;
 pub(crate) use self::types::*;
 
 impl ObswsInputRegistry {
-    pub fn new(record_directory: PathBuf) -> Self {
+    pub fn new(record_directory: PathBuf, canvas_width: u32, canvas_height: u32) -> Self {
         let mut scenes_by_name = BTreeMap::new();
         scenes_by_name.insert(
             OBSWS_DEFAULT_SCENE_NAME.to_owned(),
@@ -40,12 +40,14 @@ impl ObswsInputRegistry {
             stream_runtime: ObswsStreamRuntimeState::default(),
             record_directory,
             record_runtime: ObswsRecordRuntimeState::default(),
+            canvas_width,
+            canvas_height,
         }
     }
 
     #[cfg(test)]
     pub fn new_for_test() -> Self {
-        Self::new(PathBuf::from("recordings-for-test"))
+        Self::new(PathBuf::from("recordings-for-test"), 1920, 1080)
     }
 
     pub fn list_inputs(&self) -> Vec<ObswsInputEntry> {
@@ -441,6 +443,34 @@ impl ObswsInputRegistry {
             .filter(|item| item.enabled)
             .filter_map(|item| self.inputs_by_uuid.get(&item.input_uuid).cloned())
             .collect()
+    }
+
+    pub fn list_current_program_scene_input_entries(&self) -> Vec<ObswsSceneInputEntry> {
+        let Some(scene) = self.scenes_by_name.get(&self.current_program_scene_name) else {
+            return Vec::new();
+        };
+        scene
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.enabled)
+            .filter_map(|(index, item)| {
+                let input = self.inputs_by_uuid.get(&item.input_uuid)?.clone();
+                Some(ObswsSceneInputEntry {
+                    input,
+                    scene_item_index: index,
+                    transform: item.transform.clone(),
+                })
+            })
+            .collect()
+    }
+
+    pub fn canvas_width(&self) -> u32 {
+        self.canvas_width
+    }
+
+    pub fn canvas_height(&self) -> u32 {
+        self.canvas_height
     }
 
     pub fn resolve_scene_name(
