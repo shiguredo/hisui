@@ -54,7 +54,7 @@ pub(crate) fn push_i420_frame(
     }
 
     let timestamp_us = i64::try_from(frame.timestamp.as_micros()).unwrap_or(i64::MAX);
-    let webrtc_frame = shiguredo_webrtc::VideoFrame::from_i420(&buffer, timestamp_us);
+    let webrtc_frame = shiguredo_webrtc::VideoFrame::from_i420(&buffer, timestamp_us, 0);
     source.on_frame(&webrtc_frame);
     Ok(())
 }

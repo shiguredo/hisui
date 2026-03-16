@@ -3,10 +3,10 @@ use std::time::{Duration, Instant};
 
 use shiguredo_http11::{Request, Response, uri::Uri};
 use shiguredo_webrtc::{
-    AdaptedVideoTrackSource, CxxString, IceServer, MediaType, PeerConnection,
+    AdaptedVideoTrackSource, CxxString, IceCandidateRef, IceServer, MediaType, PeerConnection,
     PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionObserver,
-    PeerConnectionObserverBuilder, PeerConnectionRtcConfiguration, RtpCodecCapabilityVector,
-    RtpTransceiverDirection, RtpTransceiverInit,
+    PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState,
+    RtpCodecCapabilityVector, RtpTransceiverDirection, RtpTransceiverInit,
 };
 use tokio::io::AsyncWriteExt;
 
@@ -257,6 +257,33 @@ impl nojson::DisplayJson for VideoCodecPreference {
     }
 }
 
+struct WhipPcObserverHandler;
+
+impl PeerConnectionObserverHandler for WhipPcObserverHandler {
+    fn on_connection_change(&mut self, state: PeerConnectionState) {
+        tracing::info!("WHIP PeerConnection state changed: {state:?}");
+    }
+
+    fn on_ice_candidate(&mut self, candidate: IceCandidateRef<'_>) {
+        let sdp_mid = candidate
+            .sdp_mid()
+            .unwrap_or_else(|_| "<unknown>".to_owned());
+        let sdp_mline_index = candidate.sdp_mline_index();
+        match candidate.to_string() {
+            Ok(c) => {
+                tracing::debug!(
+                    "WHIP local ICE candidate gathered: sdpMid={sdp_mid}, sdpMLineIndex={sdp_mline_index}, candidate={c}"
+                );
+            }
+            Err(e) => {
+                tracing::debug!(
+                    "WHIP local ICE candidate gathered: sdpMid={sdp_mid}, sdpMLineIndex={sdp_mline_index}, candidate=<failed to stringify: {e}>"
+                );
+            }
+        }
+    }
+}
+
 struct WhipSession {
     /// `PeerConnectionFactory` のスコープを保持するために参照を持つ
     _factory_bundle: Rc<crate::webrtc_factory::WebRtcFactoryBundle>,
@@ -284,29 +311,7 @@ impl WhipSession {
         let factory_bundle = Rc::new(factory_bundle);
         let factory = factory_bundle.factory();
 
-        let observer = PeerConnectionObserverBuilder::new()
-            .on_connection_change(|state| {
-                tracing::info!("WHIP PeerConnection state changed: {state:?}");
-            })
-            .on_ice_candidate(|candidate| {
-                let sdp_mid = candidate
-                    .sdp_mid()
-                    .unwrap_or_else(|_| "<unknown>".to_owned());
-                let sdp_mline_index = candidate.sdp_mline_index();
-                match candidate.to_string() {
-                    Ok(c) => {
-                        tracing::debug!(
-                            "WHIP local ICE candidate gathered: sdpMid={sdp_mid}, sdpMLineIndex={sdp_mline_index}, candidate={c}"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::debug!(
-                            "WHIP local ICE candidate gathered: sdpMid={sdp_mid}, sdpMLineIndex={sdp_mline_index}, candidate=<failed to stringify: {e}>"
-                        );
-                    }
-                }
-            })
-            .build();
+        let observer = PeerConnectionObserver::new_with_handler(Box::new(WhipPcObserverHandler));
         let mut deps = PeerConnectionDependencies::new(&observer);
         let mut pc_config = PeerConnectionRtcConfiguration::new();
         let mut pc = PeerConnection::create(factory.as_ref(), &mut pc_config, &mut deps)
@@ -489,7 +494,7 @@ fn add_audio_transceiver(
             .name()
             .map_err(|e| Error::new(format!("failed to get audio codec name: {e}")))?;
         if name.eq_ignore_ascii_case("opus") {
-            codecs.push_ref(&codec);
+            codecs.push(&codec);
             break;
         }
     }
@@ -526,7 +531,7 @@ fn select_video_codecs(
                 .map_err(|e| Error::new(format!("failed to get video codec name: {e}")))?
                 .to_ascii_lowercase();
             if name == expected && selected.insert(name) {
-                codecs.push_ref(&codec);
+                codecs.push(&codec);
             }
         }
     }
@@ -541,7 +546,7 @@ fn select_video_codecs(
             .map_err(|e| Error::new(format!("failed to get video codec name: {e}")))?
             .to_ascii_lowercase();
         if name == "rtx" && selected.insert(name) {
-            codecs.push_ref(&codec);
+            codecs.push(&codec);
         }
     }
 

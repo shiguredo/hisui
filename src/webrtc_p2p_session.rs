@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use shiguredo_webrtc::{
-    AdaptedVideoTrackSource, CxxString, DataChannel, DataChannelInit, DataChannelObserverBuilder,
-    PeerConnection, PeerConnectionDependencies, PeerConnectionFactory,
-    PeerConnectionObserverBuilder, PeerConnectionRtcConfiguration, PeerConnectionState,
-    StringVector,
+    AdaptedVideoTrackSource, CxxString, DataChannel, DataChannelInit, DataChannelObserver,
+    DataChannelObserverHandler, PeerConnection, PeerConnectionDependencies, PeerConnectionFactory,
+    PeerConnectionObserver, PeerConnectionObserverHandler, PeerConnectionRtcConfiguration,
+    PeerConnectionState, StringVector,
 };
 use tokio::sync::mpsc;
 
@@ -56,6 +56,45 @@ fn make_offer_json(sdp: &str) -> String {
         f.member("sdp", sdp)
     })
     .to_string()
+}
+
+struct P2pPcObserverHandler {
+    event_tx: mpsc::UnboundedSender<PcEvent>,
+}
+
+impl PeerConnectionObserverHandler for P2pPcObserverHandler {
+    fn on_connection_change(&mut self, state: PeerConnectionState) {
+        let _ = self.event_tx.send(PcEvent::ConnectionChange(state));
+    }
+
+    fn on_data_channel(&mut self, dc: DataChannel) {
+        let _ = self.event_tx.send(PcEvent::DataChannel(dc));
+    }
+}
+
+struct DcMessageHandler {
+    event_tx: mpsc::UnboundedSender<PcEvent>,
+}
+
+impl DataChannelObserverHandler for DcMessageHandler {
+    fn on_message(&mut self, data: &[u8], _is_binary: bool) {
+        let _ = self.event_tx.send(PcEvent::DcMessage {
+            data: data.to_vec(),
+        });
+    }
+}
+
+struct RpcMessageHandler {
+    event_tx: mpsc::UnboundedSender<PcEvent>,
+}
+
+impl DataChannelObserverHandler for RpcMessageHandler {
+    fn on_message(&mut self, data: &[u8], is_binary: bool) {
+        let _ = self.event_tx.send(PcEvent::RpcMessage {
+            data: data.to_vec(),
+            is_binary,
+        });
+    }
 }
 
 struct Session {
@@ -130,14 +169,10 @@ impl WebRtcP2pSessionManager {
                         let label = dc.label().unwrap_or_default();
                         tracing::info!("DataChannel received: label={label}");
                         if label == "signaling" {
-                            let tx = sess.event_tx.clone();
-                            let dc_observer = DataChannelObserverBuilder::new()
-                                .on_message(move |data, _is_binary| {
-                                    let _ = tx.send(PcEvent::DcMessage {
-                                        data: data.to_vec(),
-                                    });
-                                })
-                                .build();
+                            let dc_observer =
+                                DataChannelObserver::new_with_handler(Box::new(DcMessageHandler {
+                                    event_tx: sess.event_tx.clone(),
+                                }));
                             dc.register_observer(&dc_observer);
                             sess.signaling_dc = Some(dc);
                             sess._dc_observer = Some(dc_observer);
@@ -223,16 +258,9 @@ fn bootstrap_internal(
     processor_handle: crate::ProcessorHandle,
 ) -> crate::Result<(String, Session)> {
     // PeerConnectionObserver の作成
-    let event_tx_conn = event_tx.clone();
-    let event_tx_dc = event_tx.clone();
-    let pc_observer = PeerConnectionObserverBuilder::new()
-        .on_connection_change(move |state| {
-            let _ = event_tx_conn.send(PcEvent::ConnectionChange(state));
-        })
-        .on_data_channel(move |dc| {
-            let _ = event_tx_dc.send(PcEvent::DataChannel(dc));
-        })
-        .build();
+    let pc_observer = PeerConnectionObserver::new_with_handler(Box::new(P2pPcObserverHandler {
+        event_tx: event_tx.clone(),
+    }));
 
     let mut deps = PeerConnectionDependencies::new(&pc_observer);
     let mut config = PeerConnectionRtcConfiguration::new();
@@ -256,26 +284,15 @@ fn bootstrap_internal(
         .map_err(|e| crate::Error::new(format!("Failed to create rpc DataChannel: {e}")))?;
 
     // DataChannel に observer を設定
-    let dc_event_tx = event_tx.clone();
-    let dc_observer = DataChannelObserverBuilder::new()
-        .on_message(move |data, _is_binary| {
-            let _ = dc_event_tx.send(PcEvent::DcMessage {
-                data: data.to_vec(),
-            });
-        })
-        .build();
+    let dc_observer = DataChannelObserver::new_with_handler(Box::new(DcMessageHandler {
+        event_tx: event_tx.clone(),
+    }));
     signaling_dc.register_observer(&dc_observer);
 
     // rpc 用 DataChannel に observer を設定
-    let rpc_event_tx = event_tx.clone();
-    let rpc_observer = DataChannelObserverBuilder::new()
-        .on_message(move |data, is_binary| {
-            let _ = rpc_event_tx.send(PcEvent::RpcMessage {
-                data: data.to_vec(),
-                is_binary,
-            });
-        })
-        .build();
+    let rpc_observer = DataChannelObserver::new_with_handler(Box::new(RpcMessageHandler {
+        event_tx: event_tx.clone(),
+    }));
     rpc_dc.register_observer(&rpc_observer);
 
     crate::webrtc_sdp::set_remote_offer(&pc, offer_sdp)?;

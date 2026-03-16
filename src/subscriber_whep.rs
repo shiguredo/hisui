@@ -5,8 +5,9 @@ use std::time::Duration;
 use shiguredo_http11::{Request, Response, uri::Uri};
 use shiguredo_webrtc::{
     MediaType, PeerConnection, PeerConnectionDependencies, PeerConnectionObserver,
-    PeerConnectionObserverBuilder, PeerConnectionRtcConfiguration, PeerConnectionState,
-    RtpTransceiverDirection, RtpTransceiverInit, VideoSink, VideoSinkBuilder, VideoSinkWants,
+    PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState,
+    RtpReceiver, RtpTransceiver, RtpTransceiverDirection, RtpTransceiverInit, VideoSink,
+    VideoSinkHandler, VideoSinkWants,
 };
 use tokio::io::AsyncWriteExt;
 
@@ -122,6 +123,95 @@ struct AttachedVideoTrackState {
     current_track: Option<shiguredo_webrtc::VideoTrack>,
 }
 
+struct WhepVideoSinkHandler {
+    frame_tx: tokio::sync::mpsc::UnboundedSender<crate::VideoFrame>,
+}
+
+impl VideoSinkHandler for WhepVideoSinkHandler {
+    fn on_frame(&mut self, frame: shiguredo_webrtc::VideoFrameRef<'_>) {
+        match convert_webrtc_video_frame_to_i420(frame) {
+            Ok(video_frame) => {
+                let _ = self.frame_tx.send(video_frame);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "failed to convert incoming WHEP video frame: {}",
+                    e.display()
+                );
+            }
+        }
+    }
+}
+
+struct WhepPcObserverHandler {
+    event_tx: tokio::sync::mpsc::UnboundedSender<WhepEvent>,
+    video_track_state: Arc<Mutex<AttachedVideoTrackState>>,
+}
+
+impl PeerConnectionObserverHandler for WhepPcObserverHandler {
+    fn on_connection_change(&mut self, state: PeerConnectionState) {
+        let _ = self.event_tx.send(WhepEvent::ConnectionChange(state));
+    }
+
+    fn on_track(&mut self, transceiver: RtpTransceiver) {
+        let receiver = transceiver.receiver();
+        let track = receiver.track();
+        let kind = match track.kind() {
+            Ok(kind) => kind,
+            Err(e) => {
+                tracing::warn!("failed to get incoming track kind: {e}");
+                return;
+            }
+        };
+        if kind == "audio" {
+            // 現状の webrtc-rs API には受信 AudioTrack から PCM を取り出す sink API がないため、
+            // WHEP subscriber の音声受信は未対応とする。
+            tracing::info!("WHEP incoming audio track is not supported yet");
+            return;
+        }
+        if kind != "video" {
+            tracing::debug!("ignoring unsupported incoming track kind: {kind}");
+            return;
+        }
+
+        let mut video_track = track.cast_to_video_track();
+        if let Ok(mut state) = self.video_track_state.lock() {
+            if let Some(current) = state.current_track.as_ref()
+                && current.as_ptr() == video_track.as_ptr()
+            {
+                return;
+            }
+            if let Some(mut track) = state.current_track.take() {
+                track.remove_sink(&state.sink);
+            }
+            let wants = VideoSinkWants::new();
+            video_track.add_or_update_sink(&state.sink, &wants);
+            state.current_track = Some(video_track);
+        }
+    }
+
+    fn on_remove_track(&mut self, receiver: RtpReceiver) {
+        let track = receiver.track();
+        let kind = match track.kind() {
+            Ok(kind) => kind,
+            Err(_) => return,
+        };
+        if kind != "video" {
+            return;
+        }
+        let removed_track = track.cast_to_video_track();
+        if let Ok(mut state) = self.video_track_state.lock()
+            && let Some(current) = state.current_track.as_ref()
+            && current.as_ptr() == removed_track.as_ptr()
+        {
+            if let Some(mut track) = state.current_track.take() {
+                track.remove_sink(&state.sink);
+            }
+            let _ = self.event_tx.send(WhepEvent::VideoTrackRemoved);
+        }
+    }
+}
+
 struct WhepSession {
     /// `PeerConnectionFactory` のスコープを保持するために参照を持つ
     _factory_bundle: Rc<crate::webrtc_factory::WebRtcFactoryBundle>,
@@ -143,90 +233,15 @@ impl WhepSession {
 
         let (frame_tx, frame_rx) = tokio::sync::mpsc::unbounded_channel::<crate::VideoFrame>();
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<WhepEvent>();
-        let sink =
-            VideoSinkBuilder::new(
-                move |frame| match convert_webrtc_video_frame_to_i420(frame) {
-                    Ok(video_frame) => {
-                        let _ = frame_tx.send(video_frame);
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "failed to convert incoming WHEP video frame: {}",
-                            e.display()
-                        );
-                    }
-                },
-            )
-            .build();
+        let sink = VideoSink::new_with_handler(Box::new(WhepVideoSinkHandler { frame_tx }));
         let video_track_state = Arc::new(Mutex::new(AttachedVideoTrackState {
             sink,
             current_track: None,
         }));
-        let video_track_state_for_track = video_track_state.clone();
-        let video_track_state_for_remove = video_track_state.clone();
-        let event_tx_for_conn = event_tx.clone();
-        let event_tx_for_remove = event_tx.clone();
-        let observer = PeerConnectionObserverBuilder::new()
-            .on_connection_change(move |state| {
-                let _ = event_tx_for_conn.send(WhepEvent::ConnectionChange(state));
-            })
-            .on_track(move |transceiver| {
-                let receiver = transceiver.receiver();
-                let track = receiver.track();
-                let kind = match track.kind() {
-                    Ok(kind) => kind,
-                    Err(e) => {
-                        tracing::warn!("failed to get incoming track kind: {e}");
-                        return;
-                    }
-                };
-                if kind == "audio" {
-                    // 現状の webrtc-rs API には受信 AudioTrack から PCM を取り出す sink API がないため、
-                    // WHEP subscriber の音声受信は未対応とする。
-                    tracing::info!("WHEP incoming audio track is not supported yet");
-                    return;
-                }
-                if kind != "video" {
-                    tracing::debug!("ignoring unsupported incoming track kind: {kind}");
-                    return;
-                }
-
-                let mut video_track = track.cast_to_video_track();
-                if let Ok(mut state) = video_track_state_for_track.lock() {
-                    if let Some(current) = state.current_track.as_ref()
-                        && current.as_ptr() == video_track.as_ptr()
-                    {
-                        return;
-                    }
-                    if let Some(mut track) = state.current_track.take() {
-                        track.remove_sink(&state.sink);
-                    }
-                    let wants = VideoSinkWants::new();
-                    video_track.add_or_update_sink(&state.sink, &wants);
-                    state.current_track = Some(video_track);
-                }
-            })
-            .on_remove_track(move |receiver| {
-                let track = receiver.track();
-                let kind = match track.kind() {
-                    Ok(kind) => kind,
-                    Err(_) => return,
-                };
-                if kind != "video" {
-                    return;
-                }
-                let removed_track = track.cast_to_video_track();
-                if let Ok(mut state) = video_track_state_for_remove.lock()
-                    && let Some(current) = state.current_track.as_ref()
-                    && current.as_ptr() == removed_track.as_ptr()
-                {
-                    if let Some(mut track) = state.current_track.take() {
-                        track.remove_sink(&state.sink);
-                    }
-                    let _ = event_tx_for_remove.send(WhepEvent::VideoTrackRemoved);
-                }
-            })
-            .build();
+        let observer = PeerConnectionObserver::new_with_handler(Box::new(WhepPcObserverHandler {
+            event_tx: event_tx.clone(),
+            video_track_state: video_track_state.clone(),
+        }));
 
         let mut deps = PeerConnectionDependencies::new(&observer);
         let mut pc_config = PeerConnectionRtcConfiguration::new();

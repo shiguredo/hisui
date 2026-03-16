@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use shiguredo_webrtc::{
-    AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer,
-    AudioDeviceModuleCallbacks, AudioEncoderFactory, AudioProcessingBuilder, Environment,
+    AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioDeviceModuleHandler,
+    AudioEncoderFactory, AudioProcessingBuilder, AudioTransportRef, Environment,
     PeerConnectionFactory, PeerConnectionFactoryDependencies, RtcEventLogFactory, Thread,
     VideoDecoderFactory, VideoEncoderFactory,
 };
@@ -46,41 +46,8 @@ impl WebRtcFactoryBundle {
         deps.set_event_log_factory(RtcEventLogFactory::new());
 
         let adm = if let Some(sink) = audio_sink.as_ref() {
-            let sink = sink.clone();
-            let callbacks = AudioDeviceModuleCallbacks {
-                init: Some(Box::new(|| 0)),
-                terminate: Some(Box::new(|| 0)),
-                initialized: Some(Box::new(|| true)),
-                recording_devices: Some(Box::new(|| 1)),
-                recording_device_name: Some(Box::new(|_| {
-                    Some(("hisui-whip".to_owned(), "hisui-whip".to_owned()))
-                })),
-                set_recording_device: Some(Box::new(|_| 0)),
-                recording_is_available: Some(Box::new(|available| {
-                    *available = true;
-                    0
-                })),
-                init_recording: Some(Box::new(|| 0)),
-                recording_is_initialized: Some(Box::new(|| true)),
-                start_recording: Some(Box::new(|| 0)),
-                stop_recording: Some(Box::new(|| 0)),
-                recording: Some(Box::new(|| true)),
-                stereo_recording_is_available: Some(Box::new(|available| {
-                    *available = true;
-                    0
-                })),
-                set_stereo_recording: Some(Box::new(|_| 0)),
-                stereo_recording: Some(Box::new(|enabled| {
-                    *enabled = true;
-                    0
-                })),
-                register_audio_callback: Some(Box::new(move |transport| {
-                    sink.set_transport(transport);
-                    0
-                })),
-                ..Default::default()
-            };
-            AudioDeviceModule::new_with_callbacks(callbacks)
+            let handler = HisuiAudioDeviceModuleHandler { sink: sink.clone() };
+            AudioDeviceModule::new_with_handler(Box::new(handler))
         } else {
             AudioDeviceModule::new(&env, AudioDeviceModuleAudioLayer::Dummy).map_err(|e| {
                 crate::Error::new(format!("failed to create AudioDeviceModule: {e}"))
@@ -111,5 +78,79 @@ impl WebRtcFactoryBundle {
 
     pub(crate) fn factory(&self) -> Arc<PeerConnectionFactory> {
         self.factory.clone()
+    }
+}
+
+struct HisuiAudioDeviceModuleHandler {
+    sink: crate::webrtc_audio::WebRtcAudioTransportSink,
+}
+
+impl AudioDeviceModuleHandler for HisuiAudioDeviceModuleHandler {
+    fn init(&self) -> i32 {
+        0
+    }
+
+    fn terminate(&self) -> i32 {
+        0
+    }
+
+    fn initialized(&self) -> bool {
+        true
+    }
+
+    fn recording_devices(&self) -> i16 {
+        1
+    }
+
+    fn recording_device_name(&self, _index: u16) -> Option<(String, String)> {
+        Some(("hisui-whip".to_owned(), "hisui-whip".to_owned()))
+    }
+
+    fn set_recording_device(&self, _index: u16) -> i32 {
+        0
+    }
+
+    fn recording_is_available(&self, available: &mut bool) -> i32 {
+        *available = true;
+        0
+    }
+
+    fn init_recording(&self) -> i32 {
+        0
+    }
+
+    fn recording_is_initialized(&self) -> bool {
+        true
+    }
+
+    fn start_recording(&self) -> i32 {
+        0
+    }
+
+    fn stop_recording(&self) -> i32 {
+        0
+    }
+
+    fn recording(&self) -> bool {
+        true
+    }
+
+    fn stereo_recording_is_available(&self, available: &mut bool) -> i32 {
+        *available = true;
+        0
+    }
+
+    fn set_stereo_recording(&self, _enable: bool) -> i32 {
+        0
+    }
+
+    fn stereo_recording(&self, enabled: &mut bool) -> i32 {
+        *enabled = true;
+        0
+    }
+
+    fn register_audio_callback(&self, audio_transport: Option<AudioTransportRef>) -> i32 {
+        self.sink.set_transport(audio_transport);
+        0
     }
 }
