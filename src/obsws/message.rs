@@ -176,9 +176,11 @@ pub fn handle_request_message_with_pipeline_handle(
             input_registry,
             pipeline_handle,
         ),
-        "GetCanvasList" => {
-            crate::obsws_response_builder::build_get_canvas_list_response(&request_id)
-        }
+        "GetCanvasList" => crate::obsws_response_builder::build_get_canvas_list_response(
+            &request_id,
+            input_registry.canvas_width(),
+            input_registry.canvas_height(),
+        ),
         "GetGroupList" => crate::obsws_response_builder::build_get_group_list_response(&request_id),
         "GetSceneList" => crate::obsws_response_builder::build_get_scene_list_response(
             &request_id,
@@ -990,8 +992,8 @@ mod tests {
         let session_stats = ObswsSessionStats::default();
         let mut input_registry = ObswsInputRegistry::new(
             std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
-            1920,
-            1080,
+            crate::types::EvenUsize::new(1920).unwrap(),
+            crate::types::EvenUsize::new(1080).unwrap(),
         );
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
@@ -1932,8 +1934,8 @@ mod tests {
         let session_stats = ObswsSessionStats::default();
         let mut input_registry = ObswsInputRegistry::new(
             std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
-            1920,
-            1080,
+            crate::types::EvenUsize::new(1920).unwrap(),
+            crate::types::EvenUsize::new(1080).unwrap(),
         );
         let request = RequestMessage {
             request_id: Some("req-get-record-directory".to_owned()),
@@ -1960,8 +1962,8 @@ mod tests {
         let session_stats = ObswsSessionStats::default();
         let mut input_registry = ObswsInputRegistry::new(
             std::path::PathBuf::from("/tmp/hisui-obsws-recordings"),
-            1920,
-            1080,
+            crate::types::EvenUsize::new(1920).unwrap(),
+            crate::types::EvenUsize::new(1080).unwrap(),
         );
         let request = RequestMessage {
             request_id: Some("req-set-record-directory".to_owned()),

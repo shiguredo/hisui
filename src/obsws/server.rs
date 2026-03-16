@@ -41,8 +41,8 @@ pub async fn run_server(
     password: Option<String>,
     default_record_dir: PathBuf,
     pipeline_config: crate::MediaPipelineConfig,
-    canvas_width: u32,
-    canvas_height: u32,
+    canvas_width: crate::types::EvenUsize,
+    canvas_height: crate::types::EvenUsize,
 ) -> crate::Result<()> {
     let ws_listen_addr = SocketAddr::new(ws_host, ws_port);
     let ws_listener = TcpListener::bind(ws_listen_addr)

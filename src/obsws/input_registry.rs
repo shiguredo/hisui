@@ -13,7 +13,11 @@ mod types;
 pub(crate) use self::types::*;
 
 impl ObswsInputRegistry {
-    pub fn new(record_directory: PathBuf, canvas_width: u32, canvas_height: u32) -> Self {
+    pub fn new(
+        record_directory: PathBuf,
+        canvas_width: crate::types::EvenUsize,
+        canvas_height: crate::types::EvenUsize,
+    ) -> Self {
         let mut scenes_by_name = BTreeMap::new();
         scenes_by_name.insert(
             OBSWS_DEFAULT_SCENE_NAME.to_owned(),
@@ -47,7 +51,11 @@ impl ObswsInputRegistry {
 
     #[cfg(test)]
     pub fn new_for_test() -> Self {
-        Self::new(PathBuf::from("recordings-for-test"), 1920, 1080)
+        Self::new(
+            PathBuf::from("recordings-for-test"),
+            crate::types::EvenUsize::new(1920).unwrap(),
+            crate::types::EvenUsize::new(1080).unwrap(),
+        )
     }
 
     pub fn list_inputs(&self) -> Vec<ObswsInputEntry> {
@@ -465,11 +473,11 @@ impl ObswsInputRegistry {
             .collect()
     }
 
-    pub fn canvas_width(&self) -> u32 {
+    pub fn canvas_width(&self) -> crate::types::EvenUsize {
         self.canvas_width
     }
 
-    pub fn canvas_height(&self) -> u32 {
+    pub fn canvas_height(&self) -> crate::types::EvenUsize {
         self.canvas_height
     }
 

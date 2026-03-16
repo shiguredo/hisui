@@ -48,17 +48,17 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
-    let canvas_width: u32 = noargs::opt("canvas-width")
+    let canvas_width: crate::types::EvenUsize = noargs::opt("canvas-width")
         .ty("WIDTH")
         .env("HISUI_OBSWS_CANVAS_WIDTH")
-        .doc("映像ミキサーのキャンバス幅")
+        .doc("映像ミキサーのキャンバス幅（偶数のみ）")
         .default("1920")
         .take(&mut args)
         .then(|o| o.value().parse())?;
-    let canvas_height: u32 = noargs::opt("canvas-height")
+    let canvas_height: crate::types::EvenUsize = noargs::opt("canvas-height")
         .ty("HEIGHT")
         .env("HISUI_OBSWS_CANVAS_HEIGHT")
-        .doc("映像ミキサーのキャンバス高さ")
+        .doc("映像ミキサーのキャンバス高さ（偶数のみ）")
         .default("1080")
         .take(&mut args)
         .then(|o| o.value().parse())?;
@@ -91,8 +91,8 @@ fn run_internal(
     password: Option<String>,
     default_record_dir: PathBuf,
     openh264: Option<PathBuf>,
-    canvas_width: u32,
-    canvas_height: u32,
+    canvas_width: crate::types::EvenUsize,
+    canvas_height: crate::types::EvenUsize,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()

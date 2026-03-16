@@ -10,8 +10,8 @@ pub struct ObswsComposedOutputPlan {
     pub audio_mixer_processor_id: Option<ProcessorId>,
     pub video_mixer_processor_id: Option<ProcessorId>,
     pub video_mixer_input_tracks: Vec<ObswsVideoMixerInputTrack>,
-    pub canvas_width: u32,
-    pub canvas_height: u32,
+    pub canvas_width: crate::types::EvenUsize,
+    pub canvas_height: crate::types::EvenUsize,
 }
 
 pub struct ObswsVideoMixerInputTrack {
@@ -58,8 +58,8 @@ pub fn build_composed_output_plan(
     scene_inputs: &[ObswsSceneInputEntry],
     output_kind: ObswsOutputKind,
     run_id: u64,
-    canvas_width: u32,
-    canvas_height: u32,
+    canvas_width: crate::types::EvenUsize,
+    canvas_height: crate::types::EvenUsize,
 ) -> Result<ObswsComposedOutputPlan, BuildObswsComposedOutputPlanError> {
     if scene_inputs.is_empty() {
         return Err(BuildObswsComposedOutputPlanError::NoEnabledInputs);

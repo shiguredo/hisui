@@ -965,6 +965,6 @@ pub struct ObswsInputRegistry {
     pub(crate) stream_runtime: ObswsStreamRuntimeState,
     pub(crate) record_directory: PathBuf,
     pub(crate) record_runtime: ObswsRecordRuntimeState,
-    pub(crate) canvas_width: u32,
-    pub(crate) canvas_height: u32,
+    pub(crate) canvas_width: crate::types::EvenUsize,
+    pub(crate) canvas_height: crate::types::EvenUsize,
 }

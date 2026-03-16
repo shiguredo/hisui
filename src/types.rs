@@ -393,6 +393,15 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for EvenUsize {
     }
 }
 
+impl std::str::FromStr for EvenUsize {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let n: usize = s.parse().map_err(|e| format!("{e}"))?;
+        Self::new(n).ok_or_else(|| format!("expected even number, got {n}"))
+    }
+}
+
 impl std::ops::Add for EvenUsize {
     type Output = Self;
 
