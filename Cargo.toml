@@ -21,7 +21,7 @@ libvpx = ["shiguredo_libvpx"]
 # NOTE: 通常の依存は突然挙動が変わることが内容に、バージョンは厳密一致で指定している
 
 tracing = "=0.1.44"
-tracing-subscriber = { version = "=0.3.22", features = ["fmt", "std"] }
+tracing-subscriber = { version = "=0.3.23", features = ["fmt", "std"] }
 noargs = "=0.4.2"
 nojson = "=0.3.9"
 base64 = "=0.22.1"
@@ -47,25 +47,25 @@ shiguredo_rtmp = "=2026.1.0-canary.5"
 shiguredo_rtsp = "=2026.1.0-canary.0"
 shiguredo_srt = "=2026.1.0-canary.0"
 shiguredo_webrtc = "=0.146.0"
-shiguredo_video_device = "=2026.1.0-canary.0"
+shiguredo_video_device = "=2026.1.0-canary.3"
 mpeg2ts = "=0.6.0"
 png = "=0.18.1"
 aws-lc-rs = "=1.16.1"
-libc = "=0.2.182"
+libc = "=0.2.183"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_fdk_aac = { version = "=2025.1.1", path = "crates/shiguredo_fdk_aac/", optional = true }
-shiguredo_libvpx = { version = "=2026.1.0-canary.0", optional = true }
+shiguredo_libvpx = { version = "=2026.1.0-canary.1", optional = true }
 shiguredo_libyuv = { version = "=2026.1.0-canary.0" }
 shiguredo_nvcodec = { version = "=2026.1.0-canary.1", optional = true }
-shiguredo_openh264 = { version = "=2026.1.0-canary.1" }
+shiguredo_openh264 = { version = "=2026.1.0-canary.2" }
 shiguredo_opus = { version = "=2025.1.0", path = "crates/shiguredo_opus/" }
 shiguredo_svt_av1 = { version = "=2025.1.0", path = "crates/shiguredo_svt_av1/" }
 shiguredo_websocket = "=2026.1.0-canary.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = { version = "=2026.1.0-canary.0" }
-shiguredo_video_toolbox = { version = "=2026.1.0-canary.0" }
+shiguredo_video_toolbox = { version = "=2026.1.0-canary.1" }
 
 [dev-dependencies]
 tempfile = "3.18.0"

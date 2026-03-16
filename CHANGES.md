@@ -18,7 +18,7 @@
   - `video_mixer` では `output_video_resolution` が削除され、`output_video_width` / `output_video_height` が追加される
   - `webm_audio_reader` / `webm_video_reader` では `input_files` が削除され、`current_input_file` / `total_sample_count` が追加される
   - @sile
-- [UPDATE] `libc` を direct dependency に追加する
+- [UPDATE] `libc` 0.2.183 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
   - @sile
 - [ADD] server サブコマンドの JSON-RPC で Video Device source を作成できるようにする
@@ -172,19 +172,19 @@
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する
   - @sile
-- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.1 にあげる
+- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.2 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0-canary.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.1 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが https://github.com/shiguredo/nvcodec-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libvpx のバージョンを 2026.1.0-canary.0 にあげる
+- [UPDATE] shiguredo_libvpx のバージョンを 2026.1.0-canary.1 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが https://github.com/shiguredo/libvpx-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_libyuv のバージョンを 2026.1.0-canary.0 にあげる
   - このバージョンから shiguredo_libyuv crate のリポジトリが https://github.com/shiguredo/libyuv-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.0-canary.0 にあげる
+- [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.0-canary.1 にあげる
   - このバージョンから shiguredo_video_toolbox crate のリポジトリが https://github.com/shiguredo/video-toolbox-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.1.0-canary.0 にあげる
@@ -240,6 +240,10 @@
 
 ### misc
 
+- [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
+  - @sile
+- [UPDATE] shiguredo_video_device のバージョンを 2026.1.0-canary.3 にあげる
+  - @sile
 - [ADD] 内部用に VideoDeviceSource 構造体を追加する
   - Video Device からの読み込みと I420 への変換を行い、映像トラックに出力する
   - @sile

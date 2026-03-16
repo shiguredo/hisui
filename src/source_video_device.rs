@@ -117,6 +117,7 @@ impl VideoDeviceSource {
             width: self.width.unwrap_or(default_config.width),
             height: self.height.unwrap_or(default_config.height),
             fps: self.fps.unwrap_or(default_config.fps),
+            pixel_format: Some(shiguredo_video_device::PixelFormat::I420),
         };
 
         let (frame_tx, mut frame_rx) =
@@ -337,6 +338,7 @@ mod tests {
             stride_uv: uv_width as i32,
             pixel_format: shiguredo_video_device::PixelFormat::I420,
             timestamp_us: 1_000_000,
+            pixel_buffer: None,
         };
 
         let frame = convert_captured_frame_to_i420(&captured).expect("convert");
@@ -368,6 +370,7 @@ mod tests {
             stride_uv: uv_width as i32,
             pixel_format: shiguredo_video_device::PixelFormat::I420,
             timestamp_us: 1_000_000,
+            pixel_buffer: None,
         };
 
         let error = convert_captured_frame_to_i420(&captured).expect_err("must fail");
