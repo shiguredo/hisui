@@ -102,9 +102,10 @@ pub fn build_composed_output_plan(
         ))
     });
 
-    // 複数映像入力の場合は映像ミキサーを使用する
+    // 映像入力がある場合は映像ミキサーを使用する
+    // 単一映像入力でも sceneItemTransform（position / scale / crop）を適用するためミキサーを経由する
     let (source_video_track_id, video_mixer_processor_id, video_mixer_input_tracks) =
-        if video_track_ids.len() > 1 {
+        if !video_track_ids.is_empty() {
             let mixed_video_track_id = TrackId::new(format!(
                 "obsws:{}:{run_id}:mixed_video",
                 output_kind.as_str()
@@ -152,7 +153,7 @@ pub fn build_composed_output_plan(
                 input_tracks,
             )
         } else {
-            (video_track_ids.first().cloned(), None, Vec::new())
+            (None, None, Vec::new())
         };
 
     Ok(ObswsComposedOutputPlan {
