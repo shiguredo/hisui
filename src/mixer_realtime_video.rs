@@ -137,6 +137,8 @@ pub struct InputTrack {
     pub z: isize,
     pub width: Option<EvenUsize>,
     pub height: Option<EvenUsize>,
+    pub scale_x: Option<f64>,
+    pub scale_y: Option<f64>,
     pub crop_top: usize,
     pub crop_bottom: usize,
     pub crop_left: usize,
@@ -155,6 +157,12 @@ impl nojson::DisplayJson for InputTrack {
             }
             if let Some(height) = self.height {
                 f.member("height", height)?;
+            }
+            if let Some(scale_x) = self.scale_x {
+                f.member("scaleX", scale_x)?;
+            }
+            if let Some(scale_y) = self.scale_y {
+                f.member("scaleY", scale_y)?;
             }
             if self.crop_top != 0 {
                 f.member("cropTop", self.crop_top)?;
@@ -185,6 +193,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
         let z: Option<isize> = value.to_member("z")?.try_into()?;
         let width: Option<EvenUsize> = value.to_member("width")?.try_into()?;
         let height: Option<EvenUsize> = value.to_member("height")?.try_into()?;
+        let scale_x: Option<f64> = value.to_member("scaleX")?.try_into()?;
+        let scale_y: Option<f64> = value.to_member("scaleY")?.try_into()?;
         let crop_top: Option<usize> = value.to_member("cropTop")?.try_into()?;
         let crop_bottom: Option<usize> = value.to_member("cropBottom")?.try_into()?;
         let crop_left: Option<usize> = value.to_member("cropLeft")?.try_into()?;
@@ -197,6 +207,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
             z: z.unwrap_or_default(),
             width,
             height,
+            scale_x,
+            scale_y,
             crop_top: crop_top.unwrap_or_default(),
             crop_bottom: crop_bottom.unwrap_or_default(),
             crop_left: crop_left.unwrap_or_default(),
@@ -495,6 +507,8 @@ struct InputTrackState {
     input_track: InputTrack,
     target_width: Option<EvenUsize>,
     target_height: Option<EvenUsize>,
+    scale_x: Option<f64>,
+    scale_y: Option<f64>,
     first_input_sample_timestamp: Option<Duration>,
     first_input_elapsed: Option<Duration>,
     pending_frames: VecDeque<PendingVideoFrame>,
@@ -506,11 +520,15 @@ impl InputTrackState {
     fn new(input_track: InputTrack) -> crate::Result<Self> {
         let target_width = input_track.width;
         let target_height = input_track.height;
+        let scale_x = input_track.scale_x;
+        let scale_y = input_track.scale_y;
 
         Ok(Self {
             input_track,
             target_width,
             target_height,
+            scale_x,
+            scale_y,
             first_input_sample_timestamp: None,
             first_input_elapsed: None,
             pending_frames: VecDeque::new(),
@@ -555,6 +573,8 @@ impl InputTrackState {
     fn update_input_track(&mut self, input_track: InputTrack) {
         self.target_width = input_track.width;
         self.target_height = input_track.height;
+        self.scale_x = input_track.scale_x;
+        self.scale_y = input_track.scale_y;
         self.input_track = input_track;
     }
 
@@ -832,6 +852,17 @@ fn apply_crop(
     ))?))
 }
 
+/// ソースフレームサイズにスケール係数を乗算して偶数に丸める
+fn scale_to_even(source_size: usize, scale: f64) -> usize {
+    let scaled = (source_size as f64 * scale).round() as usize;
+    // 偶数に切り上げ
+    if scaled.is_multiple_of(2) {
+        scaled
+    } else {
+        scaled + 1
+    }
+}
+
 fn compose_frame(
     canvas_width: usize,
     canvas_height: usize,
@@ -856,14 +887,24 @@ fn compose_frame(
         let source_frame = apply_crop(&current.frame, &state.input_track)?;
         let source_frame_ref = source_frame.as_ref().unwrap_or(&current.frame);
 
-        let target_width = state
-            .target_width
-            .map(EvenUsize::get)
-            .unwrap_or(source_frame_ref.size().width);
-        let target_height = state
-            .target_height
-            .map(EvenUsize::get)
-            .unwrap_or(source_frame_ref.size().height);
+        // ターゲットサイズの決定:
+        // 1. width/height が明示されていればそれを使う
+        // 2. scale_x/scale_y が指定されていればソースフレームサイズに乗算する
+        // 3. どちらもなければソースフレームの元サイズを使う
+        let target_width = if let Some(w) = state.target_width {
+            w.get()
+        } else if let Some(sx) = state.scale_x {
+            scale_to_even(source_frame_ref.size().width, sx)
+        } else {
+            source_frame_ref.size().width
+        };
+        let target_height = if let Some(h) = state.target_height {
+            h.get()
+        } else if let Some(sy) = state.scale_y {
+            scale_to_even(source_frame_ref.size().height, sy)
+        } else {
+            source_frame_ref.size().height
+        };
 
         let size = source_frame_ref.size();
         if size.width == target_width && size.height == target_height {
@@ -1424,6 +1465,8 @@ mod tests {
                     z: 0,
                     width: Some(EvenUsize::new(160).expect("infallible")),
                     height: Some(EvenUsize::new(120).expect("infallible")),
+                    scale_x: None,
+                    scale_y: None,
                     crop_top: 0,
                     crop_bottom: 0,
                     crop_left: 0,
@@ -1436,6 +1479,8 @@ mod tests {
                     z: 1,
                     width: Some(EvenUsize::new(160).expect("infallible")),
                     height: Some(EvenUsize::new(120).expect("infallible")),
+                    scale_x: None,
+                    scale_y: None,
                     crop_top: 0,
                     crop_bottom: 0,
                     crop_left: 0,
@@ -1638,6 +1683,8 @@ mod tests {
             z: 0,
             width: None,
             height: None,
+            scale_x: None,
+            scale_y: None,
             crop_top: 0,
             crop_bottom: 0,
             crop_left: 0,
@@ -1676,6 +1723,8 @@ mod tests {
             z: 0,
             width: None,
             height: None,
+            scale_x: None,
+            scale_y: None,
             crop_top: 0,
             crop_bottom: 0,
             crop_left: 0,
@@ -1700,6 +1749,8 @@ mod tests {
             z: 0,
             width: Some(EvenUsize::new(160).expect("infallible")),
             height: Some(EvenUsize::new(120).expect("infallible")),
+            scale_x: None,
+            scale_y: None,
             crop_top: 0,
             crop_bottom: 0,
             crop_left: 0,
@@ -1728,6 +1779,8 @@ mod tests {
             z: 3,
             width: Some(EvenUsize::new(320).expect("infallible")),
             height: Some(EvenUsize::new(180).expect("infallible")),
+            scale_x: None,
+            scale_y: None,
             crop_top: 0,
             crop_bottom: 0,
             crop_left: 0,
@@ -1754,6 +1807,8 @@ mod tests {
             z: 0,
             width: None,
             height: None,
+            scale_x: None,
+            scale_y: None,
             crop_top: 0,
             crop_bottom: 0,
             crop_left: 0,

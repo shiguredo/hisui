@@ -21,6 +21,8 @@ pub struct ObswsVideoMixerInputTrack {
     pub z: i64,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub scale_x: Option<f64>,
+    pub scale_y: Option<f64>,
     pub crop_top: u32,
     pub crop_bottom: u32,
     pub crop_left: u32,
@@ -132,6 +134,17 @@ pub fn build_composed_output_plan(
                     } else {
                         None
                     };
+                    // scale_x / scale_y は 1.0 以外の場合のみミキサーに渡す
+                    let scale_x = if transform.scale_x != 1.0 {
+                        Some(transform.scale_x)
+                    } else {
+                        None
+                    };
+                    let scale_y = if transform.scale_y != 1.0 {
+                        Some(transform.scale_y)
+                    } else {
+                        None
+                    };
                     Some(ObswsVideoMixerInputTrack {
                         track_id: video_track_id.clone(),
                         x: transform.position_x as i64,
@@ -139,6 +152,8 @@ pub fn build_composed_output_plan(
                         z: scene_input.scene_item_index as i64,
                         width,
                         height,
+                        scale_x,
+                        scale_y,
                         crop_top: transform.crop_top.max(0) as u32,
                         crop_bottom: transform.crop_bottom.max(0) as u32,
                         crop_left: transform.crop_left.max(0) as u32,

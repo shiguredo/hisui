@@ -566,6 +566,12 @@ impl ObswsSession {
                                     if let Some(height) = input_track.height {
                                         f.member("height", height)?;
                                     }
+                                    if let Some(scale_x) = input_track.scale_x {
+                                        f.member("scaleX", scale_x)?;
+                                    }
+                                    if let Some(scale_y) = input_track.scale_y {
+                                        f.member("scaleY", scale_y)?;
+                                    }
                                     if input_track.crop_top != 0 {
                                         f.member("cropTop", input_track.crop_top)?;
                                     }
