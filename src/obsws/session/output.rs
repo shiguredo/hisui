@@ -882,7 +882,7 @@ impl ObswsSession {
 
         // 2. ミキサーを停止
         if let Some(mixer_id) = &run.audio_mixer_processor_id {
-            self.stop_processors(&[mixer_id.clone()]).await?;
+            self.stop_processors(std::slice::from_ref(mixer_id)).await?;
         }
 
         // 3. エンコーダーを停止
@@ -900,7 +900,7 @@ impl ObswsSession {
         }
 
         // 4. パブリッシャーを停止
-        self.stop_processors(&[run.publisher_processor_id.clone()])
+        self.stop_processors(std::slice::from_ref(&run.publisher_processor_id))
             .await?;
 
         Ok(())
@@ -915,7 +915,7 @@ impl ObswsSession {
 
         // 2. ミキサーを停止（EOS をエンコーダーに伝播）
         if let Some(mixer_id) = &run.audio_mixer_processor_id {
-            self.stop_processors(&[mixer_id.clone()]).await?;
+            self.stop_processors(std::slice::from_ref(mixer_id)).await?;
         }
 
         // 3. エンコーダーを停止（EOS をライターに伝播）
@@ -933,7 +933,7 @@ impl ObswsSession {
         }
 
         // 4. ライターを停止（finalize を完了させる）
-        self.stop_processors(&[run.writer_processor_id.clone()])
+        self.stop_processors(std::slice::from_ref(&run.writer_processor_id))
             .await?;
 
         Ok(())
