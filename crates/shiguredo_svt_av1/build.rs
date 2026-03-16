@@ -176,8 +176,9 @@ fn verify_sha256(file_path: &Path, expected_hash: &str) -> Result<(), String> {
 
 // Cargo.toml から依存ライブラリの Git URL とバージョンタグを取得する
 fn get_git_url_and_version() -> (String, String) {
-    let cargo_toml: toml::Value =
-        toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml");
+    let cargo_toml: shiguredo_toml::Value = shiguredo_toml::Value::Table(
+        shiguredo_toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml"),
+    );
     if let Some((Some(git_url), Some(version))) = cargo_toml
         .get("package")
         .and_then(|v| v.get("metadata"))
@@ -200,8 +201,9 @@ fn get_git_url_and_version() -> (String, String) {
 
 // Cargo.toml から source URL を取得する
 fn get_source_url() -> String {
-    let cargo_toml: toml::Value =
-        toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml");
+    let cargo_toml: shiguredo_toml::Value = shiguredo_toml::Value::Table(
+        shiguredo_toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml"),
+    );
     if let Some(source_url) = cargo_toml
         .get("package")
         .and_then(|v| v.get("metadata"))
@@ -218,8 +220,9 @@ fn get_source_url() -> String {
 
 // Cargo.toml から期待される SHA256 ハッシュを取得する
 fn get_expected_sha256() -> String {
-    let cargo_toml: toml::Value =
-        toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml");
+    let cargo_toml: shiguredo_toml::Value = shiguredo_toml::Value::Table(
+        shiguredo_toml::from_str(include_str!("Cargo.toml")).expect("failed to parse Cargo.toml"),
+    );
     if let Some(sha256) = cargo_toml
         .get("package")
         .and_then(|v| v.get("metadata"))

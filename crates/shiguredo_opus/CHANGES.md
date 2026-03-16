@@ -11,3 +11,8 @@
 
 ## develop
 
+### misc
+
+- [CHANGE] build.rs で利用する toml crate を shiguredo_toml crate に置き換える
+  - @sile
+

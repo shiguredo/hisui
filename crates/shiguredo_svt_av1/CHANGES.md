@@ -14,3 +14,8 @@
 - [UPDATE] SVT-AV1 のソースコードを取得を git から時雨堂が用意したミラー URL に切り替える
   - ミラー URL: https://oss-mirrors.shiguredo.jp/SVT-AV1-v3.1.2.tar.gz
   - @sile
+
+### misc
+
+- [CHANGE] build.rs で利用する toml crate を shiguredo_toml crate に置き換える
+  - @sile
