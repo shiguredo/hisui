@@ -566,6 +566,18 @@ impl ObswsSession {
                                     if let Some(height) = input_track.height {
                                         f.member("height", height)?;
                                     }
+                                    if input_track.crop_top != 0 {
+                                        f.member("cropTop", input_track.crop_top)?;
+                                    }
+                                    if input_track.crop_bottom != 0 {
+                                        f.member("cropBottom", input_track.crop_bottom)?;
+                                    }
+                                    if input_track.crop_left != 0 {
+                                        f.member("cropLeft", input_track.crop_left)?;
+                                    }
+                                    if input_track.crop_right != 0 {
+                                        f.member("cropRight", input_track.crop_right)?;
+                                    }
                                     Ok(())
                                 }))?;
                             }

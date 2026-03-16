@@ -21,6 +21,10 @@ pub struct ObswsVideoMixerInputTrack {
     pub z: i64,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub crop_top: u32,
+    pub crop_bottom: u32,
+    pub crop_left: u32,
+    pub crop_right: u32,
 }
 
 #[derive(Debug)]
@@ -134,6 +138,10 @@ pub fn build_composed_output_plan(
                         z: scene_input.scene_item_index as i64,
                         width,
                         height,
+                        crop_top: transform.crop_top.max(0) as u32,
+                        crop_bottom: transform.crop_bottom.max(0) as u32,
+                        crop_left: transform.crop_left.max(0) as u32,
+                        crop_right: transform.crop_right.max(0) as u32,
                     })
                 })
                 .collect();
