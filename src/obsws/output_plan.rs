@@ -44,7 +44,7 @@ impl BuildObswsComposedOutputPlanError {
     }
 }
 
-/// 偶数に丸める（ビデオエンコーダーの要件）
+/// 偶数に丸める（映像フレームサイズの要件）
 fn round_to_even(value: f64) -> u32 {
     let v = value.round() as u32;
     if v.is_multiple_of(2) { v } else { v + 1 }
@@ -114,8 +114,7 @@ pub fn build_composed_output_plan(
             let input_tracks = source_plans
                 .iter()
                 .zip(scene_inputs.iter())
-                .enumerate()
-                .filter_map(|(plan_index, (plan, scene_input))| {
+                .filter_map(|(plan, scene_input)| {
                     let video_track_id = plan.source_video_track_id.as_ref()?;
                     let transform = &scene_input.transform;
                     let width = if transform.width > 0.0 {
@@ -132,7 +131,7 @@ pub fn build_composed_output_plan(
                         track_id: video_track_id.clone(),
                         x: transform.position_x as i64,
                         y: transform.position_y as i64,
-                        z: plan_index as i64,
+                        z: scene_input.scene_item_index as i64,
                         width,
                         height,
                     })
