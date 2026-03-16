@@ -149,6 +149,13 @@ impl Mp4FileReader {
         state: &mut ReaderState,
         context: SampleContext,
     ) -> Result<bool> {
+        // composition_time_offset は未対応
+        if context.composition_time_offset.is_some() {
+            return Err(Error::new(
+                "composition_time_offset is not supported yet".to_owned(),
+            ));
+        }
+
         match context.track_kind {
             TrackKind::Audio => self.handle_audio_sample(state, context).await,
             TrackKind::Video => self.handle_video_sample(state, context).await,
@@ -307,6 +314,7 @@ struct SampleContext {
     data_offset: u64,
     data_size: usize,
     keyframe: bool,
+    composition_time_offset: Option<i64>,
     sample_entry: Option<SampleEntry>,
 }
 
@@ -321,6 +329,7 @@ impl SampleContext {
             data_offset: sample.data_offset,
             data_size: sample.data_size,
             keyframe: sample.keyframe,
+            composition_time_offset: sample.composition_time_offset,
             sample_entry: sample.sample_entry.cloned(),
         }
     }

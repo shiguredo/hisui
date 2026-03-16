@@ -41,7 +41,7 @@ tokio = { version = "=1.50.0", features = [
     "time",
 ] }
 tokio-rustls = "=0.26.4"
-shiguredo_mp4 = "=2026.2.0-canary.3"
+shiguredo_mp4 = "=2026.2.0"
 shiguredo_http11 = "=2026.1.0"
 shiguredo_rtmp = "=2026.1.0-canary.5"
 shiguredo_rtsp = "=2026.1.0-canary.0"

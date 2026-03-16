@@ -1147,9 +1147,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_mp4"
-version = "2026.2.0-canary.3"
+version = "2026.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b060fffc1e7378d42623f8257807c1e44bd522f3c17b5179efb656b7ad77bd44"
+checksum = "029f44879b590e0b5e50add084b436a7b740e08b2cc4fee662ed93f1cffddc63"
 
 [[package]]
 name = "shiguredo_nvcodec"

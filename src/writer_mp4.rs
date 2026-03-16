@@ -516,6 +516,7 @@ impl Mp4Writer {
             keyframe: frame.keyframe,
             timescale: TIMESCALE,
             duration: duration.as_micros() as u32,
+            composition_time_offset: None,
             data_offset,
             data_size: frame.data.len(),
         };
@@ -546,6 +547,7 @@ impl Mp4Writer {
             keyframe: true,
             timescale: TIMESCALE,
             duration: duration.as_micros() as u32,
+            composition_time_offset: None,
             data_offset,
             data_size: data.data.len(),
         };

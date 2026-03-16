@@ -90,6 +90,13 @@ impl Mp4VideoReader {
             }
         };
 
+        // composition_time_offset は未対応
+        if sample.composition_time_offset.is_some() {
+            return Err(crate::Error::new(
+                "composition_time_offset is not supported yet".to_owned(),
+            ));
+        }
+
         let sample_entry = sample.sample_entry.cloned();
         if let Some(sample_entry) = &sample_entry {
             // 新しいサンプルエントリーが来たのでハンドリングする
@@ -234,6 +241,13 @@ impl Mp4AudioReader {
                 Some(sample) => break 'next_sample sample,
             }
         };
+
+        // composition_time_offset は未対応
+        if sample.composition_time_offset.is_some() {
+            return Err(crate::Error::new(
+                "composition_time_offset is not supported yet".to_owned(),
+            ));
+        }
 
         let sample_entry = sample.sample_entry.cloned();
         if let Some(sample_entry) = &sample_entry {
