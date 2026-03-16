@@ -1,11 +1,13 @@
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
+    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
 };
 use crate::obsws_input_registry::ObswsMp4FileSourceSettings;
 
 pub(super) fn build_record_source_plan(
     settings: &ObswsMp4FileSourceSettings,
+    output_kind: ObswsOutputKind,
     run_id: u64,
+    source_index: usize,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(path) = settings.path.as_deref() else {
         return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
@@ -13,15 +15,24 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let source_processor_id = format!("obsws:record:{run_id}:mp4_source");
+    let source_processor_id = format!(
+        "obsws:{}:{run_id}:source:{source_index}:mp4_source",
+        output_kind.as_str()
+    );
     let availability = crate::file_reader_mp4::probe_mp4_track_availability(path)
         .map_err(|e| BuildObswsRecordSourcePlanError::InvalidInput(e.display()))?;
-    let source_video_track_id = availability
-        .has_video
-        .then(|| format!("obsws:record:{run_id}:raw_video"));
-    let source_audio_track_id = availability
-        .has_audio
-        .then(|| format!("obsws:record:{run_id}:raw_audio"));
+    let source_video_track_id = availability.has_video.then(|| {
+        format!(
+            "obsws:{}:{run_id}:source:{source_index}:raw_video",
+            output_kind.as_str()
+        )
+    });
+    let source_audio_track_id = availability.has_audio.then(|| {
+        format!(
+            "obsws:{}:{run_id}:source:{source_index}:raw_audio",
+            output_kind.as_str()
+        )
+    });
     let request_text = nojson::object(|f| {
         f.member("jsonrpc", "2.0")?;
         f.member("id", 1)?;
@@ -67,12 +78,14 @@ mod tests {
                 path: Some("testdata/beep-aac-audio.mp4".to_owned()),
                 loop_playback: true,
             },
+            ObswsOutputKind::Record,
             1,
+            0,
         )
         .expect("audio-only mp4 source plan must succeed");
         assert_eq!(
             plan.source_audio_track_id.as_deref(),
-            Some("obsws:record:1:raw_audio")
+            Some("obsws:record:1:source:0:raw_audio")
         );
         assert_eq!(plan.source_video_track_id, None);
 
@@ -80,7 +93,10 @@ mod tests {
         let params = json.value().to_member("params")?.required()?;
         let audio_track_id: Option<String> = params.to_member("audioTrackId")?.try_into()?;
         let video_track_id: Option<String> = params.to_member("videoTrackId")?.try_into()?;
-        assert_eq!(audio_track_id.as_deref(), Some("obsws:record:1:raw_audio"));
+        assert_eq!(
+            audio_track_id.as_deref(),
+            Some("obsws:record:1:source:0:raw_audio")
+        );
         assert_eq!(video_track_id, None);
         Ok(())
     }
@@ -93,13 +109,15 @@ mod tests {
                 path: Some("testdata/archive-red-320x320-h264.mp4".to_owned()),
                 loop_playback: false,
             },
+            ObswsOutputKind::Record,
             2,
+            0,
         )
         .expect("video-only mp4 source plan must succeed");
         assert_eq!(plan.source_audio_track_id, None);
         assert_eq!(
             plan.source_video_track_id.as_deref(),
-            Some("obsws:record:2:raw_video")
+            Some("obsws:record:2:source:0:raw_video")
         );
 
         let json = nojson::RawJson::parse(&plan.requests[0].request_text)?;
@@ -107,7 +125,10 @@ mod tests {
         let audio_track_id: Option<String> = params.to_member("audioTrackId")?.try_into()?;
         let video_track_id: Option<String> = params.to_member("videoTrackId")?.try_into()?;
         assert_eq!(audio_track_id, None);
-        assert_eq!(video_track_id.as_deref(), Some("obsws:record:2:raw_video"));
+        assert_eq!(
+            video_track_id.as_deref(),
+            Some("obsws:record:2:source:0:raw_video")
+        );
         Ok(())
     }
 }

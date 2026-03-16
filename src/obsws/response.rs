@@ -1066,23 +1066,28 @@ pub(crate) fn collect_output_runtime_stats(
     let stream_total_frames = input_registry
         .stream_run()
         .map(|run| {
-            find_counter_metric(
-                &entries,
-                &run.encoder_processor_id,
-                "total_output_video_frame_count",
-            )
+            run.video
+                .as_ref()
+                .map(|video| {
+                    find_counter_metric(
+                        &entries,
+                        &video.encoder_processor_id,
+                        "total_output_video_frame_count",
+                    )
+                })
+                .unwrap_or(0)
         })
         .unwrap_or(0);
     let stream_output_bytes = input_registry
         .stream_run()
-        .map(|run| find_counter_metric(&entries, &run.endpoint_processor_id, "total_sent_bytes"))
+        .map(|run| find_counter_metric(&entries, &run.publisher_processor_id, "total_sent_bytes"))
         .unwrap_or(0);
     let stream_skipped_frames = input_registry
         .stream_run()
         .map(|run| {
             find_counter_metric(
                 &entries,
-                &run.endpoint_processor_id,
+                &run.publisher_processor_id,
                 "total_waiting_keyframe_dropped_video_frame_count",
             )
         })

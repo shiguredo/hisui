@@ -2,7 +2,7 @@ use super::*;
 
 impl ObswsSession {
     pub(super) async fn handle_start_stream(&self, request_id: &str) -> RequestOutcome {
-        let (output_url, stream_name, image_path, run) = {
+        let (output_url, stream_name, output_plan, run) = {
             let mut input_registry = self.input_registry.write().await;
             let stream_service_settings = input_registry.stream_service_settings().clone();
             if stream_service_settings.stream_service_type != "rtmp_custom" {
@@ -31,56 +31,49 @@ impl ObswsSession {
             };
 
             let scene_inputs = input_registry.list_current_program_scene_inputs();
-            if scene_inputs.len() != 1 {
-                return RequestOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
-                        "StartStream",
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        "Exactly one enabled input is required in the current program scene",
-                    ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Exactly one enabled input is required in the current program scene",
-                );
-            }
-            let input = &scene_inputs[0];
-            let ObswsInputSettings::ImageSource(settings) = &input.input.settings else {
-                return RequestOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
-                        "StartStream",
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        "Only image_source is supported for StartStream",
-                    ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Only image_source is supported for StartStream",
-                );
-            };
-            let Some(image_path) = settings.file.clone() else {
-                return RequestOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
-                        "StartStream",
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        "inputSettings.file is required for image_source",
-                    ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "inputSettings.file is required for image_source",
-                );
-            };
-
             let run_id = input_registry.next_stream_run_id();
-            let source_processor_id = format!("obsws:stream:{run_id}:png_source");
-            let encoder_processor_id = format!("obsws:stream:{run_id}:video_encoder");
-            let endpoint_processor_id = format!("obsws:stream:{run_id}:rtmp_outbound");
-            let source_track_id = format!("obsws:stream:{run_id}:raw_video");
-            let encoded_track_id = format!("obsws:stream:{run_id}:encoded_video");
+            let output_plan = match crate::obsws::output_plan::build_composed_output_plan(
+                &scene_inputs,
+                crate::obsws::source::ObswsOutputKind::Stream,
+                run_id,
+            ) {
+                Ok(output_plan) => output_plan,
+                Err(error) => {
+                    let error_comment = error.message("StartStream");
+                    return RequestOutcome::failure(
+                        crate::obsws_response_builder::build_request_response_error(
+                            "StartStream",
+                            request_id,
+                            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                            &error_comment,
+                        ),
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        error_comment,
+                    );
+                }
+            };
+            let video = output_plan
+                .source_video_track_id
+                .as_ref()
+                .map(|source_track_id| ObswsRecordTrackRun {
+                    encoder_processor_id: format!("obsws:stream:{run_id}:video_encoder"),
+                    source_track_id: source_track_id.clone(),
+                    encoded_track_id: format!("obsws:stream:{run_id}:encoded_video"),
+                });
+            let audio = output_plan
+                .source_audio_track_id
+                .as_ref()
+                .map(|source_track_id| ObswsRecordTrackRun {
+                    encoder_processor_id: format!("obsws:stream:{run_id}:audio_encoder"),
+                    source_track_id: source_track_id.clone(),
+                    encoded_track_id: format!("obsws:stream:{run_id}:encoded_audio"),
+                });
             let run = ObswsStreamRun {
-                source_processor_id: source_processor_id.clone(),
-                encoder_processor_id: encoder_processor_id.clone(),
-                endpoint_processor_id: endpoint_processor_id.clone(),
-                source_track_id: source_track_id.clone(),
-                encoded_track_id: encoded_track_id.clone(),
+                source_processor_ids: output_plan.source_processor_ids.clone(),
+                video,
+                audio,
+                audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
+                publisher_processor_id: format!("obsws:stream:{run_id}:rtmp_publisher"),
             };
             if let Err(ActivateStreamError::AlreadyActive) =
                 input_registry.activate_stream(run.clone())
@@ -97,11 +90,16 @@ impl ObswsSession {
                 );
             }
 
-            (output_url, stream_service_settings.key, image_path, run)
+            (output_url, stream_service_settings.key, output_plan, run)
         };
 
         let start_result = self
-            .start_stream_processors(&image_path, &output_url, stream_name.as_deref(), &run)
+            .start_stream_processors(
+                &output_plan.source_plans,
+                &output_url,
+                stream_name.as_deref(),
+                &run,
+            )
             .await;
 
         if let Err(e) = start_result {
@@ -164,27 +162,18 @@ impl ObswsSession {
     }
 
     pub(super) async fn handle_start_record(&self, request_id: &str) -> RequestOutcome {
-        let (source_plan, output_path, run) = {
+        let (source_plans, output_path, run) = {
             let mut input_registry = self.input_registry.write().await;
             let scene_inputs = input_registry.list_current_program_scene_inputs();
-            if scene_inputs.len() != 1 {
-                return RequestOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
-                        "StartRecord",
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        "Exactly one enabled input is required in the current program scene",
-                    ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Exactly one enabled input is required in the current program scene",
-                );
-            }
-            let input = &scene_inputs[0];
             let run_id = input_registry.next_record_run_id();
-            let source_plan = match crate::obsws::source::build_record_source_plan(input, run_id) {
-                Ok(source_plan) => source_plan,
+            let output_plan = match crate::obsws::output_plan::build_composed_output_plan(
+                &scene_inputs,
+                crate::obsws::source::ObswsOutputKind::Record,
+                run_id,
+            ) {
+                Ok(output_plan) => output_plan,
                 Err(error) => {
-                    let error_comment = error.message();
+                    let error_comment = error.message("StartRecord");
                     return RequestOutcome::failure(
                         crate::obsws_response_builder::build_request_response_error(
                             "StartRecord",
@@ -197,22 +186,8 @@ impl ObswsSession {
                     );
                 }
             };
-            if source_plan.source_video_track_id.is_none()
-                && source_plan.source_audio_track_id.is_none()
-            {
-                return RequestOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
-                        "StartRecord",
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        "At least one audio or video track is required for StartRecord",
-                    ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "At least one audio or video track is required for StartRecord",
-                );
-            }
             let writer_processor_id = format!("obsws:record:{run_id}:mp4_writer");
-            let video = source_plan
+            let video = output_plan
                 .source_video_track_id
                 .as_ref()
                 .map(|source_track_id| ObswsRecordTrackRun {
@@ -220,7 +195,7 @@ impl ObswsSession {
                     source_track_id: source_track_id.clone(),
                     encoded_track_id: format!("obsws:record:{run_id}:encoded_video"),
                 });
-            let audio = source_plan
+            let audio = output_plan
                 .source_audio_track_id
                 .as_ref()
                 .map(|source_track_id| ObswsRecordTrackRun {
@@ -236,9 +211,10 @@ impl ObswsSession {
                 .record_directory()
                 .join(format!("obsws-record-{timestamp}.mp4"));
             let run = ObswsRecordRun {
-                source_processor_id: source_plan.source_processor_id.clone(),
+                source_processor_ids: output_plan.source_processor_ids.clone(),
                 video,
                 audio,
+                audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
                 writer_processor_id,
                 output_path: output_path.clone(),
             };
@@ -256,7 +232,7 @@ impl ObswsSession {
                     "Record is already active",
                 );
             }
-            (source_plan, output_path, run)
+            (output_plan.source_plans, output_path, run)
         };
 
         if let Some(parent) = output_path.parent()
@@ -272,7 +248,7 @@ impl ObswsSession {
         }
 
         let start_result = self
-            .start_record_processors(&source_plan, &output_path, &run)
+            .start_record_processors(&source_plans, &output_path, &run)
             .await;
         if let Err(e) = start_result {
             let _ = self.input_registry.write().await.deactivate_record();
@@ -534,37 +510,111 @@ impl ObswsSession {
         }
     }
 
-    pub(super) async fn start_stream_processors(
+    /// createAudioMixer リクエストを生成して送信する
+    async fn send_create_audio_mixer_request(
         &self,
-        image_path: &str,
-        output_url: &str,
-        stream_name: Option<&str>,
-        run: &ObswsStreamRun,
+        source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
+        audio: &ObswsRecordTrackRun,
+        audio_mixer_processor_id: &str,
     ) -> crate::Result<()> {
-        let video_encoder_request = nojson::object(|f| {
+        let audio_mixer_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
             f.member("id", 1)?;
-            f.member("method", "createVideoEncoder")?;
+            f.member("method", "createAudioMixer")?;
             f.member(
                 "params",
                 nojson::object(|f| {
-                    f.member("inputTrackId", &run.source_track_id)?;
-                    f.member("outputTrackId", &run.encoded_track_id)?;
-                    f.member("codec", "H264")?;
-                    f.member("bitrateBps", 2_000_000)?;
-                    f.member("frameRate", 30)?;
-                    f.member("processorId", &run.encoder_processor_id)
+                    f.member("sampleRate", 48_000)?;
+                    f.member("channels", 2)?;
+                    f.member("frameDurationMs", 20)?;
+                    f.member("timestampRebaseThresholdMs", 100)?;
+                    f.member("terminateOnInputEos", true)?;
+                    f.member(
+                        "inputTracks",
+                        nojson::array(|f| {
+                            for source_plan in source_plans {
+                                if let Some(source_audio_track_id) =
+                                    &source_plan.source_audio_track_id
+                                {
+                                    f.element(nojson::object(|f| {
+                                        f.member("trackId", source_audio_track_id)
+                                    }))?;
+                                }
+                            }
+                            Ok(())
+                        }),
+                    )?;
+                    f.member("outputTrackId", &audio.source_track_id)?;
+                    f.member("processorId", audio_mixer_processor_id)
                 }),
             )
         })
         .to_string();
-        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
-            .await?;
+        self.send_pipeline_rpc_request("createAudioMixer", &audio_mixer_request)
+            .await
+    }
+
+    pub(super) async fn start_stream_processors(
+        &self,
+        source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
+        output_url: &str,
+        stream_name: Option<&str>,
+        run: &ObswsStreamRun,
+    ) -> crate::Result<()> {
+        if let (Some(audio), Some(audio_mixer_processor_id)) =
+            (&run.audio, &run.audio_mixer_processor_id)
+        {
+            self.send_create_audio_mixer_request(source_plans, audio, audio_mixer_processor_id)
+                .await?;
+        }
+
+        if let Some(video) = &run.video {
+            let video_encoder_request = nojson::object(|f| {
+                f.member("jsonrpc", "2.0")?;
+                f.member("id", 1)?;
+                f.member("method", "createVideoEncoder")?;
+                f.member(
+                    "params",
+                    nojson::object(|f| {
+                        f.member("inputTrackId", &video.source_track_id)?;
+                        f.member("outputTrackId", &video.encoded_track_id)?;
+                        f.member("codec", "H264")?;
+                        f.member("bitrateBps", 2_000_000)?;
+                        f.member("frameRate", 30)?;
+                        f.member("processorId", &video.encoder_processor_id)
+                    }),
+                )
+            })
+            .to_string();
+            self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
+                .await?;
+        }
+
+        if let Some(audio) = &run.audio {
+            let audio_encoder_request = nojson::object(|f| {
+                f.member("jsonrpc", "2.0")?;
+                f.member("id", 1)?;
+                f.member("method", "createAudioEncoder")?;
+                f.member(
+                    "params",
+                    nojson::object(|f| {
+                        f.member("inputTrackId", &audio.source_track_id)?;
+                        f.member("outputTrackId", &audio.encoded_track_id)?;
+                        f.member("codec", "AAC")?;
+                        f.member("bitrateBps", 128_000)?;
+                        f.member("processorId", &audio.encoder_processor_id)
+                    }),
+                )
+            })
+            .to_string();
+            self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
+                .await?;
+        }
 
         let rtmp_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
             f.member("id", 1)?;
-            f.member("method", "createRtmpOutboundEndpoint")?;
+            f.member("method", "createRtmpPublisher")?;
             f.member(
                 "params",
                 nojson::object(|f| {
@@ -572,40 +622,43 @@ impl ObswsSession {
                     if let Some(stream_name) = stream_name {
                         f.member("streamName", stream_name)?;
                     }
-                    f.member("inputVideoTrackId", &run.encoded_track_id)?;
-                    f.member("processorId", &run.endpoint_processor_id)
+                    if let Some(audio) = &run.audio {
+                        f.member("inputAudioTrackId", &audio.encoded_track_id)?;
+                    }
+                    if let Some(video) = &run.video {
+                        f.member("inputVideoTrackId", &video.encoded_track_id)?;
+                    }
+                    f.member("processorId", &run.publisher_processor_id)
                 }),
             )
         })
         .to_string();
-        self.send_pipeline_rpc_request("createRtmpOutboundEndpoint", &rtmp_request)
+        self.send_pipeline_rpc_request("createRtmpPublisher", &rtmp_request)
             .await?;
 
-        let png_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createPngFileSource")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("path", image_path)?;
-                    f.member("frameRate", 30)?;
-                    f.member("outputVideoTrackId", &run.source_track_id)?;
-                    f.member("processorId", &run.source_processor_id)
-                }),
-            )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createPngFileSource", &png_request)
-            .await
+        for source_plan in source_plans {
+            for request in &source_plan.requests {
+                self.send_pipeline_rpc_request(request.method, &request.request_text)
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 
     pub(super) async fn start_record_processors(
         &self,
-        source_plan: &crate::obsws::source::ObswsRecordSourcePlan,
+        source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
         output_path: &std::path::Path,
         run: &ObswsRecordRun,
     ) -> crate::Result<()> {
+        if let (Some(audio), Some(audio_mixer_processor_id)) =
+            (&run.audio, &run.audio_mixer_processor_id)
+        {
+            self.send_create_audio_mixer_request(source_plans, audio, audio_mixer_processor_id)
+                .await?;
+        }
+
         if let Some(video) = &run.video {
             let video_encoder_request = nojson::object(|f| {
                 f.member("jsonrpc", "2.0")?;
@@ -671,9 +724,11 @@ impl ObswsSession {
         self.send_pipeline_rpc_request("createMp4Writer", &writer_request)
             .await?;
 
-        for request in &source_plan.requests {
-            self.send_pipeline_rpc_request(request.method, &request.request_text)
-                .await?;
+        for source_plan in source_plans {
+            for request in &source_plan.requests {
+                self.send_pipeline_rpc_request(request.method, &request.request_text)
+                    .await?;
+            }
         }
 
         Ok(())
@@ -801,25 +856,84 @@ impl ObswsSession {
         Ok(())
     }
 
+    /// ソース → ミキサー → エンコーダー → パブリッシャーの順に段階的に停止する。
     pub(super) async fn stop_stream_processors(&self, run: &ObswsStreamRun) -> crate::Result<()> {
-        self.stop_processors(&[
-            crate::ProcessorId::new(run.endpoint_processor_id.clone()),
-            crate::ProcessorId::new(run.encoder_processor_id.clone()),
-            crate::ProcessorId::new(run.source_processor_id.clone()),
-        ])
-        .await
+        // 1. ソースを停止
+        {
+            let ids: Vec<_> = run
+                .source_processor_ids
+                .iter()
+                .map(|id| crate::ProcessorId::new(id.clone()))
+                .collect();
+            self.stop_processors(&ids).await?;
+        }
+
+        // 2. ミキサーを停止
+        if let Some(mixer_id) = &run.audio_mixer_processor_id {
+            self.stop_processors(&[crate::ProcessorId::new(mixer_id.clone())])
+                .await?;
+        }
+
+        // 3. エンコーダーを停止
+        {
+            let mut ids = Vec::new();
+            if let Some(video) = &run.video {
+                ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+            }
+            if let Some(audio) = &run.audio {
+                ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+            }
+            if !ids.is_empty() {
+                self.stop_processors(&ids).await?;
+            }
+        }
+
+        // 4. パブリッシャーを停止
+        self.stop_processors(&[crate::ProcessorId::new(run.publisher_processor_id.clone())])
+            .await?;
+
+        Ok(())
     }
 
+    /// ソース → ミキサー → エンコーダー → ライターの順に段階的に停止する。
+    /// EOS がパイプラインを伝播してから次の段階を停止することで、
+    /// MP4 writer の finalize が確実に完了するようにする。
     pub(super) async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
-        let mut processor_ids = vec![crate::ProcessorId::new(run.writer_processor_id.clone())];
-        if let Some(video) = &run.video {
-            processor_ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+        // 1. ソースを停止（データ生産を止める）
+        {
+            let ids: Vec<_> = run
+                .source_processor_ids
+                .iter()
+                .map(|id| crate::ProcessorId::new(id.clone()))
+                .collect();
+            self.stop_processors(&ids).await?;
         }
-        if let Some(audio) = &run.audio {
-            processor_ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+
+        // 2. ミキサーを停止（EOS をエンコーダーに伝播）
+        if let Some(mixer_id) = &run.audio_mixer_processor_id {
+            self.stop_processors(&[crate::ProcessorId::new(mixer_id.clone())])
+                .await?;
         }
-        processor_ids.push(crate::ProcessorId::new(run.source_processor_id.clone()));
-        self.stop_processors(&processor_ids).await
+
+        // 3. エンコーダーを停止（EOS をライターに伝播）
+        {
+            let mut ids = Vec::new();
+            if let Some(video) = &run.video {
+                ids.push(crate::ProcessorId::new(video.encoder_processor_id.clone()));
+            }
+            if let Some(audio) = &run.audio {
+                ids.push(crate::ProcessorId::new(audio.encoder_processor_id.clone()));
+            }
+            if !ids.is_empty() {
+                self.stop_processors(&ids).await?;
+            }
+        }
+
+        // 4. ライターを停止（finalize を完了させる）
+        self.stop_processors(&[crate::ProcessorId::new(run.writer_processor_id.clone())])
+            .await?;
+
+        Ok(())
     }
 
     pub(super) async fn stop_processors(

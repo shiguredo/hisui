@@ -98,6 +98,7 @@ impl Mp4FileSource {
         inner_handle: MediaPipelineHandle,
         outer_processor: &ProcessorHandle,
     ) -> Result<()> {
+        let openh264_lib = outer_processor.config().openh264_lib.clone();
         let mut options = Mp4FileReaderOptions {
             realtime: self.realtime,
             loop_playback: self.loop_playback,
@@ -124,8 +125,13 @@ impl Mp4FileSource {
         // 映像トラックがあるならデコーダーを起動する＆結果を外側に転送する
         if let Some(id) = self.video_track_id.clone() {
             let inner_id = TrackId::new(format!("{id}_encoded"));
-            let decoder =
-                VideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
+            let decoder = VideoDecoder::new(
+                VideoDecoderOptions {
+                    openh264_lib,
+                    ..Default::default()
+                },
+                crate::stats::Stats::new(),
+            );
 
             options.video_track_id = Some(inner_id.clone());
             start_bridge(id.clone(), &inner_handle, outer_processor).await?;
@@ -194,12 +200,12 @@ async fn start_bridge(
 
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use crate::MediaFrame;
+    use shiguredo_openh264::Openh264Library;
 
     #[tokio::test]
     async fn mp4_file_source_decode_smoke() -> Result<()> {
@@ -257,5 +263,77 @@ mod tests {
         pipeline_task.await?;
 
         Ok(())
+    }
+
+    #[test]
+    fn mp4_file_source_h264_decode_smoke() -> Result<()> {
+        let openh264_lib = if let Ok(path) = std::env::var("OPENH264_PATH") {
+            Some(Openh264Library::load(path)?)
+        } else {
+            eprintln!("no available OpenH264 decoder");
+            return Ok(());
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async move {
+            let pipeline =
+                MediaPipeline::new_with_config(crate::MediaPipelineConfig { openh264_lib })?;
+            let handle = pipeline.handle();
+            let pipeline_task = tokio::spawn(pipeline.run());
+            {
+                let handle = handle;
+                let video_track_id = TrackId::new("mp4_file_source_test_h264_video");
+                let subscriber = handle
+                    .register_processor(
+                        ProcessorId::new("test_h264_subscriber"),
+                        ProcessorMetadata::new("test_h264_subscriber"),
+                    )
+                    .await?;
+                let mut rx = subscriber.subscribe_track(video_track_id.clone());
+                subscriber.notify_ready();
+                assert!(
+                    handle
+                        .trigger_start()
+                        .await
+                        .expect("trigger_start must succeed")
+                );
+
+                let source = Mp4FileSource {
+                    path: PathBuf::from("testdata/archive-red-320x320-h264.mp4"),
+                    realtime: false,
+                    loop_playback: false,
+                    audio_track_id: None,
+                    video_track_id: Some(video_track_id.clone()),
+                };
+                handle
+                    .spawn_processor(
+                        ProcessorId::new("h264_source"),
+                        ProcessorMetadata::new("mp4_file_source"),
+                        |handle| source.run(handle),
+                    )
+                    .await?;
+
+                let mut decoded_count = 0;
+                loop {
+                    match rx.recv().await {
+                        crate::Message::Media(MediaFrame::Video(_)) => {
+                            decoded_count += 1;
+                        }
+                        crate::Message::Eos => {
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(
+                    decoded_count > 0,
+                    "Should decode at least one H264 video frame"
+                );
+            }
+
+            pipeline_task.abort();
+            Ok(())
+        })
     }
 }

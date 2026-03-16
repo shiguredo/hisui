@@ -37,6 +37,30 @@ pub struct RtmpPublisher {
     pub options: RtmpPublisherOptions,
 }
 
+#[derive(Debug, Clone)]
+struct RtmpPublisherStats {
+    total_sent_bytes: crate::stats::StatsCounter,
+    total_waiting_keyframe_dropped_video_frame_count: crate::stats::StatsCounter,
+}
+
+impl RtmpPublisherStats {
+    fn new(stats: &mut crate::stats::Stats) -> Self {
+        Self {
+            total_sent_bytes: stats.counter("total_sent_bytes"),
+            total_waiting_keyframe_dropped_video_frame_count: stats
+                .counter("total_waiting_keyframe_dropped_video_frame_count"),
+        }
+    }
+
+    fn add_sent_bytes(&self, value: usize) {
+        self.total_sent_bytes.add(value as u64);
+    }
+
+    fn add_waiting_keyframe_dropped_video_frame(&self) {
+        self.total_waiting_keyframe_dropped_video_frame_count.inc();
+    }
+}
+
 impl nojson::DisplayJson for RtmpPublisher {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
@@ -123,6 +147,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpPublisher {
 
 impl RtmpPublisher {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
+        let mut stats = handle.stats();
+        let publisher_stats = RtmpPublisherStats::new(&mut stats);
         let mut audio_rx = self
             .input_audio_track_id
             .clone()
@@ -149,6 +175,7 @@ impl RtmpPublisher {
             ),
             ready: false,
             frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(),
+            stats: publisher_stats,
         };
 
         let runner_task = tokio::spawn(async move {
@@ -281,6 +308,7 @@ struct RtmpPublishRunner {
     connection: shiguredo_rtmp::RtmpPublishClientConnection,
     ready: bool,
     frame_handler: crate::rtmp::RtmpOutgoingFrameHandler,
+    stats: RtmpPublisherStats,
 }
 
 impl RtmpPublishRunner {
@@ -308,6 +336,7 @@ impl RtmpPublishRunner {
             while !self.connection.send_buf().is_empty() {
                 let send_data = self.connection.send_buf();
                 stream.write_all(send_data).await?;
+                self.stats.add_sent_bytes(send_data.len());
                 self.connection.advance_send_buf(send_data.len());
             }
 
@@ -373,6 +402,7 @@ impl RtmpPublishRunner {
     }
 
     fn handle_video_sample(&mut self, video: Arc<VideoFrame>) -> crate::Result<()> {
+        let waiting_for_keyframe = self.frame_handler.is_waiting_for_keyframe();
         if let Some((seq_frame, video_frame)) = self
             .frame_handler
             .prepare_video_frame(video)
@@ -386,6 +416,8 @@ impl RtmpPublishRunner {
             self.connection
                 .send_video(video_frame)
                 .map_err(|e| Error::new(format!("failed to send video frame: {e}")))?;
+        } else if waiting_for_keyframe {
+            self.stats.add_waiting_keyframe_dropped_video_frame();
         }
         Ok(())
     }

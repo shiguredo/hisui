@@ -6,7 +6,6 @@ use hisui::{
 };
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 use hisui::{audio::AudioFrame, decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
-use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
 
 const VIDEO_INPUT_TRACK_ID: &str = "decoder_test_video_input";
@@ -54,16 +53,14 @@ fn multi_resolutions_test<I>(reader0: I, reader1: I) -> hisui::Result<()>
 where
     I: Iterator<Item = hisui::Result<VideoFrame>>,
 {
+    let openh264_lib = if let Ok(path) = std::env::var("OPENH264_PATH") {
+        Some(Openh264Library::load(path)?)
+    } else {
+        eprintln!("no available OpenH264 decoder");
+        return Ok(());
+    };
     let options = VideoDecoderOptions {
-        openh264_lib: if let Ok(path) = std::env::var("OPENH264_PATH") {
-            Some(Openh264Library::load(path)?)
-        } else if cfg!(target_os = "macos") {
-            None
-        } else {
-            // 利用可能な H.264 デコーダーは存在しない
-            eprintln!("no available H.264 decoder");
-            return Ok(());
-        },
+        openh264_lib,
         decode_params: Default::default(),
         engines: None,
     };
@@ -75,13 +72,13 @@ where
     let mut input_frames = Vec::new();
 
     for input_frame in reader0 {
-        input_frames.push(prepend_h264_sps_pps(input_frame?));
+        input_frames.push(input_frame?);
         blue_count += 1;
     }
 
     // このタイミングで解像度などが切り替わる
     for input_frame in reader1 {
-        input_frames.push(prepend_h264_sps_pps(input_frame?));
+        input_frames.push(input_frame?);
         red_count += 1;
     }
     output_frames.extend(decode_video_frames_with_pipeline(input_frames, options)?);
@@ -121,29 +118,6 @@ where
 
     Ok(())
 }
-
-fn prepend_h264_sps_pps(mut frame: VideoFrame) -> VideoFrame {
-    if let Some(SampleEntry::Avc1(Avc1Box {
-        avcc_box: AvccBox {
-            sps_list, pps_list, ..
-        },
-        ..
-    })) = frame.sample_entry.clone()
-    {
-        // openh264 用に映像データ本体にも SPS / PPS を含める
-        let mut data = Vec::new();
-        for nalu in sps_list.into_iter().chain(pps_list.into_iter()) {
-            data.extend_from_slice(&(nalu.len() as u32).to_be_bytes());
-            data.extend_from_slice(&nalu);
-        }
-        data.extend_from_slice(&frame.data);
-        frame.data = data;
-    };
-
-    // 対象外のフレームはそのまま返す
-    frame
-}
-
 #[test]
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn aac_decode() -> hisui::Result<()> {
