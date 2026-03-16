@@ -510,6 +510,50 @@ impl ObswsSession {
         }
     }
 
+    /// createAudioMixer リクエストを生成して送信する
+    async fn send_create_audio_mixer_request(
+        &self,
+        source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
+        audio: &ObswsRecordTrackRun,
+        audio_mixer_processor_id: &str,
+    ) -> crate::Result<()> {
+        let audio_mixer_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createAudioMixer")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("sampleRate", 48_000)?;
+                    f.member("channels", 2)?;
+                    f.member("frameDurationMs", 20)?;
+                    f.member("timestampRebaseThresholdMs", 100)?;
+                    f.member("terminateOnInputEos", true)?;
+                    f.member(
+                        "inputTracks",
+                        nojson::array(|f| {
+                            for source_plan in source_plans {
+                                if let Some(source_audio_track_id) =
+                                    &source_plan.source_audio_track_id
+                                {
+                                    f.element(nojson::object(|f| {
+                                        f.member("trackId", source_audio_track_id)
+                                    }))?;
+                                }
+                            }
+                            Ok(())
+                        }),
+                    )?;
+                    f.member("outputTrackId", &audio.source_track_id)?;
+                    f.member("processorId", audio_mixer_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createAudioMixer", &audio_mixer_request)
+            .await
+    }
+
     pub(super) async fn start_stream_processors(
         &self,
         source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
@@ -520,40 +564,7 @@ impl ObswsSession {
         if let (Some(audio), Some(audio_mixer_processor_id)) =
             (&run.audio, &run.audio_mixer_processor_id)
         {
-            let audio_mixer_request = nojson::object(|f| {
-                f.member("jsonrpc", "2.0")?;
-                f.member("id", 1)?;
-                f.member("method", "createAudioMixer")?;
-                f.member(
-                    "params",
-                    nojson::object(|f| {
-                        f.member("sampleRate", 48_000)?;
-                        f.member("channels", 2)?;
-                        f.member("frameDurationMs", 20)?;
-                        f.member("timestampRebaseThresholdMs", 100)?;
-                        f.member("terminateOnInputEos", true)?;
-                        f.member(
-                            "inputTracks",
-                            nojson::array(|f| {
-                                for source_plan in source_plans {
-                                    if let Some(source_audio_track_id) =
-                                        &source_plan.source_audio_track_id
-                                    {
-                                        f.element(nojson::object(|f| {
-                                            f.member("trackId", source_audio_track_id)
-                                        }))?;
-                                    }
-                                }
-                                Ok(())
-                            }),
-                        )?;
-                        f.member("outputTrackId", &audio.source_track_id)?;
-                        f.member("processorId", audio_mixer_processor_id)
-                    }),
-                )
-            })
-            .to_string();
-            self.send_pipeline_rpc_request("createAudioMixer", &audio_mixer_request)
+            self.send_create_audio_mixer_request(source_plans, audio, audio_mixer_processor_id)
                 .await?;
         }
 
@@ -644,40 +655,7 @@ impl ObswsSession {
         if let (Some(audio), Some(audio_mixer_processor_id)) =
             (&run.audio, &run.audio_mixer_processor_id)
         {
-            let audio_mixer_request = nojson::object(|f| {
-                f.member("jsonrpc", "2.0")?;
-                f.member("id", 1)?;
-                f.member("method", "createAudioMixer")?;
-                f.member(
-                    "params",
-                    nojson::object(|f| {
-                        f.member("sampleRate", 48_000)?;
-                        f.member("channels", 2)?;
-                        f.member("frameDurationMs", 20)?;
-                        f.member("timestampRebaseThresholdMs", 100)?;
-                        f.member("terminateOnInputEos", true)?;
-                        f.member(
-                            "inputTracks",
-                            nojson::array(|f| {
-                                for source_plan in source_plans {
-                                    if let Some(source_audio_track_id) =
-                                        &source_plan.source_audio_track_id
-                                    {
-                                        f.element(nojson::object(|f| {
-                                            f.member("trackId", source_audio_track_id)
-                                        }))?;
-                                    }
-                                }
-                                Ok(())
-                            }),
-                        )?;
-                        f.member("outputTrackId", &audio.source_track_id)?;
-                        f.member("processorId", audio_mixer_processor_id)
-                    }),
-                )
-            })
-            .to_string();
-            self.send_pipeline_rpc_request("createAudioMixer", &audio_mixer_request)
+            self.send_create_audio_mixer_request(source_plans, audio, audio_mixer_processor_id)
                 .await?;
         }
 
