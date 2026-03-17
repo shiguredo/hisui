@@ -3,7 +3,7 @@
 ## 参照仕様
 
 - プロトコル仕様: <https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md>
-- 対象仕様バージョン: OBS WebSocket 5.x（ hisui 側の現在値: `obsWebSocketVersion = 5.0.0`, `rpcVersion = 1` ）
+- 対象仕様バージョン: OBS WebSocket 5.x（ hisui 側の現在値: `obsWebSocketVersion = 5.7.2`, `rpcVersion = 1` ）
 
 ## 目的
 
@@ -41,7 +41,7 @@
 - [x] Event 配信（ `op=5` ）基盤: サーバーイベントを push 配信する
   - NOTE: 現在は `eventSubscriptions` の General / Outputs / Scenes / Inputs ビット購読時に対応イベントを配信する
 - [x] `RequestBatch (op=8/9)`: 複数 Request のバッチ処理を行う
-  - NOTE: 現時点で `executionType = 0` のみ対応し、`haltOnFailure` を反映する
+  - NOTE: 現時点で `executionType = 1 (SerialRealtime)` のみ対応し、`haltOnFailure` を反映する
 
 ## 対応すべきイベント一覧
 

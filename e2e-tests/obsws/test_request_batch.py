@@ -263,16 +263,10 @@ def test_obsws_request_batch_rejects_unsupported_execution_type(binary_path: Pat
                     }
                 )
             )
+            # OBS 互換: バリデーションエラーは close で返される
             response_msg = await ws.receive(timeout=5.0)
-            assert response_msg.type == aiohttp.WSMsgType.TEXT
-            response = json.loads(response_msg.data)
-            assert response["op"] == 7
-            assert response["d"]["requestType"] == "RequestBatch"
-            status = response["d"]["requestStatus"]
-            assert status["result"] is False
-            assert status["code"] == 400
-            assert status["comment"] == "Unsupported executionType field"
-            await ws.close()
+            assert response_msg.type == aiohttp.WSMsgType.CLOSE
+            assert response_msg.data == 1007
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
         asyncio.run(_run_invalid_batch_flow())

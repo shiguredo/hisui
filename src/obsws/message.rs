@@ -73,6 +73,10 @@ pub fn parse_client_message(text: &str) -> crate::Result<ClientMessage> {
             let request_id: Option<String> = d_value.to_member("requestId")?.try_into()?;
             let halt_on_failure: Option<bool> = d_value.to_member("haltOnFailure")?.try_into()?;
             let execution_type: Option<i64> = d_value.to_member("executionType")?.try_into()?;
+            // OBS は variables / inputVariables / outputVariables による
+            // batch 内の変数置換をサポートするが、hisui では未対応。
+            // nojson は明示的に参照しないフィールドを無視するため、
+            // これらのフィールドが存在してもパースエラーにはならない。
             let requests = if let Some(requests_value) = d_value.to_member("requests")?.optional() {
                 let requests = requests_value
                     .to_array()?

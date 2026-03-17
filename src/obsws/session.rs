@@ -289,16 +289,15 @@ impl ObswsSession {
             };
         }
 
+        // OBS 互換: RequestBatch のバリデーションエラーは op:7 レスポンスではなく
+        // WebSocket close で返す。OBS 本体と同じ挙動にすることで、
+        // OBS 向けクライアントの復旧ロジックとの互換性を確保する。
         let request_id = request_batch.request_id.unwrap_or_default();
         if request_id.is_empty() {
-            return SessionAction::SendText {
-                text: crate::obsws_response_builder::build_request_response_error(
-                    "RequestBatch",
-                    &request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    "Missing required requestId field",
-                ),
-                message_name: "request response message",
+            return SessionAction::Close {
+                code: CloseCode::INVALID_PAYLOAD,
+                reason: "missing required requestId field in request batch",
+                close_error_context: "failed to close websocket for invalid request batch",
             };
         }
 
@@ -306,26 +305,18 @@ impl ObswsSession {
         // hisui は SerialRealtime のみ対応し、それ以外は拒否する。
         let execution_type = request_batch.execution_type.unwrap_or(1);
         if execution_type != 1 {
-            return SessionAction::SendText {
-                text: crate::obsws_response_builder::build_request_response_error(
-                    "RequestBatch",
-                    &request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Unsupported executionType field",
-                ),
-                message_name: "request response message",
+            return SessionAction::Close {
+                code: CloseCode::INVALID_PAYLOAD,
+                reason: "unsupported executionType field in request batch",
+                close_error_context: "failed to close websocket for invalid request batch",
             };
         }
 
         let Some(requests) = request_batch.requests else {
-            return SessionAction::SendText {
-                text: crate::obsws_response_builder::build_request_response_error(
-                    "RequestBatch",
-                    &request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    "Missing required requests field",
-                ),
-                message_name: "request response message",
+            return SessionAction::Close {
+                code: CloseCode::INVALID_PAYLOAD,
+                reason: "missing required requests field in request batch",
+                close_error_context: "failed to close websocket for invalid request batch",
             };
         };
 
