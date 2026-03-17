@@ -2,10 +2,7 @@ use std::path::PathBuf;
 
 use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
 use crate::file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions};
-use crate::{
-    MediaPipeline, MediaPipelineHandle, Message, ProcessorHandle, ProcessorId, ProcessorMetadata,
-    Result, TrackId,
-};
+use crate::{ProcessorHandle, ProcessorId, ProcessorMetadata, Result, TrackId};
 
 #[derive(Debug, Clone)]
 pub struct Mp4FileSource {
@@ -79,26 +76,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
 }
 
 impl Mp4FileSource {
-    pub async fn run(self, outer_processor: ProcessorHandle) -> Result<()> {
-        outer_processor.notify_ready();
-        outer_processor.wait_subscribers_ready().await?;
+    pub async fn run(self, processor: ProcessorHandle) -> Result<()> {
+        let pipeline_handle = processor.pipeline_handle();
+        let openh264_lib = processor.config().openh264_lib.clone();
+        let processor_id = processor.processor_id().clone();
 
-        let inner_pipeline = MediaPipeline::new()?;
-        let inner_handle = inner_pipeline.handle();
-        let task = tokio::spawn(inner_pipeline.run());
-
-        self.initialize_pipeline(inner_handle, &outer_processor)
-            .await?;
-        task.await?;
-        Ok(())
-    }
-
-    async fn initialize_pipeline(
-        &self,
-        inner_handle: MediaPipelineHandle,
-        outer_processor: &ProcessorHandle,
-    ) -> Result<()> {
-        let openh264_lib = outer_processor.config().openh264_lib.clone();
         let mut options = Mp4FileReaderOptions {
             realtime: self.realtime,
             loop_playback: self.loop_playback,
@@ -106,105 +88,54 @@ impl Mp4FileSource {
             video_track_id: None,
         };
 
-        // 音声トラックがあるならデコーダーを起動する＆結果を外側に転送する
+        // 音声デコーダーを外側パイプラインに登録
         if let Some(id) = self.audio_track_id.clone() {
-            let inner_id = TrackId::new(format!("{id}_encoded"));
-            let decoder = AudioDecoder::new(crate::stats::Stats::new())?;
-
-            options.audio_track_id = Some(inner_id.clone());
-            start_bridge(id.clone(), &inner_handle, outer_processor).await?;
-            inner_handle
+            let encoded_id = TrackId::new(format!("{id}_encoded"));
+            options.audio_track_id = Some(encoded_id.clone());
+            pipeline_handle
                 .spawn_processor(
-                    ProcessorId::new("audio_decoder"),
+                    ProcessorId::new(format!("{processor_id}_audio_decoder")),
                     ProcessorMetadata::new("audio_decoder"),
-                    |handle| decoder.run(handle, inner_id, id),
+                    |handle| async move {
+                        let decoder = AudioDecoder::new(handle.stats())?;
+                        decoder.run(handle, encoded_id, id).await
+                    },
                 )
                 .await?;
         }
 
-        // 映像トラックがあるならデコーダーを起動する＆結果を外側に転送する
+        // 映像デコーダーを外側パイプラインに登録
         if let Some(id) = self.video_track_id.clone() {
-            let inner_id = TrackId::new(format!("{id}_encoded"));
-            let decoder = VideoDecoder::new(
-                VideoDecoderOptions {
-                    openh264_lib,
-                    ..Default::default()
-                },
-                crate::stats::Stats::new(),
-            );
-
-            options.video_track_id = Some(inner_id.clone());
-            start_bridge(id.clone(), &inner_handle, outer_processor).await?;
-            inner_handle
+            let encoded_id = TrackId::new(format!("{id}_encoded"));
+            options.video_track_id = Some(encoded_id.clone());
+            pipeline_handle
                 .spawn_processor(
-                    ProcessorId::new("video_decoder"),
+                    ProcessorId::new(format!("{processor_id}_video_decoder")),
                     ProcessorMetadata::new("video_decoder"),
-                    |handle| decoder.run(handle, inner_id, id),
+                    |handle| async move {
+                        let decoder = VideoDecoder::new(
+                            VideoDecoderOptions {
+                                openh264_lib,
+                                ..Default::default()
+                            },
+                            handle.stats(),
+                        );
+                        decoder.run(handle, encoded_id, id).await
+                    },
                 )
                 .await?;
         }
 
-        // MP4 ファイルリーダーを起動する
-        // （最初に起動すると、デコーダーが冒頭を取りこぼす恐れがあるので、最後に起動する）
+        // source プロセッサ自身がリーダーとして動作する
         let reader = Mp4FileReader::new(&self.path, options)?;
-        inner_handle
-            .spawn_processor(
-                ProcessorId::new("reader"),
-                ProcessorMetadata::new("mp4_reader"),
-                |handle| reader.run(handle),
-            )
-            .await?;
-
-        inner_handle
-            .trigger_start()
-            .await
-            .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
-
-        Ok(())
+        reader.run(processor).await
     }
-}
-
-async fn start_bridge(
-    track_id: TrackId,
-    inner_handle: &MediaPipelineHandle,
-    outer_processor: &ProcessorHandle,
-) -> Result<()> {
-    let mut tx = outer_processor.publish_track(track_id.clone()).await?;
-    let bridge_processor_id = ProcessorId::new(format!("mp4_source_bridge_{track_id}"));
-
-    inner_handle
-        .spawn_processor(
-            bridge_processor_id,
-            ProcessorMetadata::new("mp4_source_bridge"),
-            async move |inner_processor| {
-                inner_processor.notify_ready();
-                let mut rx = inner_processor.subscribe_track(track_id);
-                loop {
-                    match rx.recv().await {
-                        Message::Media(sample) => {
-                            if !tx.send_media(sample) {
-                                break;
-                            }
-                        }
-                        Message::Eos => {
-                            tx.send_eos();
-                            break;
-                        }
-                        Message::Syn(_) => {}
-                    }
-                }
-                Ok(())
-            },
-        )
-        .await?;
-
-    Ok(())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::MediaFrame;
+    use crate::{MediaFrame, MediaPipeline};
     use shiguredo_openh264::Openh264Library;
 
     #[tokio::test]
