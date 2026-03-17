@@ -847,32 +847,32 @@ impl ObswsInputRegistry {
         &self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<&ObswsSceneItemState, FindSceneItemError> {
+    ) -> Result<&ObswsSceneItemState, SceneItemLookupError> {
         let scene = self
             .scenes_by_name
             .get(scene_name)
-            .ok_or(FindSceneItemError::SceneNotFound)?;
+            .ok_or(SceneItemLookupError::SceneNotFound)?;
         scene
             .items
             .iter()
             .find(|item| item.scene_item_id == scene_item_id)
-            .ok_or(FindSceneItemError::SceneItemNotFound)
+            .ok_or(SceneItemLookupError::SceneItemNotFound)
     }
 
     fn find_scene_item_mut(
         &mut self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<&mut ObswsSceneItemState, FindSceneItemError> {
+    ) -> Result<&mut ObswsSceneItemState, SceneItemLookupError> {
         let scene = self
             .scenes_by_name
             .get_mut(scene_name)
-            .ok_or(FindSceneItemError::SceneNotFound)?;
+            .ok_or(SceneItemLookupError::SceneNotFound)?;
         scene
             .items
             .iter_mut()
             .find(|item| item.scene_item_id == scene_item_id)
-            .ok_or(FindSceneItemError::SceneItemNotFound)
+            .ok_or(SceneItemLookupError::SceneItemNotFound)
     }
 }
 
@@ -884,10 +884,4 @@ fn apply_transform_patch_value<T: PartialEq>(changed: &mut bool, dst: &mut T, va
         *changed = true;
         *dst = value;
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FindSceneItemError {
-    SceneNotFound,
-    SceneItemNotFound,
 }

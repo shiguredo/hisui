@@ -77,24 +77,24 @@ impl ObswsInputRegistry {
         &mut self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<ObswsSceneItemRef, RemoveSceneItemError> {
+    ) -> Result<ObswsSceneItemRef, SceneItemLookupError> {
         let scene = self
             .scenes_by_name
             .get_mut(scene_name)
-            .ok_or(RemoveSceneItemError::SceneNotFound)?;
+            .ok_or(SceneItemLookupError::SceneNotFound)?;
         let Some(position) = scene
             .items
             .iter()
             .position(|item| item.scene_item_id == scene_item_id)
         else {
-            return Err(RemoveSceneItemError::SceneItemNotFound);
+            return Err(SceneItemLookupError::SceneItemNotFound);
         };
         let removed = scene.items.remove(position);
         let scene_uuid = scene.scene_uuid.clone();
         let input_entry = self
             .inputs_by_uuid
             .get(&removed.input_uuid)
-            .ok_or(RemoveSceneItemError::SceneItemNotFound)?;
+            .ok_or(SceneItemLookupError::SceneItemNotFound)?;
         Ok(ObswsSceneItemRef {
             scene_name: scene_name.to_owned(),
             scene_uuid,
@@ -176,17 +176,12 @@ impl ObswsInputRegistry {
         &self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<(String, String), GetSceneItemSourceError> {
-        let scene_item = self
-            .find_scene_item(scene_name, scene_item_id)
-            .map_err(|error| match error {
-                FindSceneItemError::SceneNotFound => GetSceneItemSourceError::SceneNotFound,
-                FindSceneItemError::SceneItemNotFound => GetSceneItemSourceError::SceneItemNotFound,
-            })?;
+    ) -> Result<(String, String), SceneItemLookupError> {
+        let scene_item = self.find_scene_item(scene_name, scene_item_id)?;
         let input_entry = self
             .inputs_by_uuid
             .get(&scene_item.input_uuid)
-            .ok_or(GetSceneItemSourceError::SceneItemNotFound)?;
+            .ok_or(SceneItemLookupError::SceneItemNotFound)?;
         Ok((
             input_entry.input_name.clone(),
             input_entry.input_uuid.clone(),
@@ -197,17 +192,17 @@ impl ObswsInputRegistry {
         &self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<i64, GetSceneItemIndexError> {
+    ) -> Result<i64, SceneItemLookupError> {
         let scene = self
             .scenes_by_name
             .get(scene_name)
-            .ok_or(GetSceneItemIndexError::SceneNotFound)?;
+            .ok_or(SceneItemLookupError::SceneNotFound)?;
         let Some(index) = scene
             .items
             .iter()
             .position(|item| item.scene_item_id == scene_item_id)
         else {
-            return Err(GetSceneItemIndexError::SceneItemNotFound);
+            return Err(SceneItemLookupError::SceneItemNotFound);
         };
         Ok(index as i64)
     }
@@ -256,16 +251,16 @@ impl ObswsInputRegistry {
         scene_name: &str,
         scene_item_id: i64,
         enabled: bool,
-    ) -> Result<SetSceneItemEnabledResult, SetSceneItemEnabledError> {
+    ) -> Result<SetSceneItemEnabledResult, SceneItemLookupError> {
         let Some(scene) = self.scenes_by_name.get_mut(scene_name) else {
-            return Err(SetSceneItemEnabledError::SceneNotFound);
+            return Err(SceneItemLookupError::SceneNotFound);
         };
         let Some(scene_item) = scene
             .items
             .iter_mut()
             .find(|item| item.scene_item_id == scene_item_id)
         else {
-            return Err(SetSceneItemEnabledError::SceneItemNotFound);
+            return Err(SceneItemLookupError::SceneItemNotFound);
         };
         let changed = scene_item.enabled != enabled;
         scene_item.enabled = enabled;
@@ -276,16 +271,16 @@ impl ObswsInputRegistry {
         &self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<bool, GetSceneItemEnabledError> {
+    ) -> Result<bool, SceneItemLookupError> {
         let Some(scene) = self.scenes_by_name.get(scene_name) else {
-            return Err(GetSceneItemEnabledError::SceneNotFound);
+            return Err(SceneItemLookupError::SceneNotFound);
         };
         let Some(scene_item) = scene
             .items
             .iter()
             .find(|item| item.scene_item_id == scene_item_id)
         else {
-            return Err(GetSceneItemEnabledError::SceneItemNotFound);
+            return Err(SceneItemLookupError::SceneItemNotFound);
         };
         Ok(scene_item.enabled)
     }
@@ -294,13 +289,8 @@ impl ObswsInputRegistry {
         &self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<bool, GetSceneItemLockedError> {
-        let scene_item = self
-            .find_scene_item(scene_name, scene_item_id)
-            .map_err(|error| match error {
-                FindSceneItemError::SceneNotFound => GetSceneItemLockedError::SceneNotFound,
-                FindSceneItemError::SceneItemNotFound => GetSceneItemLockedError::SceneItemNotFound,
-            })?;
+    ) -> Result<bool, SceneItemLookupError> {
+        let scene_item = self.find_scene_item(scene_name, scene_item_id)?;
         Ok(scene_item.locked)
     }
 
@@ -309,13 +299,8 @@ impl ObswsInputRegistry {
         scene_name: &str,
         scene_item_id: i64,
         locked: bool,
-    ) -> Result<SetSceneItemLockedResult, SetSceneItemLockedError> {
-        let scene_item = self
-            .find_scene_item_mut(scene_name, scene_item_id)
-            .map_err(|error| match error {
-                FindSceneItemError::SceneNotFound => SetSceneItemLockedError::SceneNotFound,
-                FindSceneItemError::SceneItemNotFound => SetSceneItemLockedError::SceneItemNotFound,
-            })?;
+    ) -> Result<SetSceneItemLockedResult, SceneItemLookupError> {
+        let scene_item = self.find_scene_item_mut(scene_name, scene_item_id)?;
         let changed = scene_item.locked != locked;
         scene_item.locked = locked;
         Ok(SetSceneItemLockedResult { changed })
@@ -325,15 +310,8 @@ impl ObswsInputRegistry {
         &self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<ObswsSceneItemBlendMode, GetSceneItemBlendModeError> {
-        let scene_item = self
-            .find_scene_item(scene_name, scene_item_id)
-            .map_err(|error| match error {
-                FindSceneItemError::SceneNotFound => GetSceneItemBlendModeError::SceneNotFound,
-                FindSceneItemError::SceneItemNotFound => {
-                    GetSceneItemBlendModeError::SceneItemNotFound
-                }
-            })?;
+    ) -> Result<ObswsSceneItemBlendMode, SceneItemLookupError> {
+        let scene_item = self.find_scene_item(scene_name, scene_item_id)?;
         Ok(scene_item.blend_mode)
     }
 
@@ -342,15 +320,8 @@ impl ObswsInputRegistry {
         scene_name: &str,
         scene_item_id: i64,
         blend_mode: ObswsSceneItemBlendMode,
-    ) -> Result<SetSceneItemBlendModeResult, SetSceneItemBlendModeError> {
-        let scene_item = self
-            .find_scene_item_mut(scene_name, scene_item_id)
-            .map_err(|error| match error {
-                FindSceneItemError::SceneNotFound => SetSceneItemBlendModeError::SceneNotFound,
-                FindSceneItemError::SceneItemNotFound => {
-                    SetSceneItemBlendModeError::SceneItemNotFound
-                }
-            })?;
+    ) -> Result<SetSceneItemBlendModeResult, SceneItemLookupError> {
+        let scene_item = self.find_scene_item_mut(scene_name, scene_item_id)?;
         let changed = scene_item.blend_mode != blend_mode;
         scene_item.blend_mode = blend_mode;
         Ok(SetSceneItemBlendModeResult { changed })
@@ -360,15 +331,8 @@ impl ObswsInputRegistry {
         &self,
         scene_name: &str,
         scene_item_id: i64,
-    ) -> Result<ObswsSceneItemTransform, GetSceneItemTransformError> {
-        let scene_item = self
-            .find_scene_item(scene_name, scene_item_id)
-            .map_err(|error| match error {
-                FindSceneItemError::SceneNotFound => GetSceneItemTransformError::SceneNotFound,
-                FindSceneItemError::SceneItemNotFound => {
-                    GetSceneItemTransformError::SceneItemNotFound
-                }
-            })?;
+    ) -> Result<ObswsSceneItemTransform, SceneItemLookupError> {
+        let scene_item = self.find_scene_item(scene_name, scene_item_id)?;
         Ok(scene_item.transform.clone())
     }
 
@@ -377,15 +341,8 @@ impl ObswsInputRegistry {
         scene_name: &str,
         scene_item_id: i64,
         patch: ObswsSceneItemTransformPatch,
-    ) -> Result<SetSceneItemTransformResult, SetSceneItemTransformError> {
-        let scene_item = self
-            .find_scene_item_mut(scene_name, scene_item_id)
-            .map_err(|error| match error {
-                FindSceneItemError::SceneNotFound => SetSceneItemTransformError::SceneNotFound,
-                FindSceneItemError::SceneItemNotFound => {
-                    SetSceneItemTransformError::SceneItemNotFound
-                }
-            })?;
+    ) -> Result<SetSceneItemTransformResult, SceneItemLookupError> {
+        let scene_item = self.find_scene_item_mut(scene_name, scene_item_id)?;
         let mut updated = scene_item.transform.clone();
         let mut changed = false;
 

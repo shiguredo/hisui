@@ -61,26 +61,14 @@ impl ObswsSession {
             let video = output_plan
                 .source_video_track_id
                 .as_ref()
-                .map(|source_track_id| ObswsRecordTrackRun {
-                    encoder_processor_id: crate::ProcessorId::new(format!(
-                        "obsws:stream:{run_id}:video_encoder"
-                    )),
-                    source_track_id: source_track_id.clone(),
-                    encoded_track_id: crate::TrackId::new(format!(
-                        "obsws:stream:{run_id}:encoded_video"
-                    )),
+                .map(|source_track_id| {
+                    ObswsRecordTrackRun::new("stream", run_id, "video", source_track_id)
                 });
             let audio = output_plan
                 .source_audio_track_id
                 .as_ref()
-                .map(|source_track_id| ObswsRecordTrackRun {
-                    encoder_processor_id: crate::ProcessorId::new(format!(
-                        "obsws:stream:{run_id}:audio_encoder"
-                    )),
-                    source_track_id: source_track_id.clone(),
-                    encoded_track_id: crate::TrackId::new(format!(
-                        "obsws:stream:{run_id}:encoded_audio"
-                    )),
+                .map(|source_track_id| {
+                    ObswsRecordTrackRun::new("stream", run_id, "audio", source_track_id)
                 });
             let run = ObswsStreamRun {
                 source_processor_ids: output_plan.source_processor_ids.clone(),
@@ -209,26 +197,14 @@ impl ObswsSession {
             let video = output_plan
                 .source_video_track_id
                 .as_ref()
-                .map(|source_track_id| ObswsRecordTrackRun {
-                    encoder_processor_id: crate::ProcessorId::new(format!(
-                        "obsws:record:{run_id}:video_encoder"
-                    )),
-                    source_track_id: source_track_id.clone(),
-                    encoded_track_id: crate::TrackId::new(format!(
-                        "obsws:record:{run_id}:encoded_video"
-                    )),
+                .map(|source_track_id| {
+                    ObswsRecordTrackRun::new("record", run_id, "video", source_track_id)
                 });
             let audio = output_plan
                 .source_audio_track_id
                 .as_ref()
-                .map(|source_track_id| ObswsRecordTrackRun {
-                    encoder_processor_id: crate::ProcessorId::new(format!(
-                        "obsws:record:{run_id}:audio_encoder"
-                    )),
-                    source_track_id: source_track_id.clone(),
-                    encoded_track_id: crate::TrackId::new(format!(
-                        "obsws:record:{run_id}:encoded_audio"
-                    )),
+                .map(|source_track_id| {
+                    ObswsRecordTrackRun::new("record", run_id, "audio", source_track_id)
                 });
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)

@@ -481,12 +481,12 @@ fn set_scene_item_enabled_returns_not_found_errors() {
     let scene_error = registry
         .set_scene_item_enabled("Scene B", 1, false)
         .expect_err("unknown scene must be rejected");
-    assert_eq!(scene_error, SetSceneItemEnabledError::SceneNotFound);
+    assert_eq!(scene_error, SceneItemLookupError::SceneNotFound);
 
     let item_error = registry
         .set_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, 999, false)
         .expect_err("unknown scene item id must be rejected");
-    assert_eq!(item_error, SetSceneItemEnabledError::SceneItemNotFound);
+    assert_eq!(item_error, SceneItemLookupError::SceneItemNotFound);
 }
 
 #[test]
@@ -552,15 +552,12 @@ fn get_scene_item_enabled_returns_not_found_errors() {
     let scene_error = registry
         .get_scene_item_enabled("Scene B", scene_item_id)
         .expect_err("unknown scene must be rejected");
-    assert_eq!(scene_error, GetSceneItemEnabledError::SceneNotFound);
+    assert_eq!(scene_error, SceneItemLookupError::SceneNotFound);
 
     let scene_item_error = registry
         .get_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, 999)
         .expect_err("unknown scene item id must be rejected");
-    assert_eq!(
-        scene_item_error,
-        GetSceneItemEnabledError::SceneItemNotFound
-    );
+    assert_eq!(scene_item_error, SceneItemLookupError::SceneItemNotFound);
 }
 
 #[test]

@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use crate::obsws_input_registry::{ObswsInputRegistry, ObswsStreamServiceSettings};
 use crate::obsws_protocol::{
-    OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
 use super::{
@@ -38,25 +37,21 @@ pub fn build_get_stream_service_settings_response(
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let settings = input_registry.stream_service_settings();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+    super::build_request_response_success("GetStreamServiceSettings", request_id, |f| {
+        f.member("streamServiceType", &settings.stream_service_type)?;
         f.member(
-            "d",
+            "streamServiceSettings",
             nojson::object(|f| {
-                f.member("requestType", "GetStreamServiceSettings")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", settings)
+                if let Some(server) = &settings.server {
+                    f.member("server", server)?;
+                }
+                if let Some(key) = &settings.key {
+                    f.member("key", key)?;
+                }
+                Ok(())
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_set_stream_service_settings_response(
@@ -78,7 +73,7 @@ pub fn build_set_stream_service_settings_response(
         server: Some(fields.server),
         key: fields.key,
     });
-    empty_success_response("SetStreamServiceSettings", request_id)
+    super::build_request_response_success_no_data("SetStreamServiceSettings", request_id)
 }
 
 pub fn build_get_stream_status_response(
@@ -95,37 +90,16 @@ pub fn build_get_stream_status_response(
     let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
     let output_timecode = format_timecode(duration);
     let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetStreamStatus")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("outputActive", active)?;
-                        f.member("outputReconnecting", false)?;
-                        f.member("outputTimecode", &output_timecode)?;
-                        f.member("outputDuration", output_duration)?;
-                        f.member("outputCongestion", 0.0)?;
-                        f.member("outputBytes", output_stats.stream_output_bytes)?;
-                        f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
-                        f.member("outputTotalFrames", output_stats.stream_total_frames)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetStreamStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputReconnecting", false)?;
+        f.member("outputTimecode", &output_timecode)?;
+        f.member("outputDuration", output_duration)?;
+        f.member("outputCongestion", 0.0)?;
+        f.member("outputBytes", output_stats.stream_output_bytes)?;
+        f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
+        f.member("outputTotalFrames", output_stats.stream_total_frames)
     })
-    .to_string()
 }
 
 pub fn build_get_output_list_response(request_id: &str) -> String {
@@ -139,28 +113,9 @@ pub fn build_get_output_list_response(request_id: &str) -> String {
             output_kind: OBSWS_RECORD_OUTPUT_KIND,
         },
     ];
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetOutputList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("outputs", outputs)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetOutputList", request_id, |f| {
+        f.member("outputs", outputs)
     })
-    .to_string()
 }
 
 pub fn build_get_output_settings_response(
@@ -229,7 +184,7 @@ pub fn build_set_output_settings_response(
                 server: Some(settings.server),
                 key: settings.key,
             });
-            empty_success_response("SetOutputSettings", request_id)
+            super::build_request_response_success_no_data("SetOutputSettings", request_id)
         }
         OBSWS_RECORD_OUTPUT_NAME => {
             let settings =
@@ -256,7 +211,7 @@ pub fn build_set_output_settings_response(
                 }
             };
             input_registry.set_record_directory(record_directory);
-            empty_success_response("SetOutputSettings", request_id)
+            super::build_request_response_success_no_data("SetOutputSettings", request_id)
         }
         _ => super::build_request_response_error(
             "SetOutputSettings",
@@ -272,28 +227,9 @@ pub fn build_get_record_directory_response(
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let record_directory = input_registry.record_directory().display().to_string();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetRecordDirectory")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("recordDirectory", &record_directory)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetRecordDirectory", request_id, |f| {
+        f.member("recordDirectory", &record_directory)
     })
-    .to_string()
 }
 
 pub fn build_set_record_directory_response(
@@ -322,7 +258,7 @@ pub fn build_set_record_directory_response(
         }
     };
     input_registry.set_record_directory(record_directory);
-    empty_success_response("SetRecordDirectory", request_id)
+    super::build_request_response_success_no_data("SetRecordDirectory", request_id)
 }
 
 pub fn build_get_record_status_response(
@@ -348,38 +284,17 @@ pub fn build_get_record_status_response(
         .map(read_file_size_bytes)
         .unwrap_or(0);
     let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetRecordStatus")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("outputActive", active)?;
-                        f.member("outputPaused", paused)?;
-                        f.member("outputTimecode", &output_timecode)?;
-                        f.member("outputDuration", output_duration)?;
-                        f.member("outputCongestion", 0.0)?;
-                        f.member("outputBytes", output_bytes)?;
-                        f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
-                        f.member("outputTotalFrames", output_stats.record_total_frames)?;
-                        f.member("outputPath", &output_path)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetRecordStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputPaused", paused)?;
+        f.member("outputTimecode", &output_timecode)?;
+        f.member("outputDuration", output_duration)?;
+        f.member("outputCongestion", 0.0)?;
+        f.member("outputBytes", output_bytes)?;
+        f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
+        f.member("outputTotalFrames", output_stats.record_total_frames)?;
+        f.member("outputPath", &output_path)
     })
-    .to_string()
 }
 
 pub fn build_get_output_status_response(
@@ -419,28 +334,9 @@ fn build_output_active_response(
     request_id: &str,
     output_active: bool,
 ) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", request_type)?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("outputActive", output_active)),
-                )
-            }),
-        )
+    super::build_request_response_success(request_type, request_id, |f| {
+        f.member("outputActive", output_active)
     })
-    .to_string()
 }
 
 fn build_record_output_state_response(
@@ -449,31 +345,10 @@ fn build_record_output_state_response(
     output_active: bool,
     output_paused: bool,
 ) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", request_type)?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("outputActive", output_active)?;
-                        f.member("outputPaused", output_paused)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success(request_type, request_id, |f| {
+        f.member("outputActive", output_active)?;
+        f.member("outputPaused", output_paused)
     })
-    .to_string()
 }
 
 fn build_stream_output_settings_response(
@@ -481,32 +356,11 @@ fn build_stream_output_settings_response(
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let settings = input_registry.stream_service_settings();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetOutputSettings")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("outputName", OBSWS_STREAM_OUTPUT_NAME)?;
-                        f.member("outputKind", OBSWS_STREAM_OUTPUT_KIND)?;
-                        f.member("outputSettings", settings)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetOutputSettings", request_id, |f| {
+        f.member("outputName", OBSWS_STREAM_OUTPUT_NAME)?;
+        f.member("outputKind", OBSWS_STREAM_OUTPUT_KIND)?;
+        f.member("outputSettings", settings)
     })
-    .to_string()
 }
 
 fn build_record_output_settings_response(
@@ -514,57 +368,14 @@ fn build_record_output_settings_response(
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let record_directory = input_registry.record_directory().display().to_string();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+    super::build_request_response_success("GetOutputSettings", request_id, |f| {
+        f.member("outputName", OBSWS_RECORD_OUTPUT_NAME)?;
+        f.member("outputKind", OBSWS_RECORD_OUTPUT_KIND)?;
         f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetOutputSettings")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("outputName", OBSWS_RECORD_OUTPUT_NAME)?;
-                        f.member("outputKind", OBSWS_RECORD_OUTPUT_KIND)?;
-                        f.member(
-                            "outputSettings",
-                            nojson::object(|f| f.member("recordDirectory", &record_directory)),
-                        )
-                    }),
-                )
-            }),
+            "outputSettings",
+            nojson::object(|f| f.member("recordDirectory", &record_directory)),
         )
     })
-    .to_string()
-}
-
-fn empty_success_response(request_type: &str, request_id: &str) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", request_type)?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
 }
 
 pub fn build_start_stream_response(request_id: &str, output_active: bool) -> String {
@@ -584,11 +395,11 @@ pub fn build_toggle_output_response(request_id: &str, output_active: bool) -> St
 }
 
 pub fn build_stop_stream_response(request_id: &str) -> String {
-    empty_success_response("StopStream", request_id)
+    super::build_request_response_success_no_data("StopStream", request_id)
 }
 
 pub fn build_stop_output_response(request_id: &str) -> String {
-    empty_success_response("StopOutput", request_id)
+    super::build_request_response_success_no_data("StopOutput", request_id)
 }
 
 pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> String {
@@ -612,28 +423,9 @@ pub fn build_resume_record_response(request_id: &str) -> String {
 }
 
 pub fn build_stop_record_response(request_id: &str, output_path: &str) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "StopRecord")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("outputPath", output_path)),
-                )
-            }),
-        )
+    super::build_request_response_success("StopRecord", request_id, |f| {
+        f.member("outputPath", output_path)
     })
-    .to_string()
 }
 
 fn format_timecode(duration: std::time::Duration) -> String {
@@ -661,37 +453,16 @@ fn build_get_stream_status_as_output_response(
     let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
     let output_timecode = format_timecode(duration);
     let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetOutputStatus")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("outputActive", active)?;
-                        f.member("outputReconnecting", false)?;
-                        f.member("outputTimecode", &output_timecode)?;
-                        f.member("outputDuration", output_duration)?;
-                        f.member("outputCongestion", 0.0)?;
-                        f.member("outputBytes", output_stats.stream_output_bytes)?;
-                        f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
-                        f.member("outputTotalFrames", output_stats.stream_total_frames)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetOutputStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputReconnecting", false)?;
+        f.member("outputTimecode", &output_timecode)?;
+        f.member("outputDuration", output_duration)?;
+        f.member("outputCongestion", 0.0)?;
+        f.member("outputBytes", output_stats.stream_output_bytes)?;
+        f.member("outputSkippedFrames", output_stats.stream_skipped_frames)?;
+        f.member("outputTotalFrames", output_stats.stream_total_frames)
     })
-    .to_string()
 }
 
 fn build_get_record_status_as_output_response(
@@ -717,38 +488,17 @@ fn build_get_record_status_as_output_response(
         .map(read_file_size_bytes)
         .unwrap_or(0);
     let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetOutputStatus")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("outputActive", active)?;
-                        f.member("outputPaused", paused)?;
-                        f.member("outputTimecode", &output_timecode)?;
-                        f.member("outputDuration", output_duration)?;
-                        f.member("outputCongestion", 0.0)?;
-                        f.member("outputBytes", output_bytes)?;
-                        f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
-                        f.member("outputTotalFrames", output_stats.record_total_frames)?;
-                        f.member("outputPath", &output_path)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetOutputStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputPaused", paused)?;
+        f.member("outputTimecode", &output_timecode)?;
+        f.member("outputDuration", output_duration)?;
+        f.member("outputCongestion", 0.0)?;
+        f.member("outputBytes", output_bytes)?;
+        f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
+        f.member("outputTotalFrames", output_stats.record_total_frames)?;
+        f.member("outputPath", &output_path)
     })
-    .to_string()
 }
 
 fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, String> {

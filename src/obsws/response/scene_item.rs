@@ -1,27 +1,22 @@
 use crate::obsws_input_registry::{
-    CreateSceneItemError, DuplicateSceneItemError, GetSceneItemBlendModeError,
-    GetSceneItemEnabledError, GetSceneItemIdError, GetSceneItemIndexError, GetSceneItemListError,
-    GetSceneItemLockedError, GetSceneItemSourceError, GetSceneItemTransformError,
-    ObswsInputRegistry, SetSceneItemBlendModeError, SetSceneItemEnabledError,
-    SetSceneItemIndexError, SetSceneItemLockedError, SetSceneItemTransformError,
+    CreateSceneItemError, DuplicateSceneItemError, GetSceneItemIdError, GetSceneItemListError,
+    ObswsInputRegistry, SceneItemLookupError, SetSceneItemIndexError,
 };
 use crate::obsws_protocol::{
-    OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
 use super::{
-    CreateSceneItemExecution, DuplicateSceneItemExecution, SetSceneItemIndexExecution,
-    SetSceneItemLockedExecution, SetSceneItemTransformExecution, parse_create_scene_item_fields,
-    parse_duplicate_scene_item_fields, parse_get_scene_item_blend_mode_fields,
+    CreateSceneItemExecution, DuplicateSceneItemExecution, SetSceneItemIndexEventContext,
+    SetSceneItemIndexExecution, SetSceneItemLockedEventContext, SetSceneItemLockedExecution,
+    SetSceneItemTransformEventContext, SetSceneItemTransformExecution,
+    parse_create_scene_item_fields, parse_duplicate_scene_item_fields,
     parse_get_scene_item_enabled_fields, parse_get_scene_item_id_fields,
-    parse_get_scene_item_index_fields, parse_get_scene_item_list_fields,
-    parse_get_scene_item_locked_fields, parse_get_scene_item_source_fields,
-    parse_get_scene_item_transform_fields, parse_remove_scene_item_fields,
-    parse_request_data_or_error_response, parse_set_scene_item_blend_mode_fields,
-    parse_set_scene_item_enabled_fields, parse_set_scene_item_index_fields,
-    parse_set_scene_item_locked_fields, parse_set_scene_item_transform_fields,
-    resolve_scene_name_or_error,
+    parse_get_scene_item_list_fields, parse_remove_scene_item_fields,
+    parse_request_data_or_error_response, parse_scene_item_lookup_fields,
+    parse_set_scene_item_blend_mode_fields, parse_set_scene_item_enabled_fields,
+    parse_set_scene_item_index_fields, parse_set_scene_item_locked_fields,
+    parse_set_scene_item_transform_fields, resolve_scene_name_or_error,
 };
 
 pub fn build_get_scene_item_id_response(
@@ -71,28 +66,9 @@ pub fn build_get_scene_item_id_response(
         }
     };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneItemId")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("sceneItemId", scene_item_id)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneItemId", request_id, |f| {
+        f.member("sceneItemId", scene_item_id)
     })
-    .to_string()
 }
 
 pub fn build_get_scene_item_list_response(
@@ -127,28 +103,9 @@ pub fn build_get_scene_item_list_response(
             }
         });
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneItemList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("sceneItems", &scene_items)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneItemList", request_id, |f| {
+        f.member("sceneItems", &scene_items)
     })
-    .to_string()
 }
 
 pub fn execute_create_scene_item(
@@ -208,28 +165,9 @@ pub fn execute_create_scene_item(
         }
     };
 
-    let response_text = nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "CreateSceneItem")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("sceneItemId", created.scene_item.scene_item_id)),
-                )
-            }),
-        )
-    })
-    .to_string();
+    let response_text = super::build_request_response_success("CreateSceneItem", request_id, |f| {
+        f.member("sceneItemId", created.scene_item.scene_item_id)
+    });
     CreateSceneItemExecution {
         response_text,
         created: Some(created),
@@ -262,39 +200,19 @@ pub fn build_remove_scene_item_response(
     };
     if let Err(error) = input_registry.remove_scene_item(&scene_name, fields.scene_item_id) {
         return match error {
-            crate::obsws_input_registry::RemoveSceneItemError::SceneNotFound => {
+            SceneItemLookupError::SceneNotFound => {
                 unreachable!("resolved scene name must exist in input registry")
             }
-            crate::obsws_input_registry::RemoveSceneItemError::SceneItemNotFound => {
-                super::build_request_response_error(
-                    "RemoveSceneItem",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene item not found",
-                )
-            }
+            SceneItemLookupError::SceneItemNotFound => super::build_request_response_error(
+                "RemoveSceneItem",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene item not found",
+            ),
         };
     }
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "RemoveSceneItem")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("RemoveSceneItem", request_id)
 }
 
 pub fn execute_duplicate_scene_item(
@@ -371,30 +289,10 @@ pub fn execute_duplicate_scene_item(
         }
     };
 
-    let response_text = nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "DuplicateSceneItem")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("sceneItemId", duplicated.scene_item.scene_item_id)
-                    }),
-                )
-            }),
-        )
-    })
-    .to_string();
+    let response_text =
+        super::build_request_response_success("DuplicateSceneItem", request_id, |f| {
+            f.member("sceneItemId", duplicated.scene_item.scene_item_id)
+        });
     DuplicateSceneItemExecution {
         response_text,
         duplicated: Some(duplicated),
@@ -410,7 +308,7 @@ pub fn build_get_scene_item_source_response(
         "GetSceneItemSource",
         request_id,
         request_data,
-        parse_get_scene_item_source_fields,
+        parse_scene_item_lookup_fields,
     ) {
         Ok(fields) => fields,
         Err(response) => return response,
@@ -428,7 +326,7 @@ pub fn build_get_scene_item_source_response(
     let (source_name, source_uuid) =
         match input_registry.get_scene_item_source(&scene_name, fields.scene_item_id) {
             Ok(source) => source,
-            Err(GetSceneItemSourceError::SceneItemNotFound) => {
+            Err(SceneItemLookupError::SceneItemNotFound) => {
                 return super::build_request_response_error(
                     "GetSceneItemSource",
                     request_id,
@@ -436,36 +334,15 @@ pub fn build_get_scene_item_source_response(
                     "Scene item not found",
                 );
             }
-            Err(GetSceneItemSourceError::SceneNotFound) => {
+            Err(SceneItemLookupError::SceneNotFound) => {
                 unreachable!("resolved scene name must exist in input registry")
             }
         };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneItemSource")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("sourceName", &source_name)?;
-                        f.member("sourceUuid", &source_uuid)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneItemSource", request_id, |f| {
+        f.member("sourceName", &source_name)?;
+        f.member("sourceUuid", &source_uuid)
     })
-    .to_string()
 }
 
 pub fn build_get_scene_item_index_response(
@@ -477,7 +354,7 @@ pub fn build_get_scene_item_index_response(
         "GetSceneItemIndex",
         request_id,
         request_data,
-        parse_get_scene_item_index_fields,
+        parse_scene_item_lookup_fields,
     ) {
         Ok(fields) => fields,
         Err(response) => return response,
@@ -495,7 +372,7 @@ pub fn build_get_scene_item_index_response(
     let scene_item_index =
         match input_registry.get_scene_item_index(&scene_name, fields.scene_item_id) {
             Ok(scene_item_index) => scene_item_index,
-            Err(GetSceneItemIndexError::SceneItemNotFound) => {
+            Err(SceneItemLookupError::SceneItemNotFound) => {
                 return super::build_request_response_error(
                     "GetSceneItemIndex",
                     request_id,
@@ -503,33 +380,14 @@ pub fn build_get_scene_item_index_response(
                     "Scene item not found",
                 );
             }
-            Err(GetSceneItemIndexError::SceneNotFound) => {
+            Err(SceneItemLookupError::SceneNotFound) => {
                 unreachable!("resolved scene name must exist in input registry")
             }
         };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneItemIndex")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("sceneItemIndex", scene_item_index)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneItemIndex", request_id, |f| {
+        f.member("sceneItemIndex", scene_item_index)
     })
-    .to_string()
 }
 
 pub fn execute_set_scene_item_index(
@@ -547,8 +405,7 @@ pub fn execute_set_scene_item_index(
         Err(response) => {
             return SetSceneItemIndexExecution {
                 response_text: response,
-                scene_name: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
@@ -563,8 +420,7 @@ pub fn execute_set_scene_item_index(
         Err(response) => {
             return SetSceneItemIndexExecution {
                 response_text: response,
-                scene_name: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
@@ -596,35 +452,19 @@ pub fn execute_set_scene_item_index(
             };
             return SetSceneItemIndexExecution {
                 response_text,
-                scene_name: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
 
-    let response_text = nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetSceneItemIndex")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string();
+    let response_text =
+        super::build_request_response_success_no_data("SetSceneItemIndex", request_id);
     SetSceneItemIndexExecution {
         response_text,
-        scene_name: Some(scene_name),
-        set_result: Some(set_result),
+        event_context: Some(SetSceneItemIndexEventContext {
+            scene_name,
+            set_result,
+        }),
     }
 }
 
@@ -649,13 +489,13 @@ pub fn build_set_scene_item_enabled_response(
         fields.scene_item_enabled,
     ) {
         return match error {
-            SetSceneItemEnabledError::SceneNotFound => super::build_request_response_error(
+            SceneItemLookupError::SceneNotFound => super::build_request_response_error(
                 "SetSceneItemEnabled",
                 request_id,
                 REQUEST_STATUS_RESOURCE_NOT_FOUND,
                 "Scene not found",
             ),
-            SetSceneItemEnabledError::SceneItemNotFound => super::build_request_response_error(
+            SceneItemLookupError::SceneItemNotFound => super::build_request_response_error(
                 "SetSceneItemEnabled",
                 request_id,
                 REQUEST_STATUS_RESOURCE_NOT_FOUND,
@@ -685,7 +525,7 @@ pub fn build_get_scene_item_enabled_response(
     let scene_item_enabled =
         match input_registry.get_scene_item_enabled(&fields.scene_name, fields.scene_item_id) {
             Ok(scene_item_enabled) => scene_item_enabled,
-            Err(GetSceneItemEnabledError::SceneNotFound) => {
+            Err(SceneItemLookupError::SceneNotFound) => {
                 return super::build_request_response_error(
                     "GetSceneItemEnabled",
                     request_id,
@@ -693,7 +533,7 @@ pub fn build_get_scene_item_enabled_response(
                     "Scene not found",
                 );
             }
-            Err(GetSceneItemEnabledError::SceneItemNotFound) => {
+            Err(SceneItemLookupError::SceneItemNotFound) => {
                 return super::build_request_response_error(
                     "GetSceneItemEnabled",
                     request_id,
@@ -703,50 +543,13 @@ pub fn build_get_scene_item_enabled_response(
             }
         };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneItemEnabled")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("sceneItemEnabled", scene_item_enabled)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneItemEnabled", request_id, |f| {
+        f.member("sceneItemEnabled", scene_item_enabled)
     })
-    .to_string()
 }
 
 pub fn build_set_scene_item_enabled_success_response(request_id: &str) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetSceneItemEnabled")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetSceneItemEnabled", request_id)
 }
 
 pub fn build_get_scene_item_locked_response(
@@ -758,7 +561,7 @@ pub fn build_get_scene_item_locked_response(
         "GetSceneItemLocked",
         request_id,
         request_data,
-        parse_get_scene_item_locked_fields,
+        parse_scene_item_lookup_fields,
     ) {
         Ok(fields) => fields,
         Err(response) => return response,
@@ -776,10 +579,10 @@ pub fn build_get_scene_item_locked_response(
     let scene_item_locked =
         match input_registry.get_scene_item_locked(&scene_name, fields.scene_item_id) {
             Ok(scene_item_locked) => scene_item_locked,
-            Err(GetSceneItemLockedError::SceneNotFound) => {
+            Err(SceneItemLookupError::SceneNotFound) => {
                 unreachable!("resolved scene name must exist in input registry")
             }
-            Err(GetSceneItemLockedError::SceneItemNotFound) => {
+            Err(SceneItemLookupError::SceneItemNotFound) => {
                 return super::build_request_response_error(
                     "GetSceneItemLocked",
                     request_id,
@@ -789,28 +592,9 @@ pub fn build_get_scene_item_locked_response(
             }
         };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneItemLocked")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("sceneItemLocked", scene_item_locked)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneItemLocked", request_id, |f| {
+        f.member("sceneItemLocked", scene_item_locked)
     })
-    .to_string()
 }
 
 pub fn execute_set_scene_item_locked(
@@ -828,10 +612,7 @@ pub fn execute_set_scene_item_locked(
         Err(response) => {
             return SetSceneItemLockedExecution {
                 response_text: response,
-                scene_name: None,
-                scene_item_id: None,
-                scene_item_locked: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
@@ -846,10 +627,7 @@ pub fn execute_set_scene_item_locked(
         Err(response) => {
             return SetSceneItemLockedExecution {
                 response_text: response,
-                scene_name: None,
-                scene_item_id: None,
-                scene_item_locked: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
@@ -859,10 +637,10 @@ pub fn execute_set_scene_item_locked(
         fields.scene_item_locked,
     ) {
         Ok(set_result) => set_result,
-        Err(SetSceneItemLockedError::SceneNotFound) => {
+        Err(SceneItemLookupError::SceneNotFound) => {
             unreachable!("resolved scene name must exist in input registry")
         }
-        Err(SetSceneItemLockedError::SceneItemNotFound) => {
+        Err(SceneItemLookupError::SceneItemNotFound) => {
             return SetSceneItemLockedExecution {
                 response_text: super::build_request_response_error(
                     "SetSceneItemLocked",
@@ -870,40 +648,22 @@ pub fn execute_set_scene_item_locked(
                     REQUEST_STATUS_RESOURCE_NOT_FOUND,
                     "Scene item not found",
                 ),
-                scene_name: None,
-                scene_item_id: None,
-                scene_item_locked: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
 
-    let response_text = nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetSceneItemLocked")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string();
+    let response_text =
+        super::build_request_response_success_no_data("SetSceneItemLocked", request_id);
 
     SetSceneItemLockedExecution {
         response_text,
-        scene_name: Some(scene_name),
-        scene_item_id: Some(fields.scene_item_id),
-        scene_item_locked: Some(fields.scene_item_locked),
-        set_result: Some(set_result),
+        event_context: Some(SetSceneItemLockedEventContext {
+            scene_name,
+            scene_item_id: fields.scene_item_id,
+            scene_item_locked: fields.scene_item_locked,
+            set_result,
+        }),
     }
 }
 
@@ -916,7 +676,7 @@ pub fn build_get_scene_item_blend_mode_response(
         "GetSceneItemBlendMode",
         request_id,
         request_data,
-        parse_get_scene_item_blend_mode_fields,
+        parse_scene_item_lookup_fields,
     ) {
         Ok(fields) => fields,
         Err(response) => return response,
@@ -934,10 +694,10 @@ pub fn build_get_scene_item_blend_mode_response(
     let scene_item_blend_mode =
         match input_registry.get_scene_item_blend_mode(&scene_name, fields.scene_item_id) {
             Ok(scene_item_blend_mode) => scene_item_blend_mode,
-            Err(GetSceneItemBlendModeError::SceneNotFound) => {
+            Err(SceneItemLookupError::SceneNotFound) => {
                 unreachable!("resolved scene name must exist in input registry")
             }
-            Err(GetSceneItemBlendModeError::SceneItemNotFound) => {
+            Err(SceneItemLookupError::SceneItemNotFound) => {
                 return super::build_request_response_error(
                     "GetSceneItemBlendMode",
                     request_id,
@@ -947,30 +707,9 @@ pub fn build_get_scene_item_blend_mode_response(
             }
         };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneItemBlendMode")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("sceneItemBlendMode", scene_item_blend_mode.as_str())
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneItemBlendMode", request_id, |f| {
+        f.member("sceneItemBlendMode", scene_item_blend_mode.as_str())
     })
-    .to_string()
 }
 
 pub fn build_set_scene_item_blend_mode_response(
@@ -1003,10 +742,10 @@ pub fn build_set_scene_item_blend_mode_response(
         fields.scene_item_blend_mode,
     ) {
         return match error {
-            SetSceneItemBlendModeError::SceneNotFound => {
+            SceneItemLookupError::SceneNotFound => {
                 unreachable!("resolved scene name must exist in input registry")
             }
-            SetSceneItemBlendModeError::SceneItemNotFound => super::build_request_response_error(
+            SceneItemLookupError::SceneItemNotFound => super::build_request_response_error(
                 "SetSceneItemBlendMode",
                 request_id,
                 REQUEST_STATUS_RESOURCE_NOT_FOUND,
@@ -1014,25 +753,7 @@ pub fn build_set_scene_item_blend_mode_response(
             ),
         };
     }
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetSceneItemBlendMode")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetSceneItemBlendMode", request_id)
 }
 
 pub fn build_get_scene_item_transform_response(
@@ -1044,7 +765,7 @@ pub fn build_get_scene_item_transform_response(
         "GetSceneItemTransform",
         request_id,
         request_data,
-        parse_get_scene_item_transform_fields,
+        parse_scene_item_lookup_fields,
     ) {
         Ok(fields) => fields,
         Err(response) => return response,
@@ -1062,10 +783,10 @@ pub fn build_get_scene_item_transform_response(
     let scene_item_transform =
         match input_registry.get_scene_item_transform(&scene_name, fields.scene_item_id) {
             Ok(scene_item_transform) => scene_item_transform,
-            Err(GetSceneItemTransformError::SceneNotFound) => {
+            Err(SceneItemLookupError::SceneNotFound) => {
                 unreachable!("resolved scene name must exist in input registry")
             }
-            Err(GetSceneItemTransformError::SceneItemNotFound) => {
+            Err(SceneItemLookupError::SceneItemNotFound) => {
                 return super::build_request_response_error(
                     "GetSceneItemTransform",
                     request_id,
@@ -1075,28 +796,9 @@ pub fn build_get_scene_item_transform_response(
             }
         };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneItemTransform")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("sceneItemTransform", &scene_item_transform)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneItemTransform", request_id, |f| {
+        f.member("sceneItemTransform", &scene_item_transform)
     })
-    .to_string()
 }
 
 pub fn execute_set_scene_item_transform(
@@ -1114,9 +816,7 @@ pub fn execute_set_scene_item_transform(
         Err(response) => {
             return SetSceneItemTransformExecution {
                 response_text: response,
-                scene_name: None,
-                scene_item_id: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
@@ -1131,9 +831,7 @@ pub fn execute_set_scene_item_transform(
         Err(response) => {
             return SetSceneItemTransformExecution {
                 response_text: response,
-                scene_name: None,
-                scene_item_id: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
@@ -1143,10 +841,10 @@ pub fn execute_set_scene_item_transform(
         fields.scene_item_transform,
     ) {
         Ok(set_result) => set_result,
-        Err(SetSceneItemTransformError::SceneNotFound) => {
+        Err(SceneItemLookupError::SceneNotFound) => {
             unreachable!("resolved scene name must exist in input registry")
         }
-        Err(SetSceneItemTransformError::SceneItemNotFound) => {
+        Err(SceneItemLookupError::SceneItemNotFound) => {
             return SetSceneItemTransformExecution {
                 response_text: super::build_request_response_error(
                     "SetSceneItemTransform",
@@ -1154,37 +852,20 @@ pub fn execute_set_scene_item_transform(
                     REQUEST_STATUS_RESOURCE_NOT_FOUND,
                     "Scene item not found",
                 ),
-                scene_name: None,
-                scene_item_id: None,
-                set_result: None,
+                event_context: None,
             };
         }
     };
 
-    let response_text = nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetSceneItemTransform")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string();
+    let response_text =
+        super::build_request_response_success_no_data("SetSceneItemTransform", request_id);
 
     SetSceneItemTransformExecution {
         response_text,
-        scene_name: Some(scene_name),
-        scene_item_id: Some(fields.scene_item_id),
-        set_result: Some(set_result),
+        event_context: Some(SetSceneItemTransformEventContext {
+            scene_name,
+            scene_item_id: fields.scene_item_id,
+            set_result,
+        }),
     }
 }

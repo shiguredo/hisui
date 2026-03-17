@@ -1,123 +1,99 @@
 use crate::obsws_input_registry::ObswsInputRegistry;
 use crate::obsws_message::ObswsSessionStats;
-use crate::obsws_protocol::{
-    OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
-    REQUEST_STATUS_SUCCESS,
-};
+use crate::obsws_protocol::{OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION};
 #[cfg(unix)]
 use std::ffi::CString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 
 pub fn build_get_version_response(request_id: &str) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+    super::build_request_response_success("GetVersion", request_id, |f| {
+        f.member("obsVersion", env!("CARGO_PKG_VERSION"))?;
+        f.member("obsWebSocketVersion", OBSWS_VERSION)?;
+        f.member("rpcVersion", OBSWS_RPC_VERSION)?;
         f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetVersion")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("obsVersion", env!("CARGO_PKG_VERSION"))?;
-                        f.member("obsWebSocketVersion", OBSWS_VERSION)?;
-                        f.member("rpcVersion", OBSWS_RPC_VERSION)?;
-                        f.member(
-                            "availableRequests",
-                            [
-                                "GetVersion",
-                                "GetStats",
-                                "BroadcastCustomEvent",
-                                "GetGroupList",
-                                "GetCanvasList",
-                                "GetSourceActive",
-                                "GetSceneList",
-                                "CreateScene",
-                                "SetSceneName",
-                                "RemoveScene",
-                                "GetCurrentProgramScene",
-                                "SetCurrentProgramScene",
-                                "GetCurrentPreviewScene",
-                                "SetCurrentPreviewScene",
-                                "GetSceneSceneTransitionOverride",
-                                "SetSceneSceneTransitionOverride",
-                                "GetTransitionKindList",
-                                "GetSceneTransitionList",
-                                "GetCurrentSceneTransition",
-                                "SetCurrentSceneTransition",
-                                "SetCurrentSceneTransitionDuration",
-                                "SetCurrentSceneTransitionSettings",
-                                "GetCurrentSceneTransitionCursor",
-                                "SetTBarPosition",
-                                "GetSceneItemId",
-                                "GetSceneItemList",
-                                "CreateSceneItem",
-                                "RemoveSceneItem",
-                                "DuplicateSceneItem",
-                                "GetSceneItemSource",
-                                "GetSceneItemEnabled",
-                                "SetSceneItemEnabled",
-                                "GetSceneItemLocked",
-                                "SetSceneItemLocked",
-                                "GetSceneItemIndex",
-                                "SetSceneItemIndex",
-                                "GetSceneItemBlendMode",
-                                "SetSceneItemBlendMode",
-                                "GetSceneItemTransform",
-                                "SetSceneItemTransform",
-                                "GetInputList",
-                                "GetInputKindList",
-                                "GetInputSettings",
-                                "SetInputSettings",
-                                "SetInputName",
-                                "GetInputDefaultSettings",
-                                "CreateInput",
-                                "RemoveInput",
-                                "GetStreamServiceSettings",
-                                "SetStreamServiceSettings",
-                                "GetOutputList",
-                                "GetOutputStatus",
-                                "ToggleOutput",
-                                "StartOutput",
-                                "StopOutput",
-                                "GetOutputSettings",
-                                "SetOutputSettings",
-                                "GetStreamStatus",
-                                "ToggleStream",
-                                "StartStream",
-                                "StopStream",
-                                "GetRecordDirectory",
-                                "SetRecordDirectory",
-                                "GetRecordStatus",
-                                "ToggleRecord",
-                                "StartRecord",
-                                "StopRecord",
-                                "ToggleRecordPause",
-                                "PauseRecord",
-                                "ResumeRecord",
-                                "Sleep",
-                            ],
-                        )?;
-                        f.member("supportedImageFormats", OBSWS_SUPPORTED_IMAGE_FORMATS)?;
-                        f.member("platform", std::env::consts::OS)?;
-                        f.member(
-                            "platformDescription",
-                            format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
-                        )
-                    }),
-                )
-            }),
+            "availableRequests",
+            [
+                "GetVersion",
+                "GetStats",
+                "BroadcastCustomEvent",
+                "GetGroupList",
+                "GetCanvasList",
+                "GetSourceActive",
+                "GetSceneList",
+                "CreateScene",
+                "SetSceneName",
+                "RemoveScene",
+                "GetCurrentProgramScene",
+                "SetCurrentProgramScene",
+                "GetCurrentPreviewScene",
+                "SetCurrentPreviewScene",
+                "GetSceneSceneTransitionOverride",
+                "SetSceneSceneTransitionOverride",
+                "GetTransitionKindList",
+                "GetSceneTransitionList",
+                "GetCurrentSceneTransition",
+                "SetCurrentSceneTransition",
+                "SetCurrentSceneTransitionDuration",
+                "SetCurrentSceneTransitionSettings",
+                "GetCurrentSceneTransitionCursor",
+                "SetTBarPosition",
+                "GetSceneItemId",
+                "GetSceneItemList",
+                "CreateSceneItem",
+                "RemoveSceneItem",
+                "DuplicateSceneItem",
+                "GetSceneItemSource",
+                "GetSceneItemEnabled",
+                "SetSceneItemEnabled",
+                "GetSceneItemLocked",
+                "SetSceneItemLocked",
+                "GetSceneItemIndex",
+                "SetSceneItemIndex",
+                "GetSceneItemBlendMode",
+                "SetSceneItemBlendMode",
+                "GetSceneItemTransform",
+                "SetSceneItemTransform",
+                "GetInputList",
+                "GetInputKindList",
+                "GetInputSettings",
+                "SetInputSettings",
+                "SetInputName",
+                "GetInputDefaultSettings",
+                "CreateInput",
+                "RemoveInput",
+                "GetStreamServiceSettings",
+                "SetStreamServiceSettings",
+                "GetOutputList",
+                "GetOutputStatus",
+                "ToggleOutput",
+                "StartOutput",
+                "StopOutput",
+                "GetOutputSettings",
+                "SetOutputSettings",
+                "GetStreamStatus",
+                "ToggleStream",
+                "StartStream",
+                "StopStream",
+                "GetRecordDirectory",
+                "SetRecordDirectory",
+                "GetRecordStatus",
+                "ToggleRecord",
+                "StartRecord",
+                "StopRecord",
+                "ToggleRecordPause",
+                "PauseRecord",
+                "ResumeRecord",
+                "Sleep",
+            ],
+        )?;
+        f.member("supportedImageFormats", OBSWS_SUPPORTED_IMAGE_FORMATS)?;
+        f.member("platform", std::env::consts::OS)?;
+        f.member(
+            "platformDescription",
+            format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         )
     })
-    .to_string()
 }
 
 pub fn build_get_stats_response(
@@ -131,53 +107,32 @@ pub fn build_get_stats_response(
     let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     let active_fps = calculate_active_fps(input_registry, &output_stats);
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+    super::build_request_response_success("GetStats", request_id, |f| {
+        f.member("cpuUsage", 0.0)?;
+        f.member("memoryUsage", runtime_stats.memory_usage_mb)?;
+        f.member("availableDiskSpace", runtime_stats.available_disk_space_mb)?;
+        f.member("activeFps", active_fps)?;
+        f.member("averageFrameRenderTime", 0.0)?;
+        f.member("renderSkippedFrames", 0)?;
+        f.member("renderTotalFrames", 0)?;
         f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetStats")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("cpuUsage", 0.0)?;
-                        f.member("memoryUsage", runtime_stats.memory_usage_mb)?;
-                        f.member("availableDiskSpace", runtime_stats.available_disk_space_mb)?;
-                        f.member("activeFps", active_fps)?;
-                        f.member("averageFrameRenderTime", 0.0)?;
-                        f.member("renderSkippedFrames", 0)?;
-                        f.member("renderTotalFrames", 0)?;
-                        f.member(
-                            "outputSkippedFrames",
-                            output_stats
-                                .stream_skipped_frames
-                                .saturating_add(output_stats.record_skipped_frames),
-                        )?;
-                        f.member(
-                            "outputTotalFrames",
-                            output_stats
-                                .stream_total_frames
-                                .saturating_add(output_stats.record_total_frames),
-                        )?;
-                        f.member(
-                            "webSocketSessionIncomingMessages",
-                            session_stats.incoming_messages,
-                        )?;
-                        f.member("webSocketSessionOutgoingMessages", outgoing_messages)
-                    }),
-                )
-            }),
-        )
+            "outputSkippedFrames",
+            output_stats
+                .stream_skipped_frames
+                .saturating_add(output_stats.record_skipped_frames),
+        )?;
+        f.member(
+            "outputTotalFrames",
+            output_stats
+                .stream_total_frames
+                .saturating_add(output_stats.record_total_frames),
+        )?;
+        f.member(
+            "webSocketSessionIncomingMessages",
+            session_stats.incoming_messages,
+        )?;
+        f.member("webSocketSessionOutgoingMessages", outgoing_messages)
     })
-    .to_string()
 }
 
 struct ObswsRuntimeStats {
@@ -272,106 +227,30 @@ pub fn build_get_canvas_list_response(
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
 ) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+    super::build_request_response_success("GetCanvasList", request_id, |f| {
         f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetCanvasList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member(
-                            "canvases",
-                            [nojson::object(|f| {
-                                f.member("canvasName", "hisui-main")?;
-                                f.member("canvasWidth", canvas_width)?;
-                                f.member("canvasHeight", canvas_height)
-                            })],
-                        )
-                    }),
-                )
-            }),
+            "canvases",
+            [nojson::object(|f| {
+                f.member("canvasName", "hisui-main")?;
+                f.member("canvasWidth", canvas_width)?;
+                f.member("canvasHeight", canvas_height)
+            })],
         )
     })
-    .to_string()
 }
 
 pub fn build_get_group_list_response(request_id: &str) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetGroupList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("groups", nojson::array(|_| Ok(())))),
-                )
-            }),
-        )
+    super::build_request_response_success("GetGroupList", request_id, |f| {
+        f.member("groups", nojson::array(|_| Ok(())))
     })
-    .to_string()
 }
 
 pub fn build_broadcast_custom_event_response(request_id: &str) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "BroadcastCustomEvent")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("BroadcastCustomEvent", request_id)
 }
 
 pub fn build_sleep_response(request_id: &str) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "Sleep")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("Sleep", request_id)
 }
 
 pub fn build_get_scene_list_response(
@@ -397,32 +276,11 @@ pub fn build_get_scene_list_response(
         .as_ref()
         .map(|scene| scene.scene_uuid.as_str())
         .unwrap_or_default();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("currentProgramSceneName", current_program_scene_name)?;
-                        f.member("currentProgramSceneUuid", current_program_scene_uuid)?;
-                        f.member("currentPreviewSceneName", current_preview_scene_name)?;
-                        f.member("currentPreviewSceneUuid", current_preview_scene_uuid)?;
-                        f.member("scenes", &scenes)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneList", request_id, |f| {
+        f.member("currentProgramSceneName", current_program_scene_name)?;
+        f.member("currentProgramSceneUuid", current_program_scene_uuid)?;
+        f.member("currentPreviewSceneName", current_preview_scene_name)?;
+        f.member("currentPreviewSceneUuid", current_preview_scene_uuid)?;
+        f.member("scenes", &scenes)
     })
-    .to_string()
 }

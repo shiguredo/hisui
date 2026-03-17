@@ -3,9 +3,8 @@ use crate::obsws_input_registry::{
     SetInputSettingsError,
 };
 use crate::obsws_protocol::{
-    OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
-    REQUEST_STATUS_SUCCESS,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+    REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
 use super::{
@@ -19,58 +18,18 @@ pub fn build_get_input_list_response(
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let inputs = input_registry.list_inputs();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetInputList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("inputs", &inputs)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetInputList", request_id, |f| {
+        f.member("inputs", &inputs)
     })
-    .to_string()
 }
 
 pub fn build_get_input_kind_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
 ) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetInputKindList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("inputKinds", input_registry.supported_input_kinds())
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetInputKindList", request_id, |f| {
+        f.member("inputKinds", input_registry.supported_input_kinds())
     })
-    .to_string()
 }
 
 pub fn build_get_input_settings_response(
@@ -98,32 +57,11 @@ pub fn build_get_input_settings_response(
         );
     };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetInputSettings")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("inputName", &input.input_name)?;
-                        f.member("inputKind", input.input.kind_name())?;
-                        f.member("inputSettings", &input.input.settings)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetInputSettings", request_id, |f| {
+        f.member("inputName", &input.input_name)?;
+        f.member("inputKind", input.input.kind_name())?;
+        f.member("inputSettings", &input.input.settings)
     })
-    .to_string()
 }
 
 pub fn build_get_source_active_response(
@@ -154,28 +92,9 @@ pub fn build_get_source_active_response(
             }
         };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSourceActive")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("videoActive", source_active)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSourceActive", request_id, |f| {
+        f.member("videoActive", source_active)
     })
-    .to_string()
 }
 
 pub fn build_set_input_settings_response(
@@ -234,25 +153,8 @@ pub fn execute_set_input_settings(
         };
     }
 
-    let response_text = nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetInputSettings")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string();
+    let response_text =
+        super::build_request_response_success_no_data("SetInputSettings", request_id);
     SetInputSettingsExecution {
         response_text,
         request_succeeded: true,
@@ -295,25 +197,7 @@ pub fn build_set_input_name_response(
         };
     }
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetInputName")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetInputName", request_id)
 }
 
 pub fn build_get_input_default_settings_response(
@@ -346,31 +230,10 @@ pub fn build_get_input_default_settings_response(
         }
     };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetInputDefaultSettings")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("inputKind", &fields.input_kind)?;
-                        f.member("defaultInputSettings", &default_input_settings)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetInputDefaultSettings", request_id, |f| {
+        f.member("inputKind", &fields.input_kind)?;
+        f.member("defaultInputSettings", &default_input_settings)
     })
-    .to_string()
 }
 
 pub fn build_create_input_response(
@@ -414,28 +277,9 @@ pub fn build_create_input_response(
     };
     let input_uuid = created.input_uuid;
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "CreateInput")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("inputUuid", &input_uuid)),
-                )
-            }),
-        )
+    super::build_request_response_success("CreateInput", request_id, |f| {
+        f.member("inputUuid", &input_uuid)
     })
-    .to_string()
 }
 
 pub fn build_remove_input_response(
@@ -462,23 +306,5 @@ pub fn build_remove_input_response(
         );
     };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "RemoveInput")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("RemoveInput", request_id)
 }

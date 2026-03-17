@@ -5,9 +5,8 @@ use crate::obsws_input_registry::{
     SetSceneSceneTransitionOverrideError, SetTBarPositionError,
 };
 use crate::obsws_protocol::{
-    OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
-    REQUEST_STATUS_SUCCESS,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+    REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
 use super::{
@@ -55,33 +54,12 @@ pub fn build_get_current_program_scene_response(
         .as_ref()
         .map(|scene| scene.scene_uuid.as_str())
         .unwrap_or_default();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetCurrentProgramScene")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("sceneName", scene_name)?;
-                        f.member("sceneUuid", scene_uuid)?;
-                        f.member("currentProgramSceneName", scene_name)?;
-                        f.member("currentProgramSceneUuid", scene_uuid)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetCurrentProgramScene", request_id, |f| {
+        f.member("sceneName", scene_name)?;
+        f.member("sceneUuid", scene_uuid)?;
+        f.member("currentProgramSceneName", scene_name)?;
+        f.member("currentProgramSceneUuid", scene_uuid)
     })
-    .to_string()
 }
 
 pub fn build_set_current_program_scene_response(
@@ -108,25 +86,7 @@ pub fn build_set_current_program_scene_response(
             "Scene not found",
         );
     }
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetCurrentProgramScene")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetCurrentProgramScene", request_id)
 }
 
 pub fn build_get_current_preview_scene_response(
@@ -142,33 +102,12 @@ pub fn build_get_current_preview_scene_response(
         .as_ref()
         .map(|scene| scene.scene_uuid.as_str())
         .unwrap_or_default();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetCurrentPreviewScene")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("sceneName", scene_name)?;
-                        f.member("sceneUuid", scene_uuid)?;
-                        f.member("currentPreviewSceneName", scene_name)?;
-                        f.member("currentPreviewSceneUuid", scene_uuid)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetCurrentPreviewScene", request_id, |f| {
+        f.member("sceneName", scene_name)?;
+        f.member("sceneUuid", scene_uuid)?;
+        f.member("currentPreviewSceneName", scene_name)?;
+        f.member("currentPreviewSceneUuid", scene_uuid)
     })
-    .to_string()
 }
 
 pub fn build_set_current_preview_scene_response(
@@ -195,58 +134,19 @@ pub fn build_set_current_preview_scene_response(
             "Scene not found",
         );
     }
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetCurrentPreviewScene")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetCurrentPreviewScene", request_id)
 }
 
 pub fn build_get_transition_kind_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
 ) -> String {
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+    super::build_request_response_success("GetTransitionKindList", request_id, |f| {
         f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetTransitionKindList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member(
-                            "transitionKinds",
-                            input_registry.supported_transition_kinds(),
-                        )
-                    }),
-                )
-            }),
+            "transitionKinds",
+            input_registry.supported_transition_kinds(),
         )
     })
-    .to_string()
 }
 
 pub fn build_get_scene_transition_list_response(
@@ -265,32 +165,11 @@ pub fn build_get_scene_transition_list_response(
         .collect();
     let current_transition_name = input_registry.current_scene_transition_name();
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneTransitionList")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("currentSceneTransitionName", current_transition_name)?;
-                        f.member("currentSceneTransitionKind", current_transition_name)?;
-                        f.member("transitions", &transitions)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("GetSceneTransitionList", request_id, |f| {
+        f.member("currentSceneTransitionName", current_transition_name)?;
+        f.member("currentSceneTransitionKind", current_transition_name)?;
+        f.member("transitions", &transitions)
     })
-    .to_string()
 }
 
 pub fn build_get_current_scene_transition_response(
@@ -300,38 +179,17 @@ pub fn build_get_current_scene_transition_response(
     let current_transition_name = input_registry.current_scene_transition_name();
     let current_transition_duration_ms = input_registry.current_scene_transition_duration_ms();
     let transition_settings = input_registry.current_scene_transition_settings();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+    super::build_request_response_success("GetCurrentSceneTransition", request_id, |f| {
+        f.member("transitionName", current_transition_name)?;
+        f.member("transitionKind", current_transition_name)?;
         f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetCurrentSceneTransition")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("transitionName", current_transition_name)?;
-                        f.member("transitionKind", current_transition_name)?;
-                        f.member(
-                            "transitionFixed",
-                            is_fixed_transition(current_transition_name),
-                        )?;
-                        f.member("transitionConfigurable", false)?;
-                        f.member("transitionSettings", transition_settings)?;
-                        f.member("transitionDuration", current_transition_duration_ms)
-                    }),
-                )
-            }),
-        )
+            "transitionFixed",
+            is_fixed_transition(current_transition_name),
+        )?;
+        f.member("transitionConfigurable", false)?;
+        f.member("transitionSettings", transition_settings)?;
+        f.member("transitionDuration", current_transition_duration_ms)
     })
-    .to_string()
 }
 
 pub fn build_get_scene_scene_transition_override_response(
@@ -370,25 +228,10 @@ pub fn build_get_scene_scene_transition_override_response(
         }
     };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetSceneSceneTransitionOverride")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", &override_entry)
-            }),
-        )
+    super::build_request_response_success("GetSceneSceneTransitionOverride", request_id, |f| {
+        f.member("transitionName", &override_entry.transition_name)?;
+        f.member("transitionDuration", override_entry.transition_duration)
     })
-    .to_string()
 }
 
 pub fn build_set_current_scene_transition_response(
@@ -415,25 +258,7 @@ pub fn build_set_current_scene_transition_response(
             "Transition not found",
         );
     }
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetCurrentSceneTransition")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetCurrentSceneTransition", request_id)
 }
 
 pub fn build_set_current_scene_transition_duration_response(
@@ -460,25 +285,7 @@ pub fn build_set_current_scene_transition_duration_response(
             "Invalid transitionDuration field",
         );
     }
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetCurrentSceneTransitionDuration")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetCurrentSceneTransitionDuration", request_id)
 }
 
 pub fn build_set_current_scene_transition_settings_response(
@@ -498,25 +305,7 @@ pub fn build_set_current_scene_transition_settings_response(
     input_registry
         .set_current_scene_transition_settings(fields.transition_settings)
         .expect("BUG: parser must validate transitionSettings as object");
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetCurrentSceneTransitionSettings")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetCurrentSceneTransitionSettings", request_id)
 }
 
 pub fn build_set_scene_scene_transition_override_response(
@@ -575,25 +364,10 @@ pub fn build_set_scene_scene_transition_override_response(
         }
     };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetSceneSceneTransitionOverride")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", &override_entry)
-            }),
-        )
+    super::build_request_response_success("SetSceneSceneTransitionOverride", request_id, |f| {
+        f.member("transitionName", &override_entry.transition_name)?;
+        f.member("transitionDuration", override_entry.transition_duration)
     })
-    .to_string()
 }
 
 pub fn build_get_current_scene_transition_cursor_response(
@@ -601,28 +375,9 @@ pub fn build_get_current_scene_transition_cursor_response(
     input_registry: &ObswsInputRegistry,
 ) -> String {
     let transition_cursor = input_registry.current_tbar_position();
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "GetCurrentSceneTransitionCursor")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| f.member("transitionCursor", transition_cursor)),
-                )
-            }),
-        )
+    super::build_request_response_success("GetCurrentSceneTransitionCursor", request_id, |f| {
+        f.member("transitionCursor", transition_cursor)
     })
-    .to_string()
 }
 
 pub fn build_set_tbar_position_response(
@@ -649,25 +404,7 @@ pub fn build_set_tbar_position_response(
             "Invalid position field",
         );
     }
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetTBarPosition")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("SetTBarPosition", request_id)
 }
 
 pub fn build_create_scene_response(
@@ -695,31 +432,10 @@ pub fn build_create_scene_response(
             );
         }
     };
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "CreateScene")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("sceneName", &created.scene_name)?;
-                        f.member("sceneUuid", &created.scene_uuid)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("CreateScene", request_id, |f| {
+        f.member("sceneName", &created.scene_name)?;
+        f.member("sceneUuid", &created.scene_uuid)
     })
-    .to_string()
 }
 
 pub fn build_remove_scene_response(
@@ -757,25 +473,7 @@ pub fn build_remove_scene_response(
         };
     }
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "RemoveScene")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member("responseData", nojson::object(|_| Ok(())))
-            }),
-        )
-    })
-    .to_string()
+    super::build_request_response_success_no_data("RemoveScene", request_id)
 }
 
 pub fn build_set_scene_name_response(
@@ -812,31 +510,10 @@ pub fn build_set_scene_name_response(
         }
     };
 
-    nojson::object(|f| {
-        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
-        f.member(
-            "d",
-            nojson::object(|f| {
-                f.member("requestType", "SetSceneName")?;
-                f.member("requestId", request_id)?;
-                f.member(
-                    "requestStatus",
-                    nojson::object(|f| {
-                        f.member("result", true)?;
-                        f.member("code", REQUEST_STATUS_SUCCESS)
-                    }),
-                )?;
-                f.member(
-                    "responseData",
-                    nojson::object(|f| {
-                        f.member("sceneName", &renamed.scene_name)?;
-                        f.member("sceneUuid", &renamed.scene_uuid)
-                    }),
-                )
-            }),
-        )
+    super::build_request_response_success("SetSceneName", request_id, |f| {
+        f.member("sceneName", &renamed.scene_name)?;
+        f.member("sceneUuid", &renamed.scene_uuid)
     })
-    .to_string()
 }
 
 // Scene item handlers continue here.

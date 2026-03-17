@@ -293,6 +293,26 @@ pub struct ObswsRecordTrackRun {
     pub encoded_track_id: TrackId,
 }
 
+impl ObswsRecordTrackRun {
+    /// output_kind ("stream" / "record") と media_kind ("video" / "audio") から構築する
+    pub fn new(
+        output_kind: &str,
+        run_id: u64,
+        media_kind: &str,
+        source_track_id: &TrackId,
+    ) -> Self {
+        Self {
+            encoder_processor_id: ProcessorId::new(format!(
+                "obsws:{output_kind}:{run_id}:{media_kind}_encoder"
+            )),
+            source_track_id: source_track_id.clone(),
+            encoded_track_id: TrackId::new(format!(
+                "obsws:{output_kind}:{run_id}:encoded_{media_kind}"
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObswsSceneItemBlendMode {
     #[default]
@@ -828,6 +848,14 @@ pub enum ResumeRecordError {
     NotPaused,
 }
 
+/// SceneItem の検索時に発生するエラー。
+/// シーンが見つからない場合とシーンアイテムが見つからない場合を表す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneItemLookupError {
+    SceneNotFound,
+    SceneItemNotFound,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GetSceneItemIdError {
     SceneNotFound,
@@ -836,55 +864,13 @@ pub enum GetSceneItemIdError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GetSceneItemEnabledError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GetSceneItemLockedError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SetSceneItemLockedError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetSceneItemLockedResult {
     pub changed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GetSceneItemBlendModeError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SetSceneItemBlendModeError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetSceneItemBlendModeResult {
     pub changed: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GetSceneItemTransformError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SetSceneItemTransformError {
-    SceneNotFound,
-    SceneItemNotFound,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -905,24 +891,6 @@ pub enum CreateSceneItemError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RemoveSceneItemError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GetSceneItemSourceError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GetSceneItemIndexError {
-    SceneNotFound,
-    SceneItemNotFound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetSceneItemIndexError {
     SceneNotFound,
     SceneItemNotFound,
@@ -934,12 +902,6 @@ pub enum DuplicateSceneItemError {
     SourceScene,
     DestinationScene,
     SourceSceneItem,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SetSceneItemEnabledError {
-    SceneNotFound,
-    SceneItemNotFound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

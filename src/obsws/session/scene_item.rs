@@ -233,35 +233,29 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        let Some(target_scene_name) = execution.scene_name else {
+        let Some(event_context) = execution.event_context else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         };
-        let Some(set_result) = execution.set_result else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        if !set_result.changed {
+        if !event_context.set_result.changed {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         }
         let scene_uuid = input_registry
-            .get_scene_uuid(&target_scene_name)
+            .get_scene_uuid(&event_context.scene_name)
             .unwrap_or_else(|| unreachable!("resolved scene name must exist in input registry"));
         SessionAction::SendTexts {
             messages: vec![
                 (response_text, "request response message"),
                 (
                     crate::obsws_response_builder::build_scene_item_list_reindexed_event(
-                        &target_scene_name,
+                        &event_context.scene_name,
                         &scene_uuid,
-                        &set_result.scene_items,
+                        &event_context.set_result.scene_items,
                     ),
                     "event message",
                 ),
@@ -367,44 +361,26 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        let Some(scene_name) = execution.scene_name else {
+        let Some(event_context) = execution.event_context else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         };
-        let Some(scene_item_id) = execution.scene_item_id else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(scene_item_locked) = execution.scene_item_locked else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(set_result) = execution.set_result else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        if !set_result.changed {
+        if !event_context.set_result.changed {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         }
         let scene_uuid = input_registry
-            .get_scene_uuid(&scene_name)
+            .get_scene_uuid(&event_context.scene_name)
             .unwrap_or_else(|| unreachable!("resolved scene name must exist in input registry"));
         let event_text = crate::obsws_response_builder::build_scene_item_lock_state_changed_event(
-            &scene_name,
+            &event_context.scene_name,
             &scene_uuid,
-            scene_item_id,
-            scene_item_locked,
+            event_context.scene_item_id,
+            event_context.scene_item_locked,
         );
         SessionAction::SendTexts {
             messages: vec![
@@ -449,38 +425,26 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        let Some(scene_name) = execution.scene_name else {
+        let Some(event_context) = execution.event_context else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         };
-        let Some(scene_item_id) = execution.scene_item_id else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let Some(set_result) = execution.set_result else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        if !set_result.changed {
+        if !event_context.set_result.changed {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         }
         let scene_uuid = input_registry
-            .get_scene_uuid(&scene_name)
+            .get_scene_uuid(&event_context.scene_name)
             .unwrap_or_else(|| unreachable!("resolved scene name must exist in input registry"));
         let event_text = crate::obsws_response_builder::build_scene_item_transform_changed_event(
-            &scene_name,
+            &event_context.scene_name,
             &scene_uuid,
-            scene_item_id,
-            &set_result.scene_item_transform,
+            event_context.scene_item_id,
+            &event_context.set_result.scene_item_transform,
         );
         SessionAction::SendTexts {
             messages: vec![

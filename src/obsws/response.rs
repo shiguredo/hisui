@@ -8,7 +8,7 @@ use crate::obsws_protocol::{
     OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_BATCH_RESPONSE,
     OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_VERSION,
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -126,13 +126,10 @@ struct DuplicateSceneItemFields {
     scene_item_id: i64,
 }
 
-struct GetSceneItemSourceFields {
-    scene_name: Option<String>,
-    scene_uuid: Option<String>,
-    scene_item_id: i64,
-}
-
-struct GetSceneItemIndexFields {
+/// sceneName / sceneUuid + sceneItemId の共通フィールド。
+/// Get/Set の SceneItemSource, SceneItemIndex, SceneItemLocked,
+/// SceneItemBlendMode, SceneItemTransform で共有する。
+struct SceneItemLookupFields {
     scene_name: Option<String>,
     scene_uuid: Option<String>,
     scene_item_id: i64,
@@ -156,12 +153,6 @@ struct SetSceneItemEnabledFields {
     scene_item_enabled: bool,
 }
 
-struct GetSceneItemLockedFields {
-    scene_name: Option<String>,
-    scene_uuid: Option<String>,
-    scene_item_id: i64,
-}
-
 struct SetSceneItemLockedFields {
     scene_name: Option<String>,
     scene_uuid: Option<String>,
@@ -169,23 +160,11 @@ struct SetSceneItemLockedFields {
     scene_item_locked: bool,
 }
 
-struct GetSceneItemBlendModeFields {
-    scene_name: Option<String>,
-    scene_uuid: Option<String>,
-    scene_item_id: i64,
-}
-
 struct SetSceneItemBlendModeFields {
     scene_name: Option<String>,
     scene_uuid: Option<String>,
     scene_item_id: i64,
     scene_item_blend_mode: ObswsSceneItemBlendMode,
-}
-
-struct GetSceneItemTransformFields {
-    scene_name: Option<String>,
-    scene_uuid: Option<String>,
-    scene_item_id: i64,
 }
 
 struct SetSceneItemTransformFields {
@@ -230,25 +209,40 @@ pub struct RequestBatchResult {
 #[derive(Debug, Clone)]
 pub struct SetSceneItemIndexExecution {
     pub response_text: String,
-    pub scene_name: Option<String>,
-    pub set_result: Option<SetSceneItemIndexResult>,
+    pub event_context: Option<SetSceneItemIndexEventContext>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetSceneItemIndexEventContext {
+    pub scene_name: String,
+    pub set_result: SetSceneItemIndexResult,
 }
 
 #[derive(Debug, Clone)]
 pub struct SetSceneItemLockedExecution {
     pub response_text: String,
-    pub scene_name: Option<String>,
-    pub scene_item_id: Option<i64>,
-    pub scene_item_locked: Option<bool>,
-    pub set_result: Option<SetSceneItemLockedResult>,
+    pub event_context: Option<SetSceneItemLockedEventContext>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetSceneItemLockedEventContext {
+    pub scene_name: String,
+    pub scene_item_id: i64,
+    pub scene_item_locked: bool,
+    pub set_result: SetSceneItemLockedResult,
 }
 
 #[derive(Debug, Clone)]
 pub struct SetSceneItemTransformExecution {
     pub response_text: String,
-    pub scene_name: Option<String>,
-    pub scene_item_id: Option<i64>,
-    pub set_result: Option<SetSceneItemTransformResult>,
+    pub event_context: Option<SetSceneItemTransformEventContext>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetSceneItemTransformEventContext {
+    pub scene_name: String,
+    pub scene_item_id: i64,
+    pub set_result: SetSceneItemTransformResult,
 }
 
 #[derive(Debug, Clone)]
@@ -569,32 +563,16 @@ fn parse_duplicate_scene_item_fields(
     })
 }
 
-fn parse_get_scene_item_source_fields(
+fn parse_scene_item_lookup_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<GetSceneItemSourceFields, nojson::JsonParseError> {
+) -> Result<SceneItemLookupFields, nojson::JsonParseError> {
     let (scene_name, scene_uuid) =
         parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
     let scene_item_id: i64 = request_data
         .to_member("sceneItemId")?
         .required()?
         .try_into()?;
-    Ok(GetSceneItemSourceFields {
-        scene_name,
-        scene_uuid,
-        scene_item_id,
-    })
-}
-
-fn parse_get_scene_item_index_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<GetSceneItemIndexFields, nojson::JsonParseError> {
-    let (scene_name, scene_uuid) =
-        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
-    let scene_item_id: i64 = request_data
-        .to_member("sceneItemId")?
-        .required()?
-        .try_into()?;
-    Ok(GetSceneItemIndexFields {
+    Ok(SceneItemLookupFields {
         scene_name,
         scene_uuid,
         scene_item_id,
@@ -655,22 +633,6 @@ fn parse_get_scene_item_enabled_fields(
     })
 }
 
-fn parse_get_scene_item_locked_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<GetSceneItemLockedFields, nojson::JsonParseError> {
-    let (scene_name, scene_uuid) =
-        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
-    let scene_item_id: i64 = request_data
-        .to_member("sceneItemId")?
-        .required()?
-        .try_into()?;
-    Ok(GetSceneItemLockedFields {
-        scene_name,
-        scene_uuid,
-        scene_item_id,
-    })
-}
-
 fn parse_set_scene_item_locked_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetSceneItemLockedFields, nojson::JsonParseError> {
@@ -689,22 +651,6 @@ fn parse_set_scene_item_locked_fields(
         scene_uuid,
         scene_item_id,
         scene_item_locked,
-    })
-}
-
-fn parse_get_scene_item_blend_mode_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<GetSceneItemBlendModeFields, nojson::JsonParseError> {
-    let (scene_name, scene_uuid) =
-        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
-    let scene_item_id: i64 = request_data
-        .to_member("sceneItemId")?
-        .required()?
-        .try_into()?;
-    Ok(GetSceneItemBlendModeFields {
-        scene_name,
-        scene_uuid,
-        scene_item_id,
     })
 }
 
@@ -727,22 +673,6 @@ fn parse_set_scene_item_blend_mode_fields(
         scene_uuid,
         scene_item_id,
         scene_item_blend_mode,
-    })
-}
-
-fn parse_get_scene_item_transform_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<GetSceneItemTransformFields, nojson::JsonParseError> {
-    let (scene_name, scene_uuid) =
-        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
-    let scene_item_id: i64 = request_data
-        .to_member("sceneItemId")?
-        .required()?
-        .try_into()?;
-    Ok(GetSceneItemTransformFields {
-        scene_name,
-        scene_uuid,
-        scene_item_id,
     })
 }
 
@@ -992,8 +922,13 @@ fn resolve_scene_name_or_error(
 
 pub(crate) fn request_status_code_for_parse_error(error: &nojson::JsonParseError) -> i64 {
     // OBS WebSocket の 300 / 400 の厳密分類は nojson のエラー種別だけでは判別しづらいため、
-    // 現状は required member 欠落パターンのみ 300 として扱い、それ以外は 400 とする
-    // 将来的に厳密化する場合は、パーサー側で欠落と型不一致を明示的に分離する
+    // 現状は required member 欠落パターンのみ 300 として扱い、それ以外は 400 とする。
+    //
+    // TODO(nojson): この判定は nojson のエラーメッセージ文字列に依存しており、
+    // nojson 側のメッセージ変更で壊れるリスクがある。
+    // nojson に JsonParseError の種別（欠落 / 型不一致 / 範囲外など）を
+    // 構造的に取得できる API が追加された場合は、文字列マッチを廃止すること。
+    // 現状は response/tests.rs のテストで挙動を担保している。
     if let nojson::JsonParseError::InvalidValue { error, .. } = error {
         let reason = error.to_string();
         if reason.contains("required member") && reason.contains("is missing") {
@@ -1196,6 +1131,42 @@ pub fn parse_request_response_for_batch_result(
         request_status_comment,
         response_data,
     })
+}
+
+/// responseData 付きの成功レスポンスを構築する共通ヘルパー。
+/// `response_data` クロージャで responseData オブジェクトの中身を書き込む。
+pub fn build_request_response_success<F>(
+    request_type: &str,
+    request_id: &str,
+    response_data: F,
+) -> String
+where
+    F: Fn(&mut nojson::JsonObjectFormatter<'_, '_, '_>) -> std::fmt::Result,
+{
+    nojson::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", request_type)?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )?;
+                f.member("responseData", nojson::object(|f| response_data(f)))
+            }),
+        )
+    })
+    .to_string()
+}
+
+/// responseData が空オブジェクトの成功レスポンスを構築する共通ヘルパー。
+pub fn build_request_response_success_no_data(request_type: &str, request_id: &str) -> String {
+    build_request_response_success(request_type, request_id, |_| Ok(()))
 }
 
 pub fn build_request_response_error(
