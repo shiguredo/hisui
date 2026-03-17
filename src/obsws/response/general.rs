@@ -8,6 +8,7 @@ use std::os::unix::ffi::OsStrExt;
 
 pub fn build_get_version_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetVersion", request_id, |f| {
+        // hisui は OBS ではないため、obsVersion には hisui 自身のバージョンを返す。
         f.member("obsVersion", env!("CARGO_PKG_VERSION"))?;
         f.member("obsWebSocketVersion", OBSWS_VERSION)?;
         f.member("rpcVersion", OBSWS_RPC_VERSION)?;
@@ -234,7 +235,18 @@ pub fn build_get_canvas_list_response(
             [nojson::object(|f| {
                 f.member("canvasName", "hisui-main")?;
                 f.member("canvasUuid", "00000000-0000-0000-0000-000000000001")?;
-                f.member("canvasFlags", 0)?;
+                // OBS 互換の object 形式で canvasFlags を返す。
+                // hisui は単一の main canvas のみ持つため、MAIN / ACTIVATE / MIX_AUDIO を true とする。
+                f.member(
+                    "canvasFlags",
+                    nojson::object(|f| {
+                        f.member("MAIN", true)?;
+                        f.member("ACTIVATE", true)?;
+                        f.member("MIX_AUDIO", true)?;
+                        f.member("SCENE_REF", false)?;
+                        f.member("EPHEMERAL", false)
+                    }),
+                )?;
                 f.member(
                     "canvasVideoSettings",
                     nojson::object(|f| {
@@ -265,6 +277,7 @@ pub fn build_sleep_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success_no_data("Sleep", request_id)
 }
 
+/// hisui は単一 canvas 前提のため、OBS の canvasUuid によるシーン絞り込みには対応しない。
 pub fn build_get_scene_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,

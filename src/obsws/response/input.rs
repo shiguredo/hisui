@@ -36,6 +36,8 @@ pub fn build_get_input_list_response(
     })
 }
 
+/// hisui にはバージョン付き input kind が存在しないため、
+/// OBS の unversioned パラメータには対応しない。
 pub fn build_get_input_kind_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,

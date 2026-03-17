@@ -422,7 +422,7 @@ mod tests {
     };
     use crate::obsws_protocol::{
         OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-        REQUEST_STATUS_SUCCESS,
+        REQUEST_STATUS_MISSING_REQUEST_DATA, REQUEST_STATUS_SUCCESS,
     };
     use crate::{ProcessorId, TrackId};
 
@@ -1822,7 +1822,7 @@ mod tests {
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         let code: i64 = status.to_member("code")?.required()?.try_into()?;
         assert!(!result);
-        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_DATA);
         Ok(())
     }
 

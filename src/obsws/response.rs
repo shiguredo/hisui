@@ -7,8 +7,9 @@ use crate::obsws_input_registry::{
 use crate::obsws_protocol::{
     OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_BATCH_RESPONSE,
     OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_VERSION,
-    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_SUCCESS,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_DATA,
+    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_SUCCESS,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -907,7 +908,7 @@ where
         return Err(build_request_response_error(
             request_type,
             request_id,
-            REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            REQUEST_STATUS_MISSING_REQUEST_DATA,
             "Missing required requestData field",
         ));
     };

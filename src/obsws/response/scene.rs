@@ -7,6 +7,7 @@ use crate::obsws_input_registry::{
 use crate::obsws_protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
 };
 
 use super::{
@@ -103,7 +104,7 @@ pub fn build_get_current_preview_scene_response(request_id: &str) -> nojson::Raw
     super::build_request_response_error(
         "GetCurrentPreviewScene",
         request_id,
-        REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+        REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
         "Studio mode is not enabled",
     )
 }
@@ -112,7 +113,7 @@ pub fn build_set_current_preview_scene_response(request_id: &str) -> nojson::Raw
     super::build_request_response_error(
         "SetCurrentPreviewScene",
         request_id,
-        REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+        REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
         "Studio mode is not enabled",
     )
 }

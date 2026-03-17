@@ -462,6 +462,8 @@ impl ObswsSession {
                     None,
                 );
             }
+            // hisui は配信先 URL (server) の事前設定を必須とする設計であり、
+            // OBS のように GUI で事前設定済みの状態を前提としない。
             let Some(output_url) = stream_service_settings.server else {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
