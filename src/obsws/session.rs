@@ -15,11 +15,12 @@ use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS,
-    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
-    REQUEST_STATUS_OUTPUT_NOT_RUNNING, REQUEST_STATUS_OUTPUT_RUNNING,
-    REQUEST_STATUS_REQUEST_PROCESSING_FAILED, REQUEST_STATUS_RESOURCE_NOT_FOUND,
-    REQUEST_STATUS_STREAM_NOT_RUNNING, REQUEST_STATUS_STREAM_RUNNING,
+    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
+    REQUEST_STATUS_MISSING_REQUEST_TYPE, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+    REQUEST_STATUS_OUTPUT_RUNNING, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_STREAM_NOT_RUNNING,
+    REQUEST_STATUS_STREAM_RUNNING,
 };
 
 mod input;
@@ -301,8 +302,8 @@ impl ObswsSession {
             };
         }
 
-        let execution_type = request_batch.execution_type.unwrap_or(0);
-        if execution_type != 0 {
+        let execution_type = request_batch.execution_type.unwrap_or(-1);
+        if execution_type == 0 {
             return SessionAction::SendText {
                 text: crate::obsws_response_builder::build_request_response_error(
                     "RequestBatch",
@@ -691,10 +692,7 @@ impl ObswsSession {
         }
 
         match request_type {
-            "StartOutput" => crate::obsws_response_builder::build_start_output_response(
-                request_id,
-                output_active_on_success,
-            ),
+            "StartOutput" => crate::obsws_response_builder::build_start_output_response(request_id),
             "ToggleOutput" => crate::obsws_response_builder::build_toggle_output_response(
                 request_id,
                 output_active_on_success,

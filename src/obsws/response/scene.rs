@@ -1,8 +1,8 @@
 use crate::obsws_input_registry::{
     CreateSceneError, GetSceneSceneTransitionOverrideError, ObswsInputRegistry,
-    SetCurrentPreviewSceneError, SetCurrentProgramSceneError,
-    SetCurrentSceneTransitionDurationError, SetCurrentSceneTransitionError, SetSceneNameError,
-    SetSceneSceneTransitionOverrideError, SetTBarPositionError,
+    SetCurrentProgramSceneError, SetCurrentSceneTransitionDurationError,
+    SetCurrentSceneTransitionError, SetSceneNameError, SetSceneSceneTransitionOverrideError,
+    SetTBarPositionError,
 };
 use crate::obsws_protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
@@ -12,10 +12,10 @@ use crate::obsws_protocol::{
 use super::{
     parse_create_scene_fields, parse_get_scene_scene_transition_override_fields,
     parse_remove_scene_fields, parse_request_data_or_error_response,
-    parse_set_current_preview_scene_fields, parse_set_current_program_scene_fields,
-    parse_set_current_scene_transition_duration_fields, parse_set_current_scene_transition_fields,
-    parse_set_current_scene_transition_settings_fields, parse_set_scene_name_fields,
-    parse_set_scene_scene_transition_override_fields, parse_set_tbar_position_fields,
+    parse_set_current_program_scene_fields, parse_set_current_scene_transition_duration_fields,
+    parse_set_current_scene_transition_fields, parse_set_current_scene_transition_settings_fields,
+    parse_set_scene_name_fields, parse_set_scene_scene_transition_override_fields,
+    parse_set_tbar_position_fields,
 };
 
 struct ObswsSceneTransitionEntry {
@@ -89,52 +89,22 @@ pub fn build_set_current_program_scene_response(
     super::build_request_response_success_no_data("SetCurrentProgramScene", request_id)
 }
 
-pub fn build_get_current_preview_scene_response(
-    request_id: &str,
-    input_registry: &ObswsInputRegistry,
-) -> nojson::RawJsonOwned {
-    let current_preview_scene = input_registry.current_preview_scene();
-    let scene_name = current_preview_scene
-        .as_ref()
-        .map(|scene| scene.scene_name.as_str())
-        .unwrap_or_default();
-    let scene_uuid = current_preview_scene
-        .as_ref()
-        .map(|scene| scene.scene_uuid.as_str())
-        .unwrap_or_default();
-    super::build_request_response_success("GetCurrentPreviewScene", request_id, |f| {
-        f.member("sceneName", scene_name)?;
-        f.member("sceneUuid", scene_uuid)?;
-        f.member("currentPreviewSceneName", scene_name)?;
-        f.member("currentPreviewSceneUuid", scene_uuid)
-    })
+pub fn build_get_current_preview_scene_response(request_id: &str) -> nojson::RawJsonOwned {
+    super::build_request_response_error(
+        "GetCurrentPreviewScene",
+        request_id,
+        REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+        "Studio mode is not enabled",
+    )
 }
 
-pub fn build_set_current_preview_scene_response(
-    request_id: &str,
-    request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
-) -> nojson::RawJsonOwned {
-    let fields = match parse_request_data_or_error_response(
+pub fn build_set_current_preview_scene_response(request_id: &str) -> nojson::RawJsonOwned {
+    super::build_request_response_error(
         "SetCurrentPreviewScene",
         request_id,
-        request_data,
-        parse_set_current_preview_scene_fields,
-    ) {
-        Ok(fields) => fields,
-        Err(response) => return response,
-    };
-    if let Err(SetCurrentPreviewSceneError::SceneNotFound) =
-        input_registry.set_current_preview_scene(&fields.scene_name)
-    {
-        return super::build_request_response_error(
-            "SetCurrentPreviewScene",
-            request_id,
-            REQUEST_STATUS_RESOURCE_NOT_FOUND,
-            "Scene not found",
-        );
-    }
-    super::build_request_response_success_no_data("SetCurrentPreviewScene", request_id)
+        REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+        "Studio mode is not enabled",
+    )
 }
 
 pub fn build_get_transition_kind_list_response(

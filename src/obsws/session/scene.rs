@@ -49,42 +49,13 @@ impl ObswsSession {
     pub(super) async fn handle_set_current_preview_scene_request(
         &self,
         request_id: &str,
-        request_data: Option<&nojson::RawJsonOwned>,
+        _request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
-        let mut input_registry = self.input_registry.write().await;
-        let previous_scene_name = input_registry
-            .current_preview_scene()
-            .map(|scene| scene.scene_name);
-        let response_text = crate::obsws_response_builder::build_set_current_preview_scene_response(
-            request_id,
-            request_data,
-            &mut input_registry,
-        );
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        }
-        let current_scene = input_registry.current_preview_scene().unwrap_or_else(|| {
-            unreachable!("BUG: current preview scene must exist in input registry")
-        });
-        if previous_scene_name.as_deref() == Some(current_scene.scene_name.as_str()) {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        }
-
-        let event_text = crate::obsws_response_builder::build_current_preview_scene_changed_event(
-            &current_scene.scene_name,
-            &current_scene.scene_uuid,
-        );
-        SessionAction::SendTexts {
-            messages: vec![
-                (response_text, "request response message"),
-                (event_text, "event message"),
-            ],
+        let response_text =
+            crate::obsws_response_builder::build_set_current_preview_scene_response(request_id);
+        SessionAction::SendText {
+            text: response_text,
+            message_name: "request response message",
         }
     }
 
@@ -165,9 +136,6 @@ impl ObswsSession {
         let previous_current_scene_name = input_registry
             .current_program_scene()
             .map(|scene| scene.scene_name);
-        let previous_current_preview_scene_name = input_registry
-            .current_preview_scene()
-            .map(|scene| scene.scene_name);
         let response_text = crate::obsws_response_builder::build_remove_scene_response(
             request_id,
             request_data,
@@ -217,18 +185,6 @@ impl ObswsSession {
                 "event message",
             ));
         }
-        if previous_current_preview_scene_name.as_deref() == Some(removed_scene.scene_name.as_str())
-            && let Some(current_scene) = input_registry.current_preview_scene()
-        {
-            messages.push((
-                crate::obsws_response_builder::build_current_preview_scene_changed_event(
-                    &current_scene.scene_name,
-                    &current_scene.scene_uuid,
-                ),
-                "event message",
-            ));
-        }
-
         SessionAction::SendTexts { messages }
     }
 }

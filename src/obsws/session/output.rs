@@ -59,7 +59,11 @@ impl ObswsSession {
         let mut events = Vec::new();
         if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
             events.push(
-                crate::obsws_response_builder::build_record_state_changed_event(true, false, None),
+                crate::obsws_response_builder::build_record_state_changed_event(
+                    true,
+                    "OBS_WEBSOCKET_OUTPUT_STARTED",
+                    None,
+                ),
             );
         }
         Self::build_execution_from_outcome(outcome, events)
@@ -75,7 +79,7 @@ impl ObswsSession {
             events.push(
                 crate::obsws_response_builder::build_record_state_changed_event(
                     false,
-                    false,
+                    "OBS_WEBSOCKET_OUTPUT_STOPPED",
                     outcome.output_path.as_deref(),
                 ),
             );
@@ -95,15 +99,18 @@ impl ObswsSession {
         };
         let mut events = Vec::new();
         if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-            let output_path = if was_active {
-                outcome.output_path.as_deref()
+            let (output_state, output_path) = if was_active {
+                (
+                    "OBS_WEBSOCKET_OUTPUT_STOPPED",
+                    outcome.output_path.as_deref(),
+                )
             } else {
-                None
+                ("OBS_WEBSOCKET_OUTPUT_STARTED", None)
             };
             events.push(
                 crate::obsws_response_builder::build_record_state_changed_event(
                     !was_active,
-                    false,
+                    output_state,
                     output_path,
                 ),
             );
@@ -125,7 +132,11 @@ impl ObswsSession {
         let mut events = Vec::new();
         if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
             events.push(
-                crate::obsws_response_builder::build_record_state_changed_event(true, true, None),
+                crate::obsws_response_builder::build_record_state_changed_event(
+                    true,
+                    "OBS_WEBSOCKET_OUTPUT_PAUSED",
+                    None,
+                ),
             );
         }
         Self::build_execution_from_outcome(outcome, events)
@@ -141,7 +152,9 @@ impl ObswsSession {
             if outcome.success {
                 events.push(
                     crate::obsws_response_builder::build_record_state_changed_event(
-                        true, false, None,
+                        true,
+                        "OBS_WEBSOCKET_OUTPUT_RESUMED",
+                        None,
                     ),
                 );
             } else if outcome.output_path.is_some() {
@@ -151,7 +164,7 @@ impl ObswsSession {
                 events.push(
                     crate::obsws_response_builder::build_record_state_changed_event(
                         false,
-                        false,
+                        "OBS_WEBSOCKET_OUTPUT_STOPPED",
                         outcome.output_path.as_deref(),
                     ),
                 );
@@ -173,10 +186,15 @@ impl ObswsSession {
         let mut events = Vec::new();
         if self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
             if outcome.success {
+                let output_state = if !was_paused {
+                    "OBS_WEBSOCKET_OUTPUT_PAUSED"
+                } else {
+                    "OBS_WEBSOCKET_OUTPUT_RESUMED"
+                };
                 events.push(
                     crate::obsws_response_builder::build_record_state_changed_event(
                         true,
-                        !was_paused,
+                        output_state,
                         None,
                     ),
                 );
@@ -188,7 +206,7 @@ impl ObswsSession {
                 events.push(
                     crate::obsws_response_builder::build_record_state_changed_event(
                         false,
-                        false,
+                        "OBS_WEBSOCKET_OUTPUT_STOPPED",
                         outcome.output_path.as_deref(),
                     ),
                 );
@@ -235,7 +253,9 @@ impl ObswsSession {
                 if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
                     events.push(
                         crate::obsws_response_builder::build_record_state_changed_event(
-                            true, false, None,
+                            true,
+                            "OBS_WEBSOCKET_OUTPUT_STARTED",
+                            None,
                         ),
                     );
                 }
@@ -288,7 +308,7 @@ impl ObswsSession {
                     events.push(
                         crate::obsws_response_builder::build_record_state_changed_event(
                             false,
-                            false,
+                            "OBS_WEBSOCKET_OUTPUT_STOPPED",
                             outcome.output_path.as_deref(),
                         ),
                     );
@@ -351,15 +371,18 @@ impl ObswsSession {
                 };
                 let mut events = Vec::new();
                 if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                    let output_path = if was_active {
-                        outcome.output_path.as_deref()
+                    let (output_state, output_path) = if was_active {
+                        (
+                            "OBS_WEBSOCKET_OUTPUT_STOPPED",
+                            outcome.output_path.as_deref(),
+                        )
                     } else {
-                        None
+                        ("OBS_WEBSOCKET_OUTPUT_STARTED", None)
                     };
                     events.push(
                         crate::obsws_response_builder::build_record_state_changed_event(
                             !was_active,
-                            false,
+                            output_state,
                             output_path,
                         ),
                     );
@@ -534,7 +557,7 @@ impl ObswsSession {
         }
 
         RequestOutcome::success(
-            crate::obsws_response_builder::build_start_stream_response(request_id, true),
+            crate::obsws_response_builder::build_start_stream_response(request_id),
             None,
         )
     }
@@ -685,7 +708,7 @@ impl ObswsSession {
         }
 
         RequestOutcome::success(
-            crate::obsws_response_builder::build_start_record_response(request_id, true),
+            crate::obsws_response_builder::build_start_record_response(request_id),
             None,
         )
     }

@@ -378,12 +378,12 @@ fn build_record_output_settings_response(
     })
 }
 
-pub fn build_start_stream_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
-    build_output_active_response("StartStream", request_id, output_active)
+pub fn build_start_stream_response(request_id: &str) -> nojson::RawJsonOwned {
+    super::build_request_response_success_no_data("StartStream", request_id)
 }
 
-pub fn build_start_output_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
-    build_output_active_response("StartOutput", request_id, output_active)
+pub fn build_start_output_response(request_id: &str) -> nojson::RawJsonOwned {
+    super::build_request_response_success_no_data("StartOutput", request_id)
 }
 
 pub fn build_toggle_stream_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
@@ -406,8 +406,8 @@ pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> no
     build_record_output_state_response("ToggleRecord", request_id, output_active, false)
 }
 
-pub fn build_start_record_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
-    build_record_output_state_response("StartRecord", request_id, output_active, false)
+pub fn build_start_record_response(request_id: &str) -> nojson::RawJsonOwned {
+    super::build_request_response_success_no_data("StartRecord", request_id)
 }
 
 pub fn build_toggle_record_pause_response(
@@ -418,11 +418,11 @@ pub fn build_toggle_record_pause_response(
 }
 
 pub fn build_pause_record_response(request_id: &str) -> nojson::RawJsonOwned {
-    build_record_output_state_response("PauseRecord", request_id, true, true)
+    super::build_request_response_success_no_data("PauseRecord", request_id)
 }
 
 pub fn build_resume_record_response(request_id: &str) -> nojson::RawJsonOwned {
-    build_record_output_state_response("ResumeRecord", request_id, true, false)
+    super::build_request_response_success_no_data("ResumeRecord", request_id)
 }
 
 pub fn build_stop_record_response(request_id: &str, output_path: &str) -> nojson::RawJsonOwned {

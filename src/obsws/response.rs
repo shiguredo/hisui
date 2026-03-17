@@ -57,10 +57,6 @@ struct SetCurrentProgramSceneFields {
     scene_name: String,
 }
 
-struct SetCurrentPreviewSceneFields {
-    scene_name: String,
-}
-
 struct GetSceneSceneTransitionOverrideFields {
     scene_name: Option<String>,
     scene_uuid: Option<String>,
@@ -381,13 +377,6 @@ fn parse_set_current_program_scene_fields(
 ) -> Result<SetCurrentProgramSceneFields, nojson::JsonParseError> {
     let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
     Ok(SetCurrentProgramSceneFields { scene_name })
-}
-
-fn parse_set_current_preview_scene_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<SetCurrentPreviewSceneFields, nojson::JsonParseError> {
-    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
-    Ok(SetCurrentPreviewSceneFields { scene_name })
 }
 
 fn parse_get_scene_scene_transition_override_fields(

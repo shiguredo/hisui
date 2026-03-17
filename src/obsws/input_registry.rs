@@ -75,7 +75,7 @@ impl ObswsInputRegistry {
         input_name: &str,
         input: ObswsInput,
         scene_item_enabled: bool,
-    ) -> Result<ObswsInputEntry, CreateInputError> {
+    ) -> Result<(ObswsInputEntry, i64), CreateInputError> {
         if !self.scenes_by_name.contains_key(scene_name) {
             return Err(CreateInputError::UnsupportedSceneName);
         }
@@ -111,7 +111,7 @@ impl ObswsInputRegistry {
             transform: ObswsSceneItemTransform::default(),
         });
 
-        Ok(entry)
+        Ok((entry, scene_item_id))
     }
 
     pub fn create_scene(&mut self, scene_name: &str) -> Result<ObswsSceneEntry, CreateSceneError> {

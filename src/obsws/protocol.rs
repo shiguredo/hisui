@@ -18,6 +18,7 @@ pub const OBSWS_EVENT_SUB_GENERAL: u32 = 1 << 0;
 pub const OBSWS_EVENT_SUB_SCENES: u32 = 1 << 2;
 pub const OBSWS_EVENT_SUB_INPUTS: u32 = 1 << 3;
 pub const OBSWS_EVENT_SUB_OUTPUTS: u32 = 1 << 6;
+pub const OBSWS_EVENT_SUB_SCENE_ITEMS: u32 = 1 << 7;
 
 pub const OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION: CloseCode = CloseCode(4006);
 pub const OBSWS_CLOSE_NOT_IDENTIFIED: CloseCode = CloseCode(4007);

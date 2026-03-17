@@ -13,7 +13,7 @@ impl ObswsSession {
             &mut input_registry,
         );
         let response_text = execution.response_text;
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -105,7 +105,7 @@ impl ObswsSession {
             Some(request_data),
             &mut input_registry,
         );
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -189,7 +189,7 @@ impl ObswsSession {
             &mut input_registry,
         );
         let response_text = execution.response_text;
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -230,7 +230,7 @@ impl ObswsSession {
             &mut input_registry,
         );
         let response_text = execution.response_text;
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -301,7 +301,7 @@ impl ObswsSession {
             Some(request_data),
             &mut input_registry,
         );
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -355,7 +355,7 @@ impl ObswsSession {
             &mut input_registry,
         );
         let response_text = execution.response_text;
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -416,7 +416,7 @@ impl ObswsSession {
             &mut input_registry,
         );
         let response_text = execution.response_text;
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENES) {
+        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS) {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",

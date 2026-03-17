@@ -15,11 +15,24 @@ use super::{
 
 pub fn build_get_input_list_response(
     request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
 ) -> nojson::RawJsonOwned {
     let inputs = input_registry.list_inputs();
+    // inputKind フィールドが指定されている場合、その kind でフィルタする
+    let input_kind_filter: Option<String> = request_data.and_then(|data| {
+        let value: Option<String> = data.value().to_member("inputKind").ok()?.try_into().ok()?;
+        value
+    });
+    let filtered: Vec<_> = match input_kind_filter {
+        Some(ref kind) => inputs
+            .into_iter()
+            .filter(|i| i.input.kind_name() == kind)
+            .collect(),
+        None => inputs,
+    };
     super::build_request_response_success("GetInputList", request_id, |f| {
-        f.member("inputs", &inputs)
+        f.member("inputs", &filtered)
     })
 }
 
@@ -251,13 +264,13 @@ pub fn build_create_input_response(
         Err(response) => return response,
     };
 
-    let created = match input_registry.create_input(
+    let (created, scene_item_id) = match input_registry.create_input(
         &fields.scene_name,
         &fields.input_name,
         fields.input,
         fields.scene_item_enabled,
     ) {
-        Ok(created) => created,
+        Ok(result) => result,
         Err(CreateInputError::UnsupportedSceneName) => {
             return super::build_request_response_error(
                 "CreateInput",
@@ -286,7 +299,8 @@ pub fn build_create_input_response(
     let input_uuid = created.input_uuid;
 
     super::build_request_response_success("CreateInput", request_id, |f| {
-        f.member("inputUuid", &input_uuid)
+        f.member("inputUuid", &input_uuid)?;
+        f.member("sceneItemId", scene_item_id)
     })
 }
 

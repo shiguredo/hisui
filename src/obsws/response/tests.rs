@@ -3,7 +3,7 @@ use crate::obsws_input_registry::{
     ObswsInputRegistry, ObswsInputSettings, ObswsSceneItemTransform,
 };
 use crate::obsws_protocol::{
-    OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
+    OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_OP_EVENT,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_SUCCESS,
 };
 
@@ -51,25 +51,29 @@ fn build_stop_record_response_includes_output_path() {
 
 #[test]
 fn build_record_state_changed_event_includes_output_path_when_present() {
-    let event = build_record_state_changed_event(false, false, Some("/tmp/record.mp4"));
+    let event = build_record_state_changed_event(
+        false,
+        "OBS_WEBSOCKET_OUTPUT_STOPPED",
+        Some("/tmp/record.mp4"),
+    );
     let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
         .and_then(|v| v.required()?.try_into())
         .expect("eventType must be string");
-    let output_paused: bool = json
+    let output_state: String = json
         .value()
-        .to_path_member(&["d", "eventData", "outputPaused"])
+        .to_path_member(&["d", "eventData", "outputState"])
         .and_then(|v| v.required()?.try_into())
-        .expect("outputPaused must be bool");
+        .expect("outputState must be string");
     let output_path: String = json
         .value()
         .to_path_member(&["d", "eventData", "outputPath"])
         .and_then(|v| v.required()?.try_into())
         .expect("outputPath must be string");
     assert_eq!(event_type, "RecordStateChanged");
-    assert!(!output_paused);
+    assert_eq!(output_state, "OBS_WEBSOCKET_OUTPUT_STOPPED");
     assert_eq!(output_path, "/tmp/record.mp4");
 }
 
@@ -77,12 +81,12 @@ fn build_record_state_changed_event_includes_output_path_when_present() {
 fn build_pause_record_response_sets_output_paused_true() {
     let response = build_pause_record_response("req-pause-record");
     let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
-    let output_paused: bool = json
+    let result: bool = json
         .value()
-        .to_path_member(&["d", "responseData", "outputPaused"])
+        .to_path_member(&["d", "requestStatus", "result"])
         .and_then(|v| v.required()?.try_into())
-        .expect("outputPaused must be bool");
-    assert!(output_paused);
+        .expect("result must be bool");
+    assert!(result);
 }
 
 #[test]
@@ -156,17 +160,7 @@ fn build_custom_event_contains_expected_fields() {
 
 #[test]
 fn build_get_and_set_current_preview_scene_response_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
-    registry
-        .create_scene("Scene B")
-        .expect("scene creation must succeed");
-    let set_request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
-        .expect("requestData must be valid json");
-    let set_response = build_set_current_preview_scene_response(
-        "req-set-preview-scene",
-        Some(&set_request_data),
-        &mut registry,
-    );
+    let set_response = build_set_current_preview_scene_response("req-set-preview-scene");
     let set_json =
         nojson::RawJson::parse(set_response.text()).expect("response must be valid json");
     let set_result: bool = set_json
@@ -174,17 +168,17 @@ fn build_get_and_set_current_preview_scene_response_succeeds() {
         .to_path_member(&["d", "requestStatus", "result"])
         .and_then(|v| v.required()?.try_into())
         .expect("result must be bool");
-    assert!(set_result);
+    assert!(!set_result);
 
-    let get_response = build_get_current_preview_scene_response("req-get-preview-scene", &registry);
+    let get_response = build_get_current_preview_scene_response("req-get-preview-scene");
     let get_json =
         nojson::RawJson::parse(get_response.text()).expect("response must be valid json");
-    let scene_name: String = get_json
+    let get_result: bool = get_json
         .value()
-        .to_path_member(&["d", "responseData", "sceneName"])
+        .to_path_member(&["d", "requestStatus", "result"])
         .and_then(|v| v.required()?.try_into())
-        .expect("sceneName must be string");
-    assert_eq!(scene_name, "Scene B");
+        .expect("result must be bool");
+    assert!(!get_result);
 }
 
 #[test]
@@ -250,8 +244,18 @@ fn build_set_current_scene_transition_settings_and_tbar_position_responses_succe
 
 #[test]
 fn build_input_events_contain_expected_fields() {
-    let created_event = build_input_created_event("camera-1", "input-uuid-1", "image_source");
-    let removed_event = build_input_removed_event("camera-2", "input-uuid-2", "image_source");
+    let input_settings = ObswsInputSettings::default_for_kind("image_source")
+        .expect("default settings must be available");
+    let default_input_settings = ObswsInputSettings::default_for_kind("image_source")
+        .expect("default settings must be available");
+    let created_event = build_input_created_event(
+        "camera-1",
+        "input-uuid-1",
+        "image_source",
+        &input_settings,
+        &default_input_settings,
+    );
+    let removed_event = build_input_removed_event("camera-2", "input-uuid-2");
 
     for (event, expected_type, expected_name, expected_uuid) in [
         (created_event, "InputCreated", "camera-1", "input-uuid-1"),
@@ -290,12 +294,8 @@ fn build_input_settings_changed_event_contains_expected_fields() {
             device_id: Some("camera-1".to_owned()),
         },
     );
-    let event = build_input_settings_changed_event(
-        "camera-source",
-        "input-uuid-3",
-        "video_capture_device",
-        &input_settings,
-    );
+    let event =
+        build_input_settings_changed_event("camera-source", "input-uuid-3", &input_settings);
     let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
@@ -307,11 +307,6 @@ fn build_input_settings_changed_event_contains_expected_fields() {
         .to_path_member(&["d", "eventData", "inputName"])
         .and_then(|v| v.required()?.try_into())
         .expect("inputName must be string");
-    let input_kind: String = json
-        .value()
-        .to_path_member(&["d", "eventData", "inputKind"])
-        .and_then(|v| v.required()?.try_into())
-        .expect("inputKind must be string");
     let device_id: String = json
         .value()
         .to_path_member(&["d", "eventData", "inputSettings", "device_id"])
@@ -319,7 +314,6 @@ fn build_input_settings_changed_event_contains_expected_fields() {
         .expect("device_id must be string");
     assert_eq!(event_type, "InputSettingsChanged");
     assert_eq!(input_name, "camera-source");
-    assert_eq!(input_kind, "video_capture_device");
     assert_eq!(device_id, "camera-1");
 }
 
@@ -395,7 +389,7 @@ fn build_scene_item_enable_state_changed_event_contains_expected_fields() {
         .and_then(|v| v.required()?.try_into())
         .expect("sceneItemEnabled must be bool");
     assert_eq!(event_type, "SceneItemEnableStateChanged");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
     assert_eq!(scene_name, "Scene");
     assert_eq!(scene_uuid, "10000000-0000-0000-0000-000000000000");
     assert_eq!(scene_item_id, 10);
@@ -842,7 +836,7 @@ fn build_create_scene_item_response_succeeds_when_source_exists() {
         .expect("input creation must succeed");
     let request_data = nojson::RawJsonOwned::parse(format!(
         r#"{{"sceneName":"Scene","sourceUuid":"{}","sceneItemEnabled":true}}"#,
-        created.input_uuid
+        created.0.input_uuid
     ))
     .expect("request data must be valid json");
 

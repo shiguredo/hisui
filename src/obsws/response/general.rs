@@ -226,14 +226,26 @@ pub fn build_get_canvas_list_response(
     request_id: &str,
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
+    frame_rate: crate::video::FrameRate,
 ) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetCanvasList", request_id, |f| {
         f.member(
             "canvases",
             [nojson::object(|f| {
                 f.member("canvasName", "hisui-main")?;
-                f.member("canvasWidth", canvas_width)?;
-                f.member("canvasHeight", canvas_height)
+                f.member("canvasUuid", "00000000-0000-0000-0000-000000000001")?;
+                f.member("canvasFlags", 0)?;
+                f.member(
+                    "canvasVideoSettings",
+                    nojson::object(|f| {
+                        f.member("baseWidth", canvas_width)?;
+                        f.member("baseHeight", canvas_height)?;
+                        f.member("outputWidth", canvas_width)?;
+                        f.member("outputHeight", canvas_height)?;
+                        f.member("fpsNumerator", frame_rate.numerator.get())?;
+                        f.member("fpsDenominator", frame_rate.denumerator.get())
+                    }),
+                )
             })],
         )
     })
@@ -259,7 +271,6 @@ pub fn build_get_scene_list_response(
 ) -> nojson::RawJsonOwned {
     let scenes = input_registry.list_scenes();
     let current_program_scene = input_registry.current_program_scene();
-    let current_preview_scene = input_registry.current_preview_scene();
     let current_program_scene_name = current_program_scene
         .as_ref()
         .map(|scene| scene.scene_name.as_str())
@@ -268,19 +279,11 @@ pub fn build_get_scene_list_response(
         .as_ref()
         .map(|scene| scene.scene_uuid.as_str())
         .unwrap_or_default();
-    let current_preview_scene_name = current_preview_scene
-        .as_ref()
-        .map(|scene| scene.scene_name.as_str())
-        .unwrap_or_default();
-    let current_preview_scene_uuid = current_preview_scene
-        .as_ref()
-        .map(|scene| scene.scene_uuid.as_str())
-        .unwrap_or_default();
     super::build_request_response_success("GetSceneList", request_id, |f| {
         f.member("currentProgramSceneName", current_program_scene_name)?;
         f.member("currentProgramSceneUuid", current_program_scene_uuid)?;
-        f.member("currentPreviewSceneName", current_preview_scene_name)?;
-        f.member("currentPreviewSceneUuid", current_preview_scene_uuid)?;
+        f.member("currentPreviewSceneName", Option::<&str>::None)?;
+        f.member("currentPreviewSceneUuid", Option::<&str>::None)?;
         f.member("scenes", &scenes)
     })
 }

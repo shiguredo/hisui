@@ -180,6 +180,7 @@ pub fn handle_request_message_with_pipeline_handle(
             &request_id,
             input_registry.canvas_width(),
             input_registry.canvas_height(),
+            input_registry.frame_rate(),
         ),
         "GetGroupList" => crate::obsws_response_builder::build_get_group_list_response(&request_id),
         "GetSceneList" => crate::obsws_response_builder::build_get_scene_list_response(
@@ -193,10 +194,7 @@ pub fn handle_request_message_with_pipeline_handle(
             )
         }
         "GetCurrentPreviewScene" => {
-            crate::obsws_response_builder::build_get_current_preview_scene_response(
-                &request_id,
-                input_registry,
-            )
+            crate::obsws_response_builder::build_get_current_preview_scene_response(&request_id)
         }
         "GetSceneSceneTransitionOverride" => {
             crate::obsws_response_builder::build_get_scene_scene_transition_override_response(
@@ -319,6 +317,7 @@ pub fn handle_request_message_with_pipeline_handle(
         }
         "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
             &request_id,
+            request.request_data.as_ref(),
             input_registry,
         ),
         "GetInputKindList" => crate::obsws_response_builder::build_get_input_kind_list_response(

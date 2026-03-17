@@ -157,8 +157,8 @@ fn create_input_succeeds_with_supported_values() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
 
-    assert_eq!(entry.input_name, "camera-1");
-    assert_eq!(entry.input.kind_name(), "video_capture_device");
+    assert_eq!(entry.0.input_name, "camera-1");
+    assert_eq!(entry.0.input.kind_name(), "video_capture_device");
     assert!(registry.find_input(None, Some("camera-1")).is_some());
 }
 
@@ -673,7 +673,7 @@ fn create_scene_item_and_list_scene_items_succeed() {
         .expect("input creation must succeed");
 
     let created_scene_item = registry
-        .create_scene_item("Scene B", Some(&created_input.input_uuid), None, true)
+        .create_scene_item("Scene B", Some(&created_input.0.input_uuid), None, true)
         .expect("scene item creation must succeed");
     assert_eq!(created_scene_item.scene_name, "Scene B");
 
@@ -705,10 +705,10 @@ fn remove_scene_item_and_set_scene_item_index_succeed() {
         .expect("input creation must succeed");
 
     let first_scene_item = registry
-        .create_scene_item("Scene B", Some(&created_input_1.input_uuid), None, true)
+        .create_scene_item("Scene B", Some(&created_input_1.0.input_uuid), None, true)
         .expect("scene item creation must succeed");
     let second_scene_item = registry
-        .create_scene_item("Scene B", Some(&created_input_2.input_uuid), None, true)
+        .create_scene_item("Scene B", Some(&created_input_2.0.input_uuid), None, true)
         .expect("scene item creation must succeed");
 
     let set_index_result = registry
@@ -810,7 +810,7 @@ fn remove_input_by_name_succeeds() {
     assert!(removed.is_some());
     assert_eq!(
         removed.expect("removed input must exist").input_uuid,
-        created.input_uuid
+        created.0.input_uuid
     );
     assert!(registry.find_input(None, Some("camera-1")).is_none());
 }
@@ -825,11 +825,11 @@ fn remove_input_by_uuid_succeeds() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
 
-    let removed = registry.remove_input(Some(&created.input_uuid), None);
+    let removed = registry.remove_input(Some(&created.0.input_uuid), None);
     assert!(removed.is_some());
     assert!(
         registry
-            .find_input(Some(&created.input_uuid), None)
+            .find_input(Some(&created.0.input_uuid), None)
             .is_none()
     );
 }
@@ -970,7 +970,7 @@ fn is_source_active_returns_true_when_source_is_enabled_in_program_scene() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
     let active = registry
-        .is_source_active(Some(&created.input_uuid), None)
+        .is_source_active(Some(&created.0.input_uuid), None)
         .expect("source lookup must succeed");
     assert!(active);
 }

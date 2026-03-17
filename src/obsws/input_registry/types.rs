@@ -57,7 +57,8 @@ impl nojson::DisplayJson for ObswsInputEntry {
             // 現状の hisui は OBS の *_v2 / *_v3 のようなバージョン付き input kind を
             // 使っていないため、unversionedInputKind は inputKind と同値になる。
             f.member("unversionedInputKind", self.input.kind_name())?;
-            f.member("inputUuid", &self.input_uuid)
+            f.member("inputUuid", &self.input_uuid)?;
+            f.member("inputKindCaps", 0)
         })
         .fmt(f)
     }

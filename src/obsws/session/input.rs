@@ -44,10 +44,20 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         };
+        let Ok(default_settings) =
+            input_registry.get_input_default_settings(created_input.input.kind_name())
+        else {
+            return SessionAction::SendText {
+                text: response_text,
+                message_name: "request response message",
+            };
+        };
         let event_text = crate::obsws_response_builder::build_input_created_event(
             &created_input.input_name,
             &created_input.input_uuid,
             created_input.input.kind_name(),
+            &created_input.input.settings,
+            &default_settings,
         );
         SessionAction::SendTexts {
             messages: vec![
@@ -108,7 +118,6 @@ impl ObswsSession {
         let event_text = crate::obsws_response_builder::build_input_removed_event(
             &removed_input.input_name,
             &removed_input.input_uuid,
-            removed_input.input.kind_name(),
         );
         SessionAction::SendTexts {
             messages: vec![
@@ -172,7 +181,6 @@ impl ObswsSession {
         let event_text = crate::obsws_response_builder::build_input_settings_changed_event(
             &updated_input.input_name,
             &updated_input.input_uuid,
-            updated_input.input.kind_name(),
             &updated_input.input.settings,
         );
         SessionAction::SendTexts {

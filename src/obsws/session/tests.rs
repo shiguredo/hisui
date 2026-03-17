@@ -5,9 +5,9 @@ use crate::obsws_message::RequestMessage;
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS,
-    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
+    REQUEST_STATUS_OUTPUT_NOT_RUNNING, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -426,11 +426,9 @@ async fn set_current_preview_scene_with_scene_subscription_returns_preview_event
             request_data: Some(set_preview_scene_request_data),
         })
         .await;
-    let messages = unwrap_send_texts(action);
-    assert_eq!(messages.len(), 2);
-    let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
-    assert_eq!(event_type, "CurrentPreviewSceneChanged");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    let text = unwrap_send_text(action);
+    let (result, _code) = parse_request_status(&text);
+    assert!(!result);
 }
 
 #[tokio::test]
@@ -496,7 +494,7 @@ async fn remove_current_scene_with_scene_subscription_sends_scene_program_and_pr
         .await;
     assert!(matches!(
         set_preview_scene_action,
-        SessionAction::SendTexts { .. }
+        SessionAction::SendText { .. }
     ));
 
     let remove_request_data = nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
@@ -509,16 +507,13 @@ async fn remove_current_scene_with_scene_subscription_sends_scene_program_and_pr
         })
         .await;
     let messages = unwrap_send_texts(remove_action);
-    assert_eq!(messages.len(), 4);
+    assert_eq!(messages.len(), 3);
     let (_, event_type_1, event_intent_1) = parse_event_type_and_intent(&messages[1].0);
     let (_, event_type_2, event_intent_2) = parse_event_type_and_intent(&messages[2].0);
-    let (_, event_type_3, event_intent_3) = parse_event_type_and_intent(&messages[3].0);
     assert_eq!(event_type_1, "SceneRemoved");
     assert_eq!(event_intent_1, OBSWS_EVENT_SUB_SCENES);
     assert_eq!(event_type_2, "CurrentProgramSceneChanged");
     assert_eq!(event_intent_2, OBSWS_EVENT_SUB_SCENES);
-    assert_eq!(event_type_3, "CurrentPreviewSceneChanged");
-    assert_eq!(event_intent_3, OBSWS_EVENT_SUB_SCENES);
 }
 
 #[tokio::test]
@@ -757,7 +752,7 @@ async fn set_input_name_with_invalid_input_uuid_type_returns_parse_error() {
 async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -811,7 +806,7 @@ async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed
         .and_then(|v| v.required()?.try_into())
         .expect("sceneUuid must be string");
     assert_eq!(event_type, "SceneItemEnableStateChanged");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
     assert_eq!(scene_uuid, "10000000-0000-0000-0000-000000000000");
 }
 
@@ -869,7 +864,7 @@ async fn set_scene_item_enabled_with_same_value_returns_response_only() {
 async fn set_scene_item_locked_with_scene_subscription_sends_event_when_changed() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -916,14 +911,14 @@ async fn set_scene_item_locked_with_scene_subscription_sends_event_when_changed(
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemLockStateChanged");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
 }
 
 #[tokio::test]
 async fn set_scene_item_transform_with_scene_subscription_sends_event_when_changed() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -970,14 +965,14 @@ async fn set_scene_item_transform_with_scene_subscription_sends_event_when_chang
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemTransformChanged");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
 }
 
 #[tokio::test]
 async fn create_scene_item_with_scene_subscription_sends_created_event() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1013,14 +1008,14 @@ async fn create_scene_item_with_scene_subscription_sends_created_event() {
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemCreated");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
 }
 
 #[tokio::test]
 async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_events() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1088,16 +1083,16 @@ async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_e
     let (_, first_event_type, first_event_intent) = parse_event_type_and_intent(&messages[1].0);
     let (_, second_event_type, second_event_intent) = parse_event_type_and_intent(&messages[2].0);
     assert_eq!(first_event_type, "SceneItemRemoved");
-    assert_eq!(first_event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(first_event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
     assert_eq!(second_event_type, "SceneItemListReindexed");
-    assert_eq!(second_event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(second_event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
 }
 
 #[tokio::test]
 async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_event() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1164,14 +1159,14 @@ async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemRemoved");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
 }
 
 #[tokio::test]
 async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1238,7 +1233,7 @@ async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemListReindexed");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENES);
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
 }
 
 #[tokio::test]
@@ -1832,7 +1827,7 @@ async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
 
     let action = session
         .on_text_message(
-            r#"{"op":8,"d":{"requestId":"batch-1","haltOnFailure":true,"executionType":0,"requests":[{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"SetCurrentProgramScene","requestData":{"sceneName":"Scene B"}}]}}"#,
+            r#"{"op":8,"d":{"requestId":"batch-1","haltOnFailure":true,"requests":[{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"SetCurrentProgramScene","requestData":{"sceneName":"Scene B"}}]}}"#,
         )
         .await
         .expect("request batch must be parsed");
@@ -1856,7 +1851,7 @@ async fn request_batch_without_halt_on_failure_continues_after_failure() {
 
     let action = session
         .on_text_message(
-            r#"{"op":8,"d":{"requestId":"batch-2","haltOnFailure":false,"executionType":0,"requests":[{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"SetCurrentProgramScene","requestData":{"sceneName":"Scene B"}}]}}"#,
+            r#"{"op":8,"d":{"requestId":"batch-2","haltOnFailure":false,"requests":[{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"CreateScene","requestData":{"sceneName":"Scene B"}},{"requestType":"SetCurrentProgramScene","requestData":{"sceneName":"Scene B"}}]}}"#,
         )
         .await
         .expect("request batch must be parsed");
