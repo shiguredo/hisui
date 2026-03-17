@@ -23,7 +23,7 @@ pub fn build_get_scene_item_id_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemId",
         request_id,
@@ -75,7 +75,7 @@ pub fn build_get_scene_item_list_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemList",
         request_id,
@@ -178,7 +178,7 @@ pub fn build_remove_scene_item_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "RemoveSceneItem",
         request_id,
@@ -303,7 +303,7 @@ pub fn build_get_scene_item_source_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemSource",
         request_id,
@@ -349,7 +349,7 @@ pub fn build_get_scene_item_index_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemIndex",
         request_id,
@@ -472,7 +472,7 @@ pub fn build_set_scene_item_enabled_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetSceneItemEnabled",
         request_id,
@@ -511,7 +511,7 @@ pub fn build_get_scene_item_enabled_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemEnabled",
         request_id,
@@ -548,7 +548,7 @@ pub fn build_get_scene_item_enabled_response(
     })
 }
 
-pub fn build_set_scene_item_enabled_success_response(request_id: &str) -> String {
+pub fn build_set_scene_item_enabled_success_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success_no_data("SetSceneItemEnabled", request_id)
 }
 
@@ -556,7 +556,7 @@ pub fn build_get_scene_item_locked_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemLocked",
         request_id,
@@ -671,7 +671,7 @@ pub fn build_get_scene_item_blend_mode_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemBlendMode",
         request_id,
@@ -716,7 +716,7 @@ pub fn build_set_scene_item_blend_mode_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetSceneItemBlendMode",
         request_id,
@@ -760,7 +760,7 @@ pub fn build_get_scene_item_transform_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemTransform",
         request_id,

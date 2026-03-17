@@ -32,10 +32,10 @@ mod tests;
 
 pub enum SessionAction {
     SendTexts {
-        messages: Vec<(String, &'static str)>,
+        messages: Vec<(nojson::RawJsonOwned, &'static str)>,
     },
     SendText {
-        text: String,
+        text: nojson::RawJsonOwned,
         message_name: &'static str,
     },
     Close {
@@ -68,7 +68,7 @@ impl RecordWriterRpcOperation {
 }
 
 struct RequestOutcome {
-    response_text: String,
+    response_text: nojson::RawJsonOwned,
     success: bool,
     output_path: Option<String>,
     error_code: Option<i64>,
@@ -76,7 +76,7 @@ struct RequestOutcome {
 }
 
 impl RequestOutcome {
-    fn success(response_text: String, output_path: Option<String>) -> Self {
+    fn success(response_text: nojson::RawJsonOwned, output_path: Option<String>) -> Self {
         Self {
             response_text,
             success: true,
@@ -86,7 +86,11 @@ impl RequestOutcome {
         }
     }
 
-    fn failure(response_text: String, error_code: i64, error_comment: impl Into<String>) -> Self {
+    fn failure(
+        response_text: nojson::RawJsonOwned,
+        error_code: i64,
+        error_comment: impl Into<String>,
+    ) -> Self {
         Self {
             response_text,
             success: false,
@@ -97,7 +101,7 @@ impl RequestOutcome {
     }
 
     fn failure_with_output_path(
-        response_text: String,
+        response_text: nojson::RawJsonOwned,
         error_code: i64,
         error_comment: impl Into<String>,
         output_path: String,
@@ -113,9 +117,9 @@ impl RequestOutcome {
 }
 
 struct RequestExecutionResult {
-    response_text: String,
+    response_text: nojson::RawJsonOwned,
     batch_result: crate::obsws_response_builder::RequestBatchResult,
-    events: Vec<String>,
+    events: Vec<nojson::RawJsonOwned>,
 }
 
 impl RequestExecutionResult {
@@ -202,7 +206,7 @@ impl ObswsSession {
         request_type: &str,
         request_id: &str,
         message: &str,
-    ) -> String {
+    ) -> nojson::RawJsonOwned {
         crate::obsws_response_builder::build_request_response_error(
             request_type,
             request_id,
@@ -921,7 +925,7 @@ impl ObswsSession {
     fn build_execution_from_outcome(
         _request_type: &str,
         outcome: RequestOutcome,
-        events: Vec<String>,
+        events: Vec<nojson::RawJsonOwned>,
     ) -> crate::Result<RequestExecutionResult> {
         Self::build_execution_from_response_text(outcome.response_text, events)
     }
@@ -951,8 +955,8 @@ impl ObswsSession {
     }
 
     fn build_execution_from_response_text(
-        response_text: String,
-        events: Vec<String>,
+        response_text: nojson::RawJsonOwned,
+        events: Vec<nojson::RawJsonOwned>,
     ) -> crate::Result<RequestExecutionResult> {
         let batch_result =
             crate::obsws_response_builder::parse_request_response_for_batch_result(&response_text)?;
@@ -992,7 +996,7 @@ impl ObswsSession {
         request_id: &str,
         output_active_on_success: bool,
         outcome: &RequestOutcome,
-    ) -> crate::Result<String> {
+    ) -> crate::Result<nojson::RawJsonOwned> {
         if outcome.success {
             return match toggle_request_type {
                 "ToggleStream" => Ok(crate::obsws_response_builder::build_toggle_stream_response(
@@ -1033,7 +1037,7 @@ impl ObswsSession {
         request_id: &str,
         output_active_on_success: bool,
         outcome: &RequestOutcome,
-    ) -> String {
+    ) -> nojson::RawJsonOwned {
         if outcome.success {
             return match request_type {
                 "StartOutput" => crate::obsws_response_builder::build_start_output_response(

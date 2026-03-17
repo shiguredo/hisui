@@ -6,8 +6,8 @@ use crate::obsws_protocol::{
     OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
 };
 
-pub fn build_stream_state_changed_event(output_active: bool) -> String {
-    nojson::object(|f| {
+pub fn build_stream_state_changed_event(output_active: bool) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -21,15 +21,14 @@ pub fn build_stream_state_changed_event(output_active: bool) -> String {
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_record_state_changed_event(
     output_active: bool,
     output_paused: bool,
     output_path: Option<&str>,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -50,11 +49,13 @@ pub fn build_record_state_changed_event(
             }),
         )
     })
-    .to_string()
 }
 
-pub fn build_current_program_scene_changed_event(scene_name: &str, scene_uuid: &str) -> String {
-    nojson::object(|f| {
+pub fn build_current_program_scene_changed_event(
+    scene_name: &str,
+    scene_uuid: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -71,11 +72,13 @@ pub fn build_current_program_scene_changed_event(scene_name: &str, scene_uuid: &
             }),
         )
     })
-    .to_string()
 }
 
-pub fn build_current_preview_scene_changed_event(scene_name: &str, scene_uuid: &str) -> String {
-    nojson::object(|f| {
+pub fn build_current_preview_scene_changed_event(
+    scene_name: &str,
+    scene_uuid: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -92,11 +95,10 @@ pub fn build_current_preview_scene_changed_event(scene_name: &str, scene_uuid: &
             }),
         )
     })
-    .to_string()
 }
 
-pub fn build_scene_created_event(scene_name: &str, scene_uuid: &str) -> String {
-    nojson::object(|f| {
+pub fn build_scene_created_event(scene_name: &str, scene_uuid: &str) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -114,11 +116,10 @@ pub fn build_scene_created_event(scene_name: &str, scene_uuid: &str) -> String {
             }),
         )
     })
-    .to_string()
 }
 
-pub fn build_scene_removed_event(scene_name: &str, scene_uuid: &str) -> String {
-    nojson::object(|f| {
+pub fn build_scene_removed_event(scene_name: &str, scene_uuid: &str) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -136,11 +137,14 @@ pub fn build_scene_removed_event(scene_name: &str, scene_uuid: &str) -> String {
             }),
         )
     })
-    .to_string()
 }
 
-pub fn build_input_created_event(input_name: &str, input_uuid: &str, input_kind: &str) -> String {
-    nojson::object(|f| {
+pub fn build_input_created_event(
+    input_name: &str,
+    input_uuid: &str,
+    input_kind: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -158,11 +162,14 @@ pub fn build_input_created_event(input_name: &str, input_uuid: &str, input_kind:
             }),
         )
     })
-    .to_string()
 }
 
-pub fn build_input_removed_event(input_name: &str, input_uuid: &str, input_kind: &str) -> String {
-    nojson::object(|f| {
+pub fn build_input_removed_event(
+    input_name: &str,
+    input_uuid: &str,
+    input_kind: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -180,7 +187,6 @@ pub fn build_input_removed_event(input_name: &str, input_uuid: &str, input_kind:
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_input_settings_changed_event(
@@ -188,8 +194,8 @@ pub fn build_input_settings_changed_event(
     input_uuid: &str,
     input_kind: &str,
     input_settings: &ObswsInputSettings,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -208,15 +214,14 @@ pub fn build_input_settings_changed_event(
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_input_name_changed_event(
     input_name: &str,
     old_input_name: &str,
     input_uuid: &str,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -234,11 +239,10 @@ pub fn build_input_name_changed_event(
             }),
         )
     })
-    .to_string()
 }
 
-pub fn build_custom_event(event_data: &nojson::RawJsonOwned) -> String {
-    nojson::object(|f| {
+pub fn build_custom_event(event_data: &nojson::RawJsonOwned) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -249,7 +253,6 @@ pub fn build_custom_event(event_data: &nojson::RawJsonOwned) -> String {
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_scene_item_enable_state_changed_event(
@@ -257,8 +260,8 @@ pub fn build_scene_item_enable_state_changed_event(
     scene_uuid: &str,
     scene_item_id: i64,
     scene_item_enabled: bool,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -277,7 +280,6 @@ pub fn build_scene_item_enable_state_changed_event(
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_scene_item_lock_state_changed_event(
@@ -285,8 +287,8 @@ pub fn build_scene_item_lock_state_changed_event(
     scene_uuid: &str,
     scene_item_id: i64,
     scene_item_locked: bool,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -305,7 +307,6 @@ pub fn build_scene_item_lock_state_changed_event(
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_scene_item_transform_changed_event(
@@ -313,8 +314,8 @@ pub fn build_scene_item_transform_changed_event(
     scene_uuid: &str,
     scene_item_id: i64,
     scene_item_transform: &ObswsSceneItemTransform,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -333,7 +334,6 @@ pub fn build_scene_item_transform_changed_event(
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_scene_item_created_event(
@@ -343,8 +343,8 @@ pub fn build_scene_item_created_event(
     source_name: &str,
     source_uuid: &str,
     scene_item_index: i64,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -365,7 +365,6 @@ pub fn build_scene_item_created_event(
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_scene_item_removed_event(
@@ -374,8 +373,8 @@ pub fn build_scene_item_removed_event(
     scene_item_id: i64,
     source_name: &str,
     source_uuid: &str,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -395,15 +394,14 @@ pub fn build_scene_item_removed_event(
             }),
         )
     })
-    .to_string()
 }
 
 pub fn build_scene_item_list_reindexed_event(
     scene_name: &str,
     scene_uuid: &str,
     scene_items: &[ObswsSceneItemIndexEntry],
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(
             "d",
@@ -421,5 +419,4 @@ pub fn build_scene_item_list_reindexed_event(
             }),
         )
     })
-    .to_string()
 }

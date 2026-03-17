@@ -16,7 +16,7 @@ use super::{
 pub fn build_get_input_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let inputs = input_registry.list_inputs();
     super::build_request_response_success("GetInputList", request_id, |f| {
         f.member("inputs", &inputs)
@@ -26,7 +26,7 @@ pub fn build_get_input_list_response(
 pub fn build_get_input_kind_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetInputKindList", request_id, |f| {
         f.member("inputKinds", input_registry.supported_input_kinds())
     })
@@ -36,7 +36,7 @@ pub fn build_get_input_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "GetInputSettings",
         request_id,
@@ -68,7 +68,7 @@ pub fn build_get_source_active_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "GetSourceActive",
         request_id,
@@ -101,7 +101,7 @@ pub fn build_set_input_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     execute_set_input_settings(request_id, request_data, input_registry).response_text
 }
 
@@ -165,7 +165,7 @@ pub fn build_set_input_name_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetInputName",
         request_id,
@@ -204,7 +204,7 @@ pub fn build_get_input_default_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetInputDefaultSettings",
         request_id,
@@ -240,7 +240,7 @@ pub fn build_create_input_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "CreateInput",
         request_id,
@@ -286,7 +286,7 @@ pub fn build_remove_input_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "RemoveInput",
         request_id,

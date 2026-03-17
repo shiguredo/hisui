@@ -50,7 +50,7 @@ pub struct ObswsSessionStats {
 
 #[derive(Debug, Clone)]
 pub struct RequestResponsePayload {
-    pub message: String,
+    pub message: nojson::RawJsonOwned,
 }
 
 pub fn is_supported_rpc_version(rpc_version: u32) -> bool {
@@ -459,7 +459,8 @@ mod tests {
     #[test]
     fn build_hello_message_contains_expected_fields() {
         let message = build_hello_message(None);
-        let json = nojson::RawJson::parse(&message).expect("hello message must be valid JSON");
+        let json =
+            nojson::RawJson::parse(message.text()).expect("hello message must be valid JSON");
         let op_value = json
             .value()
             .to_member("op")
@@ -635,7 +636,8 @@ mod tests {
             expected_response: "unused".to_owned(),
         };
         let message = build_hello_message(Some(&auth));
-        let json = nojson::RawJson::parse(&message).expect("hello message must be valid JSON");
+        let json =
+            nojson::RawJson::parse(message.text()).expect("hello message must be valid JSON");
         let d_value = json
             .value()
             .to_member("d")
@@ -671,7 +673,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let op: i64 = json.value().to_member("op")?.required()?.try_into()?;
         let response_data = json
             .value()
@@ -834,7 +836,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let mut groups = json
             .value()
             .to_path_member(&["d", "responseData", "groups"])?
@@ -859,7 +861,7 @@ mod tests {
             .expect("scene item creation must succeed");
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let video_active: bool = json
             .value()
             .to_path_member(&["d", "responseData", "videoActive"])?
@@ -886,7 +888,7 @@ mod tests {
             &session_stats,
             &mut input_registry,
         );
-        let set_json = nojson::RawJson::parse(&set_response.message)?;
+        let set_json = nojson::RawJson::parse(set_response.message.text())?;
         let transition_name: Option<String> = set_json
             .value()
             .to_path_member(&["d", "responseData", "transitionName"])?
@@ -907,7 +909,7 @@ mod tests {
             &session_stats,
             &mut input_registry,
         );
-        let get_json = nojson::RawJson::parse(&get_response.message)?;
+        let get_json = nojson::RawJson::parse(get_response.message.text())?;
         let get_transition_name: Option<String> = get_json
             .value()
             .to_path_member(&["d", "responseData", "transitionName"])?
@@ -933,7 +935,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let outputs = json
             .value()
             .to_path_member(&["d", "responseData", "outputs"])?
@@ -959,7 +961,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -998,7 +1000,7 @@ mod tests {
         );
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let output_kind: String = json
             .value()
             .to_path_member(&["d", "responseData", "outputKind"])?
@@ -1028,7 +1030,7 @@ mod tests {
         };
 
         let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1093,7 +1095,7 @@ mod tests {
             Some(&pipeline_handle),
         );
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let output_bytes: u64 = json
             .value()
             .to_path_member(&["d", "responseData", "outputBytes"])?
@@ -1146,7 +1148,7 @@ mod tests {
             .expect("record activation must succeed");
 
         let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let output_bytes: u64 = json
             .value()
             .to_path_member(&["d", "responseData", "outputBytes"])?
@@ -1170,7 +1172,7 @@ mod tests {
         let mut input_registry = ObswsInputRegistry::new_for_test();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1204,7 +1206,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1228,7 +1230,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
             .value()
             .to_path_member(&["d", "responseData"])?
@@ -1255,7 +1257,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let memory_usage: f64 = json
             .value()
             .to_path_member(&["d", "responseData", "memoryUsage"])?
@@ -1346,7 +1348,7 @@ mod tests {
             Some(&pipeline_handle),
         );
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let output_skipped_frames: u64 = json
             .value()
             .to_path_member(&["d", "responseData", "outputSkippedFrames"])?
@@ -1380,7 +1382,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
             .value()
             .to_path_member(&["d", "responseData"])?
@@ -1410,7 +1412,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
             .value()
             .to_path_member(&["d", "responseData"])?
@@ -1437,7 +1439,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1471,7 +1473,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1497,7 +1499,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1530,7 +1532,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let input_kind: String = json
             .value()
             .to_path_member(&["d", "responseData", "inputKind"])?
@@ -1559,7 +1561,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let input_kind: String = json
             .value()
             .to_path_member(&["d", "responseData", "inputKind"])?
@@ -1602,7 +1604,7 @@ mod tests {
             .expect("input creation must succeed");
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1640,7 +1642,7 @@ mod tests {
             .expect("input creation must succeed");
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1675,7 +1677,7 @@ mod tests {
             .expect("set scene item enabled must succeed");
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1714,7 +1716,7 @@ mod tests {
             .expect("set scene item locked must succeed");
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let scene_item_locked: bool = json
             .value()
             .to_path_member(&["d", "responseData", "sceneItemLocked"])?
@@ -1751,7 +1753,7 @@ mod tests {
             .expect("set scene item blend mode must succeed");
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let scene_item_blend_mode: String = json
             .value()
             .to_path_member(&["d", "responseData", "sceneItemBlendMode"])?
@@ -1791,7 +1793,7 @@ mod tests {
             .expect("set scene item transform must succeed");
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let position_x: f64 = json
             .value()
             .to_path_member(&["d", "responseData", "sceneItemTransform", "positionX"])?
@@ -1813,7 +1815,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1837,7 +1839,7 @@ mod tests {
         let mut input_registry = input_registry();
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1890,7 +1892,7 @@ mod tests {
             };
             let mut input_registry = input_registry();
             let response = handle_request_message(request, &session_stats, &mut input_registry);
-            let json = nojson::RawJson::parse(&response.message)?;
+            let json = nojson::RawJson::parse(response.message.text())?;
             let status = json
                 .value()
                 .to_path_member(&["d", "requestStatus"])?
@@ -1917,7 +1919,7 @@ mod tests {
         };
 
         let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -1945,7 +1947,7 @@ mod tests {
             request_data: None,
         };
         let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
             .value()
             .to_path_member(&["d", "responseData"])?
@@ -1974,7 +1976,7 @@ mod tests {
             request_data: Some(request_data(r#"{"recordDirectory":"recordings-updated"}"#)),
         };
         let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
             .value()
             .to_path_member(&["d", "requestStatus"])?
@@ -2002,7 +2004,7 @@ mod tests {
             request_data: None,
         };
         let response = handle_request_message(request, &session_stats, &mut input_registry);
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
             .value()
             .to_path_member(&["d", "responseData"])?
@@ -2061,7 +2063,7 @@ mod tests {
             &mut input_registry,
             Some(&pipeline_handle),
         );
-        let json = nojson::RawJson::parse(&response.message)?;
+        let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
             .value()
             .to_path_member(&["d", "responseData"])?

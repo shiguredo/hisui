@@ -6,7 +6,7 @@ use std::ffi::CString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 
-pub fn build_get_version_response(request_id: &str) -> String {
+pub fn build_get_version_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetVersion", request_id, |f| {
         f.member("obsVersion", env!("CARGO_PKG_VERSION"))?;
         f.member("obsWebSocketVersion", OBSWS_VERSION)?;
@@ -101,7 +101,7 @@ pub fn build_get_stats_response(
     session_stats: &ObswsSessionStats,
     input_registry: &ObswsInputRegistry,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
-) -> String {
+) -> nojson::RawJsonOwned {
     let outgoing_messages = session_stats.outgoing_messages.saturating_add(1);
     let runtime_stats = collect_runtime_stats(input_registry);
     let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
@@ -226,7 +226,7 @@ pub fn build_get_canvas_list_response(
     request_id: &str,
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
-) -> String {
+) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetCanvasList", request_id, |f| {
         f.member(
             "canvases",
@@ -239,24 +239,24 @@ pub fn build_get_canvas_list_response(
     })
 }
 
-pub fn build_get_group_list_response(request_id: &str) -> String {
+pub fn build_get_group_list_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetGroupList", request_id, |f| {
         f.member("groups", nojson::array(|_| Ok(())))
     })
 }
 
-pub fn build_broadcast_custom_event_response(request_id: &str) -> String {
+pub fn build_broadcast_custom_event_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success_no_data("BroadcastCustomEvent", request_id)
 }
 
-pub fn build_sleep_response(request_id: &str) -> String {
+pub fn build_sleep_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success_no_data("Sleep", request_id)
 }
 
 pub fn build_get_scene_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let scenes = input_registry.list_scenes();
     let current_program_scene = input_registry.current_program_scene();
     let current_preview_scene = input_registry.current_preview_scene();

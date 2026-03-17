@@ -44,7 +44,7 @@ fn is_fixed_transition(transition_name: &str) -> bool {
 pub fn build_get_current_program_scene_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let current_program_scene = input_registry.current_program_scene();
     let scene_name = current_program_scene
         .as_ref()
@@ -66,7 +66,7 @@ pub fn build_set_current_program_scene_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentProgramScene",
         request_id,
@@ -92,7 +92,7 @@ pub fn build_set_current_program_scene_response(
 pub fn build_get_current_preview_scene_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let current_preview_scene = input_registry.current_preview_scene();
     let scene_name = current_preview_scene
         .as_ref()
@@ -114,7 +114,7 @@ pub fn build_set_current_preview_scene_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentPreviewScene",
         request_id,
@@ -140,7 +140,7 @@ pub fn build_set_current_preview_scene_response(
 pub fn build_get_transition_kind_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetTransitionKindList", request_id, |f| {
         f.member(
             "transitionKinds",
@@ -152,7 +152,7 @@ pub fn build_get_transition_kind_list_response(
 pub fn build_get_scene_transition_list_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let transitions: Vec<ObswsSceneTransitionEntry> = input_registry
         .supported_transition_kinds()
         .iter()
@@ -175,7 +175,7 @@ pub fn build_get_scene_transition_list_response(
 pub fn build_get_current_scene_transition_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let current_transition_name = input_registry.current_scene_transition_name();
     let current_transition_duration_ms = input_registry.current_scene_transition_duration_ms();
     let transition_settings = input_registry.current_scene_transition_settings();
@@ -196,7 +196,7 @@ pub fn build_get_scene_scene_transition_override_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneSceneTransitionOverride",
         request_id,
@@ -238,7 +238,7 @@ pub fn build_set_current_scene_transition_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentSceneTransition",
         request_id,
@@ -265,7 +265,7 @@ pub fn build_set_current_scene_transition_duration_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentSceneTransitionDuration",
         request_id,
@@ -292,7 +292,7 @@ pub fn build_set_current_scene_transition_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentSceneTransitionSettings",
         request_id,
@@ -312,7 +312,7 @@ pub fn build_set_scene_scene_transition_override_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetSceneSceneTransitionOverride",
         request_id,
@@ -373,7 +373,7 @@ pub fn build_set_scene_scene_transition_override_response(
 pub fn build_get_current_scene_transition_cursor_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let transition_cursor = input_registry.current_tbar_position();
     super::build_request_response_success("GetCurrentSceneTransitionCursor", request_id, |f| {
         f.member("transitionCursor", transition_cursor)
@@ -384,7 +384,7 @@ pub fn build_set_tbar_position_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetTBarPosition",
         request_id,
@@ -411,7 +411,7 @@ pub fn build_create_scene_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "CreateScene",
         request_id,
@@ -442,7 +442,7 @@ pub fn build_remove_scene_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "RemoveScene",
         request_id,
@@ -480,7 +480,7 @@ pub fn build_set_scene_name_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetSceneName",
         request_id,

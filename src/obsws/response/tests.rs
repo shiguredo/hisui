@@ -10,7 +10,7 @@ use crate::obsws_protocol::{
 #[test]
 fn build_stream_state_changed_event_contains_expected_fields() {
     let event = build_stream_state_changed_event(true);
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let op: i64 = json
         .value()
         .to_member("op")
@@ -40,7 +40,7 @@ fn build_stream_state_changed_event_contains_expected_fields() {
 #[test]
 fn build_stop_record_response_includes_output_path() {
     let response = build_stop_record_response("req-stop-record", "/tmp/output.mp4");
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let output_path: String = json
         .value()
         .to_path_member(&["d", "responseData", "outputPath"])
@@ -52,7 +52,7 @@ fn build_stop_record_response_includes_output_path() {
 #[test]
 fn build_record_state_changed_event_includes_output_path_when_present() {
     let event = build_record_state_changed_event(false, false, Some("/tmp/record.mp4"));
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -76,7 +76,7 @@ fn build_record_state_changed_event_includes_output_path_when_present() {
 #[test]
 fn build_pause_record_response_sets_output_paused_true() {
     let response = build_pause_record_response("req-pause-record");
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let output_paused: bool = json
         .value()
         .to_path_member(&["d", "responseData", "outputPaused"])
@@ -94,7 +94,7 @@ fn build_scene_events_contain_expected_fields() {
         (created_event, "SceneCreated", "Scene A"),
         (removed_event, "SceneRemoved", "Scene B"),
     ] {
-        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
         let event_type: String = json
             .value()
             .to_path_member(&["d", "eventType"])
@@ -113,7 +113,7 @@ fn build_scene_events_contain_expected_fields() {
 #[test]
 fn build_current_preview_scene_changed_event_contains_expected_fields() {
     let event = build_current_preview_scene_changed_event("Scene P", "scene-uuid-p");
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -133,7 +133,7 @@ fn build_custom_event_contains_expected_fields() {
     let event = build_custom_event(
         &nojson::RawJsonOwned::parse(r#"{"message":"hello"}"#).expect("eventData must be valid"),
     );
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -167,7 +167,8 @@ fn build_get_and_set_current_preview_scene_response_succeeds() {
         Some(&set_request_data),
         &mut registry,
     );
-    let set_json = nojson::RawJson::parse(&set_response).expect("response must be valid json");
+    let set_json =
+        nojson::RawJson::parse(set_response.text()).expect("response must be valid json");
     let set_result: bool = set_json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -176,7 +177,8 @@ fn build_get_and_set_current_preview_scene_response_succeeds() {
     assert!(set_result);
 
     let get_response = build_get_current_preview_scene_response("req-get-preview-scene", &registry);
-    let get_json = nojson::RawJson::parse(&get_response).expect("response must be valid json");
+    let get_json =
+        nojson::RawJson::parse(get_response.text()).expect("response must be valid json");
     let scene_name: String = get_json
         .value()
         .to_path_member(&["d", "responseData", "sceneName"])
@@ -196,8 +198,9 @@ fn build_set_current_scene_transition_settings_and_tbar_position_responses_succe
         Some(&set_transition_settings_request_data),
         &mut registry,
     );
-    let set_transition_settings_json = nojson::RawJson::parse(&set_transition_settings_response)
-        .expect("response must be valid json");
+    let set_transition_settings_json =
+        nojson::RawJson::parse(set_transition_settings_response.text())
+            .expect("response must be valid json");
     let set_transition_settings_result: bool = set_transition_settings_json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -207,8 +210,9 @@ fn build_set_current_scene_transition_settings_and_tbar_position_responses_succe
 
     let get_current_transition_response =
         build_get_current_scene_transition_response("req-get-current-transition", &registry);
-    let get_current_transition_json = nojson::RawJson::parse(&get_current_transition_response)
-        .expect("response must be valid json");
+    let get_current_transition_json =
+        nojson::RawJson::parse(get_current_transition_response.text())
+            .expect("response must be valid json");
     let transition_power: i64 = get_current_transition_json
         .value()
         .to_path_member(&["d", "responseData", "transitionSettings", "power"])
@@ -223,8 +227,8 @@ fn build_set_current_scene_transition_settings_and_tbar_position_responses_succe
         Some(&set_tbar_position_request_data),
         &mut registry,
     );
-    let set_tbar_position_json =
-        nojson::RawJson::parse(&set_tbar_position_response).expect("response must be valid json");
+    let set_tbar_position_json = nojson::RawJson::parse(set_tbar_position_response.text())
+        .expect("response must be valid json");
     let set_tbar_position_result: bool = set_tbar_position_json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -234,7 +238,7 @@ fn build_set_current_scene_transition_settings_and_tbar_position_responses_succe
 
     let get_transition_cursor_response =
         build_get_current_scene_transition_cursor_response("req-get-transition-cursor", &registry);
-    let get_transition_cursor_json = nojson::RawJson::parse(&get_transition_cursor_response)
+    let get_transition_cursor_json = nojson::RawJson::parse(get_transition_cursor_response.text())
         .expect("response must be valid json");
     let transition_cursor: f64 = get_transition_cursor_json
         .value()
@@ -253,7 +257,7 @@ fn build_input_events_contain_expected_fields() {
         (created_event, "InputCreated", "camera-1", "input-uuid-1"),
         (removed_event, "InputRemoved", "camera-2", "input-uuid-2"),
     ] {
-        let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+        let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
         let event_type: String = json
             .value()
             .to_path_member(&["d", "eventType"])
@@ -292,7 +296,7 @@ fn build_input_settings_changed_event_contains_expected_fields() {
         "video_capture_device",
         &input_settings,
     );
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -322,7 +326,7 @@ fn build_input_settings_changed_event_contains_expected_fields() {
 #[test]
 fn build_input_name_changed_event_contains_expected_fields() {
     let event = build_input_name_changed_event("camera-renamed", "camera-before", "input-uuid-4");
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -357,7 +361,7 @@ fn build_scene_item_enable_state_changed_event_contains_expected_fields() {
         10,
         false,
     );
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -406,7 +410,7 @@ fn build_scene_item_lock_state_changed_event_contains_expected_fields() {
         10,
         true,
     );
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -433,7 +437,7 @@ fn build_scene_item_transform_changed_event_contains_expected_fields() {
             ..Default::default()
         },
     );
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -468,7 +472,7 @@ fn build_get_scene_item_id_response_succeeds_when_scene_item_exists() {
 
     let response =
         build_get_scene_item_id_response("req-get-scene-item-id", Some(&request_data), &registry);
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -510,7 +514,7 @@ fn build_set_scene_item_enabled_response_succeeds_when_scene_item_exists() {
         Some(&request_data),
         &mut registry,
     );
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -550,7 +554,7 @@ fn build_get_scene_item_enabled_response_succeeds_when_scene_item_exists() {
         Some(&request_data),
         &registry,
     );
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -593,7 +597,8 @@ fn build_get_and_set_scene_item_locked_response_succeeds_when_scene_item_exists(
         &mut registry,
     )
     .response_text;
-    let set_json = nojson::RawJson::parse(&set_response).expect("response must be valid json");
+    let set_json =
+        nojson::RawJson::parse(set_response.text()).expect("response must be valid json");
     let set_result: bool = set_json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -611,7 +616,8 @@ fn build_get_and_set_scene_item_locked_response_succeeds_when_scene_item_exists(
         Some(&get_request_data),
         &registry,
     );
-    let get_json = nojson::RawJson::parse(&get_response).expect("response must be valid json");
+    let get_json =
+        nojson::RawJson::parse(get_response.text()).expect("response must be valid json");
     let locked: bool = get_json
         .value()
         .to_path_member(&["d", "responseData", "sceneItemLocked"])
@@ -647,7 +653,8 @@ fn build_get_and_set_scene_item_blend_mode_response_succeeds_when_scene_item_exi
         Some(&set_request_data),
         &mut registry,
     );
-    let set_json = nojson::RawJson::parse(&set_response).expect("response must be valid json");
+    let set_json =
+        nojson::RawJson::parse(set_response.text()).expect("response must be valid json");
     let set_result: bool = set_json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -665,7 +672,8 @@ fn build_get_and_set_scene_item_blend_mode_response_succeeds_when_scene_item_exi
         Some(&get_request_data),
         &registry,
     );
-    let get_json = nojson::RawJson::parse(&get_response).expect("response must be valid json");
+    let get_json =
+        nojson::RawJson::parse(get_response.text()).expect("response must be valid json");
     let blend_mode: String = get_json
         .value()
         .to_path_member(&["d", "responseData", "sceneItemBlendMode"])
@@ -702,7 +710,8 @@ fn build_get_and_set_scene_item_transform_response_succeeds_when_scene_item_exis
         &mut registry,
     )
     .response_text;
-    let set_json = nojson::RawJson::parse(&set_response).expect("response must be valid json");
+    let set_json =
+        nojson::RawJson::parse(set_response.text()).expect("response must be valid json");
     let set_result: bool = set_json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -720,7 +729,8 @@ fn build_get_and_set_scene_item_transform_response_succeeds_when_scene_item_exis
         Some(&get_request_data),
         &registry,
     );
-    let get_json = nojson::RawJson::parse(&get_response).expect("response must be valid json");
+    let get_json =
+        nojson::RawJson::parse(get_response.text()).expect("response must be valid json");
     let position_x: f64 = get_json
         .value()
         .to_path_member(&["d", "responseData", "sceneItemTransform", "positionX"])
@@ -757,7 +767,7 @@ fn execute_set_scene_item_transform_rejects_invalid_alignment_value() {
         &mut registry,
     )
     .response_text;
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -793,7 +803,7 @@ fn build_get_scene_item_list_response_succeeds_when_scene_exists() {
         Some(&request_data),
         &registry,
     );
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -839,7 +849,7 @@ fn build_create_scene_item_response_succeeds_when_source_exists() {
     let response =
         execute_create_scene_item("req-create-scene-item", Some(&request_data), &mut registry)
             .response_text;
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -882,7 +892,7 @@ fn build_set_scene_item_index_response_rejects_invalid_index() {
         &mut registry,
     )
     .response_text;
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -901,7 +911,7 @@ fn build_set_scene_item_index_response_rejects_invalid_index() {
 fn build_scene_item_created_event_contains_expected_fields() {
     let event =
         build_scene_item_created_event("Scene", "scene-uuid-1", 10, "camera-1", "input-uuid-1", 0);
-    let json = nojson::RawJson::parse(&event).expect("event must be valid json");
+    let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let event_type: String = json
         .value()
         .to_path_member(&["d", "eventType"])
@@ -927,7 +937,7 @@ fn build_remove_scene_response_succeeds_when_scene_exists() {
 
     let response =
         build_remove_scene_response("req-remove-scene", Some(&request_data), &mut registry);
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
         .to_path_member(&["d", "requestStatus", "result"])
@@ -960,7 +970,7 @@ fn build_and_parse_request_batch_response_preserves_fields() {
             },
         ],
     );
-    let json = nojson::RawJson::parse(&response).expect("response must be valid json");
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let op: i64 = json
         .value()
         .to_member("op")

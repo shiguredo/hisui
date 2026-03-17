@@ -208,7 +208,7 @@ pub struct RequestBatchResult {
 
 #[derive(Debug, Clone)]
 pub struct SetSceneItemIndexExecution {
-    pub response_text: String,
+    pub response_text: nojson::RawJsonOwned,
     pub event_context: Option<SetSceneItemIndexEventContext>,
 }
 
@@ -220,7 +220,7 @@ pub struct SetSceneItemIndexEventContext {
 
 #[derive(Debug, Clone)]
 pub struct SetSceneItemLockedExecution {
-    pub response_text: String,
+    pub response_text: nojson::RawJsonOwned,
     pub event_context: Option<SetSceneItemLockedEventContext>,
 }
 
@@ -234,7 +234,7 @@ pub struct SetSceneItemLockedEventContext {
 
 #[derive(Debug, Clone)]
 pub struct SetSceneItemTransformExecution {
-    pub response_text: String,
+    pub response_text: nojson::RawJsonOwned,
     pub event_context: Option<SetSceneItemTransformEventContext>,
 }
 
@@ -247,19 +247,19 @@ pub struct SetSceneItemTransformEventContext {
 
 #[derive(Debug, Clone)]
 pub struct CreateSceneItemExecution {
-    pub response_text: String,
+    pub response_text: nojson::RawJsonOwned,
     pub created: Option<ObswsSceneItemRef>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DuplicateSceneItemExecution {
-    pub response_text: String,
+    pub response_text: nojson::RawJsonOwned,
     pub duplicated: Option<ObswsSceneItemRef>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SetInputSettingsExecution {
-    pub response_text: String,
+    pub response_text: nojson::RawJsonOwned,
     pub request_succeeded: bool,
 }
 
@@ -882,7 +882,7 @@ fn parse_request_data_or_error_response<T, F>(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     parser: F,
-) -> Result<T, String>
+) -> Result<T, nojson::RawJsonOwned>
 where
     F: FnOnce(nojson::RawJsonValue<'_, '_>) -> Result<T, nojson::JsonParseError>,
 {
@@ -907,7 +907,7 @@ fn resolve_scene_name_or_error(
     input_registry: &ObswsInputRegistry,
     scene_name: Option<&str>,
     scene_uuid: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, nojson::RawJsonOwned> {
     input_registry
         .resolve_scene_name(scene_name, scene_uuid)
         .ok_or_else(|| {
@@ -938,8 +938,8 @@ pub(crate) fn request_status_code_for_parse_error(error: &nojson::JsonParseError
     REQUEST_STATUS_INVALID_REQUEST_FIELD
 }
 
-pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> String {
-    nojson::object(|f| {
+pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_HELLO)?;
         f.member(
             "d",
@@ -959,18 +959,16 @@ pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> Stri
             }),
         )
     })
-    .to_string()
 }
 
-pub fn build_identified_message(negotiated_rpc_version: u32) -> String {
-    nojson::object(|f| {
+pub fn build_identified_message(negotiated_rpc_version: u32) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_IDENTIFIED)?;
         f.member(
             "d",
             nojson::object(|f| f.member("negotiatedRpcVersion", negotiated_rpc_version)),
         )
     })
-    .to_string()
 }
 
 mod event;
@@ -1069,8 +1067,11 @@ fn find_counter_metric(
         .unwrap_or(0)
 }
 
-pub fn build_request_batch_response(request_id: &str, results: &[RequestBatchResult]) -> String {
-    nojson::object(|f| {
+pub fn build_request_batch_response(
+    request_id: &str,
+    results: &[RequestBatchResult],
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_BATCH_RESPONSE)?;
         f.member(
             "d",
@@ -1107,14 +1108,12 @@ pub fn build_request_batch_response(request_id: &str, results: &[RequestBatchRes
             }),
         )
     })
-    .to_string()
 }
 
 pub fn parse_request_response_for_batch_result(
-    response_text: &str,
+    response: &nojson::RawJsonOwned,
 ) -> crate::Result<RequestBatchResult> {
-    let json = nojson::RawJson::parse(response_text)?;
-    let d = json.value().to_member("d")?.required()?;
+    let d = response.value().to_member("d")?.required()?;
     let request_type: String = d.to_member("requestType")?.required()?.try_into()?;
     let request_status = d.to_member("requestStatus")?.required()?;
     let request_status_result: bool = request_status.to_member("result")?.required()?.try_into()?;
@@ -1139,11 +1138,11 @@ pub fn build_request_response_success<F>(
     request_type: &str,
     request_id: &str,
     response_data: F,
-) -> String
+) -> nojson::RawJsonOwned
 where
     F: Fn(&mut nojson::JsonObjectFormatter<'_, '_, '_>) -> std::fmt::Result,
 {
-    nojson::object(|f| {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
             "d",
@@ -1161,11 +1160,13 @@ where
             }),
         )
     })
-    .to_string()
 }
 
 /// responseData が空オブジェクトの成功レスポンスを構築する共通ヘルパー。
-pub fn build_request_response_success_no_data(request_type: &str, request_id: &str) -> String {
+pub fn build_request_response_success_no_data(
+    request_type: &str,
+    request_id: &str,
+) -> nojson::RawJsonOwned {
     build_request_response_success(request_type, request_id, |_| Ok(()))
 }
 
@@ -1174,8 +1175,8 @@ pub fn build_request_response_error(
     request_id: &str,
     code: i64,
     comment: &str,
-) -> String {
-    nojson::object(|f| {
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
         f.member(
             "d",
@@ -1193,7 +1194,6 @@ pub fn build_request_response_error(
             }),
         )
     })
-    .to_string()
 }
 
 #[cfg(test)]

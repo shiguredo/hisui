@@ -35,7 +35,7 @@ impl nojson::DisplayJson for ObswsOutputEntry {
 pub fn build_get_stream_service_settings_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let settings = input_registry.stream_service_settings();
     super::build_request_response_success("GetStreamServiceSettings", request_id, |f| {
         f.member("streamServiceType", &settings.stream_service_type)?;
@@ -58,7 +58,7 @@ pub fn build_set_stream_service_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetStreamServiceSettings",
         request_id,
@@ -80,7 +80,7 @@ pub fn build_get_stream_status_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
-) -> String {
+) -> nojson::RawJsonOwned {
     let active = input_registry.is_stream_active();
     let duration = if active {
         input_registry.stream_uptime()
@@ -102,7 +102,7 @@ pub fn build_get_stream_status_response(
     })
 }
 
-pub fn build_get_output_list_response(request_id: &str) -> String {
+pub fn build_get_output_list_response(request_id: &str) -> nojson::RawJsonOwned {
     let outputs = [
         ObswsOutputEntry {
             output_name: OBSWS_STREAM_OUTPUT_NAME,
@@ -122,7 +122,7 @@ pub fn build_get_output_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetOutputSettings",
         request_id,
@@ -153,7 +153,7 @@ pub fn build_set_output_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetOutputSettings",
         request_id,
@@ -225,7 +225,7 @@ pub fn build_set_output_settings_response(
 pub fn build_get_record_directory_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let record_directory = input_registry.record_directory().display().to_string();
     super::build_request_response_success("GetRecordDirectory", request_id, |f| {
         f.member("recordDirectory", &record_directory)
@@ -236,7 +236,7 @@ pub fn build_set_record_directory_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetRecordDirectory",
         request_id,
@@ -265,7 +265,7 @@ pub fn build_get_record_status_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
-) -> String {
+) -> nojson::RawJsonOwned {
     let active = input_registry.is_record_active();
     let paused = input_registry.is_record_paused();
     let duration = if active {
@@ -302,7 +302,7 @@ pub fn build_get_output_status_response(
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
-) -> String {
+) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetOutputStatus",
         request_id,
@@ -333,7 +333,7 @@ fn build_output_active_response(
     request_type: &str,
     request_id: &str,
     output_active: bool,
-) -> String {
+) -> nojson::RawJsonOwned {
     super::build_request_response_success(request_type, request_id, |f| {
         f.member("outputActive", output_active)
     })
@@ -344,7 +344,7 @@ fn build_record_output_state_response(
     request_id: &str,
     output_active: bool,
     output_paused: bool,
-) -> String {
+) -> nojson::RawJsonOwned {
     super::build_request_response_success(request_type, request_id, |f| {
         f.member("outputActive", output_active)?;
         f.member("outputPaused", output_paused)
@@ -354,7 +354,7 @@ fn build_record_output_state_response(
 fn build_stream_output_settings_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let settings = input_registry.stream_service_settings();
     super::build_request_response_success("GetOutputSettings", request_id, |f| {
         f.member("outputName", OBSWS_STREAM_OUTPUT_NAME)?;
@@ -366,7 +366,7 @@ fn build_stream_output_settings_response(
 fn build_record_output_settings_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
-) -> String {
+) -> nojson::RawJsonOwned {
     let record_directory = input_registry.record_directory().display().to_string();
     super::build_request_response_success("GetOutputSettings", request_id, |f| {
         f.member("outputName", OBSWS_RECORD_OUTPUT_NAME)?;
@@ -378,51 +378,54 @@ fn build_record_output_settings_response(
     })
 }
 
-pub fn build_start_stream_response(request_id: &str, output_active: bool) -> String {
+pub fn build_start_stream_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
     build_output_active_response("StartStream", request_id, output_active)
 }
 
-pub fn build_start_output_response(request_id: &str, output_active: bool) -> String {
+pub fn build_start_output_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
     build_output_active_response("StartOutput", request_id, output_active)
 }
 
-pub fn build_toggle_stream_response(request_id: &str, output_active: bool) -> String {
+pub fn build_toggle_stream_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
     build_output_active_response("ToggleStream", request_id, output_active)
 }
 
-pub fn build_toggle_output_response(request_id: &str, output_active: bool) -> String {
+pub fn build_toggle_output_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
     build_output_active_response("ToggleOutput", request_id, output_active)
 }
 
-pub fn build_stop_stream_response(request_id: &str) -> String {
+pub fn build_stop_stream_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success_no_data("StopStream", request_id)
 }
 
-pub fn build_stop_output_response(request_id: &str) -> String {
+pub fn build_stop_output_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success_no_data("StopOutput", request_id)
 }
 
-pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> String {
+pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
     build_record_output_state_response("ToggleRecord", request_id, output_active, false)
 }
 
-pub fn build_start_record_response(request_id: &str, output_active: bool) -> String {
+pub fn build_start_record_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
     build_record_output_state_response("StartRecord", request_id, output_active, false)
 }
 
-pub fn build_toggle_record_pause_response(request_id: &str, output_paused: bool) -> String {
+pub fn build_toggle_record_pause_response(
+    request_id: &str,
+    output_paused: bool,
+) -> nojson::RawJsonOwned {
     build_record_output_state_response("ToggleRecordPause", request_id, true, output_paused)
 }
 
-pub fn build_pause_record_response(request_id: &str) -> String {
+pub fn build_pause_record_response(request_id: &str) -> nojson::RawJsonOwned {
     build_record_output_state_response("PauseRecord", request_id, true, true)
 }
 
-pub fn build_resume_record_response(request_id: &str) -> String {
+pub fn build_resume_record_response(request_id: &str) -> nojson::RawJsonOwned {
     build_record_output_state_response("ResumeRecord", request_id, true, false)
 }
 
-pub fn build_stop_record_response(request_id: &str, output_path: &str) -> String {
+pub fn build_stop_record_response(request_id: &str, output_path: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success("StopRecord", request_id, |f| {
         f.member("outputPath", output_path)
     })
@@ -443,7 +446,7 @@ fn build_get_stream_status_as_output_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
-) -> String {
+) -> nojson::RawJsonOwned {
     let active = input_registry.is_stream_active();
     let duration = if active {
         input_registry.stream_uptime()
@@ -469,7 +472,7 @@ fn build_get_record_status_as_output_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
-) -> String {
+) -> nojson::RawJsonOwned {
     let active = input_registry.is_record_active();
     let paused = input_registry.is_record_paused();
     let duration = if active {

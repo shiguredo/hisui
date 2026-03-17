@@ -17,8 +17,8 @@ fn input_registry() -> Arc<RwLock<ObswsInputRegistry>> {
     Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()))
 }
 
-fn parse_request_status(text: &str) -> (bool, i64) {
-    let json = nojson::RawJson::parse(text).expect("response must be valid json");
+fn parse_request_status(text: &nojson::RawJsonOwned) -> (bool, i64) {
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid json");
     let status = json
         .value()
         .to_path_member(&["d", "requestStatus"])
@@ -36,24 +36,24 @@ fn parse_request_status(text: &str) -> (bool, i64) {
     (result, code)
 }
 
-fn parse_request_type(text: &str) -> String {
-    let json = nojson::RawJson::parse(text).expect("response must be valid json");
+fn parse_request_type(text: &nojson::RawJsonOwned) -> String {
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid json");
     json.value()
         .to_path_member(&["d", "requestType"])
         .and_then(|v| v.required()?.try_into())
         .expect("requestType must be string")
 }
 
-fn parse_response_scene_item_id(text: &str) -> i64 {
-    let json = nojson::RawJson::parse(text).expect("response must be valid json");
+fn parse_response_scene_item_id(text: &nojson::RawJsonOwned) -> i64 {
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid json");
     json.value()
         .to_path_member(&["d", "responseData", "sceneItemId"])
         .and_then(|v| v.required()?.try_into())
         .expect("sceneItemId must be i64")
 }
 
-fn parse_identified_message(text: &str) -> (i64, u32) {
-    let json = nojson::RawJson::parse(text).expect("response must be valid json");
+fn parse_identified_message(text: &nojson::RawJsonOwned) -> (i64, u32) {
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid json");
     let op: i64 = json
         .value()
         .to_member("op")
@@ -67,8 +67,8 @@ fn parse_identified_message(text: &str) -> (i64, u32) {
     (op, negotiated_rpc_version)
 }
 
-fn parse_event_type_and_intent(text: &str) -> (i64, String, u32) {
-    let json = nojson::RawJson::parse(text).expect("event must be valid json");
+fn parse_event_type_and_intent(text: &nojson::RawJsonOwned) -> (i64, String, u32) {
+    let json = nojson::RawJson::parse(text.text()).expect("event must be valid json");
     let op: i64 = json
         .value()
         .to_member("op")
@@ -87,8 +87,8 @@ fn parse_event_type_and_intent(text: &str) -> (i64, String, u32) {
     (op, event_type, event_intent)
 }
 
-fn parse_request_batch_results(text: &str) -> Vec<(String, bool, i64)> {
-    let json = nojson::RawJson::parse(text).expect("response must be valid json");
+fn parse_request_batch_results(text: &nojson::RawJsonOwned) -> Vec<(String, bool, i64)> {
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid json");
     let mut results = json
         .value()
         .to_path_member(&["d", "results"])
@@ -130,7 +130,7 @@ fn on_connected_returns_hello_message_action() {
         panic!("must be SendText");
     };
     assert_eq!(message_name, "hello message");
-    assert!(text.contains("\"op\":0"));
+    assert!(text.text().contains("\"op\":0"));
 }
 
 #[tokio::test]
@@ -174,7 +174,8 @@ async fn broadcast_custom_event_returns_event_when_general_subscription_enabled(
     assert_eq!(messages.len(), 2);
 
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
-    let event_json = nojson::RawJson::parse(&messages[1].0).expect("event must be valid json");
+    let event_json =
+        nojson::RawJson::parse(messages[1].0.text()).expect("event must be valid json");
     let message: String = event_json
         .value()
         .to_path_member(&["d", "eventData", "message"])
@@ -825,7 +826,7 @@ async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     let event_json =
-        nojson::RawJson::parse(&messages[1].0).expect("event message must be valid json");
+        nojson::RawJson::parse(messages[1].0.text()).expect("event message must be valid json");
     let scene_uuid: String = event_json
         .value()
         .to_path_member(&["d", "eventData", "sceneUuid"])

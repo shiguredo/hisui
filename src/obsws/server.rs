@@ -315,12 +315,12 @@ fn apply_session_action(
     match action {
         SessionAction::SendTexts { messages } => {
             for (text, message_name) in messages {
-                send_ws_text(ws, &text, session_stats, message_name)?;
+                send_ws_text(ws, text.text(), session_stats, message_name)?;
             }
             Ok(false)
         }
         SessionAction::SendText { text, message_name } => {
-            send_ws_text(ws, &text, session_stats, message_name)?;
+            send_ws_text(ws, text.text(), session_stats, message_name)?;
             Ok(false)
         }
         SessionAction::Close {
