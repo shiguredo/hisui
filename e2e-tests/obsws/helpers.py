@@ -380,6 +380,18 @@ async def _expect_stream_state_changed_event(
     *,
     output_active: bool,
 ):
+    # hisui は中間状態イベント (STARTING/STOPPING) を最終状態イベント (STARTED/STOPPED) の
+    # 前に送信するため、中間状態を消費してから最終状態を検証する。
+    intermediate_state = (
+        "OBS_WEBSOCKET_OUTPUT_STARTING" if output_active else "OBS_WEBSOCKET_OUTPUT_STOPPING"
+    )
+    intermediate_event = await _expect_obsws_event(
+        ws,
+        event_type="StreamStateChanged",
+        event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+    )
+    assert intermediate_event["d"]["eventData"]["outputState"] == intermediate_state
+
     event = await _expect_obsws_event(
         ws,
         event_type="StreamStateChanged",
