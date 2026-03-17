@@ -34,20 +34,26 @@ pub fn build_get_scene_item_id_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
+        "GetSceneItemId",
+        request_id,
+        input_registry,
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     let scene_item_id = match input_registry.get_scene_item_id(
-        &fields.scene_name,
-        &fields.source_name,
+        &scene_name,
+        fields.source_name.as_deref(),
+        fields.source_uuid.as_deref(),
         fields.search_offset,
     ) {
         Ok(scene_item_id) => scene_item_id,
         Err(GetSceneItemIdError::SceneNotFound) => {
-            return super::build_request_response_error(
-                "GetSceneItemId",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene not found",
-            );
+            unreachable!("resolved scene name must exist in input registry")
         }
         Err(GetSceneItemIdError::SourceNotFound) => {
             return super::build_request_response_error(
@@ -506,19 +512,26 @@ pub fn build_set_scene_item_enabled_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
+        "SetSceneItemEnabled",
+        request_id,
+        input_registry,
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     if let Err(error) = input_registry.set_scene_item_enabled(
-        &fields.scene_name,
+        &scene_name,
         fields.scene_item_id,
         fields.scene_item_enabled,
     ) {
         return match error {
-            SceneItemLookupError::SceneNotFound => super::build_request_response_error(
-                "SetSceneItemEnabled",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene not found",
-            ),
+            SceneItemLookupError::SceneNotFound => {
+                unreachable!("resolved scene name must exist in input registry")
+            }
             SceneItemLookupError::SceneItemNotFound => super::build_request_response_error(
                 "SetSceneItemEnabled",
                 request_id,
@@ -545,17 +558,22 @@ pub fn build_get_scene_item_enabled_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
+        "GetSceneItemEnabled",
+        request_id,
+        input_registry,
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
 
     let scene_item_enabled =
-        match input_registry.get_scene_item_enabled(&fields.scene_name, fields.scene_item_id) {
+        match input_registry.get_scene_item_enabled(&scene_name, fields.scene_item_id) {
             Ok(scene_item_enabled) => scene_item_enabled,
             Err(SceneItemLookupError::SceneNotFound) => {
-                return super::build_request_response_error(
-                    "GetSceneItemEnabled",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene not found",
-                );
+                unreachable!("resolved scene name must exist in input registry")
             }
             Err(SceneItemLookupError::SceneItemNotFound) => {
                 return super::build_request_response_error(

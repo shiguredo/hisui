@@ -76,8 +76,18 @@ pub fn build_set_current_program_scene_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
+    let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
+        "SetCurrentProgramScene",
+        request_id,
+        input_registry,
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
     if let Err(SetCurrentProgramSceneError::SceneNotFound) =
-        input_registry.set_current_program_scene(&fields.scene_name)
+        input_registry.set_current_program_scene(&scene_name)
     {
         return super::build_request_response_error(
             "SetCurrentProgramScene",
@@ -430,15 +440,20 @@ pub fn build_remove_scene_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    if let Err(error) = input_registry.remove_scene(&fields.scene_name) {
+    let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
+        "RemoveScene",
+        request_id,
+        input_registry,
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    if let Err(error) = input_registry.remove_scene(&scene_name) {
         return match error {
             crate::obsws_input_registry::RemoveSceneError::SceneNotFound => {
-                super::build_request_response_error(
-                    "RemoveScene",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene not found",
-                )
+                unreachable!("resolved scene name must exist in input registry")
             }
             crate::obsws_input_registry::RemoveSceneError::LastSceneNotRemovable => {
                 super::build_request_response_error(
@@ -468,15 +483,20 @@ pub fn build_set_scene_name_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let renamed = match input_registry.set_scene_name(&fields.scene_name, &fields.new_scene_name) {
+    let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
+        "SetSceneName",
+        request_id,
+        input_registry,
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    let renamed = match input_registry.set_scene_name(&scene_name, &fields.new_scene_name) {
         Ok(renamed) => renamed,
         Err(SetSceneNameError::SceneNotFound) => {
-            return super::build_request_response_error(
-                "SetSceneName",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene not found",
-            );
+            unreachable!("resolved scene name must exist in input registry")
         }
         Err(SetSceneNameError::SceneNameAlreadyExists) => {
             return super::build_request_response_error(

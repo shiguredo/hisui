@@ -291,9 +291,11 @@ impl ObswsSession {
         let previous_scene_item_enabled =
             requested_fields
                 .as_ref()
-                .and_then(|(scene_name, scene_item_id, _)| {
+                .and_then(|(scene_name, scene_uuid, scene_item_id, _)| {
+                    let resolved_name = input_registry
+                        .resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())?;
                     input_registry
-                        .get_scene_item_enabled(scene_name, *scene_item_id)
+                        .get_scene_item_enabled(&resolved_name, *scene_item_id)
                         .ok()
                 });
         let response_text = crate::obsws_response_builder::build_set_scene_item_enabled_response(
@@ -307,7 +309,8 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        let Some((scene_name, scene_item_id, scene_item_enabled)) = requested_fields else {
+        let Some((scene_name, scene_uuid, scene_item_id, scene_item_enabled)) = requested_fields
+        else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -325,13 +328,17 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         }
-        let scene_uuid = input_registry
-            .get_scene_uuid(&scene_name)
+        // シーン名を解決する（name or uuid のいずれかで指定されているため）
+        let resolved_scene_name = input_registry
+            .resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
+            .unwrap_or_default();
+        let resolved_scene_uuid = input_registry
+            .get_scene_uuid(&resolved_scene_name)
             .unwrap_or_default();
 
         let event_text = crate::obsws_response_builder::build_scene_item_enable_state_changed_event(
-            &scene_name,
-            &scene_uuid,
+            &resolved_scene_name,
+            &resolved_scene_uuid,
             scene_item_id,
             scene_item_enabled,
         );

@@ -395,10 +395,10 @@ fn get_scene_item_id_assigns_global_sequential_ids() {
         .expect("input creation must succeed");
 
     let scene_item_id_a = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-a", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-a"), None, 0)
         .expect("scene item id must exist");
     let scene_item_id_b = registry
-        .get_scene_item_id("Scene B", "camera-b", 0)
+        .get_scene_item_id("Scene B", Some("camera-b"), None, 0)
         .expect("scene item id must exist");
     assert_eq!(scene_item_id_a, 1);
     assert_eq!(scene_item_id_b, 2);
@@ -415,7 +415,7 @@ fn get_scene_item_id_rejects_non_zero_search_offset() {
         .expect("input creation must succeed");
 
     let error = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 1)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 1)
         .expect_err("non zero search offset must be rejected");
     assert_eq!(error, GetSceneItemIdError::SearchOffsetUnsupported);
 }
@@ -431,14 +431,37 @@ fn get_scene_item_id_returns_not_found_errors() {
         .expect("input creation must succeed");
 
     let scene_error = registry
-        .get_scene_item_id("Scene B", "camera-1", 0)
+        .get_scene_item_id("Scene B", Some("camera-1"), None, 0)
         .expect_err("unknown scene must be rejected");
     assert_eq!(scene_error, GetSceneItemIdError::SceneNotFound);
 
     let source_error = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-unknown", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-unknown"), None, 0)
         .expect_err("unknown source must be rejected");
     assert_eq!(source_error, GetSceneItemIdError::SourceNotFound);
+}
+
+#[test]
+fn get_scene_item_id_resolves_source_by_uuid() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let input =
+        ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
+            .expect("input settings must be valid");
+    let (entry, _scene_item_id) = registry
+        .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+        .expect("input creation must succeed");
+
+    // sourceUuid のみで検索する
+    let scene_item_id = registry
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, None, Some(&entry.input_uuid), 0)
+        .expect("scene item id must exist when resolved by sourceUuid");
+    assert_eq!(scene_item_id, 1);
+
+    // 存在しない sourceUuid で検索する
+    let error = registry
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, None, Some("nonexistent-uuid"), 0)
+        .expect_err("nonexistent sourceUuid must be rejected");
+    assert_eq!(error, GetSceneItemIdError::SourceNotFound);
 }
 
 #[test]
@@ -454,7 +477,7 @@ fn set_scene_item_enabled_updates_scene_item_state() {
     assert_eq!(registry.list_current_program_scene_inputs().len(), 1);
 
     let scene_item_id = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 0)
         .expect("scene item id must exist");
     let first_result = registry
         .set_scene_item_enabled(OBSWS_DEFAULT_SCENE_NAME, scene_item_id, false)
@@ -499,7 +522,7 @@ fn get_scene_item_enabled_returns_current_state() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 0)
         .expect("scene item id must exist");
 
     let initial_enabled = registry
@@ -527,7 +550,7 @@ fn create_input_with_scene_item_disabled_creates_disabled_scene_item() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, false)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 0)
         .expect("scene item id must exist");
 
     let scene_item_enabled = registry
@@ -546,7 +569,7 @@ fn get_scene_item_enabled_returns_not_found_errors() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 0)
         .expect("scene item id must exist");
 
     let scene_error = registry
@@ -570,7 +593,7 @@ fn set_and_get_scene_item_locked_succeeds() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 0)
         .expect("scene item id must exist");
 
     let initial_locked = registry
@@ -599,7 +622,7 @@ fn set_and_get_scene_item_blend_mode_succeeds() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 0)
         .expect("scene item id must exist");
 
     let initial_blend_mode = registry
@@ -632,7 +655,7 @@ fn set_and_get_scene_item_transform_succeeds() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 0)
         .expect("scene item id must exist");
 
     let set_result = registry
@@ -748,7 +771,7 @@ fn duplicate_scene_item_to_another_scene_succeeds() {
         .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, "camera-1", 0)
+        .get_scene_item_id(OBSWS_DEFAULT_SCENE_NAME, Some("camera-1"), None, 0)
         .expect("scene item id must exist");
     registry
         .set_scene_item_locked(OBSWS_DEFAULT_SCENE_NAME, scene_item_id, true)

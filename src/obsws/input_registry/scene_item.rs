@@ -4,7 +4,8 @@ impl ObswsInputRegistry {
     pub fn get_scene_item_id(
         &self,
         scene_name: &str,
-        source_name: &str,
+        source_name: Option<&str>,
+        source_uuid: Option<&str>,
         search_offset: i64,
     ) -> Result<i64, GetSceneItemIdError> {
         if search_offset != 0 {
@@ -13,9 +14,20 @@ impl ObswsInputRegistry {
         let Some(scene) = self.scenes_by_name.get(scene_name) else {
             return Err(GetSceneItemIdError::SceneNotFound);
         };
+        // source_uuid が指定されている場合は uuid から input_name を逆引きする
+        let resolved_source_name: Option<String> = if let Some(source_uuid) = source_uuid {
+            self.inputs_by_uuid
+                .get(source_uuid)
+                .map(|entry| entry.input_name.clone())
+        } else {
+            source_name.map(|s| s.to_owned())
+        };
+        let Some(resolved_source_name) = resolved_source_name else {
+            return Err(GetSceneItemIdError::SourceNotFound);
+        };
         let Some(scene_item_id) = scene.items.iter().find_map(|item| {
             let input = self.inputs_by_uuid.get(&item.input_uuid)?;
-            (input.input_name == source_name).then_some(item.scene_item_id)
+            (input.input_name == resolved_source_name).then_some(item.scene_item_id)
         }) else {
             return Err(GetSceneItemIdError::SourceNotFound);
         };

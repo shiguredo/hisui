@@ -125,13 +125,21 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let target_scene_name =
-            Self::parse_required_non_empty_string_request_field(request_data, "sceneName");
-        let removed_scene = target_scene_name.as_deref().and_then(|scene_name| {
+        // sceneName または sceneUuid からシーンを解決する
+        let removed_scene = request_data.and_then(|rd| {
+            let (scene_name, scene_uuid) =
+                crate::obsws_response_builder::parse_scene_lookup_fields_for_session(
+                    rd.value(),
+                    "sceneName",
+                    "sceneUuid",
+                )
+                .ok()?;
+            let resolved_name =
+                input_registry.resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())?;
             input_registry
                 .list_scenes()
                 .into_iter()
-                .find(|scene| scene.scene_name == scene_name)
+                .find(|scene| scene.scene_name == resolved_name)
         });
         let previous_current_scene_name = input_registry
             .current_program_scene()

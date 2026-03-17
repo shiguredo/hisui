@@ -49,12 +49,14 @@ struct CreateSceneFields {
 }
 
 struct SetSceneNameFields {
-    scene_name: String,
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
     new_scene_name: String,
 }
 
 struct SetCurrentProgramSceneFields {
-    scene_name: String,
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
 }
 
 struct GetSceneSceneTransitionOverrideFields {
@@ -86,12 +88,15 @@ struct SetTBarPositionFields {
 }
 
 struct RemoveSceneFields {
-    scene_name: String,
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
 }
 
 struct GetSceneItemIdFields {
-    scene_name: String,
-    source_name: String,
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
+    source_name: Option<String>,
+    source_uuid: Option<String>,
     search_offset: i64,
 }
 
@@ -139,12 +144,14 @@ struct SetSceneItemIndexFields {
 }
 
 struct GetSceneItemEnabledFields {
-    scene_name: String,
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
     scene_item_id: i64,
 }
 
 struct SetSceneItemEnabledFields {
-    scene_name: String,
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
     scene_item_id: i64,
     scene_item_enabled: bool,
 }
@@ -364,10 +371,12 @@ fn parse_create_scene_fields(
 fn parse_set_scene_name_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetSceneNameFields, nojson::JsonParseError> {
-    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
     let new_scene_name = required_non_empty_string_member(request_data, "newSceneName")?;
     Ok(SetSceneNameFields {
         scene_name,
+        scene_uuid,
         new_scene_name,
     })
 }
@@ -375,8 +384,12 @@ fn parse_set_scene_name_fields(
 fn parse_set_current_program_scene_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetCurrentProgramSceneFields, nojson::JsonParseError> {
-    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
-    Ok(SetCurrentProgramSceneFields { scene_name })
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
+    Ok(SetCurrentProgramSceneFields {
+        scene_name,
+        scene_uuid,
+    })
 }
 
 fn parse_get_scene_scene_transition_override_fields(
@@ -447,19 +460,26 @@ fn parse_set_tbar_position_fields(
 fn parse_remove_scene_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<RemoveSceneFields, nojson::JsonParseError> {
-    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
-    Ok(RemoveSceneFields { scene_name })
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
+    Ok(RemoveSceneFields {
+        scene_name,
+        scene_uuid,
+    })
 }
 
 fn parse_get_scene_item_id_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<GetSceneItemIdFields, nojson::JsonParseError> {
-    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
-    let source_name = required_non_empty_string_member(request_data, "sourceName")?;
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
+    let (source_name, source_uuid) = parse_source_lookup_fields(request_data)?;
     let search_offset: Option<i64> = request_data.to_member("searchOffset")?.try_into()?;
     Ok(GetSceneItemIdFields {
         scene_name,
+        scene_uuid,
         source_name,
+        source_uuid,
         search_offset: search_offset.unwrap_or(0),
     })
 }
@@ -595,7 +615,8 @@ fn parse_set_scene_item_index_fields(
 fn parse_set_scene_item_enabled_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetSceneItemEnabledFields, nojson::JsonParseError> {
-    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
     let scene_item_id: i64 = request_data
         .to_member("sceneItemId")?
         .required()?
@@ -606,6 +627,7 @@ fn parse_set_scene_item_enabled_fields(
         .try_into()?;
     Ok(SetSceneItemEnabledFields {
         scene_name,
+        scene_uuid,
         scene_item_id,
         scene_item_enabled,
     })
@@ -614,13 +636,15 @@ fn parse_set_scene_item_enabled_fields(
 fn parse_get_scene_item_enabled_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<GetSceneItemEnabledFields, nojson::JsonParseError> {
-    let scene_name = required_non_empty_string_member(request_data, "sceneName")?;
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
     let scene_item_id: i64 = request_data
         .to_member("sceneItemId")?
         .required()?
         .try_into()?;
     Ok(GetSceneItemEnabledFields {
         scene_name,
+        scene_uuid,
         scene_item_id,
     })
 }
@@ -860,10 +884,11 @@ pub(crate) fn parse_required_i64_field_for_session(
 
 pub(crate) fn parse_set_scene_item_enabled_fields_for_session(
     request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<(String, i64, bool), nojson::JsonParseError> {
+) -> Result<(Option<String>, Option<String>, i64, bool), nojson::JsonParseError> {
     let fields = parse_set_scene_item_enabled_fields(request_data)?;
     Ok((
         fields.scene_name,
+        fields.scene_uuid,
         fields.scene_item_id,
         fields.scene_item_enabled,
     ))

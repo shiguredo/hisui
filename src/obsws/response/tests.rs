@@ -482,6 +482,221 @@ fn build_get_scene_item_id_response_succeeds_when_scene_item_exists() {
 }
 
 #[test]
+fn build_get_scene_item_id_response_succeeds_with_scene_uuid_and_source_uuid() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let input = ObswsInput::from_kind_and_settings(
+        "image_source",
+        nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
+            .expect("settings must be valid json")
+            .value(),
+    )
+    .expect("input settings must be valid");
+    let (created_input, _scene_item_id) = registry
+        .create_input("Scene", "input-1", input, true)
+        .expect("input creation must succeed");
+    let scene_uuid = registry
+        .get_scene_uuid("Scene")
+        .expect("scene uuid must exist");
+    // sceneUuid と sourceUuid のみで指定する
+    let request_data = nojson::RawJsonOwned::parse(format!(
+        r#"{{"sceneUuid":"{}","sourceUuid":"{}","searchOffset":0}}"#,
+        scene_uuid, created_input.input_uuid
+    ))
+    .expect("request data must be valid json");
+
+    let response = build_get_scene_item_id_response(
+        "req-get-scene-item-id-uuid",
+        Some(&request_data),
+        &registry,
+    );
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    let scene_item_id: i64 = json
+        .value()
+        .to_path_member(&["d", "responseData", "sceneItemId"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("sceneItemId must be i64");
+    assert!(result);
+    assert_eq!(scene_item_id, 1);
+}
+
+#[test]
+fn build_set_current_program_scene_response_succeeds_with_scene_uuid() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .create_scene("Scene B")
+        .expect("scene creation must succeed");
+    let scene_uuid = registry
+        .get_scene_uuid("Scene B")
+        .expect("scene uuid must exist");
+    let request_data = nojson::RawJsonOwned::parse(format!(r#"{{"sceneUuid":"{}"}}"#, scene_uuid))
+        .expect("request data must be valid json");
+
+    let response = build_set_current_program_scene_response(
+        "req-set-current-program-scene-uuid",
+        Some(&request_data),
+        &mut registry,
+    );
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(result);
+    let current = registry
+        .current_program_scene()
+        .expect("current program scene must exist");
+    assert_eq!(current.scene_name, "Scene B");
+}
+
+#[test]
+fn build_remove_scene_response_succeeds_with_scene_uuid() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .create_scene("Scene B")
+        .expect("scene creation must succeed");
+    let scene_uuid = registry
+        .get_scene_uuid("Scene B")
+        .expect("scene uuid must exist");
+    let request_data = nojson::RawJsonOwned::parse(format!(r#"{{"sceneUuid":"{}"}}"#, scene_uuid))
+        .expect("request data must be valid json");
+
+    let response =
+        build_remove_scene_response("req-remove-scene-uuid", Some(&request_data), &mut registry);
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(result);
+}
+
+#[test]
+fn build_set_scene_name_response_succeeds_with_scene_uuid() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    registry
+        .create_scene("Scene B")
+        .expect("scene creation must succeed");
+    let scene_uuid = registry
+        .get_scene_uuid("Scene B")
+        .expect("scene uuid must exist");
+    let request_data = nojson::RawJsonOwned::parse(format!(
+        r#"{{"sceneUuid":"{}","newSceneName":"Scene C"}}"#,
+        scene_uuid
+    ))
+    .expect("request data must be valid json");
+
+    let response = build_set_scene_name_response(
+        "req-set-scene-name-uuid",
+        Some(&request_data),
+        &mut registry,
+    );
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(result);
+    let renamed_scene_name: String = json
+        .value()
+        .to_path_member(&["d", "responseData", "sceneName"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("sceneName must be string");
+    assert_eq!(renamed_scene_name, "Scene C");
+}
+
+#[test]
+fn build_set_scene_item_enabled_response_succeeds_with_scene_uuid() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let input = ObswsInput::from_kind_and_settings(
+        "image_source",
+        nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
+            .expect("settings must be valid json")
+            .value(),
+    )
+    .expect("input settings must be valid");
+    registry
+        .create_input("Scene", "input-1", input, true)
+        .expect("input creation must succeed");
+    let scene_item_id = registry
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
+        .expect("scene item id must exist");
+    let scene_uuid = registry
+        .get_scene_uuid("Scene")
+        .expect("scene uuid must exist");
+    let request_data = nojson::RawJsonOwned::parse(format!(
+        r#"{{"sceneUuid":"{}","sceneItemId":{},"sceneItemEnabled":false}}"#,
+        scene_uuid, scene_item_id
+    ))
+    .expect("request data must be valid json");
+
+    let response = build_set_scene_item_enabled_response(
+        "req-set-scene-item-enabled-uuid",
+        Some(&request_data),
+        &mut registry,
+    );
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(result);
+}
+
+#[test]
+fn build_get_scene_item_enabled_response_succeeds_with_scene_uuid() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let input = ObswsInput::from_kind_and_settings(
+        "image_source",
+        nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
+            .expect("settings must be valid json")
+            .value(),
+    )
+    .expect("input settings must be valid");
+    registry
+        .create_input("Scene", "input-1", input, true)
+        .expect("input creation must succeed");
+    let scene_item_id = registry
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
+        .expect("scene item id must exist");
+    let scene_uuid = registry
+        .get_scene_uuid("Scene")
+        .expect("scene uuid must exist");
+    let request_data = nojson::RawJsonOwned::parse(format!(
+        r#"{{"sceneUuid":"{}","sceneItemId":{}}}"#,
+        scene_uuid, scene_item_id
+    ))
+    .expect("request data must be valid json");
+
+    let response = build_get_scene_item_enabled_response(
+        "req-get-scene-item-enabled-uuid",
+        Some(&request_data),
+        &registry,
+    );
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    let scene_item_enabled: bool = json
+        .value()
+        .to_path_member(&["d", "responseData", "sceneItemEnabled"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("sceneItemEnabled must be bool");
+    assert!(result);
+    assert!(scene_item_enabled);
+}
+
+#[test]
 fn build_set_scene_item_enabled_response_succeeds_when_scene_item_exists() {
     let mut registry = ObswsInputRegistry::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
@@ -495,7 +710,7 @@ fn build_set_scene_item_enabled_response_succeeds_when_scene_item_exists() {
         .create_input("Scene", "input-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id("Scene", "input-1", 0)
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
         .expect("scene item id must exist");
     let request_data = nojson::RawJsonOwned::parse(format!(
         r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemEnabled":false}}"#,
@@ -532,7 +747,7 @@ fn build_get_scene_item_enabled_response_succeeds_when_scene_item_exists() {
         .create_input("Scene", "input-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id("Scene", "input-1", 0)
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
         .expect("scene item id must exist");
     registry
         .set_scene_item_enabled("Scene", scene_item_id, false)
@@ -577,7 +792,7 @@ fn build_get_and_set_scene_item_locked_response_succeeds_when_scene_item_exists(
         .create_input("Scene", "input-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id("Scene", "input-1", 0)
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
         .expect("scene item id must exist");
     let set_request_data = nojson::RawJsonOwned::parse(format!(
         r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemLocked":true}}"#,
@@ -634,7 +849,7 @@ fn build_get_and_set_scene_item_blend_mode_response_succeeds_when_scene_item_exi
         .create_input("Scene", "input-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id("Scene", "input-1", 0)
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
         .expect("scene item id must exist");
     let set_request_data = nojson::RawJsonOwned::parse(format!(
         r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemBlendMode":"OBS_BLEND_ADDITIVE"}}"#,
@@ -690,7 +905,7 @@ fn build_get_and_set_scene_item_transform_response_succeeds_when_scene_item_exis
         .create_input("Scene", "input-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id("Scene", "input-1", 0)
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
         .expect("scene item id must exist");
     let set_request_data = nojson::RawJsonOwned::parse(format!(
         r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemTransform":{{"positionX":321.0}}}}"#,
@@ -747,7 +962,7 @@ fn execute_set_scene_item_transform_rejects_invalid_alignment_value() {
         .create_input("Scene", "input-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id("Scene", "input-1", 0)
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
         .expect("scene item id must exist");
     let request_data = nojson::RawJsonOwned::parse(format!(
         r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemTransform":{{"alignment":3}}}}"#,
@@ -872,7 +1087,7 @@ fn build_set_scene_item_index_response_rejects_invalid_index() {
         .create_input("Scene", "input-1", input, true)
         .expect("input creation must succeed");
     let scene_item_id = registry
-        .get_scene_item_id("Scene", "input-1", 0)
+        .get_scene_item_id("Scene", Some("input-1"), None, 0)
         .expect("scene item id must exist");
     let request_data = nojson::RawJsonOwned::parse(format!(
         r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemIndex":100}}"#,
