@@ -555,7 +555,7 @@ def test_obsws_scene_events_are_sent_when_scenes_subscription_enabled(
             )
             # スタジオモードが無効のためエラーになる
             assert set_preview_scene_response["d"]["requestStatus"]["result"] is False
-            assert set_preview_scene_response["d"]["requestStatus"]["code"] == 205
+            assert set_preview_scene_response["d"]["requestStatus"]["code"] == 506
 
             remove_scene_response = await _send_obsws_request(
                 ws,

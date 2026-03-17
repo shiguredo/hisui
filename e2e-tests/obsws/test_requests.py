@@ -439,7 +439,7 @@ def test_obsws_preview_scene_requests(binary_path: Path):
             )
         )
         assert get_preview_response["d"]["requestStatus"]["result"] is False
-        assert get_preview_response["d"]["requestStatus"]["code"] == 205
+        assert get_preview_response["d"]["requestStatus"]["code"] == 506
 
         set_preview_response = asyncio.run(
             _connect_identify_and_request(
@@ -450,7 +450,7 @@ def test_obsws_preview_scene_requests(binary_path: Path):
             )
         )
         assert set_preview_response["d"]["requestStatus"]["result"] is False
-        assert set_preview_response["d"]["requestStatus"]["code"] == 205
+        assert set_preview_response["d"]["requestStatus"]["code"] == 506
 
         get_scene_list_response = asyncio.run(
             _connect_identify_and_request(
@@ -818,7 +818,7 @@ def test_obsws_set_input_settings_rejects_missing_request_data(binary_path: Path
         )
         status = response["d"]["requestStatus"]
         assert status["result"] is False
-        assert status["code"] == 300
+        assert status["code"] == 301
 
 
 def test_obsws_set_input_settings_rejects_missing_lookup_fields(binary_path: Path):
