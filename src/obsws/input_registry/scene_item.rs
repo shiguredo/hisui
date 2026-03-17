@@ -43,7 +43,9 @@ impl ObswsInputRegistry {
             .find_input(source_uuid, source_name)
             .cloned()
             .ok_or(CreateSceneItemError::SourceNotFound)?;
-        let scene_item_id = self.next_scene_item_id();
+        let scene_item_id = self
+            .next_scene_item_id()
+            .map_err(|_| CreateSceneItemError::SceneItemIdOverflow)?;
         let scene = self
             .scenes_by_name
             .get_mut(scene_name)
@@ -142,7 +144,9 @@ impl ObswsInputRegistry {
             .get(&input_uuid)
             .ok_or(DuplicateSceneItemError::SourceSceneItem)?
             .clone();
-        let new_scene_item_id = self.next_scene_item_id();
+        let new_scene_item_id = self
+            .next_scene_item_id()
+            .map_err(|_| DuplicateSceneItemError::SceneItemIdOverflow)?;
         let to_scene = self
             .scenes_by_name
             .get_mut(to_scene_name)

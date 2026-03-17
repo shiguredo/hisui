@@ -215,6 +215,7 @@ pub struct SetSceneItemIndexExecution {
 #[derive(Debug, Clone)]
 pub struct SetSceneItemIndexEventContext {
     pub scene_name: String,
+    pub scene_uuid: String,
     pub set_result: SetSceneItemIndexResult,
 }
 
@@ -227,6 +228,7 @@ pub struct SetSceneItemLockedExecution {
 #[derive(Debug, Clone)]
 pub struct SetSceneItemLockedEventContext {
     pub scene_name: String,
+    pub scene_uuid: String,
     pub scene_item_id: i64,
     pub scene_item_locked: bool,
     pub set_result: SetSceneItemLockedResult,
@@ -241,6 +243,7 @@ pub struct SetSceneItemTransformExecution {
 #[derive(Debug, Clone)]
 pub struct SetSceneItemTransformEventContext {
     pub scene_name: String,
+    pub scene_uuid: String,
     pub scene_item_id: i64,
     pub set_result: SetSceneItemTransformResult,
 }
@@ -901,14 +904,17 @@ where
     })
 }
 
+/// シーン名とシーン UUID のペアを解決する。
+/// resolve_scene_name が成功した直後に get_scene_uuid を呼ぶため、
+/// UUID 取得失敗は内部エラーとして扱う。
 fn resolve_scene_name_or_error(
     request_type: &str,
     request_id: &str,
     input_registry: &ObswsInputRegistry,
     scene_name: Option<&str>,
     scene_uuid: Option<&str>,
-) -> Result<String, nojson::RawJsonOwned> {
-    input_registry
+) -> Result<(String, String), nojson::RawJsonOwned> {
+    let resolved_name = input_registry
         .resolve_scene_name(scene_name, scene_uuid)
         .ok_or_else(|| {
             build_request_response_error(
@@ -917,7 +923,18 @@ fn resolve_scene_name_or_error(
                 REQUEST_STATUS_RESOURCE_NOT_FOUND,
                 "Scene not found",
             )
-        })
+        })?;
+    let resolved_uuid = input_registry
+        .get_scene_uuid(&resolved_name)
+        .ok_or_else(|| {
+            build_request_response_error(
+                request_type,
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Internal error: resolved scene UUID not found",
+            )
+        })?;
+    Ok((resolved_name, resolved_uuid))
 }
 
 pub(crate) fn request_status_code_for_parse_error(error: &nojson::JsonParseError) -> i64 {

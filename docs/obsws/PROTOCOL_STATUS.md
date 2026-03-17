@@ -300,7 +300,7 @@
   - NOTE: 成功時の `responseData` には `outputActive` を返す
 - [x] `StartStream`: 配信を開始する
   - NOTE: 複数映像入力に対応（`position` と `scale` と `crop` に対応。`rotation`, `blend mode` は未対応）
-  - NOTE: 現時点の入力対応は `image_source` と `mp4_file_source`
+  - NOTE: 現時点の入力対応は `image_source` / `video_capture_device` / `mp4_file_source`
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を起動する
   - NOTE: 複数映像入力時は `createVideoMixer` を追加で起動する
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す
@@ -327,7 +327,7 @@
   - NOTE: 成功時の `responseData` には `outputActive` を返す
 - [x] `StartRecord`: 録画を開始する
   - NOTE: 複数映像入力に対応（`position` と `scale` と `crop` に対応。`rotation`, `blend mode` は未対応）
-  - NOTE: 現時点の入力対応は `image_source` と `mp4_file_source`
+  - NOTE: 現時点の入力対応は `image_source` / `video_capture_device` / `mp4_file_source`
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createMp4Writer` を起動する
   - NOTE: 複数映像入力時は `createVideoMixer` を追加で起動する
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す

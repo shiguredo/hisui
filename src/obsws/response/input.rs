@@ -3,8 +3,8 @@ use crate::obsws_input_registry::{
     SetInputSettingsError,
 };
 use crate::obsws_protocol::{
-    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
 use super::{
@@ -272,6 +272,14 @@ pub fn build_create_input_response(
                 request_id,
                 REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
                 "Input already exists",
+            );
+        }
+        Err(CreateInputError::InputIdOverflow) => {
+            return super::build_request_response_error(
+                "CreateInput",
+                request_id,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "Input ID overflow",
             );
         }
     };

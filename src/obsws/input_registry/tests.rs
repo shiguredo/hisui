@@ -1307,12 +1307,12 @@ fn record_pause_resume_returns_expected_errors() {
 }
 
 #[test]
-#[should_panic(expected = "BUG: obsws input id exceeds 48-bit UUID suffix range")]
-fn create_input_panics_when_uuid_suffix_range_is_exhausted() {
+fn create_input_returns_error_when_uuid_suffix_range_is_exhausted() {
     let mut registry = ObswsInputRegistry::new_for_test();
     registry.next_input_id = OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX + 1;
     let settings = parse_owned_json("{}");
     let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
         .expect("input settings must be valid");
-    let _ = registry.create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true);
+    let result = registry.create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true);
+    assert_eq!(result, Err(CreateInputError::InputIdOverflow));
 }

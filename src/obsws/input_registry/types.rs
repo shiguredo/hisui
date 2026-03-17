@@ -748,6 +748,7 @@ pub enum ParseInputSettingsError {
 pub enum CreateInputError {
     UnsupportedSceneName,
     InputNameAlreadyExists,
+    InputIdOverflow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -765,6 +766,7 @@ pub enum SetInputNameError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateSceneError {
     SceneNameAlreadyExists,
+    SceneIdOverflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -824,6 +826,20 @@ pub enum SetTBarPositionError {
 pub enum RemoveSceneError {
     SceneNotFound,
     LastSceneNotRemovable,
+}
+
+/// input ID のオーバーフローを表す内部エラー型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InputIdOverflowError;
+
+/// scene item ID のオーバーフローを表す内部エラー型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SceneItemIdOverflowError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunIdOverflowError {
+    StreamRunIdOverflow,
+    RecordRunIdOverflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -888,6 +904,7 @@ pub enum GetSceneItemListError {
 pub enum CreateSceneItemError {
     SceneNotFound,
     SourceNotFound,
+    SceneItemIdOverflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -902,6 +919,7 @@ pub enum DuplicateSceneItemError {
     SourceScene,
     DestinationScene,
     SourceSceneItem,
+    SceneItemIdOverflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

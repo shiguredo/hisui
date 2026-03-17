@@ -5,8 +5,8 @@ use crate::obsws_input_registry::{
     SetSceneSceneTransitionOverrideError, SetTBarPositionError,
 };
 use crate::obsws_protocol::{
-    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
 use super::{
@@ -206,14 +206,14 @@ pub fn build_get_scene_scene_transition_override_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match super::resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
         "GetSceneSceneTransitionOverride",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     let override_entry = match input_registry.get_scene_transition_override(&scene_name) {
@@ -322,14 +322,14 @@ pub fn build_set_scene_scene_transition_override_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match super::resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
         "SetSceneSceneTransitionOverride",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     let override_entry = match input_registry.set_scene_transition_override(
@@ -429,6 +429,14 @@ pub fn build_create_scene_response(
                 request_id,
                 REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
                 "Scene already exists",
+            );
+        }
+        Err(CreateSceneError::SceneIdOverflow) => {
+            return super::build_request_response_error(
+                "CreateScene",
+                request_id,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "Scene ID overflow",
             );
         }
     };

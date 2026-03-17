@@ -1,62 +1,479 @@
 use super::*;
 
 impl ObswsSession {
-    pub(super) async fn handle_start_stream(&self, request_id: &str) -> RequestOutcome {
+    // --- リクエストハンドラ（handle_request_internal から委譲される） ---
+
+    pub(super) async fn handle_start_stream_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let outcome = self.handle_start_stream("StartStream", request_id).await;
+        let mut events = Vec::new();
+        if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            events.push(crate::obsws_response_builder::build_stream_state_changed_event(true));
+        }
+        Self::build_execution_from_outcome(outcome, events)
+    }
+
+    pub(super) async fn handle_stop_stream_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let outcome = self.handle_stop_stream("StopStream", request_id).await;
+        let mut events = Vec::new();
+        if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            events.push(crate::obsws_response_builder::build_stream_state_changed_event(false));
+        }
+        Self::build_execution_from_outcome(outcome, events)
+    }
+
+    pub(super) async fn handle_toggle_stream_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let was_active = self.input_registry.read().await.is_stream_active();
+        let outcome = if was_active {
+            self.handle_stop_stream("ToggleStream", request_id).await
+        } else {
+            self.handle_start_stream("ToggleStream", request_id).await
+        };
+        let mut events = Vec::new();
+        if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            events
+                .push(crate::obsws_response_builder::build_stream_state_changed_event(!was_active));
+        }
+        let response_text = Self::build_toggle_response_from_outcome(
+            "ToggleStream",
+            request_id,
+            !was_active,
+            &outcome,
+        )?;
+        Self::build_execution_from_response_text(response_text, events)
+    }
+
+    pub(super) async fn handle_start_record_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let outcome = self.handle_start_record("StartRecord", request_id).await;
+        let mut events = Vec::new();
+        if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            events.push(
+                crate::obsws_response_builder::build_record_state_changed_event(true, false, None),
+            );
+        }
+        Self::build_execution_from_outcome(outcome, events)
+    }
+
+    pub(super) async fn handle_stop_record_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let outcome = self.handle_stop_record("StopRecord", request_id).await;
+        let mut events = Vec::new();
+        if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            events.push(
+                crate::obsws_response_builder::build_record_state_changed_event(
+                    false,
+                    false,
+                    outcome.output_path.as_deref(),
+                ),
+            );
+        }
+        Self::build_execution_from_outcome(outcome, events)
+    }
+
+    pub(super) async fn handle_toggle_record_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let was_active = self.input_registry.read().await.is_record_active();
+        let outcome = if was_active {
+            self.handle_stop_record("ToggleRecord", request_id).await
+        } else {
+            self.handle_start_record("ToggleRecord", request_id).await
+        };
+        let mut events = Vec::new();
+        if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            let output_path = if was_active {
+                outcome.output_path.as_deref()
+            } else {
+                None
+            };
+            events.push(
+                crate::obsws_response_builder::build_record_state_changed_event(
+                    !was_active,
+                    false,
+                    output_path,
+                ),
+            );
+        }
+        let response_text = Self::build_toggle_response_from_outcome(
+            "ToggleRecord",
+            request_id,
+            !was_active,
+            &outcome,
+        )?;
+        Self::build_execution_from_response_text(response_text, events)
+    }
+
+    pub(super) async fn handle_pause_record_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let outcome = self.handle_pause_record(request_id).await;
+        let mut events = Vec::new();
+        if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            events.push(
+                crate::obsws_response_builder::build_record_state_changed_event(true, true, None),
+            );
+        }
+        Self::build_execution_from_outcome(outcome, events)
+    }
+
+    pub(super) async fn handle_resume_record_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let outcome = self.handle_resume_record(request_id).await;
+        let mut events = Vec::new();
+        if self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            if outcome.success {
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        true, false, None,
+                    ),
+                );
+            } else if outcome.output_path.is_some() {
+                // [NOTE]
+                // ResumeRecord の内部復旧で録画停止へフォールバックした場合は、
+                // request 自体は失敗でも出力状態の遷移（ inactive ）を通知する。
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        false,
+                        false,
+                        outcome.output_path.as_deref(),
+                    ),
+                );
+            }
+        }
+        Self::build_execution_from_outcome(outcome, events)
+    }
+
+    pub(super) async fn handle_toggle_record_pause_request(
+        &self,
+        request_id: &str,
+    ) -> crate::Result<RequestExecutionResult> {
+        let was_paused = self.input_registry.read().await.is_record_paused();
+        let outcome = if was_paused {
+            self.handle_resume_record(request_id).await
+        } else {
+            self.handle_pause_record(request_id).await
+        };
+        let mut events = Vec::new();
+        if self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+            if outcome.success {
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        true,
+                        !was_paused,
+                        None,
+                    ),
+                );
+            } else if outcome.output_path.is_some() {
+                // [NOTE]
+                // ToggleRecordPause が resume 経路で内部復旧に失敗して
+                // 録画停止へフォールバックした場合は、request 自体は失敗でも
+                // 出力状態の遷移（ inactive ）を通知する。
+                events.push(
+                    crate::obsws_response_builder::build_record_state_changed_event(
+                        false,
+                        false,
+                        outcome.output_path.as_deref(),
+                    ),
+                );
+            }
+        }
+        let response_text = Self::build_toggle_response_from_outcome(
+            "ToggleRecordPause",
+            request_id,
+            !was_paused,
+            &outcome,
+        )?;
+        Self::build_execution_from_response_text(response_text, events)
+    }
+
+    pub(super) async fn handle_start_output_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> crate::Result<RequestExecutionResult> {
+        let Some(output_name) =
+            Self::parse_required_non_empty_string_request_field(request_data, "outputName")
+        else {
+            return Ok(Self::build_error_execution(
+                "StartOutput",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required outputName field",
+            ));
+        };
+        let (outcome, events) = match output_name.as_str() {
+            "stream" => {
+                let outcome = self.handle_start_stream("StartOutput", request_id).await;
+                let mut events = Vec::new();
+                if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                    events.push(
+                        crate::obsws_response_builder::build_stream_state_changed_event(true),
+                    );
+                }
+                (outcome, events)
+            }
+            "record" => {
+                let outcome = self.handle_start_record("StartOutput", request_id).await;
+                let mut events = Vec::new();
+                if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                    events.push(
+                        crate::obsws_response_builder::build_record_state_changed_event(
+                            true, false, None,
+                        ),
+                    );
+                }
+                (outcome, events)
+            }
+            _ => {
+                return Ok(Self::build_error_execution(
+                    "StartOutput",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ));
+            }
+        };
+        let response_text =
+            Self::build_output_response_from_outcome("StartOutput", request_id, true, &outcome);
+        Self::build_execution_from_response_text(response_text, events)
+    }
+
+    pub(super) async fn handle_stop_output_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> crate::Result<RequestExecutionResult> {
+        let Some(output_name) =
+            Self::parse_required_non_empty_string_request_field(request_data, "outputName")
+        else {
+            return Ok(Self::build_error_execution(
+                "StopOutput",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required outputName field",
+            ));
+        };
+        let (outcome, events) = match output_name.as_str() {
+            "stream" => {
+                let outcome = self.handle_stop_stream("StopOutput", request_id).await;
+                let mut events = Vec::new();
+                if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                    events.push(
+                        crate::obsws_response_builder::build_stream_state_changed_event(false),
+                    );
+                }
+                (outcome, events)
+            }
+            "record" => {
+                let outcome = self.handle_stop_record("StopOutput", request_id).await;
+                let mut events = Vec::new();
+                if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                    events.push(
+                        crate::obsws_response_builder::build_record_state_changed_event(
+                            false,
+                            false,
+                            outcome.output_path.as_deref(),
+                        ),
+                    );
+                }
+                (outcome, events)
+            }
+            _ => {
+                return Ok(Self::build_error_execution(
+                    "StopOutput",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ));
+            }
+        };
+        let response_text =
+            Self::build_output_response_from_outcome("StopOutput", request_id, false, &outcome);
+        Self::build_execution_from_response_text(response_text, events)
+    }
+
+    pub(super) async fn handle_toggle_output_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> crate::Result<RequestExecutionResult> {
+        let Some(output_name) =
+            Self::parse_required_non_empty_string_request_field(request_data, "outputName")
+        else {
+            return Ok(Self::build_error_execution(
+                "ToggleOutput",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required outputName field",
+            ));
+        };
+        let (outcome, output_active_on_success, events) = match output_name.as_str() {
+            "stream" => {
+                let was_active = self.input_registry.read().await.is_stream_active();
+                let outcome = if was_active {
+                    self.handle_stop_stream("ToggleOutput", request_id).await
+                } else {
+                    self.handle_start_stream("ToggleOutput", request_id).await
+                };
+                let mut events = Vec::new();
+                if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                    events.push(
+                        crate::obsws_response_builder::build_stream_state_changed_event(
+                            !was_active,
+                        ),
+                    );
+                }
+                (outcome, !was_active, events)
+            }
+            "record" => {
+                let was_active = self.input_registry.read().await.is_record_active();
+                let outcome = if was_active {
+                    self.handle_stop_record("ToggleOutput", request_id).await
+                } else {
+                    self.handle_start_record("ToggleOutput", request_id).await
+                };
+                let mut events = Vec::new();
+                if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
+                    let output_path = if was_active {
+                        outcome.output_path.as_deref()
+                    } else {
+                        None
+                    };
+                    events.push(
+                        crate::obsws_response_builder::build_record_state_changed_event(
+                            !was_active,
+                            false,
+                            output_path,
+                        ),
+                    );
+                }
+                (outcome, !was_active, events)
+            }
+            _ => {
+                return Ok(Self::build_error_execution(
+                    "ToggleOutput",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ));
+            }
+        };
+        let response_text = Self::build_output_response_from_outcome(
+            "ToggleOutput",
+            request_id,
+            output_active_on_success,
+            &outcome,
+        );
+        Self::build_execution_from_response_text(response_text, events)
+    }
+
+    // --- 内部操作メソッド ---
+
+    /// output_plan の構築を行い、失敗時は RequestOutcome を返すヘルパー
+    fn build_output_plan_or_error(
+        request_type: &str,
+        request_id: &str,
+        input_registry: &ObswsInputRegistry,
+        output_kind: crate::obsws::source::ObswsOutputKind,
+        run_id: u64,
+    ) -> Result<crate::obsws::output_plan::ObswsComposedOutputPlan, RequestOutcome> {
+        let scene_inputs = input_registry.list_current_program_scene_input_entries();
+        let canvas_width = input_registry.canvas_width();
+        let canvas_height = input_registry.canvas_height();
+        let frame_rate = input_registry.frame_rate();
+        crate::obsws::output_plan::build_composed_output_plan(
+            &scene_inputs,
+            output_kind,
+            run_id,
+            canvas_width,
+            canvas_height,
+            frame_rate,
+        )
+        .map_err(|error| {
+            let error_comment = error.message(request_type);
+            RequestOutcome::failure(
+                crate::obsws_response_builder::build_request_response_error(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &error_comment,
+                ),
+                None,
+            )
+        })
+    }
+
+    pub(super) async fn handle_start_stream(
+        &self,
+        request_type: &str,
+        request_id: &str,
+    ) -> RequestOutcome {
         let (output_url, stream_name, output_plan, run) = {
             let mut input_registry = self.input_registry.write().await;
             let stream_service_settings = input_registry.stream_service_settings().clone();
             if stream_service_settings.stream_service_type != "rtmp_custom" {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
-                        "StartStream",
+                        request_type,
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Unsupported streamServiceType field",
                     ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Unsupported streamServiceType field",
+                    None,
                 );
             }
             let Some(output_url) = stream_service_settings.server else {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
-                        "StartStream",
+                        request_type,
                         request_id,
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Missing streamServiceSettings.server field",
                     ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Missing streamServiceSettings.server field",
+                    None,
                 );
             };
 
-            let scene_inputs = input_registry.list_current_program_scene_input_entries();
-            let run_id = input_registry.next_stream_run_id();
-            let canvas_width = input_registry.canvas_width();
-            let canvas_height = input_registry.canvas_height();
-            let frame_rate = input_registry.frame_rate();
-            let output_plan = match crate::obsws::output_plan::build_composed_output_plan(
-                &scene_inputs,
-                crate::obsws::source::ObswsOutputKind::Stream,
-                run_id,
-                canvas_width,
-                canvas_height,
-                frame_rate,
-            ) {
-                Ok(output_plan) => output_plan,
-                Err(error) => {
-                    let error_comment = error.message("StartStream");
+            let run_id = match input_registry.next_stream_run_id() {
+                Ok(run_id) => run_id,
+                Err(_) => {
                     return RequestOutcome::failure(
                         crate::obsws_response_builder::build_request_response_error(
-                            "StartStream",
+                            request_type,
                             request_id,
-                            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                            &error_comment,
+                            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            "Stream run ID overflow",
                         ),
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        error_comment,
+                        None,
                     );
                 }
+            };
+            let output_plan = match Self::build_output_plan_or_error(
+                request_type,
+                request_id,
+                &input_registry,
+                crate::obsws::source::ObswsOutputKind::Stream,
+                run_id,
+            ) {
+                Ok(output_plan) => output_plan,
+                Err(outcome) => return outcome,
             };
             let video = output_plan
                 .source_video_track_id
@@ -85,13 +502,12 @@ impl ObswsSession {
             {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
-                        "StartStream",
+                        request_type,
                         request_id,
                         REQUEST_STATUS_STREAM_RUNNING,
                         "Stream is already active",
                     ),
-                    REQUEST_STATUS_STREAM_RUNNING,
-                    "Stream is already active",
+                    None,
                 );
             }
 
@@ -112,9 +528,8 @@ impl ObswsSession {
             }
             let error_comment = format!("Failed to start stream: {}", e.display());
             return RequestOutcome::failure(
-                Self::build_internal_error_response("StartStream", request_id, &error_comment),
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                error_comment,
+                Self::build_internal_error_response(request_type, request_id, &error_comment),
+                None,
             );
         }
 
@@ -124,19 +539,22 @@ impl ObswsSession {
         )
     }
 
-    pub(super) async fn handle_stop_stream(&self, request_id: &str) -> RequestOutcome {
+    pub(super) async fn handle_stop_stream(
+        &self,
+        request_type: &str,
+        request_id: &str,
+    ) -> RequestOutcome {
         let run = {
             let input_registry = self.input_registry.read().await;
             if !input_registry.is_stream_active() {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
-                        "StopStream",
+                        request_type,
                         request_id,
                         REQUEST_STATUS_STREAM_NOT_RUNNING,
                         "Stream is not active",
                     ),
-                    REQUEST_STATUS_STREAM_NOT_RUNNING,
-                    "Stream is not active",
+                    None,
                 );
             }
             input_registry
@@ -146,9 +564,8 @@ impl ObswsSession {
         if let Err(e) = self.stop_stream_processors(&run).await {
             let error_comment = format!("Failed to stop stream: {}", e.display());
             return RequestOutcome::failure(
-                Self::build_internal_error_response("StopStream", request_id, &error_comment),
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                error_comment,
+                Self::build_internal_error_response(request_type, request_id, &error_comment),
+                None,
             );
         }
         let mut input_registry = self.input_registry.write().await;
@@ -161,36 +578,36 @@ impl ObswsSession {
         )
     }
 
-    pub(super) async fn handle_start_record(&self, request_id: &str) -> RequestOutcome {
+    pub(super) async fn handle_start_record(
+        &self,
+        request_type: &str,
+        request_id: &str,
+    ) -> RequestOutcome {
         let (output_plan, output_path, run) = {
             let mut input_registry = self.input_registry.write().await;
-            let scene_inputs = input_registry.list_current_program_scene_input_entries();
-            let run_id = input_registry.next_record_run_id();
-            let canvas_width = input_registry.canvas_width();
-            let canvas_height = input_registry.canvas_height();
-            let frame_rate = input_registry.frame_rate();
-            let output_plan = match crate::obsws::output_plan::build_composed_output_plan(
-                &scene_inputs,
-                crate::obsws::source::ObswsOutputKind::Record,
-                run_id,
-                canvas_width,
-                canvas_height,
-                frame_rate,
-            ) {
-                Ok(output_plan) => output_plan,
-                Err(error) => {
-                    let error_comment = error.message("StartRecord");
+            let run_id = match input_registry.next_record_run_id() {
+                Ok(run_id) => run_id,
+                Err(_) => {
                     return RequestOutcome::failure(
                         crate::obsws_response_builder::build_request_response_error(
-                            "StartRecord",
+                            request_type,
                             request_id,
-                            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                            &error_comment,
+                            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            "Record run ID overflow",
                         ),
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        error_comment,
+                        None,
                     );
                 }
+            };
+            let output_plan = match Self::build_output_plan_or_error(
+                request_type,
+                request_id,
+                &input_registry,
+                crate::obsws::source::ObswsOutputKind::Record,
+                run_id,
+            ) {
+                Ok(output_plan) => output_plan,
+                Err(outcome) => return outcome,
             };
             let writer_processor_id =
                 crate::ProcessorId::new(format!("obsws:record:{run_id}:mp4_writer"));
@@ -227,13 +644,12 @@ impl ObswsSession {
             {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
-                        "StartRecord",
+                        request_type,
                         request_id,
                         REQUEST_STATUS_OUTPUT_RUNNING,
                         "Record is already active",
                     ),
-                    REQUEST_STATUS_OUTPUT_RUNNING,
-                    "Record is already active",
+                    None,
                 );
             }
             (output_plan, output_path, run)
@@ -245,9 +661,8 @@ impl ObswsSession {
             let _ = self.input_registry.write().await.deactivate_record();
             let error_comment = format!("Failed to create record directory: {e}");
             return RequestOutcome::failure(
-                Self::build_internal_error_response("StartRecord", request_id, &error_comment),
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                error_comment,
+                Self::build_internal_error_response(request_type, request_id, &error_comment),
+                None,
             );
         }
 
@@ -264,9 +679,8 @@ impl ObswsSession {
             }
             let error_comment = format!("Failed to start record: {}", e.display());
             return RequestOutcome::failure(
-                Self::build_internal_error_response("StartRecord", request_id, &error_comment),
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                error_comment,
+                Self::build_internal_error_response(request_type, request_id, &error_comment),
+                None,
             );
         }
 
@@ -276,19 +690,22 @@ impl ObswsSession {
         )
     }
 
-    pub(super) async fn handle_stop_record(&self, request_id: &str) -> RequestOutcome {
+    pub(super) async fn handle_stop_record(
+        &self,
+        request_type: &str,
+        request_id: &str,
+    ) -> RequestOutcome {
         let run = {
             let input_registry = self.input_registry.read().await;
             if !input_registry.is_record_active() {
                 return RequestOutcome::failure(
                     crate::obsws_response_builder::build_request_response_error(
-                        "StopRecord",
+                        request_type,
                         request_id,
                         REQUEST_STATUS_OUTPUT_NOT_RUNNING,
                         "Record is not active",
                     ),
-                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                    "Record is not active",
+                    None,
                 );
             }
             input_registry
@@ -298,9 +715,8 @@ impl ObswsSession {
         if let Err(e) = self.stop_record_processors(&run).await {
             let error_comment = format!("Failed to stop record: {}", e.display());
             return RequestOutcome::failure(
-                Self::build_internal_error_response("StopRecord", request_id, &error_comment),
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                error_comment,
+                Self::build_internal_error_response(request_type, request_id, &error_comment),
+                None,
             );
         }
         let mut input_registry = self.input_registry.write().await;
@@ -325,8 +741,7 @@ impl ObswsSession {
                         REQUEST_STATUS_OUTPUT_NOT_RUNNING,
                         "Record is not active",
                     ),
-                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                    "Record is not active",
+                    None,
                 );
             }
             if input_registry.is_record_paused() {
@@ -337,8 +752,7 @@ impl ObswsSession {
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Record is already paused",
                     ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Record is already paused",
+                    None,
                 );
             }
             input_registry
@@ -350,8 +764,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to pause record: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("PauseRecord", request_id, &error_comment),
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                error_comment,
+                None,
             );
         }
 
@@ -368,8 +781,7 @@ impl ObswsSession {
                     REQUEST_STATUS_OUTPUT_NOT_RUNNING,
                     "Record is not active",
                 ),
-                REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                "Record is not active",
+                None,
             ),
             Err(PauseRecordError::AlreadyPaused) => RequestOutcome::failure(
                 crate::obsws_response_builder::build_request_response_error(
@@ -378,8 +790,7 @@ impl ObswsSession {
                     REQUEST_STATUS_INVALID_REQUEST_FIELD,
                     "Record is already paused",
                 ),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "Record is already paused",
+                None,
             ),
         }
     }
@@ -395,8 +806,7 @@ impl ObswsSession {
                         REQUEST_STATUS_OUTPUT_NOT_RUNNING,
                         "Record is not active",
                     ),
-                    REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                    "Record is not active",
+                    None,
                 );
             }
             if !input_registry.is_record_paused() {
@@ -407,8 +817,7 @@ impl ObswsSession {
                         REQUEST_STATUS_INVALID_REQUEST_FIELD,
                         "Record is not paused",
                     ),
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Record is not paused",
+                    None,
                 );
             }
             input_registry
@@ -420,8 +829,7 @@ impl ObswsSession {
             let error_comment = format!("Failed to resume record: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("ResumeRecord", request_id, &error_comment),
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                error_comment,
+                None,
             );
         }
         if run.video.is_some()
@@ -446,15 +854,13 @@ impl ObswsSession {
                             e.display(),
                             rollback_error.display(),
                         );
-                        return RequestOutcome::failure_with_output_path(
+                        return RequestOutcome::failure(
                             Self::build_internal_error_response(
                                 "ResumeRecord",
                                 request_id,
                                 &error_comment,
                             ),
-                            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                            error_comment,
-                            output_path,
+                            Some(output_path),
                         );
                     }
                     Err(stop_error) => {
@@ -470,8 +876,7 @@ impl ObswsSession {
                                 request_id,
                                 &error_comment,
                             ),
-                            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                            error_comment,
+                            None,
                         );
                     }
                 }
@@ -480,8 +885,7 @@ impl ObswsSession {
                 format!("Failed to request record resume keyframe: {}", e.display());
             return RequestOutcome::failure(
                 Self::build_internal_error_response("ResumeRecord", request_id, &error_comment),
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                error_comment,
+                None,
             );
         }
 
@@ -498,8 +902,7 @@ impl ObswsSession {
                     REQUEST_STATUS_OUTPUT_NOT_RUNNING,
                     "Record is not active",
                 ),
-                REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                "Record is not active",
+                None,
             ),
             Err(ResumeRecordError::NotPaused) => RequestOutcome::failure(
                 crate::obsws_response_builder::build_request_response_error(
@@ -508,11 +911,12 @@ impl ObswsSession {
                     REQUEST_STATUS_INVALID_REQUEST_FIELD,
                     "Record is not paused",
                 ),
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "Record is not paused",
+                None,
             ),
         }
     }
+
+    // --- パイプライン操作メソッド ---
 
     /// createVideoMixer リクエストを生成して送信する
     async fn send_create_video_mixer_request(

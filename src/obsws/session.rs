@@ -71,8 +71,6 @@ struct RequestOutcome {
     response_text: nojson::RawJsonOwned,
     success: bool,
     output_path: Option<String>,
-    error_code: Option<i64>,
-    error_comment: Option<String>,
 }
 
 impl RequestOutcome {
@@ -81,37 +79,14 @@ impl RequestOutcome {
             response_text,
             success: true,
             output_path,
-            error_code: None,
-            error_comment: None,
         }
     }
 
-    fn failure(
-        response_text: nojson::RawJsonOwned,
-        error_code: i64,
-        error_comment: impl Into<String>,
-    ) -> Self {
+    fn failure(response_text: nojson::RawJsonOwned, output_path: Option<String>) -> Self {
         Self {
             response_text,
             success: false,
-            output_path: None,
-            error_code: Some(error_code),
-            error_comment: Some(error_comment.into()),
-        }
-    }
-
-    fn failure_with_output_path(
-        response_text: nojson::RawJsonOwned,
-        error_code: i64,
-        error_comment: impl Into<String>,
-        output_path: String,
-    ) -> Self {
-        Self {
-            response_text,
-            success: false,
-            output_path: Some(output_path),
-            error_code: Some(error_code),
-            error_comment: Some(error_comment.into()),
+            output_path,
         }
     }
 }
@@ -437,362 +412,46 @@ impl ObswsSession {
         }
 
         if request_type == "StartStream" {
-            let outcome = self.handle_start_stream(&request_id).await;
-            let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                events.push(crate::obsws_response_builder::build_stream_state_changed_event(true));
-            }
-            return Self::build_execution_from_outcome("StartStream", outcome, events);
-        }
-        if request_type == "StartOutput" {
-            let Some(output_name) = Self::parse_required_non_empty_string_request_field(
-                request.request_data.as_ref(),
-                "outputName",
-            ) else {
-                return Ok(Self::build_error_execution(
-                    "StartOutput",
-                    &request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    "Missing required outputName field",
-                ));
-            };
-            let (outcome, events) = match output_name.as_str() {
-                "stream" => {
-                    let outcome = self.handle_start_stream(&request_id).await;
-                    let mut events = Vec::new();
-                    if outcome.success
-                        && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS)
-                    {
-                        events.push(
-                            crate::obsws_response_builder::build_stream_state_changed_event(true),
-                        );
-                    }
-                    (outcome, events)
-                }
-                "record" => {
-                    let outcome = self.handle_start_record(&request_id).await;
-                    let mut events = Vec::new();
-                    if outcome.success
-                        && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS)
-                    {
-                        events.push(
-                            crate::obsws_response_builder::build_record_state_changed_event(
-                                true, false, None,
-                            ),
-                        );
-                    }
-                    (outcome, events)
-                }
-                _ => {
-                    return Ok(Self::build_error_execution(
-                        "StartOutput",
-                        &request_id,
-                        REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                        "Output not found",
-                    ));
-                }
-            };
-            let response_text = Self::build_output_response_from_outcome(
-                "StartOutput",
-                &request_id,
-                true,
-                &outcome,
-            );
-            return Self::build_execution_from_response_text(response_text, events);
-        }
-        if request_type == "ToggleStream" {
-            let was_active = self.input_registry.read().await.is_stream_active();
-            let outcome = if was_active {
-                self.handle_stop_stream(&request_id).await
-            } else {
-                self.handle_start_stream(&request_id).await
-            };
-            let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                events.push(
-                    crate::obsws_response_builder::build_stream_state_changed_event(!was_active),
-                );
-            }
-            let response_text = Self::build_toggle_response_from_outcome(
-                "ToggleStream",
-                &request_id,
-                !was_active,
-                &outcome,
-            )?;
-            return Self::build_execution_from_response_text(response_text, events);
-        }
-        if request_type == "ToggleOutput" {
-            let Some(output_name) = Self::parse_required_non_empty_string_request_field(
-                request.request_data.as_ref(),
-                "outputName",
-            ) else {
-                return Ok(Self::build_error_execution(
-                    "ToggleOutput",
-                    &request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    "Missing required outputName field",
-                ));
-            };
-            let (outcome, output_active_on_success, events) = match output_name.as_str() {
-                "stream" => {
-                    let was_active = self.input_registry.read().await.is_stream_active();
-                    let outcome = if was_active {
-                        self.handle_stop_stream(&request_id).await
-                    } else {
-                        self.handle_start_stream(&request_id).await
-                    };
-                    let mut events = Vec::new();
-                    if outcome.success
-                        && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS)
-                    {
-                        events.push(
-                            crate::obsws_response_builder::build_stream_state_changed_event(
-                                !was_active,
-                            ),
-                        );
-                    }
-                    (outcome, !was_active, events)
-                }
-                "record" => {
-                    let was_active = self.input_registry.read().await.is_record_active();
-                    let outcome = if was_active {
-                        self.handle_stop_record(&request_id).await
-                    } else {
-                        self.handle_start_record(&request_id).await
-                    };
-                    let mut events = Vec::new();
-                    if outcome.success
-                        && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS)
-                    {
-                        let output_path = if was_active {
-                            outcome.output_path.as_deref()
-                        } else {
-                            None
-                        };
-                        events.push(
-                            crate::obsws_response_builder::build_record_state_changed_event(
-                                !was_active,
-                                false,
-                                output_path,
-                            ),
-                        );
-                    }
-                    (outcome, !was_active, events)
-                }
-                _ => {
-                    return Ok(Self::build_error_execution(
-                        "ToggleOutput",
-                        &request_id,
-                        REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                        "Output not found",
-                    ));
-                }
-            };
-            let response_text = Self::build_output_response_from_outcome(
-                "ToggleOutput",
-                &request_id,
-                output_active_on_success,
-                &outcome,
-            );
-            return Self::build_execution_from_response_text(response_text, events);
+            return self.handle_start_stream_request(&request_id).await;
         }
         if request_type == "StopStream" {
-            let outcome = self.handle_stop_stream(&request_id).await;
-            let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                events.push(crate::obsws_response_builder::build_stream_state_changed_event(false));
-            }
-            return Self::build_execution_from_outcome("StopStream", outcome, events);
+            return self.handle_stop_stream_request(&request_id).await;
         }
-        if request_type == "StopOutput" {
-            let Some(output_name) = Self::parse_required_non_empty_string_request_field(
-                request.request_data.as_ref(),
-                "outputName",
-            ) else {
-                return Ok(Self::build_error_execution(
-                    "StopOutput",
-                    &request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    "Missing required outputName field",
-                ));
-            };
-            let (outcome, events) = match output_name.as_str() {
-                "stream" => {
-                    let outcome = self.handle_stop_stream(&request_id).await;
-                    let mut events = Vec::new();
-                    if outcome.success
-                        && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS)
-                    {
-                        events.push(
-                            crate::obsws_response_builder::build_stream_state_changed_event(false),
-                        );
-                    }
-                    (outcome, events)
-                }
-                "record" => {
-                    let outcome = self.handle_stop_record(&request_id).await;
-                    let mut events = Vec::new();
-                    if outcome.success
-                        && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS)
-                    {
-                        events.push(
-                            crate::obsws_response_builder::build_record_state_changed_event(
-                                false,
-                                false,
-                                outcome.output_path.as_deref(),
-                            ),
-                        );
-                    }
-                    (outcome, events)
-                }
-                _ => {
-                    return Ok(Self::build_error_execution(
-                        "StopOutput",
-                        &request_id,
-                        REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                        "Output not found",
-                    ));
-                }
-            };
-            let response_text = Self::build_output_response_from_outcome(
-                "StopOutput",
-                &request_id,
-                false,
-                &outcome,
-            );
-            return Self::build_execution_from_response_text(response_text, events);
+        if request_type == "ToggleStream" {
+            return self.handle_toggle_stream_request(&request_id).await;
         }
         if request_type == "StartRecord" {
-            let outcome = self.handle_start_record(&request_id).await;
-            let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                events.push(
-                    crate::obsws_response_builder::build_record_state_changed_event(
-                        true, false, None,
-                    ),
-                );
-            }
-            return Self::build_execution_from_outcome("StartRecord", outcome, events);
-        }
-        if request_type == "ToggleRecord" {
-            let was_active = self.input_registry.read().await.is_record_active();
-            let outcome = if was_active {
-                self.handle_stop_record(&request_id).await
-            } else {
-                self.handle_start_record(&request_id).await
-            };
-            let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                let output_path = if was_active {
-                    outcome.output_path.as_deref()
-                } else {
-                    None
-                };
-                events.push(
-                    crate::obsws_response_builder::build_record_state_changed_event(
-                        !was_active,
-                        false,
-                        output_path,
-                    ),
-                );
-            }
-            let response_text = Self::build_toggle_response_from_outcome(
-                "ToggleRecord",
-                &request_id,
-                !was_active,
-                &outcome,
-            )?;
-            return Self::build_execution_from_response_text(response_text, events);
+            return self.handle_start_record_request(&request_id).await;
         }
         if request_type == "StopRecord" {
-            let outcome = self.handle_stop_record(&request_id).await;
-            let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                events.push(
-                    crate::obsws_response_builder::build_record_state_changed_event(
-                        false,
-                        false,
-                        outcome.output_path.as_deref(),
-                    ),
-                );
-            }
-            return Self::build_execution_from_outcome("StopRecord", outcome, events);
+            return self.handle_stop_record_request(&request_id).await;
+        }
+        if request_type == "ToggleRecord" {
+            return self.handle_toggle_record_request(&request_id).await;
         }
         if request_type == "PauseRecord" {
-            let outcome = self.handle_pause_record(&request_id).await;
-            let mut events = Vec::new();
-            if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                events.push(
-                    crate::obsws_response_builder::build_record_state_changed_event(
-                        true, true, None,
-                    ),
-                );
-            }
-            return Self::build_execution_from_outcome("PauseRecord", outcome, events);
+            return self.handle_pause_record_request(&request_id).await;
         }
         if request_type == "ResumeRecord" {
-            let outcome = self.handle_resume_record(&request_id).await;
-            let mut events = Vec::new();
-            if self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                if outcome.success {
-                    events.push(
-                        crate::obsws_response_builder::build_record_state_changed_event(
-                            true, false, None,
-                        ),
-                    );
-                } else if outcome.output_path.is_some() {
-                    // [NOTE]
-                    // ResumeRecord の内部復旧で録画停止へフォールバックした場合は、
-                    // request 自体は失敗でも出力状態の遷移（ inactive ）を通知する。
-                    events.push(
-                        crate::obsws_response_builder::build_record_state_changed_event(
-                            false,
-                            false,
-                            outcome.output_path.as_deref(),
-                        ),
-                    );
-                }
-            }
-            return Self::build_execution_from_outcome("ResumeRecord", outcome, events);
+            return self.handle_resume_record_request(&request_id).await;
         }
         if request_type == "ToggleRecordPause" {
-            let was_paused = self.input_registry.read().await.is_record_paused();
-            let outcome = if was_paused {
-                self.handle_resume_record(&request_id).await
-            } else {
-                self.handle_pause_record(&request_id).await
-            };
-            let mut events = Vec::new();
-            if self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                if outcome.success {
-                    events.push(
-                        crate::obsws_response_builder::build_record_state_changed_event(
-                            true,
-                            !was_paused,
-                            None,
-                        ),
-                    );
-                } else if outcome.output_path.is_some() {
-                    // [NOTE]
-                    // ToggleRecordPause が resume 経路で内部復旧に失敗して
-                    // 録画停止へフォールバックした場合は、request 自体は失敗でも
-                    // 出力状態の遷移（ inactive ）を通知する。
-                    events.push(
-                        crate::obsws_response_builder::build_record_state_changed_event(
-                            false,
-                            false,
-                            outcome.output_path.as_deref(),
-                        ),
-                    );
-                }
-            }
-            let response_text = Self::build_toggle_response_from_outcome(
-                "ToggleRecordPause",
-                &request_id,
-                !was_paused,
-                &outcome,
-            )?;
-            return Self::build_execution_from_response_text(response_text, events);
+            return self.handle_toggle_record_pause_request(&request_id).await;
+        }
+        if request_type == "StartOutput" {
+            return self
+                .handle_start_output_request(&request_id, request.request_data.as_ref())
+                .await;
+        }
+        if request_type == "StopOutput" {
+            return self
+                .handle_stop_output_request(&request_id, request.request_data.as_ref())
+                .await;
+        }
+        if request_type == "ToggleOutput" {
+            return self
+                .handle_toggle_output_request(&request_id, request.request_data.as_ref())
+                .await;
         }
         if request_type == "BroadcastCustomEvent" {
             let action = self
@@ -923,7 +582,6 @@ impl ObswsSession {
     }
 
     fn build_execution_from_outcome(
-        _request_type: &str,
         outcome: RequestOutcome,
         events: Vec<nojson::RawJsonOwned>,
     ) -> crate::Result<RequestExecutionResult> {
@@ -997,39 +655,28 @@ impl ObswsSession {
         output_active_on_success: bool,
         outcome: &RequestOutcome,
     ) -> crate::Result<nojson::RawJsonOwned> {
-        if outcome.success {
-            return match toggle_request_type {
-                "ToggleStream" => Ok(crate::obsws_response_builder::build_toggle_stream_response(
-                    request_id,
-                    output_active_on_success,
-                )),
-                "ToggleRecord" => Ok(crate::obsws_response_builder::build_toggle_record_response(
-                    request_id,
-                    output_active_on_success,
-                )),
-                "ToggleRecordPause" => Ok(
-                    crate::obsws_response_builder::build_toggle_record_pause_response(
-                        request_id,
-                        output_active_on_success,
-                    ),
-                ),
-                _ => Err(crate::Error::new("unknown toggle request type")),
-            };
+        // 失敗時は outcome.response_text に正しい request_type でエラーが構築済み
+        if !outcome.success {
+            return Ok(outcome.response_text.clone());
         }
 
-        let code = outcome
-            .error_code
-            .unwrap_or(REQUEST_STATUS_INVALID_REQUEST_FIELD);
-        let comment = outcome
-            .error_comment
-            .as_deref()
-            .unwrap_or("Unknown request error");
-        Ok(crate::obsws_response_builder::build_request_response_error(
-            toggle_request_type,
-            request_id,
-            code,
-            comment,
-        ))
+        match toggle_request_type {
+            "ToggleStream" => Ok(crate::obsws_response_builder::build_toggle_stream_response(
+                request_id,
+                output_active_on_success,
+            )),
+            "ToggleRecord" => Ok(crate::obsws_response_builder::build_toggle_record_response(
+                request_id,
+                output_active_on_success,
+            )),
+            "ToggleRecordPause" => Ok(
+                crate::obsws_response_builder::build_toggle_record_pause_response(
+                    request_id,
+                    output_active_on_success,
+                ),
+            ),
+            _ => Err(crate::Error::new("unknown toggle request type")),
+        }
     }
 
     fn build_output_response_from_outcome(
@@ -1038,36 +685,23 @@ impl ObswsSession {
         output_active_on_success: bool,
         outcome: &RequestOutcome,
     ) -> nojson::RawJsonOwned {
-        if outcome.success {
-            return match request_type {
-                "StartOutput" => crate::obsws_response_builder::build_start_output_response(
-                    request_id,
-                    output_active_on_success,
-                ),
-                "ToggleOutput" => crate::obsws_response_builder::build_toggle_output_response(
-                    request_id,
-                    output_active_on_success,
-                ),
-                "StopOutput" => {
-                    crate::obsws_response_builder::build_stop_output_response(request_id)
-                }
-                _ => unreachable!("BUG: unsupported output request type: {request_type}"),
-            };
+        // 失敗時は outcome.response_text に正しい request_type でエラーが構築済み
+        if !outcome.success {
+            return outcome.response_text.clone();
         }
 
-        let code = outcome
-            .error_code
-            .unwrap_or(REQUEST_STATUS_INVALID_REQUEST_FIELD);
-        let comment = outcome
-            .error_comment
-            .as_deref()
-            .unwrap_or("Unknown request error");
-        crate::obsws_response_builder::build_request_response_error(
-            request_type,
-            request_id,
-            code,
-            comment,
-        )
+        match request_type {
+            "StartOutput" => crate::obsws_response_builder::build_start_output_response(
+                request_id,
+                output_active_on_success,
+            ),
+            "ToggleOutput" => crate::obsws_response_builder::build_toggle_output_response(
+                request_id,
+                output_active_on_success,
+            ),
+            "StopOutput" => crate::obsws_response_builder::build_stop_output_response(request_id),
+            _ => unreachable!("BUG: unsupported output request type: {request_type}"),
+        }
     }
 
     fn is_event_subscription_enabled(&self, event_flag: u32) -> bool {

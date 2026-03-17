@@ -122,6 +122,30 @@ fn parse_request_batch_results(text: &nojson::RawJsonOwned) -> Vec<(String, bool
         .collect()
 }
 
+/// SessionAction::SendText から text を取り出す。SendText でなければパニック。
+fn unwrap_send_text(action: SessionAction) -> nojson::RawJsonOwned {
+    let SessionAction::SendText { text, .. } = action else {
+        panic!("expected SendText");
+    };
+    text
+}
+
+/// SessionAction::SendTexts から messages を取り出す。SendTexts でなければパニック。
+fn unwrap_send_texts(action: SessionAction) -> Vec<(nojson::RawJsonOwned, &'static str)> {
+    let SessionAction::SendTexts { messages } = action else {
+        panic!("expected SendTexts");
+    };
+    messages
+}
+
+/// SessionAction::Close から code と reason を取り出す。Close でなければパニック。
+fn unwrap_close(action: SessionAction) -> (CloseCode, &'static str) {
+    let SessionAction::Close { code, reason, .. } = action else {
+        panic!("expected Close");
+    };
+    (code, reason)
+}
+
 #[test]
 fn on_connected_returns_hello_message_action() {
     let session = ObswsSession::new(None, input_registry(), None);
@@ -143,9 +167,7 @@ async fn on_request_before_identify_returns_close_action() {
             request_data: None,
         })
         .await;
-    let SessionAction::Close { code, reason, .. } = action else {
-        panic!("must be Close");
-    };
+    let (code, reason) = unwrap_close(action);
     assert_eq!(code, OBSWS_CLOSE_NOT_IDENTIFIED);
     assert_eq!(reason, "identify is required");
 }
@@ -168,9 +190,7 @@ async fn broadcast_custom_event_returns_event_when_general_subscription_enabled(
             ),
         })
         .await;
-    let SessionAction::SendTexts { messages } = action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(action);
     assert_eq!(messages.len(), 2);
 
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
@@ -204,9 +224,7 @@ async fn sleep_request_returns_success_response() {
             ),
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(result);
     assert_eq!(code, 100);
@@ -230,9 +248,7 @@ async fn sleep_request_rejects_too_large_sleep_millis() {
             ),
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -250,9 +266,7 @@ async fn duplicate_identify_returns_already_identified_close() {
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
         .await;
     let action = second.expect("second identify must return action");
-    let SessionAction::Close { code, reason, .. } = action else {
-        panic!("must be Close");
-    };
+    let (code, reason) = unwrap_close(action);
     assert_eq!(code, OBSWS_CLOSE_ALREADY_IDENTIFIED);
     assert_eq!(reason, "already identified");
 }
@@ -264,9 +278,7 @@ async fn reidentify_before_identify_returns_not_identified_close() {
         .on_text_message(r#"{"op":3,"d":{}}"#)
         .await
         .expect("reidentify must be parsed");
-    let SessionAction::Close { code, reason, .. } = action else {
-        panic!("must be Close");
-    };
+    let (code, reason) = unwrap_close(action);
     assert_eq!(code, OBSWS_CLOSE_NOT_IDENTIFIED);
     assert_eq!(reason, "identify is required");
 }
@@ -357,9 +369,7 @@ async fn create_scene_with_scene_subscription_returns_scene_created_event() {
             request_data: Some(request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(action);
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneCreated");
@@ -416,9 +426,7 @@ async fn set_current_preview_scene_with_scene_subscription_returns_preview_event
             request_data: Some(set_preview_scene_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(action);
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "CurrentPreviewSceneChanged");
@@ -500,9 +508,7 @@ async fn remove_current_scene_with_scene_subscription_sends_scene_program_and_pr
             request_data: Some(remove_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = remove_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(remove_action);
     assert_eq!(messages.len(), 4);
     let (_, event_type_1, event_intent_1) = parse_event_type_and_intent(&messages[1].0);
     let (_, event_type_2, event_intent_2) = parse_event_type_and_intent(&messages[2].0);
@@ -535,9 +541,7 @@ async fn create_and_remove_input_with_input_subscription_send_input_events() {
             request_data: Some(create_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = create_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(create_action);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "InputCreated");
     assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
@@ -551,9 +555,7 @@ async fn create_and_remove_input_with_input_subscription_send_input_events() {
             request_data: Some(remove_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = remove_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(remove_action);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "InputRemoved");
     assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
@@ -579,9 +581,7 @@ async fn set_input_settings_with_input_subscription_sends_event() {
             request_data: Some(create_request_data),
         })
         .await;
-    let SessionAction::SendTexts { .. } = create_action else {
-        panic!("must be SendTexts");
-    };
+    let _ = unwrap_send_texts(create_action);
 
     let set_request_data = nojson::RawJsonOwned::parse(
         r#"{"inputName":"camera-1","inputSettings":{"device_id":"camera-2"}}"#,
@@ -594,9 +594,7 @@ async fn set_input_settings_with_input_subscription_sends_event() {
             request_data: Some(set_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = set_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(set_action);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "InputSettingsChanged");
     assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
@@ -622,9 +620,7 @@ async fn set_input_settings_with_input_subscription_does_not_send_event_on_error
             request_data: Some(create_request_data),
         })
         .await;
-    let SessionAction::SendTexts { .. } = create_action else {
-        panic!("must be SendTexts");
-    };
+    let _ = unwrap_send_texts(create_action);
 
     let set_request_data =
         nojson::RawJsonOwned::parse(r#"{"inputName":"camera-1","inputSettings":{"device_id":1}}"#)
@@ -636,9 +632,7 @@ async fn set_input_settings_with_input_subscription_does_not_send_event_on_error
             request_data: Some(set_request_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = set_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(set_action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -664,9 +658,7 @@ async fn set_input_name_with_input_subscription_sends_event() {
             request_data: Some(create_request_data),
         })
         .await;
-    let SessionAction::SendTexts { .. } = create_action else {
-        panic!("must be SendTexts");
-    };
+    let _ = unwrap_send_texts(create_action);
 
     let set_request_data = nojson::RawJsonOwned::parse(
         r#"{"inputName":"camera-1","newInputName":"camera-1-renamed"}"#,
@@ -679,9 +671,7 @@ async fn set_input_name_with_input_subscription_sends_event() {
             request_data: Some(set_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = set_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(set_action);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "InputNameChanged");
     assert_eq!(event_intent, OBSWS_EVENT_SUB_INPUTS);
@@ -707,9 +697,7 @@ async fn set_input_name_with_input_subscription_does_not_send_event_on_error() {
             request_data: Some(create_request_data_a),
         })
         .await;
-    let SessionAction::SendTexts { .. } = create_action_a else {
-        panic!("must be SendTexts");
-    };
+    let _ = unwrap_send_texts(create_action_a);
 
     let create_request_data_b = nojson::RawJsonOwned::parse(
         r#"{"sceneName":"Scene","inputName":"camera-2","inputKind":"video_capture_device","inputSettings":{},"sceneItemEnabled":true}"#,
@@ -722,9 +710,7 @@ async fn set_input_name_with_input_subscription_does_not_send_event_on_error() {
             request_data: Some(create_request_data_b),
         })
         .await;
-    let SessionAction::SendTexts { .. } = create_action_b else {
-        panic!("must be SendTexts");
-    };
+    let _ = unwrap_send_texts(create_action_b);
 
     let set_request_data =
         nojson::RawJsonOwned::parse(r#"{"inputName":"camera-1","newInputName":"camera-2"}"#)
@@ -736,9 +722,7 @@ async fn set_input_name_with_input_subscription_does_not_send_event_on_error() {
             request_data: Some(set_request_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = set_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(set_action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS);
@@ -763,9 +747,7 @@ async fn set_input_name_with_invalid_input_uuid_type_returns_parse_error() {
             request_data: Some(request_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -803,9 +785,7 @@ async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed
             request_data: Some(get_scene_item_id_request_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(get_scene_item_id_action);
     let scene_item_id = parse_response_scene_item_id(&text);
 
     let set_request_data = nojson::RawJsonOwned::parse(format!(
@@ -820,9 +800,7 @@ async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed
             request_data: Some(set_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = set_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(set_action);
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     let event_json =
@@ -869,9 +847,7 @@ async fn set_scene_item_enabled_with_same_value_returns_response_only() {
             request_data: Some(get_scene_item_id_request_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(get_scene_item_id_action);
     let scene_item_id = parse_response_scene_item_id(&text);
 
     let set_request_data = nojson::RawJsonOwned::parse(format!(
@@ -921,9 +897,7 @@ async fn set_scene_item_locked_with_scene_subscription_sends_event_when_changed(
             request_data: Some(get_scene_item_id_request_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(get_scene_item_id_action);
     let scene_item_id = parse_response_scene_item_id(&text);
 
     let set_request_data = nojson::RawJsonOwned::parse(format!(
@@ -938,9 +912,7 @@ async fn set_scene_item_locked_with_scene_subscription_sends_event_when_changed(
             request_data: Some(set_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = set_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(set_action);
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemLockStateChanged");
@@ -979,9 +951,7 @@ async fn set_scene_item_transform_with_scene_subscription_sends_event_when_chang
             request_data: Some(get_scene_item_id_request_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(get_scene_item_id_action);
     let scene_item_id = parse_response_scene_item_id(&text);
 
     let set_request_data = nojson::RawJsonOwned::parse(format!(
@@ -996,9 +966,7 @@ async fn set_scene_item_transform_with_scene_subscription_sends_event_when_chang
             request_data: Some(set_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = set_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(set_action);
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemTransformChanged");
@@ -1041,9 +1009,7 @@ async fn create_scene_item_with_scene_subscription_sends_created_event() {
             request_data: Some(create_scene_item_request_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = create_scene_item_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(create_scene_item_action);
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemCreated");
@@ -1102,9 +1068,7 @@ async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_e
             request_data: Some(get_scene_item_id_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(get_scene_item_id_action);
     let scene_item_id = parse_response_scene_item_id(&text);
 
     let remove_scene_item_data = nojson::RawJsonOwned::parse(format!(
@@ -1119,9 +1083,7 @@ async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_e
             request_data: Some(remove_scene_item_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = remove_scene_item_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(remove_scene_item_action);
     assert_eq!(messages.len(), 3);
     let (_, first_event_type, first_event_intent) = parse_event_type_and_intent(&messages[1].0);
     let (_, second_event_type, second_event_intent) = parse_event_type_and_intent(&messages[2].0);
@@ -1183,9 +1145,7 @@ async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_
             request_data: Some(get_scene_item_id_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(get_scene_item_id_action);
     let scene_item_id = parse_response_scene_item_id(&text);
 
     let remove_scene_item_data = nojson::RawJsonOwned::parse(format!(
@@ -1200,9 +1160,7 @@ async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_
             request_data: Some(remove_scene_item_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = remove_scene_item_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(remove_scene_item_action);
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemRemoved");
@@ -1261,9 +1219,7 @@ async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
             request_data: Some(get_scene_item_id_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = get_scene_item_id_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(get_scene_item_id_action);
     let scene_item_id = parse_response_scene_item_id(&text);
 
     let set_scene_item_index_data = nojson::RawJsonOwned::parse(format!(
@@ -1278,9 +1234,7 @@ async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
             request_data: Some(set_scene_item_index_data),
         })
         .await;
-    let SessionAction::SendTexts { messages } = set_scene_item_index_action else {
-        panic!("must be SendTexts");
-    };
+    let messages = unwrap_send_texts(set_scene_item_index_action);
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemListReindexed");
@@ -1305,9 +1259,7 @@ async fn set_scene_item_enabled_missing_field_returns_missing_request_field_erro
             request_data: Some(request_data),
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
@@ -1320,9 +1272,7 @@ async fn unsupported_rpc_version_returns_close_action() {
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":2}}"#)
         .await
         .expect("identify must be parsed");
-    let SessionAction::Close { code, reason, .. } = action else {
-        panic!("must be Close");
-    };
+    let (code, reason) = unwrap_close(action);
     assert_eq!(code, OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION);
     assert_eq!(reason, "unsupported rpc version");
 }
@@ -1343,9 +1293,7 @@ async fn invalid_authentication_returns_close_action() {
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"authentication":"invalid"}}"#)
         .await
         .expect("identify must be parsed");
-    let SessionAction::Close { code, reason, .. } = action else {
-        panic!("must be Close");
-    };
+    let (code, reason) = unwrap_close(action);
     assert_eq!(code, OBSWS_CLOSE_AUTHENTICATION_FAILED);
     assert_eq!(reason, "authentication failed");
 }
@@ -1366,9 +1314,7 @@ async fn stop_record_when_inactive_returns_error_response() {
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_OUTPUT_NOT_RUNNING);
@@ -1390,9 +1336,7 @@ async fn start_record_without_image_input_returns_error_response() {
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -1446,9 +1390,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = start_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(start_action);
     let (result, code) = parse_request_status(&text);
     assert!(result);
     assert_eq!(code, 100);
@@ -1462,9 +1404,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = stop_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(stop_action);
     let (result, code) = parse_request_status(&text);
     assert!(result);
     assert_eq!(code, 100);
@@ -1533,9 +1473,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = start_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(start_action);
     let (result, code) = parse_request_status(&text);
     assert!(result);
     assert_eq!(code, 100);
@@ -1577,9 +1515,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = stop_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(stop_action);
     let (result, code) = parse_request_status(&text);
     assert!(result);
     assert_eq!(code, 100);
@@ -1623,9 +1559,7 @@ async fn start_record_with_multiple_video_inputs_builds_plan_successfully() {
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     // プラン構築は成功するが、パイプラインがないため実行時エラーになる
     assert!(!result);
@@ -1682,9 +1616,7 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = start_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(start_action);
     let (result, code) = parse_request_status(&text);
     assert!(result);
     assert_eq!(code, 100);
@@ -1709,9 +1641,7 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = stop_action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(stop_action);
     let (result, code) = parse_request_status(&text);
     assert!(result);
     assert_eq!(code, 100);
@@ -1760,9 +1690,7 @@ async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     // プラン構築は成功するが、パイプラインがないため実行時エラーになる
     assert!(!result);
@@ -1785,9 +1713,7 @@ async fn toggle_stream_without_image_input_returns_toggle_request_type_error() {
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -1810,9 +1736,7 @@ async fn toggle_record_without_image_input_returns_toggle_request_type_error() {
             request_data: None,
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -1838,9 +1762,7 @@ async fn start_output_with_unknown_name_returns_not_found() {
             ),
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
@@ -1866,9 +1788,7 @@ async fn toggle_output_without_image_input_returns_toggle_request_type_error() {
             ),
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -1894,9 +1814,7 @@ async fn stop_output_when_record_is_inactive_returns_output_request_type_error()
             ),
         })
         .await;
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let (result, code) = parse_request_status(&text);
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_OUTPUT_NOT_RUNNING);
@@ -1918,9 +1836,7 @@ async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
         )
         .await
         .expect("request batch must be parsed");
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let results = parse_request_batch_results(&text);
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].0, "CreateScene");
@@ -1944,9 +1860,7 @@ async fn request_batch_without_halt_on_failure_continues_after_failure() {
         )
         .await
         .expect("request batch must be parsed");
-    let SessionAction::SendText { text, .. } = action else {
-        panic!("must be SendText");
-    };
+    let text = unwrap_send_text(action);
     let results = parse_request_batch_results(&text);
     assert_eq!(results.len(), 3);
     assert_eq!(results[0].0, "CreateScene");

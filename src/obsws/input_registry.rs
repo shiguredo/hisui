@@ -83,7 +83,9 @@ impl ObswsInputRegistry {
             return Err(CreateInputError::InputNameAlreadyExists);
         }
 
-        let input_uuid = self.next_input_uuid();
+        let input_uuid = self
+            .next_input_uuid()
+            .map_err(|_| CreateInputError::InputIdOverflow)?;
         let entry = ObswsInputEntry {
             input_uuid: input_uuid.clone(),
             input_name: input_name.to_owned(),
@@ -93,7 +95,9 @@ impl ObswsInputRegistry {
             .insert(entry.input_name.clone(), input_uuid);
         self.inputs_by_uuid
             .insert(entry.input_uuid.clone(), entry.clone());
-        let scene_item_id = self.next_scene_item_id();
+        let scene_item_id = self
+            .next_scene_item_id()
+            .map_err(|_| CreateInputError::InputIdOverflow)?;
         let scene = self
             .scenes_by_name
             .get_mut(scene_name)
@@ -116,12 +120,12 @@ impl ObswsInputRegistry {
         }
         let scene_id = self.next_scene_id;
         if scene_id > OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX {
-            panic!("BUG: obsws scene id exceeds 48-bit UUID suffix range");
+            return Err(CreateSceneError::SceneIdOverflow);
         }
         self.next_scene_id = self
             .next_scene_id
             .checked_add(1)
-            .expect("BUG: obsws scene id overflow");
+            .ok_or(CreateSceneError::SceneIdOverflow)?;
         let scene_uuid = format!("10000000-0000-0000-0000-{scene_id:012x}");
 
         self.scenes_by_name.insert(
@@ -517,22 +521,22 @@ impl ObswsInputRegistry {
         &self.stream_service_settings
     }
 
-    pub fn next_stream_run_id(&mut self) -> u64 {
+    pub fn next_stream_run_id(&mut self) -> Result<u64, RunIdOverflowError> {
         let run_id = self.next_stream_run_id;
         self.next_stream_run_id = self
             .next_stream_run_id
             .checked_add(1)
-            .expect("BUG: obsws stream run id overflow");
-        run_id
+            .ok_or(RunIdOverflowError::StreamRunIdOverflow)?;
+        Ok(run_id)
     }
 
-    pub fn next_record_run_id(&mut self) -> u64 {
+    pub fn next_record_run_id(&mut self) -> Result<u64, RunIdOverflowError> {
         let run_id = self.next_record_run_id;
         self.next_record_run_id = self
             .next_record_run_id
             .checked_add(1)
-            .expect("BUG: obsws record run id overflow");
-        run_id
+            .ok_or(RunIdOverflowError::RecordRunIdOverflow)?;
+        Ok(run_id)
     }
 
     pub fn set_stream_service_settings(&mut self, settings: ObswsStreamServiceSettings) {
@@ -801,25 +805,25 @@ impl ObswsInputRegistry {
         self.inputs_by_uuid.insert(entry.input_uuid.clone(), entry);
     }
 
-    fn next_input_uuid(&mut self) -> String {
+    fn next_input_uuid(&mut self) -> Result<String, InputIdOverflowError> {
         let input_id = self.next_input_id;
         if input_id > OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX {
-            panic!("BUG: obsws input id exceeds 48-bit UUID suffix range");
+            return Err(InputIdOverflowError);
         }
         self.next_input_id = self
             .next_input_id
             .checked_add(1)
-            .expect("BUG: obsws input id overflow");
-        format!("00000000-0000-0000-0000-{input_id:012x}")
+            .ok_or(InputIdOverflowError)?;
+        Ok(format!("00000000-0000-0000-0000-{input_id:012x}"))
     }
 
-    fn next_scene_item_id(&mut self) -> i64 {
+    fn next_scene_item_id(&mut self) -> Result<i64, SceneItemIdOverflowError> {
         let scene_item_id = self.next_scene_item_id;
         self.next_scene_item_id = self
             .next_scene_item_id
             .checked_add(1)
-            .expect("BUG: obsws scene item id overflow");
-        scene_item_id
+            .ok_or(SceneItemIdOverflowError)?;
+        Ok(scene_item_id)
     }
 
     fn build_scene_item_entries(&self, scene: &ObswsSceneState) -> Vec<ObswsSceneItemEntry> {

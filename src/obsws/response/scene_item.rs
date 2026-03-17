@@ -3,7 +3,8 @@ use crate::obsws_input_registry::{
     ObswsInputRegistry, SceneItemLookupError, SetSceneItemIndexError,
 };
 use crate::obsws_protocol::{
-    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+    REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
 use super::{
@@ -85,14 +86,14 @@ pub fn build_get_scene_item_list_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemList",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     let scene_items = input_registry
@@ -127,14 +128,14 @@ pub fn execute_create_scene_item(
             };
         }
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "CreateSceneItem",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => {
             return CreateSceneItemExecution {
                 response_text: response,
@@ -163,6 +164,17 @@ pub fn execute_create_scene_item(
         Err(CreateSceneItemError::SceneNotFound) => {
             unreachable!("resolved scene name must exist in input registry")
         }
+        Err(CreateSceneItemError::SceneItemIdOverflow) => {
+            return CreateSceneItemExecution {
+                response_text: super::build_request_response_error(
+                    "CreateSceneItem",
+                    request_id,
+                    REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Scene item ID overflow",
+                ),
+                created: None,
+            };
+        }
     };
 
     let response_text = super::build_request_response_success("CreateSceneItem", request_id, |f| {
@@ -188,14 +200,14 @@ pub fn build_remove_scene_item_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "RemoveSceneItem",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     if let Err(error) = input_registry.remove_scene_item(&scene_name, fields.scene_item_id) {
@@ -234,14 +246,14 @@ pub fn execute_duplicate_scene_item(
             };
         }
     };
-    let from_scene_name = match resolve_scene_name_or_error(
+    let (from_scene_name, _from_scene_uuid) = match resolve_scene_name_or_error(
         "DuplicateSceneItem",
         request_id,
         input_registry,
         fields.from_scene_name.as_deref(),
         fields.from_scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => {
             return DuplicateSceneItemExecution {
                 response_text: response,
@@ -249,14 +261,14 @@ pub fn execute_duplicate_scene_item(
             };
         }
     };
-    let to_scene_name = match resolve_scene_name_or_error(
+    let (to_scene_name, _to_scene_uuid) = match resolve_scene_name_or_error(
         "DuplicateSceneItem",
         request_id,
         input_registry,
         fields.to_scene_name.as_deref(),
         fields.to_scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => {
             return DuplicateSceneItemExecution {
                 response_text: response,
@@ -287,6 +299,17 @@ pub fn execute_duplicate_scene_item(
                 duplicated: None,
             };
         }
+        Err(DuplicateSceneItemError::SceneItemIdOverflow) => {
+            return DuplicateSceneItemExecution {
+                response_text: super::build_request_response_error(
+                    "DuplicateSceneItem",
+                    request_id,
+                    REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Scene item ID overflow",
+                ),
+                duplicated: None,
+            };
+        }
     };
 
     let response_text =
@@ -313,14 +336,14 @@ pub fn build_get_scene_item_source_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemSource",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     let (source_name, source_uuid) =
@@ -359,14 +382,14 @@ pub fn build_get_scene_item_index_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemIndex",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     let scene_item_index =
@@ -409,14 +432,14 @@ pub fn execute_set_scene_item_index(
             };
         }
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemIndex",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => {
             return SetSceneItemIndexExecution {
                 response_text: response,
@@ -463,6 +486,7 @@ pub fn execute_set_scene_item_index(
         response_text,
         event_context: Some(SetSceneItemIndexEventContext {
             scene_name,
+            scene_uuid,
             set_result,
         }),
     }
@@ -566,14 +590,14 @@ pub fn build_get_scene_item_locked_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemLocked",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     let scene_item_locked =
@@ -616,14 +640,14 @@ pub fn execute_set_scene_item_locked(
             };
         }
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemLocked",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => {
             return SetSceneItemLockedExecution {
                 response_text: response,
@@ -660,6 +684,7 @@ pub fn execute_set_scene_item_locked(
         response_text,
         event_context: Some(SetSceneItemLockedEventContext {
             scene_name,
+            scene_uuid,
             scene_item_id: fields.scene_item_id,
             scene_item_locked: fields.scene_item_locked,
             set_result,
@@ -681,14 +706,14 @@ pub fn build_get_scene_item_blend_mode_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemBlendMode",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     let scene_item_blend_mode =
@@ -726,14 +751,14 @@ pub fn build_set_scene_item_blend_mode_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemBlendMode",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     if let Err(error) = input_registry.set_scene_item_blend_mode(
@@ -770,14 +795,14 @@ pub fn build_get_scene_item_transform_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemTransform",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => return response,
     };
     let scene_item_transform =
@@ -820,14 +845,14 @@ pub fn execute_set_scene_item_transform(
             };
         }
     };
-    let scene_name = match resolve_scene_name_or_error(
+    let (scene_name, scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemTransform",
         request_id,
         input_registry,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
-        Ok(scene_name) => scene_name,
+        Ok(v) => v,
         Err(response) => {
             return SetSceneItemTransformExecution {
                 response_text: response,
@@ -864,6 +889,7 @@ pub fn execute_set_scene_item_transform(
         response_text,
         event_context: Some(SetSceneItemTransformEventContext {
             scene_name,
+            scene_uuid,
             scene_item_id: fields.scene_item_id,
             set_result,
         }),
