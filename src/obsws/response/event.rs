@@ -6,12 +6,10 @@ use crate::obsws_protocol::{
     OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
 };
 
-pub fn build_stream_state_changed_event(output_active: bool) -> nojson::RawJsonOwned {
-    let output_state = if output_active {
-        "OBS_WEBSOCKET_OUTPUT_STARTED"
-    } else {
-        "OBS_WEBSOCKET_OUTPUT_STOPPED"
-    };
+pub fn build_stream_state_changed_event(
+    output_active: bool,
+    output_state: &str,
+) -> nojson::RawJsonOwned {
     nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
         f.member(

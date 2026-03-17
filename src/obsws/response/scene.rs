@@ -421,8 +421,8 @@ pub fn build_create_scene_response(
             );
         }
     };
+    // OBS 互換で sceneUuid のみ返す
     super::build_request_response_success("CreateScene", request_id, |f| {
-        f.member("sceneName", &created.scene_name)?;
         f.member("sceneUuid", &created.scene_uuid)
     })
 }

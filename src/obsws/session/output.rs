@@ -10,7 +10,20 @@ impl ObswsSession {
         let outcome = self.handle_start_stream("StartStream", request_id).await;
         let mut events = Vec::new();
         if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-            events.push(crate::obsws_response_builder::build_stream_state_changed_event(true));
+            // hisui はストリーム開始が同期的に完了するため即座に STARTED に遷移する。
+            // OBS は STARTING を response 前に送信するが、hisui は response 後にまとめて送信する。
+            events.push(
+                crate::obsws_response_builder::build_stream_state_changed_event(
+                    false,
+                    "OBS_WEBSOCKET_OUTPUT_STARTING",
+                ),
+            );
+            events.push(
+                crate::obsws_response_builder::build_stream_state_changed_event(
+                    true,
+                    "OBS_WEBSOCKET_OUTPUT_STARTED",
+                ),
+            );
         }
         Self::build_execution_from_outcome(outcome, events)
     }
@@ -22,7 +35,18 @@ impl ObswsSession {
         let outcome = self.handle_stop_stream("StopStream", request_id).await;
         let mut events = Vec::new();
         if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-            events.push(crate::obsws_response_builder::build_stream_state_changed_event(false));
+            events.push(
+                crate::obsws_response_builder::build_stream_state_changed_event(
+                    false,
+                    "OBS_WEBSOCKET_OUTPUT_STOPPING",
+                ),
+            );
+            events.push(
+                crate::obsws_response_builder::build_stream_state_changed_event(
+                    false,
+                    "OBS_WEBSOCKET_OUTPUT_STOPPED",
+                ),
+            );
         }
         Self::build_execution_from_outcome(outcome, events)
     }
@@ -39,8 +63,33 @@ impl ObswsSession {
         };
         let mut events = Vec::new();
         if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-            events
-                .push(crate::obsws_response_builder::build_stream_state_changed_event(!was_active));
+            if was_active {
+                events.push(
+                    crate::obsws_response_builder::build_stream_state_changed_event(
+                        false,
+                        "OBS_WEBSOCKET_OUTPUT_STOPPING",
+                    ),
+                );
+                events.push(
+                    crate::obsws_response_builder::build_stream_state_changed_event(
+                        false,
+                        "OBS_WEBSOCKET_OUTPUT_STOPPED",
+                    ),
+                );
+            } else {
+                events.push(
+                    crate::obsws_response_builder::build_stream_state_changed_event(
+                        false,
+                        "OBS_WEBSOCKET_OUTPUT_STARTING",
+                    ),
+                );
+                events.push(
+                    crate::obsws_response_builder::build_stream_state_changed_event(
+                        true,
+                        "OBS_WEBSOCKET_OUTPUT_STARTED",
+                    ),
+                );
+            }
         }
         let response_text = Self::build_toggle_response_from_outcome(
             "ToggleStream",
@@ -242,7 +291,16 @@ impl ObswsSession {
                 let mut events = Vec::new();
                 if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
                     events.push(
-                        crate::obsws_response_builder::build_stream_state_changed_event(true),
+                        crate::obsws_response_builder::build_stream_state_changed_event(
+                            false,
+                            "OBS_WEBSOCKET_OUTPUT_STARTING",
+                        ),
+                    );
+                    events.push(
+                        crate::obsws_response_builder::build_stream_state_changed_event(
+                            true,
+                            "OBS_WEBSOCKET_OUTPUT_STARTED",
+                        ),
                     );
                 }
                 (outcome, events)
@@ -296,7 +354,16 @@ impl ObswsSession {
                 let mut events = Vec::new();
                 if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
                     events.push(
-                        crate::obsws_response_builder::build_stream_state_changed_event(false),
+                        crate::obsws_response_builder::build_stream_state_changed_event(
+                            false,
+                            "OBS_WEBSOCKET_OUTPUT_STOPPING",
+                        ),
+                    );
+                    events.push(
+                        crate::obsws_response_builder::build_stream_state_changed_event(
+                            false,
+                            "OBS_WEBSOCKET_OUTPUT_STOPPED",
+                        ),
                     );
                 }
                 (outcome, events)
@@ -354,11 +421,33 @@ impl ObswsSession {
                 };
                 let mut events = Vec::new();
                 if outcome.success && self.is_event_subscription_enabled(OBSWS_EVENT_SUB_OUTPUTS) {
-                    events.push(
-                        crate::obsws_response_builder::build_stream_state_changed_event(
-                            !was_active,
-                        ),
-                    );
+                    if was_active {
+                        events.push(
+                            crate::obsws_response_builder::build_stream_state_changed_event(
+                                false,
+                                "OBS_WEBSOCKET_OUTPUT_STOPPING",
+                            ),
+                        );
+                        events.push(
+                            crate::obsws_response_builder::build_stream_state_changed_event(
+                                false,
+                                "OBS_WEBSOCKET_OUTPUT_STOPPED",
+                            ),
+                        );
+                    } else {
+                        events.push(
+                            crate::obsws_response_builder::build_stream_state_changed_event(
+                                false,
+                                "OBS_WEBSOCKET_OUTPUT_STARTING",
+                            ),
+                        );
+                        events.push(
+                            crate::obsws_response_builder::build_stream_state_changed_event(
+                                true,
+                                "OBS_WEBSOCKET_OUTPUT_STARTED",
+                            ),
+                        );
+                    }
                 }
                 (outcome, !was_active, events)
             }

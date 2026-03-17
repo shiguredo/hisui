@@ -970,6 +970,8 @@ pub(crate) fn request_status_code_for_parse_error(error: &nojson::JsonParseError
     REQUEST_STATUS_INVALID_REQUEST_FIELD
 }
 
+/// Hello メッセージを構築する。
+/// hisui は OBS Studio ではないため obsStudioVersion フィールドは含めない。
 pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> nojson::RawJsonOwned {
     nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_HELLO)?;
@@ -1194,12 +1196,29 @@ where
     })
 }
 
-/// responseData が空オブジェクトの成功レスポンスを構築する共通ヘルパー。
+/// responseData が不要な成功レスポンスを構築する共通ヘルパー。
+/// OBS 互換で responseData フィールド自体を省略する。
 pub fn build_request_response_success_no_data(
     request_type: &str,
     request_id: &str,
 ) -> nojson::RawJsonOwned {
-    build_request_response_success(request_type, request_id, |_| Ok(()))
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", request_type)?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", true)?;
+                        f.member("code", REQUEST_STATUS_SUCCESS)
+                    }),
+                )
+            }),
+        )
+    })
 }
 
 pub fn build_request_response_error(

@@ -1,7 +1,7 @@
 use shiguredo_websocket::CloseCode;
 
 pub const OBSWS_SUBPROTOCOL: &str = "obswebsocket.json";
-pub const OBSWS_VERSION: &str = "5.0.0";
+pub const OBSWS_VERSION: &str = "5.7.2";
 pub const OBSWS_RPC_VERSION: u32 = 1;
 pub const OBSWS_DEFAULT_SCENE_NAME: &str = "Scene";
 pub const OBSWS_OP_HELLO: i64 = 0;

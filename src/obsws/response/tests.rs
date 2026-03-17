@@ -9,7 +9,7 @@ use crate::obsws_protocol::{
 
 #[test]
 fn build_stream_state_changed_event_contains_expected_fields() {
-    let event = build_stream_state_changed_event(true);
+    let event = build_stream_state_changed_event(true, "OBS_WEBSOCKET_OUTPUT_STARTED");
     let json = nojson::RawJson::parse(event.text()).expect("event must be valid json");
     let op: i64 = json
         .value()
@@ -31,10 +31,16 @@ fn build_stream_state_changed_event_contains_expected_fields() {
         .to_path_member(&["d", "eventData", "outputActive"])
         .and_then(|v| v.required()?.try_into())
         .expect("outputActive must be bool");
+    let output_state: String = json
+        .value()
+        .to_path_member(&["d", "eventData", "outputState"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("outputState must be string");
     assert_eq!(op, OBSWS_OP_EVENT);
     assert_eq!(event_type, "StreamStateChanged");
     assert_eq!(event_intent, OBSWS_EVENT_SUB_OUTPUTS);
     assert!(output_active);
+    assert_eq!(output_state, "OBS_WEBSOCKET_OUTPUT_STARTED");
 }
 
 #[test]
