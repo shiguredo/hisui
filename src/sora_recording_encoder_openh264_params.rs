@@ -1,4 +1,3 @@
-use crate::json::JsonObject;
 use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
 
 pub fn parse_encode_params(
@@ -9,23 +8,20 @@ pub fn parse_encode_params(
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    let params = JsonObject::new(
-        default
-            .value()
-            .to_member("openh264_encode_params")?
-            .required()?,
-    )?;
+    let params = default
+        .value()
+        .to_member("openh264_encode_params")?
+        .required()?;
     update_encode_params(params, &mut config)?;
 
     // 実際のレイアウトの設定を反映
-    let params = JsonObject::new(value)?;
-    update_encode_params(params, &mut config)?;
+    update_encode_params(value, &mut config)?;
 
     Ok(config)
 }
 
 fn update_encode_params(
-    params: JsonObject<'_, '_>,
+    params: nojson::RawJsonValue<'_, '_>,
     config: &mut shiguredo_openh264::EncoderConfig,
 ) -> Result<(), nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
@@ -36,111 +32,116 @@ fn update_encode_params(
     // - target_bitrate
 
     // 基本的なエンコーダーパラメーター
-    config.max_qp = params.get("max_qp")?.or(config.max_qp);
-    config.min_qp = params.get("min_qp")?.or(config.min_qp);
+    if let Some(v) = params.to_member("max_qp")?.optional() {
+        config.max_qp = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("min_qp")?.optional() {
+        config.min_qp = Some(v.try_into()?);
+    }
 
     // 複雑度モード
-    config.complexity_mode = params
-        .get_with("complexity_mode", |v| {
-            match v.to_unquoted_string_str()?.as_ref() {
-                "low" => Ok(shiguredo_openh264::ComplexityMode::Low),
-                "medium" => Ok(shiguredo_openh264::ComplexityMode::Medium),
-                "high" => Ok(shiguredo_openh264::ComplexityMode::High),
-                _ => Err(v.invalid("unknown 'complexity_mode' value")),
-            }
-        })?
-        .or(config.complexity_mode);
+    if let Some(v) = params.to_member("complexity_mode")?.optional() {
+        config.complexity_mode = Some(match v.to_unquoted_string_str()?.as_ref() {
+            "low" => shiguredo_openh264::ComplexityMode::Low,
+            "medium" => shiguredo_openh264::ComplexityMode::Medium,
+            "high" => shiguredo_openh264::ComplexityMode::High,
+            _ => return Err(v.invalid("unknown 'complexity_mode' value")),
+        });
+    }
 
     // エントロピー符号化モード
-    config.entropy_coding_mode = params
-        .get_with("entropy_coding_mode", |v| {
-            match v.to_unquoted_string_str()?.as_ref() {
-                "cavlc" => Ok(shiguredo_openh264::EntropyCodingMode::Cavlc),
-                "cabac" => Ok(shiguredo_openh264::EntropyCodingMode::Cabac),
-                _ => Err(v.invalid("unknown 'entropy_coding_mode' value")),
-            }
-        })?
-        .or(config.entropy_coding_mode);
+    if let Some(v) = params.to_member("entropy_coding_mode")?.optional() {
+        config.entropy_coding_mode = Some(match v.to_unquoted_string_str()?.as_ref() {
+            "cavlc" => shiguredo_openh264::EntropyCodingMode::Cavlc,
+            "cabac" => shiguredo_openh264::EntropyCodingMode::Cabac,
+            _ => return Err(v.invalid("unknown 'entropy_coding_mode' value")),
+        });
+    }
 
     // 互換のため、旧キー `entropy_coding` (bool) も受け付ける。
-    if config.entropy_coding_mode.is_none() {
-        config.entropy_coding_mode = params
-            .get_with("entropy_coding", |v| {
-                let enabled: bool = v.try_into()?;
-                Ok(if enabled {
-                    shiguredo_openh264::EntropyCodingMode::Cabac
-                } else {
-                    shiguredo_openh264::EntropyCodingMode::Cavlc
-                })
-            })?
-            .or(config.entropy_coding_mode);
+    if config.entropy_coding_mode.is_none()
+        && let Some(v) = params.to_member("entropy_coding")?.optional()
+    {
+        let enabled: bool = v.try_into()?;
+        config.entropy_coding_mode = Some(if enabled {
+            shiguredo_openh264::EntropyCodingMode::Cabac
+        } else {
+            shiguredo_openh264::EntropyCodingMode::Cavlc
+        });
     }
 
     // 参照フレーム数
-    config.ref_frame_count = params.get("ref_frame_count")?.or(config.ref_frame_count);
+    if let Some(v) = params.to_member("ref_frame_count")?.optional() {
+        config.ref_frame_count = Some(v.try_into()?);
+    }
 
     // スレッド数
-    config.thread_count = params.get("thread_count")?.or(config.thread_count);
+    if let Some(v) = params.to_member("thread_count")?.optional() {
+        config.thread_count = Some(v.try_into()?);
+    }
 
     // 空間レイヤー数
-    config.spatial_layers = params.get("spatial_layers")?.or(config.spatial_layers);
+    if let Some(v) = params.to_member("spatial_layers")?.optional() {
+        config.spatial_layers = Some(v.try_into()?);
+    }
 
     // 時間レイヤー数
-    config.temporal_layers = params.get("temporal_layers")?.or(config.temporal_layers);
+    if let Some(v) = params.to_member("temporal_layers")?.optional() {
+        config.temporal_layers = Some(v.try_into()?);
+    }
 
     // Intra フレーム間隔
-    config.intra_period = params.get("intra_period")?.or(config.intra_period);
+    if let Some(v) = params.to_member("intra_period")?.optional() {
+        config.intra_period = Some(v.try_into()?);
+    }
 
     // レート制御モード
-    config.rate_control_mode = params
-        .get_with("rate_control_mode", |v| {
-            match v.to_unquoted_string_str()?.as_ref() {
-                "off" => Ok(shiguredo_openh264::RateControlMode::Off),
-                "quality" => Ok(shiguredo_openh264::RateControlMode::Quality),
-                "bitrate" => Ok(shiguredo_openh264::RateControlMode::Bitrate),
-                "timestamp" => Ok(shiguredo_openh264::RateControlMode::Timestamp),
-                _ => Err(v.invalid("unknown 'rate_control_mode' value")),
-            }
-        })?
-        .or(config.rate_control_mode);
+    if let Some(v) = params.to_member("rate_control_mode")?.optional() {
+        config.rate_control_mode = Some(match v.to_unquoted_string_str()?.as_ref() {
+            "off" => shiguredo_openh264::RateControlMode::Off,
+            "quality" => shiguredo_openh264::RateControlMode::Quality,
+            "bitrate" => shiguredo_openh264::RateControlMode::Bitrate,
+            "timestamp" => shiguredo_openh264::RateControlMode::Timestamp,
+            _ => return Err(v.invalid("unknown 'rate_control_mode' value")),
+        });
+    }
 
     // 前処理機能設定
-    config.denoise = params.get("denoise")?.or(config.denoise);
-    config.background_detection = params
-        .get("background_detection")?
-        .or(config.background_detection);
-    config.adaptive_quantization = params
-        .get("adaptive_quantization")?
-        .or(config.adaptive_quantization);
-    config.scene_change_detection = params
-        .get("scene_change_detection")?
-        .or(config.scene_change_detection);
-    config.deblocking_filter = params
-        .get("deblocking_filter")?
-        .or(config.deblocking_filter);
-    config.long_term_reference = params
-        .get("long_term_reference")?
-        .or(config.long_term_reference);
+    if let Some(v) = params.to_member("denoise")?.optional() {
+        config.denoise = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("background_detection")?.optional() {
+        config.background_detection = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("adaptive_quantization")?.optional() {
+        config.adaptive_quantization = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("scene_change_detection")?.optional() {
+        config.scene_change_detection = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("deblocking_filter")?.optional() {
+        config.deblocking_filter = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("long_term_reference")?.optional() {
+        config.long_term_reference = Some(v.try_into()?);
+    }
 
     // スライスモード
-    config.slice_mode = params
-        .get_with("slice_mode", |v| {
-            let slice_obj = JsonObject::new(v)?;
-            let mode_type: String = slice_obj.get_required("type")?;
-            match mode_type.as_str() {
-                "single" => Ok(shiguredo_openh264::SliceMode::Single),
-                "fixed_count" => {
-                    let count = slice_obj.get_required("count")?;
-                    Ok(shiguredo_openh264::SliceMode::FixedCount(count))
-                }
-                "size_constrained" => {
-                    let size = slice_obj.get_required("size")?;
-                    Ok(shiguredo_openh264::SliceMode::SizeConstrained(size))
-                }
-                _ => Err(v.invalid("unknown 'slice_mode.type' value")),
+    if let Some(v) = params.to_member("slice_mode")?.optional() {
+        let mode_type: String = v.to_member("type")?.required()?.try_into()?;
+        config.slice_mode = Some(match mode_type.as_str() {
+            "single" => shiguredo_openh264::SliceMode::Single,
+            "fixed_count" => {
+                let count = v.to_member("count")?.required()?.try_into()?;
+                shiguredo_openh264::SliceMode::FixedCount(count)
             }
-        })?
-        .or(config.slice_mode);
+            "size_constrained" => {
+                let size = v.to_member("size")?.required()?.try_into()?;
+                shiguredo_openh264::SliceMode::SizeConstrained(size)
+            }
+            _ => return Err(v.invalid("unknown 'slice_mode.type' value")),
+        });
+    }
 
     Ok(())
 }

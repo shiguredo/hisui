@@ -7,8 +7,7 @@ use std::{
 };
 
 use crate::{
-    json::{JsonObject, JsonValue},
-    optuna::{OptunaStudy, SearchSpace, TrialValues},
+    optuna::{JsonValue, OptunaStudy, SearchSpace, TrialValues},
     sora_recording_subcommand_vmaf,
 };
 
@@ -341,11 +340,14 @@ fn run_trial_evaluation(
     // 出力結果をパース
     let stdout = String::from_utf8(output.stdout)?;
     let result = nojson::RawJson::parse(&stdout)?;
-    let object = JsonObject::new(result.value())?;
+    let object = result.value();
 
     // メトリクスを抽出
-    let vmaf_mean: f64 = object.get_required("vmaf_mean")?;
-    let elapsed_seconds: f64 = object.get_required("elapsed_seconds")?;
+    let vmaf_mean: f64 = object.to_member("vmaf_mean")?.required()?.try_into()?;
+    let elapsed_seconds: f64 = object
+        .to_member("elapsed_seconds")?
+        .required()?
+        .try_into()?;
 
     // TODO(sile): hisui compose コマンドを実行して所要時間を計測することを検討する
     //

@@ -9,7 +9,6 @@ use std::{
 use crate::{
     audio,
     encoder::VideoEncoderOptions,
-    json::JsonObject,
     sora_recording_layout_decode_params::LayoutDecodeParams,
     sora_recording_layout_encode_params::LayoutEncodeParams,
     sora_recording_layout_region::{self, RawRegion, Region},
@@ -250,8 +249,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
     type Error = nojson::JsonParseError;
 
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
-        let object = JsonObject::new(value)?;
-
         if let Some(video_layout) = value.to_member("video_layout")?.optional() {
             // 事前にリージョン名の重複をチェックする
             let mut region_names = BTreeSet::new();
@@ -262,54 +259,84 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawLayout {
             }
         }
 
-        Ok(Self {
-            audio_sources: object.get("audio_sources")?.unwrap_or_default(),
-            audio_sources_excluded: object.get("audio_sources_excluded")?.unwrap_or_default(),
-            video_layout: object.get("video_layout")?.unwrap_or_default(),
-            trim: object.get("trim")?.unwrap_or(true),
-            resolution: object.get("resolution")?,
-            audio_bitrate: object.get("audio_bitrate")?,
-            video_bitrate: if let Some(bitrate) = object.get("video_bitrate")? {
-                Some(bitrate)
-            } else {
-                // レガシー版との互換性維持のための "bitrate" フィールドも考慮する
-                // こちらは kbps 単位なのでパース後に変換する
-                object.get::<usize>("bitrate")?.map(|v| v * 1024)
-            },
-            video_codec: object
-                .get_with("video_codec", |v| {
-                    v.to_unquoted_string_str()
-                        .and_then(|s| CodecName::parse_video(&s).map_err(|e| v.invalid(e)))
-                })?
-                .unwrap_or(CodecName::Vp9),
-            audio_codec: object
-                .get_with("audio_codec", |v| {
-                    v.to_unquoted_string_str()
-                        .and_then(|s| CodecName::parse_audio(&s).map_err(|e| v.invalid(e)))
-                })?
-                .unwrap_or(CodecName::Opus),
-            video_encode_engines: object.get_with("video_encode_engines", |v| {
-                if v.to_array()?.count() == 0 {
-                    return Err(v.invalid("video_encode_engines must not be empty"));
-                }
-                v.to_array()?.map(EngineName::parse_video_encoder).collect()
-            })?,
-            video_decode_engines: object.get_with("video_decode_engines", |v| {
-                if v.to_array()?.count() == 0 {
-                    return Err(v.invalid("video_decode_engines must not be empty"));
-                }
-                v.to_array()?.map(EngineName::parse_video_decoder).collect()
-            })?,
-            frame_rate: object
-                .get_with("frame_rate", |v| {
-                    v.as_raw_str().parse().map_err(|e| v.invalid(e))
-                })?
-                .unwrap_or(FrameRate::FPS_25),
-
-            // エンコードパラメータ群はトップレベルに配置されているので object を経由せずに value を直接変換する
+        let mut raw = Self {
+            audio_sources: Vec::new(),
+            audio_sources_excluded: Vec::new(),
+            video_layout: BTreeMap::new(),
+            trim: true,
+            resolution: None,
+            audio_bitrate: None,
+            video_bitrate: None,
+            video_codec: CodecName::Vp9,
+            audio_codec: CodecName::Opus,
+            video_encode_engines: None,
+            video_decode_engines: None,
+            frame_rate: FrameRate::FPS_25,
             encode_params: value.try_into()?,
             decode_params: value.try_into()?,
-        })
+        };
+
+        if let Some(v) = value.to_member("audio_sources")?.optional() {
+            raw.audio_sources = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("audio_sources_excluded")?.optional() {
+            raw.audio_sources_excluded = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("video_layout")?.optional() {
+            raw.video_layout = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("trim")?.optional() {
+            raw.trim = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("resolution")?.optional() {
+            raw.resolution = Some(v.try_into()?);
+        }
+        if let Some(v) = value.to_member("audio_bitrate")?.optional() {
+            raw.audio_bitrate = Some(v.try_into()?);
+        }
+        if let Some(v) = value.to_member("video_bitrate")?.optional() {
+            raw.video_bitrate = Some(v.try_into()?);
+        } else if let Some(v) = value.to_member("bitrate")?.optional() {
+            // レガシー版との互換性維持のための "bitrate" フィールドも考慮する
+            // こちらは kbps 単位なのでパース後に変換する
+            let bitrate: usize = v.try_into()?;
+            raw.video_bitrate = Some(bitrate * 1024);
+        }
+        if let Some(v) = value.to_member("video_codec")?.optional() {
+            raw.video_codec = v
+                .to_unquoted_string_str()
+                .and_then(|s| CodecName::parse_video(&s).map_err(|e| v.invalid(e)))?;
+        }
+        if let Some(v) = value.to_member("audio_codec")?.optional() {
+            raw.audio_codec = v
+                .to_unquoted_string_str()
+                .and_then(|s| CodecName::parse_audio(&s).map_err(|e| v.invalid(e)))?;
+        }
+        if let Some(v) = value.to_member("video_encode_engines")?.optional() {
+            if v.to_array()?.count() == 0 {
+                return Err(v.invalid("video_encode_engines must not be empty"));
+            }
+            raw.video_encode_engines = Some(
+                v.to_array()?
+                    .map(EngineName::parse_video_encoder)
+                    .collect::<Result<_, _>>()?,
+            );
+        }
+        if let Some(v) = value.to_member("video_decode_engines")?.optional() {
+            if v.to_array()?.count() == 0 {
+                return Err(v.invalid("video_decode_engines must not be empty"));
+            }
+            raw.video_decode_engines = Some(
+                v.to_array()?
+                    .map(EngineName::parse_video_decoder)
+                    .collect::<Result<_, _>>()?,
+            );
+        }
+        if let Some(v) = value.to_member("frame_rate")?.optional() {
+            raw.frame_rate = v.as_raw_str().parse().map_err(|e| v.invalid(e))?;
+        }
+
+        Ok(raw)
     }
 }
 

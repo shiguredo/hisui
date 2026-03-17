@@ -6,7 +6,6 @@ use std::{
 };
 
 use crate::{
-    json::JsonObject,
     sora_recording_layout::{AggregatedSourceInfo, AssignedSource, Resolution},
     sora_recording_metadata::{SourceId, SourceInfo},
     types::{EvenUsize, PixelPosition},
@@ -91,26 +90,68 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RawRegion {
     type Error = nojson::JsonParseError;
 
     fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
-        let object = JsonObject::new(value)?;
-        Ok(Self {
-            video_sources: object.get_required("video_sources")?,
-            cells_excluded: object.get("cells_excluded")?.unwrap_or_default(),
-            width: object.get("width")?.unwrap_or_default(),
-            height: object.get("height")?.unwrap_or_default(),
-            max_columns: object.get("max_columns")?.unwrap_or_default(),
-            max_rows: object.get("max_rows")?.unwrap_or_default(),
-            reuse: object.get("reuse")?.unwrap_or_default(),
-            video_sources_excluded: object.get("video_sources_excluded")?.unwrap_or_default(),
-            cell_width: object.get("cell_width")?.unwrap_or_default(),
-            cell_height: object.get("cell_height")?.unwrap_or_default(),
-            x_pos: object.get("x_pos")?.unwrap_or_default(),
-            y_pos: object.get("y_pos")?.unwrap_or_default(),
-            z_pos: object.get("z_pos")?.unwrap_or_default(),
-            border_pixels: object
-                .get("border_pixels")?
-                .unwrap_or(DEFAULT_BORDER_PIXELS),
-            background_color: object.get("background_color")?.unwrap_or_default(),
-        })
+        let mut raw = Self {
+            video_sources: value.to_member("video_sources")?.required()?.try_into()?,
+            cells_excluded: Vec::new(),
+            height: 0,
+            max_columns: 0,
+            max_rows: 0,
+            reuse: ReuseKind::default(),
+            video_sources_excluded: Vec::new(),
+            width: 0,
+            cell_width: 0,
+            cell_height: 0,
+            x_pos: 0,
+            y_pos: 0,
+            z_pos: 0,
+            border_pixels: DEFAULT_BORDER_PIXELS,
+            background_color: [0, 0, 0],
+        };
+
+        if let Some(v) = value.to_member("cells_excluded")?.optional() {
+            raw.cells_excluded = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("width")?.optional() {
+            raw.width = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("height")?.optional() {
+            raw.height = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("max_columns")?.optional() {
+            raw.max_columns = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("max_rows")?.optional() {
+            raw.max_rows = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("reuse")?.optional() {
+            raw.reuse = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("video_sources_excluded")?.optional() {
+            raw.video_sources_excluded = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("cell_width")?.optional() {
+            raw.cell_width = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("cell_height")?.optional() {
+            raw.cell_height = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("x_pos")?.optional() {
+            raw.x_pos = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("y_pos")?.optional() {
+            raw.y_pos = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("z_pos")?.optional() {
+            raw.z_pos = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("border_pixels")?.optional() {
+            raw.border_pixels = v.try_into()?;
+        }
+        if let Some(v) = value.to_member("background_color")?.optional() {
+            raw.background_color = v.try_into()?;
+        }
+
+        Ok(raw)
     }
 }
 

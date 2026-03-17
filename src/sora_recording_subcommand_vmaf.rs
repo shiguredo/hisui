@@ -14,7 +14,6 @@ use crate::{
     Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, Result, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::VideoEncoder,
-    json::JsonObject,
     media::MediaFrame,
     sora_recording_layout::Layout,
     sora_recording_reader::VideoReader,
@@ -735,14 +734,17 @@ fn parse_vmaf_output(vmaf_output_file_path: &Path) -> crate::Result<VmafScoreSta
     let vmaf_content = std::fs::read_to_string(vmaf_output_file_path)
         .map_err(|e| crate::Error::new(format!("failed to read VMAF output file: {e}")))?;
     let json = nojson::RawJson::parse(&vmaf_content)?;
-    let vmaf_data = JsonObject::new(json.value())?;
-    let pooled_metrics = vmaf_data.get_required_with("pooled_metrics", JsonObject::new)?;
-    let vmaf_metrics = pooled_metrics.get_required_with("vmaf", JsonObject::new)?;
+    let vmaf_data = json.value();
+    let pooled_metrics = vmaf_data.to_member("pooled_metrics")?.required()?;
+    let vmaf_metrics = pooled_metrics.to_member("vmaf")?.required()?;
     Ok(VmafScoreStats {
-        min: vmaf_metrics.get_required("min")?,
-        max: vmaf_metrics.get_required("max")?,
-        mean: vmaf_metrics.get_required("mean")?,
-        harmonic_mean: vmaf_metrics.get_required("harmonic_mean")?,
+        min: vmaf_metrics.to_member("min")?.required()?.try_into()?,
+        max: vmaf_metrics.to_member("max")?.required()?.try_into()?,
+        mean: vmaf_metrics.to_member("mean")?.required()?.try_into()?,
+        harmonic_mean: vmaf_metrics
+            .to_member("harmonic_mean")?
+            .required()?
+            .try_into()?,
     })
 }
 

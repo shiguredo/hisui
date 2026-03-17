@@ -1,4 +1,3 @@
-use crate::json::JsonObject;
 use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
 
 pub fn parse_encode_params(
@@ -8,23 +7,20 @@ pub fn parse_encode_params(
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    let params = JsonObject::new(
-        default
-            .value()
-            .to_member("svt_av1_encode_params")?
-            .required()?,
-    )?;
+    let params = default
+        .value()
+        .to_member("svt_av1_encode_params")?
+        .required()?;
     update_encode_params(params, &mut config)?;
 
     // 実際のレイアウトの設定を反映
-    let params = JsonObject::new(value)?;
-    update_encode_params(params, &mut config)?;
+    update_encode_params(value, &mut config)?;
 
     Ok(config)
 }
 
 fn update_encode_params(
-    params: JsonObject<'_, '_>,
+    params: nojson::RawJsonValue<'_, '_>,
     config: &mut shiguredo_svt_av1::EncoderConfig,
 ) -> Result<(), nojson::JsonParseError> {
     // [NOTE] 以下は後で別途設定するので、ここではパースしない:
@@ -35,99 +31,131 @@ fn update_encode_params(
     // - target_bitrate
 
     // === 品質・速度制御関連 ===
-    config.enc_mode = params.get("enc_mode")?.unwrap_or(config.enc_mode);
-    config.qp = params.get("qp")?.or(config.qp);
-    config.min_qp_allowed = params.get("min_qp_allowed")?.or(config.min_qp_allowed);
-    config.max_qp_allowed = params.get("max_qp_allowed")?.or(config.max_qp_allowed);
+    if let Some(v) = params.to_member("enc_mode")?.optional() {
+        config.enc_mode = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("qp")?.optional() {
+        config.qp = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("min_qp_allowed")?.optional() {
+        config.min_qp_allowed = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("max_qp_allowed")?.optional() {
+        config.max_qp_allowed = Some(v.try_into()?);
+    }
 
     // === レート制御関連 ===
-    config.rate_control_mode = params
-        .get_with("rate_control_mode", |v| {
-            match v.to_unquoted_string_str()?.as_ref() {
-                "cqp_or_crf" => Ok(shiguredo_svt_av1::RateControlMode::CqpOrCrf),
-                "vbr" => Ok(shiguredo_svt_av1::RateControlMode::Vbr),
-                "cbr" => Ok(shiguredo_svt_av1::RateControlMode::Cbr),
-                _ => Err(v.invalid("unknown 'rate_control_mode' value")),
-            }
-        })?
-        .unwrap_or(config.rate_control_mode);
+    if let Some(v) = params.to_member("rate_control_mode")?.optional() {
+        config.rate_control_mode = match v.to_unquoted_string_str()?.as_ref() {
+            "cqp_or_crf" => shiguredo_svt_av1::RateControlMode::CqpOrCrf,
+            "vbr" => shiguredo_svt_av1::RateControlMode::Vbr,
+            "cbr" => shiguredo_svt_av1::RateControlMode::Cbr,
+            _ => return Err(v.invalid("unknown 'rate_control_mode' value")),
+        };
+    }
 
-    config.max_bit_rate = params.get("max_bit_rate")?.or(config.max_bit_rate);
-    config.over_shoot_pct = params
-        .get("over_shoot_pct")?
-        .unwrap_or(config.over_shoot_pct);
-    config.under_shoot_pct = params
-        .get("under_shoot_pct")?
-        .unwrap_or(config.under_shoot_pct);
+    if let Some(v) = params.to_member("max_bit_rate")?.optional() {
+        config.max_bit_rate = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("over_shoot_pct")?.optional() {
+        config.over_shoot_pct = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("under_shoot_pct")?.optional() {
+        config.under_shoot_pct = v.try_into()?;
+    }
 
     // === GOP・フレーム構造関連 ===
-    config.intra_period_length = params
-        .get("intra_period_length")?
-        .unwrap_or(config.intra_period_length);
-    config.hierarchical_levels = params
-        .get("hierarchical_levels")?
-        .unwrap_or(config.hierarchical_levels);
-    config.pred_structure = params
-        .get("pred_structure")?
-        .unwrap_or(config.pred_structure);
-    config.scene_change_detection = params
-        .get("scene_change_detection")?
-        .unwrap_or(config.scene_change_detection);
-    config.look_ahead_distance = params
-        .get("look_ahead_distance")?
-        .unwrap_or(config.look_ahead_distance);
+    if let Some(v) = params.to_member("intra_period_length")?.optional() {
+        config.intra_period_length = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("hierarchical_levels")?.optional() {
+        config.hierarchical_levels = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("pred_structure")?.optional() {
+        config.pred_structure = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("scene_change_detection")?.optional() {
+        config.scene_change_detection = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("look_ahead_distance")?.optional() {
+        config.look_ahead_distance = v.try_into()?;
+    }
 
     // === 並列処理関連 ===
-    config.pin_threads = params.get("pin_threads")?.or(config.pin_threads);
-    config.tile_columns = params.get("tile_columns")?.or(config.tile_columns);
-    config.tile_rows = params.get("tile_rows")?.or(config.tile_rows);
-    config.target_socket = params.get("target_socket")?.unwrap_or(config.target_socket);
+    if let Some(v) = params.to_member("pin_threads")?.optional() {
+        config.pin_threads = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("tile_columns")?.optional() {
+        config.tile_columns = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("tile_rows")?.optional() {
+        config.tile_rows = Some(v.try_into()?);
+    }
+    if let Some(v) = params.to_member("target_socket")?.optional() {
+        config.target_socket = v.try_into()?;
+    }
 
     // === フィルタリング関連 ===
-    config.enable_dlf_flag = params
-        .get("enable_dlf_flag")?
-        .unwrap_or(config.enable_dlf_flag);
-    config.cdef_level = params.get("cdef_level")?.unwrap_or(config.cdef_level);
-    config.enable_restoration_filtering = params
-        .get("enable_restoration_filtering")?
-        .unwrap_or(config.enable_restoration_filtering);
+    if let Some(v) = params.to_member("enable_dlf_flag")?.optional() {
+        config.enable_dlf_flag = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("cdef_level")?.optional() {
+        config.cdef_level = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("enable_restoration_filtering")?.optional() {
+        config.enable_restoration_filtering = v.try_into()?;
+    }
 
     // === 高度な設定 ===
-    config.enable_tf = params.get("enable_tf")?.unwrap_or(config.enable_tf);
-    config.enable_overlays = params
-        .get("enable_overlays")?
-        .unwrap_or(config.enable_overlays);
-    config.film_grain_denoise_strength = params
-        .get("film_grain_denoise_strength")?
-        .unwrap_or(config.film_grain_denoise_strength);
-    config.enable_tpl_la = params.get("enable_tpl_la")?.unwrap_or(config.enable_tpl_la);
-    config.force_key_frames = params
-        .get("force_key_frames")?
-        .unwrap_or(config.force_key_frames);
-    config.stat_report = params.get("stat_report")?.unwrap_or(config.stat_report);
-    config.recon_enabled = params.get("recon_enabled")?.unwrap_or(config.recon_enabled);
+    if let Some(v) = params.to_member("enable_tf")?.optional() {
+        config.enable_tf = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("enable_overlays")?.optional() {
+        config.enable_overlays = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("film_grain_denoise_strength")?.optional() {
+        config.film_grain_denoise_strength = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("enable_tpl_la")?.optional() {
+        config.enable_tpl_la = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("force_key_frames")?.optional() {
+        config.force_key_frames = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("stat_report")?.optional() {
+        config.stat_report = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("recon_enabled")?.optional() {
+        config.recon_enabled = v.try_into()?;
+    }
 
     // === エンコーダー固有設定 ===
-    config.encoder_bit_depth = params
-        .get("encoder_bit_depth")?
-        .unwrap_or(config.encoder_bit_depth);
+    if let Some(v) = params.to_member("encoder_bit_depth")?.optional() {
+        config.encoder_bit_depth = v.try_into()?;
+    }
 
-    config.encoder_color_format = params
-        .get_with("encoder_color_format", |v| {
-            match v.to_unquoted_string_str()?.as_ref() {
-                "yuv400" => Ok(shiguredo_svt_av1::ColorFormat::Yuv400),
-                "yuv420" => Ok(shiguredo_svt_av1::ColorFormat::Yuv420),
-                "yuv422" => Ok(shiguredo_svt_av1::ColorFormat::Yuv422),
-                "yuv444" => Ok(shiguredo_svt_av1::ColorFormat::Yuv444),
-                _ => Err(v.invalid("unknown 'encoder_color_format' value")),
-            }
-        })?
-        .unwrap_or(config.encoder_color_format);
+    if let Some(v) = params.to_member("encoder_color_format")?.optional() {
+        config.encoder_color_format = match v.to_unquoted_string_str()?.as_ref() {
+            "yuv400" => shiguredo_svt_av1::ColorFormat::Yuv400,
+            "yuv420" => shiguredo_svt_av1::ColorFormat::Yuv420,
+            "yuv422" => shiguredo_svt_av1::ColorFormat::Yuv422,
+            "yuv444" => shiguredo_svt_av1::ColorFormat::Yuv444,
+            _ => return Err(v.invalid("unknown 'encoder_color_format' value")),
+        };
+    }
 
-    config.profile = params.get("profile")?.unwrap_or(config.profile);
-    config.level = params.get("level")?.unwrap_or(config.level);
-    config.tier = params.get("tier")?.unwrap_or(config.tier);
-    config.fast_decode = params.get("fast_decode")?.unwrap_or(config.fast_decode);
+    if let Some(v) = params.to_member("profile")?.optional() {
+        config.profile = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("level")?.optional() {
+        config.level = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("tier")?.optional() {
+        config.tier = v.try_into()?;
+    }
+    if let Some(v) = params.to_member("fast_decode")?.optional() {
+        config.fast_decode = v.try_into()?;
+    }
 
     Ok(())
 }
