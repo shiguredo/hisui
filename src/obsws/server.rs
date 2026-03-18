@@ -144,6 +144,11 @@ async fn handle_ws_connection(
     pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
+    // WebSocket はフレーム単位の低遅延配信が必要なため、
+    // Nagle アルゴリズムを無効化する。
+    stream.set_nodelay(true).map_err(|e| {
+        crate::Error::new(format!("failed to set TCP_NODELAY on obsws socket: {e}"))
+    })?;
     let mut ws = WebSocketServerConnection::new(
         ServerConnectionOptions::new()
             .protocol(OBSWS_SUBPROTOCOL)

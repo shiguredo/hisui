@@ -20,6 +20,11 @@ pub const OBSWS_EVENT_SUB_INPUTS: u32 = 1 << 3;
 pub const OBSWS_EVENT_SUB_OUTPUTS: u32 = 1 << 6;
 pub const OBSWS_EVENT_SUB_SCENE_ITEMS: u32 = 1 << 7;
 
+/// OBS WebSocket プロトコルにおける EventSubscription::All のデフォルト値。
+/// Identify の eventSubscriptions が省略された場合に使用する。
+/// InputVolumeMeters (1 << 16) と InputActiveStateChanged (1 << 17) は除外されている。
+pub const OBSWS_EVENT_SUB_ALL: u32 = (1 << 10) - 1;
+
 pub const OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION: CloseCode = CloseCode(4006);
 pub const OBSWS_CLOSE_NOT_IDENTIFIED: CloseCode = CloseCode(4007);
 pub const OBSWS_CLOSE_ALREADY_IDENTIFIED: CloseCode = CloseCode(4008);

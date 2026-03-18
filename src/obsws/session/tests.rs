@@ -210,7 +210,7 @@ async fn broadcast_custom_event_returns_event_when_general_subscription_enabled(
 async fn sleep_request_returns_success_response() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identified = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await;
     assert!(identified.is_ok());
 
@@ -234,7 +234,7 @@ async fn sleep_request_returns_success_response() {
 async fn sleep_request_rejects_too_large_sleep_millis() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identified = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await;
     assert!(identified.is_ok());
 
@@ -258,12 +258,12 @@ async fn sleep_request_rejects_too_large_sleep_millis() {
 async fn duplicate_identify_returns_already_identified_close() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let first = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await;
     assert!(first.is_ok());
 
     let second = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await;
     let action = second.expect("second identify must return action");
     let (code, reason) = unwrap_close(action);
@@ -287,7 +287,7 @@ async fn reidentify_before_identify_returns_not_identified_close() {
 async fn reidentify_after_identify_returns_identified_message() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -303,6 +303,17 @@ async fn reidentify_after_identify_returns_identified_message() {
     let (op, negotiated_rpc_version) = parse_identified_message(&text);
     assert_eq!(op, 2);
     assert_eq!(negotiated_rpc_version, 1);
+}
+
+#[tokio::test]
+async fn identify_without_event_subscriptions_defaults_to_all() {
+    let mut session = ObswsSession::new(None, input_registry(), None);
+    let action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(action, SessionAction::SendText { .. }));
+    assert_eq!(session.event_subscriptions, OBSWS_EVENT_SUB_ALL);
 }
 
 #[tokio::test]
@@ -1240,7 +1251,7 @@ async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
 async fn set_scene_item_enabled_missing_field_returns_missing_request_field_error() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1297,7 +1308,7 @@ async fn invalid_authentication_returns_close_action() {
 async fn stop_record_when_inactive_returns_error_response() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1319,7 +1330,7 @@ async fn stop_record_when_inactive_returns_error_response() {
 async fn start_record_without_image_input_returns_error_response() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1373,7 +1384,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
 
     let mut session = ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle));
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1456,7 +1467,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
     let mut session =
         ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1542,7 +1553,7 @@ async fn start_record_with_multiple_video_inputs_builds_plan_successfully() {
 
     let mut session = ObswsSession::new(None, input_registry, None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1599,7 +1610,7 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
     let mut session =
         ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1673,7 +1684,7 @@ async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
 
     let mut session = ObswsSession::new(None, input_registry, None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1696,7 +1707,7 @@ async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
 async fn toggle_stream_without_image_input_returns_toggle_request_type_error() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1719,7 +1730,7 @@ async fn toggle_stream_without_image_input_returns_toggle_request_type_error() {
 async fn toggle_record_without_image_input_returns_toggle_request_type_error() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1742,7 +1753,7 @@ async fn toggle_record_without_image_input_returns_toggle_request_type_error() {
 async fn start_output_with_unknown_name_returns_not_found() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1768,7 +1779,7 @@ async fn start_output_with_unknown_name_returns_not_found() {
 async fn toggle_output_without_image_input_returns_toggle_request_type_error() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1794,7 +1805,7 @@ async fn toggle_output_without_image_input_returns_toggle_request_type_error() {
 async fn stop_output_when_record_is_inactive_returns_output_request_type_error() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1820,7 +1831,7 @@ async fn stop_output_when_record_is_inactive_returns_output_request_type_error()
 async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -1844,7 +1855,7 @@ async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
 async fn request_batch_without_halt_on_failure_continues_after_failure() {
     let mut session = ObswsSession::new(None, input_registry(), None);
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
