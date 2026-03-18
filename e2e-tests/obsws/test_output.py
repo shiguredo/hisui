@@ -871,7 +871,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                 )
                 if (
                     status == 200
-                    and 'hisui_total_video_frame_count{processor_id="obsws:record:0:mp4_writer"'
+                    and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
                     in body
                 ):
                     break
@@ -964,7 +964,7 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                 )
                 if (
                     status == 200
-                    and 'hisui_total_video_frame_count{processor_id="obsws:record:0:mp4_writer"'
+                    and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
                     in body
                 ):
                     break
@@ -1055,7 +1055,20 @@ def test_obsws_srt_inbound_with_stream_id(
                 lambda: _run_ffmpeg_srt_push(input_path, srt_push_url),
             )
 
-            await asyncio.sleep(1.0)
+            # mp4_writer に映像サンプルが書き込まれるまで待機する
+            for _ in range(30):
+                status, body, _ = await _http_get(
+                    f"http://{host}:{ws_port}/metrics"
+                )
+                if (
+                    status == 200
+                    and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
+                    in body
+                ):
+                    break
+                await asyncio.sleep(0.2)
+
+            await asyncio.sleep(0.5)
 
             stop_record_response = await _send_obsws_request(
                 ws,
