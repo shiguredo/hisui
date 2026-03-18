@@ -22,23 +22,18 @@ class HisuiServer:
         https_cert_path: Path | None = None,
         https_key_path: Path | None = None,
         ui_remote_url: str | None = None,
-        startup_rpc_file: Path | None = None,
-        manual_start_trigger: bool = False,
         verbose: bool = True,
     ):
         self.binary_path = binary_path
         self.https_cert_path = https_cert_path
         self.https_key_path = https_key_path
         self.ui_remote_url = ui_remote_url
-        self.startup_rpc_file = startup_rpc_file
-        self.manual_start_trigger = manual_start_trigger
         self.verbose = verbose
 
         self.port: int | None = None
 
         self._process: subprocess.Popen[None] | None = None
         self._verify: ssl.SSLContext | bool = True
-        self._next_rpc_request_id = 1
 
     def __enter__(self):
         return self.start()
@@ -86,11 +81,6 @@ class HisuiServer:
         if self.ui_remote_url:
             cmd.extend(["--ui-remote-url", self.ui_remote_url])
 
-        if self.startup_rpc_file:
-            cmd.extend(["--startup-rpc-file", str(self.startup_rpc_file)])
-        if self.manual_start_trigger:
-            cmd.append("--manual-start-trigger")
-
         # バイナリ起動直前に予約ソケットを解放する
         sock.close()
 
@@ -124,53 +114,6 @@ class HisuiServer:
 
     def ok(self) -> httpx.Response:
         return self.request("GET", "/.ok")
-
-    def rpc(self, payload: dict[str, object], **kwargs) -> httpx.Response:
-        return self.request("POST", "/rpc", json=payload, **kwargs)
-
-    def rpc_call(
-        self,
-        method: str,
-        params: dict[str, object] | None = None,
-        *,
-        timeout: float | None = None,
-    ) -> dict[str, Any]:
-        payload: dict[str, object] = {
-            "jsonrpc": "2.0",
-            "id": self._next_rpc_request_id,
-            "method": method,
-        }
-        self._next_rpc_request_id += 1
-        if params is not None:
-            payload["params"] = params
-        response = self.rpc(payload) if timeout is None else self.rpc(payload, timeout=timeout)
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"unexpected RPC HTTP status: {response.status_code}, body={response.text}"
-            )
-        return response.json()
-
-    def trigger_start(self, *, timeout: float | None = None) -> dict[str, Any]:
-        return self.rpc_call("triggerStart", timeout=timeout)
-
-    def wait_processor_terminated(
-        self,
-        processor_id: str,
-        *,
-        timeout: float | None = None,
-    ) -> str:
-        response = self.rpc_call(
-            "waitProcessorTerminated",
-            {"processorId": processor_id},
-            timeout=timeout,
-        )
-        result = response.get("result")
-        if not isinstance(result, dict):
-            raise RuntimeError(f"unexpected RPC result format: {response}")
-        terminated_processor_id = result.get("processorId")
-        if not isinstance(terminated_processor_id, str):
-            raise RuntimeError(f"unexpected RPC result.processorId format: {response}")
-        return terminated_processor_id
 
     def metrics(self, fmt: str = "text") -> httpx.Response:
         if fmt == "json":

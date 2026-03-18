@@ -56,8 +56,6 @@ struct RunOptions {
     https_cert_path: Option<PathBuf>,
     https_key_path: Option<PathBuf>,
     ui_remote_url: Option<String>,
-    startup_rpc_file: Option<PathBuf>,
-    manual_start_trigger: bool,
     openh264: Option<PathBuf>,
 }
 
@@ -95,22 +93,12 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .take(&mut args)
         .present_and_then(|o| Ok::<_, std::convert::Infallible>(o.value().to_string()))?;
 
-    let startup_rpc_file: Option<PathBuf> = noargs::opt("startup-rpc-file")
-        .ty("PATH")
-        .doc("起動時に実行する RPC 通知配列 JSON ファイル")
-        .take(&mut args)
-        .present_and_then(|o| o.value().parse())?;
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
-
-    let manual_start_trigger = noargs::flag("manual-start-trigger")
-        .doc("初期 processor 登録完了の自動トリガーを無効化する")
-        .take(&mut args)
-        .is_present();
 
     // 片方のみ指定はエラー
     match (&https_cert_path, &https_key_path) {
@@ -140,8 +128,6 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         https_cert_path,
         https_key_path,
         ui_remote_url,
-        startup_rpc_file,
-        manual_start_trigger,
         openh264,
     })
     .map_err(noargs::Error::from)
@@ -168,8 +154,6 @@ async fn run_server(options: RunOptions) -> crate::Result<()> {
         https_cert_path,
         https_key_path,
         ui_remote_url,
-        startup_rpc_file,
-        manual_start_trigger,
         openh264,
     } = options;
 
@@ -198,20 +182,12 @@ async fn run_server(options: RunOptions) -> crate::Result<()> {
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
 
-    if let Some(startup_rpc_file) = startup_rpc_file.as_ref() {
-        crate::rpc_request_file::run_rpc_request_file(startup_rpc_file, &pipeline_handle).await?;
-        tracing::info!("Startup RPCs completed: {}", startup_rpc_file.display());
-    }
-    if manual_start_trigger {
-        tracing::info!("Manual start mode enabled: waiting for triggerStart RPC");
-    } else {
-        let started = pipeline_handle
-            .trigger_start()
-            .await
-            .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
-        if !started {
-            tracing::debug!("Initial start trigger was already completed");
-        }
+    let started = pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+    if !started {
+        tracing::debug!("Initial start trigger was already completed");
     }
 
     let bootstrap_endpoint = Rc::new(
@@ -327,9 +303,6 @@ async fn handle_connection(
             let local_response = match request_path(request.uri.as_str()) {
                 "/.ok" => Some(Response::new(204, "No Content")),
                 "/bootstrap" => Some(bootstrap_endpoint.handle_request(&request).await),
-                "/rpc" => {
-                    Some(crate::endpoint_http_rpc::handle_request(&request, &pipeline_handle).await)
-                }
                 "/metrics" => Some(
                     crate::endpoint_http_metrics::handle_request(&request, &pipeline_handle).await,
                 ),
@@ -480,7 +453,7 @@ mod tests {
     #[test]
     fn request_path_returns_path_without_query() {
         assert_eq!(request_path("/metrics?format=json"), "/metrics");
-        assert_eq!(request_path("/rpc?id=1"), "/rpc");
+        assert_eq!(request_path("/.ok?check=1"), "/.ok");
     }
 
     #[test]
