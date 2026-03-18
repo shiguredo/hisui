@@ -195,6 +195,7 @@ def _run_ffmpeg_rtmp_push(
     publish_url: str,
     *,
     startup_timeout: float = 10.0,
+    stream_loop: int = 0,
 ) -> None:
     """ffmpeg で RTMP ストリームを push する（リトライ付き）"""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -211,6 +212,7 @@ def _run_ffmpeg_rtmp_push(
             "-loglevel",
             "error",
             "-nostdin",
+            *(["-stream_loop", str(stream_loop)] if stream_loop > 0 else []),
             "-i",
             str(input_path),
             "-c",
@@ -235,6 +237,7 @@ def _run_ffmpeg_srt_push(
     publish_url: str,
     *,
     startup_timeout: float = 10.0,
+    stream_loop: int = 0,
 ) -> None:
     """ffmpeg で SRT ストリームを push する（リトライ付き）"""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -251,6 +254,7 @@ def _run_ffmpeg_srt_push(
             "-loglevel",
             "error",
             "-nostdin",
+            *(["-stream_loop", str(stream_loop)] if stream_loop > 0 else []),
             "-i",
             str(input_path),
             "-c",

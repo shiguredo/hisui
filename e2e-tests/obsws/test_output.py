@@ -861,7 +861,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_push_url),
+                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_push_url, stream_loop=2),
             )
 
             # mp4_writer に映像フレームが書き込まれるまで待機する
@@ -950,14 +950,14 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
 
-            # ffmpeg SRT push を別スレッドで実行する
+            # ffmpeg SRT push を別スレッドで実行する（CI 環境でパイプライン処理が間に合うよう入力をループする）
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_srt_push(input_path, srt_url),
+                lambda: _run_ffmpeg_srt_push(input_path, srt_url, stream_loop=2),
             )
 
-            # mp4_writer に映像フレームが書き込まれるまで待機する
+            # mp4_writer に映像サンプルが書き込まれるまで待機する
             for _ in range(30):
                 status, body, _ = await _http_get(
                     f"http://{host}:{ws_port}/metrics"
@@ -1048,11 +1048,11 @@ def test_obsws_srt_inbound_with_stream_id(
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
 
-            # ffmpeg SRT push を別スレッドで実行する
+            # ffmpeg SRT push を別スレッドで実行する（CI 環境でパイプライン処理が間に合うよう入力をループする）
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_srt_push(input_path, srt_push_url),
+                lambda: _run_ffmpeg_srt_push(input_path, srt_push_url, stream_loop=2),
             )
 
             # mp4_writer に映像サンプルが書き込まれるまで待機する
@@ -1185,7 +1185,7 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_inbound_push_url),
+                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_inbound_push_url, stream_loop=2),
             )
 
             await asyncio.sleep(1.0)
@@ -1324,7 +1324,7 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_srt_push(input_path, srt_inbound_url),
+                lambda: _run_ffmpeg_srt_push(input_path, srt_inbound_url, stream_loop=2),
             )
 
             await asyncio.sleep(1.0)
