@@ -2,6 +2,7 @@
 
 import asyncio
 import concurrent.futures
+import re
 import time
 from pathlib import Path
 
@@ -23,6 +24,16 @@ from helpers import (
     _write_test_png,
 )
 from hisui_server import reserve_ephemeral_port
+
+
+def _has_positive_metric(body: str, metric_prefix: str) -> bool:
+    """Prometheus テキスト形式の body から metric_prefix に一致する行を探し、値が 0 より大きいか判定する"""
+    for line in body.splitlines():
+        if line.startswith(metric_prefix):
+            match = re.search(r"\s(\d+(?:\.\d+)?)\s*$", line)
+            if match and float(match.group(1)) > 0:
+                return True
+    return False
 
 
 def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
@@ -355,9 +366,9 @@ def test_obsws_start_record_with_multiple_audio_inputs(
                     f"http://{server.host}:{server.port}/metrics"
                 )
                 assert status == 200
-                if (
-                    'hisui_total_audio_sample_count{processor_id="obsws:record:0:mp4_writer",processor_type="mp4_writer"}'
-                    in body
+                if _has_positive_metric(
+                    body,
+                    'hisui_total_audio_sample_count{processor_id="obsws:record:0:mp4_writer"',
                 ):
                     break
                 await asyncio.sleep(0.1)
@@ -870,10 +881,9 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     status, body, _ = await _http_get(
                         f"http://{host}:{ws_port}/metrics"
                     )
-                    if (
-                        status == 200
-                        and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
-                        in body
+                    if status == 200 and _has_positive_metric(
+                        body,
+                        'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"',
                     ):
                         break
                     await asyncio.sleep(0.2)
@@ -967,10 +977,9 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                     status, body, _ = await _http_get(
                         f"http://{host}:{ws_port}/metrics"
                     )
-                    if (
-                        status == 200
-                        and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
-                        in body
+                    if status == 200 and _has_positive_metric(
+                        body,
+                        'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"',
                     ):
                         break
                     await asyncio.sleep(0.2)
@@ -1069,10 +1078,9 @@ def test_obsws_srt_inbound_with_stream_id(
                     status, body, _ = await _http_get(
                         f"http://{host}:{ws_port}/metrics"
                     )
-                    if (
-                        status == 200
-                        and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
-                        in body
+                    if status == 200 and _has_positive_metric(
+                        body,
+                        'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"',
                     ):
                         break
                     await asyncio.sleep(0.2)
