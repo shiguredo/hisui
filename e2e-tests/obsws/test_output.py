@@ -820,7 +820,9 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
     rtmp_sock.close()
 
     input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
-    rtmp_url = f"rtmp://127.0.0.1:{rtmp_port}"
+    rtmp_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
+    stream_name = "inbound"
+    rtmp_push_url = f"{rtmp_url}/{stream_name}"
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=30.0)
@@ -839,7 +841,10 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     "sceneName": "Scene",
                     "inputName": "rtmp-inbound-input",
                     "inputKind": "rtmp_inbound",
-                    "inputSettings": {"inputUrl": rtmp_url},
+                    "inputSettings": {
+                        "inputUrl": rtmp_url,
+                        "streamName": stream_name,
+                    },
                     "sceneItemEnabled": True,
                 },
             )
@@ -856,7 +861,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_url),
+                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_push_url),
             )
 
             await asyncio.sleep(1.0)
@@ -1068,7 +1073,9 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
 
     input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
     output_path = tmp_path / "received-rtmp-inbound-stream.mp4"
-    rtmp_inbound_url = f"rtmp://127.0.0.1:{rtmp_inbound_port}"
+    rtmp_inbound_url = f"rtmp://127.0.0.1:{rtmp_inbound_port}/live"
+    rtmp_inbound_stream_name = "inbound"
+    rtmp_inbound_push_url = f"{rtmp_inbound_url}/{rtmp_inbound_stream_name}"
     output_url = f"rtmp://127.0.0.1:{rtmp_outbound_port}/live"
     stream_key = "obsws-stream"
     receive_url = f"{output_url}/{stream_key}"
@@ -1091,7 +1098,10 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
                     "sceneName": "Scene",
                     "inputName": "rtmp-inbound-stream-input",
                     "inputKind": "rtmp_inbound",
-                    "inputSettings": {"inputUrl": rtmp_inbound_url},
+                    "inputSettings": {
+                        "inputUrl": rtmp_inbound_url,
+                        "streamName": rtmp_inbound_stream_name,
+                    },
                     "sceneItemEnabled": True,
                 },
             )
@@ -1136,7 +1146,7 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_inbound_url),
+                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_inbound_push_url),
             )
 
             await asyncio.sleep(1.0)
@@ -1178,6 +1188,145 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
                 )
                 raise AssertionError(
                     f"obsws rtmp_inbound start_stream test failed: {e}\nmetrics_snapshot:\n{metrics_snapshot}"
+                ) from e
+            finally:
+                if ffmpeg_process.poll() is None:
+                    ffmpeg_process.kill()
+                    ffmpeg_process.communicate(timeout=5)
+
+    assert output_path.exists(), "RTMP received output file must exist"
+    assert output_path.stat().st_size > 0, "RTMP received output file must not be empty"
+    inspect_output = _inspect_mp4(binary_path, output_path)
+    assert inspect_output["format"] == "mp4"
+    assert inspect_output["video_codec"] == "H264"
+    assert inspect_output["video_sample_count"] > 0
+
+
+def test_obsws_srt_inbound_start_stream_to_rtmp(
+    binary_path: Path,
+    tmp_path: Path,
+):
+    """obsws で srt_inbound を作成し StartStream で RTMP 配信できることを確認する"""
+    host = "127.0.0.1"
+    ws_port, ws_sock = reserve_ephemeral_port()
+    ws_sock.close()
+    srt_inbound_port, srt_inbound_sock = reserve_ephemeral_port()
+    srt_inbound_sock.close()
+    rtmp_outbound_port, rtmp_outbound_sock = reserve_ephemeral_port()
+    rtmp_outbound_sock.close()
+
+    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    output_path = tmp_path / "received-srt-inbound-stream.mp4"
+    srt_inbound_url = f"srt://127.0.0.1:{srt_inbound_port}"
+    output_url = f"rtmp://127.0.0.1:{rtmp_outbound_port}/live"
+    stream_key = "obsws-stream"
+    receive_url = f"{output_url}/{stream_key}"
+
+    async def _run_start_stream_flow():
+        timeout = aiohttp.ClientTimeout(total=30.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{ws_port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            # srt_inbound 入力を作成する
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-srt-inbound-stream",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "srt-inbound-stream-input",
+                    "inputKind": "srt_inbound",
+                    "inputSettings": {"inputUrl": srt_inbound_url},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            # 配信先の RTMP サービス設定を行う
+            set_stream_service_response = await _send_obsws_request(
+                ws,
+                request_type="SetStreamServiceSettings",
+                request_id="req-set-stream-service-srt-inbound",
+                request_data={
+                    "streamServiceType": "rtmp_custom",
+                    "streamServiceSettings": {
+                        "server": output_url,
+                        "key": stream_key,
+                    },
+                },
+            )
+            assert set_stream_service_response["d"]["requestStatus"]["result"] is True
+
+            # 配信を開始する
+            start_stream_response = await _send_obsws_request(
+                ws,
+                request_type="StartStream",
+                request_id="req-start-stream-srt-inbound",
+            )
+            assert start_stream_response["d"]["requestStatus"]["result"] is True
+
+            for _ in range(20):
+                stream_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetStreamStatus",
+                    request_id="req-get-stream-status-srt-inbound",
+                )
+                if stream_status_response["d"]["responseData"]["outputActive"] is True:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise AssertionError("stream did not become active in time")
+
+            # ffmpeg で SRT inbound 側にメディアを push する
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: _run_ffmpeg_srt_push(input_path, srt_inbound_url),
+            )
+
+            await asyncio.sleep(1.0)
+
+            # 配信を停止する
+            stop_stream_response = await _send_obsws_request(
+                ws,
+                request_type="StopStream",
+                request_id="req-stop-stream-srt-inbound",
+            )
+            assert stop_stream_response["d"]["requestStatus"]["result"] is True
+
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
+
+        def _run_start_stream_flow_sync() -> None:
+            asyncio.run(_run_start_stream_flow())
+
+        # 受信側が先に接続待機へ入れるよう、StartStream フローは別スレッドで並行実行する
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            ffmpeg_process = _start_ffmpeg_rtmp_receive(
+                receive_url,
+                output_path,
+                with_audio=True,
+                max_video_frames=None,
+                listen=True,
+                timeout_seconds=30,
+            )
+            try:
+                time.sleep(0.5)
+                start_stream_future = executor.submit(_run_start_stream_flow_sync)
+                start_stream_future.result(timeout=40.0)
+                _wait_process_exit(ffmpeg_process, timeout=20.0)
+            except Exception as e:
+                metrics_snapshot = _collect_obsws_metrics_snapshot(
+                    server.host,
+                    server.port,
+                )
+                raise AssertionError(
+                    f"obsws srt_inbound start_stream test failed: {e}\nmetrics_snapshot:\n{metrics_snapshot}"
                 ) from e
             finally:
                 if ffmpeg_process.poll() is None:
