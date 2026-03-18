@@ -190,6 +190,84 @@ def _start_ffmpeg_rtmp_receive(
     )
 
 
+def _run_ffmpeg_rtmp_push(
+    input_path: Path,
+    publish_url: str,
+    *,
+    startup_timeout: float = 10.0,
+) -> None:
+    """ffmpeg で RTMP ストリームを push する（リトライ付き）"""
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for obsws RTMP inbound test")
+
+    deadline = time.time() + startup_timeout
+    result = None
+    while time.time() < deadline:
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-re",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(input_path),
+            "-c",
+            "copy",
+            "-f",
+            "flv",
+            publish_url,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return
+        time.sleep(0.2)
+
+    raise AssertionError(
+        f"ffmpeg rtmp push failed: returncode={result.returncode}, stderr={result.stderr}"
+    )
+
+
+def _run_ffmpeg_srt_push(
+    input_path: Path,
+    publish_url: str,
+    *,
+    startup_timeout: float = 10.0,
+) -> None:
+    """ffmpeg で SRT ストリームを push する（リトライ付き）"""
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for obsws SRT inbound test")
+
+    deadline = time.time() + startup_timeout
+    result = None
+    while time.time() < deadline:
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-re",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(input_path),
+            "-c",
+            "copy",
+            "-f",
+            "mpegts",
+            publish_url,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return
+        time.sleep(0.2)
+
+    raise AssertionError(
+        f"ffmpeg srt push failed: returncode={result.returncode}, stderr={result.stderr}"
+    )
+
+
 def _wait_process_exit(
     process: subprocess.Popen[str], timeout: float
 ) -> tuple[str, str]:

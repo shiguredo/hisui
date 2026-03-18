@@ -51,6 +51,8 @@ fn supported_input_kinds_contains_expected_values() {
             .supported_input_kinds()
             .contains(&"mp4_file_source")
     );
+    assert!(registry.supported_input_kinds().contains(&"rtmp_inbound"));
+    assert!(registry.supported_input_kinds().contains(&"srt_inbound"));
 }
 
 #[test]

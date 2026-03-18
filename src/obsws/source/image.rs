@@ -42,7 +42,7 @@ pub(super) fn build_record_source_plan(
     .to_string();
 
     Ok(ObswsRecordSourcePlan {
-        source_processor_id,
+        source_processor_ids: vec![source_processor_id],
         source_video_track_id: Some(source_video_track_id),
         source_audio_track_id: None,
         requests: vec![ObswsSourceRpcRequest {

@@ -5,8 +5,13 @@ use std::time::{Duration, Instant};
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
-pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 3] =
-    ["image_source", "video_capture_device", "mp4_file_source"];
+pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 5] = [
+    "image_source",
+    "video_capture_device",
+    "mp4_file_source",
+    "rtmp_inbound",
+    "srt_inbound",
+];
 pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
 pub(crate) const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
@@ -89,6 +94,8 @@ pub enum ObswsInputSettings {
     ImageSource(ObswsImageSourceSettings),
     VideoCaptureDevice(ObswsVideoCaptureDeviceSettings),
     Mp4FileSource(ObswsMp4FileSourceSettings),
+    RtmpInbound(ObswsRtmpInboundSettings),
+    SrtInbound(ObswsSrtInboundSettings),
 }
 
 impl ObswsInputSettings {
@@ -99,6 +106,8 @@ impl ObswsInputSettings {
                 ObswsVideoCaptureDeviceSettings::default(),
             )),
             "mp4_file_source" => Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings::default())),
+            "rtmp_inbound" => Ok(Self::RtmpInbound(ObswsRtmpInboundSettings::default())),
+            "srt_inbound" => Ok(Self::SrtInbound(ObswsSrtInboundSettings::default())),
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -132,6 +141,24 @@ impl ObswsInputSettings {
                     loop_playback: loop_playback.unwrap_or(false),
                 }))
             }
+            "rtmp_inbound" => {
+                let input_url = parse_optional_string_setting(input_settings, "inputUrl")?;
+                let stream_name = parse_optional_string_setting(input_settings, "streamName")?;
+                Ok(Self::RtmpInbound(ObswsRtmpInboundSettings {
+                    input_url,
+                    stream_name,
+                }))
+            }
+            "srt_inbound" => {
+                let input_url = parse_optional_string_setting(input_settings, "inputUrl")?;
+                let stream_id = parse_optional_string_setting(input_settings, "streamId")?;
+                let passphrase = parse_optional_string_setting(input_settings, "passphrase")?;
+                Ok(Self::SrtInbound(ObswsSrtInboundSettings {
+                    input_url,
+                    stream_id,
+                    passphrase,
+                }))
+            }
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -143,6 +170,8 @@ impl ObswsInputSettings {
             // `*_source` 命名へ統一する。今回は既存 API 影響を避けるため据え置く。
             Self::VideoCaptureDevice(_) => "video_capture_device",
             Self::Mp4FileSource(_) => "mp4_file_source",
+            Self::RtmpInbound(_) => "rtmp_inbound",
+            Self::SrtInbound(_) => "srt_inbound",
         }
     }
 
@@ -180,6 +209,35 @@ impl ObswsInputSettings {
                     loop_playback,
                 }))
             }
+            Self::RtmpInbound(existing) => {
+                let input_url =
+                    parse_overlay_string_setting(input_settings, "inputUrl", &existing.input_url)?;
+                let stream_name = parse_overlay_string_setting(
+                    input_settings,
+                    "streamName",
+                    &existing.stream_name,
+                )?;
+                Ok(Self::RtmpInbound(ObswsRtmpInboundSettings {
+                    input_url,
+                    stream_name,
+                }))
+            }
+            Self::SrtInbound(existing) => {
+                let input_url =
+                    parse_overlay_string_setting(input_settings, "inputUrl", &existing.input_url)?;
+                let stream_id =
+                    parse_overlay_string_setting(input_settings, "streamId", &existing.stream_id)?;
+                let passphrase = parse_overlay_string_setting(
+                    input_settings,
+                    "passphrase",
+                    &existing.passphrase,
+                )?;
+                Ok(Self::SrtInbound(ObswsSrtInboundSettings {
+                    input_url,
+                    stream_id,
+                    passphrase,
+                }))
+            }
         }
     }
 }
@@ -190,6 +248,8 @@ impl nojson::DisplayJson for ObswsInputSettings {
             Self::ImageSource(settings) => settings.fmt(f),
             Self::VideoCaptureDevice(settings) => settings.fmt(f),
             Self::Mp4FileSource(settings) => settings.fmt(f),
+            Self::RtmpInbound(settings) => settings.fmt(f),
+            Self::SrtInbound(settings) => settings.fmt(f),
         }
     }
 }
@@ -734,6 +794,54 @@ impl nojson::DisplayJson for ObswsMp4FileSourceSettings {
                 f.member("path", path)?;
             }
             f.member("loopPlayback", self.loop_playback)
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsRtmpInboundSettings {
+    // 録画・配信開始時に必須。登録時点では未指定も許容する。
+    pub input_url: Option<String>,
+    pub stream_name: Option<String>,
+}
+
+impl nojson::DisplayJson for ObswsRtmpInboundSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(input_url) = &self.input_url {
+                f.member("inputUrl", input_url)?;
+            }
+            if let Some(stream_name) = &self.stream_name {
+                f.member("streamName", stream_name)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsSrtInboundSettings {
+    // 録画・配信開始時に必須。登録時点では未指定も許容する。
+    pub input_url: Option<String>,
+    pub stream_id: Option<String>,
+    pub passphrase: Option<String>,
+}
+
+impl nojson::DisplayJson for ObswsSrtInboundSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(input_url) = &self.input_url {
+                f.member("inputUrl", input_url)?;
+            }
+            if let Some(stream_id) = &self.stream_id {
+                f.member("streamId", stream_id)?;
+            }
+            if let Some(passphrase) = &self.passphrase {
+                f.member("passphrase", passphrase)?;
+            }
+            Ok(())
         })
         .fmt(f)
     }

@@ -3,6 +3,8 @@ use crate::{ProcessorId, TrackId};
 
 mod image;
 mod mp4;
+mod rtmp_inbound;
+mod srt_inbound;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObswsOutputKind {
@@ -25,7 +27,7 @@ pub struct ObswsSourceRpcRequest {
 }
 
 pub struct ObswsRecordSourcePlan {
-    pub source_processor_id: ProcessorId,
+    pub source_processor_ids: Vec<ProcessorId>,
     pub source_video_track_id: Option<TrackId>,
     pub source_audio_track_id: Option<TrackId>,
     pub requests: Vec<ObswsSourceRpcRequest>,
@@ -69,5 +71,11 @@ pub fn build_record_source_plan(
         ObswsInputSettings::VideoCaptureDevice(_) => Err(
             BuildObswsRecordSourcePlanError::UnsupportedInputKind("video_capture_device"),
         ),
+        ObswsInputSettings::RtmpInbound(settings) => {
+            rtmp_inbound::build_record_source_plan(settings, output_kind, run_id, source_index)
+        }
+        ObswsInputSettings::SrtInbound(settings) => {
+            srt_inbound::build_record_source_plan(settings, output_kind, run_id, source_index)
+        }
     }
 }
