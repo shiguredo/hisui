@@ -138,7 +138,6 @@
   - `GetVersion` / `GetStats` / `GetCanvasList` / `GetSceneList` / `CreateScene` / `RemoveScene` / `GetCurrentProgramScene` / `SetCurrentProgramScene` / `GetInputList` / `GetInputKindList` / `GetInputSettings` / `CreateInput` / `RemoveInput` / `GetStreamServiceSettings` / `SetStreamServiceSettings` / `GetStreamStatus` / `ToggleStream` / `StartStream` / `StopStream` / `GetRecordDirectory` / `SetRecordDirectory` / `GetRecordStatus` / `ToggleRecord` / `StartRecord` / `StopRecord` の RequestType に対応する
   - `RequestBatch (op=8/9)` の `executionType = 0` と `haltOnFailure` に対応する
   - `eventSubscriptions` に応じて `StreamStateChanged` / `RecordStateChanged` / `CurrentProgramSceneChanged` / `SceneCreated` / `SceneRemoved` / `InputCreated` / `InputRemoved` の Event を配信できる
-  - `StartStream` は `image_source` を入力として `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を内部で起動し、RTMP 配信を開始できる
   - 未対応 RequestType は `Unknown request type` のエラーで応答する
   - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する
   - @sile

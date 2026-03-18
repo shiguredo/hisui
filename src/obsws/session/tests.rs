@@ -1507,6 +1507,157 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
 }
 
 #[tokio::test]
+async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
+        temp_dir.path().to_path_buf(),
+        crate::types::EvenUsize::new(1920).unwrap(),
+        crate::types::EvenUsize::new(1080).unwrap(),
+        crate::video::FrameRate::FPS_30,
+    )));
+
+    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    let pipeline_task = tokio::spawn(pipeline.run());
+    let started = pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+    assert!(started);
+
+    let mut session =
+        ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    let start_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-record-no-inputs".to_owned()),
+            request_type: Some("StartRecord".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let text = unwrap_send_text(start_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    let record_run = input_registry
+        .read()
+        .await
+        .record_run()
+        .expect("active record must have run state");
+    assert_eq!(
+        record_run.audio_mixer_processor_id.get(),
+        "obsws:record:0:audio_mixer"
+    );
+
+    let mut found_audio_mixer = false;
+    for _ in 0..20 {
+        let live_processors = pipeline_handle
+            .list_processors()
+            .await
+            .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
+        if live_processors
+            .iter()
+            .any(|id| id.get() == "obsws:record:0:audio_mixer")
+        {
+            found_audio_mixer = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(found_audio_mixer);
+
+    let stop_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-stop-record-no-inputs".to_owned()),
+            request_type: Some("StopRecord".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let text = unwrap_send_text(stop_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    pipeline_task.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn start_stream_with_no_inputs_succeeds() -> crate::Result<()> {
+    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()));
+    {
+        let mut registry = input_registry.write().await;
+        registry.set_stream_service_settings(ObswsStreamServiceSettings {
+            stream_service_type: "rtmp_custom".to_owned(),
+            server: Some("rtmp://127.0.0.1:1935/live".to_owned()),
+            key: Some("stream-no-inputs".to_owned()),
+        });
+    }
+
+    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    let pipeline_task = tokio::spawn(pipeline.run());
+    let started = pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+    assert!(started);
+
+    let mut session =
+        ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    let start_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-stream-no-inputs".to_owned()),
+            request_type: Some("StartStream".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let text = unwrap_send_text(start_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    let stream_run = input_registry
+        .read()
+        .await
+        .stream_run()
+        .expect("active stream must have run state");
+    assert_eq!(
+        stream_run.audio_mixer_processor_id.get(),
+        "obsws:stream:0:audio_mixer"
+    );
+
+    let stop_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-stop-stream-no-inputs".to_owned()),
+            request_type: Some("StopStream".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let text = unwrap_send_text(stop_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    pipeline_task.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn start_record_with_multiple_video_inputs_builds_plan_successfully() {
     // 複数映像入力は受理されるが、パイプラインがないため実行時エラーになる
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()));

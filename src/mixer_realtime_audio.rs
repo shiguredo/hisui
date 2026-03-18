@@ -179,6 +179,7 @@ impl AudioRealtimeMixer {
             track_event_rx: Some(track_event_rx),
             rpc_rx: Some(rpc_rx),
             next_output_timestamp: None,
+            mixer_start: tokio::time::Instant::now(),
             stats,
         }
         .run()
@@ -489,6 +490,7 @@ struct AudioRealtimeMixerRunner<'a> {
     track_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
     rpc_rx: Option<tokio::sync::mpsc::UnboundedReceiver<AudioRealtimeMixerRpcMessage>>,
     next_output_timestamp: Option<Duration>,
+    mixer_start: tokio::time::Instant,
     stats: AudioRealtimeMixerStats,
 }
 
@@ -656,10 +658,13 @@ impl AudioRealtimeMixerRunner<'_> {
     }
 
     fn maybe_initialize_output_timestamp(&self) -> Option<Duration> {
-        self.states
+        let from_inputs = self
+            .states
             .values()
             .filter_map(|state| state.queue_head_timestamp)
-            .min()
+            .min();
+        // 入力フレームがない場合は mixer_start からの経過時間をタイムスタンプとして使用する
+        Some(from_inputs.unwrap_or_else(|| self.mixer_start.elapsed()))
     }
 
     fn mix_next_audio_frame(&mut self, timestamp: Duration) -> AudioFrame {
@@ -699,9 +704,11 @@ impl AudioRealtimeMixerRunner<'_> {
         if !self.config.terminate_on_input_eos {
             return false;
         }
-        // terminate_on_input_eos が true の場合は、入力トラックが 0 件になった状態も
-        // 「すべての入力が終了した」とみなして EOS で終了する。
-        // updateAudioMixerInputs([]) 直後の終了は意図した挙動。
+        // 入力トラックが 0 件の場合は無音を送出し続ける。
+        // 後から updateAudioMixerInputs で入力が追加される可能性がある。
+        if self.states.is_empty() {
+            return false;
+        }
         self.states
             .values()
             .all(|state| state.eos && state.is_empty())
