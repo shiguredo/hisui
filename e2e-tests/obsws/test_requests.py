@@ -1290,14 +1290,20 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
             )
             assert disable_response["d"]["requestStatus"]["result"] is True
 
-            start_record_error_response = await _send_obsws_request(
+            # OBS 互換: 有効な入力がなくても StartRecord は成功する（黒画面+無音）
+            start_record_disabled_response = await _send_obsws_request(
                 ws,
                 request_type="StartRecord",
                 request_id="req-start-record-disabled-input",
             )
-            start_record_error_status = start_record_error_response["d"]["requestStatus"]
-            assert start_record_error_status["result"] is False
-            assert start_record_error_status["code"] == 400
+            assert start_record_disabled_response["d"]["requestStatus"]["result"] is True
+
+            stop_record_disabled_response = await _send_obsws_request(
+                ws,
+                request_type="StopRecord",
+                request_id="req-stop-record-disabled-input",
+            )
+            assert stop_record_disabled_response["d"]["requestStatus"]["result"] is True
 
             enable_response = await _send_obsws_request(
                 ws,

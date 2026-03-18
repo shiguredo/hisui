@@ -798,4 +798,6 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
     assert inspect_output["format"] == "mp4"
     assert inspect_output["audio_codec"] == "AAC"
     assert inspect_output["audio_sample_count"] > 0
-    assert "video_sample_count" not in inspect_output
+    # OBS 互換: 映像ソースがなくても常に映像トラック（黒画面）が含まれる
+    assert inspect_output["video_codec"] == "H264"
+    assert inspect_output["video_sample_count"] > 0
