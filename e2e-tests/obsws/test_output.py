@@ -422,7 +422,11 @@ def test_obsws_start_record_with_multiple_audio_inputs(
     ) as server:
         output_path, metrics_snapshot = asyncio.run(_run(server))
 
-    inspect_output = _inspect_mp4(binary_path, output_path)
+    inspect_output = _inspect_mp4(
+        binary_path,
+        output_path,
+        required_keys=("video_codec", "video_sample_count"),
+    )
     print(f"inspect_output={inspect_output}")
     print(f"metrics_snapshot:\n{metrics_snapshot}")
     assert inspect_output["format"] == "mp4"
@@ -563,7 +567,11 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
 
     assert output_path.exists(), "RTMP received output file must exist"
     assert output_path.stat().st_size > 0, "RTMP received output file must not be empty"
-    inspect_output = _inspect_mp4(binary_path, output_path)
+    inspect_output = _inspect_mp4(
+        binary_path,
+        output_path,
+        required_keys=("video_codec", "video_sample_count"),
+    )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
     assert inspect_output["video_sample_count"] > 0

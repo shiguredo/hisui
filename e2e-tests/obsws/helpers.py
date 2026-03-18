@@ -335,18 +335,38 @@ def _wait_process_exit(
     return stdout, stderr
 
 
-def _inspect_mp4(binary_path: Path, path: Path) -> dict[str, object]:
-    result = subprocess.run(
-        [str(binary_path), "inspect", str(path)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, (
-        f"hisui inspect failed: returncode={result.returncode}, stderr={result.stderr}"
-    )
-    output = json.loads(result.stdout)
-    assert isinstance(output, dict), "inspect output must be a JSON object"
-    return output
+def _inspect_mp4(
+    binary_path: Path,
+    path: Path,
+    *,
+    required_keys: tuple[str, ...] = (),
+    timeout_sec: float = 3.0,
+    interval_sec: float = 0.1,
+) -> dict[str, object]:
+    deadline = time.time() + timeout_sec
+    while True:
+        result = subprocess.run(
+            [str(binary_path), "inspect", str(path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"hisui inspect failed: returncode={result.returncode}, stderr={result.stderr}"
+        )
+        output = json.loads(result.stdout)
+        assert isinstance(output, dict), "inspect output must be a JSON object"
+        if all(key in output for key in required_keys):
+            return output
+        if not required_keys:
+            return output
+        if time.time() >= deadline:
+            missing_keys = [key for key in required_keys if key not in output]
+            raise AssertionError(
+                f"inspect output missing required keys: missing_keys={missing_keys}, output={output}"
+            )
+
+        # StopRecord 直後は MP4 のメタ情報がまだ揃わないことがあるため、短時間だけ再試行する。
+        time.sleep(interval_sec)
 
 
 def _write_test_png(path: Path) -> None:
