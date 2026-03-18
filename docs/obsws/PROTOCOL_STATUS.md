@@ -95,6 +95,7 @@
 - [x] `BroadcastCustomEvent`: カスタムイベントを配信する
 - [x] `Sleep`: 指定時間だけ処理を待機する
   - NOTE: `sleepMillis` は `0..=50000` のみ受理する
+  - NOTE: OBS の仕様上、`Sleep` は `RequestBatch` 内でのみ利用できる。単体 Request として送った場合は `code = 206`（ `Not supported` ）になる
 
 ### Config
 
