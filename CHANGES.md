@@ -11,13 +11,8 @@
 
 ## develop
 
-- [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
-  - トップレベルの `worker_threads` が削除される
-  - `processors` から `progress_bar` が削除される
-  - `processors` の各要素から `total_processing_seconds` が削除される
-  - `video_mixer` では `output_video_resolution` が削除され、`output_video_width` / `output_video_height` が追加される
-  - `webm_audio_reader` / `webm_video_reader` では `input_files` が削除され、`current_input_file` / `total_sample_count` が追加される
-  - @sile
+- [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
+  - @voluntas
 - [UPDATE] `libc` 0.2.183 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
   - @sile
@@ -215,6 +210,13 @@
   - `processorId` 未指定時は `rtmpPublisher` を既定値として利用する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_rtmp を追加する
+  - @sile
+- [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
+  - トップレベルの `worker_threads` が削除される
+  - `processors` から `progress_bar` が削除される
+  - `processors` の各要素から `total_processing_seconds` が削除される
+  - `video_mixer` では `output_video_resolution` が削除され、`output_video_width` / `output_video_height` が追加される
+  - `webm_audio_reader` / `webm_video_reader` では `input_files` が削除され、`current_input_file` / `total_sample_count` が追加される
   - @sile
 - [CHANGE] orfail crate を依存から削除する
   - これにより、エラー発生時に標準エラー出力に表示されるメッセージの細部のフォーマットに非互換な変更が入ることになる
