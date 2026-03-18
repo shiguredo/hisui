@@ -701,18 +701,24 @@ impl AudioRealtimeMixerRunner<'_> {
     }
 
     fn should_finish(&self) -> bool {
-        if !self.config.terminate_on_input_eos {
-            return false;
-        }
-        // 入力トラックが 0 件の場合は無音を送出し続ける。
-        // 後から updateAudioMixerInputs で入力が追加される可能性がある。
-        if self.states.is_empty() {
-            return false;
-        }
-        self.states
-            .values()
-            .all(|state| state.eos && state.is_empty())
+        should_finish_with(self.config.terminate_on_input_eos, &self.states)
     }
+}
+
+/// `should_finish` のロジックを切り出した自由関数。テスト容易性のために分離。
+fn should_finish_with(
+    terminate_on_input_eos: bool,
+    states: &HashMap<TrackId, InputTrackState>,
+) -> bool {
+    if !terminate_on_input_eos {
+        return false;
+    }
+    // 入力トラックが 0 件の場合は無音を送出し続ける。
+    // 後から updateAudioMixerInputs で入力が追加される可能性がある。
+    if states.is_empty() {
+        return false;
+    }
+    states.values().all(|state| state.eos && state.is_empty())
 }
 
 #[derive(Debug)]
@@ -1112,5 +1118,59 @@ mod tests {
             .expect("second frame");
 
         assert_eq!(stats.total_timestamp_rebase_count.get(), 1);
+    }
+
+    fn make_eos_empty_state(config: AudioRealtimeMixerConfig) -> InputTrackState {
+        let mut state = InputTrackState::new(
+            config.sample_rate,
+            config.channels,
+            config.timestamp_rebase_threshold,
+        );
+        state.eos = true;
+        state
+    }
+
+    fn make_active_state(config: AudioRealtimeMixerConfig) -> InputTrackState {
+        InputTrackState::new(
+            config.sample_rate,
+            config.channels,
+            config.timestamp_rebase_threshold,
+        )
+    }
+
+    #[test]
+    fn should_finish_with_empty_inputs_returns_false() {
+        // 入力トラックが 0 件のとき、terminate_on_input_eos = true でも終了しない
+        let states = HashMap::new();
+        assert!(!should_finish_with(true, &states));
+    }
+
+    #[test]
+    fn should_finish_with_terminate_disabled_returns_false() {
+        // terminate_on_input_eos = false なら、EOS 済み入力があっても終了しない
+        let config = test_config();
+        let mut states = HashMap::new();
+        states.insert(TrackId::new("t1"), make_eos_empty_state(config));
+        assert!(!should_finish_with(false, &states));
+    }
+
+    #[test]
+    fn should_finish_with_all_eos_returns_true() {
+        // 全入力が EOS かつキューが空なら終了する
+        let config = test_config();
+        let mut states = HashMap::new();
+        states.insert(TrackId::new("t1"), make_eos_empty_state(config));
+        states.insert(TrackId::new("t2"), make_eos_empty_state(config));
+        assert!(should_finish_with(true, &states));
+    }
+
+    #[test]
+    fn should_finish_with_partial_eos_returns_false() {
+        // 一部の入力のみ EOS の場合は終了しない
+        let config = test_config();
+        let mut states = HashMap::new();
+        states.insert(TrackId::new("t1"), make_eos_empty_state(config));
+        states.insert(TrackId::new("t2"), make_active_state(config));
+        assert!(!should_finish_with(true, &states));
     }
 }
