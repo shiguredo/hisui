@@ -4,12 +4,15 @@ use crate::{ProcessorId, TrackId};
 mod image;
 mod mp4;
 mod rtmp_inbound;
+mod rtsp_subscriber;
 mod srt_inbound;
+mod video_capture_device;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObswsOutputKind {
     Stream,
     Record,
+    RtmpOutbound,
 }
 
 impl ObswsOutputKind {
@@ -17,6 +20,7 @@ impl ObswsOutputKind {
         match self {
             Self::Stream => "stream",
             Self::Record => "record",
+            Self::RtmpOutbound => "rtmp_outbound",
         }
     }
 }
@@ -68,14 +72,22 @@ pub fn build_record_source_plan(
         ObswsInputSettings::Mp4FileSource(settings) => {
             mp4::build_record_source_plan(settings, output_kind, run_id, source_index)
         }
-        ObswsInputSettings::VideoCaptureDevice(_) => Err(
-            BuildObswsRecordSourcePlanError::UnsupportedInputKind("video_capture_device"),
-        ),
+        ObswsInputSettings::VideoCaptureDevice(settings) => {
+            video_capture_device::build_record_source_plan(
+                settings,
+                output_kind,
+                run_id,
+                source_index,
+            )
+        }
         ObswsInputSettings::RtmpInbound(settings) => {
             rtmp_inbound::build_record_source_plan(settings, output_kind, run_id, source_index)
         }
         ObswsInputSettings::SrtInbound(settings) => {
             srt_inbound::build_record_source_plan(settings, output_kind, run_id, source_index)
+        }
+        ObswsInputSettings::RtspSubscriber(settings) => {
+            rtsp_subscriber::build_record_source_plan(settings, output_kind, run_id, source_index)
         }
     }
 }

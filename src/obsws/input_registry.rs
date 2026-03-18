@@ -43,6 +43,9 @@ impl ObswsInputRegistry {
             stream_service_settings: ObswsStreamServiceSettings::default(),
             transition_runtime: ObswsTransitionRuntimeState::default(),
             stream_runtime: ObswsStreamRuntimeState::default(),
+            rtmp_outbound_settings: ObswsRtmpOutboundSettings::default(),
+            rtmp_outbound_runtime: ObswsRtmpOutboundRuntimeState::default(),
+            next_rtmp_outbound_run_id: 0,
             record_directory,
             record_runtime: ObswsRecordRuntimeState::default(),
             canvas_width,
@@ -570,6 +573,58 @@ impl ObswsInputRegistry {
 
     pub fn stream_uptime(&self) -> Duration {
         self.stream_runtime
+            .started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn rtmp_outbound_settings(&self) -> &ObswsRtmpOutboundSettings {
+        &self.rtmp_outbound_settings
+    }
+
+    pub fn set_rtmp_outbound_settings(&mut self, settings: ObswsRtmpOutboundSettings) {
+        self.rtmp_outbound_settings = settings;
+    }
+
+    pub fn next_rtmp_outbound_run_id(&mut self) -> Result<u64, RunIdOverflowError> {
+        let run_id = self.next_rtmp_outbound_run_id;
+        self.next_rtmp_outbound_run_id = self
+            .next_rtmp_outbound_run_id
+            .checked_add(1)
+            .ok_or(RunIdOverflowError::RtmpOutboundRunIdOverflow)?;
+        Ok(run_id)
+    }
+
+    pub fn activate_rtmp_outbound(
+        &mut self,
+        run: ObswsRtmpOutboundRun,
+    ) -> Result<(), ActivateRtmpOutboundError> {
+        if self.rtmp_outbound_runtime.active {
+            return Err(ActivateRtmpOutboundError::AlreadyActive);
+        }
+        self.rtmp_outbound_runtime.active = true;
+        self.rtmp_outbound_runtime.started_at = Some(Instant::now());
+        self.rtmp_outbound_runtime.run = Some(run);
+        Ok(())
+    }
+
+    pub fn deactivate_rtmp_outbound(&mut self) -> Option<ObswsRtmpOutboundRun> {
+        let run = self.rtmp_outbound_runtime.run.take();
+        self.rtmp_outbound_runtime.active = false;
+        self.rtmp_outbound_runtime.started_at = None;
+        run
+    }
+
+    pub fn is_rtmp_outbound_active(&self) -> bool {
+        self.rtmp_outbound_runtime.active
+    }
+
+    pub fn rtmp_outbound_run(&self) -> Option<ObswsRtmpOutboundRun> {
+        self.rtmp_outbound_runtime.run.clone()
+    }
+
+    pub fn rtmp_outbound_uptime(&self) -> Duration {
+        self.rtmp_outbound_runtime
             .started_at
             .map(|started_at| started_at.elapsed())
             .unwrap_or(Duration::ZERO)

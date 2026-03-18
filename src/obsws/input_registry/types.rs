@@ -5,12 +5,13 @@ use std::time::{Duration, Instant};
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
-pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 5] = [
+pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 6] = [
     "image_source",
     "video_capture_device",
     "mp4_file_source",
     "rtmp_inbound",
     "srt_inbound",
+    "rtsp_subscriber",
 ];
 pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
 pub(crate) const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
@@ -96,6 +97,7 @@ pub enum ObswsInputSettings {
     Mp4FileSource(ObswsMp4FileSourceSettings),
     RtmpInbound(ObswsRtmpInboundSettings),
     SrtInbound(ObswsSrtInboundSettings),
+    RtspSubscriber(ObswsRtspSubscriberSettings),
 }
 
 impl ObswsInputSettings {
@@ -108,6 +110,7 @@ impl ObswsInputSettings {
             "mp4_file_source" => Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings::default())),
             "rtmp_inbound" => Ok(Self::RtmpInbound(ObswsRtmpInboundSettings::default())),
             "srt_inbound" => Ok(Self::SrtInbound(ObswsSrtInboundSettings::default())),
+            "rtsp_subscriber" => Ok(Self::RtspSubscriber(ObswsRtspSubscriberSettings::default())),
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -159,6 +162,12 @@ impl ObswsInputSettings {
                     passphrase,
                 }))
             }
+            "rtsp_subscriber" => {
+                let input_url = parse_optional_string_setting(input_settings, "inputUrl")?;
+                Ok(Self::RtspSubscriber(ObswsRtspSubscriberSettings {
+                    input_url,
+                }))
+            }
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -172,6 +181,7 @@ impl ObswsInputSettings {
             Self::Mp4FileSource(_) => "mp4_file_source",
             Self::RtmpInbound(_) => "rtmp_inbound",
             Self::SrtInbound(_) => "srt_inbound",
+            Self::RtspSubscriber(_) => "rtsp_subscriber",
         }
     }
 
@@ -238,6 +248,13 @@ impl ObswsInputSettings {
                     passphrase,
                 }))
             }
+            Self::RtspSubscriber(existing) => {
+                let input_url =
+                    parse_overlay_string_setting(input_settings, "inputUrl", &existing.input_url)?;
+                Ok(Self::RtspSubscriber(ObswsRtspSubscriberSettings {
+                    input_url,
+                }))
+            }
         }
     }
 }
@@ -250,6 +267,7 @@ impl nojson::DisplayJson for ObswsInputSettings {
             Self::Mp4FileSource(settings) => settings.fmt(f),
             Self::RtmpInbound(settings) => settings.fmt(f),
             Self::SrtInbound(settings) => settings.fmt(f),
+            Self::RtspSubscriber(settings) => settings.fmt(f),
         }
     }
 }
@@ -334,6 +352,16 @@ pub struct ObswsStreamRun {
     pub audio_mixer_processor_id: ProcessorId,
     pub video_mixer_processor_id: ProcessorId,
     pub publisher_processor_id: ProcessorId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsRtmpOutboundRun {
+    pub source_processor_ids: Vec<ProcessorId>,
+    pub video: ObswsRecordTrackRun,
+    pub audio: ObswsRecordTrackRun,
+    pub audio_mixer_processor_id: ProcessorId,
+    pub video_mixer_processor_id: ProcessorId,
+    pub endpoint_processor_id: ProcessorId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -595,6 +623,13 @@ pub(crate) struct ObswsStreamRuntimeState {
 }
 
 #[derive(Debug, Clone, Default)]
+pub(crate) struct ObswsRtmpOutboundRuntimeState {
+    pub(crate) active: bool,
+    pub(crate) started_at: Option<Instant>,
+    pub(crate) run: Option<ObswsRtmpOutboundRun>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ObswsRecordRuntimeState {
     pub(crate) active: bool,
     pub(crate) started_at: Option<Instant>,
@@ -845,6 +880,46 @@ impl nojson::DisplayJson for ObswsSrtInboundSettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsRtspSubscriberSettings {
+    // 録画・配信開始時に必須。登録時点では未指定も許容する。
+    pub input_url: Option<String>,
+}
+
+impl nojson::DisplayJson for ObswsRtspSubscriberSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(input_url) = &self.input_url {
+                f.member("inputUrl", input_url)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsRtmpOutboundSettings {
+    // StartOutput 時に必須。登録時点では未指定も許容する。
+    pub output_url: Option<String>,
+    pub stream_name: Option<String>,
+}
+
+impl nojson::DisplayJson for ObswsRtmpOutboundSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(output_url) = &self.output_url {
+                f.member("outputUrl", output_url)?;
+            }
+            if let Some(stream_name) = &self.stream_name {
+                f.member("streamName", stream_name)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseInputSettingsError {
     UnsupportedInputKind,
@@ -947,6 +1022,12 @@ pub(crate) struct SceneItemIdOverflowError;
 pub enum RunIdOverflowError {
     StreamRunIdOverflow,
     RecordRunIdOverflow,
+    RtmpOutboundRunIdOverflow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateRtmpOutboundError {
+    AlreadyActive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1051,6 +1132,9 @@ pub struct ObswsInputRegistry {
     pub(crate) stream_service_settings: ObswsStreamServiceSettings,
     pub(crate) transition_runtime: ObswsTransitionRuntimeState,
     pub(crate) stream_runtime: ObswsStreamRuntimeState,
+    pub(crate) rtmp_outbound_settings: ObswsRtmpOutboundSettings,
+    pub(crate) rtmp_outbound_runtime: ObswsRtmpOutboundRuntimeState,
+    pub(crate) next_rtmp_outbound_run_id: u64,
     pub(crate) record_directory: PathBuf,
     pub(crate) record_runtime: ObswsRecordRuntimeState,
     pub(crate) canvas_width: crate::types::EvenUsize,

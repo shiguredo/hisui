@@ -13,8 +13,10 @@ use super::{
 
 const OBSWS_STREAM_OUTPUT_NAME: &str = "stream";
 const OBSWS_RECORD_OUTPUT_NAME: &str = "record";
+const OBSWS_RTMP_OUTBOUND_OUTPUT_NAME: &str = "rtmp_outbound";
 const OBSWS_STREAM_OUTPUT_KIND: &str = "rtmp_output";
 const OBSWS_RECORD_OUTPUT_KIND: &str = "mp4_output";
+const OBSWS_RTMP_OUTBOUND_OUTPUT_KIND: &str = "rtmp_outbound_output";
 
 #[derive(Debug, Clone, Copy)]
 struct ObswsOutputEntry {
@@ -112,6 +114,10 @@ pub fn build_get_output_list_response(request_id: &str) -> nojson::RawJsonOwned 
             output_name: OBSWS_RECORD_OUTPUT_NAME,
             output_kind: OBSWS_RECORD_OUTPUT_KIND,
         },
+        ObswsOutputEntry {
+            output_name: OBSWS_RTMP_OUTBOUND_OUTPUT_NAME,
+            output_kind: OBSWS_RTMP_OUTBOUND_OUTPUT_KIND,
+        },
     ];
     super::build_request_response_success("GetOutputList", request_id, |f| {
         f.member("outputs", outputs)
@@ -139,6 +145,9 @@ pub fn build_get_output_settings_response(
         }
         OBSWS_RECORD_OUTPUT_NAME => {
             build_record_output_settings_response(request_id, input_registry)
+        }
+        OBSWS_RTMP_OUTBOUND_OUTPUT_NAME => {
+            build_rtmp_outbound_output_settings_response(request_id, input_registry)
         }
         _ => super::build_request_response_error(
             "GetOutputSettings",
@@ -211,6 +220,41 @@ pub fn build_set_output_settings_response(
                 }
             };
             input_registry.set_record_directory(record_directory);
+            super::build_request_response_success_no_data("SetOutputSettings", request_id)
+        }
+        OBSWS_RTMP_OUTBOUND_OUTPUT_NAME => {
+            let output_settings = fields.output_settings.value();
+            let output_url =
+                match super::optional_non_empty_string_member(output_settings, "outputUrl") {
+                    Ok(v) => v,
+                    Err(error) => {
+                        return super::build_request_response_error(
+                            "SetOutputSettings",
+                            request_id,
+                            super::request_status_code_for_parse_error(&error),
+                            &error.to_string(),
+                        );
+                    }
+                };
+            let stream_name =
+                match super::optional_non_empty_string_member(output_settings, "streamName") {
+                    Ok(v) => v,
+                    Err(error) => {
+                        return super::build_request_response_error(
+                            "SetOutputSettings",
+                            request_id,
+                            super::request_status_code_for_parse_error(&error),
+                            &error.to_string(),
+                        );
+                    }
+                };
+            let existing = input_registry.rtmp_outbound_settings().clone();
+            input_registry.set_rtmp_outbound_settings(
+                crate::obsws_input_registry::ObswsRtmpOutboundSettings {
+                    output_url: output_url.or(existing.output_url),
+                    stream_name: stream_name.or(existing.stream_name),
+                },
+            );
             super::build_request_response_success_no_data("SetOutputSettings", request_id)
         }
         _ => super::build_request_response_error(
@@ -319,6 +363,9 @@ pub fn build_get_output_status_response(
         }
         OBSWS_RECORD_OUTPUT_NAME => {
             build_get_record_status_as_output_response(request_id, input_registry, pipeline_handle)
+        }
+        OBSWS_RTMP_OUTBOUND_OUTPUT_NAME => {
+            build_get_rtmp_outbound_status_as_output_response(request_id, input_registry)
         }
         _ => super::build_request_response_error(
             "GetOutputStatus",
@@ -501,6 +548,42 @@ fn build_get_record_status_as_output_response(
         f.member("outputSkippedFrames", output_stats.record_skipped_frames)?;
         f.member("outputTotalFrames", output_stats.record_total_frames)?;
         f.member("outputPath", &output_path)
+    })
+}
+
+fn build_rtmp_outbound_output_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let settings = input_registry.rtmp_outbound_settings();
+    super::build_request_response_success("GetOutputSettings", request_id, |f| {
+        f.member("outputName", OBSWS_RTMP_OUTBOUND_OUTPUT_NAME)?;
+        f.member("outputKind", OBSWS_RTMP_OUTBOUND_OUTPUT_KIND)?;
+        f.member("outputSettings", settings)
+    })
+}
+
+fn build_get_rtmp_outbound_status_as_output_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let active = input_registry.is_rtmp_outbound_active();
+    let duration = if active {
+        input_registry.rtmp_outbound_uptime()
+    } else {
+        std::time::Duration::ZERO
+    };
+    let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+    let output_timecode = format_timecode(duration);
+    super::build_request_response_success("GetOutputStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputReconnecting", false)?;
+        f.member("outputTimecode", &output_timecode)?;
+        f.member("outputDuration", output_duration)?;
+        f.member("outputCongestion", 0.0)?;
+        f.member("outputBytes", 0)?;
+        f.member("outputSkippedFrames", 0)?;
+        f.member("outputTotalFrames", 0)
     })
 }
 

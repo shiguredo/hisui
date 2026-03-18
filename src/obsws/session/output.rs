@@ -370,6 +370,13 @@ impl ObswsSession {
                 }
                 (outcome, events)
             }
+            "rtmp_outbound" => {
+                let outcome = self
+                    .handle_start_rtmp_outbound("StartOutput", request_id)
+                    .await;
+                // rtmp_outbound はイベント通知を行わない（hisui 独自拡張のため）
+                (outcome, Vec::new())
+            }
             _ => {
                 return Ok(Self::build_error_execution(
                     "StartOutput",
@@ -439,6 +446,12 @@ impl ObswsSession {
                     );
                 }
                 (outcome, events)
+            }
+            "rtmp_outbound" => {
+                let outcome = self
+                    .handle_stop_rtmp_outbound("StopOutput", request_id)
+                    .await;
+                (outcome, Vec::new())
             }
             _ => {
                 return Ok(Self::build_error_execution(
@@ -551,6 +564,17 @@ impl ObswsSession {
                     }
                 }
                 (outcome, !was_active, events)
+            }
+            "rtmp_outbound" => {
+                let was_active = self.input_registry.read().await.is_rtmp_outbound_active();
+                let outcome = if was_active {
+                    self.handle_stop_rtmp_outbound("ToggleOutput", request_id)
+                        .await
+                } else {
+                    self.handle_start_rtmp_outbound("ToggleOutput", request_id)
+                        .await
+                };
+                (outcome, !was_active, Vec::new())
             }
             _ => {
                 return Ok(Self::build_error_execution(
@@ -754,6 +778,160 @@ impl ObswsSession {
         }
         RequestOutcome::success(
             crate::obsws_response_builder::build_stop_stream_response(request_id),
+            None,
+        )
+    }
+
+    pub(super) async fn handle_start_rtmp_outbound(
+        &self,
+        request_type: &str,
+        request_id: &str,
+    ) -> RequestOutcome {
+        let (output_url, stream_name, output_plan, run) = {
+            let mut input_registry = self.input_registry.write().await;
+            let rtmp_outbound_settings = input_registry.rtmp_outbound_settings().clone();
+            let Some(output_url) = rtmp_outbound_settings.output_url else {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        request_type,
+                        request_id,
+                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        "Missing outputSettings.outputUrl field",
+                    ),
+                    None,
+                );
+            };
+
+            let run_id = match input_registry.next_rtmp_outbound_run_id() {
+                Ok(run_id) => run_id,
+                Err(_) => {
+                    return RequestOutcome::failure(
+                        crate::obsws_response_builder::build_request_response_error(
+                            request_type,
+                            request_id,
+                            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            "RTMP outbound run ID overflow",
+                        ),
+                        None,
+                    );
+                }
+            };
+            let output_plan = match Self::build_output_plan_or_error(
+                request_type,
+                request_id,
+                &input_registry,
+                crate::obsws::source::ObswsOutputKind::RtmpOutbound,
+                run_id,
+            ) {
+                Ok(output_plan) => output_plan,
+                Err(outcome) => return outcome,
+            };
+            let video = ObswsRecordTrackRun::new(
+                "rtmp_outbound",
+                run_id,
+                "video",
+                &output_plan.video_track_id,
+            );
+            let audio = ObswsRecordTrackRun::new(
+                "rtmp_outbound",
+                run_id,
+                "audio",
+                &output_plan.audio_track_id,
+            );
+            let run = ObswsRtmpOutboundRun {
+                source_processor_ids: output_plan.source_processor_ids.clone(),
+                video,
+                audio,
+                audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
+                video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
+                endpoint_processor_id: crate::ProcessorId::new(format!(
+                    "obsws:rtmp_outbound:{run_id}:rtmp_outbound_endpoint"
+                )),
+            };
+            if let Err(ActivateRtmpOutboundError::AlreadyActive) =
+                input_registry.activate_rtmp_outbound(run.clone())
+            {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        request_type,
+                        request_id,
+                        REQUEST_STATUS_OUTPUT_RUNNING,
+                        "RTMP outbound is already active",
+                    ),
+                    None,
+                );
+            }
+
+            (
+                output_url,
+                rtmp_outbound_settings.stream_name,
+                output_plan,
+                run,
+            )
+        };
+
+        let start_result = self
+            .start_rtmp_outbound_processors(&output_plan, &output_url, stream_name.as_deref(), &run)
+            .await;
+
+        if let Err(e) = start_result {
+            let _ = self.input_registry.write().await.deactivate_rtmp_outbound();
+            if let Err(cleanup_error) = self.stop_rtmp_outbound_processors(&run).await {
+                tracing::warn!(
+                    "failed to cleanup rtmp_outbound processors after start failure: {}",
+                    cleanup_error.display()
+                );
+            }
+            let error_comment = format!("Failed to start rtmp_outbound: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response(request_type, request_id, &error_comment),
+                None,
+            );
+        }
+
+        RequestOutcome::success(
+            crate::obsws_response_builder::build_start_output_response(request_id),
+            None,
+        )
+    }
+
+    pub(super) async fn handle_stop_rtmp_outbound(
+        &self,
+        request_type: &str,
+        request_id: &str,
+    ) -> RequestOutcome {
+        let run = {
+            let input_registry = self.input_registry.read().await;
+            if !input_registry.is_rtmp_outbound_active() {
+                return RequestOutcome::failure(
+                    crate::obsws_response_builder::build_request_response_error(
+                        request_type,
+                        request_id,
+                        REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        "RTMP outbound is not active",
+                    ),
+                    None,
+                );
+            }
+            input_registry
+                .rtmp_outbound_run()
+                .expect("infallible: active rtmp_outbound must have run state")
+        };
+        if let Err(e) = self.stop_rtmp_outbound_processors(&run).await {
+            let error_comment = format!("Failed to stop rtmp_outbound: {}", e.display());
+            return RequestOutcome::failure(
+                Self::build_internal_error_response(request_type, request_id, &error_comment),
+                None,
+            );
+        }
+        let mut input_registry = self.input_registry.write().await;
+        if input_registry.deactivate_rtmp_outbound().is_none() {
+            tracing::warn!(
+                "rtmp_outbound runtime was already deactivated while stopping rtmp_outbound"
+            );
+        }
+        RequestOutcome::success(
+            crate::obsws_response_builder::build_stop_output_response(request_id),
             None,
         )
     }
@@ -1522,6 +1700,131 @@ impl ObswsSession {
 
         // 4. パブリッシャーを停止
         self.stop_processors(std::slice::from_ref(&run.publisher_processor_id))
+            .await?;
+
+        Ok(())
+    }
+
+    pub(super) async fn start_rtmp_outbound_processors(
+        &self,
+        output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
+        output_url: &str,
+        stream_name: Option<&str>,
+        run: &ObswsRtmpOutboundRun,
+    ) -> crate::Result<()> {
+        self.send_create_audio_mixer_request(
+            &output_plan.source_plans,
+            &run.audio,
+            &run.audio_mixer_processor_id,
+        )
+        .await?;
+
+        self.send_create_video_mixer_request(
+            output_plan,
+            &run.video,
+            &run.video_mixer_processor_id,
+        )
+        .await?;
+
+        let video_encoder_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createVideoEncoder")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("inputTrackId", &run.video.source_track_id)?;
+                    f.member("outputTrackId", &run.video.encoded_track_id)?;
+                    f.member("codec", "H264")?;
+                    f.member("bitrateBps", 2_000_000)?;
+                    f.member("frameRate", output_plan.frame_rate)?;
+                    f.member("processorId", &run.video.encoder_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
+            .await?;
+
+        // RTMP outbound は AAC エンコーディングを使用する（RTMP の制約）
+        let audio_encoder_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createAudioEncoder")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("inputTrackId", &run.audio.source_track_id)?;
+                    f.member("outputTrackId", &run.audio.encoded_track_id)?;
+                    f.member("codec", "AAC")?;
+                    f.member("bitrateBps", 128_000)?;
+                    f.member("processorId", &run.audio.encoder_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
+            .await?;
+
+        let rtmp_outbound_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createRtmpOutboundEndpoint")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("outputUrl", output_url)?;
+                    if let Some(stream_name) = stream_name {
+                        f.member("streamName", stream_name)?;
+                    }
+                    f.member("inputAudioTrackId", &run.audio.encoded_track_id)?;
+                    f.member("inputVideoTrackId", &run.video.encoded_track_id)?;
+                    f.member("processorId", &run.endpoint_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createRtmpOutboundEndpoint", &rtmp_outbound_request)
+            .await?;
+
+        for source_plan in &output_plan.source_plans {
+            for request in &source_plan.requests {
+                self.send_pipeline_rpc_request(request.method, &request.request_text)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// ソース → ミキサー → エンコーダー → エンドポイントの順に段階的に停止する。
+    pub(super) async fn stop_rtmp_outbound_processors(
+        &self,
+        run: &ObswsRtmpOutboundRun,
+    ) -> crate::Result<()> {
+        // 1. ソースを停止
+        self.stop_processors(&run.source_processor_ids).await?;
+
+        // 2. 音声ミキサー + 映像ミキサーを停止
+        {
+            let mixer_ids = vec![
+                run.audio_mixer_processor_id.clone(),
+                run.video_mixer_processor_id.clone(),
+            ];
+            self.stop_processors(&mixer_ids).await?;
+        }
+
+        // 3. エンコーダーを停止
+        {
+            let ids = vec![
+                run.video.encoder_processor_id.clone(),
+                run.audio.encoder_processor_id.clone(),
+            ];
+            self.stop_processors(&ids).await?;
+        }
+
+        // 4. エンドポイントを停止
+        self.stop_processors(std::slice::from_ref(&run.endpoint_processor_id))
             .await?;
 
         Ok(())
