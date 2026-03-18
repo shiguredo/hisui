@@ -363,7 +363,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
             else:
                 raise AssertionError("record writer did not expose audio sample metric in time")
 
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(2.0)
 
             stop_record_response = await _send_obsws_request(
                 ws,
@@ -864,7 +864,20 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                 lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_push_url),
             )
 
-            await asyncio.sleep(1.0)
+            # mp4_writer に映像フレームが書き込まれるまで待機する
+            for _ in range(30):
+                status, body, _ = await _http_get(
+                    f"http://{host}:{ws_port}/metrics"
+                )
+                if (
+                    status == 200
+                    and 'hisui_total_video_frame_count{processor_id="obsws:record:0:mp4_writer"'
+                    in body
+                ):
+                    break
+                await asyncio.sleep(0.2)
+
+            await asyncio.sleep(0.5)
 
             stop_record_response = await _send_obsws_request(
                 ws,
@@ -944,7 +957,20 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                 lambda: _run_ffmpeg_srt_push(input_path, srt_url),
             )
 
-            await asyncio.sleep(1.0)
+            # mp4_writer に映像フレームが書き込まれるまで待機する
+            for _ in range(30):
+                status, body, _ = await _http_get(
+                    f"http://{host}:{ws_port}/metrics"
+                )
+                if (
+                    status == 200
+                    and 'hisui_total_video_frame_count{processor_id="obsws:record:0:mp4_writer"'
+                    in body
+                ):
+                    break
+                await asyncio.sleep(0.2)
+
+            await asyncio.sleep(0.5)
 
             stop_record_response = await _send_obsws_request(
                 ws,
