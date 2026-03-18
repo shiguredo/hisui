@@ -311,8 +311,9 @@ async def _identify_with_optional_password(
     assert hello_data["rpcVersion"] == 1
 
     identify_data: dict[str, object] = {"rpcVersion": 1}
-    if event_subscriptions is not None:
-        identify_data["eventSubscriptions"] = event_subscriptions
+    # OBS WebSocket プロトコルでは eventSubscriptions 省略時のデフォルトが All のため、
+    # イベントを購読しないテストでは明示的に 0 を送信する。
+    identify_data["eventSubscriptions"] = event_subscriptions if event_subscriptions is not None else 0
     if password is not None:
         authentication = hello_data["authentication"]
         identify_data["authentication"] = _build_obsws_authentication(
