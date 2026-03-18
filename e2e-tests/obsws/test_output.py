@@ -506,7 +506,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             ffmpeg_process = _start_ffmpeg_rtmp_receive(
                 receive_url,
                 output_path,
-                with_audio=False,
+                with_audio=True,
                 max_video_frames=None,
                 listen=True,
                 timeout_seconds=20,
@@ -536,6 +536,9 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
     assert inspect_output["video_sample_count"] > 0
+    # OBS 互換: 音声ソースがなくても常に音声トラック（無音 AAC）が含まれる
+    assert inspect_output["audio_codec"] == "AAC"
+    assert inspect_output["audio_sample_count"] > 0
 
 
 def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
