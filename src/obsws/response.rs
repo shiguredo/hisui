@@ -1033,16 +1033,11 @@ pub(crate) fn collect_output_runtime_stats(
     let stream_total_frames = input_registry
         .stream_run()
         .map(|run| {
-            run.video
-                .as_ref()
-                .map(|video| {
-                    find_counter_metric(
-                        &entries,
-                        &video.encoder_processor_id,
-                        "total_output_video_frame_count",
-                    )
-                })
-                .unwrap_or(0)
+            find_counter_metric(
+                &entries,
+                &run.video.encoder_processor_id,
+                "total_output_video_frame_count",
+            )
         })
         .unwrap_or(0);
     let stream_output_bytes = input_registry

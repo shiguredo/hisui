@@ -67,11 +67,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AudioRealtimeMi
             value.to_member("inputTracks")?.required()?.try_into()?;
         let output_track_id = value.to_member("outputTrackId")?.required()?.try_into()?;
 
-        if input_tracks.is_empty() {
-            let error_value = value.to_member("inputTracks")?.required()?;
-            return Err(error_value.invalid("inputTracks must not be empty"));
-        }
-
         let mut seen_track_ids = HashSet::new();
         for track in &input_tracks {
             if !seen_track_ids.insert(track.track_id.clone()) {
@@ -184,6 +179,7 @@ impl AudioRealtimeMixer {
             track_event_rx: Some(track_event_rx),
             rpc_rx: Some(rpc_rx),
             next_output_timestamp: None,
+            mixer_start: tokio::time::Instant::now(),
             stats,
         }
         .run()
@@ -494,6 +490,7 @@ struct AudioRealtimeMixerRunner<'a> {
     track_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<TrackEvent>>,
     rpc_rx: Option<tokio::sync::mpsc::UnboundedReceiver<AudioRealtimeMixerRpcMessage>>,
     next_output_timestamp: Option<Duration>,
+    mixer_start: tokio::time::Instant,
     stats: AudioRealtimeMixerStats,
 }
 
@@ -661,10 +658,13 @@ impl AudioRealtimeMixerRunner<'_> {
     }
 
     fn maybe_initialize_output_timestamp(&self) -> Option<Duration> {
-        self.states
+        let from_inputs = self
+            .states
             .values()
             .filter_map(|state| state.queue_head_timestamp)
-            .min()
+            .min();
+        // 入力フレームがない場合は mixer_start からの経過時間をタイムスタンプとして使用する
+        Some(from_inputs.unwrap_or_else(|| self.mixer_start.elapsed()))
     }
 
     fn mix_next_audio_frame(&mut self, timestamp: Duration) -> AudioFrame {
@@ -701,16 +701,24 @@ impl AudioRealtimeMixerRunner<'_> {
     }
 
     fn should_finish(&self) -> bool {
-        if !self.config.terminate_on_input_eos {
-            return false;
-        }
-        // terminate_on_input_eos が true の場合は、入力トラックが 0 件になった状態も
-        // 「すべての入力が終了した」とみなして EOS で終了する。
-        // updateAudioMixerInputs([]) 直後の終了は意図した挙動。
-        self.states
-            .values()
-            .all(|state| state.eos && state.is_empty())
+        should_finish_with(self.config.terminate_on_input_eos, &self.states)
     }
+}
+
+/// `should_finish` のロジックを切り出した自由関数。テスト容易性のために分離。
+fn should_finish_with(
+    terminate_on_input_eos: bool,
+    states: &HashMap<TrackId, InputTrackState>,
+) -> bool {
+    if !terminate_on_input_eos {
+        return false;
+    }
+    // 入力トラックが 0 件の場合は無音を送出し続ける。
+    // 後から updateAudioMixerInputs で入力が追加される可能性がある。
+    if states.is_empty() {
+        return false;
+    }
+    states.values().all(|state| state.eos && state.is_empty())
 }
 
 #[derive(Debug)]
@@ -1110,5 +1118,59 @@ mod tests {
             .expect("second frame");
 
         assert_eq!(stats.total_timestamp_rebase_count.get(), 1);
+    }
+
+    fn make_eos_empty_state(config: AudioRealtimeMixerConfig) -> InputTrackState {
+        let mut state = InputTrackState::new(
+            config.sample_rate,
+            config.channels,
+            config.timestamp_rebase_threshold,
+        );
+        state.eos = true;
+        state
+    }
+
+    fn make_active_state(config: AudioRealtimeMixerConfig) -> InputTrackState {
+        InputTrackState::new(
+            config.sample_rate,
+            config.channels,
+            config.timestamp_rebase_threshold,
+        )
+    }
+
+    #[test]
+    fn should_finish_with_empty_inputs_returns_false() {
+        // 入力トラックが 0 件のとき、terminate_on_input_eos = true でも終了しない
+        let states = HashMap::new();
+        assert!(!should_finish_with(true, &states));
+    }
+
+    #[test]
+    fn should_finish_with_terminate_disabled_returns_false() {
+        // terminate_on_input_eos = false なら、EOS 済み入力があっても終了しない
+        let config = test_config();
+        let mut states = HashMap::new();
+        states.insert(TrackId::new("t1"), make_eos_empty_state(config));
+        assert!(!should_finish_with(false, &states));
+    }
+
+    #[test]
+    fn should_finish_with_all_eos_returns_true() {
+        // 全入力が EOS かつキューが空なら終了する
+        let config = test_config();
+        let mut states = HashMap::new();
+        states.insert(TrackId::new("t1"), make_eos_empty_state(config));
+        states.insert(TrackId::new("t2"), make_eos_empty_state(config));
+        assert!(should_finish_with(true, &states));
+    }
+
+    #[test]
+    fn should_finish_with_partial_eos_returns_false() {
+        // 一部の入力のみ EOS の場合は終了しない
+        let config = test_config();
+        let mut states = HashMap::new();
+        states.insert(TrackId::new("t1"), make_eos_empty_state(config));
+        states.insert(TrackId::new("t2"), make_active_state(config));
+        assert!(!should_finish_with(true, &states));
     }
 }
