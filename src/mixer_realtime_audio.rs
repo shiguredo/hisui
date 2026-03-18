@@ -67,11 +67,6 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for AudioRealtimeMi
             value.to_member("inputTracks")?.required()?.try_into()?;
         let output_track_id = value.to_member("outputTrackId")?.required()?.try_into()?;
 
-        if input_tracks.is_empty() {
-            let error_value = value.to_member("inputTracks")?.required()?;
-            return Err(error_value.invalid("inputTracks must not be empty"));
-        }
-
         let mut seen_track_ids = HashSet::new();
         for track in &input_tracks {
             if !seen_track_ids.insert(track.track_id.clone()) {

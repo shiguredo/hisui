@@ -519,7 +519,7 @@ impl ObswsSession {
             frame_rate,
         )
         .map_err(|error| {
-            let error_comment = error.message(request_type);
+            let error_comment = error.message();
             RequestOutcome::failure(
                 crate::obsws_response_builder::build_request_response_error(
                     request_type,
@@ -589,18 +589,10 @@ impl ObswsSession {
                 Ok(output_plan) => output_plan,
                 Err(outcome) => return outcome,
             };
-            let video = output_plan
-                .source_video_track_id
-                .as_ref()
-                .map(|source_track_id| {
-                    ObswsRecordTrackRun::new("stream", run_id, "video", source_track_id)
-                });
-            let audio = output_plan
-                .source_audio_track_id
-                .as_ref()
-                .map(|source_track_id| {
-                    ObswsRecordTrackRun::new("stream", run_id, "audio", source_track_id)
-                });
+            let video =
+                ObswsRecordTrackRun::new("stream", run_id, "video", &output_plan.video_track_id);
+            let audio =
+                ObswsRecordTrackRun::new("stream", run_id, "audio", &output_plan.audio_track_id);
             let run = ObswsStreamRun {
                 source_processor_ids: output_plan.source_processor_ids.clone(),
                 video,
@@ -725,18 +717,10 @@ impl ObswsSession {
             };
             let writer_processor_id =
                 crate::ProcessorId::new(format!("obsws:record:{run_id}:mp4_writer"));
-            let video = output_plan
-                .source_video_track_id
-                .as_ref()
-                .map(|source_track_id| {
-                    ObswsRecordTrackRun::new("record", run_id, "video", source_track_id)
-                });
-            let audio = output_plan
-                .source_audio_track_id
-                .as_ref()
-                .map(|source_track_id| {
-                    ObswsRecordTrackRun::new("record", run_id, "audio", source_track_id)
-                });
+            let video =
+                ObswsRecordTrackRun::new("record", run_id, "video", &output_plan.video_track_id);
+            let audio =
+                ObswsRecordTrackRun::new("record", run_id, "audio", &output_plan.audio_track_id);
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
@@ -946,9 +930,7 @@ impl ObswsSession {
                 None,
             );
         }
-        if run.video.is_some()
-            && let Err(e) = self.request_record_resume_keyframe(&run).await
-        {
+        if let Err(e) = self.request_record_resume_keyframe(&run).await {
             if let Err(rollback_error) = self.pause_record_processors(&run).await {
                 tracing::warn!(
                     "failed to rollback record resume after keyframe request failure: {}",
@@ -1149,9 +1131,9 @@ impl ObswsSession {
         stream_name: Option<&str>,
         run: &ObswsStreamRun,
     ) -> crate::Result<()> {
-        if let (Some(audio), Some(audio_mixer_processor_id)) =
-            (&run.audio, &run.audio_mixer_processor_id)
         {
+            let audio = &run.audio;
+            let audio_mixer_processor_id = &run.audio_mixer_processor_id;
             self.send_create_audio_mixer_request(
                 &output_plan.source_plans,
                 audio,
@@ -1160,14 +1142,15 @@ impl ObswsSession {
             .await?;
         }
 
-        if let (Some(video), Some(video_mixer_processor_id)) =
-            (&run.video, &run.video_mixer_processor_id)
         {
+            let video = &run.video;
+            let video_mixer_processor_id = &run.video_mixer_processor_id;
             self.send_create_video_mixer_request(output_plan, video, video_mixer_processor_id)
                 .await?;
         }
 
-        if let Some(video) = &run.video {
+        {
+            let video = &run.video;
             let video_encoder_request = nojson::object(|f| {
                 f.member("jsonrpc", "2.0")?;
                 f.member("id", 1)?;
@@ -1189,7 +1172,8 @@ impl ObswsSession {
                 .await?;
         }
 
-        if let Some(audio) = &run.audio {
+        {
+            let audio = &run.audio;
             let audio_encoder_request = nojson::object(|f| {
                 f.member("jsonrpc", "2.0")?;
                 f.member("id", 1)?;
@@ -1221,12 +1205,8 @@ impl ObswsSession {
                     if let Some(stream_name) = stream_name {
                         f.member("streamName", stream_name)?;
                     }
-                    if let Some(audio) = &run.audio {
-                        f.member("inputAudioTrackId", &audio.encoded_track_id)?;
-                    }
-                    if let Some(video) = &run.video {
-                        f.member("inputVideoTrackId", &video.encoded_track_id)?;
-                    }
+                    f.member("inputAudioTrackId", &run.audio.encoded_track_id)?;
+                    f.member("inputVideoTrackId", &run.video.encoded_track_id)?;
                     f.member("processorId", &run.publisher_processor_id)
                 }),
             )
@@ -1251,9 +1231,9 @@ impl ObswsSession {
         output_path: &std::path::Path,
         run: &ObswsRecordRun,
     ) -> crate::Result<()> {
-        if let (Some(audio), Some(audio_mixer_processor_id)) =
-            (&run.audio, &run.audio_mixer_processor_id)
         {
+            let audio = &run.audio;
+            let audio_mixer_processor_id = &run.audio_mixer_processor_id;
             self.send_create_audio_mixer_request(
                 &output_plan.source_plans,
                 audio,
@@ -1262,14 +1242,15 @@ impl ObswsSession {
             .await?;
         }
 
-        if let (Some(video), Some(video_mixer_processor_id)) =
-            (&run.video, &run.video_mixer_processor_id)
         {
+            let video = &run.video;
+            let video_mixer_processor_id = &run.video_mixer_processor_id;
             self.send_create_video_mixer_request(output_plan, video, video_mixer_processor_id)
                 .await?;
         }
 
-        if let Some(video) = &run.video {
+        {
+            let video = &run.video;
             let video_encoder_request = nojson::object(|f| {
                 f.member("jsonrpc", "2.0")?;
                 f.member("id", 1)?;
@@ -1291,7 +1272,8 @@ impl ObswsSession {
                 .await?;
         }
 
-        if let Some(audio) = &run.audio {
+        {
+            let audio = &run.audio;
             let audio_encoder_request = nojson::object(|f| {
                 f.member("jsonrpc", "2.0")?;
                 f.member("id", 1)?;
@@ -1320,12 +1302,8 @@ impl ObswsSession {
                 "params",
                 nojson::object(|f| {
                     f.member("outputPath", output_path.display().to_string())?;
-                    if let Some(audio) = &run.audio {
-                        f.member("inputAudioTrackId", &audio.encoded_track_id)?;
-                    }
-                    if let Some(video) = &run.video {
-                        f.member("inputVideoTrackId", &video.encoded_track_id)?;
-                    }
+                    f.member("inputAudioTrackId", &run.audio.encoded_track_id)?;
+                    f.member("inputVideoTrackId", &run.video.encoded_track_id)?;
                     f.member("processorId", &run.writer_processor_id)
                 }),
             )
@@ -1411,9 +1389,7 @@ impl ObswsSession {
             ));
         };
 
-        let Some(video) = run.video.as_ref() else {
-            return Ok(());
-        };
+        let video = &run.video;
         let encoder_processor_id = video.encoder_processor_id.clone();
         let encoder_rpc_sender = pipeline_handle
             .get_rpc_sender::<
@@ -1473,30 +1449,20 @@ impl ObswsSession {
 
         // 2. 音声ミキサー + 映像ミキサーを停止
         {
-            let mut mixer_ids = Vec::new();
-            if let Some(mixer_id) = &run.audio_mixer_processor_id {
-                mixer_ids.push(mixer_id.clone());
-            }
-            if let Some(mixer_id) = &run.video_mixer_processor_id {
-                mixer_ids.push(mixer_id.clone());
-            }
-            if !mixer_ids.is_empty() {
-                self.stop_processors(&mixer_ids).await?;
-            }
+            let mixer_ids = vec![
+                run.audio_mixer_processor_id.clone(),
+                run.video_mixer_processor_id.clone(),
+            ];
+            self.stop_processors(&mixer_ids).await?;
         }
 
         // 3. エンコーダーを停止
         {
-            let mut ids = Vec::new();
-            if let Some(video) = &run.video {
-                ids.push(video.encoder_processor_id.clone());
-            }
-            if let Some(audio) = &run.audio {
-                ids.push(audio.encoder_processor_id.clone());
-            }
-            if !ids.is_empty() {
-                self.stop_processors(&ids).await?;
-            }
+            let ids = vec![
+                run.video.encoder_processor_id.clone(),
+                run.audio.encoder_processor_id.clone(),
+            ];
+            self.stop_processors(&ids).await?;
         }
 
         // 4. パブリッシャーを停止
@@ -1515,30 +1481,20 @@ impl ObswsSession {
 
         // 2. 音声ミキサー + 映像ミキサーを停止（EOS をエンコーダーに伝播）
         {
-            let mut mixer_ids = Vec::new();
-            if let Some(mixer_id) = &run.audio_mixer_processor_id {
-                mixer_ids.push(mixer_id.clone());
-            }
-            if let Some(mixer_id) = &run.video_mixer_processor_id {
-                mixer_ids.push(mixer_id.clone());
-            }
-            if !mixer_ids.is_empty() {
-                self.stop_processors(&mixer_ids).await?;
-            }
+            let mixer_ids = vec![
+                run.audio_mixer_processor_id.clone(),
+                run.video_mixer_processor_id.clone(),
+            ];
+            self.stop_processors(&mixer_ids).await?;
         }
 
         // 3. エンコーダーを停止（EOS をライターに伝播）
         {
-            let mut ids = Vec::new();
-            if let Some(video) = &run.video {
-                ids.push(video.encoder_processor_id.clone());
-            }
-            if let Some(audio) = &run.audio {
-                ids.push(audio.encoder_processor_id.clone());
-            }
-            if !ids.is_empty() {
-                self.stop_processors(&ids).await?;
-            }
+            let ids = vec![
+                run.video.encoder_processor_id.clone(),
+                run.audio.encoder_processor_id.clone(),
+            ];
+            self.stop_processors(&ids).await?;
         }
 
         // 4. ライターを停止（finalize を完了させる）

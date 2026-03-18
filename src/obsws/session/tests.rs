@@ -1327,28 +1327,6 @@ async fn stop_record_when_inactive_returns_error_response() {
 }
 
 #[tokio::test]
-async fn start_record_without_image_input_returns_error_response() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
-    let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
-        .await
-        .expect("identify must succeed");
-    assert!(matches!(identify_action, SessionAction::SendText { .. }));
-
-    let action = session
-        .handle_request(RequestMessage {
-            request_id: Some("req-start-record".to_owned()),
-            request_type: Some("StartRecord".to_owned()),
-            request_data: None,
-        })
-        .await;
-    let text = unwrap_send_text(action);
-    let (result, code) = parse_request_status(&text);
-    assert!(!result);
-    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
-}
-
-#[tokio::test]
 async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
@@ -1490,11 +1468,8 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .record_run()
         .expect("active record must have run state");
     assert_eq!(
-        record_run
-            .audio_mixer_processor_id
-            .as_ref()
-            .map(|id| id.get()),
-        Some("obsws:record:0:audio_mixer")
+        record_run.audio_mixer_processor_id.get(),
+        "obsws:record:0:audio_mixer"
     );
 
     let mut found_audio_mixer = false;
@@ -1633,11 +1608,8 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .stream_run()
         .expect("active stream must have run state");
     assert_eq!(
-        stream_run
-            .audio_mixer_processor_id
-            .as_ref()
-            .map(|id| id.get()),
-        Some("obsws:stream:0:audio_mixer")
+        stream_run.audio_mixer_processor_id.get(),
+        "obsws:stream:0:audio_mixer"
     );
 
     let stop_action = session
@@ -1724,29 +1696,6 @@ async fn toggle_stream_without_image_input_returns_toggle_request_type_error() {
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
     assert_eq!(parse_request_type(&text), "ToggleStream");
-}
-
-#[tokio::test]
-async fn toggle_record_without_image_input_returns_toggle_request_type_error() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
-    let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
-        .await
-        .expect("identify must succeed");
-    assert!(matches!(identify_action, SessionAction::SendText { .. }));
-
-    let action = session
-        .handle_request(RequestMessage {
-            request_id: Some("req-toggle-record".to_owned()),
-            request_type: Some("ToggleRecord".to_owned()),
-            request_data: None,
-        })
-        .await;
-    let text = unwrap_send_text(action);
-    let (result, code) = parse_request_status(&text);
-    assert!(!result);
-    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
-    assert_eq!(parse_request_type(&text), "ToggleRecord");
 }
 
 #[tokio::test]
