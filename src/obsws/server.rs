@@ -1,5 +1,5 @@
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -32,12 +32,8 @@ fn request_path(uri: &str) -> &str {
     uri.split_once('?').map_or(uri, |(path, _)| path)
 }
 
-#[expect(clippy::too_many_arguments)]
 pub async fn run_server(
-    ws_host: IpAddr,
-    ws_port: u16,
-    http_host: IpAddr,
-    http_port: u16,
+    addr: SocketAddr,
     password: Option<String>,
     default_record_dir: PathBuf,
     pipeline_config: crate::MediaPipelineConfig,
@@ -45,17 +41,11 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
-    let ws_listen_addr = SocketAddr::new(ws_host, ws_port);
-    let ws_listener = TcpListener::bind(ws_listen_addr)
+    let listener = TcpListener::bind(addr)
         .await
-        .map_err(|e| crate::Error::new(format!("failed to bind obsws websocket listener: {e}")))?;
-    tracing::info!("obsws server listening on ws://{ws_listen_addr}");
+        .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
+    tracing::info!("obsws server listening on {addr}");
 
-    let http_listen_addr = SocketAddr::new(http_host, http_port);
-    let http_listener = TcpListener::bind(http_listen_addr)
-        .await
-        .map_err(|e| crate::Error::new(format!("failed to bind obsws http listener: {e}")))?;
-    tracing::info!("obsws http server listening on http://{http_listen_addr}");
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
         default_record_dir,
         canvas_width,
@@ -74,27 +64,19 @@ pub async fn run_server(
         tracing::debug!("obsws initial start trigger was already completed");
     }
 
-    let ws_task = tokio::spawn(run_ws_accept_loop(
-        ws_listener,
-        password,
-        input_registry,
-        pipeline_handle.clone(),
-    ));
-    let http_task = tokio::spawn(run_http_accept_loop(http_listener, pipeline_handle));
-
-    tokio::select! {
-        ws_result = ws_task => {
-            ws_result
-                .map_err(|e| crate::Error::new(format!("obsws websocket accept loop task failed: {e}")))?
-        }
-        http_result = http_task => {
-            http_result
-                .map_err(|e| crate::Error::new(format!("obsws http accept loop task failed: {e}")))?
-        }
-    }
+    run_accept_loop(listener, password, input_registry, pipeline_handle).await
 }
 
-async fn run_ws_accept_loop(
+/// 受信バイト列に "upgrade:" ヘッダーが含まれるかを case-insensitive で判定する
+fn contains_upgrade_header(buf: &[u8]) -> bool {
+    let needle = b"\r\nupgrade:";
+    let buf_lower: Vec<u8> = buf.iter().map(|b| b.to_ascii_lowercase()).collect();
+    buf_lower
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+async fn run_accept_loop(
     listener: TcpListener,
     password: Option<String>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
@@ -110,29 +92,43 @@ async fn run_ws_accept_loop(
         let pipeline_handle = pipeline_handle.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                handle_ws_connection(stream, peer_addr, password, input_registry, pipeline_handle)
-                    .await
+                route_connection(stream, peer_addr, password, input_registry, pipeline_handle).await
             {
-                tracing::warn!("obsws connection handler failed: {}", e.display());
+                tracing::warn!(
+                    "obsws connection handler failed from {peer_addr}: {}",
+                    e.display()
+                );
             }
         });
     }
 }
 
-async fn run_http_accept_loop(
-    listener: TcpListener,
+/// 接続の最初のデータを peek し、WebSocket Upgrade か HTTP かをルーティングする
+async fn route_connection(
+    stream: TcpStream,
+    peer_addr: SocketAddr,
+    password: Option<String>,
+    input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::Result<()> {
-    loop {
-        let (stream, peer_addr) = listener.accept().await.map_err(|e| {
-            crate::Error::new(format!("failed to accept obsws http connection: {e}"))
-        })?;
-        let pipeline_handle = pipeline_handle.clone();
-        tokio::spawn(async move {
-            if let Err(e) = handle_http_connection(stream, peer_addr, pipeline_handle).await {
-                tracing::warn!("obsws http connection handler failed from {peer_addr}: {e}");
-            }
-        });
+    let mut buf = [0u8; 8192];
+    let n = stream.peek(&mut buf).await.map_err(|e| {
+        crate::Error::new(format!(
+            "failed to peek obsws connection from {peer_addr}: {e}"
+        ))
+    })?;
+    if n == 0 {
+        return Ok(());
+    }
+
+    if contains_upgrade_header(&buf[..n]) {
+        handle_ws_connection(stream, peer_addr, password, input_registry, pipeline_handle).await
+    } else {
+        handle_http_connection(stream, peer_addr, pipeline_handle)
+            .await
+            .map_err(|e| {
+                crate::Error::new(format!("obsws http handler error from {peer_addr}: {e}"))
+            })
     }
 }
 

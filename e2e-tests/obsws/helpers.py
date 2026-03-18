@@ -15,8 +15,6 @@ from pathlib import Path
 import aiohttp
 import pytest
 
-from hisui_server import reserve_ephemeral_port
-
 OBSWS_SUBPROTOCOL = "obswebsocket.json"
 OBSWS_EVENT_SUB_SCENES = 1 << 2
 OBSWS_EVENT_SUB_INPUTS = 1 << 3
@@ -33,8 +31,6 @@ class ObswsServer:
         *,
         host: str,
         port: int,
-        http_host: str | None = None,
-        http_port: int | None = None,
         password: str | None = None,
         default_record_dir: Path | None = None,
         use_env: bool = False,
@@ -42,13 +38,6 @@ class ObswsServer:
         self.binary_path = binary_path
         self.host = host
         self.port = port
-        self.http_host = http_host or host
-        if http_port is None:
-            reserved_http_port, reserved_http_sock = reserve_ephemeral_port()
-            reserved_http_sock.close()
-            self.http_port = reserved_http_port
-        else:
-            self.http_port = http_port
         self.password = password
         self.default_record_dir = default_record_dir
         self.use_env = use_env
@@ -70,8 +59,6 @@ class ObswsServer:
         if self.use_env:
             env["HISUI_OBSWS_HOST"] = self.host
             env["HISUI_OBSWS_PORT"] = str(self.port)
-            env["HISUI_OBSWS_HTTP_LISTEN_ADDRESS"] = self.http_host
-            env["HISUI_OBSWS_HTTP_PORT"] = str(self.http_port)
             if self.password is not None:
                 env["HISUI_OBSWS_PASSWORD"] = self.password
             if self.default_record_dir is not None:
@@ -83,10 +70,6 @@ class ObswsServer:
                     self.host,
                     "--port",
                     str(self.port),
-                    "--http-listen-address",
-                    self.http_host,
-                    "--http-port",
-                    str(self.http_port),
                 ]
             )
             if self.password is not None:
@@ -121,14 +104,11 @@ class ObswsServer:
                 raise AssertionError(
                     f"obsws process exited before listening: returncode={process.returncode}"
                 )
-            ws_ready = _is_port_open(self.host, self.port)
-            http_ready = _is_port_open(self.http_host, self.http_port)
-            if ws_ready and http_ready:
+            if _is_port_open(self.host, self.port):
                 return
             time.sleep(0.1)
         raise AssertionError(
-            "obsws server did not start listening in time: "
-            f"ws={self.host}:{self.port}, http={self.http_host}:{self.http_port}"
+            f"obsws server did not start listening in time: {self.host}:{self.port}"
         )
 
 
@@ -266,9 +246,9 @@ async def _http_get(url: str):
             return response.status, await response.text(), response.headers
 
 
-def _collect_obsws_metrics_snapshot(http_host: str, http_port: int) -> str:
+def _collect_obsws_metrics_snapshot(host: str, port: int) -> str:
     endpoint = "/metrics"
-    url = f"http://{http_host}:{http_port}{endpoint}"
+    url = f"http://{host}:{port}{endpoint}"
     try:
         status, body, _ = asyncio.run(_http_get(url))
         return f"[{endpoint}] status={status}\n{body}"

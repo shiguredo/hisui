@@ -1,33 +1,19 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
-    let ws_host: IpAddr = noargs::opt("host")
+    let host: IpAddr = noargs::opt("host")
         .ty("HOST")
         .env("HISUI_OBSWS_HOST")
         .doc("OBS WebSocket のリッスンアドレス")
         .default("127.0.0.1")
         .take(&mut args)
         .then(|o| o.value().parse())?;
-    let ws_port: u16 = noargs::opt("port")
+    let port: u16 = noargs::opt("port")
         .ty("PORT")
         .env("HISUI_OBSWS_PORT")
         .doc("OBS WebSocket のリッスンポート")
         .default("4455")
-        .take(&mut args)
-        .then(|o| o.value().parse())?;
-    let http_listen_address: IpAddr = noargs::opt("http-listen-address")
-        .ty("ADDRESS")
-        .env("HISUI_OBSWS_HTTP_LISTEN_ADDRESS")
-        .doc("obsws 用 HTTP サーバーのリッスンアドレス")
-        .default("127.0.0.1")
-        .take(&mut args)
-        .then(|o| o.value().parse())?;
-    let http_port: u16 = noargs::opt("http-port")
-        .ty("PORT")
-        .env("HISUI_OBSWS_HTTP_PORT")
-        .doc("obsws 用 HTTP サーバーのリッスンポート")
-        .default("4456")
         .take(&mut args)
         .then(|o| o.value().parse())?;
     let password: Option<String> = noargs::opt("password")
@@ -75,11 +61,10 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    let addr = SocketAddr::new(host, port);
+
     run_internal(
-        ws_host,
-        ws_port,
-        http_listen_address,
-        http_port,
+        addr,
         password,
         resolve_default_record_dir(default_record_dir)?,
         openh264,
@@ -90,12 +75,8 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
     .map_err(noargs::Error::from)
 }
 
-#[expect(clippy::too_many_arguments)]
 fn run_internal(
-    ws_host: IpAddr,
-    ws_port: u16,
-    http_host: IpAddr,
-    http_port: u16,
+    addr: SocketAddr,
     password: Option<String>,
     default_record_dir: PathBuf,
     openh264: Option<PathBuf>,
@@ -115,10 +96,7 @@ fn run_internal(
 
     runtime.block_on(async move {
         crate::obsws_server::run_server(
-            ws_host,
-            ws_port,
-            http_host,
-            http_port,
+            addr,
             password,
             default_record_dir,
             pipeline_config,

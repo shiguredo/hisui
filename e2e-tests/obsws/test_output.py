@@ -285,7 +285,7 @@ def test_obsws_pause_resume_record_request(binary_path: Path, tmp_path: Path):
 
             await asyncio.sleep(0.3)
             status, body, _ = await _http_get(
-                f"http://{server.http_host}:{server.http_port}/metrics"
+                f"http://{server.host}:{server.port}/metrics"
             )
             assert status == 200
             assert "hisui_total_keyframe_wait_dropped_audio_sample_count" in body
@@ -349,7 +349,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
 
             for _ in range(20):
                 status, body, _ = await _http_get(
-                    f"http://{server.http_host}:{server.http_port}/metrics"
+                    f"http://{server.host}:{server.port}/metrics"
                 )
                 assert status == 200
                 if (
@@ -375,7 +375,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
 
             # StopRecord 後にメトリクスを取得（デバッグ用）
             status, body, _ = await _http_get(
-                f"http://{server.http_host}:{server.http_port}/metrics"
+                f"http://{server.host}:{server.port}/metrics"
             )
             metrics_snapshot = f"[/metrics] status={status}\n{body}"
 
@@ -519,8 +519,8 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
             except Exception as e:
                 # 失敗時の原因切り分け用にメトリクスを添付する。
                 metrics_snapshot = _collect_obsws_metrics_snapshot(
-                    server.http_host,
-                    server.http_port,
+                    server.host,
+                    server.port,
                 )
                 raise AssertionError(
                     f"obsws rtmp stream test failed: {e}\nmetrics_snapshot:\n{metrics_snapshot}"
@@ -650,8 +650,8 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
             except Exception as e:
                 metrics_snapshot = _collect_obsws_metrics_snapshot(
-                    server.http_host,
-                    server.http_port,
+                    server.host,
+                    server.port,
                 )
                 raise AssertionError(
                     f"obsws rtmp stream test with listen mode failed: {e}\nmetrics_snapshot:\n{metrics_snapshot}"
@@ -781,8 +781,8 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
             except Exception as e:
                 metrics_snapshot = _collect_obsws_metrics_snapshot(
-                    server.http_host,
-                    server.http_port,
+                    server.host,
+                    server.port,
                 )
                 raise AssertionError(
                     f"obsws rtmp multi-audio stream test failed: {e}\nmetrics_snapshot:\n{metrics_snapshot}"
