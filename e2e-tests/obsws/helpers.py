@@ -224,6 +224,7 @@ def _run_ffmpeg_rtmp_push(
             return
         time.sleep(0.2)
 
+    assert result is not None, "ffmpeg rtmp push loop did not execute"
     raise AssertionError(
         f"ffmpeg rtmp push failed: returncode={result.returncode}, stderr={result.stderr}"
     )
@@ -263,6 +264,7 @@ def _run_ffmpeg_srt_push(
             return
         time.sleep(0.2)
 
+    assert result is not None, "ffmpeg srt push loop did not execute"
     raise AssertionError(
         f"ffmpeg srt push failed: returncode={result.returncode}, stderr={result.stderr}"
     )

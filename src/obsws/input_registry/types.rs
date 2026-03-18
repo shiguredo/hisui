@@ -838,9 +838,7 @@ impl nojson::DisplayJson for ObswsSrtInboundSettings {
             if let Some(stream_id) = &self.stream_id {
                 f.member("streamId", stream_id)?;
             }
-            if let Some(passphrase) = &self.passphrase {
-                f.member("passphrase", passphrase)?;
-            }
+            // passphrase はセキュリティ上の理由で GetInputSettings に含めない
             Ok(())
         })
         .fmt(f)

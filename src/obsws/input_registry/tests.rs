@@ -1344,6 +1344,21 @@ fn record_pause_resume_returns_expected_errors() {
 }
 
 #[test]
+fn srt_inbound_display_json_excludes_passphrase() {
+    let settings = ObswsSrtInboundSettings {
+        input_url: Some("srt://127.0.0.1:9000".to_owned()),
+        stream_id: Some("test-stream".to_owned()),
+        passphrase: Some("secret-passphrase".to_owned()),
+    };
+    let json = nojson::json(|f| f.value(&settings)).to_string();
+    assert!(json.contains("inputUrl"));
+    assert!(json.contains("streamId"));
+    // passphrase は GetInputSettings で返却されないこと
+    assert!(!json.contains("passphrase"));
+    assert!(!json.contains("secret-passphrase"));
+}
+
+#[test]
 fn create_input_returns_error_when_uuid_suffix_range_is_exhausted() {
     let mut registry = ObswsInputRegistry::new_for_test();
     registry.next_input_id = OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX + 1;
