@@ -13,6 +13,14 @@ hooks = [
     types = ["rust"],
     pass_filenames = false
   },
+  # {
+  #   id = "cargo-clippy",
+  #   name = "cargo clippy",
+  #   entry = "cargo clippy --all-targets --all-features -- -D warnings",
+  #   language = "system",
+  #   types = ["rust"],
+  #   pass_filenames = false
+  # },
   {
     id = "ruff-e2e",
     name = "ruff (e2e-tests)",
