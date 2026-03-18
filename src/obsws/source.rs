@@ -39,7 +39,6 @@ pub struct ObswsRecordSourcePlan {
 
 #[derive(Debug)]
 pub enum BuildObswsRecordSourcePlanError {
-    UnsupportedInputKind(&'static str),
     MissingRequiredField(&'static str),
     InvalidInput(String),
 }
@@ -47,9 +46,6 @@ pub enum BuildObswsRecordSourcePlanError {
 impl BuildObswsRecordSourcePlanError {
     pub fn message(&self) -> String {
         match self {
-            Self::UnsupportedInputKind(kind) => {
-                format!("Input kind is not supported for StartRecord: {kind}")
-            }
             Self::MissingRequiredField(field_name) => {
                 format!("inputSettings.{field_name} is required")
             }

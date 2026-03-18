@@ -529,7 +529,7 @@ impl ObswsInputRegistry {
         self.next_stream_run_id = self
             .next_stream_run_id
             .checked_add(1)
-            .ok_or(RunIdOverflowError::StreamRunIdOverflow)?;
+            .ok_or(RunIdOverflowError::Stream)?;
         Ok(run_id)
     }
 
@@ -538,7 +538,7 @@ impl ObswsInputRegistry {
         self.next_record_run_id = self
             .next_record_run_id
             .checked_add(1)
-            .ok_or(RunIdOverflowError::RecordRunIdOverflow)?;
+            .ok_or(RunIdOverflowError::Record)?;
         Ok(run_id)
     }
 
@@ -591,7 +591,7 @@ impl ObswsInputRegistry {
         self.next_rtmp_outbound_run_id = self
             .next_rtmp_outbound_run_id
             .checked_add(1)
-            .ok_or(RunIdOverflowError::RtmpOutboundRunIdOverflow)?;
+            .ok_or(RunIdOverflowError::RtmpOutbound)?;
         Ok(run_id)
     }
 

@@ -1020,9 +1020,9 @@ pub(crate) struct SceneItemIdOverflowError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunIdOverflowError {
-    StreamRunIdOverflow,
-    RecordRunIdOverflow,
-    RtmpOutboundRunIdOverflow,
+    Stream,
+    Record,
+    RtmpOutbound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
