@@ -391,6 +391,26 @@ async def _expect_record_state_changed_event(
     output_active: bool,
     output_state: str | None = None,
 ):
+    if output_state in (
+        "OBS_WEBSOCKET_OUTPUT_STARTED",
+        "OBS_WEBSOCKET_OUTPUT_STOPPED",
+    ):
+        # hisui は中間状態イベント (STARTING/STOPPING) を最終状態イベントの
+        # 前に送信するため、中間状態を消費してから最終状態を検証する。
+        intermediate_state = (
+            "OBS_WEBSOCKET_OUTPUT_STARTING"
+            if output_state == "OBS_WEBSOCKET_OUTPUT_STARTED"
+            else "OBS_WEBSOCKET_OUTPUT_STOPPING"
+        )
+        intermediate_event = await _expect_obsws_event(
+            ws,
+            event_type="RecordStateChanged",
+            event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+        )
+        assert intermediate_event["d"]["eventData"]["outputState"] == intermediate_state
+        # outputPath は常に存在する（録画中でなければ null）
+        assert "outputPath" in intermediate_event["d"]["eventData"]
+
     event = await _expect_obsws_event(
         ws,
         event_type="RecordStateChanged",
