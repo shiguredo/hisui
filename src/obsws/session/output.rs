@@ -1131,68 +1131,58 @@ impl ObswsSession {
         stream_name: Option<&str>,
         run: &ObswsStreamRun,
     ) -> crate::Result<()> {
-        {
-            let audio = &run.audio;
-            let audio_mixer_processor_id = &run.audio_mixer_processor_id;
-            self.send_create_audio_mixer_request(
-                &output_plan.source_plans,
-                audio,
-                audio_mixer_processor_id,
+        self.send_create_audio_mixer_request(
+            &output_plan.source_plans,
+            &run.audio,
+            &run.audio_mixer_processor_id,
+        )
+        .await?;
+
+        self.send_create_video_mixer_request(
+            output_plan,
+            &run.video,
+            &run.video_mixer_processor_id,
+        )
+        .await?;
+
+        let video_encoder_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createVideoEncoder")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("inputTrackId", &run.video.source_track_id)?;
+                    f.member("outputTrackId", &run.video.encoded_track_id)?;
+                    f.member("codec", "H264")?;
+                    f.member("bitrateBps", 2_000_000)?;
+                    f.member("frameRate", output_plan.frame_rate)?;
+                    f.member("processorId", &run.video.encoder_processor_id)
+                }),
             )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
             .await?;
-        }
 
-        {
-            let video = &run.video;
-            let video_mixer_processor_id = &run.video_mixer_processor_id;
-            self.send_create_video_mixer_request(output_plan, video, video_mixer_processor_id)
-                .await?;
-        }
-
-        {
-            let video = &run.video;
-            let video_encoder_request = nojson::object(|f| {
-                f.member("jsonrpc", "2.0")?;
-                f.member("id", 1)?;
-                f.member("method", "createVideoEncoder")?;
-                f.member(
-                    "params",
-                    nojson::object(|f| {
-                        f.member("inputTrackId", &video.source_track_id)?;
-                        f.member("outputTrackId", &video.encoded_track_id)?;
-                        f.member("codec", "H264")?;
-                        f.member("bitrateBps", 2_000_000)?;
-                        f.member("frameRate", output_plan.frame_rate)?;
-                        f.member("processorId", &video.encoder_processor_id)
-                    }),
-                )
-            })
-            .to_string();
-            self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
-                .await?;
-        }
-
-        {
-            let audio = &run.audio;
-            let audio_encoder_request = nojson::object(|f| {
-                f.member("jsonrpc", "2.0")?;
-                f.member("id", 1)?;
-                f.member("method", "createAudioEncoder")?;
-                f.member(
-                    "params",
-                    nojson::object(|f| {
-                        f.member("inputTrackId", &audio.source_track_id)?;
-                        f.member("outputTrackId", &audio.encoded_track_id)?;
-                        f.member("codec", "AAC")?;
-                        f.member("bitrateBps", 128_000)?;
-                        f.member("processorId", &audio.encoder_processor_id)
-                    }),
-                )
-            })
-            .to_string();
-            self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
-                .await?;
-        }
+        let audio_encoder_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createAudioEncoder")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("inputTrackId", &run.audio.source_track_id)?;
+                    f.member("outputTrackId", &run.audio.encoded_track_id)?;
+                    f.member("codec", "AAC")?;
+                    f.member("bitrateBps", 128_000)?;
+                    f.member("processorId", &run.audio.encoder_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
+            .await?;
 
         let rtmp_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
@@ -1231,68 +1221,58 @@ impl ObswsSession {
         output_path: &std::path::Path,
         run: &ObswsRecordRun,
     ) -> crate::Result<()> {
-        {
-            let audio = &run.audio;
-            let audio_mixer_processor_id = &run.audio_mixer_processor_id;
-            self.send_create_audio_mixer_request(
-                &output_plan.source_plans,
-                audio,
-                audio_mixer_processor_id,
+        self.send_create_audio_mixer_request(
+            &output_plan.source_plans,
+            &run.audio,
+            &run.audio_mixer_processor_id,
+        )
+        .await?;
+
+        self.send_create_video_mixer_request(
+            output_plan,
+            &run.video,
+            &run.video_mixer_processor_id,
+        )
+        .await?;
+
+        let video_encoder_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createVideoEncoder")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("inputTrackId", &run.video.source_track_id)?;
+                    f.member("outputTrackId", &run.video.encoded_track_id)?;
+                    f.member("codec", "H264")?;
+                    f.member("bitrateBps", 2_000_000)?;
+                    f.member("frameRate", output_plan.frame_rate)?;
+                    f.member("processorId", &run.video.encoder_processor_id)
+                }),
             )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
             .await?;
-        }
 
-        {
-            let video = &run.video;
-            let video_mixer_processor_id = &run.video_mixer_processor_id;
-            self.send_create_video_mixer_request(output_plan, video, video_mixer_processor_id)
-                .await?;
-        }
-
-        {
-            let video = &run.video;
-            let video_encoder_request = nojson::object(|f| {
-                f.member("jsonrpc", "2.0")?;
-                f.member("id", 1)?;
-                f.member("method", "createVideoEncoder")?;
-                f.member(
-                    "params",
-                    nojson::object(|f| {
-                        f.member("inputTrackId", &video.source_track_id)?;
-                        f.member("outputTrackId", &video.encoded_track_id)?;
-                        f.member("codec", "H264")?;
-                        f.member("bitrateBps", 2_000_000)?;
-                        f.member("frameRate", output_plan.frame_rate)?;
-                        f.member("processorId", &video.encoder_processor_id)
-                    }),
-                )
-            })
-            .to_string();
-            self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
-                .await?;
-        }
-
-        {
-            let audio = &run.audio;
-            let audio_encoder_request = nojson::object(|f| {
-                f.member("jsonrpc", "2.0")?;
-                f.member("id", 1)?;
-                f.member("method", "createAudioEncoder")?;
-                f.member(
-                    "params",
-                    nojson::object(|f| {
-                        f.member("inputTrackId", &audio.source_track_id)?;
-                        f.member("outputTrackId", &audio.encoded_track_id)?;
-                        f.member("codec", "OPUS")?;
-                        f.member("bitrateBps", 128_000)?;
-                        f.member("processorId", &audio.encoder_processor_id)
-                    }),
-                )
-            })
-            .to_string();
-            self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
-                .await?;
-        }
+        let audio_encoder_request = nojson::object(|f| {
+            f.member("jsonrpc", "2.0")?;
+            f.member("id", 1)?;
+            f.member("method", "createAudioEncoder")?;
+            f.member(
+                "params",
+                nojson::object(|f| {
+                    f.member("inputTrackId", &run.audio.source_track_id)?;
+                    f.member("outputTrackId", &run.audio.encoded_track_id)?;
+                    f.member("codec", "OPUS")?;
+                    f.member("bitrateBps", 128_000)?;
+                    f.member("processorId", &run.audio.encoder_processor_id)
+                }),
+            )
+        })
+        .to_string();
+        self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
+            .await?;
 
         let writer_request = nojson::object(|f| {
             f.member("jsonrpc", "2.0")?;
