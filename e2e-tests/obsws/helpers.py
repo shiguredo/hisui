@@ -190,6 +190,132 @@ def _start_ffmpeg_rtmp_receive(
     )
 
 
+def _run_ffmpeg_rtmp_push(
+    input_path: Path,
+    publish_url: str,
+    *,
+    startup_timeout: float = 10.0,
+) -> None:
+    """ffmpeg で RTMP ストリームを push する（リトライ付き）"""
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for obsws RTMP inbound test")
+
+    deadline = time.time() + startup_timeout
+    result = None
+    while time.time() < deadline:
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-re",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(input_path),
+            "-c",
+            "copy",
+            "-f",
+            "flv",
+            publish_url,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return
+        time.sleep(0.2)
+
+    assert result is not None, "ffmpeg rtmp push loop did not execute"
+    raise AssertionError(
+        f"ffmpeg rtmp push failed: returncode={result.returncode}, stderr={result.stderr}"
+    )
+
+
+def _run_ffmpeg_srt_push(
+    input_path: Path,
+    publish_url: str,
+    *,
+    startup_timeout: float = 10.0,
+) -> None:
+    """ffmpeg で SRT ストリームを push する（リトライ付き）"""
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for obsws SRT inbound test")
+
+    deadline = time.time() + startup_timeout
+    result = None
+    while time.time() < deadline:
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-re",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-i",
+            str(input_path),
+            "-c",
+            "copy",
+            "-f",
+            "mpegts",
+            publish_url,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return
+        time.sleep(0.2)
+
+    assert result is not None, "ffmpeg srt push loop did not execute"
+    raise AssertionError(
+        f"ffmpeg srt push failed: returncode={result.returncode}, stderr={result.stderr}"
+    )
+
+
+def _start_ffmpeg_inbound_push(
+    input_path: Path,
+    publish_url: str,
+    output_format: str,
+    *,
+    startup_timeout: float = 10.0,
+) -> subprocess.Popen[str]:
+    """ffmpeg で inbound ストリームをバックグラウンドで push する（無限ループ、リトライ付き）
+
+    呼び出し側で kill して停止する必要がある。
+    """
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for obsws inbound test")
+
+    cmd = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-re",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-stream_loop",
+        "-1",
+        "-i",
+        str(input_path),
+        "-c",
+        "copy",
+        "-f",
+        output_format,
+        publish_url,
+    ]
+    deadline = time.time() + startup_timeout
+    while time.time() < deadline:
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # プロセスが即座に終了していないか確認する
+        time.sleep(0.3)
+        if process.poll() is None:
+            return process
+        time.sleep(0.2)
+
+    raise AssertionError(
+        f"ffmpeg inbound push failed to start within {startup_timeout}s"
+    )
+
+
 def _wait_process_exit(
     process: subprocess.Popen[str], timeout: float
 ) -> tuple[str, str]:
@@ -391,6 +517,26 @@ async def _expect_record_state_changed_event(
     output_active: bool,
     output_state: str | None = None,
 ):
+    if output_state in (
+        "OBS_WEBSOCKET_OUTPUT_STARTED",
+        "OBS_WEBSOCKET_OUTPUT_STOPPED",
+    ):
+        # hisui は中間状態イベント (STARTING/STOPPING) を最終状態イベントの
+        # 前に送信するため、中間状態を消費してから最終状態を検証する。
+        intermediate_state = (
+            "OBS_WEBSOCKET_OUTPUT_STARTING"
+            if output_state == "OBS_WEBSOCKET_OUTPUT_STARTED"
+            else "OBS_WEBSOCKET_OUTPUT_STOPPING"
+        )
+        intermediate_event = await _expect_obsws_event(
+            ws,
+            event_type="RecordStateChanged",
+            event_intent=OBSWS_EVENT_SUB_OUTPUTS,
+        )
+        assert intermediate_event["d"]["eventData"]["outputState"] == intermediate_state
+        # outputPath は常に存在する（録画中でなければ null）
+        assert "outputPath" in intermediate_event["d"]["eventData"]
+
     event = await _expect_obsws_event(
         ws,
         event_type="RecordStateChanged",

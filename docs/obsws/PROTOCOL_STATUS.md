@@ -5,6 +5,12 @@
 - プロトコル仕様: <https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md>
 - 対象仕様バージョン: OBS WebSocket 5.x（ hisui 側の現在値: `obsWebSocketVersion = 5.7.2`, `rpcVersion = 1` ）
 
+## 準拠バージョン
+
+- OBS Studio: 32.1.0
+- OBS WebSocket: 5.7.2
+- RPC Version: 1
+
 ## 目的
 
 - `obs-websocket` 互換機能の実装状況を 1 つのファイルで管理する
@@ -89,6 +95,7 @@
 - [x] `BroadcastCustomEvent`: カスタムイベントを配信する
 - [x] `Sleep`: 指定時間だけ処理を待機する
   - NOTE: `sleepMillis` は `0..=50000` のみ受理する
+  - NOTE: OBS の仕様上、`Sleep` は `RequestBatch` 内でのみ利用できる。単体 Request として送った場合は `code = 206`（ `Not supported` ）になる
 
 ### Config
 
@@ -383,3 +390,39 @@
 
 - [x] 未対応 `requestType` は `RequestResponse` でエラー応答する
 - [x] エラー内容は `Unknown request type` を返す
+
+## hisui 独自拡張
+
+OBS WebSocket 仕様には存在しない、hisui 固有の拡張機能。
+
+### 独自 Input Kind
+
+以下の `inputKind` は OBS WebSocket 仕様には存在しないが、hisui が独自に追加した入力種別である。
+`CreateInput` / `GetInputKindList` 等の既存 Request で使用できる。
+
+#### `rtmp_inbound`
+
+RTMP インバウンドエンドポイント。指定した URL でリッスンし、外部から push された RTMP ストリームを映像・音声ソースとして取り込む。
+
+**inputSettings:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `inputUrl` | string | 録画・配信開始時に必須 | リッスン URL（例: `rtmp://127.0.0.1:1935`） |
+| `streamName` | string | - | RTMP ストリーム名 |
+
+- NOTE: 映像・音声の両トラックを常に出力する。受信ストリームに含まれないトラックのデコーダーはアイドル状態になる
+
+#### `srt_inbound`
+
+SRT インバウンドエンドポイント。指定した URL でリッスンし、外部から push された SRT ストリームを映像・音声ソースとして取り込む。
+
+**inputSettings:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `inputUrl` | string | 録画・配信開始時に必須 | リッスン URL（例: `srt://127.0.0.1:9000`） |
+| `streamId` | string | - | SRT ストリーム ID（指定時は caller の streamid と照合する） |
+| `passphrase` | string | - | SRT 暗号化パスフレーズ |
+
+- NOTE: 映像・音声の両トラックを常に出力する。受信ストリームに含まれないトラックのデコーダーはアイドル状態になる

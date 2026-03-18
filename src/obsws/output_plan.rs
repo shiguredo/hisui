@@ -143,7 +143,7 @@ pub fn build_composed_output_plan(
     Ok(ObswsComposedOutputPlan {
         source_processor_ids: source_plans
             .iter()
-            .map(|plan| plan.source_processor_id.clone())
+            .flat_map(|plan| plan.source_processor_ids.iter().cloned())
             .collect(),
         source_plans,
         video_track_id,

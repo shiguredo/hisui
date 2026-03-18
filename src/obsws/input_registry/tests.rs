@@ -51,6 +51,8 @@ fn supported_input_kinds_contains_expected_values() {
             .supported_input_kinds()
             .contains(&"mp4_file_source")
     );
+    assert!(registry.supported_input_kinds().contains(&"rtmp_inbound"));
+    assert!(registry.supported_input_kinds().contains(&"srt_inbound"));
 }
 
 #[test]
@@ -1339,6 +1341,21 @@ fn record_pause_resume_returns_expected_errors() {
         registry.pause_record(),
         Err(PauseRecordError::AlreadyPaused)
     );
+}
+
+#[test]
+fn srt_inbound_display_json_excludes_passphrase() {
+    let settings = ObswsSrtInboundSettings {
+        input_url: Some("srt://127.0.0.1:9000".to_owned()),
+        stream_id: Some("test-stream".to_owned()),
+        passphrase: Some("secret-passphrase".to_owned()),
+    };
+    let json = nojson::json(|f| f.value(&settings)).to_string();
+    assert!(json.contains("inputUrl"));
+    assert!(json.contains("streamId"));
+    // passphrase は GetInputSettings で返却されないこと
+    assert!(!json.contains("passphrase"));
+    assert!(!json.contains("secret-passphrase"));
 }
 
 #[test]
