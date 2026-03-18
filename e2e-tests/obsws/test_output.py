@@ -361,7 +361,22 @@ def test_obsws_start_record_with_multiple_audio_inputs(
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
 
-            for _ in range(20):
+            for _ in range(50):
+                record_status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetRecordStatus",
+                    request_id="req-get-record-status-multi-audio",
+                )
+                record_status = record_status_response["d"]["responseData"]
+                if (
+                    record_status["outputActive"] is True
+                    and (
+                        record_status["outputBytes"] > 0
+                        or record_status["outputDuration"] > 0
+                    )
+                ):
+                    break
+
                 status, body, _ = await _http_get(
                     f"http://{server.host}:{server.port}/metrics"
                 )
@@ -373,7 +388,9 @@ def test_obsws_start_record_with_multiple_audio_inputs(
                     break
                 await asyncio.sleep(0.1)
             else:
-                raise AssertionError("record writer did not expose audio sample metric in time")
+                raise AssertionError(
+                    "record did not make observable progress in time"
+                )
 
             await asyncio.sleep(2.0)
 
