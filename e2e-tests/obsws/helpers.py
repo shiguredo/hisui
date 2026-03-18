@@ -195,7 +195,6 @@ def _run_ffmpeg_rtmp_push(
     publish_url: str,
     *,
     startup_timeout: float = 10.0,
-    stream_loop: int = 0,
 ) -> None:
     """ffmpeg で RTMP ストリームを push する（リトライ付き）"""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -212,7 +211,6 @@ def _run_ffmpeg_rtmp_push(
             "-loglevel",
             "error",
             "-nostdin",
-            *(["-stream_loop", str(stream_loop)] if stream_loop > 0 else []),
             "-i",
             str(input_path),
             "-c",
@@ -237,7 +235,6 @@ def _run_ffmpeg_srt_push(
     publish_url: str,
     *,
     startup_timeout: float = 10.0,
-    stream_loop: int = 0,
 ) -> None:
     """ffmpeg で SRT ストリームを push する（リトライ付き）"""
     ffmpeg_path = shutil.which("ffmpeg")
@@ -254,7 +251,6 @@ def _run_ffmpeg_srt_push(
             "-loglevel",
             "error",
             "-nostdin",
-            *(["-stream_loop", str(stream_loop)] if stream_loop > 0 else []),
             "-i",
             str(input_path),
             "-c",
@@ -271,6 +267,52 @@ def _run_ffmpeg_srt_push(
     assert result is not None, "ffmpeg srt push loop did not execute"
     raise AssertionError(
         f"ffmpeg srt push failed: returncode={result.returncode}, stderr={result.stderr}"
+    )
+
+
+def _start_ffmpeg_inbound_push(
+    input_path: Path,
+    publish_url: str,
+    output_format: str,
+    *,
+    startup_timeout: float = 10.0,
+) -> subprocess.Popen[str]:
+    """ffmpeg で inbound ストリームをバックグラウンドで push する（無限ループ、リトライ付き）
+
+    呼び出し側で kill して停止する必要がある。
+    """
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        pytest.skip("ffmpeg is required for obsws inbound test")
+
+    cmd = [
+        ffmpeg_path,
+        "-hide_banner",
+        "-re",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-stream_loop",
+        "-1",
+        "-i",
+        str(input_path),
+        "-c",
+        "copy",
+        "-f",
+        output_format,
+        publish_url,
+    ]
+    deadline = time.time() + startup_timeout
+    while time.time() < deadline:
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # プロセスが即座に終了していないか確認する
+        time.sleep(0.3)
+        if process.poll() is None:
+            return process
+        time.sleep(0.2)
+
+    raise AssertionError(
+        f"ffmpeg inbound push failed to start within {startup_timeout}s"
     )
 
 

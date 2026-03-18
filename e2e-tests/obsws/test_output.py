@@ -17,6 +17,7 @@ from helpers import (
     _run_ffmpeg_rtmp_push,
     _run_ffmpeg_srt_push,
     _send_obsws_request,
+    _start_ffmpeg_inbound_push,
     _start_ffmpeg_rtmp_receive,
     _wait_process_exit,
     _write_test_png,
@@ -857,35 +858,39 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
 
-            # ffmpeg RTMP push を別スレッドで実行する
+            # ffmpeg RTMP push をバックグラウンドで開始する（無限ループ）
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
+            ffmpeg_process = await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_push_url, stream_loop=2),
+                lambda: _start_ffmpeg_inbound_push(input_path, rtmp_push_url, "flv"),
             )
+            try:
+                # mp4_writer に映像サンプルが書き込まれるまで待機する
+                for _ in range(30):
+                    status, body, _ = await _http_get(
+                        f"http://{host}:{ws_port}/metrics"
+                    )
+                    if (
+                        status == 200
+                        and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
+                        in body
+                    ):
+                        break
+                    await asyncio.sleep(0.2)
 
-            # mp4_writer に映像フレームが書き込まれるまで待機する
-            for _ in range(30):
-                status, body, _ = await _http_get(
-                    f"http://{host}:{ws_port}/metrics"
+                await asyncio.sleep(0.5)
+
+                stop_record_response = await _send_obsws_request(
+                    ws,
+                    request_type="StopRecord",
+                    request_id="req-stop-record-rtmp-inbound",
                 )
-                if (
-                    status == 200
-                    and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
-                    in body
-                ):
-                    break
-                await asyncio.sleep(0.2)
+                assert stop_record_response["d"]["requestStatus"]["result"] is True
+                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+            finally:
+                ffmpeg_process.kill()
+                ffmpeg_process.communicate(timeout=5)
 
-            await asyncio.sleep(0.5)
-
-            stop_record_response = await _send_obsws_request(
-                ws,
-                request_type="StopRecord",
-                request_id="req-stop-record-rtmp-inbound",
-            )
-            assert stop_record_response["d"]["requestStatus"]["result"] is True
-            output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
             await ws.close()
             return output_path
 
@@ -950,35 +955,39 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
 
-            # ffmpeg SRT push を別スレッドで実行する（CI 環境でパイプライン処理が間に合うよう入力をループする）
+            # ffmpeg SRT push をバックグラウンドで開始する（無限ループ）
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
+            ffmpeg_process = await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_srt_push(input_path, srt_url, stream_loop=2),
+                lambda: _start_ffmpeg_inbound_push(input_path, srt_url, "mpegts"),
             )
+            try:
+                # mp4_writer に映像サンプルが書き込まれるまで待機する
+                for _ in range(30):
+                    status, body, _ = await _http_get(
+                        f"http://{host}:{ws_port}/metrics"
+                    )
+                    if (
+                        status == 200
+                        and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
+                        in body
+                    ):
+                        break
+                    await asyncio.sleep(0.2)
 
-            # mp4_writer に映像サンプルが書き込まれるまで待機する
-            for _ in range(30):
-                status, body, _ = await _http_get(
-                    f"http://{host}:{ws_port}/metrics"
+                await asyncio.sleep(0.5)
+
+                stop_record_response = await _send_obsws_request(
+                    ws,
+                    request_type="StopRecord",
+                    request_id="req-stop-record-srt-inbound",
                 )
-                if (
-                    status == 200
-                    and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
-                    in body
-                ):
-                    break
-                await asyncio.sleep(0.2)
+                assert stop_record_response["d"]["requestStatus"]["result"] is True
+                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+            finally:
+                ffmpeg_process.kill()
+                ffmpeg_process.communicate(timeout=5)
 
-            await asyncio.sleep(0.5)
-
-            stop_record_response = await _send_obsws_request(
-                ws,
-                request_type="StopRecord",
-                request_id="req-stop-record-srt-inbound",
-            )
-            assert stop_record_response["d"]["requestStatus"]["result"] is True
-            output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
             await ws.close()
             return output_path
 
@@ -1048,35 +1057,39 @@ def test_obsws_srt_inbound_with_stream_id(
             )
             assert start_record_response["d"]["requestStatus"]["result"] is True
 
-            # ffmpeg SRT push を別スレッドで実行する（CI 環境でパイプライン処理が間に合うよう入力をループする）
+            # ffmpeg SRT push をバックグラウンドで開始する（無限ループ）
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
+            ffmpeg_process = await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_srt_push(input_path, srt_push_url, stream_loop=2),
+                lambda: _start_ffmpeg_inbound_push(input_path, srt_push_url, "mpegts"),
             )
+            try:
+                # mp4_writer に映像サンプルが書き込まれるまで待機する
+                for _ in range(30):
+                    status, body, _ = await _http_get(
+                        f"http://{host}:{ws_port}/metrics"
+                    )
+                    if (
+                        status == 200
+                        and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
+                        in body
+                    ):
+                        break
+                    await asyncio.sleep(0.2)
 
-            # mp4_writer に映像サンプルが書き込まれるまで待機する
-            for _ in range(30):
-                status, body, _ = await _http_get(
-                    f"http://{host}:{ws_port}/metrics"
+                await asyncio.sleep(0.5)
+
+                stop_record_response = await _send_obsws_request(
+                    ws,
+                    request_type="StopRecord",
+                    request_id="req-stop-record-srt-inbound-sid",
                 )
-                if (
-                    status == 200
-                    and 'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"'
-                    in body
-                ):
-                    break
-                await asyncio.sleep(0.2)
+                assert stop_record_response["d"]["requestStatus"]["result"] is True
+                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+            finally:
+                ffmpeg_process.kill()
+                ffmpeg_process.communicate(timeout=5)
 
-            await asyncio.sleep(0.5)
-
-            stop_record_response = await _send_obsws_request(
-                ws,
-                request_type="StopRecord",
-                request_id="req-stop-record-srt-inbound-sid",
-            )
-            assert stop_record_response["d"]["requestStatus"]["result"] is True
-            output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
             await ws.close()
             return output_path
 
@@ -1185,7 +1198,7 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_inbound_push_url, stream_loop=2),
+                lambda: _run_ffmpeg_rtmp_push(input_path, rtmp_inbound_push_url),
             )
 
             await asyncio.sleep(1.0)
@@ -1324,7 +1337,7 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: _run_ffmpeg_srt_push(input_path, srt_inbound_url, stream_loop=2),
+                lambda: _run_ffmpeg_srt_push(input_path, srt_inbound_url),
             )
 
             await asyncio.sleep(1.0)
