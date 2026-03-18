@@ -5,7 +5,7 @@ use crate::obsws_input_registry::{
     SetSceneItemLockedResult, SetSceneItemTransformResult,
 };
 use crate::obsws_protocol::{
-    OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_BATCH_RESPONSE,
+    OBS_STUDIO_VERSION, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_BATCH_RESPONSE,
     OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_VERSION,
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_DATA,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
@@ -971,7 +971,6 @@ pub(crate) fn request_status_code_for_parse_error(error: &nojson::JsonParseError
 }
 
 /// Hello メッセージを構築する。
-/// hisui は OBS Studio ではないため obsStudioVersion フィールドは含めない。
 pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> nojson::RawJsonOwned {
     nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_HELLO)?;
@@ -980,6 +979,7 @@ pub fn build_hello_message(authentication: Option<&ObswsAuthentication>) -> nojs
             nojson::object(|f| {
                 f.member("obsWebSocketVersion", OBSWS_VERSION)?;
                 f.member("rpcVersion", OBSWS_RPC_VERSION)?;
+                f.member("obsStudioVersion", OBS_STUDIO_VERSION)?;
                 if let Some(authentication) = authentication {
                     f.member(
                         "authentication",
