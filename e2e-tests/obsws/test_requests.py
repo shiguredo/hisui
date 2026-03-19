@@ -316,9 +316,10 @@ def test_obsws_transition_requests(binary_path: Path):
             == 500
         )
         assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is False
+        # SetCurrentSceneTransitionSettings で明示的に設定されるまで null を返す
         assert get_current_transition_response["d"]["responseData"][
             "transitionSettings"
-        ] == {}
+        ] is None
 
         set_transition_settings_response = asyncio.run(
             _connect_identify_and_request(
@@ -578,9 +579,8 @@ def test_obsws_set_input_name_request(binary_path: Path):
             )
         )
         assert renamed_get_response["d"]["requestStatus"]["result"] is True
-        assert renamed_get_response["d"]["responseData"]["inputName"] == (
-            "obsws-set-name-input-renamed"
-        )
+        # GetInputSettings は inputSettings のみ返す（inputName は含まない）
+        assert "inputSettings" in renamed_get_response["d"]["responseData"]
 
 
 def test_obsws_get_input_default_settings_request(binary_path: Path):
@@ -990,7 +990,7 @@ def test_obsws_create_input_request(binary_path: Path):
         )
         settings_status = settings_response["d"]["requestStatus"]
         assert settings_status["result"] is True
-        assert settings_response["d"]["responseData"]["inputName"] == "obsws-test-input"
+        # GetInputSettings は inputSettings のみ返す（inputName は含まない）
         assert (
             settings_response["d"]["responseData"]["inputSettings"]["device_id"]
             == "sample-device"
