@@ -152,7 +152,9 @@
 ### Inputs
 
 - [x] `GetInputList`: 入力一覧を取得する
+  - NOTE: `inputKindCaps` は現状 `0` 固定。OBS は `OBS_INPUT_CAP_AUDIO` / `OBS_INPUT_CAP_VIDEO` 等のビットフラグを返す（例: image_source = 32769）
 - [x] `GetInputKindList`: 入力種別一覧を取得する
+  - NOTE: hisui の inputKind 一覧は OBS と異なる。共通は `image_source` のみ。hisui 固有の種別は「hisui 独自拡張」セクション参照
 - [ ] `GetSpecialInputs`: 特殊入力設定を取得する
 - [x] `CreateInput`: 入力を作成する
   - NOTE: `sceneName` は既存 Scene のみ受理する（ `CreateScene` で追加可能 ）
@@ -167,7 +169,9 @@
   - NOTE: 成功時は Inputs 購読中セッションへ `InputNameChanged` を配信する
 - [x] `GetInputDefaultSettings`: 入力の既定設定を取得する
   - NOTE: 現在は `image_source` / `video_capture_device` / `mp4_file_source` の既定設定を返す
+  - NOTE: hisui の `image_source` デフォルト設定は `{}` を返す。OBS は `linear_alpha` / `unload` 等のプロパティを含む
 - [x] `GetInputSettings`: 入力設定を取得する
+  - NOTE: OBS の `image_source` は `linear_alpha` / `unload` 等のプロパティを保持するが、hisui はこれらに非対応のため `overlay=true` でのマージ結果が異なる場合がある
 - [x] `SetInputSettings`: 入力設定を更新する
   - NOTE: `overlay` 未指定時は `true` として扱う
   - NOTE: 成功時は Inputs 購読中セッションへ `InputSettingsChanged` を配信する
