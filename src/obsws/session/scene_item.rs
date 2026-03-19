@@ -242,12 +242,7 @@ impl ObswsSession {
                 message_name: "request response message",
             };
         };
-        if !event_context.set_result.changed {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        }
+        // OBS は並び順が変わらなくても SetSceneItemIndex 成功時に常にイベントを送信する
         SessionAction::SendTexts {
             messages: vec![
                 (response_text, "request response message"),
