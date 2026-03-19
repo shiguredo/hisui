@@ -3,6 +3,15 @@
 #:schema https://www.schemastore.org/prek.json
 
 [[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+]
+
+[[repos]]
 repo = "local"
 hooks = [
   {
@@ -11,7 +20,8 @@ hooks = [
     entry = "cargo fmt --all -- --check",
     language = "system",
     types = ["rust"],
-    pass_filenames = false
+    pass_filenames = false,
+    priority = 0,
   },
   # {
   #   id = "cargo-clippy",
@@ -19,14 +29,16 @@ hooks = [
   #   entry = "cargo clippy --all-targets --all-features -- -D warnings",
   #   language = "system",
   #   types = ["rust"],
-  #   pass_filenames = false
+  #   pass_filenames = false,
+  #   priority = 10,
   # },
   {
     id = "ruff-e2e",
     name = "ruff (e2e-tests)",
     entry = "uv run --directory e2e-tests ruff check",
     language = "system",
-    files = '^e2e-tests/.*\.py$',
-    pass_filenames = false
-  }
+    files = { glob = "e2e-tests/**/*.py" },
+    pass_filenames = false,
+    priority = 0,
+  },
 ]
