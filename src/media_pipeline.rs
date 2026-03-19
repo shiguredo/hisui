@@ -1249,8 +1249,6 @@ pub enum PipelineOperationError {
     InvalidParams(String),
     /// 内部エラー
     InternalError(String),
-    /// リクエストが不正
-    InvalidRequest(String),
 }
 
 impl std::fmt::Display for PipelineOperationError {
@@ -1262,20 +1260,6 @@ impl std::fmt::Display for PipelineOperationError {
             Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
             Self::InvalidParams(msg) => write!(f, "Invalid params: {msg}"),
             Self::InternalError(msg) => write!(f, "Internal error: {msg}"),
-            Self::InvalidRequest(msg) => write!(f, "Invalid request: {msg}"),
-        }
-    }
-}
-
-impl From<RegisterProcessorError> for PipelineOperationError {
-    fn from(e: RegisterProcessorError) -> Self {
-        match e {
-            RegisterProcessorError::DuplicateProcessorId => {
-                // processor_id が不明な場合は空の ProcessorId を使う
-                // 呼び出し元で適切な processor_id を設定すること
-                Self::DuplicateProcessorId(ProcessorId::new(""))
-            }
-            RegisterProcessorError::PipelineTerminated => Self::PipelineTerminated,
         }
     }
 }

@@ -1,4 +1,4 @@
-// NOTE: 長いので MediaPipelineHandle の RPC 関連の処理はこっちで実装している
+// NOTE: 長いので MediaPipelineHandle のパイプライン操作メソッドはこっちで実装している
 
 use crate::media_pipeline::{
     MediaPipelineCommand, MediaPipelineHandle, PROCESSOR_TYPE_VIDEO_ENCODER,
