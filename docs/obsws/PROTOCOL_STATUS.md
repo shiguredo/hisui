@@ -238,6 +238,7 @@
 - [ ] `GetGroupSceneItemList`: グループ内アイテム一覧を取得する
 - [x] `GetSceneItemId`: ソース名からシーンアイテム ID を取得する
   - NOTE: `searchOffset` は `0` のみ対応する
+  - NOTE: `sceneItemId` の採番は全シーンで共有するグローバルカウンタを使用する。OBS はシーンごとのローカルカウンタで採番するため、同じ操作でも ID の値が異なる場合がある
 - [x] `GetSceneItemSource`: シーンアイテムに紐づくソースを取得する
 - [x] `CreateSceneItem`: シーンアイテムを作成する
 - [x] `RemoveSceneItem`: シーンアイテムを削除する
