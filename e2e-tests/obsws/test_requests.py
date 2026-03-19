@@ -368,7 +368,8 @@ def test_obsws_transition_requests(binary_path: Path):
                 request_data={"position": 0.25},
             )
         )
-        assert set_tbar_position_response["d"]["requestStatus"]["result"] is True
+        assert set_tbar_position_response["d"]["requestStatus"]["result"] is False
+        assert set_tbar_position_response["d"]["requestStatus"]["code"] == 506
 
         get_transition_cursor_after_tbar_response = asyncio.run(
             _connect_identify_and_request(
@@ -382,7 +383,7 @@ def test_obsws_transition_requests(binary_path: Path):
             get_transition_cursor_after_tbar_response["d"]["responseData"][
                 "transitionCursor"
             ]
-            == 0.25
+            == 0.0
         )
 
         invalid_transition_response = asyncio.run(

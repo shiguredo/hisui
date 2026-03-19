@@ -424,14 +424,18 @@ async def _http_get(url: str):
             return response.status, await response.text(), response.headers
 
 
-def _collect_obsws_metrics_snapshot(host: str, port: int) -> str:
+async def _collect_obsws_metrics_snapshot_async(host: str, port: int) -> str:
     endpoint = "/metrics"
     url = f"http://{host}:{port}{endpoint}"
     try:
-        status, body, _ = asyncio.run(_http_get(url))
+        status, body, _ = await _http_get(url)
         return f"[{endpoint}] status={status}\n{body}"
     except Exception as e:
         return f"[{endpoint}] failed to fetch metrics: {e}"
+
+
+def _collect_obsws_metrics_snapshot(host: str, port: int) -> str:
+    return asyncio.run(_collect_obsws_metrics_snapshot_async(host, port))
 
 
 async def _connect_and_exchange_identify(url: str):

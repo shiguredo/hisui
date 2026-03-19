@@ -12,6 +12,7 @@ from helpers import (
     OBSWS_SUBPROTOCOL,
     ObswsServer,
     _collect_obsws_metrics_snapshot,
+    _collect_obsws_metrics_snapshot_async,
     _format_obsws_diagnostics,
     _http_get,
     _identify_with_optional_password,
@@ -929,7 +930,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     )
 
                 await asyncio.sleep(0.5)
-                metrics_snapshots["before_stop_record"] = _collect_obsws_metrics_snapshot(
+                metrics_snapshots["before_stop_record"] = await _collect_obsws_metrics_snapshot_async(
                     host,
                     ws_port,
                 )
@@ -941,7 +942,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
                 output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
-                metrics_snapshots["after_stop_record"] = _collect_obsws_metrics_snapshot(
+                metrics_snapshots["after_stop_record"] = await _collect_obsws_metrics_snapshot_async(
                     host,
                     ws_port,
                 )
@@ -1049,7 +1050,7 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                     )
 
                 await asyncio.sleep(0.5)
-                metrics_snapshots["before_stop_record"] = _collect_obsws_metrics_snapshot(
+                metrics_snapshots["before_stop_record"] = await _collect_obsws_metrics_snapshot_async(
                     host,
                     ws_port,
                 )
@@ -1061,7 +1062,7 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
                 output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
-                metrics_snapshots["after_stop_record"] = _collect_obsws_metrics_snapshot(
+                metrics_snapshots["after_stop_record"] = await _collect_obsws_metrics_snapshot_async(
                     host,
                     ws_port,
                 )
@@ -1174,7 +1175,7 @@ def test_obsws_srt_inbound_with_stream_id(
                     )
 
                 await asyncio.sleep(0.5)
-                metrics_snapshots["before_stop_record"] = _collect_obsws_metrics_snapshot(
+                metrics_snapshots["before_stop_record"] = await _collect_obsws_metrics_snapshot_async(
                     host,
                     ws_port,
                 )
@@ -1186,7 +1187,7 @@ def test_obsws_srt_inbound_with_stream_id(
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
                 output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
-                metrics_snapshots["after_stop_record"] = _collect_obsws_metrics_snapshot(
+                metrics_snapshots["after_stop_record"] = await _collect_obsws_metrics_snapshot_async(
                     host,
                     ws_port,
                 )
