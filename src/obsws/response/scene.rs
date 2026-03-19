@@ -374,10 +374,9 @@ pub fn build_set_scene_scene_transition_override_response(
         }
     };
 
-    super::build_request_response_success("SetSceneSceneTransitionOverride", request_id, |f| {
-        f.member("transitionName", &override_entry.transition_name)?;
-        f.member("transitionDuration", override_entry.transition_duration)
-    })
+    // OBS は SetSceneSceneTransitionOverride で responseData を返さない
+    let _ = override_entry;
+    super::build_request_response_success_no_data("SetSceneSceneTransitionOverride", request_id)
 }
 
 pub fn build_get_current_scene_transition_cursor_response(
@@ -521,10 +520,9 @@ pub fn build_set_scene_name_response(
         }
     };
 
-    super::build_request_response_success("SetSceneName", request_id, |f| {
-        f.member("sceneName", &renamed.scene_name)?;
-        f.member("sceneUuid", &renamed.scene_uuid)
-    })
+    // OBS は SetSceneName で responseData を返さない
+    let _ = renamed;
+    super::build_request_response_success_no_data("SetSceneName", request_id)
 }
 
 // Scene item handlers continue here.

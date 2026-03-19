@@ -49,9 +49,8 @@ pub fn build_get_stream_service_settings_response(
                 if let Some(server) = &settings.server {
                     f.member("server", server)?;
                 }
-                if let Some(key) = &settings.key {
-                    f.member("key", key)?;
-                }
+                // OBS は key が未設定でも空文字列を返す
+                f.member("key", settings.key.as_deref().unwrap_or(""))?;
                 f.member("use_auth", false)
             }),
         )

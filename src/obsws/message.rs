@@ -889,17 +889,14 @@ mod tests {
             &session_stats,
             &mut input_registry,
         );
+        // OBS は SetSceneSceneTransitionOverride で responseData を返さない
         let set_json = nojson::RawJson::parse(set_response.message.text())?;
-        let transition_name: Option<String> = set_json
+        let set_result: bool = set_json
             .value()
-            .to_path_member(&["d", "responseData", "transitionName"])?
+            .to_path_member(&["d", "requestStatus", "result"])?
+            .required()?
             .try_into()?;
-        let transition_duration: Option<i64> = set_json
-            .value()
-            .to_path_member(&["d", "responseData", "transitionDuration"])?
-            .try_into()?;
-        assert_eq!(transition_name.as_deref(), Some("Fade"));
-        assert_eq!(transition_duration, Some(500));
+        assert!(set_result);
 
         let get_response = handle_request_message(
             RequestMessage {
@@ -1187,13 +1184,8 @@ mod tests {
             .to_path_member(&["d", "requestStatus"])?
             .required()?;
         let result: bool = status.to_member("result")?.required()?.try_into()?;
-        let scene_name: String = json
-            .value()
-            .to_path_member(&["d", "responseData", "sceneName"])?
-            .required()?
-            .try_into()?;
         assert!(result);
-        assert_eq!(scene_name, "Scene Renamed");
+        // OBS は SetSceneName で responseData を返さない
         assert_eq!(
             input_registry
                 .current_program_scene()

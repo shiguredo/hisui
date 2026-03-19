@@ -1035,10 +1035,10 @@ fn set_scene_name_moves_scene_transition_override_to_new_scene_name() {
 }
 
 #[test]
-fn transition_runtime_defaults_to_cut_and_300ms() {
+fn transition_runtime_defaults_to_cut_and_500ms() {
     let registry = ObswsInputRegistry::new_for_test();
     assert_eq!(registry.current_scene_transition_name(), "Cut");
-    assert_eq!(registry.current_scene_transition_duration_ms(), 300);
+    assert_eq!(registry.current_scene_transition_duration_ms(), 500);
     assert_eq!(
         registry.current_scene_transition_settings().value().kind(),
         nojson::JsonValueKind::Object

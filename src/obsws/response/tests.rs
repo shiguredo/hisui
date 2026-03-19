@@ -647,12 +647,13 @@ fn build_set_scene_name_response_succeeds_with_scene_uuid() {
         .and_then(|v| v.required()?.try_into())
         .expect("result must be bool");
     assert!(result);
-    let renamed_scene_name: String = json
+    // OBS は SetSceneName で responseData を返さないため、responseData が存在しないことを確認
+    let response_data = json
         .value()
-        .to_path_member(&["d", "responseData", "sceneName"])
-        .and_then(|v| v.required()?.try_into())
-        .expect("sceneName must be string");
-    assert_eq!(renamed_scene_name, "Scene C");
+        .to_path_member(&["d", "responseData"])
+        .expect("responseData path must be parseable")
+        .optional();
+    assert!(response_data.is_none());
 }
 
 #[test]

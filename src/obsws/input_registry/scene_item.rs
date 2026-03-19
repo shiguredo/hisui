@@ -85,7 +85,7 @@ impl ObswsInputRegistry {
                 scene_item_blend_mode: ObswsSceneItemBlendMode::default().as_str().to_owned(),
                 scene_item_index,
                 scene_item_transform: ObswsSceneItemTransform::default(),
-                is_group: false,
+                is_group: None,
             },
         })
     }
@@ -126,7 +126,7 @@ impl ObswsInputRegistry {
                 scene_item_blend_mode: removed.blend_mode.as_str().to_owned(),
                 scene_item_index: position as i64,
                 scene_item_transform: removed.transform,
-                is_group: false,
+                is_group: None,
             },
         })
     }
@@ -192,7 +192,7 @@ impl ObswsInputRegistry {
                 scene_item_blend_mode: blend_mode.as_str().to_owned(),
                 scene_item_index,
                 scene_item_transform: transform,
-                is_group: false,
+                is_group: None,
             },
         })
     }

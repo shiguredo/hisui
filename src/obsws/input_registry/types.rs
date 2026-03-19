@@ -18,7 +18,7 @@ pub(crate) const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
 pub(crate) const OBSWS_DEFAULT_TRANSITION_NAME: &str = "Cut";
-pub(crate) const OBSWS_DEFAULT_TRANSITION_DURATION_MS: i64 = 300;
+pub(crate) const OBSWS_DEFAULT_TRANSITION_DURATION_MS: i64 = 500;
 pub(crate) const OBSWS_DEFAULT_TRANSITION_SETTINGS_JSON: &str = "{}";
 pub(crate) const OBSWS_DEFAULT_TBAR_POSITION: f64 = 0.0;
 pub(crate) const OBSWS_MIN_TRANSITION_DURATION_MS: i64 = 50;
@@ -478,7 +478,7 @@ impl Default for ObswsSceneItemTransform {
             rotation: 0.0,
             scale_x: PositiveFiniteF64::ONE,
             scale_y: PositiveFiniteF64::ONE,
-            alignment: 0,
+            alignment: 5,
             bounds_type: "OBS_BOUNDS_NONE".to_owned(),
             bounds_alignment: 0,
             bounds_width: 0.0,
@@ -564,7 +564,7 @@ pub struct ObswsSceneItemEntry {
     pub scene_item_blend_mode: String,
     pub scene_item_index: i64,
     pub scene_item_transform: ObswsSceneItemTransform,
-    pub is_group: bool,
+    pub is_group: Option<bool>,
 }
 
 impl nojson::DisplayJson for ObswsSceneItemEntry {

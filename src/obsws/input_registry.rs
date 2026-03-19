@@ -899,7 +899,7 @@ impl ObswsInputRegistry {
                     scene_item_blend_mode: item.blend_mode.as_str().to_owned(),
                     scene_item_index: index as i64,
                     scene_item_transform: item.transform.clone(),
-                    is_group: false,
+                    is_group: None,
                 })
             })
             .collect()
