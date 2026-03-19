@@ -82,12 +82,23 @@ impl ObswsSession {
         let removed_input = input_registry
             .find_input(input_uuid.as_deref(), input_name.as_deref())
             .cloned();
+
+        // 削除前に、この input を参照するシーンアイテムを収集する（SceneItemRemoved イベント用）
+        let scene_items_to_remove = removed_input
+            .as_ref()
+            .map(|input| input_registry.find_scene_items_by_input_uuid(&input.input_uuid));
+
         let response_text = crate::obsws_response_builder::build_remove_input_response(
             request_id,
             Some(request_data),
             &mut input_registry,
         );
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
+
+        let input_event_enabled = self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS);
+        let scene_item_event_enabled =
+            self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS);
+
+        if !input_event_enabled && !scene_item_event_enabled {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -109,16 +120,31 @@ impl ObswsSession {
             };
         }
 
-        let event_text = crate::obsws_response_builder::build_input_removed_event(
-            &removed_input.input_name,
-            &removed_input.input_uuid,
-        );
-        SessionAction::SendTexts {
-            messages: vec![
-                (response_text, "request response message"),
-                (event_text, "event message"),
-            ],
+        let mut messages = vec![(response_text, "request response message")];
+
+        // OBS の送信順序に合わせ、InputRemoved → SceneItemRemoved の順で送信
+        if input_event_enabled {
+            let event_text = crate::obsws_response_builder::build_input_removed_event(
+                &removed_input.input_name,
+                &removed_input.input_uuid,
+            );
+            messages.push((event_text, "event message"));
         }
+
+        if scene_item_event_enabled && let Some(scene_items) = scene_items_to_remove {
+            for (scene_name, scene_uuid, scene_item_id) in scene_items {
+                let event_text = crate::obsws_response_builder::build_scene_item_removed_event(
+                    &scene_name,
+                    &scene_uuid,
+                    scene_item_id,
+                    &removed_input.input_name,
+                    &removed_input.input_uuid,
+                );
+                messages.push((event_text, "event message"));
+            }
+        }
+
+        SessionAction::SendTexts { messages }
     }
 
     pub(super) async fn handle_set_input_settings_request(

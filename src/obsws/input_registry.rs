@@ -720,6 +720,24 @@ impl ObswsInputRegistry {
             .map(|run| run.output_path.as_path())
     }
 
+    /// 指定した input_uuid を参照するシーンアイテムを全シーンから検索する。
+    /// 戻り値は (scene_name, scene_uuid, scene_item_id) のリスト。
+    pub fn find_scene_items_by_input_uuid(&self, input_uuid: &str) -> Vec<(String, String, i64)> {
+        let mut result = Vec::new();
+        for (scene_name, scene) in &self.scenes_by_name {
+            for item in &scene.items {
+                if item.input_uuid == input_uuid {
+                    result.push((
+                        scene_name.clone(),
+                        scene.scene_uuid.clone(),
+                        item.scene_item_id,
+                    ));
+                }
+            }
+        }
+        result
+    }
+
     pub fn remove_input(
         &mut self,
         input_uuid: Option<&str>,
