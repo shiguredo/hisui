@@ -1,5 +1,5 @@
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
+    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
 use crate::obsws_input_registry::ObswsRtspSubscriberSettings;
 use crate::{ProcessorId, TrackId};
@@ -39,75 +39,34 @@ pub(super) fn build_record_source_plan(
         "obsws:{kind}:{run_id}:source:{source_index}:audio_decoder"
     ));
 
-    // createRtspSubscriber リクエスト
-    let endpoint_request_text = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", 1)?;
-        f.member("method", "createRtspSubscriber")?;
-        f.member(
-            "params",
-            nojson::object(|f| {
-                f.member("inputUrl", input_url)?;
-                f.member("outputVideoTrackId", &encoded_video_track_id)?;
-                f.member("outputAudioTrackId", &encoded_audio_track_id)?;
-                f.member("processorId", &source_processor_id)
-            }),
-        )
-    })
-    .to_string();
-
-    // createVideoDecoder リクエスト
-    let video_decoder_request_text = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", 1)?;
-        f.member("method", "createVideoDecoder")?;
-        f.member(
-            "params",
-            nojson::object(|f| {
-                f.member("inputTrackId", &encoded_video_track_id)?;
-                f.member("outputTrackId", &raw_video_track_id)?;
-                f.member("processorId", &video_decoder_processor_id)
-            }),
-        )
-    })
-    .to_string();
-
-    // createAudioDecoder リクエスト
-    let audio_decoder_request_text = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", 1)?;
-        f.member("method", "createAudioDecoder")?;
-        f.member(
-            "params",
-            nojson::object(|f| {
-                f.member("inputTrackId", &encoded_audio_track_id)?;
-                f.member("outputTrackId", &raw_audio_track_id)?;
-                f.member("processorId", &audio_decoder_processor_id)
-            }),
-        )
-    })
-    .to_string();
+    let subscriber = crate::subscriber_rtsp::RtspSubscriber {
+        input_url: input_url.to_owned(),
+        output_video_track_id: Some(encoded_video_track_id.clone()),
+        output_audio_track_id: Some(encoded_audio_track_id.clone()),
+    };
 
     Ok(ObswsRecordSourcePlan {
         source_processor_ids: vec![
-            source_processor_id,
-            video_decoder_processor_id,
-            audio_decoder_processor_id,
+            source_processor_id.clone(),
+            video_decoder_processor_id.clone(),
+            audio_decoder_processor_id.clone(),
         ],
-        source_video_track_id: Some(raw_video_track_id),
-        source_audio_track_id: Some(raw_audio_track_id),
+        source_video_track_id: Some(raw_video_track_id.clone()),
+        source_audio_track_id: Some(raw_audio_track_id.clone()),
         requests: vec![
-            ObswsSourceRpcRequest {
-                method: "createRtspSubscriber",
-                request_text: endpoint_request_text,
+            ObswsSourceRequest::CreateRtspSubscriber {
+                subscriber,
+                processor_id: Some(source_processor_id),
             },
-            ObswsSourceRpcRequest {
-                method: "createVideoDecoder",
-                request_text: video_decoder_request_text,
+            ObswsSourceRequest::CreateVideoDecoder {
+                input_track_id: encoded_video_track_id,
+                output_track_id: raw_video_track_id,
+                processor_id: Some(video_decoder_processor_id),
             },
-            ObswsSourceRpcRequest {
-                method: "createAudioDecoder",
-                request_text: audio_decoder_request_text,
+            ObswsSourceRequest::CreateAudioDecoder {
+                input_track_id: encoded_audio_track_id,
+                output_track_id: raw_audio_track_id,
+                processor_id: Some(audio_decoder_processor_id),
             },
         ],
     })
@@ -118,8 +77,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_record_source_plan_generates_three_requests() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn build_record_source_plan_generates_three_requests() {
         let plan = build_record_source_plan(
             &ObswsRtspSubscriberSettings {
                 input_url: Some("rtsp://127.0.0.1:554/stream".to_owned()),
@@ -130,7 +88,6 @@ mod tests {
         )
         .expect("rtsp_subscriber source plan must succeed");
 
-        // source_processor_ids に subscriber + video_decoder + audio_decoder の 3 つが含まれることを検証する
         assert_eq!(plan.source_processor_ids.len(), 3);
         assert_eq!(
             plan.source_processor_ids[0].get(),
@@ -146,9 +103,6 @@ mod tests {
         );
 
         assert_eq!(plan.requests.len(), 3);
-        assert_eq!(plan.requests[0].method, "createRtspSubscriber");
-        assert_eq!(plan.requests[1].method, "createVideoDecoder");
-        assert_eq!(plan.requests[2].method, "createAudioDecoder");
 
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
@@ -159,45 +113,13 @@ mod tests {
             Some("obsws:record:1:source:0:raw_audio")
         );
 
-        // createRtspSubscriber のパラメータを検証する
-        let json = nojson::RawJson::parse(&plan.requests[0].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let input_url: String = params.to_member("inputUrl")?.required()?.try_into()?;
-        assert_eq!(input_url, "rtsp://127.0.0.1:554/stream");
-        let output_video_track_id: String = params
-            .to_member("outputVideoTrackId")?
-            .required()?
-            .try_into()?;
-        assert_eq!(
-            output_video_track_id,
-            "obsws:record:1:source:0:encoded_video"
-        );
-        let output_audio_track_id: String = params
-            .to_member("outputAudioTrackId")?
-            .required()?
-            .try_into()?;
-        assert_eq!(
-            output_audio_track_id,
-            "obsws:record:1:source:0:encoded_audio"
-        );
-
-        // createVideoDecoder のパラメータを検証する
-        let json = nojson::RawJson::parse(&plan.requests[1].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let input_track_id: String = params.to_member("inputTrackId")?.required()?.try_into()?;
-        assert_eq!(input_track_id, "obsws:record:1:source:0:encoded_video");
-        let output_track_id: String = params.to_member("outputTrackId")?.required()?.try_into()?;
-        assert_eq!(output_track_id, "obsws:record:1:source:0:raw_video");
-
-        // createAudioDecoder のパラメータを検証する
-        let json = nojson::RawJson::parse(&plan.requests[2].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let input_track_id: String = params.to_member("inputTrackId")?.required()?.try_into()?;
-        assert_eq!(input_track_id, "obsws:record:1:source:0:encoded_audio");
-        let output_track_id: String = params.to_member("outputTrackId")?.required()?.try_into()?;
-        assert_eq!(output_track_id, "obsws:record:1:source:0:raw_audio");
-
-        Ok(())
+        // CreateRtspSubscriber のパラメータを検証する
+        match &plan.requests[0] {
+            ObswsSourceRequest::CreateRtspSubscriber { subscriber, .. } => {
+                assert_eq!(subscriber.input_url, "rtsp://127.0.0.1:554/stream");
+            }
+            _ => panic!("expected CreateRtspSubscriber"),
+        }
     }
 
     #[test]

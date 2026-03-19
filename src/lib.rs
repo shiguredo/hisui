@@ -32,7 +32,6 @@ pub mod encoder_svt_av1;
 pub mod encoder_video_toolbox;
 pub mod endpoint_http_bootstrap;
 pub mod endpoint_http_metrics;
-pub mod endpoint_http_rpc;
 pub mod error;
 pub mod file_reader_mp4;
 pub mod file_reader_webm;
@@ -40,7 +39,6 @@ pub mod future;
 pub mod inbound_endpoint_rtmp;
 pub mod inbound_endpoint_srt;
 pub mod json;
-pub mod jsonrpc;
 pub mod logger;
 pub mod media;
 pub mod media_pipeline;
@@ -54,7 +52,6 @@ pub mod progress;
 pub mod publisher_rtmp;
 pub mod reader_mp4;
 pub mod reader_webm;
-mod rpc_request_file;
 pub mod rtmp;
 pub mod sample_based_timestamp_aligner;
 mod sora_recording_compose_stats_json;
@@ -108,8 +105,8 @@ pub use error::Error;
 pub use media::MediaFrame;
 pub use media_pipeline::{
     Ack, MediaPipeline, MediaPipelineConfig, MediaPipelineHandle, Message, MessageReceiver,
-    MessageSender, PipelineTerminated, ProcessorHandle, ProcessorId, ProcessorMetadata,
-    PublishTrackError, RegisterProcessorError, Syn, TrackId,
+    MessageSender, PipelineOperationError, PipelineTerminated, ProcessorHandle, ProcessorId,
+    ProcessorMetadata, PublishTrackError, RegisterProcessorError, Syn, TrackId,
 };
 pub use source_file_mp4::Mp4FileSource;
 pub use source_png_file::PngFileSource;

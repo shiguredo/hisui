@@ -98,7 +98,7 @@ impl DataChannelObserverHandler for RpcMessageHandler {
 }
 
 struct Session {
-    handle: crate::MediaPipelineHandle,
+    _handle: crate::MediaPipelineHandle,
     processor_handle: crate::ProcessorHandle,
     factory: Arc<PeerConnectionFactory>,
     pc: PeerConnection,
@@ -300,7 +300,7 @@ fn bootstrap_internal(
     crate::webrtc_sdp::set_local_answer(&pc, &answer_sdp)?;
 
     let sess = Session {
-        handle,
+        _handle: handle,
         processor_handle,
         factory,
         pc,
@@ -392,6 +392,10 @@ fn send_dc(sess: &Session, msg: &str) {
     }
 }
 
+/// subscribe 以外の RPC メソッドに対する固定エラーレスポンス
+const RPC_NOT_SUPPORTED_ERROR: &str =
+    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"RPC is not supported"}}"#;
+
 async fn handle_rpc_message(sess: &mut Session, data: &[u8], is_binary: bool) {
     if let Ok(text) = std::str::from_utf8(data) {
         tracing::debug!("Received rpc message: {text}");
@@ -399,52 +403,93 @@ async fn handle_rpc_message(sess: &mut Session, data: &[u8], is_binary: bool) {
         tracing::debug!("Received rpc message: {data:?}");
     }
 
-    let request_json = match crate::jsonrpc::parse_request_bytes(data) {
+    // JSON パース
+    let text = match std::str::from_utf8(data) {
+        Ok(text) => text,
+        Err(_) => {
+            send_rpc_response(sess, RPC_NOT_SUPPORTED_ERROR.as_bytes(), is_binary);
+            return;
+        }
+    };
+    let request_json = match nojson::RawJson::parse(text) {
         Ok(json) => json,
-        Err(response) => {
-            send_rpc_response(sess, response.to_string().as_bytes(), is_binary);
+        Err(_) => {
+            send_rpc_response(sess, RPC_NOT_SUPPORTED_ERROR.as_bytes(), is_binary);
             return;
         }
     };
     let request = request_json.value();
-    let method = match crate::jsonrpc::get_method(request) {
+
+    // メソッド名を取得する
+    let method = match request
+        .to_member("method")
+        .and_then(|v| v.required())
+        .and_then(|v| v.as_string_str())
+    {
         Ok(method) => method,
-        Err(response) => {
-            send_rpc_response(sess, response.to_string().as_bytes(), is_binary);
+        Err(_) => {
+            send_rpc_response(sess, RPC_NOT_SUPPORTED_ERROR.as_bytes(), is_binary);
             return;
         }
     };
     let request_id = request.to_member("id").ok().and_then(|v| v.optional());
 
+    // subscribe 以外は固定エラーを返す
     if method != "subscribe" {
-        if let Some(response) = sess.handle.rpc(data).await {
-            send_rpc_response(sess, response.to_string().as_bytes(), is_binary);
-        }
+        send_rpc_response(sess, RPC_NOT_SUPPORTED_ERROR.as_bytes(), is_binary);
         return;
     }
 
     match (request_id, handle_subscribe_rpc(sess, request).await) {
         (Some(id), Ok(result)) => {
-            let response = crate::jsonrpc::ok_response(
-                id,
-                nojson::json(|f| write!(f.inner_mut(), "{result}")),
-            );
-            send_rpc_response(sess, response.to_string().as_bytes(), is_binary);
+            let response = make_jsonrpc_ok_response(id, &result);
+            send_rpc_response(sess, response.as_bytes(), is_binary);
         }
         (Some(id), Err(e)) => {
-            let response =
-                crate::jsonrpc::error_response(id, crate::jsonrpc::INTERNAL_ERROR, e.reason);
-            send_rpc_response(sess, response.to_string().as_bytes(), is_binary);
+            let response = make_jsonrpc_error_response(id, -32603, &e.reason);
+            send_rpc_response(sess, response.as_bytes(), is_binary);
         }
         (None, Ok(_)) => {}
         (None, Err(e)) => {
             tracing::warn!(
-                "rpc notification failed: method=subscribe, code={}, message={}",
-                crate::jsonrpc::INTERNAL_ERROR,
+                "rpc notification failed: method=subscribe, code=-32603, message={}",
                 e.reason
             );
         }
     }
+}
+
+/// JSON-RPC 成功レスポンスを構築する
+fn make_jsonrpc_ok_response(id: nojson::RawJsonValue<'_, '_>, result: &str) -> String {
+    nojson::object(|f| {
+        f.member("jsonrpc", "2.0")?;
+        f.member("id", id)?;
+        f.member(
+            "result",
+            nojson::json(|f| write!(f.inner_mut(), "{result}")),
+        )
+    })
+    .to_string()
+}
+
+/// JSON-RPC エラーレスポンスを構築する
+fn make_jsonrpc_error_response(
+    id: nojson::RawJsonValue<'_, '_>,
+    code: i32,
+    message: &str,
+) -> String {
+    nojson::object(|f| {
+        f.member("jsonrpc", "2.0")?;
+        f.member("id", id)?;
+        f.member(
+            "error",
+            nojson::object(|f| {
+                f.member("code", code)?;
+                f.member("message", message)
+            }),
+        )
+    })
+    .to_string()
 }
 
 fn send_rpc_response(sess: &Session, response_bytes: &[u8], is_binary: bool) {

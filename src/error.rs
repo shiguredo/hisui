@@ -115,6 +115,13 @@ impl From<crate::PublishTrackError> for Error {
     }
 }
 
+impl From<crate::media_pipeline::PipelineOperationError> for Error {
+    #[track_caller]
+    fn from(e: crate::media_pipeline::PipelineOperationError) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
 impl From<crate::RegisterProcessorError> for Error {
     #[track_caller]
     fn from(e: crate::RegisterProcessorError) -> Self {

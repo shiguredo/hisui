@@ -705,7 +705,11 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
 
     assert output_path.exists(), "RTMP received output file must exist"
     assert output_path.stat().st_size > 0, "RTMP received output file must not be empty"
-    inspect_output = _inspect_mp4(binary_path, output_path)
+    inspect_output = _inspect_mp4(
+        binary_path,
+        output_path,
+        required_keys=("video_codec", "video_sample_count"),
+    )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
     assert inspect_output["audio_codec"] == "AAC"
@@ -836,7 +840,11 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
 
     assert output_path.exists(), "RTMP received output file must exist"
     assert output_path.stat().st_size > 0, "RTMP received output file must not be empty"
-    inspect_output = _inspect_mp4(binary_path, output_path)
+    inspect_output = _inspect_mp4(
+        binary_path,
+        output_path,
+        required_keys=("video_codec", "video_sample_count"),
+    )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["audio_codec"] == "AAC"
     assert inspect_output["audio_sample_count"] > 0
@@ -940,7 +948,11 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
-    inspect_output = _inspect_mp4(binary_path, output_path)
+    inspect_output = _inspect_mp4(
+        binary_path,
+        output_path,
+        required_keys=("video_codec", "video_sample_count"),
+    )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
     assert inspect_output["video_sample_count"] > 0
@@ -1036,7 +1048,11 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
-    inspect_output = _inspect_mp4(binary_path, output_path)
+    inspect_output = _inspect_mp4(
+        binary_path,
+        output_path,
+        required_keys=("video_codec", "video_sample_count"),
+    )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
     assert inspect_output["video_sample_count"] > 0
@@ -1137,7 +1153,11 @@ def test_obsws_srt_inbound_with_stream_id(
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
-    inspect_output = _inspect_mp4(binary_path, output_path)
+    inspect_output = _inspect_mp4(
+        binary_path,
+        output_path,
+        required_keys=("video_codec", "video_sample_count"),
+    )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
     assert inspect_output["video_sample_count"] > 0

@@ -1,5 +1,5 @@
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
+    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
 use crate::obsws_input_registry::ObswsImageSourceSettings;
 use crate::{ProcessorId, TrackId};
@@ -25,29 +25,20 @@ pub(super) fn build_record_source_plan(
         "obsws:{}:{run_id}:source:{source_index}:raw_video",
         output_kind.as_str()
     ));
-    let request_text = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", 1)?;
-        f.member("method", "createPngFileSource")?;
-        f.member(
-            "params",
-            nojson::object(|f| {
-                f.member("path", path)?;
-                f.member("frameRate", frame_rate)?;
-                f.member("outputVideoTrackId", &source_video_track_id)?;
-                f.member("processorId", &source_processor_id)
-            }),
-        )
-    })
-    .to_string();
+
+    let source = crate::PngFileSource {
+        path: std::path::PathBuf::from(path),
+        frame_rate,
+        output_video_track_id: source_video_track_id.clone(),
+    };
 
     Ok(ObswsRecordSourcePlan {
-        source_processor_ids: vec![source_processor_id],
+        source_processor_ids: vec![source_processor_id.clone()],
         source_video_track_id: Some(source_video_track_id),
         source_audio_track_id: None,
-        requests: vec![ObswsSourceRpcRequest {
-            method: "createPngFileSource",
-            request_text,
+        requests: vec![ObswsSourceRequest::CreatePngFileSource {
+            source,
+            processor_id: Some(source_processor_id),
         }],
     })
 }
