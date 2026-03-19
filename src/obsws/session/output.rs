@@ -1697,33 +1697,37 @@ impl ObswsSession {
     }
 
     /// ソース → ミキサー → エンコーダー → ライターの順に段階的に停止する。
-    /// EOS がパイプラインを伝播してから次の段階を停止することで、
-    /// MP4 writer の finalize が確実に完了するようにする。
+    /// source だけを明示的に停止し、その後段は EOS 伝播による自然終了を待つことで、
+    /// MP4 writer の finalize が完了してから StopRecord を返すようにする。
     pub(super) async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
-        // 1. ソースを停止（データ生産を止める）
+        // 1. ソースを停止して新規入力を止める
         self.stop_processors(&run.source_processor_ids).await?;
 
-        // 2. 音声ミキサー + 映像ミキサーを停止（EOS をエンコーダーに伝播）
+        // 2. 音声ミキサー + 映像ミキサーが EOS を流して自然終了するのを待つ
         {
             let mixer_ids = vec![
                 run.audio_mixer_processor_id.clone(),
                 run.video_mixer_processor_id.clone(),
             ];
-            self.stop_processors(&mixer_ids).await?;
+            self.wait_processors_stopped_with_default_timeout(&mixer_ids)
+                .await?;
         }
 
-        // 3. エンコーダーを停止（EOS をライターに伝播）
+        // 3. エンコーダーが残バッファを流して自然終了するのを待つ
         {
             let ids = vec![
                 run.video.encoder_processor_id.clone(),
                 run.audio.encoder_processor_id.clone(),
             ];
-            self.stop_processors(&ids).await?;
+            self.wait_processors_stopped_with_default_timeout(&ids)
+                .await?;
         }
 
-        // 4. ライターを停止（finalize を完了させる）
-        self.stop_processors(std::slice::from_ref(&run.writer_processor_id))
-            .await?;
+        // 4. ライターが finalize を完了して自然終了するのを待つ
+        self.wait_processors_stopped_with_default_timeout(std::slice::from_ref(
+            &run.writer_processor_id,
+        ))
+        .await?;
 
         Ok(())
     }
@@ -1752,7 +1756,7 @@ impl ObswsSession {
             }
         }
 
-        self.wait_processors_stopped(pipeline_handle, processor_ids, Duration::from_secs(2))
+        self.wait_processors_stopped_with_default_timeout(processor_ids)
             .await?;
 
         if let Some(e) = terminate_error {
@@ -1760,6 +1764,20 @@ impl ObswsSession {
         }
 
         Ok(())
+    }
+
+    pub(super) async fn wait_processors_stopped_with_default_timeout(
+        &self,
+        processor_ids: &[crate::ProcessorId],
+    ) -> crate::Result<()> {
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            return Err(crate::Error::new(
+                "BUG: obsws pipeline handle is not initialized",
+            ));
+        };
+
+        self.wait_processors_stopped(pipeline_handle, processor_ids, Duration::from_secs(5))
+            .await
     }
 
     pub(super) async fn wait_processors_stopped(

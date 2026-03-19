@@ -17,7 +17,6 @@ from helpers import (
     _http_get,
     _identify_with_optional_password,
     _inspect_mp4,
-    _print_obsws_diagnostics,
     _run_ffmpeg_rtmp_push,
     _run_ffmpeg_srt_push,
     _send_obsws_request,
@@ -972,10 +971,6 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
             metrics_snapshots=metrics_snapshots,
         ),
     )
-    _print_obsws_diagnostics(
-        inspect_output=inspect_output,
-        metrics_snapshots=metrics_snapshots,
-    )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
     assert inspect_output["video_sample_count"] > 0
@@ -1091,10 +1086,6 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
         diagnostics_text=_format_obsws_diagnostics(
             metrics_snapshots=metrics_snapshots,
         ),
-    )
-    _print_obsws_diagnostics(
-        inspect_output=inspect_output,
-        metrics_snapshots=metrics_snapshots,
     )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
@@ -1216,10 +1207,6 @@ def test_obsws_srt_inbound_with_stream_id(
         diagnostics_text=_format_obsws_diagnostics(
             metrics_snapshots=metrics_snapshots,
         ),
-    )
-    _print_obsws_diagnostics(
-        inspect_output=inspect_output,
-        metrics_snapshots=metrics_snapshots,
     )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
