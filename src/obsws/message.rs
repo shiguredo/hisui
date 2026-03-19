@@ -1543,18 +1543,12 @@ mod tests {
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(response.message.text())?;
-        let input_kind: String = json
-            .value()
-            .to_path_member(&["d", "responseData", "inputKind"])?
-            .required()?
-            .try_into()?;
         let default_input_settings = json
             .value()
             .to_path_member(&["d", "responseData", "defaultInputSettings"])?
             .required()?;
         let device_id: Option<String> =
             default_input_settings.to_member("device_id")?.try_into()?;
-        assert_eq!(input_kind, "video_capture_device");
         assert_eq!(device_id, None);
         Ok(())
     }
@@ -1572,11 +1566,6 @@ mod tests {
         let response = handle_request_message(request, &session_stats, &mut input_registry);
 
         let json = nojson::RawJson::parse(response.message.text())?;
-        let input_kind: String = json
-            .value()
-            .to_path_member(&["d", "responseData", "inputKind"])?
-            .required()?
-            .try_into()?;
         let default_input_settings = json
             .value()
             .to_path_member(&["d", "responseData", "defaultInputSettings"])?
@@ -1586,7 +1575,6 @@ mod tests {
             .to_member("loopPlayback")?
             .required()?
             .try_into()?;
-        assert_eq!(input_kind, "mp4_file_source");
         assert_eq!(path, None);
         assert!(!loop_playback);
         Ok(())

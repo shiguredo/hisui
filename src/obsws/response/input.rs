@@ -247,7 +247,6 @@ pub fn build_get_input_default_settings_response(
     };
 
     super::build_request_response_success("GetInputDefaultSettings", request_id, |f| {
-        f.member("inputKind", &fields.input_kind)?;
         f.member("defaultInputSettings", &default_input_settings)
     })
 }

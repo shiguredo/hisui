@@ -595,7 +595,8 @@ def test_obsws_get_input_default_settings_request(binary_path: Path):
         assert status["result"] is True
         assert status["code"] == 100
         response_data = response["d"]["responseData"]
-        assert response_data["inputKind"] == "video_capture_device"
+        # OBS 仕様では GetInputDefaultSettings の responseData に inputKind は含まれない
+        assert "inputKind" not in response_data
         assert response_data["defaultInputSettings"] == {}
 
         unsupported_response = asyncio.run(
