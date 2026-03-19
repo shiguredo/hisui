@@ -635,7 +635,7 @@ impl ObswsSession {
         request_type: &str,
         request_id: &str,
     ) -> RequestOutcome {
-        let (output_url, stream_name, output_plan, run) = {
+        let (output_url, stream_name, mut output_plan, run) = {
             let mut input_registry = self.input_registry.write().await;
             let stream_service_settings = input_registry.stream_service_settings().clone();
             if stream_service_settings.stream_service_type != "rtmp_custom" {
@@ -719,7 +719,7 @@ impl ObswsSession {
         };
 
         let start_result = self
-            .start_stream_processors(&output_plan, &output_url, stream_name.as_deref(), &run)
+            .start_stream_processors(&mut output_plan, &output_url, stream_name.as_deref(), &run)
             .await;
 
         if let Err(e) = start_result {
@@ -787,7 +787,7 @@ impl ObswsSession {
         request_type: &str,
         request_id: &str,
     ) -> RequestOutcome {
-        let (output_url, stream_name, output_plan, run) = {
+        let (output_url, stream_name, mut output_plan, run) = {
             let mut input_registry = self.input_registry.write().await;
             let rtmp_outbound_settings = input_registry.rtmp_outbound_settings().clone();
             let Some(output_url) = rtmp_outbound_settings.output_url else {
@@ -871,7 +871,12 @@ impl ObswsSession {
         };
 
         let start_result = self
-            .start_rtmp_outbound_processors(&output_plan, &output_url, stream_name.as_deref(), &run)
+            .start_rtmp_outbound_processors(
+                &mut output_plan,
+                &output_url,
+                stream_name.as_deref(),
+                &run,
+            )
             .await;
 
         if let Err(e) = start_result {
@@ -941,7 +946,7 @@ impl ObswsSession {
         request_type: &str,
         request_id: &str,
     ) -> RequestOutcome {
-        let (output_plan, output_path, run) = {
+        let (mut output_plan, output_path, run) = {
             let mut input_registry = self.input_registry.write().await;
             let run_id = match input_registry.next_record_run_id() {
                 Ok(run_id) => run_id,
@@ -1017,7 +1022,7 @@ impl ObswsSession {
         }
 
         let start_result = self
-            .start_record_processors(&output_plan, &output_path, &run)
+            .start_record_processors(&mut output_plan, &output_path, &run)
             .await;
         if let Err(e) = start_result {
             let _ = self.input_registry.write().await.deactivate_record();
@@ -1267,123 +1272,97 @@ impl ObswsSession {
 
     // --- パイプライン操作メソッド ---
 
-    /// createVideoMixer リクエストを生成して送信する
+    fn get_pipeline_handle(&self) -> crate::Result<&crate::MediaPipelineHandle> {
+        self.pipeline_handle
+            .as_ref()
+            .ok_or_else(|| crate::Error::new("BUG: obsws pipeline handle is not initialized"))
+    }
+
+    /// createVideoMixer を型付きメソッドで呼び出す
     async fn send_create_video_mixer_request(
         &self,
         output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
         video: &ObswsRecordTrackRun,
         video_mixer_processor_id: &crate::ProcessorId,
     ) -> crate::Result<()> {
-        let video_mixer_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createVideoMixer")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("canvasWidth", output_plan.canvas_width)?;
-                    f.member("canvasHeight", output_plan.canvas_height)?;
-                    f.member("frameRate", output_plan.frame_rate)?;
-                    f.member(
-                        "inputTracks",
-                        nojson::array(|f| {
-                            for input_track in &output_plan.video_mixer_input_tracks {
-                                f.element(nojson::object(|f| {
-                                    f.member("trackId", &input_track.track_id)?;
-                                    f.member("x", input_track.x)?;
-                                    f.member("y", input_track.y)?;
-                                    f.member("z", input_track.z)?;
-                                    if let Some(width) = input_track.width {
-                                        f.member("width", width)?;
-                                    }
-                                    if let Some(height) = input_track.height {
-                                        f.member("height", height)?;
-                                    }
-                                    if let Some(scale_x) = input_track.scale_x {
-                                        f.member("scaleX", scale_x)?;
-                                    }
-                                    if let Some(scale_y) = input_track.scale_y {
-                                        f.member("scaleY", scale_y)?;
-                                    }
-                                    if input_track.crop_top != 0 {
-                                        f.member("cropTop", input_track.crop_top)?;
-                                    }
-                                    if input_track.crop_bottom != 0 {
-                                        f.member("cropBottom", input_track.crop_bottom)?;
-                                    }
-                                    if input_track.crop_left != 0 {
-                                        f.member("cropLeft", input_track.crop_left)?;
-                                    }
-                                    if input_track.crop_right != 0 {
-                                        f.member("cropRight", input_track.crop_right)?;
-                                    }
-                                    Ok(())
-                                }))?;
-                            }
-                            Ok(())
-                        }),
-                    )?;
-                    f.member("outputTrackId", &video.source_track_id)?;
-                    f.member("processorId", video_mixer_processor_id)
-                }),
-            )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createVideoMixer", &video_mixer_request)
-            .await
+        let pipeline_handle = self.get_pipeline_handle()?;
+        let input_tracks = output_plan
+            .video_mixer_input_tracks
+            .iter()
+            .map(|t| crate::mixer_realtime_video::InputTrack {
+                track_id: t.track_id.clone(),
+                x: t.x as isize,
+                y: t.y as isize,
+                z: t.z as isize,
+                width: t
+                    .width
+                    .and_then(|w| crate::types::EvenUsize::new(w as usize)),
+                height: t
+                    .height
+                    .and_then(|h| crate::types::EvenUsize::new(h as usize)),
+                scale_x: t.scale_x,
+                scale_y: t.scale_y,
+                crop_top: t.crop_top as usize,
+                crop_bottom: t.crop_bottom as usize,
+                crop_left: t.crop_left as usize,
+                crop_right: t.crop_right as usize,
+            })
+            .collect();
+        let mixer = crate::mixer_realtime_video::VideoRealtimeMixer {
+            canvas_width: output_plan.canvas_width,
+            canvas_height: output_plan.canvas_height,
+            frame_rate: output_plan.frame_rate,
+            input_tracks,
+            output_track_id: video.source_track_id.clone(),
+        };
+        pipeline_handle
+            .create_video_mixer(mixer, Some(video_mixer_processor_id.clone()))
+            .await?;
+        Ok(())
     }
 
-    /// createAudioMixer リクエストを生成して送信する
+    /// createAudioMixer を型付きメソッドで呼び出す
     async fn send_create_audio_mixer_request(
         &self,
         source_plans: &[crate::obsws::source::ObswsRecordSourcePlan],
         audio: &ObswsRecordTrackRun,
         audio_mixer_processor_id: &crate::ProcessorId,
     ) -> crate::Result<()> {
-        let audio_mixer_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createAudioMixer")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("sampleRate", 48_000)?;
-                    f.member("channels", 2)?;
-                    f.member("frameDurationMs", 20)?;
-                    f.member("timestampRebaseThresholdMs", 100)?;
-                    f.member("terminateOnInputEos", true)?;
-                    f.member(
-                        "inputTracks",
-                        nojson::array(|f| {
-                            for source_plan in source_plans {
-                                if let Some(source_audio_track_id) =
-                                    &source_plan.source_audio_track_id
-                                {
-                                    f.element(nojson::object(|f| {
-                                        f.member("trackId", source_audio_track_id)
-                                    }))?;
-                                }
-                            }
-                            Ok(())
-                        }),
-                    )?;
-                    f.member("outputTrackId", &audio.source_track_id)?;
-                    f.member("processorId", audio_mixer_processor_id)
-                }),
-            )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createAudioMixer", &audio_mixer_request)
-            .await
+        let pipeline_handle = self.get_pipeline_handle()?;
+        let input_tracks = source_plans
+            .iter()
+            .filter_map(|sp| {
+                sp.source_audio_track_id.as_ref().map(|track_id| {
+                    crate::mixer_realtime_audio::AudioRealtimeInputTrack {
+                        track_id: track_id.clone(),
+                    }
+                })
+            })
+            .collect();
+        let mixer = crate::mixer_realtime_audio::AudioRealtimeMixer {
+            sample_rate: crate::audio::SampleRate::HZ_48000,
+            channels: crate::audio::Channels::STEREO,
+            frame_duration: std::time::Duration::from_millis(20),
+            timestamp_rebase_threshold: std::time::Duration::from_millis(100),
+            terminate_on_input_eos: true,
+            input_tracks,
+            output_track_id: audio.source_track_id.clone(),
+        };
+        pipeline_handle
+            .create_audio_mixer(mixer, Some(audio_mixer_processor_id.clone()))
+            .await?;
+        Ok(())
     }
 
     pub(super) async fn start_stream_processors(
         &self,
-        output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
+        output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
         output_url: &str,
         stream_name: Option<&str>,
         run: &ObswsStreamRun,
     ) -> crate::Result<()> {
+        let pipeline_handle = self.get_pipeline_handle()?;
+
         self.send_create_audio_mixer_request(
             &output_plan.source_plans,
             &run.audio,
@@ -1398,70 +1377,41 @@ impl ObswsSession {
         )
         .await?;
 
-        let video_encoder_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createVideoEncoder")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("inputTrackId", &run.video.source_track_id)?;
-                    f.member("outputTrackId", &run.video.encoded_track_id)?;
-                    f.member("codec", "H264")?;
-                    f.member("bitrateBps", 2_000_000)?;
-                    f.member("frameRate", output_plan.frame_rate)?;
-                    f.member("processorId", &run.video.encoder_processor_id)
-                }),
+        pipeline_handle
+            .create_video_encoder(
+                run.video.source_track_id.clone(),
+                run.video.encoded_track_id.clone(),
+                crate::types::CodecName::H264,
+                std::num::NonZeroUsize::new(2_000_000).unwrap(),
+                output_plan.frame_rate,
+                Some(run.video.encoder_processor_id.clone()),
             )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
             .await?;
 
-        let audio_encoder_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createAudioEncoder")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("inputTrackId", &run.audio.source_track_id)?;
-                    f.member("outputTrackId", &run.audio.encoded_track_id)?;
-                    f.member("codec", "AAC")?;
-                    f.member("bitrateBps", 128_000)?;
-                    f.member("processorId", &run.audio.encoder_processor_id)
-                }),
+        pipeline_handle
+            .create_audio_encoder(
+                run.audio.source_track_id.clone(),
+                run.audio.encoded_track_id.clone(),
+                crate::types::CodecName::Aac,
+                std::num::NonZeroUsize::new(128_000).unwrap(),
+                Some(run.audio.encoder_processor_id.clone()),
             )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
             .await?;
 
-        let rtmp_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createRtmpPublisher")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("outputUrl", output_url)?;
-                    if let Some(stream_name) = stream_name {
-                        f.member("streamName", stream_name)?;
-                    }
-                    f.member("inputAudioTrackId", &run.audio.encoded_track_id)?;
-                    f.member("inputVideoTrackId", &run.video.encoded_track_id)?;
-                    f.member("processorId", &run.publisher_processor_id)
-                }),
-            )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createRtmpPublisher", &rtmp_request)
+        let publisher = crate::publisher_rtmp::RtmpPublisher {
+            output_url: output_url.to_owned(),
+            stream_name: stream_name.map(|s| s.to_owned()),
+            input_audio_track_id: Some(run.audio.encoded_track_id.clone()),
+            input_video_track_id: Some(run.video.encoded_track_id.clone()),
+            options: Default::default(),
+        };
+        pipeline_handle
+            .create_rtmp_publisher(publisher, Some(run.publisher_processor_id.clone()))
             .await?;
 
-        for source_plan in &output_plan.source_plans {
-            for request in &source_plan.requests {
-                self.send_pipeline_rpc_request(request.method, &request.request_text)
-                    .await?;
+        for source_plan in &mut output_plan.source_plans {
+            for request in source_plan.requests.drain(..) {
+                request.execute(pipeline_handle).await?;
             }
         }
 
@@ -1470,10 +1420,12 @@ impl ObswsSession {
 
     pub(super) async fn start_record_processors(
         &self,
-        output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
+        output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
         output_path: &std::path::Path,
         run: &ObswsRecordRun,
     ) -> crate::Result<()> {
+        let pipeline_handle = self.get_pipeline_handle()?;
+
         self.send_create_audio_mixer_request(
             &output_plan.source_plans,
             &run.audio,
@@ -1488,67 +1440,39 @@ impl ObswsSession {
         )
         .await?;
 
-        let video_encoder_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createVideoEncoder")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("inputTrackId", &run.video.source_track_id)?;
-                    f.member("outputTrackId", &run.video.encoded_track_id)?;
-                    f.member("codec", "H264")?;
-                    f.member("bitrateBps", 2_000_000)?;
-                    f.member("frameRate", output_plan.frame_rate)?;
-                    f.member("processorId", &run.video.encoder_processor_id)
-                }),
+        pipeline_handle
+            .create_video_encoder(
+                run.video.source_track_id.clone(),
+                run.video.encoded_track_id.clone(),
+                crate::types::CodecName::H264,
+                std::num::NonZeroUsize::new(2_000_000).unwrap(),
+                output_plan.frame_rate,
+                Some(run.video.encoder_processor_id.clone()),
             )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
             .await?;
 
-        let audio_encoder_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createAudioEncoder")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("inputTrackId", &run.audio.source_track_id)?;
-                    f.member("outputTrackId", &run.audio.encoded_track_id)?;
-                    f.member("codec", "OPUS")?;
-                    f.member("bitrateBps", 128_000)?;
-                    f.member("processorId", &run.audio.encoder_processor_id)
-                }),
+        pipeline_handle
+            .create_audio_encoder(
+                run.audio.source_track_id.clone(),
+                run.audio.encoded_track_id.clone(),
+                crate::types::CodecName::Opus,
+                std::num::NonZeroUsize::new(128_000).unwrap(),
+                Some(run.audio.encoder_processor_id.clone()),
             )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
             .await?;
 
-        let writer_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createMp4Writer")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("outputPath", output_path.display().to_string())?;
-                    f.member("inputAudioTrackId", &run.audio.encoded_track_id)?;
-                    f.member("inputVideoTrackId", &run.video.encoded_track_id)?;
-                    f.member("processorId", &run.writer_processor_id)
-                }),
+        pipeline_handle
+            .create_mp4_writer(
+                output_path.to_path_buf(),
+                Some(run.audio.encoded_track_id.clone()),
+                Some(run.video.encoded_track_id.clone()),
+                Some(run.writer_processor_id.clone()),
             )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createMp4Writer", &writer_request)
             .await?;
 
-        for source_plan in &output_plan.source_plans {
-            for request in &source_plan.requests {
-                self.send_pipeline_rpc_request(request.method, &request.request_text)
-                    .await?;
+        for source_plan in &mut output_plan.source_plans {
+            for request in source_plan.requests.drain(..) {
+                request.execute(pipeline_handle).await?;
             }
         }
 
@@ -1644,37 +1568,6 @@ impl ObswsSession {
             })
     }
 
-    pub(super) async fn send_pipeline_rpc_request(
-        &self,
-        method: &str,
-        request_text: &str,
-    ) -> crate::Result<()> {
-        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            return Err(crate::Error::new(
-                "BUG: obsws pipeline handle is not initialized",
-            ));
-        };
-        let Some(response_json) = pipeline_handle.rpc(request_text.as_bytes()).await else {
-            return Err(crate::Error::new(format!(
-                "failed to run {method}: response is missing",
-            )));
-        };
-
-        if let Some(error_value) = response_json.value().to_member("error")?.optional() {
-            let message = error_value
-                .to_member("message")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok())
-                .unwrap_or_else(|| "unknown rpc error".to_owned());
-            return Err(crate::Error::new(format!(
-                "failed to run {method}: {message}"
-            )));
-        }
-
-        Ok(())
-    }
-
     /// ソース → ミキサー → エンコーダー → パブリッシャーの順に段階的に停止する。
     pub(super) async fn stop_stream_processors(&self, run: &ObswsStreamRun) -> crate::Result<()> {
         // 1. ソースを停止
@@ -1707,11 +1600,13 @@ impl ObswsSession {
 
     pub(super) async fn start_rtmp_outbound_processors(
         &self,
-        output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
+        output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
         output_url: &str,
         stream_name: Option<&str>,
         run: &ObswsRtmpOutboundRun,
     ) -> crate::Result<()> {
+        let pipeline_handle = self.get_pipeline_handle()?;
+
         self.send_create_audio_mixer_request(
             &output_plan.source_plans,
             &run.audio,
@@ -1726,71 +1621,42 @@ impl ObswsSession {
         )
         .await?;
 
-        let video_encoder_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createVideoEncoder")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("inputTrackId", &run.video.source_track_id)?;
-                    f.member("outputTrackId", &run.video.encoded_track_id)?;
-                    f.member("codec", "H264")?;
-                    f.member("bitrateBps", 2_000_000)?;
-                    f.member("frameRate", output_plan.frame_rate)?;
-                    f.member("processorId", &run.video.encoder_processor_id)
-                }),
+        pipeline_handle
+            .create_video_encoder(
+                run.video.source_track_id.clone(),
+                run.video.encoded_track_id.clone(),
+                crate::types::CodecName::H264,
+                std::num::NonZeroUsize::new(2_000_000).unwrap(),
+                output_plan.frame_rate,
+                Some(run.video.encoder_processor_id.clone()),
             )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createVideoEncoder", &video_encoder_request)
             .await?;
 
         // RTMP outbound は AAC エンコーディングを使用する（RTMP の制約）
-        let audio_encoder_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createAudioEncoder")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("inputTrackId", &run.audio.source_track_id)?;
-                    f.member("outputTrackId", &run.audio.encoded_track_id)?;
-                    f.member("codec", "AAC")?;
-                    f.member("bitrateBps", 128_000)?;
-                    f.member("processorId", &run.audio.encoder_processor_id)
-                }),
+        pipeline_handle
+            .create_audio_encoder(
+                run.audio.source_track_id.clone(),
+                run.audio.encoded_track_id.clone(),
+                crate::types::CodecName::Aac,
+                std::num::NonZeroUsize::new(128_000).unwrap(),
+                Some(run.audio.encoder_processor_id.clone()),
             )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createAudioEncoder", &audio_encoder_request)
             .await?;
 
-        let rtmp_outbound_request = nojson::object(|f| {
-            f.member("jsonrpc", "2.0")?;
-            f.member("id", 1)?;
-            f.member("method", "createRtmpOutboundEndpoint")?;
-            f.member(
-                "params",
-                nojson::object(|f| {
-                    f.member("outputUrl", output_url)?;
-                    if let Some(stream_name) = stream_name {
-                        f.member("streamName", stream_name)?;
-                    }
-                    f.member("inputAudioTrackId", &run.audio.encoded_track_id)?;
-                    f.member("inputVideoTrackId", &run.video.encoded_track_id)?;
-                    f.member("processorId", &run.endpoint_processor_id)
-                }),
-            )
-        })
-        .to_string();
-        self.send_pipeline_rpc_request("createRtmpOutboundEndpoint", &rtmp_outbound_request)
+        let endpoint = crate::outbound_endpoint_rtmp::RtmpOutboundEndpoint {
+            output_url: output_url.to_owned(),
+            stream_name: stream_name.map(|s| s.to_owned()),
+            input_audio_track_id: Some(run.audio.encoded_track_id.clone()),
+            input_video_track_id: Some(run.video.encoded_track_id.clone()),
+            options: Default::default(),
+        };
+        pipeline_handle
+            .create_rtmp_outbound_endpoint(endpoint, Some(run.endpoint_processor_id.clone()))
             .await?;
 
-        for source_plan in &output_plan.source_plans {
-            for request in &source_plan.requests {
-                self.send_pipeline_rpc_request(request.method, &request.request_text)
-                    .await?;
+        for source_plan in &mut output_plan.source_plans {
+            for request in source_plan.requests.drain(..) {
+                request.execute(pipeline_handle).await?;
             }
         }
 

@@ -1,5 +1,5 @@
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
+    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
 use crate::obsws_input_registry::ObswsMp4FileSourceSettings;
 use crate::{ProcessorId, TrackId};
@@ -34,35 +34,22 @@ pub(super) fn build_record_source_plan(
             output_kind.as_str()
         ))
     });
-    let request_text = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", 1)?;
-        f.member("method", "createMp4FileSource")?;
-        f.member(
-            "params",
-            nojson::object(|f| {
-                f.member("path", path)?;
-                f.member("realtime", true)?;
-                f.member("loopPlayback", settings.loop_playback)?;
-                if let Some(source_audio_track_id) = &source_audio_track_id {
-                    f.member("audioTrackId", source_audio_track_id)?;
-                }
-                if let Some(source_video_track_id) = &source_video_track_id {
-                    f.member("videoTrackId", source_video_track_id)?;
-                }
-                f.member("processorId", &source_processor_id)
-            }),
-        )
-    })
-    .to_string();
+
+    let source = crate::Mp4FileSource {
+        path: std::path::PathBuf::from(path),
+        realtime: true,
+        loop_playback: settings.loop_playback,
+        audio_track_id: source_audio_track_id.clone(),
+        video_track_id: source_video_track_id.clone(),
+    };
 
     Ok(ObswsRecordSourcePlan {
-        source_processor_ids: vec![source_processor_id],
+        source_processor_ids: vec![source_processor_id.clone()],
         source_video_track_id,
         source_audio_track_id,
-        requests: vec![ObswsSourceRpcRequest {
-            method: "createMp4FileSource",
-            request_text,
+        requests: vec![ObswsSourceRequest::CreateMp4FileSource {
+            source,
+            processor_id: Some(source_processor_id),
         }],
     })
 }
@@ -72,8 +59,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_record_source_plan_uses_audio_track_only_for_audio_only_file()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn build_record_source_plan_uses_audio_track_only_for_audio_only_file() {
         let plan = build_record_source_plan(
             &ObswsMp4FileSourceSettings {
                 path: Some("testdata/beep-aac-audio.mp4".to_owned()),
@@ -90,21 +76,19 @@ mod tests {
         );
         assert_eq!(plan.source_video_track_id, None);
 
-        let json = nojson::RawJson::parse(&plan.requests[0].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let audio_track_id: Option<String> = params.to_member("audioTrackId")?.try_into()?;
-        let video_track_id: Option<String> = params.to_member("videoTrackId")?.try_into()?;
-        assert_eq!(
-            audio_track_id.as_deref(),
-            Some("obsws:record:1:source:0:raw_audio")
-        );
-        assert_eq!(video_track_id, None);
-        Ok(())
+        // ObswsSourceRequest の中身を検証する
+        assert_eq!(plan.requests.len(), 1);
+        match &plan.requests[0] {
+            ObswsSourceRequest::CreateMp4FileSource { source, .. } => {
+                assert!(source.audio_track_id.is_some());
+                assert!(source.video_track_id.is_none());
+            }
+            _ => panic!("expected CreateMp4FileSource"),
+        }
     }
 
     #[test]
-    fn build_record_source_plan_uses_video_track_only_for_video_only_file()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn build_record_source_plan_uses_video_track_only_for_video_only_file() {
         let plan = build_record_source_plan(
             &ObswsMp4FileSourceSettings {
                 path: Some("testdata/archive-red-320x320-h264.mp4".to_owned()),
@@ -121,15 +105,13 @@ mod tests {
             Some("obsws:record:2:source:0:raw_video")
         );
 
-        let json = nojson::RawJson::parse(&plan.requests[0].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let audio_track_id: Option<String> = params.to_member("audioTrackId")?.try_into()?;
-        let video_track_id: Option<String> = params.to_member("videoTrackId")?.try_into()?;
-        assert_eq!(audio_track_id, None);
-        assert_eq!(
-            video_track_id.as_deref(),
-            Some("obsws:record:2:source:0:raw_video")
-        );
-        Ok(())
+        assert_eq!(plan.requests.len(), 1);
+        match &plan.requests[0] {
+            ObswsSourceRequest::CreateMp4FileSource { source, .. } => {
+                assert!(source.audio_track_id.is_none());
+                assert!(source.video_track_id.is_some());
+            }
+            _ => panic!("expected CreateMp4FileSource"),
+        }
     }
 }

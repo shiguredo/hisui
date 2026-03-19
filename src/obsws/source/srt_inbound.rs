@@ -1,5 +1,5 @@
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRpcRequest,
+    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
 use crate::obsws_input_registry::ObswsSrtInboundSettings;
 use crate::{ProcessorId, TrackId};
@@ -39,81 +39,38 @@ pub(super) fn build_record_source_plan(
         "obsws:{kind}:{run_id}:source:{source_index}:audio_decoder"
     ));
 
-    // createSrtInboundEndpoint リクエスト
-    let endpoint_request_text = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", 1)?;
-        f.member("method", "createSrtInboundEndpoint")?;
-        f.member(
-            "params",
-            nojson::object(|f| {
-                f.member("inputUrl", input_url)?;
-                if let Some(stream_id) = &settings.stream_id {
-                    f.member("streamId", stream_id)?;
-                }
-                if let Some(passphrase) = &settings.passphrase {
-                    f.member("passphrase", passphrase)?;
-                }
-                f.member("outputVideoTrackId", &encoded_video_track_id)?;
-                f.member("outputAudioTrackId", &encoded_audio_track_id)?;
-                f.member("processorId", &source_processor_id)
-            }),
-        )
-    })
-    .to_string();
-
-    // createVideoDecoder リクエスト
-    let video_decoder_request_text = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", 1)?;
-        f.member("method", "createVideoDecoder")?;
-        f.member(
-            "params",
-            nojson::object(|f| {
-                f.member("inputTrackId", &encoded_video_track_id)?;
-                f.member("outputTrackId", &raw_video_track_id)?;
-                f.member("processorId", &video_decoder_processor_id)
-            }),
-        )
-    })
-    .to_string();
-
-    // createAudioDecoder リクエスト
-    let audio_decoder_request_text = nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", 1)?;
-        f.member("method", "createAudioDecoder")?;
-        f.member(
-            "params",
-            nojson::object(|f| {
-                f.member("inputTrackId", &encoded_audio_track_id)?;
-                f.member("outputTrackId", &raw_audio_track_id)?;
-                f.member("processorId", &audio_decoder_processor_id)
-            }),
-        )
-    })
-    .to_string();
+    let endpoint = crate::inbound_endpoint_srt::SrtInboundEndpoint {
+        input_url: input_url.to_owned(),
+        output_audio_track_id: Some(encoded_audio_track_id.clone()),
+        output_video_track_id: Some(encoded_video_track_id.clone()),
+        stream_id: settings.stream_id.clone(),
+        passphrase: settings.passphrase.clone(),
+        key_length: None,
+        tsbpd_delay_ms: None,
+    };
 
     Ok(ObswsRecordSourcePlan {
         source_processor_ids: vec![
-            source_processor_id,
-            video_decoder_processor_id,
-            audio_decoder_processor_id,
+            source_processor_id.clone(),
+            video_decoder_processor_id.clone(),
+            audio_decoder_processor_id.clone(),
         ],
-        source_video_track_id: Some(raw_video_track_id),
-        source_audio_track_id: Some(raw_audio_track_id),
+        source_video_track_id: Some(raw_video_track_id.clone()),
+        source_audio_track_id: Some(raw_audio_track_id.clone()),
         requests: vec![
-            ObswsSourceRpcRequest {
-                method: "createSrtInboundEndpoint",
-                request_text: endpoint_request_text,
+            ObswsSourceRequest::CreateSrtInboundEndpoint {
+                endpoint,
+                processor_id: Some(source_processor_id),
             },
-            ObswsSourceRpcRequest {
-                method: "createVideoDecoder",
-                request_text: video_decoder_request_text,
+            ObswsSourceRequest::CreateVideoDecoder {
+                input_track_id: encoded_video_track_id,
+                output_track_id: raw_video_track_id,
+                processor_id: Some(video_decoder_processor_id),
             },
-            ObswsSourceRpcRequest {
-                method: "createAudioDecoder",
-                request_text: audio_decoder_request_text,
+            ObswsSourceRequest::CreateAudioDecoder {
+                input_track_id: encoded_audio_track_id,
+                output_track_id: raw_audio_track_id,
+                processor_id: Some(audio_decoder_processor_id),
             },
         ],
     })
@@ -124,8 +81,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_record_source_plan_generates_three_requests() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn build_record_source_plan_generates_three_requests() {
         let plan = build_record_source_plan(
             &ObswsSrtInboundSettings {
                 input_url: Some("srt://127.0.0.1:9000".to_owned()),
@@ -138,7 +94,6 @@ mod tests {
         )
         .expect("srt_inbound source plan must succeed");
 
-        // source_processor_ids に endpoint + video_decoder + audio_decoder の 3 つが含まれることを検証する
         assert_eq!(plan.source_processor_ids.len(), 3);
         assert_eq!(
             plan.source_processor_ids[0].get(),
@@ -154,9 +109,6 @@ mod tests {
         );
 
         assert_eq!(plan.requests.len(), 3);
-        assert_eq!(plan.requests[0].method, "createSrtInboundEndpoint");
-        assert_eq!(plan.requests[1].method, "createVideoDecoder");
-        assert_eq!(plan.requests[2].method, "createAudioDecoder");
 
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
@@ -167,54 +119,19 @@ mod tests {
             Some("obsws:record:1:source:0:raw_audio")
         );
 
-        // createSrtInboundEndpoint のパラメータを検証する
-        let json = nojson::RawJson::parse(&plan.requests[0].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let input_url: String = params.to_member("inputUrl")?.required()?.try_into()?;
-        assert_eq!(input_url, "srt://127.0.0.1:9000");
-        let stream_id: Option<String> = params.to_member("streamId")?.try_into()?;
-        assert_eq!(stream_id.as_deref(), Some("test-stream"));
-        let passphrase: Option<String> = params.to_member("passphrase")?.try_into()?;
-        assert_eq!(passphrase.as_deref(), Some("secret123456"));
-        let output_video_track_id: String = params
-            .to_member("outputVideoTrackId")?
-            .required()?
-            .try_into()?;
-        assert_eq!(
-            output_video_track_id,
-            "obsws:record:1:source:0:encoded_video"
-        );
-        let output_audio_track_id: String = params
-            .to_member("outputAudioTrackId")?
-            .required()?
-            .try_into()?;
-        assert_eq!(
-            output_audio_track_id,
-            "obsws:record:1:source:0:encoded_audio"
-        );
-
-        // createVideoDecoder のパラメータを検証する
-        let json = nojson::RawJson::parse(&plan.requests[1].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let input_track_id: String = params.to_member("inputTrackId")?.required()?.try_into()?;
-        assert_eq!(input_track_id, "obsws:record:1:source:0:encoded_video");
-        let output_track_id: String = params.to_member("outputTrackId")?.required()?.try_into()?;
-        assert_eq!(output_track_id, "obsws:record:1:source:0:raw_video");
-
-        // createAudioDecoder のパラメータを検証する
-        let json = nojson::RawJson::parse(&plan.requests[2].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let input_track_id: String = params.to_member("inputTrackId")?.required()?.try_into()?;
-        assert_eq!(input_track_id, "obsws:record:1:source:0:encoded_audio");
-        let output_track_id: String = params.to_member("outputTrackId")?.required()?.try_into()?;
-        assert_eq!(output_track_id, "obsws:record:1:source:0:raw_audio");
-
-        Ok(())
+        // CreateSrtInboundEndpoint のパラメータを検証する
+        match &plan.requests[0] {
+            ObswsSourceRequest::CreateSrtInboundEndpoint { endpoint, .. } => {
+                assert_eq!(endpoint.input_url, "srt://127.0.0.1:9000");
+                assert_eq!(endpoint.stream_id.as_deref(), Some("test-stream"));
+                assert_eq!(endpoint.passphrase.as_deref(), Some("secret123456"));
+            }
+            _ => panic!("expected CreateSrtInboundEndpoint"),
+        }
     }
 
     #[test]
-    fn build_record_source_plan_without_optional_params() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn build_record_source_plan_without_optional_params() {
         let plan = build_record_source_plan(
             &ObswsSrtInboundSettings {
                 input_url: Some("srt://127.0.0.1:9000".to_owned()),
@@ -227,13 +144,13 @@ mod tests {
         )
         .expect("srt_inbound source plan without optional params must succeed");
 
-        let json = nojson::RawJson::parse(&plan.requests[0].request_text)?;
-        let params = json.value().to_member("params")?.required()?;
-        let stream_id: Option<String> = params.to_member("streamId")?.try_into()?;
-        assert_eq!(stream_id, None);
-        let passphrase: Option<String> = params.to_member("passphrase")?.try_into()?;
-        assert_eq!(passphrase, None);
-        Ok(())
+        match &plan.requests[0] {
+            ObswsSourceRequest::CreateSrtInboundEndpoint { endpoint, .. } => {
+                assert_eq!(endpoint.stream_id, None);
+                assert_eq!(endpoint.passphrase, None);
+            }
+            _ => panic!("expected CreateSrtInboundEndpoint"),
+        }
     }
 
     #[test]

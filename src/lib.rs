@@ -39,7 +39,6 @@ pub mod future;
 pub mod inbound_endpoint_rtmp;
 pub mod inbound_endpoint_srt;
 pub mod json;
-pub mod jsonrpc;
 pub mod logger;
 pub mod media;
 pub mod media_pipeline;
@@ -106,8 +105,8 @@ pub use error::Error;
 pub use media::MediaFrame;
 pub use media_pipeline::{
     Ack, MediaPipeline, MediaPipelineConfig, MediaPipelineHandle, Message, MessageReceiver,
-    MessageSender, PipelineTerminated, ProcessorHandle, ProcessorId, ProcessorMetadata,
-    PublishTrackError, RegisterProcessorError, Syn, TrackId,
+    MessageSender, PipelineOperationError, PipelineTerminated, ProcessorHandle, ProcessorId,
+    ProcessorMetadata, PublishTrackError, RegisterProcessorError, Syn, TrackId,
 };
 pub use source_file_mp4::Mp4FileSource;
 pub use source_png_file::PngFileSource;
