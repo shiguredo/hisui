@@ -27,6 +27,8 @@ from helpers import (
 )
 from hisui_server import reserve_ephemeral_port
 
+RTMP_LISTEN_RECEIVER_STARTUP_WAIT_SEC = 2.0
+
 
 def _has_positive_metric(body: str, metric_prefix: str) -> bool:
     """Prometheus テキスト形式の body から metric_prefix に一致する行を探し、値が 0 より大きいか判定する"""
@@ -549,7 +551,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
                 timeout_seconds=20,
             )
             try:
-                time.sleep(0.5)
+                time.sleep(RTMP_LISTEN_RECEIVER_STARTUP_WAIT_SEC)
                 start_stream_future = executor.submit(_run_start_stream_flow_sync)
                 start_stream_future.result(timeout=30.0)
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
@@ -688,7 +690,7 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
                 timeout_seconds=20,
             )
             try:
-                time.sleep(0.5)
+                time.sleep(RTMP_LISTEN_RECEIVER_STARTUP_WAIT_SEC)
                 start_stream_future = executor.submit(_run_start_stream_flow_sync)
                 start_stream_future.result(timeout=30.0)
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
@@ -823,7 +825,7 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
                 timeout_seconds=20,
             )
             try:
-                time.sleep(0.5)
+                time.sleep(RTMP_LISTEN_RECEIVER_STARTUP_WAIT_SEC)
                 start_stream_future = executor.submit(_run_start_stream_flow_sync)
                 start_stream_future.result(timeout=30.0)
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
@@ -1332,7 +1334,7 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
                 timeout_seconds=30,
             )
             try:
-                time.sleep(0.5)
+                time.sleep(RTMP_LISTEN_RECEIVER_STARTUP_WAIT_SEC)
                 start_stream_future = executor.submit(_run_start_stream_flow_sync)
                 start_stream_future.result(timeout=40.0)
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
@@ -1471,7 +1473,7 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
                 timeout_seconds=30,
             )
             try:
-                time.sleep(0.5)
+                time.sleep(RTMP_LISTEN_RECEIVER_STARTUP_WAIT_SEC)
                 start_stream_future = executor.submit(_run_start_stream_flow_sync)
                 start_stream_future.result(timeout=40.0)
                 _wait_process_exit(ffmpeg_process, timeout=20.0)
