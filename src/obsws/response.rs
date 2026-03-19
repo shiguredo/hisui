@@ -1209,6 +1209,31 @@ pub fn build_request_response_success_no_data(
     })
 }
 
+/// comment なしのエラーレスポンスを構築する（OBS が comment を返さないリクエスト用）
+pub fn build_request_response_error_without_comment(
+    request_type: &str,
+    request_id: &str,
+    code: i64,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_REQUEST_RESPONSE)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", request_type)?;
+                f.member("requestId", request_id)?;
+                f.member(
+                    "requestStatus",
+                    nojson::object(|f| {
+                        f.member("result", false)?;
+                        f.member("code", code)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
 pub fn build_request_response_error(
     request_type: &str,
     request_id: &str,

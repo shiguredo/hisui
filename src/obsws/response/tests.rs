@@ -178,7 +178,10 @@ fn build_get_and_set_current_preview_scene_response_succeeds() {
 #[test]
 fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
     let mut registry = ObswsInputRegistry::new_for_test();
-    // デフォルトのトランジションは Fade（全ビルトイントランジションが固定）
+    // cut_transition に切り替えてからカスタム設定を試みる
+    registry
+        .set_current_scene_transition("cut_transition")
+        .expect("set transition must succeed");
     let set_transition_settings_request_data =
         nojson::RawJsonOwned::parse(r#"{"transitionSettings":{"curve":"ease","power":2}}"#)
             .expect("requestData must be valid json");
@@ -195,7 +198,7 @@ fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
         .to_path_member(&["d", "requestStatus", "result"])
         .and_then(|v| v.required()?.try_into())
         .expect("result must be bool");
-    // 全ビルトイントランジションは固定なので 606 を返す
+    // cut_transition は固定トランジションなので 606 を返す
     assert!(!set_transition_settings_result);
     let set_transition_settings_code: i64 = set_transition_settings_json
         .value()
@@ -206,9 +209,9 @@ fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
 }
 
 #[test]
-fn build_set_current_scene_transition_settings_rejects_fade_transition() {
+fn build_set_current_scene_transition_settings_accepts_fade_transition() {
     let mut registry = ObswsInputRegistry::new_for_test();
-    // Fade も固定トランジションなので 606 を返す
+    // fade_transition はカスタム設定対応なので成功する
     let set_transition_settings_request_data =
         nojson::RawJsonOwned::parse(r#"{"transitionSettings":{"curve":"ease","power":2}}"#)
             .expect("requestData must be valid json");
@@ -225,13 +228,7 @@ fn build_set_current_scene_transition_settings_rejects_fade_transition() {
         .to_path_member(&["d", "requestStatus", "result"])
         .and_then(|v| v.required()?.try_into())
         .expect("result must be bool");
-    assert!(!set_transition_settings_result);
-    let set_transition_settings_code: i64 = set_transition_settings_json
-        .value()
-        .to_path_member(&["d", "requestStatus", "code"])
-        .and_then(|v| v.required()?.try_into())
-        .expect("code must be i64");
-    assert_eq!(set_transition_settings_code, 606);
+    assert!(set_transition_settings_result);
 }
 
 #[test]

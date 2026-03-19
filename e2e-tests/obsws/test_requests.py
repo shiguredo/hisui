@@ -277,7 +277,7 @@ def test_obsws_transition_requests(binary_path: Path):
             t for t in transition_entries if t["transitionName"] == "fade_transition"
         )
         assert cut_transition["transitionFixed"] is True
-        assert fade_transition["transitionFixed"] is True
+        assert fade_transition["transitionFixed"] is False
 
         set_transition_response = asyncio.run(
             _connect_identify_and_request(
@@ -315,13 +315,13 @@ def test_obsws_transition_requests(binary_path: Path):
             get_current_transition_response["d"]["responseData"]["transitionDuration"]
             == 500
         )
-        assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is True
-        # 全ビルトイントランジションは transitionSettings を常に null で返す
+        assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is False
+        # fade_transition は transitionSettings を初期状態では null で返す
         assert get_current_transition_response["d"]["responseData"][
             "transitionSettings"
         ] is None
 
-        # 全ビルトイントランジションはカスタム設定非対応のため 606 を返す
+        # fade_transition はカスタム設定対応なので成功する
         set_transition_settings_response = asyncio.run(
             _connect_identify_and_request(
                 f"ws://{host}:{port}/",
@@ -330,8 +330,7 @@ def test_obsws_transition_requests(binary_path: Path):
                 request_data={"transitionSettings": {"curve": "ease_in_out", "power": 2}},
             )
         )
-        assert set_transition_settings_response["d"]["requestStatus"]["result"] is False
-        assert set_transition_settings_response["d"]["requestStatus"]["code"] == 606
+        assert set_transition_settings_response["d"]["requestStatus"]["result"] is True
 
         get_transition_cursor_response = asyncio.run(
             _connect_identify_and_request(
@@ -568,10 +567,8 @@ def test_obsws_set_input_name_request(binary_path: Path):
         )
         assert renamed_get_response["d"]["requestStatus"]["result"] is True
         assert "inputSettings" in renamed_get_response["d"]["responseData"]
-        assert (
-            renamed_get_response["d"]["responseData"]["inputName"]
-            == "obsws-set-name-input-renamed"
-        )
+        # OBS 仕様では GetInputSettings の responseData に inputName は含まれない
+        assert "inputName" not in renamed_get_response["d"]["responseData"]
 
 
 def test_obsws_get_input_default_settings_request(binary_path: Path):
@@ -985,9 +982,8 @@ def test_obsws_create_input_request(binary_path: Path):
             settings_response["d"]["responseData"]["inputSettings"]["device_id"]
             == "sample-device"
         )
-        assert (
-            settings_response["d"]["responseData"]["inputName"] == "obsws-test-input"
-        )
+        # OBS 仕様では GetInputSettings の responseData に inputName は含まれない
+        assert "inputName" not in settings_response["d"]["responseData"]
         assert (
             settings_response["d"]["responseData"]["inputKind"]
             == "video_capture_device"

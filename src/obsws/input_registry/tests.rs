@@ -1050,7 +1050,7 @@ fn transition_runtime_defaults_to_cut_and_500ms() {
     assert_eq!(registry.current_tbar_position(), 0.0);
     assert_eq!(
         registry.supported_transition_kinds(),
-        ["cut_transition", "fade_transition"]
+        ["fade_transition", "cut_transition"]
     );
 }
 

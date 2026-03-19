@@ -38,9 +38,9 @@ impl nojson::DisplayJson for ObswsSceneTransitionEntry {
     }
 }
 
-fn is_fixed_transition(_transition_name: &str) -> bool {
-    // OBS のビルトイントランジションはすべてカスタム設定非対応
-    true
+fn is_fixed_transition(transition_name: &str) -> bool {
+    // OBS では cut_transition のみ固定トランジション、fade_transition はカスタム設定対応
+    transition_name == "cut_transition"
 }
 
 /// トランジション名から決定的な UUID を生成する
@@ -158,7 +158,7 @@ pub fn build_get_scene_transition_list_response(
             transition_uuid: transition_uuid(name),
             transition_kind: (*name).to_owned(),
             transition_fixed: is_fixed_transition(name),
-            transition_configurable: false,
+            transition_configurable: !is_fixed_transition(name),
         })
         .collect();
     let current_transition_name = input_registry.current_scene_transition_name();
@@ -185,7 +185,7 @@ pub fn build_get_current_scene_transition_response(
         f.member("transitionUuid", &current_transition_uuid)?;
         f.member("transitionKind", current_transition_name)?;
         f.member("transitionFixed", fixed)?;
-        f.member("transitionConfigurable", false)?;
+        f.member("transitionConfigurable", !fixed)?;
         // OBS のビルトイントランジションは transitionSettings を常に null で返す
         f.member("transitionSettings", Option::<&str>::None)?;
         f.member("transitionDuration", current_transition_duration_ms)
@@ -308,7 +308,7 @@ pub fn build_set_current_scene_transition_settings_response(
             "SetCurrentSceneTransitionSettings",
             request_id,
             REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
-            "Transition does not support custom settings",
+            "The current transition does not support custom settings.",
         );
     }
     input_registry
@@ -390,11 +390,11 @@ pub fn build_get_current_scene_transition_cursor_response(
 
 pub fn build_set_tbar_position_response(request_id: &str) -> nojson::RawJsonOwned {
     // hisui は Studio Mode をサポートしていないため、常に 506 を返す
-    super::build_request_response_error(
+    // OBS は SetTBarPosition のエラーで comment を含めないため、comment なしで返す
+    super::build_request_response_error_without_comment(
         "SetTBarPosition",
         request_id,
         REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
-        "Studio mode is not enabled",
     )
 }
 

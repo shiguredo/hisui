@@ -1430,11 +1430,8 @@ mod tests {
             .required()?
             .try_into()?;
         assert_eq!(input_kind, "video_capture_device");
-        let input_name: String = response_data
-            .to_member("inputName")?
-            .required()?
-            .try_into()?;
-        assert_eq!(input_name, "input-name-1");
+        // OBS 仕様では GetInputSettings の responseData に inputName は含まれない
+        assert!(response_data.to_member("inputName")?.optional().is_none());
         Ok(())
     }
 
