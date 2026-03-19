@@ -408,6 +408,7 @@ def test_obsws_transition_requests(binary_path: Path):
         assert invalid_duration_response["d"]["requestStatus"]["result"] is False
         assert invalid_duration_response["d"]["requestStatus"]["code"] == 400
 
+        # Studio Mode 無効のため、不正な position でも 506 を返す
         invalid_tbar_position_response = asyncio.run(
             _connect_identify_and_request(
                 f"ws://{host}:{port}/",
@@ -417,7 +418,7 @@ def test_obsws_transition_requests(binary_path: Path):
             )
         )
         assert invalid_tbar_position_response["d"]["requestStatus"]["result"] is False
-        assert invalid_tbar_position_response["d"]["requestStatus"]["code"] == 400
+        assert invalid_tbar_position_response["d"]["requestStatus"]["code"] == 506
 
 
 def test_obsws_preview_scene_requests(binary_path: Path):
