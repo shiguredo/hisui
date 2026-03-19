@@ -1585,8 +1585,8 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 request_type="DuplicateSceneItem",
                 request_id="req-duplicate-scene-item",
                 request_data={
-                    "fromSceneName": "Scene",
-                    "toSceneName": "Scene",
+                    "sceneName": "Scene",
+                    "destinationSceneName": "Scene",
                     "sceneItemId": second_scene_item_id,
                 },
             )

@@ -41,7 +41,7 @@ def test_obsws_request_batch_prepares_stream_flow(binary_path: Path, tmp_path: P
                 ws,
                 request_id="batch-prepare-stream",
                 halt_on_failure=True,
-                execution_type=1,
+                execution_type=0,
                 requests=[
                     {
                         "requestType": "CreateScene",
@@ -116,7 +116,7 @@ def test_obsws_request_batch_applies_set_input_settings(binary_path: Path):
                 ws,
                 request_id="batch-set-input-settings",
                 halt_on_failure=True,
-                execution_type=1,
+                execution_type=0,
                 requests=[
                     {
                         "requestType": "CreateInput",
@@ -181,7 +181,7 @@ def test_obsws_request_batch_halt_on_failure_stops_after_set_input_settings_erro
                 ws,
                 request_id="batch-set-input-settings-halt",
                 halt_on_failure=True,
-                execution_type=1,
+                execution_type=0,
                 requests=[
                     {
                         "requestType": "CreateInput",
@@ -257,7 +257,7 @@ def test_obsws_request_batch_rejects_unsupported_execution_type(binary_path: Pat
                         "op": 8,
                         "d": {
                             "requestId": "batch-invalid-execution-type",
-                            "executionType": 0,
+                            "executionType": 1,
                             "requests": [{"requestType": "GetVersion"}],
                         },
                     }
@@ -303,7 +303,7 @@ def test_obsws_request_batch_halt_on_failure_stops_subsequent_requests(
                 ws,
                 request_id="batch-halt-on-failure",
                 halt_on_failure=True,
-                execution_type=1,
+                execution_type=0,
                 requests=[
                     {
                         "requestType": "CreateScene",

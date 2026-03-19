@@ -1010,8 +1010,8 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 request_type="DuplicateSceneItem",
                 request_id="req-duplicate-scene-item-event",
                 request_data={
-                    "fromSceneName": "Scene",
-                    "toSceneName": "Scene",
+                    "sceneName": "Scene",
+                    "destinationSceneName": "Scene",
                     "sceneItemId": first_scene_item_id,
                 },
             )
