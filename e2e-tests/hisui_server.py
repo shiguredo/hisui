@@ -25,7 +25,6 @@ def build_hisui_command(binary_path: Path, *args: str) -> tuple[list[str], Path]
             "cargo",
             "run",
             "--quiet",
-            "--release",
             *extra_args,
             "--bin",
             "hisui",

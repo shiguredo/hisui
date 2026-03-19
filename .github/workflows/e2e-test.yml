@@ -17,6 +17,7 @@ jobs:
     env:
       OPENH264_VERSION: "2.6.0"
       OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
+      HISUI_E2E_CARGO_RUN_ARGS: --release --features fdk-aac
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
@@ -36,12 +37,11 @@ jobs:
           curl -fL -o "${OPENH264_ARCHIVE}" "${OPENH264_URL}"
           bzip2 -d "${OPENH264_ARCHIVE}"
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
-      - run: cargo build --release --features fdk-aac
+      - run: cargo build $HISUI_E2E_CARGO_RUN_ARGS
       - uses: astral-sh/setup-uv@v7
       - name: Run e2e tests
         env:
           HISUI_OPENH264_PATH: ${{ env.OPENH264_PATH }}
-          HISUI_E2E_CARGO_RUN_ARGS: --features fdk-aac
         run: |
           uv sync
           uv run pytest -v
