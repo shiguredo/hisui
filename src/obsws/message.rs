@@ -1423,9 +1423,18 @@ mod tests {
             .value()
             .to_path_member(&["d", "responseData"])?
             .required()?;
-        // GetInputSettings は inputSettings のみ返す（inputName, inputKind は含まない）
         let input_settings = response_data.to_member("inputSettings")?.required()?;
         assert_eq!(input_settings.kind(), nojson::JsonValueKind::Object);
+        let input_kind: String = response_data
+            .to_member("inputKind")?
+            .required()?
+            .try_into()?;
+        assert_eq!(input_kind, "video_capture_device");
+        let input_name: String = response_data
+            .to_member("inputName")?
+            .required()?
+            .try_into()?;
+        assert_eq!(input_name, "input-name-1");
         Ok(())
     }
 

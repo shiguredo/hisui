@@ -73,7 +73,9 @@ pub fn build_get_input_settings_response(
     };
 
     super::build_request_response_success("GetInputSettings", request_id, |f| {
-        f.member("inputSettings", &input.input.settings)
+        f.member("inputSettings", &input.input.settings)?;
+        f.member("inputKind", input.input.settings.kind_name())?;
+        f.member("inputName", &input.input_name)
     })
 }
 

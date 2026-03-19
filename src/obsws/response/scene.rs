@@ -38,8 +38,9 @@ impl nojson::DisplayJson for ObswsSceneTransitionEntry {
     }
 }
 
-fn is_fixed_transition(transition_name: &str) -> bool {
-    matches!(transition_name, "cut_transition")
+fn is_fixed_transition(_transition_name: &str) -> bool {
+    // OBS のビルトイントランジションはすべてカスタム設定非対応
+    true
 }
 
 /// トランジション名から決定的な UUID を生成する
@@ -185,16 +186,8 @@ pub fn build_get_current_scene_transition_response(
         f.member("transitionKind", current_transition_name)?;
         f.member("transitionFixed", fixed)?;
         f.member("transitionConfigurable", false)?;
-        // 固定トランジションでは OBS は transitionSettings を null で返す
-        if fixed {
-            f.member("transitionSettings", Option::<&str>::None)?;
-        } else {
-            // non-fixed でも設定が未設定（None）の場合は null を返す
-            match input_registry.current_scene_transition_settings() {
-                Some(settings) => f.member("transitionSettings", settings)?,
-                None => f.member("transitionSettings", Option::<&str>::None)?,
-            }
-        }
+        // OBS のビルトイントランジションは transitionSettings を常に null で返す
+        f.member("transitionSettings", Option::<&str>::None)?;
         f.member("transitionDuration", current_transition_duration_ms)
     })
 }

@@ -263,11 +263,11 @@ def test_obsws_transition_requests(binary_path: Path):
         assert transition_list_response["d"]["requestStatus"]["result"] is True
         assert (
             transition_list_response["d"]["responseData"]["currentSceneTransitionName"]
-            == "cut_transition"
+            == "fade_transition"
         )
         assert (
             transition_list_response["d"]["responseData"]["currentSceneTransitionKind"]
-            == "cut_transition"
+            == "fade_transition"
         )
         transition_entries = transition_list_response["d"]["responseData"]["transitions"]
         cut_transition = next(
@@ -277,7 +277,7 @@ def test_obsws_transition_requests(binary_path: Path):
             t for t in transition_entries if t["transitionName"] == "fade_transition"
         )
         assert cut_transition["transitionFixed"] is True
-        assert fade_transition["transitionFixed"] is False
+        assert fade_transition["transitionFixed"] is True
 
         set_transition_response = asyncio.run(
             _connect_identify_and_request(
@@ -315,12 +315,13 @@ def test_obsws_transition_requests(binary_path: Path):
             get_current_transition_response["d"]["responseData"]["transitionDuration"]
             == 500
         )
-        assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is False
-        # SetCurrentSceneTransitionSettings で明示的に設定されるまで null を返す
+        assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is True
+        # 全ビルトイントランジションは transitionSettings を常に null で返す
         assert get_current_transition_response["d"]["responseData"][
             "transitionSettings"
         ] is None
 
+        # 全ビルトイントランジションはカスタム設定非対応のため 606 を返す
         set_transition_settings_response = asyncio.run(
             _connect_identify_and_request(
                 f"ws://{host}:{port}/",
@@ -329,21 +330,8 @@ def test_obsws_transition_requests(binary_path: Path):
                 request_data={"transitionSettings": {"curve": "ease_in_out", "power": 2}},
             )
         )
-        assert set_transition_settings_response["d"]["requestStatus"]["result"] is True
-
-        get_current_transition_response_after_settings = asyncio.run(
-            _connect_identify_and_request(
-                f"ws://{host}:{port}/",
-                request_type="GetCurrentSceneTransition",
-                request_id="req-get-current-scene-transition-after-settings",
-            )
-        )
-        assert (
-            get_current_transition_response_after_settings["d"]["responseData"][
-                "transitionSettings"
-            ]
-            == {"curve": "ease_in_out", "power": 2}
-        )
+        assert set_transition_settings_response["d"]["requestStatus"]["result"] is False
+        assert set_transition_settings_response["d"]["requestStatus"]["code"] == 606
 
         get_transition_cursor_response = asyncio.run(
             _connect_identify_and_request(
@@ -579,8 +567,11 @@ def test_obsws_set_input_name_request(binary_path: Path):
             )
         )
         assert renamed_get_response["d"]["requestStatus"]["result"] is True
-        # GetInputSettings は inputSettings のみ返す（inputName は含まない）
         assert "inputSettings" in renamed_get_response["d"]["responseData"]
+        assert (
+            renamed_get_response["d"]["responseData"]["inputName"]
+            == "obsws-set-name-input-renamed"
+        )
 
 
 def test_obsws_get_input_default_settings_request(binary_path: Path):
@@ -990,10 +981,16 @@ def test_obsws_create_input_request(binary_path: Path):
         )
         settings_status = settings_response["d"]["requestStatus"]
         assert settings_status["result"] is True
-        # GetInputSettings は inputSettings のみ返す（inputName は含まない）
         assert (
             settings_response["d"]["responseData"]["inputSettings"]["device_id"]
             == "sample-device"
+        )
+        assert (
+            settings_response["d"]["responseData"]["inputName"] == "obsws-test-input"
+        )
+        assert (
+            settings_response["d"]["responseData"]["inputKind"]
+            == "video_capture_device"
         )
 
 

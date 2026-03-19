@@ -302,6 +302,10 @@ impl ObswsInputRegistry {
             })
             .collect();
         scenes.reverse();
+        // reverse 後に sceneIndex を再計算する（OBS 互換）
+        for (i, scene) in scenes.iter_mut().enumerate() {
+            scene.scene_index = i;
+        }
         scenes
     }
 

@@ -178,7 +178,7 @@ fn build_get_and_set_current_preview_scene_response_succeeds() {
 #[test]
 fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
     let mut registry = ObswsInputRegistry::new_for_test();
-    // デフォルトのトランジションは Cut（固定トランジション）
+    // デフォルトのトランジションは Fade（全ビルトイントランジションが固定）
     let set_transition_settings_request_data =
         nojson::RawJsonOwned::parse(r#"{"transitionSettings":{"curve":"ease","power":2}}"#)
             .expect("requestData must be valid json");
@@ -195,7 +195,7 @@ fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
         .to_path_member(&["d", "requestStatus", "result"])
         .and_then(|v| v.required()?.try_into())
         .expect("result must be bool");
-    // Cut は固定トランジションなので 606 を返す
+    // 全ビルトイントランジションは固定なので 606 を返す
     assert!(!set_transition_settings_result);
     let set_transition_settings_code: i64 = set_transition_settings_json
         .value()
@@ -206,13 +206,9 @@ fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
 }
 
 #[test]
-fn build_set_current_scene_transition_settings_and_tbar_position_responses_succeed() {
+fn build_set_current_scene_transition_settings_rejects_fade_transition() {
     let mut registry = ObswsInputRegistry::new_for_test();
-    // Fade（configurable トランジション）に切り替える
-    registry
-        .set_current_scene_transition("fade_transition")
-        .expect("transition change must succeed");
-
+    // Fade も固定トランジションなので 606 を返す
     let set_transition_settings_request_data =
         nojson::RawJsonOwned::parse(r#"{"transitionSettings":{"curve":"ease","power":2}}"#)
             .expect("requestData must be valid json");
@@ -229,20 +225,18 @@ fn build_set_current_scene_transition_settings_and_tbar_position_responses_succe
         .to_path_member(&["d", "requestStatus", "result"])
         .and_then(|v| v.required()?.try_into())
         .expect("result must be bool");
-    assert!(set_transition_settings_result);
-
-    let get_current_transition_response =
-        build_get_current_scene_transition_response("req-get-current-transition", &registry);
-    let get_current_transition_json =
-        nojson::RawJson::parse(get_current_transition_response.text())
-            .expect("response must be valid json");
-    let transition_power: i64 = get_current_transition_json
+    assert!(!set_transition_settings_result);
+    let set_transition_settings_code: i64 = set_transition_settings_json
         .value()
-        .to_path_member(&["d", "responseData", "transitionSettings", "power"])
+        .to_path_member(&["d", "requestStatus", "code"])
         .and_then(|v| v.required()?.try_into())
-        .expect("power must be i64");
-    assert_eq!(transition_power, 2);
+        .expect("code must be i64");
+    assert_eq!(set_transition_settings_code, 606);
+}
 
+#[test]
+fn build_set_tbar_position_returns_506() {
+    let registry = ObswsInputRegistry::new_for_test();
     // SetTBarPosition は Studio Mode 無効のため 506 を返す
     let set_tbar_position_response = build_set_tbar_position_response("req-set-tbar-position");
     let set_tbar_position_json = nojson::RawJson::parse(set_tbar_position_response.text())
