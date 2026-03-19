@@ -210,7 +210,7 @@ fn build_set_current_scene_transition_settings_and_tbar_position_responses_succe
     let mut registry = ObswsInputRegistry::new_for_test();
     // Fade（configurable トランジション）に切り替える
     registry
-        .set_current_scene_transition("Fade")
+        .set_current_scene_transition("fade_transition")
         .expect("transition change must succeed");
 
     let set_transition_settings_request_data =
@@ -1193,6 +1193,7 @@ fn build_and_parse_request_batch_response_preserves_fields() {
         "batch-1",
         &[
             RequestBatchResult {
+                request_id: "req-1".to_owned(),
                 request_type: "GetVersion".to_owned(),
                 request_status_result: true,
                 request_status_code: REQUEST_STATUS_SUCCESS,
@@ -1203,6 +1204,7 @@ fn build_and_parse_request_batch_response_preserves_fields() {
                 ),
             },
             RequestBatchResult {
+                request_id: "req-2".to_owned(),
                 request_type: "CreateScene".to_owned(),
                 request_status_result: false,
                 request_status_code: REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,

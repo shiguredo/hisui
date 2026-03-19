@@ -230,7 +230,7 @@ pub fn build_get_canvas_list_response(
         f.member(
             "canvases",
             [nojson::object(|f| {
-                f.member("canvasName", "hisui-main")?;
+                f.member("canvasName", "Main")?;
                 f.member("canvasUuid", "00000000-0000-0000-0000-000000000001")?;
                 // OBS 互換の object 形式で canvasFlags を返す。
                 // hisui は単一の main canvas のみ持つため、MAIN / ACTIVATE / MIX_AUDIO を true とする。

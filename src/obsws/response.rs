@@ -199,6 +199,7 @@ struct SetOutputSettingsFields {
 
 #[derive(Debug, Clone)]
 pub struct RequestBatchResult {
+    pub request_id: String,
     pub request_type: String,
     pub request_status_result: bool,
     pub request_status_code: i64,
@@ -1101,6 +1102,7 @@ pub fn build_request_batch_response(
                         for result in results {
                             f.element(nojson::object(|f| {
                                 f.member("requestType", &result.request_type)?;
+                                f.member("requestId", &result.request_id)?;
                                 f.member(
                                     "requestStatus",
                                     nojson::object(|f| {
@@ -1133,6 +1135,7 @@ pub fn parse_request_response_for_batch_result(
 ) -> crate::Result<RequestBatchResult> {
     let d = response.value().to_member("d")?.required()?;
     let request_type: String = d.to_member("requestType")?.required()?.try_into()?;
+    let request_id: String = d.to_member("requestId")?.required()?.try_into()?;
     let request_status = d.to_member("requestStatus")?.required()?;
     let request_status_result: bool = request_status.to_member("result")?.required()?.try_into()?;
     let request_status_code: i64 = request_status.to_member("code")?.required()?.try_into()?;
@@ -1142,6 +1145,7 @@ pub fn parse_request_response_for_batch_result(
         .map(nojson::RawJsonOwned::try_from)?;
 
     Ok(RequestBatchResult {
+        request_id,
         request_type,
         request_status_result,
         request_status_code,

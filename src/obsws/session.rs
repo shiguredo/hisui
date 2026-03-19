@@ -573,6 +573,7 @@ impl ObswsSession {
                 status_comment,
             ),
             batch_result: crate::obsws_response_builder::RequestBatchResult {
+                request_id: request_id.to_owned(),
                 request_type: request_type.to_owned(),
                 request_status_result: false,
                 request_status_code: status_code,

@@ -62,13 +62,14 @@ impl ObswsInputRegistry {
             .scenes_by_name
             .get_mut(scene_name)
             .ok_or(CreateSceneItemError::SceneNotFound)?;
+        let transform = super::transform_for_input(&input_entry.input);
         scene.items.push(ObswsSceneItemState {
             scene_item_id,
             input_uuid: input_entry.input_uuid.clone(),
             enabled: scene_item_enabled,
             locked: false,
             blend_mode: ObswsSceneItemBlendMode::default(),
-            transform: ObswsSceneItemTransform::default(),
+            transform: transform.clone(),
         });
         let scene_item_index = scene.items.len().saturating_sub(1) as i64;
         Ok(ObswsSceneItemRef {
@@ -84,7 +85,7 @@ impl ObswsInputRegistry {
                 scene_item_locked: false,
                 scene_item_blend_mode: ObswsSceneItemBlendMode::default().as_str().to_owned(),
                 scene_item_index,
-                scene_item_transform: ObswsSceneItemTransform::default(),
+                scene_item_transform: transform,
                 is_group: None,
             },
         })

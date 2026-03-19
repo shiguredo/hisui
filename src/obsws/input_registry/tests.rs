@@ -1004,15 +1004,18 @@ fn is_source_active_returns_true_when_source_is_enabled_in_program_scene() {
 fn scene_transition_override_round_trip_succeeds() {
     let mut registry = ObswsInputRegistry::new_for_test();
     let override_entry = registry
-        .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("Fade"), Some(500))
+        .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("fade_transition"), Some(500))
         .expect("transition override update must succeed");
-    assert_eq!(override_entry.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(
+        override_entry.transition_name.as_deref(),
+        Some("fade_transition")
+    );
     assert_eq!(override_entry.transition_duration, Some(500));
 
     let fetched = registry
         .get_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME)
         .expect("transition override lookup must succeed");
-    assert_eq!(fetched.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(fetched.transition_name.as_deref(), Some("fade_transition"));
     assert_eq!(fetched.transition_duration, Some(500));
 }
 
@@ -1020,7 +1023,7 @@ fn scene_transition_override_round_trip_succeeds() {
 fn set_scene_name_moves_scene_transition_override_to_new_scene_name() {
     let mut registry = ObswsInputRegistry::new_for_test();
     registry
-        .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("Fade"), Some(500))
+        .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("fade_transition"), Some(500))
         .expect("transition override update must succeed");
 
     registry
@@ -1030,30 +1033,34 @@ fn set_scene_name_moves_scene_transition_override_to_new_scene_name() {
     let renamed_override = registry
         .get_scene_transition_override("Scene Renamed")
         .expect("renamed scene override lookup must succeed");
-    assert_eq!(renamed_override.transition_name.as_deref(), Some("Fade"));
+    assert_eq!(
+        renamed_override.transition_name.as_deref(),
+        Some("fade_transition")
+    );
     assert_eq!(renamed_override.transition_duration, Some(500));
 }
 
 #[test]
 fn transition_runtime_defaults_to_cut_and_500ms() {
     let registry = ObswsInputRegistry::new_for_test();
-    assert_eq!(registry.current_scene_transition_name(), "Cut");
+    assert_eq!(registry.current_scene_transition_name(), "cut_transition");
     assert_eq!(registry.current_scene_transition_duration_ms(), 500);
-    assert_eq!(
-        registry.current_scene_transition_settings().value().kind(),
-        nojson::JsonValueKind::Object
-    );
+    // デフォルトでは transitionSettings は None（OBS 互換で null を返す）
+    assert!(registry.current_scene_transition_settings().is_none());
     assert_eq!(registry.current_tbar_position(), 0.0);
-    assert_eq!(registry.supported_transition_kinds(), ["Cut", "Fade"]);
+    assert_eq!(
+        registry.supported_transition_kinds(),
+        ["cut_transition", "fade_transition"]
+    );
 }
 
 #[test]
 fn set_current_scene_transition_updates_transition_name() {
     let mut registry = ObswsInputRegistry::new_for_test();
     registry
-        .set_current_scene_transition("Fade")
+        .set_current_scene_transition("fade_transition")
         .expect("setting transition to Fade must succeed");
-    assert_eq!(registry.current_scene_transition_name(), "Fade");
+    assert_eq!(registry.current_scene_transition_name(), "fade_transition");
 }
 
 #[test]
@@ -1118,8 +1125,10 @@ fn set_current_scene_transition_settings_updates_runtime_value() {
     registry
         .set_current_scene_transition_settings(transition_settings)
         .expect("transition settings update must succeed");
-    let speed: i64 = registry
+    let settings = registry
         .current_scene_transition_settings()
+        .expect("transition settings must be Some after set");
+    let speed: i64 = settings
         .value()
         .to_member("speed")
         .and_then(|v| v.required()?.try_into())

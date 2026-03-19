@@ -13,13 +13,13 @@ pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 6] = [
     "srt_inbound",
     "rtsp_subscriber",
 ];
-pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] = ["Cut", "Fade"];
+pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] =
+    ["cut_transition", "fade_transition"];
 pub(crate) const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
-pub(crate) const OBSWS_DEFAULT_TRANSITION_NAME: &str = "Cut";
+pub(crate) const OBSWS_DEFAULT_TRANSITION_NAME: &str = "cut_transition";
 pub(crate) const OBSWS_DEFAULT_TRANSITION_DURATION_MS: i64 = 500;
-pub(crate) const OBSWS_DEFAULT_TRANSITION_SETTINGS_JSON: &str = "{}";
 pub(crate) const OBSWS_DEFAULT_TBAR_POSITION: f64 = 0.0;
 pub(crate) const OBSWS_MIN_TRANSITION_DURATION_MS: i64 = 50;
 pub(crate) const OBSWS_MAX_TRANSITION_DURATION_MS: i64 = 20_000;
@@ -646,7 +646,7 @@ pub(crate) struct ObswsRecordRuntimeState {
 pub(crate) struct ObswsTransitionRuntimeState {
     pub(crate) current_transition_name: String,
     pub(crate) current_transition_duration_ms: i64,
-    pub(crate) current_transition_settings: nojson::RawJsonOwned,
+    pub(crate) current_transition_settings: Option<nojson::RawJsonOwned>,
     pub(crate) current_tbar_position: f64,
 }
 
@@ -655,10 +655,7 @@ impl Default for ObswsTransitionRuntimeState {
         Self {
             current_transition_name: OBSWS_DEFAULT_TRANSITION_NAME.to_owned(),
             current_transition_duration_ms: OBSWS_DEFAULT_TRANSITION_DURATION_MS,
-            current_transition_settings: nojson::RawJsonOwned::parse(
-                OBSWS_DEFAULT_TRANSITION_SETTINGS_JSON,
-            )
-            .expect("BUG: default transition settings json must be valid"),
+            current_transition_settings: None,
             current_tbar_position: OBSWS_DEFAULT_TBAR_POSITION,
         }
     }

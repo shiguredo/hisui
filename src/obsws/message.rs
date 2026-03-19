@@ -880,7 +880,7 @@ mod tests {
                 request_id: Some("req-set-override".to_owned()),
                 request_type: Some("SetSceneSceneTransitionOverride".to_owned()),
                 request_data: Some(request_data(
-                    r#"{"sceneName":"Scene","transitionName":"Fade","transitionDuration":500}"#,
+                    r#"{"sceneName":"Scene","transitionName":"fade_transition","transitionDuration":500}"#,
                 )),
             },
             &session_stats,
@@ -913,7 +913,7 @@ mod tests {
             .value()
             .to_path_member(&["d", "responseData", "transitionDuration"])?
             .try_into()?;
-        assert_eq!(get_transition_name.as_deref(), Some("Fade"));
+        assert_eq!(get_transition_name.as_deref(), Some("fade_transition"));
         assert_eq!(get_transition_duration, Some(500));
         Ok(())
     }
@@ -1423,11 +1423,9 @@ mod tests {
             .value()
             .to_path_member(&["d", "responseData"])?
             .required()?;
-        let input_kind: String = response_data
-            .to_member("inputKind")?
-            .required()?
-            .try_into()?;
-        assert_eq!(input_kind, "video_capture_device");
+        // GetInputSettings は inputSettings のみ返す（inputName, inputKind は含まない）
+        let input_settings = response_data.to_member("inputSettings")?.required()?;
+        assert_eq!(input_settings.kind(), nojson::JsonValueKind::Object);
         Ok(())
     }
 

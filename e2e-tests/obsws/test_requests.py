@@ -250,8 +250,8 @@ def test_obsws_transition_requests(binary_path: Path):
         )
         assert kind_list_response["d"]["requestStatus"]["result"] is True
         transition_kinds = kind_list_response["d"]["responseData"]["transitionKinds"]
-        assert "Cut" in transition_kinds
-        assert "Fade" in transition_kinds
+        assert "cut_transition" in transition_kinds
+        assert "fade_transition" in transition_kinds
 
         transition_list_response = asyncio.run(
             _connect_identify_and_request(
@@ -263,18 +263,18 @@ def test_obsws_transition_requests(binary_path: Path):
         assert transition_list_response["d"]["requestStatus"]["result"] is True
         assert (
             transition_list_response["d"]["responseData"]["currentSceneTransitionName"]
-            == "Cut"
+            == "cut_transition"
         )
         assert (
             transition_list_response["d"]["responseData"]["currentSceneTransitionKind"]
-            == "Cut"
+            == "cut_transition"
         )
         transition_entries = transition_list_response["d"]["responseData"]["transitions"]
         cut_transition = next(
-            t for t in transition_entries if t["transitionName"] == "Cut"
+            t for t in transition_entries if t["transitionName"] == "cut_transition"
         )
         fade_transition = next(
-            t for t in transition_entries if t["transitionName"] == "Fade"
+            t for t in transition_entries if t["transitionName"] == "fade_transition"
         )
         assert cut_transition["transitionFixed"] is True
         assert fade_transition["transitionFixed"] is False
@@ -284,7 +284,7 @@ def test_obsws_transition_requests(binary_path: Path):
                 f"ws://{host}:{port}/",
                 request_type="SetCurrentSceneTransition",
                 request_id="req-set-current-scene-transition",
-                request_data={"transitionName": "Fade"},
+                request_data={"transitionName": "fade_transition"},
             )
         )
         assert set_transition_response["d"]["requestStatus"]["result"] is True
@@ -309,7 +309,7 @@ def test_obsws_transition_requests(binary_path: Path):
         assert get_current_transition_response["d"]["requestStatus"]["result"] is True
         assert (
             get_current_transition_response["d"]["responseData"]["transitionName"]
-            == "Fade"
+            == "fade_transition"
         )
         assert (
             get_current_transition_response["d"]["responseData"]["transitionDuration"]

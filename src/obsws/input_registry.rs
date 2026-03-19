@@ -12,6 +12,36 @@ mod types;
 
 pub(crate) use self::types::*;
 
+/// PNG ファイルのヘッダーからサイズを読み取り、偶数に丸めた (width, height) を返す。
+/// ファイルが存在しない・読めない場合は None を返す。
+fn read_png_dimensions(path: &Path) -> Option<(f64, f64)> {
+    let file = std::fs::File::open(path).ok()?;
+    let decoder = png::Decoder::new(std::io::BufReader::new(file));
+    let reader = decoder.read_info().ok()?;
+    let info = reader.info();
+    // I420 制約のため偶数に丸める（source_png_file.rs と同じロジック）
+    let width = (info.width as usize) - (info.width as usize % 2);
+    let height = (info.height as usize) - (info.height as usize % 2);
+    Some((width as f64, height as f64))
+}
+
+/// image_source の設定からサイズを取得して ObswsSceneItemTransform を構築する。
+fn transform_for_input(input: &ObswsInput) -> ObswsSceneItemTransform {
+    if let ObswsInputSettings::ImageSource(ref settings) = input.settings
+        && let Some(ref file) = settings.file
+        && let Some((w, h)) = read_png_dimensions(Path::new(file))
+    {
+        return ObswsSceneItemTransform {
+            source_width: w,
+            source_height: h,
+            width: w,
+            height: h,
+            ..Default::default()
+        };
+    }
+    ObswsSceneItemTransform::default()
+}
+
 impl ObswsInputRegistry {
     pub fn new(
         record_directory: PathBuf,
@@ -105,13 +135,14 @@ impl ObswsInputRegistry {
             .scenes_by_name
             .get_mut(scene_name)
             .expect("BUG: scene must exist after validation");
+        let transform = transform_for_input(&entry.input);
         scene.items.push(ObswsSceneItemState {
             scene_item_id,
             input_uuid: entry.input_uuid.clone(),
             enabled: scene_item_enabled,
             locked: false,
             blend_mode: ObswsSceneItemBlendMode::default(),
-            transform: ObswsSceneItemTransform::default(),
+            transform,
         });
 
         Ok((entry, scene_item_id))
@@ -402,8 +433,8 @@ impl ObswsInputRegistry {
         self.transition_runtime.current_transition_duration_ms
     }
 
-    pub fn current_scene_transition_settings(&self) -> &nojson::RawJsonOwned {
-        &self.transition_runtime.current_transition_settings
+    pub fn current_scene_transition_settings(&self) -> Option<&nojson::RawJsonOwned> {
+        self.transition_runtime.current_transition_settings.as_ref()
     }
 
     pub fn current_tbar_position(&self) -> f64 {
@@ -441,7 +472,7 @@ impl ObswsInputRegistry {
         if transition_settings.value().kind() != nojson::JsonValueKind::Object {
             return Err(SetCurrentSceneTransitionSettingsError::InvalidTransitionSettings);
         }
-        self.transition_runtime.current_transition_settings = transition_settings;
+        self.transition_runtime.current_transition_settings = Some(transition_settings);
         Ok(())
     }
 

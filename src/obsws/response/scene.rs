@@ -39,14 +39,14 @@ impl nojson::DisplayJson for ObswsSceneTransitionEntry {
 }
 
 fn is_fixed_transition(transition_name: &str) -> bool {
-    matches!(transition_name, "Cut")
+    matches!(transition_name, "cut_transition")
 }
 
 /// トランジション名から決定的な UUID を生成する
 fn transition_uuid(transition_name: &str) -> String {
     match transition_name {
-        "Cut" => "20000000-0000-0000-0000-000000000000".to_owned(),
-        "Fade" => "20000000-0000-0000-0000-000000000001".to_owned(),
+        "cut_transition" => "20000000-0000-0000-0000-000000000000".to_owned(),
+        "fade_transition" => "20000000-0000-0000-0000-000000000001".to_owned(),
         other => format!("20000000-0000-0000-0000-{:012x}", {
             let mut hash: u64 = 5381;
             for byte in other.bytes() {
@@ -189,8 +189,11 @@ pub fn build_get_current_scene_transition_response(
         if fixed {
             f.member("transitionSettings", Option::<&str>::None)?;
         } else {
-            let transition_settings = input_registry.current_scene_transition_settings();
-            f.member("transitionSettings", transition_settings)?;
+            // non-fixed でも設定が未設定（None）の場合は null を返す
+            match input_registry.current_scene_transition_settings() {
+                Some(settings) => f.member("transitionSettings", settings)?,
+                None => f.member("transitionSettings", Option::<&str>::None)?,
+            }
         }
         f.member("transitionDuration", current_transition_duration_ms)
     })
