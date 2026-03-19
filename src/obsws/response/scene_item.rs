@@ -256,8 +256,8 @@ pub fn execute_duplicate_scene_item(
         "DuplicateSceneItem",
         request_id,
         input_registry,
-        fields.from_scene_name.as_deref(),
-        fields.from_scene_uuid.as_deref(),
+        fields.scene_name.as_deref(),
+        fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => {
@@ -271,8 +271,8 @@ pub fn execute_duplicate_scene_item(
         "DuplicateSceneItem",
         request_id,
         input_registry,
-        fields.to_scene_name.as_deref(),
-        fields.to_scene_uuid.as_deref(),
+        fields.destination_scene_name.as_deref(),
+        fields.destination_scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => {

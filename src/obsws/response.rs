@@ -117,10 +117,10 @@ struct RemoveSceneItemFields {
 }
 
 struct DuplicateSceneItemFields {
-    from_scene_name: Option<String>,
-    from_scene_uuid: Option<String>,
-    to_scene_name: Option<String>,
-    to_scene_uuid: Option<String>,
+    scene_name: Option<String>,
+    scene_uuid: Option<String>,
+    destination_scene_name: Option<String>,
+    destination_scene_uuid: Option<String>,
     scene_item_id: i64,
 }
 
@@ -548,19 +548,19 @@ fn parse_remove_scene_item_fields(
 fn parse_duplicate_scene_item_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<DuplicateSceneItemFields, nojson::JsonParseError> {
-    let (from_scene_name, from_scene_uuid) =
-        parse_scene_lookup_fields(request_data, "fromSceneName", "fromSceneUuid")?;
-    let (to_scene_name, to_scene_uuid) =
-        parse_scene_lookup_fields(request_data, "toSceneName", "toSceneUuid")?;
+    let (scene_name, scene_uuid) =
+        parse_scene_lookup_fields(request_data, "sceneName", "sceneUuid")?;
+    let (destination_scene_name, destination_scene_uuid) =
+        parse_scene_lookup_fields(request_data, "destinationSceneName", "destinationSceneUuid")?;
     let scene_item_id: i64 = request_data
         .to_member("sceneItemId")?
         .required()?
         .try_into()?;
     Ok(DuplicateSceneItemFields {
-        from_scene_name,
-        from_scene_uuid,
-        to_scene_name,
-        to_scene_uuid,
+        scene_name,
+        scene_uuid,
+        destination_scene_name,
+        destination_scene_uuid,
         scene_item_id,
     })
 }

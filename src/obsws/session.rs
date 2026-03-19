@@ -303,10 +303,10 @@ impl ObswsSession {
             };
         }
 
-        // OBS 互換: 未指定時は SerialRealtime (1) として扱う。
+        // OBS 互換: 未指定時は SerialRealtime (0) として扱う。
         // hisui は SerialRealtime のみ対応し、それ以外は拒否する。
-        let execution_type = request_batch.execution_type.unwrap_or(1);
-        if execution_type != 1 {
+        let execution_type = request_batch.execution_type.unwrap_or(0);
+        if execution_type != 0 {
             return SessionAction::Close {
                 code: CloseCode::INVALID_PAYLOAD,
                 reason: "unsupported executionType field in request batch",
