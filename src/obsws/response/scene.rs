@@ -178,17 +178,20 @@ pub fn build_get_current_scene_transition_response(
     let current_transition_name = input_registry.current_scene_transition_name();
     let current_transition_uuid = transition_uuid(current_transition_name);
     let current_transition_duration_ms = input_registry.current_scene_transition_duration_ms();
-    let transition_settings = input_registry.current_scene_transition_settings();
+    let fixed = is_fixed_transition(current_transition_name);
     super::build_request_response_success("GetCurrentSceneTransition", request_id, |f| {
         f.member("transitionName", current_transition_name)?;
         f.member("transitionUuid", &current_transition_uuid)?;
         f.member("transitionKind", current_transition_name)?;
-        f.member(
-            "transitionFixed",
-            is_fixed_transition(current_transition_name),
-        )?;
+        f.member("transitionFixed", fixed)?;
         f.member("transitionConfigurable", false)?;
-        f.member("transitionSettings", transition_settings)?;
+        // 固定トランジションでは OBS は transitionSettings を null で返す
+        if fixed {
+            f.member("transitionSettings", Option::<&str>::None)?;
+        } else {
+            let transition_settings = input_registry.current_scene_transition_settings();
+            f.member("transitionSettings", transition_settings)?;
+        }
         f.member("transitionDuration", current_transition_duration_ms)
     })
 }

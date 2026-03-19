@@ -255,7 +255,9 @@ impl ObswsInputRegistry {
     }
 
     pub fn list_scenes(&self) -> Vec<ObswsSceneEntry> {
-        self.scene_order
+        // OBS は sceneIndex 降順（後から作ったシーンが先頭）で返すため逆順にする
+        let mut scenes: Vec<ObswsSceneEntry> = self
+            .scene_order
             .iter()
             .enumerate()
             .filter_map(|(index, scene_name)| {
@@ -267,7 +269,9 @@ impl ObswsInputRegistry {
                         scene_uuid: scene.scene_uuid.clone(),
                     })
             })
-            .collect()
+            .collect();
+        scenes.reverse();
+        scenes
     }
 
     pub fn current_program_scene(&self) -> Option<ObswsSceneEntry> {
