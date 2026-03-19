@@ -920,6 +920,10 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     ):
                         break
                     await asyncio.sleep(0.2)
+                else:
+                    raise AssertionError(
+                        "record did not write video samples in time for rtmp_inbound"
+                    )
 
                 await asyncio.sleep(0.5)
 
@@ -1020,6 +1024,10 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                     ):
                         break
                     await asyncio.sleep(0.2)
+                else:
+                    raise AssertionError(
+                        "record did not write video samples in time for srt_inbound"
+                    )
 
                 await asyncio.sleep(0.5)
 
@@ -1125,6 +1133,10 @@ def test_obsws_srt_inbound_with_stream_id(
                     ):
                         break
                     await asyncio.sleep(0.2)
+                else:
+                    raise AssertionError(
+                        "record did not write video samples in time for srt_inbound with stream_id"
+                    )
 
                 await asyncio.sleep(0.5)
 
