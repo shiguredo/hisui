@@ -1,6 +1,10 @@
 use super::*;
 
 impl ObswsSession {
+    const RECORD_STOP_SOURCE_GRACE_TIMEOUT: Duration = Duration::from_secs(1);
+    const RECORD_STOP_FINISH_RPC_RETRY_TIMEOUT: Duration = Duration::from_millis(500);
+    const RECORD_STOP_FINISH_RPC_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+
     // --- リクエストハンドラ（handle_request_internal から委譲される） ---
 
     pub(super) async fn handle_start_stream_request(
@@ -1704,40 +1708,39 @@ impl ObswsSession {
         // 1. ソースを停止して新規入力を止める（入力 0 件なら何もしない）
         self.stop_processors(&run.source_processor_ids).await?;
 
-        // 2. mixer に Finish RPC を送信して EOS を発行させる
-        pipeline_handle
-            .finish_audio_mixer(run.audio_mixer_processor_id.clone())
+        // 2. source 停止だけで自然終了するケースを短時間だけ待つ。
+        let mixer_ids = vec![
+            run.audio_mixer_processor_id.clone(),
+            run.video_mixer_processor_id.clone(),
+        ];
+        if self
+            .wait_processors_stopped(
+                pipeline_handle,
+                &mixer_ids,
+                Self::RECORD_STOP_SOURCE_GRACE_TIMEOUT,
+            )
             .await
-            .map_err(|e| crate::Error::new(format!("failed to finish audio mixer: {e}")))?;
-        pipeline_handle
-            .finish_video_mixer(run.video_mixer_processor_id.clone())
-            .await
-            .map_err(|e| crate::Error::new(format!("failed to finish video mixer: {e}")))?;
-
-        // 3. mixer の自然終了を待つ（Finish 受信 → 次の tick で EOS → 終了）
+            .is_err()
         {
-            let mixer_ids = vec![
-                run.audio_mixer_processor_id.clone(),
-                run.video_mixer_processor_id.clone(),
-            ];
-            self.wait_processors_stopped_with_default_timeout(&mixer_ids)
+            self.finish_or_stop_record_mixers(pipeline_handle, run)
                 .await?;
         }
 
-        // 4. エンコーダーが残バッファを流して自然終了するのを待つ
+        // 3. エンコーダーは EOS 伝播での自然終了を優先し、残れば停止する。
         {
             let ids = vec![
                 run.video.encoder_processor_id.clone(),
                 run.audio.encoder_processor_id.clone(),
             ];
-            self.wait_processors_stopped_with_default_timeout(&ids)
+            self.wait_or_stop_processors(&ids, Duration::from_secs(5))
                 .await?;
         }
 
-        // 5. ライターが finalize を完了して自然終了するのを待つ
-        self.wait_processors_stopped_with_default_timeout(std::slice::from_ref(
-            &run.writer_processor_id,
-        ))
+        // 4. ライターは finalize を優先し、残れば最後に停止する。
+        self.wait_or_stop_processors(
+            std::slice::from_ref(&run.writer_processor_id),
+            Duration::from_secs(5),
+        )
         .await?;
 
         Ok(())
@@ -1791,6 +1794,34 @@ impl ObswsSession {
             .await
     }
 
+    pub(super) async fn wait_or_stop_processors(
+        &self,
+        processor_ids: &[crate::ProcessorId],
+        timeout: Duration,
+    ) -> crate::Result<()> {
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            return Err(crate::Error::new(
+                "BUG: obsws pipeline handle is not initialized",
+            ));
+        };
+
+        if self
+            .wait_processors_stopped(pipeline_handle, processor_ids, timeout)
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+
+        let pending = self
+            .live_processor_ids(pipeline_handle, processor_ids)
+            .await?;
+        if pending.is_empty() {
+            return Ok(());
+        }
+        self.stop_processors(&pending).await
+    }
+
     pub(super) async fn wait_processors_stopped(
         &self,
         pipeline_handle: &crate::MediaPipelineHandle,
@@ -1821,5 +1852,178 @@ impl ObswsSession {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+    }
+
+    async fn finish_or_stop_record_mixers(
+        &self,
+        pipeline_handle: &crate::MediaPipelineHandle,
+        run: &ObswsRecordRun,
+    ) -> crate::Result<()> {
+        let mut terminate_ids = Vec::new();
+
+        if let Err(e) = self
+            .finish_audio_mixer_with_retry(pipeline_handle, run.audio_mixer_processor_id.clone())
+            .await
+        {
+            tracing::debug!("audio mixer finish fallback to terminate: {}", e.display());
+            terminate_ids.push(run.audio_mixer_processor_id.clone());
+        }
+        if let Err(e) = self
+            .finish_video_mixer_with_retry(pipeline_handle, run.video_mixer_processor_id.clone())
+            .await
+        {
+            tracing::debug!("video mixer finish fallback to terminate: {}", e.display());
+            terminate_ids.push(run.video_mixer_processor_id.clone());
+        }
+
+        if !terminate_ids.is_empty() {
+            self.stop_processors(&terminate_ids).await?;
+        }
+
+        let mixer_ids = vec![
+            run.audio_mixer_processor_id.clone(),
+            run.video_mixer_processor_id.clone(),
+        ];
+        if let Err(e) = self
+            .wait_processors_stopped_with_default_timeout(&mixer_ids)
+            .await
+        {
+            let pending = self
+                .live_processor_ids(pipeline_handle, &mixer_ids)
+                .await
+                .map_err(|list_error| {
+                    crate::Error::new(format!(
+                        "failed to finish record mixers: {}; additionally failed to inspect live mixers: {}",
+                        e.display(),
+                        list_error.display()
+                    ))
+                })?;
+            if pending.is_empty() {
+                return Ok(());
+            }
+            self.stop_processors(&pending).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn finish_audio_mixer_with_retry(
+        &self,
+        pipeline_handle: &crate::MediaPipelineHandle,
+        processor_id: crate::ProcessorId,
+    ) -> crate::Result<()> {
+        let deadline = tokio::time::Instant::now() + Self::RECORD_STOP_FINISH_RPC_RETRY_TIMEOUT;
+        loop {
+            let sender = match pipeline_handle
+                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
+                    crate::mixer_realtime_audio::AudioRealtimeMixerRpcMessage,
+                >>(&processor_id)
+                .await
+            {
+                Ok(sender) => sender,
+                Err(crate::media_pipeline::GetProcessorRpcSenderError::ProcessorNotFound) => {
+                    return Ok(());
+                }
+                Err(crate::media_pipeline::GetProcessorRpcSenderError::SenderNotRegistered) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(crate::Error::new(format!(
+                            "audio mixer RPC sender is not registered: {processor_id}"
+                        )));
+                    }
+                    tokio::time::sleep(Self::RECORD_STOP_FINISH_RPC_RETRY_INTERVAL).await;
+                    continue;
+                }
+                Err(e) => {
+                    return Err(crate::Error::new(format!(
+                        "failed to get audio mixer RPC sender ({processor_id}): {e}"
+                    )));
+                }
+            };
+
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            sender
+                .send(
+                    crate::mixer_realtime_audio::AudioRealtimeMixerRpcMessage::Finish { reply_tx },
+                )
+                .map_err(|_| {
+                    crate::Error::new(format!(
+                        "failed to send finish RPC to audio mixer: {processor_id}"
+                    ))
+                })?;
+            reply_rx.await.map_err(|_| {
+                crate::Error::new(format!(
+                    "failed to receive finish RPC response from audio mixer: {processor_id}"
+                ))
+            })?;
+            return Ok(());
+        }
+    }
+
+    async fn finish_video_mixer_with_retry(
+        &self,
+        pipeline_handle: &crate::MediaPipelineHandle,
+        processor_id: crate::ProcessorId,
+    ) -> crate::Result<()> {
+        let deadline = tokio::time::Instant::now() + Self::RECORD_STOP_FINISH_RPC_RETRY_TIMEOUT;
+        loop {
+            let sender = match pipeline_handle
+                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
+                    crate::mixer_realtime_video::VideoRealtimeMixerRpcMessage,
+                >>(&processor_id)
+                .await
+            {
+                Ok(sender) => sender,
+                Err(crate::media_pipeline::GetProcessorRpcSenderError::ProcessorNotFound) => {
+                    return Ok(());
+                }
+                Err(crate::media_pipeline::GetProcessorRpcSenderError::SenderNotRegistered) => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(crate::Error::new(format!(
+                            "video mixer RPC sender is not registered: {processor_id}"
+                        )));
+                    }
+                    tokio::time::sleep(Self::RECORD_STOP_FINISH_RPC_RETRY_INTERVAL).await;
+                    continue;
+                }
+                Err(e) => {
+                    return Err(crate::Error::new(format!(
+                        "failed to get video mixer RPC sender ({processor_id}): {e}"
+                    )));
+                }
+            };
+
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            sender
+                .send(
+                    crate::mixer_realtime_video::VideoRealtimeMixerRpcMessage::Finish { reply_tx },
+                )
+                .map_err(|_| {
+                    crate::Error::new(format!(
+                        "failed to send finish RPC to video mixer: {processor_id}"
+                    ))
+                })?;
+            reply_rx.await.map_err(|_| {
+                crate::Error::new(format!(
+                    "failed to receive finish RPC response from video mixer: {processor_id}"
+                ))
+            })?;
+            return Ok(());
+        }
+    }
+
+    async fn live_processor_ids(
+        &self,
+        pipeline_handle: &crate::MediaPipelineHandle,
+        processor_ids: &[crate::ProcessorId],
+    ) -> crate::Result<Vec<crate::ProcessorId>> {
+        let live_processors = pipeline_handle
+            .list_processors()
+            .await
+            .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
+        Ok(processor_ids
+            .iter()
+            .filter(|processor_id| live_processors.iter().any(|id| id == *processor_id))
+            .cloned()
+            .collect())
     }
 }

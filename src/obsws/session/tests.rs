@@ -1407,6 +1407,76 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
 }
 
 #[tokio::test]
+async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() -> crate::Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(
+        temp_dir.path().to_path_buf(),
+        crate::types::EvenUsize::new(1920).unwrap(),
+        crate::types::EvenUsize::new(1080).unwrap(),
+        crate::video::FrameRate::FPS_30,
+    )));
+    {
+        let mut registry = input_registry.write().await;
+        let input = ObswsInput::from_kind_and_settings(
+            "mp4_file_source",
+            nojson::RawJsonOwned::parse(
+                r#"{"path":"testdata/beep-aac-audio.mp4","loopPlayback":true}"#,
+            )
+            .expect("requestData must be valid json")
+            .value(),
+        )
+        .expect("input settings must be valid");
+        registry
+            .create_input("Scene", "audio-file-immediate-stop", input, true)
+            .expect("input creation must succeed");
+    }
+
+    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    let pipeline_task = tokio::spawn(pipeline.run());
+    let started = pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+    assert!(started);
+
+    let mut session = ObswsSession::new(None, input_registry, Some(pipeline_handle));
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    let start_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-record-mp4-immediate-stop".to_owned()),
+            request_type: Some("StartRecord".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let text = unwrap_send_text(start_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    let stop_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-stop-record-mp4-immediate-stop".to_owned()),
+            request_type: Some("StopRecord".to_owned()),
+            request_data: None,
+        })
+        .await;
+    let text = unwrap_send_text(stop_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    pipeline_task.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let input_registry = Arc::new(RwLock::new(ObswsInputRegistry::new(

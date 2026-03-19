@@ -41,6 +41,7 @@ jobs:
       - name: Run e2e tests
         env:
           HISUI_OPENH264_PATH: ${{ env.OPENH264_PATH }}
+          HISUI_E2E_CARGO_RUN_ARGS: --features fdk-aac
         run: |
           uv sync
           uv run pytest -v

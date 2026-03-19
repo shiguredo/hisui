@@ -1,5 +1,7 @@
 """hisui server e2e テスト補助クラス"""
 
+import os
+import shlex
 import signal
 import socket
 import ssl
@@ -10,6 +12,33 @@ from typing import Any
 
 import httpx
 from processor_metrics import ProcessorMetrics
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def build_hisui_command(binary_path: Path, *args: str) -> tuple[list[str], Path]:
+    """hisui 起動コマンドを環境変数に応じて組み立てる"""
+    runner = os.environ.get("HISUI_E2E_HISUI_RUNNER", "cargo-run")
+    if runner == "direct":
+        return ([str(binary_path), *args], REPO_ROOT)
+    if runner != "cargo-run":
+        raise ValueError(f"unsupported HISUI_E2E_HISUI_RUNNER: {runner}")
+
+    extra_args = shlex.split(os.environ.get("HISUI_E2E_CARGO_RUN_ARGS", ""))
+    return (
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "--release",
+            *extra_args,
+            "--bin",
+            "hisui",
+            "--",
+            *args,
+        ],
+        REPO_ROOT,
+    )
 
 
 class HisuiServer:
@@ -65,13 +94,13 @@ class HisuiServer:
         port, sock = reserve_ephemeral_port()
         self.port = port
 
-        cmd = [str(self.binary_path)]
+        args: list[str] = []
         if self.verbose:
-            cmd.append("--verbose")
-        cmd.extend(["--experimental", "server", "--http-port", str(port)])
+            args.append("--verbose")
+        args.extend(["--experimental", "server", "--http-port", str(port)])
 
         if self.https_cert_path and self.https_key_path:
-            cmd.extend([
+            args.extend([
                 "--https-cert-path",
                 str(self.https_cert_path),
                 "--https-key-path",
@@ -79,12 +108,13 @@ class HisuiServer:
             ])
 
         if self.ui_remote_url:
-            cmd.extend(["--ui-remote-url", self.ui_remote_url])
+            args.extend(["--ui-remote-url", self.ui_remote_url])
 
         # バイナリ起動直前に予約ソケットを解放する
         sock.close()
 
-        self._process = subprocess.Popen(cmd)
+        cmd, cwd = build_hisui_command(self.binary_path, *args)
+        self._process = subprocess.Popen(cmd, cwd=cwd)
 
         self._verify = True
         if self.is_https:

@@ -15,6 +15,8 @@ from pathlib import Path
 import aiohttp
 import pytest
 
+from hisui_server import build_hisui_command
+
 OBSWS_SUBPROTOCOL = "obswebsocket.json"
 OBSWS_EVENT_SUB_SCENES = 1 << 2
 OBSWS_EVENT_SUB_INPUTS = 1 << 3
@@ -53,7 +55,7 @@ class ObswsServer:
         if self._process is not None:
             raise RuntimeError("obsws server is already started")
 
-        cmd = [str(self.binary_path), "--verbose", "--experimental", "obsws"]
+        args = ["--verbose", "--experimental", "obsws"]
         env = os.environ.copy()
         openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
@@ -64,7 +66,7 @@ class ObswsServer:
             if self.default_record_dir is not None:
                 env["HISUI_DEFAULT_RECORD_DIR"] = str(self.default_record_dir)
         else:
-            cmd.extend(
+            args.extend(
                 [
                     "--host",
                     self.host,
@@ -73,13 +75,14 @@ class ObswsServer:
                 ]
             )
             if self.password is not None:
-                cmd.extend(["--password", self.password])
+                args.extend(["--password", self.password])
             if self.default_record_dir is not None:
-                cmd.extend(["--default-record-dir", str(self.default_record_dir)])
+                args.extend(["--default-record-dir", str(self.default_record_dir)])
             if openh264_path:
-                cmd.extend(["--openh264", openh264_path])
+                args.extend(["--openh264", openh264_path])
 
-        self._process = subprocess.Popen(cmd, env=env)
+        cmd, cwd = build_hisui_command(self.binary_path, *args)
+        self._process = subprocess.Popen(cmd, env=env, cwd=cwd)
         self._wait_until_listening()
         return self
 
@@ -346,10 +349,12 @@ def _inspect_mp4(
 ) -> dict[str, object]:
     deadline = time.time() + timeout_sec
     while True:
+        cmd, cwd = build_hisui_command(binary_path, "inspect", str(path))
         result = subprocess.run(
-            [str(binary_path), "inspect", str(path)],
+            cmd,
             capture_output=True,
             text=True,
+            cwd=cwd,
         )
         assert result.returncode == 0, (
             f"hisui inspect failed: returncode={result.returncode}, stderr={result.stderr}"
