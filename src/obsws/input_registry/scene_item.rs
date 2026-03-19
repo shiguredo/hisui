@@ -76,12 +76,15 @@ impl ObswsInputRegistry {
             scene_uuid: scene.scene_uuid.clone(),
             scene_item: ObswsSceneItemEntry {
                 scene_item_id,
+                input_kind: input_entry.input.kind_name().to_owned(),
+                source_type: "OBS_SOURCE_TYPE_INPUT".to_owned(),
                 source_name: input_entry.input_name,
                 source_uuid: input_entry.input_uuid,
                 scene_item_enabled,
                 scene_item_locked: false,
                 scene_item_blend_mode: ObswsSceneItemBlendMode::default().as_str().to_owned(),
                 scene_item_index,
+                scene_item_transform: ObswsSceneItemTransform::default(),
                 is_group: false,
             },
         })
@@ -116,10 +119,13 @@ impl ObswsInputRegistry {
                 scene_item_id: removed.scene_item_id,
                 source_name: input_entry.input_name.clone(),
                 source_uuid: input_entry.input_uuid.clone(),
+                input_kind: input_entry.input.kind_name().to_owned(),
+                source_type: "OBS_SOURCE_TYPE_INPUT".to_owned(),
                 scene_item_enabled: removed.enabled,
                 scene_item_locked: removed.locked,
                 scene_item_blend_mode: removed.blend_mode.as_str().to_owned(),
                 scene_item_index: position as i64,
+                scene_item_transform: removed.transform,
                 is_group: false,
             },
         })
@@ -169,7 +175,7 @@ impl ObswsInputRegistry {
             enabled,
             locked,
             blend_mode,
-            transform,
+            transform: transform.clone(),
         });
         let scene_item_index = to_scene.items.len().saturating_sub(1) as i64;
         Ok(ObswsSceneItemRef {
@@ -179,10 +185,13 @@ impl ObswsInputRegistry {
                 scene_item_id: new_scene_item_id,
                 source_name: input_entry.input_name,
                 source_uuid: input_entry.input_uuid,
+                input_kind: input_entry.input.kind_name().to_owned(),
+                source_type: "OBS_SOURCE_TYPE_INPUT".to_owned(),
                 scene_item_enabled: enabled,
                 scene_item_locked: locked,
                 scene_item_blend_mode: blend_mode.as_str().to_owned(),
                 scene_item_index,
+                scene_item_transform: transform,
                 is_group: false,
             },
         })

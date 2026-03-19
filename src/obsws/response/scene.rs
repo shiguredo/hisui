@@ -2,12 +2,11 @@ use crate::obsws_input_registry::{
     CreateSceneError, GetSceneSceneTransitionOverrideError, ObswsInputRegistry,
     SetCurrentProgramSceneError, SetCurrentSceneTransitionDurationError,
     SetCurrentSceneTransitionError, SetSceneNameError, SetSceneSceneTransitionOverrideError,
-    SetTBarPositionError,
 };
 use crate::obsws_protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
-    REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
+    REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
 };
 
 use super::{
@@ -16,11 +15,11 @@ use super::{
     parse_set_current_program_scene_fields, parse_set_current_scene_transition_duration_fields,
     parse_set_current_scene_transition_fields, parse_set_current_scene_transition_settings_fields,
     parse_set_scene_name_fields, parse_set_scene_scene_transition_override_fields,
-    parse_set_tbar_position_fields,
 };
 
 struct ObswsSceneTransitionEntry {
     transition_name: String,
+    transition_uuid: String,
     transition_kind: String,
     transition_fixed: bool,
     transition_configurable: bool,
@@ -30,6 +29,7 @@ impl nojson::DisplayJson for ObswsSceneTransitionEntry {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             f.member("transitionName", &self.transition_name)?;
+            f.member("transitionUuid", &self.transition_uuid)?;
             f.member("transitionKind", &self.transition_kind)?;
             f.member("transitionFixed", self.transition_fixed)?;
             f.member("transitionConfigurable", self.transition_configurable)
@@ -40,6 +40,21 @@ impl nojson::DisplayJson for ObswsSceneTransitionEntry {
 
 fn is_fixed_transition(transition_name: &str) -> bool {
     matches!(transition_name, "Cut")
+}
+
+/// トランジション名から決定的な UUID を生成する
+fn transition_uuid(transition_name: &str) -> String {
+    match transition_name {
+        "Cut" => "20000000-0000-0000-0000-000000000000".to_owned(),
+        "Fade" => "20000000-0000-0000-0000-000000000001".to_owned(),
+        other => format!("20000000-0000-0000-0000-{:012x}", {
+            let mut hash: u64 = 5381;
+            for byte in other.bytes() {
+                hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
+            }
+            hash & 0xFFFF_FFFF_FFFF
+        }),
+    }
 }
 
 pub fn build_get_current_program_scene_response(
@@ -139,15 +154,18 @@ pub fn build_get_scene_transition_list_response(
         .iter()
         .map(|name| ObswsSceneTransitionEntry {
             transition_name: (*name).to_owned(),
+            transition_uuid: transition_uuid(name),
             transition_kind: (*name).to_owned(),
             transition_fixed: is_fixed_transition(name),
             transition_configurable: false,
         })
         .collect();
     let current_transition_name = input_registry.current_scene_transition_name();
+    let current_transition_uuid = transition_uuid(current_transition_name);
 
     super::build_request_response_success("GetSceneTransitionList", request_id, |f| {
         f.member("currentSceneTransitionName", current_transition_name)?;
+        f.member("currentSceneTransitionUuid", &current_transition_uuid)?;
         f.member("currentSceneTransitionKind", current_transition_name)?;
         f.member("transitions", &transitions)
     })
@@ -158,10 +176,12 @@ pub fn build_get_current_scene_transition_response(
     input_registry: &ObswsInputRegistry,
 ) -> nojson::RawJsonOwned {
     let current_transition_name = input_registry.current_scene_transition_name();
+    let current_transition_uuid = transition_uuid(current_transition_name);
     let current_transition_duration_ms = input_registry.current_scene_transition_duration_ms();
     let transition_settings = input_registry.current_scene_transition_settings();
     super::build_request_response_success("GetCurrentSceneTransition", request_id, |f| {
         f.member("transitionName", current_transition_name)?;
+        f.member("transitionUuid", &current_transition_uuid)?;
         f.member("transitionKind", current_transition_name)?;
         f.member(
             "transitionFixed",
@@ -283,6 +303,15 @@ pub fn build_set_current_scene_transition_settings_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
+    // Cut 等の固定トランジションはカスタム設定をサポートしない
+    if is_fixed_transition(input_registry.current_scene_transition_name()) {
+        return super::build_request_response_error(
+            "SetCurrentSceneTransitionSettings",
+            request_id,
+            REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
+            "Transition does not support custom settings",
+        );
+    }
     input_registry
         .set_current_scene_transition_settings(fields.transition_settings)
         .expect("BUG: parser must validate transitionSettings as object");
@@ -361,31 +390,14 @@ pub fn build_get_current_scene_transition_cursor_response(
     })
 }
 
-pub fn build_set_tbar_position_response(
-    request_id: &str,
-    request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
-) -> nojson::RawJsonOwned {
-    let fields = match parse_request_data_or_error_response(
+pub fn build_set_tbar_position_response(request_id: &str) -> nojson::RawJsonOwned {
+    // hisui は Studio Mode をサポートしていないため、常に 506 を返す
+    super::build_request_response_error(
         "SetTBarPosition",
         request_id,
-        request_data,
-        parse_set_tbar_position_fields,
-    ) {
-        Ok(fields) => fields,
-        Err(response) => return response,
-    };
-    if let Err(SetTBarPositionError::InvalidTBarPosition) =
-        input_registry.set_tbar_position(fields.position)
-    {
-        return super::build_request_response_error(
-            "SetTBarPosition",
-            request_id,
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            "Invalid position field",
-        );
-    }
-    super::build_request_response_success_no_data("SetTBarPosition", request_id)
+        REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
+        "Studio mode is not enabled",
+    )
 }
 
 pub fn build_create_scene_response(

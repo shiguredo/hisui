@@ -892,10 +892,13 @@ impl ObswsInputRegistry {
                     scene_item_id: item.scene_item_id,
                     source_name: input_entry.input_name.clone(),
                     source_uuid: input_entry.input_uuid.clone(),
+                    input_kind: input_entry.input.kind_name().to_owned(),
+                    source_type: "OBS_SOURCE_TYPE_INPUT".to_owned(),
                     scene_item_enabled: item.enabled,
                     scene_item_locked: item.locked,
                     scene_item_blend_mode: item.blend_mode.as_str().to_owned(),
                     scene_item_index: index as i64,
+                    scene_item_transform: item.transform.clone(),
                     is_group: false,
                 })
             })

@@ -259,11 +259,9 @@ pub fn handle_request_message_with_pipeline_handle(
                 input_registry,
             )
         }
-        "SetTBarPosition" => crate::obsws_response_builder::build_set_tbar_position_response(
-            &request_id,
-            request.request_data.as_ref(),
-            input_registry,
-        ),
+        "SetTBarPosition" => {
+            crate::obsws_response_builder::build_set_tbar_position_response(&request_id)
+        }
         "SetSceneName" => crate::obsws_response_builder::build_set_scene_name_response(
             &request_id,
             request.request_data.as_ref(),

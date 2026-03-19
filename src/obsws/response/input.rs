@@ -108,7 +108,9 @@ pub fn build_get_source_active_response(
         };
 
     super::build_request_response_success("GetSourceActive", request_id, |f| {
-        f.member("videoActive", source_active)
+        f.member("videoActive", source_active)?;
+        // videoShowing は hisui では videoActive と同値
+        f.member("videoShowing", source_active)
     })
 }
 

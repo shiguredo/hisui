@@ -84,10 +84,6 @@ struct SetCurrentSceneTransitionSettingsFields {
     transition_settings: nojson::RawJsonOwned,
 }
 
-struct SetTBarPositionFields {
-    position: f64,
-}
-
 struct RemoveSceneFields {
     scene_name: Option<String>,
     scene_uuid: Option<String>,
@@ -449,13 +445,6 @@ fn parse_set_current_scene_transition_settings_fields(
     Ok(SetCurrentSceneTransitionSettingsFields {
         transition_settings: nojson::RawJsonOwned::try_from(transition_settings)?,
     })
-}
-
-fn parse_set_tbar_position_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<SetTBarPositionFields, nojson::JsonParseError> {
-    let position: f64 = request_data.to_member("position")?.required()?.try_into()?;
-    Ok(SetTBarPositionFields { position })
 }
 
 fn parse_remove_scene_fields(

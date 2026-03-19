@@ -552,15 +552,18 @@ pub(crate) struct ObswsSceneItemState {
     pub(crate) transform: ObswsSceneItemTransform,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObswsSceneItemEntry {
     pub scene_item_id: i64,
     pub source_name: String,
     pub source_uuid: String,
+    pub input_kind: String,
+    pub source_type: String,
     pub scene_item_enabled: bool,
     pub scene_item_locked: bool,
     pub scene_item_blend_mode: String,
     pub scene_item_index: i64,
+    pub scene_item_transform: ObswsSceneItemTransform,
     pub is_group: bool,
 }
 
@@ -570,17 +573,20 @@ impl nojson::DisplayJson for ObswsSceneItemEntry {
             f.member("sceneItemId", self.scene_item_id)?;
             f.member("sourceName", &self.source_name)?;
             f.member("sourceUuid", &self.source_uuid)?;
+            f.member("inputKind", &self.input_kind)?;
+            f.member("sourceType", &self.source_type)?;
             f.member("sceneItemEnabled", self.scene_item_enabled)?;
             f.member("sceneItemLocked", self.scene_item_locked)?;
             f.member("sceneItemBlendMode", &self.scene_item_blend_mode)?;
             f.member("sceneItemIndex", self.scene_item_index)?;
+            f.member("sceneItemTransform", &self.scene_item_transform)?;
             f.member("isGroup", self.is_group)
         })
         .fmt(f)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObswsSceneItemRef {
     pub scene_name: String,
     pub scene_uuid: String,

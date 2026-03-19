@@ -44,13 +44,15 @@ pub fn build_get_stream_service_settings_response(
         f.member(
             "streamServiceSettings",
             nojson::object(|f| {
+                // OBS 互換のデフォルト値を含める
+                f.member("bwtest", false)?;
                 if let Some(server) = &settings.server {
                     f.member("server", server)?;
                 }
                 if let Some(key) = &settings.key {
                     f.member("key", key)?;
                 }
-                Ok(())
+                f.member("use_auth", false)
             }),
         )
     })
