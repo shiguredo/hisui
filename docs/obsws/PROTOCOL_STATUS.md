@@ -395,6 +395,12 @@ OBS 側の問題が解消された時点で再実装を検討する。
 - vendor 拡張 request
   - `CallVendorRequest`: ベンダー拡張リクエストを実行する
   - NOTE: hisui では plugin / vendor namespace を導入する前提を取らないため、対応対象外とする
+- OBS 実測で確認した Request
+  - `GetSceneItemPrivateSettings`: Scene Item の private settings を取得する
+  - `SetSceneItemPrivateSettings`: Scene Item の private settings を設定する
+  - `GetSourcePrivateSettings`: Source の private settings を取得する
+  - `SetSourcePrivateSettings`: Source の private settings を設定する
+  - NOTE: これらは `protocol.md` には記載がないが、OBS 32.1.0 の `GetVersion.availableRequests` 実測で確認した。OBS 内部メタデータに依存し、hisui の現行モデルでは対応対象外とする
 
 ## 未対応 Request の扱い
 
