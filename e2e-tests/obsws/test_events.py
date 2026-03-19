@@ -10,6 +10,7 @@ from helpers import (
     OBSWS_EVENT_SUB_INPUTS,
     OBSWS_EVENT_SUB_OUTPUTS,
     OBSWS_EVENT_SUB_SCENE_ITEMS,
+    OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
     OBSWS_EVENT_SUB_SCENES,
     OBSWS_SUBPROTOCOL,
     ObswsServer,
@@ -921,7 +922,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
 def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscription_enabled(
     binary_path: Path,
 ):
-    """obsws が SceneItems 購読時に Scene Item lock / transform イベントを送ることを確認する"""
+    """obsws が SceneItems / SceneItemTransformChanged 購読時に Scene Item lock / transform イベントを送ることを確認する"""
     host = "127.0.0.1"
     ws_port, ws_sock = reserve_ephemeral_port()
     ws_sock.close()
@@ -936,7 +937,7 @@ def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscri
             await _identify_with_optional_password(
                 ws,
                 None,
-                event_subscriptions=OBSWS_EVENT_SUB_SCENE_ITEMS,
+                event_subscriptions=OBSWS_EVENT_SUB_SCENE_ITEMS | OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
             )
 
             create_input_response = await _send_obsws_request(

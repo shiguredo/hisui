@@ -22,6 +22,7 @@ OBSWS_EVENT_SUB_SCENES = 1 << 2
 OBSWS_EVENT_SUB_INPUTS = 1 << 3
 OBSWS_EVENT_SUB_OUTPUTS = 1 << 6
 OBSWS_EVENT_SUB_SCENE_ITEMS = 1 << 7
+OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED = 1 << 19
 
 
 class ObswsServer:
@@ -690,7 +691,7 @@ async def _expect_scene_item_transform_changed_event(
     event = await _expect_obsws_event(
         ws,
         event_type="SceneItemTransformChanged",
-        event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
+        event_intent=OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
     )
     assert event["d"]["eventData"]["sceneName"] == scene_name
     assert isinstance(event["d"]["eventData"]["sceneUuid"], str)
