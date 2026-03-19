@@ -84,18 +84,6 @@ fn build_record_state_changed_event_includes_output_path_when_present() {
 }
 
 #[test]
-fn build_pause_record_response_sets_output_paused_true() {
-    let response = build_pause_record_response("req-pause-record");
-    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
-    let result: bool = json
-        .value()
-        .to_path_member(&["d", "requestStatus", "result"])
-        .and_then(|v| v.required()?.try_into())
-        .expect("result must be bool");
-    assert!(result);
-}
-
-#[test]
 fn build_scene_events_contain_expected_fields() {
     let created_event = build_scene_created_event("Scene A", "scene-uuid-a");
     let removed_event = build_scene_removed_event("Scene B", "scene-uuid-b");

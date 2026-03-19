@@ -818,9 +818,6 @@ mod tests {
         assert!(available_requests.iter().any(|r| r == "StartRecord"));
         assert!(available_requests.iter().any(|r| r == "ToggleRecord"));
         assert!(available_requests.iter().any(|r| r == "StopRecord"));
-        assert!(available_requests.iter().any(|r| r == "PauseRecord"));
-        assert!(available_requests.iter().any(|r| r == "ResumeRecord"));
-        assert!(available_requests.iter().any(|r| r == "ToggleRecordPause"));
         assert!(available_requests.iter().any(|r| r == "Sleep"));
         Ok(())
     }
@@ -1888,9 +1885,6 @@ mod tests {
             "StartRecord",
             "ToggleRecord",
             "StopRecord",
-            "PauseRecord",
-            "ResumeRecord",
-            "ToggleRecordPause",
         ];
 
         for request_type in request_types {
@@ -2022,12 +2016,7 @@ mod tests {
             .to_member("outputActive")?
             .required()?
             .try_into()?;
-        let output_paused: bool = response_data
-            .to_member("outputPaused")?
-            .required()?
-            .try_into()?;
         assert!(!output_active);
-        assert!(!output_paused);
         Ok(())
     }
 

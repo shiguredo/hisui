@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
@@ -639,9 +639,6 @@ pub(crate) struct ObswsRtmpOutboundRuntimeState {
 pub(crate) struct ObswsRecordRuntimeState {
     pub(crate) active: bool,
     pub(crate) started_at: Option<Instant>,
-    pub(crate) paused: bool,
-    pub(crate) paused_at: Option<Instant>,
-    pub(crate) total_paused_duration: Duration,
     pub(crate) run: Option<ObswsRecordRun>,
 }
 
@@ -1044,18 +1041,6 @@ pub enum ActivateStreamError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivateRecordError {
     AlreadyActive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PauseRecordError {
-    RecordNotActive,
-    AlreadyPaused,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResumeRecordError {
-    RecordNotActive,
-    NotPaused,
 }
 
 /// SceneItem の検索時に発生するエラー。

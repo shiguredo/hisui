@@ -312,7 +312,6 @@ pub fn build_get_record_status_response(
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> nojson::RawJsonOwned {
     let active = input_registry.is_record_active();
-    let paused = input_registry.is_record_paused();
     let duration = if active {
         input_registry.record_uptime()
     } else {
@@ -331,7 +330,6 @@ pub fn build_get_record_status_response(
     let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     super::build_request_response_success("GetRecordStatus", request_id, |f| {
         f.member("outputActive", active)?;
-        f.member("outputPaused", paused)?;
         f.member("outputTimecode", &output_timecode)?;
         f.member("outputDuration", output_duration)?;
         f.member("outputCongestion", 0.0)?;
@@ -387,15 +385,13 @@ fn build_output_active_response(
     })
 }
 
-fn build_record_output_state_response(
+fn build_output_active_record_response(
     request_type: &str,
     request_id: &str,
     output_active: bool,
-    output_paused: bool,
 ) -> nojson::RawJsonOwned {
     super::build_request_response_success(request_type, request_id, |f| {
-        f.member("outputActive", output_active)?;
-        f.member("outputPaused", output_paused)
+        f.member("outputActive", output_active)
     })
 }
 
@@ -451,26 +447,11 @@ pub fn build_stop_output_response(request_id: &str) -> nojson::RawJsonOwned {
 }
 
 pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
-    build_record_output_state_response("ToggleRecord", request_id, output_active, false)
+    build_output_active_record_response("ToggleRecord", request_id, output_active)
 }
 
 pub fn build_start_record_response(request_id: &str) -> nojson::RawJsonOwned {
     super::build_request_response_success_no_data("StartRecord", request_id)
-}
-
-pub fn build_toggle_record_pause_response(
-    request_id: &str,
-    output_paused: bool,
-) -> nojson::RawJsonOwned {
-    build_record_output_state_response("ToggleRecordPause", request_id, true, output_paused)
-}
-
-pub fn build_pause_record_response(request_id: &str) -> nojson::RawJsonOwned {
-    super::build_request_response_success_no_data("PauseRecord", request_id)
-}
-
-pub fn build_resume_record_response(request_id: &str) -> nojson::RawJsonOwned {
-    super::build_request_response_success_no_data("ResumeRecord", request_id)
 }
 
 pub fn build_stop_record_response(request_id: &str, output_path: &str) -> nojson::RawJsonOwned {
@@ -522,7 +503,6 @@ fn build_get_record_status_as_output_response(
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> nojson::RawJsonOwned {
     let active = input_registry.is_record_active();
-    let paused = input_registry.is_record_paused();
     let duration = if active {
         input_registry.record_uptime()
     } else {
@@ -541,7 +521,6 @@ fn build_get_record_status_as_output_response(
     let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
     super::build_request_response_success("GetOutputStatus", request_id, |f| {
         f.member("outputActive", active)?;
-        f.member("outputPaused", paused)?;
         f.member("outputTimecode", &output_timecode)?;
         f.member("outputDuration", output_duration)?;
         f.member("outputCongestion", 0.0)?;

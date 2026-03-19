@@ -1262,10 +1262,9 @@ fn stream_runtime_state_changes_on_activate_and_deactivate() {
 }
 
 #[test]
-fn record_runtime_state_changes_on_activate_pause_resume_and_deactivate() {
+fn record_runtime_state_changes_on_activate_and_deactivate() {
     let mut registry = ObswsInputRegistry::new_for_test();
     assert!(!registry.is_record_active());
-    assert!(!registry.is_record_paused());
     assert_eq!(registry.record_uptime(), Duration::ZERO);
 
     registry
@@ -1288,59 +1287,10 @@ fn record_runtime_state_changes_on_activate_pause_resume_and_deactivate() {
         })
         .expect("record activation must succeed");
     assert!(registry.is_record_active());
-    assert!(!registry.is_record_paused());
-
-    registry.pause_record().expect("record pause must succeed");
-    assert!(registry.is_record_paused());
-
-    registry
-        .resume_record()
-        .expect("record resume must succeed");
-    assert!(!registry.is_record_paused());
 
     registry.deactivate_record();
     assert!(!registry.is_record_active());
-    assert!(!registry.is_record_paused());
     assert_eq!(registry.record_uptime(), Duration::ZERO);
-}
-
-#[test]
-fn record_pause_resume_returns_expected_errors() {
-    let mut registry = ObswsInputRegistry::new_for_test();
-    assert_eq!(
-        registry.pause_record(),
-        Err(PauseRecordError::RecordNotActive)
-    );
-    assert_eq!(
-        registry.resume_record(),
-        Err(ResumeRecordError::RecordNotActive)
-    );
-
-    registry
-        .activate_record(ObswsRecordRun {
-            source_processor_ids: vec![ProcessorId::new("source")],
-            video: ObswsRecordTrackRun {
-                encoder_processor_id: ProcessorId::new("encoder"),
-                source_track_id: TrackId::new("source-track"),
-                encoded_track_id: TrackId::new("encoded-track"),
-            },
-            audio: ObswsRecordTrackRun {
-                encoder_processor_id: ProcessorId::new("audio-encoder"),
-                source_track_id: TrackId::new("audio-source-track"),
-                encoded_track_id: TrackId::new("audio-encoded-track"),
-            },
-            audio_mixer_processor_id: ProcessorId::new("audio-mixer"),
-            video_mixer_processor_id: ProcessorId::new("video-mixer"),
-            writer_processor_id: ProcessorId::new("writer"),
-            output_path: PathBuf::from("recordings-for-test/output.mp4"),
-        })
-        .expect("record activation must succeed");
-    assert_eq!(registry.resume_record(), Err(ResumeRecordError::NotPaused));
-    registry.pause_record().expect("record pause must succeed");
-    assert_eq!(
-        registry.pause_record(),
-        Err(PauseRecordError::AlreadyPaused)
-    );
 }
 
 #[test]

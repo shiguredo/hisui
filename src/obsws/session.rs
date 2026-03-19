@@ -9,8 +9,7 @@ use tokio::sync::RwLock;
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
     ActivateRecordError, ActivateRtmpOutboundError, ActivateStreamError, ObswsInputRegistry,
-    ObswsRecordRun, ObswsRecordTrackRun, ObswsRtmpOutboundRun, ObswsStreamRun, PauseRecordError,
-    ResumeRecordError,
+    ObswsRecordRun, ObswsRecordTrackRun, ObswsRtmpOutboundRun, ObswsStreamRun,
 };
 use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
@@ -53,21 +52,6 @@ pub enum SessionAction {
 enum ObswsSessionState {
     AwaitingIdentify,
     Identified,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum RecordWriterRpcOperation {
-    Pause,
-    Resume,
-}
-
-impl RecordWriterRpcOperation {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Pause => "pause",
-            Self::Resume => "resume",
-        }
-    }
 }
 
 struct RequestOutcome {
@@ -425,15 +409,6 @@ impl ObswsSession {
         if request_type == "ToggleRecord" {
             return self.handle_toggle_record_request(&request_id).await;
         }
-        if request_type == "PauseRecord" {
-            return self.handle_pause_record_request(&request_id).await;
-        }
-        if request_type == "ResumeRecord" {
-            return self.handle_resume_record_request(&request_id).await;
-        }
-        if request_type == "ToggleRecordPause" {
-            return self.handle_toggle_record_pause_request(&request_id).await;
-        }
         if request_type == "StartOutput" {
             return self
                 .handle_start_output_request(&request_id, request.request_data.as_ref())
@@ -665,12 +640,6 @@ impl ObswsSession {
                 request_id,
                 output_active_on_success,
             )),
-            "ToggleRecordPause" => Ok(
-                crate::obsws_response_builder::build_toggle_record_pause_response(
-                    request_id,
-                    output_active_on_success,
-                ),
-            ),
             _ => Err(crate::Error::new("unknown toggle request type")),
         }
     }

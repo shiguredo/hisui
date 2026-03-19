@@ -82,9 +82,6 @@ pub fn build_get_version_response(request_id: &str) -> nojson::RawJsonOwned {
                 "ToggleRecord",
                 "StartRecord",
                 "StopRecord",
-                "ToggleRecordPause",
-                "PauseRecord",
-                "ResumeRecord",
                 "Sleep",
             ],
         )?;

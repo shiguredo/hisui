@@ -79,9 +79,6 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "StartRecord" in response_data["availableRequests"]
         assert "ToggleRecord" in response_data["availableRequests"]
         assert "StopRecord" in response_data["availableRequests"]
-        assert "PauseRecord" in response_data["availableRequests"]
-        assert "ResumeRecord" in response_data["availableRequests"]
-        assert "ToggleRecordPause" in response_data["availableRequests"]
         supported_image_formats = response_data["supportedImageFormats"]
         assert isinstance(supported_image_formats, list)
         assert "png" in supported_image_formats
@@ -230,7 +227,6 @@ def test_obsws_get_record_status_request(binary_path: Path):
         assert status["code"] == 100
         response_data = response["d"]["responseData"]
         assert response_data["outputActive"] is False
-        assert response_data["outputPaused"] is False
 
 
 def test_obsws_transition_requests(binary_path: Path):

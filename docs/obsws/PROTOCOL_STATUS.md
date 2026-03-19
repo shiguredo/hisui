@@ -319,7 +319,8 @@
 
 - [x] `GetRecordStatus`: 録画状態を取得する
   - [x] `outputActive`: 録画出力のアクティブ状態を返す
-  - [x] `outputPaused`: 録画一時停止状態を返す
+  - [ ] `outputPaused`: 録画一時停止状態を返す
+    - NOTE: 対応保留セクション参照
   - [x] `outputTimecode`: 録画タイムコードを返す
   - [x] `outputDuration`: 録画継続時間を返す
   - [x] `outputBytes`: 出力バイト数を返す
@@ -340,13 +341,12 @@
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す
 - [x] `StopRecord`: 録画を停止する
   - NOTE: 内部で起動した record 用 processor を停止する
-- [x] `ToggleRecordPause`: 録画一時停止をトグルする
-  - NOTE: 成功時の `responseData` には `outputActive` と `outputPaused` を返す
-- [x] `PauseRecord`: 録画を一時停止する
-  - NOTE: pause 区間は録画タイムラインに含めない（ OBS 互換 ）
-- [x] `ResumeRecord`: 録画を再開する
-  - NOTE: resume 時は keyframe 要求を送信し、最初の keyframe 到着まで映像をドロップする
-  - NOTE: keyframe 待機中の drop 数は `hisui_total_keyframe_wait_dropped_video_frame_count`（映像）と `hisui_total_keyframe_wait_dropped_audio_sample_count`（音声）で確認できる
+- [ ] `ToggleRecordPause`: 録画一時停止をトグルする
+  - NOTE: 対応保留セクション参照
+- [ ] `PauseRecord`: 録画を一時停止する
+  - NOTE: 対応保留セクション参照
+- [ ] `ResumeRecord`: 録画を再開する
+  - NOTE: 対応保留セクション参照
 - [ ] `SplitRecordFile`: 録画ファイルを分割する
 - [ ] `CreateRecordChapter`: 録画チャプターを作成する
 - [ ] 配信 / 録画の encoder 共有構成
@@ -359,6 +359,16 @@
 - [ ] `SetMediaInputCursor`: メディア入力カーソル位置を設定する
 - [ ] `OffsetMediaInputCursor`: メディア入力カーソル位置を相対移動する
 - [ ] `TriggerMediaInputAction`: メディア入力アクションを実行する
+
+## 対応保留
+
+実装済みだったが、OBS 側の問題により正常動作を確認できないため一時的に実装を削除して保留としている機能。
+OBS 側の問題が解消された時点で再実装を検討する。
+
+- `ToggleRecordPause` / `PauseRecord` / `ResumeRecord`: 録画の一時停止・再開
+  - OBS 32.1.0 + macOS で PauseRecord は成功するが ResumeRecord が code=503 (OutputNotRunning) で失敗する
+  - mkv / hybrid_mov 両フォーマットで再現し、OBS 単体実行でも同一の挙動
+  - OBS 側の内部状態遷移の問題と判断し、hisui 側の実装を一旦削除
 
 ## 実装対象外
 

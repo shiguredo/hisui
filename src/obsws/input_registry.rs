@@ -648,9 +648,6 @@ impl ObswsInputRegistry {
         }
         self.record_runtime.active = true;
         self.record_runtime.started_at = Some(Instant::now());
-        self.record_runtime.paused = false;
-        self.record_runtime.paused_at = None;
-        self.record_runtime.total_paused_duration = Duration::ZERO;
         self.record_runtime.run = Some(run);
         Ok(())
     }
@@ -659,9 +656,6 @@ impl ObswsInputRegistry {
         let run = self.record_runtime.run.take();
         self.record_runtime.active = false;
         self.record_runtime.started_at = None;
-        self.record_runtime.paused = false;
-        self.record_runtime.paused_at = None;
-        self.record_runtime.total_paused_duration = Duration::ZERO;
         run
     }
 
@@ -669,51 +663,15 @@ impl ObswsInputRegistry {
         self.record_runtime.active
     }
 
-    pub fn is_record_paused(&self) -> bool {
-        self.record_runtime.paused
-    }
-
-    pub fn pause_record(&mut self) -> Result<(), PauseRecordError> {
-        if !self.record_runtime.active {
-            return Err(PauseRecordError::RecordNotActive);
-        }
-        if self.record_runtime.paused {
-            return Err(PauseRecordError::AlreadyPaused);
-        }
-        self.record_runtime.paused = true;
-        self.record_runtime.paused_at = Some(Instant::now());
-        Ok(())
-    }
-
-    pub fn resume_record(&mut self) -> Result<(), ResumeRecordError> {
-        if !self.record_runtime.active {
-            return Err(ResumeRecordError::RecordNotActive);
-        }
-        if !self.record_runtime.paused {
-            return Err(ResumeRecordError::NotPaused);
-        }
-        if let Some(paused_at) = self.record_runtime.paused_at.take() {
-            self.record_runtime.total_paused_duration += paused_at.elapsed();
-        }
-        self.record_runtime.paused = false;
-        Ok(())
-    }
-
     pub fn record_run(&self) -> Option<ObswsRecordRun> {
         self.record_runtime.run.clone()
     }
 
     pub fn record_uptime(&self) -> Duration {
-        let Some(started_at) = self.record_runtime.started_at else {
-            return Duration::ZERO;
-        };
-        let mut total_paused_duration = self.record_runtime.total_paused_duration;
-        if self.record_runtime.paused
-            && let Some(paused_at) = self.record_runtime.paused_at
-        {
-            total_paused_duration += paused_at.elapsed();
-        }
-        started_at.elapsed().saturating_sub(total_paused_duration)
+        self.record_runtime
+            .started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or(Duration::ZERO)
     }
 
     pub fn record_output_path(&self) -> Option<&Path> {
