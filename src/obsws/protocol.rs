@@ -22,6 +22,7 @@ pub const OBSWS_EVENT_SUB_SCENES: u32 = 1 << 2;
 pub const OBSWS_EVENT_SUB_INPUTS: u32 = 1 << 3;
 pub const OBSWS_EVENT_SUB_OUTPUTS: u32 = 1 << 6;
 pub const OBSWS_EVENT_SUB_SCENE_ITEMS: u32 = 1 << 7;
+pub const OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED: u32 = 1 << 19;
 
 /// OBS WebSocket プロトコルにおける EventSubscription::All のデフォルト値。
 /// Identify の eventSubscriptions が省略された場合に使用する。
@@ -33,9 +34,7 @@ pub const OBSWS_CLOSE_NOT_IDENTIFIED: CloseCode = CloseCode(4007);
 pub const OBSWS_CLOSE_ALREADY_IDENTIFIED: CloseCode = CloseCode(4008);
 pub const OBSWS_CLOSE_AUTHENTICATION_FAILED: CloseCode = CloseCode(4009);
 
-pub const OBSWS_SUPPORTED_IMAGE_FORMATS: [&str; 9] = [
-    "bmp", "cur", "heic", "jpeg", "jpg", "jxl", "png", "tga", "webp",
-];
+pub const OBSWS_SUPPORTED_IMAGE_FORMATS: [&str; 1] = ["png"];
 
 pub const AUTH_RANDOM_BYTE_LEN: usize = 32;
 pub const REQUEST_STATUS_SUCCESS: i64 = 100;

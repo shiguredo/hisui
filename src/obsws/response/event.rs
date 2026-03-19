@@ -3,7 +3,8 @@ use crate::obsws_input_registry::{
 };
 use crate::obsws_protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
-    OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
+    OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED, OBSWS_EVENT_SUB_SCENE_ITEMS,
+    OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
 };
 
 pub fn build_stream_state_changed_event(
@@ -323,7 +324,7 @@ pub fn build_scene_item_transform_changed_event(
             "d",
             nojson::object(|f| {
                 f.member("eventType", "SceneItemTransformChanged")?;
-                f.member("eventIntent", OBSWS_EVENT_SUB_SCENE_ITEMS)?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED)?;
                 f.member(
                     "eventData",
                     nojson::object(|f| {

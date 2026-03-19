@@ -5,9 +5,10 @@ use crate::obsws_message::RequestMessage;
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS,
-    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES,
-    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
-    REQUEST_STATUS_OUTPUT_NOT_RUNNING, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
+    OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
+    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -928,8 +929,9 @@ async fn set_scene_item_locked_with_scene_subscription_sends_event_when_changed(
 #[tokio::test]
 async fn set_scene_item_transform_with_scene_subscription_sends_event_when_changed() {
     let mut session = ObswsSession::new(None, input_registry(), None);
+    // 524420 = OBSWS_EVENT_SUB_SCENES (1 << 2) | OBSWS_EVENT_SUB_SCENE_ITEMS (1 << 7) | OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED (1 << 19)
     let identify_action = session
-        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":524420}}"#)
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
@@ -976,7 +978,7 @@ async fn set_scene_item_transform_with_scene_subscription_sends_event_when_chang
     assert_eq!(messages.len(), 2);
     let (_, event_type, event_intent) = parse_event_type_and_intent(&messages[1].0);
     assert_eq!(event_type, "SceneItemTransformChanged");
-    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED);
 }
 
 #[tokio::test]
