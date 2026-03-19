@@ -718,6 +718,12 @@ def test_obsws_scene_item_enabled_events_are_sent_when_scenes_subscription_enabl
                 },
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
+            # CreateInput 時に SceneItemCreated イベントが送信されるので消費する
+            await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
+            )
 
             get_scene_item_id_response = await _send_obsws_request(
                 ws,
@@ -803,6 +809,12 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
             source_uuid = create_input_response["d"]["responseData"]["inputUuid"]
+            # CreateInput 時に SceneItemCreated イベントが送信されるので消費する
+            await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
+            )
 
             create_scene_item_first_response = await _send_obsws_request(
                 ws,
@@ -953,6 +965,12 @@ def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscri
                 },
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
+            # CreateInput 時に SceneItemCreated イベントが送信されるので消費する
+            await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
+            )
 
             get_scene_item_id_response = await _send_obsws_request(
                 ws,
@@ -1078,6 +1096,12 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
             source_uuid = create_input_response["d"]["responseData"]["inputUuid"]
+            # CreateInput 時に SceneItemCreated イベントが送信されるので消費する
+            await _expect_obsws_event(
+                ws,
+                event_type="SceneItemCreated",
+                event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
+            )
 
             create_scene_item_second_response = await _send_obsws_request(
                 ws,

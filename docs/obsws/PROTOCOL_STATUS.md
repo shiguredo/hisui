@@ -378,6 +378,8 @@ OBS 側の問題が解消された時点で再実装を検討する。
 
 - MessagePack: WebSocket の MessagePack サブプロトコル対応
   - NOTE: 現状は `obswebsocket.json` のみを対象とする
+- SceneItemSelected: Scene Item の選択状態変更を通知する
+  - NOTE: OBS の GUI 操作（ユーザーがアイテムをクリックして選択）に紐づくイベントであり、hisui は headless サーバーのため選択概念が存在しない
 - UI / Studio Mode 依存機能
   - `GetHotkeyList`: ホットキー一覧を取得する
   - `TriggerHotkeyByName`: 名前指定でホットキーを発火する

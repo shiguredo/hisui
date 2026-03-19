@@ -780,7 +780,8 @@ async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed
             request_data: Some(create_request_data),
         })
         .await;
-    assert!(matches!(create_action, SessionAction::SendText { .. }));
+    // SCENE_ITEMS サブスクリプションが有効なため SceneItemCreated イベントも送信される
+    let _ = unwrap_send_texts(create_action);
 
     let get_scene_item_id_request_data =
         nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene","sourceName":"camera-1"}"#)
@@ -892,7 +893,7 @@ async fn set_scene_item_locked_with_scene_subscription_sends_event_when_changed(
             request_data: Some(create_request_data),
         })
         .await;
-    assert!(matches!(create_action, SessionAction::SendText { .. }));
+    let _ = unwrap_send_texts(create_action);
 
     let get_scene_item_id_request_data =
         nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene","sourceName":"camera-1"}"#)
@@ -947,7 +948,7 @@ async fn set_scene_item_transform_with_scene_subscription_sends_event_when_chang
             request_data: Some(create_request_data),
         })
         .await;
-    assert!(matches!(create_action, SessionAction::SendText { .. }));
+    let _ = unwrap_send_texts(create_action);
 
     let get_scene_item_id_request_data =
         nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene","sourceName":"camera-1"}"#)
@@ -1001,10 +1002,12 @@ async fn create_scene_item_with_scene_subscription_sends_created_event() {
             request_data: Some(create_input_request_data),
         })
         .await;
-    assert!(matches!(
-        create_input_action,
-        SessionAction::SendText { .. }
-    ));
+    // SCENE_ITEMS サブスクリプションが有効なため SceneItemCreated イベントも送信される
+    let create_input_messages = unwrap_send_texts(create_input_action);
+    assert_eq!(create_input_messages.len(), 2);
+    let (_, event_type, event_intent) = parse_event_type_and_intent(&create_input_messages[1].0);
+    assert_eq!(event_type, "SceneItemCreated");
+    assert_eq!(event_intent, OBSWS_EVENT_SUB_SCENE_ITEMS);
 
     let create_scene_item_request_data = nojson::RawJsonOwned::parse(
         r#"{"sceneName":"Scene","sourceName":"camera-1","sceneItemEnabled":true}"#,
@@ -1044,10 +1047,8 @@ async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_e
             request_data: Some(create_first_input_data),
         })
         .await;
-    assert!(matches!(
-        create_first_input_action,
-        SessionAction::SendText { .. }
-    ));
+    // SCENE_ITEMS サブスクリプションが有効なため SceneItemCreated イベントも送信される
+    let _ = unwrap_send_texts(create_first_input_action);
 
     let create_second_input_data = nojson::RawJsonOwned::parse(
         r#"{"sceneName":"Scene","inputName":"camera-2","inputKind":"image_source","inputSettings":{},"sceneItemEnabled":true}"#,
@@ -1060,10 +1061,7 @@ async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_e
             request_data: Some(create_second_input_data),
         })
         .await;
-    assert!(matches!(
-        create_second_input_action,
-        SessionAction::SendText { .. }
-    ));
+    let _ = unwrap_send_texts(create_second_input_action);
 
     let get_scene_item_id_data = nojson::RawJsonOwned::parse(
         r#"{"sceneName":"Scene","sourceName":"camera-1","searchOffset":0}"#,
@@ -1121,10 +1119,7 @@ async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_
             request_data: Some(create_first_input_data),
         })
         .await;
-    assert!(matches!(
-        create_first_input_action,
-        SessionAction::SendText { .. }
-    ));
+    let _ = unwrap_send_texts(create_first_input_action);
 
     let create_second_input_data = nojson::RawJsonOwned::parse(
         r#"{"sceneName":"Scene","inputName":"camera-2","inputKind":"image_source","inputSettings":{},"sceneItemEnabled":true}"#,
@@ -1137,10 +1132,7 @@ async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_
             request_data: Some(create_second_input_data),
         })
         .await;
-    assert!(matches!(
-        create_second_input_action,
-        SessionAction::SendText { .. }
-    ));
+    let _ = unwrap_send_texts(create_second_input_action);
 
     let get_scene_item_id_data = nojson::RawJsonOwned::parse(
         r#"{"sceneName":"Scene","sourceName":"camera-2","searchOffset":0}"#,
@@ -1195,10 +1187,7 @@ async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
             request_data: Some(create_first_input_data),
         })
         .await;
-    assert!(matches!(
-        create_first_input_action,
-        SessionAction::SendText { .. }
-    ));
+    let _ = unwrap_send_texts(create_first_input_action);
 
     let create_second_input_data = nojson::RawJsonOwned::parse(
         r#"{"sceneName":"Scene","inputName":"camera-2","inputKind":"image_source","inputSettings":{},"sceneItemEnabled":true}"#,
@@ -1211,10 +1200,7 @@ async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
             request_data: Some(create_second_input_data),
         })
         .await;
-    assert!(matches!(
-        create_second_input_action,
-        SessionAction::SendText { .. }
-    ));
+    let _ = unwrap_send_texts(create_second_input_action);
 
     let get_scene_item_id_data = nojson::RawJsonOwned::parse(
         r#"{"sceneName":"Scene","sourceName":"camera-2","searchOffset":0}"#,

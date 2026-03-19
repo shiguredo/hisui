@@ -1,8 +1,8 @@
 use crate::obsws_auth::ObswsAuthentication;
 use crate::obsws_input_registry::{
-    ObswsInput, ObswsInputRegistry, ObswsSceneItemBlendMode, ObswsSceneItemRef,
-    ObswsSceneItemTransformPatch, ParseInputSettingsError, SetSceneItemIndexResult,
-    SetSceneItemLockedResult, SetSceneItemTransformResult,
+    ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings, ObswsSceneItemBlendMode,
+    ObswsSceneItemRef, ObswsSceneItemTransformPatch, ParseInputSettingsError,
+    SetSceneItemIndexResult, SetSceneItemLockedResult, SetSceneItemTransformResult,
 };
 use crate::obsws_protocol::{
     OBS_STUDIO_VERSION, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_BATCH_RESPONSE,
@@ -259,6 +259,19 @@ pub struct CreateSceneItemExecution {
 pub struct DuplicateSceneItemExecution {
     pub response_text: nojson::RawJsonOwned,
     pub duplicated: Option<ObswsSceneItemRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateInputExecution {
+    pub response_text: nojson::RawJsonOwned,
+    pub created: Option<CreateInputCreated>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateInputCreated {
+    pub input_entry: ObswsInputEntry,
+    pub default_settings: ObswsInputSettings,
+    pub scene_item_ref: ObswsSceneItemRef,
 }
 
 #[derive(Debug, Clone)]

@@ -7,64 +7,58 @@ impl ObswsSession {
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> SessionAction {
         let mut input_registry = self.input_registry.write().await;
-        let requested_input_name =
-            Self::parse_required_non_empty_string_request_field(request_data, "inputName");
-        let existed_before = requested_input_name
-            .as_deref()
-            .is_some_and(|input_name| input_registry.find_input(None, Some(input_name)).is_some());
-        let response_text = crate::obsws_response_builder::build_create_input_response(
+        let execution = crate::obsws_response_builder::execute_create_input(
             request_id,
             request_data,
             &mut input_registry,
         );
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS) {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        }
-        if existed_before {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        }
-        let Some(requested_input_name) = requested_input_name else {
+        let response_text = execution.response_text;
+        let Some(created) = execution.created else {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
         };
-        let Some(created_input) = input_registry
-            .find_input(None, Some(requested_input_name.as_str()))
-            .cloned()
-        else {
+
+        let input_event_enabled = self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS);
+        let scene_item_event_enabled =
+            self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS);
+
+        if !input_event_enabled && !scene_item_event_enabled {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
             };
-        };
-        let Ok(default_settings) =
-            input_registry.get_input_default_settings(created_input.input.kind_name())
-        else {
-            return SessionAction::SendText {
-                text: response_text,
-                message_name: "request response message",
-            };
-        };
-        let event_text = crate::obsws_response_builder::build_input_created_event(
-            &created_input.input_name,
-            &created_input.input_uuid,
-            created_input.input.kind_name(),
-            &created_input.input.settings,
-            &default_settings,
-        );
-        SessionAction::SendTexts {
-            messages: vec![
-                (response_text, "request response message"),
-                (event_text, "event message"),
-            ],
         }
+
+        let mut messages = vec![(response_text, "request response message")];
+
+        // OBS の送信順序に合わせ、InputCreated → SceneItemCreated の順で送信
+        if input_event_enabled {
+            let event_text = crate::obsws_response_builder::build_input_created_event(
+                &created.input_entry.input_name,
+                &created.input_entry.input_uuid,
+                created.input_entry.input.kind_name(),
+                &created.input_entry.input.settings,
+                &created.default_settings,
+            );
+            messages.push((event_text, "event message"));
+        }
+
+        if scene_item_event_enabled {
+            let scene_item = &created.scene_item_ref;
+            let event_text = crate::obsws_response_builder::build_scene_item_created_event(
+                &scene_item.scene_name,
+                &scene_item.scene_uuid,
+                scene_item.scene_item.scene_item_id,
+                &scene_item.scene_item.source_name,
+                &scene_item.scene_item.source_uuid,
+                scene_item.scene_item.scene_item_index,
+            );
+            messages.push((event_text, "event message"));
+        }
+
+        SessionAction::SendTexts { messages }
     }
 
     pub(super) async fn handle_remove_input_request(

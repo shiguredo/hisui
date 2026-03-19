@@ -8,8 +8,9 @@ use crate::obsws_protocol::{
 };
 
 use super::{
-    SetInputSettingsExecution, parse_create_input_fields, parse_get_input_default_settings_fields,
-    parse_input_lookup_fields, parse_request_data_or_error_response, parse_set_input_name_fields,
+    CreateInputCreated, CreateInputExecution, SetInputSettingsExecution, parse_create_input_fields,
+    parse_get_input_default_settings_fields, parse_input_lookup_fields,
+    parse_request_data_or_error_response, parse_set_input_name_fields,
     parse_set_input_settings_fields,
 };
 
@@ -256,6 +257,14 @@ pub fn build_create_input_response(
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
 ) -> nojson::RawJsonOwned {
+    execute_create_input(request_id, request_data, input_registry).response_text
+}
+
+pub fn execute_create_input(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> CreateInputExecution {
     let fields = match parse_request_data_or_error_response(
         "CreateInput",
         request_id,
@@ -263,10 +272,16 @@ pub fn build_create_input_response(
         parse_create_input_fields,
     ) {
         Ok(fields) => fields,
-        Err(response) => return response,
+        Err(response) => {
+            return CreateInputExecution {
+                response_text: response,
+                created: None,
+            };
+        }
     };
 
-    let (created, scene_item_id) = match input_registry.create_input(
+    let scene_name = fields.scene_name.clone();
+    let (created_entry, scene_item_id) = match input_registry.create_input(
         &fields.scene_name,
         &fields.input_name,
         fields.input,
@@ -274,36 +289,91 @@ pub fn build_create_input_response(
     ) {
         Ok(result) => result,
         Err(CreateInputError::UnsupportedSceneName) => {
-            return super::build_request_response_error(
-                "CreateInput",
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Scene not found",
-            );
+            return CreateInputExecution {
+                response_text: super::build_request_response_error(
+                    "CreateInput",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Scene not found",
+                ),
+                created: None,
+            };
         }
         Err(CreateInputError::InputNameAlreadyExists) => {
-            return super::build_request_response_error(
-                "CreateInput",
-                request_id,
-                REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-                "Input already exists",
-            );
+            return CreateInputExecution {
+                response_text: super::build_request_response_error(
+                    "CreateInput",
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+                    "Input already exists",
+                ),
+                created: None,
+            };
         }
         Err(CreateInputError::InputIdOverflow) => {
-            return super::build_request_response_error(
-                "CreateInput",
-                request_id,
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "Input ID overflow",
-            );
+            return CreateInputExecution {
+                response_text: super::build_request_response_error(
+                    "CreateInput",
+                    request_id,
+                    REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Input ID overflow",
+                ),
+                created: None,
+            };
         }
     };
-    let input_uuid = created.input_uuid;
 
-    super::build_request_response_success("CreateInput", request_id, |f| {
-        f.member("inputUuid", &input_uuid)?;
+    let response_text = super::build_request_response_success("CreateInput", request_id, |f| {
+        f.member("inputUuid", &created_entry.input_uuid)?;
         f.member("sceneItemId", scene_item_id)
-    })
+    });
+
+    // SceneItemCreated イベント用の情報を構築する
+    let scene_uuid = input_registry
+        .get_scene_uuid(&scene_name)
+        .unwrap_or_default();
+    let scene_items = input_registry
+        .list_scene_items(&scene_name)
+        .unwrap_or_default();
+    // 追加直後のアイテムを scene_item_id で検索する
+    let scene_item_index = scene_items
+        .iter()
+        .find(|item| item.scene_item_id == scene_item_id)
+        .map(|item| item.scene_item_index)
+        .unwrap_or(0);
+
+    let default_settings = input_registry
+        .get_input_default_settings(created_entry.input.kind_name())
+        .unwrap_or_else(|_| created_entry.input.settings.clone());
+
+    let scene_item_ref = crate::obsws_input_registry::ObswsSceneItemRef {
+        scene_name: scene_name.clone(),
+        scene_uuid,
+        scene_item: crate::obsws_input_registry::ObswsSceneItemEntry {
+            scene_item_id,
+            source_name: created_entry.input_name.clone(),
+            source_uuid: created_entry.input_uuid.clone(),
+            input_kind: created_entry.input.kind_name().to_owned(),
+            source_type: "OBS_SOURCE_TYPE_INPUT".to_owned(),
+            scene_item_enabled: fields.scene_item_enabled,
+            scene_item_locked: false,
+            scene_item_blend_mode: crate::obsws_input_registry::ObswsSceneItemBlendMode::default()
+                .as_str()
+                .to_owned(),
+            scene_item_index,
+            scene_item_transform: crate::obsws_input_registry::ObswsSceneItemTransform::default(),
+            is_group: None,
+        },
+    };
+
+    CreateInputExecution {
+        response_text,
+        created: Some(CreateInputCreated {
+            input_entry: created_entry,
+            default_settings,
+            scene_item_ref,
+        }),
+    }
 }
 
 pub fn build_remove_input_response(
