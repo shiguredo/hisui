@@ -342,6 +342,7 @@ def _inspect_mp4(
     required_keys: tuple[str, ...] = (),
     timeout_sec: float = 3.0,
     interval_sec: float = 0.1,
+    diagnostics_text: str | None = None,
 ) -> dict[str, object]:
     deadline = time.time() + timeout_sec
     while True:
@@ -361,12 +362,43 @@ def _inspect_mp4(
             return output
         if time.time() >= deadline:
             missing_keys = [key for key in required_keys if key not in output]
+            diagnostics_suffix = ""
+            if diagnostics_text:
+                diagnostics_suffix = f"\ndiagnostics:\n{diagnostics_text}"
             raise AssertionError(
-                f"inspect output missing required keys: missing_keys={missing_keys}, output={output}"
+                "inspect output missing required keys: "
+                f"missing_keys={missing_keys}, output={output}{diagnostics_suffix}"
             )
 
         # StopRecord 直後は MP4 のメタ情報がまだ揃わないことがあるため、短時間だけ再試行する。
         time.sleep(interval_sec)
+
+
+def _format_obsws_diagnostics(
+    *,
+    inspect_output: dict[str, object] | None = None,
+    metrics_snapshots: dict[str, str] | None = None,
+) -> str:
+    parts: list[str] = []
+    if inspect_output is not None:
+        parts.append(f"inspect_output={inspect_output}")
+    if metrics_snapshots is not None:
+        for name, snapshot in metrics_snapshots.items():
+            parts.append(f"metrics_snapshot[{name}]:\n{snapshot}")
+    return "\n".join(parts)
+
+
+def _print_obsws_diagnostics(
+    *,
+    inspect_output: dict[str, object] | None = None,
+    metrics_snapshots: dict[str, str] | None = None,
+) -> None:
+    diagnostics_text = _format_obsws_diagnostics(
+        inspect_output=inspect_output,
+        metrics_snapshots=metrics_snapshots,
+    )
+    if diagnostics_text:
+        print(diagnostics_text)
 
 
 def _write_test_png(path: Path) -> None:
