@@ -17,13 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def build_hisui_command(binary_path: Path, *args: str) -> tuple[list[str], Path]:
-    """hisui 起動コマンドを環境変数に応じて組み立てる"""
-    runner = os.environ.get("HISUI_E2E_HISUI_RUNNER", "cargo-run")
-    if runner == "direct":
-        return ([str(binary_path), *args], REPO_ROOT)
-    if runner != "cargo-run":
-        raise ValueError(f"unsupported HISUI_E2E_HISUI_RUNNER: {runner}")
-
+    """hisui を cargo run 経由で起動するコマンドを返す"""
+    _ = binary_path
     extra_args = shlex.split(os.environ.get("HISUI_E2E_CARGO_RUN_ARGS", ""))
     return (
         [

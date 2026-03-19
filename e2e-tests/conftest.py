@@ -14,23 +14,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from hisui_server import HisuiServer, reserve_ephemeral_port
+from hisui_server import REPO_ROOT, HisuiServer, reserve_ephemeral_port
 
 
 def _find_binary() -> Path:
-    """hisui バイナリを探す"""
-    paths = [
-        Path("target/release/hisui"),
-        Path("target/debug/hisui"),
-        Path("../target/release/hisui"),
-        Path("../target/debug/hisui"),
-    ]
-    # 存在するバイナリのうち最も新しいものを返す
-    candidates = [(p.resolve(), p.stat().st_mtime) for p in paths if p.exists()]
-    if candidates:
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return candidates[0][0]
-    raise FileNotFoundError("hisui binary not found. Run 'cargo build' first.")
+    """hisui 実行に使うパス相当の値を返す"""
+    return REPO_ROOT / "hisui"
 
 
 @pytest.fixture(scope="session")
