@@ -180,6 +180,7 @@ impl AudioRealtimeMixer {
             rpc_rx: Some(rpc_rx),
             next_output_timestamp: None,
             mixer_start: tokio::time::Instant::now(),
+            finishing: false,
             stats,
         }
         .run()
@@ -214,6 +215,9 @@ pub enum AudioRealtimeMixerRpcMessage {
     UpdateInputs {
         input_tracks: Vec<AudioRealtimeInputTrack>,
         reply_tx: tokio::sync::oneshot::Sender<crate::Result<AudioRealtimeMixerUpdateInputsResult>>,
+    },
+    Finish {
+        reply_tx: tokio::sync::oneshot::Sender<()>,
     },
 }
 
@@ -491,6 +495,7 @@ struct AudioRealtimeMixerRunner<'a> {
     rpc_rx: Option<tokio::sync::mpsc::UnboundedReceiver<AudioRealtimeMixerRpcMessage>>,
     next_output_timestamp: Option<Duration>,
     mixer_start: tokio::time::Instant,
+    finishing: bool,
     stats: AudioRealtimeMixerStats,
 }
 
@@ -564,6 +569,10 @@ impl AudioRealtimeMixerRunner<'_> {
                 let result = self.update_inputs(input_tracks);
                 let _ = reply_tx.send(result);
             }
+            AudioRealtimeMixerRpcMessage::Finish { reply_tx } => {
+                self.finishing = true;
+                let _ = reply_tx.send(());
+            }
         }
 
         Ok(())
@@ -636,7 +645,7 @@ impl AudioRealtimeMixerRunner<'_> {
     }
 
     fn handle_output_tick(&mut self) -> crate::Result<bool> {
-        if self.should_finish() {
+        if self.finishing || self.should_finish() {
             self.output_tx.send_eos();
             return Ok(false);
         }

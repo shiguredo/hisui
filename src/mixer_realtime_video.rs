@@ -122,6 +122,7 @@ impl VideoRealtimeMixer {
             output_frame_index: 0,
             noacked_sent: 0,
             ack,
+            finishing: false,
             stats,
         }
         .run()
@@ -223,6 +224,9 @@ pub enum VideoRealtimeMixerRpcMessage {
         request: VideoRealtimeMixerUpdateConfigRequest,
         reply_tx: tokio::sync::oneshot::Sender<crate::Result<VideoRealtimeMixerUpdateConfigResult>>,
     },
+    Finish {
+        reply_tx: tokio::sync::oneshot::Sender<()>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -289,6 +293,7 @@ struct VideoRealtimeMixerRunner {
     output_frame_index: u64,
     noacked_sent: u64,
     ack: Option<crate::Ack>,
+    finishing: bool,
     stats: VideoRealtimeMixerStats,
 }
 
@@ -365,6 +370,11 @@ impl VideoRealtimeMixerRunner {
     }
 
     async fn handle_output_tick(&mut self) -> crate::Result<bool> {
+        if self.finishing {
+            self.output_tx.send_eos();
+            return Ok(false);
+        }
+
         let now = self.mixer_start.elapsed();
         for state in self.states.values_mut() {
             state.advance(now);
@@ -424,6 +434,10 @@ impl VideoRealtimeMixerRunner {
             VideoRealtimeMixerRpcMessage::UpdateConfig { request, reply_tx } => {
                 let result = self.update_config(request);
                 let _ = reply_tx.send(result);
+            }
+            VideoRealtimeMixerRpcMessage::Finish { reply_tx } => {
+                self.finishing = true;
+                let _ = reply_tx.send(());
             }
         }
 

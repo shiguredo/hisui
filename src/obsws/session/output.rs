@@ -1697,24 +1697,34 @@ impl ObswsSession {
     }
 
     /// ソース → ミキサー → エンコーダー → ライターの順に段階的に停止する。
-    /// source を停止したあと mixer の自然終了を短時間だけ待ち、残っていれば停止する。
-    /// encoder / writer はその結果流れてくる EOS で自然終了させ、MP4 finalize 完了を待つ。
+    /// mixer に Finish RPC を送信して EOS を発行させ、下流は EOS 伝播で自然終了させる。
     pub(super) async fn stop_record_processors(&self, run: &ObswsRecordRun) -> crate::Result<()> {
-        // 1. ソースを停止して新規入力を止める
+        let pipeline_handle = self.get_pipeline_handle()?;
+
+        // 1. ソースを停止して新規入力を止める（入力 0 件なら何もしない）
         self.stop_processors(&run.source_processor_ids).await?;
 
-        // 2. 音声ミキサー + 映像ミキサーは短時間だけ自然終了を待ち、
-        //    残っているものだけ停止して EOS 相当を downstream に伝える
+        // 2. mixer に Finish RPC を送信して EOS を発行させる
+        pipeline_handle
+            .finish_audio_mixer(run.audio_mixer_processor_id.clone())
+            .await
+            .map_err(|e| crate::Error::new(format!("failed to finish audio mixer: {e}")))?;
+        pipeline_handle
+            .finish_video_mixer(run.video_mixer_processor_id.clone())
+            .await
+            .map_err(|e| crate::Error::new(format!("failed to finish video mixer: {e}")))?;
+
+        // 3. mixer の自然終了を待つ（Finish 受信 → 次の tick で EOS → 終了）
         {
             let mixer_ids = vec![
                 run.audio_mixer_processor_id.clone(),
                 run.video_mixer_processor_id.clone(),
             ];
-            self.wait_or_stop_processors(&mixer_ids, Duration::from_secs(1))
+            self.wait_processors_stopped_with_default_timeout(&mixer_ids)
                 .await?;
         }
 
-        // 3. エンコーダーが残バッファを流して自然終了するのを待つ
+        // 4. エンコーダーが残バッファを流して自然終了するのを待つ
         {
             let ids = vec![
                 run.video.encoder_processor_id.clone(),
@@ -1724,7 +1734,7 @@ impl ObswsSession {
                 .await?;
         }
 
-        // 4. ライターが finalize を完了して自然終了するのを待つ
+        // 5. ライターが finalize を完了して自然終了するのを待つ
         self.wait_processors_stopped_with_default_timeout(std::slice::from_ref(
             &run.writer_processor_id,
         ))
@@ -1779,40 +1789,6 @@ impl ObswsSession {
 
         self.wait_processors_stopped(pipeline_handle, processor_ids, Duration::from_secs(5))
             .await
-    }
-
-    pub(super) async fn wait_or_stop_processors(
-        &self,
-        processor_ids: &[crate::ProcessorId],
-        grace_timeout: Duration,
-    ) -> crate::Result<()> {
-        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            return Err(crate::Error::new(
-                "BUG: obsws pipeline handle is not initialized",
-            ));
-        };
-
-        let wait_result = self
-            .wait_processors_stopped(pipeline_handle, processor_ids, grace_timeout)
-            .await;
-        if wait_result.is_ok() {
-            return Ok(());
-        }
-
-        let live_processors = pipeline_handle
-            .list_processors()
-            .await
-            .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
-        let pending_processor_ids = processor_ids
-            .iter()
-            .filter(|processor_id| live_processors.iter().any(|id| id == *processor_id))
-            .cloned()
-            .collect::<Vec<_>>();
-        if pending_processor_ids.is_empty() {
-            Ok(())
-        } else {
-            self.stop_processors(&pending_processor_ids).await
-        }
     }
 
     pub(super) async fn wait_processors_stopped(

@@ -404,6 +404,33 @@ impl MediaPipelineHandle {
         Ok(result.previous_input_tracks)
     }
 
+    pub async fn finish_audio_mixer(
+        &self,
+        processor_id: ProcessorId,
+    ) -> Result<(), PipelineOperationError> {
+        let sender = self
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
+                crate::mixer_realtime_audio::AudioRealtimeMixerRpcMessage,
+            >>(&processor_id)
+            .await
+            .map_err(|e| Self::map_get_rpc_sender_error(e, &processor_id, "audio mixer"))?;
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        sender
+            .send(crate::mixer_realtime_audio::AudioRealtimeMixerRpcMessage::Finish { reply_tx })
+            .map_err(|_| {
+                PipelineOperationError::InternalError(
+                    "audio mixer RPC sender channel is closed".to_owned(),
+                )
+            })?;
+        reply_rx.await.map_err(|_| {
+            PipelineOperationError::InternalError(
+                "audio mixer RPC response channel is closed".to_owned(),
+            )
+        })?;
+        Ok(())
+    }
+
     pub async fn create_video_mixer(
         &self,
         mixer: crate::mixer_realtime_video::VideoRealtimeMixer,
@@ -457,6 +484,33 @@ impl MediaPipelineHandle {
             previous_frame_rate: result.previous_frame_rate,
             previous_input_tracks: result.previous_input_tracks,
         })
+    }
+
+    pub async fn finish_video_mixer(
+        &self,
+        processor_id: ProcessorId,
+    ) -> Result<(), PipelineOperationError> {
+        let sender = self
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
+                crate::mixer_realtime_video::VideoRealtimeMixerRpcMessage,
+            >>(&processor_id)
+            .await
+            .map_err(|e| Self::map_get_rpc_sender_error(e, &processor_id, "video mixer"))?;
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        sender
+            .send(crate::mixer_realtime_video::VideoRealtimeMixerRpcMessage::Finish { reply_tx })
+            .map_err(|_| {
+                PipelineOperationError::InternalError(
+                    "video mixer RPC sender channel is closed".to_owned(),
+                )
+            })?;
+        reply_rx.await.map_err(|_| {
+            PipelineOperationError::InternalError(
+                "video mixer RPC response channel is closed".to_owned(),
+            )
+        })?;
+        Ok(())
     }
 
     pub async fn create_rtmp_publisher(
