@@ -1063,8 +1063,10 @@ async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_e
         .await;
     let _ = unwrap_send_texts(create_second_input_action);
 
+    // insert(0) で追加されるため、camera-2 が index=0（先頭）、camera-1 が index=1（末尾）
+    // 先頭（非末尾）のアイテムを削除して再インデックスイベントが送信されることを確認する
     let get_scene_item_id_data = nojson::RawJsonOwned::parse(
-        r#"{"sceneName":"Scene","sourceName":"camera-1","searchOffset":0}"#,
+        r#"{"sceneName":"Scene","sourceName":"camera-2","searchOffset":0}"#,
     )
     .expect("requestData must be valid json");
     let get_scene_item_id_action = session
@@ -1134,8 +1136,10 @@ async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_
         .await;
     let _ = unwrap_send_texts(create_second_input_action);
 
+    // insert(0) で追加されるため、camera-2 が index=0、camera-1 が index=1（末尾）
+    // 末尾のアイテムを削除して再インデックスイベントが送信されないことを確認する
     let get_scene_item_id_data = nojson::RawJsonOwned::parse(
-        r#"{"sceneName":"Scene","sourceName":"camera-2","searchOffset":0}"#,
+        r#"{"sceneName":"Scene","sourceName":"camera-1","searchOffset":0}"#,
     )
     .expect("requestData must be valid json");
     let get_scene_item_id_action = session
@@ -1202,8 +1206,10 @@ async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
         .await;
     let _ = unwrap_send_texts(create_second_input_action);
 
+    // insert(0) で追加されるため、camera-2 が index=0、camera-1 が index=1
+    // camera-1 を index=0 に移動して再インデックスイベントが送信されることを確認する
     let get_scene_item_id_data = nojson::RawJsonOwned::parse(
-        r#"{"sceneName":"Scene","sourceName":"camera-2","searchOffset":0}"#,
+        r#"{"sceneName":"Scene","sourceName":"camera-1","searchOffset":0}"#,
     )
     .expect("requestData must be valid json");
     let get_scene_item_id_action = session

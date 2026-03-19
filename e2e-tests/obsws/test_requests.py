@@ -1501,6 +1501,7 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 == "scene-item-management-input"
             )
 
+            # insert(0) で追加されるため、second が index=0、first が index=1、create_input が index=2
             get_second_scene_item_index_response = await _send_obsws_request(
                 ws,
                 request_type="GetSceneItemIndex",
@@ -1513,9 +1514,10 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
             assert get_second_scene_item_index_response["d"]["requestStatus"]["result"] is True
             assert (
                 get_second_scene_item_index_response["d"]["responseData"]["sceneItemIndex"]
-                == 2
+                == 0
             )
 
+            # second を末尾（index=2）に移動する
             set_scene_item_index_response = await _send_obsws_request(
                 ws,
                 request_type="SetSceneItemIndex",
@@ -1523,7 +1525,7 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 request_data={
                     "sceneName": "Scene",
                     "sceneItemId": second_scene_item_id,
-                    "sceneItemIndex": 0,
+                    "sceneItemIndex": 2,
                 },
             )
             assert set_scene_item_index_response["d"]["requestStatus"]["result"] is True
@@ -1541,7 +1543,7 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 get_second_scene_item_index_after_response["d"]["responseData"][
                     "sceneItemIndex"
                 ]
-                == 0
+                == 2
             )
 
             remove_scene_item_response = await _send_obsws_request(

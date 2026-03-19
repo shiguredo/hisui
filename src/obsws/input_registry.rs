@@ -136,14 +136,18 @@ impl ObswsInputRegistry {
             .get_mut(scene_name)
             .expect("BUG: scene must exist after validation");
         let transform = transform_for_input(&entry.input);
-        scene.items.push(ObswsSceneItemState {
-            scene_item_id,
-            input_uuid: entry.input_uuid.clone(),
-            enabled: scene_item_enabled,
-            locked: false,
-            blend_mode: ObswsSceneItemBlendMode::default(),
-            transform,
-        });
+        // OBS と同じく先頭（index=0）に挿入する
+        scene.items.insert(
+            0,
+            ObswsSceneItemState {
+                scene_item_id,
+                input_uuid: entry.input_uuid.clone(),
+                enabled: scene_item_enabled,
+                locked: false,
+                blend_mode: ObswsSceneItemBlendMode::default(),
+                transform,
+            },
+        );
 
         Ok((entry, scene_item_id))
     }

@@ -858,13 +858,15 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
             )
             assert created_event_2["d"]["eventData"]["sceneItemId"] == second_scene_item_id
 
+            # insert(0) で追加されるため second が index=0、first が index=1
+            # first を index=0 に移動して再インデックスイベントを確認する
             set_scene_item_index_response = await _send_obsws_request(
                 ws,
                 request_type="SetSceneItemIndex",
                 request_id="req-set-scene-item-index-event",
                 request_data={
                     "sceneName": "Scene",
-                    "sceneItemId": second_scene_item_id,
+                    "sceneItemId": first_scene_item_id,
                     "sceneItemIndex": 0,
                 },
             )
@@ -877,7 +879,7 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
             reindexed_ids_1 = [
                 item["sceneItemId"] for item in reindexed_event_1["d"]["eventData"]["sceneItems"]
             ]
-            assert reindexed_ids_1[0] == second_scene_item_id
+            assert reindexed_ids_1[0] == first_scene_item_id
 
             remove_scene_item_response = await _send_obsws_request(
                 ws,
@@ -1096,6 +1098,8 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
             source_uuid = create_input_response["d"]["responseData"]["inputUuid"]
+            # CreateInput の sceneItemId は末尾確認に使用する
+            first_scene_item_id = create_input_response["d"]["responseData"]["sceneItemId"]
             # CreateInput 時に SceneItemCreated イベントが送信されるので消費する
             await _expect_obsws_event(
                 ws,
@@ -1124,13 +1128,15 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
             )
             assert created_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
 
+            # insert(0) で追加されるため、second が index=0、first が index=1（末尾）
+            # 末尾のアイテムを削除して再インデックスイベントが送信されないことを確認する
             remove_scene_item_response = await _send_obsws_request(
                 ws,
                 request_type="RemoveSceneItem",
                 request_id="req-remove-scene-item-tail-remove",
                 request_data={
                     "sceneName": "Scene",
-                    "sceneItemId": second_scene_item_id,
+                    "sceneItemId": first_scene_item_id,
                 },
             )
             assert remove_scene_item_response["d"]["requestStatus"]["result"] is True
@@ -1139,7 +1145,7 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
                 event_type="SceneItemRemoved",
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
-            assert removed_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            assert removed_event["d"]["eventData"]["sceneItemId"] == first_scene_item_id
             try:
                 next_msg = await ws.receive(timeout=0.5)
             except asyncio.TimeoutError:

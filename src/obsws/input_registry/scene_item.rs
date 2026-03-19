@@ -63,15 +63,19 @@ impl ObswsInputRegistry {
             .get_mut(scene_name)
             .ok_or(CreateSceneItemError::SceneNotFound)?;
         let transform = super::transform_for_input(&input_entry.input);
-        scene.items.push(ObswsSceneItemState {
-            scene_item_id,
-            input_uuid: input_entry.input_uuid.clone(),
-            enabled: scene_item_enabled,
-            locked: false,
-            blend_mode: ObswsSceneItemBlendMode::default(),
-            transform: transform.clone(),
-        });
-        let scene_item_index = scene.items.len().saturating_sub(1) as i64;
+        // OBS と同じく先頭（index=0）に挿入する
+        scene.items.insert(
+            0,
+            ObswsSceneItemState {
+                scene_item_id,
+                input_uuid: input_entry.input_uuid.clone(),
+                enabled: scene_item_enabled,
+                locked: false,
+                blend_mode: ObswsSceneItemBlendMode::default(),
+                transform: transform.clone(),
+            },
+        );
+        let scene_item_index = 0i64;
         Ok(ObswsSceneItemRef {
             scene_name: scene_name.to_owned(),
             scene_uuid: scene.scene_uuid.clone(),
@@ -170,15 +174,19 @@ impl ObswsInputRegistry {
             .scenes_by_name
             .get_mut(to_scene_name)
             .ok_or(DuplicateSceneItemError::DestinationScene)?;
-        to_scene.items.push(ObswsSceneItemState {
-            scene_item_id: new_scene_item_id,
-            input_uuid: input_uuid.clone(),
-            enabled,
-            locked,
-            blend_mode,
-            transform: transform.clone(),
-        });
-        let scene_item_index = to_scene.items.len().saturating_sub(1) as i64;
+        // OBS と同じく先頭（index=0）に挿入する
+        to_scene.items.insert(
+            0,
+            ObswsSceneItemState {
+                scene_item_id: new_scene_item_id,
+                input_uuid: input_uuid.clone(),
+                enabled,
+                locked,
+                blend_mode,
+                transform: transform.clone(),
+            },
+        );
+        let scene_item_index = 0i64;
         Ok(ObswsSceneItemRef {
             scene_name: to_scene_name.to_owned(),
             scene_uuid: to_scene.scene_uuid.clone(),

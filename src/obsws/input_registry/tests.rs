@@ -736,17 +736,19 @@ fn remove_scene_item_and_set_scene_item_index_succeed() {
         .create_scene_item("Scene B", Some(&created_input_2.0.input_uuid), None, true)
         .expect("scene item creation must succeed");
 
+    // insert(0) で追加されるため、second が index=0、first が index=1
+    // first を index=0 に移動する
     let set_index_result = registry
-        .set_scene_item_index("Scene B", second_scene_item.scene_item.scene_item_id, 0)
+        .set_scene_item_index("Scene B", first_scene_item.scene_item.scene_item_id, 0)
         .expect("set scene item index must succeed");
     assert!(set_index_result.changed);
     assert_eq!(
         set_index_result.scene_items[0].scene_item_id,
-        second_scene_item.scene_item.scene_item_id
+        first_scene_item.scene_item.scene_item_id
     );
     assert_eq!(
         set_index_result.scene_items[1].scene_item_id,
-        first_scene_item.scene_item.scene_item_id
+        second_scene_item.scene_item.scene_item_id
     );
 
     let removed_scene_item = registry
