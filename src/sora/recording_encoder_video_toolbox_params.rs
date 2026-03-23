@@ -1,4 +1,4 @@
-use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
+use crate::sora::recording_layout::DEFAULT_LAYOUT_JSON;
 use shiguredo_video_toolbox::{
     CodecConfig, EncoderConfig, H264EncoderConfig, H264EntropyMode, H264Profile, HevcEncoderConfig,
     HevcProfile, PixelFormat,

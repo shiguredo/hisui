@@ -1,5 +1,5 @@
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
-use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
+use crate::sora::recording_layout::DEFAULT_LAYOUT_JSON;
 
 pub fn parse_h264_decode_params(
     value: nojson::RawJsonValue<'_, '_>,

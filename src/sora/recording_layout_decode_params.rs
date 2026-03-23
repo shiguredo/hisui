@@ -1,10 +1,10 @@
 #![cfg_attr(not(feature = "nvcodec"), expect(unused_variables, unused_mut))]
 
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use crate::decoder::DecodeConfig;
 #[cfg(feature = "nvcodec")]
-use crate::sora_recording_decoder_nvcodec_params;
-use crate::sora_recording_layout::DEFAULT_LAYOUT_JSON;
+use crate::sora::recording_decoder_nvcodec_params;
+use crate::sora::recording_layout::DEFAULT_LAYOUT_JSON;
 
 #[derive(Debug, Clone)]
 pub struct LayoutDecodeParams {
@@ -21,27 +21,27 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutDecodePar
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_h264_decode_params" => {
                     config.nvcodec_h264 =
-                        sora_recording_decoder_nvcodec_params::parse_h264_decode_params(value)?;
+                        recording_decoder_nvcodec_params::parse_h264_decode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_h265_decode_params" => {
                     config.nvcodec_h265 =
-                        sora_recording_decoder_nvcodec_params::parse_h265_decode_params(value)?;
+                        recording_decoder_nvcodec_params::parse_h265_decode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_av1_decode_params" => {
                     config.nvcodec_av1 =
-                        sora_recording_decoder_nvcodec_params::parse_av1_decode_params(value)?;
+                        recording_decoder_nvcodec_params::parse_av1_decode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_vp8_decode_params" => {
                     config.nvcodec_vp8 =
-                        sora_recording_decoder_nvcodec_params::parse_vp8_decode_params(value)?;
+                        recording_decoder_nvcodec_params::parse_vp8_decode_params(value)?;
                 }
                 #[cfg(feature = "nvcodec")]
                 "nvcodec_vp9_decode_params" => {
                     config.nvcodec_vp9 =
-                        sora_recording_decoder_nvcodec_params::parse_vp9_decode_params(value)?;
+                        recording_decoder_nvcodec_params::parse_vp9_decode_params(value)?;
                 }
                 _ => {}
             }
@@ -56,27 +56,27 @@ impl LayoutDecodeParams {
         let value = default_layout.value();
 
         #[cfg(feature = "nvcodec")]
-        let nvcodec_h264 = sora_recording_decoder_nvcodec_params::parse_h264_decode_params(
+        let nvcodec_h264 = recording_decoder_nvcodec_params::parse_h264_decode_params(
             value.to_member("nvcodec_h264_decode_params")?.required()?,
         )?;
 
         #[cfg(feature = "nvcodec")]
-        let nvcodec_h265 = sora_recording_decoder_nvcodec_params::parse_h265_decode_params(
+        let nvcodec_h265 = recording_decoder_nvcodec_params::parse_h265_decode_params(
             value.to_member("nvcodec_h265_decode_params")?.required()?,
         )?;
 
         #[cfg(feature = "nvcodec")]
-        let nvcodec_av1 = sora_recording_decoder_nvcodec_params::parse_av1_decode_params(
+        let nvcodec_av1 = recording_decoder_nvcodec_params::parse_av1_decode_params(
             value.to_member("nvcodec_av1_decode_params")?.required()?,
         )?;
 
         #[cfg(feature = "nvcodec")]
-        let nvcodec_vp8 = sora_recording_decoder_nvcodec_params::parse_vp8_decode_params(
+        let nvcodec_vp8 = recording_decoder_nvcodec_params::parse_vp8_decode_params(
             value.to_member("nvcodec_vp8_decode_params")?.required()?,
         )?;
 
         #[cfg(feature = "nvcodec")]
-        let nvcodec_vp9 = sora_recording_decoder_nvcodec_params::parse_vp9_decode_params(
+        let nvcodec_vp9 = recording_decoder_nvcodec_params::parse_vp9_decode_params(
             value.to_member("nvcodec_vp9_decode_params")?.required()?,
         )?;
 

@@ -1,4 +1,4 @@
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{BTreeSet, HashMap},
     future::Future,
@@ -14,10 +14,10 @@ use crate::{
     TrackId,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, VideoEncoder},
-    sora_recording_layout::{DEFAULT_LAYOUT_JSON, Layout},
-    sora_recording_mixer_audio::AudioMixer,
-    sora_recording_reader::{AudioReader, VideoReader},
-    sora_recording_video_mixer::{VideoMixer, VideoMixerSpec},
+    sora::recording_layout::{DEFAULT_LAYOUT_JSON, Layout},
+    sora::recording_mixer_audio::AudioMixer,
+    sora::recording_reader::{AudioReader, VideoReader},
+    sora::recording_video_mixer::{VideoMixer, VideoMixerSpec},
     stats::{StatsEntry, StatsValue},
     types::ContainerFormat,
     writer_mp4::Mp4Writer,
@@ -223,7 +223,7 @@ fn run_compose(
     ))?;
 
     if let Some(path) = stats_file_path {
-        match crate::sora_recording_compose_stats_json::to_json(
+        match crate::sora::recording_compose_stats_json::to_json(
             &result.stats,
             result.elapsed_duration.as_secs_f64(),
         ) {

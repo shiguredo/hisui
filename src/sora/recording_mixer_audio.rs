@@ -1,4 +1,4 @@
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{HashMap, VecDeque},
     time::Duration,
@@ -8,7 +8,7 @@ use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     media::MediaFrame,
-    sora_recording_layout::TrimSpans,
+    sora::recording_layout::TrimSpans,
 };
 
 pub const MIXED_AUDIO_DATA_DURATION: Duration = Duration::from_millis(20);

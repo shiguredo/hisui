@@ -37,7 +37,7 @@ pub struct UpdateVideoMixerResult {
 
 fn default_video_encode_config_for_rpc() -> crate::encoder::EncodeConfig {
     // server RPC の既定 encode params は、compose 既定値と同じ値を利用する。
-    crate::sora_recording_layout_encode_params::LayoutEncodeParams::default().config
+    crate::sora::recording_layout_encode_params::LayoutEncodeParams::default().config
 }
 
 impl MediaPipelineHandle {
@@ -109,7 +109,7 @@ impl MediaPipelineHandle {
             processor_id.clone(),
             ProcessorMetadata::new("mp4_video_reader"),
             move |handle| async move {
-                let reader = crate::sora_recording_reader::VideoReader::new(
+                let reader = crate::sora::recording_reader::VideoReader::new(
                     crate::types::ContainerFormat::Mp4,
                     std::time::Duration::ZERO,
                     vec![path],
@@ -135,7 +135,7 @@ impl MediaPipelineHandle {
             processor_id.clone(),
             ProcessorMetadata::new("mp4_audio_reader"),
             move |handle| async move {
-                let reader = crate::sora_recording_reader::AudioReader::new(
+                let reader = crate::sora::recording_reader::AudioReader::new(
                     crate::types::ContainerFormat::Mp4,
                     std::time::Duration::ZERO,
                     vec![path],

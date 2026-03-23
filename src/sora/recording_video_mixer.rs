@@ -1,4 +1,4 @@
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{HashMap, VecDeque},
     time::Duration,
@@ -6,9 +6,9 @@ use std::{
 
 use crate::{
     Error, MediaFrame, Message, ProcessorHandle, Result, TrackId,
-    sora_recording_layout::{Layout, Resolution, TrimSpans},
-    sora_recording_layout_region::Region,
-    sora_recording_metadata::SourceId,
+    sora::recording_layout::{Layout, Resolution, TrimSpans},
+    sora::recording_layout_region::Region,
+    sora::recording_metadata::SourceId,
     types::{EvenUsize, PixelPosition},
     video::{FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };

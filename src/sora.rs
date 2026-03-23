@@ -1,0 +1,21 @@
+mod recording_compose_stats_json;
+#[cfg(feature = "nvcodec")]
+pub mod recording_decoder_nvcodec_params;
+pub mod recording_encoder_libvpx_params;
+#[cfg(feature = "nvcodec")]
+pub mod recording_encoder_nvcodec_params;
+pub mod recording_encoder_openh264_params;
+pub mod recording_encoder_svt_av1_params;
+#[cfg(target_os = "macos")]
+pub mod recording_encoder_video_toolbox_params;
+pub mod recording_layout;
+pub mod recording_layout_decode_params;
+pub mod recording_layout_encode_params;
+pub mod recording_layout_region;
+pub mod recording_metadata;
+pub mod recording_mixer_audio;
+pub mod recording_reader;
+pub mod recording_subcommand_compose;
+pub mod recording_subcommand_tune;
+pub mod recording_subcommand_vmaf;
+pub mod recording_video_mixer;

@@ -1,4 +1,4 @@
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     num::NonZeroUsize,
@@ -9,16 +9,16 @@ use std::{
 use crate::{
     audio,
     encoder::VideoEncoderOptions,
-    sora_recording_layout_decode_params::LayoutDecodeParams,
-    sora_recording_layout_encode_params::LayoutEncodeParams,
-    sora_recording_layout_region::{self, RawRegion, Region},
-    sora_recording_metadata::{ArchiveMetadata, RecordingMetadata, SourceId, SourceInfo},
+    sora::recording_layout_decode_params::LayoutDecodeParams,
+    sora::recording_layout_encode_params::LayoutEncodeParams,
+    sora::recording_layout_region::{self, RawRegion, Region},
+    sora::recording_metadata::{ArchiveMetadata, RecordingMetadata, SourceId, SourceInfo},
     types::{CodecName, ContainerFormat, EngineName, EvenUsize},
     video::FrameRate,
     writer_mp4::Mp4WriterOptions,
 };
 
-pub const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/compose-default.jsonc");
+pub const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/compose-default.jsonc");
 
 /// トリム開始時刻から終了時刻へのマップ
 #[derive(Debug, Default, Clone)]
@@ -110,11 +110,7 @@ impl Layout {
         let (rows, columns) = if audio_only {
             (1, 1)
         } else {
-            sora_recording_layout_region::decide_grid_dimensions(
-                0,
-                max_columns,
-                report.archives.len(),
-            )
+            recording_layout_region::decide_grid_dimensions(0, max_columns, report.archives.len())
         };
 
         // 全体の解像度を求める（キリを良くするために内枠のことはここでは考慮しない）
@@ -827,21 +823,21 @@ mod tests {
 
     use super::*;
     use crate::{
-        sora_recording_metadata::{SourceId, SourceInfo},
+        sora::recording_metadata::{SourceId, SourceInfo},
         types::ContainerFormat,
     };
 
     #[test]
     fn load_layout_jsons() -> crate::Result<()> {
         let jsons = [
-            include_str!("../testdata/layouts/layout0.json"),
-            include_str!("../testdata/layouts/layout1.json"),
-            include_str!("../testdata/layouts/layout2.json"),
-            include_str!("../testdata/layouts/layout3.json"),
-            include_str!("../testdata/layouts/layout4.json"),
-            include_str!("../testdata/layouts/layout5.json"),
-            include_str!("../testdata/layouts/layout6.json"),
-            include_str!("../testdata/layouts/layout7.json"),
+            include_str!("../../testdata/layouts/layout0.json"),
+            include_str!("../../testdata/layouts/layout1.json"),
+            include_str!("../../testdata/layouts/layout2.json"),
+            include_str!("../../testdata/layouts/layout3.json"),
+            include_str!("../../testdata/layouts/layout4.json"),
+            include_str!("../../testdata/layouts/layout5.json"),
+            include_str!("../../testdata/layouts/layout6.json"),
+            include_str!("../../testdata/layouts/layout7.json"),
         ];
         for json in jsons {
             // Layout をロードしようとすると関連する archive.json も用意する必要があって
@@ -853,7 +849,7 @@ mod tests {
 
     #[test]
     fn test_duplicate_region_name() -> crate::Result<()> {
-        let json = include_str!("../testdata/layouts/error-layout-duplicate-region-name.json");
+        let json = include_str!("../../testdata/layouts/error-layout-duplicate-region-name.json");
         let e = json
             .parse::<nojson::Json<RawLayout>>()
             .err()

@@ -1,4 +1,4 @@
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -7,7 +7,7 @@ use crate::{
     media::MediaFrame,
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     reader_webm::{WebmAudioReader, WebmVideoReader},
-    sora_recording_layout::AggregatedSourceInfo,
+    sora::recording_layout::AggregatedSourceInfo,
     types::ContainerFormat,
     video::VideoFrame,
 };

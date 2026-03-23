@@ -1,4 +1,4 @@
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     num::NonZeroUsize,
     path::PathBuf,
@@ -8,11 +8,11 @@ use std::{
 
 use crate::{
     optuna::{JsonValue, OptunaStudy, SearchSpace, TrialValues},
-    sora_recording_subcommand_vmaf,
+    sora::recording_subcommand_vmaf,
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/tune-libvpx-vp9.jsonc");
-const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../search-space-examples/full.jsonc");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/tune-libvpx-vp9.jsonc");
+const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../../search-space-examples/full.jsonc");
 
 #[derive(Debug)]
 struct Args {
@@ -137,7 +137,7 @@ pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
 fn run_internal(args: Args) -> crate::Result<()> {
     // 最初に optuna と vmaf コマンドが利用可能かどうかをチェックする
     OptunaStudy::check_optuna_availability()?;
-    sora_recording_subcommand_vmaf::check_vmaf_availability()?;
+    recording_subcommand_vmaf::check_vmaf_availability()?;
 
     // 必要なら tune_working_dir を作る
     if !args.tune_working_dir().exists() {

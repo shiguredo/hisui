@@ -1,4 +1,4 @@
-// Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
+// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -15,14 +15,14 @@ use crate::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::VideoEncoder,
     media::MediaFrame,
-    sora_recording_layout::Layout,
-    sora_recording_reader::VideoReader,
-    sora_recording_video_mixer::{VideoMixer, VideoMixerSpec},
+    sora::recording_layout::Layout,
+    sora::recording_reader::VideoReader,
+    sora::recording_video_mixer::{VideoMixer, VideoMixerSpec},
     video::FrameRate,
     writer_yuv::YuvWriter,
 };
 
-const DEFAULT_LAYOUT_JSON: &str = include_str!("../layout-examples/vmaf-default.jsonc");
+const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/vmaf-default.jsonc");
 
 #[derive(Debug)]
 struct Args {
