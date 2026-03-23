@@ -9,7 +9,7 @@ pub type NalUnitArray = Vec<Vec<u8>>;
 
 // H.265 の NAL ユニット前に付与されるサイズのバイト数
 // Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい（H.264と同様）
-pub use crate::video_h264::NALU_HEADER_LENGTH;
+pub use crate::video::h264::NALU_HEADER_LENGTH;
 
 // H.265 の NAL ユニットタイプ
 pub const H265_NALU_TYPE_VPS: u8 = 32;

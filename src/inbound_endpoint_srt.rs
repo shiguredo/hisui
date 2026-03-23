@@ -856,9 +856,9 @@ impl SrtTsDemuxer {
         let dts = pending.header.dts.unwrap_or(pts);
 
         let mut keyframe = false;
-        for nalu in crate::video_h264::H264AnnexBNalUnits::new(&pending.data) {
+        for nalu in crate::video::h264::H264AnnexBNalUnits::new(&pending.data) {
             let nalu = nalu?;
-            if nalu.ty == crate::video_h264::H264_NALU_TYPE_IDR {
+            if nalu.ty == crate::video::h264::H264_NALU_TYPE_IDR {
                 keyframe = true;
                 break;
             }
@@ -924,13 +924,13 @@ impl SrtTsDemuxer {
             let raw_data = pending.data[offset + header_len..offset + frame_len].to_vec();
 
             let sample_rate =
-                crate::audio_aac::sample_rate_from_sampling_frequency_index(header.sample_rate())?;
+                crate::audio::aac::sample_rate_from_sampling_frequency_index(header.sample_rate())?;
             let channels = header.channel_configuration;
             let channels_value = crate::audio::Channels::from_u8(channels)?;
             let aac_config_key = header.config_key();
             let sample_entry = if self.last_aac_config_key != Some(aac_config_key) {
                 let audio_specific_config = header.audio_specific_config();
-                let entry = crate::audio_aac::create_mp4a_sample_entry(
+                let entry = crate::audio::aac::create_mp4a_sample_entry(
                     &audio_specific_config,
                     sample_rate,
                     channels_value,
@@ -1018,7 +1018,7 @@ impl AdtsHeader {
     }
 
     fn audio_specific_config(self) -> Vec<u8> {
-        crate::audio_aac::create_audio_specific_config(
+        crate::audio::aac::create_audio_specific_config(
             self.audio_object_type,
             self.sampling_frequency_index,
             self.channel_configuration,
@@ -1079,7 +1079,7 @@ mod tests {
 
     #[test]
     fn create_aac_sample_entry_keeps_config_in_esds() {
-        let sample_entry = crate::audio_aac::create_mp4a_sample_entry(
+        let sample_entry = crate::audio::aac::create_mp4a_sample_entry(
             &[0x12, 0x10],
             crate::audio::SampleRate::from_u32(44_100).expect("must create sample rate"),
             crate::audio::Channels::STEREO,

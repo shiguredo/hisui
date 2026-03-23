@@ -1,3 +1,8 @@
+pub mod av1;
+pub mod canvas;
+pub mod h264;
+pub mod h265;
+
 use std::{num::NonZeroUsize, str::FromStr, sync::Arc, time::Duration};
 
 use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields};

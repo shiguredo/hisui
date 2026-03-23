@@ -1,7 +1,5 @@
 pub mod arg_utils;
 pub mod audio;
-pub mod audio_aac;
-pub mod audio_converter;
 pub mod decoder;
 pub mod encoder;
 pub mod endpoint_http_bootstrap;
@@ -29,9 +27,6 @@ pub mod reader_webm;
 pub mod rtmp;
 pub mod sample_based_timestamp_aligner;
 pub mod sora;
-pub mod source_file_mp4;
-pub mod source_png_file;
-pub mod source_video_device;
 pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
@@ -42,14 +37,7 @@ pub mod tcp;
 pub mod timestamp_mapper;
 pub mod types;
 pub mod video;
-pub mod video_av1;
-pub mod video_canvas;
-pub mod video_h264;
-pub mod video_h265;
-mod webrtc_factory;
-pub mod webrtc_p2p_session;
-mod webrtc_sdp;
-mod webrtc_video;
+pub mod webrtc;
 pub mod writer_mp4;
 pub mod writer_yuv;
 
@@ -61,9 +49,6 @@ pub use media_pipeline::{
     MessageSender, PipelineOperationError, PipelineTerminated, ProcessorHandle, ProcessorId,
     ProcessorMetadata, PublishTrackError, RegisterProcessorError, Syn, TrackId,
 };
-pub use source_file_mp4::Mp4FileSource;
-pub use source_png_file::PngFileSource;
-pub use source_video_device::VideoDeviceSource;
 pub use video::VideoFrame;
 
 pub use obsws::auth as obsws_auth;

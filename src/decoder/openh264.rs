@@ -116,8 +116,8 @@ fn build_annexb_input(frame: &VideoFrame) -> crate::Result<Vec<u8>> {
         let nalu = &data[..n];
         if let Some(header) = nalu.first() {
             match header & 0b0001_1111 {
-                crate::video_h264::H264_NALU_TYPE_SPS => has_sps = true,
-                crate::video_h264::H264_NALU_TYPE_PPS => has_pps = true,
+                crate::video::h264::H264_NALU_TYPE_SPS => has_sps = true,
+                crate::video::h264::H264_NALU_TYPE_PPS => has_pps = true,
                 _ => {}
             }
         }
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn build_annexb_input_prepends_missing_sps_pps_from_sample_entry() -> crate::Result<()> {
-        let sample_entry = crate::video_h264::h264_sample_entry_from_annexb(
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
             320,
             320,
             &[
@@ -182,15 +182,15 @@ mod tests {
         };
 
         let annexb = build_annexb_input(&frame)?;
-        let nalus = crate::video_h264::H264AnnexBNalUnits::new(&annexb)
+        let nalus = crate::video::h264::H264AnnexBNalUnits::new(&annexb)
             .collect::<crate::Result<Vec<_>>>()?;
         let nalu_types = nalus.iter().map(|nalu| nalu.ty).collect::<Vec<_>>();
         assert_eq!(
             nalu_types,
             vec![
-                crate::video_h264::H264_NALU_TYPE_SPS,
-                crate::video_h264::H264_NALU_TYPE_PPS,
-                crate::video_h264::H264_NALU_TYPE_IDR,
+                crate::video::h264::H264_NALU_TYPE_SPS,
+                crate::video::h264::H264_NALU_TYPE_PPS,
+                crate::video::h264::H264_NALU_TYPE_IDR,
             ]
         );
         Ok(())
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn build_annexb_input_keeps_existing_sps_pps() -> crate::Result<()> {
-        let sample_entry = crate::video_h264::h264_sample_entry_from_annexb(
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
             320,
             320,
             &[
@@ -219,15 +219,15 @@ mod tests {
         };
 
         let annexb = build_annexb_input(&frame)?;
-        let nalus = crate::video_h264::H264AnnexBNalUnits::new(&annexb)
+        let nalus = crate::video::h264::H264AnnexBNalUnits::new(&annexb)
             .collect::<crate::Result<Vec<_>>>()?;
         let nalu_types = nalus.iter().map(|nalu| nalu.ty).collect::<Vec<_>>();
         assert_eq!(
             nalu_types,
             vec![
-                crate::video_h264::H264_NALU_TYPE_SPS,
-                crate::video_h264::H264_NALU_TYPE_PPS,
-                crate::video_h264::H264_NALU_TYPE_IDR,
+                crate::video::h264::H264_NALU_TYPE_SPS,
+                crate::video::h264::H264_NALU_TYPE_PPS,
+                crate::video::h264::H264_NALU_TYPE_IDR,
             ]
         );
         Ok(())

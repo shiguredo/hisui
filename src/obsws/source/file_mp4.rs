@@ -16,65 +16,6 @@ pub struct Mp4FileSource {
     pub video_track_id: Option<TrackId>,
 }
 
-impl nojson::DisplayJson for Mp4FileSource {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("path", &self.path)?;
-            f.member("realtime", self.realtime)?;
-            f.member("loopPlayback", self.loop_playback)?;
-            if let Some(id) = &self.audio_track_id {
-                f.member("audioTrackId", id)?;
-            }
-            if let Some(id) = &self.video_track_id {
-                f.member("videoTrackId", id)?;
-            }
-            Ok(())
-        })
-    }
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for Mp4FileSource {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(
-        value: nojson::RawJsonValue<'text, 'raw>,
-    ) -> std::result::Result<Self, Self::Error> {
-        let path: PathBuf = value.to_member("path")?.required()?.try_into()?;
-        let realtime: Option<bool> = value.to_member("realtime")?.try_into()?;
-        let loop_playback: Option<bool> = value.to_member("loopPlayback")?.try_into()?;
-        let audio_track_id: Option<TrackId> = value.to_member("audioTrackId")?.try_into()?;
-        let video_track_id: Option<TrackId> = value.to_member("videoTrackId")?.try_into()?;
-
-        // トラック ID のバリデーション
-        match (&audio_track_id, &video_track_id) {
-            (None, None) => {
-                return Err(value.invalid("audioTrackId or videoTrackId is required"));
-            }
-            (Some(audio), Some(video)) if audio == video => {
-                let error_value = value.to_member("audioTrackId")?.required()?;
-                return Err(error_value.invalid("audioTrackId and videoTrackId must be different"));
-            }
-            _ => {}
-        }
-
-        // ファイルパスのバリデーション
-        if !path.exists() {
-            let error_value = value.to_member("path")?.required()?;
-            return Err(
-                error_value.invalid(format!("input path does not exist: {}", path.display()))
-            );
-        }
-
-        Ok(Self {
-            path,
-            realtime: realtime.unwrap_or(true),
-            loop_playback: loop_playback.unwrap_or(true),
-            audio_track_id,
-            video_track_id,
-        })
-    }
-}
-
 impl Mp4FileSource {
     pub async fn run(self, processor: ProcessorHandle) -> Result<()> {
         let pipeline_handle = processor.pipeline_handle();
@@ -139,7 +80,7 @@ impl Mp4FileSource {
 mod tests {
     use super::*;
 
-    use crate::{MediaFrame, MediaPipeline};
+    use crate::{MediaFrame, MediaPipeline, ProcessorId, ProcessorMetadata, TrackId};
     use shiguredo_openh264::Openh264Library;
 
     #[tokio::test]

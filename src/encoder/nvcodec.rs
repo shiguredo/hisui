@@ -5,8 +5,10 @@ use shiguredo_mp4::boxes::SampleEntry;
 use crate::{
     encoder::VideoEncoderOptions,
     types::CodecName,
+    video::av1,
+    video::h264,
+    video::h265,
     video::{RawVideoFrame, VideoFormat, VideoFrame},
-    video_av1, video_h264, video_h265,
 };
 
 #[derive(Debug)]
@@ -45,7 +47,7 @@ impl NvcodecEncoder {
 
         let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
         let seq_params = inner.get_sequence_params()?;
-        let sample_entry = video_h264::h264_sample_entry_from_annexb(width, height, &seq_params)?;
+        let sample_entry = h264::h264_sample_entry_from_annexb(width, height, &seq_params)?;
 
         Ok(Self {
             inner,
@@ -82,12 +84,8 @@ impl NvcodecEncoder {
 
         let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
         let seq_params = inner.get_sequence_params()?;
-        let sample_entry = video_h265::h265_sample_entry_from_annexb(
-            width,
-            height,
-            options.frame_rate,
-            &seq_params,
-        )?;
+        let sample_entry =
+            h265::h265_sample_entry_from_annexb(width, height, options.frame_rate, &seq_params)?;
 
         Ok(Self {
             inner,
@@ -141,7 +139,7 @@ impl NvcodecEncoder {
         // hisui 側で明示的に付与するワークアラウンドを実装している。
         let seq_params = inner.get_sequence_params()?;
 
-        let sample_entry = video_av1::av1_sample_entry(width, height, &seq_params);
+        let sample_entry = av1::av1_sample_entry(width, height, &seq_params);
 
         Ok(Self {
             inner,

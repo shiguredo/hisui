@@ -11,92 +11,6 @@ pub struct VideoDeviceSource {
     pub fps: Option<i32>,
 }
 
-impl nojson::DisplayJson for VideoDeviceSource {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("outputVideoTrackId", &self.output_video_track_id)?;
-            if let Some(device_id) = &self.device_id {
-                f.member("deviceId", device_id)?;
-            }
-            if let Some(width) = self.width {
-                f.member("width", width)?;
-            }
-            if let Some(height) = self.height {
-                f.member("height", height)?;
-            }
-            if let Some(fps) = self.fps {
-                f.member("fps", fps)?;
-            }
-            Ok(())
-        })
-    }
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoDeviceSource {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(
-        value: nojson::RawJsonValue<'text, 'raw>,
-    ) -> std::result::Result<Self, Self::Error> {
-        let output_video_track_id: TrackId = value
-            .to_member("outputVideoTrackId")?
-            .required()?
-            .try_into()?;
-        let device_id: Option<String> = value.to_member("deviceId")?.try_into()?;
-        let width: Option<i32> = value.to_member("width")?.try_into()?;
-        let height: Option<i32> = value.to_member("height")?.try_into()?;
-        let fps: Option<i32> = value.to_member("fps")?.try_into()?;
-
-        if let Some(device_id) = device_id.as_ref()
-            && device_id.trim().is_empty()
-        {
-            return Err(value
-                .to_member("deviceId")?
-                .required()?
-                .invalid("deviceId must not be empty"));
-        }
-
-        if width.is_some() != height.is_some() {
-            return Err(value.invalid("width and height must be specified together"));
-        }
-
-        if let Some(width) = width
-            && width <= 0
-        {
-            return Err(value
-                .to_member("width")?
-                .required()?
-                .invalid("width must be greater than 0"));
-        }
-
-        if let Some(height) = height
-            && height <= 0
-        {
-            return Err(value
-                .to_member("height")?
-                .required()?
-                .invalid("height must be greater than 0"));
-        }
-
-        if let Some(fps) = fps
-            && fps <= 0
-        {
-            return Err(value
-                .to_member("fps")?
-                .required()?
-                .invalid("fps must be greater than 0"));
-        }
-
-        Ok(Self {
-            output_video_track_id,
-            device_id,
-            width,
-            height,
-            fps,
-        })
-    }
-}
-
 impl VideoDeviceSource {
     pub async fn run(self, handle: ProcessorHandle) -> Result<()> {
         let mut output_video_sender = handle
@@ -273,49 +187,106 @@ fn convert_captured_frame_to_i420(
     }
 }
 
+pub(super) fn build_record_source_plan(
+    settings: &crate::obsws_input_registry::ObswsVideoCaptureDeviceSettings,
+    output_kind: super::ObswsOutputKind,
+    run_id: u64,
+    source_index: usize,
+) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
+    let kind = output_kind.as_str();
+    let source_processor_id = crate::ProcessorId::new(format!(
+        "obsws:{kind}:{run_id}:source:{source_index}:video_device_source"
+    ));
+    let raw_video_track_id = crate::TrackId::new(format!(
+        "obsws:{kind}:{run_id}:source:{source_index}:raw_video"
+    ));
+
+    let source = VideoDeviceSource {
+        output_video_track_id: raw_video_track_id.clone(),
+        device_id: settings.device_id.clone(),
+        width: None,
+        height: None,
+        fps: None,
+    };
+
+    Ok(super::ObswsRecordSourcePlan {
+        source_processor_ids: vec![source_processor_id.clone()],
+        source_video_track_id: Some(raw_video_track_id),
+        source_audio_track_id: None,
+        requests: vec![super::ObswsSourceRequest::CreateVideoDeviceSource {
+            source,
+            processor_id: Some(source_processor_id),
+        }],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::obsws::source::{ObswsOutputKind, ObswsSourceRequest};
+    use crate::obsws_input_registry::ObswsVideoCaptureDeviceSettings;
 
     #[test]
-    fn video_device_source_requires_output_video_track_id() {
-        let json = r#"{}"#;
-        let result: crate::Result<VideoDeviceSource> = crate::json::parse_str(json);
-        assert!(result.is_err());
+    fn build_record_source_plan_with_device_id() {
+        let plan = build_record_source_plan(
+            &ObswsVideoCaptureDeviceSettings {
+                device_id: Some("camera0".to_owned()),
+            },
+            ObswsOutputKind::Record,
+            1,
+            0,
+        )
+        .expect("video_capture_device source plan must succeed");
+
+        assert_eq!(plan.source_processor_ids.len(), 1);
+        assert_eq!(
+            plan.source_processor_ids[0].get(),
+            "obsws:record:1:source:0:video_device_source"
+        );
+
+        assert_eq!(plan.requests.len(), 1);
+
+        assert_eq!(
+            plan.source_video_track_id.as_ref().map(|t| t.get()),
+            Some("obsws:record:1:source:0:raw_video")
+        );
+        assert!(plan.source_audio_track_id.is_none());
+
+        match &plan.requests[0] {
+            ObswsSourceRequest::CreateVideoDeviceSource {
+                source,
+                processor_id,
+            } => {
+                assert_eq!(
+                    source.output_video_track_id.get(),
+                    "obsws:record:1:source:0:raw_video"
+                );
+                assert_eq!(source.device_id.as_deref(), Some("camera0"));
+                assert_eq!(
+                    processor_id.as_ref().map(|p| p.get()),
+                    Some("obsws:record:1:source:0:video_device_source")
+                );
+            }
+            _ => panic!("expected CreateVideoDeviceSource"),
+        }
     }
 
     #[test]
-    fn video_device_source_accepts_default_device() {
-        let json = r#"{
-            "outputVideoTrackId": "video-main"
-        }"#;
-        let source: VideoDeviceSource = crate::json::parse_str(json).expect("parse");
+    fn build_record_source_plan_without_device_id() {
+        let plan = build_record_source_plan(
+            &ObswsVideoCaptureDeviceSettings { device_id: None },
+            ObswsOutputKind::Record,
+            2,
+            1,
+        )
+        .expect("video_capture_device source plan without device_id must succeed");
 
-        assert_eq!(source.output_video_track_id.get(), "video-main");
-        assert!(source.device_id.is_none());
-        assert!(source.width.is_none());
-        assert!(source.height.is_none());
-        assert!(source.fps.is_none());
-    }
-
-    #[test]
-    fn video_device_source_rejects_only_width() {
-        let json = r#"{
-            "outputVideoTrackId": "video-main",
-            "width": 640
-        }"#;
-        let result: crate::Result<VideoDeviceSource> = crate::json::parse_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn video_device_source_rejects_zero_fps() {
-        let json = r#"{
-            "outputVideoTrackId": "video-main",
-            "fps": 0
-        }"#;
-        let result: crate::Result<VideoDeviceSource> = crate::json::parse_str(json);
-        assert!(result.is_err());
+        match &plan.requests[0] {
+            ObswsSourceRequest::CreateVideoDeviceSource { source, .. } => {
+                assert_eq!(source.device_id, None);
+            }
+            _ => panic!("expected CreateVideoDeviceSource"),
+        }
     }
 
     #[test]

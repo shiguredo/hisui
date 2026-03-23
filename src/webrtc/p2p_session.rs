@@ -133,7 +133,7 @@ pub enum BootstrapError {
 }
 
 pub struct WebRtcP2pSessionManager {
-    factory_bundle: Arc<crate::webrtc_factory::WebRtcFactoryBundle>,
+    factory_bundle: Arc<super::factory::WebRtcFactoryBundle>,
     pipeline_handle: crate::MediaPipelineHandle,
     session: Arc<tokio::sync::Mutex<Option<Session>>>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
@@ -142,7 +142,7 @@ pub struct WebRtcP2pSessionManager {
 impl WebRtcP2pSessionManager {
     pub fn new(handle: crate::MediaPipelineHandle) -> crate::Result<Self> {
         #[allow(clippy::arc_with_non_send_sync)]
-        let factory_bundle = Arc::new(crate::webrtc_factory::WebRtcFactoryBundle::new()?);
+        let factory_bundle = Arc::new(super::factory::WebRtcFactoryBundle::new()?);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PcEvent>();
         let session: Arc<tokio::sync::Mutex<Option<Session>>> =
             Arc::new(tokio::sync::Mutex::new(None));
@@ -295,9 +295,9 @@ fn bootstrap_internal(
     }));
     rpc_dc.register_observer(&rpc_observer);
 
-    crate::webrtc_sdp::set_remote_offer(&pc, offer_sdp)?;
-    let answer_sdp = crate::webrtc_sdp::create_answer_sdp(&pc)?;
-    crate::webrtc_sdp::set_local_answer(&pc, &answer_sdp)?;
+    super::sdp::set_remote_offer(&pc, offer_sdp)?;
+    let answer_sdp = super::sdp::create_answer_sdp(&pc)?;
+    super::sdp::set_local_answer(&pc, &answer_sdp)?;
 
     let sess = Session {
         _handle: handle,
@@ -362,7 +362,7 @@ fn handle_answer(sess: &mut Session, sdp: Option<&str>) -> bool {
         return true;
     };
 
-    if let Err(e) = crate::webrtc_sdp::set_remote_answer(&sess.pc, sdp) {
+    if let Err(e) = super::sdp::set_remote_answer(&sess.pc, sdp) {
         if e.reason.contains("timed out") {
             send_close(sess, "timeout", &e.reason);
         } else {
@@ -514,8 +514,7 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                     let TrackState::Video(state) = &mut subscribed.state else {
                         return;
                     };
-                    if let Err(e) = crate::webrtc_video::push_i420_frame(&mut state.source, &frame)
-                    {
+                    if let Err(e) = super::video::push_i420_frame(&mut state.source, &frame) {
                         tracing::warn!(
                             "Failed to send video frame for track {track_id}: {}",
                             e.display()
@@ -571,8 +570,8 @@ fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
     }
     sess.pending_renegotiation = false;
 
-    let offer_sdp = crate::webrtc_sdp::create_offer_sdp(&sess.pc)?;
-    crate::webrtc_sdp::set_local_offer(&sess.pc, &offer_sdp)?;
+    let offer_sdp = super::sdp::create_offer_sdp(&sess.pc)?;
+    super::sdp::set_local_offer(&sess.pc, &offer_sdp)?;
 
     send_dc(sess, &make_offer_json(&offer_sdp));
     sess.in_flight_offer = true;

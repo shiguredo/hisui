@@ -8,9 +8,9 @@ use shiguredo_mp4::{
 use crate::{
     encoder::VideoEncoderOptions,
     types::{CodecName, EvenUsize},
+    video::h264::{H264_LEVEL_3_1, H264_PROFILE_BASELINE, NALU_HEADER_LENGTH},
+    video::h265,
     video::{self, FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
-    video_h264::{H264_LEVEL_3_1, H264_PROFILE_BASELINE, NALU_HEADER_LENGTH},
-    video_h265,
 };
 
 #[derive(Debug)]
@@ -140,7 +140,7 @@ impl VideoToolboxEncoder {
                         frame.pps_list.clone(),
                     )?
                 } else {
-                    video_h265::h265_sample_entry(
+                    h265::h265_sample_entry(
                         self.width,
                         self.height,
                         self.fps,

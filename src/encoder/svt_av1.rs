@@ -5,8 +5,8 @@ use shiguredo_mp4::boxes::SampleEntry;
 use crate::{
     encoder::VideoEncoderOptions,
     types::EvenUsize,
+    video::av1,
     video::{RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
-    video_av1,
 };
 
 #[derive(Debug)]
@@ -32,7 +32,7 @@ impl SvtAv1Encoder {
             ..options.encode_params.svt_av1.clone()
         };
         let inner = shiguredo_svt_av1::Encoder::new(config)?;
-        let sample_entry = video_av1::av1_sample_entry(width, height, inner.extra_data());
+        let sample_entry = av1::av1_sample_entry(width, height, inner.extra_data());
 
         Ok(Self {
             inner,

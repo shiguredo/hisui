@@ -2,11 +2,11 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 
 use super::DecodeConfig;
-use crate::video::{VideoFormat, VideoFrame};
-use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
-use crate::video_h265::{
+use crate::video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
+use crate::video::h265::{
     H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
 };
+use crate::video::{VideoFormat, VideoFrame};
 
 #[derive(Debug)]
 pub struct NvcodecDecoder {

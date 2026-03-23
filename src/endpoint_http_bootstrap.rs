@@ -1,6 +1,6 @@
 use shiguredo_http11::{Request, Response};
 
-use crate::webrtc_p2p_session::{BootstrapError, WebRtcP2pSessionManager};
+use crate::webrtc::p2p_session::{BootstrapError, WebRtcP2pSessionManager};
 
 fn build_error_response(status: u16, reason: &str) -> Response {
     Response::new(status, reason)

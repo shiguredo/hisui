@@ -1,7 +1,7 @@
 use crate::{
     encoder::VideoEncoderOptions,
+    video::h264::{self, H264_NALU_TYPE_SEI, H264AnnexBNalUnits},
     video::{RawVideoFrame, VideoFormat, VideoFrame},
-    video_h264::{self, H264_NALU_TYPE_SEI, H264AnnexBNalUnits},
 };
 
 #[derive(Debug)]
@@ -53,10 +53,10 @@ impl Openh264Encoder {
         // 古い parameter set 参照によるデコード失敗を避ける。
         let sample_entry = if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let size = frame.size();
-            Some(video_h264::h264_sample_entry_from_annexb(
+            Some(h264::h264_sample_entry_from_annexb(
                 size.width,
                 size.height,
-                &video_h264::create_sequence_header_annexb(&encoded.sps_list, &encoded.pps_list),
+                &h264::create_sequence_header_annexb(&encoded.sps_list, &encoded.pps_list),
             )?)
         } else {
             None

@@ -82,7 +82,7 @@ impl MediaPipelineHandle {
 
     pub async fn create_mp4_file_source(
         &self,
-        source: crate::Mp4FileSource,
+        source: crate::obsws::source::file_mp4::Mp4FileSource,
         processor_id: Option<ProcessorId>,
     ) -> Result<ProcessorId, PipelineOperationError> {
         let processor_id =
@@ -329,7 +329,7 @@ impl MediaPipelineHandle {
 
     pub async fn create_png_file_source(
         &self,
-        source: crate::PngFileSource,
+        source: crate::obsws::source::png_file::PngFileSource,
         processor_id: Option<ProcessorId>,
     ) -> Result<ProcessorId, PipelineOperationError> {
         let processor_id =
@@ -346,7 +346,7 @@ impl MediaPipelineHandle {
 
     pub async fn create_video_device_source(
         &self,
-        source: crate::VideoDeviceSource,
+        source: crate::obsws::source::video_device::VideoDeviceSource,
         processor_id: Option<ProcessorId>,
     ) -> Result<ProcessorId, PipelineOperationError> {
         let processor_id = processor_id.unwrap_or_else(|| {
@@ -654,7 +654,7 @@ mod tests {
     #[tokio::test]
     async fn create_mp4_file_source_uses_path_as_default_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let source = crate::Mp4FileSource {
+        let source = crate::obsws::source::file_mp4::Mp4FileSource {
             path: PathBuf::from(TEST_MP4_PATH),
             realtime: false,
             loop_playback: false,
@@ -679,7 +679,7 @@ mod tests {
     #[tokio::test]
     async fn create_mp4_file_source_uses_explicit_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let source = crate::Mp4FileSource {
+        let source = crate::obsws::source::file_mp4::Mp4FileSource {
             path: PathBuf::from(TEST_MP4_PATH),
             realtime: false,
             loop_playback: false,
@@ -704,14 +704,14 @@ mod tests {
     #[tokio::test]
     async fn create_mp4_file_source_rejects_duplicate_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let source1 = crate::Mp4FileSource {
+        let source1 = crate::obsws::source::file_mp4::Mp4FileSource {
             path: PathBuf::from(TEST_MP4_PATH),
             realtime: true,
             loop_playback: false,
             audio_track_id: None,
             video_track_id: Some(TrackId::new("video-duplicate-id")),
         };
-        let source2 = crate::Mp4FileSource {
+        let source2 = crate::obsws::source::file_mp4::Mp4FileSource {
             path: PathBuf::from(TEST_MP4_PATH),
             realtime: true,
             loop_playback: false,
@@ -1324,7 +1324,7 @@ mod tests {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgb8, &[0; 12])?;
         let file_path = png_file.path().to_path_buf();
-        let source = crate::PngFileSource {
+        let source = crate::obsws::source::png_file::PngFileSource {
             path: file_path.clone(),
             frame_rate: crate::video::FrameRate::FPS_1,
             output_video_track_id: TrackId::new("png-video-default"),
@@ -1347,7 +1347,7 @@ mod tests {
     async fn create_png_file_source_uses_explicit_processor_id() -> crate::Result<()> {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgb8, &[0; 12])?;
-        let source = crate::PngFileSource {
+        let source = crate::obsws::source::png_file::PngFileSource {
             path: png_file.path().to_path_buf(),
             frame_rate: crate::video::FrameRate::FPS_1,
             output_video_track_id: TrackId::new("png-video-custom"),
@@ -1370,12 +1370,12 @@ mod tests {
     async fn create_png_file_source_rejects_duplicate_processor_id() -> crate::Result<()> {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgba8, &[255; 16])?;
-        let source1 = crate::PngFileSource {
+        let source1 = crate::obsws::source::png_file::PngFileSource {
             path: png_file.path().to_path_buf(),
             frame_rate: crate::video::FrameRate::FPS_1,
             output_video_track_id: TrackId::new("png-video-duplicate"),
         };
-        let source2 = crate::PngFileSource {
+        let source2 = crate::obsws::source::png_file::PngFileSource {
             path: png_file.path().to_path_buf(),
             frame_rate: crate::video::FrameRate::FPS_1,
             output_video_track_id: TrackId::new("png-video-duplicate"),
@@ -1406,7 +1406,7 @@ mod tests {
     #[tokio::test]
     async fn create_video_device_source_uses_default_processor_id_for_default_device() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let source = crate::VideoDeviceSource {
+        let source = crate::obsws::source::video_device::VideoDeviceSource {
             output_video_track_id: TrackId::new("video-device-output"),
             device_id: None,
             width: None,
@@ -1429,7 +1429,7 @@ mod tests {
     #[tokio::test]
     async fn create_video_device_source_uses_default_processor_id_for_device_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let source = crate::VideoDeviceSource {
+        let source = crate::obsws::source::video_device::VideoDeviceSource {
             output_video_track_id: TrackId::new("video-device-output"),
             device_id: Some("camera0".to_owned()),
             width: None,
@@ -1452,7 +1452,7 @@ mod tests {
     #[tokio::test]
     async fn create_video_device_source_uses_explicit_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let source = crate::VideoDeviceSource {
+        let source = crate::obsws::source::video_device::VideoDeviceSource {
             output_video_track_id: TrackId::new("video-device-output"),
             device_id: None,
             width: None,
@@ -1475,14 +1475,14 @@ mod tests {
     #[tokio::test]
     async fn create_video_device_source_rejects_duplicate_processor_id() {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let source1 = crate::VideoDeviceSource {
+        let source1 = crate::obsws::source::video_device::VideoDeviceSource {
             output_video_track_id: TrackId::new("video-device-output"),
             device_id: None,
             width: None,
             height: None,
             fps: None,
         };
-        let source2 = crate::VideoDeviceSource {
+        let source2 = crate::obsws::source::video_device::VideoDeviceSource {
             output_video_track_id: TrackId::new("video-device-output"),
             device_id: None,
             width: None,

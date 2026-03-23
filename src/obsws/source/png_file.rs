@@ -17,44 +17,6 @@ pub struct PngFileSource {
     pub output_video_track_id: TrackId,
 }
 
-impl nojson::DisplayJson for PngFileSource {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("path", &self.path)?;
-            f.member("frameRate", self.frame_rate)?;
-            f.member("outputVideoTrackId", &self.output_video_track_id)
-        })
-    }
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for PngFileSource {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(
-        value: nojson::RawJsonValue<'text, 'raw>,
-    ) -> std::result::Result<Self, Self::Error> {
-        let path: PathBuf = value.to_member("path")?.required()?.try_into()?;
-        let frame_rate: Option<FrameRate> = value.to_member("frameRate")?.try_into()?;
-        let output_video_track_id: TrackId = value
-            .to_member("outputVideoTrackId")?
-            .required()?
-            .try_into()?;
-
-        if !path.exists() {
-            let error_value = value.to_member("path")?.required()?;
-            return Err(
-                error_value.invalid(format!("input path does not exist: {}", path.display()))
-            );
-        }
-
-        Ok(Self {
-            path,
-            frame_rate: frame_rate.unwrap_or(FrameRate::FPS_1),
-            output_video_track_id,
-        })
-    }
-}
-
 #[derive(Debug)]
 struct DecodedPngI420A {
     width: usize,
@@ -306,45 +268,49 @@ fn grayscale_like_to_i420a(
     Ok((data, width, height))
 }
 
+pub(super) fn build_record_source_plan(
+    settings: &crate::obsws_input_registry::ObswsImageSourceSettings,
+    output_kind: super::ObswsOutputKind,
+    run_id: u64,
+    source_index: usize,
+    frame_rate: crate::video::FrameRate,
+) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
+    let Some(path) = settings.file.as_deref() else {
+        return Err(super::BuildObswsRecordSourcePlanError::MissingRequiredField("file"));
+    };
+
+    let source_processor_id = crate::ProcessorId::new(format!(
+        "obsws:{}:{run_id}:source:{source_index}:png_source",
+        output_kind.as_str()
+    ));
+    let source_video_track_id = crate::TrackId::new(format!(
+        "obsws:{}:{run_id}:source:{source_index}:raw_video",
+        output_kind.as_str()
+    ));
+
+    let source = PngFileSource {
+        path: std::path::PathBuf::from(path),
+        frame_rate,
+        output_video_track_id: source_video_track_id.clone(),
+    };
+
+    Ok(super::ObswsRecordSourcePlan {
+        source_processor_ids: vec![source_processor_id.clone()],
+        source_video_track_id: Some(source_video_track_id),
+        source_audio_track_id: None,
+        requests: vec![super::ObswsSourceRequest::CreatePngFileSource {
+            source,
+            processor_id: Some(source_processor_id),
+        }],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{MediaPipeline, Message, ProcessorId, ProcessorMetadata};
-
-    #[test]
-    fn png_file_source_json_parse_defaults_frame_rate() -> crate::Result<()> {
-        let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgba8, &[255; 16])?;
-        let json = format!(
-            r#"{{"path":"{}","outputVideoTrackId":"video-main"}}"#,
-            png_file.path().display()
-        );
-        let source: PngFileSource = crate::json::parse_str(&json)?;
-
-        assert_eq!(source.frame_rate, FrameRate::FPS_1);
-        assert_eq!(source.output_video_track_id.get(), "video-main");
-        Ok(())
-    }
-
-    #[test]
-    fn png_file_source_json_parse_requires_output_video_track_id() -> crate::Result<()> {
-        let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgb8, &[0; 12])?;
-        let json = format!(r#"{{"path":"{}"}}"#, png_file.path().display());
-        let result = crate::json::parse_str::<PngFileSource>(&json);
-
-        assert!(result.is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn png_file_source_json_parse_requires_existing_path() {
-        let result = crate::json::parse_str::<PngFileSource>(
-            r#"{"path":"testdata/not-found.png","outputVideoTrackId":"video-main"}"#,
-        );
-
-        assert!(result.is_err());
-    }
+    use crate::{Error, MediaPipeline, Message, ProcessorId, ProcessorMetadata};
 
     #[test]
     fn decode_png_to_i420a_truncates_odd_size() -> crate::Result<()> {

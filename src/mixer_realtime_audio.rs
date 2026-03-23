@@ -6,8 +6,8 @@ use std::{
 
 use crate::{
     Error, MediaFrame, Message, ProcessorHandle, TrackId,
+    audio::converter::AudioConverterBuilder,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
-    audio_converter::AudioConverterBuilder,
     sample_based_timestamp_aligner::{DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner},
 };
 
@@ -338,7 +338,7 @@ impl AudioRealtimeMixerStats {
 
 #[derive(Debug)]
 struct InputTrackState {
-    converter: crate::audio_converter::AudioConverter,
+    converter: crate::audio::converter::AudioConverter,
     aligner: SampleBasedTimestampAligner,
     timing_initialized: bool,
     total_input_samples_per_channel: u64,

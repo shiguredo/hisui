@@ -887,7 +887,7 @@ impl H264RtpDepacketizer {
         match nal_unit_type {
             1..=23 => {
                 self.append_annexb_nalu(&packet.payload);
-                if nal_unit_type == crate::video_h264::H264_NALU_TYPE_IDR {
+                if nal_unit_type == crate::video::h264::H264_NALU_TYPE_IDR {
                     self.current_has_keyframe = true;
                 }
             }
@@ -904,7 +904,7 @@ impl H264RtpDepacketizer {
                     }
                     let nalu = &packet.payload[pos..pos + nalu_size];
                     if let Some(header) = nalu.first()
-                        && header & 0x1f == crate::video_h264::H264_NALU_TYPE_IDR
+                        && header & 0x1f == crate::video::h264::H264_NALU_TYPE_IDR
                     {
                         self.current_has_keyframe = true;
                     }
@@ -923,7 +923,7 @@ impl H264RtpDepacketizer {
                 if start {
                     self.current_data
                         .extend_from_slice(&[0, 0, 0, 1, reconstructed_nal]);
-                    if reconstructed_nal & 0x1f == crate::video_h264::H264_NALU_TYPE_IDR {
+                    if reconstructed_nal & 0x1f == crate::video::h264::H264_NALU_TYPE_IDR {
                         self.current_has_keyframe = true;
                     }
                 }
@@ -1257,9 +1257,9 @@ fn select_audio_track(
             .get("config")
             .ok_or_else(|| Error::new("AAC fmtp is missing config parameter"))?;
         let config = parse_hex(config_hex)?;
-        let (sample_rate, channels) = crate::audio_aac::parse_audio_specific_config(&config)?;
+        let (sample_rate, channels) = crate::audio::aac::parse_audio_specific_config(&config)?;
         let sample_entry =
-            crate::audio_aac::create_mp4a_sample_entry(&config, sample_rate, channels)?;
+            crate::audio::aac::create_mp4a_sample_entry(&config, sample_rate, channels)?;
         let size_length = params
             .get("sizelength")
             .and_then(|v| v.parse::<u8>().ok())

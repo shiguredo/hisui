@@ -1,12 +1,13 @@
 use crate::obsws_input_registry::{ObswsInputEntry, ObswsInputSettings};
 use crate::{PipelineOperationError, ProcessorId, TrackId};
 
-mod image;
+pub mod file_mp4;
 mod mp4;
+pub mod png_file;
 mod rtmp_inbound;
 mod rtsp_subscriber;
 mod srt_inbound;
-mod video_capture_device;
+pub mod video_device;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObswsOutputKind {
@@ -28,15 +29,15 @@ impl ObswsOutputKind {
 /// obsws ソースプランで使用する型付きリクエスト
 pub enum ObswsSourceRequest {
     CreateMp4FileSource {
-        source: crate::Mp4FileSource,
+        source: self::file_mp4::Mp4FileSource,
         processor_id: Option<ProcessorId>,
     },
     CreatePngFileSource {
-        source: crate::PngFileSource,
+        source: self::png_file::PngFileSource,
         processor_id: Option<ProcessorId>,
     },
     CreateVideoDeviceSource {
-        source: crate::VideoDeviceSource,
+        source: self::video_device::VideoDeviceSource,
         processor_id: Option<ProcessorId>,
     },
     CreateRtmpInboundEndpoint {
@@ -163,19 +164,18 @@ pub fn build_record_source_plan(
     frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     match &input.input.settings {
-        ObswsInputSettings::ImageSource(settings) => {
-            image::build_record_source_plan(settings, output_kind, run_id, source_index, frame_rate)
-        }
+        ObswsInputSettings::ImageSource(settings) => png_file::build_record_source_plan(
+            settings,
+            output_kind,
+            run_id,
+            source_index,
+            frame_rate,
+        ),
         ObswsInputSettings::Mp4FileSource(settings) => {
             mp4::build_record_source_plan(settings, output_kind, run_id, source_index)
         }
         ObswsInputSettings::VideoCaptureDevice(settings) => {
-            video_capture_device::build_record_source_plan(
-                settings,
-                output_kind,
-                run_id,
-                source_index,
-            )
+            video_device::build_record_source_plan(settings, output_kind, run_id, source_index)
         }
         ObswsInputSettings::RtmpInbound(settings) => {
             rtmp_inbound::build_record_source_plan(settings, output_kind, run_id, source_index)

@@ -126,7 +126,7 @@ impl RtmpOutgoingFrameHandler {
             }
             crate::video::VideoFormat::H264AnnexB => {
                 // Annex B 形式（開始コード付き）から AVC 形式に変換が必要
-                crate::video_h264::convert_annexb_to_nalu(&video.data, self.video_nalu_length_size)
+                crate::video::h264::convert_annexb_to_nalu(&video.data, self.video_nalu_length_size)
                     .map_err(|e| e.with_context("failed to convert Annex B to NALU"))?
             }
             _ => return Err(Error::new("unsupported video format")),
@@ -202,11 +202,11 @@ impl RtmpIncomingFrameHandler {
         if frame.is_aac_sequence_header {
             // AAC シーケンスヘッダー（Audio Specific Config）をパース
             let (sample_rate, channels) =
-                crate::audio_aac::parse_audio_specific_config(&frame.data)?;
+                crate::audio::aac::parse_audio_specific_config(&frame.data)?;
 
             // SampleEntry を生成
             let sample_entry =
-                crate::audio_aac::create_mp4a_sample_entry(&frame.data, sample_rate, channels)?;
+                crate::audio::aac::create_mp4a_sample_entry(&frame.data, sample_rate, channels)?;
 
             self.audio_codec_info = Some(AudioCodecInfo {
                 format: crate::audio::AudioFormat::Aac,

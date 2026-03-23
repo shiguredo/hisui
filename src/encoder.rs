@@ -31,8 +31,8 @@ use self::svt_av1::SvtAv1Encoder;
 use self::video_toolbox::VideoToolboxEncoder;
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
+    audio::converter::{AudioConverter, AudioConverterBuilder},
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
-    audio_converter::{AudioConverter, AudioConverterBuilder},
     media::MediaFrame,
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, RawVideoFrame, VideoFrame},
