@@ -11,6 +11,12 @@
 
 ## develop
 
+- [UPDATE] shiguredo_opus のバージョンを 2026.1.0-canary.4 にあげる
+  - このバージョンから shiguredo_opus crate のリポジトリが https://github.com/shiguredo/opus-rs に独立したので、hisui のワークスペースからは削除されている
+  - @sile
+- [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0-canary.0 にあげる
+  - このバージョンから shiguredo_svt_av1 crate のリポジトリが https://github.com/shiguredo/svt-av1-rs に独立したので、hisui のワークスペースからは削除されている
+  - @sile
 - [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
   - @voluntas
 - [UPDATE] `libc` 0.2.183 を direct dependency に追加する

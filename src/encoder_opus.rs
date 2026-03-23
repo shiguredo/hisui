@@ -12,11 +12,14 @@ pub struct OpusEncoder {
 
 impl OpusEncoder {
     pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
-        let inner = shiguredo_opus::Encoder::new(
-            SampleRate::HZ_48000.as_u16()?,
-            Channels::STEREO.get(),
-            bitrate.get() as u32,
-        )?;
+        let config = shiguredo_opus::EncoderConfig {
+            bitrate: Some(bitrate.get() as u32),
+            ..shiguredo_opus::EncoderConfig::new(
+                u32::from(SampleRate::HZ_48000.as_u16()?),
+                Channels::STEREO.get(),
+            )
+        };
+        let inner = shiguredo_opus::Encoder::new(config)?;
 
         // 最初の AudioFrame に載せるサンプルエントリーを作っておく
         let pre_skip = inner.get_lookahead()?;

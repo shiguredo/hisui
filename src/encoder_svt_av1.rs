@@ -24,14 +24,14 @@ impl SvtAv1Encoder {
         let width = options.width;
         let height = options.height;
         let config = shiguredo_svt_av1::EncoderConfig {
-            target_bitrate: options.bitrate,
+            target_bit_rate: options.bitrate,
             width: width.get(),
             height: height.get(),
             fps_numerator: options.frame_rate.numerator.get(),
             fps_denominator: options.frame_rate.denumerator.get(),
             ..options.encode_params.svt_av1.clone()
         };
-        let inner = shiguredo_svt_av1::Encoder::new(&config)?;
+        let inner = shiguredo_svt_av1::Encoder::new(config)?;
         let sample_entry = video_av1::av1_sample_entry(width, height, inner.extra_data());
 
         Ok(Self {
@@ -46,7 +46,15 @@ impl SvtAv1Encoder {
 
     pub fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         let (y_plane, u_plane, v_plane) = frame.as_i420_planes()?;
-        self.inner.encode(y_plane, u_plane, v_plane)?;
+        let frame_data = shiguredo_svt_av1::FrameData::I420 {
+            y: y_plane,
+            u: u_plane,
+            v: v_plane,
+        };
+        let options = shiguredo_svt_av1::EncodeOptions {
+            force_keyframe: false,
+        };
+        self.inner.encode(&frame_data, &options)?;
         self.input_queue.push_back(frame);
         self.handle_encoded_frames()?;
 
@@ -64,7 +72,7 @@ impl SvtAv1Encoder {
     }
 
     fn handle_encoded_frames(&mut self) -> crate::Result<()> {
-        while let Some(frame) = self.inner.next_frame()? {
+        while let Some(frame) = self.inner.next_frame() {
             // B フレームはない前提なので、タイムスタンプのいれかわりもない
             let input_frame = self
                 .input_queue

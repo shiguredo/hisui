@@ -876,17 +876,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha2"
-version = "0.10.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "digest",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -906,12 +895,11 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_cmake"
-version = "4.2.3"
+version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9607158f5993fb23f69624846dbdf2e11106d6ab68094b7ea10ca8b0375a0f9"
+checksum = "c5fb5a616371eb2329e68c9b2a2aa184dd700f056f8df460cfbd8fc88d3ae302"
 dependencies = [
  "cmake",
- "sha2",
  "shiguredo_toml",
 ]
 
@@ -985,9 +973,12 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_opus"
-version = "2025.1.0"
+version = "2026.1.0-canary.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4b5559679cf0dd728829a9e1146131eddc9eba54e53e47e177ba287d4690d99"
 dependencies = [
  "bindgen",
+ "shiguredo_cmake",
  "shiguredo_toml",
 ]
 
@@ -1018,12 +1009,13 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_svt_av1"
-version = "2025.1.0"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a69ad41fdf6643b66c98a0c9b6227b325b37d3bae5f456dcd5db6280eb36e9eb"
 dependencies = [
  "bindgen",
- "cmake",
  "log",
- "sha2",
+ "shiguredo_cmake",
  "shiguredo_toml",
 ]
 

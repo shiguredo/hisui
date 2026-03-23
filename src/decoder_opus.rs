@@ -14,7 +14,10 @@ pub struct OpusDecoder {
 impl OpusDecoder {
     pub fn new() -> crate::Result<Self> {
         Ok(Self {
-            inner: shiguredo_opus::Decoder::new(SampleRate::HZ_48000.as_u16()?, DECODED_CHANNELS)?,
+            inner: shiguredo_opus::Decoder::new(shiguredo_opus::DecoderConfig::new(
+                u32::from(SampleRate::HZ_48000.as_u16()?),
+                DECODED_CHANNELS,
+            ))?,
         })
     }
 
