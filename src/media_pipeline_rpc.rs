@@ -656,7 +656,6 @@ mod tests {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let source = crate::obsws::source::file_mp4::Mp4FileSource {
             path: PathBuf::from(TEST_MP4_PATH),
-            realtime: false,
             loop_playback: false,
             audio_track_id: None,
             video_track_id: Some(TrackId::new("video-default-id")),
@@ -681,7 +680,6 @@ mod tests {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let source = crate::obsws::source::file_mp4::Mp4FileSource {
             path: PathBuf::from(TEST_MP4_PATH),
-            realtime: false,
             loop_playback: false,
             audio_track_id: None,
             video_track_id: Some(TrackId::new("video-custom-id")),
@@ -706,14 +704,12 @@ mod tests {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
         let source1 = crate::obsws::source::file_mp4::Mp4FileSource {
             path: PathBuf::from(TEST_MP4_PATH),
-            realtime: true,
             loop_playback: false,
             audio_track_id: None,
             video_track_id: Some(TrackId::new("video-duplicate-id")),
         };
         let source2 = crate::obsws::source::file_mp4::Mp4FileSource {
             path: PathBuf::from(TEST_MP4_PATH),
-            realtime: true,
             loop_playback: false,
             audio_track_id: None,
             video_track_id: Some(TrackId::new("video-duplicate-id")),

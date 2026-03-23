@@ -7,10 +7,6 @@ use crate::{ProcessorHandle, ProcessorId, ProcessorMetadata, Result, TrackId};
 #[derive(Debug, Clone)]
 pub struct Mp4FileSource {
     pub path: PathBuf,
-    // true の場合は実時間再生を行う。
-    // 具体的には、フレーム送出時刻を実時間に合わせて待機しつつ、
-    // 出力 timestamp は実時刻ベースに補正した単調増加値として扱う。
-    pub realtime: bool,
     pub loop_playback: bool,
     pub audio_track_id: Option<TrackId>,
     pub video_track_id: Option<TrackId>,
@@ -23,7 +19,7 @@ impl Mp4FileSource {
         let processor_id = processor.processor_id().clone();
 
         let mut options = Mp4FileReaderOptions {
-            realtime: self.realtime,
+            realtime: true,
             loop_playback: self.loop_playback,
             audio_track_id: None,
             video_track_id: None,
@@ -76,6 +72,7 @@ impl Mp4FileSource {
         reader.run(processor).await
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,7 +105,6 @@ mod tests {
 
             let source = Mp4FileSource {
                 path: PathBuf::from("testdata/archive-red-320x320-av1.mp4"),
-                realtime: false,
                 loop_playback: false,
                 audio_track_id: None,
                 video_track_id: Some(video_track_id.clone()),
@@ -180,7 +176,6 @@ mod tests {
 
                 let source = Mp4FileSource {
                     path: PathBuf::from("testdata/archive-red-320x320-h264.mp4"),
-                    realtime: false,
                     loop_playback: false,
                     audio_track_id: None,
                     video_track_id: Some(video_track_id.clone()),

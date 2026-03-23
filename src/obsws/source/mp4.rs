@@ -37,7 +37,6 @@ pub(super) fn build_record_source_plan(
 
     let source = super::file_mp4::Mp4FileSource {
         path: std::path::PathBuf::from(path),
-        realtime: true,
         loop_playback: settings.loop_playback,
         audio_track_id: source_audio_track_id.clone(),
         video_track_id: source_video_track_id.clone(),
