@@ -153,17 +153,13 @@ impl EngineName {
             engines.push(Self::VideoToolbox);
         }
         engines.push(Self::Dav1d);
-        #[cfg(feature = "libvpx")]
-        {
-            engines.push(Self::Libvpx);
-        }
+        engines.push(Self::Libvpx);
 
         engines
     }
 
     pub fn is_available_video_decode_codec(self, codec: CodecName) -> bool {
         match self {
-            #[cfg(feature = "libvpx")]
             EngineName::Libvpx => matches!(codec, CodecName::Vp8 | CodecName::Vp9),
             #[cfg(feature = "nvcodec")]
             EngineName::Nvcodec => {
@@ -200,17 +196,13 @@ impl EngineName {
             engines.push(Self::VideoToolbox);
         }
         engines.push(Self::SvtAv1);
-        #[cfg(feature = "libvpx")]
-        {
-            engines.push(Self::Libvpx);
-        }
+        engines.push(Self::Libvpx);
 
         engines
     }
 
     pub fn is_available_video_encode_codec(self, codec: CodecName) -> bool {
         match self {
-            #[cfg(feature = "libvpx")]
             EngineName::Libvpx => matches!(codec, CodecName::Vp8 | CodecName::Vp9),
             #[cfg(feature = "nvcodec")]
             EngineName::Nvcodec => {
@@ -243,16 +235,7 @@ impl EngineName {
     ) -> Result<Self, nojson::JsonParseError> {
         let s = value.to_unquoted_string_str()?;
         match s.as_ref() {
-            "libvpx" => {
-                #[cfg(feature = "libvpx")]
-                {
-                    Ok(Self::Libvpx)
-                }
-                #[cfg(not(feature = "libvpx"))]
-                {
-                    Err(value.invalid("libvpx feature is not enabled"))
-                }
-            }
+            "libvpx" => Ok(Self::Libvpx),
             "nvcodec" => {
                 #[cfg(feature = "nvcodec")]
                 {
@@ -287,16 +270,7 @@ impl EngineName {
     ) -> Result<Self, nojson::JsonParseError> {
         let s = value.to_unquoted_string_str()?;
         match s.as_ref() {
-            "libvpx" => {
-                #[cfg(feature = "libvpx")]
-                {
-                    Ok(Self::Libvpx)
-                }
-                #[cfg(not(feature = "libvpx"))]
-                {
-                    Err(value.invalid("libvpx feature is not enabled"))
-                }
-            }
+            "libvpx" => Ok(Self::Libvpx),
             "nvcodec" => {
                 #[cfg(feature = "nvcodec")]
                 {

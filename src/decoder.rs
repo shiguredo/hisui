@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use shiguredo_openh264::Openh264Library;
 
 use crate::audio::AudioFormat;
-#[cfg(feature = "libvpx")]
 use crate::decoder_libvpx::LibvpxDecoder;
 #[cfg(feature = "nvcodec")]
 use crate::decoder_nvcodec::NvcodecDecoder;
@@ -404,10 +403,7 @@ impl VideoDecoder {
                 if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
                 }
-                #[cfg(feature = "libvpx")]
-                {
-                    engines.push(EngineName::Libvpx);
-                }
+                engines.push(EngineName::Libvpx);
             }
             CodecName::H264 => {
                 if is_openh264_available {
@@ -492,7 +488,6 @@ enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,
     },
-    #[cfg(feature = "libvpx")]
     Libvpx(LibvpxDecoder),
     Openh264(Openh264Decoder),
     Dav1d(Dav1dDecoder),
@@ -571,11 +566,9 @@ impl VideoDecoderInner {
                 })?;
                 *self = Openh264Decoder::new(lib.clone()).map(Self::Openh264)?;
             }
-            #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp8) => {
                 *self = LibvpxDecoder::new_vp8().map(Self::Libvpx)?;
             }
-            #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp9) => {
                 *self = LibvpxDecoder::new_vp9().map(Self::Libvpx)?;
             }
@@ -609,7 +602,6 @@ impl VideoDecoderInner {
                 self.initialize_decoder(frame, codec_metric, engine_metric, options)?;
                 self.decode(frame, codec_metric, engine_metric)
             }
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(decoder) => decoder.decode(frame),
             Self::Openh264(decoder) => decoder.decode(frame),
             Self::Dav1d(decoder) => decoder.decode(frame),
@@ -623,7 +615,6 @@ impl VideoDecoderInner {
     fn finish(&mut self) -> crate::Result<()> {
         match self {
             Self::Initial { .. } => {}
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(decoder) => decoder.finish()?,
             Self::Openh264(decoder) => decoder.finish()?,
             Self::Dav1d(decoder) => decoder.finish()?,
@@ -638,7 +629,6 @@ impl VideoDecoderInner {
     fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
         match self {
             Self::Initial { .. } => None,
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(decoder) => decoder.next_decoded_frame(),
             Self::Openh264(decoder) => decoder.next_decoded_frame(),
             Self::Dav1d(decoder) => decoder.next_decoded_frame(),

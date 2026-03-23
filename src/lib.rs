@@ -8,7 +8,6 @@ pub mod decoder_audio_toolbox;
 pub mod decoder_dav1d;
 #[cfg(feature = "fdk-aac")]
 pub mod decoder_fdk_aac;
-#[cfg(feature = "libvpx")]
 pub mod decoder_libvpx;
 #[cfg(feature = "nvcodec")]
 pub mod decoder_nvcodec;
@@ -21,7 +20,6 @@ pub mod encoder;
 pub mod encoder_audio_toolbox;
 #[cfg(feature = "fdk-aac")]
 pub mod encoder_fdk_aac;
-#[cfg(feature = "libvpx")]
 pub mod encoder_libvpx;
 #[cfg(feature = "nvcodec")]
 pub mod encoder_nvcodec;
@@ -57,7 +55,6 @@ pub mod sample_based_timestamp_aligner;
 mod sora_recording_compose_stats_json;
 #[cfg(feature = "nvcodec")]
 pub mod sora_recording_decoder_nvcodec_params;
-#[cfg(feature = "libvpx")]
 pub mod sora_recording_encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
 pub mod sora_recording_encoder_nvcodec_params;

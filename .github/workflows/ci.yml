@@ -51,9 +51,9 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
       - name: Update PATH
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
-      - run: cargo check --no-default-features --features nvcodec -p hisui
-      - run: cargo clippy --no-default-features --features nvcodec -p hisui -- --deny warnings
-      - run: cargo test --no-default-features --features nvcodec -p hisui -- --test-threads=1
+      - run: cargo check --features nvcodec -p hisui
+      - run: cargo clippy --features nvcodec -p hisui -- --deny warnings
+      - run: cargo test --features nvcodec -p hisui -- --test-threads=1
 
   test-apple-toolbox:
     runs-on:
@@ -73,9 +73,9 @@ jobs:
         run: |
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
-      - run: cargo check --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_libvpx
-      - run: cargo clippy --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_libvpx -- --deny warnings
-      - run: cargo test --no-default-features --workspace --exclude shiguredo_fdk_aac --exclude shiguredo_libvpx
+      - run: cargo check --workspace --exclude shiguredo_fdk_aac
+      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac -- --deny warnings
+      - run: cargo test --workspace --exclude shiguredo_fdk_aac
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
@@ -95,7 +95,7 @@ jobs:
       # shiguredo_fdk_aac はリリースビルドでだけセグフォすることがあったので、それもテストする
       # （最終的にはリリースバイナリを使った e2e で置き換えるべき）
       - run: cargo test --release --package shiguredo_fdk_aac
-      - run: cargo test --no-default-features --features fdk-aac
+      - run: cargo test --features fdk-aac
 
       - run: cargo build --no-default-features --features fdk-aac
       - run: ldd target/debug/hisui
@@ -132,7 +132,7 @@ jobs:
           curl -fL -o "${OPENH264_ARCHIVE}" "${OPENH264_URL}"
           bzip2 -d "${OPENH264_ARCHIVE}"
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
-      - run: cargo test --no-default-features -p hisui
+      - run: cargo test -p hisui
 
   valgrind:
     # [NOTE]

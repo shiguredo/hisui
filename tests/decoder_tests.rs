@@ -33,7 +33,6 @@ fn h265_multi_resolutions() -> hisui::Result<()> {
 }
 
 #[test]
-#[cfg(feature = "libvpx")]
 fn vp9_multi_resolutions() -> hisui::Result<()> {
     let reader0 = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
     let reader1 = Mp4VideoReader::new("testdata/archive-red-320x320-vp9.mp4")?;

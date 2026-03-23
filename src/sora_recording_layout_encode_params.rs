@@ -1,6 +1,5 @@
 // Sora の録画ファイル合成処理固有モジュール（sora_recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use crate::encoder::EncodeConfig;
-#[cfg(feature = "libvpx")]
 use crate::sora_recording_encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
 use crate::sora_recording_encoder_nvcodec_params;
@@ -21,12 +20,10 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for LayoutEncodePar
         let mut config = Self::default().config;
         for (key, value) in value.to_object()? {
             match &*key.to_unquoted_string_str()? {
-                #[cfg(feature = "libvpx")]
                 "libvpx_vp8_encode_params" => {
                     config.libvpx_vp8 =
                         sora_recording_encoder_libvpx_params::parse_vp8_encode_params(value)?;
                 }
-                #[cfg(feature = "libvpx")]
                 "libvpx_vp9_encode_params" => {
                     config.libvpx_vp9 =
                         sora_recording_encoder_libvpx_params::parse_vp9_encode_params(value)?;
@@ -80,12 +77,10 @@ impl LayoutEncodeParams {
         let default_layout = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
         let value = default_layout.value();
 
-        #[cfg(feature = "libvpx")]
         let libvpx_vp8 = sora_recording_encoder_libvpx_params::parse_vp8_encode_params(
             value.to_member("libvpx_vp8_encode_params")?.required()?,
         )?;
 
-        #[cfg(feature = "libvpx")]
         let libvpx_vp9 = sora_recording_encoder_libvpx_params::parse_vp9_encode_params(
             value.to_member("libvpx_vp9_encode_params")?.required()?,
         )?;
@@ -130,9 +125,7 @@ impl LayoutEncodeParams {
         )?;
 
         Ok(EncodeConfig {
-            #[cfg(feature = "libvpx")]
             libvpx_vp8,
-            #[cfg(feature = "libvpx")]
             libvpx_vp9,
             openh264,
             svt_av1,

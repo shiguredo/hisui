@@ -8,7 +8,6 @@ use shiguredo_openh264::Openh264Library;
 use crate::encoder_audio_toolbox::AudioToolboxEncoder;
 #[cfg(feature = "fdk-aac")]
 use crate::encoder_fdk_aac::FdkAacEncoder;
-#[cfg(feature = "libvpx")]
 use crate::encoder_libvpx::LibvpxEncoder;
 #[cfg(feature = "nvcodec")]
 use crate::encoder_nvcodec::NvcodecEncoder;
@@ -307,9 +306,7 @@ impl AudioEncoderInner {
 
 #[derive(Debug, Clone)]
 pub struct EncodeConfig {
-    #[cfg(feature = "libvpx")]
     pub libvpx_vp8: shiguredo_libvpx::EncoderConfig,
-    #[cfg(feature = "libvpx")]
     pub libvpx_vp9: shiguredo_libvpx::EncoderConfig,
     pub openh264: shiguredo_openh264::EncoderConfig,
     pub svt_av1: shiguredo_svt_av1::EncoderConfig,
@@ -442,9 +439,7 @@ impl VideoEncoder {
             .copied();
 
         match (engine, options.codec) {
-            #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp8) => VideoEncoderInner::new_vp8(options),
-            #[cfg(feature = "libvpx")]
             (Some(EngineName::Libvpx), CodecName::Vp9) => VideoEncoderInner::new_vp9(options),
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H264) => {
@@ -504,10 +499,7 @@ impl VideoEncoder {
         let mut engines = Vec::new();
         match codec {
             CodecName::Vp8 | CodecName::Vp9 => {
-                #[cfg(feature = "libvpx")]
-                {
-                    engines.push(EngineName::Libvpx);
-                }
+                engines.push(EngineName::Libvpx);
             }
             CodecName::H264 => {
                 if is_openh264_available {
@@ -731,7 +723,6 @@ async fn recv_video_encoder_rpc_message_or_pending(
 
 #[derive(Debug)]
 enum VideoEncoderInner {
-    #[cfg(feature = "libvpx")]
     Libvpx(LibvpxEncoder),
     Openh264(Openh264Encoder),
     SvtAv1(SvtAv1Encoder),
@@ -742,13 +733,11 @@ enum VideoEncoderInner {
 }
 
 impl VideoEncoderInner {
-    #[cfg(feature = "libvpx")]
     fn new_vp8(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let encoder = LibvpxEncoder::new_vp8(options)?;
         Ok(Self::Libvpx(encoder))
     }
 
-    #[cfg(feature = "libvpx")]
     fn new_vp9(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let encoder = LibvpxEncoder::new_vp9(options)?;
         Ok(Self::Libvpx(encoder))
@@ -796,7 +785,6 @@ impl VideoEncoderInner {
 
     fn encode(&mut self, frame: RawVideoFrame) -> crate::Result<()> {
         match self {
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(encoder) => encoder.encode(frame),
             Self::Openh264(encoder) => encoder.encode(frame),
             Self::SvtAv1(encoder) => encoder.encode(frame),
@@ -809,7 +797,6 @@ impl VideoEncoderInner {
 
     fn finish(&mut self) -> crate::Result<()> {
         match self {
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(encoder) => encoder.finish(),
             Self::Openh264(encoder) => encoder.finish(),
             Self::SvtAv1(encoder) => encoder.finish(),
@@ -822,7 +809,6 @@ impl VideoEncoderInner {
 
     fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         match self {
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(encoder) => encoder.next_encoded_frame(),
             Self::Openh264(encoder) => encoder.next_encoded_frame(),
             Self::SvtAv1(encoder) => encoder.next_encoded_frame(),
@@ -835,7 +821,6 @@ impl VideoEncoderInner {
 
     fn request_keyframe(&mut self) -> bool {
         match self {
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(encoder) => {
                 encoder.request_keyframe();
                 true
@@ -857,7 +842,6 @@ impl VideoEncoderInner {
 
     fn name(&self) -> EngineName {
         match self {
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(_) => EngineName::Libvpx,
             Self::Openh264(_) => EngineName::Openh264,
             Self::SvtAv1(_) => EngineName::SvtAv1,
@@ -870,7 +854,6 @@ impl VideoEncoderInner {
 
     fn codec(&self) -> CodecName {
         match self {
-            #[cfg(feature = "libvpx")]
             Self::Libvpx(encoder) => encoder.codec(),
             Self::Openh264(_) => CodecName::H264,
             Self::SvtAv1(_) => CodecName::Av1,

@@ -156,6 +156,9 @@
 
 ### misc
 
+- libvpx feature を削除して shiguredo_libvpx を常に有効にする
+  - shiguredo_libvpx のリポジトリを外出ししたことで、ビルドに時間が大幅に短縮されたので feature にする必要がなくなったため
+  - @sile
 - [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
   - @sile
 - [UPDATE] shiguredo_video_device のバージョンを 2026.1.0-canary.3 にあげる

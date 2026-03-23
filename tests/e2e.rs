@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-#[cfg(feature = "libvpx")]
 use hisui::decoder_libvpx::LibvpxDecoder;
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
@@ -62,7 +61,6 @@ fn inspect_mp4_without_decode() -> noargs::Result<()> {
 }
 
 #[test]
-#[cfg(feature = "libvpx")]
 fn inspect_mp4_with_decode() -> noargs::Result<()> {
     let output = run_hisui_command(&[
         "inspect",
@@ -138,7 +136,6 @@ fn inspect_webm_without_decode() -> noargs::Result<()> {
 }
 
 #[test]
-#[cfg(feature = "libvpx")]
 fn inspect_webm_with_decode() -> noargs::Result<()> {
     let output = run_hisui_command(&["inspect", "--decode", "testdata/archive-black-silent.webm"])?;
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -179,7 +176,6 @@ fn inspect_webm_with_decode() -> noargs::Result<()> {
 
 /// ソースが空の場合
 #[test]
-#[cfg(feature = "libvpx")]
 fn empty_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -611,7 +607,6 @@ fn optional_f64_member(
 }
 
 #[test]
-#[cfg(feature = "libvpx")]
 fn compose_stdout_summary_has_required_fields() -> noargs::Result<()> {
     let out_file = tempfile::NamedTempFile::new()?;
     let stats_file = tempfile::NamedTempFile::new()?;
@@ -664,7 +659,6 @@ fn compose_stdout_summary_has_required_fields() -> noargs::Result<()> {
 }
 
 #[test]
-#[cfg(feature = "libvpx")]
 fn compose_stats_file_has_required_top_level_and_processor_entries() -> noargs::Result<()> {
     let out_file = tempfile::NamedTempFile::new()?;
     let stats_file = tempfile::NamedTempFile::new()?;
@@ -723,7 +717,6 @@ fn compose_stats_file_has_required_top_level_and_processor_entries() -> noargs::
 }
 
 #[test]
-#[cfg(feature = "libvpx")]
 fn compose_empty_source_summary_omits_media_specific_fields() -> noargs::Result<()> {
     let out_file = tempfile::NamedTempFile::new()?;
 
@@ -786,7 +779,6 @@ fn compose_empty_source_summary_omits_media_specific_fields() -> noargs::Result<
 /// - 出力:
 ///   - VP9, OPUS, 25 fps, 320x240
 #[test]
-#[cfg(feature = "libvpx")]
 fn simple_single_source_vp9() -> noargs::Result<()> {
     test_simple_single_source_common(
         "testdata/e2e/simple_single_source_vp9/",
@@ -902,7 +894,6 @@ fn simple_single_source_av1() -> noargs::Result<()> {
 /// - 出力:
 ///   - VP9, OPUS, 25 fps, 319x239
 #[test]
-#[cfg(feature = "libvpx")]
 fn odd_resolution_single_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -1030,7 +1021,6 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
 
 /// 複数のソースをレイアウト指定なしで変換する場合
 #[test]
-#[cfg(feature = "libvpx")]
 fn simple_multi_sources() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -1109,7 +1099,6 @@ fn simple_multi_sources() -> noargs::Result<()> {
 /// - 各ソースファイルは16x16の解像度
 /// - レイアウトファイルで縦に並べて配置
 #[test]
-#[cfg(feature = "libvpx")]
 fn simple_split_archive() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -1247,7 +1236,6 @@ fn simple_split_archive() -> noargs::Result<()> {
 
 /// 複数のソースをレイアウト指定で、縦に並べて変換する場合
 #[test]
-#[cfg(feature = "libvpx")]
 fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -1371,7 +1359,6 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 /// - 二つ目のリージョンは中央に一つのセルがある（赤） => 後ろに別のリージョンがあるので外枠がつく
 /// - 音声ソースはなし
 #[test]
-#[cfg(feature = "libvpx")]
 fn two_regions() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;

@@ -192,7 +192,6 @@ impl From<shiguredo_dav1d::Error> for Error {
     }
 }
 
-#[cfg(feature = "libvpx")]
 impl From<shiguredo_libvpx::Error> for Error {
     #[track_caller]
     fn from(e: shiguredo_libvpx::Error) -> Self {

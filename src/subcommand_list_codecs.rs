@@ -70,14 +70,11 @@ fn run_internal(openh264: Option<PathBuf>) -> crate::Result<()> {
             ..EngineInfo::new(EngineName::SvtAv1)
         },
     ];
-    #[cfg(feature = "libvpx")]
-    {
-        engines.push(EngineInfo {
-            repository: Some(shiguredo_libvpx::BUILD_REPOSITORY),
-            build_version: Some(shiguredo_libvpx::BUILD_VERSION),
-            ..EngineInfo::new(EngineName::Libvpx)
-        });
-    }
+    engines.push(EngineInfo {
+        repository: Some(shiguredo_libvpx::BUILD_REPOSITORY),
+        build_version: Some(shiguredo_libvpx::BUILD_VERSION),
+        ..EngineInfo::new(EngineName::Libvpx)
+    });
     #[cfg(feature = "fdk-aac")]
     {
         engines.push(EngineInfo {
