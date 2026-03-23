@@ -127,25 +127,49 @@ impl ObswsSourceRequest {
                 endpoint,
                 processor_id,
             } => {
+                let processor_id =
+                    processor_id.unwrap_or_else(|| ProcessorId::new("rtmpInboundEndpoint"));
                 handle
-                    .create_rtmp_inbound_endpoint(endpoint, processor_id)
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("rtmp_inbound_endpoint"),
+                        move |h| endpoint.run(h),
+                    )
                     .await
+                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                Ok(processor_id)
             }
             Self::CreateSrtInboundEndpoint {
                 endpoint,
                 processor_id,
             } => {
+                let processor_id =
+                    processor_id.unwrap_or_else(|| ProcessorId::new("srtInboundEndpoint"));
                 handle
-                    .create_srt_inbound_endpoint(endpoint, processor_id)
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("srt_inbound_endpoint"),
+                        move |h| endpoint.run(h),
+                    )
                     .await
+                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                Ok(processor_id)
             }
             Self::CreateRtspSubscriber {
                 subscriber,
                 processor_id,
             } => {
+                let processor_id =
+                    processor_id.unwrap_or_else(|| ProcessorId::new(subscriber.input_url.clone()));
                 handle
-                    .create_rtsp_subscriber(subscriber, processor_id)
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("rtsp_subscriber"),
+                        move |h| subscriber.run(h),
+                    )
                     .await
+                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                Ok(processor_id)
             }
             Self::CreateVideoDecoder {
                 input_track_id,
