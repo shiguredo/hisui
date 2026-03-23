@@ -147,7 +147,7 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libx11-dev
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libx11-dev libfdk-aac-dev
 
       # CUDA のインストール (x86_64 のみ)
       - uses: shiguredo/github-actions/.github/actions/setup-cuda-toolkit@main
@@ -162,15 +162,15 @@ jobs:
           os: ${{ matrix.platform.runs-on }}
           toolchain: stable
 
-      # x86_64 では nvcodec feature を有効化
-      - name: Build with NVCODEC (x86_64)
+      # x86_64 では nvcodec と fdk-aac feature を有効化
+      - name: Build with NVCODEC and FDK-AAC (x86_64)
         if: contains(matrix.platform.name, 'x86_64')
-        run: cargo build --release --features nvcodec
+        run: cargo build --release --features nvcodec,fdk-aac
 
-      # ARM では通常ビルド
-      - name: Build (ARM)
+      # ARM では fdk-aac のみ有効化
+      - name: Build with FDK-AAC (ARM)
         if: contains(matrix.platform.name, 'arm64')
-        run: cargo build --release
+        run: cargo build --release --features fdk-aac
 
       - name: Get the version
         id: get_version
