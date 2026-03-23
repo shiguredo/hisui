@@ -39,8 +39,13 @@ impl nojson::DisplayJson for ObswsSceneTransitionEntry {
 }
 
 fn is_fixed_transition(transition_name: &str) -> bool {
-    // OBS では cut_transition のみ固定トランジション、fade_transition はカスタム設定対応
+    // OBS では cut_transition のみ固定トランジション
     transition_name == "cut_transition"
+}
+
+fn is_configurable_transition(_transition_name: &str) -> bool {
+    // OBS のビルトイントランジションはいずれもカスタム設定をサポートしない
+    false
 }
 
 /// トランジション名から決定的な UUID を生成する
@@ -151,14 +156,14 @@ pub fn build_get_scene_transition_list_response(
     input_registry: &ObswsInputRegistry,
 ) -> nojson::RawJsonOwned {
     let transitions: Vec<ObswsSceneTransitionEntry> = input_registry
-        .supported_transition_kinds()
+        .transition_instances()
         .iter()
         .map(|name| ObswsSceneTransitionEntry {
             transition_name: (*name).to_owned(),
             transition_uuid: transition_uuid(name),
             transition_kind: (*name).to_owned(),
             transition_fixed: is_fixed_transition(name),
-            transition_configurable: !is_fixed_transition(name),
+            transition_configurable: is_configurable_transition(name),
         })
         .collect();
     let current_transition_name = input_registry.current_scene_transition_name();
@@ -185,7 +190,10 @@ pub fn build_get_current_scene_transition_response(
         f.member("transitionUuid", &current_transition_uuid)?;
         f.member("transitionKind", current_transition_name)?;
         f.member("transitionFixed", fixed)?;
-        f.member("transitionConfigurable", !fixed)?;
+        f.member(
+            "transitionConfigurable",
+            is_configurable_transition(current_transition_name),
+        )?;
         // OBS のビルトイントランジションは transitionSettings を常に null で返す
         f.member("transitionSettings", Option::<&str>::None)?;
         f.member("transitionDuration", current_transition_duration_ms)
@@ -302,8 +310,8 @@ pub fn build_set_current_scene_transition_settings_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    // Cut 等の固定トランジションはカスタム設定をサポートしない
-    if is_fixed_transition(input_registry.current_scene_transition_name()) {
+    // ビルトイントランジションはカスタム設定をサポートしない
+    if !is_configurable_transition(input_registry.current_scene_transition_name()) {
         return super::build_request_response_error(
             "SetCurrentSceneTransitionSettings",
             request_id,

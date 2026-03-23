@@ -583,9 +583,9 @@ dependencies = [
 
 [[package]]
 name = "nopng"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "837eae2b57250a7287affe26cc7ed2dc0bbce45fd4f7456a7257bf03794a939d"
+checksum = "0d8886528a493733b1fbf014afcf5abbc73254ef3d336d570b709b0c9720f543"
 
 [[package]]
 name = "nu-ansi-term"
@@ -960,9 +960,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_libyuv"
-version = "2026.1.0-canary.0"
+version = "2026.1.0-canary.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9eb9a67579047fe25144dbcc0519aa691744ca9a5042518fa7382428cf0887e5"
+checksum = "24462bb844c0f17cc8108907a19b40b30445ceeab249b3d447c945caedb549a7"
 dependencies = [
  "bindgen",
  "shiguredo_cmake",
@@ -977,9 +977,9 @@ checksum = "029f44879b590e0b5e50add084b436a7b740e08b2cc4fee662ed93f1cffddc63"
 
 [[package]]
 name = "shiguredo_nvcodec"
-version = "2026.1.0-canary.1"
+version = "2026.1.0-canary.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b76046632f2e74d708bab5f55204311297d6c6d6c4d9d9b833144e4215676023"
+checksum = "cd546dad5208bd7798af07e15286b66923294ff47b758ba60f73ffe95ce163d3"
 dependencies = [
  "bindgen",
  "shiguredo_toml",

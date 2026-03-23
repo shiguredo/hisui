@@ -431,6 +431,11 @@ impl ObswsInputRegistry {
         &OBSWS_SUPPORTED_TRANSITION_KINDS
     }
 
+    /// シーンコレクション内のデフォルトトランジションインスタンス一覧を返す。
+    pub fn transition_instances(&self) -> &'static [&'static str] {
+        &OBSWS_DEFAULT_TRANSITION_INSTANCES
+    }
+
     pub fn current_scene_transition_name(&self) -> &str {
         &self.transition_runtime.current_transition_name
     }

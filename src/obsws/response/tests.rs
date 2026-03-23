@@ -209,9 +209,9 @@ fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
 }
 
 #[test]
-fn build_set_current_scene_transition_settings_accepts_fade_transition() {
+fn build_set_current_scene_transition_settings_rejects_fade_transition() {
     let mut registry = ObswsInputRegistry::new_for_test();
-    // fade_transition はカスタム設定対応なので成功する
+    // fade_transition はビルトイントランジションなのでカスタム設定をサポートしない
     let set_transition_settings_request_data =
         nojson::RawJsonOwned::parse(r#"{"transitionSettings":{"curve":"ease","power":2}}"#)
             .expect("requestData must be valid json");
@@ -228,7 +228,7 @@ fn build_set_current_scene_transition_settings_accepts_fade_transition() {
         .to_path_member(&["d", "requestStatus", "result"])
         .and_then(|v| v.required()?.try_into())
         .expect("result must be bool");
-    assert!(set_transition_settings_result);
+    assert!(!set_transition_settings_result);
 }
 
 #[test]

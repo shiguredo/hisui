@@ -78,7 +78,7 @@
   - @sile
 - [ADD] 依存ライブラリに base64 0.22.1 を追加する
   - @sile
-- [ADD] 依存ライブラリに nopng 0.1.0 を追加する
+- [ADD] 依存ライブラリに nopng 0.1.1 を追加する
   - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libx11-dev` を追加する
   - @sile
@@ -102,13 +102,13 @@
 - [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.3 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0-canary.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.1 にあげる
+- [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.2 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが https://github.com/shiguredo/nvcodec-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_libvpx のバージョンを 2026.1.0-canary.2 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが https://github.com/shiguredo/libvpx-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libyuv のバージョンを 2026.1.0-canary.0 にあげる
+- [UPDATE] shiguredo_libyuv のバージョンを 2026.1.0-canary.2 にあげる
   - このバージョンから shiguredo_libyuv crate のリポジトリが https://github.com/shiguredo/libyuv-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.0-canary.1 にあげる

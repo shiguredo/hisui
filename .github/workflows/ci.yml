@@ -121,43 +121,6 @@ jobs:
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
       - run: cargo test -p hisui
 
-  valgrind:
-    # [NOTE]
-    # Rust 1.93.0 に上がったタイミングで valgrind チェックが常に失敗するようになったので、その解決策が見つかるまでこのジョブはスキップする
-    # 失敗例: https://github.com/shiguredo/hisui/actions/runs/21272612023/job/61225691502 )
-    #
-    # 上の結果を見ると、特定のテストでチェックがこけている、という感じではなく cargo test 自体と相性が悪そうにも見える
-    if: false
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    env:
-      OPENH264_VERSION: "2.6.0"
-      OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
-    steps:
-      - uses: actions/checkout@v6
-      - run: rustup update stable
-      - name: Install packages to build external dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libx11-dev valgrind
-      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
-        with:
-          os: ubuntu-24.04
-          toolchain: stable
-      - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
-        run: |
-          OPENH264_ARCHIVE="libopenh264-${OPENH264_VERSION}-linux64.8.so.bz2"
-          OPENH264_URL="https://ciscobinary.openh264.org/${OPENH264_ARCHIVE}"
-          echo "Downloading ${OPENH264_URL}"
-          curl -fL -o "${OPENH264_ARCHIVE}" "${OPENH264_URL}"
-          bzip2 -d "${OPENH264_ARCHIVE}"
-          mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
-      - run: cargo install cargo-valgrind || echo 'already installed'
-      - name: Run valgrind tests
-        env:
-          VALGRINDFLAGS: --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
-        # NOTE: SVT-AV1 の v3.1.2 では hisui 側では対処不可能そうなエラーが出ているので、いったん抑制している（TODO: 新バージョンが出たらまた対象に含めること）
-        run: cargo valgrind test --workspace --exclude shiguredo_svt_av1 -- --skip simple_single_source_av1
 
   ubuntu-binary:
     name: "Upload Binary for Ubuntu"
@@ -291,8 +254,6 @@ jobs:
       - test-openh264
       - ubuntu-binary
       - macos-binary
-      # - valgrind  # スキップ中のため除外（TODO: valgrind ジョブのスキップをやめたらコメントアウトを外す）
-      - valgrind
       - docs_rs
     permissions:
       actions: read

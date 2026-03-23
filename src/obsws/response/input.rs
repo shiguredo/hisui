@@ -336,11 +336,15 @@ pub fn execute_create_input(
         .list_scene_items(&scene_name)
         .unwrap_or_default();
     // 追加直後のアイテムを scene_item_id で検索する
-    let scene_item_index = scene_items
+    let created_scene_item = scene_items
         .iter()
-        .find(|item| item.scene_item_id == scene_item_id)
+        .find(|item| item.scene_item_id == scene_item_id);
+    let scene_item_index = created_scene_item
         .map(|item| item.scene_item_index)
         .unwrap_or(0);
+    let scene_item_transform = created_scene_item
+        .map(|item| item.scene_item_transform.clone())
+        .unwrap_or_default();
 
     let default_settings = input_registry
         .get_input_default_settings(created_entry.input.kind_name())
@@ -361,7 +365,7 @@ pub fn execute_create_input(
                 .as_str()
                 .to_owned(),
             scene_item_index,
-            scene_item_transform: crate::obsws_input_registry::ObswsSceneItemTransform::default(),
+            scene_item_transform,
             is_group: None,
         },
     };

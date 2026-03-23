@@ -321,7 +321,7 @@ def test_obsws_transition_requests(binary_path: Path):
             "transitionSettings"
         ] is None
 
-        # fade_transition はカスタム設定対応なので成功する
+        # ビルトイントランジションはカスタム設定をサポートしないので失敗する
         set_transition_settings_response = asyncio.run(
             _connect_identify_and_request(
                 f"ws://{host}:{port}/",
@@ -330,7 +330,8 @@ def test_obsws_transition_requests(binary_path: Path):
                 request_data={"transitionSettings": {"curve": "ease_in_out", "power": 2}},
             )
         )
-        assert set_transition_settings_response["d"]["requestStatus"]["result"] is True
+        assert set_transition_settings_response["d"]["requestStatus"]["result"] is False
+        assert set_transition_settings_response["d"]["requestStatus"]["code"] == 606
 
         get_transition_cursor_response = asyncio.run(
             _connect_identify_and_request(

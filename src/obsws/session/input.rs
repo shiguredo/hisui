@@ -23,8 +23,10 @@ impl ObswsSession {
         let input_event_enabled = self.is_event_subscription_enabled(OBSWS_EVENT_SUB_INPUTS);
         let scene_item_event_enabled =
             self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEMS);
+        let transform_event_enabled =
+            self.is_event_subscription_enabled(OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED);
 
-        if !input_event_enabled && !scene_item_event_enabled {
+        if !input_event_enabled && !scene_item_event_enabled && !transform_event_enabled {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request response message",
@@ -55,6 +57,20 @@ impl ObswsSession {
                 &scene_item.scene_item.source_uuid,
                 scene_item.scene_item.scene_item_index,
             );
+            messages.push((event_text, "event message"));
+        }
+
+        // OBS は CreateInput でシーンアイテムが作成された際にデフォルト transform の
+        // SceneItemTransformChanged イベントを発火する
+        if transform_event_enabled {
+            let scene_item = &created.scene_item_ref;
+            let event_text =
+                crate::obsws_response_builder::build_scene_item_transform_changed_event(
+                    &scene_item.scene_name,
+                    &scene_item.scene_uuid,
+                    scene_item.scene_item.scene_item_id,
+                    &scene_item.scene_item.scene_item_transform,
+                );
             messages.push((event_text, "event message"));
         }
 

@@ -45,25 +45,25 @@ shiguredo_srt = "=2026.1.0-canary.0"
 shiguredo_webrtc = "=0.146.0"
 shiguredo_video_device = "=2026.1.0-canary.3"
 mpeg2ts = "=0.6.0"
-nopng = "=0.1.0"
+nopng = "=0.1.1"
 aws-lc-rs = "=1.16.2"
 libc = "=0.2.183"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
 shiguredo_libvpx = "=2026.1.0-canary.2"
-shiguredo_libyuv = { version = "=2026.1.0-canary.0" }
-shiguredo_nvcodec = { version = "=2026.1.0-canary.1", optional = true }
-shiguredo_openh264 = { version = "=2026.1.0-canary.3" }
-shiguredo_opus = { version = "=2026.1.0-canary.4" }
-shiguredo_svt_av1 = { version = "=2026.1.0-canary.0" }
+shiguredo_libyuv = "=2026.1.0-canary.2"
+shiguredo_nvcodec = { version = "=2026.1.0-canary.2", optional = true }
+shiguredo_openh264 = "=2026.1.0-canary.3"
+shiguredo_opus = "=2026.1.0-canary.4"
+shiguredo_svt_av1 = "=2026.1.0-canary.0"
 shiguredo_websocket = "=2026.1.0-canary.5"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 shiguredo_fdk_aac = "=2026.1.0-canary.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-shiguredo_audio_toolbox = { version = "=2026.1.0-canary.0" }
-shiguredo_video_toolbox = { version = "=2026.1.0-canary.1" }
+shiguredo_audio_toolbox = "=2026.1.0-canary.0"
+shiguredo_video_toolbox = "=2026.1.0-canary.1"
 
 [dev-dependencies]
 tempfile = "3.18.0"
