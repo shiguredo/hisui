@@ -1,5 +1,5 @@
 use crate::obsws_input_registry::{ObswsInputEntry, ObswsInputSettings};
-use crate::{PipelineOperationError, ProcessorId, TrackId};
+use crate::{PipelineOperationError, ProcessorId, ProcessorMetadata, TrackId};
 
 pub mod file_mp4;
 mod mp4;
@@ -73,18 +73,55 @@ impl ObswsSourceRequest {
             Self::CreateMp4FileSource {
                 source,
                 processor_id,
-            } => handle.create_mp4_file_source(source, processor_id).await,
+            } => {
+                let processor_id = processor_id
+                    .unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
+                handle
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("mp4_file_source"),
+                        move |h| source.run(h),
+                    )
+                    .await
+                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                Ok(processor_id)
+            }
             Self::CreatePngFileSource {
                 source,
                 processor_id,
-            } => handle.create_png_file_source(source, processor_id).await,
+            } => {
+                let processor_id = processor_id
+                    .unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
+                handle
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("png_file_source"),
+                        move |h| source.run(h),
+                    )
+                    .await
+                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                Ok(processor_id)
+            }
             Self::CreateVideoDeviceSource {
                 source,
                 processor_id,
             } => {
+                let processor_id = processor_id.unwrap_or_else(|| {
+                    if let Some(device_id) = source.device_id.as_deref() {
+                        ProcessorId::new(format!("videoDeviceSource:{device_id}"))
+                    } else {
+                        ProcessorId::new("videoDeviceSource:default")
+                    }
+                });
                 handle
-                    .create_video_device_source(source, processor_id)
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("video_device_source"),
+                        move |h| source.run(h),
+                    )
                     .await
+                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                Ok(processor_id)
             }
             Self::CreateRtmpInboundEndpoint {
                 endpoint,
@@ -127,6 +164,20 @@ impl ObswsSourceRequest {
                 handle
                     .create_audio_decoder(input_track_id, output_track_id, processor_id)
                     .await
+            }
+        }
+    }
+
+    fn map_register_error(
+        e: crate::RegisterProcessorError,
+        processor_id: &ProcessorId,
+    ) -> PipelineOperationError {
+        match e {
+            crate::RegisterProcessorError::DuplicateProcessorId => {
+                PipelineOperationError::DuplicateProcessorId(processor_id.clone())
+            }
+            crate::RegisterProcessorError::PipelineTerminated => {
+                PipelineOperationError::PipelineTerminated
             }
         }
     }
