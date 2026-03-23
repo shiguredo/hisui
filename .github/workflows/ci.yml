@@ -92,7 +92,7 @@ jobs:
         with:
           os: ubuntu-24.04
           toolchain: stable
-      - run: cargo test
+      - run: cargo test --features fdk-aac
 
   test-openh264:
     runs-on: ubuntu-24.04

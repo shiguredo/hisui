@@ -29,7 +29,7 @@ struct Args {
     output_file_path: Option<PathBuf>,
     stats_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     fdk_aac: Option<PathBuf>,
     no_progress_bar: bool,
     worker_threads: NonZeroUsize,
@@ -66,7 +66,7 @@ impl Args {
                 .doc("OpenH264 の共有ライブラリのパスを指定します")
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "fdk-aac")]
             fdk_aac: noargs::opt("fdk-aac")
                 .ty("PATH")
                 .env("HISUI_FDK_AAC_PATH")
@@ -134,7 +134,7 @@ fn run_internal(args: Args) -> crate::Result<()> {
     };
 
     // 必要に応じて FDK-AAC の共有ライブラリを読み込む
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac_lib = args
         .fdk_aac
         .as_ref()
@@ -148,7 +148,7 @@ fn run_internal(args: Args) -> crate::Result<()> {
     let result = run_compose(
         layout,
         openh264_lib,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac_lib,
         !args.no_progress_bar,
         args.worker_threads,
@@ -201,7 +201,7 @@ struct ComposePipelineSetup {
 fn run_compose(
     layout: Layout,
     openh264_lib: Option<Openh264Library>,
-    #[cfg(target_os = "linux")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
+    #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
     show_progress_bar: bool,
     worker_threads: NonZeroUsize,
     out_file_path: PathBuf,
@@ -216,7 +216,7 @@ fn run_compose(
     let result = runtime.block_on(run_compose_pipeline(
         layout,
         openh264_lib,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac_lib,
         show_progress_bar,
         out_file_path,
@@ -252,7 +252,7 @@ fn run_compose(
 async fn run_compose_pipeline(
     layout: Layout,
     openh264_lib: Option<Openh264Library>,
-    #[cfg(target_os = "linux")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
+    #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
     show_progress_bar: bool,
     out_file_path: PathBuf,
 ) -> Result<ComposeResult> {
@@ -264,7 +264,7 @@ async fn run_compose_pipeline(
         &pipeline_handle,
         &layout,
         openh264_lib,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac_lib,
         show_progress_bar,
         out_file_path,
@@ -312,7 +312,7 @@ async fn setup_pipeline(
     pipeline_handle: &crate::MediaPipelineHandle,
     layout: &Layout,
     openh264_lib: Option<Openh264Library>,
-    #[cfg(target_os = "linux")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
+    #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
     show_progress_bar: bool,
     out_file_path: PathBuf,
 ) -> Result<ComposePipelineSetup> {
@@ -358,7 +358,7 @@ async fn setup_pipeline(
         let decoder_output_track_id = TrackId::new(decoder_processor_id.get());
         let reader_output_track_id_for_decoder = reader_output_track_id.clone();
         let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         let fdk_aac_lib_for_decoder = fdk_aac_lib.clone();
         spawn_processor_task(
             pipeline_handle,
@@ -366,7 +366,7 @@ async fn setup_pipeline(
             decoder_metadata,
             move |handle| async move {
                 let decoder = AudioDecoder::new(
-                    #[cfg(target_os = "linux")]
+                    #[cfg(feature = "fdk-aac")]
                     fdk_aac_lib_for_decoder,
                     handle.stats(),
                 )?;
@@ -514,7 +514,7 @@ async fn setup_pipeline(
             let encoder = AudioEncoder::new(
                 audio_codec,
                 audio_bitrate,
-                #[cfg(target_os = "linux")]
+                #[cfg(feature = "fdk-aac")]
                 fdk_aac_lib,
                 handle.stats(),
             )?;

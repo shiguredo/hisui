@@ -7,7 +7,7 @@ pub const PROCESSOR_TYPE_VIDEO_ENCODER: &str = "video_encoder";
 #[derive(Clone, Default)]
 pub struct MediaPipelineConfig {
     pub openh264_lib: Option<shiguredo_openh264::Openh264Library>,
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     pub fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
 }
 
@@ -15,7 +15,7 @@ impl std::fmt::Debug for MediaPipelineConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("MediaPipelineConfig");
         s.field("openh264_lib", &self.openh264_lib.is_some());
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         s.field("fdk_aac_lib", &self.fdk_aac_lib.is_some());
         s.finish()
     }

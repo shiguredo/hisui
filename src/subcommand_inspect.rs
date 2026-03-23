@@ -31,7 +31,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
         .ty("PATH")
         .env("HISUI_FDK_AAC_PATH")
@@ -53,7 +53,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         input_file_path,
         decode,
         openh264,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac,
     )
     .map_err(noargs::Error::from)?;
@@ -64,7 +64,7 @@ fn run_internal(
     input_file_path: PathBuf,
     decode: bool,
     openh264: Option<PathBuf>,
-    #[cfg(target_os = "linux")] fdk_aac: Option<PathBuf>,
+    #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
 ) -> Result<()> {
     let format = ContainerFormat::from_path(&input_file_path)?;
 
@@ -83,7 +83,7 @@ fn run_internal(
             format,
             decode,
             openh264,
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "fdk-aac")]
             fdk_aac,
         )
         .await
@@ -102,7 +102,7 @@ async fn setup_pipeline(
     format: ContainerFormat,
     decode: bool,
     openh264: Option<PathBuf>,
-    #[cfg(target_os = "linux")] fdk_aac: Option<PathBuf>,
+    #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
 ) -> Result<()> {
     let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode);
 
@@ -151,13 +151,13 @@ async fn setup_pipeline(
             .map(Openh264Library::load)
             .transpose()
             .map_err(|e| Error::new(e.to_string()))?;
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         let fdk_aac_lib = fdk_aac
             .map(shiguredo_fdk_aac::FdkAacLibrary::load)
             .transpose()?;
 
         let audio_decoder = AudioDecoder::new(
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "fdk-aac")]
             fdk_aac_lib,
             crate::stats::Stats::new(),
         )?;

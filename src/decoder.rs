@@ -21,7 +21,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct AudioDecoder {
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
@@ -39,7 +39,7 @@ enum DecoderRunOutput {
 
 impl AudioDecoder {
     pub fn new(
-        #[cfg(target_os = "linux")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
+        #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         let engine_metric = compose_stats.string("engine");
@@ -47,7 +47,7 @@ impl AudioDecoder {
         let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
         compose_stats.flag("error").set(false);
         Ok(Self {
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "fdk-aac")]
             fdk_aac_lib,
             engine_metric,
             codec_metric,
@@ -109,9 +109,9 @@ impl AudioDecoder {
         if self.inner.is_none() {
             let inner = AudioDecoderInner::new(
                 &frame,
-                #[cfg(target_os = "linux")]
+                #[cfg(feature = "fdk-aac")]
                 self.fdk_aac_lib.take(),
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(feature = "fdk-aac"))]
                 None,
             )?;
             self.engine_metric.set(inner.engine_name().as_str());
@@ -173,20 +173,20 @@ enum AudioDecoderInner {
     Opus(OpusDecoder),
     #[cfg(target_os = "macos")]
     AudioToolbox(crate::decoder_audio_toolbox::AudioToolboxDecoder),
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     FdkAac(crate::decoder_fdk_aac::FdkAacDecoder),
 }
 
 impl AudioDecoderInner {
     fn new(
         frame: &AudioFrame,
-        #[cfg(target_os = "linux")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
-        #[cfg(not(target_os = "linux"))] _fdk_aac_lib: Option<()>,
+        #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
+        #[cfg(not(feature = "fdk-aac"))] _fdk_aac_lib: Option<()>,
     ) -> crate::Result<Self> {
         match frame.format {
             AudioFormat::Opus => OpusDecoder::new().map(Self::Opus),
             AudioFormat::Aac => {
-                #[cfg(target_os = "linux")]
+                #[cfg(feature = "fdk-aac")]
                 if let Some(lib) = fdk_aac_lib {
                     return crate::decoder_fdk_aac::FdkAacDecoder::new(lib).map(Self::FdkAac);
                 }
@@ -195,7 +195,7 @@ impl AudioDecoderInner {
                 {
                     crate::decoder_audio_toolbox::AudioToolboxDecoder::new().map(Self::AudioToolbox)
                 }
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(not(any(target_os = "macos", feature = "fdk-aac")))]
                 {
                     Err(crate::Error::new(
                         "AAC decoding is not supported without --fdk-aac option or macOS",
@@ -214,7 +214,7 @@ impl AudioDecoderInner {
             Self::Opus(decoder) => decoder.decode(frame),
             #[cfg(target_os = "macos")]
             Self::AudioToolbox(decoder) => decoder.decode(frame),
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "fdk-aac")]
             Self::FdkAac(decoder) => decoder.decode(frame),
         }
     }
@@ -224,7 +224,7 @@ impl AudioDecoderInner {
             Self::Opus(_decoder) => Ok(None),
             #[cfg(target_os = "macos")]
             Self::AudioToolbox(decoder) => decoder.finish(),
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "fdk-aac")]
             Self::FdkAac(_decoder) => Ok(None),
         }
     }
@@ -234,7 +234,7 @@ impl AudioDecoderInner {
             Self::Opus(_) => EngineName::Opus,
             #[cfg(target_os = "macos")]
             Self::AudioToolbox(_) => EngineName::AudioToolbox,
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "fdk-aac")]
             Self::FdkAac(_) => EngineName::FdkAac,
         }
     }
@@ -244,7 +244,7 @@ impl AudioDecoderInner {
             Self::Opus(_) => CodecName::Opus,
             #[cfg(target_os = "macos")]
             Self::AudioToolbox(_) => CodecName::Aac,
-            #[cfg(target_os = "linux")]
+            #[cfg(feature = "fdk-aac")]
             Self::FdkAac(_) => CodecName::Aac,
         }
     }

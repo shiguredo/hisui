@@ -34,7 +34,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
         .ty("PATH")
         .env("HISUI_FDK_AAC_PATH")
@@ -75,7 +75,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         password,
         resolve_default_record_dir(default_record_dir)?,
         openh264,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac,
         canvas_width,
         canvas_height,
@@ -89,7 +89,7 @@ fn run_internal(
     password: Option<String>,
     default_record_dir: PathBuf,
     openh264: Option<PathBuf>,
-    #[cfg(target_os = "linux")] fdk_aac: Option<PathBuf>,
+    #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
@@ -98,14 +98,14 @@ fn run_internal(
         .as_ref()
         .map(shiguredo_openh264::Openh264Library::load)
         .transpose()?;
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac_lib = fdk_aac
         .as_ref()
         .map(shiguredo_fdk_aac::FdkAacLibrary::load)
         .transpose()?;
     let pipeline_config = crate::MediaPipelineConfig {
         openh264_lib,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac_lib,
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()

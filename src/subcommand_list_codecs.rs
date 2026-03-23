@@ -15,7 +15,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
         .ty("PATH")
         .env("HISUI_FDK_AAC_PATH")
@@ -29,7 +29,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
     run_internal(
         openh264,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac,
     )
     .map_err(noargs::Error::from)
@@ -37,21 +37,21 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
 
 fn run_internal(
     openh264: Option<PathBuf>,
-    #[cfg(target_os = "linux")] fdk_aac: Option<PathBuf>,
+    #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
         .and_then(|path| Openh264Library::load(path).ok());
     let is_openh264_available = openh264_lib.is_some();
 
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac_lib = fdk_aac
         .as_ref()
         .map(shiguredo_fdk_aac::FdkAacLibrary::load)
         .transpose()?;
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let is_fdk_aac_available = fdk_aac_lib.is_some();
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(feature = "fdk-aac"))]
     let is_fdk_aac_available = false;
 
     let mut codecs = Vec::new();
@@ -100,7 +100,7 @@ fn run_internal(
         build_version: Some(shiguredo_libvpx::BUILD_VERSION),
         ..EngineInfo::new(EngineName::Libvpx)
     });
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     if let Some(lib) = fdk_aac_lib {
         engines.push(EngineInfo {
             shared_library_path: Some(lib.path().to_path_buf()),

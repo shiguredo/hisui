@@ -57,7 +57,7 @@ struct RunOptions {
     https_key_path: Option<PathBuf>,
     ui_remote_url: Option<String>,
     openh264: Option<PathBuf>,
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     fdk_aac: Option<PathBuf>,
 }
 
@@ -101,7 +101,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|o| o.value().parse())?;
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
         .ty("PATH")
         .env("HISUI_FDK_AAC_PATH")
@@ -138,7 +138,7 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         https_key_path,
         ui_remote_url,
         openh264,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac,
     })
     .map_err(noargs::Error::from)
@@ -166,7 +166,7 @@ async fn run_server(options: RunOptions) -> crate::Result<()> {
         https_key_path,
         ui_remote_url,
         openh264,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac,
     } = options;
 
@@ -190,14 +190,14 @@ async fn run_server(options: RunOptions) -> crate::Result<()> {
         .as_ref()
         .map(shiguredo_openh264::Openh264Library::load)
         .transpose()?;
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac_lib = fdk_aac
         .as_ref()
         .map(shiguredo_fdk_aac::FdkAacLibrary::load)
         .transpose()?;
     let pipeline = crate::MediaPipeline::new_with_config(crate::MediaPipelineConfig {
         openh264_lib,
-        #[cfg(target_os = "linux")]
+        #[cfg(feature = "fdk-aac")]
         fdk_aac_lib,
     })?;
     let pipeline_handle = pipeline.handle();

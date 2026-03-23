@@ -6,7 +6,7 @@ pub mod decoder;
 #[cfg(target_os = "macos")]
 pub mod decoder_audio_toolbox;
 pub mod decoder_dav1d;
-#[cfg(target_os = "linux")]
+#[cfg(feature = "fdk-aac")]
 pub mod decoder_fdk_aac;
 pub mod decoder_libvpx;
 #[cfg(feature = "nvcodec")]
@@ -18,7 +18,7 @@ pub mod decoder_video_toolbox;
 pub mod encoder;
 #[cfg(target_os = "macos")]
 pub mod encoder_audio_toolbox;
-#[cfg(target_os = "linux")]
+#[cfg(feature = "fdk-aac")]
 pub mod encoder_fdk_aac;
 pub mod encoder_libvpx;
 #[cfg(feature = "nvcodec")]

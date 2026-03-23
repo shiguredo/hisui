@@ -11,6 +11,7 @@ repository = "https://github.com/shiguredo/hisui"
 readme = "README.md"
 
 [features]
+fdk-aac = ["shiguredo_fdk_aac"]
 nvcodec = ["shiguredo_nvcodec"]
 
 [dependencies]
@@ -58,8 +59,7 @@ shiguredo_opus = "=2026.1.0-canary.4"
 shiguredo_svt_av1 = "=2026.1.0-canary.0"
 shiguredo_websocket = "=2026.1.0-canary.5"
 
-[target.'cfg(target_os = "linux")'.dependencies]
-shiguredo_fdk_aac = "=2026.1.0-canary.0"
+shiguredo_fdk_aac = { version = "=2026.1.0-canary.0", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = "=2026.1.0-canary.0"

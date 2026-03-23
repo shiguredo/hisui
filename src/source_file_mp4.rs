@@ -98,7 +98,7 @@ impl Mp4FileSource {
                     ProcessorMetadata::new("audio_decoder"),
                     |handle| async move {
                         let decoder = AudioDecoder::new(
-                            #[cfg(target_os = "linux")]
+                            #[cfg(feature = "fdk-aac")]
                             handle.config().fdk_aac_lib.clone(),
                             handle.stats(),
                         )?;

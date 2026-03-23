@@ -203,7 +203,7 @@ fn decode_video_frames_with_pipeline(
 
 fn decode_audio_count_with_pipeline(input_samples: Vec<AudioFrame>) -> hisui::Result<usize> {
     // FDK-AAC ライブラリを環境変数から読み込む（macOS の場合は不要）
-    #[cfg(target_os = "linux")]
+    #[cfg(feature = "fdk-aac")]
     let fdk_aac_lib = if let Ok(path) = std::env::var("HISUI_FDK_AAC_PATH") {
         Some(shiguredo_fdk_aac::FdkAacLibrary::load(path)?)
     } else {
@@ -241,7 +241,7 @@ fn decode_audio_count_with_pipeline(input_samples: Vec<AudioFrame>) -> hisui::Re
         .await?;
         let decoder_task = tokio::spawn(async move {
             let decoder = AudioDecoder::new(
-                #[cfg(target_os = "linux")]
+                #[cfg(feature = "fdk-aac")]
                 fdk_aac_lib,
                 decoder_handle.stats(),
             )?;
