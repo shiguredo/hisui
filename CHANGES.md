@@ -129,7 +129,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtmp を追加する
   - @sile
-- [CHANGE] FDK-AAC を feature フラグによるビルド時有効化から、`--fdk-aac` オプションによる実行時の共有ライブラリ指定方式に変更する
+- [CHANGE] FDK-AAC を `fdk-aac` feature フラグによるビルド時有効化と、`--fdk-aac` オプションによる実行時の共有ライブラリ指定を併用する方式に変更する
   - @sile
 - [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
   - トップレベルの `worker_threads` が削除される

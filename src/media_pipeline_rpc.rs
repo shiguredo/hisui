@@ -244,10 +244,10 @@ impl MediaPipelineHandle {
             processor_id.clone(),
             ProcessorMetadata::new("audio_decoder"),
             move |handle| async move {
-                #[cfg(target_os = "linux")]
+                #[cfg(feature = "fdk-aac")]
                 let fdk_aac_lib = handle.config().fdk_aac_lib.clone();
                 let decoder = crate::decoder::AudioDecoder::new(
-                    #[cfg(target_os = "linux")]
+                    #[cfg(feature = "fdk-aac")]
                     fdk_aac_lib,
                     handle.stats(),
                 )?;
@@ -273,12 +273,12 @@ impl MediaPipelineHandle {
             processor_id.clone(),
             ProcessorMetadata::new("audio_encoder"),
             move |handle| async move {
-                #[cfg(target_os = "linux")]
+                #[cfg(feature = "fdk-aac")]
                 let fdk_aac_lib = handle.config().fdk_aac_lib.clone();
                 let encoder = crate::encoder::AudioEncoder::new(
                     codec,
                     bitrate_bps,
-                    #[cfg(target_os = "linux")]
+                    #[cfg(feature = "fdk-aac")]
                     fdk_aac_lib,
                     handle.stats(),
                 )?;

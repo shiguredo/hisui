@@ -192,15 +192,13 @@ impl AudioDecoderInner {
                 }
 
                 #[cfg(target_os = "macos")]
-                {
-                    crate::decoder_audio_toolbox::AudioToolboxDecoder::new().map(Self::AudioToolbox)
-                }
-                #[cfg(not(any(target_os = "macos", feature = "fdk-aac")))]
-                {
-                    Err(crate::Error::new(
-                        "AAC decoding is not supported without --fdk-aac option or macOS",
-                    ))
-                }
+                return crate::decoder_audio_toolbox::AudioToolboxDecoder::new()
+                    .map(Self::AudioToolbox);
+
+                #[cfg(not(target_os = "macos"))]
+                return Err(crate::Error::new(
+                    "AAC decoding is not supported without --fdk-aac option or macOS",
+                ));
             }
             _ => Err(crate::Error::new(format!(
                 "Unsupported audio format: {:?}",

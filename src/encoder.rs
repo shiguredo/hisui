@@ -56,17 +56,14 @@ impl AudioEncoder {
                 }
 
                 #[cfg(target_os = "macos")]
-                {
-                    AudioEncoder::new_audio_toolbox_aac(bitrate, compose_stats)
-                }
-                #[cfg(not(any(target_os = "macos", feature = "fdk-aac")))]
-                {
-                    Err(crate::Error::new(
-                        "AAC encoding requires FDK-AAC library. \
-                         Please specify the library path using --fdk-aac command line argument or \
-                         HISUI_FDK_AAC_PATH environment variable.",
-                    ))
-                }
+                return AudioEncoder::new_audio_toolbox_aac(bitrate, compose_stats);
+
+                #[cfg(not(target_os = "macos"))]
+                return Err(crate::Error::new(
+                    "AAC encoding requires FDK-AAC library. \
+                     Please specify the library path using --fdk-aac command line argument or \
+                     HISUI_FDK_AAC_PATH environment variable.",
+                ));
             }
             CodecName::Opus => AudioEncoder::new_opus(bitrate, compose_stats),
             _ => unreachable!(),
