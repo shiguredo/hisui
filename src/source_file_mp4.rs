@@ -97,7 +97,11 @@ impl Mp4FileSource {
                     ProcessorId::new(format!("{processor_id}_audio_decoder")),
                     ProcessorMetadata::new("audio_decoder"),
                     |handle| async move {
-                        let decoder = AudioDecoder::new(handle.stats())?;
+                        let decoder = AudioDecoder::new(
+                            #[cfg(target_os = "linux")]
+                            handle.config().fdk_aac_lib.clone(),
+                            handle.stats(),
+                        )?;
                         decoder.run(handle, encoded_id, id).await
                     },
                 )
