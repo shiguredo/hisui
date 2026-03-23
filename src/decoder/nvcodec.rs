@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
 
-use crate::decoder::DecodeConfig;
+use super::DecodeConfig;
 use crate::video::{VideoFormat, VideoFrame};
 use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
 use crate::video_h265::{

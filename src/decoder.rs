@@ -1,19 +1,31 @@
+#[cfg(target_os = "macos")]
+pub mod audio_toolbox;
+pub mod dav1d;
+#[cfg(feature = "fdk-aac")]
+pub mod fdk_aac;
+pub mod libvpx;
+#[cfg(feature = "nvcodec")]
+pub mod nvcodec;
+pub mod openh264;
+pub mod opus;
+#[cfg(target_os = "macos")]
+pub mod video_toolbox;
+
 use std::collections::VecDeque;
 
 use shiguredo_openh264::Openh264Library;
 
-use crate::audio::AudioFormat;
-use crate::decoder_libvpx::LibvpxDecoder;
+use self::dav1d::Dav1dDecoder;
+use self::libvpx::LibvpxDecoder;
 #[cfg(feature = "nvcodec")]
-use crate::decoder_nvcodec::NvcodecDecoder;
+use self::nvcodec::NvcodecDecoder;
+use self::openh264::Openh264Decoder;
+use self::opus::OpusDecoder;
 #[cfg(target_os = "macos")]
-use crate::decoder_video_toolbox::VideoToolboxDecoder;
+use self::video_toolbox::VideoToolboxDecoder;
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
-    audio::AudioFrame,
-    decoder_dav1d::Dav1dDecoder,
-    decoder_openh264::Openh264Decoder,
-    decoder_opus::OpusDecoder,
+    audio::{AudioFormat, AudioFrame},
     media::MediaFrame,
     types::{CodecName, EngineName},
     video::VideoFrame,
@@ -170,9 +182,9 @@ impl AudioDecoder {
 enum AudioDecoderInner {
     Opus(OpusDecoder),
     #[cfg(target_os = "macos")]
-    AudioToolbox(crate::decoder_audio_toolbox::AudioToolboxDecoder),
+    AudioToolbox(self::audio_toolbox::AudioToolboxDecoder),
     #[cfg(feature = "fdk-aac")]
-    FdkAac(crate::decoder_fdk_aac::FdkAacDecoder),
+    FdkAac(self::fdk_aac::FdkAacDecoder),
 }
 
 impl AudioDecoderInner {
@@ -185,12 +197,11 @@ impl AudioDecoderInner {
             AudioFormat::Aac => {
                 #[cfg(feature = "fdk-aac")]
                 if let Some(lib) = fdk_aac_lib {
-                    return crate::decoder_fdk_aac::FdkAacDecoder::new(lib).map(Self::FdkAac);
+                    return self::fdk_aac::FdkAacDecoder::new(lib).map(Self::FdkAac);
                 }
 
                 #[cfg(target_os = "macos")]
-                return crate::decoder_audio_toolbox::AudioToolboxDecoder::new()
-                    .map(Self::AudioToolbox);
+                return self::audio_toolbox::AudioToolboxDecoder::new().map(Self::AudioToolbox);
 
                 #[cfg(not(target_os = "macos"))]
                 return Err(crate::Error::new(

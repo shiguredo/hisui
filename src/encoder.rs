@@ -1,3 +1,16 @@
+#[cfg(target_os = "macos")]
+pub mod audio_toolbox;
+#[cfg(feature = "fdk-aac")]
+pub mod fdk_aac;
+pub mod libvpx;
+#[cfg(feature = "nvcodec")]
+pub mod nvcodec;
+pub mod openh264;
+pub mod opus;
+pub mod svt_av1;
+#[cfg(target_os = "macos")]
+pub mod video_toolbox;
+
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
@@ -5,21 +18,21 @@ use shiguredo_mp4::boxes::SampleEntry;
 use shiguredo_openh264::Openh264Library;
 
 #[cfg(target_os = "macos")]
-use crate::encoder_audio_toolbox::AudioToolboxEncoder;
+use self::audio_toolbox::AudioToolboxEncoder;
 #[cfg(feature = "fdk-aac")]
-use crate::encoder_fdk_aac::FdkAacEncoder;
-use crate::encoder_libvpx::LibvpxEncoder;
+use self::fdk_aac::FdkAacEncoder;
+use self::libvpx::LibvpxEncoder;
 #[cfg(feature = "nvcodec")]
-use crate::encoder_nvcodec::NvcodecEncoder;
+use self::nvcodec::NvcodecEncoder;
+use self::openh264::Openh264Encoder;
+use self::opus::OpusEncoder;
+use self::svt_av1::SvtAv1Encoder;
 #[cfg(target_os = "macos")]
-use crate::encoder_video_toolbox::VideoToolboxEncoder;
+use self::video_toolbox::VideoToolboxEncoder;
 use crate::{
     Error, Message, ProcessorHandle, Result, TrackId,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     audio_converter::{AudioConverter, AudioConverterBuilder},
-    encoder_openh264::Openh264Encoder,
-    encoder_opus::OpusEncoder,
-    encoder_svt_av1::SvtAv1Encoder,
     media::MediaFrame,
     types::{CodecName, EngineName, EvenUsize},
     video::{FrameRate, RawVideoFrame, VideoFrame},

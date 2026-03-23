@@ -1,11 +1,10 @@
 use std::time::Duration;
 
 #[cfg(not(feature = "nvcodec"))]
-use hisui::decoder_libvpx::LibvpxDecoder;
+use hisui::decoder::libvpx::LibvpxDecoder;
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
-    decoder::{VideoDecoder, VideoDecoderOptions},
-    decoder_opus::OpusDecoder,
+    decoder::{VideoDecoder, VideoDecoderOptions, opus::OpusDecoder},
     reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     types::{CodecName, EngineName},
     video::VideoFrame,
