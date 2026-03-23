@@ -973,6 +973,12 @@ def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscri
                 event_type="SceneItemCreated",
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
+            # CreateInput 時にデフォルト transform の SceneItemTransformChanged イベントも送信されるので消費する
+            await _expect_obsws_event(
+                ws,
+                event_type="SceneItemTransformChanged",
+                event_intent=OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
+            )
 
             get_scene_item_id_response = await _send_obsws_request(
                 ws,
