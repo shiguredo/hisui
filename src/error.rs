@@ -243,7 +243,7 @@ impl From<shiguredo_video_toolbox::Error> for Error {
     }
 }
 
-#[cfg(feature = "fdk-aac")]
+#[cfg(target_os = "linux")]
 impl From<shiguredo_fdk_aac::Error> for Error {
     #[track_caller]
     fn from(e: shiguredo_fdk_aac::Error) -> Self {

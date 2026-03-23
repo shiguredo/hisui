@@ -6,7 +6,7 @@ use shiguredo_openh264::Openh264Library;
 
 #[cfg(target_os = "macos")]
 use crate::encoder_audio_toolbox::AudioToolboxEncoder;
-#[cfg(feature = "fdk-aac")]
+#[cfg(target_os = "linux")]
 use crate::encoder_fdk_aac::FdkAacEncoder;
 use crate::encoder_libvpx::LibvpxEncoder;
 #[cfg(feature = "nvcodec")]
@@ -45,15 +45,25 @@ impl AudioEncoder {
     pub fn new(
         codec: CodecName,
         bitrate: NonZeroUsize,
+        #[cfg(target_os = "linux")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
         compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         match codec {
-            #[cfg(feature = "fdk-aac")]
-            CodecName::Aac => AudioEncoder::new_fdk_aac(bitrate, compose_stats),
-            #[cfg(all(not(feature = "fdk-aac"), target_os = "macos"))]
-            CodecName::Aac => AudioEncoder::new_audio_toolbox_aac(bitrate, compose_stats),
-            #[cfg(all(not(feature = "fdk-aac"), not(target_os = "macos")))]
-            CodecName::Aac => Err(crate::Error::new("AAC output is not supported")),
+            CodecName::Aac => {
+                #[cfg(target_os = "linux")]
+                if let Some(lib) = fdk_aac_lib {
+                    return AudioEncoder::new_fdk_aac(lib, bitrate, compose_stats);
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    AudioEncoder::new_audio_toolbox_aac(bitrate, compose_stats)
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+                {
+                    Err(crate::Error::new("AAC output is not supported"))
+                }
+            }
             CodecName::Opus => AudioEncoder::new_opus(bitrate, compose_stats),
             _ => unreachable!(),
         }
@@ -80,8 +90,9 @@ impl AudioEncoder {
         })
     }
 
-    #[cfg(feature = "fdk-aac")]
+    #[cfg(target_os = "linux")]
     fn new_fdk_aac(
+        lib: shiguredo_fdk_aac::FdkAacLibrary,
         bitrate: NonZeroUsize,
         mut compose_stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
@@ -98,7 +109,7 @@ impl AudioEncoder {
             encoded: VecDeque::new(),
             eos: false,
             converter: default_audio_converter(),
-            inner: AudioEncoderInner::new_fdk_aac(bitrate)?,
+            inner: AudioEncoderInner::new_fdk_aac(lib, bitrate)?,
         })
     }
 
@@ -126,7 +137,7 @@ impl AudioEncoder {
 
     pub fn name(&self) -> EngineName {
         match &self.inner {
-            #[cfg(feature = "fdk-aac")]
+            #[cfg(target_os = "linux")]
             AudioEncoderInner::FdkAac(_) => EngineName::FdkAac,
             #[cfg(target_os = "macos")]
             AudioEncoderInner::AudioToolbox(_) => EngineName::AudioToolbox,
@@ -136,7 +147,7 @@ impl AudioEncoder {
 
     pub fn codec(&self) -> CodecName {
         match &self.inner {
-            #[cfg(feature = "fdk-aac")]
+            #[cfg(target_os = "linux")]
             AudioEncoderInner::FdkAac(_) => CodecName::Aac,
             #[cfg(target_os = "macos")]
             AudioEncoderInner::AudioToolbox(_) => CodecName::Aac,
@@ -144,12 +155,11 @@ impl AudioEncoder {
         }
     }
 
-    pub fn get_engines(codec: CodecName) -> Vec<EngineName> {
+    pub fn get_engines(codec: CodecName, is_fdk_aac_available: bool) -> Vec<EngineName> {
         let mut engines = Vec::new();
         match codec {
             CodecName::Aac => {
-                #[cfg(feature = "fdk-aac")]
-                {
+                if is_fdk_aac_available {
                     engines.push(EngineName::FdkAac);
                 }
                 #[cfg(target_os = "macos")]
@@ -261,7 +271,7 @@ fn drain_audio_encoder_output(
 
 #[derive(Debug)]
 enum AudioEncoderInner {
-    #[cfg(feature = "fdk-aac")]
+    #[cfg(target_os = "linux")]
     FdkAac(FdkAacEncoder),
     #[cfg(target_os = "macos")]
     AudioToolbox(AudioToolboxEncoder),
@@ -273,9 +283,12 @@ impl AudioEncoderInner {
         OpusEncoder::new(bitrate).map(Self::Opus)
     }
 
-    #[cfg(feature = "fdk-aac")]
-    fn new_fdk_aac(bitrate: NonZeroUsize) -> crate::Result<Self> {
-        FdkAacEncoder::new(bitrate).map(Self::FdkAac)
+    #[cfg(target_os = "linux")]
+    fn new_fdk_aac(
+        lib: shiguredo_fdk_aac::FdkAacLibrary,
+        bitrate: NonZeroUsize,
+    ) -> crate::Result<Self> {
+        FdkAacEncoder::new(lib, bitrate).map(Self::FdkAac)
     }
 
     #[cfg(target_os = "macos")]
@@ -285,7 +298,7 @@ impl AudioEncoderInner {
 
     fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Option<AudioFrame>> {
         match self {
-            #[cfg(feature = "fdk-aac")]
+            #[cfg(target_os = "linux")]
             Self::FdkAac(encoder) => encoder.encode(frame),
             #[cfg(target_os = "macos")]
             Self::AudioToolbox(encoder) => encoder.encode(frame),
@@ -295,7 +308,7 @@ impl AudioEncoderInner {
 
     fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
         match self {
-            #[cfg(feature = "fdk-aac")]
+            #[cfg(target_os = "linux")]
             Self::FdkAac(encoder) => encoder.finish(),
             #[cfg(target_os = "macos")]
             Self::AudioToolbox(encoder) => encoder.finish(),

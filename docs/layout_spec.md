@@ -122,7 +122,7 @@
 `"AAC"` は、以下のいずれかの条件を満たしている場合にのみ指定可能です:
 
 - macOS 用にビルドされた Hisui（Apple Audio Toolboxの AAC エンコーダーが使用されます）
-- FDK-AAC を有効にしてビルドされた Hisui（参考: [build.md](build.md)）
+- `--fdk-aac` オプションまたは `HISUI_FDK_AAC_PATH` 環境変数で FDK-AAC の共有ライブラリが指定された場合（参考: [build.md](build.md)）
 
 ### `audio_bitrate: $BITRATE`
 

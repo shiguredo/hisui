@@ -35,10 +35,9 @@ jobs:
           os: ubuntu-24.04
           toolchain: stable
       - run: cargo fmt --all --check
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac
-      - run: cargo clippy --workspace --all-targets --exclude shiguredo_fdk_aac -- --deny warnings
-      - run: cargo test --workspace --exclude shiguredo_fdk_aac
-
+      - run: cargo check --workspace
+      - run: cargo clippy --workspace --all-targets -- --deny warnings
+      - run: cargo test --workspace
   test-nvidia-video-codec:
     runs-on:
       group: Self
@@ -73,13 +72,15 @@ jobs:
         run: |
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
-      - run: cargo check --workspace --exclude shiguredo_fdk_aac
-      - run: cargo clippy --workspace --exclude shiguredo_fdk_aac -- --deny warnings
-      - run: cargo test --workspace --exclude shiguredo_fdk_aac
+      - run: cargo check --workspace
+      - run: cargo clippy --workspace -- --deny warnings
+      - run: cargo test --workspace
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      HISUI_FDK_AAC_PATH: /usr/lib/x86_64-linux-gnu/libfdk-aac.so
     steps:
       - uses: actions/checkout@v6
       - run: rustup update stable
@@ -91,21 +92,7 @@ jobs:
         with:
           os: ubuntu-24.04
           toolchain: stable
-      - run: cargo test --package shiguredo_fdk_aac
-      # shiguredo_fdk_aac はリリースビルドでだけセグフォすることがあったので、それもテストする
-      # （最終的にはリリースバイナリを使った e2e で置き換えるべき）
-      - run: cargo test --release --package shiguredo_fdk_aac
-      - run: cargo test --features fdk-aac
-
-      - run: cargo build --no-default-features --features fdk-aac
-      - run: ldd target/debug/hisui
-      - name: FDK-AAC が動的リンクされることを確認する
-        run: ldd target/debug/hisui | grep fdk-aac
-
-      - run: cargo build
-      - run: ldd target/debug/hisui
-      - name: FDK-AAC がリンクされないことを確認する
-        run: if ldd target/debug/hisui | grep -q fdk-aac; then exit 1; else exit 0; fi
+      - run: cargo test
 
   test-openh264:
     runs-on: ubuntu-24.04
@@ -152,7 +139,7 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libx11-dev valgrind libfdk-aac-dev
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake libx11-dev valgrind
       - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
           os: ubuntu-24.04

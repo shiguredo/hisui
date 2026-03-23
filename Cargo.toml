@@ -11,7 +11,6 @@ repository = "https://github.com/shiguredo/hisui"
 readme = "README.md"
 
 [features]
-fdk-aac = ["shiguredo_fdk_aac"]
 nvcodec = ["shiguredo_nvcodec"]
 
 [dependencies]
@@ -51,7 +50,6 @@ aws-lc-rs = "=1.16.2"
 libc = "=0.2.183"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
-shiguredo_fdk_aac = { version = "=2025.1.1", path = "crates/shiguredo_fdk_aac/", optional = true }
 shiguredo_libvpx = "=2026.1.0-canary.2"
 shiguredo_libyuv = { version = "=2026.1.0-canary.0" }
 shiguredo_nvcodec = { version = "=2026.1.0-canary.1", optional = true }
@@ -59,6 +57,9 @@ shiguredo_openh264 = { version = "=2026.1.0-canary.3" }
 shiguredo_opus = { version = "=2026.1.0-canary.4" }
 shiguredo_svt_av1 = { version = "=2026.1.0-canary.0" }
 shiguredo_websocket = "=2026.1.0-canary.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+shiguredo_fdk_aac = "=2026.1.0-canary.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = { version = "=2026.1.0-canary.0" }
@@ -70,5 +71,4 @@ tempfile = "3.18.0"
 [workspace]
 members = [
     "crates/shiguredo_dav1d",
-    "crates/shiguredo_fdk_aac",
 ]

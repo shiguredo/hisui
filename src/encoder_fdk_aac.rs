@@ -16,11 +16,16 @@ pub struct FdkAacEncoder {
 }
 
 impl FdkAacEncoder {
-    pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
+    pub fn new(
+        lib: shiguredo_fdk_aac::FdkAacLibrary,
+        bitrate: NonZeroUsize,
+    ) -> crate::Result<Self> {
         let config = shiguredo_fdk_aac::EncoderConfig {
-            target_bitrate: bitrate.get(),
+            sample_rate: 48000,
+            channels: 2,
+            bitrate: Some(bitrate.get() as u32),
         };
-        let inner = shiguredo_fdk_aac::Encoder::new(config)?;
+        let inner = shiguredo_fdk_aac::Encoder::new(lib, config)?;
         let sample_entry = Some(sample_entry(&inner, bitrate));
         Ok(Self {
             inner,
@@ -30,10 +35,13 @@ impl FdkAacEncoder {
     }
 
     pub fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
-        let Some(encoded) = self.inner.finish()? else {
-            return Ok(None);
-        };
-        Ok(Some(self.handle_encoded_frame(encoded)))
+        self.inner.finish()?;
+        // finish 後にキューに溜まったフレームを回収する
+        let mut last_frame = None;
+        while let Some(encoded) = self.inner.next_frame() {
+            last_frame = Some(self.handle_encoded_frame(encoded));
+        }
+        Ok(last_frame)
     }
 
     pub fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Option<AudioFrame>> {
@@ -50,10 +58,14 @@ impl FdkAacEncoder {
         }
 
         let input = frame.interleaved_stereo_samples()?.collect::<Vec<_>>();
-        let Some(encoded) = self.inner.encode(&input)? else {
-            return Ok(None);
-        };
-        Ok(Some(self.handle_encoded_frame(encoded)))
+        self.inner.encode(&input)?;
+
+        // エンコード後にキューに溜まったフレームを回収する
+        let mut last_frame = None;
+        while let Some(encoded) = self.inner.next_frame() {
+            last_frame = Some(self.handle_encoded_frame(encoded));
+        }
+        Ok(last_frame)
     }
 
     fn handle_encoded_frame(&mut self, encoded: shiguredo_fdk_aac::EncodedFrame) -> AudioFrame {

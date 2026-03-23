@@ -1,18 +1,15 @@
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
-    decoder::{VideoDecoder, VideoDecoderOptions},
-    reader_mp4::Mp4VideoReader,
+    audio::AudioFrame,
+    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
+    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
     video::VideoFrame,
 };
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-use hisui::{audio::AudioFrame, decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
 use shiguredo_openh264::Openh264Library;
 
 const VIDEO_INPUT_TRACK_ID: &str = "decoder_test_video_input";
 const VIDEO_OUTPUT_TRACK_ID: &str = "decoder_test_video_output";
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 const AUDIO_INPUT_TRACK_ID: &str = "decoder_test_audio_input";
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 const AUDIO_OUTPUT_TRACK_ID: &str = "decoder_test_audio_output";
 
 #[test]
@@ -118,8 +115,11 @@ where
     Ok(())
 }
 #[test]
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn aac_decode() -> hisui::Result<()> {
+    if !cfg!(target_os = "macos") && std::env::var("HISUI_FDK_AAC_PATH").is_err() {
+        eprintln!("skipping: AAC test requires macOS or HISUI_FDK_AAC_PATH");
+        return Ok(());
+    }
     let reader = Mp4AudioReader::new("testdata/beep-aac-audio.mp4")?;
     let mut input_samples = Vec::new();
     for input_data in reader {
@@ -201,8 +201,15 @@ fn decode_video_frames_with_pipeline(
     })
 }
 
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 fn decode_audio_count_with_pipeline(input_samples: Vec<AudioFrame>) -> hisui::Result<usize> {
+    // FDK-AAC ライブラリを環境変数から読み込む（macOS の場合は不要）
+    #[cfg(target_os = "linux")]
+    let fdk_aac_lib = if let Ok(path) = std::env::var("HISUI_FDK_AAC_PATH") {
+        Some(shiguredo_fdk_aac::FdkAacLibrary::load(path)?)
+    } else {
+        None
+    };
+
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -233,7 +240,11 @@ fn decode_audio_count_with_pipeline(input_samples: Vec<AudioFrame>) -> hisui::Re
         )
         .await?;
         let decoder_task = tokio::spawn(async move {
-            let decoder = AudioDecoder::new(decoder_handle.stats())?;
+            let decoder = AudioDecoder::new(
+                #[cfg(target_os = "linux")]
+                fdk_aac_lib,
+                decoder_handle.stats(),
+            )?;
             decoder
                 .run(
                     decoder_handle,
@@ -306,7 +317,6 @@ async fn run_video_source(
     Ok(())
 }
 
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 async fn run_audio_source(
     handle: ProcessorHandle,
     samples: Vec<AudioFrame>,
@@ -344,7 +354,6 @@ async fn collect_video_frames(
     Ok(frames)
 }
 
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 async fn collect_audio_count(handle: ProcessorHandle, track_id: TrackId) -> hisui::Result<usize> {
     let mut rx = handle.subscribe_track(track_id);
     handle.notify_ready();
@@ -402,7 +411,6 @@ async fn await_video_pipeline_tasks(
     Ok(output_frames)
 }
 
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
 async fn await_audio_pipeline_tasks(
     source_task: tokio::task::JoinHandle<hisui::Result<()>>,
     decoder_task: tokio::task::JoinHandle<hisui::Result<()>>,

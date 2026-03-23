@@ -23,6 +23,7 @@ struct Args {
     trial_count: usize,
     trial_timeout: Option<Duration>,
     openh264: Option<PathBuf>,
+    fdk_aac: Option<PathBuf>,
     max_cpu_cores: Option<NonZeroUsize>,
     frame_count: usize,
     root_dir: PathBuf,
@@ -77,6 +78,12 @@ impl Args {
                 .ty("PATH")
                 .env("HISUI_OPENH264_PATH")
                 .doc("OpenH264 の共有ライブラリのパスを指定します")
+                .take(raw_args)
+                .present_and_then(|a| a.value().parse())?,
+            fdk_aac: noargs::opt("fdk-aac")
+                .ty("PATH")
+                .env("HISUI_FDK_AAC_PATH")
+                .doc("FDK-AAC の共有ライブラリのパスを指定します")
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
             max_cpu_cores: noargs::opt("max-cpu-cores")
@@ -301,6 +308,9 @@ fn run_trial_evaluation(
         .stderr(Stdio::inherit());
     if let Some(openh264_path) = &args.openh264 {
         cmd.arg("--openh264").arg(openh264_path);
+    }
+    if let Some(fdk_aac_path) = &args.fdk_aac {
+        cmd.arg("--fdk-aac").arg(fdk_aac_path);
     }
     if let Some(timeout) = &args.trial_timeout {
         cmd.arg(format!("--timeout={}", timeout.as_secs_f32()));

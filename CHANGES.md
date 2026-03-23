@@ -11,6 +11,9 @@
 
 ## develop
 
+- [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.0 にあげる
+  - このバージョンから shiguredo_fdk_aac crate のリポジトリが https://github.com/shiguredo/fdk-aac-rs に独立したので、hisui のワークスペースからは削除されている
+  - @sile
 - [UPDATE] shiguredo_opus のバージョンを 2026.1.0-canary.4 にあげる
   - このバージョンから shiguredo_opus crate のリポジトリが https://github.com/shiguredo/opus-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
@@ -124,6 +127,8 @@
   - バージョンが `-canary.X` は `.devX` 形式に変換される
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtmp を追加する
+  - @sile
+- [CHANGE] FDK-AAC を feature フラグによるビルド時有効化から、`--fdk-aac` オプションによる実行時の共有ライブラリ指定方式に変更する
   - @sile
 - [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
   - トップレベルの `worker_threads` が削除される
