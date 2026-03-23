@@ -13,7 +13,7 @@
 
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.0 にあげる
   - このバージョンから shiguredo_fdk_aac crate のリポジトリが https://github.com/shiguredo/fdk-aac-rs に独立したので、hisui のワークスペースからは削除されている
-  - fdk-aac feature フラグ（デフォルト無効）で有効化する方式に変更
+  - `fdk-aac` feature フラグ（デフォルト無効）によるビルド時有効化と、`--fdk-aac` オプションまたは `HISUI_FDK_AAC_PATH` 環境変数による実行時の共有ライブラリ指定を併用する方式に変更
   - @sile
 - [UPDATE] shiguredo_opus のバージョンを 2026.1.0-canary.4 にあげる
   - このバージョンから shiguredo_opus crate のリポジトリが https://github.com/shiguredo/opus-rs に独立したので、hisui のワークスペースからは削除されている
