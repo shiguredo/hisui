@@ -176,18 +176,52 @@ impl ObswsSourceRequest {
                 output_track_id,
                 processor_id,
             } => {
+                let processor_id = processor_id
+                    .unwrap_or_else(|| ProcessorId::new(format!("videoDecoder:{input_track_id}")));
                 handle
-                    .create_video_decoder(input_track_id, output_track_id, processor_id)
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("video_decoder"),
+                        move |h| async move {
+                            let decoder = crate::decoder::VideoDecoder::new(
+                                crate::decoder::VideoDecoderOptions {
+                                    openh264_lib: h.config().openh264_lib.clone(),
+                                    ..Default::default()
+                                },
+                                h.stats(),
+                            );
+                            decoder.run(h, input_track_id, output_track_id).await
+                        },
+                    )
                     .await
+                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                Ok(processor_id)
             }
             Self::CreateAudioDecoder {
                 input_track_id,
                 output_track_id,
                 processor_id,
             } => {
+                let processor_id = processor_id
+                    .unwrap_or_else(|| ProcessorId::new(format!("audioDecoder:{input_track_id}")));
                 handle
-                    .create_audio_decoder(input_track_id, output_track_id, processor_id)
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("audio_decoder"),
+                        move |h| async move {
+                            #[cfg(feature = "fdk-aac")]
+                            let fdk_aac_lib = h.config().fdk_aac_lib.clone();
+                            let decoder = crate::decoder::AudioDecoder::new(
+                                #[cfg(feature = "fdk-aac")]
+                                fdk_aac_lib,
+                                h.stats(),
+                            )?;
+                            decoder.run(h, input_track_id, output_track_id).await
+                        },
+                    )
                     .await
+                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                Ok(processor_id)
             }
         }
     }

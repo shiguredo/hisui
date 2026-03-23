@@ -1183,3 +1183,85 @@ mod tests {
         assert!(!should_finish_with(true, &states));
     }
 }
+
+pub async fn update_audio_mixer_inputs(
+    handle: &crate::MediaPipelineHandle,
+    processor_id: crate::ProcessorId,
+    input_tracks: Vec<AudioRealtimeInputTrack>,
+) -> Result<Vec<AudioRealtimeInputTrack>, crate::PipelineOperationError> {
+    let sender = handle
+        .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<AudioRealtimeMixerRpcMessage>>(
+            &processor_id,
+        )
+        .await
+        .map_err(|e| map_rpc_sender_error(e, &processor_id, "audio mixer input"))?;
+
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    sender
+        .send(AudioRealtimeMixerRpcMessage::UpdateInputs {
+            input_tracks,
+            reply_tx,
+        })
+        .map_err(|_| {
+            crate::PipelineOperationError::InternalError(
+                "audio mixer RPC sender channel is closed".to_owned(),
+            )
+        })?;
+    let result = reply_rx.await.map_err(|_| {
+        crate::PipelineOperationError::InternalError(
+            "audio mixer RPC response channel is closed".to_owned(),
+        )
+    })?;
+    let result = result.map_err(|e| crate::PipelineOperationError::InvalidParams(e.display()))?;
+    Ok(result.previous_input_tracks)
+}
+
+pub async fn finish_audio_mixer(
+    handle: &crate::MediaPipelineHandle,
+    processor_id: crate::ProcessorId,
+) -> Result<(), crate::PipelineOperationError> {
+    let sender = handle
+        .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<AudioRealtimeMixerRpcMessage>>(
+            &processor_id,
+        )
+        .await
+        .map_err(|e| map_rpc_sender_error(e, &processor_id, "audio mixer"))?;
+
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    sender
+        .send(AudioRealtimeMixerRpcMessage::Finish { reply_tx })
+        .map_err(|_| {
+            crate::PipelineOperationError::InternalError(
+                "audio mixer RPC sender channel is closed".to_owned(),
+            )
+        })?;
+    reply_rx.await.map_err(|_| {
+        crate::PipelineOperationError::InternalError(
+            "audio mixer RPC response channel is closed".to_owned(),
+        )
+    })?;
+    Ok(())
+}
+
+fn map_rpc_sender_error(
+    e: crate::media_pipeline::GetProcessorRpcSenderError,
+    processor_id: &crate::ProcessorId,
+    component: &str,
+) -> crate::PipelineOperationError {
+    match e {
+        crate::media_pipeline::GetProcessorRpcSenderError::PipelineTerminated => {
+            crate::PipelineOperationError::PipelineTerminated
+        }
+        crate::media_pipeline::GetProcessorRpcSenderError::ProcessorNotFound => {
+            crate::PipelineOperationError::InvalidParams(format!(
+                "processorId not found: {processor_id}"
+            ))
+        }
+        crate::media_pipeline::GetProcessorRpcSenderError::SenderNotRegistered
+        | crate::media_pipeline::GetProcessorRpcSenderError::TypeMismatch => {
+            crate::PipelineOperationError::InvalidParams(format!(
+                "processor does not support {component} updates: {processor_id}"
+            ))
+        }
+    }
+}
