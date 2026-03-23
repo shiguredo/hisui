@@ -122,11 +122,22 @@ impl Args {
     }
 }
 
-pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
+pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+    if !noargs::cmd("tune")
+        .doc("Optuna を用いた映像エンコードパラメーターの調整を行います")
+        .take(args)
+        .is_present()
+    {
+        return Ok(false);
+    }
+    run(args)?;
+    Ok(true)
+}
+
+fn run(raw_args: &mut noargs::RawArgs) -> noargs::Result<()> {
     // コマンドライン引数処理
-    let args = Args::parse(&mut raw_args)?;
-    if let Some(help) = raw_args.finish()? {
-        print!("{help}");
+    let args = Args::parse(raw_args)?;
+    if raw_args.metadata().help_mode {
         return Ok(());
     }
 

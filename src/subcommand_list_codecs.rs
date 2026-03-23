@@ -8,22 +8,34 @@ use crate::{
     types::{CodecName, EngineName},
 };
 
-pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
+pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+    if !noargs::cmd("list-codecs")
+        .doc("利用可能なコーデック一覧を表示します")
+        .take(args)
+        .is_present()
+    {
+        return Ok(false);
+    }
+    run(args)?;
+    Ok(true)
+}
+
+fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
         .doc("OpenH264 の共有ライブラリのパス")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|a| a.value().parse())?;
     #[cfg(feature = "fdk-aac")]
     let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
         .ty("PATH")
         .env("HISUI_FDK_AAC_PATH")
         .doc("FDK-AAC の共有ライブラリのパス")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|o| o.value().parse())?;
-    if let Some(help) = args.finish()? {
-        print!("{help}");
+
+    if args.metadata().help_mode {
         return Ok(());
     }
 

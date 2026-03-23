@@ -61,12 +61,24 @@ struct RunOptions {
     fdk_aac: Option<PathBuf>,
 }
 
-pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
+pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+    if !noargs::cmd("server")
+        .doc("HTTP サーバーを起動します")
+        .take(args)
+        .is_present()
+    {
+        return Ok(false);
+    }
+    run(args)?;
+    Ok(true)
+}
+
+fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
     let http_listen_address: IpAddr = noargs::opt("http-listen-address")
         .ty("ADDRESS")
         .doc("HTTP サーバーのリッスンアドレス")
         .default("127.0.0.1")
-        .take(&mut args)
+        .take(args)
         .then(|o| o.value().parse())?;
 
     // デフォルトポートは 8919 (H=8, I=9, S=19 で "His")
@@ -74,61 +86,60 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .ty("PORT")
         .doc("HTTP サーバーのリッスンポート")
         .default("8919")
-        .take(&mut args)
+        .take(args)
         .then(|o| o.value().parse())?;
 
     let https_cert_path: Option<PathBuf> = noargs::opt("https-cert-path")
         .ty("PATH")
         .doc("HTTPS 用の証明書ファイルパス（PEM 形式）")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|o| o.value().parse())?;
 
     let https_key_path: Option<PathBuf> = noargs::opt("https-key-path")
         .ty("PATH")
         .doc("HTTPS 用の秘密鍵ファイルパス（PEM 形式）")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|o| o.value().parse())?;
 
     let ui_remote_url: Option<String> = noargs::opt("ui-remote-url")
         .ty("URL")
         .doc("UI 用リモートサーバーの URL（GET リクエストをリバースプロキシする）")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|o| Ok::<_, std::convert::Infallible>(o.value().to_string()))?;
 
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
         .doc("OpenH264 の共有ライブラリのパス")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|o| o.value().parse())?;
     #[cfg(feature = "fdk-aac")]
     let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
         .ty("PATH")
         .env("HISUI_FDK_AAC_PATH")
         .doc("FDK-AAC の共有ライブラリのパス")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|o| o.value().parse())?;
+
+    if args.metadata().help_mode {
+        return Ok(());
+    }
 
     // 片方のみ指定はエラー
     match (&https_cert_path, &https_key_path) {
         (Some(_), None) => {
             return Err(noargs::Error::other(
-                &args,
+                args,
                 "--https-cert-path requires --https-key-path",
             ));
         }
         (None, Some(_)) => {
             return Err(noargs::Error::other(
-                &args,
+                args,
                 "--https-key-path requires --https-cert-path",
             ));
         }
         _ => {}
-    }
-
-    if let Some(help) = args.finish()? {
-        print!("{help}");
-        return Ok(());
     }
 
     run_internal(RunOptions {

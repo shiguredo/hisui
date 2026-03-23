@@ -20,32 +20,43 @@ const VIDEO_ENCODED_TRACK_ID: &str = "video_encoded";
 const AUDIO_DECODED_TRACK_ID: &str = "audio_decoded";
 const VIDEO_DECODED_TRACK_ID: &str = "video_decoded";
 
-pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
+pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+    if !noargs::cmd("inspect")
+        .doc("録画ファイルの情報を取得します")
+        .take(args)
+        .is_present()
+    {
+        return Ok(false);
+    }
+    run(args)?;
+    Ok(true)
+}
+
+fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
     let decode: bool = noargs::flag("decode")
         .doc("指定された場合にはデコードまで行います")
-        .take(&mut args)
+        .take(args)
         .is_present();
     let openh264: Option<PathBuf> = noargs::opt("openh264")
         .ty("PATH")
         .env("HISUI_OPENH264_PATH")
         .doc("OpenH264 の共有ライブラリのパス")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|a| a.value().parse())?;
     #[cfg(feature = "fdk-aac")]
     let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
         .ty("PATH")
         .env("HISUI_FDK_AAC_PATH")
         .doc("FDK-AAC の共有ライブラリのパス")
-        .take(&mut args)
+        .take(args)
         .present_and_then(|a| a.value().parse())?;
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
         .example("/path/to/archive.mp4")
         .doc("情報取得対象の録画ファイル(.mp4|.webm)")
-        .take(&mut args)
+        .take(args)
         .then(|a| a.value().parse())?;
 
-    if let Some(help) = args.finish()? {
-        print!("{help}");
+    if args.metadata().help_mode {
         return Ok(());
     }
 

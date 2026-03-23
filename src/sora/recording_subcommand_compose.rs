@@ -106,10 +106,21 @@ impl Args {
     }
 }
 
-pub fn run(mut raw_args: noargs::RawArgs) -> noargs::Result<()> {
-    let args = Args::parse(&mut raw_args)?;
-    if let Some(help) = raw_args.finish()? {
-        print!("{help}");
+pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+    if !noargs::cmd("compose")
+        .doc("録画ファイルの合成を行います")
+        .take(args)
+        .is_present()
+    {
+        return Ok(false);
+    }
+    run(args)?;
+    Ok(true)
+}
+
+fn run(raw_args: &mut noargs::RawArgs) -> noargs::Result<()> {
+    let args = Args::parse(raw_args)?;
+    if raw_args.metadata().help_mode {
         return Ok(());
     }
 
