@@ -1,4 +1,3 @@
-// Sora の録画ファイル合成処理固有モジュール（recording_ がつかないモジュールからこのモジュールは参照しないこと）
 use crate::encoder::EncodeConfig;
 use crate::sora::recording_encoder_libvpx_params;
 #[cfg(feature = "nvcodec")]
