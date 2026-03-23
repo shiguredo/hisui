@@ -47,8 +47,7 @@ fn run_internal(
     #[cfg(feature = "fdk-aac")]
     let fdk_aac_lib = fdk_aac
         .as_ref()
-        .map(shiguredo_fdk_aac::FdkAacLibrary::load)
-        .transpose()?;
+        .and_then(|path| shiguredo_fdk_aac::FdkAacLibrary::load(path).ok());
     #[cfg(feature = "fdk-aac")]
     let is_fdk_aac_available = fdk_aac_lib.is_some();
     #[cfg(not(feature = "fdk-aac"))]
