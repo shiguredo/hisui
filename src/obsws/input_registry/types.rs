@@ -13,8 +13,15 @@ pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 6] = [
     "srt_inbound",
     "rtsp_subscriber",
 ];
-pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 2] =
-    ["fade_transition", "cut_transition"];
+pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 7] = [
+    "fade_transition",
+    "cut_transition",
+    "swipe_transition",
+    "slide_transition",
+    "obs_stinger_transition",
+    "fade_to_color_transition",
+    "wipe_transition",
+];
 pub(crate) const OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_MAX_SCENE_ID_FOR_UUID_SUFFIX: u64 = (1 << 48) - 1;
 pub(crate) const OBSWS_DEFAULT_STREAM_SERVICE_TYPE: &str = "rtmp_custom";
