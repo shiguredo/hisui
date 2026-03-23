@@ -156,7 +156,7 @@ pub fn build_get_scene_transition_list_response(
     input_registry: &ObswsInputRegistry,
 ) -> nojson::RawJsonOwned {
     let transitions: Vec<ObswsSceneTransitionEntry> = input_registry
-        .supported_transition_kinds()
+        .transition_instances()
         .iter()
         .map(|name| ObswsSceneTransitionEntry {
             transition_name: (*name).to_owned(),
