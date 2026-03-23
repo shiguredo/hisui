@@ -121,7 +121,6 @@ jobs:
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
       - run: cargo test -p hisui
 
-
   ubuntu-binary:
     name: "Upload Binary for Ubuntu"
     needs: [ci]
