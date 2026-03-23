@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+#[cfg(not(feature = "nvcodec"))]
 use hisui::decoder_libvpx::LibvpxDecoder;
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
@@ -893,7 +894,10 @@ fn simple_single_source_av1() -> noargs::Result<()> {
 ///     - ホワイトノイズ
 /// - 出力:
 ///   - VP9, OPUS, 25 fps, 319x239
+// nvcodec feature が有効な場合、デコーダ選択で NVDEC が優先されるが、
+// テスト用の小さい解像度の映像（16x16 等）や奇数解像度は NVDEC の制約で処理できないためスキップする
 #[test]
+#[cfg(not(feature = "nvcodec"))]
 fn odd_resolution_single_source() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -1020,7 +1024,10 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
 }
 
 /// 複数のソースをレイアウト指定なしで変換する場合
+// nvcodec feature が有効な場合、デコーダ選択で NVDEC が優先されるが、
+// テスト用の小さい解像度の映像（16x16 等）は NVDEC の制約で処理できないためスキップする
 #[test]
+#[cfg(not(feature = "nvcodec"))]
 fn simple_multi_sources() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -1098,7 +1105,10 @@ fn simple_multi_sources() -> noargs::Result<()> {
 /// - 同一接続から時系列で分割された複数のソースファイル（R -> G -> B）を一つにまとめる
 /// - 各ソースファイルは16x16の解像度
 /// - レイアウトファイルで縦に並べて配置
+// nvcodec feature が有効な場合、デコーダ選択で NVDEC が優先されるが、
+// テスト用の小さい解像度の映像（16x16 等）は NVDEC の制約で処理できないためスキップする
 #[test]
+#[cfg(not(feature = "nvcodec"))]
 fn simple_split_archive() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -1235,7 +1245,10 @@ fn simple_split_archive() -> noargs::Result<()> {
 }
 
 /// 複数のソースをレイアウト指定で、縦に並べて変換する場合
+// nvcodec feature が有効な場合、デコーダ選択で NVDEC が優先されるが、
+// テスト用の小さい解像度の映像（16x16 等）は NVDEC の制約で処理できないためスキップする
 #[test]
+#[cfg(not(feature = "nvcodec"))]
 fn multi_sources_single_column() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
@@ -1358,7 +1371,10 @@ fn multi_sources_single_column() -> noargs::Result<()> {
 /// - 一つ目のリージョンには縦並びの二つのセルがある（青と緑）
 /// - 二つ目のリージョンは中央に一つのセルがある（赤） => 後ろに別のリージョンがあるので外枠がつく
 /// - 音声ソースはなし
+// nvcodec feature が有効な場合、デコーダ選択で NVDEC が優先されるが、
+// テスト用の小さい解像度の映像（16x16 等）は NVDEC の制約で処理できないためスキップする
 #[test]
+#[cfg(not(feature = "nvcodec"))]
 fn two_regions() -> noargs::Result<()> {
     // 変換を実行
     let out_file = tempfile::NamedTempFile::new()?;
