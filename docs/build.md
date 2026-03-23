@@ -89,10 +89,10 @@ cargo install hisui --features fdk-aac
 
 ```bash
 # 実行時に共有ライブラリのパスを指定する
-hisui --fdk-aac /usr/lib/x86_64-linux-gnu/libfdk-aac.so compose ...
+hisui compose --fdk-aac /path/to/libfdk-aac.so ...
 
 # あるいは環境変数で指定する
-export HISUI_FDK_AAC_PATH=/usr/lib/x86_64-linux-gnu/libfdk-aac.so
+export HISUI_FDK_AAC_PATH=/path/to/libfdk-aac.so
 hisui compose ...
 ```
 
