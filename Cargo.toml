@@ -51,7 +51,6 @@ aws-lc-rs = "=1.16.2"
 libc = "=0.2.183"
 
 shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
-shiguredo_fdk_aac = { version = "=2025.1.1", path = "crates/shiguredo_fdk_aac/", optional = true }
 shiguredo_libvpx = "=2026.1.0-canary.2"
 shiguredo_libyuv = "=2026.1.0-canary.2"
 shiguredo_nvcodec = { version = "=2026.1.0-canary.2", optional = true }
@@ -59,6 +58,8 @@ shiguredo_openh264 = "=2026.1.0-canary.3"
 shiguredo_opus = "=2026.1.0-canary.4"
 shiguredo_svt_av1 = "=2026.1.0-canary.0"
 shiguredo_websocket = "=2026.1.0-canary.5"
+
+shiguredo_fdk_aac = { version = "=2026.1.0-canary.0", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = "=2026.1.0-canary.0"
@@ -70,5 +71,4 @@ tempfile = "3.18.0"
 [workspace]
 members = [
     "crates/shiguredo_dav1d",
-    "crates/shiguredo_fdk_aac",
 ]

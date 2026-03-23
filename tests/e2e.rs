@@ -804,8 +804,13 @@ fn simple_single_source_vp9_nvcodec() -> noargs::Result<()> {
 
 /// simple_single_source_vp9 とほぼ同様だけどエンコードに AAC を指定している
 #[test]
-#[cfg(any(feature = "fdk-aac", target_os = "macos"))]
 fn simple_single_source_aac_encode() -> noargs::Result<()> {
+    if !cfg!(target_os = "macos")
+        && (!cfg!(feature = "fdk-aac") || std::env::var("HISUI_FDK_AAC_PATH").is_err())
+    {
+        eprintln!("skipping: AAC test requires macOS or fdk-aac feature with HISUI_FDK_AAC_PATH");
+        return Ok(());
+    }
     test_simple_single_source_common(
         "testdata/e2e/simple_single_source_aac_encode/",
         CodecName::Av1,

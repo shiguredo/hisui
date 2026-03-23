@@ -8,6 +8,8 @@ use crate::sample_based_timestamp_aligner::{
 /// FDK AAC デコーダー
 #[derive(Debug)]
 pub struct FdkAacDecoder {
+    /// 遅延初期化のために保持しておくライブラリハンドル
+    lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
     inner: Option<shiguredo_fdk_aac::Decoder>,
     sample_rate: Option<SampleRate>,
     channels: Option<Channels>,
@@ -17,9 +19,10 @@ pub struct FdkAacDecoder {
 
 impl FdkAacDecoder {
     /// デコーダーインスタンスを生成する
-    pub fn new() -> crate::Result<Self> {
+    pub fn new(lib: shiguredo_fdk_aac::FdkAacLibrary) -> crate::Result<Self> {
         // サンプルレートなどの情報が実際にデータが届くまで不明なので遅延初期化している
         Ok(Self {
+            lib: Some(lib),
             inner: None,
             sample_rate: None,
             channels: None,
@@ -46,8 +49,11 @@ impl FdkAacDecoder {
                 "FDK AAC decoder initialized with config length: {}",
                 audio_specific_config.len()
             );
+            let lib = self.lib.take().ok_or_else(|| {
+                crate::Error::new("FDK AAC library handle has already been consumed")
+            })?;
             self.inner = Some(
-                shiguredo_fdk_aac::Decoder::new(&audio_specific_config).map_err(|e| {
+                shiguredo_fdk_aac::Decoder::new(lib, &audio_specific_config).map_err(|e| {
                     crate::Error::from(e).with_context("Failed to create FDK AAC decoder")
                 })?,
             );
@@ -65,9 +71,13 @@ impl FdkAacDecoder {
             .inner
             .as_mut()
             .ok_or_else(|| crate::Error::new("FDK AAC decoder is not initialized"))?;
-        let decoded_frame = inner
+        inner
             .decode(&frame.data)
             .map_err(|e| crate::Error::from(e).with_context("Failed to decode AAC"))?;
+
+        let decoded_frame = inner
+            .next_frame()
+            .map_err(|e| crate::Error::from(e).with_context("Failed to get decoded AAC frame"))?;
 
         if let Some(decoded) = decoded_frame {
             let sample_rate = SampleRate::from_u32(decoded.sample_rate)?;

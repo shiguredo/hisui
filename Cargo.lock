@@ -935,7 +935,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_fdk_aac"
-version = "2025.1.1"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23f48231d5c45157ce289c2bf3ad9fe301973f050601ff6ae311eed85546db8e"
 dependencies = [
  "bindgen",
 ]

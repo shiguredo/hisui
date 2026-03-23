@@ -16,11 +16,16 @@ pub struct FdkAacEncoder {
 }
 
 impl FdkAacEncoder {
-    pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
+    pub fn new(
+        lib: shiguredo_fdk_aac::FdkAacLibrary,
+        bitrate: NonZeroUsize,
+    ) -> crate::Result<Self> {
         let config = shiguredo_fdk_aac::EncoderConfig {
-            target_bitrate: bitrate.get(),
+            sample_rate: 48000,
+            channels: 2,
+            bitrate: Some(bitrate.get() as u32),
         };
-        let inner = shiguredo_fdk_aac::Encoder::new(config)?;
+        let inner = shiguredo_fdk_aac::Encoder::new(lib, config)?;
         let sample_entry = Some(sample_entry(&inner, bitrate));
         Ok(Self {
             inner,
@@ -29,14 +34,12 @@ impl FdkAacEncoder {
         })
     }
 
-    pub fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
-        let Some(encoded) = self.inner.finish()? else {
-            return Ok(None);
-        };
-        Ok(Some(self.handle_encoded_frame(encoded)))
+    pub fn finish(&mut self) -> crate::Result<Vec<AudioFrame>> {
+        self.inner.finish()?;
+        Ok(self.drain_encoded_frames())
     }
 
-    pub fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Option<AudioFrame>> {
+    pub fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Vec<AudioFrame>> {
         if frame.format != AudioFormat::I16Be {
             return Err(crate::Error::new(format!(
                 "expected I16Be audio format, got {:?}",
@@ -50,10 +53,17 @@ impl FdkAacEncoder {
         }
 
         let input = frame.interleaved_stereo_samples()?.collect::<Vec<_>>();
-        let Some(encoded) = self.inner.encode(&input)? else {
-            return Ok(None);
-        };
-        Ok(Some(self.handle_encoded_frame(encoded)))
+        self.inner.encode(&input)?;
+        Ok(self.drain_encoded_frames())
+    }
+
+    /// 内部キューに溜まったエンコード済みフレームをすべて回収する
+    fn drain_encoded_frames(&mut self) -> Vec<AudioFrame> {
+        let mut frames = Vec::new();
+        while let Some(encoded) = self.inner.next_frame() {
+            frames.push(self.handle_encoded_frame(encoded));
+        }
+        frames
     }
 
     fn handle_encoded_frame(&mut self, encoded: shiguredo_fdk_aac::EncodedFrame) -> AudioFrame {

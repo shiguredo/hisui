@@ -74,12 +74,26 @@ cargo install hisui --features nvcodec
 
 ### FDK-AAC を使った AAC エンコードやデコードを有効にする場合
 
-Ubuntu で FDK-AAC を使った AAC エンコードやデコードを行う場合には `libfdk-aac-dev` パッケージをインストールした上で、
-`--features fdk-aac` を指定して Hisui をビルドする必要があります。
+FDK-AAC を使った AAC エンコードやデコードを行う場合には、まず FDK-AAC の開発用ヘッダーをインストールした上で、
+`--features fdk-aac` を指定してビルドします。
 
 ```bash
+# Ubuntu の場合
 sudo apt-get install -y libfdk-aac-dev
+
+# fdk-aac feature を有効にしてビルドする
 cargo install hisui --features fdk-aac
+```
+
+ビルド後、実行時には `--fdk-aac` CLI オプションまたは `HISUI_FDK_AAC_PATH` 環境変数で共有ライブラリのパスを指定します。
+
+```bash
+# 実行時に共有ライブラリのパスを指定する
+hisui compose --fdk-aac /path/to/libfdk-aac.so ...
+
+# あるいは環境変数で指定する
+export HISUI_FDK_AAC_PATH=/path/to/libfdk-aac.so
+hisui compose ...
 ```
 
 なお macOS の場合には Apple Audio Toolbox を用いた AAC エンコードおよびデコードが自動で有効になるため、 FDK-AAC を利用する必要はありません。

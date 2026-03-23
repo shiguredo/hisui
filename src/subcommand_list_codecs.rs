@@ -15,27 +15,51 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
+    #[cfg(feature = "fdk-aac")]
+    let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
+        .ty("PATH")
+        .env("HISUI_FDK_AAC_PATH")
+        .doc("FDK-AAC の共有ライブラリのパス")
+        .take(&mut args)
+        .present_and_then(|o| o.value().parse())?;
     if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
     }
 
-    run_internal(openh264).map_err(noargs::Error::from)
+    run_internal(
+        openh264,
+        #[cfg(feature = "fdk-aac")]
+        fdk_aac,
+    )
+    .map_err(noargs::Error::from)
 }
 
-fn run_internal(openh264: Option<PathBuf>) -> crate::Result<()> {
+fn run_internal(
+    openh264: Option<PathBuf>,
+    #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
+) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
         .and_then(|path| Openh264Library::load(path).ok());
     let is_openh264_available = openh264_lib.is_some();
+
+    #[cfg(feature = "fdk-aac")]
+    let fdk_aac_lib = fdk_aac
+        .as_ref()
+        .and_then(|path| shiguredo_fdk_aac::FdkAacLibrary::load(path).ok());
+    #[cfg(feature = "fdk-aac")]
+    let is_fdk_aac_available = fdk_aac_lib.is_some();
+    #[cfg(not(feature = "fdk-aac"))]
+    let is_fdk_aac_available = false;
 
     let mut codecs = Vec::new();
 
     for name in [CodecName::Opus, CodecName::Aac] {
         codecs.push(CodecInfo {
             name,
-            decoders: AudioDecoder::get_engines(name),
-            encoders: AudioEncoder::get_engines(name),
+            decoders: AudioDecoder::get_engines(name, is_fdk_aac_available),
+            encoders: AudioEncoder::get_engines(name, is_fdk_aac_available),
         });
     }
 
@@ -76,8 +100,9 @@ fn run_internal(openh264: Option<PathBuf>) -> crate::Result<()> {
         ..EngineInfo::new(EngineName::Libvpx)
     });
     #[cfg(feature = "fdk-aac")]
-    {
+    if let Some(lib) = fdk_aac_lib {
         engines.push(EngineInfo {
+            shared_library_path: Some(lib.path().to_path_buf()),
             ..EngineInfo::new(EngineName::FdkAac)
         });
     }

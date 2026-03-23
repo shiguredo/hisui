@@ -97,7 +97,11 @@ impl Mp4FileSource {
                     ProcessorId::new(format!("{processor_id}_audio_decoder")),
                     ProcessorMetadata::new("audio_decoder"),
                     |handle| async move {
-                        let decoder = AudioDecoder::new(handle.stats())?;
+                        let decoder = AudioDecoder::new(
+                            #[cfg(feature = "fdk-aac")]
+                            handle.config().fdk_aac_lib.clone(),
+                            handle.stats(),
+                        )?;
                         decoder.run(handle, encoded_id, id).await
                     },
                 )
@@ -208,8 +212,11 @@ mod tests {
             .enable_all()
             .build()?;
         runtime.block_on(async move {
-            let pipeline =
-                MediaPipeline::new_with_config(crate::MediaPipelineConfig { openh264_lib })?;
+            let pipeline = MediaPipeline::new_with_config(crate::MediaPipelineConfig {
+                openh264_lib,
+                #[cfg(feature = "fdk-aac")]
+                fdk_aac_lib: None,
+            })?;
             let handle = pipeline.handle();
             let pipeline_task = tokio::spawn(pipeline.run());
             {

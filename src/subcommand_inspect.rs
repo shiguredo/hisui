@@ -31,6 +31,13 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         .doc("OpenH264 の共有ライブラリのパス")
         .take(&mut args)
         .present_and_then(|a| a.value().parse())?;
+    #[cfg(feature = "fdk-aac")]
+    let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
+        .ty("PATH")
+        .env("HISUI_FDK_AAC_PATH")
+        .doc("FDK-AAC の共有ライブラリのパス")
+        .take(&mut args)
+        .present_and_then(|a| a.value().parse())?;
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
         .example("/path/to/archive.mp4")
         .doc("情報取得対象の録画ファイル(.mp4|.webm)")
@@ -42,11 +49,23 @@ pub fn run(mut args: noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
-    run_internal(input_file_path, decode, openh264).map_err(noargs::Error::from)?;
+    run_internal(
+        input_file_path,
+        decode,
+        openh264,
+        #[cfg(feature = "fdk-aac")]
+        fdk_aac,
+    )
+    .map_err(noargs::Error::from)?;
     Ok(())
 }
 
-fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf>) -> Result<()> {
+fn run_internal(
+    input_file_path: PathBuf,
+    decode: bool,
+    openh264: Option<PathBuf>,
+    #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
+) -> Result<()> {
     let format = ContainerFormat::from_path(&input_file_path)?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -58,8 +77,16 @@ fn run_internal(input_file_path: PathBuf, decode: bool, openh264: Option<PathBuf
     let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
     runtime.spawn(async move {
-        if let Err(e) =
-            setup_pipeline(pipeline_handle, input_file_path, format, decode, openh264).await
+        if let Err(e) = setup_pipeline(
+            pipeline_handle,
+            input_file_path,
+            format,
+            decode,
+            openh264,
+            #[cfg(feature = "fdk-aac")]
+            fdk_aac,
+        )
+        .await
         {
             tracing::error!("pipeline setup failed: {e:?}");
         }
@@ -75,6 +102,7 @@ async fn setup_pipeline(
     format: ContainerFormat,
     decode: bool,
     openh264: Option<PathBuf>,
+    #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
 ) -> Result<()> {
     let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode);
 
@@ -123,8 +151,16 @@ async fn setup_pipeline(
             .map(Openh264Library::load)
             .transpose()
             .map_err(|e| Error::new(e.to_string()))?;
+        #[cfg(feature = "fdk-aac")]
+        let fdk_aac_lib = fdk_aac
+            .map(shiguredo_fdk_aac::FdkAacLibrary::load)
+            .transpose()?;
 
-        let audio_decoder = AudioDecoder::new(crate::stats::Stats::new())?;
+        let audio_decoder = AudioDecoder::new(
+            #[cfg(feature = "fdk-aac")]
+            fdk_aac_lib,
+            crate::stats::Stats::new(),
+        )?;
 
         pipeline_handle
             .spawn_processor(
