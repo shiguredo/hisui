@@ -111,8 +111,6 @@ impl AudioDecoder {
                 &frame,
                 #[cfg(feature = "fdk-aac")]
                 self.fdk_aac_lib.take(),
-                #[cfg(not(feature = "fdk-aac"))]
-                None,
             )?;
             self.engine_metric.set(inner.engine_name().as_str());
             self.codec_metric.set(inner.codec_name().as_str());
@@ -181,7 +179,6 @@ impl AudioDecoderInner {
     fn new(
         frame: &AudioFrame,
         #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
-        #[cfg(not(feature = "fdk-aac"))] _fdk_aac_lib: Option<()>,
     ) -> crate::Result<Self> {
         match frame.format {
             AudioFormat::Opus => OpusDecoder::new().map(Self::Opus),
