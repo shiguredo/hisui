@@ -80,6 +80,9 @@
   - @sile
 - [ADD] 依存ライブラリに nopng 0.1.1 を追加する
   - @sile
+- [UPDATE] Linux 向けのビルド済みバイナリでは fdk-aac feature を有効にする
+  - ただし実行時に有効にするためには --fdk-aac オプションないし HISUI_FDK_AAC_PATH 環境変数で、fdk-aac ライブラリのパスを指定する必要がある
+  - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libx11-dev` を追加する
   - @sile
 - [UPDATE] エンコーダーのインスタンス生成を実際の映像フレームが届くまで遅延させる
