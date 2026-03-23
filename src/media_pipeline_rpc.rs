@@ -627,7 +627,7 @@ impl MediaPipelineHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::File, io::BufWriter, path::PathBuf, time::Duration};
+    use std::{path::PathBuf, time::Duration};
 
     use crate::media_pipeline::{
         MediaPipeline, MediaPipelineHandle, ProcessorId, ProcessorMetadata, TrackId,
@@ -1309,7 +1309,7 @@ mod tests {
     #[tokio::test]
     async fn create_png_file_source_uses_path_as_default_processor_id() -> crate::Result<()> {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let png_file = create_test_png_file(2, 2, png::ColorType::Rgb, &[0; 12])?;
+        let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgb8, &[0; 12])?;
         let file_path = png_file.path().to_path_buf();
         let source = crate::PngFileSource {
             path: file_path.clone(),
@@ -1333,7 +1333,7 @@ mod tests {
     #[tokio::test]
     async fn create_png_file_source_uses_explicit_processor_id() -> crate::Result<()> {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let png_file = create_test_png_file(2, 2, png::ColorType::Rgb, &[0; 12])?;
+        let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgb8, &[0; 12])?;
         let source = crate::PngFileSource {
             path: png_file.path().to_path_buf(),
             frame_rate: crate::video::FrameRate::FPS_1,
@@ -1356,7 +1356,7 @@ mod tests {
     #[tokio::test]
     async fn create_png_file_source_rejects_duplicate_processor_id() -> crate::Result<()> {
         let (handle, pipeline_task) = spawn_test_pipeline().await;
-        let png_file = create_test_png_file(2, 2, png::ColorType::Rgba, &[255; 16])?;
+        let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgba8, &[255; 16])?;
         let source1 = crate::PngFileSource {
             path: png_file.path().to_path_buf(),
             frame_rate: crate::video::FrameRate::FPS_1,
@@ -2806,20 +2806,14 @@ mod tests {
     fn create_test_png_file(
         width: u32,
         height: u32,
-        color_type: png::ColorType,
+        pixel_format: nopng::PixelFormat,
         data: &[u8],
     ) -> crate::Result<tempfile::NamedTempFile> {
+        let spec = nopng::ImageSpec::new(width, height, pixel_format);
+        let png_bytes =
+            nopng::encode_image(&spec, data).map_err(|e| crate::Error::new(e.to_string()))?;
         let file = tempfile::NamedTempFile::new()?;
-        let writer = BufWriter::new(File::create(file.path())?);
-        let mut encoder = png::Encoder::new(writer, width, height);
-        encoder.set_color(color_type);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| crate::Error::new(e.to_string()))?;
-        writer
-            .write_image_data(data)
-            .map_err(|e| crate::Error::new(e.to_string()))?;
+        std::fs::write(file.path(), &png_bytes)?;
         Ok(file)
     }
 }

@@ -15,13 +15,11 @@ pub(crate) use self::types::*;
 /// PNG ファイルのヘッダーからサイズを読み取り、偶数に丸めた (width, height) を返す。
 /// ファイルが存在しない・読めない場合は None を返す。
 fn read_png_dimensions(path: &Path) -> Option<(f64, f64)> {
-    let file = std::fs::File::open(path).ok()?;
-    let decoder = png::Decoder::new(std::io::BufReader::new(file));
-    let reader = decoder.read_info().ok()?;
-    let info = reader.info();
+    let png_bytes = std::fs::read(path).ok()?;
+    let spec = nopng::inspect_image(&png_bytes).ok()?;
     // I420 制約のため偶数に丸める（source_png_file.rs と同じロジック）
-    let width = (info.width as usize) - (info.width as usize % 2);
-    let height = (info.height as usize) - (info.height as usize % 2);
+    let width = (spec.width as usize) - (spec.width as usize % 2);
+    let height = (spec.height as usize) - (spec.height as usize % 2);
     Some((width as f64, height as f64))
 }
 

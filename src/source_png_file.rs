@@ -1,6 +1,4 @@
 use std::{
-    fs::File,
-    io::BufReader,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -116,44 +114,21 @@ fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
 }
 
 fn decode_png_to_i420a(path: &Path) -> Result<DecodedPngI420A> {
-    let file = File::open(path).map_err(|e| {
+    let png_bytes = std::fs::read(path).map_err(|e| {
         Error::new(format!(
             "failed to open input PNG file {}: {e}",
             path.display()
         ))
     })?;
-    let mut decoder = png::Decoder::new(BufReader::new(file));
-    decoder.set_transformations(png::Transformations::EXPAND);
-    let mut reader = decoder.read_info().map_err(|e| {
-        Error::new(format!(
-            "failed to read PNG header from {}: {e}",
-            path.display()
-        ))
-    })?;
-
-    let output_buffer_size = reader.output_buffer_size().ok_or_else(|| {
-        Error::new(format!(
-            "failed to determine PNG output buffer size from {}",
-            path.display()
-        ))
-    })?;
-    let mut output_buf = vec![0; output_buffer_size];
-    let info = reader.next_frame(&mut output_buf).map_err(|e| {
+    let (spec, pixels) = nopng::decode_image(&png_bytes).map_err(|e| {
         Error::new(format!(
             "failed to decode PNG image from {}: {e}",
             path.display()
         ))
     })?;
 
-    if info.bit_depth != png::BitDepth::Eight {
-        return Err(Error::new(format!(
-            "unsupported PNG bit depth: expected 8-bit, got {:?}",
-            info.bit_depth
-        )));
-    }
-
-    let src_width = info.width as usize;
-    let src_height = info.height as usize;
+    let src_width = spec.width as usize;
+    let src_height = spec.height as usize;
     let width = src_width - (src_width % 2);
     let height = src_height - (src_height % 2);
     if src_width != width || src_height != height {
@@ -171,20 +146,32 @@ fn decode_png_to_i420a(path: &Path) -> Result<DecodedPngI420A> {
         )));
     }
 
-    let src = &output_buf[..info.buffer_size()];
-    let (data, converted_width, converted_height) = match info.color_type {
-        png::ColorType::Rgb => rgba_like_to_i420a(src, src_width, src_height, width, height, 3),
-        png::ColorType::Rgba => rgba_like_to_i420a(src, src_width, src_height, width, height, 4),
-        png::ColorType::Grayscale => {
-            grayscale_like_to_i420a(src, src_width, src_height, width, height, 1)
+    let (data, converted_width, converted_height) = match spec.pixel_format {
+        nopng::PixelFormat::Rgb8 => {
+            rgba_like_to_i420a(&pixels, src_width, src_height, width, height, 3)
         }
-        png::ColorType::GrayscaleAlpha => {
-            grayscale_like_to_i420a(src, src_width, src_height, width, height, 2)
+        nopng::PixelFormat::Rgba8 => {
+            rgba_like_to_i420a(&pixels, src_width, src_height, width, height, 4)
         }
-        other => {
-            return Err(Error::new(format!(
-                "unsupported PNG color type after transform: {other:?}"
-            )));
+        nopng::PixelFormat::Gray8 => {
+            grayscale_like_to_i420a(&pixels, src_width, src_height, width, height, 1)
+        }
+        nopng::PixelFormat::GrayAlpha8 => {
+            grayscale_like_to_i420a(&pixels, src_width, src_height, width, height, 2)
+        }
+        ref other => {
+            // サポート外のフォーマットは Rgba8 に変換してからデコードする
+            let rgba = nopng::reformat_pixels(
+                &spec.pixel_format,
+                &pixels,
+                &nopng::PixelFormat::Rgba8,
+            )
+            .map_err(|e| {
+                Error::new(format!(
+                    "unsupported PNG pixel format {other:?}, and failed to convert to RGBA8: {e}"
+                ))
+            })?;
+            rgba_like_to_i420a(&rgba, src_width, src_height, width, height, 4)
         }
     }?;
 
@@ -321,14 +308,14 @@ fn grayscale_like_to_i420a(
 
 #[cfg(test)]
 mod tests {
-    use std::{io::BufWriter, time::Duration};
+    use std::time::Duration;
 
     use super::*;
     use crate::{MediaPipeline, Message, ProcessorId, ProcessorMetadata};
 
     #[test]
     fn png_file_source_json_parse_defaults_frame_rate() -> crate::Result<()> {
-        let png_file = create_test_png_file(2, 2, png::ColorType::Rgba, &[255; 16])?;
+        let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgba8, &[255; 16])?;
         let json = format!(
             r#"{{"path":"{}","outputVideoTrackId":"video-main"}}"#,
             png_file.path().display()
@@ -342,7 +329,7 @@ mod tests {
 
     #[test]
     fn png_file_source_json_parse_requires_output_video_track_id() -> crate::Result<()> {
-        let png_file = create_test_png_file(2, 2, png::ColorType::Rgb, &[0; 12])?;
+        let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgb8, &[0; 12])?;
         let json = format!(r#"{{"path":"{}"}}"#, png_file.path().display());
         let result = crate::json::parse_str::<PngFileSource>(&json);
 
@@ -366,7 +353,7 @@ mod tests {
             255, 255, 0, 0, 255, 255, 255, 0, 255, //
             10, 20, 30, 40, 50, 60, 70, 80, 90, //
         ];
-        let png_file = create_test_png_file(3, 3, png::ColorType::Rgb, &data)?;
+        let png_file = create_test_png_file(3, 3, nopng::PixelFormat::Rgb8, &data)?;
         let decoded = decode_png_to_i420a(png_file.path())?;
 
         assert_eq!(decoded.width, 2);
@@ -377,7 +364,7 @@ mod tests {
 
     #[tokio::test]
     async fn png_file_source_run_sends_i420a_frames() -> crate::Result<()> {
-        let png_file = create_test_png_file(2, 2, png::ColorType::Rgba, &[255; 16])?;
+        let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgba8, &[255; 16])?;
         let pipeline = MediaPipeline::new()?;
         let pipeline_handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
@@ -446,20 +433,13 @@ mod tests {
     fn create_test_png_file(
         width: u32,
         height: u32,
-        color_type: png::ColorType,
+        pixel_format: nopng::PixelFormat,
         data: &[u8],
     ) -> crate::Result<tempfile::NamedTempFile> {
+        let spec = nopng::ImageSpec::new(width, height, pixel_format);
+        let png_bytes = nopng::encode_image(&spec, data).map_err(|e| Error::new(e.to_string()))?;
         let file = tempfile::NamedTempFile::new()?;
-        let writer = BufWriter::new(File::create(file.path())?);
-        let mut encoder = png::Encoder::new(writer, width, height);
-        encoder.set_color(color_type);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| Error::new(e.to_string()))?;
-        writer
-            .write_image_data(data)
-            .map_err(|e| Error::new(e.to_string()))?;
+        std::fs::write(file.path(), &png_bytes)?;
         Ok(file)
     }
 }

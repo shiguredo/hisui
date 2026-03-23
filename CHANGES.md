@@ -69,6 +69,8 @@
   - @sile
 - [ADD] 依存ライブラリに base64 0.22.1 を追加する
   - @sile
+- [ADD] 依存ライブラリに nopng 0.1.0 を追加する
+  - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libx11-dev` を追加する
   - @sile
 - [UPDATE] エンコーダーのインスタンス生成を実際の映像フレームが届くまで遅延させる
@@ -79,8 +81,6 @@
 - [UPDATE] noargs crate のバージョンを 0.4.2 に上げる
   - @sile
 - [UPDATE] rustls crate のバージョンを 0.23.37 に上げる
-  - @sile
-- [UPDATE] png crate のバージョンを 0.18.1 に上げる
   - @sile
 - [UPDATE] aws-lc-rs crate のバージョンを 1.16.1 に上げる
   - @sile

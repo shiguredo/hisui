@@ -49,7 +49,7 @@ shiguredo_srt = "=2026.1.0-canary.0"
 shiguredo_webrtc = "=0.146.0"
 shiguredo_video_device = "=2026.1.0-canary.3"
 mpeg2ts = "=0.6.0"
-png = "=0.18.1"
+nopng = "=0.1.0"
 aws-lc-rs = "=1.16.1"
 libc = "=0.2.183"
 
