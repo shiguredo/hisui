@@ -31,7 +31,7 @@ struct Args {
     distorted_yuv_file_path: Option<PathBuf>,
     vmaf_output_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
-    #[expect(dead_code)]
+    #[cfg(feature = "fdk-aac")]
     fdk_aac: Option<PathBuf>,
     #[expect(dead_code)]
     max_cpu_cores: Option<NonZeroUsize>,
@@ -75,6 +75,7 @@ impl Args {
                 .doc("OpenH264 の共有ライブラリのパスを指定します")
                 .take(raw_args)
                 .present_and_then(|a| a.value().parse())?,
+            #[cfg(feature = "fdk-aac")]
             fdk_aac: noargs::opt("fdk-aac")
                 .ty("PATH")
                 .env("HISUI_FDK_AAC_PATH")
