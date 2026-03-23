@@ -217,7 +217,7 @@ impl AudioEncoder {
     }
 
     fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
-        let encoded = if let Some(sample) = sample {
+        let frames = if let Some(sample) = sample {
             let frame = sample.expect_audio()?;
             let converted = self.converter.convert(&frame)?;
             self.inner.encode(&converted)?
@@ -226,7 +226,7 @@ impl AudioEncoder {
             self.inner.finish()?
         };
 
-        if let Some(encoded) = encoded {
+        for encoded in frames {
             self.total_audio_data_count_metric.inc();
             self.encoded.push_back(encoded);
         }
@@ -300,23 +300,23 @@ impl AudioEncoderInner {
         AudioToolboxEncoder::new(bitrate).map(Self::AudioToolbox)
     }
 
-    fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Option<AudioFrame>> {
+    fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Vec<AudioFrame>> {
         match self {
             #[cfg(target_os = "linux")]
             Self::FdkAac(encoder) => encoder.encode(frame),
             #[cfg(target_os = "macos")]
-            Self::AudioToolbox(encoder) => encoder.encode(frame),
-            Self::Opus(encoder) => encoder.encode(frame).map(Some),
+            Self::AudioToolbox(encoder) => encoder.encode(frame).map(|f| f.into_iter().collect()),
+            Self::Opus(encoder) => encoder.encode(frame).map(|f| vec![f]),
         }
     }
 
-    fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
+    fn finish(&mut self) -> crate::Result<Vec<AudioFrame>> {
         match self {
             #[cfg(target_os = "linux")]
             Self::FdkAac(encoder) => encoder.finish(),
             #[cfg(target_os = "macos")]
-            Self::AudioToolbox(encoder) => encoder.finish(),
-            Self::Opus(_encoder) => Ok(None),
+            Self::AudioToolbox(encoder) => encoder.finish().map(|f| f.into_iter().collect()),
+            Self::Opus(_encoder) => Ok(vec![]),
         }
     }
 }

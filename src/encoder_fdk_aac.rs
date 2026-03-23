@@ -34,17 +34,12 @@ impl FdkAacEncoder {
         })
     }
 
-    pub fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
+    pub fn finish(&mut self) -> crate::Result<Vec<AudioFrame>> {
         self.inner.finish()?;
-        // finish 後にキューに溜まったフレームを回収する
-        let mut last_frame = None;
-        while let Some(encoded) = self.inner.next_frame() {
-            last_frame = Some(self.handle_encoded_frame(encoded));
-        }
-        Ok(last_frame)
+        Ok(self.drain_encoded_frames())
     }
 
-    pub fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Option<AudioFrame>> {
+    pub fn encode(&mut self, frame: &AudioFrame) -> crate::Result<Vec<AudioFrame>> {
         if frame.format != AudioFormat::I16Be {
             return Err(crate::Error::new(format!(
                 "expected I16Be audio format, got {:?}",
@@ -59,13 +54,16 @@ impl FdkAacEncoder {
 
         let input = frame.interleaved_stereo_samples()?.collect::<Vec<_>>();
         self.inner.encode(&input)?;
+        Ok(self.drain_encoded_frames())
+    }
 
-        // エンコード後にキューに溜まったフレームを回収する
-        let mut last_frame = None;
+    /// 内部キューに溜まったエンコード済みフレームをすべて回収する
+    fn drain_encoded_frames(&mut self) -> Vec<AudioFrame> {
+        let mut frames = Vec::new();
         while let Some(encoded) = self.inner.next_frame() {
-            last_frame = Some(self.handle_encoded_frame(encoded));
+            frames.push(self.handle_encoded_frame(encoded));
         }
-        Ok(last_frame)
+        frames
     }
 
     fn handle_encoded_frame(&mut self, encoded: shiguredo_fdk_aac::EncodedFrame) -> AudioFrame {
