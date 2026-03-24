@@ -14,6 +14,7 @@ def _build_bootstrap_command(
     host: str,
     port: int,
     duration: int,
+    input_mp4_path: str,
     output_path: str,
 ) -> tuple[list[str], Path]:
     """obsws_bootstrap を cargo run 経由で起動するコマンドを返す"""
@@ -36,6 +37,8 @@ def _build_bootstrap_command(
             str(port),
             "--duration",
             str(duration),
+            "--input-mp4-path",
+            input_mp4_path,
             "--output-path",
             output_path,
         ],
@@ -48,11 +51,14 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
+    input_mp4 = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     output_mp4 = tmp_path / "output.mp4"
 
     with ObswsServer(binary_path, host=host, port=port):
         cmd, cwd = _build_bootstrap_command(
-            host, port, 5, str(output_mp4)
+            host, port, 5, str(input_mp4), str(output_mp4)
         )
         result = subprocess.run(
             cmd,

@@ -279,7 +279,10 @@ impl WebRtcP2pSessionManager {
                         }
                     }
                     PcEvent::ObswsMessage { data } => {
-                        handle_obsws_message(sess, &data).await;
+                        if handle_obsws_message(sess, &data).await {
+                            tracing::info!("Session closed");
+                            *guard = None;
+                        }
                     }
                     PcEvent::TrackMessage { track_id, message } => {
                         handle_track_message(sess, &track_id, message);

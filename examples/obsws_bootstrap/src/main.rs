@@ -12,7 +12,7 @@ use shiguredo_webrtc::{
     AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioEncoderFactory,
     AudioProcessingBuilder, CreateSessionDescriptionObserver,
     CreateSessionDescriptionObserverHandler, DataChannel, DataChannelInit, DataChannelObserver,
-    DataChannelObserverHandler, Environment, IceGatheringState, PeerConnection,
+    DataChannelObserverHandler, DataChannelState, Environment, IceGatheringState, PeerConnection,
     PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionFactoryDependencies,
     PeerConnectionObserver, PeerConnectionObserverHandler, PeerConnectionOfferAnswerOptions,
     PeerConnectionRtcConfiguration, PeerConnectionState, RtcError, RtcEventLogFactory,
@@ -25,6 +25,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
+const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
 
 // MP4 のタイムスケールはマイクロ秒固定にする
 const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
@@ -364,6 +365,76 @@ fn make_answer_json(sdp: &str) -> String {
     .to_string()
 }
 
+fn make_create_mp4_input_request(input_path: &str) -> String {
+    nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "CreateInput")?;
+                f.member("requestId", CREATE_INPUT_REQUEST_ID)?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| {
+                        f.member("sceneName", "Scene")?;
+                        f.member("inputName", "obsws-bootstrap-input")?;
+                        f.member("inputKind", "mp4_file_source")?;
+                        f.member(
+                            "inputSettings",
+                            nojson::object(|f| {
+                                f.member("path", input_path)?;
+                                f.member("loopPlayback", true)
+                            }),
+                        )?;
+                        f.member("sceneItemEnabled", true)
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string()
+}
+
+fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
+    let json = nojson::RawJson::parse(text).ok()?;
+    let root = json.value();
+    let op: i64 = root
+        .to_member("op")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if op != 7 {
+        return None;
+    }
+
+    let d = root.to_member("d").ok()?.required().ok()?;
+    let request_id: String = d
+        .to_member("requestId")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if request_id != CREATE_INPUT_REQUEST_ID {
+        return None;
+    }
+
+    let request_status = d.to_member("requestStatus").ok()?.required().ok()?;
+    let result: bool = request_status
+        .to_member("result")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if result {
+        return Some(Ok(()));
+    }
+
+    let comment: Option<String> =
+        if let Some(v) = request_status.to_member("comment").ok()?.optional() {
+            v.try_into().ok()
+        } else {
+            None
+        };
+    Some(Err(
+        comment.unwrap_or_else(|| "CreateInput request failed".to_owned())
+    ))
+}
+
 // --- VP9 SampleEntry ---
 
 fn vp9_sample_entry(width: usize, height: usize) -> SampleEntry {
@@ -532,6 +603,10 @@ fn main() -> noargs::Result<()> {
         .doc("MP4 出力先パス")
         .take(&mut args)
         .then(|o| o.value().parse())?;
+    let input_mp4_path: String = noargs::opt("input-mp4-path")
+        .doc("obsws 経由で入力として追加する MP4 ファイルパス")
+        .take(&mut args)
+        .then(|o| o.value().parse())?;
 
     args.finish()?;
 
@@ -556,7 +631,13 @@ fn main() -> noargs::Result<()> {
     let result = runtime.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
-            .run_until(run_client(&host, port, duration, &output_path))
+            .run_until(run_client(
+                &host,
+                port,
+                duration,
+                &output_path,
+                &input_mp4_path,
+            ))
             .await
     });
 
@@ -758,6 +839,7 @@ async fn run_client(
     port: u16,
     duration_secs: u64,
     output_path: &str,
+    input_mp4_path: &str,
 ) -> Result<Stats, String> {
     // WebRTC ファクトリを初期化する
     let env = Environment::new();
@@ -855,6 +937,8 @@ async fn run_client(
 
     // イベントループ（duration 秒間）
     let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs);
+    let mut obsws_create_input_sent = false;
+    let mut obsws_create_input_succeeded = false;
     loop {
         // フレーム受信チャネルから溜まっているフレームを処理する
         while let Ok(frame_data) = frame_rx.try_recv() {
@@ -864,6 +948,18 @@ async fn run_client(
                 &mut vp9_sample_entry,
                 &mut mp4_writer,
             )?;
+        }
+
+        if !obsws_create_input_sent
+            && let Some(dc) = &retained.obsws_dc
+            && dc.state() == DataChannelState::Open
+        {
+            let request = make_create_mp4_input_request(input_mp4_path);
+            if !dc.send(request.as_bytes(), false) {
+                return Err("failed to send CreateInput request on obsws DataChannel".to_owned());
+            }
+            obsws_create_input_sent = true;
+            tracing::info!("CreateInput request sent on obsws DataChannel");
         }
 
         let event = tokio::select! {
@@ -982,6 +1078,17 @@ async fn run_client(
             ClientEvent::ObswsMessage { data } => {
                 if let Ok(text) = std::str::from_utf8(&data) {
                     tracing::debug!("obsws message: {text}");
+                    if let Some(result) = parse_obsws_request_response(text) {
+                        match result {
+                            Ok(()) => {
+                                obsws_create_input_succeeded = true;
+                                tracing::info!("CreateInput request succeeded");
+                            }
+                            Err(reason) => {
+                                return Err(format!("CreateInput request failed: {reason}"));
+                            }
+                        }
+                    }
                 } else {
                     tracing::debug!("obsws message: <binary {} bytes>", data.len());
                 }
@@ -1020,6 +1127,10 @@ async fn run_client(
     } else {
         "none".to_owned()
     };
+
+    if !obsws_create_input_succeeded {
+        return Err("CreateInput request did not complete".to_owned());
+    }
 
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
