@@ -254,8 +254,8 @@ def test_obsws_proxy_ok_endpoint_not_proxied(binary_path: Path):
             assert status == 204
 
 
-def test_obsws_proxy_post_returns_404(binary_path: Path):
-    """obsws が proxy 対象外の POST を 404 で返すことを確認する"""
+def test_obsws_proxy_post_returns_405(binary_path: Path):
+    """obsws が proxy 対象外の POST を 405 で返すことを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
@@ -271,7 +271,7 @@ def test_obsws_proxy_post_returns_404(binary_path: Path):
             status, _, _ = asyncio.run(
                 _http_request("POST", f"http://{server.host}:{server.port}/")
             )
-            assert status == 404
+            assert status == 405
 
 
 def test_obsws_proxy_unknown_upstream_path(binary_path: Path):
