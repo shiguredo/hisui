@@ -50,7 +50,7 @@ nopng = "=0.1.1"
 aws-lc-rs = "=1.16.2"
 libc = "=0.2.183"
 
-shiguredo_dav1d = { version = "=2025.1.0", path = "crates/shiguredo_dav1d/" }
+shiguredo_dav1d = "=2026.1.0-canary.0"
 shiguredo_libvpx = "=2026.1.0-canary.2"
 shiguredo_libyuv = "=2026.1.0-canary.2"
 shiguredo_nvcodec = { version = "=2026.1.0-canary.2", optional = true }
@@ -67,8 +67,3 @@ shiguredo_video_toolbox = "=2026.1.0-canary.1"
 
 [dev-dependencies]
 tempfile = "3.18.0"
-
-[workspace]
-members = [
-    "crates/shiguredo_dav1d",
-]

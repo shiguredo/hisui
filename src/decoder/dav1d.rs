@@ -12,7 +12,7 @@ pub struct Dav1dDecoder {
 impl Dav1dDecoder {
     pub fn new() -> crate::Result<Self> {
         Ok(Self {
-            inner: shiguredo_dav1d::Decoder::new()?,
+            inner: shiguredo_dav1d::Decoder::new(shiguredo_dav1d::DecoderConfig::default())?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
         })
