@@ -8,15 +8,16 @@ use shiguredo_webrtc::{
 };
 use tokio::sync::mpsc;
 
+use crate::obsws_session::{ObswsSession, SessionAction};
+
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
     DataChannel(DataChannel),
     DcMessage {
         data: Vec<u8>,
     },
-    RpcMessage {
+    ObswsMessage {
         data: Vec<u8>,
-        is_binary: bool,
     },
     TrackMessage {
         track_id: crate::TrackId,
@@ -84,15 +85,14 @@ impl DataChannelObserverHandler for DcMessageHandler {
     }
 }
 
-struct RpcMessageHandler {
+struct ObswsMessageHandler {
     event_tx: mpsc::UnboundedSender<PcEvent>,
 }
 
-impl DataChannelObserverHandler for RpcMessageHandler {
-    fn on_message(&mut self, data: &[u8], is_binary: bool) {
-        let _ = self.event_tx.send(PcEvent::RpcMessage {
+impl DataChannelObserverHandler for ObswsMessageHandler {
+    fn on_message(&mut self, data: &[u8], _is_binary: bool) {
+        let _ = self.event_tx.send(PcEvent::ObswsMessage {
             data: data.to_vec(),
-            is_binary,
         });
     }
 }
@@ -104,13 +104,14 @@ struct Session {
     pc: PeerConnection,
     _pc_observer: shiguredo_webrtc::PeerConnectionObserver,
     signaling_dc: Option<DataChannel>,
-    _rpc_dc: Option<DataChannel>,
+    obsws_dc: Option<DataChannel>,
     _dc_observer: Option<shiguredo_webrtc::DataChannelObserver>,
-    _rpc_dc_observer: Option<shiguredo_webrtc::DataChannelObserver>,
+    _obsws_dc_observer: Option<shiguredo_webrtc::DataChannelObserver>,
     in_flight_offer: bool,
     pending_renegotiation: bool,
     subscribed_tracks: std::collections::HashMap<crate::TrackId, SubscribedTrack>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
+    obsws_session: ObswsSession,
 }
 
 struct SubscribedTrack {
@@ -135,12 +136,16 @@ pub enum BootstrapError {
 pub struct WebRtcP2pSessionManager {
     factory_bundle: Arc<super::factory::WebRtcFactoryBundle>,
     pipeline_handle: crate::MediaPipelineHandle,
+    input_registry: Arc<tokio::sync::RwLock<crate::obsws_input_registry::ObswsInputRegistry>>,
     session: Arc<tokio::sync::Mutex<Option<Session>>>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
 }
 
 impl WebRtcP2pSessionManager {
-    pub fn new(handle: crate::MediaPipelineHandle) -> crate::Result<Self> {
+    pub fn new(
+        handle: crate::MediaPipelineHandle,
+        input_registry: Arc<tokio::sync::RwLock<crate::obsws_input_registry::ObswsInputRegistry>>,
+    ) -> crate::Result<Self> {
         #[allow(clippy::arc_with_non_send_sync)]
         let factory_bundle = Arc::new(super::factory::WebRtcFactoryBundle::new()?);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PcEvent>();
@@ -184,8 +189,8 @@ impl WebRtcP2pSessionManager {
                             *guard = None;
                         }
                     }
-                    PcEvent::RpcMessage { data, is_binary } => {
-                        handle_rpc_message(sess, &data, is_binary).await;
+                    PcEvent::ObswsMessage { data } => {
+                        handle_obsws_message(sess, &data).await;
                     }
                     PcEvent::TrackMessage { track_id, message } => {
                         handle_track_message(sess, &track_id, message);
@@ -197,6 +202,7 @@ impl WebRtcP2pSessionManager {
         Ok(Self {
             factory_bundle,
             pipeline_handle: handle,
+            input_registry,
             session,
             event_tx,
         })
@@ -228,6 +234,11 @@ impl WebRtcP2pSessionManager {
                 }
             })?;
 
+        let obsws_session = ObswsSession::new_identified(
+            self.input_registry.clone(),
+            Some(self.pipeline_handle.clone()),
+        );
+
         let mut guard = self.session.lock().await;
         if guard.is_some() {
             drop(processor_handle);
@@ -240,6 +251,7 @@ impl WebRtcP2pSessionManager {
             self.event_tx.clone(),
             self.pipeline_handle.clone(),
             processor_handle,
+            obsws_session,
         ) {
             Ok((answer_sdp, sess)) => {
                 *guard = Some(sess);
@@ -256,6 +268,7 @@ fn bootstrap_internal(
     event_tx: mpsc::UnboundedSender<PcEvent>,
     handle: crate::MediaPipelineHandle,
     processor_handle: crate::ProcessorHandle,
+    obsws_session: ObswsSession,
 ) -> crate::Result<(String, Session)> {
     // PeerConnectionObserver の作成
     let pc_observer = PeerConnectionObserver::new_with_handler(Box::new(P2pPcObserverHandler {
@@ -276,12 +289,12 @@ fn bootstrap_internal(
         .create_data_channel("signaling", &mut dc_init)
         .map_err(|e| crate::Error::new(format!("Failed to create signaling DataChannel: {e}")))?;
 
-    let mut rpc_dc_init = DataChannelInit::new();
-    rpc_dc_init.set_ordered(true);
-    rpc_dc_init.set_protocol("rpc");
-    let mut rpc_dc = pc
-        .create_data_channel("rpc", &mut rpc_dc_init)
-        .map_err(|e| crate::Error::new(format!("Failed to create rpc DataChannel: {e}")))?;
+    let mut obsws_dc_init = DataChannelInit::new();
+    obsws_dc_init.set_ordered(true);
+    obsws_dc_init.set_protocol("obsws");
+    let mut obsws_dc = pc
+        .create_data_channel("obsws", &mut obsws_dc_init)
+        .map_err(|e| crate::Error::new(format!("Failed to create obsws DataChannel: {e}")))?;
 
     // DataChannel に observer を設定
     let dc_observer = DataChannelObserver::new_with_handler(Box::new(DcMessageHandler {
@@ -289,11 +302,11 @@ fn bootstrap_internal(
     }));
     signaling_dc.register_observer(&dc_observer);
 
-    // rpc 用 DataChannel に observer を設定
-    let rpc_observer = DataChannelObserver::new_with_handler(Box::new(RpcMessageHandler {
+    // obsws 用 DataChannel に observer を設定
+    let obsws_observer = DataChannelObserver::new_with_handler(Box::new(ObswsMessageHandler {
         event_tx: event_tx.clone(),
     }));
-    rpc_dc.register_observer(&rpc_observer);
+    obsws_dc.register_observer(&obsws_observer);
 
     super::sdp::set_remote_offer(&pc, offer_sdp)?;
     let answer_sdp = super::sdp::create_answer_sdp(&pc)?;
@@ -306,13 +319,14 @@ fn bootstrap_internal(
         pc,
         _pc_observer: pc_observer,
         signaling_dc: Some(signaling_dc),
-        _rpc_dc: Some(rpc_dc),
+        obsws_dc: Some(obsws_dc),
         _dc_observer: Some(dc_observer),
-        _rpc_dc_observer: Some(rpc_observer),
+        _obsws_dc_observer: Some(obsws_observer),
         in_flight_offer: false,
         pending_renegotiation: false,
         subscribed_tracks: std::collections::HashMap::new(),
         event_tx,
+        obsws_session,
     };
 
     Ok((answer_sdp, sess))
@@ -392,109 +406,55 @@ fn send_dc(sess: &Session, msg: &str) {
     }
 }
 
-/// subscribe 以外の RPC メソッドに対する固定エラーレスポンス
-const RPC_NOT_SUPPORTED_ERROR: &str =
-    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"RPC is not supported"}}"#;
-
-async fn handle_rpc_message(sess: &mut Session, data: &[u8], is_binary: bool) {
-    if let Ok(text) = std::str::from_utf8(data) {
-        tracing::debug!("Received rpc message: {text}");
-    } else {
-        tracing::debug!("Received rpc message: {data:?}");
-    }
-
-    // JSON パース
+/// obsws DataChannel で OBS WebSocket プロトコルメッセージを処理する
+async fn handle_obsws_message(sess: &mut Session, data: &[u8]) {
     let text = match std::str::from_utf8(data) {
         Ok(text) => text,
         Err(_) => {
-            send_rpc_response(sess, RPC_NOT_SUPPORTED_ERROR.as_bytes(), is_binary);
+            tracing::warn!("Received non-UTF-8 obsws message on DataChannel");
             return;
         }
     };
-    let request_json = match nojson::RawJson::parse(text) {
-        Ok(json) => json,
-        Err(_) => {
-            send_rpc_response(sess, RPC_NOT_SUPPORTED_ERROR.as_bytes(), is_binary);
+    tracing::debug!("Received obsws message: {text}");
+
+    // OBS WS メッセージとして処理する
+    let action = match sess.obsws_session.on_text_message(text).await {
+        Ok(action) => action,
+        Err(e) => {
+            tracing::warn!("Invalid OBS WS message on DataChannel: {}", e.display());
             return;
         }
     };
-    let request = request_json.value();
 
-    // メソッド名を取得する
-    let method = match request
-        .to_member("method")
-        .and_then(|v| v.required())
-        .and_then(|v| v.as_string_str())
-    {
-        Ok(method) => method,
-        Err(_) => {
-            send_rpc_response(sess, RPC_NOT_SUPPORTED_ERROR.as_bytes(), is_binary);
-            return;
-        }
-    };
-    let request_id = request.to_member("id").ok().and_then(|v| v.optional());
+    // SessionAction を obsws DataChannel 送信に変換する
+    apply_obsws_action_to_dc(sess, action);
+}
 
-    // subscribe 以外は固定エラーを返す
-    if method != "subscribe" {
-        send_rpc_response(sess, RPC_NOT_SUPPORTED_ERROR.as_bytes(), is_binary);
-        return;
-    }
-
-    match (request_id, handle_subscribe_rpc(sess, request).await) {
-        (Some(id), Ok(result)) => {
-            let response = make_jsonrpc_ok_response(id, &result);
-            send_rpc_response(sess, response.as_bytes(), is_binary);
+/// OBS WS SessionAction を obsws DataChannel 経由で送信する
+fn apply_obsws_action_to_dc(sess: &Session, action: SessionAction) {
+    match action {
+        SessionAction::SendText { text, .. } => {
+            send_obsws_dc(sess, text.text());
         }
-        (Some(id), Err(e)) => {
-            let response = make_jsonrpc_error_response(id, -32603, &e.reason);
-            send_rpc_response(sess, response.as_bytes(), is_binary);
+        SessionAction::SendTexts { messages } => {
+            for (text, _) in messages {
+                send_obsws_dc(sess, text.text());
+            }
         }
-        (None, Ok(_)) => {}
-        (None, Err(e)) => {
-            tracing::warn!(
-                "rpc notification failed: method=subscribe, code=-32603, message={}",
-                e.reason
-            );
+        SessionAction::Close { reason, .. } => {
+            tracing::warn!("OBS WS session close on DataChannel: {reason}");
+            send_close(sess, "obsws-error", reason);
+        }
+        SessionAction::Terminate => {
+            tracing::warn!("OBS WS session terminate on DataChannel");
+            send_close(sess, "obsws-terminated", "OBS WS session terminated");
         }
     }
 }
 
-/// JSON-RPC 成功レスポンスを構築する
-fn make_jsonrpc_ok_response(id: nojson::RawJsonValue<'_, '_>, result: &str) -> String {
-    nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", id)?;
-        f.member(
-            "result",
-            nojson::json(|f| write!(f.inner_mut(), "{result}")),
-        )
-    })
-    .to_string()
-}
-
-/// JSON-RPC エラーレスポンスを構築する
-fn make_jsonrpc_error_response(
-    id: nojson::RawJsonValue<'_, '_>,
-    code: i32,
-    message: &str,
-) -> String {
-    nojson::object(|f| {
-        f.member("jsonrpc", "2.0")?;
-        f.member("id", id)?;
-        f.member(
-            "error",
-            nojson::object(|f| {
-                f.member("code", code)?;
-                f.member("message", message)
-            }),
-        )
-    })
-    .to_string()
-}
-
-fn send_rpc_response(sess: &Session, response_bytes: &[u8], is_binary: bool) {
-    if let Some(dc) = &sess._rpc_dc {
-        dc.send(response_bytes, is_binary);
+fn send_obsws_dc(sess: &Session, msg: &str) {
+    if let Some(dc) = &sess.obsws_dc {
+        dc.send(msg.as_bytes(), false);
     }
 }
 
@@ -578,86 +538,54 @@ fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
     Ok(())
 }
 
-async fn handle_subscribe_rpc(
+/// トラックを購読して WebRTC で配信する
+fn subscribe_track(
     session: &mut Session,
-    req: nojson::RawJsonValue<'_, '_>,
-) -> crate::Result<String> {
-    enum SubscribeKind {
-        Audio,
-        Video,
+    track_id: crate::TrackId,
+    kind: TrackKind,
+) -> crate::Result<bool> {
+    if session.subscribed_tracks.contains_key(&track_id) {
+        return Ok(false);
     }
 
-    struct SubscribeItem {
-        track_id: crate::TrackId,
-        kind: SubscribeKind,
-    }
-
-    let params_value = req.to_member("params")?.required()?;
-    let mut items: Vec<SubscribeItem> = params_value
-        .to_array()?
-        .map(|value| {
-            let track_id: crate::TrackId = value.to_member("trackId")?.required()?.try_into()?;
-            let kind = match value.to_member("kind")?.required()?.as_string_str()? {
-                "audio" => SubscribeKind::Audio,
-                "video" => SubscribeKind::Video,
-                _ => {
-                    return Err(value
-                        .to_member("kind")?
-                        .required()?
-                        .invalid("kind must be \"audio\" or \"video\""));
-                }
-            };
-            Ok(SubscribeItem { track_id, kind })
-        })
-        .collect::<Result<_, nojson::JsonParseError>>()?;
-
-    items.sort_by(|a, b| a.track_id.cmp(&b.track_id));
-    items.dedup_by(|a, b| a.track_id == b.track_id);
-
-    let mut needs_offer = false;
-    for item in items {
-        if session.subscribed_tracks.contains_key(&item.track_id) {
-            continue;
+    let state = match kind {
+        TrackKind::Video => {
+            let state = create_video_track(session, &track_id)?;
+            TrackState::Video(state)
         }
-        let state = match item.kind {
-            SubscribeKind::Video => {
-                let state = create_video_track(session, &item.track_id)?;
-                needs_offer = true;
-                TrackState::Video(state)
-            }
-            SubscribeKind::Audio => {
-                tracing::info!("Audio track is not supported yet: {}", item.track_id);
-                TrackState::AudioUnsupported
-            }
-        };
-        session
-            .subscribed_tracks
-            .insert(item.track_id.clone(), SubscribedTrack { state });
+        TrackKind::Audio => {
+            tracing::info!("Audio track is not supported yet: {}", track_id);
+            TrackState::AudioUnsupported
+        }
+    };
 
-        let mut rx = session
-            .processor_handle
-            .subscribe_track(item.track_id.clone());
-        let event_tx = session.event_tx.clone();
-        let track_id_for_task = item.track_id;
-        let _task = tokio::spawn(async move {
-            loop {
-                let message = rx.recv().await;
-                if event_tx
-                    .send(PcEvent::TrackMessage {
-                        track_id: track_id_for_task.clone(),
-                        message,
-                    })
-                    .is_err()
-                {
-                    break;
-                }
+    let needs_offer = matches!(state, TrackState::Video(_));
+
+    session
+        .subscribed_tracks
+        .insert(track_id.clone(), SubscribedTrack { state });
+
+    let mut rx = session.processor_handle.subscribe_track(track_id.clone());
+    let event_tx = session.event_tx.clone();
+    let _task = tokio::spawn(async move {
+        loop {
+            let message = rx.recv().await;
+            if event_tx
+                .send(PcEvent::TrackMessage {
+                    track_id: track_id.clone(),
+                    message,
+                })
+                .is_err()
+            {
+                break;
             }
-        });
-    }
+        }
+    });
 
-    if needs_offer {
-        maybe_send_offer(session)?;
-    }
+    Ok(needs_offer)
+}
 
-    Ok(nojson::Json("ok").to_string())
+enum TrackKind {
+    Video,
+    Audio,
 }

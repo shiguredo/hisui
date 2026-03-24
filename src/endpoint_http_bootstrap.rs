@@ -21,9 +21,14 @@ pub struct BootstrapEndpoint {
 }
 
 impl BootstrapEndpoint {
-    pub fn new(handle: crate::MediaPipelineHandle) -> crate::Result<Self> {
+    pub fn new(
+        handle: crate::MediaPipelineHandle,
+        input_registry: std::sync::Arc<
+            tokio::sync::RwLock<crate::obsws_input_registry::ObswsInputRegistry>,
+        >,
+    ) -> crate::Result<Self> {
         Ok(Self {
-            session_manager: WebRtcP2pSessionManager::new(handle)?,
+            session_manager: WebRtcP2pSessionManager::new(handle, input_registry)?,
         })
     }
 

@@ -130,6 +130,22 @@ impl ObswsSession {
         }
     }
 
+    /// DataChannel 経由の接続用。認証なし・Identified 状態で初期化する。
+    pub fn new_identified(
+        input_registry: Arc<RwLock<ObswsInputRegistry>>,
+        pipeline_handle: Option<crate::MediaPipelineHandle>,
+    ) -> Self {
+        Self {
+            state: ObswsSessionState::Identified,
+            negotiated_rpc_version: Some(1),
+            event_subscriptions: OBSWS_EVENT_SUB_ALL,
+            auth: None,
+            input_registry,
+            pipeline_handle,
+            stats: ObswsSessionStats::default(),
+        }
+    }
+
     pub fn stats_mut(&mut self) -> &mut ObswsSessionStats {
         &mut self.stats
     }

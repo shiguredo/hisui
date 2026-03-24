@@ -24,7 +24,7 @@ pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
 pub mod subcommand_obsws;
-pub mod subcommand_server;
+
 pub mod tcp;
 pub mod timestamp;
 pub mod types;
