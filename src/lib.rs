@@ -6,7 +6,6 @@ pub mod endpoint_http_bootstrap;
 pub mod endpoint_http_metrics;
 pub mod error;
 pub mod future;
-pub mod inbound_endpoint_srt;
 pub mod json;
 pub mod logger;
 pub mod media;
@@ -17,6 +16,7 @@ pub mod mp4;
 mod obsws;
 pub mod optuna;
 pub mod progress;
+pub mod srt;
 
 pub mod rtmp;
 pub mod sample_based_timestamp_aligner;
