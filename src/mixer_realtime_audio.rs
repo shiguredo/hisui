@@ -8,7 +8,7 @@ use crate::{
     Error, MediaFrame, Message, ProcessorHandle, TrackId,
     audio::converter::AudioConverterBuilder,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
-    sample_based_timestamp_aligner::{DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner},
+    timestamp::sample_aligner::{DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner},
 };
 
 const DEFAULT_FRAME_DURATION: Duration = Duration::from_millis(20);

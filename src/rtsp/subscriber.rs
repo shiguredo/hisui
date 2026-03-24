@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::{
     Error, MessageSender, ProcessorHandle, TrackId,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
-    timestamp_mapper::TimestampMapper,
+    timestamp::mapper::TimestampMapper,
     video::{VideoFormat, VideoFrame},
 };
 

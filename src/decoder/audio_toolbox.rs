@@ -3,9 +3,7 @@ use std::num::NonZeroU8;
 use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
-use crate::sample_based_timestamp_aligner::{
-    DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner,
-};
+use crate::timestamp::sample_aligner::{DEFAULT_REBASE_THRESHOLD, SampleBasedTimestampAligner};
 
 #[derive(Debug)]
 pub struct AudioToolboxDecoder {

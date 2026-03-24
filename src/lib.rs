@@ -20,7 +20,6 @@ pub mod srt;
 
 pub mod rtmp;
 pub mod rtsp;
-pub mod sample_based_timestamp_aligner;
 pub mod sora;
 pub mod stats;
 pub mod subcommand_inspect;
@@ -28,7 +27,7 @@ pub mod subcommand_list_codecs;
 pub mod subcommand_obsws;
 pub mod subcommand_server;
 pub mod tcp;
-pub mod timestamp_mapper;
+pub mod timestamp;
 pub mod types;
 pub mod video;
 pub mod webm;
