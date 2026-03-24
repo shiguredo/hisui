@@ -188,13 +188,7 @@ impl ObswsSession {
         }
 
         // 不要な rebuild を避けるための早期チェック
-        let current_scene_uuid = self
-            .input_registry
-            .read()
-            .await
-            .current_program_scene()
-            .map(|scene| scene.scene_uuid)
-            .unwrap_or_default();
+        let current_scene_uuid = self.current_program_scene_uuid().await;
 
         {
             let program = self.program_output.read().await;
@@ -212,10 +206,20 @@ impl ObswsSession {
         self.rebuild_program_output().await
     }
 
+    async fn current_program_scene_uuid(&self) -> String {
+        self.input_registry
+            .read()
+            .await
+            .current_program_scene()
+            .map(|scene| scene.scene_uuid)
+            .unwrap_or_default()
+    }
+
     /// Program Scene 切替時に Program 出力を再構築する。
     ///
     /// current_scene_uuid と入力一覧を同じ read lock 内で一貫して取得し、
-    /// 並行な scene 切替による不整合を防ぐ。
+    /// commit 前には再度 read lock を取得して scene 切替 writer を止めた上で
+    /// stale snapshot を破棄する。
     async fn rebuild_program_output(&self) -> crate::Result<()> {
         let pipeline_handle = self
             .pipeline_handle
@@ -245,13 +249,18 @@ impl ObswsSession {
         })?;
         drop(input_registry);
 
-        let mut program = self.program_output.write().await;
-
-        // read lock 解放から write lock 取得の間に別スレッドが scene を変更した場合、
-        // ここでスキップする（後続の sync_program_output_state が正しく再構築する）
-        if program.scene_uuid == current_scene_uuid {
+        // commit 前に read lock を再取得し、scene 切替 writer を止めた上で
+        // snapshot がまだ current scene を指しているか最終確認する。
+        let input_registry = self.input_registry.read().await;
+        if input_registry
+            .current_program_scene()
+            .map(|scene| scene.scene_uuid.as_str() != current_scene_uuid.as_str())
+            .unwrap_or(true)
+        {
             return Ok(());
         }
+
+        let mut program = self.program_output.write().await;
 
         // ミキサーの入力トラックを更新する
         output::update_program_mixers(

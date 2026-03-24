@@ -76,6 +76,36 @@ async fn remove_current_scene_updates_program_output_state_without_pipeline() {
     assert_eq!(program_output.read().await.scene_uuid, current_scene_uuid);
 }
 
+#[tokio::test]
+async fn stale_scene_uuid_differs_from_current_program_scene_uuid() {
+    let input_registry = input_registry();
+    {
+        let mut registry = input_registry.write().await;
+        registry.create_scene("Scene B").expect("must create scene");
+    }
+
+    let stale_scene_uuid = input_registry
+        .read()
+        .await
+        .get_scene_uuid("Scene")
+        .expect("default scene must exist");
+
+    {
+        let mut registry = input_registry.write().await;
+        registry
+            .set_current_program_scene("Scene B")
+            .expect("must switch scene");
+    }
+
+    let current_scene_uuid = input_registry
+        .read()
+        .await
+        .current_program_scene()
+        .map(|scene| scene.scene_uuid)
+        .expect("current program scene must exist");
+    assert_ne!(stale_scene_uuid, current_scene_uuid);
+}
+
 fn parse_request_status(text: &nojson::RawJsonOwned) -> (bool, i64) {
     let json = nojson::RawJson::parse(text.text()).expect("response must be valid json");
     let status = json
