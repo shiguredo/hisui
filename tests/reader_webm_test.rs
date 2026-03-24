@@ -1,4 +1,4 @@
-use hisui::reader_webm::{WebmAudioReader, WebmVideoReader};
+use hisui::webm::reader::{WebmAudioReader, WebmVideoReader};
 
 #[test]
 fn webm_audio_reader_test() -> hisui::Result<()> {

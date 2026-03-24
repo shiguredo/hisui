@@ -20,7 +20,7 @@ pub(super) fn build_record_source_plan(
         "obsws:{}:{run_id}:source:{source_index}:mp4_source",
         output_kind.as_str()
     ));
-    let availability = crate::file_reader_mp4::probe_mp4_track_availability(path)
+    let availability = crate::mp4::file_reader::probe_mp4_track_availability(path)
         .map_err(|e| BuildObswsRecordSourcePlanError::InvalidInput(e.display()))?;
     let source_video_track_id = availability.has_video.then(|| {
         TrackId::new(format!(

@@ -7,11 +7,11 @@ use std::{
 use crate::{
     Error, Result,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
-    file_reader_mp4::{Mp4FileReader, Mp4FileReaderOptions},
-    file_reader_webm::{WebmFileReader, WebmFileReaderOptions},
+    mp4::file_reader::{Mp4FileReader, Mp4FileReaderOptions},
     types::{CodecName, ContainerFormat},
     video::h264::H264AnnexBNalUnits,
     video::{VideoFormat, VideoFrame},
+    webm::file_reader::{WebmFileReader, WebmFileReaderOptions},
 };
 use shiguredo_openh264::Openh264Library;
 

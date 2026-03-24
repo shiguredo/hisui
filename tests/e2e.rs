@@ -5,7 +5,7 @@ use hisui::decoder::libvpx::LibvpxDecoder;
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions, opus::OpusDecoder},
-    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
+    mp4::reader::{Mp4AudioReader, Mp4VideoReader},
     types::{CodecName, EngineName},
     video::VideoFrame,
 };

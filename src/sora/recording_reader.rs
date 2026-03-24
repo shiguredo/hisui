@@ -4,11 +4,11 @@ use std::time::Duration;
 use crate::{
     audio::AudioFrame,
     media::MediaFrame,
-    reader_mp4::{Mp4AudioReader, Mp4VideoReader},
-    reader_webm::{WebmAudioReader, WebmVideoReader},
+    mp4::reader::{Mp4AudioReader, Mp4VideoReader},
     sora::recording_layout::AggregatedSourceInfo,
     types::ContainerFormat,
     video::VideoFrame,
+    webm::reader::{WebmAudioReader, WebmVideoReader},
 };
 
 #[derive(Debug)]

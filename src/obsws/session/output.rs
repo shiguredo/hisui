@@ -1113,14 +1113,14 @@ impl ObswsSession {
         )
         .await?;
 
-        let publisher = crate::publisher_rtmp::RtmpPublisher {
+        let publisher = crate::rtmp::publisher::RtmpPublisher {
             output_url: output_url.to_owned(),
             stream_name: stream_name.map(|s| s.to_owned()),
             input_audio_track_id: Some(run.audio.encoded_track_id.clone()),
             input_video_track_id: Some(run.video.encoded_track_id.clone()),
             options: Default::default(),
         };
-        crate::publisher_rtmp::create_processor(
+        crate::rtmp::publisher::create_processor(
             pipeline_handle,
             publisher,
             Some(run.publisher_processor_id.clone()),
@@ -1179,7 +1179,7 @@ impl ObswsSession {
         )
         .await?;
 
-        crate::writer_mp4::create_processor(
+        crate::mp4::writer::create_processor(
             pipeline_handle,
             output_path.to_path_buf(),
             Some(run.audio.encoded_track_id.clone()),
@@ -1272,14 +1272,14 @@ impl ObswsSession {
         )
         .await?;
 
-        let endpoint = crate::outbound_endpoint_rtmp::RtmpOutboundEndpoint {
+        let endpoint = crate::rtmp::outbound_endpoint::RtmpOutboundEndpoint {
             output_url: output_url.to_owned(),
             stream_name: stream_name.map(|s| s.to_owned()),
             input_audio_track_id: Some(run.audio.encoded_track_id.clone()),
             input_video_track_id: Some(run.video.encoded_track_id.clone()),
             options: Default::default(),
         };
-        crate::outbound_endpoint_rtmp::create_processor(
+        crate::rtmp::outbound_endpoint::create_processor(
             pipeline_handle,
             endpoint,
             Some(run.endpoint_processor_id.clone()),

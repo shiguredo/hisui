@@ -1,11 +1,11 @@
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    reader_mp4::Mp4VideoReader,
+    mp4::reader::Mp4VideoReader,
     video::VideoFrame,
 };
 #[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-use hisui::{audio::AudioFrame, decoder::AudioDecoder, reader_mp4::Mp4AudioReader};
+use hisui::{audio::AudioFrame, decoder::AudioDecoder, mp4::reader::Mp4AudioReader};
 use shiguredo_openh264::Openh264Library;
 
 const VIDEO_INPUT_TRACK_ID: &str = "decoder_test_video_input";

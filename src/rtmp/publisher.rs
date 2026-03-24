@@ -174,7 +174,7 @@ impl RtmpPublisher {
                     .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?,
             ),
             ready: false,
-            frame_handler: crate::rtmp::RtmpOutgoingFrameHandler::new(),
+            frame_handler: crate::rtmp::frame::RtmpOutgoingFrameHandler::new(),
             stats: publisher_stats,
         };
 
@@ -307,7 +307,7 @@ struct RtmpPublishRunner {
     recv_buf: Vec<u8>,
     connection: shiguredo_rtmp::RtmpPublishClientConnection,
     ready: bool,
-    frame_handler: crate::rtmp::RtmpOutgoingFrameHandler,
+    frame_handler: crate::rtmp::frame::RtmpOutgoingFrameHandler,
     stats: RtmpPublisherStats,
 }
 

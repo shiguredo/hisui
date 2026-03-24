@@ -41,7 +41,7 @@ pub enum ObswsSourceRequest {
         processor_id: Option<ProcessorId>,
     },
     CreateRtmpInboundEndpoint {
-        endpoint: crate::inbound_endpoint_rtmp::RtmpInboundEndpoint,
+        endpoint: crate::rtmp::inbound_endpoint::RtmpInboundEndpoint,
         processor_id: Option<ProcessorId>,
     },
     CreateSrtInboundEndpoint {

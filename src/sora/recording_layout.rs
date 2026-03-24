@@ -8,13 +8,13 @@ use std::{
 use crate::{
     audio,
     encoder::VideoEncoderOptions,
+    mp4::writer::Mp4WriterOptions,
     sora::recording_layout_decode_params::LayoutDecodeParams,
     sora::recording_layout_encode_params::LayoutEncodeParams,
     sora::recording_layout_region::{self, RawRegion, Region},
     sora::recording_metadata::{ArchiveMetadata, RecordingMetadata, SourceId, SourceInfo},
     types::{CodecName, ContainerFormat, EngineName, EvenUsize},
     video::FrameRate,
-    writer_mp4::Mp4WriterOptions,
 };
 
 pub const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/compose-default.jsonc");

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     Ack, AudioFrame, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
-    reader_webm::{WebmAudioReader, WebmVideoReader},
+    webm::reader::{WebmAudioReader, WebmVideoReader},
 };
 
 const MAX_NOACKED_COUNT: u64 = 100;

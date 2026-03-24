@@ -39,7 +39,7 @@ pub(super) fn build_record_source_plan(
         "obsws:{kind}:{run_id}:source:{source_index}:audio_decoder"
     ));
 
-    let endpoint = crate::inbound_endpoint_rtmp::RtmpInboundEndpoint {
+    let endpoint = crate::rtmp::inbound_endpoint::RtmpInboundEndpoint {
         input_url: input_url.to_owned(),
         stream_name: settings.stream_name.clone(),
         output_audio_track_id: Some(encoded_audio_track_id.clone()),
