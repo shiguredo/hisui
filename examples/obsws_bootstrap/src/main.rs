@@ -1014,6 +1014,10 @@ async fn run_client(
                         retained.video_sinks.push(sink);
                     }
                     "audio" => {
+                        // 現在の shiguredo_webrtc 0.146.0 には remote audio track
+                        // から PCM を取り出すための公開 API が見当たらないため、
+                        // 音声は受信数の記録のみに留める。音声を MP4 に書くには、
+                        // 別途 audio sink 相当の API が必要になる。
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
                     }
                     _ => {
