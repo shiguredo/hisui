@@ -28,8 +28,13 @@
 ## Python について
 
 - コメントは日本語で書くこと
-- `uv run maturin develop` でビルドできることを確認すること
+- `uv run maturin develop` は現在実行不要（バージョン名に "canary" を含む場合、PEP 440 非互換でビルドに失敗する）
 - `uv run pytest` でテストが通ることを確認すること
+
+## e2e テストについて
+
+- e2e テストの実行前に `cargo build --workspace` でバイナリをビルドしておくこと
+- e2e テストは `e2e-tests/` ディレクトリで `uv run pytest` を実行すること
 
 ## コード中の言語について
 

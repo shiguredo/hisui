@@ -38,6 +38,7 @@ jobs:
           bzip2 -d "${OPENH264_ARCHIVE}"
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
       - run: cargo build $HISUI_E2E_CARGO_RUN_ARGS
+      - run: cargo build -p obsws_scenario_client
       - uses: astral-sh/setup-uv@v7
       - name: Run e2e tests
         env:
