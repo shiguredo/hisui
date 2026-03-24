@@ -10,20 +10,23 @@ from helpers import ObswsServer, _inspect_mp4
 from hisui_server import REPO_ROOT, reserve_ephemeral_port
 
 
-def _build_bootstrap_record_command(
+def _build_bootstrap_command(
     host: str,
     port: int,
     duration: int,
     output_path: str,
 ) -> tuple[list[str], Path]:
     """obsws_bootstrap を cargo run 経由で起動するコマンドを返す"""
+    # HISUI_E2E_CARGO_RUN_ARGS には --features fdk-aac など hisui 本体用の
+    # オプションが含まれるため、obsws_bootstrap では --release のみ使う
     extra_args = shlex.split(os.environ.get("HISUI_E2E_CARGO_RUN_ARGS", ""))
+    release_args = ["--release"] if "--release" in extra_args else []
     return (
         [
             "cargo",
             "run",
             "--quiet",
-            *extra_args,
+            *release_args,
             "-p",
             "obsws_bootstrap",
             "--",
@@ -48,7 +51,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     output_mp4 = tmp_path / "output.mp4"
 
     with ObswsServer(binary_path, host=host, port=port):
-        cmd, cwd = _build_bootstrap_record_command(
+        cmd, cwd = _build_bootstrap_command(
             host, port, 5, str(output_mp4)
         )
         result = subprocess.run(
