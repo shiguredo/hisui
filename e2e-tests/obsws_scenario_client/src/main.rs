@@ -6,10 +6,10 @@ use shiguredo_http11::{Request, ResponseDecoder};
 use shiguredo_webrtc::{
     AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioEncoderFactory,
     AudioProcessingBuilder, CreateSessionDescriptionObserver,
-    CreateSessionDescriptionObserverHandler, DataChannel, DataChannelObserver,
-    DataChannelObserverHandler, Environment, PeerConnection, PeerConnectionDependencies,
-    PeerConnectionFactory, PeerConnectionFactoryDependencies, PeerConnectionObserver,
-    PeerConnectionObserverHandler, PeerConnectionOfferAnswerOptions,
+    CreateSessionDescriptionObserverHandler, DataChannel, DataChannelInit, DataChannelObserver,
+    DataChannelObserverHandler, Environment, IceGatheringState, PeerConnection,
+    PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionFactoryDependencies,
+    PeerConnectionObserver, PeerConnectionObserverHandler, PeerConnectionOfferAnswerOptions,
     PeerConnectionRtcConfiguration, PeerConnectionState, RtcError, RtcEventLogFactory,
     RtpTransceiver, SdpType, SessionDescription, SetLocalDescriptionObserver,
     SetLocalDescriptionObserverHandler, SetRemoteDescriptionObserver,
@@ -30,10 +30,20 @@ enum ClientEvent {
     SignalingMessage { data: Vec<u8> },
 }
 
+enum IceObserverEvent {
+    Candidate {
+        sdp_mid: String,
+        sdp_mline_index: i32,
+        candidate: String,
+    },
+    Complete,
+}
+
 // --- Observer ハンドラ ---
 
 struct ClientPcObserver {
     event_tx: mpsc::UnboundedSender<ClientEvent>,
+    ice_tx: std::sync::mpsc::Sender<IceObserverEvent>,
 }
 
 impl PeerConnectionObserverHandler for ClientPcObserver {
@@ -47,6 +57,27 @@ impl PeerConnectionObserverHandler for ClientPcObserver {
 
     fn on_data_channel(&mut self, dc: DataChannel) {
         let _ = self.event_tx.send(ClientEvent::DataChannel(dc));
+    }
+
+    fn on_ice_gathering_change(&mut self, state: IceGatheringState) {
+        if state == IceGatheringState::Complete {
+            let _ = self.ice_tx.send(IceObserverEvent::Complete);
+        }
+    }
+
+    fn on_ice_candidate(&mut self, candidate: shiguredo_webrtc::IceCandidateRef<'_>) {
+        let Ok(sdp_mid) = candidate.sdp_mid() else {
+            return;
+        };
+        let sdp_mline_index = candidate.sdp_mline_index();
+        let Ok(candidate) = candidate.to_string() else {
+            return;
+        };
+        let _ = self.ice_tx.send(IceObserverEvent::Candidate {
+            sdp_mid,
+            sdp_mline_index,
+            candidate,
+        });
     }
 }
 
@@ -372,6 +403,162 @@ struct Stats {
     connection_state: String,
 }
 
+#[derive(Clone)]
+struct GatheredIceCandidate {
+    sdp_mid: String,
+    sdp_mline_index: i32,
+    candidate: String,
+}
+
+struct RetainedState {
+    event_tx: mpsc::UnboundedSender<ClientEvent>,
+    _pc_observer: PeerConnectionObserver,
+    _bootstrap_dc: DataChannel,
+    signaling_dc: Option<DataChannel>,
+    dc_observer: Option<DataChannelObserver>,
+    video_sinks: Vec<VideoSink>,
+    ice_rx: std::sync::mpsc::Receiver<IceObserverEvent>,
+    ice_candidates: Vec<GatheredIceCandidate>,
+}
+
+fn finalize_local_sdp(
+    initial_sdp: String,
+    ice_rx: &std::sync::mpsc::Receiver<IceObserverEvent>,
+    cached_candidates: &mut Vec<GatheredIceCandidate>,
+) -> Result<String, String> {
+    if initial_sdp.contains("\r\na=candidate:") {
+        return Ok(initial_sdp);
+    }
+
+    let mut candidates = Vec::new();
+    let mut complete = false;
+    while let Ok(event) = ice_rx.try_recv() {
+        match event {
+            IceObserverEvent::Candidate {
+                sdp_mid,
+                sdp_mline_index,
+                candidate,
+            } => {
+                candidates.push(GatheredIceCandidate {
+                    sdp_mid,
+                    sdp_mline_index,
+                    candidate,
+                });
+            }
+            IceObserverEvent::Complete => {
+                complete = true;
+            }
+        }
+    }
+
+    if !complete && candidates.is_empty() && !cached_candidates.is_empty() {
+        return Ok(append_ice_candidates_to_sdp(
+            &initial_sdp,
+            cached_candidates,
+        ));
+    }
+
+    let deadline = std::time::Instant::now() + SDP_TIMEOUT;
+    while !complete {
+        let Some(timeout) = deadline.checked_duration_since(std::time::Instant::now()) else {
+            if !cached_candidates.is_empty() {
+                return Ok(append_ice_candidates_to_sdp(
+                    &initial_sdp,
+                    cached_candidates,
+                ));
+            }
+            return Err("ICE gathering timed out".to_owned());
+        };
+        match ice_rx.recv_timeout(timeout) {
+            Ok(IceObserverEvent::Candidate {
+                sdp_mid,
+                sdp_mline_index,
+                candidate,
+            }) => {
+                candidates.push(GatheredIceCandidate {
+                    sdp_mid,
+                    sdp_mline_index,
+                    candidate,
+                });
+            }
+            Ok(IceObserverEvent::Complete) => {
+                complete = true;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if !cached_candidates.is_empty() {
+                    return Ok(append_ice_candidates_to_sdp(
+                        &initial_sdp,
+                        cached_candidates,
+                    ));
+                }
+                return Err("ICE gathering timed out".to_owned());
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("ICE gathering channel closed".to_owned());
+            }
+        }
+    }
+
+    if !candidates.is_empty() {
+        *cached_candidates = candidates.clone();
+    }
+
+    Ok(append_ice_candidates_to_sdp(
+        &initial_sdp,
+        if candidates.is_empty() {
+            cached_candidates
+        } else {
+            &candidates
+        },
+    ))
+}
+
+fn append_ice_candidates_to_sdp(sdp: &str, candidates: &[GatheredIceCandidate]) -> String {
+    let mut sections: Vec<Vec<String>> = Vec::new();
+    let mut current_section = Vec::new();
+
+    for line in sdp.split("\r\n").filter(|line| !line.is_empty()) {
+        if line.starts_with("m=") && !current_section.is_empty() {
+            sections.push(current_section);
+            current_section = Vec::new();
+        }
+        current_section.push(line.to_owned());
+    }
+    if !current_section.is_empty() {
+        sections.push(current_section);
+    }
+
+    let mut output = Vec::new();
+    for (index, section) in sections.into_iter().enumerate() {
+        let is_media_section = section.first().is_some_and(|line| line.starts_with("m="));
+        let sdp_mid = section
+            .iter()
+            .find_map(|line| line.strip_prefix("a=mid:"))
+            .unwrap_or_default();
+
+        for line in &section {
+            output.push(line.clone());
+        }
+
+        if is_media_section {
+            let section_candidates: Vec<&GatheredIceCandidate> = candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate.sdp_mid == sdp_mid || candidate.sdp_mline_index == index as i32 - 1
+                })
+                .collect();
+            if !section_candidates.is_empty() {
+                for candidate in section_candidates {
+                    output.push(format!("a={}", candidate.candidate));
+                }
+                output.push("a=end-of-candidates".to_owned());
+            }
+        }
+    }
+
+    output.join("\r\n") + "\r\n"
+}
+
 async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, String> {
     // WebRTC ファクトリを初期化する
     let env = Environment::new();
@@ -405,8 +592,10 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
 
     // PeerConnection を作成する
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<ClientEvent>();
+    let (ice_tx, ice_rx) = std::sync::mpsc::channel::<IceObserverEvent>();
     let pc_observer = PeerConnectionObserver::new_with_handler(Box::new(ClientPcObserver {
         event_tx: event_tx.clone(),
+        ice_tx,
     }));
     let mut pc_deps = PeerConnectionDependencies::new(&pc_observer);
     let mut config = PeerConnectionRtcConfiguration::new();
@@ -414,9 +603,17 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
     let pc = PeerConnection::create(factory.as_ref(), &mut config, &mut pc_deps)
         .map_err(|e| format!("failed to create PeerConnection: {e}"))?;
 
+    let mut dc_init = DataChannelInit::new();
+    dc_init.set_ordered(true);
+    let bootstrap_dc = pc
+        .create_data_channel("bootstrap", &mut dc_init)
+        .map_err(|e| format!("failed to create bootstrap DataChannel: {e}"))?;
+
     // offer SDP を生成する
     let offer_sdp = create_offer_sdp(&pc)?;
     set_local_description(&pc, SdpType::Offer, &offer_sdp)?;
+    let mut initial_ice_candidates = Vec::new();
+    let offer_sdp = finalize_local_sdp(offer_sdp, &ice_rx, &mut initial_ice_candidates)?;
     tracing::debug!("offer SDP created");
 
     // /bootstrap で answer SDP を取得する
@@ -432,11 +629,16 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
     let video_height = Arc::new(AtomicUsize::new(0));
     let connection_state = Arc::new(std::sync::Mutex::new("new".to_owned()));
 
-    // signaling DC の observer を保持する（ドロップ防止）
-    let mut _signaling_dc: Option<DataChannel> = None;
-    let mut _dc_observer: Option<DataChannelObserver> = None;
-    // VideoSink をドロップさせないために保持する
-    let mut _video_sinks: Vec<VideoSink> = Vec::new();
+    let mut retained = RetainedState {
+        event_tx: event_tx.clone(),
+        _pc_observer: pc_observer,
+        _bootstrap_dc: bootstrap_dc,
+        signaling_dc: None,
+        dc_observer: None,
+        video_sinks: Vec::new(),
+        ice_rx,
+        ice_candidates: initial_ice_candidates,
+    };
 
     // イベントループ（duration 秒間）
     let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs);
@@ -482,7 +684,7 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
                         }));
                         let wants = VideoSinkWants::default();
                         video_track.add_or_update_sink(&sink, &wants);
-                        _video_sinks.push(sink);
+                        retained.video_sinks.push(sink);
                     }
                     "audio" => {
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
@@ -498,11 +700,11 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
                 if label == "signaling" {
                     let observer =
                         DataChannelObserver::new_with_handler(Box::new(SignalingDcHandler {
-                            event_tx: event_tx.clone(),
+                            event_tx: retained.event_tx.clone(),
                         }));
                     dc.register_observer(&observer);
-                    _signaling_dc = Some(dc);
-                    _dc_observer = Some(observer);
+                    retained.signaling_dc = Some(dc);
+                    retained.dc_observer = Some(observer);
                 }
             }
             ClientEvent::SignalingMessage { data } => {
@@ -522,8 +724,19 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
                                     tracing::warn!("failed to set local answer: {e}");
                                     continue;
                                 }
+                                let answer = match finalize_local_sdp(
+                                    answer,
+                                    &retained.ice_rx,
+                                    &mut retained.ice_candidates,
+                                ) {
+                                    Ok(answer) => answer,
+                                    Err(e) => {
+                                        tracing::warn!("failed to gather ICE candidates: {e}");
+                                        continue;
+                                    }
+                                };
                                 let answer_json = make_answer_json(&answer);
-                                if let Some(dc) = &_signaling_dc {
+                                if let Some(dc) = &retained.signaling_dc {
                                     dc.send(answer_json.as_bytes(), false);
                                     tracing::info!("renegotiation answer sent");
                                 }

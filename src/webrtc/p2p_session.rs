@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use shiguredo_webrtc::{
     AdaptedVideoTrackSource, CxxString, DataChannel, DataChannelInit, DataChannelObserver,
-    DataChannelObserverHandler, PeerConnection, PeerConnectionDependencies, PeerConnectionFactory,
-    PeerConnectionObserver, PeerConnectionObserverHandler, PeerConnectionRtcConfiguration,
-    PeerConnectionState, StringVector,
+    DataChannelObserverHandler, IceGatheringState, PeerConnection, PeerConnectionDependencies,
+    PeerConnectionFactory, PeerConnectionObserver, PeerConnectionObserverHandler,
+    PeerConnectionRtcConfiguration, PeerConnectionState, StringVector,
 };
 use tokio::sync::mpsc;
 
@@ -23,6 +23,22 @@ enum PcEvent {
         track_id: crate::TrackId,
         message: crate::Message,
     },
+}
+
+enum IceObserverEvent {
+    Candidate {
+        sdp_mid: String,
+        sdp_mline_index: i32,
+        candidate: String,
+    },
+    Complete,
+}
+
+#[derive(Clone)]
+struct GatheredIceCandidate {
+    sdp_mid: String,
+    sdp_mline_index: i32,
+    candidate: String,
 }
 
 struct SignalingMessage {
@@ -61,6 +77,7 @@ fn make_offer_json(sdp: &str) -> String {
 
 struct P2pPcObserverHandler {
     event_tx: mpsc::UnboundedSender<PcEvent>,
+    ice_tx: std::sync::mpsc::Sender<IceObserverEvent>,
 }
 
 impl PeerConnectionObserverHandler for P2pPcObserverHandler {
@@ -70,6 +87,27 @@ impl PeerConnectionObserverHandler for P2pPcObserverHandler {
 
     fn on_data_channel(&mut self, dc: DataChannel) {
         let _ = self.event_tx.send(PcEvent::DataChannel(dc));
+    }
+
+    fn on_ice_gathering_change(&mut self, state: IceGatheringState) {
+        if state == IceGatheringState::Complete {
+            let _ = self.ice_tx.send(IceObserverEvent::Complete);
+        }
+    }
+
+    fn on_ice_candidate(&mut self, candidate: shiguredo_webrtc::IceCandidateRef<'_>) {
+        let Ok(sdp_mid) = candidate.sdp_mid() else {
+            return;
+        };
+        let sdp_mline_index = candidate.sdp_mline_index();
+        let Ok(candidate) = candidate.to_string() else {
+            return;
+        };
+        let _ = self.ice_tx.send(IceObserverEvent::Candidate {
+            sdp_mid,
+            sdp_mline_index,
+            candidate,
+        });
     }
 }
 
@@ -111,6 +149,8 @@ struct Session {
     pending_renegotiation: bool,
     subscribed_tracks: std::collections::HashMap<crate::TrackId, SubscribedTrack>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
+    ice_rx: std::sync::mpsc::Receiver<IceObserverEvent>,
+    ice_candidates: Vec<GatheredIceCandidate>,
     obsws_session: ObswsSession,
 }
 
@@ -164,6 +204,15 @@ impl WebRtcP2pSessionManager {
                 match event {
                     PcEvent::ConnectionChange(state) => {
                         tracing::info!("PeerConnection state changed: {state:?}");
+                        if state == PeerConnectionState::Connected && sess.pending_renegotiation {
+                            // 接続確立後に保留中の renegotiation offer を送信する
+                            if let Err(e) = maybe_send_offer(sess) {
+                                tracing::warn!(
+                                    "failed to send renegotiation offer: {}",
+                                    e.display()
+                                );
+                            }
+                        }
                         if matches!(
                             state,
                             PeerConnectionState::Failed | PeerConnectionState::Closed
@@ -258,7 +307,8 @@ impl WebRtcP2pSessionManager {
             obsws_session,
         ) {
             Ok((answer_sdp, mut sess)) => {
-                // Program 出力の固定トラックを自動購読する
+                // Program 出力の固定トラックを購読する（PeerConnection にトラックを追加）
+                // renegotiation offer は接続確立後に送信される
                 let program = self.program_output.read().await;
                 if let Err(e) =
                     subscribe_track(&mut sess, program.video_track_id.clone(), TrackKind::Video)
@@ -270,10 +320,9 @@ impl WebRtcP2pSessionManager {
                 {
                     tracing::warn!("failed to subscribe program audio track: {}", e.display());
                 }
-                // トラック追加に伴う renegotiation offer を送信する
-                if let Err(e) = maybe_send_offer(&mut sess) {
-                    tracing::warn!("failed to send renegotiation offer: {}", e.display());
-                }
+                // トラック追加があるので pending_renegotiation を設定する。
+                // 実際の offer 送信は ConnectionChange(Connected) で行う。
+                sess.pending_renegotiation = true;
 
                 *guard = Some(sess);
                 Ok(answer_sdp)
@@ -291,9 +340,12 @@ fn bootstrap_internal(
     processor_handle: crate::ProcessorHandle,
     obsws_session: ObswsSession,
 ) -> crate::Result<(String, Session)> {
+    let (ice_tx, ice_rx) = std::sync::mpsc::channel::<IceObserverEvent>();
+
     // PeerConnectionObserver の作成
     let pc_observer = PeerConnectionObserver::new_with_handler(Box::new(P2pPcObserverHandler {
         event_tx: event_tx.clone(),
+        ice_tx,
     }));
 
     let mut deps = PeerConnectionDependencies::new(&pc_observer);
@@ -332,6 +384,8 @@ fn bootstrap_internal(
     super::sdp::set_remote_offer(&pc, offer_sdp)?;
     let answer_sdp = super::sdp::create_answer_sdp(&pc)?;
     super::sdp::set_local_answer(&pc, &answer_sdp)?;
+    let mut ice_candidates = Vec::new();
+    let answer_sdp = finalize_local_sdp(answer_sdp, &ice_rx, &mut ice_candidates)?;
 
     let sess = Session {
         _handle: handle,
@@ -347,10 +401,150 @@ fn bootstrap_internal(
         pending_renegotiation: false,
         subscribed_tracks: std::collections::HashMap::new(),
         event_tx,
+        ice_rx,
+        ice_candidates,
         obsws_session,
     };
 
     Ok((answer_sdp, sess))
+}
+
+fn finalize_local_sdp(
+    initial_sdp: String,
+    ice_rx: &std::sync::mpsc::Receiver<IceObserverEvent>,
+    cached_candidates: &mut Vec<GatheredIceCandidate>,
+) -> crate::Result<String> {
+    if initial_sdp.contains("\r\na=candidate:") {
+        return Ok(initial_sdp);
+    }
+
+    let mut candidates = Vec::new();
+    let mut complete = false;
+    while let Ok(event) = ice_rx.try_recv() {
+        match event {
+            IceObserverEvent::Candidate {
+                sdp_mid,
+                sdp_mline_index,
+                candidate,
+            } => {
+                candidates.push(GatheredIceCandidate {
+                    sdp_mid,
+                    sdp_mline_index,
+                    candidate,
+                });
+            }
+            IceObserverEvent::Complete => {
+                complete = true;
+            }
+        }
+    }
+
+    if !complete && candidates.is_empty() && !cached_candidates.is_empty() {
+        return Ok(append_ice_candidates_to_sdp(
+            &initial_sdp,
+            cached_candidates,
+        ));
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !complete {
+        let Some(timeout) = deadline.checked_duration_since(std::time::Instant::now()) else {
+            if !cached_candidates.is_empty() {
+                return Ok(append_ice_candidates_to_sdp(
+                    &initial_sdp,
+                    cached_candidates,
+                ));
+            }
+            return Err(crate::Error::new("ICE gathering timed out"));
+        };
+        match ice_rx.recv_timeout(timeout) {
+            Ok(IceObserverEvent::Candidate {
+                sdp_mid,
+                sdp_mline_index,
+                candidate,
+            }) => {
+                candidates.push(GatheredIceCandidate {
+                    sdp_mid,
+                    sdp_mline_index,
+                    candidate,
+                });
+            }
+            Ok(IceObserverEvent::Complete) => {
+                complete = true;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if !cached_candidates.is_empty() {
+                    return Ok(append_ice_candidates_to_sdp(
+                        &initial_sdp,
+                        cached_candidates,
+                    ));
+                }
+                return Err(crate::Error::new("ICE gathering timed out"));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(crate::Error::new("ICE gathering channel closed"));
+            }
+        }
+    }
+
+    if !candidates.is_empty() {
+        *cached_candidates = candidates.clone();
+    }
+
+    Ok(append_ice_candidates_to_sdp(
+        &initial_sdp,
+        if candidates.is_empty() {
+            cached_candidates
+        } else {
+            &candidates
+        },
+    ))
+}
+
+fn append_ice_candidates_to_sdp(sdp: &str, candidates: &[GatheredIceCandidate]) -> String {
+    let mut sections: Vec<Vec<String>> = Vec::new();
+    let mut current_section = Vec::new();
+
+    for line in sdp.split("\r\n").filter(|line| !line.is_empty()) {
+        if line.starts_with("m=") && !current_section.is_empty() {
+            sections.push(current_section);
+            current_section = Vec::new();
+        }
+        current_section.push(line.to_owned());
+    }
+    if !current_section.is_empty() {
+        sections.push(current_section);
+    }
+
+    let mut output = Vec::new();
+    for (index, section) in sections.into_iter().enumerate() {
+        let is_media_section = section.first().is_some_and(|line| line.starts_with("m="));
+        let sdp_mid = section
+            .iter()
+            .find_map(|line| line.strip_prefix("a=mid:"))
+            .unwrap_or_default();
+
+        for line in &section {
+            output.push(line.clone());
+        }
+
+        if is_media_section {
+            let section_candidates: Vec<&GatheredIceCandidate> = candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate.sdp_mid == sdp_mid || candidate.sdp_mline_index == index as i32 - 1
+                })
+                .collect();
+            if !section_candidates.is_empty() {
+                for candidate in section_candidates {
+                    output.push(format!("a={}", candidate.candidate));
+                }
+                output.push("a=end-of-candidates".to_owned());
+            }
+        }
+    }
+
+    output.join("\r\n") + "\r\n"
 }
 
 // DataChannel メッセージ処理
@@ -553,6 +747,7 @@ fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
 
     let offer_sdp = super::sdp::create_offer_sdp(&sess.pc)?;
     super::sdp::set_local_offer(&sess.pc, &offer_sdp)?;
+    let offer_sdp = finalize_local_sdp(offer_sdp, &sess.ice_rx, &mut sess.ice_candidates)?;
 
     send_dc(sess, &make_offer_json(&offer_sdp));
     sess.in_flight_offer = true;
