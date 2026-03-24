@@ -50,7 +50,7 @@ nopng = "=0.1.1"
 aws-lc-rs = "=1.16.2"
 libc = "=0.2.183"
 
-shiguredo_dav1d = "=2026.1.0-canary.0"
+shiguredo_dav1d = "=2026.1.0-canary.1"
 shiguredo_libvpx = "=2026.1.0-canary.2"
 shiguredo_libyuv = "=2026.1.0-canary.2"
 shiguredo_nvcodec = { version = "=2026.1.0-canary.2", optional = true }

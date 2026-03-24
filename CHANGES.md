@@ -11,7 +11,7 @@
 
 ## develop
 
-- [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0-canary.0 にあげる
+- [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0-canary.1 にあげる
   - このバージョンから shiguredo_dav1d crate のリポジトリが https://github.com/shiguredo/dav1d-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.0 にあげる
