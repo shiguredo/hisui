@@ -691,7 +691,7 @@ struct GatheredIceCandidate {
 struct RetainedState {
     event_tx: mpsc::UnboundedSender<ClientEvent>,
     _pc_observer: PeerConnectionObserver,
-    _bootstrap_dc: DataChannel,
+    _dummy_dc: DataChannel,
     obsws_dc: Option<DataChannel>,
     signaling_dc: Option<DataChannel>,
     signaling_dc_observer: Option<DataChannelObserver>,
@@ -893,9 +893,9 @@ async fn run_client(
     // m=application 用ダミー DataChannel
     let mut dc_init = DataChannelInit::new();
     dc_init.set_ordered(true);
-    let bootstrap_dc = pc
-        .create_data_channel("bootstrap", &mut dc_init)
-        .map_err(|e| format!("failed to create bootstrap DataChannel: {e}"))?;
+    let dummy_dc = pc
+        .create_data_channel("dummy", &mut dc_init)
+        .map_err(|e| format!("failed to create dummy DataChannel: {e}"))?;
 
     // offer SDP を生成する
     let offer_sdp = create_offer_sdp(&pc)?;
@@ -923,7 +923,7 @@ async fn run_client(
     let mut retained = RetainedState {
         event_tx: event_tx.clone(),
         _pc_observer: pc_observer,
-        _bootstrap_dc: bootstrap_dc,
+        _dummy_dc: dummy_dc,
         obsws_dc: None,
         signaling_dc: None,
         signaling_dc_observer: None,
@@ -944,7 +944,7 @@ async fn run_client(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs);
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
-    let mut obsws_ready_at: Option<tokio::time::Instant> = None;
+    let mut obsws_ready = false;
     loop {
         // フレーム受信チャネルから溜まっているフレームを処理する
         while let Ok(frame_data) = frame_rx.try_recv() {
@@ -958,10 +958,10 @@ async fn run_client(
 
         if !obsws_create_input_sent
             && let Some(dc) = &retained.obsws_dc
-            && let Some(ready_at) = obsws_ready_at
-            && tokio::time::Instant::now() >= ready_at
+            && obsws_ready
             && dc.state() == DataChannelState::Open
         {
+            tracing::info!("sending CreateInput request on obsws DataChannel");
             let request = make_create_mp4_input_request(input_mp4_path);
             if !dc.send(request.as_bytes(), false) {
                 return Err("failed to send CreateInput request on obsws DataChannel".to_owned());
@@ -970,16 +970,12 @@ async fn run_client(
             tracing::info!("CreateInput request sent on obsws DataChannel");
         }
 
-        let send_wakeup = obsws_ready_at.unwrap_or(deadline);
         let event = tokio::select! {
             event = event_rx.recv() => {
                 match event {
                     Some(e) => e,
                     None => break,
                 }
-            }
-            _ = tokio::time::sleep_until(send_wakeup), if !obsws_create_input_sent && obsws_ready_at.is_some() => {
-                continue;
             }
             _ = tokio::time::sleep_until(deadline) => break,
         };
@@ -1042,10 +1038,8 @@ async fn run_client(
                             event_tx: retained.event_tx.clone(),
                         }));
                     dc.register_observer(&observer);
-                    if dc.state() == DataChannelState::Open {
-                        obsws_ready_at =
-                            Some(tokio::time::Instant::now() + Duration::from_millis(200));
-                    }
+                    obsws_ready = dc.state() == DataChannelState::Open;
+                    tracing::info!("obsws data channel ready={obsws_ready}");
                     retained.obsws_dc = Some(dc);
                     retained.obsws_dc_observer = Some(observer);
                 }
@@ -1111,12 +1105,8 @@ async fn run_client(
             }
             ClientEvent::ObswsDataChannelStateChange => {
                 if let Some(dc) = &retained.obsws_dc {
-                    let state = dc.state();
-                    tracing::info!("obsws data channel state: {state:?}");
-                    if state == DataChannelState::Open {
-                        obsws_ready_at =
-                            Some(tokio::time::Instant::now() + Duration::from_millis(200));
-                    }
+                    obsws_ready = dc.state() == DataChannelState::Open;
+                    tracing::info!("obsws data channel ready={obsws_ready}");
                 }
             }
         }
