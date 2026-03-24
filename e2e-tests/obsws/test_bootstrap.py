@@ -84,8 +84,8 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     assert inspect.get("format") == "mp4", (
         f"expected format=mp4, got {inspect.get('format')}"
     )
-    assert inspect.get("video_codec") == "vp9", (
-        f"expected video_codec=vp9, got {inspect.get('video_codec')}"
+    assert inspect.get("video_codec") == "VP9", (
+        f"expected video_codec=VP9, got {inspect.get('video_codec')}"
     )
     assert inspect.get("video_sample_count", 0) >= 1, (
         f"expected at least 1 video sample, got {inspect}"

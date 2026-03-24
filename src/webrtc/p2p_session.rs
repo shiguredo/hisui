@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use shiguredo_webrtc::{
     AdaptedVideoTrackSource, CxxString, DataChannel, DataChannelInit, DataChannelObserver,
-    DataChannelObserverHandler, IceGatheringState, PeerConnection, PeerConnectionDependencies,
-    PeerConnectionFactory, PeerConnectionObserver, PeerConnectionObserverHandler,
-    PeerConnectionRtcConfiguration, PeerConnectionState, StringVector,
+    DataChannelObserverHandler, DataChannelState, IceGatheringState, PeerConnection,
+    PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionObserver,
+    PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState,
+    StringVector,
 };
 use tokio::sync::mpsc;
 
@@ -13,6 +14,9 @@ use crate::obsws_session::{ObswsSession, SessionAction};
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
     DataChannel(DataChannel),
+    DataChannelStateChange {
+        label: String,
+    },
     DcMessage {
         data: Vec<u8>,
     },
@@ -113,9 +117,16 @@ impl PeerConnectionObserverHandler for P2pPcObserverHandler {
 
 struct DcMessageHandler {
     event_tx: mpsc::UnboundedSender<PcEvent>,
+    label: &'static str,
 }
 
 impl DataChannelObserverHandler for DcMessageHandler {
+    fn on_state_change(&mut self) {
+        let _ = self.event_tx.send(PcEvent::DataChannelStateChange {
+            label: self.label.to_owned(),
+        });
+    }
+
     fn on_message(&mut self, data: &[u8], _is_binary: bool) {
         let _ = self.event_tx.send(PcEvent::DcMessage {
             data: data.to_vec(),
@@ -125,9 +136,16 @@ impl DataChannelObserverHandler for DcMessageHandler {
 
 struct ObswsMessageHandler {
     event_tx: mpsc::UnboundedSender<PcEvent>,
+    label: &'static str,
 }
 
 impl DataChannelObserverHandler for ObswsMessageHandler {
+    fn on_state_change(&mut self) {
+        let _ = self.event_tx.send(PcEvent::DataChannelStateChange {
+            label: self.label.to_owned(),
+        });
+    }
+
     fn on_message(&mut self, data: &[u8], _is_binary: bool) {
         let _ = self.event_tx.send(PcEvent::ObswsMessage {
             data: data.to_vec(),
@@ -146,6 +164,7 @@ struct Session {
     obsws_dc: Option<DataChannel>,
     _dc_observer: Option<shiguredo_webrtc::DataChannelObserver>,
     _obsws_dc_observer: Option<shiguredo_webrtc::DataChannelObserver>,
+    connection_state: PeerConnectionState,
     in_flight_offer: bool,
     pending_renegotiation: bool,
     subscribed_tracks: std::collections::HashMap<crate::TrackId, SubscribedTrack>,
@@ -211,6 +230,7 @@ impl WebRtcP2pSessionManager {
                 match event {
                     PcEvent::ConnectionChange(state) => {
                         tracing::info!("PeerConnection state changed: {state:?}");
+                        sess.connection_state = state;
                         if state == PeerConnectionState::Connected && sess.pending_renegotiation {
                             // 接続確立後に保留中の renegotiation offer を送信する
                             if let Err(e) = maybe_send_offer(sess).await {
@@ -235,10 +255,21 @@ impl WebRtcP2pSessionManager {
                             let dc_observer =
                                 DataChannelObserver::new_with_handler(Box::new(DcMessageHandler {
                                     event_tx: sess.event_tx.clone(),
+                                    label: "signaling",
                                 }));
                             dc.register_observer(&dc_observer);
                             sess.signaling_dc = Some(dc);
                             sess._dc_observer = Some(dc_observer);
+                        }
+                    }
+                    PcEvent::DataChannelStateChange { label } => {
+                        tracing::info!("DataChannel state changed: label={label}");
+                        if label == "signaling"
+                            && sess.pending_renegotiation
+                            && sess.connection_state == PeerConnectionState::Connected
+                            && let Err(e) = maybe_send_offer(sess).await
+                        {
+                            tracing::warn!("failed to send renegotiation offer: {}", e.display());
                         }
                     }
                     PcEvent::DcMessage { data } => {
@@ -383,12 +414,14 @@ async fn bootstrap_internal(
     // DataChannel に observer を設定
     let dc_observer = DataChannelObserver::new_with_handler(Box::new(DcMessageHandler {
         event_tx: event_tx.clone(),
+        label: "signaling",
     }));
     signaling_dc.register_observer(&dc_observer);
 
     // obsws 用 DataChannel に observer を設定
     let obsws_observer = DataChannelObserver::new_with_handler(Box::new(ObswsMessageHandler {
         event_tx: event_tx.clone(),
+        label: "obsws",
     }));
     obsws_dc.register_observer(&obsws_observer);
 
@@ -410,6 +443,7 @@ async fn bootstrap_internal(
         obsws_dc: Some(obsws_dc),
         _dc_observer: Some(dc_observer),
         _obsws_dc_observer: Some(obsws_observer),
+        connection_state: PeerConnectionState::New,
         in_flight_offer: false,
         pending_renegotiation: false,
         subscribed_tracks: std::collections::HashMap::new(),
@@ -781,6 +815,14 @@ fn create_audio_track(
 
 async fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
     if sess.in_flight_offer {
+        sess.pending_renegotiation = true;
+        return Ok(());
+    }
+    let Some(dc) = &sess.signaling_dc else {
+        sess.pending_renegotiation = true;
+        return Ok(());
+    };
+    if dc.state() != DataChannelState::Open {
         sess.pending_renegotiation = true;
         return Ok(());
     }

@@ -42,6 +42,7 @@ enum ClientEvent {
     Track(RtpTransceiver),
     DataChannel(DataChannel),
     SignalingMessage { data: Vec<u8> },
+    ObswsMessage { data: Vec<u8> },
 }
 
 // VideoSinkHandler から送信するフレームデータ
@@ -115,6 +116,18 @@ struct SignalingDcHandler {
 impl DataChannelObserverHandler for SignalingDcHandler {
     fn on_message(&mut self, data: &[u8], _is_binary: bool) {
         let _ = self.event_tx.send(ClientEvent::SignalingMessage {
+            data: data.to_vec(),
+        });
+    }
+}
+
+struct ObswsDcHandler {
+    event_tx: mpsc::UnboundedSender<ClientEvent>,
+}
+
+impl DataChannelObserverHandler for ObswsDcHandler {
+    fn on_message(&mut self, data: &[u8], _is_binary: bool) {
+        let _ = self.event_tx.send(ClientEvent::ObswsMessage {
             data: data.to_vec(),
         });
     }
@@ -593,8 +606,10 @@ struct RetainedState {
     event_tx: mpsc::UnboundedSender<ClientEvent>,
     _pc_observer: PeerConnectionObserver,
     _bootstrap_dc: DataChannel,
+    obsws_dc: Option<DataChannel>,
     signaling_dc: Option<DataChannel>,
-    dc_observer: Option<DataChannelObserver>,
+    signaling_dc_observer: Option<DataChannelObserver>,
+    obsws_dc_observer: Option<DataChannelObserver>,
     video_sinks: Vec<VideoSink>,
     ice_rx: std::sync::mpsc::Receiver<IceObserverEvent>,
     ice_candidates: Vec<GatheredIceCandidate>,
@@ -787,6 +802,8 @@ async fn run_client(
     let pc = PeerConnection::create(factory.as_ref(), &mut config, &mut pc_deps)
         .map_err(|e| format!("failed to create PeerConnection: {e}"))?;
 
+    // server 側の signaling / obsws DataChannel を初回 offer に載せるための
+    // m=application 用ダミー DataChannel
     let mut dc_init = DataChannelInit::new();
     dc_init.set_ordered(true);
     let bootstrap_dc = pc
@@ -820,8 +837,10 @@ async fn run_client(
         event_tx: event_tx.clone(),
         _pc_observer: pc_observer,
         _bootstrap_dc: bootstrap_dc,
+        obsws_dc: None,
         signaling_dc: None,
-        dc_observer: None,
+        signaling_dc_observer: None,
+        obsws_dc_observer: None,
         video_sinks: Vec::new(),
         ice_rx,
         ice_candidates: initial_ice_candidates,
@@ -908,7 +927,15 @@ async fn run_client(
                         }));
                     dc.register_observer(&observer);
                     retained.signaling_dc = Some(dc);
-                    retained.dc_observer = Some(observer);
+                    retained.signaling_dc_observer = Some(observer);
+                } else if label == "obsws" {
+                    let observer =
+                        DataChannelObserver::new_with_handler(Box::new(ObswsDcHandler {
+                            event_tx: retained.event_tx.clone(),
+                        }));
+                    dc.register_observer(&observer);
+                    retained.obsws_dc = Some(dc);
+                    retained.obsws_dc_observer = Some(observer);
                 }
             }
             ClientEvent::SignalingMessage { data } => {
@@ -950,6 +977,13 @@ async fn run_client(
                             }
                         }
                     }
+                }
+            }
+            ClientEvent::ObswsMessage { data } => {
+                if let Ok(text) = std::str::from_utf8(&data) {
+                    tracing::debug!("obsws message: {text}");
+                } else {
+                    tracing::debug!("obsws message: <binary {} bytes>", data.len());
                 }
             }
         }

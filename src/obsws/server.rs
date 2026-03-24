@@ -503,7 +503,7 @@ async fn handle_http_connection(
                         let _ = write_response(&mut writer, &error_response).await;
                     }
                 } else {
-                    let response = Response::new(404, "Not Found");
+                    let response = Response::new(405, "Method Not Allowed");
                     if let Err(e) = write_response(&mut writer, &response).await {
                         if is_client_disconnect(&e) {
                             tracing::warn!("obsws http 499 Client Closed Request from {peer_addr}");
