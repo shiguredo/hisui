@@ -88,19 +88,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bootstrap_client"
-version = "0.0.0"
-dependencies = [
- "noargs",
- "nojson",
- "shiguredo_http11",
- "shiguredo_webrtc",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -607,6 +594,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "obsws_scenario_client"
+version = "0.0.0"
+dependencies = [
+ "noargs",
+ "nojson",
+ "shiguredo_http11",
+ "shiguredo_webrtc",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

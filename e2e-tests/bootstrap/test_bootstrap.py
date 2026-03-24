@@ -25,8 +25,9 @@ def test_bootstrap_receives_video_track(binary_path: Path):
                 "cargo",
                 "run",
                 "-p",
-                "bootstrap_client",
+                "obsws_scenario_client",
                 "--",
+                "bootstrap",
                 "--host",
                 host,
                 "--port",
@@ -40,7 +41,7 @@ def test_bootstrap_receives_video_track(binary_path: Path):
             cwd=REPO_ROOT,
         )
         assert result.returncode == 0, (
-            f"bootstrap_client failed: stderr={result.stderr}"
+            f"obsws_scenario_client failed: stderr={result.stderr}"
         )
         stats = json.loads(result.stdout)
         assert stats["video_tracks_received"] >= 1, (

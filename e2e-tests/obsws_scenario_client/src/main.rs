@@ -262,24 +262,40 @@ fn make_answer_json(sdp: &str) -> String {
 
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
-    args.metadata_mut().app_name = "bootstrap_client";
+    args.metadata_mut().app_name = "obsws_scenario_client";
     noargs::HELP_FLAG.take_help(&mut args);
+
+    let verbose = noargs::flag("verbose")
+        .short('v')
+        .doc("詳細ログを出力する")
+        .take(&mut args)
+        .is_present();
+
+    if !noargs::cmd("bootstrap")
+        .doc("bootstrap エンドポイントで WebRTC 接続し、トラック受信統計を出力する")
+        .take(&mut args)
+        .is_present()
+    {
+        if let Some(help) = args.finish()? {
+            print!("{help}");
+        }
+        return Ok(());
+    }
 
     let host: String = noargs::opt("host")
         .default("127.0.0.1")
+        .doc("接続先ホスト")
         .take(&mut args)
         .then(|o| o.value().parse())?;
     let port: u16 = noargs::opt("port")
+        .doc("接続先ポート")
         .take(&mut args)
         .then(|o| o.value().parse())?;
     let duration: u64 = noargs::opt("duration")
         .default("5")
+        .doc("トラック受信を待つ秒数")
         .take(&mut args)
         .then(|o| o.value().parse())?;
-    let verbose = noargs::flag("verbose")
-        .short('v')
-        .take(&mut args)
-        .is_present();
 
     if args.metadata().help_mode {
         return Ok(());
