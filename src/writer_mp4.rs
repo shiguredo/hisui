@@ -847,9 +847,9 @@ pub async fn create_processor(
     input_audio_track_id: Option<crate::TrackId>,
     input_video_track_id: Option<crate::TrackId>,
     processor_id: Option<crate::ProcessorId>,
-) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+) -> crate::Result<crate::ProcessorId> {
     if input_audio_track_id.is_none() && input_video_track_id.is_none() {
-        return Err(crate::PipelineOperationError::InvalidParams(
+        return Err(crate::Error::new(
             "inputAudioTrackId or inputVideoTrackId is required".to_owned(),
         ));
     }
@@ -859,7 +859,7 @@ pub async fn create_processor(
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
     if !is_mp4 {
-        return Err(crate::PipelineOperationError::InvalidParams(format!(
+        return Err(crate::Error::new(format!(
             "outputPath must be an mp4 file: {}",
             output_path.display()
         )));
@@ -869,7 +869,7 @@ pub async fn create_processor(
         && !parent.as_os_str().is_empty()
         && !parent.exists()
     {
-        return Err(crate::PipelineOperationError::InvalidParams(format!(
+        return Err(crate::Error::new(format!(
             "outputPath parent directory does not exist: {}",
             parent.display()
         )));
@@ -894,6 +894,6 @@ pub async fn create_processor(
             },
         )
         .await
-        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+        .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
 }

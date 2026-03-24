@@ -711,7 +711,7 @@ pub async fn create_processor(
     handle: &crate::MediaPipelineHandle,
     endpoint: RtmpOutboundEndpoint,
     processor_id: Option<crate::ProcessorId>,
-) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+) -> crate::Result<crate::ProcessorId> {
     let processor_id =
         processor_id.unwrap_or_else(|| crate::ProcessorId::new("rtmpOutboundEndpoint"));
     handle
@@ -721,6 +721,6 @@ pub async fn create_processor(
             move |h| endpoint.run(h),
         )
         .await
-        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+        .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
 }

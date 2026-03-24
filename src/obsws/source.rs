@@ -1,5 +1,5 @@
 use crate::obsws_input_registry::{ObswsInputEntry, ObswsInputSettings};
-use crate::{PipelineOperationError, ProcessorId, ProcessorMetadata, TrackId};
+use crate::{ProcessorId, ProcessorMetadata, TrackId};
 
 pub mod file_mp4;
 mod mp4;
@@ -65,10 +65,7 @@ pub enum ObswsSourceRequest {
 }
 
 impl ObswsSourceRequest {
-    pub async fn execute(
-        self,
-        handle: &crate::MediaPipelineHandle,
-    ) -> Result<ProcessorId, PipelineOperationError> {
+    pub async fn execute(self, handle: &crate::MediaPipelineHandle) -> crate::Result<ProcessorId> {
         match self {
             Self::CreateMp4FileSource {
                 source,
@@ -83,7 +80,7 @@ impl ObswsSourceRequest {
                         move |h| source.run(h),
                     )
                     .await
-                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
                 Ok(processor_id)
             }
             Self::CreatePngFileSource {
@@ -99,7 +96,7 @@ impl ObswsSourceRequest {
                         move |h| source.run(h),
                     )
                     .await
-                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
                 Ok(processor_id)
             }
             Self::CreateVideoDeviceSource {
@@ -120,7 +117,7 @@ impl ObswsSourceRequest {
                         move |h| source.run(h),
                     )
                     .await
-                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
                 Ok(processor_id)
             }
             Self::CreateRtmpInboundEndpoint {
@@ -136,7 +133,7 @@ impl ObswsSourceRequest {
                         move |h| endpoint.run(h),
                     )
                     .await
-                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
                 Ok(processor_id)
             }
             Self::CreateSrtInboundEndpoint {
@@ -152,7 +149,7 @@ impl ObswsSourceRequest {
                         move |h| endpoint.run(h),
                     )
                     .await
-                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
                 Ok(processor_id)
             }
             Self::CreateRtspSubscriber {
@@ -168,7 +165,7 @@ impl ObswsSourceRequest {
                         move |h| subscriber.run(h),
                     )
                     .await
-                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
                 Ok(processor_id)
             }
             Self::CreateVideoDecoder {
@@ -194,7 +191,7 @@ impl ObswsSourceRequest {
                         },
                     )
                     .await
-                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
                 Ok(processor_id)
             }
             Self::CreateAudioDecoder {
@@ -220,22 +217,8 @@ impl ObswsSourceRequest {
                         },
                     )
                     .await
-                    .map_err(|e| Self::map_register_error(e, &processor_id))?;
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
                 Ok(processor_id)
-            }
-        }
-    }
-
-    fn map_register_error(
-        e: crate::RegisterProcessorError,
-        processor_id: &ProcessorId,
-    ) -> PipelineOperationError {
-        match e {
-            crate::RegisterProcessorError::DuplicateProcessorId => {
-                PipelineOperationError::DuplicateProcessorId(processor_id.clone())
-            }
-            crate::RegisterProcessorError::PipelineTerminated => {
-                PipelineOperationError::PipelineTerminated
             }
         }
     }

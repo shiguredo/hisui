@@ -904,7 +904,7 @@ pub async fn create_audio_processor(
     codec: crate::types::CodecName,
     bitrate_bps: std::num::NonZeroUsize,
     processor_id: Option<crate::ProcessorId>,
-) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+) -> crate::Result<crate::ProcessorId> {
     let processor_id = processor_id
         .unwrap_or_else(|| crate::ProcessorId::new(format!("audioEncoder:{input_track_id}")));
     handle
@@ -925,7 +925,7 @@ pub async fn create_audio_processor(
             },
         )
         .await
-        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+        .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
 }
 
@@ -937,7 +937,7 @@ pub async fn create_video_processor(
     bitrate_bps: std::num::NonZeroUsize,
     frame_rate: crate::video::FrameRate,
     processor_id: Option<crate::ProcessorId>,
-) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+) -> crate::Result<crate::ProcessorId> {
     let processor_id = processor_id
         .unwrap_or_else(|| crate::ProcessorId::new(format!("videoEncoder:{input_track_id}")));
     let options = VideoEncoderOptions {
@@ -960,6 +960,6 @@ pub async fn create_video_processor(
             },
         )
         .await
-        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+        .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
 }

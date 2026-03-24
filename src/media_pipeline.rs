@@ -1262,43 +1262,6 @@ impl std::fmt::Display for PublishTrackError {
 
 impl std::error::Error for PublishTrackError {}
 
-/// パイプライン操作メソッドのエラー型
-#[derive(Debug)]
-pub enum PipelineOperationError {
-    /// プロセッサーID が重複している
-    DuplicateProcessorId(ProcessorId),
-    /// パイプラインが終了している
-    PipelineTerminated,
-    /// パラメータが不正
-    InvalidParams(String),
-    /// 内部エラー
-    InternalError(String),
-}
-
-impl PipelineOperationError {
-    pub fn from_register_error(e: RegisterProcessorError, processor_id: &ProcessorId) -> Self {
-        match e {
-            RegisterProcessorError::DuplicateProcessorId => {
-                Self::DuplicateProcessorId(processor_id.clone())
-            }
-            RegisterProcessorError::PipelineTerminated => Self::PipelineTerminated,
-        }
-    }
-}
-
-impl std::fmt::Display for PipelineOperationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::DuplicateProcessorId(id) => {
-                write!(f, "Processor ID already exists: {id}")
-            }
-            Self::PipelineTerminated => write!(f, "Pipeline has terminated"),
-            Self::InvalidParams(msg) => write!(f, "Invalid params: {msg}"),
-            Self::InternalError(msg) => write!(f, "Internal error: {msg}"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;

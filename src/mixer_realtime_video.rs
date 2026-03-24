@@ -1205,28 +1205,22 @@ pub async fn update_video_mixer(
     handle: &crate::MediaPipelineHandle,
     processor_id: crate::ProcessorId,
     request: VideoRealtimeMixerUpdateConfigRequest,
-) -> Result<UpdateVideoMixerResult, crate::PipelineOperationError> {
+) -> crate::Result<UpdateVideoMixerResult> {
     let sender = handle
         .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<VideoRealtimeMixerRpcMessage>>(
             &processor_id,
         )
         .await
-        .map_err(|e| map_rpc_sender_error(e, &processor_id, "video mixer"))?;
+        .map_err(|e| crate::Error::new(format!("video mixer RPC error for {processor_id}: {e}")))?;
 
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     sender
         .send(VideoRealtimeMixerRpcMessage::UpdateConfig { request, reply_tx })
-        .map_err(|_| {
-            crate::PipelineOperationError::InternalError(
-                "video mixer RPC sender channel is closed".to_owned(),
-            )
-        })?;
-    let result = reply_rx.await.map_err(|_| {
-        crate::PipelineOperationError::InternalError(
-            "video mixer RPC response channel is closed".to_owned(),
-        )
-    })?;
-    let result = result.map_err(|e| crate::PipelineOperationError::InvalidParams(e.display()))?;
+        .map_err(|_| crate::Error::new("video mixer RPC sender channel is closed".to_owned()))?;
+    let result = reply_rx
+        .await
+        .map_err(|_| crate::Error::new("video mixer RPC response channel is closed".to_owned()))?;
+    let result = result.map_err(|e| crate::Error::new(e.display()))?;
     Ok(UpdateVideoMixerResult {
         previous_canvas_width: result.previous_canvas_width,
         previous_canvas_height: result.previous_canvas_height,
@@ -1238,58 +1232,29 @@ pub async fn update_video_mixer(
 pub async fn finish_video_mixer(
     handle: &crate::MediaPipelineHandle,
     processor_id: crate::ProcessorId,
-) -> Result<(), crate::PipelineOperationError> {
+) -> crate::Result<()> {
     let sender = handle
         .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<VideoRealtimeMixerRpcMessage>>(
             &processor_id,
         )
         .await
-        .map_err(|e| map_rpc_sender_error(e, &processor_id, "video mixer"))?;
+        .map_err(|e| crate::Error::new(format!("video mixer RPC error for {processor_id}: {e}")))?;
 
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     sender
         .send(VideoRealtimeMixerRpcMessage::Finish { reply_tx })
-        .map_err(|_| {
-            crate::PipelineOperationError::InternalError(
-                "video mixer RPC sender channel is closed".to_owned(),
-            )
-        })?;
-    reply_rx.await.map_err(|_| {
-        crate::PipelineOperationError::InternalError(
-            "video mixer RPC response channel is closed".to_owned(),
-        )
-    })?;
+        .map_err(|_| crate::Error::new("video mixer RPC sender channel is closed".to_owned()))?;
+    reply_rx
+        .await
+        .map_err(|_| crate::Error::new("video mixer RPC response channel is closed".to_owned()))?;
     Ok(())
-}
-
-fn map_rpc_sender_error(
-    e: crate::media_pipeline::GetProcessorRpcSenderError,
-    processor_id: &crate::ProcessorId,
-    component: &str,
-) -> crate::PipelineOperationError {
-    match e {
-        crate::media_pipeline::GetProcessorRpcSenderError::PipelineTerminated => {
-            crate::PipelineOperationError::PipelineTerminated
-        }
-        crate::media_pipeline::GetProcessorRpcSenderError::ProcessorNotFound => {
-            crate::PipelineOperationError::InvalidParams(format!(
-                "processorId not found: {processor_id}"
-            ))
-        }
-        crate::media_pipeline::GetProcessorRpcSenderError::SenderNotRegistered
-        | crate::media_pipeline::GetProcessorRpcSenderError::TypeMismatch => {
-            crate::PipelineOperationError::InvalidParams(format!(
-                "processor does not support {component} updates: {processor_id}"
-            ))
-        }
-    }
 }
 
 pub async fn create_processor(
     handle: &crate::MediaPipelineHandle,
     mixer: VideoRealtimeMixer,
     processor_id: Option<crate::ProcessorId>,
-) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+) -> crate::Result<crate::ProcessorId> {
     let processor_id = processor_id.unwrap_or_else(|| crate::ProcessorId::new("videoMixer"));
     handle
         .spawn_processor(
@@ -1298,7 +1263,7 @@ pub async fn create_processor(
             move |h| mixer.run(h),
         )
         .await
-        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+        .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
 }
 
