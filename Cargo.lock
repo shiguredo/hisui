@@ -88,6 +88,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bootstrap_client"
+version = "0.0.0"
+dependencies = [
+ "noargs",
+ "nojson",
+ "shiguredo_http11",
+ "shiguredo_webrtc",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

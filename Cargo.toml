@@ -67,3 +67,6 @@ shiguredo_video_toolbox = "=2026.1.0-canary.1"
 
 [dev-dependencies]
 tempfile = "3.18.0"
+
+[workspace]
+members = ["examples/bootstrap_client"]
