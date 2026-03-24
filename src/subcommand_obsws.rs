@@ -130,6 +130,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
     .map_err(noargs::Error::from)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn run_internal(
     addr: SocketAddr,
     password: Option<String>,

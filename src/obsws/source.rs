@@ -14,6 +14,7 @@ pub enum ObswsOutputKind {
     Stream,
     Record,
     RtmpOutbound,
+    Program,
 }
 
 impl ObswsOutputKind {
@@ -22,6 +23,7 @@ impl ObswsOutputKind {
             Self::Stream => "stream",
             Self::Record => "record",
             Self::RtmpOutbound => "rtmp_outbound",
+            Self::Program => "program",
         }
     }
 }

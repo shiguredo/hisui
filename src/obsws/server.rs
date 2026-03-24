@@ -24,6 +24,15 @@ use crate::tcp::{ServerTcpOrTlsStream, TcpOrTlsStream, create_server_tls_accepto
 
 type TlsAcceptor = Arc<tokio_rustls::TlsAcceptor>;
 
+/// Program 出力の状態。常駐ミキサーのプロセッサ ID と固定トラック ID を保持する。
+pub struct ProgramOutputState {
+    pub video_track_id: crate::TrackId,
+    pub audio_track_id: crate::TrackId,
+    pub video_mixer_processor_id: crate::ProcessorId,
+    pub audio_mixer_processor_id: crate::ProcessorId,
+    pub source_processor_ids: Vec<crate::ProcessorId>,
+}
+
 /// upstream リバースプロキシ設定
 struct UpstreamConfig {
     host: String,
@@ -60,6 +69,7 @@ fn request_path(uri: &str) -> &str {
     uri.split_once('?').map_or(uri, |(path, _)| path)
 }
 
+#[expect(clippy::too_many_arguments)]
 pub async fn run_server(
     addr: SocketAddr,
     password: Option<String>,
@@ -116,9 +126,55 @@ pub async fn run_server(
         tracing::debug!("obsws initial start trigger was already completed");
     }
 
+    // Program 出力を初期化する（常駐ミキサー + ソースプロセッサ）
+    let program_output = {
+        let registry = input_registry.read().await;
+        let scene_inputs = registry.list_current_program_scene_input_entries();
+        let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
+            &scene_inputs,
+            crate::obsws::source::ObswsOutputKind::Program,
+            0,
+            registry.canvas_width(),
+            registry.canvas_height(),
+            registry.frame_rate(),
+        )
+        .map_err(|e| {
+            crate::Error::new(format!(
+                "failed to build program output plan: {}",
+                e.message()
+            ))
+        })?;
+
+        crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan)
+            .await?;
+        crate::obsws::session::output::start_source_processors(
+            &pipeline_handle,
+            &mut output_plan.source_plans,
+        )
+        .await?;
+
+        tracing::info!(
+            "program output initialized: video={}, audio={}",
+            output_plan.video_track_id,
+            output_plan.audio_track_id,
+        );
+
+        Arc::new(RwLock::new(ProgramOutputState {
+            video_track_id: output_plan.video_track_id,
+            audio_track_id: output_plan.audio_track_id,
+            video_mixer_processor_id: output_plan.video_mixer_processor_id,
+            audio_mixer_processor_id: output_plan.audio_mixer_processor_id,
+            source_processor_ids: output_plan.source_processor_ids,
+        }))
+    };
+
     let bootstrap_endpoint = Rc::new(
-        BootstrapEndpoint::new(pipeline_handle.clone(), input_registry.clone())
-            .map_err(|e| e.with_context("Failed to init /bootstrap"))?,
+        BootstrapEndpoint::new(
+            pipeline_handle.clone(),
+            input_registry.clone(),
+            program_output.clone(),
+        )
+        .map_err(|e| e.with_context("Failed to init /bootstrap"))?,
     );
 
     run_accept_loop(
@@ -129,6 +185,7 @@ pub async fn run_server(
         input_registry,
         pipeline_handle,
         bootstrap_endpoint,
+        program_output,
     )
     .await
 }
@@ -142,6 +199,7 @@ fn contains_upgrade_header(buf: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn run_accept_loop(
     listener: TcpListener,
     tls_acceptor: Option<TlsAcceptor>,
@@ -150,6 +208,7 @@ async fn run_accept_loop(
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
+    program_output: Arc<RwLock<ProgramOutputState>>,
 ) -> crate::Result<()> {
     loop {
         let (stream, peer_addr) = listener
@@ -162,6 +221,7 @@ async fn run_accept_loop(
         let input_registry = input_registry.clone();
         let pipeline_handle = pipeline_handle.clone();
         let bootstrap_endpoint = bootstrap_endpoint.clone();
+        let program_output = program_output.clone();
         tokio::task::spawn_local(async move {
             // WebSocket はフレーム単位の低遅延配信が必要なため、
             // Nagle アルゴリズムを無効化する。TLS ハンドシェイク前に設定する。
@@ -188,6 +248,7 @@ async fn run_accept_loop(
                 input_registry,
                 pipeline_handle,
                 bootstrap_endpoint,
+                program_output,
             )
             .await
             {
@@ -201,6 +262,7 @@ async fn run_accept_loop(
 }
 
 /// 接続の最初のデータを読み取り、WebSocket Upgrade か HTTP かをルーティングする
+#[expect(clippy::too_many_arguments)]
 async fn route_connection(
     mut stream: ServerTcpOrTlsStream,
     peer_addr: SocketAddr,
@@ -209,6 +271,7 @@ async fn route_connection(
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
+    program_output: Arc<RwLock<ProgramOutputState>>,
 ) -> crate::Result<()> {
     let mut buf = vec![0u8; 8192];
     let n = stream.read(&mut buf).await.map_err(|e| {
@@ -229,6 +292,7 @@ async fn route_connection(
             password,
             input_registry,
             pipeline_handle,
+            program_output,
         )
         .await
     } else {
@@ -252,6 +316,7 @@ async fn handle_ws_connection(
     password: Option<String>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: crate::MediaPipelineHandle,
+    program_output: Arc<RwLock<ProgramOutputState>>,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
     let mut ws = WebSocketServerConnection::new(
@@ -266,7 +331,8 @@ async fn handle_ws_connection(
         .as_deref()
         .map(ObswsAuthentication::new)
         .transpose()?;
-    let mut session = ObswsSession::new(auth, input_registry, Some(pipeline_handle));
+    let mut session =
+        ObswsSession::new(auth, input_registry, Some(pipeline_handle), program_output);
 
     // route_connection で読み取った最初のデータを先に処理する
     let mut pending_initial: Option<Vec<u8>> = Some(initial_buf);

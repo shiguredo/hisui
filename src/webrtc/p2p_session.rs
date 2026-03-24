@@ -137,6 +137,7 @@ pub struct WebRtcP2pSessionManager {
     factory_bundle: Arc<super::factory::WebRtcFactoryBundle>,
     pipeline_handle: crate::MediaPipelineHandle,
     input_registry: Arc<tokio::sync::RwLock<crate::obsws_input_registry::ObswsInputRegistry>>,
+    program_output: Arc<tokio::sync::RwLock<crate::obsws_server::ProgramOutputState>>,
     session: Arc<tokio::sync::Mutex<Option<Session>>>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
 }
@@ -145,6 +146,7 @@ impl WebRtcP2pSessionManager {
     pub fn new(
         handle: crate::MediaPipelineHandle,
         input_registry: Arc<tokio::sync::RwLock<crate::obsws_input_registry::ObswsInputRegistry>>,
+        program_output: Arc<tokio::sync::RwLock<crate::obsws_server::ProgramOutputState>>,
     ) -> crate::Result<Self> {
         #[allow(clippy::arc_with_non_send_sync)]
         let factory_bundle = Arc::new(super::factory::WebRtcFactoryBundle::new()?);
@@ -203,6 +205,7 @@ impl WebRtcP2pSessionManager {
             factory_bundle,
             pipeline_handle: handle,
             input_registry,
+            program_output,
             session,
             event_tx,
         })
@@ -237,6 +240,7 @@ impl WebRtcP2pSessionManager {
         let obsws_session = ObswsSession::new_identified(
             self.input_registry.clone(),
             Some(self.pipeline_handle.clone()),
+            self.program_output.clone(),
         );
 
         let mut guard = self.session.lock().await;
@@ -253,7 +257,24 @@ impl WebRtcP2pSessionManager {
             processor_handle,
             obsws_session,
         ) {
-            Ok((answer_sdp, sess)) => {
+            Ok((answer_sdp, mut sess)) => {
+                // Program 出力の固定トラックを自動購読する
+                let program = self.program_output.read().await;
+                if let Err(e) =
+                    subscribe_track(&mut sess, program.video_track_id.clone(), TrackKind::Video)
+                {
+                    tracing::warn!("failed to subscribe program video track: {}", e.display());
+                }
+                if let Err(e) =
+                    subscribe_track(&mut sess, program.audio_track_id.clone(), TrackKind::Audio)
+                {
+                    tracing::warn!("failed to subscribe program audio track: {}", e.display());
+                }
+                // トラック追加に伴う renegotiation offer を送信する
+                if let Err(e) = maybe_send_offer(&mut sess) {
+                    tracing::warn!("failed to send renegotiation offer: {}", e.display());
+                }
+
                 *guard = Some(sess);
                 Ok(answer_sdp)
             }

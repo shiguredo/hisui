@@ -25,7 +25,7 @@ use crate::obsws_protocol::{
 };
 
 mod input;
-mod output;
+pub mod output;
 mod scene;
 mod scene_item;
 #[cfg(test)]
@@ -110,6 +110,7 @@ pub struct ObswsSession {
     auth: Option<ObswsAuthentication>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
+    program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
     stats: ObswsSessionStats,
 }
 
@@ -118,6 +119,7 @@ impl ObswsSession {
         auth: Option<ObswsAuthentication>,
         input_registry: Arc<RwLock<ObswsInputRegistry>>,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
+        program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
     ) -> Self {
         Self {
             state: ObswsSessionState::AwaitingIdentify,
@@ -126,6 +128,7 @@ impl ObswsSession {
             auth,
             input_registry,
             pipeline_handle,
+            program_output,
             stats: ObswsSessionStats::default(),
         }
     }
@@ -134,6 +137,7 @@ impl ObswsSession {
     pub fn new_identified(
         input_registry: Arc<RwLock<ObswsInputRegistry>>,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
+        program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
     ) -> Self {
         Self {
             state: ObswsSessionState::Identified,
@@ -142,6 +146,7 @@ impl ObswsSession {
             auth: None,
             input_registry,
             pipeline_handle,
+            program_output,
             stats: ObswsSessionStats::default(),
         }
     }
@@ -170,6 +175,55 @@ impl ObswsSession {
             }
         };
         Ok(action)
+    }
+
+    /// Program Scene 切替時に Program 出力を再構築する
+    async fn rebuild_program_output(&self) -> crate::Result<()> {
+        let pipeline_handle = self
+            .pipeline_handle
+            .as_ref()
+            .ok_or_else(|| crate::Error::new("BUG: obsws pipeline handle is not initialized"))?;
+
+        let input_registry = self.input_registry.read().await;
+        let scene_inputs = input_registry.list_current_program_scene_input_entries();
+        let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
+            &scene_inputs,
+            crate::obsws::source::ObswsOutputKind::Program,
+            0,
+            input_registry.canvas_width(),
+            input_registry.canvas_height(),
+            input_registry.frame_rate(),
+        )
+        .map_err(|e| {
+            crate::Error::new(format!(
+                "failed to build program output plan: {}",
+                e.message()
+            ))
+        })?;
+        drop(input_registry);
+
+        let mut program = self.program_output.write().await;
+
+        // ミキサーの入力トラックを更新する
+        output::update_program_mixers(
+            pipeline_handle,
+            &output_plan,
+            &program.video_mixer_processor_id,
+            &program.audio_mixer_processor_id,
+        )
+        .await?;
+
+        // 旧ソースプロセッサを停止する
+        output::stop_source_processors(pipeline_handle, &program.source_processor_ids).await?;
+
+        // 新しいソースプロセッサを起動する
+        output::start_source_processors(pipeline_handle, &mut output_plan.source_plans).await?;
+
+        // ソースプロセッサ ID を更新する
+        program.source_processor_ids = output_plan.source_processor_ids;
+
+        tracing::info!("program output rebuilt for scene change");
+        Ok(())
     }
 
     pub fn on_close_event(&self) -> SessionAction {
@@ -269,7 +323,7 @@ impl ObswsSession {
         }
         let request_id = request.request_id.clone().unwrap_or_default();
         let request_type = request.request_type.clone().unwrap_or_default();
-        match self.handle_request_internal(request).await {
+        let result = match self.handle_request_internal(request).await {
             Ok(execution) => execution.into_session_action(),
             Err(_) => SessionAction::SendText {
                 text: Self::build_internal_error_response(
@@ -279,7 +333,16 @@ impl ObswsSession {
                 ),
                 message_name: "request response message",
             },
+        };
+
+        // Program Scene が切り替わった場合に Program 出力を再構築する
+        if request_type == "SetCurrentProgramScene"
+            && let Err(e) = self.rebuild_program_output().await
+        {
+            tracing::warn!("failed to rebuild program output: {}", e.display());
         }
+
+        result
     }
 
     async fn handle_request_batch(&mut self, request_batch: RequestBatchMessage) -> SessionAction {
