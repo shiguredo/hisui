@@ -8,6 +8,7 @@ import os
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import time
 from pathlib import Path
@@ -36,6 +37,9 @@ class ObswsServer:
         port: int,
         password: str | None = None,
         default_record_dir: Path | None = None,
+        ui_remote_url: str | None = None,
+        https_cert_path: Path | None = None,
+        https_key_path: Path | None = None,
         use_env: bool = False,
     ):
         self.binary_path = binary_path
@@ -43,6 +47,9 @@ class ObswsServer:
         self.port = port
         self.password = password
         self.default_record_dir = default_record_dir
+        self.ui_remote_url = ui_remote_url
+        self.https_cert_path = https_cert_path
+        self.https_key_path = https_key_path
         self.use_env = use_env
         self._process: subprocess.Popen[None] | None = None
 
@@ -55,6 +62,8 @@ class ObswsServer:
     def start(self):
         if self._process is not None:
             raise RuntimeError("obsws server is already started")
+        if (self.https_cert_path is None) != (self.https_key_path is None):
+            raise ValueError("https_cert_path and https_key_path must be provided together")
 
         args = ["--verbose", "--experimental", "obsws"]
         env = os.environ.copy()
@@ -79,6 +88,17 @@ class ObswsServer:
                 args.extend(["--password", self.password])
             if self.default_record_dir is not None:
                 args.extend(["--default-record-dir", str(self.default_record_dir)])
+            if self.ui_remote_url is not None:
+                args.extend(["--ui-remote-url", self.ui_remote_url])
+            if self.https_cert_path is not None and self.https_key_path is not None:
+                args.extend(
+                    [
+                        "--https-cert-path",
+                        str(self.https_cert_path),
+                        "--https-key-path",
+                        str(self.https_key_path),
+                    ]
+                )
             if openh264_path:
                 args.extend(["--openh264", openh264_path])
 
@@ -424,9 +444,18 @@ async def _connect_websocket(url: str):
 
 
 async def _http_get(url: str):
+    return await _http_request("GET", url)
+
+
+async def _http_request(
+    method: str,
+    url: str,
+    *,
+    ssl_context: ssl.SSLContext | bool | None = None,
+):
     timeout = aiohttp.ClientTimeout(total=10.0)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url) as response:
+        async with session.request(method, url, ssl=ssl_context) as response:
             return response.status, await response.text(), response.headers
 
 

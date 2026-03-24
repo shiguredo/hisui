@@ -177,28 +177,48 @@ impl ObswsSession {
         Ok(action)
     }
 
+    /// Program 出力の現在シーン状態を同期する。
+    async fn sync_program_output_state(
+        &self,
+        request_type: &str,
+        request_succeeded: bool,
+    ) -> crate::Result<()> {
+        if !request_succeeded || !matches!(request_type, "SetCurrentProgramScene" | "RemoveScene") {
+            return Ok(());
+        }
+
+        let current_scene_uuid = self
+            .input_registry
+            .read()
+            .await
+            .current_program_scene()
+            .map(|scene| scene.scene_uuid)
+            .unwrap_or_default();
+
+        {
+            let program = self.program_output.read().await;
+            if program.scene_uuid == current_scene_uuid {
+                return Ok(());
+            }
+        }
+
+        if self.pipeline_handle.is_none() {
+            // 単体テストでは pipeline がないため、状態だけ同期する。
+            self.program_output.write().await.scene_uuid = current_scene_uuid;
+            return Ok(());
+        }
+
+        self.rebuild_program_output(&current_scene_uuid).await
+    }
+
     /// Program Scene 切替時に Program 出力を再構築する。
-    /// シーンが実際に変わっていない場合は何もしない。
-    async fn rebuild_program_output(&self) -> crate::Result<()> {
+    async fn rebuild_program_output(&self, current_scene_uuid: &str) -> crate::Result<()> {
         let pipeline_handle = self
             .pipeline_handle
             .as_ref()
             .ok_or_else(|| crate::Error::new("BUG: obsws pipeline handle is not initialized"))?;
 
         let input_registry = self.input_registry.read().await;
-
-        // シーンが変わっていなければ何もしない
-        let current_scene_name = input_registry
-            .current_program_scene()
-            .map(|s| s.scene_name.clone())
-            .unwrap_or_default();
-        {
-            let program = self.program_output.read().await;
-            if program.scene_name == current_scene_name {
-                return Ok(());
-            }
-        }
-
         let scene_inputs = input_registry.list_current_program_scene_input_entries();
         let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
@@ -235,7 +255,7 @@ impl ObswsSession {
 
         // 状態を更新する
         program.source_processor_ids = output_plan.source_processor_ids;
-        program.scene_name = current_scene_name;
+        program.scene_uuid = current_scene_uuid.to_owned();
 
         tracing::info!("program output rebuilt for scene change");
         Ok(())
@@ -338,21 +358,27 @@ impl ObswsSession {
         }
         let request_id = request.request_id.clone().unwrap_or_default();
         let request_type = request.request_type.clone().unwrap_or_default();
-        let result = match self.handle_request_internal(request).await {
-            Ok(execution) => execution.into_session_action(),
-            Err(_) => SessionAction::SendText {
-                text: Self::build_internal_error_response(
-                    &request_type,
-                    &request_id,
-                    "Failed to build internal request response",
-                ),
-                message_name: "request response message",
-            },
+        let (result, request_succeeded) = match self.handle_request_internal(request).await {
+            Ok(execution) => {
+                let request_succeeded = execution.batch_result.request_status_result;
+                (execution.into_session_action(), request_succeeded)
+            }
+            Err(_) => (
+                SessionAction::SendText {
+                    text: Self::build_internal_error_response(
+                        &request_type,
+                        &request_id,
+                        "Failed to build internal request response",
+                    ),
+                    message_name: "request response message",
+                },
+                false,
+            ),
         };
 
-        // Program Scene が切り替わった場合に Program 出力を再構築する
-        if request_type == "SetCurrentProgramScene"
-            && let Err(e) = self.rebuild_program_output().await
+        if let Err(e) = self
+            .sync_program_output_state(&request_type, request_succeeded)
+            .await
         {
             tracing::warn!("failed to rebuild program output: {}", e.display());
         }
@@ -437,6 +463,15 @@ impl ObswsSession {
                     .into_iter()
                     .map(|text| (text, "event message")),
             );
+            if let Err(e) = self
+                .sync_program_output_state(
+                    &results.last().expect("must exist").request_type,
+                    request_succeeded,
+                )
+                .await
+            {
+                tracing::warn!("failed to rebuild program output: {}", e.display());
+            }
             if halt_on_failure && !request_succeeded {
                 break;
             }

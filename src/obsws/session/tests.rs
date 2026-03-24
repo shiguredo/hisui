@@ -20,13 +20,60 @@ fn input_registry() -> Arc<RwLock<ObswsInputRegistry>> {
 
 fn program_output() -> Arc<RwLock<crate::obsws_server::ProgramOutputState>> {
     Arc::new(RwLock::new(crate::obsws_server::ProgramOutputState {
-        scene_name: "Scene".to_owned(),
+        scene_uuid: "scene-default".to_owned(),
         video_track_id: crate::TrackId::new("obsws:program:0:mixed_video"),
         audio_track_id: crate::TrackId::new("obsws:program:0:mixed_audio"),
         video_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:video_mixer"),
         audio_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:audio_mixer"),
         source_processor_ids: Vec::new(),
     }))
+}
+
+#[tokio::test]
+async fn remove_current_scene_updates_program_output_state_without_pipeline() {
+    let input_registry = input_registry();
+    {
+        let mut registry = input_registry.write().await;
+        registry.create_scene("Scene B").expect("must create scene");
+        registry
+            .set_current_program_scene("Scene B")
+            .expect("must switch scene");
+    }
+
+    let program_output = Arc::new(RwLock::new(crate::obsws_server::ProgramOutputState {
+        scene_uuid: "stale-scene-uuid".to_owned(),
+        video_track_id: crate::TrackId::new("obsws:program:0:mixed_video"),
+        audio_track_id: crate::TrackId::new("obsws:program:0:mixed_audio"),
+        video_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:video_mixer"),
+        audio_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:audio_mixer"),
+        source_processor_ids: Vec::new(),
+    }));
+    let mut session = ObswsSession::new(None, input_registry.clone(), None, program_output.clone());
+    let identified = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .await;
+    assert!(identified.is_ok());
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-remove-scene".to_owned()),
+            request_type: Some("RemoveScene".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+
+    let messages = unwrap_send_texts(action);
+    assert_eq!(messages.len(), 3);
+    let current_scene_uuid = input_registry
+        .read()
+        .await
+        .current_program_scene()
+        .map(|scene| scene.scene_uuid)
+        .expect("current program scene must exist");
+    assert_eq!(program_output.read().await.scene_uuid, current_scene_uuid);
 }
 
 fn parse_request_status(text: &nojson::RawJsonOwned) -> (bool, i64) {

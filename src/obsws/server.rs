@@ -26,7 +26,7 @@ type TlsAcceptor = Arc<tokio_rustls::TlsAcceptor>;
 
 /// Program 出力の状態。常駐ミキサーのプロセッサ ID と固定トラック ID を保持する。
 pub struct ProgramOutputState {
-    pub scene_name: String,
+    pub scene_uuid: String,
     pub video_track_id: crate::TrackId,
     pub audio_track_id: crate::TrackId,
     pub video_mixer_processor_id: crate::ProcessorId,
@@ -160,12 +160,12 @@ pub async fn run_server(
             output_plan.audio_track_id,
         );
 
-        let scene_name = registry
+        let scene_uuid = registry
             .current_program_scene()
-            .map(|s| s.scene_name)
+            .map(|s| s.scene_uuid)
             .unwrap_or_default();
         Arc::new(RwLock::new(ProgramOutputState {
-            scene_name,
+            scene_uuid,
             video_track_id: output_plan.video_track_id,
             audio_track_id: output_plan.audio_track_id,
             video_mixer_processor_id: output_plan.video_mixer_processor_id,
