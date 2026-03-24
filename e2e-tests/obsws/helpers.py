@@ -69,6 +69,13 @@ class ObswsServer:
         env = os.environ.copy()
         openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
+            # use_env=True では対応する環境変数がない引数は未対応
+            if self.ui_remote_url is not None:
+                raise ValueError("ui_remote_url is not supported with use_env=True")
+            if self.https_cert_path is not None or self.https_key_path is not None:
+                raise ValueError(
+                    "https_cert_path/https_key_path is not supported with use_env=True"
+                )
             env["HISUI_OBSWS_HOST"] = self.host
             env["HISUI_OBSWS_PORT"] = str(self.port)
             if self.password is not None:

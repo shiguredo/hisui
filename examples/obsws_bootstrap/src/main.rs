@@ -5,12 +5,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use shiguredo_http11::{Request, ResponseDecoder};
-use shiguredo_mp4::boxes::{
-    AudioSampleEntryFields, DopsBox, OpusBox, SampleEntry, VisualSampleEntryFields, Vp09Box,
-    VpccBox,
-};
+use shiguredo_mp4::Uint;
+use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields, Vp09Box, VpccBox};
 use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions, Sample};
-use shiguredo_mp4::{FixedPointNumber, Uint};
 use shiguredo_webrtc::{
     AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioEncoderFactory,
     AudioProcessingBuilder, CreateSessionDescriptionObserver,
@@ -45,7 +42,6 @@ enum ClientEvent {
     Track(RtpTransceiver),
     DataChannel(DataChannel),
     SignalingMessage { data: Vec<u8> },
-    VideoFrame(VideoFrameData),
 }
 
 // VideoSinkHandler から送信するフレームデータ
@@ -384,26 +380,6 @@ fn vp9_sample_entry(width: usize, height: usize) -> SampleEntry {
     })
 }
 
-// --- Opus SampleEntry ---
-
-fn opus_sample_entry(pre_skip: u16) -> SampleEntry {
-    SampleEntry::Opus(OpusBox {
-        audio: AudioSampleEntryFields {
-            data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
-            channelcount: 2,
-            samplesize: 16,
-            samplerate: FixedPointNumber::new(48000, 0),
-        },
-        dops_box: DopsBox {
-            output_channel_count: 2,
-            pre_skip,
-            input_sample_rate: 48000,
-            output_gain: 0,
-        },
-        unknown_boxes: Vec::new(),
-    })
-}
-
 // --- MP4 ライター ---
 
 struct SimpleMp4Writer {
@@ -411,9 +387,7 @@ struct SimpleMp4Writer {
     muxer: Mp4FileMuxer,
     next_position: u64,
     video_sample_entry: Option<SampleEntry>,
-    audio_sample_entry: Option<SampleEntry>,
     video_sample_count: usize,
-    audio_sample_count: usize,
     last_video_timestamp_us: Option<i64>,
 }
 
@@ -445,9 +419,7 @@ impl SimpleMp4Writer {
             muxer,
             next_position,
             video_sample_entry: None,
-            audio_sample_entry: None,
             video_sample_count: 0,
-            audio_sample_count: 0,
             last_video_timestamp_us: None,
         })
     }
@@ -980,14 +952,6 @@ async fn run_client(
                     }
                 }
             }
-            ClientEvent::VideoFrame(frame_data) => {
-                encode_and_write_frame(
-                    &frame_data,
-                    &mut vp9_encoder,
-                    &mut vp9_sample_entry,
-                    &mut mp4_writer,
-                )?;
-            }
         }
     }
 
@@ -1066,14 +1030,14 @@ fn encode_and_write_frame(
     let u_plane = build_plane_data(
         &frame_data.u,
         frame_data.stride_u,
-        (width + 1) / 2,
-        (height + 1) / 2,
+        width.div_ceil(2),
+        height.div_ceil(2),
     );
     let v_plane = build_plane_data(
         &frame_data.v,
         frame_data.stride_v,
-        (width + 1) / 2,
-        (height + 1) / 2,
+        width.div_ceil(2),
+        height.div_ceil(2),
     );
 
     let encode_options = shiguredo_libvpx::EncodeOptions {

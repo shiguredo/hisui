@@ -187,6 +187,7 @@ impl ObswsSession {
             return Ok(());
         }
 
+        // 不要な rebuild を避けるための早期チェック
         let current_scene_uuid = self
             .input_registry
             .read()
@@ -208,17 +209,25 @@ impl ObswsSession {
             return Ok(());
         }
 
-        self.rebuild_program_output(&current_scene_uuid).await
+        self.rebuild_program_output().await
     }
 
     /// Program Scene 切替時に Program 出力を再構築する。
-    async fn rebuild_program_output(&self, current_scene_uuid: &str) -> crate::Result<()> {
+    ///
+    /// current_scene_uuid と入力一覧を同じ read lock 内で一貫して取得し、
+    /// 並行な scene 切替による不整合を防ぐ。
+    async fn rebuild_program_output(&self) -> crate::Result<()> {
         let pipeline_handle = self
             .pipeline_handle
             .as_ref()
             .ok_or_else(|| crate::Error::new("BUG: obsws pipeline handle is not initialized"))?;
 
+        // current_scene_uuid と入力一覧を同じ read lock 内で取得する
         let input_registry = self.input_registry.read().await;
+        let current_scene_uuid = input_registry
+            .current_program_scene()
+            .map(|scene| scene.scene_uuid)
+            .unwrap_or_default();
         let scene_inputs = input_registry.list_current_program_scene_input_entries();
         let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
@@ -238,6 +247,12 @@ impl ObswsSession {
 
         let mut program = self.program_output.write().await;
 
+        // read lock 解放から write lock 取得の間に別スレッドが scene を変更した場合、
+        // ここでスキップする（後続の sync_program_output_state が正しく再構築する）
+        if program.scene_uuid == current_scene_uuid {
+            return Ok(());
+        }
+
         // ミキサーの入力トラックを更新する
         output::update_program_mixers(
             pipeline_handle,
@@ -255,7 +270,7 @@ impl ObswsSession {
 
         // 状態を更新する
         program.source_processor_ids = output_plan.source_processor_ids;
-        program.scene_uuid = current_scene_uuid.to_owned();
+        program.scene_uuid = current_scene_uuid;
 
         tracing::info!("program output rebuilt for scene change");
         Ok(())
