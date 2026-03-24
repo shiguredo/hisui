@@ -597,12 +597,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "obsws_scenario_client"
+name = "obsws_bootstrap"
 version = "0.0.0"
 dependencies = [
  "noargs",
  "nojson",
  "shiguredo_http11",
+ "shiguredo_libvpx",
+ "shiguredo_mp4",
+ "shiguredo_opus",
  "shiguredo_webrtc",
  "tokio",
  "tracing",

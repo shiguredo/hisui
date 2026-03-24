@@ -139,6 +139,7 @@ struct Session {
     _handle: crate::MediaPipelineHandle,
     processor_handle: crate::ProcessorHandle,
     factory: Arc<PeerConnectionFactory>,
+    audio_state: Arc<super::audio::SharedAudioState>,
     pc: PeerConnection,
     _pc_observer: shiguredo_webrtc::PeerConnectionObserver,
     signaling_dc: Option<DataChannel>,
@@ -160,12 +161,18 @@ struct SubscribedTrack {
 
 enum TrackState {
     Video(VideoTrackState),
-    AudioUnsupported,
+    Audio(AudioTrackState),
 }
 
 struct VideoTrackState {
     source: AdaptedVideoTrackSource,
     _track: shiguredo_webrtc::VideoTrack,
+}
+
+struct AudioTrackState {
+    audio_state: Arc<super::audio::SharedAudioState>,
+    _source: shiguredo_webrtc::AudioTrackSource,
+    _track: shiguredo_webrtc::AudioTrack,
 }
 
 pub enum BootstrapError {
@@ -300,6 +307,7 @@ impl WebRtcP2pSessionManager {
 
         match bootstrap_internal(
             self.factory_bundle.factory(),
+            self.factory_bundle.audio_state(),
             offer_sdp,
             self.event_tx.clone(),
             self.pipeline_handle.clone(),
@@ -334,6 +342,7 @@ impl WebRtcP2pSessionManager {
 
 fn bootstrap_internal(
     factory: Arc<PeerConnectionFactory>,
+    audio_state: Arc<super::audio::SharedAudioState>,
     offer_sdp: &str,
     event_tx: mpsc::UnboundedSender<PcEvent>,
     handle: crate::MediaPipelineHandle,
@@ -391,6 +400,7 @@ fn bootstrap_internal(
         _handle: handle,
         processor_handle,
         factory,
+        audio_state,
         pc,
         _pc_observer: pc_observer,
         signaling_dc: Some(signaling_dc),
@@ -697,12 +707,16 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                     }
                 }
             }
-            crate::MediaFrame::Audio(_) => {
+            crate::MediaFrame::Audio(frame) => {
                 if let Some(subscribed) = sess.subscribed_tracks.get_mut(track_id)
-                    && !matches!(subscribed.state, TrackState::AudioUnsupported)
+                    && let TrackState::Audio(state) = &subscribed.state
+                    && frame.format == crate::audio::AudioFormat::I16Be
+                    && let Err(e) = state.audio_state.push_audio_frame(&frame)
                 {
-                    tracing::info!("Audio track is not supported yet: {track_id}");
-                    subscribed.state = TrackState::AudioUnsupported;
+                    tracing::warn!(
+                        "Failed to send audio frame for track {track_id}: {}",
+                        e.display()
+                    );
                 }
             }
         },
@@ -734,6 +748,34 @@ fn create_video_track(
 
     Ok(VideoTrackState {
         source,
+        _track: track,
+    })
+}
+
+fn create_audio_track(
+    sess: &mut Session,
+    track_id: &crate::TrackId,
+) -> crate::Result<AudioTrackState> {
+    let source = sess
+        .factory
+        .create_audio_source()
+        .map_err(|e| crate::Error::new(format!("Failed to create audio source: {e}")))?;
+    let track = sess
+        .factory
+        .create_audio_track(&source, track_id.get())
+        .map_err(|e| crate::Error::new(format!("Failed to create audio track: {e}")))?;
+
+    let mut stream_ids = StringVector::new(0);
+    let stream_id = CxxString::from_str(track_id.get());
+    stream_ids.push(&stream_id);
+    let _sender = sess
+        .pc
+        .add_track(&track.cast_to_media_stream_track(), &stream_ids)
+        .map_err(|e| crate::Error::new(format!("Failed to add audio track: {e}")))?;
+
+    Ok(AudioTrackState {
+        audio_state: sess.audio_state.clone(),
+        _source: source,
         _track: track,
     })
 }
@@ -770,12 +812,12 @@ fn subscribe_track(
             TrackState::Video(state)
         }
         TrackKind::Audio => {
-            tracing::info!("Audio track is not supported yet: {}", track_id);
-            TrackState::AudioUnsupported
+            let state = create_audio_track(session, &track_id)?;
+            TrackState::Audio(state)
         }
     };
 
-    let needs_offer = matches!(state, TrackState::Video(_));
+    let needs_offer = matches!(state, TrackState::Video(_) | TrackState::Audio(_));
 
     session
         .subscribed_tracks

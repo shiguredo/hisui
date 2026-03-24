@@ -28,6 +28,8 @@
 - [UPDATE] `libc` 0.2.183 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
   - @sile
+- [ADD] examples/ に /bootstrap の受信映像を VP9 エンコードして MP4 に保存する example を追加する
+  - @sile
 - [ADD] `VideoFormat` に `I420A` を追加する
   - `PngFileSource` の出力にアルファ付き I420 を使えるようにする
   - `VideoRealtimeMixer` は `I420A` を受け取った場合にアルファ合成して `I420` で出力する

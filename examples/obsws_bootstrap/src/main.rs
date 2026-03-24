@@ -1,8 +1,16 @@
+use std::io::{Seek, SeekFrom, Write};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use shiguredo_http11::{Request, ResponseDecoder};
+use shiguredo_mp4::boxes::{
+    AudioSampleEntryFields, DopsBox, OpusBox, SampleEntry, VisualSampleEntryFields, Vp09Box,
+    VpccBox,
+};
+use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions, Sample};
+use shiguredo_mp4::{FixedPointNumber, Uint};
 use shiguredo_webrtc::{
     AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioEncoderFactory,
     AudioProcessingBuilder, CreateSessionDescriptionObserver,
@@ -21,6 +29,15 @@ use tokio::sync::mpsc;
 
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 
+// MP4 のタイムスケールはマイクロ秒固定にする
+const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
+
+// VP9 SampleEntry 用の定数
+const CHROMA_SUBSAMPLING_I420: Uint<u8, 3, 1> = Uint::new(1);
+const BIT_DEPTH: Uint<u8, 4, 4> = Uint::new(8);
+const LEGAL_RANGE: Uint<u8, 1> = Uint::new(0);
+const BT_709: u8 = 1;
+
 // --- イベント ---
 
 enum ClientEvent {
@@ -28,6 +45,20 @@ enum ClientEvent {
     Track(RtpTransceiver),
     DataChannel(DataChannel),
     SignalingMessage { data: Vec<u8> },
+    VideoFrame(VideoFrameData),
+}
+
+// VideoSinkHandler から送信するフレームデータ
+struct VideoFrameData {
+    y: Vec<u8>,
+    u: Vec<u8>,
+    v: Vec<u8>,
+    stride_y: i32,
+    stride_u: i32,
+    stride_v: i32,
+    width: i32,
+    height: i32,
+    timestamp_us: i64,
 }
 
 enum IceObserverEvent {
@@ -93,19 +124,37 @@ impl DataChannelObserverHandler for SignalingDcHandler {
     }
 }
 
-struct FrameCounterHandler {
+// フレームデータをチャネルで送信するハンドラ
+struct FrameRecordHandler {
     frame_count: Arc<AtomicUsize>,
     width: Arc<AtomicUsize>,
     height: Arc<AtomicUsize>,
+    frame_tx: std::sync::mpsc::SyncSender<VideoFrameData>,
 }
 
-impl VideoSinkHandler for FrameCounterHandler {
+impl VideoSinkHandler for FrameRecordHandler {
     fn on_frame(&mut self, frame: shiguredo_webrtc::VideoFrameRef<'_>) {
         self.frame_count.fetch_add(1, Ordering::Relaxed);
-        // 最新のフレーム解像度を記録する
-        self.width.store(frame.width() as usize, Ordering::Relaxed);
-        self.height
-            .store(frame.height() as usize, Ordering::Relaxed);
+        let w = frame.width();
+        let h = frame.height();
+        self.width.store(w as usize, Ordering::Relaxed);
+        self.height.store(h as usize, Ordering::Relaxed);
+
+        // I420 バッファからプレーンデータをコピーする
+        let buffer = frame.buffer();
+        let data = VideoFrameData {
+            y: buffer.y_data().to_vec(),
+            u: buffer.u_data().to_vec(),
+            v: buffer.v_data().to_vec(),
+            stride_y: buffer.stride_y(),
+            stride_u: buffer.stride_u(),
+            stride_v: buffer.stride_v(),
+            width: w,
+            height: h,
+            timestamp_us: frame.timestamp_us(),
+        };
+        // バッファがいっぱいの場合はフレームを捨てる
+        let _ = self.frame_tx.try_send(data);
     }
 }
 
@@ -306,11 +355,172 @@ fn make_answer_json(sdp: &str) -> String {
     .to_string()
 }
 
+// --- VP9 SampleEntry ---
+
+fn vp9_sample_entry(width: usize, height: usize) -> SampleEntry {
+    SampleEntry::Vp09(Vp09Box {
+        visual: VisualSampleEntryFields {
+            data_reference_index: VisualSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
+            width: width as u16,
+            height: height as u16,
+            horizresolution: VisualSampleEntryFields::DEFAULT_HORIZRESOLUTION,
+            vertresolution: VisualSampleEntryFields::DEFAULT_VERTRESOLUTION,
+            frame_count: VisualSampleEntryFields::DEFAULT_FRAME_COUNT,
+            compressorname: VisualSampleEntryFields::NULL_COMPRESSORNAME,
+            depth: VisualSampleEntryFields::DEFAULT_DEPTH,
+        },
+        vpcc_box: VpccBox {
+            profile: 0,
+            level: 0,
+            bit_depth: BIT_DEPTH,
+            chroma_subsampling: CHROMA_SUBSAMPLING_I420,
+            video_full_range_flag: LEGAL_RANGE,
+            colour_primaries: BT_709,
+            transfer_characteristics: BT_709,
+            matrix_coefficients: BT_709,
+            codec_initialization_data: Vec::new(),
+        },
+        unknown_boxes: Vec::new(),
+    })
+}
+
+// --- Opus SampleEntry ---
+
+fn opus_sample_entry(pre_skip: u16) -> SampleEntry {
+    SampleEntry::Opus(OpusBox {
+        audio: AudioSampleEntryFields {
+            data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
+            channelcount: 2,
+            samplesize: 16,
+            samplerate: FixedPointNumber::new(48000, 0),
+        },
+        dops_box: DopsBox {
+            output_channel_count: 2,
+            pre_skip,
+            input_sample_rate: 48000,
+            output_gain: 0,
+        },
+        unknown_boxes: Vec::new(),
+    })
+}
+
+// --- MP4 ライター ---
+
+struct SimpleMp4Writer {
+    file: std::io::BufWriter<std::fs::File>,
+    muxer: Mp4FileMuxer,
+    next_position: u64,
+    video_sample_entry: Option<SampleEntry>,
+    audio_sample_entry: Option<SampleEntry>,
+    video_sample_count: usize,
+    audio_sample_count: usize,
+    last_video_timestamp_us: Option<i64>,
+}
+
+impl SimpleMp4Writer {
+    fn new(path: &str) -> Result<Self, String> {
+        let muxer_options = Mp4FileMuxerOptions {
+            creation_timestamp: std::time::UNIX_EPOCH
+                .elapsed()
+                .map_err(|e| format!("failed to get epoch: {e}"))?,
+            reserved_moov_box_size: 0,
+        };
+        let muxer =
+            Mp4FileMuxer::with_options(muxer_options).map_err(|e| format!("muxer error: {e}"))?;
+
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)
+            .map_err(|e| format!("failed to create MP4 file: {e}"))?;
+
+        let initial_bytes = muxer.initial_boxes_bytes();
+        file.write_all(initial_bytes)
+            .map_err(|e| format!("failed to write initial boxes: {e}"))?;
+        let next_position = initial_bytes.len() as u64;
+
+        Ok(Self {
+            file: std::io::BufWriter::new(file),
+            muxer,
+            next_position,
+            video_sample_entry: None,
+            audio_sample_entry: None,
+            video_sample_count: 0,
+            audio_sample_count: 0,
+            last_video_timestamp_us: None,
+        })
+    }
+
+    fn append_video(
+        &mut self,
+        data: &[u8],
+        keyframe: bool,
+        sample_entry: Option<SampleEntry>,
+        timestamp_us: i64,
+    ) -> Result<(), String> {
+        // duration は前のフレームとのタイムスタンプ差から計算する
+        let duration_us = if let Some(last_ts) = self.last_video_timestamp_us {
+            let d = timestamp_us - last_ts;
+            if d > 0 { d as u32 } else { 33333 } // デフォルト 30fps 相当
+        } else {
+            33333
+        };
+        self.last_video_timestamp_us = Some(timestamp_us);
+
+        self.file
+            .write_all(data)
+            .map_err(|e| format!("failed to write video data: {e}"))?;
+
+        let sample = Sample {
+            track_kind: shiguredo_mp4::TrackKind::Video,
+            sample_entry: sample_entry.or_else(|| self.video_sample_entry.clone()),
+            keyframe,
+            timescale: TIMESCALE,
+            duration: duration_us,
+            composition_time_offset: None,
+            data_offset: self.next_position,
+            data_size: data.len(),
+        };
+
+        // 最初のサンプルで sample_entry を記録する
+        if self.video_sample_entry.is_none() {
+            self.video_sample_entry = sample.sample_entry.clone();
+        }
+
+        self.muxer
+            .append_sample(&sample)
+            .map_err(|e| format!("failed to append video sample: {e}"))?;
+        self.next_position += data.len() as u64;
+        self.video_sample_count += 1;
+        Ok(())
+    }
+
+    fn finalize(&mut self) -> Result<(), String> {
+        let finalized = self
+            .muxer
+            .finalize()
+            .map_err(|e| format!("failed to finalize muxer: {e}"))?;
+        for (offset, bytes) in finalized.offset_and_bytes_pairs() {
+            self.file
+                .seek(SeekFrom::Start(offset))
+                .map_err(|e| format!("failed to seek: {e}"))?;
+            self.file
+                .write_all(bytes)
+                .map_err(|e| format!("failed to write finalized data: {e}"))?;
+        }
+        self.file
+            .flush()
+            .map_err(|e| format!("failed to flush: {e}"))?;
+        Ok(())
+    }
+}
+
 // --- main ---
 
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
-    args.metadata_mut().app_name = "obsws_scenario_client";
+    args.metadata_mut().app_name = "obsws_bootstrap";
     noargs::HELP_FLAG.take_help(&mut args);
 
     let verbose = noargs::flag("verbose")
@@ -318,17 +528,6 @@ fn main() -> noargs::Result<()> {
         .doc("詳細ログを出力する")
         .take(&mut args)
         .is_present();
-
-    if !noargs::cmd("bootstrap")
-        .doc("bootstrap エンドポイントで WebRTC 接続し、トラック受信統計を出力する")
-        .take(&mut args)
-        .is_present()
-    {
-        if let Some(help) = args.finish()? {
-            print!("{help}");
-        }
-        return Ok(());
-    }
 
     let host: String = noargs::opt("host")
         .default("127.0.0.1")
@@ -344,10 +543,12 @@ fn main() -> noargs::Result<()> {
         .doc("トラック受信を待つ秒数")
         .take(&mut args)
         .then(|o| o.value().parse())?;
+    let output_path: String = noargs::opt("output-path")
+        .doc("MP4 出力先パス")
+        .take(&mut args)
+        .then(|o| o.value().parse())?;
 
-    if args.metadata().help_mode {
-        return Ok(());
-    }
+    args.finish()?;
 
     if verbose {
         tracing_subscriber::fmt()
@@ -369,7 +570,9 @@ fn main() -> noargs::Result<()> {
 
     let result = runtime.block_on(async {
         let local = tokio::task::LocalSet::new();
-        local.run_until(run_client(&host, port, duration)).await
+        local
+            .run_until(run_client(&host, port, duration, &output_path))
+            .await
     });
 
     match result {
@@ -381,6 +584,8 @@ fn main() -> noargs::Result<()> {
                 f.member("video_frames_received", stats.video_frames)?;
                 f.member("video_width", stats.video_width)?;
                 f.member("video_height", stats.video_height)?;
+                f.member("video_codec", stats.video_codec.as_str())?;
+                f.member("video_samples_written", stats.video_samples_written)?;
                 f.member("connection_state", stats.connection_state.as_str())
             });
             println!("{json}");
@@ -400,6 +605,8 @@ struct Stats {
     video_frames: usize,
     video_width: usize,
     video_height: usize,
+    video_codec: String,
+    video_samples_written: usize,
     connection_state: String,
 }
 
@@ -559,7 +766,12 @@ fn append_ice_candidates_to_sdp(sdp: &str, candidates: &[GatheredIceCandidate]) 
     output.join("\r\n") + "\r\n"
 }
 
-async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, String> {
+async fn run_client(
+    host: &str,
+    port: u16,
+    duration_secs: u64,
+    output_path: &str,
+) -> Result<Stats, String> {
     // WebRTC ファクトリを初期化する
     let env = Environment::new();
     let mut network = Thread::new_with_socket_server();
@@ -629,6 +841,9 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
     let video_height = Arc::new(AtomicUsize::new(0));
     let connection_state = Arc::new(std::sync::Mutex::new("new".to_owned()));
 
+    // フレームデータ受信用チャネル
+    let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<VideoFrameData>(60);
+
     let mut retained = RetainedState {
         event_tx: event_tx.clone(),
         _pc_observer: pc_observer,
@@ -640,9 +855,26 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
         ice_candidates: initial_ice_candidates,
     };
 
+    // VP9 エンコーダー（遅延初期化）
+    let mut vp9_encoder: Option<shiguredo_libvpx::Encoder> = None;
+    let mut vp9_sample_entry: Option<SampleEntry> = None;
+
+    // MP4 ライター
+    let mut mp4_writer = SimpleMp4Writer::new(output_path)?;
+
     // イベントループ（duration 秒間）
     let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs);
     loop {
+        // フレーム受信チャネルから溜まっているフレームを処理する
+        while let Ok(frame_data) = frame_rx.try_recv() {
+            encode_and_write_frame(
+                &frame_data,
+                &mut vp9_encoder,
+                &mut vp9_sample_entry,
+                &mut mp4_writer,
+            )?;
+        }
+
         let event = tokio::select! {
             event = event_rx.recv() => {
                 match event {
@@ -675,12 +907,12 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
                 match kind.as_str() {
                     "video" => {
                         video_tracks.fetch_add(1, Ordering::Relaxed);
-                        // VideoSink を登録してフレーム受信をカウントする
                         let mut video_track = track.cast_to_video_track();
-                        let sink = VideoSink::new_with_handler(Box::new(FrameCounterHandler {
+                        let sink = VideoSink::new_with_handler(Box::new(FrameRecordHandler {
                             frame_count: video_frames.clone(),
                             width: video_width.clone(),
                             height: video_height.clone(),
+                            frame_tx: frame_tx.clone(),
                         }));
                         let wants = VideoSinkWants::default();
                         video_track.add_or_update_sink(&sink, &wants);
@@ -748,8 +980,48 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
                     }
                 }
             }
+            ClientEvent::VideoFrame(frame_data) => {
+                encode_and_write_frame(
+                    &frame_data,
+                    &mut vp9_encoder,
+                    &mut vp9_sample_entry,
+                    &mut mp4_writer,
+                )?;
+            }
         }
     }
+
+    // 残りのフレームを処理する
+    while let Ok(frame_data) = frame_rx.try_recv() {
+        encode_and_write_frame(
+            &frame_data,
+            &mut vp9_encoder,
+            &mut vp9_sample_entry,
+            &mut mp4_writer,
+        )?;
+    }
+
+    // エンコーダーの残りフレームをフラッシュする
+    if let Some(encoder) = &mut vp9_encoder {
+        encoder
+            .finish()
+            .map_err(|e| format!("failed to finish encoder: {e}"))?;
+        while let Some(frame) = encoder.next_frame() {
+            let se = vp9_sample_entry.take();
+            mp4_writer.append_video(frame.data(), frame.is_keyframe(), se, 0)?;
+        }
+    }
+
+    // MP4 ファイルをファイナライズする
+    if mp4_writer.video_sample_count > 0 {
+        mp4_writer.finalize()?;
+    }
+
+    let video_codec = if mp4_writer.video_sample_count > 0 {
+        "vp9".to_owned()
+    } else {
+        "none".to_owned()
+    };
 
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
@@ -757,6 +1029,101 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
         video_frames: video_frames.load(Ordering::Relaxed),
         video_width: video_width.load(Ordering::Relaxed),
         video_height: video_height.load(Ordering::Relaxed),
+        video_codec,
+        video_samples_written: mp4_writer.video_sample_count,
         connection_state: connection_state.lock().unwrap().clone(),
     })
+}
+
+/// フレームを VP9 エンコードして MP4 に書き込む
+fn encode_and_write_frame(
+    frame_data: &VideoFrameData,
+    vp9_encoder: &mut Option<shiguredo_libvpx::Encoder>,
+    vp9_sample_entry: &mut Option<SampleEntry>,
+    mp4_writer: &mut SimpleMp4Writer,
+) -> Result<(), String> {
+    let width = frame_data.width as usize;
+    let height = frame_data.height as usize;
+
+    // エンコーダーの遅延初期化
+    if vp9_encoder.is_none() {
+        let config = shiguredo_libvpx::EncoderConfig::new(
+            width,
+            height,
+            shiguredo_libvpx::ImageFormat::I420,
+            shiguredo_libvpx::CodecConfig::Vp9(Default::default()),
+        );
+        let encoder = shiguredo_libvpx::Encoder::new(config)
+            .map_err(|e| format!("failed to create VP9 encoder: {e}"))?;
+        *vp9_encoder = Some(encoder);
+        *vp9_sample_entry = Some(vp9_sample_entry_value(width, height));
+    }
+
+    let encoder = vp9_encoder.as_mut().unwrap();
+
+    // I420 プレーンデータからストライドを考慮して正しいサイズを構築する
+    let y_plane = build_plane_data(&frame_data.y, frame_data.stride_y, width, height);
+    let u_plane = build_plane_data(
+        &frame_data.u,
+        frame_data.stride_u,
+        (width + 1) / 2,
+        (height + 1) / 2,
+    );
+    let v_plane = build_plane_data(
+        &frame_data.v,
+        frame_data.stride_v,
+        (width + 1) / 2,
+        (height + 1) / 2,
+    );
+
+    let encode_options = shiguredo_libvpx::EncodeOptions {
+        force_keyframe: false,
+    };
+    encoder
+        .encode(
+            &shiguredo_libvpx::ImageData::I420 {
+                y: &y_plane,
+                u: &u_plane,
+                v: &v_plane,
+            },
+            &encode_options,
+        )
+        .map_err(|e| format!("VP9 encode failed: {e}"))?;
+
+    while let Some(frame) = encoder.next_frame() {
+        let se = vp9_sample_entry.take();
+        mp4_writer.append_video(
+            frame.data(),
+            frame.is_keyframe(),
+            se,
+            frame_data.timestamp_us,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// ストライドを考慮して plane データを width * height のバイト列に変換する
+fn build_plane_data(data: &[u8], stride: i32, width: usize, height: usize) -> Vec<u8> {
+    let stride = stride as usize;
+    if stride == width {
+        // ストライドと幅が一致する場合はそのまま返す
+        data[..width * height].to_vec()
+    } else {
+        // 行ごとにコピーする
+        let mut result = Vec::with_capacity(width * height);
+        for row in 0..height {
+            let start = row * stride;
+            let end = start + width;
+            if end <= data.len() {
+                result.extend_from_slice(&data[start..end]);
+            }
+        }
+        result
+    }
+}
+
+/// VP9 SampleEntry の値を返す（エンコーダー初期化時に呼ぶ）
+fn vp9_sample_entry_value(width: usize, height: usize) -> SampleEntry {
+    vp9_sample_entry(width, height)
 }

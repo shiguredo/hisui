@@ -69,4 +69,4 @@ shiguredo_video_toolbox = "=2026.1.0-canary.1"
 tempfile = "3.18.0"
 
 [workspace]
-members = ["e2e-tests/obsws_scenario_client"]
+members = ["examples/obsws_bootstrap"]
