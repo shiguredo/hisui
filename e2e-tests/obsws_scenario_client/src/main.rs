@@ -14,6 +14,7 @@ use shiguredo_webrtc::{
     RtpTransceiver, SdpType, SessionDescription, SetLocalDescriptionObserver,
     SetLocalDescriptionObserverHandler, SetRemoteDescriptionObserver,
     SetRemoteDescriptionObserverHandler, Thread, VideoDecoderFactory, VideoEncoderFactory,
+    VideoSink, VideoSinkHandler, VideoSinkWants,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -58,6 +59,22 @@ impl DataChannelObserverHandler for SignalingDcHandler {
         let _ = self.event_tx.send(ClientEvent::SignalingMessage {
             data: data.to_vec(),
         });
+    }
+}
+
+struct FrameCounterHandler {
+    frame_count: Arc<AtomicUsize>,
+    width: Arc<AtomicUsize>,
+    height: Arc<AtomicUsize>,
+}
+
+impl VideoSinkHandler for FrameCounterHandler {
+    fn on_frame(&mut self, frame: shiguredo_webrtc::VideoFrameRef<'_>) {
+        self.frame_count.fetch_add(1, Ordering::Relaxed);
+        // 最新のフレーム解像度を記録する
+        self.width.store(frame.width() as usize, Ordering::Relaxed);
+        self.height
+            .store(frame.height() as usize, Ordering::Relaxed);
     }
 }
 
@@ -328,8 +345,11 @@ fn main() -> noargs::Result<()> {
         Ok(stats) => {
             // JSON 統計を stdout に出力する
             let json = nojson::object(|f| {
-                f.member("video_tracks_received", stats.video_tracks as i64)?;
-                f.member("audio_tracks_received", stats.audio_tracks as i64)?;
+                f.member("video_tracks_received", stats.video_tracks)?;
+                f.member("audio_tracks_received", stats.audio_tracks)?;
+                f.member("video_frames_received", stats.video_frames)?;
+                f.member("video_width", stats.video_width)?;
+                f.member("video_height", stats.video_height)?;
                 f.member("connection_state", stats.connection_state.as_str())
             });
             println!("{json}");
@@ -346,6 +366,9 @@ fn main() -> noargs::Result<()> {
 struct Stats {
     video_tracks: usize,
     audio_tracks: usize,
+    video_frames: usize,
+    video_width: usize,
+    video_height: usize,
     connection_state: String,
 }
 
@@ -404,11 +427,16 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
     // 統計カウンタ
     let video_tracks = Arc::new(AtomicUsize::new(0));
     let audio_tracks = Arc::new(AtomicUsize::new(0));
+    let video_frames = Arc::new(AtomicUsize::new(0));
+    let video_width = Arc::new(AtomicUsize::new(0));
+    let video_height = Arc::new(AtomicUsize::new(0));
     let connection_state = Arc::new(std::sync::Mutex::new("new".to_owned()));
 
     // signaling DC の observer を保持する（ドロップ防止）
     let mut _signaling_dc: Option<DataChannel> = None;
     let mut _dc_observer: Option<DataChannelObserver> = None;
+    // VideoSink をドロップさせないために保持する
+    let mut _video_sinks: Vec<VideoSink> = Vec::new();
 
     // イベントループ（duration 秒間）
     let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs);
@@ -445,6 +473,16 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
                 match kind.as_str() {
                     "video" => {
                         video_tracks.fetch_add(1, Ordering::Relaxed);
+                        // VideoSink を登録してフレーム受信をカウントする
+                        let mut video_track = track.cast_to_video_track();
+                        let sink = VideoSink::new_with_handler(Box::new(FrameCounterHandler {
+                            frame_count: video_frames.clone(),
+                            width: video_width.clone(),
+                            height: video_height.clone(),
+                        }));
+                        let wants = VideoSinkWants::default();
+                        video_track.add_or_update_sink(&sink, &wants);
+                        _video_sinks.push(sink);
                     }
                     "audio" => {
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
@@ -503,6 +541,9 @@ async fn run_client(host: &str, port: u16, duration_secs: u64) -> Result<Stats, 
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
         audio_tracks: audio_tracks.load(Ordering::Relaxed),
+        video_frames: video_frames.load(Ordering::Relaxed),
+        video_width: video_width.load(Ordering::Relaxed),
+        video_height: video_height.load(Ordering::Relaxed),
         connection_state: connection_state.lock().unwrap().clone(),
     })
 }

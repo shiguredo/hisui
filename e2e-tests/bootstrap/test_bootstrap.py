@@ -47,3 +47,12 @@ def test_bootstrap_receives_video_track(binary_path: Path):
         assert stats["video_tracks_received"] >= 1, (
             f"expected at least 1 video track, got {stats}"
         )
+        assert stats["video_frames_received"] >= 1, (
+            f"expected at least 1 video frame, got {stats}"
+        )
+        assert stats["video_width"] == 1920, (
+            f"expected video_width=1920, got {stats}"
+        )
+        assert stats["video_height"] == 1080, (
+            f"expected video_height=1080, got {stats}"
+        )
