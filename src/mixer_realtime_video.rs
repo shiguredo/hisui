@@ -2110,3 +2110,20 @@ fn map_rpc_sender_error(
         }
     }
 }
+
+pub async fn create_processor(
+    handle: &crate::MediaPipelineHandle,
+    mixer: VideoRealtimeMixer,
+    processor_id: Option<crate::ProcessorId>,
+) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+    let processor_id = processor_id.unwrap_or_else(|| crate::ProcessorId::new("videoMixer"));
+    handle
+        .spawn_processor(
+            processor_id.clone(),
+            crate::ProcessorMetadata::new("video_mixer"),
+            move |h| mixer.run(h),
+        )
+        .await
+        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+    Ok(processor_id)
+}

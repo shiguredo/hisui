@@ -14,7 +14,6 @@ pub mod json;
 pub mod logger;
 pub mod media;
 pub mod media_pipeline;
-mod media_pipeline_rpc;
 pub mod mixer_realtime_audio;
 pub mod mixer_realtime_video;
 mod obsws;

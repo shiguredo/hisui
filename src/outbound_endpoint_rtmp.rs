@@ -706,3 +706,21 @@ async fn request_video_keyframe_for_rtmp_play_start(
     );
     Ok(())
 }
+
+pub async fn create_processor(
+    handle: &crate::MediaPipelineHandle,
+    endpoint: RtmpOutboundEndpoint,
+    processor_id: Option<crate::ProcessorId>,
+) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+    let processor_id =
+        processor_id.unwrap_or_else(|| crate::ProcessorId::new("rtmpOutboundEndpoint"));
+    handle
+        .spawn_processor(
+            processor_id.clone(),
+            crate::ProcessorMetadata::new("rtmp_outbound_endpoint"),
+            move |h| endpoint.run(h),
+        )
+        .await
+        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+    Ok(processor_id)
+}

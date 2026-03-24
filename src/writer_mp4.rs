@@ -840,3 +840,60 @@ async fn recv_mp4_writer_rpc_message_or_pending(
         std::future::pending().await
     }
 }
+
+pub async fn create_processor(
+    handle: &crate::MediaPipelineHandle,
+    output_path: std::path::PathBuf,
+    input_audio_track_id: Option<crate::TrackId>,
+    input_video_track_id: Option<crate::TrackId>,
+    processor_id: Option<crate::ProcessorId>,
+) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+    if input_audio_track_id.is_none() && input_video_track_id.is_none() {
+        return Err(crate::PipelineOperationError::InvalidParams(
+            "inputAudioTrackId or inputVideoTrackId is required".to_owned(),
+        ));
+    }
+
+    let is_mp4 = output_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
+    if !is_mp4 {
+        return Err(crate::PipelineOperationError::InvalidParams(format!(
+            "outputPath must be an mp4 file: {}",
+            output_path.display()
+        )));
+    }
+
+    if let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        return Err(crate::PipelineOperationError::InvalidParams(format!(
+            "outputPath parent directory does not exist: {}",
+            parent.display()
+        )));
+    }
+
+    let processor_id = processor_id.unwrap_or_else(|| crate::ProcessorId::new("mp4Writer"));
+    handle
+        .spawn_processor(
+            processor_id.clone(),
+            crate::ProcessorMetadata::new("mp4_writer"),
+            move |h| async move {
+                let writer = Mp4Writer::new(
+                    &output_path,
+                    None,
+                    input_audio_track_id.clone(),
+                    input_video_track_id.clone(),
+                    h.stats(),
+                )?;
+                writer
+                    .run(h, input_audio_track_id, input_video_track_id)
+                    .await
+            },
+        )
+        .await
+        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+    Ok(processor_id)
+}

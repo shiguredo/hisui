@@ -689,6 +689,26 @@ impl MediaPipelineHandle {
     pub(crate) fn send(&self, command: MediaPipelineCommand) -> bool {
         self.command_tx.send(command).is_ok()
     }
+
+    pub async fn list_tracks(&self) -> Result<Vec<TrackId>, PipelineTerminated> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.send(MediaPipelineCommand::ListTracks { reply_tx });
+        reply_rx.await.map_err(|_| PipelineTerminated)
+    }
+
+    pub async fn wait_processor_terminated(
+        &self,
+        processor_id: ProcessorId,
+    ) -> Result<(), PipelineTerminated> {
+        loop {
+            let processor_ids = self.list_processors().await?;
+            if !processor_ids.iter().any(|id| id == &processor_id) {
+                return Ok(());
+            }
+            // 現状は簡易実装として、短い間隔でポーリングしている
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
 }
 
 fn run_local_processor_runtime_thread(
@@ -1253,6 +1273,17 @@ pub enum PipelineOperationError {
     InvalidParams(String),
     /// 内部エラー
     InternalError(String),
+}
+
+impl PipelineOperationError {
+    pub fn from_register_error(e: RegisterProcessorError, processor_id: &ProcessorId) -> Self {
+        match e {
+            RegisterProcessorError::DuplicateProcessorId => {
+                Self::DuplicateProcessorId(processor_id.clone())
+            }
+            RegisterProcessorError::PipelineTerminated => Self::PipelineTerminated,
+        }
+    }
 }
 
 impl std::fmt::Display for PipelineOperationError {

@@ -422,3 +422,20 @@ impl RtmpPublishRunner {
         Ok(())
     }
 }
+
+pub async fn create_processor(
+    handle: &crate::MediaPipelineHandle,
+    publisher: RtmpPublisher,
+    processor_id: Option<crate::ProcessorId>,
+) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+    let processor_id = processor_id.unwrap_or_else(|| crate::ProcessorId::new("rtmpPublisher"));
+    handle
+        .spawn_processor(
+            processor_id.clone(),
+            crate::ProcessorMetadata::new("rtmp_publisher"),
+            move |h| publisher.run(h),
+        )
+        .await
+        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+    Ok(processor_id)
+}

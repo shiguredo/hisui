@@ -891,3 +891,75 @@ impl VideoEncoderInner {
         }
     }
 }
+
+fn default_video_encode_config_for_rpc() -> EncodeConfig {
+    // server RPC の既定 encode params は、compose 既定値と同じ値を利用する
+    crate::sora::recording_layout_encode_params::LayoutEncodeParams::default().config
+}
+
+pub async fn create_audio_processor(
+    handle: &crate::MediaPipelineHandle,
+    input_track_id: crate::TrackId,
+    output_track_id: crate::TrackId,
+    codec: crate::types::CodecName,
+    bitrate_bps: std::num::NonZeroUsize,
+    processor_id: Option<crate::ProcessorId>,
+) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+    let processor_id = processor_id
+        .unwrap_or_else(|| crate::ProcessorId::new(format!("audioEncoder:{input_track_id}")));
+    handle
+        .spawn_processor(
+            processor_id.clone(),
+            crate::ProcessorMetadata::new("audio_encoder"),
+            move |h| async move {
+                #[cfg(feature = "fdk-aac")]
+                let fdk_aac_lib = h.config().fdk_aac_lib.clone();
+                let encoder = AudioEncoder::new(
+                    codec,
+                    bitrate_bps,
+                    #[cfg(feature = "fdk-aac")]
+                    fdk_aac_lib,
+                    h.stats(),
+                )?;
+                encoder.run(h, input_track_id, output_track_id).await
+            },
+        )
+        .await
+        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+    Ok(processor_id)
+}
+
+pub async fn create_video_processor(
+    handle: &crate::MediaPipelineHandle,
+    input_track_id: crate::TrackId,
+    output_track_id: crate::TrackId,
+    codec: crate::types::CodecName,
+    bitrate_bps: std::num::NonZeroUsize,
+    frame_rate: crate::video::FrameRate,
+    processor_id: Option<crate::ProcessorId>,
+) -> std::result::Result<crate::ProcessorId, crate::PipelineOperationError> {
+    let processor_id = processor_id
+        .unwrap_or_else(|| crate::ProcessorId::new(format!("videoEncoder:{input_track_id}")));
+    let options = VideoEncoderOptions {
+        codec,
+        engines: None,
+        bitrate: bitrate_bps.get(),
+        width: crate::types::EvenUsize::ZERO,
+        height: crate::types::EvenUsize::ZERO,
+        frame_rate,
+        encode_params: default_video_encode_config_for_rpc(),
+    };
+    handle
+        .spawn_processor(
+            processor_id.clone(),
+            crate::ProcessorMetadata::new(crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER),
+            move |h| async move {
+                let encoder =
+                    VideoEncoder::new(&options, h.config().openh264_lib.clone(), h.stats())?;
+                encoder.run(h, input_track_id, output_track_id).await
+            },
+        )
+        .await
+        .map_err(|e| crate::PipelineOperationError::from_register_error(e, &processor_id))?;
+    Ok(processor_id)
+}

@@ -1024,9 +1024,12 @@ impl ObswsSession {
             input_tracks,
             output_track_id: video.source_track_id.clone(),
         };
-        pipeline_handle
-            .create_video_mixer(mixer, Some(video_mixer_processor_id.clone()))
-            .await?;
+        crate::mixer_realtime_video::create_processor(
+            pipeline_handle,
+            mixer,
+            Some(video_mixer_processor_id.clone()),
+        )
+        .await?;
         Ok(())
     }
 
@@ -1057,9 +1060,12 @@ impl ObswsSession {
             input_tracks,
             output_track_id: audio.source_track_id.clone(),
         };
-        pipeline_handle
-            .create_audio_mixer(mixer, Some(audio_mixer_processor_id.clone()))
-            .await?;
+        crate::mixer_realtime_audio::create_processor(
+            pipeline_handle,
+            mixer,
+            Some(audio_mixer_processor_id.clone()),
+        )
+        .await?;
         Ok(())
     }
 
@@ -1086,26 +1092,26 @@ impl ObswsSession {
         )
         .await?;
 
-        pipeline_handle
-            .create_video_encoder(
-                run.video.source_track_id.clone(),
-                run.video.encoded_track_id.clone(),
-                crate::types::CodecName::H264,
-                std::num::NonZeroUsize::new(2_000_000).unwrap(),
-                output_plan.frame_rate,
-                Some(run.video.encoder_processor_id.clone()),
-            )
-            .await?;
+        crate::encoder::create_video_processor(
+            pipeline_handle,
+            run.video.source_track_id.clone(),
+            run.video.encoded_track_id.clone(),
+            crate::types::CodecName::H264,
+            std::num::NonZeroUsize::new(2_000_000).unwrap(),
+            output_plan.frame_rate,
+            Some(run.video.encoder_processor_id.clone()),
+        )
+        .await?;
 
-        pipeline_handle
-            .create_audio_encoder(
-                run.audio.source_track_id.clone(),
-                run.audio.encoded_track_id.clone(),
-                crate::types::CodecName::Aac,
-                std::num::NonZeroUsize::new(128_000).unwrap(),
-                Some(run.audio.encoder_processor_id.clone()),
-            )
-            .await?;
+        crate::encoder::create_audio_processor(
+            pipeline_handle,
+            run.audio.source_track_id.clone(),
+            run.audio.encoded_track_id.clone(),
+            crate::types::CodecName::Aac,
+            std::num::NonZeroUsize::new(128_000).unwrap(),
+            Some(run.audio.encoder_processor_id.clone()),
+        )
+        .await?;
 
         let publisher = crate::publisher_rtmp::RtmpPublisher {
             output_url: output_url.to_owned(),
@@ -1114,9 +1120,12 @@ impl ObswsSession {
             input_video_track_id: Some(run.video.encoded_track_id.clone()),
             options: Default::default(),
         };
-        pipeline_handle
-            .create_rtmp_publisher(publisher, Some(run.publisher_processor_id.clone()))
-            .await?;
+        crate::publisher_rtmp::create_processor(
+            pipeline_handle,
+            publisher,
+            Some(run.publisher_processor_id.clone()),
+        )
+        .await?;
 
         for source_plan in &mut output_plan.source_plans {
             for request in source_plan.requests.drain(..) {
@@ -1149,35 +1158,35 @@ impl ObswsSession {
         )
         .await?;
 
-        pipeline_handle
-            .create_video_encoder(
-                run.video.source_track_id.clone(),
-                run.video.encoded_track_id.clone(),
-                crate::types::CodecName::H264,
-                std::num::NonZeroUsize::new(2_000_000).unwrap(),
-                output_plan.frame_rate,
-                Some(run.video.encoder_processor_id.clone()),
-            )
-            .await?;
+        crate::encoder::create_video_processor(
+            pipeline_handle,
+            run.video.source_track_id.clone(),
+            run.video.encoded_track_id.clone(),
+            crate::types::CodecName::H264,
+            std::num::NonZeroUsize::new(2_000_000).unwrap(),
+            output_plan.frame_rate,
+            Some(run.video.encoder_processor_id.clone()),
+        )
+        .await?;
 
-        pipeline_handle
-            .create_audio_encoder(
-                run.audio.source_track_id.clone(),
-                run.audio.encoded_track_id.clone(),
-                crate::types::CodecName::Opus,
-                std::num::NonZeroUsize::new(128_000).unwrap(),
-                Some(run.audio.encoder_processor_id.clone()),
-            )
-            .await?;
+        crate::encoder::create_audio_processor(
+            pipeline_handle,
+            run.audio.source_track_id.clone(),
+            run.audio.encoded_track_id.clone(),
+            crate::types::CodecName::Opus,
+            std::num::NonZeroUsize::new(128_000).unwrap(),
+            Some(run.audio.encoder_processor_id.clone()),
+        )
+        .await?;
 
-        pipeline_handle
-            .create_mp4_writer(
-                output_path.to_path_buf(),
-                Some(run.audio.encoded_track_id.clone()),
-                Some(run.video.encoded_track_id.clone()),
-                Some(run.writer_processor_id.clone()),
-            )
-            .await?;
+        crate::writer_mp4::create_processor(
+            pipeline_handle,
+            output_path.to_path_buf(),
+            Some(run.audio.encoded_track_id.clone()),
+            Some(run.video.encoded_track_id.clone()),
+            Some(run.writer_processor_id.clone()),
+        )
+        .await?;
 
         for source_plan in &mut output_plan.source_plans {
             for request in source_plan.requests.drain(..) {
@@ -1241,27 +1250,27 @@ impl ObswsSession {
         )
         .await?;
 
-        pipeline_handle
-            .create_video_encoder(
-                run.video.source_track_id.clone(),
-                run.video.encoded_track_id.clone(),
-                crate::types::CodecName::H264,
-                std::num::NonZeroUsize::new(2_000_000).unwrap(),
-                output_plan.frame_rate,
-                Some(run.video.encoder_processor_id.clone()),
-            )
-            .await?;
+        crate::encoder::create_video_processor(
+            pipeline_handle,
+            run.video.source_track_id.clone(),
+            run.video.encoded_track_id.clone(),
+            crate::types::CodecName::H264,
+            std::num::NonZeroUsize::new(2_000_000).unwrap(),
+            output_plan.frame_rate,
+            Some(run.video.encoder_processor_id.clone()),
+        )
+        .await?;
 
         // RTMP outbound は AAC エンコーディングを使用する（RTMP の制約）
-        pipeline_handle
-            .create_audio_encoder(
-                run.audio.source_track_id.clone(),
-                run.audio.encoded_track_id.clone(),
-                crate::types::CodecName::Aac,
-                std::num::NonZeroUsize::new(128_000).unwrap(),
-                Some(run.audio.encoder_processor_id.clone()),
-            )
-            .await?;
+        crate::encoder::create_audio_processor(
+            pipeline_handle,
+            run.audio.source_track_id.clone(),
+            run.audio.encoded_track_id.clone(),
+            crate::types::CodecName::Aac,
+            std::num::NonZeroUsize::new(128_000).unwrap(),
+            Some(run.audio.encoder_processor_id.clone()),
+        )
+        .await?;
 
         let endpoint = crate::outbound_endpoint_rtmp::RtmpOutboundEndpoint {
             output_url: output_url.to_owned(),
@@ -1270,9 +1279,12 @@ impl ObswsSession {
             input_video_track_id: Some(run.video.encoded_track_id.clone()),
             options: Default::default(),
         };
-        pipeline_handle
-            .create_rtmp_outbound_endpoint(endpoint, Some(run.endpoint_processor_id.clone()))
-            .await?;
+        crate::outbound_endpoint_rtmp::create_processor(
+            pipeline_handle,
+            endpoint,
+            Some(run.endpoint_processor_id.clone()),
+        )
+        .await?;
 
         for source_plan in &mut output_plan.source_plans {
             for request in source_plan.requests.drain(..) {
