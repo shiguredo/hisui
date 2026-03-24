@@ -18,7 +18,7 @@ use crate::{
     sora::recording_reader::VideoReader,
     sora::recording_video_mixer::{VideoMixer, VideoMixerSpec},
     video::FrameRate,
-    writer_yuv::YuvWriter,
+    yuv::YuvWriter,
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/vmaf-default.jsonc");

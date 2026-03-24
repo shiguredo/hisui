@@ -39,7 +39,7 @@ pub(super) fn build_record_source_plan(
         "obsws:{kind}:{run_id}:source:{source_index}:audio_decoder"
     ));
 
-    let subscriber = crate::subscriber_rtsp::RtspSubscriber {
+    let subscriber = crate::rtsp::subscriber::RtspSubscriber {
         input_url: input_url.to_owned(),
         output_video_track_id: Some(encoded_video_track_id.clone()),
         output_audio_track_id: Some(encoded_audio_track_id.clone()),

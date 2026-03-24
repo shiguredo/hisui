@@ -49,7 +49,7 @@ pub enum ObswsSourceRequest {
         processor_id: Option<ProcessorId>,
     },
     CreateRtspSubscriber {
-        subscriber: crate::subscriber_rtsp::RtspSubscriber,
+        subscriber: crate::rtsp::subscriber::RtspSubscriber,
         processor_id: Option<ProcessorId>,
     },
     CreateVideoDecoder {
