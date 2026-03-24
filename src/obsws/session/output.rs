@@ -998,7 +998,7 @@ impl ObswsSession {
         let input_tracks = output_plan
             .video_mixer_input_tracks
             .iter()
-            .map(|t| crate::mixer_realtime_video::InputTrack {
+            .map(|t| crate::mixer::video::InputTrack {
                 track_id: t.track_id.clone(),
                 x: t.x as isize,
                 y: t.y as isize,
@@ -1017,14 +1017,14 @@ impl ObswsSession {
                 crop_right: t.crop_right as usize,
             })
             .collect();
-        let mixer = crate::mixer_realtime_video::VideoRealtimeMixer {
+        let mixer = crate::mixer::video::VideoRealtimeMixer {
             canvas_width: output_plan.canvas_width,
             canvas_height: output_plan.canvas_height,
             frame_rate: output_plan.frame_rate,
             input_tracks,
             output_track_id: video.source_track_id.clone(),
         };
-        crate::mixer_realtime_video::create_processor(
+        crate::mixer::video::create_processor(
             pipeline_handle,
             mixer,
             Some(video_mixer_processor_id.clone()),
@@ -1045,13 +1045,13 @@ impl ObswsSession {
             .iter()
             .filter_map(|sp| {
                 sp.source_audio_track_id.as_ref().map(|track_id| {
-                    crate::mixer_realtime_audio::AudioRealtimeInputTrack {
+                    crate::mixer::audio::AudioRealtimeInputTrack {
                         track_id: track_id.clone(),
                     }
                 })
             })
             .collect();
-        let mixer = crate::mixer_realtime_audio::AudioRealtimeMixer {
+        let mixer = crate::mixer::audio::AudioRealtimeMixer {
             sample_rate: crate::audio::SampleRate::HZ_48000,
             channels: crate::audio::Channels::STEREO,
             frame_duration: std::time::Duration::from_millis(20),
@@ -1060,7 +1060,7 @@ impl ObswsSession {
             input_tracks,
             output_track_id: audio.source_track_id.clone(),
         };
-        crate::mixer_realtime_audio::create_processor(
+        crate::mixer::audio::create_processor(
             pipeline_handle,
             mixer,
             Some(audio_mixer_processor_id.clone()),
@@ -1544,7 +1544,7 @@ impl ObswsSession {
         loop {
             let sender = match pipeline_handle
                 .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
-                    crate::mixer_realtime_audio::AudioRealtimeMixerRpcMessage,
+                    crate::mixer::audio::AudioRealtimeMixerRpcMessage,
                 >>(&processor_id)
                 .await
             {
@@ -1570,9 +1570,7 @@ impl ObswsSession {
 
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             sender
-                .send(
-                    crate::mixer_realtime_audio::AudioRealtimeMixerRpcMessage::Finish { reply_tx },
-                )
+                .send(crate::mixer::audio::AudioRealtimeMixerRpcMessage::Finish { reply_tx })
                 .map_err(|_| {
                     crate::Error::new(format!(
                         "failed to send finish RPC to audio mixer: {processor_id}"
@@ -1596,7 +1594,7 @@ impl ObswsSession {
         loop {
             let sender = match pipeline_handle
                 .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
-                    crate::mixer_realtime_video::VideoRealtimeMixerRpcMessage,
+                    crate::mixer::video::VideoRealtimeMixerRpcMessage,
                 >>(&processor_id)
                 .await
             {
@@ -1622,9 +1620,7 @@ impl ObswsSession {
 
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
             sender
-                .send(
-                    crate::mixer_realtime_video::VideoRealtimeMixerRpcMessage::Finish { reply_tx },
-                )
+                .send(crate::mixer::video::VideoRealtimeMixerRpcMessage::Finish { reply_tx })
                 .map_err(|_| {
                     crate::Error::new(format!(
                         "failed to send finish RPC to video mixer: {processor_id}"
