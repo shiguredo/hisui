@@ -77,7 +77,7 @@ fn make_offer_json(sdp: &str) -> String {
 
 struct P2pPcObserverHandler {
     event_tx: mpsc::UnboundedSender<PcEvent>,
-    ice_tx: std::sync::mpsc::Sender<IceObserverEvent>,
+    ice_tx: tokio::sync::mpsc::UnboundedSender<IceObserverEvent>,
 }
 
 impl PeerConnectionObserverHandler for P2pPcObserverHandler {
@@ -150,7 +150,7 @@ struct Session {
     pending_renegotiation: bool,
     subscribed_tracks: std::collections::HashMap<crate::TrackId, SubscribedTrack>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
-    ice_rx: std::sync::mpsc::Receiver<IceObserverEvent>,
+    ice_rx: tokio::sync::mpsc::UnboundedReceiver<IceObserverEvent>,
     ice_candidates: Vec<GatheredIceCandidate>,
     obsws_session: ObswsSession,
 }
@@ -213,7 +213,7 @@ impl WebRtcP2pSessionManager {
                         tracing::info!("PeerConnection state changed: {state:?}");
                         if state == PeerConnectionState::Connected && sess.pending_renegotiation {
                             // 接続確立後に保留中の renegotiation offer を送信する
-                            if let Err(e) = maybe_send_offer(sess) {
+                            if let Err(e) = maybe_send_offer(sess).await {
                                 tracing::warn!(
                                     "failed to send renegotiation offer: {}",
                                     e.display()
@@ -242,7 +242,7 @@ impl WebRtcP2pSessionManager {
                         }
                     }
                     PcEvent::DcMessage { data } => {
-                        if handle_dc_message(sess, &data) {
+                        if handle_dc_message(sess, &data).await {
                             tracing::info!("Session closed");
                             *guard = None;
                         }
@@ -313,7 +313,9 @@ impl WebRtcP2pSessionManager {
             self.pipeline_handle.clone(),
             processor_handle,
             obsws_session,
-        ) {
+        )
+        .await
+        {
             Ok((answer_sdp, mut sess)) => {
                 // Program 出力の固定トラックを購読する（PeerConnection にトラックを追加）
                 // renegotiation offer は接続確立後に送信される
@@ -340,7 +342,7 @@ impl WebRtcP2pSessionManager {
     }
 }
 
-fn bootstrap_internal(
+async fn bootstrap_internal(
     factory: Arc<PeerConnectionFactory>,
     audio_state: Arc<super::audio::SharedAudioState>,
     offer_sdp: &str,
@@ -349,7 +351,7 @@ fn bootstrap_internal(
     processor_handle: crate::ProcessorHandle,
     obsws_session: ObswsSession,
 ) -> crate::Result<(String, Session)> {
-    let (ice_tx, ice_rx) = std::sync::mpsc::channel::<IceObserverEvent>();
+    let (ice_tx, ice_rx) = tokio::sync::mpsc::unbounded_channel::<IceObserverEvent>();
 
     // PeerConnectionObserver の作成
     let pc_observer = PeerConnectionObserver::new_with_handler(Box::new(P2pPcObserverHandler {
@@ -394,7 +396,8 @@ fn bootstrap_internal(
     let answer_sdp = super::sdp::create_answer_sdp(&pc)?;
     super::sdp::set_local_answer(&pc, &answer_sdp)?;
     let mut ice_candidates = Vec::new();
-    let answer_sdp = finalize_local_sdp(answer_sdp, &ice_rx, &mut ice_candidates)?;
+    let mut ice_rx = ice_rx;
+    let answer_sdp = finalize_local_sdp(answer_sdp, &mut ice_rx, &mut ice_candidates).await?;
 
     let sess = Session {
         _handle: handle,
@@ -419,9 +422,9 @@ fn bootstrap_internal(
     Ok((answer_sdp, sess))
 }
 
-fn finalize_local_sdp(
+async fn finalize_local_sdp(
     initial_sdp: String,
-    ice_rx: &std::sync::mpsc::Receiver<IceObserverEvent>,
+    ice_rx: &mut tokio::sync::mpsc::UnboundedReceiver<IceObserverEvent>,
     cached_candidates: &mut Vec<GatheredIceCandidate>,
 ) -> crate::Result<String> {
     if initial_sdp.contains("\r\na=candidate:") {
@@ -430,6 +433,7 @@ fn finalize_local_sdp(
 
     let mut candidates = Vec::new();
     let mut complete = false;
+    // まずノンブロッキングで既に到着しているイベントを処理する
     while let Ok(event) = ice_rx.try_recv() {
         match event {
             IceObserverEvent::Candidate {
@@ -456,33 +460,31 @@ fn finalize_local_sdp(
         ));
     }
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // タイムアウト付きで ICE gathering 完了を待機する
+    let timeout_duration = std::time::Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + timeout_duration;
     while !complete {
-        let Some(timeout) = deadline.checked_duration_since(std::time::Instant::now()) else {
-            if !cached_candidates.is_empty() {
-                return Ok(append_ice_candidates_to_sdp(
-                    &initial_sdp,
-                    cached_candidates,
-                ));
-            }
-            return Err(crate::Error::new("ICE gathering timed out"));
-        };
-        match ice_rx.recv_timeout(timeout) {
-            Ok(IceObserverEvent::Candidate {
+        match tokio::time::timeout_at(deadline, ice_rx.recv()).await {
+            Ok(Some(IceObserverEvent::Candidate {
                 sdp_mid,
                 sdp_mline_index,
                 candidate,
-            }) => {
+            })) => {
                 candidates.push(GatheredIceCandidate {
                     sdp_mid,
                     sdp_mline_index,
                     candidate,
                 });
             }
-            Ok(IceObserverEvent::Complete) => {
+            Ok(Some(IceObserverEvent::Complete)) => {
                 complete = true;
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Ok(None) => {
+                // チャネルが切断された
+                return Err(crate::Error::new("ICE gathering channel closed"));
+            }
+            Err(_) => {
+                // タイムアウト
                 if !cached_candidates.is_empty() {
                     return Ok(append_ice_candidates_to_sdp(
                         &initial_sdp,
@@ -490,9 +492,6 @@ fn finalize_local_sdp(
                     ));
                 }
                 return Err(crate::Error::new("ICE gathering timed out"));
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(crate::Error::new("ICE gathering channel closed"));
             }
         }
     }
@@ -560,14 +559,14 @@ fn append_ice_candidates_to_sdp(sdp: &str, candidates: &[GatheredIceCandidate]) 
 // DataChannel メッセージ処理
 
 /// DataChannel メッセージを処理する。true を返した場合はセッションを終了する。
-fn handle_dc_message(sess: &mut Session, data: &[u8]) -> bool {
+async fn handle_dc_message(sess: &mut Session, data: &[u8]) -> bool {
     let Some(msg) = parse_signaling_message(data) else {
         tracing::warn!("Failed to parse signaling message");
         return false;
     };
 
     match msg.msg_type.as_str() {
-        "answer" => handle_answer(sess, msg.sdp.as_deref()),
+        "answer" => handle_answer(sess, msg.sdp.as_deref()).await,
         "offer" => {
             // client からの offer は無視する
             tracing::info!("Ignoring offer from client");
@@ -590,7 +589,7 @@ fn handle_dc_message(sess: &mut Session, data: &[u8]) -> bool {
 }
 
 /// answer を処理する。true を返した場合はセッションを終了する。
-fn handle_answer(sess: &mut Session, sdp: Option<&str>) -> bool {
+async fn handle_answer(sess: &mut Session, sdp: Option<&str>) -> bool {
     if !sess.in_flight_offer {
         send_close(sess, "unexpected", "Offer has not been sent");
         return true;
@@ -613,7 +612,7 @@ fn handle_answer(sess: &mut Session, sdp: Option<&str>) -> bool {
     sess.in_flight_offer = false;
     if sess.pending_renegotiation {
         sess.pending_renegotiation = false;
-        if let Err(e) = maybe_send_offer(sess) {
+        if let Err(e) = maybe_send_offer(sess).await {
             send_close(sess, "sdp-error", &e.reason);
             return true;
         }
@@ -780,7 +779,7 @@ fn create_audio_track(
     })
 }
 
-fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
+async fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
     if sess.in_flight_offer {
         sess.pending_renegotiation = true;
         return Ok(());
@@ -789,7 +788,8 @@ fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
 
     let offer_sdp = super::sdp::create_offer_sdp(&sess.pc)?;
     super::sdp::set_local_offer(&sess.pc, &offer_sdp)?;
-    let offer_sdp = finalize_local_sdp(offer_sdp, &sess.ice_rx, &mut sess.ice_candidates)?;
+    let offer_sdp =
+        finalize_local_sdp(offer_sdp, &mut sess.ice_rx, &mut sess.ice_candidates).await?;
 
     send_dc(sess, &make_offer_json(&offer_sdp));
     sess.in_flight_offer = true;
