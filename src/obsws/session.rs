@@ -177,7 +177,8 @@ impl ObswsSession {
         Ok(action)
     }
 
-    /// Program Scene 切替時に Program 出力を再構築する
+    /// Program Scene 切替時に Program 出力を再構築する。
+    /// シーンが実際に変わっていない場合は何もしない。
     async fn rebuild_program_output(&self) -> crate::Result<()> {
         let pipeline_handle = self
             .pipeline_handle
@@ -185,6 +186,19 @@ impl ObswsSession {
             .ok_or_else(|| crate::Error::new("BUG: obsws pipeline handle is not initialized"))?;
 
         let input_registry = self.input_registry.read().await;
+
+        // シーンが変わっていなければ何もしない
+        let current_scene_name = input_registry
+            .current_program_scene()
+            .map(|s| s.scene_name.clone())
+            .unwrap_or_default();
+        {
+            let program = self.program_output.read().await;
+            if program.scene_name == current_scene_name {
+                return Ok(());
+            }
+        }
+
         let scene_inputs = input_registry.list_current_program_scene_input_entries();
         let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
@@ -219,8 +233,9 @@ impl ObswsSession {
         // 新しいソースプロセッサを起動する
         output::start_source_processors(pipeline_handle, &mut output_plan.source_plans).await?;
 
-        // ソースプロセッサ ID を更新する
+        // 状態を更新する
         program.source_processor_ids = output_plan.source_processor_ids;
+        program.scene_name = current_scene_name;
 
         tracing::info!("program output rebuilt for scene change");
         Ok(())

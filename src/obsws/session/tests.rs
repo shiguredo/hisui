@@ -20,6 +20,7 @@ fn input_registry() -> Arc<RwLock<ObswsInputRegistry>> {
 
 fn program_output() -> Arc<RwLock<crate::obsws_server::ProgramOutputState>> {
     Arc::new(RwLock::new(crate::obsws_server::ProgramOutputState {
+        scene_name: "Scene".to_owned(),
         video_track_id: crate::TrackId::new("obsws:program:0:mixed_video"),
         audio_track_id: crate::TrackId::new("obsws:program:0:mixed_audio"),
         video_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:video_mixer"),
