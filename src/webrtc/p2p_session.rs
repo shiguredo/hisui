@@ -668,12 +668,12 @@ fn send_dc(sess: &Session, msg: &str) {
 }
 
 /// obsws DataChannel で OBS WebSocket プロトコルメッセージを処理する
-async fn handle_obsws_message(sess: &mut Session, data: &[u8]) {
+async fn handle_obsws_message(sess: &mut Session, data: &[u8]) -> bool {
     let text = match std::str::from_utf8(data) {
         Ok(text) => text,
         Err(_) => {
             tracing::warn!("Received non-UTF-8 obsws message on DataChannel");
-            return;
+            return false;
         }
     };
     tracing::debug!("Received obsws message: {text}");
@@ -683,32 +683,36 @@ async fn handle_obsws_message(sess: &mut Session, data: &[u8]) {
         Ok(action) => action,
         Err(e) => {
             tracing::warn!("Invalid OBS WS message on DataChannel: {}", e.display());
-            return;
+            return false;
         }
     };
 
     // SessionAction を obsws DataChannel 送信に変換する
-    apply_obsws_action_to_dc(sess, action);
+    apply_obsws_action_to_dc(sess, action)
 }
 
 /// OBS WS SessionAction を obsws DataChannel 経由で送信する
-fn apply_obsws_action_to_dc(sess: &Session, action: SessionAction) {
+fn apply_obsws_action_to_dc(sess: &Session, action: SessionAction) -> bool {
     match action {
         SessionAction::SendText { text, .. } => {
             send_obsws_dc(sess, text.text());
+            false
         }
         SessionAction::SendTexts { messages } => {
             for (text, _) in messages {
                 send_obsws_dc(sess, text.text());
             }
+            false
         }
         SessionAction::Close { reason, .. } => {
             tracing::warn!("OBS WS session close on DataChannel: {reason}");
             send_close(sess, "obsws-error", reason);
+            true
         }
         SessionAction::Terminate => {
             tracing::warn!("OBS WS session terminate on DataChannel");
             send_close(sess, "obsws-terminated", "OBS WS session terminated");
+            true
         }
     }
 }

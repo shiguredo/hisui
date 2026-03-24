@@ -42,6 +42,7 @@ enum ClientEvent {
     ConnectionChange(PeerConnectionState),
     Track(RtpTransceiver),
     DataChannel(DataChannel),
+    ObswsDataChannelStateChange,
     SignalingMessage { data: Vec<u8> },
     ObswsMessage { data: Vec<u8> },
 }
@@ -127,6 +128,10 @@ struct ObswsDcHandler {
 }
 
 impl DataChannelObserverHandler for ObswsDcHandler {
+    fn on_state_change(&mut self) {
+        let _ = self.event_tx.send(ClientEvent::ObswsDataChannelStateChange);
+    }
+
     fn on_message(&mut self, data: &[u8], _is_binary: bool) {
         let _ = self.event_tx.send(ClientEvent::ObswsMessage {
             data: data.to_vec(),
@@ -939,6 +944,7 @@ async fn run_client(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs);
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
+    let mut obsws_ready_at: Option<tokio::time::Instant> = None;
     loop {
         // フレーム受信チャネルから溜まっているフレームを処理する
         while let Ok(frame_data) = frame_rx.try_recv() {
@@ -952,6 +958,8 @@ async fn run_client(
 
         if !obsws_create_input_sent
             && let Some(dc) = &retained.obsws_dc
+            && let Some(ready_at) = obsws_ready_at
+            && tokio::time::Instant::now() >= ready_at
             && dc.state() == DataChannelState::Open
         {
             let request = make_create_mp4_input_request(input_mp4_path);
@@ -962,12 +970,16 @@ async fn run_client(
             tracing::info!("CreateInput request sent on obsws DataChannel");
         }
 
+        let send_wakeup = obsws_ready_at.unwrap_or(deadline);
         let event = tokio::select! {
             event = event_rx.recv() => {
                 match event {
                     Some(e) => e,
                     None => break,
                 }
+            }
+            _ = tokio::time::sleep_until(send_wakeup), if !obsws_create_input_sent && obsws_ready_at.is_some() => {
+                continue;
             }
             _ = tokio::time::sleep_until(deadline) => break,
         };
@@ -1030,6 +1042,10 @@ async fn run_client(
                             event_tx: retained.event_tx.clone(),
                         }));
                     dc.register_observer(&observer);
+                    if dc.state() == DataChannelState::Open {
+                        obsws_ready_at =
+                            Some(tokio::time::Instant::now() + Duration::from_millis(200));
+                    }
                     retained.obsws_dc = Some(dc);
                     retained.obsws_dc_observer = Some(observer);
                 }
@@ -1091,6 +1107,16 @@ async fn run_client(
                     }
                 } else {
                     tracing::debug!("obsws message: <binary {} bytes>", data.len());
+                }
+            }
+            ClientEvent::ObswsDataChannelStateChange => {
+                if let Some(dc) = &retained.obsws_dc {
+                    let state = dc.state();
+                    tracing::info!("obsws data channel state: {state:?}");
+                    if state == DataChannelState::Open {
+                        obsws_ready_at =
+                            Some(tokio::time::Instant::now() + Duration::from_millis(200));
+                    }
                 }
             }
         }
