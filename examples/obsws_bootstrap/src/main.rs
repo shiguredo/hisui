@@ -683,6 +683,10 @@ fn main() -> noargs::Result<()> {
                 f.member("connection_state", stats.connection_state.as_str())
             });
             println!("{json}");
+            // 一時対処:
+            // WebRTC teardown 中の race で process 終了時に SIGSEGV することがあるため、
+            // 成功時は統計出力後に即時終了して destructor 群を踏まないようにする。
+            std::process::exit(0);
         }
         Err(e) => {
             eprintln!("error: {e}");
