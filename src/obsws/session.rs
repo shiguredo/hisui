@@ -25,7 +25,7 @@ use crate::obsws_protocol::{
 };
 
 mod input;
-mod output;
+pub mod output;
 mod scene;
 mod scene_item;
 #[cfg(test)]
@@ -110,6 +110,7 @@ pub struct ObswsSession {
     auth: Option<ObswsAuthentication>,
     input_registry: Arc<RwLock<ObswsInputRegistry>>,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
+    program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
     stats: ObswsSessionStats,
 }
 
@@ -118,6 +119,7 @@ impl ObswsSession {
         auth: Option<ObswsAuthentication>,
         input_registry: Arc<RwLock<ObswsInputRegistry>>,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
+        program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
     ) -> Self {
         Self {
             state: ObswsSessionState::AwaitingIdentify,
@@ -126,6 +128,25 @@ impl ObswsSession {
             auth,
             input_registry,
             pipeline_handle,
+            program_output,
+            stats: ObswsSessionStats::default(),
+        }
+    }
+
+    /// DataChannel 経由の接続用。認証なし・Identified 状態で初期化する。
+    pub fn new_identified(
+        input_registry: Arc<RwLock<ObswsInputRegistry>>,
+        pipeline_handle: Option<crate::MediaPipelineHandle>,
+        program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
+    ) -> Self {
+        Self {
+            state: ObswsSessionState::Identified,
+            negotiated_rpc_version: Some(1),
+            event_subscriptions: OBSWS_EVENT_SUB_ALL,
+            auth: None,
+            input_registry,
+            pipeline_handle,
+            program_output,
             stats: ObswsSessionStats::default(),
         }
     }
@@ -154,6 +175,132 @@ impl ObswsSession {
             }
         };
         Ok(action)
+    }
+
+    /// Program 出力の現在シーン状態を同期する。
+    async fn sync_program_output_state(
+        &self,
+        request_type: &str,
+        request_succeeded: bool,
+    ) -> crate::Result<()> {
+        let scene_change_only_request =
+            matches!(request_type, "SetCurrentProgramScene" | "RemoveScene");
+        if !request_succeeded
+            || !matches!(
+                request_type,
+                "SetCurrentProgramScene"
+                    | "RemoveScene"
+                    | "CreateInput"
+                    | "RemoveInput"
+                    | "SetInputSettings"
+                    | "CreateSceneItem"
+                    | "RemoveSceneItem"
+                    | "DuplicateSceneItem"
+                    | "SetSceneItemEnabled"
+                    | "SetSceneItemIndex"
+                    | "SetSceneItemBlendMode"
+                    | "SetSceneItemTransform"
+            )
+        {
+            return Ok(());
+        }
+
+        // 不要な rebuild を避けるための早期チェック
+        let current_scene_uuid = self.current_program_scene_uuid().await;
+
+        if scene_change_only_request {
+            let program = self.program_output.read().await;
+            if program.scene_uuid == current_scene_uuid {
+                return Ok(());
+            }
+        }
+
+        if self.pipeline_handle.is_none() {
+            // 単体テストでは pipeline がないため、状態だけ同期する。
+            self.program_output.write().await.scene_uuid = current_scene_uuid;
+            return Ok(());
+        }
+
+        self.rebuild_program_output().await
+    }
+
+    async fn current_program_scene_uuid(&self) -> String {
+        self.input_registry
+            .read()
+            .await
+            .current_program_scene()
+            .map(|scene| scene.scene_uuid)
+            .unwrap_or_default()
+    }
+
+    /// Program Scene 切替時に Program 出力を再構築する。
+    ///
+    /// current_scene_uuid と入力一覧を同じ read lock 内で一貫して取得し、
+    /// commit 前には再度 read lock を取得して scene 切替 writer を止めた上で
+    /// stale snapshot を破棄する。
+    async fn rebuild_program_output(&self) -> crate::Result<()> {
+        let pipeline_handle = self
+            .pipeline_handle
+            .as_ref()
+            .ok_or_else(|| crate::Error::new("BUG: obsws pipeline handle is not initialized"))?;
+
+        // current_scene_uuid と入力一覧を同じ read lock 内で取得する
+        let input_registry = self.input_registry.read().await;
+        let current_scene_uuid = input_registry
+            .current_program_scene()
+            .map(|scene| scene.scene_uuid)
+            .unwrap_or_default();
+        let scene_inputs = input_registry.list_current_program_scene_input_entries();
+        let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
+            &scene_inputs,
+            crate::obsws::source::ObswsOutputKind::Program,
+            0,
+            input_registry.canvas_width(),
+            input_registry.canvas_height(),
+            input_registry.frame_rate(),
+        )
+        .map_err(|e| {
+            crate::Error::new(format!(
+                "failed to build program output plan: {}",
+                e.message()
+            ))
+        })?;
+        drop(input_registry);
+
+        // commit 前に read lock を再取得し、scene 切替 writer を止めた上で
+        // snapshot がまだ current scene を指しているか最終確認する。
+        let input_registry = self.input_registry.read().await;
+        if input_registry
+            .current_program_scene()
+            .map(|scene| scene.scene_uuid.as_str() != current_scene_uuid.as_str())
+            .unwrap_or(true)
+        {
+            return Ok(());
+        }
+
+        let mut program = self.program_output.write().await;
+
+        // ミキサーの入力トラックを更新する
+        output::update_program_mixers(
+            pipeline_handle,
+            &output_plan,
+            &program.video_mixer_processor_id,
+            &program.audio_mixer_processor_id,
+        )
+        .await?;
+
+        // 旧ソースプロセッサを停止する
+        output::stop_source_processors(pipeline_handle, &program.source_processor_ids).await?;
+
+        // 新しいソースプロセッサを起動する
+        output::start_source_processors(pipeline_handle, &mut output_plan.source_plans).await?;
+
+        // 状態を更新する
+        program.source_processor_ids = output_plan.source_processor_ids;
+        program.scene_uuid = current_scene_uuid;
+
+        tracing::info!("program output rebuilt for scene change");
+        Ok(())
     }
 
     pub fn on_close_event(&self) -> SessionAction {
@@ -253,17 +400,32 @@ impl ObswsSession {
         }
         let request_id = request.request_id.clone().unwrap_or_default();
         let request_type = request.request_type.clone().unwrap_or_default();
-        match self.handle_request_internal(request).await {
-            Ok(execution) => execution.into_session_action(),
-            Err(_) => SessionAction::SendText {
-                text: Self::build_internal_error_response(
-                    &request_type,
-                    &request_id,
-                    "Failed to build internal request response",
-                ),
-                message_name: "request response message",
-            },
+        let (result, request_succeeded) = match self.handle_request_internal(request).await {
+            Ok(execution) => {
+                let request_succeeded = execution.batch_result.request_status_result;
+                (execution.into_session_action(), request_succeeded)
+            }
+            Err(_) => (
+                SessionAction::SendText {
+                    text: Self::build_internal_error_response(
+                        &request_type,
+                        &request_id,
+                        "Failed to build internal request response",
+                    ),
+                    message_name: "request response message",
+                },
+                false,
+            ),
+        };
+
+        if let Err(e) = self
+            .sync_program_output_state(&request_type, request_succeeded)
+            .await
+        {
+            tracing::warn!("failed to rebuild program output: {}", e.display());
         }
+
+        result
     }
 
     async fn handle_request_batch(&mut self, request_batch: RequestBatchMessage) -> SessionAction {
@@ -343,6 +505,15 @@ impl ObswsSession {
                     .into_iter()
                     .map(|text| (text, "event message")),
             );
+            if let Err(e) = self
+                .sync_program_output_state(
+                    &results.last().expect("must exist").request_type,
+                    request_succeeded,
+                )
+                .await
+            {
+                tracing::warn!("failed to rebuild program output: {}", e.display());
+            }
             if halt_on_failure && !request_succeeded {
                 break;
             }

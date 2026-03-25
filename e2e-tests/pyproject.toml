@@ -13,5 +13,5 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["server", "obsws"]
+testpaths = ["obsws"]
 timeout = 30

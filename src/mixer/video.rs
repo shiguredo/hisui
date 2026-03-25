@@ -299,6 +299,8 @@ struct VideoRealtimeMixerRunner {
 
 #[derive(Debug)]
 struct VideoRealtimeMixerStats {
+    total_input_video_frame_count: crate::stats::StatsCounter,
+    total_output_video_frame_count: crate::stats::StatsCounter,
     current_input_track_count: crate::stats::StatsGauge,
     current_canvas_width: crate::stats::StatsGauge,
     current_canvas_height: crate::stats::StatsGauge,
@@ -311,6 +313,8 @@ struct VideoRealtimeMixerStats {
 impl VideoRealtimeMixerStats {
     fn new(stats: &mut crate::stats::Stats) -> Self {
         Self {
+            total_input_video_frame_count: stats.counter("total_input_video_frame_count"),
+            total_output_video_frame_count: stats.counter("total_output_video_frame_count"),
             current_input_track_count: stats.gauge("current_input_track_count"),
             current_canvas_width: stats.gauge("current_canvas_width"),
             current_canvas_height: stats.gauge("current_canvas_height"),
@@ -335,6 +339,14 @@ impl VideoRealtimeMixerStats {
         self.current_frame_rate_denumerator
             .set(frame_rate.denumerator.get() as i64);
         self.current_input_track_count.set(input_track_count as i64);
+    }
+
+    fn add_input_video_frame_count(&self) {
+        self.total_input_video_frame_count.inc();
+    }
+
+    fn add_output_video_frame_count(&self) {
+        self.total_output_video_frame_count.inc();
     }
 }
 
@@ -399,10 +411,10 @@ impl VideoRealtimeMixerRunner {
             &self.states,
             &self.stats,
         )?;
-
         if !self.output_tx.send_video(frame) {
             return Ok(false);
         }
+        self.stats.add_output_video_frame_count();
         self.noacked_sent = self.noacked_sent.saturating_add(1);
 
         Ok(true)
@@ -417,7 +429,7 @@ impl VideoRealtimeMixerRunner {
             *event_rx = None;
             return Ok(());
         };
-        handle_track_event(event, &mut self.states)
+        handle_track_event(event, &mut self.states, &self.stats)
     }
 
     fn handle_rpc_message(
@@ -717,6 +729,7 @@ async fn recv_rpc_message_or_pending(
 fn handle_track_event(
     event: TrackEvent,
     states: &mut HashMap<TrackId, InputTrackState>,
+    stats: &VideoRealtimeMixerStats,
 ) -> crate::Result<()> {
     match event {
         TrackEvent::Video {
@@ -728,6 +741,7 @@ fn handle_track_event(
                 return Ok(());
             };
             state.handle_video(frame, received_at)?;
+            stats.add_input_video_frame_count();
         }
         TrackEvent::Eos { track_id } => {
             if let Some(state) = states.get_mut(&track_id) {

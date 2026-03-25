@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
 use shiguredo_webrtc::{
-    AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioEncoderFactory,
-    AudioProcessingBuilder, Environment, PeerConnectionFactory, PeerConnectionFactoryDependencies,
-    RtcEventLogFactory, Thread, VideoDecoderFactory, VideoEncoderFactory,
+    AudioDecoderFactory, AudioDeviceModule, AudioEncoderFactory, AudioProcessingBuilder,
+    PeerConnectionFactory, PeerConnectionFactoryDependencies, RtcEventLogFactory, Thread,
+    VideoDecoderFactory, VideoEncoderFactory,
 };
+
+use super::audio::{HisuiAudioDeviceModuleHandler, SharedAudioState};
 
 pub(crate) struct WebRtcFactoryBundle {
     factory: Arc<PeerConnectionFactory>,
+    audio_state: Arc<SharedAudioState>,
     _network: Thread,
     _worker: Thread,
     _signaling: Thread,
@@ -15,7 +18,6 @@ pub(crate) struct WebRtcFactoryBundle {
 
 impl WebRtcFactoryBundle {
     pub(crate) fn new() -> crate::Result<Self> {
-        let env = Environment::new();
         let mut network = Thread::new_with_socket_server();
         let mut worker = Thread::new();
         let mut signaling = Thread::new();
@@ -29,8 +31,10 @@ impl WebRtcFactoryBundle {
         deps.set_signaling_thread(&signaling);
         deps.set_event_log_factory(RtcEventLogFactory::new());
 
-        let adm = AudioDeviceModule::new(&env, AudioDeviceModuleAudioLayer::Dummy)
-            .map_err(|e| crate::Error::new(format!("failed to create AudioDeviceModule: {e}")))?;
+        // メディアパイプラインの音声を WebRTC に供給するカスタム ADM を使用する
+        let audio_state = Arc::new(SharedAudioState::new());
+        let handler = HisuiAudioDeviceModuleHandler::new(audio_state.clone());
+        let adm = AudioDeviceModule::new_with_handler(Box::new(handler));
         deps.set_audio_device_module(&adm);
         deps.set_audio_encoder_factory(&AudioEncoderFactory::builtin());
         deps.set_audio_decoder_factory(&AudioDecoderFactory::builtin());
@@ -45,6 +49,7 @@ impl WebRtcFactoryBundle {
 
         Ok(Self {
             factory: Arc::new(factory),
+            audio_state,
             _network: network,
             _worker: worker,
             _signaling: signaling,
@@ -53,5 +58,9 @@ impl WebRtcFactoryBundle {
 
     pub(crate) fn factory(&self) -> Arc<PeerConnectionFactory> {
         self.factory.clone()
+    }
+
+    pub(crate) fn audio_state(&self) -> Arc<SharedAudioState> {
+        self.audio_state.clone()
     }
 }

@@ -1,0 +1,25 @@
+[package]
+name = "obsws_bootstrap"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+shiguredo_webrtc = "=0.146.2-canary.1"
+shiguredo_http11 = "2026.1.1"
+shiguredo_libvpx = "2026.1.0-canary.2"
+shiguredo_opus = "2026.1.0-canary.4"
+shiguredo_mp4 = "2026.2.0"
+nojson = "0.3.9"
+tokio = { version = "1.50.0", features = [
+    "rt",
+    "rt-multi-thread",
+    "net",
+    "io-util",
+    "macros",
+    "time",
+    "sync",
+] }
+noargs = "0.4.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "std"] }

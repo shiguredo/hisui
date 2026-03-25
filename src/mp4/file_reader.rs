@@ -42,6 +42,12 @@ pub struct Mp4FileTrackAvailability {
     pub has_video: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mp4FileVideoDimensions {
+    pub width: usize,
+    pub height: usize,
+}
+
 impl Mp4FileReader {
     pub fn new<P: AsRef<Path>>(path: P, options: Mp4FileReaderOptions) -> Result<Self> {
         Ok(Self {
@@ -302,6 +308,42 @@ pub fn probe_mp4_track_availability<P: AsRef<Path>>(path: P) -> Result<Mp4FileTr
         has_audio,
         has_video,
     })
+}
+
+pub fn probe_mp4_video_dimensions<P: AsRef<Path>>(
+    path: P,
+) -> Result<Option<Mp4FileVideoDimensions>> {
+    let path = path.as_ref();
+    let mut file = File::open(path)
+        .map_err(|e| Error::new(format!("Cannot open file {}: {e}", path.display())))?;
+    let mut demuxer = Mp4FileDemuxer::new();
+    initialize_mp4_demuxer(&mut file, &mut demuxer, path)?;
+
+    while let Some(sample) = demuxer.next_sample()? {
+        if sample.track.kind != TrackKind::Video {
+            continue;
+        }
+        let Some(sample_entry) = sample.sample_entry else {
+            continue;
+        };
+        let metadata = match sample_entry {
+            SampleEntry::Avc1(b) => Some(&b.visual),
+            SampleEntry::Hev1(b) => Some(&b.visual),
+            SampleEntry::Hvc1(b) => Some(&b.visual),
+            SampleEntry::Vp08(b) => Some(&b.visual),
+            SampleEntry::Vp09(b) => Some(&b.visual),
+            SampleEntry::Av01(b) => Some(&b.visual),
+            _ => None,
+        };
+        if let Some(metadata) = metadata {
+            return Ok(Some(Mp4FileVideoDimensions {
+                width: metadata.width as usize,
+                height: metadata.height as usize,
+            }));
+        }
+    }
+
+    Ok(None)
 }
 
 #[derive(Debug, Clone)]

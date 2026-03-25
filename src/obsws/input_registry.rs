@@ -37,6 +37,20 @@ fn transform_for_input(input: &ObswsInput) -> ObswsSceneItemTransform {
             ..Default::default()
         };
     }
+    if let ObswsInputSettings::Mp4FileSource(ref settings) = input.settings
+        && let Some(ref path) = settings.path
+        && let Ok(Some(dimensions)) = crate::mp4::file_reader::probe_mp4_video_dimensions(path)
+    {
+        let width = dimensions.width - (dimensions.width % 2);
+        let height = dimensions.height - (dimensions.height % 2);
+        return ObswsSceneItemTransform {
+            source_width: width as f64,
+            source_height: height as f64,
+            width: width as f64,
+            height: height as f64,
+            ..Default::default()
+        };
+    }
     ObswsSceneItemTransform::default()
 }
 

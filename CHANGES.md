@@ -39,6 +39,8 @@
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
   - 未指定の場合は従来通り 404 を返す
   - @voluntas
+- [ADD] examples/ に /bootstrap の受信映像を VP9 エンコードして MP4 に保存する example を追加する
+  - @sile
 - [ADD] `VideoFormat` に `I420A` を追加する
   - `PngFileSource` の出力にアルファ付き I420 を使えるようにする
   - `VideoRealtimeMixer` は `I420A` を受け取った場合にアルファ合成して `I420` で出力する
@@ -46,22 +48,6 @@
   - @sile
 - [ADD] 環境変数 `HISUI_WEBRTC_LOG` で WebRTC ネイティブログを有効化できるようにする
   - `verbose` / `info` / `warning` / `error` / `none` を指定できる
-  - @sile
-- [ADD] server サブコマンドに `--http-listen-address` オプションを追加する
-  - HTTP サーバーのリッスンアドレスを指定可能にする
-  - デフォルトは `127.0.0.1`
-  - @sile
-- [ADD] 実験的な server サブコマンドを追加する
-  - `hisui server --http-port <PORT>` で HTTP サーバーを起動する
-  - `/.ok` は 204 No Content を返す
-  - `/bootstrap` は WebRTC 向けの SDP ベースのブートストラップを処理する:
-    - `POST /bootstrap` かつ `Content-Type: application/sdp` の場合は 201 Created で SDP を返す
-    - 条件に合わない場合は 400 / 404 / 405 / 409 / 415 / 500 を返す
-  - それ以外のパスには 404 Not Found を返す
-  - @voluntas
-- [ADD] server サブコマンドの `/metrics` で統計値を JSON 形式でも取得できるようにする
-  - `GET /metrics?format=json` で `prom2json` 準拠の JSON を返す
-  - 既存の `GET /metrics` は従来どおり Prometheus text 形式を返す
   - @sile
 - [ADD] 依存ライブラリに shiguredo_http11 を追加する
   - @voluntas
@@ -72,9 +58,13 @@
 - [ADD] 実験的な `obsws` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui obsws` で WebSocket サーバーを起動できる
   - `hisui obsws --default-record-dir <PATH>` と `HISUI_DEFAULT_RECORD_DIR` で録画先ディレクトリの初期値を設定できる
+  - `--ui-remote-url` を指定した場合、ローカル endpoint 以外への GET リクエストを指定 URL にリバースプロキシする
+  - `--https-cert-path` と `--https-key-path` を指定した場合、HTTPS で待ち受けできる
   - `obswebsocket.json` サブプロトコルでの接続を受け付ける
-  - Hisui 固有の HTTP endpoint として `/.ok` と `/metrics` を公開する
-    - `GET /metrics?format=json` で JSON 形式のメトリクス取得もできる
+  - Hisui 固有の HTTP endpoint として `/.ok` と `/metrics` と `/bootstrap` を公開する
+    - `GET /metrics?format=json` で `prom2json` 準拠の JSON を返す
+    - `POST /bootstrap` かつ `Content-Type: application/sdp` の場合は 201 Created で SDP を返す
+    - `/bootstrap` は条件に合わない場合は 400 / 404 / 405 / 409 / 415 / 500 を返す
   - `Hello (op=0)` / `Identify (op=1)` / `Identified (op=2)` を処理できる
   - challenge / salt ベースの password 認証に対応する
   - `Request (op=6)` / `RequestResponse (op=7)` を処理できる
@@ -196,9 +186,6 @@
   - @voluntas
 - [ADD] python/tests に Hisui Python バインディングのテストコードを追加する
   - @voluntas
-- [ADD] e2e-tests に `HisuiServer` 補助クラスを追加する
-  - server サブコマンドの起動・終了処理を共通化する
-  - @sile
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
   - @sile
 - [CHANGE] Slack 通知を rtCamp/action-slack-notify から shiguredo/github-actions の slack-notify に置き換える

@@ -16,6 +16,7 @@ pub struct ObswsComposedOutputPlan {
     pub frame_rate: crate::video::FrameRate,
 }
 
+#[derive(Debug)]
 pub struct ObswsVideoMixerInputTrack {
     pub track_id: TrackId,
     pub x: i64,

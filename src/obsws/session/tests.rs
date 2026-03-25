@@ -18,6 +18,94 @@ fn input_registry() -> Arc<RwLock<ObswsInputRegistry>> {
     Arc::new(RwLock::new(ObswsInputRegistry::new_for_test()))
 }
 
+fn program_output() -> Arc<RwLock<crate::obsws_server::ProgramOutputState>> {
+    Arc::new(RwLock::new(crate::obsws_server::ProgramOutputState {
+        scene_uuid: "scene-default".to_owned(),
+        video_track_id: crate::TrackId::new("obsws:program:0:mixed_video"),
+        audio_track_id: crate::TrackId::new("obsws:program:0:mixed_audio"),
+        video_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:video_mixer"),
+        audio_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:audio_mixer"),
+        source_processor_ids: Vec::new(),
+    }))
+}
+
+#[tokio::test]
+async fn remove_current_scene_updates_program_output_state_without_pipeline() {
+    let input_registry = input_registry();
+    {
+        let mut registry = input_registry.write().await;
+        registry.create_scene("Scene B").expect("must create scene");
+        registry
+            .set_current_program_scene("Scene B")
+            .expect("must switch scene");
+    }
+
+    let program_output = Arc::new(RwLock::new(crate::obsws_server::ProgramOutputState {
+        scene_uuid: "stale-scene-uuid".to_owned(),
+        video_track_id: crate::TrackId::new("obsws:program:0:mixed_video"),
+        audio_track_id: crate::TrackId::new("obsws:program:0:mixed_audio"),
+        video_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:video_mixer"),
+        audio_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:audio_mixer"),
+        source_processor_ids: Vec::new(),
+    }));
+    let mut session = ObswsSession::new(None, input_registry.clone(), None, program_output.clone());
+    let identified = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
+        .await;
+    assert!(identified.is_ok());
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-remove-scene".to_owned()),
+            request_type: Some("RemoveScene".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+
+    let messages = unwrap_send_texts(action);
+    assert_eq!(messages.len(), 3);
+    let current_scene_uuid = input_registry
+        .read()
+        .await
+        .current_program_scene()
+        .map(|scene| scene.scene_uuid)
+        .expect("current program scene must exist");
+    assert_eq!(program_output.read().await.scene_uuid, current_scene_uuid);
+}
+
+#[tokio::test]
+async fn stale_scene_uuid_differs_from_current_program_scene_uuid() {
+    let input_registry = input_registry();
+    {
+        let mut registry = input_registry.write().await;
+        registry.create_scene("Scene B").expect("must create scene");
+    }
+
+    let stale_scene_uuid = input_registry
+        .read()
+        .await
+        .get_scene_uuid("Scene")
+        .expect("default scene must exist");
+
+    {
+        let mut registry = input_registry.write().await;
+        registry
+            .set_current_program_scene("Scene B")
+            .expect("must switch scene");
+    }
+
+    let current_scene_uuid = input_registry
+        .read()
+        .await
+        .current_program_scene()
+        .map(|scene| scene.scene_uuid)
+        .expect("current program scene must exist");
+    assert_ne!(stale_scene_uuid, current_scene_uuid);
+}
+
 fn parse_request_status(text: &nojson::RawJsonOwned) -> (bool, i64) {
     let json = nojson::RawJson::parse(text.text()).expect("response must be valid json");
     let status = json
@@ -149,7 +237,7 @@ fn unwrap_close(action: SessionAction) -> (CloseCode, &'static str) {
 
 #[test]
 fn on_connected_returns_hello_message_action() {
-    let session = ObswsSession::new(None, input_registry(), None);
+    let session = ObswsSession::new(None, input_registry(), None, program_output());
     let action = session.on_connected();
     let SessionAction::SendText { text, message_name } = action else {
         panic!("must be SendText");
@@ -160,7 +248,7 @@ fn on_connected_returns_hello_message_action() {
 
 #[tokio::test]
 async fn on_request_before_identify_returns_close_action() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let action = session
         .handle_request(RequestMessage {
             request_id: Some("req-1".to_owned()),
@@ -175,7 +263,7 @@ async fn on_request_before_identify_returns_close_action() {
 
 #[tokio::test]
 async fn broadcast_custom_event_returns_event_when_general_subscription_enabled() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identified = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":1}}"#)
         .await;
@@ -209,7 +297,7 @@ async fn broadcast_custom_event_returns_event_when_general_subscription_enabled(
 
 #[tokio::test]
 async fn sleep_request_returns_success_response() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identified = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await;
@@ -233,7 +321,7 @@ async fn sleep_request_returns_success_response() {
 
 #[tokio::test]
 async fn sleep_request_rejects_too_large_sleep_millis() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identified = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await;
@@ -257,7 +345,7 @@ async fn sleep_request_rejects_too_large_sleep_millis() {
 
 #[tokio::test]
 async fn duplicate_identify_returns_already_identified_close() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let first = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await;
@@ -274,7 +362,7 @@ async fn duplicate_identify_returns_already_identified_close() {
 
 #[tokio::test]
 async fn reidentify_before_identify_returns_not_identified_close() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let action = session
         .on_text_message(r#"{"op":3,"d":{}}"#)
         .await
@@ -286,7 +374,7 @@ async fn reidentify_before_identify_returns_not_identified_close() {
 
 #[tokio::test]
 async fn reidentify_after_identify_returns_identified_message() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -308,7 +396,7 @@ async fn reidentify_after_identify_returns_identified_message() {
 
 #[tokio::test]
 async fn identify_without_event_subscriptions_defaults_to_all() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1}}"#)
         .await
@@ -319,7 +407,7 @@ async fn identify_without_event_subscriptions_defaults_to_all() {
 
 #[tokio::test]
 async fn identify_with_event_subscriptions_updates_session_state() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":64}}"#)
         .await
@@ -330,7 +418,7 @@ async fn identify_with_event_subscriptions_updates_session_state() {
 
 #[tokio::test]
 async fn reidentify_updates_event_subscriptions_when_specified() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":1}}"#)
         .await
@@ -348,7 +436,7 @@ async fn reidentify_updates_event_subscriptions_when_specified() {
 
 #[tokio::test]
 async fn reidentify_without_event_subscriptions_keeps_previous_value() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":64}}"#)
         .await
@@ -365,7 +453,7 @@ async fn reidentify_without_event_subscriptions_keeps_previous_value() {
 
 #[tokio::test]
 async fn create_scene_with_scene_subscription_returns_scene_created_event() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
         .await
@@ -390,7 +478,7 @@ async fn create_scene_with_scene_subscription_returns_scene_created_event() {
 
 #[tokio::test]
 async fn set_current_program_scene_to_same_scene_returns_response_only() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
         .await
@@ -411,7 +499,7 @@ async fn set_current_program_scene_to_same_scene_returns_response_only() {
 
 #[tokio::test]
 async fn set_current_preview_scene_with_scene_subscription_returns_preview_event() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
         .await
@@ -445,7 +533,7 @@ async fn set_current_preview_scene_with_scene_subscription_returns_preview_event
 
 #[tokio::test]
 async fn set_current_preview_scene_to_same_scene_returns_response_only() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
         .await
@@ -466,7 +554,7 @@ async fn set_current_preview_scene_to_same_scene_returns_response_only() {
 
 #[tokio::test]
 async fn remove_current_scene_with_scene_subscription_sends_scene_program_and_preview_events() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
         .await
@@ -530,7 +618,7 @@ async fn remove_current_scene_with_scene_subscription_sends_scene_program_and_pr
 
 #[tokio::test]
 async fn create_and_remove_input_with_input_subscription_send_input_events() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
         .await
@@ -570,7 +658,7 @@ async fn create_and_remove_input_with_input_subscription_send_input_events() {
 
 #[tokio::test]
 async fn set_input_settings_with_input_subscription_sends_event() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
         .await
@@ -609,7 +697,7 @@ async fn set_input_settings_with_input_subscription_sends_event() {
 
 #[tokio::test]
 async fn set_input_settings_with_input_subscription_does_not_send_event_on_error() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
         .await
@@ -647,7 +735,7 @@ async fn set_input_settings_with_input_subscription_does_not_send_event_on_error
 
 #[tokio::test]
 async fn set_input_name_with_input_subscription_sends_event() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
         .await
@@ -686,7 +774,7 @@ async fn set_input_name_with_input_subscription_sends_event() {
 
 #[tokio::test]
 async fn set_input_name_with_input_subscription_does_not_send_event_on_error() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
         .await
@@ -737,7 +825,7 @@ async fn set_input_name_with_input_subscription_does_not_send_event_on_error() {
 
 #[tokio::test]
 async fn set_input_name_with_invalid_input_uuid_type_returns_parse_error() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":8}}"#)
         .await
@@ -762,7 +850,7 @@ async fn set_input_name_with_invalid_input_uuid_type_returns_parse_error() {
 
 #[tokio::test]
 async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
@@ -825,7 +913,7 @@ async fn set_scene_item_enabled_with_scene_subscription_sends_event_when_changed
 
 #[tokio::test]
 async fn set_scene_item_enabled_with_same_value_returns_response_only() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":4}}"#)
         .await
@@ -875,7 +963,7 @@ async fn set_scene_item_enabled_with_same_value_returns_response_only() {
 
 #[tokio::test]
 async fn set_scene_item_locked_with_scene_subscription_sends_event_when_changed() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
@@ -929,7 +1017,7 @@ async fn set_scene_item_locked_with_scene_subscription_sends_event_when_changed(
 
 #[tokio::test]
 async fn set_scene_item_transform_with_scene_subscription_sends_event_when_changed() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     // 524420 = OBSWS_EVENT_SUB_SCENES (1 << 2) | OBSWS_EVENT_SUB_SCENE_ITEMS (1 << 7) | OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED (1 << 19)
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":524420}}"#)
@@ -984,7 +1072,7 @@ async fn set_scene_item_transform_with_scene_subscription_sends_event_when_chang
 
 #[tokio::test]
 async fn create_scene_item_with_scene_subscription_sends_created_event() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
@@ -1029,7 +1117,7 @@ async fn create_scene_item_with_scene_subscription_sends_created_event() {
 
 #[tokio::test]
 async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_events() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
@@ -1103,7 +1191,7 @@ async fn remove_scene_item_with_scene_subscription_sends_removed_and_reindexed_e
 
 #[tokio::test]
 async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_event() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
@@ -1173,7 +1261,7 @@ async fn remove_scene_item_tail_with_scene_subscription_does_not_send_reindexed_
 
 #[tokio::test]
 async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":132}}"#)
         .await
@@ -1243,7 +1331,7 @@ async fn set_scene_item_index_with_scene_subscription_sends_reindexed_event() {
 
 #[tokio::test]
 async fn set_scene_item_enabled_missing_field_returns_missing_request_field_error() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1267,7 +1355,7 @@ async fn set_scene_item_enabled_missing_field_returns_missing_request_field_erro
 
 #[tokio::test]
 async fn unsupported_rpc_version_returns_close_action() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":2}}"#)
         .await
@@ -1288,7 +1376,7 @@ async fn invalid_authentication_returns_close_action() {
             "test-challenge",
         ),
     };
-    let mut session = ObswsSession::new(Some(auth), input_registry(), None);
+    let mut session = ObswsSession::new(Some(auth), input_registry(), None, program_output());
     let action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"authentication":"invalid"}}"#)
         .await
@@ -1300,7 +1388,7 @@ async fn invalid_authentication_returns_close_action() {
 
 #[tokio::test]
 async fn stop_record_when_inactive_returns_error_response() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1354,7 +1442,12 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let mut session = ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle));
+    let mut session = ObswsSession::new(
+        None,
+        input_registry.clone(),
+        Some(pipeline_handle),
+        program_output(),
+    );
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1434,7 +1527,12 @@ async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() ->
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let mut session = ObswsSession::new(None, input_registry, Some(pipeline_handle));
+    let mut session = ObswsSession::new(
+        None,
+        input_registry,
+        Some(pipeline_handle),
+        program_output(),
+    );
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1506,8 +1604,12 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let mut session =
-        ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
+    let mut session = ObswsSession::new(
+        None,
+        input_registry.clone(),
+        Some(pipeline_handle.clone()),
+        program_output(),
+    );
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1589,8 +1691,12 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let mut session =
-        ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
+    let mut session = ObswsSession::new(
+        None,
+        input_registry.clone(),
+        Some(pipeline_handle.clone()),
+        program_output(),
+    );
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1674,8 +1780,12 @@ async fn start_stream_with_no_inputs_succeeds() -> crate::Result<()> {
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let mut session =
-        ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
+    let mut session = ObswsSession::new(
+        None,
+        input_registry.clone(),
+        Some(pipeline_handle.clone()),
+        program_output(),
+    );
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1741,7 +1851,7 @@ async fn start_record_with_multiple_video_inputs_builds_plan_successfully() {
         }
     }
 
-    let mut session = ObswsSession::new(None, input_registry, None);
+    let mut session = ObswsSession::new(None, input_registry, None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1797,8 +1907,12 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let mut session =
-        ObswsSession::new(None, input_registry.clone(), Some(pipeline_handle.clone()));
+    let mut session = ObswsSession::new(
+        None,
+        input_registry.clone(),
+        Some(pipeline_handle.clone()),
+        program_output(),
+    );
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1869,7 +1983,7 @@ async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
         }
     }
 
-    let mut session = ObswsSession::new(None, input_registry, None);
+    let mut session = ObswsSession::new(None, input_registry, None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1892,7 +2006,7 @@ async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
 
 #[tokio::test]
 async fn toggle_stream_without_image_input_returns_toggle_request_type_error() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1915,7 +2029,7 @@ async fn toggle_stream_without_image_input_returns_toggle_request_type_error() {
 
 #[tokio::test]
 async fn start_output_with_unknown_name_returns_not_found() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1941,7 +2055,7 @@ async fn start_output_with_unknown_name_returns_not_found() {
 
 #[tokio::test]
 async fn toggle_output_without_image_input_returns_toggle_request_type_error() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1967,7 +2081,7 @@ async fn toggle_output_without_image_input_returns_toggle_request_type_error() {
 
 #[tokio::test]
 async fn stop_output_when_record_is_inactive_returns_output_request_type_error() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -1993,7 +2107,7 @@ async fn stop_output_when_record_is_inactive_returns_output_request_type_error()
 
 #[tokio::test]
 async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -2017,7 +2131,7 @@ async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
 
 #[tokio::test]
 async fn request_batch_without_halt_on_failure_continues_after_failure() {
-    let mut session = ObswsSession::new(None, input_registry(), None);
+    let mut session = ObswsSession::new(None, input_registry(), None, program_output());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await

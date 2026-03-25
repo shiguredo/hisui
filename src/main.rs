@@ -42,7 +42,6 @@ fn main() -> noargs::Result<()> {
         || hisui::sora::recording_subcommand_compose::try_run(&mut args)?
         || hisui::sora::recording_subcommand_vmaf::try_run(&mut args)?
         || hisui::sora::recording_subcommand_tune::try_run(&mut args)?
-        || (experimental && hisui::subcommand_server::try_run(&mut args)?)
         || (experimental && hisui::subcommand_obsws::try_run(&mut args)?);
 
     if let Some(help) = args.finish()? {

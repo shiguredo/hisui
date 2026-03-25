@@ -8,6 +8,7 @@ import os
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import time
 from pathlib import Path
@@ -36,6 +37,9 @@ class ObswsServer:
         port: int,
         password: str | None = None,
         default_record_dir: Path | None = None,
+        ui_remote_url: str | None = None,
+        https_cert_path: Path | None = None,
+        https_key_path: Path | None = None,
         use_env: bool = False,
     ):
         self.binary_path = binary_path
@@ -43,8 +47,13 @@ class ObswsServer:
         self.port = port
         self.password = password
         self.default_record_dir = default_record_dir
+        self.ui_remote_url = ui_remote_url
+        self.https_cert_path = https_cert_path
+        self.https_key_path = https_key_path
         self.use_env = use_env
-        self._process: subprocess.Popen[None] | None = None
+        self._process: subprocess.Popen[str] | None = None
+        self._stdout = ""
+        self._stderr = ""
 
     def __enter__(self):
         return self.start()
@@ -55,11 +64,20 @@ class ObswsServer:
     def start(self):
         if self._process is not None:
             raise RuntimeError("obsws server is already started")
+        if (self.https_cert_path is None) != (self.https_key_path is None):
+            raise ValueError("https_cert_path and https_key_path must be provided together")
 
         args = ["--verbose", "--experimental", "obsws"]
         env = os.environ.copy()
         openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
+            # use_env=True では対応する環境変数がない引数は未対応
+            if self.ui_remote_url is not None:
+                raise ValueError("ui_remote_url is not supported with use_env=True")
+            if self.https_cert_path is not None or self.https_key_path is not None:
+                raise ValueError(
+                    "https_cert_path/https_key_path is not supported with use_env=True"
+                )
             env["HISUI_OBSWS_HOST"] = self.host
             env["HISUI_OBSWS_PORT"] = str(self.port)
             if self.password is not None:
@@ -79,11 +97,29 @@ class ObswsServer:
                 args.extend(["--password", self.password])
             if self.default_record_dir is not None:
                 args.extend(["--default-record-dir", str(self.default_record_dir)])
+            if self.ui_remote_url is not None:
+                args.extend(["--ui-remote-url", self.ui_remote_url])
+            if self.https_cert_path is not None and self.https_key_path is not None:
+                args.extend(
+                    [
+                        "--https-cert-path",
+                        str(self.https_cert_path),
+                        "--https-key-path",
+                        str(self.https_key_path),
+                    ]
+                )
             if openh264_path:
                 args.extend(["--openh264", openh264_path])
 
         cmd, cwd = build_hisui_command(self.binary_path, *args)
-        self._process = subprocess.Popen(cmd, env=env, cwd=cwd)
+        self._process = subprocess.Popen(
+            cmd,
+            env=env,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         self._wait_until_listening()
         return self
 
@@ -98,6 +134,9 @@ class ObswsServer:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=3.0)
+        stdout, stderr = process.communicate(timeout=1.0)
+        self._stdout = stdout
+        self._stderr = stderr
         self._process = None
 
     def _wait_until_listening(self, timeout: float = 10.0):
@@ -105,15 +144,29 @@ class ObswsServer:
         while time.time() < deadline:
             process = self._process
             if process is not None and process.poll() is not None:
+                stdout, stderr = process.communicate(timeout=1.0)
+                self._stdout = stdout
+                self._stderr = stderr
                 raise AssertionError(
-                    f"obsws process exited before listening: returncode={process.returncode}"
+                    "obsws process exited before listening: "
+                    f"returncode={process.returncode}, stdout={stdout}, stderr={stderr}"
                 )
             if _is_port_open(self.host, self.port):
                 return
             time.sleep(0.1)
         raise AssertionError(
-            f"obsws server did not start listening in time: {self.host}:{self.port}"
+            "obsws server did not start listening in time: "
+            f"{self.host}:{self.port}, stdout={self._stdout}, stderr={self._stderr}"
         )
+
+    def diagnostics(self) -> str:
+        process = self._process
+        if process is not None and process.poll() is None:
+            return (
+                "obsws process is still running; buffered output is not available until stop. "
+                f"host={self.host}, port={self.port}"
+            )
+        return f"obsws stdout={self._stdout}, obsws stderr={self._stderr}"
 
 
 def _is_port_open(host: str, port: int) -> bool:
@@ -424,9 +477,18 @@ async def _connect_websocket(url: str):
 
 
 async def _http_get(url: str):
+    return await _http_request("GET", url)
+
+
+async def _http_request(
+    method: str,
+    url: str,
+    *,
+    ssl_context: ssl.SSLContext | bool | None = None,
+):
     timeout = aiohttp.ClientTimeout(total=10.0)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(url) as response:
+        async with session.request(method, url, ssl=ssl_context) as response:
             return response.status, await response.text(), response.headers
 
 
