@@ -48,6 +48,7 @@ pub use obsws::input_registry as obsws_input_registry;
 pub use obsws::message as obsws_message;
 pub use obsws::protocol as obsws_protocol;
 pub use obsws::response as obsws_response_builder;
+pub use obsws::runtime as obsws_runtime;
 pub use obsws::server as obsws_server;
 pub use obsws::session as obsws_session;
 

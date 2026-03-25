@@ -4,6 +4,7 @@ pub mod message;
 mod output_plan;
 pub mod protocol;
 pub mod response;
+pub mod runtime;
 pub mod server;
 pub mod session;
 pub(crate) mod source;

@@ -414,6 +414,174 @@ pub fn handle_request_message_with_pipeline_handle(
     RequestResponsePayload { message }
 }
 
+/// read-only リクエストを snapshot ベースで処理する。
+/// pipeline_handle が必要なリクエスト（GetStats, GetStreamStatus 等）や
+/// write リクエストは処理せず None を返す。
+pub fn handle_read_only_request(
+    request: &RequestMessage,
+    input_registry: &ObswsInputRegistry,
+) -> Option<RequestResponsePayload> {
+    let request_id = request.request_id.as_deref().unwrap_or_default();
+    let request_type = request.request_type.as_deref().unwrap_or_default();
+    if request_id.is_empty() || request_type.is_empty() {
+        return None;
+    }
+
+    let message = match request_type {
+        "GetVersion" => crate::obsws_response_builder::build_get_version_response(request_id),
+        "GetCanvasList" => crate::obsws_response_builder::build_get_canvas_list_response(
+            request_id,
+            input_registry.canvas_width(),
+            input_registry.canvas_height(),
+            input_registry.frame_rate(),
+        ),
+        "GetGroupList" => crate::obsws_response_builder::build_get_group_list_response(request_id),
+        "GetSceneList" => {
+            crate::obsws_response_builder::build_get_scene_list_response(request_id, input_registry)
+        }
+        "GetCurrentProgramScene" => {
+            crate::obsws_response_builder::build_get_current_program_scene_response(
+                request_id,
+                input_registry,
+            )
+        }
+        "GetCurrentPreviewScene" => {
+            crate::obsws_response_builder::build_get_current_preview_scene_response(request_id)
+        }
+        "GetSceneSceneTransitionOverride" => {
+            crate::obsws_response_builder::build_get_scene_scene_transition_override_response(
+                request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetTransitionKindList" => {
+            crate::obsws_response_builder::build_get_transition_kind_list_response(
+                request_id,
+                input_registry,
+            )
+        }
+        "GetSceneTransitionList" => {
+            crate::obsws_response_builder::build_get_scene_transition_list_response(
+                request_id,
+                input_registry,
+            )
+        }
+        "GetCurrentSceneTransition" => {
+            crate::obsws_response_builder::build_get_current_scene_transition_response(
+                request_id,
+                input_registry,
+            )
+        }
+        "GetCurrentSceneTransitionCursor" => {
+            crate::obsws_response_builder::build_get_current_scene_transition_cursor_response(
+                request_id,
+                input_registry,
+            )
+        }
+        "SetTBarPosition" => {
+            crate::obsws_response_builder::build_set_tbar_position_response(request_id)
+        }
+        "GetSceneItemId" => crate::obsws_response_builder::build_get_scene_item_id_response(
+            request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetSceneItemList" => crate::obsws_response_builder::build_get_scene_item_list_response(
+            request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetSceneItemSource" => {
+            crate::obsws_response_builder::build_get_scene_item_source_response(
+                request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetSceneItemEnabled" => {
+            crate::obsws_response_builder::build_get_scene_item_enabled_response(
+                request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetSceneItemLocked" => {
+            crate::obsws_response_builder::build_get_scene_item_locked_response(
+                request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetSceneItemIndex" => crate::obsws_response_builder::build_get_scene_item_index_response(
+            request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetSceneItemBlendMode" => {
+            crate::obsws_response_builder::build_get_scene_item_blend_mode_response(
+                request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetSceneItemTransform" => {
+            crate::obsws_response_builder::build_get_scene_item_transform_response(
+                request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetInputList" => crate::obsws_response_builder::build_get_input_list_response(
+            request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetInputKindList" => crate::obsws_response_builder::build_get_input_kind_list_response(
+            request_id,
+            input_registry,
+        ),
+        "GetSourceActive" => crate::obsws_response_builder::build_get_source_active_response(
+            request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetInputSettings" => crate::obsws_response_builder::build_get_input_settings_response(
+            request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetInputDefaultSettings" => {
+            crate::obsws_response_builder::build_get_input_default_settings_response(
+                request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
+        "GetStreamServiceSettings" => {
+            crate::obsws_response_builder::build_get_stream_service_settings_response(
+                request_id,
+                input_registry,
+            )
+        }
+        "GetOutputList" => {
+            crate::obsws_response_builder::build_get_output_list_response(request_id)
+        }
+        "GetOutputSettings" => crate::obsws_response_builder::build_get_output_settings_response(
+            request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetRecordDirectory" => crate::obsws_response_builder::build_get_record_directory_response(
+            request_id,
+            input_registry,
+        ),
+        // pipeline_handle が必要なリクエストや write リクエストは処理しない
+        _ => return None,
+    };
+    Some(RequestResponsePayload { message })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
