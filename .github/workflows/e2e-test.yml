@@ -46,7 +46,7 @@ jobs:
           HISUI_FDK_AAC_PATH: /usr/lib/x86_64-linux-gnu/libfdk-aac.so
         run: |
           uv sync
-          uv run pytest -v
+          uv run pytest -vv -rxXs --durations=20
         working-directory: e2e-tests
 
   slack_notify:
