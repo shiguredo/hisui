@@ -209,7 +209,7 @@ pub enum BootstrapError {
 pub struct WebRtcP2pSessionManager {
     factory_bundle: Arc<super::factory::WebRtcFactoryBundle>,
     pipeline_handle: crate::MediaPipelineHandle,
-    runtime_handle: crate::obsws_runtime::ObswsRuntimeHandle,
+    coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
     session: Arc<tokio::sync::Mutex<Option<Session>>>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
 }
@@ -217,7 +217,7 @@ pub struct WebRtcP2pSessionManager {
 impl WebRtcP2pSessionManager {
     pub fn new(
         handle: crate::MediaPipelineHandle,
-        runtime_handle: crate::obsws_runtime::ObswsRuntimeHandle,
+        coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
     ) -> crate::Result<Self> {
         #[allow(clippy::arc_with_non_send_sync)]
         let factory_bundle = Arc::new(super::factory::WebRtcFactoryBundle::new()?);
@@ -299,7 +299,7 @@ impl WebRtcP2pSessionManager {
         Ok(Self {
             factory_bundle,
             pipeline_handle: handle,
-            runtime_handle,
+            coordinator_handle,
             session,
             event_tx,
         })
@@ -331,7 +331,7 @@ impl WebRtcP2pSessionManager {
                 }
             })?;
 
-        let obsws_session = ObswsSession::new_identified(self.runtime_handle.clone());
+        let obsws_session = ObswsSession::new_identified(self.coordinator_handle.clone());
 
         let mut guard = self.session.lock().await;
         if guard.is_some() {
@@ -353,9 +353,9 @@ impl WebRtcP2pSessionManager {
             Ok((answer_sdp, mut sess)) => {
                 // Program 出力の固定トラックを購読する（PeerConnection にトラックを追加）
                 // renegotiation offer は接続確立後に送信される
-                // TODO: runtime_handle の snapshot 経由で取得する
-                let program_video_track_id = self.runtime_handle.program_video_track_id();
-                let program_audio_track_id = self.runtime_handle.program_audio_track_id();
+                // coordinator が保持する固定 Program 出力トラックを購読する
+                let program_video_track_id = self.coordinator_handle.program_video_track_id();
+                let program_audio_track_id = self.coordinator_handle.program_audio_track_id();
                 if let Err(e) = subscribe_track(&mut sess, program_video_track_id, TrackKind::Video)
                 {
                     tracing::warn!("failed to subscribe program video track: {}", e.display());

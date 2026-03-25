@@ -169,7 +169,7 @@ pub async fn run_server(
     };
 
     // runtime actor を起動する
-    let (actor, runtime_handle) = crate::obsws_runtime::ObswsRuntimeActor::new(
+    let (actor, coordinator_handle) = crate::obsws_coordinator::ObswsCoordinator::new(
         input_registry,
         program_output,
         Some(pipeline_handle.clone()),
@@ -177,7 +177,7 @@ pub async fn run_server(
     tokio::task::spawn_local(actor.run());
 
     let bootstrap_endpoint = Rc::new(
-        BootstrapEndpoint::new(pipeline_handle.clone(), runtime_handle.clone())
+        BootstrapEndpoint::new(pipeline_handle.clone(), coordinator_handle.clone())
             .map_err(|e| e.with_context("Failed to init /bootstrap"))?,
     );
 
@@ -186,7 +186,7 @@ pub async fn run_server(
         tls_acceptor,
         upstream_config,
         password,
-        runtime_handle,
+        coordinator_handle,
         pipeline_handle,
         bootstrap_endpoint,
     )
@@ -207,7 +207,7 @@ async fn run_accept_loop(
     tls_acceptor: Option<TlsAcceptor>,
     upstream_config: Option<Arc<UpstreamConfig>>,
     password: Option<String>,
-    runtime_handle: crate::obsws_runtime::ObswsRuntimeHandle,
+    coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
 ) -> crate::Result<()> {
@@ -219,7 +219,7 @@ async fn run_accept_loop(
         let tls_acceptor = tls_acceptor.clone();
         let upstream_config = upstream_config.clone();
         let password = password.clone();
-        let runtime_handle = runtime_handle.clone();
+        let coordinator_handle = coordinator_handle.clone();
         let pipeline_handle = pipeline_handle.clone();
         let bootstrap_endpoint = bootstrap_endpoint.clone();
         tokio::task::spawn_local(async move {
@@ -245,7 +245,7 @@ async fn run_accept_loop(
                 peer_addr,
                 upstream_config,
                 password,
-                runtime_handle,
+                coordinator_handle,
                 pipeline_handle,
                 bootstrap_endpoint,
             )
@@ -266,7 +266,7 @@ async fn route_connection(
     peer_addr: SocketAddr,
     upstream_config: Option<Arc<UpstreamConfig>>,
     password: Option<String>,
-    runtime_handle: crate::obsws_runtime::ObswsRuntimeHandle,
+    coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
 ) -> crate::Result<()> {
@@ -282,7 +282,7 @@ async fn route_connection(
     buf.truncate(n);
 
     if contains_upgrade_header(&buf) {
-        handle_ws_connection(stream, buf, peer_addr, password, runtime_handle).await
+        handle_ws_connection(stream, buf, peer_addr, password, coordinator_handle).await
     } else {
         handle_http_connection(
             stream,
@@ -302,7 +302,7 @@ async fn handle_ws_connection(
     initial_buf: Vec<u8>,
     peer_addr: SocketAddr,
     password: Option<String>,
-    runtime_handle: crate::obsws_runtime::ObswsRuntimeHandle,
+    coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
     let mut ws = WebSocketServerConnection::new(
@@ -317,7 +317,7 @@ async fn handle_ws_connection(
         .as_deref()
         .map(ObswsAuthentication::new)
         .transpose()?;
-    let mut session = ObswsSession::new(auth, runtime_handle);
+    let mut session = ObswsSession::new(auth, coordinator_handle);
 
     // route_connection で読み取った最初のデータを先に処理する
     let mut pending_initial: Option<Vec<u8>> = Some(initial_buf);

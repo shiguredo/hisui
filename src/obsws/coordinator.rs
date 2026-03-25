@@ -9,8 +9,8 @@ use crate::obsws_protocol::{
 
 use std::time::Duration;
 
-/// actor に送信するコマンド
-pub enum ObswsRuntimeCommand {
+/// coordinator に送信するコマンド
+pub enum ObswsCoordinatorCommand {
     /// 単一リクエストを処理する
     ProcessRequest {
         request: crate::obsws_message::RequestMessage,
@@ -52,15 +52,14 @@ pub struct ProgramTrackIds {
     pub audio_track_id: crate::TrackId,
 }
 
-/// actor への handle。セッションや bootstrap が保持する。
+/// coordinator への handle。セッションや bootstrap が保持する。
 #[derive(Clone)]
-pub struct ObswsRuntimeHandle {
-    command_tx: tokio::sync::mpsc::UnboundedSender<ObswsRuntimeCommand>,
-    snapshot_rx: tokio::sync::watch::Receiver<std::sync::Arc<ObswsInputRegistry>>,
+pub struct ObswsCoordinatorHandle {
+    command_tx: tokio::sync::mpsc::UnboundedSender<ObswsCoordinatorCommand>,
     program_track_ids: ProgramTrackIds,
 }
 
-impl ObswsRuntimeHandle {
+impl ObswsCoordinatorHandle {
     /// 単一リクエストを actor に送信し、結果を待つ
     pub async fn process_request(
         &self,
@@ -69,15 +68,15 @@ impl ObswsRuntimeHandle {
     ) -> crate::Result<CommandResult> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.command_tx
-            .send(ObswsRuntimeCommand::ProcessRequest {
+            .send(ObswsCoordinatorCommand::ProcessRequest {
                 request,
                 session_stats,
                 reply_tx,
             })
-            .map_err(|_| crate::Error::new("runtime actor has terminated"))?;
+            .map_err(|_| crate::Error::new("coordinator has terminated"))?;
         reply_rx
             .await
-            .map_err(|_| crate::Error::new("runtime actor dropped reply channel"))
+            .map_err(|_| crate::Error::new("coordinator dropped reply channel"))
     }
 
     /// RequestBatch を actor に送信し、結果を待つ
@@ -89,53 +88,45 @@ impl ObswsRuntimeHandle {
     ) -> crate::Result<BatchCommandResult> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.command_tx
-            .send(ObswsRuntimeCommand::ProcessRequestBatch {
+            .send(ObswsCoordinatorCommand::ProcessRequestBatch {
                 requests,
                 session_stats,
                 halt_on_failure,
                 reply_tx,
             })
-            .map_err(|_| crate::Error::new("runtime actor has terminated"))?;
+            .map_err(|_| crate::Error::new("coordinator has terminated"))?;
         reply_rx
             .await
-            .map_err(|_| crate::Error::new("runtime actor dropped reply channel"))
+            .map_err(|_| crate::Error::new("coordinator dropped reply channel"))
     }
 
-    /// 最新の input registry snapshot を取得する
-    pub fn snapshot(&self) -> std::sync::Arc<ObswsInputRegistry> {
-        self.snapshot_rx.borrow().clone()
-    }
-
-    /// Program 出力の video track ID を取得する
+    /// coordinator が保持する固定 Program 出力の video track ID を取得する
     pub fn program_video_track_id(&self) -> crate::TrackId {
         self.program_track_ids.video_track_id.clone()
     }
 
-    /// Program 出力の audio track ID を取得する
+    /// coordinator が保持する固定 Program 出力の audio track ID を取得する
     pub fn program_audio_track_id(&self) -> crate::TrackId {
         self.program_track_ids.audio_track_id.clone()
     }
 }
 
-/// obsws 状態管理 actor
-pub struct ObswsRuntimeActor {
+/// obsws の状態変更・副作用・Program 出力同期を調停する coordinator
+pub struct ObswsCoordinator {
     input_registry: ObswsInputRegistry,
     program_output: crate::obsws_server::ProgramOutputState,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
-    command_rx: tokio::sync::mpsc::UnboundedReceiver<ObswsRuntimeCommand>,
-    snapshot_tx: tokio::sync::watch::Sender<std::sync::Arc<ObswsInputRegistry>>,
+    command_rx: tokio::sync::mpsc::UnboundedReceiver<ObswsCoordinatorCommand>,
 }
 
-impl ObswsRuntimeActor {
+impl ObswsCoordinator {
     /// actor と handle を生成する。program_output の初期化は呼び出し側で行う。
     pub fn new(
         input_registry: ObswsInputRegistry,
         program_output: crate::obsws_server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
-    ) -> (Self, ObswsRuntimeHandle) {
+    ) -> (Self, ObswsCoordinatorHandle) {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
-        let initial_snapshot = std::sync::Arc::new(input_registry.clone());
-        let (snapshot_tx, snapshot_rx) = tokio::sync::watch::channel(initial_snapshot);
         let program_track_ids = ProgramTrackIds {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
@@ -145,11 +136,9 @@ impl ObswsRuntimeActor {
             program_output,
             pipeline_handle,
             command_rx,
-            snapshot_tx,
         };
-        let handle = ObswsRuntimeHandle {
+        let handle = ObswsCoordinatorHandle {
             command_tx,
-            snapshot_rx,
             program_track_ids,
         };
         (actor, handle)
@@ -159,7 +148,7 @@ impl ObswsRuntimeActor {
     pub async fn run(mut self) {
         while let Some(command) = self.command_rx.recv().await {
             match command {
-                ObswsRuntimeCommand::ProcessRequest {
+                ObswsCoordinatorCommand::ProcessRequest {
                     request,
                     session_stats,
                     reply_tx,
@@ -167,7 +156,7 @@ impl ObswsRuntimeActor {
                     let result = self.handle_request(request, &session_stats).await;
                     let _ = reply_tx.send(result);
                 }
-                ObswsRuntimeCommand::ProcessRequestBatch {
+                ObswsCoordinatorCommand::ProcessRequestBatch {
                     requests,
                     session_stats,
                     halt_on_failure,
@@ -199,8 +188,6 @@ impl ObswsRuntimeActor {
             // 失敗時も request_type によっては sync が必要（現行コードと同じ挙動）
             // ただし request_succeeded=false の場合は sync_program_output_state が早期リターンする
         }
-        // write 後に snapshot を publish する
-        self.publish_snapshot();
         result
     }
 
@@ -229,8 +216,6 @@ impl ObswsRuntimeActor {
                 break;
             }
         }
-        // batch 処理後に snapshot を publish する
-        self.publish_snapshot();
         BatchCommandResult { results, events }
     }
 
@@ -261,13 +246,21 @@ impl ObswsRuntimeActor {
         }
 
         match request_type.as_str() {
-            // --- Scene 系 write ---
+            // --- state write（状態変更系） ---
             "SetCurrentProgramScene" => {
                 self.handle_set_current_program_scene(&request_id, request.request_data.as_ref())
             }
             "CreateScene" => self.handle_create_scene(&request_id, request.request_data.as_ref()),
             "RemoveScene" => self.handle_remove_scene(&request_id, request.request_data.as_ref()),
-            // --- Input 系 write ---
+            "SetCurrentPreviewScene" => {
+                // スタジオモード未対応のため常にエラーを返す
+                let response_text =
+                    crate::obsws_response_builder::build_set_current_preview_scene_response(
+                        &request_id,
+                    );
+                self.build_result_from_response(response_text, Vec::new())
+            }
+            // Input 系
             "CreateInput" => self.handle_create_input(&request_id, request.request_data.as_ref()),
             "RemoveInput" => self.handle_remove_input(&request_id, request.request_data.as_ref()),
             "SetInputSettings" => {
@@ -276,7 +269,7 @@ impl ObswsRuntimeActor {
             "SetInputName" => {
                 self.handle_set_input_name(&request_id, request.request_data.as_ref())
             }
-            // --- SceneItem 系 write ---
+            // SceneItem 系
             "CreateSceneItem" => {
                 self.handle_create_scene_item(&request_id, request.request_data.as_ref())
             }
@@ -301,7 +294,7 @@ impl ObswsRuntimeActor {
             "SetSceneItemTransform" => {
                 self.handle_set_scene_item_transform(&request_id, request.request_data.as_ref())
             }
-            // --- Output 系 write ---
+            // --- output side effect（pipeline 操作を伴う副作用系） ---
             "StartStream" => self.handle_start_stream_request(&request_id).await,
             "StopStream" => self.handle_stop_stream_request(&request_id).await,
             "ToggleStream" => self.handle_toggle_stream_request(&request_id).await,
@@ -320,7 +313,7 @@ impl ObswsRuntimeActor {
                 self.handle_toggle_output_request(&request_id, request.request_data.as_ref())
                     .await
             }
-            // --- セッションローカル（状態変更なし） ---
+            // --- session-local（coordinator で扱うが状態変更なし） ---
             "Sleep" => {
                 self.handle_sleep(&request_id, request.request_data.as_ref())
                     .await
@@ -328,7 +321,7 @@ impl ObswsRuntimeActor {
             "BroadcastCustomEvent" => {
                 self.handle_broadcast_custom_event(&request_id, request.request_data.as_ref())
             }
-            // --- フォールスルー: message.rs の既存ハンドラに委譲 ---
+            // --- pure read / 残りの state write: message.rs に委譲 ---
             _ => {
                 let response = crate::obsws_message::handle_request_message_with_pipeline_handle(
                     request,
@@ -1618,9 +1611,14 @@ impl ObswsRuntimeActor {
             );
         }
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            return OutputOperationOutcome::success(
-                crate::obsws_response_builder::build_start_stream_response(request_id),
-                None,
+            self.input_registry.deactivate_stream();
+            return OutputOperationOutcome::failure(
+                crate::obsws_response_builder::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Pipeline is not initialized",
+                ),
             );
         };
         if let Err(e) = start_stream_processors(
@@ -1770,10 +1768,14 @@ impl ObswsRuntimeActor {
             );
         }
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            let output_path_str = output_path.display().to_string();
-            return OutputOperationOutcome::success(
-                crate::obsws_response_builder::build_start_record_response(request_id),
-                Some(output_path_str),
+            self.input_registry.deactivate_record();
+            return OutputOperationOutcome::failure(
+                crate::obsws_response_builder::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Pipeline is not initialized",
+                ),
             );
         };
         if let Err(e) =
@@ -1906,9 +1908,14 @@ impl ObswsRuntimeActor {
             );
         }
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            return OutputOperationOutcome::success(
-                crate::obsws_response_builder::build_start_output_response(request_id),
-                None,
+            self.input_registry.deactivate_rtmp_outbound();
+            return OutputOperationOutcome::failure(
+                crate::obsws_response_builder::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Pipeline is not initialized",
+                ),
             );
         };
         if let Err(e) = start_rtmp_outbound_processors(
@@ -2062,7 +2069,7 @@ impl ObswsRuntimeActor {
             return Ok(());
         }
         if self.pipeline_handle.is_none() {
-            // テスト用: pipeline がない場合は状態だけ同期する
+            // pipeline がない場合はミキサー再構築をスキップし、シーン UUID だけ同期する
             self.program_output.scene_uuid = current_scene_uuid;
             return Ok(());
         }
@@ -2137,13 +2144,6 @@ impl ObswsRuntimeActor {
     // -----------------------------------------------------------------------
     // ヘルパー
     // -----------------------------------------------------------------------
-
-    /// input_registry の snapshot を watch channel に publish する
-    fn publish_snapshot(&self) {
-        let _ = self
-            .snapshot_tx
-            .send(std::sync::Arc::new(self.input_registry.clone()));
-    }
 
     fn build_result_from_response(
         &self,

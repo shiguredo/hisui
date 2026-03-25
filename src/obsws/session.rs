@@ -1,12 +1,12 @@
 use shiguredo_websocket::CloseCode;
 
 use crate::obsws_auth::ObswsAuthentication;
+use crate::obsws_coordinator::ObswsCoordinatorHandle;
 use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_ALL,
 };
-use crate::obsws_runtime::ObswsRuntimeHandle;
 
 pub mod output;
 #[cfg(test)]
@@ -40,30 +40,33 @@ pub struct ObswsSession {
     negotiated_rpc_version: Option<u32>,
     event_subscriptions: u32,
     auth: Option<ObswsAuthentication>,
-    runtime_handle: ObswsRuntimeHandle,
+    coordinator_handle: ObswsCoordinatorHandle,
     stats: ObswsSessionStats,
 }
 
 impl ObswsSession {
-    pub fn new(auth: Option<ObswsAuthentication>, runtime_handle: ObswsRuntimeHandle) -> Self {
+    pub fn new(
+        auth: Option<ObswsAuthentication>,
+        coordinator_handle: ObswsCoordinatorHandle,
+    ) -> Self {
         Self {
             state: ObswsSessionState::AwaitingIdentify,
             negotiated_rpc_version: None,
             event_subscriptions: 0,
             auth,
-            runtime_handle,
+            coordinator_handle,
             stats: ObswsSessionStats::default(),
         }
     }
 
     /// DataChannel 経由の接続用。認証なし・Identified 状態で初期化する。
-    pub fn new_identified(runtime_handle: ObswsRuntimeHandle) -> Self {
+    pub fn new_identified(coordinator_handle: ObswsCoordinatorHandle) -> Self {
         Self {
             state: ObswsSessionState::Identified,
             negotiated_rpc_version: Some(1),
             event_subscriptions: OBSWS_EVENT_SUB_ALL,
             auth: None,
-            runtime_handle,
+            coordinator_handle,
             stats: ObswsSessionStats::default(),
         }
     }
@@ -118,19 +121,8 @@ impl ObswsSession {
             };
         }
 
-        // read-only リクエストは snapshot ベースで処理する（actor を経由しない）
-        if let Some(response) = crate::obsws_message::handle_read_only_request(
-            &request,
-            &self.runtime_handle.snapshot(),
-        ) {
-            return SessionAction::SendText {
-                text: response.message,
-                message_name: "request response message",
-            };
-        }
-
         let result = match self
-            .runtime_handle
+            .coordinator_handle
             .process_request(request, self.stats.clone())
             .await
         {
@@ -141,7 +133,7 @@ impl ObswsSession {
                         "",
                         "",
                         crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                        "Runtime actor has terminated",
+                        "Coordinator has terminated",
                     ),
                     message_name: "request response message",
                 };
@@ -231,7 +223,7 @@ impl ObswsSession {
             .collect();
 
         let batch_result = match self
-            .runtime_handle
+            .coordinator_handle
             .process_request_batch(requests, self.stats.clone(), halt_on_failure)
             .await
         {
@@ -242,7 +234,7 @@ impl ObswsSession {
                         "RequestBatch",
                         &request_id,
                         crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                        "Runtime actor has terminated",
+                        "Coordinator has terminated",
                     ),
                     message_name: "request response message",
                 };
