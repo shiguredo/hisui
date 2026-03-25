@@ -73,7 +73,7 @@ enum IceObserverEvent {
 
 struct ClientPcObserver {
     event_tx: mpsc::UnboundedSender<ClientEvent>,
-    ice_tx: std::sync::mpsc::Sender<IceObserverEvent>,
+    ice_tx: mpsc::UnboundedSender<IceObserverEvent>,
 }
 
 impl PeerConnectionObserverHandler for ClientPcObserver {
@@ -697,13 +697,13 @@ struct RetainedState {
     signaling_dc_observer: Option<DataChannelObserver>,
     obsws_dc_observer: Option<DataChannelObserver>,
     video_sinks: Vec<VideoSink>,
-    ice_rx: std::sync::mpsc::Receiver<IceObserverEvent>,
+    ice_rx: mpsc::UnboundedReceiver<IceObserverEvent>,
     ice_candidates: Vec<GatheredIceCandidate>,
 }
 
-fn finalize_local_sdp(
+async fn finalize_local_sdp(
     initial_sdp: String,
-    ice_rx: &std::sync::mpsc::Receiver<IceObserverEvent>,
+    ice_rx: &mut mpsc::UnboundedReceiver<IceObserverEvent>,
     cached_candidates: &mut Vec<GatheredIceCandidate>,
 ) -> Result<String, String> {
     if initial_sdp.contains("\r\na=candidate:") {
@@ -712,6 +712,7 @@ fn finalize_local_sdp(
 
     let mut candidates = Vec::new();
     let mut complete = false;
+    // まずノンブロッキングで既に到着しているイベントを処理する
     while let Ok(event) = ice_rx.try_recv() {
         match event {
             IceObserverEvent::Candidate {
@@ -738,33 +739,30 @@ fn finalize_local_sdp(
         ));
     }
 
-    let deadline = std::time::Instant::now() + SDP_TIMEOUT;
+    // タイムアウト付きで ICE gathering 完了を待機する
+    let deadline = tokio::time::Instant::now() + SDP_TIMEOUT;
     while !complete {
-        let Some(timeout) = deadline.checked_duration_since(std::time::Instant::now()) else {
-            if !cached_candidates.is_empty() {
-                return Ok(append_ice_candidates_to_sdp(
-                    &initial_sdp,
-                    cached_candidates,
-                ));
-            }
-            return Err("ICE gathering timed out".to_owned());
-        };
-        match ice_rx.recv_timeout(timeout) {
-            Ok(IceObserverEvent::Candidate {
+        match tokio::time::timeout_at(deadline, ice_rx.recv()).await {
+            Ok(Some(IceObserverEvent::Candidate {
                 sdp_mid,
                 sdp_mline_index,
                 candidate,
-            }) => {
+            })) => {
                 candidates.push(GatheredIceCandidate {
                     sdp_mid,
                     sdp_mline_index,
                     candidate,
                 });
             }
-            Ok(IceObserverEvent::Complete) => {
+            Ok(Some(IceObserverEvent::Complete)) => {
                 complete = true;
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Ok(None) => {
+                // チャネルが切断された
+                return Err("ICE gathering channel closed".to_owned());
+            }
+            Err(_) => {
+                // タイムアウト
                 if !cached_candidates.is_empty() {
                     return Ok(append_ice_candidates_to_sdp(
                         &initial_sdp,
@@ -772,9 +770,6 @@ fn finalize_local_sdp(
                     ));
                 }
                 return Err("ICE gathering timed out".to_owned());
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                return Err("ICE gathering channel closed".to_owned());
             }
         }
     }
@@ -878,7 +873,7 @@ async fn run_client(
 
     // PeerConnection を作成する
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<ClientEvent>();
-    let (ice_tx, ice_rx) = std::sync::mpsc::channel::<IceObserverEvent>();
+    let (ice_tx, mut ice_rx) = mpsc::unbounded_channel::<IceObserverEvent>();
     let pc_observer = PeerConnectionObserver::new_with_handler(Box::new(ClientPcObserver {
         event_tx: event_tx.clone(),
         ice_tx,
@@ -901,7 +896,7 @@ async fn run_client(
     let offer_sdp = create_offer_sdp(&pc)?;
     set_local_description(&pc, SdpType::Offer, &offer_sdp)?;
     let mut initial_ice_candidates = Vec::new();
-    let offer_sdp = finalize_local_sdp(offer_sdp, &ice_rx, &mut initial_ice_candidates)?;
+    let offer_sdp = finalize_local_sdp(offer_sdp, &mut ice_rx, &mut initial_ice_candidates).await?;
     tracing::debug!("offer SDP created");
 
     // /bootstrap で answer SDP を取得する
@@ -1067,9 +1062,11 @@ async fn run_client(
                                 }
                                 let answer = match finalize_local_sdp(
                                     answer,
-                                    &retained.ice_rx,
+                                    &mut retained.ice_rx,
                                     &mut retained.ice_candidates,
-                                ) {
+                                )
+                                .await
+                                {
                                     Ok(answer) => answer,
                                     Err(e) => {
                                         tracing::warn!("failed to gather ICE candidates: {e}");
