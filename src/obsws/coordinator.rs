@@ -313,11 +313,7 @@ impl ObswsCoordinator {
                 self.handle_toggle_output_request(&request_id, request.request_data.as_ref())
                     .await
             }
-            // --- session-local（coordinator で扱うが状態変更なし） ---
-            "Sleep" => {
-                self.handle_sleep(&request_id, request.request_data.as_ref())
-                    .await
-            }
+            // --- session-local（状態変更なし） ---
             "BroadcastCustomEvent" => {
                 self.handle_broadcast_custom_event(&request_id, request.request_data.as_ref())
             }
@@ -1979,28 +1975,6 @@ impl ObswsCoordinator {
     // セッションローカルハンドラ（状態変更なし）
     // -----------------------------------------------------------------------
 
-    async fn handle_sleep(
-        &self,
-        request_id: &str,
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> CommandResult {
-        let Some(request_data) = request_data else {
-            return self.build_error_result(
-                "Sleep",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_DATA,
-                "Missing required requestData field",
-            );
-        };
-        let sleep_millis = match parse_sleep_millis(request_data) {
-            Ok(millis) => millis,
-            Err(error) => return self.build_parse_error_result("Sleep", request_id, &error),
-        };
-        tokio::time::sleep(Duration::from_millis(sleep_millis)).await;
-        let response_text = crate::obsws_response_builder::build_sleep_response(request_id);
-        self.build_result_from_response(response_text, Vec::new())
-    }
-
     fn handle_broadcast_custom_event(
         &self,
         request_id: &str,
@@ -2250,18 +2224,6 @@ fn parse_required_non_empty_string_field(
         return None;
     }
     Some(value)
-}
-
-fn parse_sleep_millis(request_data: &nojson::RawJsonOwned) -> Result<u64, nojson::JsonParseError> {
-    let raw = request_data.value().to_member("sleepMillis")?.required()?;
-    let millis: i64 = raw.try_into()?;
-    if millis < 0 {
-        return Err(raw.invalid("sleepMillis must be greater than or equal to 0"));
-    }
-    if millis > 50_000 {
-        return Err(raw.invalid("sleepMillis must be less than or equal to 50000"));
-    }
-    Ok(millis as u64)
 }
 
 fn parse_custom_event_data(

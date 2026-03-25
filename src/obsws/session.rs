@@ -106,7 +106,7 @@ impl ObswsSession {
     }
 
     // -----------------------------------------------------------------------
-    // リクエスト処理（actor に委譲）
+    // リクエスト処理（coordinator に委譲）
     // -----------------------------------------------------------------------
 
     async fn handle_request(
@@ -119,6 +119,12 @@ impl ObswsSession {
                 reason: "identify is required",
                 close_error_context: "failed to close websocket for unidentified request",
             };
+        }
+
+        // Sleep は状態を変更しないため、coordinator を経由せず session 側で完結させる。
+        // coordinator のキューを塞がないことで、他セッションの処理への影響を防ぐ。
+        if request.request_type.as_deref() == Some("Sleep") {
+            return self.handle_sleep(&request).await;
         }
 
         let result = match self
@@ -266,6 +272,61 @@ impl ObswsSession {
         messages.push((response_text, "request batch response message"));
         messages.extend(filtered_events);
         SessionAction::SendTexts { messages }
+    }
+
+    // -----------------------------------------------------------------------
+    // session-local ハンドラ（coordinator を経由しない）
+    // -----------------------------------------------------------------------
+
+    /// Sleep は状態を変更しないため session 側で完結させる。
+    async fn handle_sleep(&self, request: &crate::obsws_message::RequestMessage) -> SessionAction {
+        let request_id = request.request_id.as_deref().unwrap_or_default();
+        let Some(request_data) = request.request_data.as_ref() else {
+            return SessionAction::SendText {
+                text: crate::obsws_response_builder::build_request_response_error(
+                    "Sleep",
+                    request_id,
+                    crate::obsws_protocol::REQUEST_STATUS_MISSING_REQUEST_DATA,
+                    "Missing required requestData field",
+                ),
+                message_name: "request response message",
+            };
+        };
+        let sleep_millis = match Self::parse_sleep_millis(request_data) {
+            Ok(millis) => millis,
+            Err(error) => {
+                let code =
+                    crate::obsws_response_builder::request_status_code_for_parse_error(&error);
+                return SessionAction::SendText {
+                    text: crate::obsws_response_builder::build_request_response_error(
+                        "Sleep",
+                        request_id,
+                        code,
+                        &error.to_string(),
+                    ),
+                    message_name: "request response message",
+                };
+            }
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(sleep_millis)).await;
+        SessionAction::SendText {
+            text: crate::obsws_response_builder::build_sleep_response(request_id),
+            message_name: "request response message",
+        }
+    }
+
+    fn parse_sleep_millis(
+        request_data: &nojson::RawJsonOwned,
+    ) -> Result<u64, nojson::JsonParseError> {
+        let raw = request_data.value().to_member("sleepMillis")?.required()?;
+        let millis: i64 = raw.try_into()?;
+        if millis < 0 {
+            return Err(raw.invalid("sleepMillis must be greater than or equal to 0"));
+        }
+        if millis > 50_000 {
+            return Err(raw.invalid("sleepMillis must be less than or equal to 50000"));
+        }
+        Ok(millis as u64)
     }
 
     // -----------------------------------------------------------------------
