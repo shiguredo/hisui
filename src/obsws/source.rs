@@ -1,6 +1,7 @@
 use crate::obsws_input_registry::{ObswsInputEntry, ObswsInputSettings};
 use crate::{ProcessorId, ProcessorMetadata, TrackId};
 
+pub mod audio_device;
 pub mod file_mp4;
 mod mp4;
 pub mod png_file;
@@ -40,6 +41,10 @@ pub enum ObswsSourceRequest {
     },
     CreateVideoDeviceSource {
         source: self::video_device::VideoDeviceSource,
+        processor_id: Option<ProcessorId>,
+    },
+    CreateAudioDeviceSource {
+        source: self::audio_device::AudioDeviceSource,
         processor_id: Option<ProcessorId>,
     },
     CreateRtmpInboundEndpoint {
@@ -116,6 +121,27 @@ impl ObswsSourceRequest {
                     .spawn_processor(
                         processor_id.clone(),
                         ProcessorMetadata::new("video_device_source"),
+                        move |h| source.run(h),
+                    )
+                    .await
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
+                Ok(processor_id)
+            }
+            Self::CreateAudioDeviceSource {
+                source,
+                processor_id,
+            } => {
+                let processor_id = processor_id.unwrap_or_else(|| {
+                    if let Some(device_id) = source.device_id.as_deref() {
+                        ProcessorId::new(format!("audioDeviceSource:{device_id}"))
+                    } else {
+                        ProcessorId::new("audioDeviceSource:default")
+                    }
+                });
+                handle
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("audio_device_source"),
                         move |h| source.run(h),
                     )
                     .await
@@ -270,6 +296,9 @@ pub fn build_record_source_plan(
         }
         ObswsInputSettings::VideoCaptureDevice(settings) => {
             video_device::build_record_source_plan(settings, output_kind, run_id, source_index)
+        }
+        ObswsInputSettings::AudioCaptureDevice(settings) => {
+            audio_device::build_record_source_plan(settings, output_kind, run_id, source_index)
         }
         ObswsInputSettings::RtmpInbound(settings) => {
             rtmp_inbound::build_record_source_plan(settings, output_kind, run_id, source_index)
