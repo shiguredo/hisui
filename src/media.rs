@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, SyncSender};
 use std::time::Duration;
 
 use crate::audio::AudioFrame;
@@ -55,6 +54,3 @@ impl MediaFrame {
         Self::Video(Arc::new(frame))
     }
 }
-
-pub type MediaStreamReceiver = Receiver<MediaFrame>;
-pub type MediaStreamSyncSender = SyncSender<MediaFrame>;
