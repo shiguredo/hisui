@@ -326,8 +326,6 @@ async fn http_bootstrap(host: &str, port: u16, offer_sdp: &str) -> Result<String
         .flush()
         .await
         .map_err(|e| format!("failed to flush: {e}"))?;
-    tracing::info!("bootstrap offer sent: sdp_bytes={}", offer_sdp.len());
-
     let mut decoder = ResponseDecoder::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -345,11 +343,6 @@ async fn http_bootstrap(host: &str, port: u16, offer_sdp: &str) -> Result<String
             .decode()
             .map_err(|e| format!("failed to decode response: {e}"))?
         {
-            tracing::info!(
-                "bootstrap response received: status={} {}",
-                response.status_code,
-                response.reason_phrase
-            );
             if response.status_code != 201 {
                 return Err(format!(
                     "bootstrap failed: {} {}",
@@ -672,7 +665,6 @@ fn main() -> noargs::Result<()> {
 
     match result {
         Ok(stats) => {
-            // JSON 統計を stdout に出力する
             let json = nojson::object(|f| {
                 f.member("video_tracks_received", stats.video_tracks)?;
                 f.member("audio_tracks_received", stats.audio_tracks)?;
@@ -684,10 +676,7 @@ fn main() -> noargs::Result<()> {
                 f.member("connection_state", stats.connection_state.as_str())
             });
             println!("{json}");
-            // 一時対処:
-            // WebRTC teardown 中の race で process 終了時に SIGSEGV することがあるため、
-            // 成功時は統計出力後に即時終了して destructor 群を踏まないようにする。
-            std::process::exit(0);
+            Ok(())
         }
         Err(e) => {
             eprintln!("error: {e}");
@@ -866,9 +855,6 @@ async fn run_client(
     output_path: &str,
     input_mp4_path: &str,
 ) -> Result<Stats, String> {
-    tracing::info!(
-        "run_client started: host={host}, port={port}, duration_secs={duration_secs}, output_path={output_path}, input_mp4_path={input_mp4_path}"
-    );
     // WebRTC ファクトリを初期化する
     let env = Environment::new();
     let mut network = Thread::new_with_socket_server();
@@ -911,8 +897,6 @@ async fn run_client(
 
     let pc = PeerConnection::create(factory.as_ref(), &mut config, &mut pc_deps)
         .map_err(|e| format!("failed to create PeerConnection: {e}"))?;
-    tracing::info!("peer connection created");
-
     // server 側の signaling / obsws DataChannel を初回 offer に載せるための
     // m=application 用ダミー DataChannel
     let mut dc_init = DataChannelInit::new();
@@ -920,26 +904,15 @@ async fn run_client(
     let dummy_dc = pc
         .create_data_channel("dummy", &mut dc_init)
         .map_err(|e| format!("failed to create dummy DataChannel: {e}"))?;
-    tracing::info!("dummy data channel created");
-
     // offer SDP を生成する
     let offer_sdp = create_offer_sdp(&pc)?;
-    tracing::info!("initial offer created");
     set_local_description(&pc, SdpType::Offer, &offer_sdp)?;
-    tracing::info!("initial local description set");
     let mut initial_ice_candidates = Vec::new();
     let offer_sdp = finalize_local_sdp(offer_sdp, &mut ice_rx, &mut initial_ice_candidates).await?;
-    tracing::info!(
-        "initial offer finalized with ICE candidates: sdp_bytes={}, ice_candidates={}",
-        offer_sdp.len(),
-        initial_ice_candidates.len()
-    );
 
     // /bootstrap で answer SDP を取得する
     let answer_sdp = http_bootstrap(host, port, &offer_sdp).await?;
-    tracing::info!("bootstrap answer received: sdp_bytes={}", answer_sdp.len());
     set_remote_description(&pc, SdpType::Answer, &answer_sdp)?;
-    tracing::info!("bootstrap completed");
 
     // 統計カウンタ
     let video_tracks = Arc::new(AtomicUsize::new(0));
@@ -976,29 +949,19 @@ async fn run_client(
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
-    let mut first_video_frame_logged = false;
     let frame_poll_interval = Duration::from_millis(50);
-    let loop_exit_reason = 'event_loop: loop {
+    'event_loop: loop {
         // フレーム受信チャネルから溜まっているフレームを処理する。
         // 1 回のポーリングで処理するフレーム数を制限して、
         // deadline 判定とイベント処理に必ず戻れるようにする。
         let mut processed_frames = 0;
         while processed_frames < MAX_FRAMES_PER_POLL {
             if tokio::time::Instant::now() >= deadline {
-                break 'event_loop "deadline reached during frame drain".to_owned();
+                break 'event_loop;
             }
             let Ok(frame_data) = frame_rx.try_recv() else {
                 break;
             };
-            if !first_video_frame_logged {
-                tracing::info!(
-                    "first video frame received: width={}, height={}, timestamp_us={}",
-                    frame_data.width,
-                    frame_data.height,
-                    frame_data.timestamp_us
-                );
-                first_video_frame_logged = true;
-            }
             encode_and_write_frame(
                 &frame_data,
                 &mut vp9_encoder,
@@ -1013,29 +976,26 @@ async fn run_client(
             && obsws_ready
             && dc.state() == DataChannelState::Open
         {
-            tracing::info!("sending CreateInput request on obsws DataChannel");
             let request = make_create_mp4_input_request(input_mp4_path);
             if !dc.send(request.as_bytes(), false) {
                 return Err("failed to send CreateInput request on obsws DataChannel".to_owned());
             }
             obsws_create_input_sent = true;
-            tracing::info!("CreateInput request sent on obsws DataChannel");
         }
 
         let event = tokio::select! {
             event = event_rx.recv() => {
                 match event {
                     Some(e) => e,
-                    None => break "event channel closed".to_owned(),
+                    None => break 'event_loop,
                 }
             }
             _ = tokio::time::sleep(frame_poll_interval) => continue,
-            _ = tokio::time::sleep_until(deadline) => break "deadline reached".to_owned(),
+            _ = tokio::time::sleep_until(deadline) => break 'event_loop,
         };
 
         match event {
             ClientEvent::ConnectionChange(state) => {
-                tracing::info!("connection state: {state:?}");
                 let state_str = match state {
                     PeerConnectionState::New => "new",
                     PeerConnectionState::Connecting => "connecting",
@@ -1051,7 +1011,6 @@ async fn run_client(
                 let receiver = transceiver.receiver();
                 let track = receiver.track();
                 let kind = track.kind().unwrap_or_default();
-                tracing::info!("track received: kind={kind}");
                 match kind.as_str() {
                     "video" => {
                         video_tracks.fetch_add(1, Ordering::Relaxed);
@@ -1080,39 +1039,31 @@ async fn run_client(
             }
             ClientEvent::DataChannel(dc, observer) => {
                 let label = dc.label().unwrap_or_default();
-                tracing::info!("data channel received: label={label}");
                 if label == "signaling" {
                     retained.signaling_dc = Some(dc);
                     retained.signaling_dc_observer = observer;
                 } else if label == "obsws" {
                     obsws_ready = dc.state() == DataChannelState::Open;
-                    tracing::info!("obsws data channel ready={obsws_ready}");
                     retained.obsws_dc = Some(dc);
                     retained.obsws_dc_observer = observer;
                 }
             }
             ClientEvent::SignalingMessage { data } => {
                 let msg_type = parse_signaling_type(&data).unwrap_or_default();
-                tracing::debug!("signaling message: type={msg_type}");
                 if msg_type == "offer" {
-                    tracing::info!("handling renegotiation offer");
                     // renegotiation: サーバーからの offer に answer を返す
                     if let Some(sdp) = parse_signaling_sdp(&data) {
-                        tracing::info!("renegotiation offer parsed: sdp_bytes={}", sdp.len());
                         if let Err(e) = set_remote_description(&pc, SdpType::Offer, &sdp) {
                             tracing::warn!("failed to set remote offer: {e}");
                             continue;
                         }
-                        tracing::info!("remote renegotiation offer applied");
                         match create_answer_sdp(&pc) {
                             Ok(answer) => {
-                                tracing::info!("renegotiation answer created");
                                 if let Err(e) = set_local_description(&pc, SdpType::Answer, &answer)
                                 {
                                     tracing::warn!("failed to set local answer: {e}");
                                     continue;
                                 }
-                                tracing::info!("local renegotiation answer applied");
                                 let answer = match finalize_local_sdp(
                                     answer,
                                     &mut retained.ice_rx,
@@ -1129,7 +1080,6 @@ async fn run_client(
                                 let answer_json = make_answer_json(&answer);
                                 if let Some(dc) = &retained.signaling_dc {
                                     dc.send(answer_json.as_bytes(), false);
-                                    tracing::info!("renegotiation answer sent");
                                 }
                             }
                             Err(e) => {
@@ -1141,12 +1091,10 @@ async fn run_client(
             }
             ClientEvent::ObswsMessage { data } => {
                 if let Ok(text) = std::str::from_utf8(&data) {
-                    tracing::debug!("obsws message: {text}");
                     if let Some(result) = parse_obsws_request_response(text) {
                         match result {
                             Ok(()) => {
                                 obsws_create_input_succeeded = true;
-                                tracing::info!("CreateInput request succeeded");
                             }
                             Err(reason) => {
                                 return Err(format!("CreateInput request failed: {reason}"));
@@ -1160,26 +1108,14 @@ async fn run_client(
             ClientEvent::ObswsDataChannelStateChange => {
                 if let Some(dc) = &retained.obsws_dc {
                     obsws_ready = dc.state() == DataChannelState::Open;
-                    tracing::info!("obsws data channel ready={obsws_ready}");
                 }
             }
         }
-    };
-    tracing::info!("event loop exited: reason={loop_exit_reason}");
+    }
 
     // 残りのフレームを処理する
-    tracing::info!("draining remaining frames");
     let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while let Ok(frame_data) = frame_rx.try_recv() {
-        if !first_video_frame_logged {
-            tracing::info!(
-                "first video frame received: width={}, height={}, timestamp_us={}",
-                frame_data.width,
-                frame_data.height,
-                frame_data.timestamp_us
-            );
-            first_video_frame_logged = true;
-        }
         encode_and_write_frame(
             &frame_data,
             &mut vp9_encoder,
@@ -1187,35 +1123,24 @@ async fn run_client(
             &mut mp4_writer,
         )?;
         if tokio::time::Instant::now() >= drain_deadline {
-            tracing::info!("remaining frame drain timed out");
             break;
         }
     }
-    tracing::info!("remaining frames drained");
 
     // エンコーダーの残りフレームをフラッシュする
     if let Some(encoder) = &mut vp9_encoder {
-        tracing::info!("finishing VP9 encoder");
         encoder
             .finish()
             .map_err(|e| format!("failed to finish encoder: {e}"))?;
-        tracing::info!("VP9 encoder finished");
-        tracing::info!("draining encoded frames after finish");
         while let Some(frame) = encoder.next_frame() {
             let se = vp9_sample_entry.take();
             mp4_writer.append_video(frame.data(), frame.is_keyframe(), se, 0)?;
         }
-        tracing::info!("encoded frame drain completed");
     }
 
     // MP4 ファイルをファイナライズする
     if mp4_writer.video_sample_count > 0 {
-        tracing::info!(
-            "finalizing MP4 writer: video_sample_count={}",
-            mp4_writer.video_sample_count
-        );
         mp4_writer.finalize()?;
-        tracing::info!("MP4 writer finalized");
     }
 
     let video_codec = if mp4_writer.video_sample_count > 0 {
@@ -1228,14 +1153,6 @@ async fn run_client(
         tracing::warn!("CreateInput request did not complete before deadline");
         return Err("CreateInput request did not complete".to_owned());
     }
-
-    tracing::info!(
-        "run_client completed: video_tracks={}, audio_tracks={}, video_frames={}, video_samples_written={}",
-        video_tracks.load(Ordering::Relaxed),
-        audio_tracks.load(Ordering::Relaxed),
-        video_frames.load(Ordering::Relaxed),
-        mp4_writer.video_sample_count
-    );
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
         audio_tracks: audio_tracks.load(Ordering::Relaxed),
@@ -1257,16 +1174,9 @@ fn encode_and_write_frame(
 ) -> Result<(), String> {
     let width = frame_data.width as usize;
     let height = frame_data.height as usize;
-    tracing::info!(
-        "encode_and_write_frame start: width={}, height={}, timestamp_us={}",
-        width,
-        height,
-        frame_data.timestamp_us
-    );
 
     // エンコーダーの遅延初期化
     if vp9_encoder.is_none() {
-        tracing::info!("initializing VP9 encoder");
         let config = shiguredo_libvpx::EncoderConfig::new(
             width,
             height,
@@ -1277,7 +1187,6 @@ fn encode_and_write_frame(
             .map_err(|e| format!("failed to create VP9 encoder: {e}"))?;
         *vp9_encoder = Some(encoder);
         *vp9_sample_entry = Some(vp9_sample_entry_value(width, height));
-        tracing::info!("VP9 encoder initialized");
     }
 
     let encoder = vp9_encoder.as_mut().unwrap();
@@ -1300,7 +1209,6 @@ fn encode_and_write_frame(
     let encode_options = shiguredo_libvpx::EncodeOptions {
         force_keyframe: false,
     };
-    tracing::info!("calling VP9 encoder.encode");
     encoder
         .encode(
             &shiguredo_libvpx::ImageData::I420 {
@@ -1311,28 +1219,16 @@ fn encode_and_write_frame(
             &encode_options,
         )
         .map_err(|e| format!("VP9 encode failed: {e}"))?;
-    tracing::info!("VP9 encoder.encode completed");
 
-    tracing::info!("draining encoded frames after encode");
     while let Some(frame) = encoder.next_frame() {
-        tracing::info!(
-            "encoded frame available: bytes={}, keyframe={}",
-            frame.data().len(),
-            frame.is_keyframe()
-        );
         let se = vp9_sample_entry.take();
-        tracing::info!("appending encoded frame to MP4");
         mp4_writer.append_video(
             frame.data(),
             frame.is_keyframe(),
             se,
             frame_data.timestamp_us,
         )?;
-        tracing::info!("encoded frame appended to MP4");
     }
-    tracing::info!("encoded frame drain after encode completed");
-
-    tracing::info!("encode_and_write_frame completed");
     Ok(())
 }
 

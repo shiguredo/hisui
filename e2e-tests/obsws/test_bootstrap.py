@@ -36,7 +36,6 @@ def _build_bootstrap_command(
             "-p",
             "obsws_bootstrap",
             "--",
-            "--verbose",
             "--host",
             host,
             "--port",
