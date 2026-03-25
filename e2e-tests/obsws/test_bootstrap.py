@@ -107,10 +107,10 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     server = ObswsServer(binary_path, host=host, port=port)
     result = None
     try:
-            with server:
-                cmd, cwd = _build_bootstrap_command(
-                    host, port, 5, str(input_mp4), str(output_mp4)
-                )
+        with server:
+            cmd, cwd = _build_bootstrap_command(
+                host, port, 5, str(input_mp4), str(output_mp4)
+            )
             result = _run_bootstrap_command(cmd, cwd)
             assert result.returncode == 0, (
                 "obsws_bootstrap failed: "
