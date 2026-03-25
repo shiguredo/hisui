@@ -1,8 +1,8 @@
-use crate::obsws_input_registry::{
+use crate::obsws::input_registry::{
     CreateSceneItemError, DuplicateSceneItemError, GetSceneItemIdError, GetSceneItemListError,
     ObswsInputRegistry, SceneItemLookupError, SetSceneItemIndexError,
 };
-use crate::obsws_protocol::{
+use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
     REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };

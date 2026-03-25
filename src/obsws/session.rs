@@ -1,9 +1,9 @@
 use shiguredo_websocket::CloseCode;
 
-use crate::obsws_auth::ObswsAuthentication;
-use crate::obsws_coordinator::ObswsCoordinatorHandle;
-use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
-use crate::obsws_protocol::{
+use crate::obsws::auth::ObswsAuthentication;
+use crate::obsws::coordinator::ObswsCoordinatorHandle;
+use crate::obsws::message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
+use crate::obsws::protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_ALL,
 };
@@ -77,7 +77,7 @@ impl ObswsSession {
 
     pub fn on_connected(&self) -> SessionAction {
         SessionAction::SendText {
-            text: crate::obsws_message::build_hello_message(self.auth.as_ref()),
+            text: crate::obsws::message::build_hello_message(self.auth.as_ref()),
             message_name: "hello message",
         }
     }
@@ -85,7 +85,7 @@ impl ObswsSession {
     pub async fn on_text_message(&mut self, text: &str) -> crate::Result<SessionAction> {
         self.stats.incoming_messages = self.stats.incoming_messages.saturating_add(1);
 
-        let message = crate::obsws_message::parse_client_message(text)?;
+        let message = crate::obsws::message::parse_client_message(text)?;
         let action = match message {
             ClientMessage::Identify(identify) => self.handle_identify(identify),
             ClientMessage::Reidentify(reidentify) => self.handle_reidentify(reidentify),
@@ -111,7 +111,7 @@ impl ObswsSession {
 
     async fn handle_request(
         &mut self,
-        request: crate::obsws_message::RequestMessage,
+        request: crate::obsws::message::RequestMessage,
     ) -> SessionAction {
         if self.state != ObswsSessionState::Identified {
             return SessionAction::Close {
@@ -135,10 +135,10 @@ impl ObswsSession {
             Ok(result) => result,
             Err(_) => {
                 return SessionAction::SendText {
-                    text: crate::obsws_response_builder::build_request_response_error(
+                    text: crate::obsws::response::build_request_response_error(
                         "",
                         "",
-                        crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                         "Coordinator has terminated",
                     ),
                     message_name: "request response message",
@@ -220,7 +220,7 @@ impl ObswsSession {
                     .clone()
                     .filter(|id| !id.is_empty())
                     .unwrap_or_else(|| format!("{request_id}:{index}"));
-                crate::obsws_message::RequestMessage {
+                crate::obsws::message::RequestMessage {
                     request_id: Some(sub_request_id),
                     request_type: r.request_type,
                     request_data: r.request_data,
@@ -236,10 +236,10 @@ impl ObswsSession {
             Ok(result) => result,
             Err(_) => {
                 return SessionAction::SendText {
-                    text: crate::obsws_response_builder::build_request_response_error(
+                    text: crate::obsws::response::build_request_response_error(
                         "RequestBatch",
                         &request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                         "Coordinator has terminated",
                     ),
                     message_name: "request response message",
@@ -247,7 +247,7 @@ impl ObswsSession {
             }
         };
 
-        let response_text = crate::obsws_response_builder::build_request_batch_response(
+        let response_text = crate::obsws::response::build_request_batch_response(
             &request_id,
             &batch_result.results,
         );
@@ -279,14 +279,14 @@ impl ObswsSession {
     // -----------------------------------------------------------------------
 
     /// Sleep は状態を変更しないため session 側で完結させる。
-    async fn handle_sleep(&self, request: &crate::obsws_message::RequestMessage) -> SessionAction {
+    async fn handle_sleep(&self, request: &crate::obsws::message::RequestMessage) -> SessionAction {
         let request_id = request.request_id.as_deref().unwrap_or_default();
         let Some(request_data) = request.request_data.as_ref() else {
             return SessionAction::SendText {
-                text: crate::obsws_response_builder::build_request_response_error(
+                text: crate::obsws::response::build_request_response_error(
                     "Sleep",
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_MISSING_REQUEST_DATA,
+                    crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_DATA,
                     "Missing required requestData field",
                 ),
                 message_name: "request response message",
@@ -295,10 +295,9 @@ impl ObswsSession {
         let sleep_millis = match Self::parse_sleep_millis(request_data) {
             Ok(millis) => millis,
             Err(error) => {
-                let code =
-                    crate::obsws_response_builder::request_status_code_for_parse_error(&error);
+                let code = crate::obsws::response::request_status_code_for_parse_error(&error);
                 return SessionAction::SendText {
-                    text: crate::obsws_response_builder::build_request_response_error(
+                    text: crate::obsws::response::build_request_response_error(
                         "Sleep",
                         request_id,
                         code,
@@ -310,7 +309,7 @@ impl ObswsSession {
         };
         tokio::time::sleep(std::time::Duration::from_millis(sleep_millis)).await;
         SessionAction::SendText {
-            text: crate::obsws_response_builder::build_sleep_response(request_id),
+            text: crate::obsws::response::build_sleep_response(request_id),
             message_name: "request response message",
         }
     }
@@ -335,7 +334,7 @@ impl ObswsSession {
 
     fn handle_identify(
         &mut self,
-        identify: crate::obsws_message::IdentifyMessage,
+        identify: crate::obsws::message::IdentifyMessage,
     ) -> SessionAction {
         if self.state != ObswsSessionState::AwaitingIdentify {
             return SessionAction::Close {
@@ -369,14 +368,14 @@ impl ObswsSession {
         self.event_subscriptions = identify.event_subscriptions.unwrap_or(OBSWS_EVENT_SUB_ALL);
 
         SessionAction::SendText {
-            text: crate::obsws_message::build_identified_message(rpc_version),
+            text: crate::obsws::message::build_identified_message(rpc_version),
             message_name: "identified message",
         }
     }
 
     fn handle_reidentify(
         &mut self,
-        reidentify: crate::obsws_message::ReidentifyMessage,
+        reidentify: crate::obsws::message::ReidentifyMessage,
     ) -> SessionAction {
         if self.state != ObswsSessionState::Identified {
             return SessionAction::Close {
@@ -391,7 +390,7 @@ impl ObswsSession {
             .unwrap_or(OBSWS_EVENT_SUB_ALL);
 
         SessionAction::SendText {
-            text: crate::obsws_message::build_identified_message(
+            text: crate::obsws::message::build_identified_message(
                 self.negotiated_rpc_version.unwrap_or(1),
             ),
             message_name: "identified message",

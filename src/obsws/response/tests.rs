@@ -1,8 +1,8 @@
 use super::*;
-use crate::obsws_input_registry::{
+use crate::obsws::input_registry::{
     ObswsInputRegistry, ObswsInputSettings, ObswsSceneItemTransform,
 };
-use crate::obsws_protocol::{
+use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_OP_EVENT,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_SUCCESS,
 };
@@ -312,7 +312,7 @@ fn build_input_events_contain_expected_fields() {
 #[test]
 fn build_input_settings_changed_event_contains_expected_fields() {
     let input_settings = ObswsInputSettings::VideoCaptureDevice(
-        crate::obsws_input_registry::ObswsVideoCaptureDeviceSettings {
+        crate::obsws::input_registry::ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-1".to_owned()),
         },
     );

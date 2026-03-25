@@ -1,6 +1,6 @@
 use base64::Engine as _;
 
-use crate::obsws_protocol::AUTH_RANDOM_BYTE_LEN;
+use crate::obsws::protocol::AUTH_RANDOM_BYTE_LEN;
 
 #[derive(Debug, Clone)]
 pub struct ObswsAuthentication {

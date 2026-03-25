@@ -1,7 +1,7 @@
-use crate::obsws_input_registry::{
+use crate::obsws::input_registry::{
     ObswsInputSettings, ObswsSceneItemIndexEntry, ObswsSceneItemTransform,
 };
-use crate::obsws_protocol::{
+use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
     OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED, OBSWS_EVENT_SUB_SCENE_ITEMS,
     OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,

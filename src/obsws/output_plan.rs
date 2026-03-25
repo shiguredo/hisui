@@ -1,5 +1,5 @@
+use crate::obsws::input_registry::ObswsSceneInputEntry;
 use crate::obsws::source::{self, ObswsOutputKind, ObswsRecordSourcePlan};
-use crate::obsws_input_registry::ObswsSceneInputEntry;
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 

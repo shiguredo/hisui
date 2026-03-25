@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::obsws_input_registry::{ObswsInputRegistry, ObswsStreamServiceSettings};
-use crate::obsws_protocol::{
+use crate::obsws::input_registry::{ObswsInputRegistry, ObswsStreamServiceSettings};
+use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
@@ -251,7 +251,7 @@ pub fn build_set_output_settings_response(
                 };
             let existing = input_registry.rtmp_outbound_settings().clone();
             input_registry.set_rtmp_outbound_settings(
-                crate::obsws_input_registry::ObswsRtmpOutboundSettings {
+                crate::obsws::input_registry::ObswsRtmpOutboundSettings {
                     output_url: output_url.or(existing.output_url),
                     stream_name: stream_name.or(existing.stream_name),
                 },

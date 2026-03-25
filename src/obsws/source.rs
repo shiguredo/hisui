@@ -1,4 +1,4 @@
-use crate::obsws_input_registry::{ObswsInputEntry, ObswsInputSettings};
+use crate::obsws::input_registry::{ObswsInputEntry, ObswsInputSettings};
 use crate::{ProcessorId, ProcessorMetadata, TrackId};
 
 pub mod audio_device;

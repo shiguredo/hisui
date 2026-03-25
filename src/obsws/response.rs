@@ -1,10 +1,10 @@
-use crate::obsws_auth::ObswsAuthentication;
-use crate::obsws_input_registry::{
+use crate::obsws::auth::ObswsAuthentication;
+use crate::obsws::input_registry::{
     ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings, ObswsSceneItemBlendMode,
     ObswsSceneItemRef, ObswsSceneItemTransformPatch, ParseInputSettingsError,
     SetSceneItemIndexResult, SetSceneItemLockedResult, SetSceneItemTransformResult,
 };
-use crate::obsws_protocol::{
+use crate::obsws::protocol::{
     OBS_STUDIO_VERSION, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_BATCH_RESPONSE,
     OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_VERSION,
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_DATA,

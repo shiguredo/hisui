@@ -23,7 +23,7 @@ pub struct BootstrapEndpoint {
 impl BootstrapEndpoint {
     pub fn new(
         handle: crate::MediaPipelineHandle,
-        coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
+        coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
     ) -> crate::Result<Self> {
         Ok(Self {
             session_manager: WebRtcP2pSessionManager::new(handle, coordinator_handle)?,

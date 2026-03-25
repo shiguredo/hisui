@@ -124,7 +124,7 @@ fn convert_captured_frame_to_i16be(
 }
 
 pub(super) fn build_record_source_plan(
-    settings: &crate::obsws_input_registry::ObswsAudioCaptureDeviceSettings,
+    settings: &crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings,
     output_kind: super::ObswsOutputKind,
     run_id: u64,
     source_index: usize,
@@ -158,8 +158,8 @@ pub(super) fn build_record_source_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings;
     use crate::obsws::source::{ObswsOutputKind, ObswsSourceRequest};
-    use crate::obsws_input_registry::ObswsAudioCaptureDeviceSettings;
 
     #[test]
     fn build_record_source_plan_with_device_id() {

@@ -1,9 +1,9 @@
-use crate::obsws_input_registry::{
+use crate::obsws::input_registry::{
     CreateSceneError, GetSceneSceneTransitionOverrideError, ObswsInputRegistry,
     SetCurrentProgramSceneError, SetCurrentSceneTransitionDurationError,
     SetCurrentSceneTransitionError, SetSceneNameError, SetSceneSceneTransitionOverrideError,
 };
-use crate::obsws_protocol::{
+use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
     REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
     REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
@@ -471,10 +471,10 @@ pub fn build_remove_scene_response(
     };
     if let Err(error) = input_registry.remove_scene(&scene_name) {
         return match error {
-            crate::obsws_input_registry::RemoveSceneError::SceneNotFound => {
+            crate::obsws::input_registry::RemoveSceneError::SceneNotFound => {
                 unreachable!("resolved scene name must exist in input registry")
             }
-            crate::obsws_input_registry::RemoveSceneError::LastSceneNotRemovable => {
+            crate::obsws::input_registry::RemoveSceneError::LastSceneNotRemovable => {
                 super::build_request_response_error(
                     "RemoveScene",
                     request_id,

@@ -1,8 +1,8 @@
 use super::*;
-use crate::obsws_auth::build_authentication_response;
-use crate::obsws_input_registry::{ObswsInput, ObswsInputRegistry, ObswsStreamServiceSettings};
-use crate::obsws_message::RequestMessage;
-use crate::obsws_protocol::{
+use crate::obsws::auth::build_authentication_response;
+use crate::obsws::input_registry::{ObswsInput, ObswsInputRegistry, ObswsStreamServiceSettings};
+use crate::obsws::message::RequestMessage;
+use crate::obsws::protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
     OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS,
     OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
@@ -14,8 +14,8 @@ use crate::obsws_protocol::{
 use std::time::Duration;
 
 /// テスト用の ProgramOutputState を生成する
-fn test_program_output() -> crate::obsws_server::ProgramOutputState {
-    crate::obsws_server::ProgramOutputState {
+fn test_program_output() -> crate::obsws::server::ProgramOutputState {
+    crate::obsws::server::ProgramOutputState {
         scene_uuid: "scene-default".to_owned(),
         video_track_id: crate::TrackId::new("obsws:program:0:mixed_video"),
         audio_track_id: crate::TrackId::new("obsws:program:0:mixed_audio"),
@@ -28,16 +28,16 @@ fn test_program_output() -> crate::obsws_server::ProgramOutputState {
 /// レジストリからランタイムハンドルを生成し、actor を spawn する
 fn create_coordinator_handle(
     registry: ObswsInputRegistry,
-) -> crate::obsws_coordinator::ObswsCoordinatorHandle {
+) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
     let (actor, handle) =
-        crate::obsws_coordinator::ObswsCoordinator::new(registry, program_output, None);
+        crate::obsws::coordinator::ObswsCoordinator::new(registry, program_output, None);
     tokio::spawn(actor.run());
     handle
 }
 
 /// デフォルトのテスト用ランタイムハンドルを生成する
-fn default_coordinator_handle() -> crate::obsws_coordinator::ObswsCoordinatorHandle {
+fn default_coordinator_handle() -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     create_coordinator_handle(ObswsInputRegistry::new_for_test())
 }
 
@@ -45,9 +45,9 @@ fn default_coordinator_handle() -> crate::obsws_coordinator::ObswsCoordinatorHan
 fn create_coordinator_handle_with_pipeline(
     registry: ObswsInputRegistry,
     pipeline_handle: crate::MediaPipelineHandle,
-) -> crate::obsws_coordinator::ObswsCoordinatorHandle {
+) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
-    let (actor, handle) = crate::obsws_coordinator::ObswsCoordinator::new(
+    let (actor, handle) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
         program_output,
         Some(pipeline_handle),

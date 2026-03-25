@@ -1,7 +1,7 @@
+use crate::obsws::input_registry::ObswsMp4FileSourceSettings;
 use crate::obsws::source::{
     BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
-use crate::obsws_input_registry::ObswsMp4FileSourceSettings;
 use crate::{ProcessorId, TrackId};
 
 pub(super) fn build_record_source_plan(

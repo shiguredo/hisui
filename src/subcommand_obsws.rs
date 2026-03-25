@@ -168,7 +168,7 @@ fn run_internal(
         // obsws サーバーの実行コンテキストは LocalSet 上で動かす必要がある。
         let local = tokio::task::LocalSet::new();
         local
-            .run_until(crate::obsws_server::run_server(
+            .run_until(crate::obsws::server::run_server(
                 addr,
                 password,
                 default_record_dir,

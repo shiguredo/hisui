@@ -1,6 +1,6 @@
-use crate::obsws_input_registry::ObswsInputRegistry;
-use crate::obsws_message::ObswsSessionStats;
-use crate::obsws_protocol::{OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION};
+use crate::obsws::input_registry::ObswsInputRegistry;
+use crate::obsws::message::ObswsSessionStats;
+use crate::obsws::protocol::{OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION};
 #[cfg(unix)]
 use std::ffi::CString;
 #[cfg(unix)]

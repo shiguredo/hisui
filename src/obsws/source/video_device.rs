@@ -188,7 +188,7 @@ fn convert_captured_frame_to_i420(
 }
 
 pub(super) fn build_record_source_plan(
-    settings: &crate::obsws_input_registry::ObswsVideoCaptureDeviceSettings,
+    settings: &crate::obsws::input_registry::ObswsVideoCaptureDeviceSettings,
     output_kind: super::ObswsOutputKind,
     run_id: u64,
     source_index: usize,
@@ -223,8 +223,8 @@ pub(super) fn build_record_source_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::obsws::input_registry::ObswsVideoCaptureDeviceSettings;
     use crate::obsws::source::{ObswsOutputKind, ObswsSourceRequest};
-    use crate::obsws_input_registry::ObswsVideoCaptureDeviceSettings;
 
     #[test]
     fn build_record_source_plan_with_device_id() {

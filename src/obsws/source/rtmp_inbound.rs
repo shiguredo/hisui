@@ -1,7 +1,7 @@
+use crate::obsws::input_registry::ObswsRtmpInboundSettings;
 use crate::obsws::source::{
     BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
-use crate::obsws_input_registry::ObswsRtmpInboundSettings;
 use crate::{ProcessorId, TrackId};
 
 pub(super) fn build_record_source_plan(

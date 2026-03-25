@@ -269,7 +269,7 @@ fn grayscale_like_to_i420a(
 }
 
 pub(super) fn build_record_source_plan(
-    settings: &crate::obsws_input_registry::ObswsImageSourceSettings,
+    settings: &crate::obsws::input_registry::ObswsImageSourceSettings,
     output_kind: super::ObswsOutputKind,
     run_id: u64,
     source_index: usize,

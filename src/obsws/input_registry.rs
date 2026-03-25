@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::obsws_protocol::OBSWS_DEFAULT_SCENE_NAME;
+use crate::obsws::protocol::OBSWS_DEFAULT_SCENE_NAME;
 
 mod scene_item;
 #[cfg(test)]

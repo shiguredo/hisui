@@ -1,6 +1,6 @@
-use crate::obsws_input_registry::ObswsInputRegistry;
-use crate::obsws_message::ObswsSessionStats;
-use crate::obsws_protocol::{
+use crate::obsws::input_registry::ObswsInputRegistry;
+use crate::obsws::message::ObswsSessionStats;
+use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
     OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED, OBSWS_EVENT_SUB_SCENE_ITEMS,
     OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_MISSING_REQUEST_DATA,
@@ -13,13 +13,13 @@ use std::time::Duration;
 pub enum ObswsCoordinatorCommand {
     /// 単一リクエストを処理する
     ProcessRequest {
-        request: crate::obsws_message::RequestMessage,
+        request: crate::obsws::message::RequestMessage,
         session_stats: ObswsSessionStats,
         reply_tx: tokio::sync::oneshot::Sender<CommandResult>,
     },
     /// RequestBatch 内のリクエストを逐次処理する
     ProcessRequestBatch {
-        requests: Vec<crate::obsws_message::RequestMessage>,
+        requests: Vec<crate::obsws::message::RequestMessage>,
         session_stats: ObswsSessionStats,
         halt_on_failure: bool,
         reply_tx: tokio::sync::oneshot::Sender<BatchCommandResult>,
@@ -30,12 +30,12 @@ pub enum ObswsCoordinatorCommand {
 pub struct CommandResult {
     pub response_text: nojson::RawJsonOwned,
     pub events: Vec<TaggedEvent>,
-    pub batch_result: crate::obsws_response_builder::RequestBatchResult,
+    pub batch_result: crate::obsws::response::RequestBatchResult,
 }
 
 /// バッチリクエストの処理結果
 pub struct BatchCommandResult {
-    pub results: Vec<crate::obsws_response_builder::RequestBatchResult>,
+    pub results: Vec<crate::obsws::response::RequestBatchResult>,
     pub events: Vec<TaggedEvent>,
 }
 
@@ -63,7 +63,7 @@ impl ObswsCoordinatorHandle {
     /// 単一リクエストを actor に送信し、結果を待つ
     pub async fn process_request(
         &self,
-        request: crate::obsws_message::RequestMessage,
+        request: crate::obsws::message::RequestMessage,
         session_stats: ObswsSessionStats,
     ) -> crate::Result<CommandResult> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -82,7 +82,7 @@ impl ObswsCoordinatorHandle {
     /// RequestBatch を actor に送信し、結果を待つ
     pub async fn process_request_batch(
         &self,
-        requests: Vec<crate::obsws_message::RequestMessage>,
+        requests: Vec<crate::obsws::message::RequestMessage>,
         session_stats: ObswsSessionStats,
         halt_on_failure: bool,
     ) -> crate::Result<BatchCommandResult> {
@@ -114,7 +114,7 @@ impl ObswsCoordinatorHandle {
 /// obsws の状態変更・副作用・Program 出力同期を調停する coordinator
 pub struct ObswsCoordinator {
     input_registry: ObswsInputRegistry,
-    program_output: crate::obsws_server::ProgramOutputState,
+    program_output: crate::obsws::server::ProgramOutputState,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<ObswsCoordinatorCommand>,
 }
@@ -123,7 +123,7 @@ impl ObswsCoordinator {
     /// actor と handle を生成する。program_output の初期化は呼び出し側で行う。
     pub fn new(
         input_registry: ObswsInputRegistry,
-        program_output: crate::obsws_server::ProgramOutputState,
+        program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
     ) -> (Self, ObswsCoordinatorHandle) {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -174,7 +174,7 @@ impl ObswsCoordinator {
     /// 単一リクエストを処理する
     async fn handle_request(
         &mut self,
-        request: crate::obsws_message::RequestMessage,
+        request: crate::obsws::message::RequestMessage,
         session_stats: &ObswsSessionStats,
     ) -> CommandResult {
         let request_type = request.request_type.clone().unwrap_or_default();
@@ -192,7 +192,7 @@ impl ObswsCoordinator {
     /// RequestBatch を逐次処理する
     async fn handle_request_batch(
         &mut self,
-        requests: Vec<crate::obsws_message::RequestMessage>,
+        requests: Vec<crate::obsws::message::RequestMessage>,
         session_stats: &ObswsSessionStats,
         halt_on_failure: bool,
     ) -> BatchCommandResult {
@@ -220,7 +220,7 @@ impl ObswsCoordinator {
     /// リクエストを種別に応じてディスパッチする
     async fn dispatch_request(
         &mut self,
-        request: crate::obsws_message::RequestMessage,
+        request: crate::obsws::message::RequestMessage,
         session_stats: &ObswsSessionStats,
     ) -> CommandResult {
         let request_id = request.request_id.clone().unwrap_or_default();
@@ -230,7 +230,7 @@ impl ObswsCoordinator {
             return self.build_error_result(
                 &request_type,
                 &request_id,
-                crate::obsws_protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
                 "Missing required requestId field",
             );
         }
@@ -238,7 +238,7 @@ impl ObswsCoordinator {
             return self.build_error_result(
                 &request_type,
                 &request_id,
-                crate::obsws_protocol::REQUEST_STATUS_MISSING_REQUEST_TYPE,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_TYPE,
                 "Missing required requestType field",
             );
         }
@@ -253,9 +253,7 @@ impl ObswsCoordinator {
             "SetCurrentPreviewScene" => {
                 // スタジオモード未対応のため常にエラーを返す
                 let response_text =
-                    crate::obsws_response_builder::build_set_current_preview_scene_response(
-                        &request_id,
-                    );
+                    crate::obsws::response::build_set_current_preview_scene_response(&request_id);
                 self.build_result_from_response(response_text, Vec::new())
             }
             // Input 系
@@ -317,7 +315,7 @@ impl ObswsCoordinator {
             }
             // --- pure read / 残りの state write: message.rs に委譲 ---
             _ => {
-                let response = crate::obsws_message::handle_request_message_with_pipeline_handle(
+                let response = crate::obsws::message::handle_request_message_with_pipeline_handle(
                     request,
                     session_stats,
                     &mut self.input_registry,
@@ -341,7 +339,7 @@ impl ObswsCoordinator {
             .input_registry
             .current_program_scene()
             .map(|scene| scene.scene_name);
-        let response_text = crate::obsws_response_builder::build_set_current_program_scene_response(
+        let response_text = crate::obsws::response::build_set_current_program_scene_response(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -351,7 +349,7 @@ impl ObswsCoordinator {
             && previous_scene_name.as_deref() != Some(current_scene.scene_name.as_str())
         {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_current_program_scene_changed_event(
+                text: crate::obsws::response::build_current_program_scene_changed_event(
                     &current_scene.scene_name,
                     &current_scene.scene_uuid,
                 ),
@@ -373,7 +371,7 @@ impl ObswsCoordinator {
                 .into_iter()
                 .any(|scene| scene.scene_name == scene_name)
         });
-        let response_text = crate::obsws_response_builder::build_create_scene_response(
+        let response_text = crate::obsws::response::build_create_scene_response(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -388,7 +386,7 @@ impl ObswsCoordinator {
                 .find(|scene| scene.scene_name == requested_scene_name)
         {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_created_event(
+                text: crate::obsws::response::build_scene_created_event(
                     &created_scene.scene_name,
                     &created_scene.scene_uuid,
                 ),
@@ -405,7 +403,7 @@ impl ObswsCoordinator {
     ) -> CommandResult {
         let removed_scene = request_data.and_then(|rd| {
             let (scene_name, scene_uuid) =
-                crate::obsws_response_builder::parse_scene_lookup_fields_for_session(
+                crate::obsws::response::parse_scene_lookup_fields_for_session(
                     rd.value(),
                     "sceneName",
                     "sceneUuid",
@@ -423,7 +421,7 @@ impl ObswsCoordinator {
             .input_registry
             .current_program_scene()
             .map(|scene| scene.scene_name);
-        let response_text = crate::obsws_response_builder::build_remove_scene_response(
+        let response_text = crate::obsws::response::build_remove_scene_response(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -437,7 +435,7 @@ impl ObswsCoordinator {
                 .all(|scene| scene.scene_uuid != removed_scene.scene_uuid);
             if removed_succeeded {
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_scene_removed_event(
+                    text: crate::obsws::response::build_scene_removed_event(
                         &removed_scene.scene_name,
                         &removed_scene.scene_uuid,
                     ),
@@ -447,12 +445,12 @@ impl ObswsCoordinator {
                     && let Some(current_scene) = self.input_registry.current_program_scene()
                 {
                     events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_current_program_scene_changed_event(
-                                &current_scene.scene_name,
-                                &current_scene.scene_uuid,
-                            ),
-                            subscription_flag: OBSWS_EVENT_SUB_SCENES,
-                        });
+                        text: crate::obsws::response::build_current_program_scene_changed_event(
+                            &current_scene.scene_name,
+                            &current_scene.scene_uuid,
+                        ),
+                        subscription_flag: OBSWS_EVENT_SUB_SCENES,
+                    });
                 }
             }
         }
@@ -468,7 +466,7 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let execution = crate::obsws_response_builder::execute_create_input(
+        let execution = crate::obsws::response::execute_create_input(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -477,7 +475,7 @@ impl ObswsCoordinator {
         let mut events = Vec::new();
         if let Some(created) = execution.created {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_input_created_event(
+                text: crate::obsws::response::build_input_created_event(
                     &created.input_entry.input_name,
                     &created.input_entry.input_uuid,
                     created.input_entry.input.kind_name(),
@@ -488,7 +486,7 @@ impl ObswsCoordinator {
             });
             let scene_item = &created.scene_item_ref;
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_created_event(
+                text: crate::obsws::response::build_scene_item_created_event(
                     &scene_item.scene_name,
                     &scene_item.scene_uuid,
                     scene_item.scene_item.scene_item_id,
@@ -499,7 +497,7 @@ impl ObswsCoordinator {
                 subscription_flag: OBSWS_EVENT_SUB_SCENE_ITEMS,
             });
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_transform_changed_event(
+                text: crate::obsws::response::build_scene_item_transform_changed_event(
                     &scene_item.scene_name,
                     &scene_item.scene_uuid,
                     scene_item.scene_item.scene_item_id,
@@ -525,7 +523,7 @@ impl ObswsCoordinator {
             );
         };
         let (input_uuid, input_name) =
-            match crate::obsws_response_builder::parse_input_lookup_fields_for_session(
+            match crate::obsws::response::parse_input_lookup_fields_for_session(
                 request_data.value(),
             ) {
                 Ok(fields) => fields,
@@ -542,7 +540,7 @@ impl ObswsCoordinator {
             self.input_registry
                 .find_scene_items_by_input_uuid(&input.input_uuid)
         });
-        let response_text = crate::obsws_response_builder::build_remove_input_response(
+        let response_text = crate::obsws::response::build_remove_input_response(
             request_id,
             Some(request_data),
             &mut self.input_registry,
@@ -555,7 +553,7 @@ impl ObswsCoordinator {
                 .is_none();
             if removed_succeeded {
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_input_removed_event(
+                    text: crate::obsws::response::build_input_removed_event(
                         &removed_input.input_name,
                         &removed_input.input_uuid,
                     ),
@@ -564,7 +562,7 @@ impl ObswsCoordinator {
                 if let Some(scene_items) = scene_items_to_remove {
                     for (scene_name, scene_uuid, scene_item_id) in scene_items {
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_scene_item_removed_event(
+                            text: crate::obsws::response::build_scene_item_removed_event(
                                 &scene_name,
                                 &scene_uuid,
                                 scene_item_id,
@@ -594,7 +592,7 @@ impl ObswsCoordinator {
             );
         };
         let requested_input_lookup =
-            match crate::obsws_response_builder::parse_input_lookup_fields_for_session(
+            match crate::obsws::response::parse_input_lookup_fields_for_session(
                 request_data.value(),
             ) {
                 Ok(fields) => Some(fields),
@@ -602,7 +600,7 @@ impl ObswsCoordinator {
                     return self.build_parse_error_result("SetInputSettings", request_id, &error);
                 }
             };
-        let execution = crate::obsws_response_builder::execute_set_input_settings(
+        let execution = crate::obsws::response::execute_set_input_settings(
             request_id,
             Some(request_data),
             &mut self.input_registry,
@@ -617,7 +615,7 @@ impl ObswsCoordinator {
                 .cloned()
         {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_input_settings_changed_event(
+                text: crate::obsws::response::build_input_settings_changed_event(
                     &updated_input.input_name,
                     &updated_input.input_uuid,
                     &updated_input.input.settings,
@@ -642,7 +640,7 @@ impl ObswsCoordinator {
             );
         };
         let requested_input_lookup =
-            match crate::obsws_response_builder::parse_input_lookup_fields_for_session(
+            match crate::obsws::response::parse_input_lookup_fields_for_session(
                 request_data.value(),
             ) {
                 Ok(fields) => Some(fields),
@@ -657,7 +655,7 @@ impl ObswsCoordinator {
                     .find_input(input_uuid.as_deref(), input_name.as_deref())
                     .cloned()
             });
-        let response_text = crate::obsws_response_builder::build_set_input_name_response(
+        let response_text = crate::obsws::response::build_set_input_name_response(
             request_id,
             Some(request_data),
             &mut self.input_registry,
@@ -671,7 +669,7 @@ impl ObswsCoordinator {
             && old_input.input_name != updated_input.input_name
         {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_input_name_changed_event(
+                text: crate::obsws::response::build_input_name_changed_event(
                     &updated_input.input_name,
                     &old_input.input_name,
                     &updated_input.input_uuid,
@@ -691,7 +689,7 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let execution = crate::obsws_response_builder::execute_create_scene_item(
+        let execution = crate::obsws::response::execute_create_scene_item(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -700,7 +698,7 @@ impl ObswsCoordinator {
         let mut events = Vec::new();
         if let Some(created_scene_item) = execution.created {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_created_event(
+                text: crate::obsws::response::build_scene_item_created_event(
                     &created_scene_item.scene_name,
                     &created_scene_item.scene_uuid,
                     created_scene_item.scene_item.scene_item_id,
@@ -728,7 +726,7 @@ impl ObswsCoordinator {
             );
         };
         let (scene_name, scene_uuid) =
-            match crate::obsws_response_builder::parse_scene_lookup_fields_for_session(
+            match crate::obsws::response::parse_scene_lookup_fields_for_session(
                 request_data.value(),
                 "sceneName",
                 "sceneUuid",
@@ -738,16 +736,15 @@ impl ObswsCoordinator {
                     return self.build_parse_error_result("RemoveSceneItem", request_id, &error);
                 }
             };
-        let scene_item_id =
-            match crate::obsws_response_builder::parse_required_i64_field_for_session(
-                request_data.value(),
-                "sceneItemId",
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    return self.build_parse_error_result("RemoveSceneItem", request_id, &error);
-                }
-            };
+        let scene_item_id = match crate::obsws::response::parse_required_i64_field_for_session(
+            request_data.value(),
+            "sceneItemId",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                return self.build_parse_error_result("RemoveSceneItem", request_id, &error);
+            }
+        };
         let target_fields = self
             .input_registry
             .resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
@@ -779,7 +776,7 @@ impl ObswsCoordinator {
                         .collect::<Vec<_>>()
                 })
         });
-        let response_text = crate::obsws_response_builder::build_remove_scene_item_response(
+        let response_text = crate::obsws::response::build_remove_scene_item_response(
             request_id,
             Some(request_data),
             &mut self.input_registry,
@@ -789,7 +786,7 @@ impl ObswsCoordinator {
             && let Some((source_name, source_uuid)) = removed_scene_item
         {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_removed_event(
+                text: crate::obsws::response::build_scene_item_removed_event(
                     &scene_name,
                     &scene_uuid,
                     scene_item_id,
@@ -803,10 +800,12 @@ impl ObswsCoordinator {
                 .list_scene_items(&scene_name)
                 .unwrap_or_default()
                 .iter()
-                .map(|si| crate::obsws_input_registry::ObswsSceneItemIndexEntry {
-                    scene_item_id: si.scene_item_id,
-                    scene_item_index: si.scene_item_index,
-                })
+                .map(
+                    |si| crate::obsws::input_registry::ObswsSceneItemIndexEntry {
+                        scene_item_id: si.scene_item_id,
+                        scene_item_index: si.scene_item_index,
+                    },
+                )
                 .collect::<Vec<_>>();
             let scene_items_after_simple = scene_items_after
                 .iter()
@@ -823,7 +822,7 @@ impl ObswsCoordinator {
                     .collect::<Vec<_>>();
                 if still_present_before != scene_items_after_simple {
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_scene_item_list_reindexed_event(
+                        text: crate::obsws::response::build_scene_item_list_reindexed_event(
                             &scene_name,
                             &scene_uuid,
                             &scene_items_after,
@@ -841,7 +840,7 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let execution = crate::obsws_response_builder::execute_duplicate_scene_item(
+        let execution = crate::obsws::response::execute_duplicate_scene_item(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -850,7 +849,7 @@ impl ObswsCoordinator {
         let mut events = Vec::new();
         if let Some(duplicated) = execution.duplicated {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_created_event(
+                text: crate::obsws::response::build_scene_item_created_event(
                     &duplicated.scene_name,
                     &duplicated.scene_uuid,
                     duplicated.scene_item.scene_item_id,
@@ -878,7 +877,7 @@ impl ObswsCoordinator {
             );
         };
         let requested_fields =
-            match crate::obsws_response_builder::parse_set_scene_item_enabled_fields_for_session(
+            match crate::obsws::response::parse_set_scene_item_enabled_fields_for_session(
                 request_data.value(),
             ) {
                 Ok(fields) => Some(fields),
@@ -901,7 +900,7 @@ impl ObswsCoordinator {
                         .get_scene_item_enabled(&resolved_name, *scene_item_id)
                         .ok()
                 });
-        let response_text = crate::obsws_response_builder::build_set_scene_item_enabled_response(
+        let response_text = crate::obsws::response::build_set_scene_item_enabled_response(
             request_id,
             Some(request_data),
             &mut self.input_registry,
@@ -920,7 +919,7 @@ impl ObswsCoordinator {
                 .get_scene_uuid(&resolved_scene_name)
                 .unwrap_or_default();
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_enable_state_changed_event(
+                text: crate::obsws::response::build_scene_item_enable_state_changed_event(
                     &resolved_scene_name,
                     &resolved_scene_uuid,
                     scene_item_id,
@@ -937,7 +936,7 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let execution = crate::obsws_response_builder::execute_set_scene_item_locked(
+        let execution = crate::obsws::response::execute_set_scene_item_locked(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -948,7 +947,7 @@ impl ObswsCoordinator {
             && ctx.set_result.changed
         {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_lock_state_changed_event(
+                text: crate::obsws::response::build_scene_item_lock_state_changed_event(
                     &ctx.scene_name,
                     &ctx.scene_uuid,
                     ctx.scene_item_id,
@@ -965,7 +964,7 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let execution = crate::obsws_response_builder::execute_set_scene_item_index(
+        let execution = crate::obsws::response::execute_set_scene_item_index(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -974,7 +973,7 @@ impl ObswsCoordinator {
         let mut events = Vec::new();
         if let Some(ctx) = execution.event_context {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_list_reindexed_event(
+                text: crate::obsws::response::build_scene_item_list_reindexed_event(
                     &ctx.scene_name,
                     &ctx.scene_uuid,
                     &ctx.set_result.scene_items,
@@ -990,7 +989,7 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let response_text = crate::obsws_response_builder::build_set_scene_item_blend_mode_response(
+        let response_text = crate::obsws::response::build_set_scene_item_blend_mode_response(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -1003,7 +1002,7 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let execution = crate::obsws_response_builder::execute_set_scene_item_transform(
+        let execution = crate::obsws::response::execute_set_scene_item_transform(
             request_id,
             request_data,
             &mut self.input_registry,
@@ -1014,7 +1013,7 @@ impl ObswsCoordinator {
             && ctx.set_result.changed
         {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_scene_item_transform_changed_event(
+                text: crate::obsws::response::build_scene_item_transform_changed_event(
                     &ctx.scene_name,
                     &ctx.scene_uuid,
                     ctx.scene_item_id,
@@ -1035,14 +1034,14 @@ impl ObswsCoordinator {
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_stream_state_changed_event(
+                text: crate::obsws::response::build_stream_state_changed_event(
                     false,
                     "OBS_WEBSOCKET_OUTPUT_STARTING",
                 ),
                 subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
             });
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_stream_state_changed_event(
+                text: crate::obsws::response::build_stream_state_changed_event(
                     true,
                     "OBS_WEBSOCKET_OUTPUT_STARTED",
                 ),
@@ -1057,14 +1056,14 @@ impl ObswsCoordinator {
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_stream_state_changed_event(
+                text: crate::obsws::response::build_stream_state_changed_event(
                     false,
                     "OBS_WEBSOCKET_OUTPUT_STOPPING",
                 ),
                 subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
             });
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_stream_state_changed_event(
+                text: crate::obsws::response::build_stream_state_changed_event(
                     false,
                     "OBS_WEBSOCKET_OUTPUT_STOPPED",
                 ),
@@ -1085,14 +1084,14 @@ impl ObswsCoordinator {
         if outcome.success {
             if was_active {
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_stream_state_changed_event(
+                    text: crate::obsws::response::build_stream_state_changed_event(
                         false,
                         "OBS_WEBSOCKET_OUTPUT_STOPPING",
                     ),
                     subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                 });
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_stream_state_changed_event(
+                    text: crate::obsws::response::build_stream_state_changed_event(
                         false,
                         "OBS_WEBSOCKET_OUTPUT_STOPPED",
                     ),
@@ -1100,14 +1099,14 @@ impl ObswsCoordinator {
                 });
             } else {
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_stream_state_changed_event(
+                    text: crate::obsws::response::build_stream_state_changed_event(
                         false,
                         "OBS_WEBSOCKET_OUTPUT_STARTING",
                     ),
                     subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                 });
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_stream_state_changed_event(
+                    text: crate::obsws::response::build_stream_state_changed_event(
                         true,
                         "OBS_WEBSOCKET_OUTPUT_STARTED",
                     ),
@@ -1116,7 +1115,7 @@ impl ObswsCoordinator {
             }
         }
         let response_text = if outcome.success {
-            crate::obsws_response_builder::build_toggle_stream_response(request_id, !was_active)
+            crate::obsws::response::build_toggle_stream_response(request_id, !was_active)
         } else {
             outcome.response_text
         };
@@ -1128,7 +1127,7 @@ impl ObswsCoordinator {
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_record_state_changed_event(
+                text: crate::obsws::response::build_record_state_changed_event(
                     false,
                     "OBS_WEBSOCKET_OUTPUT_STARTING",
                     None,
@@ -1136,7 +1135,7 @@ impl ObswsCoordinator {
                 subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
             });
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_record_state_changed_event(
+                text: crate::obsws::response::build_record_state_changed_event(
                     true,
                     "OBS_WEBSOCKET_OUTPUT_STARTED",
                     outcome.output_path.as_deref(),
@@ -1152,7 +1151,7 @@ impl ObswsCoordinator {
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_record_state_changed_event(
+                text: crate::obsws::response::build_record_state_changed_event(
                     false,
                     "OBS_WEBSOCKET_OUTPUT_STOPPING",
                     None,
@@ -1160,7 +1159,7 @@ impl ObswsCoordinator {
                 subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
             });
             events.push(TaggedEvent {
-                text: crate::obsws_response_builder::build_record_state_changed_event(
+                text: crate::obsws::response::build_record_state_changed_event(
                     false,
                     "OBS_WEBSOCKET_OUTPUT_STOPPED",
                     outcome.output_path.as_deref(),
@@ -1182,7 +1181,7 @@ impl ObswsCoordinator {
         if outcome.success {
             if was_active {
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_record_state_changed_event(
+                    text: crate::obsws::response::build_record_state_changed_event(
                         false,
                         "OBS_WEBSOCKET_OUTPUT_STOPPING",
                         None,
@@ -1190,7 +1189,7 @@ impl ObswsCoordinator {
                     subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                 });
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_record_state_changed_event(
+                    text: crate::obsws::response::build_record_state_changed_event(
                         false,
                         "OBS_WEBSOCKET_OUTPUT_STOPPED",
                         outcome.output_path.as_deref(),
@@ -1199,7 +1198,7 @@ impl ObswsCoordinator {
                 });
             } else {
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_record_state_changed_event(
+                    text: crate::obsws::response::build_record_state_changed_event(
                         false,
                         "OBS_WEBSOCKET_OUTPUT_STARTING",
                         None,
@@ -1207,7 +1206,7 @@ impl ObswsCoordinator {
                     subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                 });
                 events.push(TaggedEvent {
-                    text: crate::obsws_response_builder::build_record_state_changed_event(
+                    text: crate::obsws::response::build_record_state_changed_event(
                         true,
                         "OBS_WEBSOCKET_OUTPUT_STARTED",
                         outcome.output_path.as_deref(),
@@ -1217,7 +1216,7 @@ impl ObswsCoordinator {
             }
         }
         let response_text = if outcome.success {
-            crate::obsws_response_builder::build_toggle_record_response(request_id, !was_active)
+            crate::obsws::response::build_toggle_record_response(request_id, !was_active)
         } else {
             outcome.response_text
         };
@@ -1244,14 +1243,14 @@ impl ObswsCoordinator {
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_stream_state_changed_event(
+                        text: crate::obsws::response::build_stream_state_changed_event(
                             false,
                             "OBS_WEBSOCKET_OUTPUT_STARTING",
                         ),
                         subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                     });
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_stream_state_changed_event(
+                        text: crate::obsws::response::build_stream_state_changed_event(
                             true,
                             "OBS_WEBSOCKET_OUTPUT_STARTED",
                         ),
@@ -1265,7 +1264,7 @@ impl ObswsCoordinator {
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_record_state_changed_event(
+                        text: crate::obsws::response::build_record_state_changed_event(
                             false,
                             "OBS_WEBSOCKET_OUTPUT_STARTING",
                             None,
@@ -1273,7 +1272,7 @@ impl ObswsCoordinator {
                         subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                     });
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_record_state_changed_event(
+                        text: crate::obsws::response::build_record_state_changed_event(
                             true,
                             "OBS_WEBSOCKET_OUTPUT_STARTED",
                             outcome.output_path.as_deref(),
@@ -1299,7 +1298,7 @@ impl ObswsCoordinator {
             }
         };
         let response_text = if outcome.success {
-            crate::obsws_response_builder::build_start_output_response(request_id)
+            crate::obsws::response::build_start_output_response(request_id)
         } else {
             outcome.response_text
         };
@@ -1326,14 +1325,14 @@ impl ObswsCoordinator {
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_stream_state_changed_event(
+                        text: crate::obsws::response::build_stream_state_changed_event(
                             false,
                             "OBS_WEBSOCKET_OUTPUT_STOPPING",
                         ),
                         subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                     });
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_stream_state_changed_event(
+                        text: crate::obsws::response::build_stream_state_changed_event(
                             false,
                             "OBS_WEBSOCKET_OUTPUT_STOPPED",
                         ),
@@ -1347,7 +1346,7 @@ impl ObswsCoordinator {
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_record_state_changed_event(
+                        text: crate::obsws::response::build_record_state_changed_event(
                             false,
                             "OBS_WEBSOCKET_OUTPUT_STOPPING",
                             None,
@@ -1355,7 +1354,7 @@ impl ObswsCoordinator {
                         subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                     });
                     events.push(TaggedEvent {
-                        text: crate::obsws_response_builder::build_record_state_changed_event(
+                        text: crate::obsws::response::build_record_state_changed_event(
                             false,
                             "OBS_WEBSOCKET_OUTPUT_STOPPED",
                             outcome.output_path.as_deref(),
@@ -1381,7 +1380,7 @@ impl ObswsCoordinator {
             }
         };
         let response_text = if outcome.success {
-            crate::obsws_response_builder::build_stop_output_response(request_id)
+            crate::obsws::response::build_stop_output_response(request_id)
         } else {
             outcome.response_text
         };
@@ -1414,14 +1413,14 @@ impl ObswsCoordinator {
                 if outcome.success {
                     if was_active {
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_stream_state_changed_event(
+                            text: crate::obsws::response::build_stream_state_changed_event(
                                 false,
                                 "OBS_WEBSOCKET_OUTPUT_STOPPING",
                             ),
                             subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                         });
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_stream_state_changed_event(
+                            text: crate::obsws::response::build_stream_state_changed_event(
                                 false,
                                 "OBS_WEBSOCKET_OUTPUT_STOPPED",
                             ),
@@ -1429,14 +1428,14 @@ impl ObswsCoordinator {
                         });
                     } else {
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_stream_state_changed_event(
+                            text: crate::obsws::response::build_stream_state_changed_event(
                                 false,
                                 "OBS_WEBSOCKET_OUTPUT_STARTING",
                             ),
                             subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                         });
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_stream_state_changed_event(
+                            text: crate::obsws::response::build_stream_state_changed_event(
                                 true,
                                 "OBS_WEBSOCKET_OUTPUT_STARTED",
                             ),
@@ -1457,7 +1456,7 @@ impl ObswsCoordinator {
                 if outcome.success {
                     if was_active {
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_record_state_changed_event(
+                            text: crate::obsws::response::build_record_state_changed_event(
                                 false,
                                 "OBS_WEBSOCKET_OUTPUT_STOPPING",
                                 None,
@@ -1465,7 +1464,7 @@ impl ObswsCoordinator {
                             subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                         });
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_record_state_changed_event(
+                            text: crate::obsws::response::build_record_state_changed_event(
                                 false,
                                 "OBS_WEBSOCKET_OUTPUT_STOPPED",
                                 outcome.output_path.as_deref(),
@@ -1474,7 +1473,7 @@ impl ObswsCoordinator {
                         });
                     } else {
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_record_state_changed_event(
+                            text: crate::obsws::response::build_record_state_changed_event(
                                 false,
                                 "OBS_WEBSOCKET_OUTPUT_STARTING",
                                 None,
@@ -1482,7 +1481,7 @@ impl ObswsCoordinator {
                             subscription_flag: OBSWS_EVENT_SUB_OUTPUTS,
                         });
                         events.push(TaggedEvent {
-                            text: crate::obsws_response_builder::build_record_state_changed_event(
+                            text: crate::obsws::response::build_record_state_changed_event(
                                 true,
                                 "OBS_WEBSOCKET_OUTPUT_STARTED",
                                 outcome.output_path.as_deref(),
@@ -1514,7 +1513,7 @@ impl ObswsCoordinator {
             }
         };
         let response_text = if outcome.success {
-            crate::obsws_response_builder::build_toggle_output_response(
+            crate::obsws::response::build_toggle_output_response(
                 request_id,
                 output_active_on_success,
             )
@@ -1531,26 +1530,26 @@ impl ObswsCoordinator {
         request_type: &str,
         request_id: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws_input_registry::{
+        use crate::obsws::input_registry::{
             ActivateStreamError, ObswsRecordTrackRun, ObswsStreamRun,
         };
         let stream_service_settings = self.input_registry.stream_service_settings().clone();
         if stream_service_settings.stream_service_type != "rtmp_custom" {
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
                     "Unsupported streamServiceType field",
                 ),
             );
         }
         let Some(output_url) = stream_service_settings.server else {
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
                     "Missing streamServiceSettings.server field",
                 ),
             );
@@ -1559,10 +1558,10 @@ impl ObswsCoordinator {
             Ok(run_id) => run_id,
             Err(_) => {
                 return OutputOperationOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
+                    crate::obsws::response::build_request_response_error(
                         request_type,
                         request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                         "Stream run ID overflow",
                     ),
                 );
@@ -1596,10 +1595,10 @@ impl ObswsCoordinator {
             self.input_registry.activate_stream(run.clone())
         {
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_STREAM_RUNNING,
+                    crate::obsws::protocol::REQUEST_STATUS_STREAM_RUNNING,
                     "Stream is already active",
                 ),
             );
@@ -1607,10 +1606,10 @@ impl ObswsCoordinator {
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
             self.input_registry.deactivate_stream();
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                     "Pipeline is not initialized",
                 ),
             );
@@ -1628,16 +1627,16 @@ impl ObswsCoordinator {
             let _ = stop_processors_staged_stream(pipeline_handle, &run).await;
             let error_comment = format!("Failed to start stream: {}", e.display());
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                     &error_comment,
                 ),
             );
         }
         OutputOperationOutcome::success(
-            crate::obsws_response_builder::build_start_stream_response(request_id),
+            crate::obsws::response::build_start_stream_response(request_id),
             None,
         )
     }
@@ -1651,10 +1650,10 @@ impl ObswsCoordinator {
             Some(run) => run.clone(),
             None => {
                 return OutputOperationOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
+                    crate::obsws::response::build_request_response_error(
                         request_type,
                         request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_STREAM_NOT_RUNNING,
+                        crate::obsws::protocol::REQUEST_STATUS_STREAM_NOT_RUNNING,
                         "Stream is not active",
                     ),
                 );
@@ -1665,17 +1664,17 @@ impl ObswsCoordinator {
         {
             let error_comment = format!("Failed to stop stream: {}", e.display());
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                     &error_comment,
                 ),
             );
         }
         self.input_registry.deactivate_stream();
         OutputOperationOutcome::success(
-            crate::obsws_response_builder::build_stop_stream_response(request_id),
+            crate::obsws::response::build_stop_stream_response(request_id),
             None,
         )
     }
@@ -1685,7 +1684,7 @@ impl ObswsCoordinator {
         request_type: &str,
         request_id: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws_input_registry::{
+        use crate::obsws::input_registry::{
             ActivateRecordError, ObswsRecordRun, ObswsRecordTrackRun,
         };
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -1693,10 +1692,10 @@ impl ObswsCoordinator {
             Ok(run_id) => run_id,
             Err(_) => {
                 return OutputOperationOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
+                    crate::obsws::response::build_request_response_error(
                         request_type,
                         request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                         "Record run ID overflow",
                     ),
                 );
@@ -1739,10 +1738,10 @@ impl ObswsCoordinator {
             self.input_registry.activate_record(run.clone())
         {
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
                     "Record is already active",
                 ),
             );
@@ -1753,10 +1752,10 @@ impl ObswsCoordinator {
             self.input_registry.deactivate_record();
             let error_comment = format!("Failed to create record directory: {e}");
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                     &error_comment,
                 ),
             );
@@ -1764,10 +1763,10 @@ impl ObswsCoordinator {
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
             self.input_registry.deactivate_record();
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                     "Pipeline is not initialized",
                 ),
             );
@@ -1779,17 +1778,17 @@ impl ObswsCoordinator {
             let _ = stop_processors_staged_record(pipeline_handle, &run).await;
             let error_comment = format!("Failed to start record: {}", e.display());
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                     &error_comment,
                 ),
             );
         }
         let output_path_str = output_path.display().to_string();
         OutputOperationOutcome::success(
-            crate::obsws_response_builder::build_start_record_response(request_id),
+            crate::obsws::response::build_start_record_response(request_id),
             Some(output_path_str),
         )
     }
@@ -1803,10 +1802,10 @@ impl ObswsCoordinator {
             Some(run) => run.clone(),
             None => {
                 return OutputOperationOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
+                    crate::obsws::response::build_request_response_error(
                         request_type,
                         request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
                         "Record is not active",
                     ),
                 );
@@ -1822,7 +1821,7 @@ impl ObswsCoordinator {
         }
         self.input_registry.deactivate_record();
         OutputOperationOutcome::success(
-            crate::obsws_response_builder::build_stop_record_response(request_id, &output_path),
+            crate::obsws::response::build_stop_record_response(request_id, &output_path),
             Some(output_path),
         )
     }
@@ -1832,16 +1831,16 @@ impl ObswsCoordinator {
         request_type: &str,
         request_id: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws_input_registry::{
+        use crate::obsws::input_registry::{
             ActivateRtmpOutboundError, ObswsRecordTrackRun, ObswsRtmpOutboundRun,
         };
         let rtmp_outbound_settings = self.input_registry.rtmp_outbound_settings().clone();
         let Some(output_url) = rtmp_outbound_settings.output_url else {
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
                     "Missing outputSettings.outputUrl field",
                 ),
             );
@@ -1850,10 +1849,10 @@ impl ObswsCoordinator {
             Ok(run_id) => run_id,
             Err(_) => {
                 return OutputOperationOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
+                    crate::obsws::response::build_request_response_error(
                         request_type,
                         request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                         "RTMP outbound run ID overflow",
                     ),
                 );
@@ -1895,10 +1894,10 @@ impl ObswsCoordinator {
             self.input_registry.activate_rtmp_outbound(run.clone())
         {
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
                     "RTMP outbound is already active",
                 ),
             );
@@ -1906,10 +1905,10 @@ impl ObswsCoordinator {
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
             self.input_registry.deactivate_rtmp_outbound();
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                     "Pipeline is not initialized",
                 ),
             );
@@ -1927,16 +1926,16 @@ impl ObswsCoordinator {
             let _ = stop_processors_staged_rtmp_outbound(pipeline_handle, &run).await;
             let error_comment = format!("Failed to start rtmp_outbound: {}", e.display());
             return OutputOperationOutcome::failure(
-                crate::obsws_response_builder::build_request_response_error(
+                crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
-                    crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                     &error_comment,
                 ),
             );
         }
         OutputOperationOutcome::success(
-            crate::obsws_response_builder::build_start_output_response(request_id),
+            crate::obsws::response::build_start_output_response(request_id),
             None,
         )
     }
@@ -1950,10 +1949,10 @@ impl ObswsCoordinator {
             Some(run) => run.clone(),
             None => {
                 return OutputOperationOutcome::failure(
-                    crate::obsws_response_builder::build_request_response_error(
+                    crate::obsws::response::build_request_response_error(
                         request_type,
                         request_id,
-                        crate::obsws_protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
                         "RTMP outbound is not active",
                     ),
                 );
@@ -1966,7 +1965,7 @@ impl ObswsCoordinator {
         }
         self.input_registry.deactivate_rtmp_outbound();
         OutputOperationOutcome::success(
-            crate::obsws_response_builder::build_stop_output_response(request_id),
+            crate::obsws::response::build_stop_output_response(request_id),
             None,
         )
     }
@@ -1995,9 +1994,9 @@ impl ObswsCoordinator {
             }
         };
         let response_text =
-            crate::obsws_response_builder::build_broadcast_custom_event_response(request_id);
+            crate::obsws::response::build_broadcast_custom_event_response(request_id);
         let events = vec![TaggedEvent {
-            text: crate::obsws_response_builder::build_custom_event(&event_data),
+            text: crate::obsws::response::build_custom_event(&event_data),
             subscription_flag: OBSWS_EVENT_SUB_GENERAL,
         }];
         self.build_result_from_response(response_text, events)
@@ -2085,7 +2084,7 @@ impl ObswsCoordinator {
         // actor は registry を所有しているため、snapshot の stale チェックは不要
 
         // ミキサーの入力トラックを更新する
-        crate::obsws_session::output::update_program_mixers(
+        crate::obsws::session::output::update_program_mixers(
             pipeline_handle,
             &output_plan,
             &self.program_output.video_mixer_processor_id,
@@ -2094,14 +2093,14 @@ impl ObswsCoordinator {
         .await?;
 
         // 旧ソースプロセッサを停止する
-        crate::obsws_session::output::stop_source_processors(
+        crate::obsws::session::output::stop_source_processors(
             pipeline_handle,
             &self.program_output.source_processor_ids,
         )
         .await?;
 
         // 新しいソースプロセッサを起動する
-        crate::obsws_session::output::start_source_processors(
+        crate::obsws::session::output::start_source_processors(
             pipeline_handle,
             &mut output_plan.source_plans,
         )
@@ -2125,8 +2124,8 @@ impl ObswsCoordinator {
         events: Vec<TaggedEvent>,
     ) -> CommandResult {
         let batch_result =
-            crate::obsws_response_builder::parse_request_response_for_batch_result(&response_text)
-                .unwrap_or_else(|_| crate::obsws_response_builder::RequestBatchResult {
+            crate::obsws::response::parse_request_response_for_batch_result(&response_text)
+                .unwrap_or_else(|_| crate::obsws::response::RequestBatchResult {
                     request_id: String::new(),
                     request_type: String::new(),
                     request_status_result: false,
@@ -2148,7 +2147,7 @@ impl ObswsCoordinator {
         status_code: i64,
         status_comment: &str,
     ) -> CommandResult {
-        let response_text = crate::obsws_response_builder::build_request_response_error(
+        let response_text = crate::obsws::response::build_request_response_error(
             request_type,
             request_id,
             status_code,
@@ -2157,7 +2156,7 @@ impl ObswsCoordinator {
         CommandResult {
             response_text,
             events: Vec::new(),
-            batch_result: crate::obsws_response_builder::RequestBatchResult {
+            batch_result: crate::obsws::response::RequestBatchResult {
                 request_id: request_id.to_owned(),
                 request_type: request_type.to_owned(),
                 request_status_result: false,
@@ -2174,7 +2173,7 @@ impl ObswsCoordinator {
         request_id: &str,
         error: &nojson::JsonParseError,
     ) -> CommandResult {
-        let code = crate::obsws_response_builder::request_status_code_for_parse_error(error);
+        let code = crate::obsws::response::request_status_code_for_parse_error(error);
         self.build_error_result(request_type, request_id, code, &error.to_string())
     }
 }
@@ -2253,10 +2252,10 @@ fn build_output_plan_or_error(
         input_registry.frame_rate(),
     )
     .map_err(|error| OutputOperationOutcome {
-        response_text: crate::obsws_response_builder::build_request_response_error(
+        response_text: crate::obsws::response::build_request_response_error(
             request_type,
             request_id,
-            crate::obsws_protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
             &error.message(),
         ),
         success: false,
@@ -2274,10 +2273,10 @@ async fn start_stream_processors(
     output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_url: &str,
     stream_key: Option<&str>,
-    run: &crate::obsws_input_registry::ObswsStreamRun,
+    run: &crate::obsws::input_registry::ObswsStreamRun,
 ) -> crate::Result<()> {
     // ミキサーを起動する（pub 関数を利用）
-    crate::obsws_session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
+    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     // ビデオエンコーダーを起動する
     crate::encoder::create_video_processor(
         pipeline_handle,
@@ -2314,7 +2313,7 @@ async fn start_stream_processors(
     )
     .await?;
     // ソースプロセッサを起動する
-    crate::obsws_session::output::start_source_processors(
+    crate::obsws::session::output::start_source_processors(
         pipeline_handle,
         &mut output_plan.source_plans,
     )
@@ -2327,9 +2326,9 @@ async fn start_record_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_path: &std::path::Path,
-    run: &crate::obsws_input_registry::ObswsRecordRun,
+    run: &crate::obsws::input_registry::ObswsRecordRun,
 ) -> crate::Result<()> {
-    crate::obsws_session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
+    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     crate::encoder::create_video_processor(
         pipeline_handle,
         run.video.source_track_id.clone(),
@@ -2358,7 +2357,7 @@ async fn start_record_processors(
         Some(run.writer_processor_id.clone()),
     )
     .await?;
-    crate::obsws_session::output::start_source_processors(
+    crate::obsws::session::output::start_source_processors(
         pipeline_handle,
         &mut output_plan.source_plans,
     )
@@ -2372,9 +2371,9 @@ async fn start_rtmp_outbound_processors(
     output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_url: &str,
     stream_name: Option<&str>,
-    run: &crate::obsws_input_registry::ObswsRtmpOutboundRun,
+    run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
 ) -> crate::Result<()> {
-    crate::obsws_session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
+    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     crate::encoder::create_video_processor(
         pipeline_handle,
         run.video.source_track_id.clone(),
@@ -2408,7 +2407,7 @@ async fn start_rtmp_outbound_processors(
         Some(run.endpoint_processor_id.clone()),
     )
     .await?;
-    crate::obsws_session::output::start_source_processors(
+    crate::obsws::session::output::start_source_processors(
         pipeline_handle,
         &mut output_plan.source_plans,
     )
@@ -2419,7 +2418,7 @@ async fn start_rtmp_outbound_processors(
 /// ストリーム用プロセッサを段階的に停止する: ソース → ミキサー → エンコーダー → パブリッシャー
 async fn stop_processors_staged_stream(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws_input_registry::ObswsStreamRun,
+    run: &crate::obsws::input_registry::ObswsStreamRun,
 ) -> crate::Result<()> {
     terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
     terminate_and_wait(
@@ -2450,7 +2449,7 @@ async fn stop_processors_staged_stream(
 /// ミキサーには Finish RPC を送信して EOS を発行させ、下流は EOS 伝播で自然終了させる。
 async fn stop_processors_staged_record(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws_input_registry::ObswsRecordRun,
+    run: &crate::obsws::input_registry::ObswsRecordRun,
 ) -> crate::Result<()> {
     // 1. ソースを停止
     terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
@@ -2505,7 +2504,7 @@ async fn stop_processors_staged_record(
 /// RTMP outbound 用プロセッサを段階的に停止する
 async fn stop_processors_staged_rtmp_outbound(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws_input_registry::ObswsRtmpOutboundRun,
+    run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
 ) -> crate::Result<()> {
     terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
     terminate_and_wait(

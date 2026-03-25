@@ -12,7 +12,7 @@ pub mod media;
 pub mod media_pipeline;
 pub mod mixer;
 pub mod mp4;
-mod obsws;
+pub mod obsws;
 pub mod optuna;
 pub mod progress;
 pub mod srt;
@@ -42,15 +42,6 @@ pub use media_pipeline::{
     PublishTrackError, RegisterProcessorError, Syn, TrackId,
 };
 pub use video::VideoFrame;
-
-pub use obsws::auth as obsws_auth;
-pub use obsws::coordinator as obsws_coordinator;
-pub use obsws::input_registry as obsws_input_registry;
-pub use obsws::message as obsws_message;
-pub use obsws::protocol as obsws_protocol;
-pub use obsws::response as obsws_response_builder;
-pub use obsws::server as obsws_server;
-pub use obsws::session as obsws_session;
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub type Failure = Error;

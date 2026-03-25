@@ -1,8 +1,8 @@
-use crate::obsws_input_registry::{
+use crate::obsws::input_registry::{
     CreateInputError, ObswsInputRegistry, ParseInputSettingsError, SetInputNameError,
     SetInputSettingsError,
 };
-use crate::obsws_protocol::{
+use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
@@ -97,7 +97,7 @@ pub fn build_get_source_active_response(
     let source_active =
         match input_registry.is_source_active(input_uuid.as_deref(), input_name.as_deref()) {
             Ok(source_active) => source_active,
-            Err(crate::obsws_input_registry::GetSourceActiveError::SourceNotFound) => {
+            Err(crate::obsws::input_registry::GetSourceActiveError::SourceNotFound) => {
                 return super::build_request_response_error(
                     "GetSourceActive",
                     request_id,
@@ -350,10 +350,10 @@ pub fn execute_create_input(
         .get_input_default_settings(created_entry.input.kind_name())
         .unwrap_or_else(|_| created_entry.input.settings.clone());
 
-    let scene_item_ref = crate::obsws_input_registry::ObswsSceneItemRef {
+    let scene_item_ref = crate::obsws::input_registry::ObswsSceneItemRef {
         scene_name: scene_name.clone(),
         scene_uuid,
-        scene_item: crate::obsws_input_registry::ObswsSceneItemEntry {
+        scene_item: crate::obsws::input_registry::ObswsSceneItemEntry {
             scene_item_id,
             source_name: created_entry.input_name.clone(),
             source_uuid: created_entry.input_uuid.clone(),
@@ -361,7 +361,7 @@ pub fn execute_create_input(
             source_type: "OBS_SOURCE_TYPE_INPUT".to_owned(),
             scene_item_enabled: fields.scene_item_enabled,
             scene_item_locked: false,
-            scene_item_blend_mode: crate::obsws_input_registry::ObswsSceneItemBlendMode::default()
+            scene_item_blend_mode: crate::obsws::input_registry::ObswsSceneItemBlendMode::default()
                 .as_str()
                 .to_owned(),
             scene_item_index,

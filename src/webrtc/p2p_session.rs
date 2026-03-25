@@ -9,7 +9,7 @@ use shiguredo_webrtc::{
 };
 use tokio::sync::mpsc;
 
-use crate::obsws_session::{ObswsSession, SessionAction};
+use crate::obsws::session::{ObswsSession, SessionAction};
 
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
@@ -209,7 +209,7 @@ pub enum BootstrapError {
 pub struct WebRtcP2pSessionManager {
     factory_bundle: Arc<super::factory::WebRtcFactoryBundle>,
     pipeline_handle: crate::MediaPipelineHandle,
-    coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
+    coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
     session: Arc<tokio::sync::Mutex<Option<Session>>>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
 }
@@ -217,7 +217,7 @@ pub struct WebRtcP2pSessionManager {
 impl WebRtcP2pSessionManager {
     pub fn new(
         handle: crate::MediaPipelineHandle,
-        coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
+        coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
     ) -> crate::Result<Self> {
         #[allow(clippy::arc_with_non_send_sync)]
         let factory_bundle = Arc::new(super::factory::WebRtcFactoryBundle::new()?);

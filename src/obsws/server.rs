@@ -14,11 +14,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpListener;
 
 use crate::endpoint_http_bootstrap::BootstrapEndpoint;
-use crate::obsws_auth::ObswsAuthentication;
-use crate::obsws_input_registry::ObswsInputRegistry;
-use crate::obsws_message::ObswsSessionStats;
-use crate::obsws_protocol::OBSWS_SUBPROTOCOL;
-use crate::obsws_session::{ObswsSession, SessionAction};
+use crate::obsws::auth::ObswsAuthentication;
+use crate::obsws::input_registry::ObswsInputRegistry;
+use crate::obsws::message::ObswsSessionStats;
+use crate::obsws::protocol::OBSWS_SUBPROTOCOL;
+use crate::obsws::session::{ObswsSession, SessionAction};
 use crate::tcp::{ServerTcpOrTlsStream, TcpOrTlsStream, create_server_tls_acceptor};
 
 type TlsAcceptor = Arc<tokio_rustls::TlsAcceptor>;
@@ -169,7 +169,7 @@ pub async fn run_server(
     };
 
     // runtime actor を起動する
-    let (actor, coordinator_handle) = crate::obsws_coordinator::ObswsCoordinator::new(
+    let (actor, coordinator_handle) = crate::obsws::coordinator::ObswsCoordinator::new(
         input_registry,
         program_output,
         Some(pipeline_handle.clone()),
@@ -207,7 +207,7 @@ async fn run_accept_loop(
     tls_acceptor: Option<TlsAcceptor>,
     upstream_config: Option<Arc<UpstreamConfig>>,
     password: Option<String>,
-    coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
+    coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
 ) -> crate::Result<()> {
@@ -266,7 +266,7 @@ async fn route_connection(
     peer_addr: SocketAddr,
     upstream_config: Option<Arc<UpstreamConfig>>,
     password: Option<String>,
-    coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
+    coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
 ) -> crate::Result<()> {
@@ -302,7 +302,7 @@ async fn handle_ws_connection(
     initial_buf: Vec<u8>,
     peer_addr: SocketAddr,
     password: Option<String>,
-    coordinator_handle: crate::obsws_coordinator::ObswsCoordinatorHandle,
+    coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
 ) -> crate::Result<()> {
     tracing::debug!("obsws peer connected: {peer_addr}");
     let mut ws = WebSocketServerConnection::new(
