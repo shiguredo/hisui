@@ -1,7 +1,8 @@
 use std::io::{Seek, SeekFrom, Write};
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use shiguredo_http11::{Request, ResponseDecoder};
@@ -13,18 +14,17 @@ use shiguredo_mp4::boxes::{
 };
 use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions, Sample};
 use shiguredo_webrtc::{
-    AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioEncoderFactory,
-    AudioProcessingBuilder, AudioTrackSink, AudioTrackSinkHandler,
+    AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleHandler, AudioEncoderFactory,
+    AudioProcessingBuilder, AudioTrackSink, AudioTrackSinkHandler, AudioTransportRef,
     CreateSessionDescriptionObserver, CreateSessionDescriptionObserverHandler, DataChannel,
     DataChannelInit, DataChannelObserver, DataChannelObserverHandler, DataChannelState,
-    Environment, IceGatheringState, PeerConnection, PeerConnectionDependencies,
-    PeerConnectionFactory, PeerConnectionFactoryDependencies, PeerConnectionObserver,
-    PeerConnectionObserverHandler, PeerConnectionOfferAnswerOptions,
-    PeerConnectionRtcConfiguration, PeerConnectionState, RtcError, RtcEventLogFactory,
-    RtpTransceiver, SdpType, SessionDescription, SetLocalDescriptionObserver,
-    SetLocalDescriptionObserverHandler, SetRemoteDescriptionObserver,
-    SetRemoteDescriptionObserverHandler, Thread, VideoDecoderFactory, VideoEncoderFactory,
-    VideoSink, VideoSinkHandler, VideoSinkWants,
+    IceGatheringState, PeerConnection, PeerConnectionDependencies, PeerConnectionFactory,
+    PeerConnectionFactoryDependencies, PeerConnectionObserver, PeerConnectionObserverHandler,
+    PeerConnectionOfferAnswerOptions, PeerConnectionRtcConfiguration, PeerConnectionState,
+    RtcError, RtcEventLogFactory, RtpTransceiver, SdpType, SessionDescription,
+    SetLocalDescriptionObserver, SetLocalDescriptionObserverHandler,
+    SetRemoteDescriptionObserver, SetRemoteDescriptionObserverHandler, Thread,
+    VideoDecoderFactory, VideoEncoderFactory, VideoSink, VideoSinkHandler, VideoSinkWants,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -231,6 +231,130 @@ impl AudioTrackSinkHandler for AudioRecordHandler {
             sample_rate,
             channels: number_of_channels,
         });
+    }
+}
+
+struct BootstrapAudioDeviceModuleHandler {
+    transport: Mutex<Option<AudioTransportRef>>,
+    playout_thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl BootstrapAudioDeviceModuleHandler {
+    fn new() -> Self {
+        Self {
+            transport: Mutex::new(None),
+            playout_thread: Mutex::new(None),
+        }
+    }
+}
+
+impl Drop for BootstrapAudioDeviceModuleHandler {
+    fn drop(&mut self) {
+        let handle = self.playout_thread.get_mut().unwrap().take();
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl AudioDeviceModuleHandler for BootstrapAudioDeviceModuleHandler {
+    fn register_audio_callback(&self, audio_transport: Option<AudioTransportRef>) -> i32 {
+        let mut guard = self.transport.lock().unwrap();
+        *guard = audio_transport;
+        0
+    }
+
+    fn init(&self) -> i32 {
+        0
+    }
+
+    fn terminate(&self) -> i32 {
+        0
+    }
+
+    fn initialized(&self) -> bool {
+        true
+    }
+
+    fn playout_is_available(&self, available: &mut bool) -> i32 {
+        *available = true;
+        0
+    }
+
+    fn init_playout(&self) -> i32 {
+        0
+    }
+
+    fn playout_is_initialized(&self) -> bool {
+        true
+    }
+
+    fn start_playout(&self) -> i32 {
+        let transport = {
+            let guard = self.transport.lock().unwrap();
+            *guard
+        };
+        let Some(transport) = transport else {
+            return 0;
+        };
+
+        let mut thread_guard = self.playout_thread.lock().unwrap();
+        if thread_guard.is_some() {
+            return 0;
+        }
+
+        *thread_guard = Some(std::thread::spawn(move || {
+            let bits_per_sample = 16;
+            let sample_rate = 48_000;
+            let number_of_channels = 2;
+            let number_of_frames = sample_rate as usize / 100;
+            let mut audio_data =
+                vec![0_u8; number_of_frames * number_of_channels * (bits_per_sample as usize / 8)];
+            let mut elapsed_time_ms = 0_i64;
+            let mut ntp_time_ms = 0_i64;
+
+            for _ in 0..800 {
+                unsafe {
+                    transport.pull_render_data(
+                        bits_per_sample,
+                        sample_rate,
+                        number_of_channels,
+                        number_of_frames,
+                        audio_data.as_mut_ptr(),
+                        &mut elapsed_time_ms,
+                        &mut ntp_time_ms,
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }));
+        0
+    }
+
+    fn stop_playout(&self) -> i32 {
+        let handle = self.playout_thread.lock().unwrap().take();
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
+        0
+    }
+
+    fn playing(&self) -> bool {
+        self.playout_thread.lock().unwrap().is_some()
+    }
+
+    fn stereo_playout_is_available(&self, available: &mut bool) -> i32 {
+        *available = true;
+        0
+    }
+
+    fn set_stereo_playout(&self, _enable: bool) -> i32 {
+        0
+    }
+
+    fn stereo_playout(&self, enabled: &mut bool) -> i32 {
+        *enabled = true;
+        0
     }
 }
 
@@ -964,7 +1088,6 @@ async fn run_client(
     input_mp4_path: &str,
 ) -> Result<Stats, String> {
     // WebRTC ファクトリを初期化する
-    let env = Environment::new();
     let mut network = Thread::new_with_socket_server();
     let mut worker = Thread::new();
     let mut signaling = Thread::new();
@@ -978,8 +1101,9 @@ async fn run_client(
     deps.set_signaling_thread(&signaling);
     deps.set_event_log_factory(RtcEventLogFactory::new());
 
-    let adm = AudioDeviceModule::new(&env, AudioDeviceModuleAudioLayer::Dummy)
-        .map_err(|e| format!("failed to create AudioDeviceModule: {e}"))?;
+    let adm = AudioDeviceModule::new_with_handler(Box::new(
+        BootstrapAudioDeviceModuleHandler::new(),
+    ));
     deps.set_audio_device_module(&adm);
     deps.set_audio_encoder_factory(&AudioEncoderFactory::builtin());
     deps.set_audio_decoder_factory(&AudioDecoderFactory::builtin());

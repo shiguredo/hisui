@@ -125,11 +125,23 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
             assert stats["video_frames_received"] >= 1, (
                 f"expected at least 1 video frame, got {stats}"
             )
+            assert stats["audio_tracks_received"] >= 1, (
+                f"expected at least 1 audio track, got {stats}"
+            )
+            assert stats["audio_frames_received"] >= 1, (
+                f"expected at least 1 audio frame, got {stats}"
+            )
             assert stats["video_width"] == 1920, (
                 f"expected video_width=1920, got {stats}"
             )
             assert stats["video_height"] == 1080, (
                 f"expected video_height=1080, got {stats}"
+            )
+            assert stats["audio_codec"] == "opus", (
+                f"expected audio_codec=opus, got {stats}"
+            )
+            assert stats["audio_samples_written"] >= 1, (
+                f"expected at least 1 audio sample, got {stats}"
             )
     except subprocess.TimeoutExpired as e:
         raise AssertionError(
@@ -155,4 +167,10 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     )
     assert inspect.get("video_sample_count", 0) >= 1, (
         f"expected at least 1 video sample, got {inspect}"
+    )
+    assert inspect.get("audio_codec") == "OPUS", (
+        f"expected audio_codec=OPUS, got {inspect.get('audio_codec')}"
+    )
+    assert inspect.get("audio_sample_count", 0) >= 1, (
+        f"expected at least 1 audio sample, got {inspect}"
     )

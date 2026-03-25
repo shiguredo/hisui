@@ -37,8 +37,8 @@ impl SharedAudioState {
         let n_channels = frame.channels.get() as usize;
         // チャンネルあたりのサンプル数
         let n_samples = samples.len() / n_channels;
-        // WebRTC の定義: bytes_per_sample = sizeof(i16) * channels
-        let n_bytes_per_sample = 2 * n_channels;
+        // WebRTC の bytes_per_sample は 1 サンプルあたりのバイト数
+        let n_bytes_per_sample = std::mem::size_of::<i16>();
 
         let mut new_mic_level: u32 = 0;
         unsafe {
