@@ -693,8 +693,6 @@ fn main() -> noargs::Result<()> {
             std::process::exit(1);
         }
     }
-
-    Ok(())
 }
 
 struct Stats {
@@ -978,8 +976,7 @@ async fn run_client(
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
     let mut first_video_frame_logged = false;
-    let mut loop_exit_reason = None;
-    loop {
+    let loop_exit_reason = loop {
         // フレーム受信チャネルから溜まっているフレームを処理する
         while let Ok(frame_data) = frame_rx.try_recv() {
             if !first_video_frame_logged {
@@ -1017,16 +1014,10 @@ async fn run_client(
             event = event_rx.recv() => {
                 match event {
                     Some(e) => e,
-                    None => {
-                        loop_exit_reason = Some("event channel closed".to_owned());
-                        break;
-                    }
+                    None => break "event channel closed".to_owned(),
                 }
             }
-            _ = tokio::time::sleep_until(deadline) => {
-                loop_exit_reason = Some("deadline reached".to_owned());
-                break;
-            }
+            _ = tokio::time::sleep_until(deadline) => break "deadline reached".to_owned(),
         };
 
         match event {
@@ -1160,11 +1151,8 @@ async fn run_client(
                 }
             }
         }
-    }
-    tracing::info!(
-        "event loop exited: reason={}",
-        loop_exit_reason.unwrap_or_else(|| "unknown".to_owned())
-    );
+    };
+    tracing::info!("event loop exited: reason={loop_exit_reason}");
 
     // 残りのフレームを処理する
     tracing::info!("draining remaining frames");
