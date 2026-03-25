@@ -87,20 +87,17 @@ impl PeerConnectionObserverHandler for ClientPcObserver {
 
     fn on_data_channel(&mut self, mut dc: DataChannel) {
         let label = dc.label().unwrap_or_default();
-        tracing::info!("on_data_channel: label={label}");
         let observer = if label == "signaling" {
             let observer = DataChannelObserver::new_with_handler(Box::new(SignalingDcHandler {
                 event_tx: self.event_tx.clone(),
             }));
             dc.register_observer(&observer);
-            tracing::info!("registered signaling data channel observer");
             Some(observer)
         } else if label == "obsws" {
             let observer = DataChannelObserver::new_with_handler(Box::new(ObswsDcHandler {
                 event_tx: self.event_tx.clone(),
             }));
             dc.register_observer(&observer);
-            tracing::info!("registered obsws data channel observer");
             Some(observer)
         } else {
             None
@@ -136,11 +133,6 @@ struct SignalingDcHandler {
 
 impl DataChannelObserverHandler for SignalingDcHandler {
     fn on_message(&mut self, data: &[u8], _is_binary: bool) {
-        let msg_type = parse_signaling_type(data).unwrap_or_default();
-        tracing::info!(
-            "signaling data channel message received: type={msg_type}, bytes={}",
-            data.len()
-        );
         let _ = self.event_tx.send(ClientEvent::SignalingMessage {
             data: data.to_vec(),
         });
@@ -153,7 +145,6 @@ struct ObswsDcHandler {
 
 impl DataChannelObserverHandler for ObswsDcHandler {
     fn on_state_change(&mut self) {
-        tracing::info!("obsws data channel state changed");
         let _ = self.event_tx.send(ClientEvent::ObswsDataChannelStateChange);
     }
 
@@ -174,17 +165,11 @@ struct FrameRecordHandler {
 
 impl VideoSinkHandler for FrameRecordHandler {
     fn on_frame(&mut self, frame: shiguredo_webrtc::VideoFrameRef<'_>) {
-        let count = self.frame_count.fetch_add(1, Ordering::Relaxed);
+        self.frame_count.fetch_add(1, Ordering::Relaxed);
         let w = frame.width();
         let h = frame.height();
         self.width.store(w as usize, Ordering::Relaxed);
         self.height.store(h as usize, Ordering::Relaxed);
-        if count == 0 {
-            tracing::info!(
-                "first video frame received: width={w}, height={h}, timestamp_us={}",
-                frame.timestamp_us()
-            );
-        }
 
         // I420 バッファからプレーンデータをコピーする
         let buffer = frame.buffer();
@@ -988,9 +973,19 @@ async fn run_client(
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
+    let mut first_video_frame_logged = false;
     loop {
         // フレーム受信チャネルから溜まっているフレームを処理する
         while let Ok(frame_data) = frame_rx.try_recv() {
+            if !first_video_frame_logged {
+                tracing::info!(
+                    "first video frame received: width={}, height={}, timestamp_us={}",
+                    frame_data.width,
+                    frame_data.height,
+                    frame_data.timestamp_us
+                );
+                first_video_frame_logged = true;
+            }
             encode_and_write_frame(
                 &frame_data,
                 &mut vp9_encoder,
@@ -1158,6 +1153,15 @@ async fn run_client(
 
     // 残りのフレームを処理する
     while let Ok(frame_data) = frame_rx.try_recv() {
+        if !first_video_frame_logged {
+            tracing::info!(
+                "first video frame received: width={}, height={}, timestamp_us={}",
+                frame_data.width,
+                frame_data.height,
+                frame_data.timestamp_us
+            );
+            first_video_frame_logged = true;
+        }
         encode_and_write_frame(
             &frame_data,
             &mut vp9_encoder,
