@@ -217,6 +217,95 @@ pub fn build_set_input_name_response(
     super::build_request_response_success_no_data("SetInputName", request_id)
 }
 
+/// デバイスプロパティの一覧を返す。
+/// OBS 本来は inputName で既存入力を指定するが、hisui では inputKind で種別を指定する。
+pub fn build_get_input_properties_list_property_items_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+) -> nojson::RawJsonOwned {
+    let fields = match parse_request_data_or_error_response(
+        "GetInputPropertiesListPropertyItems",
+        request_id,
+        request_data,
+        super::parse_get_input_properties_list_property_items_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    // property_name が "device_id" の場合のみデバイス一覧を返す
+    if fields.property_name != "device_id" {
+        return super::build_request_response_error(
+            "GetInputPropertiesListPropertyItems",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            &format!("Unknown property: {}", fields.property_name),
+        );
+    }
+
+    let items: Vec<(String, String)> = match fields.input_kind.as_str() {
+        "video_capture_device" => match shiguredo_video_device::VideoDeviceList::enumerate() {
+            Ok(devices) => devices
+                .devices()
+                .iter()
+                .filter_map(|d| {
+                    let name = d.name().ok()?;
+                    let id = d.unique_id().ok()?;
+                    Some((name, id))
+                })
+                .collect(),
+            Err(e) => {
+                tracing::warn!("Failed to enumerate video devices: {e}");
+                Vec::new()
+            }
+        },
+        "audio_capture_device" => {
+            match shiguredo_audio_device::AudioDeviceList::enumerate_input() {
+                Ok(devices) => devices
+                    .devices()
+                    .iter()
+                    .filter_map(|d| {
+                        let name = d.name().ok()?;
+                        let id = d.unique_id().ok()?;
+                        Some((name, id))
+                    })
+                    .collect(),
+                Err(e) => {
+                    tracing::warn!("Failed to enumerate audio devices: {e}");
+                    Vec::new()
+                }
+            }
+        }
+        _ => {
+            return super::build_request_response_error(
+                "GetInputPropertiesListPropertyItems",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &format!(
+                    "Input kind '{}' does not support property listing",
+                    fields.input_kind
+                ),
+            );
+        }
+    };
+
+    super::build_request_response_success("GetInputPropertiesListPropertyItems", request_id, |f| {
+        f.member(
+            "propertyItems",
+            nojson::array(|f| {
+                for (name, id) in &items {
+                    f.element(nojson::object(|f| {
+                        f.member("itemName", name)?;
+                        f.member("itemValue", id)?;
+                        f.member("itemEnabled", true)
+                    }))?;
+                }
+                Ok(())
+            }),
+        )
+    })
+}
+
 pub fn build_get_input_default_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,

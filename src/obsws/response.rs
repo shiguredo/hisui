@@ -45,6 +45,11 @@ struct GetInputDefaultSettingsFields {
     input_kind: String,
 }
 
+pub(crate) struct GetInputPropertiesListPropertyItemsFields {
+    pub(crate) input_kind: String,
+    pub(crate) property_name: String,
+}
+
 struct CreateSceneFields {
     scene_name: String,
 }
@@ -370,6 +375,17 @@ fn parse_get_input_default_settings_fields(
 ) -> Result<GetInputDefaultSettingsFields, nojson::JsonParseError> {
     let input_kind = required_non_empty_string_member(request_data, "inputKind")?;
     Ok(GetInputDefaultSettingsFields { input_kind })
+}
+
+pub(crate) fn parse_get_input_properties_list_property_items_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<GetInputPropertiesListPropertyItemsFields, nojson::JsonParseError> {
+    let input_kind = required_non_empty_string_member(request_data, "inputKind")?;
+    let property_name = required_non_empty_string_member(request_data, "propertyName")?;
+    Ok(GetInputPropertiesListPropertyItemsFields {
+        input_kind,
+        property_name,
+    })
 }
 
 fn parse_create_scene_fields(
