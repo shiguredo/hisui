@@ -3,6 +3,7 @@
 import json
 import os
 import shlex
+import signal
 import subprocess
 from pathlib import Path
 
@@ -31,6 +32,7 @@ def _build_bootstrap_command(
             "-p",
             "obsws_bootstrap",
             "--",
+            "--verbose",
             "--host",
             host,
             "--port",
@@ -44,6 +46,20 @@ def _build_bootstrap_command(
         ],
         REPO_ROOT,
     )
+
+
+def _format_process_failure(result: subprocess.CompletedProcess[str]) -> str:
+    """異常終了した subprocess の内容を整形する"""
+    details = [f"returncode={result.returncode}"]
+    if result.returncode < 0:
+        try:
+            signal_name = signal.Signals(-result.returncode).name
+            details.append(f"signal={signal_name}")
+        except ValueError:
+            pass
+    details.append(f"stdout={result.stdout}")
+    details.append(f"stderr={result.stderr}")
+    return ", ".join(details)
 
 
 def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
@@ -72,7 +88,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
             )
             assert result.returncode == 0, (
                 "obsws_bootstrap failed: "
-                f"stdout={result.stdout}, stderr={result.stderr}"
+                f"{_format_process_failure(result)}"
             )
             stats = json.loads(result.stdout)
             assert stats["video_tracks_received"] >= 1, (
@@ -96,8 +112,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
         bootstrap_details = ""
         if result is not None:
             bootstrap_details = (
-                f" obsws_bootstrap stdout={result.stdout},"
-                f" obsws_bootstrap stderr={result.stderr},"
+                f" obsws_bootstrap {_format_process_failure(result)},"
             )
         raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e
 
