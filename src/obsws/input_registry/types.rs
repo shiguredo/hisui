@@ -5,9 +5,10 @@ use std::time::Instant;
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
-pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 6] = [
+pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 7] = [
     "image_source",
     "video_capture_device",
+    "audio_capture_device",
     "mp4_file_source",
     "rtmp_inbound",
     "srt_inbound",
@@ -105,6 +106,7 @@ impl ObswsInput {
 pub enum ObswsInputSettings {
     ImageSource(ObswsImageSourceSettings),
     VideoCaptureDevice(ObswsVideoCaptureDeviceSettings),
+    AudioCaptureDevice(ObswsAudioCaptureDeviceSettings),
     Mp4FileSource(ObswsMp4FileSourceSettings),
     RtmpInbound(ObswsRtmpInboundSettings),
     SrtInbound(ObswsSrtInboundSettings),
@@ -117,6 +119,9 @@ impl ObswsInputSettings {
             "image_source" => Ok(Self::ImageSource(ObswsImageSourceSettings::default())),
             "video_capture_device" => Ok(Self::VideoCaptureDevice(
                 ObswsVideoCaptureDeviceSettings::default(),
+            )),
+            "audio_capture_device" => Ok(Self::AudioCaptureDevice(
+                ObswsAudioCaptureDeviceSettings::default(),
             )),
             "mp4_file_source" => Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings::default())),
             "rtmp_inbound" => Ok(Self::RtmpInbound(ObswsRtmpInboundSettings::default())),
@@ -144,6 +149,12 @@ impl ObswsInputSettings {
             "video_capture_device" => {
                 let device_id = parse_optional_string_setting(input_settings, "device_id")?;
                 Ok(Self::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
+                    device_id,
+                }))
+            }
+            "audio_capture_device" => {
+                let device_id = parse_optional_string_setting(input_settings, "device_id")?;
+                Ok(Self::AudioCaptureDevice(ObswsAudioCaptureDeviceSettings {
                     device_id,
                 }))
             }
@@ -189,6 +200,7 @@ impl ObswsInputSettings {
             // TODO: `video_capture_device` は将来的に `video_device_source` へ rename して、
             // `*_source` 命名へ統一する。今回は既存 API 影響を避けるため据え置く。
             Self::VideoCaptureDevice(_) => "video_capture_device",
+            Self::AudioCaptureDevice(_) => "audio_capture_device",
             Self::Mp4FileSource(_) => "mp4_file_source",
             Self::RtmpInbound(_) => "rtmp_inbound",
             Self::SrtInbound(_) => "srt_inbound",
@@ -215,6 +227,13 @@ impl ObswsInputSettings {
                 let device_id =
                     parse_overlay_string_setting(input_settings, "device_id", &existing.device_id)?;
                 Ok(Self::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
+                    device_id,
+                }))
+            }
+            Self::AudioCaptureDevice(existing) => {
+                let device_id =
+                    parse_overlay_string_setting(input_settings, "device_id", &existing.device_id)?;
+                Ok(Self::AudioCaptureDevice(ObswsAudioCaptureDeviceSettings {
                     device_id,
                 }))
             }
@@ -275,6 +294,7 @@ impl nojson::DisplayJson for ObswsInputSettings {
         match self {
             Self::ImageSource(settings) => settings.fmt(f),
             Self::VideoCaptureDevice(settings) => settings.fmt(f),
+            Self::AudioCaptureDevice(settings) => settings.fmt(f),
             Self::Mp4FileSource(settings) => settings.fmt(f),
             Self::RtmpInbound(settings) => settings.fmt(f),
             Self::SrtInbound(settings) => settings.fmt(f),
@@ -814,6 +834,24 @@ pub struct ObswsVideoCaptureDeviceSettings {
 }
 
 impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(device_id) = &self.device_id {
+                f.member("device_id", device_id)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsAudioCaptureDeviceSettings {
+    // OBS 互換のため、audio_capture_device は device_id 未指定の状態も有効として扱う
+    pub device_id: Option<String>,
+}
+
+impl nojson::DisplayJson for ObswsAudioCaptureDeviceSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if let Some(device_id) = &self.device_id {
