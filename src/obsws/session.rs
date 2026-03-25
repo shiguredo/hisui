@@ -193,7 +193,6 @@ impl ObswsSession {
                     | "CreateInput"
                     | "RemoveInput"
                     | "SetInputSettings"
-                    | "SetInputName"
                     | "CreateSceneItem"
                     | "RemoveSceneItem"
                     | "DuplicateSceneItem"
