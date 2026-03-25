@@ -974,6 +974,7 @@ async fn run_client(
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
     let mut first_video_frame_logged = false;
+    let mut loop_exit_reason = "unknown".to_owned();
     loop {
         // フレーム受信チャネルから溜まっているフレームを処理する
         while let Ok(frame_data) = frame_rx.try_recv() {
@@ -1012,10 +1013,16 @@ async fn run_client(
             event = event_rx.recv() => {
                 match event {
                     Some(e) => e,
-                    None => break,
+                    None => {
+                        loop_exit_reason = "event channel closed".to_owned();
+                        break;
+                    }
                 }
             }
-            _ = tokio::time::sleep_until(deadline) => break,
+            _ = tokio::time::sleep_until(deadline) => {
+                loop_exit_reason = "deadline reached".to_owned();
+                break;
+            }
         };
 
         match event {
@@ -1150,8 +1157,10 @@ async fn run_client(
             }
         }
     }
+    tracing::info!("event loop exited: reason={loop_exit_reason}");
 
     // 残りのフレームを処理する
+    tracing::info!("draining remaining frames");
     while let Ok(frame_data) = frame_rx.try_recv() {
         if !first_video_frame_logged {
             tracing::info!(
@@ -1169,21 +1178,31 @@ async fn run_client(
             &mut mp4_writer,
         )?;
     }
+    tracing::info!("remaining frames drained");
 
     // エンコーダーの残りフレームをフラッシュする
     if let Some(encoder) = &mut vp9_encoder {
+        tracing::info!("finishing VP9 encoder");
         encoder
             .finish()
             .map_err(|e| format!("failed to finish encoder: {e}"))?;
+        tracing::info!("VP9 encoder finished");
+        tracing::info!("draining encoded frames after finish");
         while let Some(frame) = encoder.next_frame() {
             let se = vp9_sample_entry.take();
             mp4_writer.append_video(frame.data(), frame.is_keyframe(), se, 0)?;
         }
+        tracing::info!("encoded frame drain completed");
     }
 
     // MP4 ファイルをファイナライズする
     if mp4_writer.video_sample_count > 0 {
+        tracing::info!(
+            "finalizing MP4 writer: video_sample_count={}",
+            mp4_writer.video_sample_count
+        );
         mp4_writer.finalize()?;
+        tracing::info!("MP4 writer finalized");
     }
 
     let video_codec = if mp4_writer.video_sample_count > 0 {
@@ -1197,6 +1216,13 @@ async fn run_client(
         return Err("CreateInput request did not complete".to_owned());
     }
 
+    tracing::info!(
+        "run_client completed: video_tracks={}, audio_tracks={}, video_frames={}, video_samples_written={}",
+        video_tracks.load(Ordering::Relaxed),
+        audio_tracks.load(Ordering::Relaxed),
+        video_frames.load(Ordering::Relaxed),
+        mp4_writer.video_sample_count
+    );
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
         audio_tracks: audio_tracks.load(Ordering::Relaxed),
