@@ -976,6 +976,7 @@ async fn run_client(
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
     let mut first_video_frame_logged = false;
+    let frame_poll_interval = Duration::from_millis(50);
     let loop_exit_reason = loop {
         // フレーム受信チャネルから溜まっているフレームを処理する
         while let Ok(frame_data) = frame_rx.try_recv() {
@@ -1017,6 +1018,7 @@ async fn run_client(
                     None => break "event channel closed".to_owned(),
                 }
             }
+            _ = tokio::time::sleep(frame_poll_interval) => continue,
             _ = tokio::time::sleep_until(deadline) => break "deadline reached".to_owned(),
         };
 
@@ -1156,6 +1158,7 @@ async fn run_client(
 
     // 残りのフレームを処理する
     tracing::info!("draining remaining frames");
+    let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while let Ok(frame_data) = frame_rx.try_recv() {
         if !first_video_frame_logged {
             tracing::info!(
@@ -1172,6 +1175,10 @@ async fn run_client(
             &mut vp9_sample_entry,
             &mut mp4_writer,
         )?;
+        if tokio::time::Instant::now() >= drain_deadline {
+            tracing::info!("remaining frame drain timed out");
+            break;
+        }
     }
     tracing::info!("remaining frames drained");
 
