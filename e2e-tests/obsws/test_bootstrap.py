@@ -7,6 +7,8 @@ import signal
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from helpers import ObswsServer, _inspect_mp4
 from hisui_server import REPO_ROOT, reserve_ephemeral_port
 
@@ -94,6 +96,7 @@ def _run_bootstrap_command(
     )
 
 
+@pytest.mark.timeout(90)
 def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     """bootstrap で WebRTC 接続し、映像トラックが受信できることを確認する"""
     host = "127.0.0.1"

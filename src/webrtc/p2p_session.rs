@@ -174,6 +174,13 @@ struct Session {
     obsws_session: ObswsSession,
 }
 
+impl Drop for Session {
+    fn drop(&mut self) {
+        tracing::info!("Closing PeerConnection");
+        self.pc.close();
+    }
+}
+
 struct SubscribedTrack {
     state: TrackState,
 }

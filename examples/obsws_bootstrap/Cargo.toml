@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-shiguredo_webrtc = "0.146.0"
+shiguredo_webrtc = "=0.146.2-canary.1"
 shiguredo_http11 = "2026.1.1"
 shiguredo_libvpx = "2026.1.0-canary.2"
 shiguredo_opus = "2026.1.0-canary.4"
