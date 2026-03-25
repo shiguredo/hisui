@@ -168,7 +168,7 @@
   - NOTE: `inputName` または `inputUuid` のいずれかで対象 Input を指定する
   - NOTE: 成功時は Inputs 購読中セッションへ `InputNameChanged` を配信する
 - [x] `GetInputDefaultSettings`: 入力の既定設定を取得する
-  - NOTE: 現在は `image_source` / `video_capture_device` / `mp4_file_source` の既定設定を返す
+  - NOTE: 現在は `image_source` / `video_capture_device` / `audio_capture_device` / `mp4_file_source` の既定設定を返す
   - NOTE: hisui の `image_source` デフォルト設定は `{}` を返す。OBS は `linear_alpha` / `unload` 等のプロパティを含む
 - [x] `GetInputSettings`: 入力設定を取得する
   - NOTE: OBS の `image_source` は `linear_alpha` / `unload` 等のプロパティを保持するが、hisui はこれらに非対応のため `overlay=true` でのマージ結果が異なる場合がある
@@ -312,7 +312,7 @@
   - NOTE: 成功時の `responseData` には `outputActive` を返す
 - [x] `StartStream`: 配信を開始する
   - NOTE: 複数映像入力に対応（`position` と `scale` と `crop` に対応。`rotation`, `blend mode` は未対応）
-  - NOTE: 現時点の入力対応は `image_source` / `video_capture_device` / `mp4_file_source`
+  - NOTE: 現時点の入力対応は `image_source` / `video_capture_device` / `audio_capture_device` / `mp4_file_source`
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を起動する
   - NOTE: 複数映像入力時は `createVideoMixer` を追加で起動する
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す
@@ -340,7 +340,7 @@
   - NOTE: 成功時の `responseData` には `outputActive` を返す
 - [x] `StartRecord`: 録画を開始する
   - NOTE: 複数映像入力に対応（`position` と `scale` と `crop` に対応。`rotation`, `blend mode` は未対応）
-  - NOTE: 現時点の入力対応は `image_source` / `video_capture_device` / `mp4_file_source`
+  - NOTE: 現時点の入力対応は `image_source` / `video_capture_device` / `audio_capture_device` / `mp4_file_source`
   - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createMp4Writer` を起動する
   - NOTE: 複数映像入力時は `createVideoMixer` を追加で起動する
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す

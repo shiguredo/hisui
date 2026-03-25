@@ -28,6 +28,9 @@
 - [UPDATE] `libc` 0.2.183 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
   - @sile
+- [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
+  - `shiguredo_audio_device` が PulseAudio バックエンドを利用するために必要
+  - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0-canary.0 を追加する
