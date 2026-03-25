@@ -1,6 +1,6 @@
 use std::io::{Seek, SeekFrom, Write};
 use std::num::NonZeroU32;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -235,12 +235,14 @@ impl AudioTrackSinkHandler for AudioRecordHandler {
 
 struct BootstrapAudioDeviceModuleState {
     transport: Mutex<Option<AudioTransportRef>>,
+    playing: AtomicBool,
 }
 
 impl BootstrapAudioDeviceModuleState {
     fn new() -> Self {
         Self {
             transport: Mutex::new(None),
+            playing: AtomicBool::new(false),
         }
     }
 
@@ -319,15 +321,17 @@ impl AudioDeviceModuleHandler for BootstrapAudioDeviceModuleHandler {
     }
 
     fn start_playout(&self) -> i32 {
+        self.state.playing.store(true, Ordering::Relaxed);
         0
     }
 
     fn stop_playout(&self) -> i32 {
+        self.state.playing.store(false, Ordering::Relaxed);
         0
     }
 
     fn playing(&self) -> bool {
-        true
+        self.state.playing.load(Ordering::Relaxed)
     }
 
     fn stereo_playout_is_available(&self, available: &mut bool) -> i32 {
@@ -1178,7 +1182,8 @@ async fn run_client(
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
-    let frame_poll_interval = Duration::from_millis(50);
+    let mut playout_interval = tokio::time::interval(Duration::from_millis(10));
+    playout_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     'event_loop: loop {
         audio_state.render_10ms_audio();
 
@@ -1241,7 +1246,7 @@ async fn run_client(
                     None => break 'event_loop,
                 }
             }
-            _ = tokio::time::sleep(frame_poll_interval) => continue,
+            _ = playout_interval.tick() => continue,
             _ = tokio::time::sleep_until(deadline) => break 'event_loop,
         };
 
