@@ -105,7 +105,7 @@ fn convert_captured_frame_to_i16be(
                 .chunks_exact(4)
                 .flat_map(|chunk| {
                     let sample_f32 = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                    let clamped = (sample_f32 * 32767.0).clamp(-32768.0, 32767.0);
+                    let clamped = (sample_f32 * 32767.0).clamp(-32767.0, 32767.0);
                     (clamped as i16).to_be_bytes()
                 })
                 .collect()
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn convert_captured_frame_to_i16be_f32_input() {
-        // F32 LE: 1.0 → 32767, -1.0 → -32768 (クランプ後)
+        // F32 LE: 1.0 → 32767, -1.0 → -32767
         let mut data = Vec::new();
         data.extend_from_slice(&1.0f32.to_le_bytes());
         data.extend_from_slice(&(-1.0f32).to_le_bytes());
