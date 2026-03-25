@@ -183,14 +183,33 @@ impl ObswsSession {
         request_type: &str,
         request_succeeded: bool,
     ) -> crate::Result<()> {
-        if !request_succeeded || !matches!(request_type, "SetCurrentProgramScene" | "RemoveScene") {
+        let scene_change_only_request =
+            matches!(request_type, "SetCurrentProgramScene" | "RemoveScene");
+        if !request_succeeded
+            || !matches!(
+                request_type,
+                "SetCurrentProgramScene"
+                    | "RemoveScene"
+                    | "CreateInput"
+                    | "RemoveInput"
+                    | "SetInputSettings"
+                    | "SetInputName"
+                    | "CreateSceneItem"
+                    | "RemoveSceneItem"
+                    | "DuplicateSceneItem"
+                    | "SetSceneItemEnabled"
+                    | "SetSceneItemIndex"
+                    | "SetSceneItemBlendMode"
+                    | "SetSceneItemTransform"
+            )
+        {
             return Ok(());
         }
 
         // 不要な rebuild を避けるための早期チェック
         let current_scene_uuid = self.current_program_scene_uuid().await;
 
-        {
+        if scene_change_only_request {
             let program = self.program_output.read().await;
             if program.scene_uuid == current_scene_uuid {
                 return Ok(());
