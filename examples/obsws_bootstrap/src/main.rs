@@ -41,7 +41,7 @@ const BT_709: u8 = 1;
 enum ClientEvent {
     ConnectionChange(PeerConnectionState),
     Track(RtpTransceiver),
-    DataChannel(DataChannel),
+    DataChannel(DataChannel, Option<DataChannelObserver>),
     ObswsDataChannelStateChange,
     SignalingMessage { data: Vec<u8> },
     ObswsMessage { data: Vec<u8> },
@@ -85,8 +85,24 @@ impl PeerConnectionObserverHandler for ClientPcObserver {
         let _ = self.event_tx.send(ClientEvent::Track(transceiver));
     }
 
-    fn on_data_channel(&mut self, dc: DataChannel) {
-        let _ = self.event_tx.send(ClientEvent::DataChannel(dc));
+    fn on_data_channel(&mut self, mut dc: DataChannel) {
+        let label = dc.label().unwrap_or_default();
+        let observer = if label == "signaling" {
+            let observer = DataChannelObserver::new_with_handler(Box::new(SignalingDcHandler {
+                event_tx: self.event_tx.clone(),
+            }));
+            dc.register_observer(&observer);
+            Some(observer)
+        } else if label == "obsws" {
+            let observer = DataChannelObserver::new_with_handler(Box::new(ObswsDcHandler {
+                event_tx: self.event_tx.clone(),
+            }));
+            dc.register_observer(&observer);
+            Some(observer)
+        } else {
+            None
+        };
+        let _ = self.event_tx.send(ClientEvent::DataChannel(dc, observer));
     }
 
     fn on_ice_gathering_change(&mut self, state: IceGatheringState) {
@@ -689,7 +705,6 @@ struct GatheredIceCandidate {
 }
 
 struct RetainedState {
-    event_tx: mpsc::UnboundedSender<ClientEvent>,
     _pc_observer: PeerConnectionObserver,
     _dummy_dc: DataChannel,
     obsws_dc: Option<DataChannel>,
@@ -916,7 +931,6 @@ async fn run_client(
     let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<VideoFrameData>(60);
 
     let mut retained = RetainedState {
-        event_tx: event_tx.clone(),
         _pc_observer: pc_observer,
         _dummy_dc: dummy_dc,
         obsws_dc: None,
@@ -1020,27 +1034,17 @@ async fn run_client(
                     }
                 }
             }
-            ClientEvent::DataChannel(mut dc) => {
+            ClientEvent::DataChannel(dc, observer) => {
                 let label = dc.label().unwrap_or_default();
                 tracing::info!("data channel received: label={label}");
                 if label == "signaling" {
-                    let observer =
-                        DataChannelObserver::new_with_handler(Box::new(SignalingDcHandler {
-                            event_tx: retained.event_tx.clone(),
-                        }));
-                    dc.register_observer(&observer);
                     retained.signaling_dc = Some(dc);
-                    retained.signaling_dc_observer = Some(observer);
+                    retained.signaling_dc_observer = observer;
                 } else if label == "obsws" {
-                    let observer =
-                        DataChannelObserver::new_with_handler(Box::new(ObswsDcHandler {
-                            event_tx: retained.event_tx.clone(),
-                        }));
-                    dc.register_observer(&observer);
                     obsws_ready = dc.state() == DataChannelState::Open;
                     tracing::info!("obsws data channel ready={obsws_ready}");
                     retained.obsws_dc = Some(dc);
-                    retained.obsws_dc_observer = Some(observer);
+                    retained.obsws_dc_observer = observer;
                 }
             }
             ClientEvent::SignalingMessage { data } => {
