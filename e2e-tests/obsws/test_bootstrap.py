@@ -56,33 +56,50 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     )
     output_mp4 = tmp_path / "output.mp4"
 
-    with ObswsServer(binary_path, host=host, port=port):
-        cmd, cwd = _build_bootstrap_command(
-            host, port, 5, str(input_mp4), str(output_mp4)
-        )
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd=cwd,
-        )
-        assert result.returncode == 0, (
-            f"obsws_bootstrap failed: stderr={result.stderr}"
-        )
-        stats = json.loads(result.stdout)
-        assert stats["video_tracks_received"] >= 1, (
-            f"expected at least 1 video track, got {stats}"
-        )
-        assert stats["video_frames_received"] >= 1, (
-            f"expected at least 1 video frame, got {stats}"
-        )
-        assert stats["video_width"] == 1920, (
-            f"expected video_width=1920, got {stats}"
-        )
-        assert stats["video_height"] == 1080, (
-            f"expected video_height=1080, got {stats}"
-        )
+    server = ObswsServer(binary_path, host=host, port=port)
+    result = None
+    try:
+        with server:
+            cmd, cwd = _build_bootstrap_command(
+                host, port, 5, str(input_mp4), str(output_mp4)
+            )
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=cwd,
+            )
+            assert result.returncode == 0, (
+                "obsws_bootstrap failed: "
+                f"stdout={result.stdout}, stderr={result.stderr}"
+            )
+            stats = json.loads(result.stdout)
+            assert stats["video_tracks_received"] >= 1, (
+                f"expected at least 1 video track, got {stats}"
+            )
+            assert stats["video_frames_received"] >= 1, (
+                f"expected at least 1 video frame, got {stats}"
+            )
+            assert stats["video_width"] == 1920, (
+                f"expected video_width=1920, got {stats}"
+            )
+            assert stats["video_height"] == 1080, (
+                f"expected video_height=1080, got {stats}"
+            )
+    except subprocess.TimeoutExpired as e:
+        raise AssertionError(
+            "obsws_bootstrap timed out: "
+            f"stdout={e.stdout}, stderr={e.stderr}, {server.diagnostics()}"
+        ) from e
+    except Exception as e:
+        bootstrap_details = ""
+        if result is not None:
+            bootstrap_details = (
+                f" obsws_bootstrap stdout={result.stdout},"
+                f" obsws_bootstrap stderr={result.stderr},"
+            )
+        raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e
 
     # MP4 ファイルの検証
     assert output_mp4.exists(), "output MP4 file should exist"

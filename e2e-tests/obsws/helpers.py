@@ -51,7 +51,9 @@ class ObswsServer:
         self.https_cert_path = https_cert_path
         self.https_key_path = https_key_path
         self.use_env = use_env
-        self._process: subprocess.Popen[None] | None = None
+        self._process: subprocess.Popen[str] | None = None
+        self._stdout = ""
+        self._stderr = ""
 
     def __enter__(self):
         return self.start()
@@ -110,7 +112,14 @@ class ObswsServer:
                 args.extend(["--openh264", openh264_path])
 
         cmd, cwd = build_hisui_command(self.binary_path, *args)
-        self._process = subprocess.Popen(cmd, env=env, cwd=cwd)
+        self._process = subprocess.Popen(
+            cmd,
+            env=env,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         self._wait_until_listening()
         return self
 
@@ -125,6 +134,9 @@ class ObswsServer:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=3.0)
+        stdout, stderr = process.communicate(timeout=1.0)
+        self._stdout = stdout
+        self._stderr = stderr
         self._process = None
 
     def _wait_until_listening(self, timeout: float = 10.0):
@@ -132,15 +144,29 @@ class ObswsServer:
         while time.time() < deadline:
             process = self._process
             if process is not None and process.poll() is not None:
+                stdout, stderr = process.communicate(timeout=1.0)
+                self._stdout = stdout
+                self._stderr = stderr
                 raise AssertionError(
-                    f"obsws process exited before listening: returncode={process.returncode}"
+                    "obsws process exited before listening: "
+                    f"returncode={process.returncode}, stdout={stdout}, stderr={stderr}"
                 )
             if _is_port_open(self.host, self.port):
                 return
             time.sleep(0.1)
         raise AssertionError(
-            f"obsws server did not start listening in time: {self.host}:{self.port}"
+            "obsws server did not start listening in time: "
+            f"{self.host}:{self.port}, stdout={self._stdout}, stderr={self._stderr}"
         )
+
+    def diagnostics(self) -> str:
+        process = self._process
+        if process is not None and process.poll() is None:
+            return (
+                "obsws process is still running; buffered output is not available until stop. "
+                f"host={self.host}, port={self.port}"
+            )
+        return f"obsws stdout={self._stdout}, obsws stderr={self._stderr}"
 
 
 def _is_port_open(host: str, port: int) -> bool:

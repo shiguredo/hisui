@@ -87,17 +87,20 @@ impl PeerConnectionObserverHandler for ClientPcObserver {
 
     fn on_data_channel(&mut self, mut dc: DataChannel) {
         let label = dc.label().unwrap_or_default();
+        tracing::info!("on_data_channel: label={label}");
         let observer = if label == "signaling" {
             let observer = DataChannelObserver::new_with_handler(Box::new(SignalingDcHandler {
                 event_tx: self.event_tx.clone(),
             }));
             dc.register_observer(&observer);
+            tracing::info!("registered signaling data channel observer");
             Some(observer)
         } else if label == "obsws" {
             let observer = DataChannelObserver::new_with_handler(Box::new(ObswsDcHandler {
                 event_tx: self.event_tx.clone(),
             }));
             dc.register_observer(&observer);
+            tracing::info!("registered obsws data channel observer");
             Some(observer)
         } else {
             None
@@ -133,6 +136,11 @@ struct SignalingDcHandler {
 
 impl DataChannelObserverHandler for SignalingDcHandler {
     fn on_message(&mut self, data: &[u8], _is_binary: bool) {
+        let msg_type = parse_signaling_type(data).unwrap_or_default();
+        tracing::info!(
+            "signaling data channel message received: type={msg_type}, bytes={}",
+            data.len()
+        );
         let _ = self.event_tx.send(ClientEvent::SignalingMessage {
             data: data.to_vec(),
         });
@@ -145,6 +153,7 @@ struct ObswsDcHandler {
 
 impl DataChannelObserverHandler for ObswsDcHandler {
     fn on_state_change(&mut self) {
+        tracing::info!("obsws data channel state changed");
         let _ = self.event_tx.send(ClientEvent::ObswsDataChannelStateChange);
     }
 
@@ -165,11 +174,17 @@ struct FrameRecordHandler {
 
 impl VideoSinkHandler for FrameRecordHandler {
     fn on_frame(&mut self, frame: shiguredo_webrtc::VideoFrameRef<'_>) {
-        self.frame_count.fetch_add(1, Ordering::Relaxed);
+        let count = self.frame_count.fetch_add(1, Ordering::Relaxed);
         let w = frame.width();
         let h = frame.height();
         self.width.store(w as usize, Ordering::Relaxed);
         self.height.store(h as usize, Ordering::Relaxed);
+        if count == 0 {
+            tracing::info!(
+                "first video frame received: width={w}, height={h}, timestamp_us={}",
+                frame.timestamp_us()
+            );
+        }
 
         // I420 バッファからプレーンデータをコピーする
         let buffer = frame.buffer();
@@ -306,6 +321,7 @@ fn set_remote_description(pc: &PeerConnection, sdp_type: SdpType, sdp: &str) -> 
 // --- HTTP bootstrap ---
 
 async fn http_bootstrap(host: &str, port: u16, offer_sdp: &str) -> Result<String, String> {
+    tracing::info!("connecting to bootstrap endpoint: host={host}, port={port}");
     let mut stream = tokio::net::TcpStream::connect(format!("{host}:{port}"))
         .await
         .map_err(|e| format!("failed to connect: {e}"))?;
@@ -324,6 +340,7 @@ async fn http_bootstrap(host: &str, port: u16, offer_sdp: &str) -> Result<String
         .flush()
         .await
         .map_err(|e| format!("failed to flush: {e}"))?;
+    tracing::info!("bootstrap offer sent: sdp_bytes={}", offer_sdp.len());
 
     let mut decoder = ResponseDecoder::new();
     let mut buf = [0u8; 8192];
@@ -342,6 +359,11 @@ async fn http_bootstrap(host: &str, port: u16, offer_sdp: &str) -> Result<String
             .decode()
             .map_err(|e| format!("failed to decode response: {e}"))?
         {
+            tracing::info!(
+                "bootstrap response received: status={} {}",
+                response.status_code,
+                response.reason_phrase
+            );
             if response.status_code != 201 {
                 return Err(format!(
                     "bootstrap failed: {} {}",
@@ -856,6 +878,9 @@ async fn run_client(
     output_path: &str,
     input_mp4_path: &str,
 ) -> Result<Stats, String> {
+    tracing::info!(
+        "run_client started: host={host}, port={port}, duration_secs={duration_secs}, output_path={output_path}, input_mp4_path={input_mp4_path}"
+    );
     // WebRTC ファクトリを初期化する
     let env = Environment::new();
     let mut network = Thread::new_with_socket_server();
@@ -898,6 +923,7 @@ async fn run_client(
 
     let pc = PeerConnection::create(factory.as_ref(), &mut config, &mut pc_deps)
         .map_err(|e| format!("failed to create PeerConnection: {e}"))?;
+    tracing::info!("peer connection created");
 
     // server 側の signaling / obsws DataChannel を初回 offer に載せるための
     // m=application 用ダミー DataChannel
@@ -906,16 +932,24 @@ async fn run_client(
     let dummy_dc = pc
         .create_data_channel("dummy", &mut dc_init)
         .map_err(|e| format!("failed to create dummy DataChannel: {e}"))?;
+    tracing::info!("dummy data channel created");
 
     // offer SDP を生成する
     let offer_sdp = create_offer_sdp(&pc)?;
+    tracing::info!("initial offer created");
     set_local_description(&pc, SdpType::Offer, &offer_sdp)?;
+    tracing::info!("initial local description set");
     let mut initial_ice_candidates = Vec::new();
     let offer_sdp = finalize_local_sdp(offer_sdp, &mut ice_rx, &mut initial_ice_candidates).await?;
-    tracing::debug!("offer SDP created");
+    tracing::info!(
+        "initial offer finalized with ICE candidates: sdp_bytes={}, ice_candidates={}",
+        offer_sdp.len(),
+        initial_ice_candidates.len()
+    );
 
     // /bootstrap で answer SDP を取得する
     let answer_sdp = http_bootstrap(host, port, &offer_sdp).await?;
+    tracing::info!("bootstrap answer received: sdp_bytes={}", answer_sdp.len());
     set_remote_description(&pc, SdpType::Answer, &answer_sdp)?;
     tracing::info!("bootstrap completed");
 
@@ -1051,19 +1085,24 @@ async fn run_client(
                 let msg_type = parse_signaling_type(&data).unwrap_or_default();
                 tracing::debug!("signaling message: type={msg_type}");
                 if msg_type == "offer" {
+                    tracing::info!("handling renegotiation offer");
                     // renegotiation: サーバーからの offer に answer を返す
                     if let Some(sdp) = parse_signaling_sdp(&data) {
+                        tracing::info!("renegotiation offer parsed: sdp_bytes={}", sdp.len());
                         if let Err(e) = set_remote_description(&pc, SdpType::Offer, &sdp) {
                             tracing::warn!("failed to set remote offer: {e}");
                             continue;
                         }
+                        tracing::info!("remote renegotiation offer applied");
                         match create_answer_sdp(&pc) {
                             Ok(answer) => {
+                                tracing::info!("renegotiation answer created");
                                 if let Err(e) = set_local_description(&pc, SdpType::Answer, &answer)
                                 {
                                     tracing::warn!("failed to set local answer: {e}");
                                     continue;
                                 }
+                                tracing::info!("local renegotiation answer applied");
                                 let answer = match finalize_local_sdp(
                                     answer,
                                     &mut retained.ice_rx,
@@ -1150,6 +1189,7 @@ async fn run_client(
     };
 
     if !obsws_create_input_succeeded {
+        tracing::warn!("CreateInput request did not complete before deadline");
         return Err("CreateInput request did not complete".to_owned());
     }
 
