@@ -179,14 +179,12 @@ impl ObswsCoordinator {
     ) -> CommandResult {
         let request_type = request.request_type.clone().unwrap_or_default();
         let result = self.dispatch_request(request, session_stats).await;
-        // write リクエストの場合は program output を同期する
-        if result.batch_result.request_status_result {
-            if let Err(e) = self.sync_program_output_state(&request_type, true).await {
-                tracing::warn!("failed to rebuild program output: {}", e.display());
-            }
-        } else {
-            // 失敗時も request_type によっては sync が必要（現行コードと同じ挙動）
-            // ただし request_succeeded=false の場合は sync_program_output_state が早期リターンする
+        let request_succeeded = result.batch_result.request_status_result;
+        if let Err(e) = self
+            .sync_program_output_state(&request_type, request_succeeded)
+            .await
+        {
+            tracing::warn!("failed to rebuild program output: {}", e.display());
         }
         result
     }
@@ -313,7 +311,7 @@ impl ObswsCoordinator {
                 self.handle_toggle_output_request(&request_id, request.request_data.as_ref())
                     .await
             }
-            // --- session-local（状態変更なし） ---
+            // --- レジストリ状態変更なし ---
             "BroadcastCustomEvent" => {
                 self.handle_broadcast_custom_event(&request_id, request.request_data.as_ref())
             }
@@ -1818,6 +1816,8 @@ impl ObswsCoordinator {
         if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
             && let Err(e) = stop_processors_staged_record(pipeline_handle, &run).await
         {
+            // プロセッサ停止に失敗してもレコード状態は解除する。
+            // MP4 ファイルの finalize を優先し、クライアントには成功を返す。
             tracing::warn!("failed to stop record processors: {}", e.display());
         }
         self.input_registry.deactivate_record();
@@ -2552,12 +2552,12 @@ async fn wait_processors_stopped(
 ) -> crate::Result<()> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if tokio::time::Instant::now() >= deadline {
-            return Err(crate::Error::new("timeout waiting for processors to stop"));
-        }
         let live = live_processor_ids(pipeline_handle, processor_ids).await;
         if live.is_empty() {
             return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(crate::Error::new("timeout waiting for processors to stop"));
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
