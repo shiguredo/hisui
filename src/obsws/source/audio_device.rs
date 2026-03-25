@@ -48,6 +48,7 @@ impl AudioDeviceSource {
             }
         }
 
+        // NOTE: エラーによる早期リターン時も AudioCapture::drop() が stop() を呼ぶため安全
         capture.stop();
         output_audio_sender.send_eos();
 
@@ -58,7 +59,7 @@ impl AudioDeviceSource {
 fn convert_captured_frame_to_i16be(
     frame: &shiguredo_audio_device::AudioFrameOwned,
 ) -> Result<AudioFrame> {
-    let timestamp = if frame.timestamp_us <= 0 {
+    let timestamp = if frame.timestamp_us < 0 {
         Duration::ZERO
     } else {
         Duration::from_micros(frame.timestamp_us as u64)
@@ -139,8 +140,8 @@ pub(super) fn build_record_source_plan(
     let source = AudioDeviceSource {
         output_audio_track_id: raw_audio_track_id.clone(),
         device_id: settings.device_id.clone(),
-        sample_rate: None,
-        channels: None,
+        sample_rate: settings.sample_rate,
+        channels: settings.channels,
     };
 
     Ok(super::ObswsRecordSourcePlan {
@@ -165,6 +166,8 @@ mod tests {
         let plan = build_record_source_plan(
             &ObswsAudioCaptureDeviceSettings {
                 device_id: Some("mic0".to_owned()),
+                sample_rate: None,
+                channels: None,
             },
             ObswsOutputKind::Record,
             1,
@@ -208,7 +211,11 @@ mod tests {
     #[test]
     fn build_record_source_plan_without_device_id() {
         let plan = build_record_source_plan(
-            &ObswsAudioCaptureDeviceSettings { device_id: None },
+            &ObswsAudioCaptureDeviceSettings {
+                device_id: None,
+                sample_rate: None,
+                channels: None,
+            },
             ObswsOutputKind::Record,
             2,
             1,

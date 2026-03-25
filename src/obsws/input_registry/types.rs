@@ -154,8 +154,12 @@ impl ObswsInputSettings {
             }
             "audio_capture_device" => {
                 let device_id = parse_optional_string_setting(input_settings, "device_id")?;
+                let sample_rate = parse_optional_i32_setting(input_settings, "sampleRate")?;
+                let channels = parse_optional_i32_setting(input_settings, "channels")?;
                 Ok(Self::AudioCaptureDevice(ObswsAudioCaptureDeviceSettings {
                     device_id,
+                    sample_rate,
+                    channels,
                 }))
             }
             "mp4_file_source" => {
@@ -233,8 +237,14 @@ impl ObswsInputSettings {
             Self::AudioCaptureDevice(existing) => {
                 let device_id =
                     parse_overlay_string_setting(input_settings, "device_id", &existing.device_id)?;
+                let sample_rate =
+                    parse_overlay_i32_setting(input_settings, "sampleRate", &existing.sample_rate)?;
+                let channels =
+                    parse_overlay_i32_setting(input_settings, "channels", &existing.channels)?;
                 Ok(Self::AudioCaptureDevice(ObswsAudioCaptureDeviceSettings {
                     device_id,
+                    sample_rate,
+                    channels,
                 }))
             }
             Self::Mp4FileSource(existing) => {
@@ -809,6 +819,75 @@ fn parse_overlay_bool_setting(
     })
 }
 
+fn parse_optional_i32_setting(
+    settings: nojson::RawJsonValue<'_, '_>,
+    key: &str,
+) -> Result<Option<i32>, ParseInputSettingsError> {
+    let Some(value) = settings
+        .to_member(key)
+        .map_err(|e| {
+            ParseInputSettingsError::InvalidInputSettings(format!(
+                "Invalid inputSettings field: {e}"
+            ))
+        })?
+        .optional()
+    else {
+        return Ok(None);
+    };
+
+    if value.kind() != nojson::JsonValueKind::Integer {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: integer is required"
+        )));
+    }
+    let value: i64 = value.try_into().map_err(|e| {
+        ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: {e}"
+        ))
+    })?;
+    let value = i32::try_from(value).map_err(|_| {
+        ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: value out of i32 range"
+        ))
+    })?;
+    Ok(Some(value))
+}
+
+fn parse_overlay_i32_setting(
+    settings: nojson::RawJsonValue<'_, '_>,
+    key: &str,
+    current: &Option<i32>,
+) -> Result<Option<i32>, ParseInputSettingsError> {
+    let Some(value) = settings
+        .to_member(key)
+        .map_err(|e| {
+            ParseInputSettingsError::InvalidInputSettings(format!(
+                "Invalid inputSettings field: {e}"
+            ))
+        })?
+        .optional()
+    else {
+        return Ok(*current);
+    };
+
+    if value.kind() != nojson::JsonValueKind::Integer {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: integer is required"
+        )));
+    }
+    let value: i64 = value.try_into().map_err(|e| {
+        ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: {e}"
+        ))
+    })?;
+    let value = i32::try_from(value).map_err(|_| {
+        ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.{key} field: value out of i32 range"
+        ))
+    })?;
+    Ok(Some(value))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsImageSourceSettings {
     // OBS 互換のため、image_source は file 未指定の状態も有効として扱う
@@ -849,6 +928,8 @@ impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
 pub struct ObswsAudioCaptureDeviceSettings {
     // OBS 互換のため、audio_capture_device は device_id 未指定の状態も有効として扱う
     pub device_id: Option<String>,
+    pub sample_rate: Option<i32>,
+    pub channels: Option<i32>,
 }
 
 impl nojson::DisplayJson for ObswsAudioCaptureDeviceSettings {
@@ -856,6 +937,12 @@ impl nojson::DisplayJson for ObswsAudioCaptureDeviceSettings {
         nojson::object(|f| {
             if let Some(device_id) = &self.device_id {
                 f.member("device_id", device_id)?;
+            }
+            if let Some(sample_rate) = self.sample_rate {
+                f.member("sampleRate", i64::from(sample_rate))?;
+            }
+            if let Some(channels) = self.channels {
+                f.member("channels", i64::from(channels))?;
             }
             Ok(())
         })
