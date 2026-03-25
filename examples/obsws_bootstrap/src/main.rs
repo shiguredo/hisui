@@ -1,8 +1,7 @@
 use std::io::{Seek, SeekFrom, Write};
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::thread::JoinHandle;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use shiguredo_http11::{Request, ResponseDecoder};
@@ -22,9 +21,9 @@ use shiguredo_webrtc::{
     PeerConnectionFactoryDependencies, PeerConnectionObserver, PeerConnectionObserverHandler,
     PeerConnectionOfferAnswerOptions, PeerConnectionRtcConfiguration, PeerConnectionState,
     RtcError, RtcEventLogFactory, RtpTransceiver, SdpType, SessionDescription,
-    SetLocalDescriptionObserver, SetLocalDescriptionObserverHandler,
-    SetRemoteDescriptionObserver, SetRemoteDescriptionObserverHandler, Thread,
-    VideoDecoderFactory, VideoEncoderFactory, VideoSink, VideoSinkHandler, VideoSinkWants,
+    SetLocalDescriptionObserver, SetLocalDescriptionObserverHandler, SetRemoteDescriptionObserver,
+    SetRemoteDescriptionObserverHandler, Thread, VideoDecoderFactory, VideoEncoderFactory,
+    VideoSink, VideoSinkHandler, VideoSinkWants,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -234,32 +233,62 @@ impl AudioTrackSinkHandler for AudioRecordHandler {
     }
 }
 
-struct BootstrapAudioDeviceModuleHandler {
+struct BootstrapAudioDeviceModuleState {
     transport: Mutex<Option<AudioTransportRef>>,
-    playout_thread: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl BootstrapAudioDeviceModuleHandler {
+impl BootstrapAudioDeviceModuleState {
     fn new() -> Self {
         Self {
             transport: Mutex::new(None),
-            playout_thread: Mutex::new(None),
+        }
+    }
+
+    fn render_10ms_audio(&self) {
+        let transport = {
+            let guard = self.transport.lock().unwrap();
+            *guard
+        };
+        let Some(transport) = transport else {
+            return;
+        };
+
+        let bits_per_sample = 16;
+        let sample_rate = 48_000;
+        let number_of_channels = 2;
+        let number_of_frames = sample_rate as usize / 100;
+        let mut audio_data =
+            vec![0_u8; number_of_frames * number_of_channels * (bits_per_sample as usize / 8)];
+        let mut elapsed_time_ms = 0_i64;
+        let mut ntp_time_ms = 0_i64;
+
+        unsafe {
+            transport.pull_render_data(
+                bits_per_sample,
+                sample_rate,
+                number_of_channels,
+                number_of_frames,
+                audio_data.as_mut_ptr(),
+                &mut elapsed_time_ms,
+                &mut ntp_time_ms,
+            );
         }
     }
 }
 
-impl Drop for BootstrapAudioDeviceModuleHandler {
-    fn drop(&mut self) {
-        let handle = self.playout_thread.get_mut().unwrap().take();
-        if let Some(handle) = handle {
-            let _ = handle.join();
-        }
+struct BootstrapAudioDeviceModuleHandler {
+    state: Arc<BootstrapAudioDeviceModuleState>,
+}
+
+impl BootstrapAudioDeviceModuleHandler {
+    fn new(state: Arc<BootstrapAudioDeviceModuleState>) -> Self {
+        Self { state }
     }
 }
 
 impl AudioDeviceModuleHandler for BootstrapAudioDeviceModuleHandler {
     fn register_audio_callback(&self, audio_transport: Option<AudioTransportRef>) -> i32 {
-        let mut guard = self.transport.lock().unwrap();
+        let mut guard = self.state.transport.lock().unwrap();
         *guard = audio_transport;
         0
     }
@@ -290,57 +319,15 @@ impl AudioDeviceModuleHandler for BootstrapAudioDeviceModuleHandler {
     }
 
     fn start_playout(&self) -> i32 {
-        let transport = {
-            let guard = self.transport.lock().unwrap();
-            *guard
-        };
-        let Some(transport) = transport else {
-            return 0;
-        };
-
-        let mut thread_guard = self.playout_thread.lock().unwrap();
-        if thread_guard.is_some() {
-            return 0;
-        }
-
-        *thread_guard = Some(std::thread::spawn(move || {
-            let bits_per_sample = 16;
-            let sample_rate = 48_000;
-            let number_of_channels = 2;
-            let number_of_frames = sample_rate as usize / 100;
-            let mut audio_data =
-                vec![0_u8; number_of_frames * number_of_channels * (bits_per_sample as usize / 8)];
-            let mut elapsed_time_ms = 0_i64;
-            let mut ntp_time_ms = 0_i64;
-
-            for _ in 0..800 {
-                unsafe {
-                    transport.pull_render_data(
-                        bits_per_sample,
-                        sample_rate,
-                        number_of_channels,
-                        number_of_frames,
-                        audio_data.as_mut_ptr(),
-                        &mut elapsed_time_ms,
-                        &mut ntp_time_ms,
-                    );
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }));
         0
     }
 
     fn stop_playout(&self) -> i32 {
-        let handle = self.playout_thread.lock().unwrap().take();
-        if let Some(handle) = handle {
-            let _ = handle.join();
-        }
         0
     }
 
     fn playing(&self) -> bool {
-        self.playout_thread.lock().unwrap().is_some()
+        true
     }
 
     fn stereo_playout_is_available(&self, available: &mut bool) -> i32 {
@@ -1101,8 +1088,9 @@ async fn run_client(
     deps.set_signaling_thread(&signaling);
     deps.set_event_log_factory(RtcEventLogFactory::new());
 
+    let audio_state = Arc::new(BootstrapAudioDeviceModuleState::new());
     let adm = AudioDeviceModule::new_with_handler(Box::new(
-        BootstrapAudioDeviceModuleHandler::new(),
+        BootstrapAudioDeviceModuleHandler::new(audio_state.clone()),
     ));
     deps.set_audio_device_module(&adm);
     deps.set_audio_encoder_factory(&AudioEncoderFactory::builtin());
@@ -1192,6 +1180,8 @@ async fn run_client(
     let mut obsws_ready = false;
     let frame_poll_interval = Duration::from_millis(50);
     'event_loop: loop {
+        audio_state.render_10ms_audio();
+
         // フレーム受信チャネルから溜まっているフレームを処理する。
         // 1 回のポーリングで処理するフレーム数を制限して、
         // deadline 判定とイベント処理に必ず戻れるようにする。
