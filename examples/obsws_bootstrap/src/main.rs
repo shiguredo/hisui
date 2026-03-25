@@ -26,6 +26,7 @@ use tokio::sync::mpsc;
 
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
+const MAX_FRAMES_PER_POLL: usize = 8;
 
 // MP4 のタイムスケールはマイクロ秒固定にする
 const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
@@ -977,9 +978,18 @@ async fn run_client(
     let mut obsws_ready = false;
     let mut first_video_frame_logged = false;
     let frame_poll_interval = Duration::from_millis(50);
-    let loop_exit_reason = loop {
-        // フレーム受信チャネルから溜まっているフレームを処理する
-        while let Ok(frame_data) = frame_rx.try_recv() {
+    let loop_exit_reason = 'event_loop: loop {
+        // フレーム受信チャネルから溜まっているフレームを処理する。
+        // 1 回のポーリングで処理するフレーム数を制限して、
+        // deadline 判定とイベント処理に必ず戻れるようにする。
+        let mut processed_frames = 0;
+        while processed_frames < MAX_FRAMES_PER_POLL {
+            if tokio::time::Instant::now() >= deadline {
+                break 'event_loop "deadline reached during frame drain".to_owned();
+            }
+            let Ok(frame_data) = frame_rx.try_recv() else {
+                break;
+            };
             if !first_video_frame_logged {
                 tracing::info!(
                     "first video frame received: width={}, height={}, timestamp_us={}",
@@ -995,6 +1005,7 @@ async fn run_client(
                 &mut vp9_sample_entry,
                 &mut mp4_writer,
             )?;
+            processed_frames += 1;
         }
 
         if !obsws_create_input_sent
