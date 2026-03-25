@@ -113,6 +113,13 @@ struct Session {
     event_tx: mpsc::UnboundedSender<PcEvent>,
 }
 
+impl Drop for Session {
+    fn drop(&mut self) {
+        tracing::info!("Closing PeerConnection");
+        self.pc.close();
+    }
+}
+
 struct SubscribedTrack {
     state: TrackState,
 }
