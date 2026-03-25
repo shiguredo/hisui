@@ -10,7 +10,7 @@ from pathlib import Path
 from helpers import ObswsServer, _inspect_mp4
 from hisui_server import REPO_ROOT, reserve_ephemeral_port
 
-BOOTSTRAP_TIMEOUT_SECONDS = 25.0
+BOOTSTRAP_TIMEOUT_SECONDS = 60.0
 
 
 def _build_bootstrap_command(

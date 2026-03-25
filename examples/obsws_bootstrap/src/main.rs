@@ -1246,9 +1246,16 @@ fn encode_and_write_frame(
 ) -> Result<(), String> {
     let width = frame_data.width as usize;
     let height = frame_data.height as usize;
+    tracing::info!(
+        "encode_and_write_frame start: width={}, height={}, timestamp_us={}",
+        width,
+        height,
+        frame_data.timestamp_us
+    );
 
     // エンコーダーの遅延初期化
     if vp9_encoder.is_none() {
+        tracing::info!("initializing VP9 encoder");
         let config = shiguredo_libvpx::EncoderConfig::new(
             width,
             height,
@@ -1259,6 +1266,7 @@ fn encode_and_write_frame(
             .map_err(|e| format!("failed to create VP9 encoder: {e}"))?;
         *vp9_encoder = Some(encoder);
         *vp9_sample_entry = Some(vp9_sample_entry_value(width, height));
+        tracing::info!("VP9 encoder initialized");
     }
 
     let encoder = vp9_encoder.as_mut().unwrap();
@@ -1281,6 +1289,7 @@ fn encode_and_write_frame(
     let encode_options = shiguredo_libvpx::EncodeOptions {
         force_keyframe: false,
     };
+    tracing::info!("calling VP9 encoder.encode");
     encoder
         .encode(
             &shiguredo_libvpx::ImageData::I420 {
@@ -1291,17 +1300,28 @@ fn encode_and_write_frame(
             &encode_options,
         )
         .map_err(|e| format!("VP9 encode failed: {e}"))?;
+    tracing::info!("VP9 encoder.encode completed");
 
+    tracing::info!("draining encoded frames after encode");
     while let Some(frame) = encoder.next_frame() {
+        tracing::info!(
+            "encoded frame available: bytes={}, keyframe={}",
+            frame.data().len(),
+            frame.is_keyframe()
+        );
         let se = vp9_sample_entry.take();
+        tracing::info!("appending encoded frame to MP4");
         mp4_writer.append_video(
             frame.data(),
             frame.is_keyframe(),
             se,
             frame_data.timestamp_us,
         )?;
+        tracing::info!("encoded frame appended to MP4");
     }
+    tracing::info!("encoded frame drain after encode completed");
 
+    tracing::info!("encode_and_write_frame completed");
     Ok(())
 }
 
