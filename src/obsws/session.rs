@@ -1,33 +1,14 @@
-use std::sync::Arc;
-use std::time::Duration;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
-
 use shiguredo_websocket::CloseCode;
-use tokio::sync::RwLock;
 
 use crate::obsws_auth::ObswsAuthentication;
-use crate::obsws_input_registry::{
-    ActivateRecordError, ActivateRtmpOutboundError, ActivateStreamError, ObswsInputRegistry,
-    ObswsRecordRun, ObswsRecordTrackRun, ObswsRtmpOutboundRun, ObswsStreamRun,
-};
+use crate::obsws_coordinator::ObswsCoordinatorHandle;
 use crate::obsws_message::{ClientMessage, ObswsSessionStats, RequestBatchMessage};
 use crate::obsws_protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
-    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_ALL, OBSWS_EVENT_SUB_GENERAL,
-    OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
-    OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-    REQUEST_STATUS_MISSING_REQUEST_DATA, REQUEST_STATUS_MISSING_REQUEST_FIELD,
-    REQUEST_STATUS_MISSING_REQUEST_TYPE, REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-    REQUEST_STATUS_OUTPUT_RUNNING, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_STREAM_NOT_RUNNING,
-    REQUEST_STATUS_STREAM_RUNNING,
+    OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION, OBSWS_EVENT_SUB_ALL,
 };
 
-mod input;
 pub mod output;
-mod scene;
-mod scene_item;
 #[cfg(test)]
 #[path = "session/tests.rs"]
 mod tests;
@@ -54,99 +35,38 @@ enum ObswsSessionState {
     Identified,
 }
 
-struct RequestOutcome {
-    response_text: nojson::RawJsonOwned,
-    success: bool,
-    output_path: Option<String>,
-}
-
-impl RequestOutcome {
-    fn success(response_text: nojson::RawJsonOwned, output_path: Option<String>) -> Self {
-        Self {
-            response_text,
-            success: true,
-            output_path,
-        }
-    }
-
-    fn failure(response_text: nojson::RawJsonOwned, output_path: Option<String>) -> Self {
-        Self {
-            response_text,
-            success: false,
-            output_path,
-        }
-    }
-}
-
-struct RequestExecutionResult {
-    response_text: nojson::RawJsonOwned,
-    batch_result: crate::obsws_response_builder::RequestBatchResult,
-    events: Vec<nojson::RawJsonOwned>,
-}
-
-impl RequestExecutionResult {
-    fn into_session_action(self) -> SessionAction {
-        if self.events.is_empty() {
-            return SessionAction::SendText {
-                text: self.response_text,
-                message_name: "request response message",
-            };
-        }
-        let mut messages = Vec::with_capacity(self.events.len() + 1);
-        messages.push((self.response_text, "request response message"));
-        messages.extend(
-            self.events
-                .into_iter()
-                .map(|event| (event, "event message")),
-        );
-        SessionAction::SendTexts { messages }
-    }
-}
-
 pub struct ObswsSession {
     state: ObswsSessionState,
     negotiated_rpc_version: Option<u32>,
     event_subscriptions: u32,
     auth: Option<ObswsAuthentication>,
-    input_registry: Arc<RwLock<ObswsInputRegistry>>,
-    pipeline_handle: Option<crate::MediaPipelineHandle>,
-    program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
+    coordinator_handle: ObswsCoordinatorHandle,
     stats: ObswsSessionStats,
 }
 
 impl ObswsSession {
     pub fn new(
         auth: Option<ObswsAuthentication>,
-        input_registry: Arc<RwLock<ObswsInputRegistry>>,
-        pipeline_handle: Option<crate::MediaPipelineHandle>,
-        program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
+        coordinator_handle: ObswsCoordinatorHandle,
     ) -> Self {
         Self {
             state: ObswsSessionState::AwaitingIdentify,
             negotiated_rpc_version: None,
             event_subscriptions: 0,
             auth,
-            input_registry,
-            pipeline_handle,
-            program_output,
+            coordinator_handle,
             stats: ObswsSessionStats::default(),
         }
     }
 
     /// DataChannel 経由の接続用。認証なし・Identified 状態で初期化する。
-    pub fn new_identified(
-        input_registry: Arc<RwLock<ObswsInputRegistry>>,
-        pipeline_handle: Option<crate::MediaPipelineHandle>,
-        program_output: Arc<RwLock<crate::obsws_server::ProgramOutputState>>,
-    ) -> Self {
+    pub fn new_identified(coordinator_handle: ObswsCoordinatorHandle) -> Self {
         Self {
             state: ObswsSessionState::Identified,
             negotiated_rpc_version: Some(1),
             event_subscriptions: OBSWS_EVENT_SUB_ALL,
             auth: None,
-            input_registry,
-            pipeline_handle,
-            program_output,
+            coordinator_handle,
             stats: ObswsSessionStats::default(),
         }
     }
@@ -177,132 +97,6 @@ impl ObswsSession {
         Ok(action)
     }
 
-    /// Program 出力の現在シーン状態を同期する。
-    async fn sync_program_output_state(
-        &self,
-        request_type: &str,
-        request_succeeded: bool,
-    ) -> crate::Result<()> {
-        let scene_change_only_request =
-            matches!(request_type, "SetCurrentProgramScene" | "RemoveScene");
-        if !request_succeeded
-            || !matches!(
-                request_type,
-                "SetCurrentProgramScene"
-                    | "RemoveScene"
-                    | "CreateInput"
-                    | "RemoveInput"
-                    | "SetInputSettings"
-                    | "CreateSceneItem"
-                    | "RemoveSceneItem"
-                    | "DuplicateSceneItem"
-                    | "SetSceneItemEnabled"
-                    | "SetSceneItemIndex"
-                    | "SetSceneItemBlendMode"
-                    | "SetSceneItemTransform"
-            )
-        {
-            return Ok(());
-        }
-
-        // 不要な rebuild を避けるための早期チェック
-        let current_scene_uuid = self.current_program_scene_uuid().await;
-
-        if scene_change_only_request {
-            let program = self.program_output.read().await;
-            if program.scene_uuid == current_scene_uuid {
-                return Ok(());
-            }
-        }
-
-        if self.pipeline_handle.is_none() {
-            // 単体テストでは pipeline がないため、状態だけ同期する。
-            self.program_output.write().await.scene_uuid = current_scene_uuid;
-            return Ok(());
-        }
-
-        self.rebuild_program_output().await
-    }
-
-    async fn current_program_scene_uuid(&self) -> String {
-        self.input_registry
-            .read()
-            .await
-            .current_program_scene()
-            .map(|scene| scene.scene_uuid)
-            .unwrap_or_default()
-    }
-
-    /// Program Scene 切替時に Program 出力を再構築する。
-    ///
-    /// current_scene_uuid と入力一覧を同じ read lock 内で一貫して取得し、
-    /// commit 前には再度 read lock を取得して scene 切替 writer を止めた上で
-    /// stale snapshot を破棄する。
-    async fn rebuild_program_output(&self) -> crate::Result<()> {
-        let pipeline_handle = self
-            .pipeline_handle
-            .as_ref()
-            .ok_or_else(|| crate::Error::new("BUG: obsws pipeline handle is not initialized"))?;
-
-        // current_scene_uuid と入力一覧を同じ read lock 内で取得する
-        let input_registry = self.input_registry.read().await;
-        let current_scene_uuid = input_registry
-            .current_program_scene()
-            .map(|scene| scene.scene_uuid)
-            .unwrap_or_default();
-        let scene_inputs = input_registry.list_current_program_scene_input_entries();
-        let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
-            &scene_inputs,
-            crate::obsws::source::ObswsOutputKind::Program,
-            0,
-            input_registry.canvas_width(),
-            input_registry.canvas_height(),
-            input_registry.frame_rate(),
-        )
-        .map_err(|e| {
-            crate::Error::new(format!(
-                "failed to build program output plan: {}",
-                e.message()
-            ))
-        })?;
-        drop(input_registry);
-
-        // commit 前に read lock を再取得し、scene 切替 writer を止めた上で
-        // snapshot がまだ current scene を指しているか最終確認する。
-        let input_registry = self.input_registry.read().await;
-        if input_registry
-            .current_program_scene()
-            .map(|scene| scene.scene_uuid.as_str() != current_scene_uuid.as_str())
-            .unwrap_or(true)
-        {
-            return Ok(());
-        }
-
-        let mut program = self.program_output.write().await;
-
-        // ミキサーの入力トラックを更新する
-        output::update_program_mixers(
-            pipeline_handle,
-            &output_plan,
-            &program.video_mixer_processor_id,
-            &program.audio_mixer_processor_id,
-        )
-        .await?;
-
-        // 旧ソースプロセッサを停止する
-        output::stop_source_processors(pipeline_handle, &program.source_processor_ids).await?;
-
-        // 新しいソースプロセッサを起動する
-        output::start_source_processors(pipeline_handle, &mut output_plan.source_plans).await?;
-
-        // 状態を更新する
-        program.source_processor_ids = output_plan.source_processor_ids;
-        program.scene_uuid = current_scene_uuid;
-
-        tracing::info!("program output rebuilt for scene change");
-        Ok(())
-    }
-
     pub fn on_close_event(&self) -> SessionAction {
         SessionAction::Terminate
     }
@@ -311,81 +105,9 @@ impl ObswsSession {
         SessionAction::Terminate
     }
 
-    fn build_internal_error_response(
-        request_type: &str,
-        request_id: &str,
-        message: &str,
-    ) -> nojson::RawJsonOwned {
-        crate::obsws_response_builder::build_request_response_error(
-            request_type,
-            request_id,
-            REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-            message,
-        )
-    }
-
-    fn handle_identify(
-        &mut self,
-        identify: crate::obsws_message::IdentifyMessage,
-    ) -> SessionAction {
-        if self.state == ObswsSessionState::Identified {
-            return SessionAction::Close {
-                code: OBSWS_CLOSE_ALREADY_IDENTIFIED,
-                reason: "already identified",
-                close_error_context: "failed to close websocket for duplicated identify",
-            };
-        }
-
-        if !crate::obsws_message::is_supported_rpc_version(identify.rpc_version) {
-            return SessionAction::Close {
-                code: OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
-                reason: "unsupported rpc version",
-                close_error_context: "failed to close websocket for unsupported rpc version",
-            };
-        }
-
-        if let Some(auth) = self.auth.as_ref()
-            && !auth.is_valid_response(identify.authentication.as_deref())
-        {
-            return SessionAction::Close {
-                code: OBSWS_CLOSE_AUTHENTICATION_FAILED,
-                reason: "authentication failed",
-                close_error_context: "failed to close websocket for authentication failure",
-            };
-        }
-
-        self.state = ObswsSessionState::Identified;
-        self.negotiated_rpc_version = Some(identify.rpc_version);
-        self.event_subscriptions = identify.event_subscriptions.unwrap_or(OBSWS_EVENT_SUB_ALL);
-        SessionAction::SendText {
-            text: crate::obsws_message::build_identified_message(identify.rpc_version),
-            message_name: "identified message",
-        }
-    }
-
-    fn handle_reidentify(
-        &mut self,
-        reidentify: crate::obsws_message::ReidentifyMessage,
-    ) -> SessionAction {
-        if self.state != ObswsSessionState::Identified {
-            return SessionAction::Close {
-                code: OBSWS_CLOSE_NOT_IDENTIFIED,
-                reason: "identify is required",
-                close_error_context: "failed to close websocket for unidentified reidentify",
-            };
-        }
-        if let Some(event_subscriptions) = reidentify.event_subscriptions {
-            self.event_subscriptions = event_subscriptions;
-        }
-
-        let negotiated_rpc_version = self
-            .negotiated_rpc_version
-            .expect("negotiated rpc version must be set after identify");
-        SessionAction::SendText {
-            text: crate::obsws_message::build_identified_message(negotiated_rpc_version),
-            message_name: "identified message",
-        }
-    }
+    // -----------------------------------------------------------------------
+    // リクエスト処理（coordinator に委譲）
+    // -----------------------------------------------------------------------
 
     async fn handle_request(
         &mut self,
@@ -398,34 +120,54 @@ impl ObswsSession {
                 close_error_context: "failed to close websocket for unidentified request",
             };
         }
-        let request_id = request.request_id.clone().unwrap_or_default();
-        let request_type = request.request_type.clone().unwrap_or_default();
-        let (result, request_succeeded) = match self.handle_request_internal(request).await {
-            Ok(execution) => {
-                let request_succeeded = execution.batch_result.request_status_result;
-                (execution.into_session_action(), request_succeeded)
-            }
-            Err(_) => (
-                SessionAction::SendText {
-                    text: Self::build_internal_error_response(
-                        &request_type,
-                        &request_id,
-                        "Failed to build internal request response",
-                    ),
-                    message_name: "request response message",
-                },
-                false,
-            ),
-        };
 
-        if let Err(e) = self
-            .sync_program_output_state(&request_type, request_succeeded)
-            .await
-        {
-            tracing::warn!("failed to rebuild program output: {}", e.display());
+        // Sleep は状態を変更しないため、coordinator を経由せず session 側で完結させる。
+        // coordinator のキューを塞がないことで、他セッションの処理への影響を防ぐ。
+        if request.request_type.as_deref() == Some("Sleep") {
+            return self.handle_sleep(&request).await;
         }
 
-        result
+        let result = match self
+            .coordinator_handle
+            .process_request(request, self.stats.clone())
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                return SessionAction::SendText {
+                    text: crate::obsws_response_builder::build_request_response_error(
+                        "",
+                        "",
+                        crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        "Coordinator has terminated",
+                    ),
+                    message_name: "request response message",
+                };
+            }
+        };
+
+        // イベントを event_subscriptions でフィルタリングする
+        let filtered_events: Vec<_> = result
+            .events
+            .into_iter()
+            .filter(|e| (self.event_subscriptions & e.subscription_flag) != 0)
+            .collect();
+
+        if filtered_events.is_empty() {
+            return SessionAction::SendText {
+                text: result.response_text,
+                message_name: "request response message",
+            };
+        }
+
+        let mut messages = Vec::with_capacity(filtered_events.len() + 1);
+        messages.push((result.response_text, "request response message"));
+        messages.extend(
+            filtered_events
+                .into_iter()
+                .map(|e| (e.text, "event message")),
+        );
+        SessionAction::SendTexts { messages }
     }
 
     async fn handle_request_batch(&mut self, request_batch: RequestBatchMessage) -> SessionAction {
@@ -438,8 +180,7 @@ impl ObswsSession {
         }
 
         // OBS 互換: RequestBatch のバリデーションエラーは op:7 レスポンスではなく
-        // WebSocket close で返す。OBS 本体と同じ挙動にすることで、
-        // OBS 向けクライアントの復旧ロジックとの互換性を確保する。
+        // WebSocket close で返す。
         let request_id = request_batch.request_id.unwrap_or_default();
         if request_id.is_empty() {
             return SessionAction::Close {
@@ -450,7 +191,6 @@ impl ObswsSession {
         }
 
         // OBS 互換: 未指定時は SerialRealtime (0) として扱う。
-        // hisui は SerialRealtime のみ対応し、それ以外は拒否する。
         let execution_type = request_batch.execution_type.unwrap_or(0);
         if execution_type != 0 {
             return SessionAction::Close {
@@ -469,505 +209,192 @@ impl ObswsSession {
         };
 
         let halt_on_failure = request_batch.halt_on_failure.unwrap_or(false);
-        let mut results = Vec::new();
-        let mut events = Vec::new();
-        for (index, request) in requests.into_iter().enumerate() {
-            let sub_request_id = request
-                .request_id
-                .clone()
-                .filter(|id| !id.is_empty())
-                .unwrap_or_else(|| format!("{request_id}:{index}"));
-            let execution = match self
-                .handle_request_internal(crate::obsws_message::RequestMessage {
-                    request_id: Some(sub_request_id),
-                    request_type: request.request_type,
-                    request_data: request.request_data,
-                })
-                .await
-            {
-                Ok(execution) => execution,
-                Err(_) => {
-                    return SessionAction::SendText {
-                        text: Self::build_internal_error_response(
-                            "RequestBatch",
-                            &request_id,
-                            "Failed to build request batch response",
-                        ),
-                        message_name: "request response message",
-                    };
-                }
-            };
-            let request_succeeded = execution.batch_result.request_status_result;
-            results.push(execution.batch_result);
-            events.extend(
-                execution
-                    .events
-                    .into_iter()
-                    .map(|text| (text, "event message")),
-            );
-            if let Err(e) = self
-                .sync_program_output_state(
-                    &results.last().expect("must exist").request_type,
-                    request_succeeded,
-                )
-                .await
-            {
-                tracing::warn!("failed to rebuild program output: {}", e.display());
-            }
-            if halt_on_failure && !request_succeeded {
-                break;
-            }
-        }
 
-        let response_text =
-            crate::obsws_response_builder::build_request_batch_response(&request_id, &results);
-        if events.is_empty() {
+        // sub request の request_id を補完する
+        let requests: Vec<_> = requests
+            .into_iter()
+            .enumerate()
+            .map(|(index, r)| {
+                let sub_request_id = r
+                    .request_id
+                    .clone()
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or_else(|| format!("{request_id}:{index}"));
+                crate::obsws_message::RequestMessage {
+                    request_id: Some(sub_request_id),
+                    request_type: r.request_type,
+                    request_data: r.request_data,
+                }
+            })
+            .collect();
+
+        let batch_result = match self
+            .coordinator_handle
+            .process_request_batch(requests, self.stats.clone(), halt_on_failure)
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                return SessionAction::SendText {
+                    text: crate::obsws_response_builder::build_request_response_error(
+                        "RequestBatch",
+                        &request_id,
+                        crate::obsws_protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        "Coordinator has terminated",
+                    ),
+                    message_name: "request response message",
+                };
+            }
+        };
+
+        let response_text = crate::obsws_response_builder::build_request_batch_response(
+            &request_id,
+            &batch_result.results,
+        );
+
+        // イベントをフィルタリングする
+        let filtered_events: Vec<_> = batch_result
+            .events
+            .into_iter()
+            .filter(|e| (self.event_subscriptions & e.subscription_flag) != 0)
+            .map(|e| (e.text, "event message"))
+            .collect();
+
+        if filtered_events.is_empty() {
             return SessionAction::SendText {
                 text: response_text,
                 message_name: "request batch response message",
             };
         }
 
-        let mut messages = Vec::with_capacity(events.len() + 1);
-        // [NOTE]
-        // RequestBatch では、client が batch 完了を判定しやすいよう
-        // RequestBatchResponse (op=9) を先に返し、その後に event を送信する。
-        // OBS 実装と厳密に同一順序ではない可能性があるため、
-        // 互換性要件が変わる場合は送信順序を再検討すること。
+        let mut messages = Vec::with_capacity(filtered_events.len() + 1);
+        // RequestBatch では、RequestBatchResponse (op=9) を先に返し、その後に event を送信する。
         messages.push((response_text, "request batch response message"));
-        messages.extend(events);
+        messages.extend(filtered_events);
         SessionAction::SendTexts { messages }
     }
 
-    async fn handle_request_internal(
-        &mut self,
-        request: crate::obsws_message::RequestMessage,
-    ) -> crate::Result<RequestExecutionResult> {
-        let request_id = request.request_id.clone().unwrap_or_default();
-        let request_type = request.request_type.clone().unwrap_or_default();
-        if request_id.is_empty() {
-            return Ok(Self::build_error_execution(
-                &request_type,
-                &request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing required requestId field",
-            ));
-        }
-        if request_type.is_empty() {
-            return Ok(Self::build_error_execution(
-                &request_type,
-                &request_id,
-                REQUEST_STATUS_MISSING_REQUEST_TYPE,
-                "Missing required requestType field",
-            ));
-        }
+    // -----------------------------------------------------------------------
+    // session-local ハンドラ（coordinator を経由しない）
+    // -----------------------------------------------------------------------
 
-        if request_type == "StartStream" {
-            return self.handle_start_stream_request(&request_id).await;
-        }
-        if request_type == "StopStream" {
-            return self.handle_stop_stream_request(&request_id).await;
-        }
-        if request_type == "ToggleStream" {
-            return self.handle_toggle_stream_request(&request_id).await;
-        }
-        if request_type == "StartRecord" {
-            return self.handle_start_record_request(&request_id).await;
-        }
-        if request_type == "StopRecord" {
-            return self.handle_stop_record_request(&request_id).await;
-        }
-        if request_type == "ToggleRecord" {
-            return self.handle_toggle_record_request(&request_id).await;
-        }
-        if request_type == "StartOutput" {
-            return self
-                .handle_start_output_request(&request_id, request.request_data.as_ref())
-                .await;
-        }
-        if request_type == "StopOutput" {
-            return self
-                .handle_stop_output_request(&request_id, request.request_data.as_ref())
-                .await;
-        }
-        if request_type == "ToggleOutput" {
-            return self
-                .handle_toggle_output_request(&request_id, request.request_data.as_ref())
-                .await;
-        }
-        if request_type == "BroadcastCustomEvent" {
-            let action = self
-                .handle_broadcast_custom_event_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "Sleep" {
-            let action = self
-                .handle_sleep_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetCurrentProgramScene" {
-            let action = self
-                .handle_set_current_program_scene_request(
-                    &request_id,
-                    request.request_data.as_ref(),
-                )
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetCurrentPreviewScene" {
-            let action = self
-                .handle_set_current_preview_scene_request(
-                    &request_id,
-                    request.request_data.as_ref(),
-                )
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "CreateScene" {
-            let action = self
-                .handle_create_scene_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "RemoveScene" {
-            let action = self
-                .handle_remove_scene_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "CreateInput" {
-            let action = self
-                .handle_create_input_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "RemoveInput" {
-            let action = self
-                .handle_remove_input_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetInputSettings" {
-            let action = self
-                .handle_set_input_settings_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetInputName" {
-            let action = self
-                .handle_set_input_name_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "CreateSceneItem" {
-            let action = self
-                .handle_create_scene_item_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "RemoveSceneItem" {
-            let action = self
-                .handle_remove_scene_item_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "DuplicateSceneItem" {
-            let action = self
-                .handle_duplicate_scene_item_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetSceneItemEnabled" {
-            let action = self
-                .handle_set_scene_item_enabled_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetSceneItemLocked" {
-            let action = self
-                .handle_set_scene_item_locked_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetSceneItemIndex" {
-            let action = self
-                .handle_set_scene_item_index_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetSceneItemBlendMode" {
-            let action = self
-                .handle_set_scene_item_blend_mode_request(
-                    &request_id,
-                    request.request_data.as_ref(),
-                )
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-        if request_type == "SetSceneItemTransform" {
-            let action = self
-                .handle_set_scene_item_transform_request(&request_id, request.request_data.as_ref())
-                .await;
-            return Self::build_execution_from_action(action);
-        }
-
-        let mut input_registry = self.input_registry.write().await;
-        let response = crate::obsws_message::handle_request_message_with_pipeline_handle(
-            request,
-            &self.stats,
-            &mut input_registry,
-            self.pipeline_handle.as_ref(),
-        );
-        Self::build_execution_from_response_text(response.message, Vec::new())
-    }
-
-    fn build_execution_from_outcome(
-        outcome: RequestOutcome,
-        events: Vec<nojson::RawJsonOwned>,
-    ) -> crate::Result<RequestExecutionResult> {
-        Self::build_execution_from_response_text(outcome.response_text, events)
-    }
-
-    fn build_error_execution(
-        request_type: &str,
-        request_id: &str,
-        status_code: i64,
-        status_comment: &str,
-    ) -> RequestExecutionResult {
-        RequestExecutionResult {
-            response_text: crate::obsws_response_builder::build_request_response_error(
-                request_type,
-                request_id,
-                status_code,
-                status_comment,
-            ),
-            batch_result: crate::obsws_response_builder::RequestBatchResult {
-                request_id: request_id.to_owned(),
-                request_type: request_type.to_owned(),
-                request_status_result: false,
-                request_status_code: status_code,
-                request_status_comment: Some(status_comment.to_owned()),
-                response_data: None,
-            },
-            events: Vec::new(),
-        }
-    }
-
-    fn build_execution_from_response_text(
-        response_text: nojson::RawJsonOwned,
-        events: Vec<nojson::RawJsonOwned>,
-    ) -> crate::Result<RequestExecutionResult> {
-        let batch_result =
-            crate::obsws_response_builder::parse_request_response_for_batch_result(&response_text)?;
-        Ok(RequestExecutionResult {
-            response_text,
-            batch_result,
-            events,
-        })
-    }
-
-    fn build_execution_from_action(action: SessionAction) -> crate::Result<RequestExecutionResult> {
-        match action {
-            SessionAction::SendText { text, .. } => {
-                Self::build_execution_from_response_text(text, Vec::new())
-            }
-            SessionAction::SendTexts { messages } => {
-                let mut iter = messages.into_iter();
-                // [NOTE]
-                // SendTexts は「先頭が request response、2 件目以降が event」という
-                // 形式を前提に組み立てる。これは obsws の各 request ハンドラ
-                // （例: Scene / Input / Output 系）が共通で守る契約とする。
-                // もし順序規約を変更する場合は、この抽出ロジックも同時に更新すること。
-                let Some((response_text, _)) = iter.next() else {
-                    return Err(crate::Error::new("response message is missing"));
-                };
-                let events = iter.map(|(text, _)| text).collect();
-                Self::build_execution_from_response_text(response_text, events)
-            }
-            SessionAction::Close { .. } | SessionAction::Terminate => {
-                Err(crate::Error::new("request handler returned invalid action"))
-            }
-        }
-    }
-
-    fn build_toggle_response_from_outcome(
-        toggle_request_type: &str,
-        request_id: &str,
-        output_active_on_success: bool,
-        outcome: &RequestOutcome,
-    ) -> crate::Result<nojson::RawJsonOwned> {
-        // 失敗時は outcome.response_text に正しい request_type でエラーが構築済み
-        if !outcome.success {
-            return Ok(outcome.response_text.clone());
-        }
-
-        match toggle_request_type {
-            "ToggleStream" => Ok(crate::obsws_response_builder::build_toggle_stream_response(
-                request_id,
-                output_active_on_success,
-            )),
-            "ToggleRecord" => Ok(crate::obsws_response_builder::build_toggle_record_response(
-                request_id,
-                output_active_on_success,
-            )),
-            _ => Err(crate::Error::new("unknown toggle request type")),
-        }
-    }
-
-    fn build_output_response_from_outcome(
-        request_type: &str,
-        request_id: &str,
-        output_active_on_success: bool,
-        outcome: &RequestOutcome,
-    ) -> nojson::RawJsonOwned {
-        // 失敗時は outcome.response_text に正しい request_type でエラーが構築済み
-        if !outcome.success {
-            return outcome.response_text.clone();
-        }
-
-        match request_type {
-            "StartOutput" => crate::obsws_response_builder::build_start_output_response(request_id),
-            "ToggleOutput" => crate::obsws_response_builder::build_toggle_output_response(
-                request_id,
-                output_active_on_success,
-            ),
-            "StopOutput" => crate::obsws_response_builder::build_stop_output_response(request_id),
-            _ => unreachable!("BUG: unsupported output request type: {request_type}"),
-        }
-    }
-
-    fn is_event_subscription_enabled(&self, event_flag: u32) -> bool {
-        (self.event_subscriptions & event_flag) != 0
-    }
-
-    fn parse_required_non_empty_string_request_field(
-        request_data: Option<&nojson::RawJsonOwned>,
-        field_name: &str,
-    ) -> Option<String> {
-        let request_data = request_data?;
-        let value: Option<String> = request_data
-            .value()
-            .to_member(field_name)
-            .ok()?
-            .try_into()
-            .ok()?;
-        let value = value?;
-        if value.is_empty() {
-            return None;
-        }
-        Some(value)
-    }
-
-    fn build_missing_request_data_error_action(
-        request_type: &str,
-        request_id: &str,
-    ) -> SessionAction {
-        SessionAction::SendText {
-            text: crate::obsws_response_builder::build_request_response_error(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_DATA,
-                "Missing required requestData field",
-            ),
-            message_name: "request response message",
-        }
-    }
-
-    fn build_parse_error_action(
-        request_type: &str,
-        request_id: &str,
-        error: &nojson::JsonParseError,
-    ) -> SessionAction {
-        let code = crate::obsws_response_builder::request_status_code_for_parse_error(error);
-        SessionAction::SendText {
-            text: crate::obsws_response_builder::build_request_response_error(
-                request_type,
-                request_id,
-                code,
-                &error.to_string(),
-            ),
-            message_name: "request response message",
-        }
-    }
-
-    async fn handle_broadcast_custom_event_request(
-        &self,
-        request_id: &str,
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> SessionAction {
-        let Some(request_data) = request_data else {
-            return Self::build_missing_request_data_error_action(
-                "BroadcastCustomEvent",
-                request_id,
-            );
-        };
-        let event_data = match Self::parse_custom_event_request_data(request_data) {
-            Ok(event_data) => event_data,
-            Err(error) => {
-                return Self::build_parse_error_action("BroadcastCustomEvent", request_id, &error);
-            }
-        };
-
-        let response_text =
-            crate::obsws_response_builder::build_broadcast_custom_event_response(request_id);
-        if !self.is_event_subscription_enabled(OBSWS_EVENT_SUB_GENERAL) {
+    /// Sleep は状態を変更しないため session 側で完結させる。
+    async fn handle_sleep(&self, request: &crate::obsws_message::RequestMessage) -> SessionAction {
+        let request_id = request.request_id.as_deref().unwrap_or_default();
+        let Some(request_data) = request.request_data.as_ref() else {
             return SessionAction::SendText {
-                text: response_text,
+                text: crate::obsws_response_builder::build_request_response_error(
+                    "Sleep",
+                    request_id,
+                    crate::obsws_protocol::REQUEST_STATUS_MISSING_REQUEST_DATA,
+                    "Missing required requestData field",
+                ),
                 message_name: "request response message",
             };
-        }
-
-        let event_text = crate::obsws_response_builder::build_custom_event(&event_data);
-        SessionAction::SendTexts {
-            messages: vec![
-                (response_text, "request response message"),
-                (event_text, "event message"),
-            ],
-        }
-    }
-
-    async fn handle_sleep_request(
-        &self,
-        request_id: &str,
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> SessionAction {
-        let Some(request_data) = request_data else {
-            return Self::build_missing_request_data_error_action("Sleep", request_id);
         };
-        let sleep_millis = match Self::parse_sleep_millis_request_field(request_data) {
-            Ok(sleep_millis) => sleep_millis,
-            Err(error) => return Self::build_parse_error_action("Sleep", request_id, &error),
+        let sleep_millis = match Self::parse_sleep_millis(request_data) {
+            Ok(millis) => millis,
+            Err(error) => {
+                let code =
+                    crate::obsws_response_builder::request_status_code_for_parse_error(&error);
+                return SessionAction::SendText {
+                    text: crate::obsws_response_builder::build_request_response_error(
+                        "Sleep",
+                        request_id,
+                        code,
+                        &error.to_string(),
+                    ),
+                    message_name: "request response message",
+                };
+            }
         };
-        tokio::time::sleep(Duration::from_millis(sleep_millis)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(sleep_millis)).await;
         SessionAction::SendText {
             text: crate::obsws_response_builder::build_sleep_response(request_id),
             message_name: "request response message",
         }
     }
 
-    fn parse_custom_event_request_data(
-        request_data: &nojson::RawJsonOwned,
-    ) -> Result<nojson::RawJsonOwned, nojson::JsonParseError> {
-        let event_data = request_data.value().to_member("eventData")?.required()?;
-        if event_data.kind() != nojson::JsonValueKind::Object {
-            return Err(event_data.invalid("object is required"));
-        }
-        nojson::RawJsonOwned::try_from(event_data)
-    }
-
-    fn parse_sleep_millis_request_field(
+    fn parse_sleep_millis(
         request_data: &nojson::RawJsonOwned,
     ) -> Result<u64, nojson::JsonParseError> {
-        let raw_sleep_millis = request_data.value().to_member("sleepMillis")?.required()?;
-        let sleep_millis: i64 = raw_sleep_millis.try_into()?;
-        if sleep_millis < 0 {
-            return Err(raw_sleep_millis.invalid("sleepMillis must be greater than or equal to 0"));
+        let raw = request_data.value().to_member("sleepMillis")?.required()?;
+        let millis: i64 = raw.try_into()?;
+        if millis < 0 {
+            return Err(raw.invalid("sleepMillis must be greater than or equal to 0"));
         }
-        if sleep_millis > 50_000 {
-            return Err(raw_sleep_millis.invalid("sleepMillis must be less than or equal to 50000"));
+        if millis > 50_000 {
+            return Err(raw.invalid("sleepMillis must be less than or equal to 50000"));
         }
-        Ok(sleep_millis as u64)
+        Ok(millis as u64)
+    }
+
+    // -----------------------------------------------------------------------
+    // Identify / Reidentify
+    // -----------------------------------------------------------------------
+
+    fn handle_identify(
+        &mut self,
+        identify: crate::obsws_message::IdentifyMessage,
+    ) -> SessionAction {
+        if self.state != ObswsSessionState::AwaitingIdentify {
+            return SessionAction::Close {
+                code: OBSWS_CLOSE_ALREADY_IDENTIFIED,
+                reason: "already identified",
+                close_error_context: "failed to close websocket for already identified",
+            };
+        }
+
+        let rpc_version = identify.rpc_version;
+        if rpc_version != 1 {
+            return SessionAction::Close {
+                code: OBSWS_CLOSE_UNSUPPORTED_RPC_VERSION,
+                reason: "unsupported rpc version",
+                close_error_context: "failed to close websocket for unsupported rpc version",
+            };
+        }
+
+        if let Some(auth) = &self.auth
+            && !auth.is_valid_response(identify.authentication.as_deref())
+        {
+            return SessionAction::Close {
+                code: OBSWS_CLOSE_AUTHENTICATION_FAILED,
+                reason: "authentication failed",
+                close_error_context: "failed to close websocket for authentication failure",
+            };
+        }
+
+        self.state = ObswsSessionState::Identified;
+        self.negotiated_rpc_version = Some(rpc_version);
+        self.event_subscriptions = identify.event_subscriptions.unwrap_or(OBSWS_EVENT_SUB_ALL);
+
+        SessionAction::SendText {
+            text: crate::obsws_message::build_identified_message(rpc_version),
+            message_name: "identified message",
+        }
+    }
+
+    fn handle_reidentify(
+        &mut self,
+        reidentify: crate::obsws_message::ReidentifyMessage,
+    ) -> SessionAction {
+        if self.state != ObswsSessionState::Identified {
+            return SessionAction::Close {
+                code: OBSWS_CLOSE_NOT_IDENTIFIED,
+                reason: "identify is required",
+                close_error_context: "failed to close websocket for unidentified reidentify",
+            };
+        }
+
+        self.event_subscriptions = reidentify
+            .event_subscriptions
+            .unwrap_or(OBSWS_EVENT_SUB_ALL);
+
+        SessionAction::SendText {
+            text: crate::obsws_message::build_identified_message(
+                self.negotiated_rpc_version.unwrap_or(1),
+            ),
+            message_name: "identified message",
+        }
     }
 }

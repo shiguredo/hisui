@@ -44,6 +44,7 @@ pub use media_pipeline::{
 pub use video::VideoFrame;
 
 pub use obsws::auth as obsws_auth;
+pub use obsws::coordinator as obsws_coordinator;
 pub use obsws::input_registry as obsws_input_registry;
 pub use obsws::message as obsws_message;
 pub use obsws::protocol as obsws_protocol;

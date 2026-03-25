@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod coordinator;
 pub mod input_registry;
 pub mod message;
 mod output_plan;
