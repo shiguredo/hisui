@@ -10,6 +10,8 @@ from pathlib import Path
 from helpers import ObswsServer, _inspect_mp4
 from hisui_server import REPO_ROOT, reserve_ephemeral_port
 
+BOOTSTRAP_TIMEOUT_SECONDS = 25.0
+
 
 def _build_bootstrap_command(
     host: str,
@@ -62,6 +64,36 @@ def _format_process_failure(result: subprocess.CompletedProcess[str]) -> str:
     return ", ".join(details)
 
 
+def _run_bootstrap_command(
+    cmd: list[str], cwd: Path
+) -> subprocess.CompletedProcess[str]:
+    """obsws_bootstrap を実行し、pytest-timeout より前に結果を回収する"""
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=BOOTSTRAP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as e:
+        process.kill()
+        stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(
+            cmd=e.cmd,
+            timeout=e.timeout,
+            output=stdout,
+            stderr=stderr,
+        ) from e
+    return subprocess.CompletedProcess(
+        cmd,
+        process.returncode,
+        stdout,
+        stderr,
+    )
+
+
 def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     """bootstrap で WebRTC 接続し、映像トラックが受信できることを確認する"""
     host = "127.0.0.1"
@@ -75,17 +107,11 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     server = ObswsServer(binary_path, host=host, port=port)
     result = None
     try:
-        with server:
-            cmd, cwd = _build_bootstrap_command(
-                host, port, 5, str(input_mp4), str(output_mp4)
-            )
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,
-                cwd=cwd,
-            )
+            with server:
+                cmd, cwd = _build_bootstrap_command(
+                    host, port, 5, str(input_mp4), str(output_mp4)
+                )
+            result = _run_bootstrap_command(cmd, cwd)
             assert result.returncode == 0, (
                 "obsws_bootstrap failed: "
                 f"{_format_process_failure(result)}"
