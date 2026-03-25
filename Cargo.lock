@@ -358,6 +358,7 @@ dependencies = [
  "nopng",
  "rustls",
  "rustls-platform-verifier",
+ "shiguredo_audio_device",
  "shiguredo_audio_toolbox",
  "shiguredo_dav1d",
  "shiguredo_fdk_aac",
@@ -904,6 +905,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "shiguredo_audio_device"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b87c199e71b70fe1d2628e86f6a9625d02734013a8dd3be1ce1a518a7cac64c"
+dependencies = [
+ "bindgen",
+ "cc",
+ "pkg-config",
+ "windows",
 ]
 
 [[package]]
