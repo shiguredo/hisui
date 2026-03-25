@@ -31,7 +31,8 @@ impl VideoDeviceSource {
             width: self.width.unwrap_or(default_config.width),
             height: self.height.unwrap_or(default_config.height),
             fps: self.fps.unwrap_or(default_config.fps),
-            pixel_format: Some(shiguredo_video_device::PixelFormat::I420),
+            // NV12 はほぼ全てのカメラがサポートしている
+            pixel_format: Some(shiguredo_video_device::PixelFormat::Nv12),
         };
 
         let (frame_tx, mut frame_rx) =
