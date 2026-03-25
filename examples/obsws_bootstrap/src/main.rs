@@ -5,16 +5,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use shiguredo_http11::{Request, ResponseDecoder};
+use shiguredo_mp4::FixedPointNumber;
 use shiguredo_mp4::Uint;
-use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields, Vp09Box, VpccBox};
+use shiguredo_mp4::boxes::{
+    AudioSampleEntryFields, DopsBox, OpusBox, SampleEntry, VisualSampleEntryFields, Vp09Box,
+    VpccBox,
+};
 use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions, Sample};
 use shiguredo_webrtc::{
     AudioDecoderFactory, AudioDeviceModule, AudioDeviceModuleAudioLayer, AudioEncoderFactory,
-    AudioProcessingBuilder, CreateSessionDescriptionObserver,
-    CreateSessionDescriptionObserverHandler, DataChannel, DataChannelInit, DataChannelObserver,
-    DataChannelObserverHandler, DataChannelState, Environment, IceGatheringState, PeerConnection,
-    PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionFactoryDependencies,
-    PeerConnectionObserver, PeerConnectionObserverHandler, PeerConnectionOfferAnswerOptions,
+    AudioProcessingBuilder, AudioTrackSink, AudioTrackSinkHandler,
+    CreateSessionDescriptionObserver, CreateSessionDescriptionObserverHandler, DataChannel,
+    DataChannelInit, DataChannelObserver, DataChannelObserverHandler, DataChannelState,
+    Environment, IceGatheringState, PeerConnection, PeerConnectionDependencies,
+    PeerConnectionFactory, PeerConnectionFactoryDependencies, PeerConnectionObserver,
+    PeerConnectionObserverHandler, PeerConnectionOfferAnswerOptions,
     PeerConnectionRtcConfiguration, PeerConnectionState, RtcError, RtcEventLogFactory,
     RtpTransceiver, SdpType, SessionDescription, SetLocalDescriptionObserver,
     SetLocalDescriptionObserverHandler, SetRemoteDescriptionObserver,
@@ -59,6 +64,13 @@ struct VideoFrameData {
     width: i32,
     height: i32,
     timestamp_us: i64,
+}
+
+// AudioTrackSinkHandler から送信する音声データ
+struct AudioFrameData {
+    pcm: Vec<i16>,
+    sample_rate: i32,
+    channels: usize,
 }
 
 enum IceObserverEvent {
@@ -187,6 +199,38 @@ impl VideoSinkHandler for FrameRecordHandler {
         };
         // バッファがいっぱいの場合はフレームを捨てる
         let _ = self.frame_tx.try_send(data);
+    }
+}
+
+// 受信音声データをチャネルで送信するハンドラ
+struct AudioRecordHandler {
+    audio_frame_count: Arc<AtomicUsize>,
+    audio_tx: std::sync::mpsc::SyncSender<AudioFrameData>,
+}
+
+impl AudioTrackSinkHandler for AudioRecordHandler {
+    fn on_data(
+        &mut self,
+        audio_data: &[u8],
+        bits_per_sample: i32,
+        sample_rate: i32,
+        number_of_channels: usize,
+        _number_of_frames: usize,
+    ) {
+        self.audio_frame_count.fetch_add(1, Ordering::Relaxed);
+        if bits_per_sample != 16 {
+            return;
+        }
+        // u8 スライスをネイティブエンディアン i16 に変換する
+        let pcm: Vec<i16> = audio_data
+            .chunks_exact(2)
+            .map(|chunk| i16::from_ne_bytes([chunk[0], chunk[1]]))
+            .collect();
+        let _ = self.audio_tx.try_send(AudioFrameData {
+            pcm,
+            sample_rate,
+            channels: number_of_channels,
+        });
     }
 }
 
@@ -486,6 +530,26 @@ fn vp9_sample_entry(width: usize, height: usize) -> SampleEntry {
     })
 }
 
+// --- Opus SampleEntry ---
+
+fn opus_sample_entry_value(channels: u8, pre_skip: u16) -> SampleEntry {
+    SampleEntry::Opus(OpusBox {
+        audio: AudioSampleEntryFields {
+            data_reference_index: AudioSampleEntryFields::DEFAULT_DATA_REFERENCE_INDEX,
+            channelcount: channels as u16,
+            samplesize: AudioSampleEntryFields::DEFAULT_SAMPLESIZE,
+            samplerate: FixedPointNumber::new(48000u16, 0u16),
+        },
+        dops_box: DopsBox {
+            output_channel_count: channels,
+            pre_skip,
+            input_sample_rate: 48000,
+            output_gain: 0,
+        },
+        unknown_boxes: Vec::new(),
+    })
+}
+
 // --- MP4 ライター ---
 
 struct SimpleMp4Writer {
@@ -495,6 +559,8 @@ struct SimpleMp4Writer {
     video_sample_entry: Option<SampleEntry>,
     video_sample_count: usize,
     last_video_timestamp_us: Option<i64>,
+    audio_sample_entry: Option<SampleEntry>,
+    audio_sample_count: usize,
 }
 
 impl SimpleMp4Writer {
@@ -527,6 +593,8 @@ impl SimpleMp4Writer {
             video_sample_entry: None,
             video_sample_count: 0,
             last_video_timestamp_us: None,
+            audio_sample_entry: None,
+            audio_sample_count: 0,
         })
     }
 
@@ -571,6 +639,39 @@ impl SimpleMp4Writer {
             .map_err(|e| format!("failed to append video sample: {e}"))?;
         self.next_position += data.len() as u64;
         self.video_sample_count += 1;
+        Ok(())
+    }
+
+    fn append_audio(
+        &mut self,
+        data: &[u8],
+        sample_entry: Option<SampleEntry>,
+        duration: u32,
+    ) -> Result<(), String> {
+        self.file
+            .write_all(data)
+            .map_err(|e| format!("failed to write audio data: {e}"))?;
+
+        let sample = Sample {
+            track_kind: shiguredo_mp4::TrackKind::Audio,
+            sample_entry: sample_entry.or_else(|| self.audio_sample_entry.clone()),
+            keyframe: true,
+            timescale: TIMESCALE,
+            duration,
+            composition_time_offset: None,
+            data_offset: self.next_position,
+            data_size: data.len(),
+        };
+
+        if self.audio_sample_entry.is_none() {
+            self.audio_sample_entry = sample.sample_entry.clone();
+        }
+
+        self.muxer
+            .append_sample(&sample)
+            .map_err(|e| format!("failed to append audio sample: {e}"))?;
+        self.next_position += data.len() as u64;
+        self.audio_sample_count += 1;
         Ok(())
     }
 
@@ -669,10 +770,13 @@ fn main() -> noargs::Result<()> {
                 f.member("video_tracks_received", stats.video_tracks)?;
                 f.member("audio_tracks_received", stats.audio_tracks)?;
                 f.member("video_frames_received", stats.video_frames)?;
+                f.member("audio_frames_received", stats.audio_frames)?;
                 f.member("video_width", stats.video_width)?;
                 f.member("video_height", stats.video_height)?;
                 f.member("video_codec", stats.video_codec.as_str())?;
+                f.member("audio_codec", stats.audio_codec.as_str())?;
                 f.member("video_samples_written", stats.video_samples_written)?;
+                f.member("audio_samples_written", stats.audio_samples_written)?;
                 f.member("connection_state", stats.connection_state.as_str())
             });
             println!("{json}");
@@ -689,10 +793,13 @@ struct Stats {
     video_tracks: usize,
     audio_tracks: usize,
     video_frames: usize,
+    audio_frames: usize,
     video_width: usize,
     video_height: usize,
     video_codec: String,
+    audio_codec: String,
     video_samples_written: usize,
+    audio_samples_written: usize,
     connection_state: String,
 }
 
@@ -711,6 +818,7 @@ struct RetainedState {
     signaling_dc_observer: Option<DataChannelObserver>,
     obsws_dc_observer: Option<DataChannelObserver>,
     video_sinks: Vec<VideoSink>,
+    audio_sinks: Vec<AudioTrackSink>,
     ice_rx: mpsc::UnboundedReceiver<IceObserverEvent>,
     ice_candidates: Vec<GatheredIceCandidate>,
 }
@@ -918,12 +1026,14 @@ async fn run_client(
     let video_tracks = Arc::new(AtomicUsize::new(0));
     let audio_tracks = Arc::new(AtomicUsize::new(0));
     let video_frames = Arc::new(AtomicUsize::new(0));
+    let audio_frames = Arc::new(AtomicUsize::new(0));
     let video_width = Arc::new(AtomicUsize::new(0));
     let video_height = Arc::new(AtomicUsize::new(0));
     let connection_state = Arc::new(std::sync::Mutex::new("new".to_owned()));
 
     // フレームデータ受信用チャネル
     let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<VideoFrameData>(60);
+    let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel::<AudioFrameData>(120);
 
     let mut retained = RetainedState {
         _pc_observer: pc_observer,
@@ -933,6 +1043,7 @@ async fn run_client(
         signaling_dc_observer: None,
         obsws_dc_observer: None,
         video_sinks: Vec::new(),
+        audio_sinks: Vec::new(),
         ice_rx,
         ice_candidates: initial_ice_candidates,
     };
@@ -940,6 +1051,12 @@ async fn run_client(
     // VP9 エンコーダー（遅延初期化）
     let mut vp9_encoder: Option<shiguredo_libvpx::Encoder> = None;
     let mut vp9_sample_entry: Option<SampleEntry> = None;
+
+    // Opus エンコーダー（遅延初期化）
+    let mut opus_encoder: Option<shiguredo_opus::Encoder> = None;
+    let mut opus_sample_entry: Option<SampleEntry> = None;
+    let mut audio_pcm_buffer: Vec<i16> = Vec::new();
+    let mut audio_channels: u8 = 0;
 
     // MP4 ライター
     let mut mp4_writer = SimpleMp4Writer::new(output_path)?;
@@ -969,6 +1086,26 @@ async fn run_client(
                 &mut mp4_writer,
             )?;
             processed_frames += 1;
+        }
+
+        // 音声フレームを処理する
+        let mut processed_audio = 0;
+        while processed_audio < MAX_FRAMES_PER_POLL {
+            if tokio::time::Instant::now() >= deadline {
+                break 'event_loop;
+            }
+            let Ok(audio_data) = audio_rx.try_recv() else {
+                break;
+            };
+            audio_channels = audio_data.channels as u8;
+            encode_and_write_audio_frame(
+                &audio_data,
+                &mut opus_encoder,
+                &mut opus_sample_entry,
+                &mut audio_pcm_buffer,
+                &mut mp4_writer,
+            )?;
+            processed_audio += 1;
         }
 
         if !obsws_create_input_sent
@@ -1026,11 +1163,14 @@ async fn run_client(
                         retained.video_sinks.push(sink);
                     }
                     "audio" => {
-                        // 現在の shiguredo_webrtc 0.146.0 には remote audio track
-                        // から PCM を取り出すための公開 API が見当たらないため、
-                        // 音声は受信数の記録のみに留める。音声を MP4 に書くには、
-                        // 別途 audio sink 相当の API が必要になる。
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
+                        let mut audio_track = track.cast_to_audio_track();
+                        let sink = AudioTrackSink::new_with_handler(Box::new(AudioRecordHandler {
+                            audio_frame_count: audio_frames.clone(),
+                            audio_tx: audio_tx.clone(),
+                        }));
+                        audio_track.add_sink(&sink);
+                        retained.audio_sinks.push(sink);
                     }
                     _ => {
                         tracing::warn!("unknown track kind: {kind}");
@@ -1126,6 +1266,20 @@ async fn run_client(
             break;
         }
     }
+    // 残りの音声フレームを処理する
+    while let Ok(audio_data) = audio_rx.try_recv() {
+        audio_channels = audio_data.channels as u8;
+        encode_and_write_audio_frame(
+            &audio_data,
+            &mut opus_encoder,
+            &mut opus_sample_entry,
+            &mut audio_pcm_buffer,
+            &mut mp4_writer,
+        )?;
+        if tokio::time::Instant::now() >= drain_deadline {
+            break;
+        }
+    }
 
     // エンコーダーの残りフレームをフラッシュする
     if let Some(encoder) = &mut vp9_encoder {
@@ -1138,13 +1292,38 @@ async fn run_client(
         }
     }
 
+    // バッファに残った PCM データが 1 フレーム分以上あればエンコードする
+    if let Some(encoder) = &mut opus_encoder {
+        let frame_samples = encoder.frame_samples();
+        let total_per_frame = frame_samples * audio_channels as usize;
+        if total_per_frame > 0 {
+            while audio_pcm_buffer.len() >= total_per_frame {
+                let pcm: Vec<i16> = audio_pcm_buffer.drain(..total_per_frame).collect();
+                let opus_data = encoder
+                    .encode(&pcm)
+                    .map_err(|e| format!("Opus encode failed: {e}"))?;
+                let sample_rate = encoder
+                    .get_sample_rate()
+                    .map_err(|e| format!("failed to get sample rate: {e}"))?;
+                let duration_us = (frame_samples as u64 * 1_000_000 / sample_rate as u64) as u32;
+                let se = opus_sample_entry.take();
+                mp4_writer.append_audio(&opus_data, se, duration_us)?;
+            }
+        }
+    }
+
     // MP4 ファイルをファイナライズする
-    if mp4_writer.video_sample_count > 0 {
+    if mp4_writer.video_sample_count > 0 || mp4_writer.audio_sample_count > 0 {
         mp4_writer.finalize()?;
     }
 
     let video_codec = if mp4_writer.video_sample_count > 0 {
         "vp9".to_owned()
+    } else {
+        "none".to_owned()
+    };
+    let audio_codec = if mp4_writer.audio_sample_count > 0 {
+        "opus".to_owned()
     } else {
         "none".to_owned()
     };
@@ -1157,10 +1336,13 @@ async fn run_client(
         video_tracks: video_tracks.load(Ordering::Relaxed),
         audio_tracks: audio_tracks.load(Ordering::Relaxed),
         video_frames: video_frames.load(Ordering::Relaxed),
+        audio_frames: audio_frames.load(Ordering::Relaxed),
         video_width: video_width.load(Ordering::Relaxed),
         video_height: video_height.load(Ordering::Relaxed),
         video_codec,
+        audio_codec,
         video_samples_written: mp4_writer.video_sample_count,
+        audio_samples_written: mp4_writer.audio_sample_count,
         connection_state: connection_state.lock().unwrap().clone(),
     })
 }
@@ -1255,4 +1437,46 @@ fn build_plane_data(data: &[u8], stride: i32, width: usize, height: usize) -> Ve
 /// VP9 SampleEntry の値を返す（エンコーダー初期化時に呼ぶ）
 fn vp9_sample_entry_value(width: usize, height: usize) -> SampleEntry {
     vp9_sample_entry(width, height)
+}
+
+/// 受信した PCM 音声データを Opus エンコードして MP4 に書き込む
+fn encode_and_write_audio_frame(
+    frame_data: &AudioFrameData,
+    opus_encoder: &mut Option<shiguredo_opus::Encoder>,
+    opus_sample_entry: &mut Option<SampleEntry>,
+    audio_pcm_buffer: &mut Vec<i16>,
+    mp4_writer: &mut SimpleMp4Writer,
+) -> Result<(), String> {
+    let sample_rate = frame_data.sample_rate as u32;
+    let channels = frame_data.channels as u8;
+
+    // エンコーダーの遅延初期化
+    if opus_encoder.is_none() {
+        let mut config = shiguredo_opus::EncoderConfig::new(sample_rate, channels);
+        config.frame_duration = Some(shiguredo_opus::FrameDuration::Ms10);
+        let encoder = shiguredo_opus::Encoder::new(config)
+            .map_err(|e| format!("failed to create Opus encoder: {e}"))?;
+        let pre_skip = encoder
+            .get_lookahead()
+            .map_err(|e| format!("failed to get Opus lookahead: {e}"))?;
+        *opus_sample_entry = Some(opus_sample_entry_value(channels, pre_skip));
+        *opus_encoder = Some(encoder);
+    }
+
+    let encoder = opus_encoder.as_mut().unwrap();
+    let frame_samples = encoder.frame_samples();
+    let total_per_frame = frame_samples * channels as usize;
+
+    audio_pcm_buffer.extend_from_slice(&frame_data.pcm);
+
+    while audio_pcm_buffer.len() >= total_per_frame {
+        let pcm: Vec<i16> = audio_pcm_buffer.drain(..total_per_frame).collect();
+        let opus_data = encoder
+            .encode(&pcm)
+            .map_err(|e| format!("Opus encode failed: {e}"))?;
+        let duration_us = (frame_samples as u64 * 1_000_000 / sample_rate as u64) as u32;
+        let se = opus_sample_entry.take();
+        mp4_writer.append_audio(&opus_data, se, duration_us)?;
+    }
+    Ok(())
 }
