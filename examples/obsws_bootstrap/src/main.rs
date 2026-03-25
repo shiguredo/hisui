@@ -247,11 +247,8 @@ impl BootstrapAudioDeviceModuleState {
     }
 
     fn render_10ms_audio(&self) {
-        let transport = {
-            let guard = self.transport.lock().unwrap();
-            *guard
-        };
-        let Some(transport) = transport else {
+        let guard = self.transport.lock().unwrap();
+        let Some(transport) = guard.as_ref() else {
             return;
         };
 
