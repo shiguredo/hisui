@@ -2054,10 +2054,9 @@ impl ObswsCoordinator {
                     &output_plan.audio_track_id,
                 );
                 // 解像度がミキサーのキャンバスサイズと異なる場合はスケーラーが必要
-                let needs_scaler = variant.width.is_some()
-                    && variant.height.is_some()
-                    && (variant.width.unwrap() != output_plan.canvas_width
-                        || variant.height.unwrap() != output_plan.canvas_height);
+                let needs_scaler = variant.width.zip(variant.height).is_some_and(|(w, h)| {
+                    w != output_plan.canvas_width || h != output_plan.canvas_height
+                });
                 let scaler_processor_id = if needs_scaler {
                     Some(crate::ProcessorId::new(format!(
                         "obsws:hls:{run_id}:{variant_label}_scaler"
