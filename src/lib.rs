@@ -20,6 +20,7 @@ pub mod srt;
 pub mod rtmp;
 pub mod rtsp;
 pub mod sora;
+pub mod sora_publisher;
 pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;

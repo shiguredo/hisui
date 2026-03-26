@@ -88,6 +88,9 @@ impl ObswsInputRegistry {
             rtmp_outbound_settings: ObswsRtmpOutboundSettings::default(),
             rtmp_outbound_runtime: ObswsRtmpOutboundRuntimeState::default(),
             next_rtmp_outbound_run_id: 0,
+            sora_publisher_settings: ObswsSoraPublisherSettings::default(),
+            sora_publisher_runtime: ObswsSoraPublisherRuntimeState::default(),
+            next_sora_publisher_run_id: 0,
             record_directory,
             record_runtime: ObswsRecordRuntimeState::default(),
             canvas_width,
@@ -685,6 +688,58 @@ impl ObswsInputRegistry {
 
     pub fn rtmp_outbound_uptime(&self) -> Duration {
         self.rtmp_outbound_runtime
+            .started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn sora_publisher_settings(&self) -> &ObswsSoraPublisherSettings {
+        &self.sora_publisher_settings
+    }
+
+    pub fn set_sora_publisher_settings(&mut self, settings: ObswsSoraPublisherSettings) {
+        self.sora_publisher_settings = settings;
+    }
+
+    pub fn next_sora_publisher_run_id(&mut self) -> Result<u64, RunIdOverflowError> {
+        let run_id = self.next_sora_publisher_run_id;
+        self.next_sora_publisher_run_id = self
+            .next_sora_publisher_run_id
+            .checked_add(1)
+            .ok_or(RunIdOverflowError::SoraPublisher)?;
+        Ok(run_id)
+    }
+
+    pub fn activate_sora_publisher(
+        &mut self,
+        run: ObswsSoraPublisherRun,
+    ) -> Result<(), ActivateSoraPublisherError> {
+        if self.sora_publisher_runtime.active {
+            return Err(ActivateSoraPublisherError::AlreadyActive);
+        }
+        self.sora_publisher_runtime.active = true;
+        self.sora_publisher_runtime.started_at = Some(Instant::now());
+        self.sora_publisher_runtime.run = Some(run);
+        Ok(())
+    }
+
+    pub fn deactivate_sora_publisher(&mut self) -> Option<ObswsSoraPublisherRun> {
+        let run = self.sora_publisher_runtime.run.take();
+        self.sora_publisher_runtime.active = false;
+        self.sora_publisher_runtime.started_at = None;
+        run
+    }
+
+    pub fn is_sora_publisher_active(&self) -> bool {
+        self.sora_publisher_runtime.active
+    }
+
+    pub fn sora_publisher_run(&self) -> Option<ObswsSoraPublisherRun> {
+        self.sora_publisher_runtime.run.clone()
+    }
+
+    pub fn sora_publisher_uptime(&self) -> Duration {
+        self.sora_publisher_runtime
             .started_at
             .map(|started_at| started_at.elapsed())
             .unwrap_or(Duration::ZERO)
