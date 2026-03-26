@@ -64,6 +64,10 @@ struct MpegTsState {
     pmt_cc: ContinuityCounter,
     video_cc: ContinuityCounter,
     audio_cc: ContinuityCounter,
+    /// 最後に受信したビデオの sample_entry（SPS/PPS 注入用）
+    last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    /// 最後に受信したオーディオの sample_entry（ADTS ヘッダ生成用）
+    last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
 }
 
 /// fMP4 フォーマット固有の状態
@@ -99,6 +103,8 @@ impl HlsWriter {
                 pmt_cc: ContinuityCounter::new(),
                 video_cc: ContinuityCounter::new(),
                 audio_cc: ContinuityCounter::new(),
+                last_video_sample_entry: None,
+                last_audio_sample_entry: None,
             }),
             HlsSegmentFormat::Fmp4 => {
                 let muxer = shiguredo_mp4::mux::Fmp4SegmentMuxer::new().map_err(|e| {
@@ -218,9 +224,18 @@ impl HlsWriter {
 
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
-                // length-prefixed NALU → Annex B 変換
-                let annexb_data =
-                    convert_length_prefixed_to_annexb(&frame.data, &frame.sample_entry)?;
+                // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
+                if frame.sample_entry.is_some() {
+                    state
+                        .last_video_sample_entry
+                        .clone_from(&frame.sample_entry);
+                }
+                // length-prefixed NALU → Annex B 変換 + キーフレーム時の SPS/PPS 注入
+                let annexb_data = convert_length_prefixed_to_annexb(
+                    &frame.data,
+                    &state.last_video_sample_entry,
+                    frame.keyframe,
+                )?;
                 let pts = duration_to_timestamp(frame.timestamp)?;
                 write_pes_packets_mpegts(
                     state,
@@ -275,8 +290,14 @@ impl HlsWriter {
 
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
+                // sample_entry が来たら保持する
+                if frame.sample_entry.is_some() {
+                    state
+                        .last_audio_sample_entry
+                        .clone_from(&frame.sample_entry);
+                }
                 // raw AAC → ADTS 変換
-                let adts_data = wrap_raw_aac_in_adts(&frame.data, &frame.sample_entry)?;
+                let adts_data = wrap_raw_aac_in_adts(&frame.data, &state.last_audio_sample_entry)?;
                 let pts = duration_to_timestamp(frame.timestamp)?;
                 write_pes_packets_mpegts(
                     state,
@@ -379,6 +400,11 @@ impl HlsWriter {
                 if state.current_samples.is_empty() {
                     return Ok(());
                 }
+
+                // 末尾サンプルの duration を補完する。
+                // 各トラックの最後のサンプルは次フレーム未到着のため duration=0 のまま。
+                // 同一トラックの直前サンプルの duration を流用して埋める。
+                fixup_last_sample_duration(&mut state.current_samples);
 
                 // moof + mdat ヘッダを生成
                 let metadata = state
@@ -734,6 +760,39 @@ fn write_pes_packets_mpegts(
     Ok(())
 }
 
+/// fMP4 セグメントの末尾サンプルの duration を補完する。
+/// 各トラックの最後のサンプルが duration=0 の場合、同一トラックの直前サンプルの duration を流用する。
+fn fixup_last_sample_duration(samples: &mut [shiguredo_mp4::mux::Sample]) {
+    // ビデオの末尾を補完
+    fixup_last_sample_duration_for_track(samples, shiguredo_mp4::TrackKind::Video);
+    // オーディオの末尾を補完
+    fixup_last_sample_duration_for_track(samples, shiguredo_mp4::TrackKind::Audio);
+}
+
+fn fixup_last_sample_duration_for_track(
+    samples: &mut [shiguredo_mp4::mux::Sample],
+    track_kind: shiguredo_mp4::TrackKind,
+) {
+    let track_samples: Vec<usize> = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.track_kind == track_kind)
+        .map(|(i, _)| i)
+        .collect();
+
+    if track_samples.len() < 2 {
+        // サンプルが 1 つ以下なら補完する情報がないので何もしない
+        // （duration=0 は fMP4 上は許容される）
+        return;
+    }
+
+    let last_idx = track_samples[track_samples.len() - 1];
+    if samples[last_idx].duration == 0 {
+        let prev_idx = track_samples[track_samples.len() - 2];
+        samples[last_idx].duration = samples[prev_idx].duration;
+    }
+}
+
 /// Duration を mpeg2ts の Timestamp (90kHz) に変換する
 fn duration_to_timestamp(d: Duration) -> crate::Result<Timestamp> {
     let ticks = (d.as_secs_f64() * Timestamp::RESOLUTION as f64) as u64;
@@ -743,9 +802,11 @@ fn duration_to_timestamp(d: Duration) -> crate::Result<Timestamp> {
 
 /// MP4 形式の length-prefixed NALU を Annex B 形式に変換する。
 /// MPEG-TS では Annex B（start code prefix 付き）が必要。
+/// キーフレームの場合は sample_entry から SPS/PPS を抽出して先頭に注入する。
 fn convert_length_prefixed_to_annexb(
     data: &[u8],
     sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
+    keyframe: bool,
 ) -> crate::Result<Vec<u8>> {
     let length_size = match sample_entry {
         Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) => {
@@ -756,8 +817,24 @@ fn convert_length_prefixed_to_annexb(
 
     let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
     let mut result = Vec::with_capacity(data.len());
-    let mut offset = 0;
 
+    // キーフレームの場合は SPS/PPS を先頭に注入する。
+    // エンコーダーは SPS/PPS を sample_entry にのみ格納し、フレーム本体には含めない場合がある。
+    // MPEG-TS ではセグメント先頭のキーフレームに SPS/PPS が必要。
+    if keyframe {
+        if let Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) = sample_entry {
+            for sps in &avc1.avcc_box.sps_list {
+                result.extend_from_slice(start_code);
+                result.extend_from_slice(sps);
+            }
+            for pps in &avc1.avcc_box.pps_list {
+                result.extend_from_slice(start_code);
+                result.extend_from_slice(pps);
+            }
+        }
+    }
+
+    let mut offset = 0;
     while offset + length_size <= data.len() {
         let nalu_len = match length_size {
             1 => data[offset] as usize,
