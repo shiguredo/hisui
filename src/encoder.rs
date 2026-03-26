@@ -905,6 +905,14 @@ pub fn encode_config_with_keyframe_interval(
 ) -> EncodeConfig {
     let mut config = default_video_encode_config_for_rpc();
 
+    // キーフレーム間隔を秒に変換（VideoToolbox の duration 指定で使用）
+    let keyframe_interval_duration = std::time::Duration::from_secs_f64(
+        keyframe_interval_frames as f64
+            / (frame_rate.numerator.get() as f64 / frame_rate.denumerator.get() as f64),
+    );
+    // frame_rate から計算した duration を全プラットフォームで使えるようにする
+    let _ = keyframe_interval_duration;
+
     // openh264: intra_period (フレーム数)
     config.openh264.intra_period = Some(keyframe_interval_frames as usize);
 
@@ -913,28 +921,26 @@ pub fn encode_config_with_keyframe_interval(
     {
         config.video_toolbox_h264.max_key_frame_interval =
             std::num::NonZeroU32::new(keyframe_interval_frames);
-        let duration_secs = keyframe_interval_frames as f64
-            / (frame_rate.numerator.get() as f64 / frame_rate.denumerator.get() as f64);
         config.video_toolbox_h264.max_key_frame_interval_duration =
-            Some(std::time::Duration::from_secs_f64(duration_secs));
+            Some(keyframe_interval_duration);
         config.video_toolbox_h265.max_key_frame_interval =
             std::num::NonZeroU32::new(keyframe_interval_frames);
         config.video_toolbox_h265.max_key_frame_interval_duration =
-            Some(std::time::Duration::from_secs_f64(duration_secs));
+            Some(keyframe_interval_duration);
     }
 
-    // NVENC: idr_period
+    // NVENC: idr_period (H264 / HEVC / AV1)
     #[cfg(feature = "nvcodec")]
     {
-        fn set_idr_period(codec_config: &mut shiguredo_nvcodec::CodecConfig, period: u32) {
-            match codec_config {
-                shiguredo_nvcodec::CodecConfig::H264(ref mut c) => c.idr_period = Some(period),
-                shiguredo_nvcodec::CodecConfig::H265(ref mut c) => c.idr_period = Some(period),
-                _ => {}
-            }
+        if let shiguredo_nvcodec::CodecConfig::H264(ref mut c) = config.nvcodec_h264.codec {
+            c.idr_period = Some(keyframe_interval_frames);
         }
-        set_idr_period(&mut config.nvcodec_h264.codec, keyframe_interval_frames);
-        set_idr_period(&mut config.nvcodec_h265.codec, keyframe_interval_frames);
+        if let shiguredo_nvcodec::CodecConfig::Hevc(ref mut c) = config.nvcodec_h265.codec {
+            c.idr_period = Some(keyframe_interval_frames);
+        }
+        if let shiguredo_nvcodec::CodecConfig::Av1(ref mut c) = config.nvcodec_av1.codec {
+            c.idr_period = Some(keyframe_interval_frames);
+        }
     }
 
     config
