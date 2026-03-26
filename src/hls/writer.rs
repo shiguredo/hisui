@@ -148,11 +148,11 @@ impl HlsWriter {
     async fn run(
         mut self,
         handle: crate::ProcessorHandle,
-        input_audio_track_id: Option<crate::TrackId>,
-        input_video_track_id: Option<crate::TrackId>,
+        input_audio_track_id: crate::TrackId,
+        input_video_track_id: crate::TrackId,
     ) -> crate::Result<()> {
-        let mut audio_rx = input_audio_track_id.map(|id| handle.subscribe_track(id));
-        let mut video_rx = input_video_track_id.map(|id| handle.subscribe_track(id));
+        let mut audio_rx = Some(handle.subscribe_track(input_audio_track_id));
+        let mut video_rx = Some(handle.subscribe_track(input_video_track_id));
         handle.notify_ready();
 
         loop {
@@ -983,11 +983,18 @@ fn extract_aac_config(
     ))
 }
 
-/// HLS writer プロセッサの設定
+/// HLS writer プロセッサの設定。
+///
+/// 現在は映像と音声の両方を必須としている。
+/// 将来的に映像のみ・音声のみに対応する場合は、以下を修正すること:
+/// - このフィールドを `Option<TrackId>` に戻す
+/// - `HlsWriter::run()` の subscribe 部分を条件分岐にする
+/// - `write_pmt()` の ES info を実際の入力トラックに応じて構築する
+/// - fMP4 の `reorder_payload_by_track()` で存在しないトラックをスキップする
 pub struct HlsWriterConfig {
     pub output_directory: PathBuf,
-    pub input_audio_track_id: Option<crate::TrackId>,
-    pub input_video_track_id: Option<crate::TrackId>,
+    pub input_audio_track_id: crate::TrackId,
+    pub input_video_track_id: crate::TrackId,
     pub segment_duration: f64,
     pub max_retained_segments: usize,
     pub segment_format: HlsSegmentFormat,
@@ -999,12 +1006,6 @@ pub async fn create_processor(
     config: HlsWriterConfig,
     processor_id: Option<crate::ProcessorId>,
 ) -> crate::Result<crate::ProcessorId> {
-    if config.input_audio_track_id.is_none() && config.input_video_track_id.is_none() {
-        return Err(crate::Error::new(
-            "inputAudioTrackId or inputVideoTrackId is required".to_owned(),
-        ));
-    }
-
     let processor_id = processor_id.unwrap_or_else(|| crate::ProcessorId::new("hlsWriter"));
     handle
         .spawn_processor(

@@ -2877,8 +2877,8 @@ async fn start_hls_processors(
         pipeline_handle,
         crate::hls::writer::HlsWriterConfig {
             output_directory: output_directory.to_path_buf(),
-            input_audio_track_id: Some(run.audio.encoded_track_id.clone()),
-            input_video_track_id: Some(run.video.encoded_track_id.clone()),
+            input_audio_track_id: run.audio.encoded_track_id.clone(),
+            input_video_track_id: run.video.encoded_track_id.clone(),
             segment_duration: hls_settings.segment_duration,
             max_retained_segments: hls_settings.max_retained_segments,
             segment_format: hls_settings.segment_format,
