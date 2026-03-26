@@ -1497,11 +1497,19 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
             else:
                 raise AssertionError("HLS did not become active after StartOutput")
 
-            # セグメントが生成されるまで待つ
-            await asyncio.sleep(5.0)
+            # セグメントが生成されるまでポーリングで待つ
+            playlist_path = hls_dir / "playlist.m3u8"
+            for _ in range(100):
+                if playlist_path.exists() and list(hls_dir.glob("segment-*.ts")):
+                    break
+                await asyncio.sleep(0.2)
+            else:
+                raise AssertionError(
+                    f"playlist.m3u8 or .ts segments were not generated within timeout. "
+                    f"Files in {hls_dir}: {list(hls_dir.iterdir())}"
+                )
 
             # playlist.m3u8 が存在することを確認
-            playlist_path = hls_dir / "playlist.m3u8"
             assert playlist_path.exists(), "playlist.m3u8 must exist"
 
             # .ts セグメントファイルが存在することを確認
@@ -1761,15 +1769,27 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
             )
             assert start_response["d"]["requestStatus"]["result"] is True
 
-            # セグメントが生成されるまで待つ
-            await asyncio.sleep(5.0)
+            # セグメントが生成されるまでポーリングで待つ
+            init_path = hls_dir / "init.mp4"
+            playlist_path = hls_dir / "playlist.m3u8"
+            for _ in range(100):
+                if (
+                    init_path.exists()
+                    and playlist_path.exists()
+                    and list(hls_dir.glob("segment-*.m4s"))
+                ):
+                    break
+                await asyncio.sleep(0.2)
+            else:
+                raise AssertionError(
+                    f"fMP4 HLS files were not generated within timeout. "
+                    f"Files in {hls_dir}: {list(hls_dir.iterdir())}"
+                )
 
             # init.mp4 が存在することを確認
-            init_path = hls_dir / "init.mp4"
             assert init_path.exists(), "init.mp4 must exist for fMP4 HLS"
 
             # playlist.m3u8 が存在することを確認
-            playlist_path = hls_dir / "playlist.m3u8"
             assert playlist_path.exists(), "playlist.m3u8 must exist"
 
             # playlist に EXT-X-MAP が含まれることを確認
