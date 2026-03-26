@@ -25,10 +25,26 @@ impl Mp4FileSource {
             video_track_id: None,
         };
 
-        // 音声デコーダーを外側パイプラインに登録
-        if let Some(id) = self.audio_track_id.clone() {
+        // エンコードトラック ID を設定する
+        let audio_decoder_params = self.audio_track_id.clone().map(|id| {
             let encoded_id = TrackId::new(format!("{id}_encoded"));
             options.audio_track_id = Some(encoded_id.clone());
+            (id, encoded_id)
+        });
+        let video_decoder_params = self.video_track_id.clone().map(|id| {
+            let encoded_id = TrackId::new(format!("{id}_encoded"));
+            options.video_track_id = Some(encoded_id.clone());
+            (id, encoded_id)
+        });
+
+        // エンコードトラックを先にパブリッシュする。
+        // デコーダーが subscribe する時点で publisher が必ず存在する状態にすることで、
+        // レースコンディションによるフレーム欠落を防止する。
+        let mut reader = Mp4FileReader::new(&self.path, options)?;
+        reader.publish_tracks(&processor).await?;
+
+        // 音声デコーダーを外側パイプラインに登録
+        if let Some((id, encoded_id)) = audio_decoder_params {
             pipeline_handle
                 .spawn_processor(
                     ProcessorId::new(format!("{processor_id}_audio_decoder")),
@@ -46,9 +62,7 @@ impl Mp4FileSource {
         }
 
         // 映像デコーダーを外側パイプラインに登録
-        if let Some(id) = self.video_track_id.clone() {
-            let encoded_id = TrackId::new(format!("{id}_encoded"));
-            options.video_track_id = Some(encoded_id.clone());
+        if let Some((id, encoded_id)) = video_decoder_params {
             pipeline_handle
                 .spawn_processor(
                     ProcessorId::new(format!("{processor_id}_video_decoder")),
@@ -68,7 +82,6 @@ impl Mp4FileSource {
         }
 
         // source プロセッサ自身がリーダーとして動作する
-        let reader = Mp4FileReader::new(&self.path, options)?;
         reader.run(processor).await
     }
 }
