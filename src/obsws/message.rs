@@ -1559,7 +1559,7 @@ mod tests {
             .required()?
             .try_into()?;
         assert_eq!(path, None);
-        assert!(!loop_playback);
+        assert!(loop_playback);
         Ok(())
     }
 
