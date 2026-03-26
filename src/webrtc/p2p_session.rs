@@ -250,15 +250,15 @@ impl WebRtcP2pSessionManager {
                     PcEvent::ConnectionChange(state) => {
                         tracing::info!("PeerConnection state changed: {state:?}");
                         sess.connection_state = state;
-                        if state == PeerConnectionState::Connected {
-                            if sess.pending_renegotiation {
-                                // 接続確立後に保留中の renegotiation offer を送信する
-                                if let Err(e) = maybe_send_offer(sess).await {
-                                    tracing::warn!(
-                                        "failed to send renegotiation offer: {}",
-                                        e.display()
-                                    );
-                                }
+                        if state == PeerConnectionState::Connected
+                            && sess.pending_renegotiation
+                        {
+                            // 接続確立後に保留中の renegotiation offer を送信する
+                            if let Err(e) = maybe_send_offer(sess).await {
+                                tracing::warn!(
+                                    "failed to send renegotiation offer: {}",
+                                    e.display()
+                                );
                             }
                         }
                         if matches!(
