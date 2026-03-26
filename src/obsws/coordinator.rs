@@ -1986,7 +1986,9 @@ impl ObswsCoordinator {
         request_type: &str,
         request_id: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::input_registry::{ActivateHlsError, ObswsHlsRun, ObswsRecordTrackRun};
+        use crate::obsws::input_registry::{
+            ActivateHlsError, ObswsHlsRun, ObswsHlsVariantRun, ObswsRecordTrackRun,
+        };
         let hls_settings = self.input_registry.hls_settings().clone();
         let Some(ref output_directory_str) = hls_settings.output_directory else {
             return OutputOperationOutcome::failure(
@@ -1998,6 +2000,16 @@ impl ObswsCoordinator {
                 ),
             );
         };
+        if hls_settings.variants.is_empty() {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "variants must not be empty",
+                ),
+            );
+        }
         let output_directory = std::path::PathBuf::from(&output_directory_str);
         let run_id = match self.input_registry.next_hls_run_id() {
             Ok(run_id) => run_id,
@@ -2022,16 +2034,68 @@ impl ObswsCoordinator {
             Ok(plan) => plan,
             Err(outcome) => return outcome,
         };
-        let video = ObswsRecordTrackRun::new("hls", run_id, "video", &output_plan.video_track_id);
-        let audio = ObswsRecordTrackRun::new("hls", run_id, "audio", &output_plan.audio_track_id);
+        let is_abr = hls_settings.variants.len() > 1;
+        let variant_runs: Vec<ObswsHlsVariantRun> = hls_settings
+            .variants
+            .iter()
+            .enumerate()
+            .map(|(i, variant)| {
+                let variant_label = format!("v{i}");
+                let video = ObswsRecordTrackRun::new(
+                    "hls",
+                    run_id,
+                    &format!("{variant_label}_video"),
+                    &output_plan.video_track_id,
+                );
+                let audio = ObswsRecordTrackRun::new(
+                    "hls",
+                    run_id,
+                    &format!("{variant_label}_audio"),
+                    &output_plan.audio_track_id,
+                );
+                // 解像度がミキサーのキャンバスサイズと異なる場合はスケーラーが必要
+                let needs_scaler = variant.width.is_some()
+                    && variant.height.is_some()
+                    && (variant.width.unwrap() != output_plan.canvas_width
+                        || variant.height.unwrap() != output_plan.canvas_height);
+                let scaler_processor_id = if needs_scaler {
+                    Some(crate::ProcessorId::new(format!(
+                        "obsws:hls:{run_id}:{variant_label}_scaler"
+                    )))
+                } else {
+                    None
+                };
+                let scaled_track_id = if needs_scaler {
+                    Some(crate::TrackId::new(format!(
+                        "obsws:hls:{run_id}:{variant_label}_scaled_video"
+                    )))
+                } else {
+                    None
+                };
+                let writer_processor_id = crate::ProcessorId::new(format!(
+                    "obsws:hls:{run_id}:{variant_label}_hls_writer"
+                ));
+                let variant_directory = if is_abr {
+                    output_directory.join(format!("variant_{i}"))
+                } else {
+                    output_directory.clone()
+                };
+                ObswsHlsVariantRun {
+                    video,
+                    audio,
+                    scaler_processor_id,
+                    scaled_track_id,
+                    writer_processor_id,
+                    variant_directory,
+                }
+            })
+            .collect();
         let run = ObswsHlsRun {
             source_processor_ids: output_plan.source_processor_ids.clone(),
-            video,
-            audio,
             audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
             video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
-            writer_processor_id: crate::ProcessorId::new(format!("obsws:hls:{run_id}:hls_writer")),
             output_directory: output_directory.clone(),
+            variant_runs,
         };
         if let Err(ActivateHlsError::AlreadyActive) = self.input_registry.activate_hls(run.clone())
         {
@@ -2067,14 +2131,8 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        if let Err(e) = start_hls_processors(
-            pipeline_handle,
-            &mut output_plan,
-            &output_directory,
-            &run,
-            &hls_settings,
-        )
-        .await
+        if let Err(e) =
+            start_hls_processors(pipeline_handle, &mut output_plan, &run, &hls_settings).await
         {
             self.input_registry.deactivate_hls();
             let _ = stop_processors_staged_hls(pipeline_handle, &run).await;
@@ -3005,7 +3063,6 @@ async fn stop_processors_staged_record(
 async fn start_hls_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
-    output_directory: &std::path::Path,
     run: &crate::obsws::input_registry::ObswsHlsRun,
     hls_settings: &crate::obsws::input_registry::ObswsHlsSettings,
 ) -> crate::Result<()> {
@@ -3022,42 +3079,124 @@ async fn start_hls_processors(
         output_plan.frame_rate,
     );
 
-    crate::encoder::create_video_processor_with_params(
-        pipeline_handle,
-        run.video.source_track_id.clone(),
-        run.video.encoded_track_id.clone(),
-        crate::types::CodecName::H264,
-        std::num::NonZeroUsize::new(hls_settings.video_bitrate_bps)
-            .unwrap_or(std::num::NonZeroUsize::MIN),
-        output_plan.frame_rate,
-        Some(encode_params),
-        Some(run.video.encoder_processor_id.clone()),
-    )
-    .await?;
-    // HLS は AAC エンコーディングを使用する（HLS 仕様の要件）
-    crate::encoder::create_audio_processor(
-        pipeline_handle,
-        run.audio.source_track_id.clone(),
-        run.audio.encoded_track_id.clone(),
-        crate::types::CodecName::Aac,
-        std::num::NonZeroUsize::new(hls_settings.audio_bitrate_bps)
-            .unwrap_or(std::num::NonZeroUsize::MIN),
-        Some(run.audio.encoder_processor_id.clone()),
-    )
-    .await?;
-    crate::hls::writer::create_processor(
-        pipeline_handle,
-        crate::hls::writer::HlsWriterConfig {
-            output_directory: output_directory.to_path_buf(),
-            input_audio_track_id: run.audio.encoded_track_id.clone(),
-            input_video_track_id: run.video.encoded_track_id.clone(),
-            segment_duration: hls_settings.segment_duration,
-            max_retained_segments: hls_settings.max_retained_segments,
-            segment_format: hls_settings.segment_format,
-        },
-        Some(run.writer_processor_id.clone()),
-    )
-    .await?;
+    let is_abr = hls_settings.variants.len() > 1;
+
+    // バリアントごとにスケーラー、エンコーダー、ライターを起動する
+    for (i, (variant, variant_run)) in hls_settings
+        .variants
+        .iter()
+        .zip(run.variant_runs.iter())
+        .enumerate()
+    {
+        // バリアントの出力ディレクトリを作成する
+        if is_abr {
+            std::fs::create_dir_all(&variant_run.variant_directory).map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to create variant directory {}: {e}",
+                    variant_run.variant_directory.display()
+                ))
+            })?;
+        }
+
+        // 解像度変換が必要な場合はスケーラーを挿入する
+        let video_encoder_input_track = if let (Some(scaler_id), Some(scaled_track_id)) = (
+            &variant_run.scaler_processor_id,
+            &variant_run.scaled_track_id,
+        ) {
+            let width = variant.width.expect("infallible: scaler requires width");
+            let height = variant.height.expect("infallible: scaler requires height");
+            crate::scaler::create_processor(
+                pipeline_handle,
+                crate::scaler::VideoScalerConfig {
+                    input_track_id: variant_run.video.source_track_id.clone(),
+                    output_track_id: scaled_track_id.clone(),
+                    width,
+                    height,
+                },
+                Some(scaler_id.clone()),
+            )
+            .await?;
+            scaled_track_id.clone()
+        } else {
+            variant_run.video.source_track_id.clone()
+        };
+
+        // ビデオエンコーダー
+        crate::encoder::create_video_processor_with_params(
+            pipeline_handle,
+            video_encoder_input_track,
+            variant_run.video.encoded_track_id.clone(),
+            crate::types::CodecName::H264,
+            std::num::NonZeroUsize::new(variant.video_bitrate_bps)
+                .unwrap_or(std::num::NonZeroUsize::MIN),
+            output_plan.frame_rate,
+            Some(encode_params.clone()),
+            Some(variant_run.video.encoder_processor_id.clone()),
+        )
+        .await?;
+
+        // オーディオエンコーダー（HLS 仕様で AAC 必須）
+        crate::encoder::create_audio_processor(
+            pipeline_handle,
+            variant_run.audio.source_track_id.clone(),
+            variant_run.audio.encoded_track_id.clone(),
+            crate::types::CodecName::Aac,
+            std::num::NonZeroUsize::new(variant.audio_bitrate_bps)
+                .unwrap_or(std::num::NonZeroUsize::MIN),
+            Some(variant_run.audio.encoder_processor_id.clone()),
+        )
+        .await?;
+
+        // HLS ライター
+        crate::hls::writer::create_processor(
+            pipeline_handle,
+            crate::hls::writer::HlsWriterConfig {
+                output_directory: variant_run.variant_directory.clone(),
+                input_audio_track_id: variant_run.audio.encoded_track_id.clone(),
+                input_video_track_id: variant_run.video.encoded_track_id.clone(),
+                segment_duration: hls_settings.segment_duration,
+                max_retained_segments: hls_settings.max_retained_segments,
+                segment_format: hls_settings.segment_format,
+            },
+            Some(variant_run.writer_processor_id.clone()),
+        )
+        .await?;
+
+        tracing::info!(
+            variant = i,
+            video_bitrate = variant.video_bitrate_bps,
+            audio_bitrate = variant.audio_bitrate_bps,
+            directory = %variant_run.variant_directory.display(),
+            "HLS variant processor started"
+        );
+    }
+
+    // ABR の場合はマスタープレイリストを書き出す
+    if is_abr {
+        let master_variants: Vec<crate::hls::writer::MasterPlaylistVariant> = hls_settings
+            .variants
+            .iter()
+            .enumerate()
+            .map(|(i, variant)| {
+                let width = variant
+                    .width
+                    .map(|w| w.get() as u32)
+                    .unwrap_or(output_plan.canvas_width.get() as u32);
+                let height = variant
+                    .height
+                    .map(|h| h.get() as u32)
+                    .unwrap_or(output_plan.canvas_height.get() as u32);
+                crate::hls::writer::MasterPlaylistVariant {
+                    bandwidth: (variant.video_bitrate_bps + variant.audio_bitrate_bps) as u64,
+                    width,
+                    height,
+                    playlist_uri: format!("variant_{i}/playlist.m3u8"),
+                }
+            })
+            .collect();
+        crate::hls::writer::write_master_playlist(&run.output_directory, &master_variants)?;
+    }
+
     crate::obsws::session::output::start_source_processors(
         pipeline_handle,
         &mut output_plan.source_plans,
@@ -3067,7 +3206,7 @@ async fn start_hls_processors(
 }
 
 /// HLS 用プロセッサを段階的に停止する。
-/// record と同じパターン: ソース → ミキサー (EOS) → エンコーダ → ライター
+/// record と同じパターン: ソース → ミキサー (EOS) → スケーラー → エンコーダ → ライター
 async fn stop_processors_staged_hls(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsHlsRun,
@@ -3097,24 +3236,53 @@ async fn stop_processors_staged_hls(
         }
     }
 
-    // 3. エンコーダーは EOS 伝播での自然終了を優先し、残れば強制停止
-    wait_or_terminate(
-        pipeline_handle,
-        &[
-            run.video.encoder_processor_id.clone(),
-            run.audio.encoder_processor_id.clone(),
-        ],
-        Duration::from_secs(5),
-    )
-    .await?;
+    // 3. スケーラーの停止（存在する場合のみ）
+    let scaler_ids: Vec<crate::ProcessorId> = run
+        .variant_runs
+        .iter()
+        .filter_map(|vr| vr.scaler_processor_id.clone())
+        .collect();
+    if !scaler_ids.is_empty() {
+        wait_or_terminate(pipeline_handle, &scaler_ids, Duration::from_secs(5)).await?;
+    }
 
-    // 4. HLS ライターは cleanup を含む自然終了を優先し、残れば強制停止
-    wait_or_terminate(
-        pipeline_handle,
-        std::slice::from_ref(&run.writer_processor_id),
-        Duration::from_secs(5),
-    )
-    .await?;
+    // 4. 全バリアントのエンコーダーは EOS 伝播での自然終了を優先し、残れば強制停止
+    let encoder_ids: Vec<crate::ProcessorId> = run
+        .variant_runs
+        .iter()
+        .flat_map(|vr| {
+            [
+                vr.video.encoder_processor_id.clone(),
+                vr.audio.encoder_processor_id.clone(),
+            ]
+        })
+        .collect();
+    wait_or_terminate(pipeline_handle, &encoder_ids, Duration::from_secs(5)).await?;
+
+    // 5. 全バリアントの HLS ライターは cleanup を含む自然終了を優先し、残れば強制停止
+    let writer_ids: Vec<crate::ProcessorId> = run
+        .variant_runs
+        .iter()
+        .map(|vr| vr.writer_processor_id.clone())
+        .collect();
+    wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
+
+    // ABR の場合はマスタープレイリストを削除する
+    if run.variant_runs.len() > 1 {
+        let master_playlist_path = run.output_directory.join("playlist.m3u8");
+        if let Err(e) = std::fs::remove_file(&master_playlist_path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(
+                "failed to remove master playlist {}: {e}",
+                master_playlist_path.display()
+            );
+        }
+        // バリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
+        for vr in &run.variant_runs {
+            let _ = std::fs::remove_dir(&vr.variant_directory);
+        }
+    }
 
     Ok(())
 }

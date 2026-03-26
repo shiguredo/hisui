@@ -800,21 +800,77 @@ fn parse_hls_settings(
         super::optional_non_empty_string_member(output_settings, "segmentFormat")
             .map_err(|e| e.to_string())?;
 
-    let video_bitrate: Option<usize> = output_settings
-        .to_member("videoBitrate")
-        .map_err(|e| e.to_string())?
-        .optional()
-        .map(|v| v.try_into())
-        .transpose()
-        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    // variants 配列のパース
+    let variants: Option<Vec<crate::obsws::input_registry::HlsVariant>> =
+        if let Some(variants_value) = output_settings
+            .to_member("variants")
+            .map_err(|e| e.to_string())?
+            .optional()
+        {
+            let mut variants = Vec::new();
+            for item in variants_value.to_array().map_err(|e| e.to_string())? {
+                let video_bitrate: usize = item
+                    .to_member("videoBitrate")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "variants[].videoBitrate is required".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let audio_bitrate: usize = item
+                    .to_member("audioBitrate")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "variants[].audioBitrate is required".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let width: Option<usize> = item
+                    .to_member("width")
+                    .map_err(|e| e.to_string())?
+                    .optional()
+                    .map(|v| v.try_into())
+                    .transpose()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let height: Option<usize> = item
+                    .to_member("height")
+                    .map_err(|e| e.to_string())?
+                    .optional()
+                    .map(|v| v.try_into())
+                    .transpose()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
-    let audio_bitrate: Option<usize> = output_settings
-        .to_member("audioBitrate")
-        .map_err(|e| e.to_string())?
-        .optional()
-        .map(|v| v.try_into())
-        .transpose()
-        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                if video_bitrate == 0 {
+                    return Err("variants[].videoBitrate must be positive".to_owned());
+                }
+                if audio_bitrate == 0 {
+                    return Err("variants[].audioBitrate must be positive".to_owned());
+                }
+                let width = match width {
+                    Some(w) => Some(
+                        crate::types::EvenUsize::new(w).ok_or("variants[].width must be even")?,
+                    ),
+                    None => None,
+                };
+                let height = match height {
+                    Some(h) => Some(
+                        crate::types::EvenUsize::new(h).ok_or("variants[].height must be even")?,
+                    ),
+                    None => None,
+                };
+
+                variants.push(crate::obsws::input_registry::HlsVariant {
+                    video_bitrate_bps: video_bitrate,
+                    audio_bitrate_bps: audio_bitrate,
+                    width,
+                    height,
+                });
+            }
+            if variants.is_empty() {
+                return Err("variants must not be empty".to_owned());
+            }
+            Some(variants)
+        } else {
+            None
+        };
 
     if let Some(duration) = segment_duration
         && duration <= 0.0
@@ -825,16 +881,6 @@ fn parse_hls_settings(
         && count == 0
     {
         return Err("maxRetainedSegments must be at least 1".to_owned());
-    }
-    if let Some(bps) = video_bitrate
-        && bps == 0
-    {
-        return Err("videoBitrate must be positive".to_owned());
-    }
-    if let Some(bps) = audio_bitrate
-        && bps == 0
-    {
-        return Err("audioBitrate must be positive".to_owned());
     }
     let segment_format = match segment_format_str {
         Some(ref s) => s.parse::<crate::obsws::input_registry::HlsSegmentFormat>()?,
@@ -847,8 +893,7 @@ fn parse_hls_settings(
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
         segment_format,
-        video_bitrate_bps: video_bitrate.unwrap_or(existing.video_bitrate_bps),
-        audio_bitrate_bps: audio_bitrate.unwrap_or(existing.audio_bitrate_bps),
+        variants: variants.unwrap_or(existing.variants),
     });
     Ok(())
 }

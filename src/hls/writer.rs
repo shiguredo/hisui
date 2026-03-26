@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::io::{BufWriter, Write};
 use std::num::NonZeroU32;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::obsws::input_registry::HlsSegmentFormat;
@@ -1089,4 +1089,83 @@ pub async fn create_processor(
         .await
         .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
+}
+
+/// マスタープレイリストのバリアント情報
+pub struct MasterPlaylistVariant {
+    /// バリアントの合計帯域幅（ビデオ + オーディオ、bps）
+    pub bandwidth: u64,
+    /// ビデオ幅
+    pub width: u32,
+    /// ビデオ高さ
+    pub height: u32,
+    /// バリアントのメディアプレイリスト URI（例: "variant_0/playlist.m3u8"）
+    pub playlist_uri: String,
+}
+
+/// ABR 用のマスタープレイリスト（Multivariant Playlist）を書き出す。
+/// 一時ファイルに書いてから rename してアトミックに更新する。
+pub fn write_master_playlist(
+    output_directory: &Path,
+    variants: &[MasterPlaylistVariant],
+) -> crate::Result<()> {
+    let playlist = shiguredo_m3u8::multivariant::MultivariantPlaylist {
+        version: None,
+        independent_segments: true,
+        start: None,
+        variable_definitions: Vec::new(),
+        content_steering: None,
+        variant_streams: variants
+            .iter()
+            .map(|v| shiguredo_m3u8::multivariant::VariantStream {
+                bandwidth: v.bandwidth,
+                average_bandwidth: None,
+                // H.264 Baseline Profile Level 3.1 + AAC-LC
+                codecs: Some("avc1.42e01f,mp4a.40.2".to_owned()),
+                supplemental_codecs: None,
+                resolution: Some(shiguredo_m3u8::multivariant::Resolution {
+                    width: v.width,
+                    height: v.height,
+                }),
+                frame_rate: None,
+                hdcp_level: None,
+                allowed_cpc: None,
+                video_range: None,
+                audio: None,
+                video: None,
+                subtitles: None,
+                closed_captions: None,
+                name: None,
+                stable_variant_id: None,
+                pathway_id: None,
+                uri: v.playlist_uri.clone(),
+            })
+            .collect(),
+        renditions: Vec::new(),
+        i_frame_streams: Vec::new(),
+        session_data: Vec::new(),
+        session_keys: Vec::new(),
+    };
+
+    let content = shiguredo_m3u8::write_multivariant_playlist(&playlist);
+
+    let playlist_path = output_directory.join(PLAYLIST_FILENAME);
+    let tmp_path = output_directory.join(".playlist.m3u8.tmp");
+
+    std::fs::write(&tmp_path, content.as_bytes()).map_err(|e| {
+        crate::Error::new(format!(
+            "failed to write temporary master playlist {}: {e}",
+            tmp_path.display()
+        ))
+    })?;
+
+    std::fs::rename(&tmp_path, &playlist_path).map_err(|e| {
+        crate::Error::new(format!(
+            "failed to rename master playlist {} -> {}: {e}",
+            tmp_path.display(),
+            playlist_path.display()
+        ))
+    })?;
+
+    Ok(())
 }
