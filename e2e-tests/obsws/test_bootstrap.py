@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers import ObswsServer, _inspect_mp4
+from helpers import ObswsServer, _collect_obsws_metrics_snapshot, _inspect_mp4
 from hisui_server import REPO_ROOT, reserve_ephemeral_port
 
 BOOTSTRAP_TIMEOUT_SECONDS = 60.0
@@ -114,11 +114,16 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
                 host, port, 10, str(input_mp4), str(output_mp4)
             )
             result = _run_bootstrap_command(cmd, cwd)
+            # bootstrap 完了後にサーバーのメトリクスを取得する
+            # （成功時は pytest が出力を抑制するため、常に表示して問題ない）
+            metrics = _collect_obsws_metrics_snapshot(host, port)
+            print(f"\n--- hisui /metrics after bootstrap ---\n{metrics}")
             assert result.returncode == 0, (
                 "obsws_bootstrap failed: "
                 f"{_format_process_failure(result)}"
             )
             stats = json.loads(result.stdout)
+            print(f"\n--- obsws_bootstrap stats ---\n{json.dumps(stats, indent=2)}")
             assert stats["video_tracks_received"] >= 1, (
                 f"expected at least 1 video track, got {stats}"
             )

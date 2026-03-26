@@ -167,7 +167,7 @@ impl ObswsInputSettings {
                 let loop_playback = parse_optional_bool_setting(input_settings, "loopPlayback")?;
                 Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings {
                     path,
-                    loop_playback: loop_playback.unwrap_or(false),
+                    loop_playback: loop_playback.unwrap_or(true),
                 }))
             }
             "rtmp_inbound" => {
@@ -993,12 +993,21 @@ impl nojson::DisplayJson for ObswsAudioCaptureDeviceSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsMp4FileSourceSettings {
     // OBS 互換ではなく hisui 独自 input として扱うため、path 未指定も保持可能にする。
     // 実行時には path 必須とする。
     pub path: Option<String>,
     pub loop_playback: bool,
+}
+
+impl Default for ObswsMp4FileSourceSettings {
+    fn default() -> Self {
+        Self {
+            path: None,
+            loop_playback: true,
+        }
+    }
 }
 
 impl nojson::DisplayJson for ObswsMp4FileSourceSettings {

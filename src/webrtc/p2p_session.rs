@@ -250,23 +250,13 @@ impl WebRtcP2pSessionManager {
                     PcEvent::ConnectionChange(state) => {
                         tracing::info!("PeerConnection state changed: {state:?}");
                         sess.connection_state = state;
-                        if state == PeerConnectionState::Connected {
-                            // 接続確立時に bootstrap-tracks snapshot を送信する
-                            let snapshot_entries: Vec<_> =
-                                sess.bootstrap_tracks.values().cloned().collect();
-                            if !snapshot_entries.is_empty() {
-                                let msg = build_bootstrap_tracks_json(&snapshot_entries);
-                                send_dc(sess, &msg);
-                            }
-
-                            if sess.pending_renegotiation {
-                                // 接続確立後に保留中の renegotiation offer を送信する
-                                if let Err(e) = maybe_send_offer(sess).await {
-                                    tracing::warn!(
-                                        "failed to send renegotiation offer: {}",
-                                        e.display()
-                                    );
-                                }
+                        if state == PeerConnectionState::Connected && sess.pending_renegotiation {
+                            // 接続確立後に保留中の renegotiation offer を送信する
+                            if let Err(e) = maybe_send_offer(sess).await {
+                                tracing::warn!(
+                                    "failed to send renegotiation offer: {}",
+                                    e.display()
+                                );
                             }
                         }
                         if matches!(
@@ -929,6 +919,7 @@ fn subscribe_track(
     let task = tokio::spawn(async move {
         loop {
             let message = rx.recv().await;
+            let is_eos = matches!(message, crate::Message::Eos);
             if event_tx
                 .send(PcEvent::TrackMessage {
                     track_id: track_id_for_task.clone(),
@@ -936,6 +927,11 @@ fn subscribe_track(
                 })
                 .is_err()
             {
+                break;
+            }
+            // EOS 受信後はチャネルが閉じており recv() が即座に Eos を返し続けるため、
+            // ループを抜ける
+            if is_eos {
                 break;
             }
         }
@@ -1001,10 +997,6 @@ async fn handle_bootstrap_input_created(
 ) {
     subscribe_bootstrap_input(sess, &snapshot);
 
-    // メタデータを signaling DataChannel で送信する
-    let msg = build_bootstrap_track_added_json(&snapshot);
-    send_dc(sess, &msg);
-
     if let Err(e) = maybe_send_offer(sess).await {
         tracing::warn!(
             "failed to send renegotiation offer after input created: {}",
@@ -1025,75 +1017,12 @@ async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
         unsubscribe_track(sess, audio_track_id);
     }
 
-    // メタデータを signaling DataChannel で送信する
-    let msg = build_bootstrap_track_removed_json(input_uuid);
-    send_dc(sess, &msg);
-
     if let Err(e) = maybe_send_offer(sess).await {
         tracing::warn!(
             "failed to send renegotiation offer after input removed: {}",
             e.display()
         );
     }
-}
-
-/// bootstrap-tracks snapshot メッセージを構築する
-fn build_bootstrap_tracks_json(
-    snapshots: &[crate::obsws::coordinator::BootstrapInputSnapshot],
-) -> String {
-    nojson::object(|f| {
-        f.member("type", "bootstrap-tracks")?;
-        f.member(
-            "tracks",
-            nojson::array(|a| {
-                for s in snapshots {
-                    a.element(nojson::object(|f| {
-                        f.member("inputUuid", s.input_uuid.as_str())?;
-                        f.member("inputName", s.input_name.as_str())?;
-                        f.member("inputKind", s.input_kind.as_str())?;
-                        if let Some(id) = &s.video_track_id {
-                            f.member("videoTrackId", id.get())?;
-                        }
-                        if let Some(id) = &s.audio_track_id {
-                            f.member("audioTrackId", id.get())?;
-                        }
-                        Ok(())
-                    }))?;
-                }
-                Ok(())
-            }),
-        )
-    })
-    .to_string()
-}
-
-/// bootstrap-track-added メッセージを構築する
-fn build_bootstrap_track_added_json(
-    snapshot: &crate::obsws::coordinator::BootstrapInputSnapshot,
-) -> String {
-    nojson::object(|f| {
-        f.member("type", "bootstrap-track-added")?;
-        f.member("inputUuid", snapshot.input_uuid.as_str())?;
-        f.member("inputName", snapshot.input_name.as_str())?;
-        f.member("inputKind", snapshot.input_kind.as_str())?;
-        if let Some(id) = &snapshot.video_track_id {
-            f.member("videoTrackId", id.get())?;
-        }
-        if let Some(id) = &snapshot.audio_track_id {
-            f.member("audioTrackId", id.get())?;
-        }
-        Ok(())
-    })
-    .to_string()
-}
-
-/// bootstrap-track-removed メッセージを構築する
-fn build_bootstrap_track_removed_json(input_uuid: &str) -> String {
-    nojson::object(|f| {
-        f.member("type", "bootstrap-track-removed")?;
-        f.member("inputUuid", input_uuid)
-    })
-    .to_string()
 }
 
 enum TrackKind {

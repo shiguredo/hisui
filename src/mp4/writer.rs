@@ -81,6 +81,10 @@ pub struct Mp4WriterStats {
     total_video_track_duration: crate::stats::StatsDuration,
     total_keyframe_wait_dropped_audio_sample_count: crate::stats::StatsCounter,
     total_keyframe_wait_dropped_video_frame_count: crate::stats::StatsCounter,
+    total_received_audio_data_count: crate::stats::StatsCounter,
+    total_received_audio_eos_count: crate::stats::StatsCounter,
+    total_received_video_data_count: crate::stats::StatsCounter,
+    total_received_video_eos_count: crate::stats::StatsCounter,
     error: crate::stats::StatsFlag,
 }
 
@@ -103,6 +107,10 @@ impl Mp4WriterStats {
             stats.counter("total_keyframe_wait_dropped_audio_sample_count");
         let total_keyframe_wait_dropped_video_frame_count =
             stats.counter("total_keyframe_wait_dropped_video_frame_count");
+        let total_received_audio_data_count = stats.counter("total_received_audio_data_count");
+        let total_received_audio_eos_count = stats.counter("total_received_audio_eos_count");
+        let total_received_video_data_count = stats.counter("total_received_video_data_count");
+        let total_received_video_eos_count = stats.counter("total_received_video_eos_count");
         let error = stats.flag("error");
         error.set(false);
         Self {
@@ -120,6 +128,10 @@ impl Mp4WriterStats {
             total_video_track_duration,
             total_keyframe_wait_dropped_audio_sample_count,
             total_keyframe_wait_dropped_video_frame_count,
+            total_received_audio_data_count,
+            total_received_audio_eos_count,
+            total_received_video_data_count,
+            total_received_video_eos_count,
             error,
         }
     }
@@ -166,6 +178,22 @@ impl Mp4WriterStats {
 
     fn add_keyframe_wait_dropped_audio_sample(&self) {
         self.total_keyframe_wait_dropped_audio_sample_count.inc();
+    }
+
+    fn add_received_audio_data(&self) {
+        self.total_received_audio_data_count.inc();
+    }
+
+    fn add_received_audio_eos(&self) {
+        self.total_received_audio_eos_count.inc();
+    }
+
+    fn add_received_video_data(&self) {
+        self.total_received_video_data_count.inc();
+    }
+
+    fn add_received_video_eos(&self) {
+        self.total_received_video_eos_count.inc();
     }
 
     pub fn audio_codec(&self) -> Option<CodecName> {
@@ -787,6 +815,7 @@ impl Mp4Writer {
     ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
+                self.stats.add_received_audio_data();
                 if self.input_audio_track_id.is_some() {
                     self.handle_input_sample(
                         InputTrackKind::Audio,
@@ -795,6 +824,7 @@ impl Mp4Writer {
                 }
             }
             crate::Message::Eos => {
+                self.stats.add_received_audio_eos();
                 if self.input_audio_track_id.is_some() {
                     self.handle_input_sample(InputTrackKind::Audio, None)?;
                 }
@@ -812,6 +842,7 @@ impl Mp4Writer {
     ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
+                self.stats.add_received_video_data();
                 if self.input_video_track_id.is_some() {
                     self.handle_input_sample(
                         InputTrackKind::Video,
@@ -820,6 +851,7 @@ impl Mp4Writer {
                 }
             }
             crate::Message::Eos => {
+                self.stats.add_received_video_eos();
                 if self.input_video_track_id.is_some() {
                     self.handle_input_sample(InputTrackKind::Video, None)?;
                 }
