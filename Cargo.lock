@@ -996,9 +996,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_dav1d"
-version = "2026.1.0-canary.1"
+version = "2026.1.0-canary.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6799986ef8d29acab434ef4a5df46038360e28555152e7377b4b29d00163ea54"
+checksum = "86ae228a686e227e11c611abe74b3bf43ed0370dc231530635273a4bddcf0721"
 dependencies = [
  "bindgen",
  "shiguredo_toml",
@@ -1021,9 +1021,9 @@ checksum = "50203212be42844ef00003e05fe57f0b19a80b33d9d35745c48efc01e5d2fb63"
 
 [[package]]
 name = "shiguredo_libvpx"
-version = "2026.1.0-canary.2"
+version = "2026.1.0-canary.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6744ef39f982d745eb5f055d7803a7e0d9d32769e81c559f8a356b94a3a3e146"
+checksum = "6e5e61d99e0797ec87b5a40efa8ec6bb4f35ad7e6ae9bc1130eeaf7c181c25cb"
 dependencies = [
  "bindgen",
  "shiguredo_toml",
@@ -1031,9 +1031,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_libyuv"
-version = "2026.1.0-canary.2"
+version = "2026.1.0-canary.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24462bb844c0f17cc8108907a19b40b30445ceeab249b3d447c945caedb549a7"
+checksum = "b7628576525f7a244e901b216a8876ef7f82692776381453093b03079e98fc26"
 dependencies = [
  "bindgen",
  "shiguredo_cmake",
@@ -1074,9 +1074,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_opus"
-version = "2026.1.0-canary.4"
+version = "2026.1.0-canary.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4b5559679cf0dd728829a9e1146131eddc9eba54e53e47e177ba287d4690d99"
+checksum = "fb42c0801b9e9625226e5769584ecf4ad4bf8a11d5b49d8fb7f3db1a04f9cbb9"
 dependencies = [
  "bindgen",
  "shiguredo_cmake",
@@ -1110,9 +1110,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_svt_av1"
-version = "2026.1.0-canary.0"
+version = "2026.1.0-canary.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a69ad41fdf6643b66c98a0c9b6227b325b37d3bae5f456dcd5db6280eb36e9eb"
+checksum = "36ac82e30ad411e7c53f2f78f22bd4958b016187ad24b18185519871cf94f15e"
 dependencies = [
  "bindgen",
  "log",
@@ -1140,9 +1140,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_video_toolbox"
-version = "2026.1.0-canary.1"
+version = "2026.1.0-canary.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "699d44b29f453c905d13f004ad886b4ea6003a7a5502321e52b0b296581d55c8"
+checksum = "4c78e7a1989bed55b6d200da9cab87ea8d52a1d6426078311a22bd56b47dc202"
 dependencies = [
  "bindgen",
  "log",
