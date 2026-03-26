@@ -835,9 +835,11 @@ fn fixup_last_sample_duration_for_track(
     }
 }
 
-/// Duration を mpeg2ts の Timestamp (90kHz) に変換する
+/// Duration を mpeg2ts の Timestamp (90kHz) に変換する。
+/// 浮動小数点を避けて整数演算で計算する。
 fn duration_to_timestamp(d: Duration) -> crate::Result<Timestamp> {
-    let ticks = (d.as_secs_f64() * Timestamp::RESOLUTION as f64) as u64;
+    let ticks = d.as_secs() * Timestamp::RESOLUTION
+        + u64::from(d.subsec_nanos()) * Timestamp::RESOLUTION / 1_000_000_000;
     let ticks = ticks % (Timestamp::MAX + 1);
     Timestamp::new(ticks).map_err(|e| crate::Error::new(format!("invalid timestamp: {e}")))
 }
