@@ -273,23 +273,19 @@
 - [ ] `SaveReplayBuffer`: Replay Buffer を保存する
 - [ ] `GetLastReplayBufferReplay`: 最後の Replay Buffer ファイル情報を取得する
 - [x] `GetOutputList`: 出力一覧を取得する
-  - NOTE: 現時点では `stream` / `record` の 2 出力を返す
+  - NOTE: `stream` / `record` / `rtmp_outbound` / `sora` / `hls` の 5 出力を返す
 - [x] `GetOutputStatus`: 出力状態を取得する
-  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
 - [x] `ToggleOutput`: 出力をトグルする
-  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
-  - NOTE: 内部では `ToggleStream` / `ToggleRecord` 相当の処理を実行する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
 - [x] `StartOutput`: 出力を開始する
-  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
-  - NOTE: 内部では `StartStream` / `StartRecord` 相当の処理を実行する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
 - [x] `StopOutput`: 出力を停止する
-  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
-  - NOTE: 内部では `StopStream` / `StopRecord` 相当の処理を実行する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
 - [x] `GetOutputSettings`: 出力設定を取得する
-  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
-  - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ返す
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
 - [x] `SetOutputSettings`: 出力設定を更新する
-  - NOTE: `outputName` は現時点では `stream` / `record` のみ受理する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
   - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ更新する
 
 ### Stream
@@ -516,5 +512,37 @@ outputSettings は `soraSdkSettings` オブジェクトを含む。
 
 - `signalingUrls` が空、または `channelId` が未設定の場合: `StartOutput` が失敗
 - `metadata` が JSON object 以外の場合: `SetOutputSettings` が失敗
+- 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
+- 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す
+
+#### `hls`
+
+HLS ライブ出力。H.264 + AAC の MPEG-TS セグメントを生成し、M3U8 プレイリストで管理する。
+
+- `outputKind`: `hls_output`
+- ローカルファイルシステムへの出力のみ対応
+- 停止時に生成ファイル（playlist.m3u8 + 全 .ts セグメント）を自動削除する
+- `outputBytes` / `outputSkippedFrames` / `outputTotalFrames` は現時点では 0 固定
+
+**outputSettings（`SetOutputSettings` / `GetOutputSettings`）:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `outputDirectory` | string | StartOutput 時に必須 | セグメントとプレイリストの出力先ディレクトリ |
+| `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
+| `maxRetainedSegments` | number | - | プレイリストに保持するセグメント数。デフォルト: 6 |
+
+**フロー:**
+
+1. `SetOutputSettings` で `outputDirectory` 等を設定
+2. `StartOutput` で pipeline 生成 + HLS セグメント書き出し開始
+3. `GetOutputStatus` で稼働状態確認（`outputPath` にプレイリストパスを返す）
+4. `StopOutput` で pipeline 停止 + 生成ファイル削除
+
+**エラー条件:**
+
+- `outputDirectory` が未設定の場合: `StartOutput` が失敗
+- `segmentDuration` が 0 以下の場合: `SetOutputSettings` が失敗
+- `maxRetainedSegments` が 0 の場合: `SetOutputSettings` が失敗
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す
