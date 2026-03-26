@@ -897,6 +897,55 @@ fn default_video_encode_config_for_rpc() -> EncodeConfig {
     crate::sora::recording_layout_encode_params::LayoutEncodeParams::default().config
 }
 
+/// 指定したキーフレーム間隔（フレーム数）を全エンコーダーに設定した EncodeConfig を生成する。
+/// HLS セグメント分割に必要なキーフレームを確実に得るために使用する。
+pub fn encode_config_with_keyframe_interval(
+    keyframe_interval_frames: u32,
+    frame_rate: crate::video::FrameRate,
+) -> EncodeConfig {
+    let mut config = default_video_encode_config_for_rpc();
+
+    // キーフレーム間隔を秒に変換（VideoToolbox の duration 指定で使用）
+    let keyframe_interval_duration = std::time::Duration::from_secs_f64(
+        keyframe_interval_frames as f64
+            / (frame_rate.numerator.get() as f64 / frame_rate.denumerator.get() as f64),
+    );
+    // frame_rate から計算した duration を全プラットフォームで使えるようにする
+    let _ = keyframe_interval_duration;
+
+    // openh264: intra_period (フレーム数)
+    config.openh264.intra_period = Some(keyframe_interval_frames as usize);
+
+    // VideoToolbox: max_key_frame_interval (フレーム数) + max_key_frame_interval_duration (秒)
+    #[cfg(target_os = "macos")]
+    {
+        config.video_toolbox_h264.max_key_frame_interval =
+            std::num::NonZeroU32::new(keyframe_interval_frames);
+        config.video_toolbox_h264.max_key_frame_interval_duration =
+            Some(keyframe_interval_duration);
+        config.video_toolbox_h265.max_key_frame_interval =
+            std::num::NonZeroU32::new(keyframe_interval_frames);
+        config.video_toolbox_h265.max_key_frame_interval_duration =
+            Some(keyframe_interval_duration);
+    }
+
+    // NVENC: idr_period (H264 / HEVC / AV1)
+    #[cfg(feature = "nvcodec")]
+    {
+        if let shiguredo_nvcodec::CodecConfig::H264(ref mut c) = config.nvcodec_h264.codec {
+            c.idr_period = Some(keyframe_interval_frames);
+        }
+        if let shiguredo_nvcodec::CodecConfig::Hevc(ref mut c) = config.nvcodec_h265.codec {
+            c.idr_period = Some(keyframe_interval_frames);
+        }
+        if let shiguredo_nvcodec::CodecConfig::Av1(ref mut c) = config.nvcodec_av1.codec {
+            c.idr_period = Some(keyframe_interval_frames);
+        }
+    }
+
+    config
+}
+
 pub async fn create_audio_processor(
     handle: &crate::MediaPipelineHandle,
     input_track_id: crate::TrackId,
@@ -938,6 +987,35 @@ pub async fn create_video_processor(
     frame_rate: crate::video::FrameRate,
     processor_id: Option<crate::ProcessorId>,
 ) -> crate::Result<crate::ProcessorId> {
+    create_video_processor_with_params(
+        handle,
+        input_track_id,
+        output_track_id,
+        codec,
+        bitrate_bps,
+        frame_rate,
+        None,
+        processor_id,
+    )
+    .await
+}
+
+/// エンコードパラメータを指定してビデオエンコーダプロセッサを作成する。
+/// `encode_params` が `None` の場合はデフォルト値を使用する。
+#[expect(
+    clippy::too_many_arguments,
+    reason = "encode_params の指定が必要なため引数が多い"
+)]
+pub async fn create_video_processor_with_params(
+    handle: &crate::MediaPipelineHandle,
+    input_track_id: crate::TrackId,
+    output_track_id: crate::TrackId,
+    codec: crate::types::CodecName,
+    bitrate_bps: std::num::NonZeroUsize,
+    frame_rate: crate::video::FrameRate,
+    encode_params: Option<EncodeConfig>,
+    processor_id: Option<crate::ProcessorId>,
+) -> crate::Result<crate::ProcessorId> {
     let processor_id = processor_id
         .unwrap_or_else(|| crate::ProcessorId::new(format!("videoEncoder:{input_track_id}")));
     let options = VideoEncoderOptions {
@@ -947,7 +1025,7 @@ pub async fn create_video_processor(
         width: crate::types::EvenUsize::ZERO,
         height: crate::types::EvenUsize::ZERO,
         frame_rate,
-        encode_params: default_video_encode_config_for_rpc(),
+        encode_params: encode_params.unwrap_or_else(default_video_encode_config_for_rpc),
     };
     handle
         .spawn_processor(

@@ -6,6 +6,7 @@ pub mod endpoint_http_bootstrap;
 pub mod endpoint_http_metrics;
 pub mod error;
 pub mod future;
+pub mod hls;
 pub mod json;
 pub mod logger;
 pub mod media;
