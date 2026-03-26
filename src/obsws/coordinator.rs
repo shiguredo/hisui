@@ -2838,13 +2838,26 @@ async fn start_hls_processors(
     hls_settings: &crate::obsws::input_registry::ObswsHlsSettings,
 ) -> crate::Result<()> {
     crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
-    crate::encoder::create_video_processor(
+
+    // HLS 用にキーフレーム間隔を設定する。
+    // segment_duration に合わせたフレーム数を計算し、エンコーダーに事前通知する。
+    let fps = output_plan.frame_rate.numerator.get() as f64
+        / output_plan.frame_rate.denumerator.get() as f64;
+    let keyframe_interval_frames = (hls_settings.segment_duration * fps).ceil() as u32;
+    let keyframe_interval_frames = keyframe_interval_frames.max(1);
+    let encode_params = crate::encoder::encode_config_with_keyframe_interval(
+        keyframe_interval_frames,
+        output_plan.frame_rate,
+    );
+
+    crate::encoder::create_video_processor_with_params(
         pipeline_handle,
         run.video.source_track_id.clone(),
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
         std::num::NonZeroUsize::new(2_000_000).unwrap(),
         output_plan.frame_rate,
+        Some(encode_params),
         Some(run.video.encoder_processor_id.clone()),
     )
     .await?;

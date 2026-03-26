@@ -52,8 +52,8 @@ struct CurrentSegmentInfo {
 
 /// フォーマット固有の状態
 enum FormatState {
-    MpegTs(MpegTsState),
-    Fmp4(Fmp4State),
+    MpegTs(Box<MpegTsState>),
+    Fmp4(Box<Fmp4State>),
 }
 
 /// MPEG-TS フォーマット固有の状態
@@ -97,7 +97,7 @@ impl HlsWriter {
         segment_format: HlsSegmentFormat,
     ) -> crate::Result<Self> {
         let format_state = match segment_format {
-            HlsSegmentFormat::MpegTs => FormatState::MpegTs(MpegTsState {
+            HlsSegmentFormat::MpegTs => FormatState::MpegTs(Box::new(MpegTsState {
                 current_writer: None,
                 pat_cc: ContinuityCounter::new(),
                 pmt_cc: ContinuityCounter::new(),
@@ -105,19 +105,19 @@ impl HlsWriter {
                 audio_cc: ContinuityCounter::new(),
                 last_video_sample_entry: None,
                 last_audio_sample_entry: None,
-            }),
+            })),
             HlsSegmentFormat::Fmp4 => {
                 let muxer = shiguredo_mp4::mux::Fmp4SegmentMuxer::new().map_err(|e| {
                     crate::Error::new(format!("failed to create fMP4 segment muxer: {e}"))
                 })?;
-                FormatState::Fmp4(Fmp4State {
+                FormatState::Fmp4(Box::new(Fmp4State {
                     muxer,
                     init_segment_written: false,
                     current_samples: Vec::new(),
                     current_payload: Vec::new(),
                     last_video_timestamp: None,
                     last_audio_timestamp: None,
-                })
+                }))
             }
         };
 
@@ -821,16 +821,14 @@ fn convert_length_prefixed_to_annexb(
     // キーフレームの場合は SPS/PPS を先頭に注入する。
     // エンコーダーは SPS/PPS を sample_entry にのみ格納し、フレーム本体には含めない場合がある。
     // MPEG-TS ではセグメント先頭のキーフレームに SPS/PPS が必要。
-    if keyframe {
-        if let Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) = sample_entry {
-            for sps in &avc1.avcc_box.sps_list {
-                result.extend_from_slice(start_code);
-                result.extend_from_slice(sps);
-            }
-            for pps in &avc1.avcc_box.pps_list {
-                result.extend_from_slice(start_code);
-                result.extend_from_slice(pps);
-            }
+    if keyframe && let Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) = sample_entry {
+        for sps in &avc1.avcc_box.sps_list {
+            result.extend_from_slice(start_code);
+            result.extend_from_slice(sps);
+        }
+        for pps in &avc1.avcc_box.pps_list {
+            result.extend_from_slice(start_code);
+            result.extend_from_slice(pps);
         }
     }
 
