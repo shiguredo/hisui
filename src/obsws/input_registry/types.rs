@@ -1095,12 +1095,18 @@ impl HlsSegmentFormat {
             Self::Fmp4 => "fmp4",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for HlsSegmentFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "mpegts" => Some(Self::MpegTs),
-            "fmp4" => Some(Self::Fmp4),
-            _ => None,
+            "mpegts" => Ok(Self::MpegTs),
+            "fmp4" => Ok(Self::Fmp4),
+            _ => Err(format!(
+                "segmentFormat must be \"mpegts\" or \"fmp4\", got \"{s}\""
+            )),
         }
     }
 }

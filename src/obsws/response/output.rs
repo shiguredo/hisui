@@ -837,8 +837,7 @@ fn parse_hls_settings(
         return Err("audioBitrate must be positive".to_owned());
     }
     let segment_format = match segment_format_str {
-        Some(ref s) => crate::obsws::input_registry::HlsSegmentFormat::from_str(s)
-            .ok_or_else(|| format!("segmentFormat must be \"mpegts\" or \"fmp4\", got \"{s}\""))?,
+        Some(ref s) => s.parse::<crate::obsws::input_registry::HlsSegmentFormat>()?,
         None => input_registry.hls_settings().segment_format,
     };
 
