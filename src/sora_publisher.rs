@@ -88,8 +88,7 @@ impl SoraPublisher {
         handle.notify_ready();
 
         // メッセージ受信ループ
-        // video/audio どちらかの EOS で切断する。
-        // Program 出力では両トラックが同時に終了するため、片方の EOS で十分。
+        // video/audio 両方の EOS を受け取ってから切断する。
         let mut video_eos = false;
         let mut audio_eos = false;
         loop {
