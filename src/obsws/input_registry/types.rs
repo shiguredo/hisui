@@ -1072,9 +1072,11 @@ pub struct ObswsRtmpOutboundSettings {
 }
 
 /// HLS 出力の設定。
-/// segment_duration と max_retained_segments は SetOutputSettings で変更可能。
+/// SetOutputSettings で各フィールドを変更可能。
 pub const DEFAULT_HLS_SEGMENT_DURATION_SECS: f64 = 2.0;
 pub const DEFAULT_HLS_MAX_RETAINED_SEGMENTS: usize = 6;
+pub const DEFAULT_HLS_VIDEO_BITRATE_BPS: usize = 2_000_000;
+pub const DEFAULT_HLS_AUDIO_BITRATE_BPS: usize = 128_000;
 
 /// HLS セグメントのフォーマット
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1113,6 +1115,10 @@ pub struct ObswsHlsSettings {
     pub max_retained_segments: usize,
     /// セグメントフォーマット
     pub segment_format: HlsSegmentFormat,
+    /// ビデオビットレート (bps)
+    pub video_bitrate_bps: usize,
+    /// オーディオビットレート (bps)
+    pub audio_bitrate_bps: usize,
 }
 
 impl Default for ObswsHlsSettings {
@@ -1122,6 +1128,8 @@ impl Default for ObswsHlsSettings {
             segment_duration: DEFAULT_HLS_SEGMENT_DURATION_SECS,
             max_retained_segments: DEFAULT_HLS_MAX_RETAINED_SEGMENTS,
             segment_format: HlsSegmentFormat::default(),
+            video_bitrate_bps: DEFAULT_HLS_VIDEO_BITRATE_BPS,
+            audio_bitrate_bps: DEFAULT_HLS_AUDIO_BITRATE_BPS,
         }
     }
 }
@@ -1134,7 +1142,9 @@ impl nojson::DisplayJson for ObswsHlsSettings {
             }
             f.member("segmentDuration", self.segment_duration)?;
             f.member("maxRetainedSegments", self.max_retained_segments)?;
-            f.member("segmentFormat", self.segment_format.as_str())
+            f.member("segmentFormat", self.segment_format.as_str())?;
+            f.member("videoBitrate", self.video_bitrate_bps)?;
+            f.member("audioBitrate", self.audio_bitrate_bps)
         })
         .fmt(f)
     }

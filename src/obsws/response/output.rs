@@ -800,6 +800,22 @@ fn parse_hls_settings(
         super::optional_non_empty_string_member(output_settings, "segmentFormat")
             .map_err(|e| e.to_string())?;
 
+    let video_bitrate: Option<usize> = output_settings
+        .to_member("videoBitrate")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    let audio_bitrate: Option<usize> = output_settings
+        .to_member("audioBitrate")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
     if let Some(duration) = segment_duration
         && duration <= 0.0
     {
@@ -809,6 +825,16 @@ fn parse_hls_settings(
         && count == 0
     {
         return Err("maxRetainedSegments must be at least 1".to_owned());
+    }
+    if let Some(bps) = video_bitrate
+        && bps == 0
+    {
+        return Err("videoBitrate must be positive".to_owned());
+    }
+    if let Some(bps) = audio_bitrate
+        && bps == 0
+    {
+        return Err("audioBitrate must be positive".to_owned());
     }
     let segment_format = match segment_format_str {
         Some(ref s) => crate::obsws::input_registry::HlsSegmentFormat::from_str(s)
@@ -822,6 +848,8 @@ fn parse_hls_settings(
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
         segment_format,
+        video_bitrate_bps: video_bitrate.unwrap_or(existing.video_bitrate_bps),
+        audio_bitrate_bps: audio_bitrate.unwrap_or(existing.audio_bitrate_bps),
     });
     Ok(())
 }

@@ -532,6 +532,8 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS セグメントを生成し、M3U8
 | `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
 | `maxRetainedSegments` | number | - | プレイリストに保持するセグメント数。デフォルト: 6 |
 | `segmentFormat` | string | - | セグメントフォーマット。`"mpegts"` (デフォルト) または `"fmp4"` |
+| `videoBitrate` | number | - | ビデオビットレート (bps)。デフォルト: 2000000 |
+| `audioBitrate` | number | - | オーディオビットレート (bps)。デフォルト: 128000 |
 
 **フロー:**
 
@@ -545,5 +547,7 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS セグメントを生成し、M3U8
 - `outputDirectory` が未設定の場合: `StartOutput` が失敗
 - `segmentDuration` が 0 以下の場合: `SetOutputSettings` が失敗
 - `maxRetainedSegments` が 0 の場合: `SetOutputSettings` が失敗
+- `videoBitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `audioBitrate` が 0 の場合: `SetOutputSettings` が失敗
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す

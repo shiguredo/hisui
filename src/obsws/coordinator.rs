@@ -2855,7 +2855,8 @@ async fn start_hls_processors(
         run.video.source_track_id.clone(),
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
-        std::num::NonZeroUsize::new(2_000_000).unwrap(),
+        std::num::NonZeroUsize::new(hls_settings.video_bitrate_bps)
+            .unwrap_or(std::num::NonZeroUsize::MIN),
         output_plan.frame_rate,
         Some(encode_params),
         Some(run.video.encoder_processor_id.clone()),
@@ -2867,7 +2868,8 @@ async fn start_hls_processors(
         run.audio.source_track_id.clone(),
         run.audio.encoded_track_id.clone(),
         crate::types::CodecName::Aac,
-        std::num::NonZeroUsize::new(128_000).unwrap(),
+        std::num::NonZeroUsize::new(hls_settings.audio_bitrate_bps)
+            .unwrap_or(std::num::NonZeroUsize::MIN),
         Some(run.audio.encoder_processor_id.clone()),
     )
     .await?;
