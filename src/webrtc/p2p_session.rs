@@ -157,12 +157,6 @@ impl DataChannelObserverHandler for ObswsMessageHandler {
     }
 }
 
-/// bootstrap トラック管理エントリ
-struct BootstrapTrackEntry {
-    video_track_id: Option<crate::TrackId>,
-    audio_track_id: Option<crate::TrackId>,
-}
-
 struct Session {
     _handle: crate::MediaPipelineHandle,
     processor_handle: crate::ProcessorHandle,
@@ -182,8 +176,9 @@ struct Session {
     ice_rx: tokio::sync::mpsc::UnboundedReceiver<IceObserverEvent>,
     ice_candidates: Vec<GatheredIceCandidate>,
     obsws_session: ObswsSession,
-    /// bootstrap の input_uuid → track ID マッピング
-    bootstrap_tracks: std::collections::HashMap<String, BootstrapTrackEntry>,
+    /// bootstrap の input_uuid → snapshot マッピング
+    bootstrap_tracks:
+        std::collections::HashMap<String, crate::obsws::coordinator::BootstrapInputSnapshot>,
 }
 
 impl Drop for Session {
@@ -252,19 +247,8 @@ impl WebRtcP2pSessionManager {
                         sess.connection_state = state;
                         if state == PeerConnectionState::Connected {
                             // 接続確立時に bootstrap-tracks snapshot を送信する
-                            let snapshot_entries: Vec<_> = sess
-                                .bootstrap_tracks
-                                .iter()
-                                .map(|(uuid, entry)| {
-                                    crate::obsws::coordinator::BootstrapInputSnapshot {
-                                        input_uuid: uuid.clone(),
-                                        input_name: String::new(),
-                                        input_kind: String::new(),
-                                        video_track_id: entry.video_track_id.clone(),
-                                        audio_track_id: entry.audio_track_id.clone(),
-                                    }
-                                })
-                                .collect();
+                            let snapshot_entries: Vec<_> =
+                                sess.bootstrap_tracks.values().cloned().collect();
                             if !snapshot_entries.is_empty() {
                                 let msg = build_bootstrap_tracks_json(&snapshot_entries);
                                 send_dc(sess, &msg);
@@ -985,13 +969,9 @@ fn subscribe_bootstrap_input(
             e.display()
         );
     }
-    session.bootstrap_tracks.insert(
-        snapshot.input_uuid.clone(),
-        BootstrapTrackEntry {
-            video_track_id: snapshot.video_track_id.clone(),
-            audio_track_id: snapshot.audio_track_id.clone(),
-        },
-    );
+    session
+        .bootstrap_tracks
+        .insert(snapshot.input_uuid.clone(), snapshot.clone());
 }
 
 /// bootstrap 入力作成時のハンドラ
