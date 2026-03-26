@@ -845,17 +845,26 @@ fn parse_hls_settings(
                     return Err("variants[].audioBitrate must be positive".to_owned());
                 }
                 let width = match width {
+                    Some(0) => return Err("variants[].width must be positive".to_owned()),
                     Some(w) => Some(
                         crate::types::EvenUsize::new(w).ok_or("variants[].width must be even")?,
                     ),
                     None => None,
                 };
                 let height = match height {
+                    Some(0) => return Err("variants[].height must be positive".to_owned()),
                     Some(h) => Some(
                         crate::types::EvenUsize::new(h).ok_or("variants[].height must be even")?,
                     ),
                     None => None,
                 };
+                // width と height は両方指定するか両方省略する必要がある
+                if width.is_some() != height.is_some() {
+                    return Err(
+                    "variants[].width and variants[].height must both be specified or both omitted"
+                        .to_owned(),
+                );
+                }
 
                 variants.push(crate::obsws::input_registry::HlsVariant {
                     video_bitrate_bps: video_bitrate,

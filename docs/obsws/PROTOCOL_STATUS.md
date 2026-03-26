@@ -574,6 +574,7 @@ outputDirectory/
 - `variants` が空の場合: `SetOutputSettings` が失敗
 - `variants[].videoBitrate` が 0 の場合: `SetOutputSettings` が失敗
 - `variants[].audioBitrate` が 0 の場合: `SetOutputSettings` が失敗
-- `variants[].width` / `height` が奇数の場合: `SetOutputSettings` が失敗
+- `variants[].width` / `height` が 0 または奇数の場合: `SetOutputSettings` が失敗
+- `variants[].width` / `height` の片方だけ指定された場合: `SetOutputSettings` が失敗
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す

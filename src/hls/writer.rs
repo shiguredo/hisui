@@ -1120,7 +1120,9 @@ pub fn write_master_playlist(
             .map(|v| shiguredo_m3u8::multivariant::VariantStream {
                 bandwidth: v.bandwidth,
                 average_bandwidth: None,
-                // H.264 Baseline Profile Level 3.1 + AAC-LC
+                // TODO: エンコーダーの SPS から正確な profile/level を取得すべきだが、
+                // プレイリスト生成時点ではその情報がないため暫定値を使用する。
+                // avc1.42e01f = H.264 Baseline Profile Level 3.1, mp4a.40.2 = AAC-LC
                 codecs: Some("avc1.42e01f,mp4a.40.2".to_owned()),
                 supplemental_codecs: None,
                 resolution: Some(shiguredo_m3u8::multivariant::Resolution {
