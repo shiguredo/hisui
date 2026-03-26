@@ -1838,3 +1838,262 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
         asyncio.run(_run_hls_fmp4_flow())
+
+
+def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
+    """ABR 設定での HLS 出力を開始・停止できることを確認する。
+    マスタープレイリストとバリアントサブディレクトリが生成・削除されることを確認する。"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    image_path = tmp_path / "hls-abr-input.png"
+    _write_test_png(image_path)
+    hls_dir = tmp_path / "hls-abr-output"
+    hls_dir.mkdir()
+
+    async def _run_hls_abr_flow():
+        timeout = aiohttp.ClientTimeout(total=30.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            # 入力ソースを作成
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-hls-abr-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "hls-abr-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            # ABR 設定（2 バリアント）を行う
+            set_settings_response = await _send_obsws_request(
+                ws,
+                request_type="SetOutputSettings",
+                request_id="req-set-hls-abr-settings",
+                request_data={
+                    "outputName": "hls",
+                    "outputSettings": {
+                        "outputDirectory": str(hls_dir),
+                        "variants": [
+                            {"videoBitrate": 2000000, "audioBitrate": 128000},
+                            {"videoBitrate": 800000, "audioBitrate": 96000},
+                        ],
+                    },
+                },
+            )
+            assert set_settings_response["d"]["requestStatus"]["result"] is True
+
+            # 設定を取得して variants が反映されていることを確認
+            get_settings_response = await _send_obsws_request(
+                ws,
+                request_type="GetOutputSettings",
+                request_id="req-get-hls-abr-settings",
+                request_data={"outputName": "hls"},
+            )
+            assert get_settings_response["d"]["requestStatus"]["result"] is True
+            settings = get_settings_response["d"]["responseData"]["outputSettings"]
+            assert len(settings["variants"]) == 2
+            assert settings["variants"][0]["videoBitrate"] == 2000000
+            assert settings["variants"][1]["videoBitrate"] == 800000
+
+            # HLS 出力を開始
+            start_response = await _send_obsws_request(
+                ws,
+                request_type="StartOutput",
+                request_id="req-start-hls-abr",
+                request_data={"outputName": "hls"},
+            )
+            assert start_response["d"]["requestStatus"]["result"] is True
+
+            # マスタープレイリストとバリアントディレクトリが生成されるまで待つ
+            master_playlist_path = hls_dir / "playlist.m3u8"
+            variant_0_dir = hls_dir / "variant_0"
+            variant_1_dir = hls_dir / "variant_1"
+            variant_0_playlist = variant_0_dir / "playlist.m3u8"
+            for _ in range(100):
+                if (
+                    master_playlist_path.exists()
+                    and variant_0_dir.exists()
+                    and variant_1_dir.exists()
+                    and variant_0_playlist.exists()
+                    and list(variant_0_dir.glob("segment-*.ts"))
+                ):
+                    break
+                await asyncio.sleep(0.2)
+            else:
+                files = list(hls_dir.rglob("*"))
+                raise AssertionError(
+                    f"ABR HLS files were not generated within timeout. "
+                    f"Files: {files}"
+                )
+
+            # マスタープレイリストに EXT-X-STREAM-INF が含まれることを確認
+            master_content = master_playlist_path.read_text()
+            assert "#EXT-X-STREAM-INF" in master_content, (
+                "master playlist must contain EXT-X-STREAM-INF"
+            )
+            assert "variant_0/playlist.m3u8" in master_content
+            assert "variant_1/playlist.m3u8" in master_content
+
+            # 各バリアントディレクトリにセグメントが存在することを確認
+            assert list(variant_0_dir.glob("segment-*.ts")), (
+                "variant_0 must have .ts segments"
+            )
+            assert list(variant_1_dir.glob("segment-*.ts")), (
+                "variant_1 must have .ts segments"
+            )
+
+            # HLS 出力を停止
+            stop_response = await _send_obsws_request(
+                ws,
+                request_type="StopOutput",
+                request_id="req-stop-hls-abr",
+                request_data={"outputName": "hls"},
+            )
+            assert stop_response["d"]["requestStatus"]["result"] is True
+
+            # 停止を待つ
+            for _ in range(20):
+                status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetOutputStatus",
+                    request_id="req-get-hls-abr-status-inactive",
+                    request_data={"outputName": "hls"},
+                )
+                if status_response["d"]["responseData"]["outputActive"] is False:
+                    break
+                await asyncio.sleep(0.1)
+
+            # 停止後にファイルが削除されていることを確認
+            assert not master_playlist_path.exists(), (
+                "master playlist must be deleted after stop"
+            )
+            # バリアントディレクトリ内のファイルも削除されていることを確認
+            assert not list(variant_0_dir.glob("*")), (
+                "variant_0 files must be deleted after stop"
+            )
+
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run_hls_abr_flow())
+
+
+def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
+    """HLS variants のバリデーションエラーを確認する。"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    async def _run_validation_flow():
+        timeout = aiohttp.ClientTimeout(total=10.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            # 空の variants 配列はエラー
+            resp = await _send_obsws_request(
+                ws,
+                request_type="SetOutputSettings",
+                request_id="req-hls-empty-variants",
+                request_data={
+                    "outputName": "hls",
+                    "outputSettings": {"variants": []},
+                },
+            )
+            assert resp["d"]["requestStatus"]["result"] is False
+
+            # videoBitrate が 0 はエラー
+            resp = await _send_obsws_request(
+                ws,
+                request_type="SetOutputSettings",
+                request_id="req-hls-zero-video-bitrate",
+                request_data={
+                    "outputName": "hls",
+                    "outputSettings": {
+                        "variants": [{"videoBitrate": 0, "audioBitrate": 128000}],
+                    },
+                },
+            )
+            assert resp["d"]["requestStatus"]["result"] is False
+
+            # width のみ指定（height なし）はエラー
+            resp = await _send_obsws_request(
+                ws,
+                request_type="SetOutputSettings",
+                request_id="req-hls-width-only",
+                request_data={
+                    "outputName": "hls",
+                    "outputSettings": {
+                        "variants": [
+                            {
+                                "videoBitrate": 2000000,
+                                "audioBitrate": 128000,
+                                "width": 1280,
+                            }
+                        ],
+                    },
+                },
+            )
+            assert resp["d"]["requestStatus"]["result"] is False
+
+            # 奇数 width はエラー
+            resp = await _send_obsws_request(
+                ws,
+                request_type="SetOutputSettings",
+                request_id="req-hls-odd-width",
+                request_data={
+                    "outputName": "hls",
+                    "outputSettings": {
+                        "variants": [
+                            {
+                                "videoBitrate": 2000000,
+                                "audioBitrate": 128000,
+                                "width": 1281,
+                                "height": 720,
+                            }
+                        ],
+                    },
+                },
+            )
+            assert resp["d"]["requestStatus"]["result"] is False
+
+            # 正常な variants は成功
+            resp = await _send_obsws_request(
+                ws,
+                request_type="SetOutputSettings",
+                request_id="req-hls-valid-variants",
+                request_data={
+                    "outputName": "hls",
+                    "outputSettings": {
+                        "variants": [
+                            {
+                                "videoBitrate": 2000000,
+                                "audioBitrate": 128000,
+                                "width": 1280,
+                                "height": 720,
+                            }
+                        ],
+                    },
+                },
+            )
+            assert resp["d"]["requestStatus"]["result"] is True
+
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run_validation_flow())
