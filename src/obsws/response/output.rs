@@ -679,14 +679,13 @@ fn parse_sora_publisher_settings(
         }
     };
 
-    let existing = input_registry.sora_publisher_settings().clone();
     input_registry.set_sora_publisher_settings(
         crate::obsws::input_registry::ObswsSoraPublisherSettings {
-            signaling_urls: signaling_urls.unwrap_or(existing.signaling_urls),
-            channel_id: channel_id.or(existing.channel_id),
-            client_id: client_id.or(existing.client_id),
-            bundle_id: bundle_id.or(existing.bundle_id),
-            metadata: metadata.or(existing.metadata),
+            signaling_urls: signaling_urls.unwrap_or_default(),
+            channel_id,
+            client_id,
+            bundle_id,
+            metadata,
         },
     );
     Ok(())
