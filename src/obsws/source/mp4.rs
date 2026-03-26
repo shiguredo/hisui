@@ -8,7 +8,7 @@ pub(super) fn build_record_source_plan(
     settings: &ObswsMp4FileSourceSettings,
     output_kind: ObswsOutputKind,
     run_id: u64,
-    source_index: usize,
+    source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(path) = settings.path.as_deref() else {
         return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
@@ -17,20 +17,20 @@ pub(super) fn build_record_source_plan(
     };
 
     let source_processor_id = ProcessorId::new(format!(
-        "obsws:{}:{run_id}:source:{source_index}:mp4_source",
+        "obsws:{}:{run_id}:source:{source_key}:mp4_source",
         output_kind.as_str()
     ));
     let availability = crate::mp4::file_reader::probe_mp4_track_availability(path)
         .map_err(|e| BuildObswsRecordSourcePlanError::InvalidInput(e.display()))?;
     let source_video_track_id = availability.has_video.then(|| {
         TrackId::new(format!(
-            "obsws:{}:{run_id}:source:{source_index}:raw_video",
+            "obsws:{}:{run_id}:source:{source_key}:raw_video",
             output_kind.as_str()
         ))
     });
     let source_audio_track_id = availability.has_audio.then(|| {
         TrackId::new(format!(
-            "obsws:{}:{run_id}:source:{source_index}:raw_audio",
+            "obsws:{}:{run_id}:source:{source_key}:raw_audio",
             output_kind.as_str()
         ))
     });
@@ -66,7 +66,7 @@ mod tests {
             },
             ObswsOutputKind::Record,
             1,
-            0,
+            "0",
         )
         .expect("audio-only mp4 source plan must succeed");
         assert_eq!(
@@ -95,7 +95,7 @@ mod tests {
             },
             ObswsOutputKind::Record,
             2,
-            0,
+            "0",
         )
         .expect("video-only mp4 source plan must succeed");
         assert_eq!(plan.source_audio_track_id, None);

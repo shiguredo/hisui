@@ -122,10 +122,10 @@ pub async fn run_server(
         tracing::debug!("obsws initial start trigger was already completed");
     }
 
-    // Program 出力を初期化する（常駐ミキサー + ソースプロセッサ）
+    // Program 出力を初期化する（常駐ミキサー）
     let program_output = {
         let scene_inputs = input_registry.list_current_program_scene_input_entries();
-        let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
+        let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
             crate::obsws::source::ObswsOutputKind::Program,
             0,
@@ -142,11 +142,6 @@ pub async fn run_server(
 
         crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan)
             .await?;
-        crate::obsws::session::output::start_source_processors(
-            &pipeline_handle,
-            &mut output_plan.source_plans,
-        )
-        .await?;
 
         tracing::info!(
             "program output initialized: video={}, audio={}",
@@ -169,11 +164,13 @@ pub async fn run_server(
     };
 
     // runtime actor を起動する
-    let (actor, coordinator_handle) = crate::obsws::coordinator::ObswsCoordinator::new(
+    // source processor は入力ライフサイクルで管理するため、coordinator 経由で初期起動する
+    let (mut actor, coordinator_handle) = crate::obsws::coordinator::ObswsCoordinator::new(
         input_registry,
         program_output,
         Some(pipeline_handle.clone()),
     );
+    actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());
 
     let bootstrap_endpoint = Rc::new(

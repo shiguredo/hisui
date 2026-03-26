@@ -8,7 +8,7 @@ pub(super) fn build_record_source_plan(
     settings: &ObswsSrtInboundSettings,
     output_kind: ObswsOutputKind,
     run_id: u64,
-    source_index: usize,
+    source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(input_url) = settings.input_url.as_deref() else {
         return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
@@ -18,25 +18,25 @@ pub(super) fn build_record_source_plan(
 
     let kind = output_kind.as_str();
     let source_processor_id = ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:srt_inbound"
+        "obsws:{kind}:{run_id}:source:{source_key}:srt_inbound"
     ));
     let encoded_video_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:encoded_video"
+        "obsws:{kind}:{run_id}:source:{source_key}:encoded_video"
     ));
     let encoded_audio_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:encoded_audio"
+        "obsws:{kind}:{run_id}:source:{source_key}:encoded_audio"
     ));
     let raw_video_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:raw_video"
+        "obsws:{kind}:{run_id}:source:{source_key}:raw_video"
     ));
     let raw_audio_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:raw_audio"
+        "obsws:{kind}:{run_id}:source:{source_key}:raw_audio"
     ));
     let video_decoder_processor_id = ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:video_decoder"
+        "obsws:{kind}:{run_id}:source:{source_key}:video_decoder"
     ));
     let audio_decoder_processor_id = ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:audio_decoder"
+        "obsws:{kind}:{run_id}:source:{source_key}:audio_decoder"
     ));
 
     let endpoint = crate::srt::inbound_endpoint::SrtInboundEndpoint {
@@ -90,7 +90,7 @@ mod tests {
             },
             ObswsOutputKind::Record,
             1,
-            0,
+            "0",
         )
         .expect("srt_inbound source plan must succeed");
 
@@ -140,7 +140,7 @@ mod tests {
             },
             ObswsOutputKind::Record,
             2,
-            1,
+            "1",
         )
         .expect("srt_inbound source plan without optional params must succeed");
 
@@ -163,7 +163,7 @@ mod tests {
             },
             ObswsOutputKind::Record,
             1,
-            0,
+            "0",
         );
         assert!(matches!(
             result,

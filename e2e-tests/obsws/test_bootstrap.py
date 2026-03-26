@@ -111,7 +111,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     try:
         with server:
             cmd, cwd = _build_bootstrap_command(
-                host, port, 5, str(input_mp4), str(output_mp4)
+                host, port, 10, str(input_mp4), str(output_mp4)
             )
             result = _run_bootstrap_command(cmd, cwd)
             assert result.returncode == 0, (
@@ -131,11 +131,11 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
             assert stats["audio_frames_received"] >= 1, (
                 f"expected at least 1 audio frame, got {stats}"
             )
-            assert stats["video_width"] == 1920, (
-                f"expected video_width=1920, got {stats}"
+            assert stats["video_width"] == 320, (
+                f"expected video_width=320, got {stats}"
             )
-            assert stats["video_height"] == 1080, (
-                f"expected video_height=1080, got {stats}"
+            assert stats["video_height"] == 320, (
+                f"expected video_height=320, got {stats}"
             )
             assert stats["audio_codec"] == "opus", (
                 f"expected audio_codec=opus, got {stats}"

@@ -191,14 +191,14 @@ pub(super) fn build_record_source_plan(
     settings: &crate::obsws::input_registry::ObswsVideoCaptureDeviceSettings,
     output_kind: super::ObswsOutputKind,
     run_id: u64,
-    source_index: usize,
+    source_key: &str,
 ) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
     let kind = output_kind.as_str();
     let source_processor_id = crate::ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:video_device_source"
+        "obsws:{kind}:{run_id}:source:{source_key}:video_device_source"
     ));
     let raw_video_track_id = crate::TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:raw_video"
+        "obsws:{kind}:{run_id}:source:{source_key}:raw_video"
     ));
 
     let source = VideoDeviceSource {
@@ -234,7 +234,7 @@ mod tests {
             },
             ObswsOutputKind::Record,
             1,
-            0,
+            "0",
         )
         .expect("video_capture_device source plan must succeed");
 
@@ -277,7 +277,7 @@ mod tests {
             &ObswsVideoCaptureDeviceSettings { device_id: None },
             ObswsOutputKind::Record,
             2,
-            1,
+            "1",
         )
         .expect("video_capture_device source plan without device_id must succeed");
 

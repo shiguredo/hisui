@@ -1150,9 +1150,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_webrtc"
-version = "0.146.2-canary.1"
+version = "0.146.2-canary.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc65993fc52b4d2f26835c97f9d50b16db797f93bb148a84096556e6ee5fc3c9"
+checksum = "b78d683ff0b30c0ddd11933a0d2e8cddc92a021c07b02300799e624249055957"
 dependencies = [
  "bindgen",
  "shiguredo_cmake",
@@ -1223,9 +1223,9 @@ dependencies = [
 
 [[package]]
 name = "sora_sdk"
-version = "2026.1.0-canary.2"
+version = "2026.1.0-canary.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac78b0d0578b9c12bc633d3d083c91e1031491a7b8a4fd4522d5ab36a2254977"
+checksum = "2958543da469837dd572550726fbe76d084e34b68188aa2bda0ee1d03c72ea7c"
 dependencies = [
  "aws-lc-rs",
  "flate2",

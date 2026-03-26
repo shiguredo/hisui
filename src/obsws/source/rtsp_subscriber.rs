@@ -8,7 +8,7 @@ pub(super) fn build_record_source_plan(
     settings: &ObswsRtspSubscriberSettings,
     output_kind: ObswsOutputKind,
     run_id: u64,
-    source_index: usize,
+    source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(input_url) = settings.input_url.as_deref() else {
         return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
@@ -18,25 +18,25 @@ pub(super) fn build_record_source_plan(
 
     let kind = output_kind.as_str();
     let source_processor_id = ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:rtsp_subscriber"
+        "obsws:{kind}:{run_id}:source:{source_key}:rtsp_subscriber"
     ));
     let encoded_video_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:encoded_video"
+        "obsws:{kind}:{run_id}:source:{source_key}:encoded_video"
     ));
     let encoded_audio_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:encoded_audio"
+        "obsws:{kind}:{run_id}:source:{source_key}:encoded_audio"
     ));
     let raw_video_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:raw_video"
+        "obsws:{kind}:{run_id}:source:{source_key}:raw_video"
     ));
     let raw_audio_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:raw_audio"
+        "obsws:{kind}:{run_id}:source:{source_key}:raw_audio"
     ));
     let video_decoder_processor_id = ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:video_decoder"
+        "obsws:{kind}:{run_id}:source:{source_key}:video_decoder"
     ));
     let audio_decoder_processor_id = ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_index}:audio_decoder"
+        "obsws:{kind}:{run_id}:source:{source_key}:audio_decoder"
     ));
 
     let subscriber = crate::rtsp::subscriber::RtspSubscriber {
@@ -84,7 +84,7 @@ mod tests {
             },
             ObswsOutputKind::Record,
             1,
-            0,
+            "0",
         )
         .expect("rtsp_subscriber source plan must succeed");
 
@@ -128,7 +128,7 @@ mod tests {
             &ObswsRtspSubscriberSettings { input_url: None },
             ObswsOutputKind::Record,
             1,
-            0,
+            "0",
         );
         assert!(matches!(
             result,

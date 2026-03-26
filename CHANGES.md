@@ -61,7 +61,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.146.2-canary1 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.146.2-canary3 を追加する
   - @sile
 - [ADD] 実験的な `obsws` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui obsws` で WebSocket サーバーを起動できる

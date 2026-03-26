@@ -282,7 +282,7 @@ pub fn build_record_source_plan(
     input: &ObswsInputEntry,
     output_kind: ObswsOutputKind,
     run_id: u64,
-    source_index: usize,
+    source_key: &str,
     frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     match &input.input.settings {
@@ -290,26 +290,26 @@ pub fn build_record_source_plan(
             settings,
             output_kind,
             run_id,
-            source_index,
+            source_key,
             frame_rate,
         ),
         ObswsInputSettings::Mp4FileSource(settings) => {
-            mp4::build_record_source_plan(settings, output_kind, run_id, source_index)
+            mp4::build_record_source_plan(settings, output_kind, run_id, source_key)
         }
         ObswsInputSettings::VideoCaptureDevice(settings) => {
-            video_device::build_record_source_plan(settings, output_kind, run_id, source_index)
+            video_device::build_record_source_plan(settings, output_kind, run_id, source_key)
         }
         ObswsInputSettings::AudioCaptureDevice(settings) => {
-            audio_device::build_record_source_plan(settings, output_kind, run_id, source_index)
+            audio_device::build_record_source_plan(settings, output_kind, run_id, source_key)
         }
         ObswsInputSettings::RtmpInbound(settings) => {
-            rtmp_inbound::build_record_source_plan(settings, output_kind, run_id, source_index)
+            rtmp_inbound::build_record_source_plan(settings, output_kind, run_id, source_key)
         }
         ObswsInputSettings::SrtInbound(settings) => {
-            srt_inbound::build_record_source_plan(settings, output_kind, run_id, source_index)
+            srt_inbound::build_record_source_plan(settings, output_kind, run_id, source_key)
         }
         ObswsInputSettings::RtspSubscriber(settings) => {
-            rtsp_subscriber::build_record_source_plan(settings, output_kind, run_id, source_index)
+            rtsp_subscriber::build_record_source_plan(settings, output_kind, run_id, source_key)
         }
     }
 }
