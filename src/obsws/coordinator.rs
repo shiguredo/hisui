@@ -1557,6 +1557,9 @@ impl ObswsCoordinator {
             ActivateStreamError, ObswsRecordTrackRun, ObswsStreamRun,
         };
         let stream_service_settings = self.input_registry.stream_service_settings().clone();
+        // `stream` は OBS 互換の主配信 Output として扱い、現状は RTMP 起動経路に限定する。
+        // `sora` は stream service の差し替えではなく別 Output として扱うため、
+        // ここでは `rtmp_custom` 以外を受け付けない。
         if stream_service_settings.stream_service_type != "rtmp_custom" {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -1994,6 +1997,10 @@ impl ObswsCoordinator {
     }
 
     // --- Sora Publisher 操作 ---
+    // `sora` は OBS の `stream` を拡張したものではなく、Program 出力の raw frame を
+    // `sora-rust-sdk` に直接渡す専用 Output として扱う。
+    // 将来的に `stream` を多プロトコル化する余地はあるが、現時点では OBS 互換の
+    // 意味を保つため `stream` と `sora` を分離している。
 
     async fn handle_start_sora_publisher(
         &mut self,

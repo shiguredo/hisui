@@ -11,6 +11,11 @@ use super::{
     parse_set_record_directory_fields, parse_set_stream_service_settings_fields,
 };
 
+// `stream` は OBS 互換の主配信 Output として扱う。
+// 現状は `streamServiceSettings` を使う RTMP 系の配信実装に結び付いているため、
+// raw frame をそのまま WebRTC SDK に渡す `sora` とは分離している。
+// 将来的に `stream` を多プロトコル化する余地はあるが、現時点では API の意味を
+// 明確に保つことを優先して独立 Output 名を維持する。
 const OBSWS_STREAM_OUTPUT_NAME: &str = "stream";
 const OBSWS_RECORD_OUTPUT_NAME: &str = "record";
 const OBSWS_RTMP_OUTBOUND_OUTPUT_NAME: &str = "rtmp_outbound";
