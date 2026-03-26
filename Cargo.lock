@@ -365,6 +365,7 @@ dependencies = [
  "shiguredo_http11",
  "shiguredo_libvpx",
  "shiguredo_libyuv",
+ "shiguredo_m3u8",
  "shiguredo_mp4",
  "shiguredo_nvcodec",
  "shiguredo_openh264",
@@ -1038,6 +1039,12 @@ dependencies = [
  "shiguredo_cmake",
  "shiguredo_toml",
 ]
+
+[[package]]
+name = "shiguredo_m3u8"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33c686e9773e36ea91141a001ae4c3140b992b7e1d56b2c414fba547cd396e46"
 
 [[package]]
 name = "shiguredo_mp4"

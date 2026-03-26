@@ -417,6 +417,17 @@ pub struct ObswsRecordRun {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsHlsRun {
+    pub source_processor_ids: Vec<ProcessorId>,
+    pub video: ObswsRecordTrackRun,
+    pub audio: ObswsRecordTrackRun,
+    pub audio_mixer_processor_id: ProcessorId,
+    pub video_mixer_processor_id: ProcessorId,
+    pub writer_processor_id: ProcessorId,
+    pub output_directory: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsSoraPublisherRun {
     pub publisher_processor_id: ProcessorId,
 }
@@ -693,6 +704,13 @@ pub(crate) struct ObswsRecordRuntimeState {
     pub(crate) active: bool,
     pub(crate) started_at: Option<Instant>,
     pub(crate) run: Option<ObswsRecordRun>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ObswsHlsRuntimeState {
+    pub(crate) active: bool,
+    pub(crate) started_at: Option<Instant>,
+    pub(crate) run: Option<ObswsHlsRun>,
 }
 
 #[derive(Debug, Clone)]
@@ -1053,6 +1071,44 @@ pub struct ObswsRtmpOutboundSettings {
     pub stream_name: Option<String>,
 }
 
+/// HLS 出力の設定。
+/// segment_duration と max_retained_segments は SetOutputSettings で変更可能。
+pub const DEFAULT_HLS_SEGMENT_DURATION_SECS: f64 = 2.0;
+pub const DEFAULT_HLS_MAX_RETAINED_SEGMENTS: usize = 6;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObswsHlsSettings {
+    // StartOutput 時に必須。登録時点では未指定も許容する。
+    pub output_directory: Option<String>,
+    /// セグメントの目標尺（秒）
+    pub segment_duration: f64,
+    /// プレイリストに保持するセグメント数
+    pub max_retained_segments: usize,
+}
+
+impl Default for ObswsHlsSettings {
+    fn default() -> Self {
+        Self {
+            output_directory: None,
+            segment_duration: DEFAULT_HLS_SEGMENT_DURATION_SECS,
+            max_retained_segments: DEFAULT_HLS_MAX_RETAINED_SEGMENTS,
+        }
+    }
+}
+
+impl nojson::DisplayJson for ObswsHlsSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(output_directory) = &self.output_directory {
+                f.member("outputDirectory", output_directory)?;
+            }
+            f.member("segmentDuration", self.segment_duration)?;
+            f.member("maxRetainedSegments", self.max_retained_segments)
+        })
+        .fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsSoraPublisherSettings {
     // StartOutput 時に必須。登録時点では未指定も許容する。
@@ -1211,6 +1267,7 @@ pub enum RunIdOverflowError {
     Record,
     RtmpOutbound,
     SoraPublisher,
+    Hls,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1230,6 +1287,11 @@ pub enum ActivateStreamError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivateRecordError {
+    AlreadyActive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateHlsError {
     AlreadyActive,
 }
 
@@ -1321,6 +1383,9 @@ pub struct ObswsInputRegistry {
     pub(crate) next_sora_publisher_run_id: u64,
     pub(crate) record_directory: PathBuf,
     pub(crate) record_runtime: ObswsRecordRuntimeState,
+    pub(crate) hls_settings: ObswsHlsSettings,
+    pub(crate) hls_runtime: ObswsHlsRuntimeState,
+    pub(crate) next_hls_run_id: u64,
     pub(crate) canvas_width: crate::types::EvenUsize,
     pub(crate) canvas_height: crate::types::EvenUsize,
     pub(crate) frame_rate: crate::video::FrameRate,

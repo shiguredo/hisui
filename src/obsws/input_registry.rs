@@ -93,6 +93,9 @@ impl ObswsInputRegistry {
             next_sora_publisher_run_id: 0,
             record_directory,
             record_runtime: ObswsRecordRuntimeState::default(),
+            hls_settings: ObswsHlsSettings::default(),
+            hls_runtime: ObswsHlsRuntimeState::default(),
+            next_hls_run_id: 0,
             canvas_width,
             canvas_height,
             frame_rate,
@@ -790,6 +793,62 @@ impl ObswsInputRegistry {
             .run
             .as_ref()
             .map(|run| run.output_path.as_path())
+    }
+
+    pub fn hls_settings(&self) -> &ObswsHlsSettings {
+        &self.hls_settings
+    }
+
+    pub fn set_hls_settings(&mut self, settings: ObswsHlsSettings) {
+        self.hls_settings = settings;
+    }
+
+    pub fn next_hls_run_id(&mut self) -> Result<u64, RunIdOverflowError> {
+        let run_id = self.next_hls_run_id;
+        self.next_hls_run_id = self
+            .next_hls_run_id
+            .checked_add(1)
+            .ok_or(RunIdOverflowError::Hls)?;
+        Ok(run_id)
+    }
+
+    pub fn activate_hls(&mut self, run: ObswsHlsRun) -> Result<(), ActivateHlsError> {
+        if self.hls_runtime.active {
+            return Err(ActivateHlsError::AlreadyActive);
+        }
+        self.hls_runtime.active = true;
+        self.hls_runtime.started_at = Some(Instant::now());
+        self.hls_runtime.run = Some(run);
+        Ok(())
+    }
+
+    pub fn deactivate_hls(&mut self) -> Option<ObswsHlsRun> {
+        let run = self.hls_runtime.run.take();
+        self.hls_runtime.active = false;
+        self.hls_runtime.started_at = None;
+        run
+    }
+
+    pub fn is_hls_active(&self) -> bool {
+        self.hls_runtime.active
+    }
+
+    pub fn hls_run(&self) -> Option<ObswsHlsRun> {
+        self.hls_runtime.run.clone()
+    }
+
+    pub fn hls_uptime(&self) -> Duration {
+        self.hls_runtime
+            .started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn hls_output_directory(&self) -> Option<&Path> {
+        self.hls_runtime
+            .run
+            .as_ref()
+            .map(|run| run.output_directory.as_path())
     }
 
     /// 指定した input_uuid を参照するシーンアイテムを全シーンから検索する。

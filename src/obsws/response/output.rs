@@ -20,10 +20,12 @@ const OBSWS_STREAM_OUTPUT_NAME: &str = "stream";
 const OBSWS_RECORD_OUTPUT_NAME: &str = "record";
 const OBSWS_RTMP_OUTBOUND_OUTPUT_NAME: &str = "rtmp_outbound";
 const OBSWS_SORA_OUTPUT_NAME: &str = "sora";
+const OBSWS_HLS_OUTPUT_NAME: &str = "hls";
 const OBSWS_STREAM_OUTPUT_KIND: &str = "rtmp_output";
 const OBSWS_RECORD_OUTPUT_KIND: &str = "mp4_output";
 const OBSWS_RTMP_OUTBOUND_OUTPUT_KIND: &str = "rtmp_outbound_output";
 const OBSWS_SORA_OUTPUT_KIND: &str = "sora_webrtc_output";
+const OBSWS_HLS_OUTPUT_KIND: &str = "hls_output";
 
 #[derive(Debug, Clone, Copy)]
 struct ObswsOutputEntry {
@@ -130,6 +132,10 @@ pub fn build_get_output_list_response(request_id: &str) -> nojson::RawJsonOwned 
             output_name: OBSWS_SORA_OUTPUT_NAME,
             output_kind: OBSWS_SORA_OUTPUT_KIND,
         },
+        ObswsOutputEntry {
+            output_name: OBSWS_HLS_OUTPUT_NAME,
+            output_kind: OBSWS_HLS_OUTPUT_KIND,
+        },
     ];
     super::build_request_response_success("GetOutputList", request_id, |f| {
         f.member("outputs", outputs)
@@ -162,6 +168,7 @@ pub fn build_get_output_settings_response(
             build_rtmp_outbound_output_settings_response(request_id, input_registry)
         }
         OBSWS_SORA_OUTPUT_NAME => build_sora_output_settings_response(request_id, input_registry),
+        OBSWS_HLS_OUTPUT_NAME => build_hls_output_settings_response(request_id, input_registry),
         _ => super::build_request_response_error(
             "GetOutputSettings",
             request_id,
@@ -284,6 +291,20 @@ pub fn build_set_output_settings_response(
                 ),
             }
         }
+        OBSWS_HLS_OUTPUT_NAME => {
+            let output_settings = fields.output_settings.value();
+            match parse_hls_settings(output_settings, input_registry) {
+                Ok(()) => {
+                    super::build_request_response_success_no_data("SetOutputSettings", request_id)
+                }
+                Err(error) => super::build_request_response_error(
+                    "SetOutputSettings",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &error,
+                ),
+            }
+        }
         _ => super::build_request_response_error(
             "SetOutputSettings",
             request_id,
@@ -394,6 +415,9 @@ pub fn build_get_output_status_response(
         }
         OBSWS_SORA_OUTPUT_NAME => {
             build_get_sora_status_as_output_response(request_id, input_registry)
+        }
+        OBSWS_HLS_OUTPUT_NAME => {
+            build_get_hls_status_as_output_response(request_id, input_registry)
         }
         _ => super::build_request_response_error(
             "GetOutputStatus",
@@ -702,4 +726,92 @@ fn read_file_size_bytes(path: &std::path::Path) -> u64 {
     std::fs::metadata(path)
         .map(|metadata| metadata.len())
         .unwrap_or(0)
+}
+
+fn build_hls_output_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let settings = input_registry.hls_settings();
+    super::build_request_response_success("GetOutputSettings", request_id, |f| {
+        f.member("outputName", OBSWS_HLS_OUTPUT_NAME)?;
+        f.member("outputKind", OBSWS_HLS_OUTPUT_KIND)?;
+        f.member("outputSettings", settings)
+    })
+}
+
+fn build_get_hls_status_as_output_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let active = input_registry.is_hls_active();
+    let duration = if active {
+        input_registry.hls_uptime()
+    } else {
+        std::time::Duration::ZERO
+    };
+    let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+    let output_timecode = format_timecode(duration);
+    let output_path = input_registry
+        .hls_output_directory()
+        .map(|p| p.join("playlist.m3u8").display().to_string())
+        .unwrap_or_default();
+    // TODO: outputBytes / outputSkippedFrames / outputTotalFrames は未対応。0 固定。
+    super::build_request_response_success("GetOutputStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputReconnecting", false)?;
+        f.member("outputTimecode", &output_timecode)?;
+        f.member("outputDuration", output_duration)?;
+        f.member("outputCongestion", 0.0)?;
+        f.member("outputBytes", 0)?;
+        f.member("outputSkippedFrames", 0)?;
+        f.member("outputTotalFrames", 0)?;
+        f.member("outputPath", &output_path)
+    })
+}
+
+/// HLS 出力の設定をパースして registry に保存する。
+/// 省略されたフィールドは既存値を維持する。
+fn parse_hls_settings(
+    output_settings: nojson::RawJsonValue<'_, '_>,
+    input_registry: &mut ObswsInputRegistry,
+) -> Result<(), String> {
+    let output_directory: Option<String> =
+        super::optional_non_empty_string_member(output_settings, "outputDirectory")
+            .map_err(|e| e.to_string())?;
+
+    let segment_duration: Option<f64> = output_settings
+        .to_member("segmentDuration")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    let max_retained_segments: Option<usize> = output_settings
+        .to_member("maxRetainedSegments")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    if let Some(duration) = segment_duration {
+        if duration <= 0.0 {
+            return Err("segmentDuration must be positive".to_owned());
+        }
+    }
+    if let Some(count) = max_retained_segments {
+        if count == 0 {
+            return Err("maxRetainedSegments must be at least 1".to_owned());
+        }
+    }
+
+    let existing = input_registry.hls_settings().clone();
+    input_registry.set_hls_settings(crate::obsws::input_registry::ObswsHlsSettings {
+        output_directory: output_directory.or(existing.output_directory),
+        segment_duration: segment_duration.unwrap_or(existing.segment_duration),
+        max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
+    });
+    Ok(())
 }
