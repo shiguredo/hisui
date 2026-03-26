@@ -4,8 +4,8 @@ use shiguredo_webrtc::{
     AdaptedVideoTrackSource, CxxString, DataChannel, DataChannelInit, DataChannelObserver,
     DataChannelObserverHandler, DataChannelState, IceGatheringState, PeerConnection,
     PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionObserver,
-    PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState,
-    RtpSender, StringVector,
+    PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState, RtpSender,
+    StringVector,
 };
 use tokio::sync::mpsc;
 
@@ -403,8 +403,7 @@ impl WebRtcP2pSessionManager {
                 }
 
                 // bootstrap 差分イベントの購読タスクを起動する
-                let mut bootstrap_rx =
-                    self.coordinator_handle.subscribe_bootstrap_events();
+                let mut bootstrap_rx = self.coordinator_handle.subscribe_bootstrap_events();
                 let event_tx = sess.event_tx.clone();
                 tokio::spawn(async move {
                     while let Ok(event) = bootstrap_rx.recv().await {
@@ -968,23 +967,23 @@ fn subscribe_bootstrap_input(
     session: &mut Session,
     snapshot: &crate::obsws::coordinator::BootstrapInputSnapshot,
 ) {
-    if let Some(video_track_id) = &snapshot.video_track_id {
-        if let Err(e) = subscribe_track(session, video_track_id.clone(), TrackKind::Video) {
-            tracing::warn!(
-                "failed to subscribe bootstrap video track for {}: {}",
-                snapshot.input_uuid,
-                e.display()
-            );
-        }
+    if let Some(video_track_id) = &snapshot.video_track_id
+        && let Err(e) = subscribe_track(session, video_track_id.clone(), TrackKind::Video)
+    {
+        tracing::warn!(
+            "failed to subscribe bootstrap video track for {}: {}",
+            snapshot.input_uuid,
+            e.display()
+        );
     }
-    if let Some(audio_track_id) = &snapshot.audio_track_id {
-        if let Err(e) = subscribe_track(session, audio_track_id.clone(), TrackKind::Audio) {
-            tracing::warn!(
-                "failed to subscribe bootstrap audio track for {}: {}",
-                snapshot.input_uuid,
-                e.display()
-            );
-        }
+    if let Some(audio_track_id) = &snapshot.audio_track_id
+        && let Err(e) = subscribe_track(session, audio_track_id.clone(), TrackKind::Audio)
+    {
+        tracing::warn!(
+            "failed to subscribe bootstrap audio track for {}: {}",
+            snapshot.input_uuid,
+            e.display()
+        );
     }
     session.bootstrap_tracks.insert(
         snapshot.input_uuid.clone(),
@@ -1007,7 +1006,10 @@ async fn handle_bootstrap_input_created(
     send_dc(sess, &msg);
 
     if let Err(e) = maybe_send_offer(sess).await {
-        tracing::warn!("failed to send renegotiation offer after input created: {}", e.display());
+        tracing::warn!(
+            "failed to send renegotiation offer after input created: {}",
+            e.display()
+        );
     }
 }
 
@@ -1027,7 +1029,10 @@ async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
     send_dc(sess, &msg);
 
     if let Err(e) = maybe_send_offer(sess).await {
-        tracing::warn!("failed to send renegotiation offer after input removed: {}", e.display());
+        tracing::warn!(
+            "failed to send renegotiation offer after input removed: {}",
+            e.display()
+        );
     }
 }
 

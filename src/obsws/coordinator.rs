@@ -552,18 +552,19 @@ impl ObswsCoordinator {
             }
 
             // bootstrap 用の差分イベントを送信する
-            if let Some(source_state) =
-                self.input_source_processors.get(&created.input_entry.input_uuid)
+            if let Some(source_state) = self
+                .input_source_processors
+                .get(&created.input_entry.input_uuid)
             {
-                let _ =
-                    self.bootstrap_event_tx
-                        .send(BootstrapInputEvent::InputCreated(BootstrapInputSnapshot {
-                            input_uuid: created.input_entry.input_uuid.clone(),
-                            input_name: created.input_entry.input_name.clone(),
-                            input_kind: created.input_entry.input.kind_name().to_owned(),
-                            video_track_id: source_state.video_track_id.clone(),
-                            audio_track_id: source_state.audio_track_id.clone(),
-                        }));
+                let _ = self
+                    .bootstrap_event_tx
+                    .send(BootstrapInputEvent::InputCreated(BootstrapInputSnapshot {
+                        input_uuid: created.input_entry.input_uuid.clone(),
+                        input_name: created.input_entry.input_name.clone(),
+                        input_kind: created.input_entry.input.kind_name().to_owned(),
+                        video_track_id: source_state.video_track_id.clone(),
+                        audio_track_id: source_state.audio_track_id.clone(),
+                    }));
             }
 
             events.push(TaggedEvent {
@@ -657,9 +658,11 @@ impl ObswsCoordinator {
                 }
 
                 // bootstrap 用の差分イベントを送信する
-                let _ = self.bootstrap_event_tx.send(BootstrapInputEvent::InputRemoved {
-                    input_uuid: removed_input.input_uuid.clone(),
-                });
+                let _ = self
+                    .bootstrap_event_tx
+                    .send(BootstrapInputEvent::InputRemoved {
+                        input_uuid: removed_input.input_uuid.clone(),
+                    });
 
                 events.push(TaggedEvent {
                     text: crate::obsws::response::build_input_removed_event(
@@ -2198,11 +2201,8 @@ impl ObswsCoordinator {
             audio_track_id: source_plan.source_audio_track_id.clone(),
         };
 
-        crate::obsws::session::output::start_source_processors(
-            pipeline_handle,
-            &mut vec![source_plan],
-        )
-        .await?;
+        crate::obsws::session::output::start_source_processors(pipeline_handle, &mut [source_plan])
+            .await?;
 
         self.input_source_processors
             .insert(input_entry.input_uuid.clone(), state);
@@ -2217,16 +2217,18 @@ impl ObswsCoordinator {
         let Some(pipeline_handle) = &self.pipeline_handle else {
             return Ok(());
         };
-        crate::obsws::session::output::stop_source_processors(
-            pipeline_handle,
-            &state.processor_ids,
-        )
-        .await
+        crate::obsws::session::output::stop_source_processors(pipeline_handle, &state.processor_ids)
+            .await
     }
 
     /// 初期入力に対して source processor を一括起動する
     pub async fn start_initial_input_source_processors(&mut self) -> crate::Result<()> {
-        let entries: Vec<_> = self.input_registry.inputs_by_uuid.values().cloned().collect();
+        let entries: Vec<_> = self
+            .input_registry
+            .inputs_by_uuid
+            .values()
+            .cloned()
+            .collect();
         for entry in entries {
             if let Err(e) = self.start_input_source_processor(&entry).await {
                 tracing::warn!(
