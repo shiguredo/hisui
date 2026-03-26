@@ -33,9 +33,18 @@ impl shiguredo_websocket::RandomSource for SecureRandom {
 }
 
 fn rand_byte() -> u8 {
+    use std::sync::Once;
     static COUNTER: AtomicU64 = AtomicU64::new(0);
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        // 起動ごとに異なるシーケンスを生成するため、時刻で seed を設定する
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        COUNTER.store(seed, Ordering::Relaxed);
+    });
     let v = COUNTER.fetch_add(1, Ordering::Relaxed);
-    // 簡易な疑似乱数（example 用途なので暗号的安全性は不要）
     let mixed = v
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
