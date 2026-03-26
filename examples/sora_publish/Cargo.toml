@@ -5,18 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-shiguredo_websocket = "2026.1.0-canary.5"
-nojson = "0.3.9"
-tokio = { version = "1.50.0", features = [
-    "rt",
-    "rt-multi-thread",
-    "net",
-    "io-util",
-    "macros",
-    "time",
-    "sync",
-    "signal",
-] }
-noargs = "0.4.2"
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["fmt", "std"] }
+shiguredo_websocket = { workspace = true }
+nojson = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
+noargs = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

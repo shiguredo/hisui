@@ -5,21 +5,13 @@ edition = "2024"
 publish = false
 
 [dependencies]
-shiguredo_webrtc = "=0.146.2-canary.3"
-shiguredo_http11 = "2026.1.1"
-shiguredo_libvpx = "2026.1.0-canary.2"
-shiguredo_opus = "2026.1.0-canary.4"
-shiguredo_mp4 = "2026.2.0"
-nojson = "0.3.9"
-tokio = { version = "1.50.0", features = [
-    "rt",
-    "rt-multi-thread",
-    "net",
-    "io-util",
-    "macros",
-    "time",
-    "sync",
-] }
-noargs = "0.4.2"
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["fmt", "std"] }
+shiguredo_webrtc = { workspace = true }
+shiguredo_http11 = { workspace = true }
+shiguredo_libvpx = { workspace = true }
+shiguredo_opus = { workspace = true }
+shiguredo_mp4 = { workspace = true }
+nojson = { workspace = true }
+tokio = { workspace = true }
+noargs = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
