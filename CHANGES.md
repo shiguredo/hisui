@@ -31,6 +31,11 @@
 - [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
   - `shiguredo_audio_device` が PulseAudio バックエンドを利用するために必要
   - @sile
+- [ADD] obsws の Output に HLS ライブ出力 (`outputName: "hls"`) を追加する
+  - H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する
+  - `SetOutputSettings` で `outputDirectory` / `segmentDuration` / `maxRetainedSegments` / `segmentFormat` を設定可能
+  - `segmentFormat` は `"mpegts"` (デフォルト) または `"fmp4"` を指定可能
+  - @sile
 - [ADD] obsws Output に Sora WebRTC Publisher (`outputName: "sora"`) を追加する
   - sora-rust-sdk を使い、Program 出力を Sora に SendOnly で配信する
   - @sile

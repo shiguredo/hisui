@@ -1406,6 +1406,10 @@ impl ObswsCoordinator {
                     .await;
                 (outcome, Vec::new())
             }
+            "hls" => {
+                let outcome = self.handle_start_hls("StartOutput", request_id).await;
+                (outcome, Vec::new())
+            }
             _ => {
                 return self.build_error_result(
                     "StartOutput",
@@ -1492,6 +1496,10 @@ impl ObswsCoordinator {
                 let outcome = self
                     .handle_stop_sora_publisher("StopOutput", request_id)
                     .await;
+                (outcome, Vec::new())
+            }
+            "hls" => {
+                let outcome = self.handle_stop_hls("StopOutput", request_id).await;
                 (outcome, Vec::new())
             }
             _ => {
@@ -1635,6 +1643,15 @@ impl ObswsCoordinator {
                 } else {
                     self.handle_start_sora_publisher("ToggleOutput", request_id)
                         .await
+                };
+                (outcome, !was_active, Vec::new())
+            }
+            "hls" => {
+                let was_active = self.input_registry.is_hls_active();
+                let outcome = if was_active {
+                    self.handle_stop_hls("ToggleOutput", request_id).await
+                } else {
+                    self.handle_start_hls("ToggleOutput", request_id).await
                 };
                 (outcome, !was_active, Vec::new())
             }
@@ -1961,6 +1978,149 @@ impl ObswsCoordinator {
         OutputOperationOutcome::success(
             crate::obsws::response::build_stop_record_response(request_id, &output_path),
             Some(output_path),
+        )
+    }
+
+    async fn handle_start_hls(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+    ) -> OutputOperationOutcome {
+        use crate::obsws::input_registry::{ActivateHlsError, ObswsHlsRun, ObswsRecordTrackRun};
+        let hls_settings = self.input_registry.hls_settings().clone();
+        let Some(ref output_directory_str) = hls_settings.output_directory else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Missing outputSettings.outputDirectory field",
+                ),
+            );
+        };
+        let output_directory = std::path::PathBuf::from(&output_directory_str);
+        let run_id = match self.input_registry.next_hls_run_id() {
+            Ok(run_id) => run_id,
+            Err(_) => {
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        "HLS run ID overflow",
+                    ),
+                );
+            }
+        };
+        let mut output_plan = match build_output_plan_or_error(
+            request_type,
+            request_id,
+            &self.input_registry,
+            crate::obsws::source::ObswsOutputKind::Hls,
+            run_id,
+        ) {
+            Ok(plan) => plan,
+            Err(outcome) => return outcome,
+        };
+        let video = ObswsRecordTrackRun::new("hls", run_id, "video", &output_plan.video_track_id);
+        let audio = ObswsRecordTrackRun::new("hls", run_id, "audio", &output_plan.audio_track_id);
+        let run = ObswsHlsRun {
+            source_processor_ids: output_plan.source_processor_ids.clone(),
+            video,
+            audio,
+            audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
+            video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
+            writer_processor_id: crate::ProcessorId::new(format!("obsws:hls:{run_id}:hls_writer")),
+            output_directory: output_directory.clone(),
+        };
+        if let Err(ActivateHlsError::AlreadyActive) = self.input_registry.activate_hls(run.clone())
+        {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    "HLS is already active",
+                ),
+            );
+        }
+        if let Err(e) = std::fs::create_dir_all(&output_directory) {
+            self.input_registry.deactivate_hls();
+            let error_comment = format!("Failed to create HLS output directory: {e}");
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &error_comment,
+                ),
+            );
+        }
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            self.input_registry.deactivate_hls();
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Pipeline is not initialized",
+                ),
+            );
+        };
+        if let Err(e) = start_hls_processors(
+            pipeline_handle,
+            &mut output_plan,
+            &output_directory,
+            &run,
+            &hls_settings,
+        )
+        .await
+        {
+            self.input_registry.deactivate_hls();
+            let _ = stop_processors_staged_hls(pipeline_handle, &run).await;
+            let error_comment = format!("Failed to start HLS: {}", e.display());
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &error_comment,
+                ),
+            );
+        }
+        OutputOperationOutcome::success(
+            crate::obsws::response::build_start_output_response(request_id),
+            None,
+        )
+    }
+
+    async fn handle_stop_hls(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+    ) -> OutputOperationOutcome {
+        // deactivate_hls() でアクティブチェックと状態解除を兼ねる（不要な clone を避ける）
+        let run = match self.input_registry.deactivate_hls() {
+            Some(run) => run,
+            None => {
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        "HLS is not active",
+                    ),
+                );
+            }
+        };
+        if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
+            && let Err(e) = stop_processors_staged_hls(pipeline_handle, &run).await
+        {
+            tracing::warn!("failed to stop HLS processors: {}", e.display());
+        }
+        OutputOperationOutcome::success(
+            crate::obsws::response::build_stop_output_response(request_id),
+            None,
         )
     }
 
@@ -2831,6 +2991,124 @@ async fn stop_processors_staged_record(
     .await?;
 
     // 4. ライターは finalize を優先し、残れば強制停止
+    wait_or_terminate(
+        pipeline_handle,
+        std::slice::from_ref(&run.writer_processor_id),
+        Duration::from_secs(5),
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// HLS 用プロセッサを起動する
+async fn start_hls_processors(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
+    output_directory: &std::path::Path,
+    run: &crate::obsws::input_registry::ObswsHlsRun,
+    hls_settings: &crate::obsws::input_registry::ObswsHlsSettings,
+) -> crate::Result<()> {
+    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
+
+    // HLS 用にキーフレーム間隔を設定する。
+    // segment_duration に合わせたフレーム数を計算し、エンコーダーに事前通知する。
+    let fps = output_plan.frame_rate.numerator.get() as f64
+        / output_plan.frame_rate.denumerator.get() as f64;
+    let keyframe_interval_frames = (hls_settings.segment_duration * fps).ceil() as u32;
+    let keyframe_interval_frames = keyframe_interval_frames.max(1);
+    let encode_params = crate::encoder::encode_config_with_keyframe_interval(
+        keyframe_interval_frames,
+        output_plan.frame_rate,
+    );
+
+    crate::encoder::create_video_processor_with_params(
+        pipeline_handle,
+        run.video.source_track_id.clone(),
+        run.video.encoded_track_id.clone(),
+        crate::types::CodecName::H264,
+        std::num::NonZeroUsize::new(hls_settings.video_bitrate_bps)
+            .unwrap_or(std::num::NonZeroUsize::MIN),
+        output_plan.frame_rate,
+        Some(encode_params),
+        Some(run.video.encoder_processor_id.clone()),
+    )
+    .await?;
+    // HLS は AAC エンコーディングを使用する（HLS 仕様の要件）
+    crate::encoder::create_audio_processor(
+        pipeline_handle,
+        run.audio.source_track_id.clone(),
+        run.audio.encoded_track_id.clone(),
+        crate::types::CodecName::Aac,
+        std::num::NonZeroUsize::new(hls_settings.audio_bitrate_bps)
+            .unwrap_or(std::num::NonZeroUsize::MIN),
+        Some(run.audio.encoder_processor_id.clone()),
+    )
+    .await?;
+    crate::hls::writer::create_processor(
+        pipeline_handle,
+        crate::hls::writer::HlsWriterConfig {
+            output_directory: output_directory.to_path_buf(),
+            input_audio_track_id: run.audio.encoded_track_id.clone(),
+            input_video_track_id: run.video.encoded_track_id.clone(),
+            segment_duration: hls_settings.segment_duration,
+            max_retained_segments: hls_settings.max_retained_segments,
+            segment_format: hls_settings.segment_format,
+        },
+        Some(run.writer_processor_id.clone()),
+    )
+    .await?;
+    crate::obsws::session::output::start_source_processors(
+        pipeline_handle,
+        &mut output_plan.source_plans,
+    )
+    .await?;
+    Ok(())
+}
+
+/// HLS 用プロセッサを段階的に停止する。
+/// record と同じパターン: ソース → ミキサー (EOS) → エンコーダ → ライター
+async fn stop_processors_staged_hls(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    run: &crate::obsws::input_registry::ObswsHlsRun,
+) -> crate::Result<()> {
+    // 1. ソースを停止
+    terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
+
+    // 2. ミキサーに Finish RPC を送り、自然終了を試みる
+    let mixer_ids = vec![
+        run.audio_mixer_processor_id.clone(),
+        run.video_mixer_processor_id.clone(),
+    ];
+    if wait_processors_stopped(pipeline_handle, &mixer_ids, Duration::from_secs(1))
+        .await
+        .is_err()
+    {
+        finish_mixer_rpc(pipeline_handle, &run.audio_mixer_processor_id, true).await;
+        finish_mixer_rpc(pipeline_handle, &run.video_mixer_processor_id, false).await;
+        if wait_processors_stopped(pipeline_handle, &mixer_ids, Duration::from_secs(5))
+            .await
+            .is_err()
+        {
+            let live = live_processor_ids(pipeline_handle, &mixer_ids).await;
+            if !live.is_empty() {
+                terminate_and_wait(pipeline_handle, &live).await?;
+            }
+        }
+    }
+
+    // 3. エンコーダーは EOS 伝播での自然終了を優先し、残れば強制停止
+    wait_or_terminate(
+        pipeline_handle,
+        &[
+            run.video.encoder_processor_id.clone(),
+            run.audio.encoder_processor_id.clone(),
+        ],
+        Duration::from_secs(5),
+    )
+    .await?;
+
+    // 4. HLS ライターは cleanup を含む自然終了を優先し、残れば強制停止
     wait_or_terminate(
         pipeline_handle,
         std::slice::from_ref(&run.writer_processor_id),
