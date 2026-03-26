@@ -39,11 +39,15 @@ pub(super) fn build_record_source_plan(
         "obsws:{kind}:{run_id}:source:{source_key}:audio_decoder"
     ));
 
+    // obsws 経由では 1 ストリームのみ（stream_name 未指定時は空文字列）
+    let stream_name = settings.stream_name.clone().unwrap_or_default();
     let endpoint = crate::rtmp::inbound_endpoint::RtmpInboundEndpoint {
         input_url: input_url.to_owned(),
-        stream_name: settings.stream_name.clone(),
-        output_audio_track_id: Some(encoded_audio_track_id.clone()),
-        output_video_track_id: Some(encoded_video_track_id.clone()),
+        streams: vec![crate::rtmp::inbound_endpoint::RtmpInboundStream {
+            stream_name,
+            output_audio_track_id: Some(encoded_audio_track_id.clone()),
+            output_video_track_id: Some(encoded_video_track_id.clone()),
+        }],
         options: Default::default(),
     };
 
@@ -120,7 +124,8 @@ mod tests {
         match &plan.requests[0] {
             ObswsSourceRequest::CreateRtmpInboundEndpoint { endpoint, .. } => {
                 assert_eq!(endpoint.input_url, "rtmp://127.0.0.1:1935");
-                assert_eq!(endpoint.stream_name.as_deref(), Some("live"));
+                assert_eq!(endpoint.streams.len(), 1);
+                assert_eq!(endpoint.streams[0].stream_name, "live");
             }
             _ => panic!("expected CreateRtmpInboundEndpoint"),
         }
@@ -141,7 +146,9 @@ mod tests {
 
         match &plan.requests[0] {
             ObswsSourceRequest::CreateRtmpInboundEndpoint { endpoint, .. } => {
-                assert_eq!(endpoint.stream_name, None);
+                assert_eq!(endpoint.streams.len(), 1);
+                // stream_name 未指定時は空文字列
+                assert_eq!(endpoint.streams[0].stream_name, "");
             }
             _ => panic!("expected CreateRtmpInboundEndpoint"),
         }

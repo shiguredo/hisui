@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -14,14 +16,28 @@ pub struct RtmpInboundEndpointOptions {
     pub key_path: Option<PathBuf>,
 }
 
-/// RTMP Inbound Endpoint
-pub struct RtmpInboundEndpoint {
-    pub input_url: String,
-    pub stream_name: Option<String>,
+/// 1 つのストリームキーに対応する設定
+pub struct RtmpInboundStream {
+    pub stream_name: String,
     pub output_audio_track_id: Option<crate::TrackId>,
     pub output_video_track_id: Option<crate::TrackId>,
+}
+
+/// RTMP Inbound Endpoint（1 ポートで複数ストリームを受信）
+pub struct RtmpInboundEndpoint {
+    pub input_url: String,
+    pub streams: Vec<RtmpInboundStream>,
     pub options: RtmpInboundEndpointOptions,
 }
+
+/// ストリームごとのランタイム状態
+struct StreamSlot {
+    video_track_tx: Option<crate::MessageSender>,
+    audio_track_tx: Option<crate::MessageSender>,
+}
+
+/// 共有状態（accept ループと各 handler タスクで共有）
+type StreamSlots = Mutex<HashMap<String, StreamSlot>>;
 
 #[derive(Debug, Clone)]
 struct RtmpInboundEndpointStats {
@@ -79,10 +95,22 @@ impl RtmpInboundEndpointStats {
 impl RtmpInboundEndpoint {
     /// Start the RTMP Inbound Endpoint
     pub async fn run(self, handle: crate::ProcessorHandle) -> crate::Result<()> {
-        let url = parse_rtmp_url(&self.input_url, self.stream_name.as_deref())
+        // input_url を stream_name なしでパース（バインドアドレス取得用）
+        let url = shiguredo_rtmp::RtmpUrl::parse(&self.input_url)
             .map_err(|e| crate::Error::new(format!("invalid inputUrl: {e}")))?;
         let addr = format!("{}:{}", url.host, url.port);
         tracing::debug!("Starting RTMP inbound endpoint on {addr}");
+
+        // 各ストリームの stream_name でバリデーション
+        for stream in &self.streams {
+            shiguredo_rtmp::RtmpUrl::parse_with_stream_name(&self.input_url, &stream.stream_name)
+                .map_err(|e| {
+                crate::Error::new(format!(
+                    "invalid inputUrl with streamName '{}': {e}",
+                    stream.stream_name
+                ))
+            })?;
+        }
 
         let listener = TcpListener::bind(&addr).await?;
 
@@ -99,75 +127,99 @@ impl RtmpInboundEndpoint {
             None
         };
 
-        let output_audio_track_id = self.output_audio_track_id.clone();
-        let output_video_track_id = self.output_video_track_id.clone();
         let stats = RtmpInboundEndpointStats::new(handle.stats());
         stats.set_listening(true);
         let server_started_at = tokio::time::Instant::now();
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
 
-        let mut video_track_tx = if let Some(track_id) = &output_video_track_id {
-            Some(handle.publish_track(track_id.clone()).await?)
-        } else {
-            None
-        };
+        // 各ストリームのトラック送信者を初期化して StreamSlot に格納
+        let mut slots = HashMap::new();
+        for stream in self.streams {
+            let video_track_tx = if let Some(track_id) = stream.output_video_track_id {
+                Some(handle.publish_track(track_id).await?)
+            } else {
+                None
+            };
+            let audio_track_tx = if let Some(track_id) = stream.output_audio_track_id {
+                Some(handle.publish_track(track_id).await?)
+            } else {
+                None
+            };
+            slots.insert(
+                stream.stream_name,
+                StreamSlot {
+                    video_track_tx,
+                    audio_track_tx,
+                },
+            );
+        }
+        let stream_slots: Arc<StreamSlots> = Arc::new(Mutex::new(slots));
 
-        let mut audio_track_tx = if let Some(track_id) = &output_audio_track_id {
-            Some(handle.publish_track(track_id.clone()).await?)
-        } else {
-            None
-        };
+        let mut join_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+
+        let expected_app = url.app.clone();
 
         loop {
             match listener.accept().await {
                 Ok((stream, peer_addr)) => {
                     tracing::debug!("New RTMP client connection from: {peer_addr}");
-                    let expected_app = url.app.clone();
-                    let expected_stream_name = url.stream_name.clone();
                     let tls_acceptor = tls_acceptor.clone();
                     let timestamp_offset = server_started_at.elapsed();
                     let stats = stats.clone();
+                    let stream_slots = Arc::clone(&stream_slots);
+                    let expected_app = expected_app.clone();
 
-                    match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await
-                    {
-                        Ok(tls_stream) => {
-                            if tls_acceptor.is_some() {
-                                tracing::debug!("TLS handshake successful with {peer_addr}");
-                            }
-                            let Ok(mut handler) = RtmpPublisherHandler::new(
-                                tls_stream,
-                                expected_app,
-                                expected_stream_name,
-                                timestamp_offset,
-                                video_track_tx.take(),
-                                audio_track_tx.take(),
-                                stats,
-                            )
-                            .inspect_err(|e| {
-                                tracing::error!(
-                                    "Failed to initialize RTMP publisher handler: {}",
-                                    e.display()
-                                );
-                            }) else {
-                                continue;
-                            };
+                    // 完了済みタスクを除去
+                    join_handles.retain(|h| !h.is_finished());
 
-                            if let Err(e) = handler.run().await {
-                                tracing::error!("RTMP publisher handler error: {}", e.display());
+                    let join_handle = tokio::spawn(async move {
+                        match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref())
+                            .await
+                        {
+                            Ok(tls_stream) => {
+                                if tls_acceptor.is_some() {
+                                    tracing::debug!("TLS handshake successful with {peer_addr}");
+                                }
+                                let Ok(mut handler) = RtmpPublisherHandler::new(
+                                    tls_stream,
+                                    expected_app,
+                                    stream_slots,
+                                    timestamp_offset,
+                                    stats,
+                                )
+                                .inspect_err(|e| {
+                                    tracing::error!(
+                                        "Failed to initialize RTMP publisher handler: {}",
+                                        e.display()
+                                    );
+                                }) else {
+                                    return;
+                                };
+
+                                if let Err(e) = handler.run().await {
+                                    tracing::error!(
+                                        "RTMP publisher handler error: {}",
+                                        e.display()
+                                    );
+                                }
+                                handler.finalize();
+                                tracing::debug!("RTMP publisher disconnected: {peer_addr}");
                             }
-                            let (restored_video_track_tx, restored_audio_track_tx) =
-                                handler.into_track_senders();
-                            video_track_tx = restored_video_track_tx;
-                            audio_track_tx = restored_audio_track_tx;
-                            tracing::debug!("RTMP publisher disconnected: {peer_addr}");
+                            Err(e) => {
+                                tracing::error!("Connection setup failed with {peer_addr}: {e}");
+                            }
                         }
-                        Err(e) => {
-                            tracing::error!("Connection setup failed with {peer_addr}: {e}");
-                        }
-                    }
+                    });
+                    join_handles.push(join_handle);
                 }
-                Err(e) => return Err(e.into()),
+                Err(e) => {
+                    // リスナーエラー時は全タスクを停止
+                    for h in &join_handles {
+                        h.abort();
+                    }
+                    return Err(e.into());
+                }
             }
         }
     }
@@ -187,13 +239,10 @@ impl RtmpInboundEndpoint {
     }
 }
 
-impl nojson::DisplayJson for RtmpInboundEndpoint {
+impl nojson::DisplayJson for RtmpInboundStream {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("inputUrl", &self.input_url)?;
-            if let Some(stream_name) = &self.stream_name {
-                f.member("streamName", stream_name)?;
-            }
+            f.member("streamName", &self.stream_name)?;
             if let Some(track_id) = &self.output_audio_track_id {
                 f.member("outputAudioTrackId", track_id)?;
             }
@@ -205,14 +254,23 @@ impl nojson::DisplayJson for RtmpInboundEndpoint {
     }
 }
 
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundEndpoint {
+impl nojson::DisplayJson for RtmpInboundEndpoint {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("inputUrl", &self.input_url)?;
+            f.member("streams", &self.streams)?;
+            Ok(())
+        })
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundStream {
     type Error = nojson::JsonParseError;
 
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
-        let input_url: String = value.to_member("inputUrl")?.required()?.try_into()?;
-        let stream_name: Option<String> = value.to_member("streamName")?.try_into()?;
+        let stream_name: String = value.to_member("streamName")?.required()?.try_into()?;
         let output_audio_track_id: Option<crate::TrackId> =
             value.to_member("outputAudioTrackId")?.try_into()?;
         let output_video_track_id: Option<crate::TrackId> =
@@ -222,55 +280,77 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundEndp
             return Err(value.invalid("outputAudioTrackId or outputVideoTrackId is required"));
         }
 
-        let stream_name = match stream_name {
-            Some(stream_name) => {
-                let trimmed = stream_name.trim();
-                if trimmed.is_empty() {
-                    return Err(value
-                        .to_member("streamName")?
-                        .required()?
-                        .invalid("streamName must not be empty"));
-                }
-                Some(trimmed.to_owned())
-            }
-            None => None,
-        };
+        let trimmed = stream_name.trim();
+        if trimmed.is_empty() {
+            return Err(value
+                .to_member("streamName")?
+                .required()?
+                .invalid("streamName must not be empty"));
+        }
 
-        if let Err(e) = parse_rtmp_url(&input_url, stream_name.as_deref()) {
-            return Err(value.to_member("inputUrl")?.required()?.invalid(e));
+        Ok(Self {
+            stream_name: trimmed.to_owned(),
+            output_audio_track_id,
+            output_video_track_id,
+        })
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundEndpoint {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(
+        value: nojson::RawJsonValue<'text, 'raw>,
+    ) -> std::result::Result<Self, Self::Error> {
+        let input_url: String = value.to_member("inputUrl")?.required()?.try_into()?;
+        let streams: Vec<RtmpInboundStream> = value.to_member("streams")?.required()?.try_into()?;
+
+        if streams.is_empty() {
+            return Err(value
+                .to_member("streams")?
+                .required()?
+                .invalid("streams must not be empty"));
+        }
+
+        // streamName の重複チェック
+        let mut seen = std::collections::HashSet::new();
+        for stream in &streams {
+            if !seen.insert(&stream.stream_name) {
+                return Err(value
+                    .to_member("streams")?
+                    .required()?
+                    .invalid(format!("duplicate streamName: {}", stream.stream_name)));
+            }
+        }
+
+        // 各ストリームの URL バリデーション
+        for stream in &streams {
+            if let Err(e) =
+                shiguredo_rtmp::RtmpUrl::parse_with_stream_name(&input_url, &stream.stream_name)
+            {
+                return Err(value
+                    .to_member("inputUrl")?
+                    .required()?
+                    .invalid(e.to_string()));
+            }
         }
 
         Ok(Self {
             input_url,
-            stream_name,
-            output_audio_track_id,
-            output_video_track_id,
+            streams,
             options: RtmpInboundEndpointOptions::default(),
         })
     }
 }
 
-fn parse_rtmp_url(
-    input_url: &str,
-    stream_name: Option<&str>,
-) -> std::result::Result<shiguredo_rtmp::RtmpUrl, String> {
-    match stream_name {
-        Some(stream_name) => {
-            shiguredo_rtmp::RtmpUrl::parse_with_stream_name(input_url, stream_name)
-                .map_err(|e| e.to_string())
-        }
-        None => shiguredo_rtmp::RtmpUrl::parse(input_url).map_err(|e| e.to_string()),
-    }
-}
-
 /// 個別のクライアント（パブリッシャー）接続を処理する
-#[derive(Debug)]
 struct RtmpPublisherHandler {
     stream: ServerTcpOrTlsStream,
     connection: shiguredo_rtmp::RtmpServerConnection,
     recv_buf: Vec<u8>,
     expected_app: String,
-    expected_stream_name: String,
+    stream_slots: Arc<StreamSlots>,
+    active_stream_name: Option<String>,
     frame_handler: crate::rtmp::frame::RtmpIncomingFrameHandler,
     video_track_tx: Option<crate::MessageSender>,
     audio_track_tx: Option<crate::MessageSender>,
@@ -281,10 +361,8 @@ impl RtmpPublisherHandler {
     fn new(
         stream: ServerTcpOrTlsStream,
         expected_app: String,
-        expected_stream_name: String,
+        stream_slots: Arc<StreamSlots>,
         timestamp_offset: std::time::Duration,
-        video_track_tx: Option<crate::MessageSender>,
-        audio_track_tx: Option<crate::MessageSender>,
         stats: RtmpInboundEndpointStats,
     ) -> crate::Result<Self> {
         Ok(Self {
@@ -292,10 +370,11 @@ impl RtmpPublisherHandler {
             connection: shiguredo_rtmp::RtmpServerConnection::new(),
             recv_buf: vec![0u8; 4096],
             expected_app,
-            expected_stream_name,
+            stream_slots,
+            active_stream_name: None,
             frame_handler: crate::rtmp::frame::RtmpIncomingFrameHandler::new(timestamp_offset)?,
-            video_track_tx,
-            audio_track_tx,
+            video_track_tx: None,
+            audio_track_tx: None,
             stats,
         })
     }
@@ -327,8 +406,15 @@ impl RtmpPublisherHandler {
         Ok(())
     }
 
-    fn into_track_senders(self) -> (Option<crate::MessageSender>, Option<crate::MessageSender>) {
-        (self.video_track_tx, self.audio_track_tx)
+    /// トラック送信者を StreamSlot に返却する
+    fn finalize(&mut self) {
+        if let Some(stream_name) = self.active_stream_name.take() {
+            let mut slots = self.stream_slots.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(slot) = slots.get_mut(&stream_name) {
+                slot.video_track_tx = self.video_track_tx.take();
+                slot.audio_track_tx = self.audio_track_tx.take();
+            }
+        }
     }
 
     /// RTMP イベントを処理する
@@ -354,21 +440,41 @@ impl RtmpPublisherHandler {
             shiguredo_rtmp::RtmpConnectionEvent::PublishRequested {
                 app, stream_name, ..
             } => {
-                if app == &self.expected_app && stream_name == &self.expected_stream_name {
-                    self.connection.accept()?;
-                    tracing::debug!("Client started publishing stream: {}/{}", app, stream_name);
-                } else {
+                if app != &self.expected_app {
                     self.connection.reject(&format!(
-                        "Stream not found: {}/{}. Expected: {}/{}",
-                        app, stream_name, self.expected_app, self.expected_stream_name
+                        "Unknown app: {app}. Expected: {}",
+                        self.expected_app
                     ))?;
                     tracing::warn!(
-                        "Client requested invalid stream: {}/{}, expected: {}/{}",
-                        app,
-                        stream_name,
-                        self.expected_app,
-                        self.expected_stream_name
+                        "Client requested unknown app: {app}, expected: {}",
+                        self.expected_app
                     );
+                    return Ok(());
+                }
+
+                let mut slots = self.stream_slots.lock().unwrap_or_else(|e| e.into_inner());
+                match slots.get_mut(stream_name.as_str()) {
+                    Some(slot) => {
+                        // トラック送信者が利用可能か確認（他の配信者が使用中でないか）
+                        if slot.video_track_tx.is_none() && slot.audio_track_tx.is_none() {
+                            self.connection
+                                .reject(&format!("Stream already in use: {app}/{stream_name}"))?;
+                            tracing::warn!("Stream already in use: {app}/{stream_name}");
+                        } else {
+                            self.video_track_tx = slot.video_track_tx.take();
+                            self.audio_track_tx = slot.audio_track_tx.take();
+                            self.active_stream_name = Some(stream_name.clone());
+                            self.connection.accept()?;
+                            tracing::debug!(
+                                "Client started publishing stream: {app}/{stream_name}"
+                            );
+                        }
+                    }
+                    None => {
+                        self.connection
+                            .reject(&format!("Stream not found: {app}/{stream_name}"))?;
+                        tracing::warn!("Client requested unknown stream: {app}/{stream_name}");
+                    }
                 }
             }
             shiguredo_rtmp::RtmpConnectionEvent::PlayRequested { .. } => {

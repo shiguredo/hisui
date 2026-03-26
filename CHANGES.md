@@ -9,6 +9,14 @@
 - FIX
   - バグ修正
 
+## feature/rtmp-multiple-stream-keys
+
+- [CHANGE] RTMP Inbound Endpoint を 1 ポートで複数ストリームキーを受信できるように変更する
+  - `streamName` と `outputAudioTrackId` / `outputVideoTrackId` のフラットな指定から、`streams` 配列形式に変更する
+  - 異なるストリームキーの配信者を並行処理できるようにする
+  - 同じストリームキーに対しては同時に 1 配信者のみ許可する
+  - @voluntas
+
 ## develop
 
 - [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0-canary.2 にあげる
