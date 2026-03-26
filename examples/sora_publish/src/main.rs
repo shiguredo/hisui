@@ -305,6 +305,7 @@ fn main() -> noargs::Result<()> {
         .take(&mut args)
         .then(|o| o.value().parse())?;
     let port: u16 = noargs::opt("port")
+        .default("4455")
         .doc("接続先ポート")
         .take(&mut args)
         .then(|o| o.value().parse())?;
