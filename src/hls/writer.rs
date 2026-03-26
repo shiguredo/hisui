@@ -218,29 +218,40 @@ impl HlsWriter {
 
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
+                // length-prefixed NALU → Annex B 変換
+                let annexb_data =
+                    convert_length_prefixed_to_annexb(&frame.data, &frame.sample_entry)?;
                 let pts = duration_to_timestamp(frame.timestamp)?;
                 write_pes_packets_mpegts(
                     state,
                     Pid::new(VIDEO_PID).unwrap(),
                     StreamId::new_video(StreamId::VIDEO_MIN).unwrap(),
-                    &frame.data,
+                    &annexb_data,
                     Some(pts),
                     true,
                 )?;
             }
             FormatState::Fmp4(state) => {
-                let duration = state
-                    .last_video_timestamp
-                    .map(|prev| frame.timestamp.saturating_sub(prev).as_micros() as u32)
-                    .unwrap_or(0);
+                // 前のビデオサンプルの duration を確定させる
+                if let Some(prev_ts) = state.last_video_timestamp {
+                    let duration = frame.timestamp.saturating_sub(prev_ts).as_micros() as u32;
+                    if let Some(last) = state
+                        .current_samples
+                        .iter_mut()
+                        .rfind(|s| s.track_kind == shiguredo_mp4::TrackKind::Video)
+                    {
+                        last.duration = duration;
+                    }
+                }
                 let data_offset = state.current_payload.len() as u64;
                 state.current_payload.extend_from_slice(&frame.data);
+                // duration は次のフレーム到着時に確定するので、仮に 0 を入れる
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Video,
                     sample_entry: frame.sample_entry.clone(),
                     keyframe: frame.keyframe,
                     timescale: FMP4_TIMESCALE,
-                    duration,
+                    duration: 0,
                     composition_time_offset: None,
                     data_offset,
                     data_size: frame.data.len(),
@@ -264,21 +275,30 @@ impl HlsWriter {
 
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
+                // raw AAC → ADTS 変換
+                let adts_data = wrap_raw_aac_in_adts(&frame.data, &frame.sample_entry)?;
                 let pts = duration_to_timestamp(frame.timestamp)?;
                 write_pes_packets_mpegts(
                     state,
                     Pid::new(AUDIO_PID).unwrap(),
                     StreamId::new(StreamId::AUDIO_MIN),
-                    &frame.data,
+                    &adts_data,
                     Some(pts),
                     false,
                 )?;
             }
             FormatState::Fmp4(state) => {
-                let duration = state
-                    .last_audio_timestamp
-                    .map(|prev| frame.timestamp.saturating_sub(prev).as_micros() as u32)
-                    .unwrap_or(0);
+                // 前のオーディオサンプルの duration を確定させる
+                if let Some(prev_ts) = state.last_audio_timestamp {
+                    let duration = frame.timestamp.saturating_sub(prev_ts).as_micros() as u32;
+                    if let Some(last) = state
+                        .current_samples
+                        .iter_mut()
+                        .rfind(|s| s.track_kind == shiguredo_mp4::TrackKind::Audio)
+                    {
+                        last.duration = duration;
+                    }
+                }
                 let data_offset = state.current_payload.len() as u64;
                 state.current_payload.extend_from_slice(&frame.data);
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
@@ -286,7 +306,7 @@ impl HlsWriter {
                     sample_entry: frame.sample_entry.clone(),
                     keyframe: true,
                     timescale: FMP4_TIMESCALE,
-                    duration,
+                    duration: 0,
                     composition_time_offset: None,
                     data_offset,
                     data_size: frame.data.len(),
@@ -415,9 +435,8 @@ impl HlsWriter {
             duration,
         });
 
-        self.write_playlist()?;
-
-        // 保持数超過分の古いセグメントを削除
+        // 保持数超過分の古いセグメントを先に削除してから playlist を書き出す。
+        // この順序にしないと、playlist が削除済みセグメントを参照してしまう。
         while self.retained_segments.len() > self.max_retained_segments {
             if let Some(old) = self.retained_segments.pop_front() {
                 let path = self.output_directory.join(&old.filename);
@@ -426,6 +445,8 @@ impl HlsWriter {
                 }
             }
         }
+
+        self.write_playlist()?;
 
         Ok(())
     }
@@ -718,6 +739,129 @@ fn duration_to_timestamp(d: Duration) -> crate::Result<Timestamp> {
     let ticks = (d.as_secs_f64() * Timestamp::RESOLUTION as f64) as u64;
     let ticks = ticks % (Timestamp::MAX + 1);
     Timestamp::new(ticks).map_err(|e| crate::Error::new(format!("invalid timestamp: {e}")))
+}
+
+/// MP4 形式の length-prefixed NALU を Annex B 形式に変換する。
+/// MPEG-TS では Annex B（start code prefix 付き）が必要。
+fn convert_length_prefixed_to_annexb(
+    data: &[u8],
+    sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
+) -> crate::Result<Vec<u8>> {
+    let length_size = match sample_entry {
+        Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) => {
+            avc1.avcc_box.length_size_minus_one.get() as usize + 1
+        }
+        _ => 4, // デフォルトは 4 バイト
+    };
+
+    let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
+    let mut result = Vec::with_capacity(data.len());
+    let mut offset = 0;
+
+    while offset + length_size <= data.len() {
+        let nalu_len = match length_size {
+            1 => data[offset] as usize,
+            2 => u16::from_be_bytes([data[offset], data[offset + 1]]) as usize,
+            3 => {
+                ((data[offset] as usize) << 16)
+                    | ((data[offset + 1] as usize) << 8)
+                    | (data[offset + 2] as usize)
+            }
+            4 => u32::from_be_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]) as usize,
+            _ => {
+                return Err(crate::Error::new(format!(
+                    "unsupported NALU length size: {length_size}"
+                )));
+            }
+        };
+        offset += length_size;
+
+        if offset + nalu_len > data.len() {
+            return Err(crate::Error::new(format!(
+                "NALU length {nalu_len} exceeds remaining data {} at offset {}",
+                data.len() - offset,
+                offset
+            )));
+        }
+
+        result.extend_from_slice(start_code);
+        result.extend_from_slice(&data[offset..offset + nalu_len]);
+        offset += nalu_len;
+    }
+
+    Ok(result)
+}
+
+/// Raw AAC フレームに ADTS ヘッダを付与する。
+/// MPEG-TS では ADTS 付きの AAC が必要。
+/// SampleEntry から AudioSpecificConfig を取得し、ADTS ヘッダを構築する。
+fn wrap_raw_aac_in_adts(
+    data: &[u8],
+    sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
+) -> crate::Result<Vec<u8>> {
+    // SampleEntry から audio_object_type, sampling_frequency_index, channel_configuration を取得
+    let (audio_object_type, sampling_frequency_index, channel_configuration) =
+        extract_aac_config(sample_entry)?;
+
+    let frame_length = (data.len() + 7) as u16; // ADTS ヘッダ 7 バイト + raw AAC データ
+
+    // ADTS ヘッダ構築 (7 バイト、CRC なし)
+    let mut header = [0u8; 7];
+    // syncword (12 bits): 0xFFF
+    header[0] = 0xFF;
+    // syncword (4) + ID (1, MPEG-4) + layer (2, 00) + protection_absent (1, no CRC)
+    header[1] = 0xF1;
+    // profile (2, audio_object_type - 1) + sampling_frequency_index (4) + private_bit (1) + channel_configuration_high (1)
+    let profile = audio_object_type.saturating_sub(1);
+    header[2] =
+        (profile << 6) | (sampling_frequency_index << 2) | ((channel_configuration >> 2) & 0x01);
+    // channel_configuration_low (2) + original_copy (1) + home (1) + copyright_id_bit (1) + copyright_id_start (1) + frame_length_high (2)
+    header[3] = ((channel_configuration & 0x03) << 6) | ((frame_length >> 11) as u8 & 0x03);
+    // frame_length_mid (8)
+    header[4] = ((frame_length >> 3) & 0xFF) as u8;
+    // frame_length_low (3) + buffer_fullness_high (5)
+    header[5] = ((frame_length & 0x07) as u8) << 5 | 0x1F; // buffer fullness = 0x7FF (VBR)
+    // buffer_fullness_low (6) + number_of_raw_data_blocks (2, 0 = 1 block)
+    header[6] = 0xFC; // 0x7FF の下位 6 bit = 0x3F << 2 = 0xFC
+
+    let mut result = Vec::with_capacity(7 + data.len());
+    result.extend_from_slice(&header);
+    result.extend_from_slice(data);
+    Ok(result)
+}
+
+/// SampleEntry から AAC の設定情報を抽出する
+fn extract_aac_config(
+    sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
+) -> crate::Result<(u8, u8, u8)> {
+    let Some(shiguredo_mp4::boxes::SampleEntry::Mp4a(mp4a)) = sample_entry else {
+        // SampleEntry が無い場合のフォールバック: AAC-LC, 48kHz, stereo
+        return Ok((2, 3, 2));
+    };
+
+    let Some(ref dec_specific_info) = mp4a.esds_box.es.dec_config_descr.dec_specific_info else {
+        return Ok((2, 3, 2));
+    };
+
+    let asc = &dec_specific_info.payload;
+    if asc.len() < 2 {
+        return Ok((2, 3, 2));
+    }
+
+    let audio_object_type = (asc[0] >> 3) & 0x1F;
+    let sampling_frequency_index = ((asc[0] & 0x07) << 1) | (asc[1] >> 7);
+    let channel_configuration = (asc[1] >> 3) & 0x0F;
+
+    Ok((
+        audio_object_type,
+        sampling_frequency_index,
+        channel_configuration,
+    ))
 }
 
 /// HLS writer プロセッサの設定
