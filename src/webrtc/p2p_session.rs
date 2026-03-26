@@ -953,6 +953,19 @@ fn subscribe_track(
     Ok(true)
 }
 
+/// トラックの購読を解除する
+fn unsubscribe_track(session: &mut Session, track_id: &crate::TrackId) {
+    if let Some(mut subscribed) = session.subscribed_tracks.remove(track_id) {
+        subscribed.abort_handle.abort();
+        if !subscribed.sender.set_track(None) {
+            tracing::warn!("set_track(None) failed for track {track_id}");
+        }
+        if let Err(e) = session.pc.remove_track(&subscribed.sender) {
+            tracing::warn!("remove_track failed for track {track_id}: {e}");
+        }
+    }
+}
+
 /// bootstrap snapshot の入力に対してトラックを購読する
 fn subscribe_bootstrap_input(
     session: &mut Session,
@@ -1080,16 +1093,6 @@ fn build_bootstrap_track_removed_json(input_uuid: &str) -> String {
         f.member("inputUuid", input_uuid)
     })
     .to_string()
-}
-
-/// トラックの購読を解除する
-fn unsubscribe_track(session: &mut Session, track_id: &crate::TrackId) {
-    if let Some(mut subscribed) = session.subscribed_tracks.remove(track_id) {
-        subscribed.abort_handle.abort();
-        if !subscribed.sender.set_track(None) {
-            tracing::warn!("set_track(None) failed for track {track_id}");
-        }
-    }
 }
 
 enum TrackKind {
