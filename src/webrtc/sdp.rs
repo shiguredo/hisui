@@ -52,6 +52,7 @@ fn create_sdp(
     options: &mut PeerConnectionOfferAnswerOptions,
     is_offer: bool,
 ) -> crate::Result<String> {
+    // libwebrtc のコールバックは内部スレッドから呼ばれる非 async コンテキストのため std::sync::mpsc を使用
     let (tx, rx) = std::sync::mpsc::channel::<crate::Result<String>>();
     let mut observer =
         CreateSessionDescriptionObserver::new_with_handler(Box::new(CreateSdpHandler {
@@ -116,6 +117,7 @@ fn set_local_description(
 ) -> crate::Result<()> {
     let description = SessionDescription::new(sdp_type, sdp)
         .map_err(|e| crate::Error::new(format!("failed to parse local {kind} SDP: {e}")))?;
+    // libwebrtc のコールバックは内部スレッドから呼ばれる非 async コンテキストのため std::sync::mpsc を使用
     let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
     let observer =
         SetLocalDescriptionObserver::new_with_handler(Box::new(SetLocalSdpHandler { tx }));
@@ -155,6 +157,7 @@ fn set_remote_description(
 ) -> crate::Result<()> {
     let description = SessionDescription::new(sdp_type, sdp)
         .map_err(|e| crate::Error::new(format!("failed to parse remote {kind} SDP: {e}")))?;
+    // libwebrtc のコールバックは内部スレッドから呼ばれる非 async コンテキストのため std::sync::mpsc を使用
     let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
     let observer =
         SetRemoteDescriptionObserver::new_with_handler(Box::new(SetRemoteSdpHandler { tx }));
