@@ -273,6 +273,12 @@ impl BootstrapAudioDeviceModuleState {
             );
         }
     }
+
+    fn shutdown(&self) {
+        self.playing.store(false, Ordering::Relaxed);
+        let mut guard = self.transport.lock().unwrap();
+        *guard = None;
+    }
 }
 
 struct BootstrapAudioDeviceModuleHandler {
@@ -924,15 +930,54 @@ struct GatheredIceCandidate {
 
 struct RetainedState {
     _pc_observer: PeerConnectionObserver,
-    _dummy_dc: DataChannel,
+    dummy_dc: DataChannel,
     obsws_dc: Option<DataChannel>,
     signaling_dc: Option<DataChannel>,
     signaling_dc_observer: Option<DataChannelObserver>,
     obsws_dc_observer: Option<DataChannelObserver>,
-    video_sinks: Vec<VideoSink>,
-    audio_sinks: Vec<AudioTrackSink>,
+    video_sinks: Vec<RetainedVideoSink>,
+    audio_sinks: Vec<RetainedAudioSink>,
     ice_rx: mpsc::UnboundedReceiver<IceObserverEvent>,
     ice_candidates: Vec<GatheredIceCandidate>,
+}
+
+struct RetainedVideoSink {
+    track: shiguredo_webrtc::VideoTrack,
+    sink: VideoSink,
+}
+
+struct RetainedAudioSink {
+    track: shiguredo_webrtc::AudioTrack,
+    sink: AudioTrackSink,
+}
+
+async fn teardown_client(
+    pc: &PeerConnection,
+    retained: &mut RetainedState,
+    audio_state: &BootstrapAudioDeviceModuleState,
+) {
+    for retained_sink in &mut retained.video_sinks {
+        retained_sink.track.remove_sink(&retained_sink.sink);
+    }
+    for retained_sink in &mut retained.audio_sinks {
+        retained_sink.track.remove_sink(&retained_sink.sink);
+    }
+
+    if let Some(dc) = retained.obsws_dc.as_ref() {
+        dc.unregister_observer();
+        dc.close();
+    }
+    if let Some(dc) = retained.signaling_dc.as_ref() {
+        dc.unregister_observer();
+        dc.close();
+    }
+    retained.dummy_dc.close();
+
+    pc.close();
+    audio_state.shutdown();
+
+    // close 後の非同期コールバックが収束するまで少し待つ。
+    tokio::time::sleep(Duration::from_millis(100)).await;
 }
 
 async fn finalize_local_sdp(
@@ -1150,7 +1195,7 @@ async fn run_client(
 
     let mut retained = RetainedState {
         _pc_observer: pc_observer,
-        _dummy_dc: dummy_dc,
+        dummy_dc,
         obsws_dc: None,
         signaling_dc: None,
         signaling_dc_observer: None,
@@ -1276,7 +1321,10 @@ async fn run_client(
                         }));
                         let wants = VideoSinkWants::default();
                         video_track.add_or_update_sink(&sink, &wants);
-                        retained.video_sinks.push(sink);
+                        retained.video_sinks.push(RetainedVideoSink {
+                            track: video_track,
+                            sink,
+                        });
                     }
                     "audio" => {
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
@@ -1286,7 +1334,10 @@ async fn run_client(
                             audio_tx: audio_tx.clone(),
                         }));
                         audio_track.add_sink(&sink);
-                        retained.audio_sinks.push(sink);
+                        retained.audio_sinks.push(RetainedAudioSink {
+                            track: audio_track,
+                            sink,
+                        });
                     }
                     _ => {
                         tracing::warn!("unknown track kind: {kind}");
@@ -1368,6 +1419,8 @@ async fn run_client(
             }
         }
     }
+
+    teardown_client(&pc, &mut retained, &audio_state).await;
 
     // 残りのフレームを処理する
     let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(500);

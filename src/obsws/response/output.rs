@@ -11,12 +11,19 @@ use super::{
     parse_set_record_directory_fields, parse_set_stream_service_settings_fields,
 };
 
+// `stream` は OBS 互換の主配信 Output として扱う。
+// 現状は `streamServiceSettings` を使う RTMP 系の配信実装に結び付いているため、
+// raw frame をそのまま WebRTC SDK に渡す `sora` とは分離している。
+// 将来的に `stream` を多プロトコル化する余地はあるが、現時点では API の意味を
+// 明確に保つことを優先して独立 Output 名を維持する。
 const OBSWS_STREAM_OUTPUT_NAME: &str = "stream";
 const OBSWS_RECORD_OUTPUT_NAME: &str = "record";
 const OBSWS_RTMP_OUTBOUND_OUTPUT_NAME: &str = "rtmp_outbound";
+const OBSWS_SORA_OUTPUT_NAME: &str = "sora";
 const OBSWS_STREAM_OUTPUT_KIND: &str = "rtmp_output";
 const OBSWS_RECORD_OUTPUT_KIND: &str = "mp4_output";
 const OBSWS_RTMP_OUTBOUND_OUTPUT_KIND: &str = "rtmp_outbound_output";
+const OBSWS_SORA_OUTPUT_KIND: &str = "sora_webrtc_output";
 
 #[derive(Debug, Clone, Copy)]
 struct ObswsOutputEntry {
@@ -119,6 +126,10 @@ pub fn build_get_output_list_response(request_id: &str) -> nojson::RawJsonOwned 
             output_name: OBSWS_RTMP_OUTBOUND_OUTPUT_NAME,
             output_kind: OBSWS_RTMP_OUTBOUND_OUTPUT_KIND,
         },
+        ObswsOutputEntry {
+            output_name: OBSWS_SORA_OUTPUT_NAME,
+            output_kind: OBSWS_SORA_OUTPUT_KIND,
+        },
     ];
     super::build_request_response_success("GetOutputList", request_id, |f| {
         f.member("outputs", outputs)
@@ -150,6 +161,7 @@ pub fn build_get_output_settings_response(
         OBSWS_RTMP_OUTBOUND_OUTPUT_NAME => {
             build_rtmp_outbound_output_settings_response(request_id, input_registry)
         }
+        OBSWS_SORA_OUTPUT_NAME => build_sora_output_settings_response(request_id, input_registry),
         _ => super::build_request_response_error(
             "GetOutputSettings",
             request_id,
@@ -258,6 +270,20 @@ pub fn build_set_output_settings_response(
             );
             super::build_request_response_success_no_data("SetOutputSettings", request_id)
         }
+        OBSWS_SORA_OUTPUT_NAME => {
+            let output_settings = fields.output_settings.value();
+            match parse_sora_publisher_settings(output_settings, input_registry) {
+                Ok(()) => {
+                    super::build_request_response_success_no_data("SetOutputSettings", request_id)
+                }
+                Err(error) => super::build_request_response_error(
+                    "SetOutputSettings",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &error,
+                ),
+            }
+        }
         _ => super::build_request_response_error(
             "SetOutputSettings",
             request_id,
@@ -365,6 +391,9 @@ pub fn build_get_output_status_response(
         }
         OBSWS_RTMP_OUTBOUND_OUTPUT_NAME => {
             build_get_rtmp_outbound_status_as_output_response(request_id, input_registry)
+        }
+        OBSWS_SORA_OUTPUT_NAME => {
+            build_get_sora_status_as_output_response(request_id, input_registry)
         }
         _ => super::build_request_response_error(
             "GetOutputStatus",
@@ -565,6 +594,103 @@ fn build_get_rtmp_outbound_status_as_output_response(
         f.member("outputSkippedFrames", 0)?;
         f.member("outputTotalFrames", 0)
     })
+}
+
+fn build_sora_output_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let settings = input_registry.sora_publisher_settings();
+    super::build_request_response_success("GetOutputSettings", request_id, |f| {
+        f.member("outputName", OBSWS_SORA_OUTPUT_NAME)?;
+        f.member("outputKind", OBSWS_SORA_OUTPUT_KIND)?;
+        f.member("outputSettings", settings)
+    })
+}
+
+fn build_get_sora_status_as_output_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let active = input_registry.is_sora_publisher_active();
+    let duration = if active {
+        input_registry.sora_publisher_uptime()
+    } else {
+        std::time::Duration::ZERO
+    };
+    let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+    let output_timecode = format_timecode(duration);
+    // TODO: outputBytes / outputSkippedFrames / outputTotalFrames は sora-rust-sdk に
+    // フレーム単位の統計 API が追加されたら対応する。現時点では 0 固定。
+    super::build_request_response_success("GetOutputStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputReconnecting", false)?;
+        f.member("outputTimecode", &output_timecode)?;
+        f.member("outputDuration", output_duration)?;
+        f.member("outputCongestion", 0.0)?;
+        f.member("outputBytes", 0)?;
+        f.member("outputSkippedFrames", 0)?;
+        f.member("outputTotalFrames", 0)
+    })
+}
+
+/// soraSdkSettings をパースして registry に保存する。
+fn parse_sora_publisher_settings(
+    output_settings: nojson::RawJsonValue<'_, '_>,
+    input_registry: &mut ObswsInputRegistry,
+) -> Result<(), String> {
+    let sora_sdk_settings = output_settings
+        .to_member("soraSdkSettings")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|e| e.to_string())?;
+
+    let signaling_urls: Option<Vec<String>> = sora_sdk_settings
+        .to_member("signalingUrls")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    let channel_id: Option<String> =
+        super::optional_non_empty_string_member(sora_sdk_settings, "channelId")
+            .map_err(|e| e.to_string())?;
+
+    let client_id: Option<String> =
+        super::optional_non_empty_string_member(sora_sdk_settings, "clientId")
+            .map_err(|e| e.to_string())?;
+
+    let bundle_id: Option<String> =
+        super::optional_non_empty_string_member(sora_sdk_settings, "bundleId")
+            .map_err(|e| e.to_string())?;
+
+    // metadata は object として保持する
+    let metadata: Option<nojson::RawJsonOwned> = {
+        let member = sora_sdk_settings
+            .to_member("metadata")
+            .map_err(|e| e.to_string())?;
+        match member.optional() {
+            Some(value) => {
+                if !value.kind().is_object() {
+                    return Err("metadata must be a JSON object".to_owned());
+                }
+                Some(value.extract().into_owned())
+            }
+            None => None,
+        }
+    };
+
+    input_registry.set_sora_publisher_settings(
+        crate::obsws::input_registry::ObswsSoraPublisherSettings {
+            signaling_urls: signaling_urls.unwrap_or_default(),
+            channel_id,
+            client_id,
+            bundle_id,
+            metadata,
+        },
+    );
+    Ok(())
 }
 
 fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, String> {

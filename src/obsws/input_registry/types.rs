@@ -417,6 +417,11 @@ pub struct ObswsRecordRun {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsSoraPublisherRun {
+    pub publisher_processor_id: ProcessorId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsRecordTrackRun {
     pub encoder_processor_id: ProcessorId,
     pub source_track_id: TrackId,
@@ -674,6 +679,13 @@ pub(crate) struct ObswsRtmpOutboundRuntimeState {
     pub(crate) active: bool,
     pub(crate) started_at: Option<Instant>,
     pub(crate) run: Option<ObswsRtmpOutboundRun>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ObswsSoraPublisherRuntimeState {
+    pub(crate) active: bool,
+    pub(crate) started_at: Option<Instant>,
+    pub(crate) run: Option<ObswsSoraPublisherRun>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1041,6 +1053,45 @@ pub struct ObswsRtmpOutboundSettings {
     pub stream_name: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsSoraPublisherSettings {
+    // StartOutput 時に必須。登録時点では未指定も許容する。
+    pub signaling_urls: Vec<String>,
+    pub channel_id: Option<String>,
+    pub client_id: Option<String>,
+    pub bundle_id: Option<String>,
+    pub metadata: Option<nojson::RawJsonOwned>,
+}
+
+impl nojson::DisplayJson for ObswsSoraPublisherSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member(
+                "soraSdkSettings",
+                nojson::object(|f| {
+                    if !self.signaling_urls.is_empty() {
+                        f.member("signalingUrls", &self.signaling_urls)?;
+                    }
+                    if let Some(channel_id) = &self.channel_id {
+                        f.member("channelId", channel_id)?;
+                    }
+                    if let Some(client_id) = &self.client_id {
+                        f.member("clientId", client_id)?;
+                    }
+                    if let Some(bundle_id) = &self.bundle_id {
+                        f.member("bundleId", bundle_id)?;
+                    }
+                    if let Some(metadata) = &self.metadata {
+                        f.member("metadata", metadata)?;
+                    }
+                    Ok(())
+                }),
+            )
+        })
+        .fmt(f)
+    }
+}
+
 impl nojson::DisplayJson for ObswsRtmpOutboundSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
@@ -1159,10 +1210,16 @@ pub enum RunIdOverflowError {
     Stream,
     Record,
     RtmpOutbound,
+    SoraPublisher,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivateRtmpOutboundError {
+    AlreadyActive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateSoraPublisherError {
     AlreadyActive,
 }
 
@@ -1259,6 +1316,9 @@ pub struct ObswsInputRegistry {
     pub(crate) rtmp_outbound_settings: ObswsRtmpOutboundSettings,
     pub(crate) rtmp_outbound_runtime: ObswsRtmpOutboundRuntimeState,
     pub(crate) next_rtmp_outbound_run_id: u64,
+    pub(crate) sora_publisher_settings: ObswsSoraPublisherSettings,
+    pub(crate) sora_publisher_runtime: ObswsSoraPublisherRuntimeState,
+    pub(crate) next_sora_publisher_run_id: u64,
     pub(crate) record_directory: PathBuf,
     pub(crate) record_runtime: ObswsRecordRuntimeState,
     pub(crate) canvas_width: crate::types::EvenUsize,

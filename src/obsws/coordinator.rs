@@ -1400,6 +1400,12 @@ impl ObswsCoordinator {
                     .await;
                 (outcome, Vec::new())
             }
+            "sora" => {
+                let outcome = self
+                    .handle_start_sora_publisher("StartOutput", request_id)
+                    .await;
+                (outcome, Vec::new())
+            }
             _ => {
                 return self.build_error_result(
                     "StartOutput",
@@ -1479,6 +1485,12 @@ impl ObswsCoordinator {
             "rtmp_outbound" => {
                 let outcome = self
                     .handle_stop_rtmp_outbound("StopOutput", request_id)
+                    .await;
+                (outcome, Vec::new())
+            }
+            "sora" => {
+                let outcome = self
+                    .handle_stop_sora_publisher("StopOutput", request_id)
                     .await;
                 (outcome, Vec::new())
             }
@@ -1615,6 +1627,17 @@ impl ObswsCoordinator {
                 };
                 (outcome, !was_active, Vec::new())
             }
+            "sora" => {
+                let was_active = self.input_registry.is_sora_publisher_active();
+                let outcome = if was_active {
+                    self.handle_stop_sora_publisher("ToggleOutput", request_id)
+                        .await
+                } else {
+                    self.handle_start_sora_publisher("ToggleOutput", request_id)
+                        .await
+                };
+                (outcome, !was_active, Vec::new())
+            }
             _ => {
                 return self.build_error_result(
                     "ToggleOutput",
@@ -1646,6 +1669,9 @@ impl ObswsCoordinator {
             ActivateStreamError, ObswsRecordTrackRun, ObswsStreamRun,
         };
         let stream_service_settings = self.input_registry.stream_service_settings().clone();
+        // `stream` は OBS 互換の主配信 Output として扱い、現状は RTMP 起動経路に限定する。
+        // `sora` は stream service の差し替えではなく別 Output として扱うため、
+        // ここでは `rtmp_custom` 以外を受け付けない。
         if stream_service_settings.stream_service_type != "rtmp_custom" {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -2076,6 +2102,147 @@ impl ObswsCoordinator {
             tracing::warn!("failed to stop rtmp outbound processors: {}", e.display());
         }
         self.input_registry.deactivate_rtmp_outbound();
+        OutputOperationOutcome::success(
+            crate::obsws::response::build_stop_output_response(request_id),
+            None,
+        )
+    }
+
+    // --- Sora Publisher 操作 ---
+    // `sora` は OBS の `stream` を拡張したものではなく、Program 出力の raw frame を
+    // `sora-rust-sdk` に直接渡す専用 Output として扱う。
+    // 将来的に `stream` を多プロトコル化する余地はあるが、現時点では OBS 互換の
+    // 意味を保つため `stream` と `sora` を分離している。
+
+    async fn handle_start_sora_publisher(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+    ) -> OutputOperationOutcome {
+        use crate::obsws::input_registry::{ActivateSoraPublisherError, ObswsSoraPublisherRun};
+        let sora_settings = self.input_registry.sora_publisher_settings().clone();
+        if sora_settings.signaling_urls.is_empty() {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Missing outputSettings.soraSdkSettings.signalingUrls field",
+                ),
+            );
+        }
+        let Some(channel_id) = sora_settings.channel_id.clone() else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Missing outputSettings.soraSdkSettings.channelId field",
+                ),
+            );
+        };
+        let run_id = match self.input_registry.next_sora_publisher_run_id() {
+            Ok(run_id) => run_id,
+            Err(_) => {
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        "Sora publisher run ID overflow",
+                    ),
+                );
+            }
+        };
+        let publisher_processor_id =
+            crate::ProcessorId::new(format!("obsws:sora_publisher:{run_id}:sora_publisher"));
+        let run = ObswsSoraPublisherRun {
+            publisher_processor_id: publisher_processor_id.clone(),
+        };
+        if let Err(ActivateSoraPublisherError::AlreadyActive) =
+            self.input_registry.activate_sora_publisher(run.clone())
+        {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    "Sora publisher is already active",
+                ),
+            );
+        }
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            self.input_registry.deactivate_sora_publisher();
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Pipeline is not initialized",
+                ),
+            );
+        };
+        let publisher = crate::sora_publisher::SoraPublisher {
+            signaling_urls: sora_settings.signaling_urls.clone(),
+            channel_id,
+            client_id: sora_settings.client_id.clone(),
+            bundle_id: sora_settings.bundle_id.clone(),
+            metadata: sora_settings.metadata.clone(),
+            input_video_track_id: self.program_output.video_track_id.clone(),
+            input_audio_track_id: self.program_output.audio_track_id.clone(),
+        };
+        if let Err(e) = crate::sora_publisher::create_processor(
+            pipeline_handle,
+            publisher,
+            Some(publisher_processor_id),
+        )
+        .await
+        {
+            self.input_registry.deactivate_sora_publisher();
+            let error_comment = format!("Failed to start sora publisher: {}", e.display());
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &error_comment,
+                ),
+            );
+        }
+        OutputOperationOutcome::success(
+            crate::obsws::response::build_start_output_response(request_id),
+            None,
+        )
+    }
+
+    async fn handle_stop_sora_publisher(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+    ) -> OutputOperationOutcome {
+        let run = match self.input_registry.sora_publisher_run() {
+            Some(run) => run.clone(),
+            None => {
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        "Sora publisher is not active",
+                    ),
+                );
+            }
+        };
+        if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
+            && let Err(e) = terminate_and_wait(
+                pipeline_handle,
+                std::slice::from_ref(&run.publisher_processor_id),
+            )
+            .await
+        {
+            tracing::warn!("failed to stop sora publisher processor: {}", e.display());
+        }
+        self.input_registry.deactivate_sora_publisher();
         OutputOperationOutcome::success(
             crate::obsws::response::build_stop_output_response(request_id),
             None,

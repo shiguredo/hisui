@@ -31,6 +31,9 @@
 - [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
   - `shiguredo_audio_device` が PulseAudio バックエンドを利用するために必要
   - @sile
+- [ADD] obsws Output に Sora WebRTC Publisher (`outputName: "sora"`) を追加する
+  - sora-rust-sdk を使い、Program 出力を Sora に SendOnly で配信する
+  - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0-canary.0 を追加する
@@ -74,7 +77,7 @@
   - 未対応 RequestType は `Unknown request type` のエラーで応答する
   - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_websocket 2026.1.0-canary.5 を追加する
+- [ADD] 依存ライブラリに shiguredo_websocket 2026.1.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに base64 0.22.1 を追加する
   - @sile
