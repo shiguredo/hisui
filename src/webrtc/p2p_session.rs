@@ -1015,13 +1015,14 @@ async fn handle_bootstrap_input_created(
 
 /// bootstrap 入力削除時のハンドラ
 async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
-    if let Some(entry) = sess.bootstrap_tracks.remove(input_uuid) {
-        if let Some(video_track_id) = &entry.video_track_id {
-            unsubscribe_track(sess, video_track_id);
-        }
-        if let Some(audio_track_id) = &entry.audio_track_id {
-            unsubscribe_track(sess, audio_track_id);
-        }
+    let Some(entry) = sess.bootstrap_tracks.remove(input_uuid) else {
+        return;
+    };
+    if let Some(video_track_id) = &entry.video_track_id {
+        unsubscribe_track(sess, video_track_id);
+    }
+    if let Some(audio_track_id) = &entry.audio_track_id {
+        unsubscribe_track(sess, audio_track_id);
     }
 
     // メタデータを signaling DataChannel で送信する
