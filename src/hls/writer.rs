@@ -406,6 +406,12 @@ impl HlsWriter {
                 // 同一トラックの直前サンプルの duration を流用して埋める。
                 fixup_last_sample_duration(&mut state.current_samples);
 
+                // mdat payload をトラックごとに連続配置し、data_offset を再計算する。
+                // Fmp4SegmentMuxer は同一トラックの sample data が mdat 内で
+                // 連続していることを要求する。
+                let reordered_payload =
+                    reorder_payload_by_track(&mut state.current_samples, &state.current_payload);
+
                 // moof + mdat ヘッダを生成
                 let metadata = state
                     .muxer
@@ -440,7 +446,7 @@ impl HlsWriter {
                 file.write_all(&metadata).map_err(|e| {
                     crate::Error::new(format!("failed to write fMP4 metadata: {e}"))
                 })?;
-                file.write_all(&state.current_payload)
+                file.write_all(&reordered_payload)
                     .map_err(|e| crate::Error::new(format!("failed to write fMP4 payload: {e}")))?;
                 file.flush()
                     .map_err(|e| crate::Error::new(format!("failed to flush fMP4 segment: {e}")))?;
@@ -762,6 +768,42 @@ fn write_pes_packets_mpegts(
 
 /// fMP4 セグメントの末尾サンプルの duration を補完する。
 /// 各トラックの最後のサンプルが duration=0 の場合、同一トラックの直前サンプルの duration を流用する。
+/// mdat payload をトラックごとに連続配置し、samples の data_offset を再計算する。
+/// Fmp4SegmentMuxer は同一トラックの sample data が mdat 内で連続していることを要求する。
+/// 到着順（audio/video 混在）の payload を、video → audio の順に並べ替えた新しい payload を返す。
+fn reorder_payload_by_track(
+    samples: &mut [shiguredo_mp4::mux::Sample],
+    original_payload: &[u8],
+) -> Vec<u8> {
+    let mut reordered = Vec::with_capacity(original_payload.len());
+
+    // Video のデータを先に配置
+    for sample in samples
+        .iter_mut()
+        .filter(|s| s.track_kind == shiguredo_mp4::TrackKind::Video)
+    {
+        let new_offset = reordered.len() as u64;
+        let start = sample.data_offset as usize;
+        let end = start + sample.data_size;
+        reordered.extend_from_slice(&original_payload[start..end]);
+        sample.data_offset = new_offset;
+    }
+
+    // Audio のデータを次に配置
+    for sample in samples
+        .iter_mut()
+        .filter(|s| s.track_kind == shiguredo_mp4::TrackKind::Audio)
+    {
+        let new_offset = reordered.len() as u64;
+        let start = sample.data_offset as usize;
+        let end = start + sample.data_size;
+        reordered.extend_from_slice(&original_payload[start..end]);
+        sample.data_offset = new_offset;
+    }
+
+    reordered
+}
+
 fn fixup_last_sample_duration(samples: &mut [shiguredo_mp4::mux::Sample]) {
     // ビデオの末尾を補完
     fixup_last_sample_duration_for_track(samples, shiguredo_mp4::TrackKind::Video);
