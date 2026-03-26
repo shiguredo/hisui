@@ -833,10 +833,6 @@ impl ObswsInputRegistry {
         self.hls_runtime.active
     }
 
-    pub fn hls_run(&self) -> Option<ObswsHlsRun> {
-        self.hls_runtime.run.clone()
-    }
-
     pub fn hls_uptime(&self) -> Duration {
         self.hls_runtime
             .started_at

@@ -1987,7 +1987,8 @@ impl ObswsCoordinator {
         request_type: &str,
         request_id: &str,
     ) -> OutputOperationOutcome {
-        let run = match self.input_registry.hls_run() {
+        // deactivate_hls() でアクティブチェックと状態解除を兼ねる（不要な clone を避ける）
+        let run = match self.input_registry.deactivate_hls() {
             Some(run) => run,
             None => {
                 return OutputOperationOutcome::failure(
@@ -2003,10 +2004,8 @@ impl ObswsCoordinator {
         if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
             && let Err(e) = stop_processors_staged_hls(pipeline_handle, &run).await
         {
-            // プロセッサ停止に失敗しても HLS 状態は解除する。
             tracing::warn!("failed to stop HLS processors: {}", e.display());
         }
-        self.input_registry.deactivate_hls();
         OutputOperationOutcome::success(
             crate::obsws::response::build_stop_output_response(request_id),
             None,
