@@ -79,7 +79,7 @@ impl SoraPublisher {
             .map_err(|e| crate::Error::new(format!("failed to build SoraClient: {e}")))?;
 
         // Sora 接続を開始（バックグラウンドタスク）
-        let client_task = tokio::spawn(async move {
+        let mut client_task = tokio::spawn(async move {
             if let Err(e) = client.run().await {
                 tracing::warn!("Sora client terminated with error: {e}");
             }
@@ -88,23 +88,33 @@ impl SoraPublisher {
         handle.notify_ready();
 
         // メッセージ受信ループ
+        // video/audio どちらかの EOS で切断する。
+        // Program 出力では両トラックが同時に終了するため、片方の EOS で十分。
+        let mut video_eos = false;
+        let mut audio_eos = false;
         loop {
             tokio::select! {
                 message = video_rx.recv() => {
                     match message {
                         crate::Message::Media(crate::MediaFrame::Video(frame)) => {
-                            if frame.format == crate::video::VideoFormat::I420
-                                && let Err(e) = crate::webrtc::video::push_i420_frame(
+                            if frame.format == crate::video::VideoFormat::I420 {
+                                if let Err(e) = crate::webrtc::video::push_i420_frame(
                                     &mut video_source,
                                     &frame,
                                 ) {
                                     tracing::warn!("failed to push video frame to Sora: {}", e.display());
                                 }
+                            } else {
+                                tracing::debug!("unsupported video format: {}, expected I420", frame.format);
+                            }
                         }
                         crate::Message::Media(crate::MediaFrame::Audio(_)) => {}
                         crate::Message::Eos => {
-                            tracing::info!("video track EOS received, stopping Sora publisher");
-                            break;
+                            tracing::info!("video track EOS received");
+                            video_eos = true;
+                            if video_eos && audio_eos {
+                                break;
+                            }
                         }
                         crate::Message::Syn(_) => {}
                     }
@@ -112,15 +122,21 @@ impl SoraPublisher {
                 message = audio_rx.recv() => {
                     match message {
                         crate::Message::Media(crate::MediaFrame::Audio(frame)) => {
-                            if frame.format == crate::audio::AudioFormat::I16Be
-                                && let Err(e) = audio_state.push_audio_frame(&frame) {
+                            if frame.format == crate::audio::AudioFormat::I16Be {
+                                if let Err(e) = audio_state.push_audio_frame(&frame) {
                                     tracing::warn!("failed to push audio frame to Sora: {}", e.display());
                                 }
+                            } else {
+                                tracing::debug!("unsupported audio format: {}, expected I16Be", frame.format);
+                            }
                         }
                         crate::Message::Media(crate::MediaFrame::Video(_)) => {}
                         crate::Message::Eos => {
-                            tracing::info!("audio track EOS received, stopping Sora publisher");
-                            break;
+                            tracing::info!("audio track EOS received");
+                            audio_eos = true;
+                            if video_eos && audio_eos {
+                                break;
+                            }
                         }
                         crate::Message::Syn(_) => {}
                     }
@@ -132,8 +148,9 @@ impl SoraPublisher {
         if let Err(e) = client_handle.disconnect().await {
             tracing::warn!("failed to disconnect Sora client: {e}");
         }
-        // タスク終了を待つ
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), client_task).await;
+        // タスク終了を待ち、タイムアウト時は abort する
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut client_task).await;
+        client_task.abort();
 
         Ok(())
     }
