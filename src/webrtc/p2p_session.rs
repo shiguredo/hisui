@@ -921,6 +921,7 @@ fn subscribe_track(
     let task = tokio::spawn(async move {
         loop {
             let message = rx.recv().await;
+            let is_eos = matches!(message, crate::Message::Eos);
             if event_tx
                 .send(PcEvent::TrackMessage {
                     track_id: track_id_for_task.clone(),
@@ -928,6 +929,11 @@ fn subscribe_track(
                 })
                 .is_err()
             {
+                break;
+            }
+            // EOS 受信後はチャネルが閉じており recv() が即座に Eos を返し続けるため、
+            // ループを抜ける
+            if is_eos {
                 break;
             }
         }
