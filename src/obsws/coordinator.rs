@@ -1876,7 +1876,7 @@ impl ObswsCoordinator {
     ) -> OutputOperationOutcome {
         use crate::obsws::input_registry::{ActivateHlsError, ObswsHlsRun, ObswsRecordTrackRun};
         let hls_settings = self.input_registry.hls_settings().clone();
-        let Some(output_directory_str) = hls_settings.output_directory else {
+        let Some(ref output_directory_str) = hls_settings.output_directory else {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -1960,8 +1960,7 @@ impl ObswsCoordinator {
             &mut output_plan,
             &output_directory,
             &run,
-            hls_settings.segment_duration,
-            hls_settings.max_retained_segments,
+            &hls_settings,
         )
         .await
         {
@@ -2836,8 +2835,7 @@ async fn start_hls_processors(
     output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_directory: &std::path::Path,
     run: &crate::obsws::input_registry::ObswsHlsRun,
-    segment_duration: f64,
-    max_retained_segments: usize,
+    hls_settings: &crate::obsws::input_registry::ObswsHlsSettings,
 ) -> crate::Result<()> {
     crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     crate::encoder::create_video_processor(
@@ -2862,11 +2860,14 @@ async fn start_hls_processors(
     .await?;
     crate::hls::writer::create_processor(
         pipeline_handle,
-        output_directory.to_path_buf(),
-        Some(run.audio.encoded_track_id.clone()),
-        Some(run.video.encoded_track_id.clone()),
-        segment_duration,
-        max_retained_segments,
+        crate::hls::writer::HlsWriterConfig {
+            output_directory: output_directory.to_path_buf(),
+            input_audio_track_id: Some(run.audio.encoded_track_id.clone()),
+            input_video_track_id: Some(run.video.encoded_track_id.clone()),
+            segment_duration: hls_settings.segment_duration,
+            max_retained_segments: hls_settings.max_retained_segments,
+            segment_format: hls_settings.segment_format,
+        },
         Some(run.writer_processor_id.clone()),
     )
     .await?;

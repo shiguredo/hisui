@@ -1,7 +1,10 @@
 use std::collections::VecDeque;
 use std::io::{BufWriter, Write};
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Duration;
+
+use crate::obsws::input_registry::HlsSegmentFormat;
 
 use mpeg2ts::es::{StreamId, StreamType};
 use mpeg2ts::pes::PesHeader;
@@ -20,31 +23,60 @@ const AUDIO_PID: u16 = 0x101;
 
 /// プレイリストファイル名
 const PLAYLIST_FILENAME: &str = "playlist.m3u8";
+/// fMP4 の init segment ファイル名
+const INIT_SEGMENT_FILENAME: &str = "init.mp4";
+
+/// fMP4 用のタイムスケール（マイクロ秒単位）
+const FMP4_TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 
 /// HLS セグメントライター。
-/// エンコード済みの H.264 + AAC フレームを MPEG-TS セグメントに分割し、
+/// エンコード済みの H.264 + AAC フレームを MPEG-TS または fMP4 セグメントに分割し、
 /// M3U8 プレイリストを管理する。
 struct HlsWriter {
     output_directory: PathBuf,
     segment_duration_target: f64,
     max_retained_segments: usize,
     segment_sequence: u64,
-    current_segment: Option<CurrentSegment>,
     retained_segments: VecDeque<RetainedSegment>,
-    /// PAT/PMT 用の continuity counter（セグメント跨ぎで連続）
+    format_state: FormatState,
+    /// 現在のセグメントの共通情報
+    current_segment_info: Option<CurrentSegmentInfo>,
+}
+
+/// セグメントの共通情報（フォーマット非依存）
+struct CurrentSegmentInfo {
+    filename: String,
+    start_timestamp: Duration,
+    last_timestamp: Duration,
+}
+
+/// フォーマット固有の状態
+enum FormatState {
+    MpegTs(MpegTsState),
+    Fmp4(Fmp4State),
+}
+
+/// MPEG-TS フォーマット固有の状態
+struct MpegTsState {
+    /// 現在のセグメントのライター
+    current_writer: Option<TsPacketWriter<BufWriter<std::fs::File>>>,
     pat_cc: ContinuityCounter,
     pmt_cc: ContinuityCounter,
-    /// PES 用の continuity counter（セグメント跨ぎで連続）
     video_cc: ContinuityCounter,
     audio_cc: ContinuityCounter,
 }
 
-struct CurrentSegment {
-    writer: TsPacketWriter<BufWriter<std::fs::File>>,
-    filename: String,
-    start_timestamp: Duration,
-    last_timestamp: Duration,
-    byte_count: u64,
+/// fMP4 フォーマット固有の状態
+struct Fmp4State {
+    muxer: shiguredo_mp4::mux::Fmp4SegmentMuxer,
+    init_segment_written: bool,
+    /// 現在のセグメントに蓄積中のサンプルと payload
+    current_samples: Vec<shiguredo_mp4::mux::Sample>,
+    current_payload: Vec<u8>,
+    /// 前回のビデオフレームのタイムスタンプ（duration 計算用）
+    last_video_timestamp: Option<Duration>,
+    /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
+    last_audio_timestamp: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -58,18 +90,51 @@ impl HlsWriter {
         output_directory: PathBuf,
         segment_duration_target: f64,
         max_retained_segments: usize,
-    ) -> Self {
-        Self {
+        segment_format: HlsSegmentFormat,
+    ) -> crate::Result<Self> {
+        let format_state = match segment_format {
+            HlsSegmentFormat::MpegTs => FormatState::MpegTs(MpegTsState {
+                current_writer: None,
+                pat_cc: ContinuityCounter::new(),
+                pmt_cc: ContinuityCounter::new(),
+                video_cc: ContinuityCounter::new(),
+                audio_cc: ContinuityCounter::new(),
+            }),
+            HlsSegmentFormat::Fmp4 => {
+                let muxer = shiguredo_mp4::mux::Fmp4SegmentMuxer::new().map_err(|e| {
+                    crate::Error::new(format!("failed to create fMP4 segment muxer: {e}"))
+                })?;
+                FormatState::Fmp4(Fmp4State {
+                    muxer,
+                    init_segment_written: false,
+                    current_samples: Vec::new(),
+                    current_payload: Vec::new(),
+                    last_video_timestamp: None,
+                    last_audio_timestamp: None,
+                })
+            }
+        };
+
+        Ok(Self {
             output_directory,
             segment_duration_target,
             max_retained_segments,
             segment_sequence: 0,
-            current_segment: None,
             retained_segments: VecDeque::new(),
-            pat_cc: ContinuityCounter::new(),
-            pmt_cc: ContinuityCounter::new(),
-            video_cc: ContinuityCounter::new(),
-            audio_cc: ContinuityCounter::new(),
+            format_state,
+            current_segment_info: None,
+        })
+    }
+
+    fn is_fmp4(&self) -> bool {
+        matches!(self.format_state, FormatState::Fmp4(_))
+    }
+
+    /// セグメントファイルの拡張子
+    fn segment_extension(&self) -> &'static str {
+        match self.format_state {
+            FormatState::MpegTs(_) => "ts",
+            FormatState::Fmp4(_) => "m4s",
         }
     }
 
@@ -131,38 +196,61 @@ impl HlsWriter {
     /// キーフレームかつセグメント尺が target を超えていたらセグメントを切り替える。
     fn handle_video_frame(&mut self, frame: &crate::VideoFrame) -> crate::Result<()> {
         // キーフレームでセグメント切り替え判定
-        if frame.keyframe {
-            if let Some(ref seg) = self.current_segment {
-                let elapsed = frame
-                    .timestamp
-                    .saturating_sub(seg.start_timestamp)
-                    .as_secs_f64();
-                if elapsed >= self.segment_duration_target {
-                    self.finalize_current_segment()?;
-                }
+        if frame.keyframe
+            && let Some(ref info) = self.current_segment_info
+        {
+            let elapsed = frame
+                .timestamp
+                .saturating_sub(info.start_timestamp)
+                .as_secs_f64();
+            if elapsed >= self.segment_duration_target {
+                self.finalize_current_segment()?;
             }
         }
 
         // セグメントが無ければ新規作成（キーフレームで開始）
-        if self.current_segment.is_none() {
+        if self.current_segment_info.is_none() {
             if !frame.keyframe {
-                // キーフレーム以外では新セグメントを開始しない
                 return Ok(());
             }
             self.start_new_segment(frame.timestamp)?;
         }
 
-        let pts = duration_to_timestamp(frame.timestamp)?;
-        self.write_pes_packets(
-            Pid::new(VIDEO_PID).unwrap(),
-            StreamId::new_video(StreamId::VIDEO_MIN).unwrap(),
-            &frame.data,
-            Some(pts),
-            true, // ビデオ
-        )?;
+        match &mut self.format_state {
+            FormatState::MpegTs(state) => {
+                let pts = duration_to_timestamp(frame.timestamp)?;
+                write_pes_packets_mpegts(
+                    state,
+                    Pid::new(VIDEO_PID).unwrap(),
+                    StreamId::new_video(StreamId::VIDEO_MIN).unwrap(),
+                    &frame.data,
+                    Some(pts),
+                    true,
+                )?;
+            }
+            FormatState::Fmp4(state) => {
+                let duration = state
+                    .last_video_timestamp
+                    .map(|prev| frame.timestamp.saturating_sub(prev).as_micros() as u32)
+                    .unwrap_or(0);
+                let data_offset = state.current_payload.len() as u64;
+                state.current_payload.extend_from_slice(&frame.data);
+                state.current_samples.push(shiguredo_mp4::mux::Sample {
+                    track_kind: shiguredo_mp4::TrackKind::Video,
+                    sample_entry: frame.sample_entry.clone(),
+                    keyframe: frame.keyframe,
+                    timescale: FMP4_TIMESCALE,
+                    duration,
+                    composition_time_offset: None,
+                    data_offset,
+                    data_size: frame.data.len(),
+                });
+                state.last_video_timestamp = Some(frame.timestamp);
+            }
+        }
 
-        if let Some(ref mut seg) = self.current_segment {
-            seg.last_timestamp = frame.timestamp;
+        if let Some(ref mut info) = self.current_segment_info {
+            info.last_timestamp = frame.timestamp;
         }
 
         Ok(())
@@ -170,282 +258,163 @@ impl HlsWriter {
 
     /// オーディオフレーム処理
     fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
-        if self.current_segment.is_none() {
-            // ビデオのキーフレームがまだ来ていない場合はスキップ
+        if self.current_segment_info.is_none() {
             return Ok(());
         }
 
-        let pts = duration_to_timestamp(frame.timestamp)?;
-        self.write_pes_packets(
-            Pid::new(AUDIO_PID).unwrap(),
-            StreamId::new(StreamId::AUDIO_MIN),
-            &frame.data,
-            Some(pts),
-            false, // オーディオ
-        )?;
+        match &mut self.format_state {
+            FormatState::MpegTs(state) => {
+                let pts = duration_to_timestamp(frame.timestamp)?;
+                write_pes_packets_mpegts(
+                    state,
+                    Pid::new(AUDIO_PID).unwrap(),
+                    StreamId::new(StreamId::AUDIO_MIN),
+                    &frame.data,
+                    Some(pts),
+                    false,
+                )?;
+            }
+            FormatState::Fmp4(state) => {
+                let duration = state
+                    .last_audio_timestamp
+                    .map(|prev| frame.timestamp.saturating_sub(prev).as_micros() as u32)
+                    .unwrap_or(0);
+                let data_offset = state.current_payload.len() as u64;
+                state.current_payload.extend_from_slice(&frame.data);
+                state.current_samples.push(shiguredo_mp4::mux::Sample {
+                    track_kind: shiguredo_mp4::TrackKind::Audio,
+                    sample_entry: frame.sample_entry.clone(),
+                    keyframe: true,
+                    timescale: FMP4_TIMESCALE,
+                    duration,
+                    composition_time_offset: None,
+                    data_offset,
+                    data_size: frame.data.len(),
+                });
+                state.last_audio_timestamp = Some(frame.timestamp);
+            }
+        }
 
-        if let Some(ref mut seg) = self.current_segment {
-            seg.last_timestamp = frame.timestamp;
+        if let Some(ref mut info) = self.current_segment_info {
+            info.last_timestamp = frame.timestamp;
         }
 
         Ok(())
     }
 
-    /// 新しいセグメントファイルを開始する
+    /// 新しいセグメントを開始する
     fn start_new_segment(&mut self, timestamp: Duration) -> crate::Result<()> {
         let sequence = self.segment_sequence;
         self.segment_sequence += 1;
-        let filename = format!("segment-{sequence:06}.ts");
-        let path = self.output_directory.join(&filename);
+        let ext = self.segment_extension();
+        let filename = format!("segment-{sequence:06}.{ext}");
 
-        let file = std::fs::File::create(&path).map_err(|e| {
-            crate::Error::new(format!(
-                "failed to create segment file {}: {e}",
-                path.display()
-            ))
-        })?;
-        let buf_writer = BufWriter::new(file);
-        let mut writer = TsPacketWriter::new(buf_writer);
+        match &mut self.format_state {
+            FormatState::MpegTs(state) => {
+                let path = self.output_directory.join(&filename);
+                let file = std::fs::File::create(&path).map_err(|e| {
+                    crate::Error::new(format!(
+                        "failed to create segment file {}: {e}",
+                        path.display()
+                    ))
+                })?;
+                let buf_writer = BufWriter::new(file);
+                let mut writer = TsPacketWriter::new(buf_writer);
+                write_pat(state, &mut writer)?;
+                write_pmt(state, &mut writer)?;
+                state.current_writer = Some(writer);
+            }
+            FormatState::Fmp4(state) => {
+                // fMP4: samples と payload をクリアして蓄積開始
+                state.current_samples.clear();
+                state.current_payload.clear();
+            }
+        }
 
-        // セグメント先頭に PAT と PMT を書き出す
-        self.write_pat(&mut writer)?;
-        self.write_pmt(&mut writer)?;
-
-        self.current_segment = Some(CurrentSegment {
-            writer,
+        self.current_segment_info = Some(CurrentSegmentInfo {
             filename,
             start_timestamp: timestamp,
             last_timestamp: timestamp,
-            byte_count: 0,
         });
-
-        Ok(())
-    }
-
-    /// PAT (Program Association Table) を書き出す
-    fn write_pat<W: Write>(&mut self, writer: &mut TsPacketWriter<W>) -> crate::Result<()> {
-        let cc = self.pat_cc;
-        self.pat_cc.increment();
-        let packet = TsPacket {
-            header: TsHeader {
-                transport_error_indicator: false,
-                transport_priority: false,
-                pid: Pid::from(0u8),
-                transport_scrambling_control: TransportScramblingControl::NotScrambled,
-                continuity_counter: cc,
-            },
-            adaptation_field: None,
-            payload: Some(TsPayload::Pat(Pat {
-                transport_stream_id: 1,
-                version_number: VersionNumber::new(),
-                table: vec![ProgramAssociation {
-                    program_num: 1,
-                    program_map_pid: Pid::new(PMT_PID).unwrap(),
-                }],
-            })),
-        };
-        writer
-            .write_ts_packet(&packet)
-            .map_err(|e| crate::Error::new(format!("failed to write PAT: {e}")))?;
-        Ok(())
-    }
-
-    /// PMT (Program Map Table) を書き出す
-    fn write_pmt<W: Write>(&mut self, writer: &mut TsPacketWriter<W>) -> crate::Result<()> {
-        let cc = self.pmt_cc;
-        self.pmt_cc.increment();
-        let packet = TsPacket {
-            header: TsHeader {
-                transport_error_indicator: false,
-                transport_priority: false,
-                pid: Pid::new(PMT_PID).unwrap(),
-                transport_scrambling_control: TransportScramblingControl::NotScrambled,
-                continuity_counter: cc,
-            },
-            adaptation_field: None,
-            payload: Some(TsPayload::Pmt(Pmt {
-                program_num: 1,
-                pcr_pid: Some(Pid::new(VIDEO_PID).unwrap()),
-                version_number: VersionNumber::new(),
-                program_info: vec![],
-                es_info: vec![
-                    EsInfo {
-                        stream_type: StreamType::H264,
-                        elementary_pid: Pid::new(VIDEO_PID).unwrap(),
-                        descriptors: vec![],
-                    },
-                    EsInfo {
-                        stream_type: StreamType::AdtsAac,
-                        elementary_pid: Pid::new(AUDIO_PID).unwrap(),
-                        descriptors: vec![],
-                    },
-                ],
-            })),
-        };
-        writer
-            .write_ts_packet(&packet)
-            .map_err(|e| crate::Error::new(format!("failed to write PMT: {e}")))?;
-        Ok(())
-    }
-
-    /// PES データを TS パケットに分割して書き出す。
-    /// 大きなフレームは PesStart + 複数の PesContinuation に分割される。
-    fn write_pes_packets(
-        &mut self,
-        pid: Pid,
-        stream_id: StreamId,
-        data: &[u8],
-        pts: Option<Timestamp>,
-        is_video: bool,
-    ) -> crate::Result<()> {
-        let seg = self
-            .current_segment
-            .as_mut()
-            .ok_or_else(|| crate::Error::new("no active segment".to_owned()))?;
-
-        let cc = if is_video {
-            &mut self.video_cc
-        } else {
-            &mut self.audio_cc
-        };
-
-        // PES ヘッダを構築
-        let pes_header = PesHeader {
-            stream_id,
-            priority: false,
-            data_alignment_indicator: true,
-            copyright: false,
-            original_or_copy: false,
-            pts,
-            dts: None,
-            escr: None,
-        };
-
-        // PES ヘッダのサイズを計算
-        // optional header: 3 バイト (flags + header_data_length) + PTS(5) + DTS(5)
-        let optional_header_len: usize = 3 + pts.map_or(0, |_| 5) + pes_header.dts.map_or(0, |_| 5);
-        // PES パケットの総ヘッダサイズ: start_code(3) + stream_id(1) + packet_len(2) + optional_header(N)
-        let pes_header_size = 3 + 1 + 2 + optional_header_len;
-        let total_pes_size = pes_header_size + data.len();
-
-        // pes_packet_len: PES パケット長 (stream_id + packet_len の後から)
-        // = optional_header_len + data.len()
-        // 0 はビデオでの unbounded を意味する
-        let pes_packet_len = if total_pes_size - 6 > u16::MAX as usize {
-            0 // unbounded (ビデオでは一般的)
-        } else {
-            (total_pes_size - 6) as u16
-        };
-
-        // 最初の TS パケット: PesStart
-        // TS パケットの payload は最大 184 バイト (188 - 4 header)
-        // PES の先頭データを Bytes に収める
-        let max_first_payload = Bytes::MAX_SIZE - pes_header_size;
-        let first_data_len = data.len().min(max_first_payload);
-
-        let first_data = Bytes::new(&data[..first_data_len])
-            .map_err(|e| crate::Error::new(format!("failed to create PES start data: {e}")))?;
-
-        let current_cc = *cc;
-        cc.increment();
-
-        // PCR を最初のビデオパケットの adaptation field に含める
-        let adaptation_field = if is_video {
-            pts.map(|pts_val| AdaptationField {
-                discontinuity_indicator: false,
-                random_access_indicator: false,
-                es_priority_indicator: false,
-                pcr: Some(ClockReference::from(pts_val)),
-                opcr: None,
-                splice_countdown: None,
-                transport_private_data: Vec::new(),
-                extension: None,
-            })
-        } else {
-            None
-        };
-
-        let start_packet = TsPacket {
-            header: TsHeader {
-                transport_error_indicator: false,
-                transport_priority: false,
-                pid,
-                transport_scrambling_control: TransportScramblingControl::NotScrambled,
-                continuity_counter: current_cc,
-            },
-            adaptation_field,
-            payload: Some(TsPayload::PesStart(Pes {
-                header: pes_header,
-                pes_packet_len,
-                data: first_data,
-            })),
-        };
-
-        seg.writer
-            .write_ts_packet(&start_packet)
-            .map_err(|e| crate::Error::new(format!("failed to write PES start packet: {e}")))?;
-        seg.byte_count += TsPacket::SIZE as u64;
-
-        // 残りのデータを PesContinuation パケットで送る
-        let mut offset = first_data_len;
-        while offset < data.len() {
-            let remaining = data.len() - offset;
-            let chunk_len = remaining.min(Bytes::MAX_SIZE);
-            let chunk = Bytes::new(&data[offset..offset + chunk_len]).map_err(|e| {
-                crate::Error::new(format!("failed to create PES continuation data: {e}"))
-            })?;
-
-            let current_cc = *cc;
-            cc.increment();
-
-            let cont_packet = TsPacket {
-                header: TsHeader {
-                    transport_error_indicator: false,
-                    transport_priority: false,
-                    pid,
-                    transport_scrambling_control: TransportScramblingControl::NotScrambled,
-                    continuity_counter: current_cc,
-                },
-                adaptation_field: None,
-                payload: Some(TsPayload::PesContinuation(chunk)),
-            };
-
-            seg.writer.write_ts_packet(&cont_packet).map_err(|e| {
-                crate::Error::new(format!("failed to write PES continuation packet: {e}"))
-            })?;
-            seg.byte_count += TsPacket::SIZE as u64;
-            offset += chunk_len;
-        }
 
         Ok(())
     }
 
     /// 現在のセグメントを完了し、プレイリストを更新する
     fn finalize_current_segment(&mut self) -> crate::Result<()> {
-        let Some(seg) = self.current_segment.take() else {
+        let Some(info) = self.current_segment_info.take() else {
             return Ok(());
         };
 
-        // ファイルをフラッシュして閉じる
-        let mut inner = seg.writer.into_stream();
-        inner
-            .flush()
-            .map_err(|e| crate::Error::new(format!("failed to flush segment file: {e}")))?;
-        drop(inner);
+        match &mut self.format_state {
+            FormatState::MpegTs(state) => {
+                if let Some(writer) = state.current_writer.take() {
+                    let mut inner = writer.into_stream();
+                    inner.flush().map_err(|e| {
+                        crate::Error::new(format!("failed to flush segment file: {e}"))
+                    })?;
+                }
+            }
+            FormatState::Fmp4(state) => {
+                if state.current_samples.is_empty() {
+                    return Ok(());
+                }
 
-        let duration = seg
+                // moof + mdat ヘッダを生成
+                let metadata = state
+                    .muxer
+                    .create_media_segment_metadata(&state.current_samples)
+                    .map_err(|e| {
+                        crate::Error::new(format!("failed to create fMP4 segment metadata: {e}"))
+                    })?;
+
+                // init segment がまだ書かれていなければ書き出す
+                if !state.init_segment_written {
+                    let init_bytes = state.muxer.init_segment_bytes().map_err(|e| {
+                        crate::Error::new(format!("failed to create fMP4 init segment: {e}"))
+                    })?;
+                    let init_path = self.output_directory.join(INIT_SEGMENT_FILENAME);
+                    std::fs::write(&init_path, &init_bytes).map_err(|e| {
+                        crate::Error::new(format!(
+                            "failed to write init segment {}: {e}",
+                            init_path.display()
+                        ))
+                    })?;
+                    state.init_segment_written = true;
+                }
+
+                // セグメントファイルを書き出す（metadata + payload）
+                let path = self.output_directory.join(&info.filename);
+                let mut file = BufWriter::new(std::fs::File::create(&path).map_err(|e| {
+                    crate::Error::new(format!(
+                        "failed to create segment file {}: {e}",
+                        path.display()
+                    ))
+                })?);
+                file.write_all(&metadata).map_err(|e| {
+                    crate::Error::new(format!("failed to write fMP4 metadata: {e}"))
+                })?;
+                file.write_all(&state.current_payload)
+                    .map_err(|e| crate::Error::new(format!("failed to write fMP4 payload: {e}")))?;
+                file.flush()
+                    .map_err(|e| crate::Error::new(format!("failed to flush fMP4 segment: {e}")))?;
+
+                state.current_samples.clear();
+                state.current_payload.clear();
+            }
+        }
+
+        let duration = info
             .last_timestamp
-            .saturating_sub(seg.start_timestamp)
+            .saturating_sub(info.start_timestamp)
             .as_secs_f64();
-        // 最低限の duration を保証する
         let duration = duration.max(0.001);
 
         self.retained_segments.push_back(RetainedSegment {
-            filename: seg.filename,
+            filename: info.filename,
             duration,
         });
 
-        // プレイリストを更新
         self.write_playlist()?;
 
         // 保持数超過分の古いセグメントを削除
@@ -468,10 +437,8 @@ impl HlsWriter {
             return Ok(());
         }
 
-        // media sequence は最も古いセグメントの番号
         let media_sequence = self.segment_sequence as usize - self.retained_segments.len();
 
-        // EXT-X-TARGETDURATION は最大セグメント尺の切り上げ整数
         let max_duration = self
             .retained_segments
             .iter()
@@ -482,9 +449,21 @@ impl HlsWriter {
 
         let mut content = String::new();
         content.push_str("#EXTM3U\n");
-        content.push_str(&format!("#EXT-X-VERSION:3\n"));
+
+        if self.is_fmp4() {
+            // fMP4 は HLS v7 で規定
+            content.push_str("#EXT-X-VERSION:7\n");
+        } else {
+            content.push_str("#EXT-X-VERSION:3\n");
+        }
+
         content.push_str(&format!("#EXT-X-TARGETDURATION:{target_duration}\n"));
         content.push_str(&format!("#EXT-X-MEDIA-SEQUENCE:{media_sequence}\n"));
+
+        // fMP4 の場合は init segment への参照を追加
+        if self.is_fmp4() {
+            content.push_str(&format!("#EXT-X-MAP:URI=\"{INIT_SEGMENT_FILENAME}\"\n"));
+        }
 
         for seg in &self.retained_segments {
             content.push_str(&format!("#EXTINF:{:.3},\n", seg.duration));
@@ -492,7 +471,6 @@ impl HlsWriter {
             content.push('\n');
         }
 
-        // アトミック書き込み: 一時ファイル → rename
         let playlist_path = self.output_directory.join(PLAYLIST_FILENAME);
         let tmp_path = self.output_directory.join(".playlist.m3u8.tmp");
 
@@ -516,47 +494,249 @@ impl HlsWriter {
 
     /// 停止時に全生成ファイルを削除する
     fn cleanup(&self) {
-        // プレイリストを削除
         let playlist_path = self.output_directory.join(PLAYLIST_FILENAME);
-        if let Err(e) = std::fs::remove_file(&playlist_path) {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!("failed to remove playlist {}: {e}", playlist_path.display());
-            }
+        if let Err(e) = std::fs::remove_file(&playlist_path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!("failed to remove playlist {}: {e}", playlist_path.display());
         }
-        // 一時ファイルも削除
         let tmp_path = self.output_directory.join(".playlist.m3u8.tmp");
         let _ = std::fs::remove_file(&tmp_path);
 
-        // 保持中のセグメントを削除
+        // fMP4 の場合は init segment も削除
+        if self.is_fmp4() {
+            let init_path = self.output_directory.join(INIT_SEGMENT_FILENAME);
+            if let Err(e) = std::fs::remove_file(&init_path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!("failed to remove init segment {}: {e}", init_path.display());
+            }
+        }
+
         for seg in &self.retained_segments {
             let path = self.output_directory.join(&seg.filename);
-            if let Err(e) = std::fs::remove_file(&path) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    tracing::warn!("failed to remove segment {}: {e}", path.display());
-                }
+            if let Err(e) = std::fs::remove_file(&path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!("failed to remove segment {}: {e}", path.display());
             }
         }
     }
 }
 
+// --- MPEG-TS 固有の関数群 ---
+
+fn write_pat<W: Write>(
+    state: &mut MpegTsState,
+    writer: &mut TsPacketWriter<W>,
+) -> crate::Result<()> {
+    let cc = state.pat_cc;
+    state.pat_cc.increment();
+    let packet = TsPacket {
+        header: TsHeader {
+            transport_error_indicator: false,
+            transport_priority: false,
+            pid: Pid::from(0u8),
+            transport_scrambling_control: TransportScramblingControl::NotScrambled,
+            continuity_counter: cc,
+        },
+        adaptation_field: None,
+        payload: Some(TsPayload::Pat(Pat {
+            transport_stream_id: 1,
+            version_number: VersionNumber::new(),
+            table: vec![ProgramAssociation {
+                program_num: 1,
+                program_map_pid: Pid::new(PMT_PID).unwrap(),
+            }],
+        })),
+    };
+    writer
+        .write_ts_packet(&packet)
+        .map_err(|e| crate::Error::new(format!("failed to write PAT: {e}")))?;
+    Ok(())
+}
+
+fn write_pmt<W: Write>(
+    state: &mut MpegTsState,
+    writer: &mut TsPacketWriter<W>,
+) -> crate::Result<()> {
+    let cc = state.pmt_cc;
+    state.pmt_cc.increment();
+    let packet = TsPacket {
+        header: TsHeader {
+            transport_error_indicator: false,
+            transport_priority: false,
+            pid: Pid::new(PMT_PID).unwrap(),
+            transport_scrambling_control: TransportScramblingControl::NotScrambled,
+            continuity_counter: cc,
+        },
+        adaptation_field: None,
+        payload: Some(TsPayload::Pmt(Pmt {
+            program_num: 1,
+            pcr_pid: Some(Pid::new(VIDEO_PID).unwrap()),
+            version_number: VersionNumber::new(),
+            program_info: vec![],
+            es_info: vec![
+                EsInfo {
+                    stream_type: StreamType::H264,
+                    elementary_pid: Pid::new(VIDEO_PID).unwrap(),
+                    descriptors: vec![],
+                },
+                EsInfo {
+                    stream_type: StreamType::AdtsAac,
+                    elementary_pid: Pid::new(AUDIO_PID).unwrap(),
+                    descriptors: vec![],
+                },
+            ],
+        })),
+    };
+    writer
+        .write_ts_packet(&packet)
+        .map_err(|e| crate::Error::new(format!("failed to write PMT: {e}")))?;
+    Ok(())
+}
+
+/// PES データを TS パケットに分割して書き出す。
+fn write_pes_packets_mpegts(
+    state: &mut MpegTsState,
+    pid: Pid,
+    stream_id: StreamId,
+    data: &[u8],
+    pts: Option<Timestamp>,
+    is_video: bool,
+) -> crate::Result<()> {
+    let writer = state
+        .current_writer
+        .as_mut()
+        .ok_or_else(|| crate::Error::new("no active MPEG-TS segment".to_owned()))?;
+
+    let cc = if is_video {
+        &mut state.video_cc
+    } else {
+        &mut state.audio_cc
+    };
+
+    let pes_header = PesHeader {
+        stream_id,
+        priority: false,
+        data_alignment_indicator: true,
+        copyright: false,
+        original_or_copy: false,
+        pts,
+        dts: None,
+        escr: None,
+    };
+
+    let optional_header_len: usize = 3 + pts.map_or(0, |_| 5) + pes_header.dts.map_or(0, |_| 5);
+    let pes_header_size = 3 + 1 + 2 + optional_header_len;
+    let total_pes_size = pes_header_size + data.len();
+
+    let pes_packet_len = if total_pes_size - 6 > u16::MAX as usize {
+        0
+    } else {
+        (total_pes_size - 6) as u16
+    };
+
+    let max_first_payload = Bytes::MAX_SIZE - pes_header_size;
+    let first_data_len = data.len().min(max_first_payload);
+
+    let first_data = Bytes::new(&data[..first_data_len])
+        .map_err(|e| crate::Error::new(format!("failed to create PES start data: {e}")))?;
+
+    let current_cc = *cc;
+    cc.increment();
+
+    let adaptation_field = if is_video {
+        pts.map(|pts_val| AdaptationField {
+            discontinuity_indicator: false,
+            random_access_indicator: false,
+            es_priority_indicator: false,
+            pcr: Some(ClockReference::from(pts_val)),
+            opcr: None,
+            splice_countdown: None,
+            transport_private_data: Vec::new(),
+            extension: None,
+        })
+    } else {
+        None
+    };
+
+    let start_packet = TsPacket {
+        header: TsHeader {
+            transport_error_indicator: false,
+            transport_priority: false,
+            pid,
+            transport_scrambling_control: TransportScramblingControl::NotScrambled,
+            continuity_counter: current_cc,
+        },
+        adaptation_field,
+        payload: Some(TsPayload::PesStart(Pes {
+            header: pes_header,
+            pes_packet_len,
+            data: first_data,
+        })),
+    };
+
+    writer
+        .write_ts_packet(&start_packet)
+        .map_err(|e| crate::Error::new(format!("failed to write PES start packet: {e}")))?;
+
+    let mut offset = first_data_len;
+    while offset < data.len() {
+        let remaining = data.len() - offset;
+        let chunk_len = remaining.min(Bytes::MAX_SIZE);
+        let chunk = Bytes::new(&data[offset..offset + chunk_len]).map_err(|e| {
+            crate::Error::new(format!("failed to create PES continuation data: {e}"))
+        })?;
+
+        let current_cc = *cc;
+        cc.increment();
+
+        let cont_packet = TsPacket {
+            header: TsHeader {
+                transport_error_indicator: false,
+                transport_priority: false,
+                pid,
+                transport_scrambling_control: TransportScramblingControl::NotScrambled,
+                continuity_counter: current_cc,
+            },
+            adaptation_field: None,
+            payload: Some(TsPayload::PesContinuation(chunk)),
+        };
+
+        writer.write_ts_packet(&cont_packet).map_err(|e| {
+            crate::Error::new(format!("failed to write PES continuation packet: {e}"))
+        })?;
+        offset += chunk_len;
+    }
+
+    Ok(())
+}
+
 /// Duration を mpeg2ts の Timestamp (90kHz) に変換する
 fn duration_to_timestamp(d: Duration) -> crate::Result<Timestamp> {
     let ticks = (d.as_secs_f64() * Timestamp::RESOLUTION as f64) as u64;
-    let ticks = ticks % (Timestamp::MAX + 1); // ラップアラウンド
+    let ticks = ticks % (Timestamp::MAX + 1);
     Timestamp::new(ticks).map_err(|e| crate::Error::new(format!("invalid timestamp: {e}")))
+}
+
+/// HLS writer プロセッサの設定
+pub struct HlsWriterConfig {
+    pub output_directory: PathBuf,
+    pub input_audio_track_id: Option<crate::TrackId>,
+    pub input_video_track_id: Option<crate::TrackId>,
+    pub segment_duration: f64,
+    pub max_retained_segments: usize,
+    pub segment_format: HlsSegmentFormat,
 }
 
 /// HLS writer プロセッサを作成する
 pub async fn create_processor(
     handle: &crate::MediaPipelineHandle,
-    output_directory: PathBuf,
-    input_audio_track_id: Option<crate::TrackId>,
-    input_video_track_id: Option<crate::TrackId>,
-    segment_duration: f64,
-    max_retained_segments: usize,
+    config: HlsWriterConfig,
     processor_id: Option<crate::ProcessorId>,
 ) -> crate::Result<crate::ProcessorId> {
-    if input_audio_track_id.is_none() && input_video_track_id.is_none() {
+    if config.input_audio_track_id.is_none() && config.input_video_track_id.is_none() {
         return Err(crate::Error::new(
             "inputAudioTrackId or inputVideoTrackId is required".to_owned(),
         ));
@@ -568,10 +748,14 @@ pub async fn create_processor(
             processor_id.clone(),
             crate::ProcessorMetadata::new("hls_writer"),
             move |h| async move {
-                let writer =
-                    HlsWriter::new(output_directory, segment_duration, max_retained_segments);
+                let writer = HlsWriter::new(
+                    config.output_directory,
+                    config.segment_duration,
+                    config.max_retained_segments,
+                    config.segment_format,
+                )?;
                 writer
-                    .run(h, input_audio_track_id, input_video_track_id)
+                    .run(h, config.input_audio_track_id, config.input_video_track_id)
                     .await
             },
         )

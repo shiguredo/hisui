@@ -1688,3 +1688,133 @@ def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Pa
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
         asyncio.run(_run_hls_nodir_flow())
+
+
+def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
+    """obsws が fMP4 形式の HLS 出力を開始・停止できることを確認する。
+    init.mp4 と .m4s セグメントが生成され、停止後に削除されることを確認する。"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    image_path = tmp_path / "hls-fmp4-input.png"
+    _write_test_png(image_path)
+    hls_dir = tmp_path / "hls-fmp4-output"
+    hls_dir.mkdir()
+
+    async def _run_hls_fmp4_flow():
+        timeout = aiohttp.ClientTimeout(total=30.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            ws = await session.ws_connect(
+                f"ws://{host}:{port}/",
+                protocols=[OBSWS_SUBPROTOCOL],
+            )
+            await _identify_with_optional_password(ws, None)
+
+            # 入力ソースを作成
+            create_input_response = await _send_obsws_request(
+                ws,
+                request_type="CreateInput",
+                request_id="req-create-hls-fmp4-input",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "hls-fmp4-input",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": str(image_path)},
+                    "sceneItemEnabled": True,
+                },
+            )
+            assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            # fMP4 形式で HLS 設定を行う
+            set_settings_response = await _send_obsws_request(
+                ws,
+                request_type="SetOutputSettings",
+                request_id="req-set-hls-fmp4-settings",
+                request_data={
+                    "outputName": "hls",
+                    "outputSettings": {
+                        "outputDirectory": str(hls_dir),
+                        "segmentFormat": "fmp4",
+                    },
+                },
+            )
+            assert set_settings_response["d"]["requestStatus"]["result"] is True
+
+            # 設定を取得して segmentFormat が fmp4 であることを確認
+            get_settings_response = await _send_obsws_request(
+                ws,
+                request_type="GetOutputSettings",
+                request_id="req-get-hls-fmp4-settings",
+                request_data={"outputName": "hls"},
+            )
+            assert get_settings_response["d"]["requestStatus"]["result"] is True
+            settings = get_settings_response["d"]["responseData"]["outputSettings"]
+            assert settings["segmentFormat"] == "fmp4"
+
+            # HLS 出力を開始
+            start_response = await _send_obsws_request(
+                ws,
+                request_type="StartOutput",
+                request_id="req-start-hls-fmp4",
+                request_data={"outputName": "hls"},
+            )
+            assert start_response["d"]["requestStatus"]["result"] is True
+
+            # セグメントが生成されるまで待つ
+            await asyncio.sleep(5.0)
+
+            # init.mp4 が存在することを確認
+            init_path = hls_dir / "init.mp4"
+            assert init_path.exists(), "init.mp4 must exist for fMP4 HLS"
+
+            # playlist.m3u8 が存在することを確認
+            playlist_path = hls_dir / "playlist.m3u8"
+            assert playlist_path.exists(), "playlist.m3u8 must exist"
+
+            # playlist に EXT-X-MAP が含まれることを確認
+            playlist_content = playlist_path.read_text()
+            assert '#EXT-X-MAP:URI="init.mp4"' in playlist_content, (
+                "playlist must contain EXT-X-MAP for fMP4"
+            )
+            assert "#EXT-X-VERSION:7" in playlist_content, (
+                "playlist must use version 7 for fMP4"
+            )
+
+            # .m4s セグメントファイルが存在することを確認
+            m4s_files = list(hls_dir.glob("segment-*.m4s"))
+            assert len(m4s_files) > 0, "at least one .m4s segment must exist"
+
+            # HLS 出力を停止
+            stop_response = await _send_obsws_request(
+                ws,
+                request_type="StopOutput",
+                request_id="req-stop-hls-fmp4",
+                request_data={"outputName": "hls"},
+            )
+            assert stop_response["d"]["requestStatus"]["result"] is True
+
+            # 停止を待つ
+            for _ in range(20):
+                status_response = await _send_obsws_request(
+                    ws,
+                    request_type="GetOutputStatus",
+                    request_id="req-get-hls-fmp4-status-inactive",
+                    request_data={"outputName": "hls"},
+                )
+                if status_response["d"]["responseData"]["outputActive"] is False:
+                    break
+                await asyncio.sleep(0.1)
+
+            # 停止後にファイルが削除されていることを確認
+            assert not init_path.exists(), "init.mp4 must be deleted after stop"
+            assert not playlist_path.exists(), "playlist.m3u8 must be deleted after stop"
+            m4s_files_after = list(hls_dir.glob("segment-*.m4s"))
+            assert (
+                len(m4s_files_after) == 0
+            ), "all .m4s segments must be deleted after stop"
+
+            await ws.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        asyncio.run(_run_hls_fmp4_flow())

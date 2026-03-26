@@ -531,6 +531,7 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS セグメントを生成し、M3U8
 | `outputDirectory` | string | StartOutput 時に必須 | セグメントとプレイリストの出力先ディレクトリ |
 | `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
 | `maxRetainedSegments` | number | - | プレイリストに保持するセグメント数。デフォルト: 6 |
+| `segmentFormat` | string | - | セグメントフォーマット。`"mpegts"` (デフォルト) または `"fmp4"` |
 
 **フロー:**
 

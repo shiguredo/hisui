@@ -796,22 +796,32 @@ fn parse_hls_settings(
         .transpose()
         .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
-    if let Some(duration) = segment_duration {
-        if duration <= 0.0 {
-            return Err("segmentDuration must be positive".to_owned());
-        }
+    let segment_format_str: Option<String> =
+        super::optional_non_empty_string_member(output_settings, "segmentFormat")
+            .map_err(|e| e.to_string())?;
+
+    if let Some(duration) = segment_duration
+        && duration <= 0.0
+    {
+        return Err("segmentDuration must be positive".to_owned());
     }
-    if let Some(count) = max_retained_segments {
-        if count == 0 {
-            return Err("maxRetainedSegments must be at least 1".to_owned());
-        }
+    if let Some(count) = max_retained_segments
+        && count == 0
+    {
+        return Err("maxRetainedSegments must be at least 1".to_owned());
     }
+    let segment_format = match segment_format_str {
+        Some(ref s) => crate::obsws::input_registry::HlsSegmentFormat::from_str(s)
+            .ok_or_else(|| format!("segmentFormat must be \"mpegts\" or \"fmp4\", got \"{s}\""))?,
+        None => input_registry.hls_settings().segment_format,
+    };
 
     let existing = input_registry.hls_settings().clone();
     input_registry.set_hls_settings(crate::obsws::input_registry::ObswsHlsSettings {
         output_directory: output_directory.or(existing.output_directory),
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
+        segment_format,
     });
     Ok(())
 }

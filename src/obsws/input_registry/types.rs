@@ -1076,6 +1076,33 @@ pub struct ObswsRtmpOutboundSettings {
 pub const DEFAULT_HLS_SEGMENT_DURATION_SECS: f64 = 2.0;
 pub const DEFAULT_HLS_MAX_RETAINED_SEGMENTS: usize = 6;
 
+/// HLS セグメントのフォーマット
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HlsSegmentFormat {
+    /// MPEG-TS (.ts)
+    #[default]
+    MpegTs,
+    /// Fragmented MP4 (.m4s + init.mp4)
+    Fmp4,
+}
+
+impl HlsSegmentFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MpegTs => "mpegts",
+            Self::Fmp4 => "fmp4",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "mpegts" => Some(Self::MpegTs),
+            "fmp4" => Some(Self::Fmp4),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsHlsSettings {
     // StartOutput 時に必須。登録時点では未指定も許容する。
@@ -1084,6 +1111,8 @@ pub struct ObswsHlsSettings {
     pub segment_duration: f64,
     /// プレイリストに保持するセグメント数
     pub max_retained_segments: usize,
+    /// セグメントフォーマット
+    pub segment_format: HlsSegmentFormat,
 }
 
 impl Default for ObswsHlsSettings {
@@ -1092,6 +1121,7 @@ impl Default for ObswsHlsSettings {
             output_directory: None,
             segment_duration: DEFAULT_HLS_SEGMENT_DURATION_SECS,
             max_retained_segments: DEFAULT_HLS_MAX_RETAINED_SEGMENTS,
+            segment_format: HlsSegmentFormat::default(),
         }
     }
 }
@@ -1103,7 +1133,8 @@ impl nojson::DisplayJson for ObswsHlsSettings {
                 f.member("outputDirectory", output_directory)?;
             }
             f.member("segmentDuration", self.segment_duration)?;
-            f.member("maxRetainedSegments", self.max_retained_segments)
+            f.member("maxRetainedSegments", self.max_retained_segments)?;
+            f.member("segmentFormat", self.segment_format.as_str())
         })
         .fmt(f)
     }
