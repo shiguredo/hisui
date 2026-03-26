@@ -165,7 +165,7 @@ pub struct ObswsCoordinator {
     pipeline_handle: Option<crate::MediaPipelineHandle>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<ObswsCoordinatorCommand>,
     /// 入力ごとの source processor 管理（キーは input_uuid）
-    input_source_processors: std::collections::HashMap<String, InputSourceState>,
+    input_source_processors: std::collections::BTreeMap<String, InputSourceState>,
     /// bootstrap 用の差分イベント送信チャネル
     bootstrap_event_tx: tokio::sync::broadcast::Sender<BootstrapInputEvent>,
 }
@@ -188,7 +188,7 @@ impl ObswsCoordinator {
             program_output,
             pipeline_handle,
             command_rx,
-            input_source_processors: std::collections::HashMap::new(),
+            input_source_processors: std::collections::BTreeMap::new(),
             bootstrap_event_tx: bootstrap_event_tx.clone(),
         };
         let handle = ObswsCoordinatorHandle {
