@@ -620,6 +620,8 @@ fn build_get_sora_status_as_output_response(
     };
     let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
     let output_timecode = format_timecode(duration);
+    // TODO: outputBytes / outputSkippedFrames / outputTotalFrames は sora-rust-sdk に
+    // フレーム単位の統計 API が追加されたら対応する。現時点では 0 固定。
     super::build_request_response_success("GetOutputStatus", request_id, |f| {
         f.member("outputActive", active)?;
         f.member("outputReconnecting", false)?;
