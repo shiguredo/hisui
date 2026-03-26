@@ -179,10 +179,15 @@ struct Session {
     /// bootstrap の input_uuid → snapshot マッピング
     bootstrap_tracks:
         std::collections::HashMap<String, crate::obsws::coordinator::BootstrapInputSnapshot>,
+    /// bootstrap 差分イベント購読タスクの停止用ハンドル
+    bootstrap_event_abort_handle: Option<tokio::task::AbortHandle>,
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
+        if let Some(handle) = &self.bootstrap_event_abort_handle {
+            handle.abort();
+        }
         tracing::info!("Closing PeerConnection");
         self.pc.close();
     }
@@ -389,7 +394,7 @@ impl WebRtcP2pSessionManager {
                 // bootstrap 差分イベントの購読タスクを起動する
                 let mut bootstrap_rx = self.coordinator_handle.subscribe_bootstrap_events();
                 let event_tx = sess.event_tx.clone();
-                tokio::spawn(async move {
+                let bootstrap_task = tokio::spawn(async move {
                     while let Ok(event) = bootstrap_rx.recv().await {
                         let pc_event = match event {
                             crate::obsws::coordinator::BootstrapInputEvent::InputCreated(
@@ -404,6 +409,7 @@ impl WebRtcP2pSessionManager {
                         }
                     }
                 });
+                sess.bootstrap_event_abort_handle = Some(bootstrap_task.abort_handle());
 
                 // トラック追加があるので pending_renegotiation を設定する。
                 // 実際の offer 送信は ConnectionChange(Connected) で行う。
@@ -498,6 +504,7 @@ async fn bootstrap_internal(
         ice_candidates,
         obsws_session,
         bootstrap_tracks: std::collections::HashMap::new(),
+        bootstrap_event_abort_handle: None,
     };
 
     Ok((answer_sdp, sess))
