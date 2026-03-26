@@ -44,6 +44,7 @@ shiguredo_rtmp = "=2026.1.0-canary.5"
 shiguredo_rtsp = "=2026.1.0-canary.0"
 shiguredo_srt = "=2026.1.0-canary.0"
 shiguredo_webrtc = "=0.146.2-canary.1"
+sora_sdk = "=2026.1.0-canary.2"
 shiguredo_video_device = "=2026.1.0-canary.3"
 shiguredo_audio_device = "=2026.1.0-canary.0"
 mpeg2ts = "=0.6.0"
@@ -70,4 +71,4 @@ shiguredo_video_toolbox = "=2026.1.0-canary.1"
 tempfile = "3.18.0"
 
 [workspace]
-members = ["examples/obsws_bootstrap"]
+members = ["examples/obsws_bootstrap", "examples/sora_publish"]

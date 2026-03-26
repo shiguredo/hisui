@@ -2057,4 +2057,168 @@ mod tests {
         assert_eq!(output_total_frames, 7);
         Ok(())
     }
+
+    // --- sora output テスト ---
+
+    #[test]
+    fn get_output_list_includes_sora() -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-ol".to_owned()),
+            request_type: Some("GetOutputList".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let outputs = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputs"])?
+            .required()?;
+        let output_names: Vec<String> = outputs
+            .to_array()?
+            .map(|output| output.to_member("outputName")?.required()?.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+        assert!(output_names.iter().any(|name| name == "sora"));
+        Ok(())
+    }
+
+    #[test]
+    fn set_and_get_sora_output_settings() -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+
+        // SetOutputSettings
+        let set_request = RequestMessage {
+            request_id: Some("req-set-sora".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"],"channelId":"test-ch","clientId":"c1","metadata":{"key":"value"}}}}"#,
+            )),
+        };
+        let set_response = handle_request_message(set_request, &session_stats, &mut input_registry);
+        let set_json = nojson::RawJson::parse(set_response.message.text())?;
+        let set_result: bool = set_json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])?
+            .required()?
+            .try_into()?;
+        assert!(set_result);
+
+        // GetOutputSettings で設定が保持されていることを確認
+        let get_request = RequestMessage {
+            request_id: Some("req-get-sora".to_owned()),
+            request_type: Some("GetOutputSettings".to_owned()),
+            request_data: Some(request_data(r#"{"outputName":"sora"}"#)),
+        };
+        let get_response = handle_request_message(get_request, &session_stats, &mut input_registry);
+        let get_json = nojson::RawJson::parse(get_response.message.text())?;
+        let output_kind: String = get_json
+            .value()
+            .to_path_member(&["d", "responseData", "outputKind"])?
+            .required()?
+            .try_into()?;
+        assert_eq!(output_kind, "sora_webrtc_output");
+
+        let channel_id: String = get_json
+            .value()
+            .to_path_member(&[
+                "d",
+                "responseData",
+                "outputSettings",
+                "soraSdkSettings",
+                "channelId",
+            ])?
+            .required()?
+            .try_into()?;
+        assert_eq!(channel_id, "test-ch");
+        Ok(())
+    }
+
+    #[test]
+    fn set_sora_output_settings_overwrites_previous_values()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+
+        // 初回設定
+        let request1 = RequestMessage {
+            request_id: Some("req-1".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://a.example.com"],"channelId":"ch-1","clientId":"c1","metadata":{"k":"v"}}}}"#,
+            )),
+        };
+        handle_request_message(request1, &session_stats, &mut input_registry);
+
+        // 上書き（clientId と metadata を省略）
+        let request2 = RequestMessage {
+            request_id: Some("req-2".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://b.example.com"],"channelId":"ch-2"}}}"#,
+            )),
+        };
+        handle_request_message(request2, &session_stats, &mut input_registry);
+
+        // clientId と metadata がクリアされていることを確認
+        let settings = input_registry.sora_publisher_settings();
+        assert_eq!(settings.signaling_urls, vec!["wss://b.example.com"]);
+        assert_eq!(settings.channel_id.as_deref(), Some("ch-2"));
+        assert!(settings.client_id.is_none());
+        assert!(settings.metadata.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn get_sora_output_status_returns_inactive() -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-sora-status".to_owned()),
+            request_type: Some("GetOutputStatus".to_owned()),
+            request_data: Some(request_data(r#"{"outputName":"sora"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let result: bool = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        let output_active: bool = json
+            .value()
+            .to_path_member(&["d", "responseData", "outputActive"])?
+            .required()?
+            .try_into()?;
+        assert!(!output_active);
+        Ok(())
+    }
+
+    #[test]
+    fn set_sora_output_settings_rejects_non_object_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = ObswsInputRegistry::new_for_test();
+
+        let request = RequestMessage {
+            request_id: Some("req-bad-meta".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(request_data(
+                r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://a.example.com"],"channelId":"ch","metadata":"not-an-object"}}}"#,
+            )),
+        };
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let result: bool = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])?
+            .required()?
+            .try_into()?;
+        assert!(!result);
+        Ok(())
+    }
 }
