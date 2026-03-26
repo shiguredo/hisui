@@ -24,6 +24,27 @@ pub enum ObswsCoordinatorCommand {
         halt_on_failure: bool,
         reply_tx: tokio::sync::oneshot::Sender<BatchCommandResult>,
     },
+    /// bootstrap 用の入力 snapshot を取得する
+    GetBootstrapSnapshot {
+        reply_tx: tokio::sync::oneshot::Sender<Vec<BootstrapInputSnapshot>>,
+    },
+}
+
+/// bootstrap 用の入力 snapshot
+#[derive(Clone, Debug)]
+pub struct BootstrapInputSnapshot {
+    pub input_uuid: String,
+    pub input_name: String,
+    pub input_kind: String,
+    pub video_track_id: Option<crate::TrackId>,
+    pub audio_track_id: Option<crate::TrackId>,
+}
+
+/// bootstrap 用の入力差分イベント
+#[derive(Clone, Debug)]
+pub enum BootstrapInputEvent {
+    InputCreated(BootstrapInputSnapshot),
+    InputRemoved { input_uuid: String },
 }
 
 /// 単一リクエストの処理結果
@@ -57,6 +78,7 @@ pub struct ProgramTrackIds {
 pub struct ObswsCoordinatorHandle {
     command_tx: tokio::sync::mpsc::UnboundedSender<ObswsCoordinatorCommand>,
     program_track_ids: ProgramTrackIds,
+    bootstrap_event_tx: tokio::sync::broadcast::Sender<BootstrapInputEvent>,
 }
 
 impl ObswsCoordinatorHandle {
@@ -109,6 +131,31 @@ impl ObswsCoordinatorHandle {
     pub fn program_audio_track_id(&self) -> crate::TrackId {
         self.program_track_ids.audio_track_id.clone()
     }
+
+    /// bootstrap 用の入力 snapshot を取得する
+    pub async fn get_bootstrap_snapshot(&self) -> crate::Result<Vec<BootstrapInputSnapshot>> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.command_tx
+            .send(ObswsCoordinatorCommand::GetBootstrapSnapshot { reply_tx })
+            .map_err(|_| crate::Error::new("coordinator has terminated"))?;
+        reply_rx
+            .await
+            .map_err(|_| crate::Error::new("coordinator dropped reply channel"))
+    }
+
+    /// bootstrap 用の差分イベントを購読する
+    pub fn subscribe_bootstrap_events(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<BootstrapInputEvent> {
+        self.bootstrap_event_tx.subscribe()
+    }
+}
+
+/// 入力ごとの source processor 状態
+pub struct InputSourceState {
+    pub processor_ids: Vec<crate::ProcessorId>,
+    pub video_track_id: Option<crate::TrackId>,
+    pub audio_track_id: Option<crate::TrackId>,
 }
 
 /// obsws の状態変更・副作用・Program 出力同期を調停する coordinator
@@ -117,6 +164,10 @@ pub struct ObswsCoordinator {
     program_output: crate::obsws::server::ProgramOutputState,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<ObswsCoordinatorCommand>,
+    /// 入力ごとの source processor 管理（キーは input_uuid）
+    input_source_processors: std::collections::HashMap<String, InputSourceState>,
+    /// bootstrap 用の差分イベント送信チャネル
+    bootstrap_event_tx: tokio::sync::broadcast::Sender<BootstrapInputEvent>,
 }
 
 impl ObswsCoordinator {
@@ -127,6 +178,7 @@ impl ObswsCoordinator {
         pipeline_handle: Option<crate::MediaPipelineHandle>,
     ) -> (Self, ObswsCoordinatorHandle) {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (bootstrap_event_tx, _) = tokio::sync::broadcast::channel(64);
         let program_track_ids = ProgramTrackIds {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
@@ -136,10 +188,13 @@ impl ObswsCoordinator {
             program_output,
             pipeline_handle,
             command_rx,
+            input_source_processors: std::collections::HashMap::new(),
+            bootstrap_event_tx: bootstrap_event_tx.clone(),
         };
         let handle = ObswsCoordinatorHandle {
             command_tx,
             program_track_ids,
+            bootstrap_event_tx,
         };
         (actor, handle)
     }
@@ -166,6 +221,10 @@ impl ObswsCoordinator {
                         .handle_request_batch(requests, &session_stats, halt_on_failure)
                         .await;
                     let _ = reply_tx.send(result);
+                }
+                ObswsCoordinatorCommand::GetBootstrapSnapshot { reply_tx } => {
+                    let snapshot = self.build_bootstrap_snapshot();
+                    let _ = reply_tx.send(snapshot);
                 }
             }
         }
@@ -257,8 +316,14 @@ impl ObswsCoordinator {
                 self.build_result_from_response(response_text, Vec::new())
             }
             // Input 系
-            "CreateInput" => self.handle_create_input(&request_id, request.request_data.as_ref()),
-            "RemoveInput" => self.handle_remove_input(&request_id, request.request_data.as_ref()),
+            "CreateInput" => {
+                self.handle_create_input(&request_id, request.request_data.as_ref())
+                    .await
+            }
+            "RemoveInput" => {
+                self.handle_remove_input(&request_id, request.request_data.as_ref())
+                    .await
+            }
             "SetInputSettings" => {
                 self.handle_set_input_settings(&request_id, request.request_data.as_ref())
             }
@@ -461,7 +526,7 @@ impl ObswsCoordinator {
     // Input 系ハンドラ
     // -----------------------------------------------------------------------
 
-    fn handle_create_input(
+    async fn handle_create_input(
         &mut self,
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
@@ -474,6 +539,33 @@ impl ObswsCoordinator {
         let response_text = execution.response_text;
         let mut events = Vec::new();
         if let Some(created) = execution.created {
+            // 入力ライフサイクルの source processor を起動する
+            if let Err(e) = self
+                .start_input_source_processor(&created.input_entry)
+                .await
+            {
+                tracing::warn!(
+                    "failed to start source processor for input {}: {}",
+                    created.input_entry.input_uuid,
+                    e.display()
+                );
+            }
+
+            // bootstrap 用の差分イベントを送信する
+            if let Some(source_state) =
+                self.input_source_processors.get(&created.input_entry.input_uuid)
+            {
+                let _ =
+                    self.bootstrap_event_tx
+                        .send(BootstrapInputEvent::InputCreated(BootstrapInputSnapshot {
+                            input_uuid: created.input_entry.input_uuid.clone(),
+                            input_name: created.input_entry.input_name.clone(),
+                            input_kind: created.input_entry.input.kind_name().to_owned(),
+                            video_track_id: source_state.video_track_id.clone(),
+                            audio_track_id: source_state.audio_track_id.clone(),
+                        }));
+            }
+
             events.push(TaggedEvent {
                 text: crate::obsws::response::build_input_created_event(
                     &created.input_entry.input_name,
@@ -509,7 +601,7 @@ impl ObswsCoordinator {
         self.build_result_from_response(response_text, events)
     }
 
-    fn handle_remove_input(
+    async fn handle_remove_input(
         &mut self,
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
@@ -552,6 +644,23 @@ impl ObswsCoordinator {
                 .find_input(Some(&removed_input.input_uuid), None)
                 .is_none();
             if removed_succeeded {
+                // 入力ライフサイクルの source processor を停止する
+                if let Err(e) = self
+                    .stop_input_source_processor(&removed_input.input_uuid)
+                    .await
+                {
+                    tracing::warn!(
+                        "failed to stop source processor for input {}: {}",
+                        removed_input.input_uuid,
+                        e.display()
+                    );
+                }
+
+                // bootstrap 用の差分イベントを送信する
+                let _ = self.bootstrap_event_tx.send(BootstrapInputEvent::InputRemoved {
+                    input_uuid: removed_input.input_uuid.clone(),
+                });
+
                 events.push(TaggedEvent {
                     text: crate::obsws::response::build_input_removed_event(
                         &removed_input.input_name,
@@ -2049,9 +2158,89 @@ impl ObswsCoordinator {
         self.rebuild_program_output().await
     }
 
+    /// bootstrap 用の入力 snapshot を構築する
+    fn build_bootstrap_snapshot(&self) -> Vec<BootstrapInputSnapshot> {
+        self.input_source_processors
+            .iter()
+            .filter_map(|(input_uuid, state)| {
+                let entry = self.input_registry.find_input(Some(input_uuid), None)?;
+                Some(BootstrapInputSnapshot {
+                    input_uuid: entry.input_uuid.clone(),
+                    input_name: entry.input_name.clone(),
+                    input_kind: entry.input.kind_name().to_owned(),
+                    video_track_id: state.video_track_id.clone(),
+                    audio_track_id: state.audio_track_id.clone(),
+                })
+            })
+            .collect()
+    }
+
+    /// 入力ライフサイクルの source processor を起動する
+    async fn start_input_source_processor(
+        &mut self,
+        input_entry: &crate::obsws::input_registry::ObswsInputEntry,
+    ) -> crate::Result<()> {
+        let Some(pipeline_handle) = &self.pipeline_handle else {
+            return Ok(());
+        };
+        let source_plan = crate::obsws::source::build_record_source_plan(
+            input_entry,
+            crate::obsws::source::ObswsOutputKind::Program,
+            0,
+            &input_entry.input_uuid,
+            self.input_registry.frame_rate(),
+        )
+        .map_err(|e| crate::Error::new(format!("failed to build source plan: {}", e.message())))?;
+
+        let state = InputSourceState {
+            processor_ids: source_plan.source_processor_ids.clone(),
+            video_track_id: source_plan.source_video_track_id.clone(),
+            audio_track_id: source_plan.source_audio_track_id.clone(),
+        };
+
+        crate::obsws::session::output::start_source_processors(
+            pipeline_handle,
+            &mut vec![source_plan],
+        )
+        .await?;
+
+        self.input_source_processors
+            .insert(input_entry.input_uuid.clone(), state);
+        Ok(())
+    }
+
+    /// 入力ライフサイクルの source processor を停止する
+    async fn stop_input_source_processor(&mut self, input_uuid: &str) -> crate::Result<()> {
+        let Some(state) = self.input_source_processors.remove(input_uuid) else {
+            return Ok(());
+        };
+        let Some(pipeline_handle) = &self.pipeline_handle else {
+            return Ok(());
+        };
+        crate::obsws::session::output::stop_source_processors(
+            pipeline_handle,
+            &state.processor_ids,
+        )
+        .await
+    }
+
+    /// 初期入力に対して source processor を一括起動する
+    pub async fn start_initial_input_source_processors(&mut self) -> crate::Result<()> {
+        let entries: Vec<_> = self.input_registry.inputs_by_uuid.values().cloned().collect();
+        for entry in entries {
+            if let Err(e) = self.start_input_source_processor(&entry).await {
+                tracing::warn!(
+                    "failed to start source processor for initial input {}: {}",
+                    entry.input_uuid,
+                    e.display()
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Program 出力を再構築する。
-    /// actor が registry と program_output を両方所有するため、
-    /// session.rs の double-read-lock パターンが不要になる。
+    /// source processor は入力ライフサイクルで管理するため、ここではミキサーの入力トラックのみ更新する。
     async fn rebuild_program_output(&mut self) -> crate::Result<()> {
         let pipeline_handle = self
             .pipeline_handle
@@ -2066,7 +2255,7 @@ impl ObswsCoordinator {
         let scene_inputs = self
             .input_registry
             .list_current_program_scene_input_entries();
-        let mut output_plan = crate::obsws::output_plan::build_composed_output_plan(
+        let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
             crate::obsws::source::ObswsOutputKind::Program,
             0,
@@ -2081,8 +2270,6 @@ impl ObswsCoordinator {
             ))
         })?;
 
-        // actor は registry を所有しているため、snapshot の stale チェックは不要
-
         // ミキサーの入力トラックを更新する
         crate::obsws::session::output::update_program_mixers(
             pipeline_handle,
@@ -2092,22 +2279,6 @@ impl ObswsCoordinator {
         )
         .await?;
 
-        // 旧ソースプロセッサを停止する
-        crate::obsws::session::output::stop_source_processors(
-            pipeline_handle,
-            &self.program_output.source_processor_ids,
-        )
-        .await?;
-
-        // 新しいソースプロセッサを起動する
-        crate::obsws::session::output::start_source_processors(
-            pipeline_handle,
-            &mut output_plan.source_plans,
-        )
-        .await?;
-
-        // 状態を更新する
-        self.program_output.source_processor_ids = output_plan.source_processor_ids;
         self.program_output.scene_uuid = current_scene_uuid;
 
         tracing::info!("program output rebuilt for scene change");

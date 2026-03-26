@@ -5,7 +5,7 @@ use shiguredo_webrtc::{
     DataChannelObserverHandler, DataChannelState, IceGatheringState, PeerConnection,
     PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionObserver,
     PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState,
-    StringVector,
+    RtpSender, StringVector,
 };
 use tokio::sync::mpsc;
 
@@ -26,6 +26,10 @@ enum PcEvent {
     TrackMessage {
         track_id: crate::TrackId,
         message: crate::Message,
+    },
+    BootstrapInputCreated(crate::obsws::coordinator::BootstrapInputSnapshot),
+    BootstrapInputRemoved {
+        input_uuid: String,
     },
 }
 
@@ -153,6 +157,12 @@ impl DataChannelObserverHandler for ObswsMessageHandler {
     }
 }
 
+/// bootstrap トラック管理エントリ
+struct BootstrapTrackEntry {
+    video_track_id: Option<crate::TrackId>,
+    audio_track_id: Option<crate::TrackId>,
+}
+
 struct Session {
     _handle: crate::MediaPipelineHandle,
     processor_handle: crate::ProcessorHandle,
@@ -172,6 +182,8 @@ struct Session {
     ice_rx: tokio::sync::mpsc::UnboundedReceiver<IceObserverEvent>,
     ice_candidates: Vec<GatheredIceCandidate>,
     obsws_session: ObswsSession,
+    /// bootstrap の input_uuid → track ID マッピング
+    bootstrap_tracks: std::collections::HashMap<String, BootstrapTrackEntry>,
 }
 
 impl Drop for Session {
@@ -183,6 +195,8 @@ impl Drop for Session {
 
 struct SubscribedTrack {
     state: TrackState,
+    sender: RtpSender,
+    abort_handle: tokio::task::AbortHandle,
 }
 
 enum TrackState {
@@ -236,13 +250,34 @@ impl WebRtcP2pSessionManager {
                     PcEvent::ConnectionChange(state) => {
                         tracing::info!("PeerConnection state changed: {state:?}");
                         sess.connection_state = state;
-                        if state == PeerConnectionState::Connected && sess.pending_renegotiation {
-                            // 接続確立後に保留中の renegotiation offer を送信する
-                            if let Err(e) = maybe_send_offer(sess).await {
-                                tracing::warn!(
-                                    "failed to send renegotiation offer: {}",
-                                    e.display()
-                                );
+                        if state == PeerConnectionState::Connected {
+                            // 接続確立時に bootstrap-tracks snapshot を送信する
+                            let snapshot_entries: Vec<_> = sess
+                                .bootstrap_tracks
+                                .iter()
+                                .map(|(uuid, entry)| {
+                                    crate::obsws::coordinator::BootstrapInputSnapshot {
+                                        input_uuid: uuid.clone(),
+                                        input_name: String::new(),
+                                        input_kind: String::new(),
+                                        video_track_id: entry.video_track_id.clone(),
+                                        audio_track_id: entry.audio_track_id.clone(),
+                                    }
+                                })
+                                .collect();
+                            if !snapshot_entries.is_empty() {
+                                let msg = build_bootstrap_tracks_json(&snapshot_entries);
+                                send_dc(sess, &msg);
+                            }
+
+                            if sess.pending_renegotiation {
+                                // 接続確立後に保留中の renegotiation offer を送信する
+                                if let Err(e) = maybe_send_offer(sess).await {
+                                    tracing::warn!(
+                                        "failed to send renegotiation offer: {}",
+                                        e.display()
+                                    );
+                                }
                             }
                         }
                         if matches!(
@@ -291,6 +326,12 @@ impl WebRtcP2pSessionManager {
                     }
                     PcEvent::TrackMessage { track_id, message } => {
                         handle_track_message(sess, &track_id, message);
+                    }
+                    PcEvent::BootstrapInputCreated(snapshot) => {
+                        handle_bootstrap_input_created(sess, snapshot).await;
+                    }
+                    PcEvent::BootstrapInputRemoved { input_uuid } => {
+                        handle_bootstrap_input_removed(sess, &input_uuid).await;
                     }
                 }
             }
@@ -351,22 +392,41 @@ impl WebRtcP2pSessionManager {
         .await
         {
             Ok((answer_sdp, mut sess)) => {
-                // Program 出力の固定トラックを購読する（PeerConnection にトラックを追加）
-                // renegotiation offer は接続確立後に送信される
-                // coordinator が保持する固定 Program 出力トラックを購読する
-                let program_video_track_id = self.coordinator_handle.program_video_track_id();
-                let program_audio_track_id = self.coordinator_handle.program_audio_track_id();
-                if let Err(e) = subscribe_track(&mut sess, program_video_track_id, TrackKind::Video)
-                {
-                    tracing::warn!("failed to subscribe program video track: {}", e.display());
+                // 入力ソース単位のトラックを購読する
+                let snapshot = self
+                    .coordinator_handle
+                    .get_bootstrap_snapshot()
+                    .await
+                    .map_err(BootstrapError::Internal)?;
+                for input in &snapshot {
+                    subscribe_bootstrap_input(&mut sess, input);
                 }
-                if let Err(e) = subscribe_track(&mut sess, program_audio_track_id, TrackKind::Audio)
-                {
-                    tracing::warn!("failed to subscribe program audio track: {}", e.display());
-                }
+
+                // bootstrap 差分イベントの購読タスクを起動する
+                let mut bootstrap_rx =
+                    self.coordinator_handle.subscribe_bootstrap_events();
+                let event_tx = sess.event_tx.clone();
+                tokio::spawn(async move {
+                    while let Ok(event) = bootstrap_rx.recv().await {
+                        let pc_event = match event {
+                            crate::obsws::coordinator::BootstrapInputEvent::InputCreated(
+                                snapshot,
+                            ) => PcEvent::BootstrapInputCreated(snapshot),
+                            crate::obsws::coordinator::BootstrapInputEvent::InputRemoved {
+                                input_uuid,
+                            } => PcEvent::BootstrapInputRemoved { input_uuid },
+                        };
+                        if event_tx.send(pc_event).is_err() {
+                            break;
+                        }
+                    }
+                });
+
                 // トラック追加があるので pending_renegotiation を設定する。
                 // 実際の offer 送信は ConnectionChange(Connected) で行う。
-                sess.pending_renegotiation = true;
+                if !sess.subscribed_tracks.is_empty() {
+                    sess.pending_renegotiation = true;
+                }
 
                 *guard = Some(sess);
                 Ok(answer_sdp)
@@ -454,6 +514,7 @@ async fn bootstrap_internal(
         ice_rx,
         ice_candidates,
         obsws_session,
+        bootstrap_tracks: std::collections::HashMap::new(),
     };
 
     Ok((answer_sdp, sess))
@@ -770,7 +831,7 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
 fn create_video_track(
     sess: &mut Session,
     track_id: &crate::TrackId,
-) -> crate::Result<VideoTrackState> {
+) -> crate::Result<(VideoTrackState, RtpSender)> {
     let source = AdaptedVideoTrackSource::new();
     let video_source = source.cast_to_video_track_source();
     let track = sess
@@ -781,21 +842,24 @@ fn create_video_track(
     let mut stream_ids = StringVector::new(0);
     let stream_id = CxxString::from_str(track_id.get());
     stream_ids.push(&stream_id);
-    let _sender = sess
+    let sender = sess
         .pc
         .add_track(&track.cast_to_media_stream_track(), &stream_ids)
         .map_err(|e| crate::Error::new(format!("Failed to add track: {e}")))?;
 
-    Ok(VideoTrackState {
-        source,
-        _track: track,
-    })
+    Ok((
+        VideoTrackState {
+            source,
+            _track: track,
+        },
+        sender,
+    ))
 }
 
 fn create_audio_track(
     sess: &mut Session,
     track_id: &crate::TrackId,
-) -> crate::Result<AudioTrackState> {
+) -> crate::Result<(AudioTrackState, RtpSender)> {
     let source = sess
         .factory
         .create_audio_source()
@@ -808,16 +872,19 @@ fn create_audio_track(
     let mut stream_ids = StringVector::new(0);
     let stream_id = CxxString::from_str(track_id.get());
     stream_ids.push(&stream_id);
-    let _sender = sess
+    let sender = sess
         .pc
         .add_track(&track.cast_to_media_stream_track(), &stream_ids)
         .map_err(|e| crate::Error::new(format!("Failed to add audio track: {e}")))?;
 
-    Ok(AudioTrackState {
-        audio_state: sess.audio_state.clone(),
-        _source: source,
-        _track: track,
-    })
+    Ok((
+        AudioTrackState {
+            audio_state: sess.audio_state.clone(),
+            _source: source,
+            _track: track,
+        },
+        sender,
+    ))
 }
 
 async fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
@@ -855,31 +922,26 @@ fn subscribe_track(
         return Ok(false);
     }
 
-    let state = match kind {
+    let (state, sender) = match kind {
         TrackKind::Video => {
-            let state = create_video_track(session, &track_id)?;
-            TrackState::Video(state)
+            let (state, sender) = create_video_track(session, &track_id)?;
+            (TrackState::Video(state), sender)
         }
         TrackKind::Audio => {
-            let state = create_audio_track(session, &track_id)?;
-            TrackState::Audio(state)
+            let (state, sender) = create_audio_track(session, &track_id)?;
+            (TrackState::Audio(state), sender)
         }
     };
 
-    let needs_offer = matches!(state, TrackState::Video(_) | TrackState::Audio(_));
-
-    session
-        .subscribed_tracks
-        .insert(track_id.clone(), SubscribedTrack { state });
-
     let mut rx = session.processor_handle.subscribe_track(track_id.clone());
     let event_tx = session.event_tx.clone();
-    let _task = tokio::spawn(async move {
+    let track_id_for_task = track_id.clone();
+    let task = tokio::spawn(async move {
         loop {
             let message = rx.recv().await;
             if event_tx
                 .send(PcEvent::TrackMessage {
-                    track_id: track_id.clone(),
+                    track_id: track_id_for_task.clone(),
                     message,
                 })
                 .is_err()
@@ -889,7 +951,153 @@ fn subscribe_track(
         }
     });
 
-    Ok(needs_offer)
+    session.subscribed_tracks.insert(
+        track_id,
+        SubscribedTrack {
+            state,
+            sender,
+            abort_handle: task.abort_handle(),
+        },
+    );
+
+    Ok(true)
+}
+
+/// bootstrap snapshot の入力に対してトラックを購読する
+fn subscribe_bootstrap_input(
+    session: &mut Session,
+    snapshot: &crate::obsws::coordinator::BootstrapInputSnapshot,
+) {
+    if let Some(video_track_id) = &snapshot.video_track_id {
+        if let Err(e) = subscribe_track(session, video_track_id.clone(), TrackKind::Video) {
+            tracing::warn!(
+                "failed to subscribe bootstrap video track for {}: {}",
+                snapshot.input_uuid,
+                e.display()
+            );
+        }
+    }
+    if let Some(audio_track_id) = &snapshot.audio_track_id {
+        if let Err(e) = subscribe_track(session, audio_track_id.clone(), TrackKind::Audio) {
+            tracing::warn!(
+                "failed to subscribe bootstrap audio track for {}: {}",
+                snapshot.input_uuid,
+                e.display()
+            );
+        }
+    }
+    session.bootstrap_tracks.insert(
+        snapshot.input_uuid.clone(),
+        BootstrapTrackEntry {
+            video_track_id: snapshot.video_track_id.clone(),
+            audio_track_id: snapshot.audio_track_id.clone(),
+        },
+    );
+}
+
+/// bootstrap 入力作成時のハンドラ
+async fn handle_bootstrap_input_created(
+    sess: &mut Session,
+    snapshot: crate::obsws::coordinator::BootstrapInputSnapshot,
+) {
+    subscribe_bootstrap_input(sess, &snapshot);
+
+    // メタデータを signaling DataChannel で送信する
+    let msg = build_bootstrap_track_added_json(&snapshot);
+    send_dc(sess, &msg);
+
+    if let Err(e) = maybe_send_offer(sess).await {
+        tracing::warn!("failed to send renegotiation offer after input created: {}", e.display());
+    }
+}
+
+/// bootstrap 入力削除時のハンドラ
+async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
+    if let Some(entry) = sess.bootstrap_tracks.remove(input_uuid) {
+        if let Some(video_track_id) = &entry.video_track_id {
+            unsubscribe_track(sess, video_track_id);
+        }
+        if let Some(audio_track_id) = &entry.audio_track_id {
+            unsubscribe_track(sess, audio_track_id);
+        }
+    }
+
+    // メタデータを signaling DataChannel で送信する
+    let msg = build_bootstrap_track_removed_json(input_uuid);
+    send_dc(sess, &msg);
+
+    if let Err(e) = maybe_send_offer(sess).await {
+        tracing::warn!("failed to send renegotiation offer after input removed: {}", e.display());
+    }
+}
+
+/// bootstrap-tracks snapshot メッセージを構築する
+fn build_bootstrap_tracks_json(
+    snapshots: &[crate::obsws::coordinator::BootstrapInputSnapshot],
+) -> String {
+    nojson::object(|f| {
+        f.member("type", "bootstrap-tracks")?;
+        f.member(
+            "tracks",
+            nojson::array(|a| {
+                for s in snapshots {
+                    a.element(nojson::object(|f| {
+                        f.member("inputUuid", s.input_uuid.as_str())?;
+                        f.member("inputName", s.input_name.as_str())?;
+                        f.member("inputKind", s.input_kind.as_str())?;
+                        if let Some(id) = &s.video_track_id {
+                            f.member("videoTrackId", id.get())?;
+                        }
+                        if let Some(id) = &s.audio_track_id {
+                            f.member("audioTrackId", id.get())?;
+                        }
+                        Ok(())
+                    }))?;
+                }
+                Ok(())
+            }),
+        )
+    })
+    .to_string()
+}
+
+/// bootstrap-track-added メッセージを構築する
+fn build_bootstrap_track_added_json(
+    snapshot: &crate::obsws::coordinator::BootstrapInputSnapshot,
+) -> String {
+    nojson::object(|f| {
+        f.member("type", "bootstrap-track-added")?;
+        f.member("inputUuid", snapshot.input_uuid.as_str())?;
+        f.member("inputName", snapshot.input_name.as_str())?;
+        f.member("inputKind", snapshot.input_kind.as_str())?;
+        if let Some(id) = &snapshot.video_track_id {
+            f.member("videoTrackId", id.get())?;
+        }
+        if let Some(id) = &snapshot.audio_track_id {
+            f.member("audioTrackId", id.get())?;
+        }
+        Ok(())
+    })
+    .to_string()
+}
+
+/// bootstrap-track-removed メッセージを構築する
+fn build_bootstrap_track_removed_json(input_uuid: &str) -> String {
+    nojson::object(|f| {
+        f.member("type", "bootstrap-track-removed")?;
+        f.member("inputUuid", input_uuid)
+    })
+    .to_string()
+}
+
+/// トラックの購読を解除する
+fn unsubscribe_track(session: &mut Session, track_id: &crate::TrackId) {
+    if let Some(mut subscribed) = session.subscribed_tracks.remove(track_id) {
+        subscribed.abort_handle.abort();
+        if !subscribed.sender.set_track(None) {
+            tracing::warn!("set_track(None) failed for track {track_id}");
+        }
+    }
 }
 
 enum TrackKind {

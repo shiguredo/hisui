@@ -62,12 +62,12 @@ pub fn build_composed_output_plan(
     frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsComposedOutputPlan, BuildObswsComposedOutputPlanError> {
     let mut source_plans = Vec::with_capacity(scene_inputs.len());
-    for (source_index, scene_input) in scene_inputs.iter().enumerate() {
+    for scene_input in scene_inputs.iter() {
         let source_plan = source::build_record_source_plan(
             &scene_input.input,
             output_kind,
             run_id,
-            source_index,
+            &scene_input.input.input_uuid,
             frame_rate,
         )
         .map_err(BuildObswsComposedOutputPlanError::Source)?;
