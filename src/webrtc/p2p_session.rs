@@ -371,41 +371,30 @@ impl WebRtcP2pSessionManager {
         .await
         {
             Ok((answer_sdp, mut sess)) => {
-                // 入力ソース単位のトラックを購読する
-                let snapshot = self
-                    .coordinator_handle
-                    .get_bootstrap_snapshot()
-                    .await
-                    .map_err(BootstrapError::Internal)?;
-                for input in &snapshot {
-                    subscribe_bootstrap_input(&mut sess, input);
+                // bootstrap では入力ごとの raw track ではなく、
+                // 固定の Program 出力 track を配信する。
+                // これにより入力追加・削除のたびに track を張り替える必要がなくなり、
+                // video_mixer / audio_mixer を通った安定した出力をそのまま送れる。
+                let program_video_track_id = self.coordinator_handle.program_video_track_id();
+                if let Err(e) = subscribe_track(&mut sess, program_video_track_id, TrackKind::Video)
+                {
+                    return Err(BootstrapError::Internal(crate::Error::new(format!(
+                        "failed to subscribe program video track: {}",
+                        e.display()
+                    ))));
+                }
+                let program_audio_track_id = self.coordinator_handle.program_audio_track_id();
+                if let Err(e) = subscribe_track(&mut sess, program_audio_track_id, TrackKind::Audio)
+                {
+                    return Err(BootstrapError::Internal(crate::Error::new(format!(
+                        "failed to subscribe program audio track: {}",
+                        e.display()
+                    ))));
                 }
 
-                // bootstrap 差分イベントの購読タスクを起動する
-                let mut bootstrap_rx = self.coordinator_handle.subscribe_bootstrap_events();
-                let event_tx = sess.event_tx.clone();
-                let bootstrap_task = tokio::spawn(async move {
-                    while let Ok(event) = bootstrap_rx.recv().await {
-                        let pc_event = match event {
-                            crate::obsws::coordinator::BootstrapInputEvent::InputCreated(
-                                snapshot,
-                            ) => PcEvent::BootstrapInputCreated(snapshot),
-                            crate::obsws::coordinator::BootstrapInputEvent::InputRemoved {
-                                input_uuid,
-                            } => PcEvent::BootstrapInputRemoved { input_uuid },
-                        };
-                        if event_tx.send(pc_event).is_err() {
-                            break;
-                        }
-                    }
-                });
-                sess.bootstrap_event_abort_handle = Some(bootstrap_task.abort_handle());
-
-                // トラック追加があるので pending_renegotiation を設定する。
-                // 実際の offer 送信は ConnectionChange(Connected) で行う。
-                if !sess.subscribed_tracks.is_empty() {
-                    sess.pending_renegotiation = true;
-                }
+                // bootstrap_internal() の answer 生成後に track を追加しているため、
+                // 接続確立後に 1 回だけ renegotiation offer を送る。
+                sess.pending_renegotiation = true;
 
                 *guard = Some(sess);
                 Ok(answer_sdp)
