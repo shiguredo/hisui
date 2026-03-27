@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
 use crate::mp4::file_reader::{Mp4FileReader, Mp4FileReaderOptions};
-use crate::{ProcessorHandle, ProcessorId, ProcessorMetadata, Result, TrackId};
+use crate::{ProcessorHandle, Result, TrackId};
 
 #[derive(Debug, Clone)]
 pub struct Mp4FileSource {
@@ -14,74 +14,40 @@ pub struct Mp4FileSource {
 
 impl Mp4FileSource {
     pub async fn run(self, processor: ProcessorHandle) -> Result<()> {
-        let pipeline_handle = processor.pipeline_handle();
-        let openh264_lib = processor.config().openh264_lib.clone();
-        let processor_id = processor.processor_id().clone();
-
-        let mut options = Mp4FileReaderOptions {
+        let options = Mp4FileReaderOptions {
             realtime: true,
             loop_playback: self.loop_playback,
-            audio_track_id: None,
-            video_track_id: None,
+            audio_track_id: self.audio_track_id.clone(),
+            video_track_id: self.video_track_id.clone(),
         };
 
-        // エンコードトラック ID を設定する
-        let audio_decoder_params = self.audio_track_id.clone().map(|id| {
-            let encoded_id = TrackId::new(format!("{id}_encoded"));
-            options.audio_track_id = Some(encoded_id.clone());
-            (id, encoded_id)
-        });
-        let video_decoder_params = self.video_track_id.clone().map(|id| {
-            let encoded_id = TrackId::new(format!("{id}_encoded"));
-            options.video_track_id = Some(encoded_id.clone());
-            (id, encoded_id)
-        });
-
-        // エンコードトラックを先にパブリッシュする。
-        // デコーダーが subscribe する時点で publisher が必ず存在する状態にすることで、
-        // レースコンディションによるフレーム欠落を防止する。
         let mut reader = Mp4FileReader::new(&self.path, options)?;
-        reader.publish_tracks(&processor).await?;
 
-        // 音声デコーダーを外側パイプラインに登録
-        if let Some((id, encoded_id)) = audio_decoder_params {
-            pipeline_handle
-                .spawn_processor(
-                    ProcessorId::new(format!("{processor_id}_audio_decoder")),
-                    ProcessorMetadata::new("audio_decoder"),
-                    |handle| async move {
-                        let decoder = AudioDecoder::new(
-                            #[cfg(feature = "fdk-aac")]
-                            handle.config().fdk_aac_lib.clone(),
-                            handle.stats(),
-                        )?;
-                        decoder.run(handle, encoded_id, id).await
-                    },
-                )
-                .await?;
+        // デコーダーを生成して reader に設定する
+        if self.audio_track_id.is_some() {
+            let mut decoder_stats = processor.stats();
+            decoder_stats.set_default_label("component", "audio_decoder");
+            let decoder = AudioDecoder::new(
+                #[cfg(feature = "fdk-aac")]
+                processor.config().fdk_aac_lib.clone(),
+                decoder_stats,
+            )?;
+            reader.set_audio_decoder(decoder);
+        }
+        if self.video_track_id.is_some() {
+            let mut decoder_stats = processor.stats();
+            decoder_stats.set_default_label("component", "video_decoder");
+            let decoder = VideoDecoder::new(
+                VideoDecoderOptions {
+                    openh264_lib: processor.config().openh264_lib.clone(),
+                    ..Default::default()
+                },
+                decoder_stats,
+            );
+            reader.set_video_decoder(decoder);
         }
 
-        // 映像デコーダーを外側パイプラインに登録
-        if let Some((id, encoded_id)) = video_decoder_params {
-            pipeline_handle
-                .spawn_processor(
-                    ProcessorId::new(format!("{processor_id}_video_decoder")),
-                    ProcessorMetadata::new("video_decoder"),
-                    |handle| async move {
-                        let decoder = VideoDecoder::new(
-                            VideoDecoderOptions {
-                                openh264_lib,
-                                ..Default::default()
-                            },
-                            handle.stats(),
-                        );
-                        decoder.run(handle, encoded_id, id).await
-                    },
-                )
-                .await?;
-        }
-
-        // source プロセッサ自身がリーダーとして動作する
+        // raw トラックに直接パブリッシュし、reader 内でデコードしてから送信する
         reader.run(processor).await
     }
 }

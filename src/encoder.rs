@@ -372,6 +372,55 @@ pub enum VideoEncoderRpcMessage {
     RequestKeyframe,
 }
 
+/// 上流の video encoder にキーフレーム要求を送る。
+///
+/// encoder が見つからない場合は debug ログを出して正常終了する（best effort）。
+/// encoder は後から追加される可能性があり、その時点でキーフレームが届く。
+pub async fn request_upstream_video_keyframe(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    processor_id: &crate::ProcessorId,
+    trigger: &str,
+) -> crate::Result<()> {
+    let maybe_encoder_processor_id = pipeline_handle
+        .find_upstream_video_encoder(processor_id)
+        .await
+        .map_err(|_| crate::Error::new("failed to find upstream video encoder"))?;
+    let Some(encoder_processor_id) = maybe_encoder_processor_id else {
+        tracing::debug!(
+            "skip keyframe request: upstream video encoder not found (processor={}, trigger={})",
+            processor_id,
+            trigger,
+        );
+        return Ok(());
+    };
+
+    let rpc_sender = pipeline_handle
+        .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<VideoEncoderRpcMessage>>(
+            &encoder_processor_id,
+        )
+        .await
+        .map_err(|e| {
+            crate::Error::new(format!(
+                "failed to get video encoder RPC sender ({encoder_processor_id}): {e}"
+            ))
+        })?;
+
+    rpc_sender
+        .send(VideoEncoderRpcMessage::RequestKeyframe)
+        .map_err(|_| {
+            crate::Error::new(format!(
+                "failed to send keyframe request to video encoder: {encoder_processor_id}"
+            ))
+        })?;
+    tracing::debug!(
+        "requested keyframe: processor={}, encoder={}, trigger={}",
+        processor_id,
+        encoder_processor_id,
+        trigger,
+    );
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct VideoEncoder {
     engine_metric: crate::stats::StatsString,

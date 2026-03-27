@@ -159,7 +159,22 @@ impl HlsWriter {
     ) -> crate::Result<()> {
         let mut audio_rx = Some(handle.subscribe_track(input_audio_track_id));
         let mut video_rx = Some(handle.subscribe_track(input_video_track_id));
+
         handle.notify_ready();
+
+        // 起動直後に上流 video encoder へキーフレーム要求を送る
+        if let Err(e) = crate::encoder::request_upstream_video_keyframe(
+            &handle.pipeline_handle(),
+            handle.processor_id(),
+            "hls_writer_start",
+        )
+        .await
+        {
+            tracing::warn!(
+                "failed to request keyframe for HLS writer start: {}",
+                e.display()
+            );
+        }
 
         loop {
             if audio_rx.is_none() && video_rx.is_none() {

@@ -710,7 +710,23 @@ impl Mp4Writer {
         handle.register_rpc_sender(rpc_tx).await.map_err(|e| {
             crate::Error::new(format!("failed to register mp4 writer RPC sender: {e}"))
         })?;
+
         handle.notify_ready();
+
+        // 起動直後に上流 video encoder へキーフレーム要求を送る
+        if video_rx.is_some()
+            && let Err(e) = crate::encoder::request_upstream_video_keyframe(
+                &handle.pipeline_handle(),
+                handle.processor_id(),
+                "mp4_writer_start",
+            )
+            .await
+        {
+            tracing::warn!(
+                "failed to request keyframe for mp4 writer start: {}",
+                e.display()
+            );
+        }
         let mut rpc_rx_enabled = true;
 
         // 入力トラックが 0 本でも finalize まで到達する。

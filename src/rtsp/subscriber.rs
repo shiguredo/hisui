@@ -96,6 +96,33 @@ impl RtspSubscriber {
 
         let stats = RtspSubscriberStats::new(handle.stats());
         stats.set_connected(false);
+
+        // デコーダーを生成する
+        let mut video_decoder = if want_video {
+            let mut decoder_stats = handle.stats();
+            decoder_stats.set_default_label("component", "video_decoder");
+            Some(crate::decoder::VideoDecoder::new(
+                crate::decoder::VideoDecoderOptions {
+                    openh264_lib: handle.config().openh264_lib.clone(),
+                    ..Default::default()
+                },
+                decoder_stats,
+            ))
+        } else {
+            None
+        };
+        let mut audio_decoder = if want_audio {
+            let mut decoder_stats = handle.stats();
+            decoder_stats.set_default_label("component", "audio_decoder");
+            Some(crate::decoder::AudioDecoder::new(
+                #[cfg(feature = "fdk-aac")]
+                handle.config().fdk_aac_lib.clone(),
+                decoder_stats,
+            )?)
+        } else {
+            None
+        };
+
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
 
@@ -104,14 +131,19 @@ impl RtspSubscriber {
 
         loop {
             let connection_offset = started_at.elapsed();
+            let mut output = RtspOutputContext {
+                audio_track_tx: &mut audio_track_tx,
+                video_track_tx: &mut video_track_tx,
+                audio_decoder: &mut audio_decoder,
+                video_decoder: &mut video_decoder,
+            };
             let session_result = run_rtsp_session(
                 &parsed_url,
                 want_audio,
                 want_video,
                 connection_offset,
                 &stats,
-                &mut audio_track_tx,
-                &mut video_track_tx,
+                &mut output,
             )
             .await;
 
@@ -236,6 +268,14 @@ struct SelectedTracks {
 }
 
 #[derive(Debug)]
+/// subscriber の出力先（トラック sender）とデコーダーをまとめた構造体
+struct RtspOutputContext<'a> {
+    audio_track_tx: &'a mut Option<MessageSender>,
+    video_track_tx: &'a mut Option<MessageSender>,
+    audio_decoder: &'a mut Option<crate::decoder::AudioDecoder>,
+    video_decoder: &'a mut Option<crate::decoder::VideoDecoder>,
+}
+
 struct RtspSessionRunner {
     stream: crate::tcp::TcpOrTlsStream,
     connection: RtspClientConnection,
@@ -305,8 +345,7 @@ async fn run_rtsp_session(
     want_video: bool,
     connection_offset: Duration,
     stats: &RtspSubscriberStats,
-    audio_track_tx: &mut Option<MessageSender>,
-    video_track_tx: &mut Option<MessageSender>,
+    output: &mut RtspOutputContext<'_>,
 ) -> Result<(), SessionError> {
     let stream =
         crate::tcp::TcpOrTlsStream::connect(&parsed_url.host, parsed_url.port, parsed_url.tls)
@@ -341,12 +380,9 @@ async fn run_rtsp_session(
         stats.set_video_codec(crate::types::CodecName::H264);
     }
 
-    runner
-        .play_loop(audio_track_tx, video_track_tx, stats)
-        .await
-        .inspect_err(|_| {
-            stats.set_connected(false);
-        })
+    runner.play_loop(output, stats).await.inspect_err(|_| {
+        stats.set_connected(false);
+    })
 }
 
 impl RtspSessionRunner {
@@ -472,8 +508,7 @@ impl RtspSessionRunner {
 
     async fn play_loop(
         &mut self,
-        audio_track_tx: &mut Option<MessageSender>,
-        video_track_tx: &mut Option<MessageSender>,
+        output: &mut RtspOutputContext<'_>,
         stats: &RtspSubscriberStats,
     ) -> Result<(), SessionError> {
         let mut keepalive_interval = tokio::time::interval(KEEPALIVE_INTERVAL);
@@ -489,7 +524,7 @@ impl RtspSessionRunner {
                     self.connection
                         .feed_recv_buf(&self.recv_buf[..n])
                         .map_err(|e| SessionError::Retryable(Error::new(format!("failed to parse RTSP stream: {e}"))))?;
-                    self.process_events(audio_track_tx, video_track_tx, stats)?;
+                    self.process_events(output, stats)?;
                 }
                 _ = keepalive_interval.tick() => {
                     self.send_keepalive().await?;
@@ -513,8 +548,7 @@ impl RtspSessionRunner {
 
     fn process_events(
         &mut self,
-        audio_track_tx: &mut Option<MessageSender>,
-        video_track_tx: &mut Option<MessageSender>,
+        output: &mut RtspOutputContext<'_>,
         stats: &RtspSubscriberStats,
     ) -> Result<(), SessionError> {
         while let Some(event) = self.connection.next_event() {
@@ -528,7 +562,7 @@ impl RtspSessionRunner {
                     }
                 }
                 RtspConnectionEvent::RtpReceived { channel, packet } => {
-                    self.handle_rtp_packet(channel, packet, audio_track_tx, video_track_tx, stats)?
+                    self.handle_rtp_packet(channel, packet, output, stats)?
                 }
                 RtspConnectionEvent::RtcpReceived { .. } => {}
                 RtspConnectionEvent::InterleavedData { .. } => {}
@@ -580,8 +614,7 @@ impl RtspSessionRunner {
         &mut self,
         channel: u8,
         packet: shiguredo_rtsp::RtpPacket,
-        audio_track_tx: &mut Option<MessageSender>,
-        video_track_tx: &mut Option<MessageSender>,
+        output: &mut RtspOutputContext<'_>,
         stats: &RtspSubscriberStats,
     ) -> Result<(), SessionError> {
         if let Some(video_receiver) = self.video_receiver.as_mut()
@@ -604,15 +637,19 @@ impl RtspSessionRunner {
                     timestamp,
                     sample_entry: None,
                 };
-                if let Some(tx) = video_track_tx.as_mut()
-                    && !tx.send_video(video_frame)
-                {
-                    return Err(SessionError::Retryable(Error::new(
-                        "video track sender is closed",
-                    )));
-                }
                 stats.add_input_video_frame_count();
                 stats.set_last_input_video_timestamp(timestamp);
+                if let Some(decoder) = output.video_decoder.as_mut()
+                    && let Some(tx) = output.video_track_tx.as_mut()
+                {
+                    decoder
+                        .handle_input_sample(Some(crate::MediaFrame::Video(std::sync::Arc::new(
+                            video_frame,
+                        ))))
+                        .map_err(SessionError::Fatal)?;
+                    crate::decoder::drain_video_decoder_output(decoder, tx)
+                        .map_err(SessionError::Fatal)?;
+                }
             }
             return Ok(());
         }
@@ -643,15 +680,19 @@ impl RtspSessionRunner {
                     timestamp,
                     sample_entry,
                 };
-                if let Some(tx) = audio_track_tx.as_mut()
-                    && !tx.send_audio(audio_frame)
-                {
-                    return Err(SessionError::Retryable(Error::new(
-                        "audio track sender is closed",
-                    )));
-                }
                 stats.add_input_audio_data_count();
                 stats.set_last_input_audio_timestamp(timestamp);
+                if let Some(decoder) = output.audio_decoder.as_mut()
+                    && let Some(tx) = output.audio_track_tx.as_mut()
+                {
+                    decoder
+                        .handle_input_sample(Some(crate::MediaFrame::Audio(std::sync::Arc::new(
+                            audio_frame,
+                        ))))
+                        .map_err(SessionError::Fatal)?;
+                    crate::decoder::drain_audio_decoder_output(decoder, tx)
+                        .map_err(SessionError::Fatal)?;
+                }
             }
         }
 
@@ -1561,14 +1602,19 @@ mod tests {
         let mut audio_track_tx = None;
         let mut video_track_tx = None;
 
+        let mut output = RtspOutputContext {
+            audio_track_tx: &mut audio_track_tx,
+            video_track_tx: &mut video_track_tx,
+            audio_decoder: &mut None,
+            video_decoder: &mut None,
+        };
         let result = run_rtsp_session(
             &parsed_url,
             true,
             true,
             Duration::from_secs(3),
             &stats,
-            &mut audio_track_tx,
-            &mut video_track_tx,
+            &mut output,
         )
         .await;
 
@@ -1595,14 +1641,19 @@ mod tests {
         let mut audio_track_tx = None;
         let mut video_track_tx = None;
 
+        let mut output = RtspOutputContext {
+            audio_track_tx: &mut audio_track_tx,
+            video_track_tx: &mut video_track_tx,
+            audio_decoder: &mut None,
+            video_decoder: &mut None,
+        };
         let result = run_rtsp_session(
             &parsed_url,
             false,
             true,
             Duration::from_secs(1),
             &stats,
-            &mut audio_track_tx,
-            &mut video_track_tx,
+            &mut output,
         )
         .await;
 
@@ -1635,14 +1686,19 @@ mod tests {
         let mut audio_track_tx = None;
         let mut video_track_tx = None;
 
+        let mut output = RtspOutputContext {
+            audio_track_tx: &mut audio_track_tx,
+            video_track_tx: &mut video_track_tx,
+            audio_decoder: &mut None,
+            video_decoder: &mut None,
+        };
         let result = run_rtsp_session(
             &parsed_url,
             false,
             true,
             Duration::ZERO,
             &stats,
-            &mut audio_track_tx,
-            &mut video_track_tx,
+            &mut output,
         )
         .await;
 

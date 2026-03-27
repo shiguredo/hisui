@@ -29,6 +29,8 @@ pub struct Mp4FileReader {
     options: Mp4FileReaderOptions,
     audio_sender: Option<TrackSender>,
     video_sender: Option<TrackSender>,
+    audio_decoder: Option<crate::decoder::AudioDecoder>,
+    video_decoder: Option<crate::decoder::VideoDecoder>,
     base_offset: Duration,
     last_emitted_end: Duration,
     start_instant: tokio::time::Instant,
@@ -55,12 +57,24 @@ impl Mp4FileReader {
             options,
             audio_sender: None,
             video_sender: None,
+            audio_decoder: None,
+            video_decoder: None,
             base_offset: Duration::ZERO,
             last_emitted_end: Duration::ZERO,
             start_instant: tokio::time::Instant::now(),
             last_realtime_timestamp: None,
             emitted_in_loop: false,
         })
+    }
+
+    /// デコーダーを設定する。設定された場合、encoded frame を decode してから送信する。
+    pub fn set_audio_decoder(&mut self, decoder: crate::decoder::AudioDecoder) {
+        self.audio_decoder = Some(decoder);
+    }
+
+    /// デコーダーを設定する。設定された場合、encoded frame を decode してから送信する。
+    pub fn set_video_decoder(&mut self, decoder: crate::decoder::VideoDecoder) {
+        self.video_decoder = Some(decoder);
     }
 
     /// エンコードトラックをパブリッシュして sender を保持する。
@@ -92,7 +106,7 @@ impl Mp4FileReader {
             return Ok(());
         }
 
-        Self::send_eos(&mut self.audio_sender, &mut self.video_sender).await;
+        self.flush_and_send_eos()?;
 
         Ok(())
     }
@@ -213,7 +227,15 @@ impl Mp4FileReader {
         };
 
         if let Some(sender) = self.audio_sender.as_mut() {
-            if !sender.send_audio(audio_data).await {
+            if let Some(decoder) = self.audio_decoder.as_mut() {
+                // デコーダーが設定されている場合、decode してから送信する
+                decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
+                    std::sync::Arc::new(audio_data),
+                )))?;
+                if crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)? {
+                    return Ok(true);
+                }
+            } else if !sender.send_audio(audio_data).await {
                 return Ok(true);
             }
             self.emitted_in_loop = true;
@@ -263,7 +285,15 @@ impl Mp4FileReader {
         };
 
         if let Some(sender) = self.video_sender.as_mut() {
-            if !sender.send_video(video_frame).await {
+            if let Some(decoder) = self.video_decoder.as_mut() {
+                // デコーダーが設定されている場合、decode してから送信する
+                decoder.handle_input_sample(Some(crate::MediaFrame::Video(
+                    std::sync::Arc::new(video_frame),
+                )))?;
+                if crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)? {
+                    return Ok(true);
+                }
+            } else if !sender.send_video(video_frame).await {
                 return Ok(true);
             }
             self.emitted_in_loop = true;
@@ -292,16 +322,27 @@ impl Mp4FileReader {
         timestamp
     }
 
-    async fn send_eos(
-        audio_sender: &mut Option<TrackSender>,
-        video_sender: &mut Option<TrackSender>,
-    ) {
-        if let Some(sender) = audio_sender.as_mut() {
+    fn flush_and_send_eos(&mut self) -> Result<()> {
+        // デコーダーの残りのフレームを flush する
+        if let Some(decoder) = self.audio_decoder.as_mut()
+            && let Some(sender) = self.audio_sender.as_mut()
+        {
+            decoder.handle_input_sample(None)?;
+            crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?;
+        }
+        if let Some(decoder) = self.video_decoder.as_mut()
+            && let Some(sender) = self.video_sender.as_mut()
+        {
+            decoder.handle_input_sample(None)?;
+            crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?;
+        }
+        if let Some(sender) = self.audio_sender.as_mut() {
             sender.send_eos();
         }
-        if let Some(sender) = video_sender.as_mut() {
+        if let Some(sender) = self.video_sender.as_mut() {
             sender.send_eos();
         }
+        Ok(())
     }
 }
 

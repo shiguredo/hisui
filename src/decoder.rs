@@ -43,7 +43,7 @@ pub struct AudioDecoder {
     inner: Option<AudioDecoderInner>,
 }
 
-enum DecoderRunOutput {
+pub enum DecoderRunOutput {
     Processed(MediaFrame),
     Pending,
     Finished,
@@ -102,7 +102,7 @@ impl AudioDecoder {
         Ok(())
     }
 
-    fn handle_input_message(&mut self, message: Message) -> Result<()> {
+    pub fn handle_input_message(&mut self, message: Message) -> Result<()> {
         match message {
             Message::Media(sample) => self.handle_input_sample(Some(sample)),
             Message::Eos => self.handle_input_sample(None),
@@ -110,7 +110,7 @@ impl AudioDecoder {
         }
     }
 
-    fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
+    pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         let Some(sample) = sample else {
             self.eos = true;
             return Ok(());
@@ -137,7 +137,7 @@ impl AudioDecoder {
         Ok(())
     }
 
-    fn poll_output(&mut self) -> Result<DecoderRunOutput> {
+    pub fn poll_output(&mut self) -> Result<DecoderRunOutput> {
         if let Some(frame) = self.decoded.pop_front() {
             Ok(DecoderRunOutput::Processed(MediaFrame::audio(frame)))
         } else if self.eos {
@@ -377,7 +377,7 @@ impl VideoDecoder {
         Ok(())
     }
 
-    fn handle_input_message(&mut self, message: Message) -> Result<()> {
+    pub fn handle_input_message(&mut self, message: Message) -> Result<()> {
         match message {
             Message::Media(sample) => self.handle_input_sample(Some(sample)),
             Message::Eos => self.handle_input_sample(None),
@@ -385,7 +385,7 @@ impl VideoDecoder {
         }
     }
 
-    fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
+    pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
 
@@ -406,7 +406,7 @@ impl VideoDecoder {
         Ok(())
     }
 
-    fn poll_output(&mut self) -> Result<DecoderRunOutput> {
+    pub fn poll_output(&mut self) -> Result<DecoderRunOutput> {
         if let Some(frame) = self.decoded.pop_front() {
             Ok(DecoderRunOutput::Processed(MediaFrame::video(frame)))
         } else if self.eos {
@@ -462,7 +462,7 @@ impl VideoDecoder {
     }
 }
 
-fn drain_audio_decoder_output(
+pub fn drain_audio_decoder_output(
     decoder: &mut AudioDecoder,
     output_tx: &mut crate::MessageSender,
 ) -> Result<bool> {
@@ -483,7 +483,7 @@ fn drain_audio_decoder_output(
     }
 }
 
-fn drain_video_decoder_output(
+pub fn drain_video_decoder_output(
     decoder: &mut VideoDecoder,
     output_tx: &mut crate::MessageSender,
 ) -> Result<bool> {
