@@ -3648,12 +3648,15 @@ async fn start_hls_processors(
                 }
             })
             .collect();
-        let master_content = crate::hls::writer::build_master_playlist_content(&master_variants);
+        let hls_codecs = crate::codec_string::CodecString::h264_aac_default();
+        let master_content =
+            crate::hls::writer::build_master_playlist_content(&master_variants, &hls_codecs);
         match &run.destination {
             crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
                 crate::hls::writer::write_master_playlist(
                     &std::path::PathBuf::from(directory),
                     &master_variants,
+                    &hls_codecs,
                 )?;
             }
             crate::obsws::input_registry::HlsDestination::S3 {
@@ -3876,6 +3879,7 @@ async fn start_dash_processors(
     );
 
     let is_abr = run.is_abr();
+    let dash_codecs = crate::codec_string::CodecString::h264_aac_default();
 
     // バリアントごとにスケーラー、エンコーダー、ライターを起動する
     for (i, (variant, variant_run)) in dash_settings
@@ -3987,6 +3991,7 @@ async fn start_dash_processors(
                 segment_duration: dash_settings.segment_duration,
                 max_retained_segments: dash_settings.max_retained_segments,
                 skip_mpd: is_abr,
+                codecs: dash_codecs.clone(),
             },
             Some(variant_run.writer_processor_id.clone()),
         )
@@ -4029,6 +4034,7 @@ async fn start_dash_processors(
             &mpd_variants,
             dash_settings.segment_duration,
             dash_settings.max_retained_segments,
+            &dash_codecs,
         );
         match &run.destination {
             crate::obsws::input_registry::DashDestination::Filesystem { directory } => {
@@ -4037,6 +4043,7 @@ async fn start_dash_processors(
                     &mpd_variants,
                     dash_settings.segment_duration,
                     dash_settings.max_retained_segments,
+                    &dash_codecs,
                 )?;
             }
             crate::obsws::input_registry::DashDestination::S3 {

@@ -1358,7 +1358,10 @@ pub struct MasterPlaylistVariant {
 /// ABR 用のマスタープレイリスト（Multivariant Playlist）を書き出す。
 /// 一時ファイルに書いてから rename してアトミックに更新する。
 /// マスタープレイリストの内容を生成する
-pub fn build_master_playlist_content(variants: &[MasterPlaylistVariant]) -> String {
+pub fn build_master_playlist_content(
+    variants: &[MasterPlaylistVariant],
+    codecs: &crate::codec_string::CodecString,
+) -> String {
     let playlist = shiguredo_m3u8::multivariant::MultivariantPlaylist {
         version: None,
         independent_segments: true,
@@ -1370,10 +1373,7 @@ pub fn build_master_playlist_content(variants: &[MasterPlaylistVariant]) -> Stri
             .map(|v| shiguredo_m3u8::multivariant::VariantStream {
                 bandwidth: v.bandwidth,
                 average_bandwidth: None,
-                // TODO: エンコーダーの SPS から正確な profile/level を取得すべきだが、
-                // プレイリスト生成時点ではその情報がないため暫定値を使用する。
-                // avc1.42e01f = H.264 Baseline Profile Level 3.1, mp4a.40.2 = AAC-LC
-                codecs: Some("avc1.42e01f,mp4a.40.2".to_owned()),
+                codecs: Some(codecs.as_combined()),
                 supplemental_codecs: None,
                 resolution: Some(shiguredo_m3u8::multivariant::Resolution {
                     width: v.width,
@@ -1407,8 +1407,9 @@ pub fn build_master_playlist_content(variants: &[MasterPlaylistVariant]) -> Stri
 pub fn write_master_playlist(
     output_directory: &Path,
     variants: &[MasterPlaylistVariant],
+    codecs: &crate::codec_string::CodecString,
 ) -> crate::Result<()> {
-    let content = build_master_playlist_content(variants);
+    let content = build_master_playlist_content(variants, codecs);
 
     let playlist_path = output_directory.join(PLAYLIST_FILENAME);
     let tmp_path = output_directory.join(".playlist.m3u8.tmp");

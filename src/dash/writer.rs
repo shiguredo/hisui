@@ -253,6 +253,8 @@ struct DashWriter {
     availability_start_time: String,
     /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
     skip_mpd: bool,
+    /// MPD の AdaptationSet に設定するコーデック文字列
+    codecs: crate::codec_string::CodecString,
     stats: DashWriterStats,
 }
 
@@ -316,6 +318,7 @@ impl DashWriter {
         segment_duration_target: f64,
         max_retained_segments: usize,
         skip_mpd: bool,
+        codecs: crate::codec_string::CodecString,
         stats: DashWriterStats,
     ) -> crate::Result<Self> {
         let muxer = shiguredo_mp4::mux::Fmp4SegmentMuxer::new()
@@ -338,6 +341,7 @@ impl DashWriter {
             current_segment_info: None,
             availability_start_time: format_utc_now(),
             skip_mpd,
+            codecs,
             stats,
         })
     }
@@ -450,8 +454,11 @@ impl DashWriter {
             // 発生した場合、該当セグメントの再生タイミングがずれるが、
             // 次のキーフレームでセグメントが切り替わるため影響は限定的。
             // ここでは u32::MAX にサチュレーションして安全側に倒す。
-            let duration =
-                frame.timestamp.saturating_sub(prev_ts).as_micros().min(u32::MAX as u128) as u32;
+            let duration = frame
+                .timestamp
+                .saturating_sub(prev_ts)
+                .as_micros()
+                .min(u32::MAX as u128) as u32;
             if let Some(last) = self
                 .current_samples
                 .iter_mut()
@@ -501,8 +508,11 @@ impl DashWriter {
 
         // 前のオーディオサンプルの duration を確定させる（サチュレーションについてはビデオ側のコメント参照）
         if let Some(prev_ts) = self.last_audio_timestamp {
-            let duration =
-                frame.timestamp.saturating_sub(prev_ts).as_micros().min(u32::MAX as u128) as u32;
+            let duration = frame
+                .timestamp
+                .saturating_sub(prev_ts)
+                .as_micros()
+                .min(u32::MAX as u128) as u32;
             if let Some(last) = self
                 .current_samples
                 .iter_mut()
@@ -723,10 +733,7 @@ impl DashWriter {
                 adaptation_sets: vec![shiguredo_mpd::AdaptationSet {
                     id: Some(0),
                     mime_type: Some("video/mp4".to_owned()),
-                    // TODO: エンコーダーの SPS から正確な profile/level を取得すべきだが、
-                    // マニフェスト生成時点ではその情報がないため暫定値を使用する。
-                    // avc1.42e01f = H.264 Baseline Profile Level 3.1, mp4a.40.2 = AAC-LC
-                    codecs: Some("avc1.42e01f,mp4a.40.2".to_owned()),
+                    codecs: Some(self.codecs.as_combined()),
                     content_type: Some(shiguredo_mpd::ContentType::Video),
                     lang: None,
                     width: None,
@@ -968,6 +975,8 @@ pub struct DashWriterConfig {
     pub max_retained_segments: usize,
     /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
     pub skip_mpd: bool,
+    /// MPD の AdaptationSet に設定するコーデック文字列。
+    pub codecs: crate::codec_string::CodecString,
 }
 
 /// DASH writer プロセッサを作成する
@@ -1007,6 +1016,7 @@ pub async fn create_processor(
                     config.segment_duration,
                     config.max_retained_segments,
                     config.skip_mpd,
+                    config.codecs,
                     writer_stats,
                 )?;
                 writer
@@ -1039,6 +1049,7 @@ pub fn build_combined_mpd_content(
     variants: &[CombinedMpdVariant],
     segment_duration: f64,
     max_retained_segments: usize,
+    codecs: &crate::codec_string::CodecString,
 ) -> String {
     let timescale = FMP4_TIMESCALE.get() as u64;
     let duration_scaled = (segment_duration * timescale as f64).round() as u64;
@@ -1141,7 +1152,7 @@ pub fn build_combined_mpd_content(
             adaptation_sets: vec![shiguredo_mpd::AdaptationSet {
                 id: Some(0),
                 mime_type: Some("video/mp4".to_owned()),
-                codecs: Some("avc1.42e01f,mp4a.40.2".to_owned()),
+                codecs: Some(codecs.as_combined()),
                 content_type: Some(shiguredo_mpd::ContentType::Video),
                 lang: None,
                 width: None,
@@ -1204,8 +1215,10 @@ pub fn write_combined_mpd(
     variants: &[CombinedMpdVariant],
     segment_duration: f64,
     max_retained_segments: usize,
+    codecs: &crate::codec_string::CodecString,
 ) -> crate::Result<()> {
-    let content = build_combined_mpd_content(variants, segment_duration, max_retained_segments);
+    let content =
+        build_combined_mpd_content(variants, segment_duration, max_retained_segments, codecs);
 
     let mpd_path = output_directory.join(MANIFEST_FILENAME);
     let tmp_path = output_directory.join(format!(".{MANIFEST_FILENAME}.tmp"));
@@ -1252,7 +1265,12 @@ mod tests {
                 init_path: "variant_1/init.mp4".to_owned(),
             },
         ];
-        let xml = build_combined_mpd_content(&variants, 2.0, 6);
+        let xml = build_combined_mpd_content(
+            &variants,
+            2.0,
+            6,
+            &crate::codec_string::CodecString::h264_aac_default(),
+        );
         let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
 
         assert_eq!(
@@ -1309,7 +1327,12 @@ mod tests {
             media_path: "variant_0/segment-$Number%06d$.m4s".to_owned(),
             init_path: "variant_0/init.mp4".to_owned(),
         }];
-        let xml = build_combined_mpd_content(&variants, 2.0, 6);
+        let xml = build_combined_mpd_content(
+            &variants,
+            2.0,
+            6,
+            &crate::codec_string::CodecString::h264_aac_default(),
+        );
         let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
 
         let rep = &mpd.periods[0].adaptation_sets[0].representations[0];
@@ -1335,7 +1358,12 @@ mod tests {
             media_path: "v0/seg-$Number%06d$.m4s".to_owned(),
             init_path: "v0/init.mp4".to_owned(),
         }];
-        let xml = build_combined_mpd_content(&variants, 3.0, 5);
+        let xml = build_combined_mpd_content(
+            &variants,
+            3.0,
+            5,
+            &crate::codec_string::CodecString::h264_aac_default(),
+        );
         let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
 
         // timeShiftBufferDepth = segment_duration * max_retained_segments
