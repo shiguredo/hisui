@@ -1983,6 +1983,9 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
             assert not list(variant_0_dir.glob("*")), (
                 "variant_0 files must be deleted after stop"
             )
+            assert not list(variant_1_dir.glob("*")), (
+                "variant_1 files must be deleted after stop"
+            )
 
             await ws.close()
 
