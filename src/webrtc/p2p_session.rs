@@ -5,7 +5,7 @@ use shiguredo_webrtc::{
     DataChannelObserverHandler, DataChannelState, IceGatheringState, PeerConnection,
     PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionObserver,
     PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState, RtpSender,
-    StringVector,
+    StringVector, TimestampAligner,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -209,6 +209,7 @@ enum TrackState {
 
 struct VideoTrackState {
     source: AdaptedVideoTrackSource,
+    timestamp_aligner: TimestampAligner,
     _track: shiguredo_webrtc::VideoTrack,
 }
 
@@ -897,7 +898,11 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                     let TrackState::Video(state) = &mut subscribed.state else {
                         return;
                     };
-                    if let Err(e) = super::video::push_i420_frame(&mut state.source, &frame) {
+                    if let Err(e) = super::video::push_i420_frame(
+                        &mut state.source,
+                        &mut state.timestamp_aligner,
+                        &frame,
+                    ) {
                         tracing::warn!(
                             "Failed to send video frame for track {track_id}: {}",
                             e.display()
@@ -961,6 +966,7 @@ fn create_video_track(
     Ok((
         VideoTrackState {
             source,
+            timestamp_aligner: TimestampAligner::new(),
             _track: track,
         },
         sender,

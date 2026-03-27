@@ -38,6 +38,7 @@ impl SoraPublisher {
 
         // video track を作成
         let mut video_source = shiguredo_webrtc::AdaptedVideoTrackSource::new();
+        let mut video_timestamp_aligner = shiguredo_webrtc::TimestampAligner::new();
         let video_track = context
             .create_video_track(&video_source.cast_to_video_track_source())
             .map_err(|e| crate::Error::new(format!("failed to create video track: {e}")))?;
@@ -113,6 +114,7 @@ impl SoraPublisher {
                             if frame.format == crate::video::VideoFormat::I420 {
                                 if let Err(e) = crate::webrtc::video::push_i420_frame(
                                     &mut video_source,
+                                    &mut video_timestamp_aligner,
                                     &frame,
                                 ) {
                                     tracing::warn!("failed to push video frame to Sora: {}", e.display());
