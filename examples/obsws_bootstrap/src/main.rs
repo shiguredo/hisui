@@ -31,6 +31,7 @@ use tokio::sync::mpsc;
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
 const MAX_FRAMES_PER_POLL: usize = 8;
+const INITIAL_VIDEO_FRAME_GRACE: Duration = Duration::from_secs(2);
 
 // MP4 のタイムスケールはマイクロ秒固定にする
 const TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
@@ -170,6 +171,7 @@ impl DataChannelObserverHandler for ObswsDcHandler {
 // フレームデータをチャネルで送信するハンドラ
 struct FrameRecordHandler {
     frame_count: Arc<AtomicUsize>,
+    first_frame_logged: Arc<AtomicBool>,
     width: Arc<AtomicUsize>,
     height: Arc<AtomicUsize>,
     frame_tx: std::sync::mpsc::SyncSender<VideoFrameData>,
@@ -177,11 +179,17 @@ struct FrameRecordHandler {
 
 impl VideoSinkHandler for FrameRecordHandler {
     fn on_frame(&mut self, frame: shiguredo_webrtc::VideoFrameRef<'_>) {
-        self.frame_count.fetch_add(1, Ordering::Relaxed);
+        let previous = self.frame_count.fetch_add(1, Ordering::Relaxed);
         let w = frame.width();
         let h = frame.height();
         self.width.store(w as usize, Ordering::Relaxed);
         self.height.store(h as usize, Ordering::Relaxed);
+        if previous == 0 && !self.first_frame_logged.swap(true, Ordering::Relaxed) {
+            tracing::warn!(
+                "first video frame received: width={w}, height={h}, timestamp_us={}",
+                frame.timestamp_us()
+            );
+        }
 
         // I420 バッファからプレーンデータをコピーする
         let buffer = frame.buffer();
@@ -1188,6 +1196,7 @@ async fn run_client(
     let audio_frames = Arc::new(AtomicUsize::new(0));
     let video_width = Arc::new(AtomicUsize::new(0));
     let video_height = Arc::new(AtomicUsize::new(0));
+    let first_video_frame_logged = Arc::new(AtomicBool::new(false));
     let connection_state = Arc::new(std::sync::Mutex::new("new".to_owned()));
 
     // フレームデータ受信用チャネル
@@ -1284,6 +1293,9 @@ async fn run_client(
             && dc.state() == DataChannelState::Open
         {
             let request = make_create_mp4_input_request(input_mp4_path);
+            tracing::warn!(
+                "sending CreateInput request: input_mp4_path={input_mp4_path}, duration_secs={duration_secs}"
+            );
             if !dc.send(request.as_bytes(), false) {
                 return Err("failed to send CreateInput request on obsws DataChannel".to_owned());
             }
@@ -1303,6 +1315,7 @@ async fn run_client(
 
         match event {
             ClientEvent::ConnectionChange(state) => {
+                tracing::warn!("peer connection state changed: {state:?}");
                 let state_str = match state {
                     PeerConnectionState::New => "new",
                     PeerConnectionState::Connecting => "connecting",
@@ -1318,12 +1331,15 @@ async fn run_client(
                 let receiver = transceiver.receiver();
                 let track = receiver.track();
                 let kind = track.kind().unwrap_or_default();
+                let track_id = track.id().unwrap_or_default();
                 match kind.as_str() {
                     "video" => {
                         video_tracks.fetch_add(1, Ordering::Relaxed);
+                        tracing::warn!("video track received: track_id={track_id}");
                         let mut video_track = track.cast_to_video_track();
                         let sink = VideoSink::new_with_handler(Box::new(FrameRecordHandler {
                             frame_count: video_frames.clone(),
+                            first_frame_logged: first_video_frame_logged.clone(),
                             width: video_width.clone(),
                             height: video_height.clone(),
                             frame_tx: frame_tx.clone(),
@@ -1337,6 +1353,7 @@ async fn run_client(
                     }
                     "audio" => {
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
+                        tracing::warn!("audio track received: track_id={track_id}");
                         let mut audio_track = track.cast_to_audio_track();
                         let sink = AudioTrackSink::new_with_handler(Box::new(AudioRecordHandler {
                             audio_frame_count: audio_frames.clone(),
@@ -1357,6 +1374,10 @@ async fn run_client(
             }
             ClientEvent::DataChannel(dc, observer) => {
                 let label = dc.label().unwrap_or_default();
+                tracing::warn!(
+                    "data channel received: label={label}, state={:?}",
+                    dc.state()
+                );
                 if label == "signaling" {
                     retained.signaling_dc = Some(dc);
                     retained.signaling_dc_observer = observer;
@@ -1369,6 +1390,7 @@ async fn run_client(
             ClientEvent::SignalingMessage { data } => {
                 let msg_type = parse_signaling_type(&data).unwrap_or_default();
                 if msg_type == "offer" {
+                    tracing::warn!("renegotiation offer received from signaling data channel");
                     // renegotiation: サーバーからの offer に answer を返す
                     if let Some(sdp) = parse_signaling_sdp(&data) {
                         if let Err(e) = set_remote_description(&pc, SdpType::Offer, &sdp) {
@@ -1397,6 +1419,9 @@ async fn run_client(
                                 };
                                 let answer_json = make_answer_json(&answer);
                                 if let Some(dc) = &retained.signaling_dc {
+                                    tracing::warn!(
+                                        "sending renegotiation answer on signaling data channel"
+                                    );
                                     dc.send(answer_json.as_bytes(), false);
                                 }
                             }
@@ -1428,6 +1453,28 @@ async fn run_client(
                     obsws_ready = dc.state() == DataChannelState::Open;
                 }
             }
+        }
+    }
+
+    if video_tracks.load(Ordering::Relaxed) > 0 && video_frames.load(Ordering::Relaxed) == 0 {
+        tracing::warn!(
+            "video track was received but no video frames arrived before deadline; waiting additional {:?}",
+            INITIAL_VIDEO_FRAME_GRACE
+        );
+        let grace_deadline = tokio::time::Instant::now() + INITIAL_VIDEO_FRAME_GRACE;
+        while tokio::time::Instant::now() < grace_deadline {
+            while let Ok(frame_data) = frame_rx.try_recv() {
+                encode_and_write_frame(
+                    &frame_data,
+                    &mut vp9_encoder,
+                    &mut vp9_sample_entry,
+                    &mut mp4_writer,
+                )?;
+            }
+            if video_frames.load(Ordering::Relaxed) > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 
@@ -1512,6 +1559,22 @@ async fn run_client(
         tracing::warn!("CreateInput request did not complete before deadline");
         return Err("CreateInput request did not complete".to_owned());
     }
+    let final_connection_state = connection_state
+        .lock()
+        .expect("connection_state mutex should not be poisoned")
+        .clone();
+    tracing::warn!(
+        "bootstrap finished: video_tracks={}, video_frames={}, audio_tracks={}, audio_frames={}, video_width={}, video_height={}, video_samples_written={}, audio_samples_written={}, connection_state={}",
+        video_tracks.load(Ordering::Relaxed),
+        video_frames.load(Ordering::Relaxed),
+        audio_tracks.load(Ordering::Relaxed),
+        audio_frames.load(Ordering::Relaxed),
+        video_width.load(Ordering::Relaxed),
+        video_height.load(Ordering::Relaxed),
+        mp4_writer.video_sample_count,
+        mp4_writer.audio_sample_count,
+        final_connection_state,
+    );
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
         audio_tracks: audio_tracks.load(Ordering::Relaxed),
