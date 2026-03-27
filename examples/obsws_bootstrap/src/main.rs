@@ -1406,6 +1406,14 @@ async fn run_client(
                     "video" => {
                         video_tracks.fetch_add(1, Ordering::Relaxed);
                         tracing::warn!("video track received: track_id={track_id}");
+                        if !track.enabled() {
+                            tracing::warn!(
+                                "video track is disabled on arrival: track_id={track_id}"
+                            );
+                        }
+                        if !track.set_enabled(true) {
+                            tracing::warn!("failed to enable video track: track_id={track_id}");
+                        }
                         let mut video_track = track.cast_to_video_track();
                         let sink = VideoSink::new_with_handler(Box::new(FrameRecordHandler {
                             frame_count: video_frames.clone(),
@@ -1424,6 +1432,14 @@ async fn run_client(
                     "audio" => {
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
                         tracing::warn!("audio track received: track_id={track_id}");
+                        if !track.enabled() {
+                            tracing::warn!(
+                                "audio track is disabled on arrival: track_id={track_id}"
+                            );
+                        }
+                        if !track.set_enabled(true) {
+                            tracing::warn!("failed to enable audio track: track_id={track_id}");
+                        }
                         let mut audio_track = track.cast_to_audio_track();
                         let sink = AudioTrackSink::new_with_handler(Box::new(AudioRecordHandler {
                             audio_frame_count: audio_frames.clone(),
