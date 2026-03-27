@@ -9,6 +9,15 @@ use crate::obsws::protocol::{
 
 use std::time::Duration;
 
+#[derive(Clone)]
+struct ObswsProgramOutputContext {
+    video_track_id: crate::TrackId,
+    audio_track_id: crate::TrackId,
+    canvas_width: crate::types::EvenUsize,
+    canvas_height: crate::types::EvenUsize,
+    frame_rate: crate::video::FrameRate,
+}
+
 /// coordinator に送信するコマンド
 pub enum ObswsCoordinatorCommand {
     /// 単一リクエストを処理する
@@ -2041,10 +2050,13 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let program_video_track_id = self.program_output.video_track_id.clone();
-        let program_audio_track_id = self.program_output.audio_track_id.clone();
-        let canvas_width = self.input_registry.canvas_width();
-        let canvas_height = self.input_registry.canvas_height();
+        let program_output = ObswsProgramOutputContext {
+            video_track_id: self.program_output.video_track_id.clone(),
+            audio_track_id: self.program_output.audio_track_id.clone(),
+            canvas_width: self.input_registry.canvas_width(),
+            canvas_height: self.input_registry.canvas_height(),
+            frame_rate: self.input_registry.frame_rate(),
+        };
         let is_abr = hls_settings.variants.len() > 1;
         let variant_runs: Vec<ObswsHlsVariantRun> = hls_settings
             .variants
@@ -2056,19 +2068,18 @@ impl ObswsCoordinator {
                     "hls",
                     run_id,
                     &format!("{variant_label}_video"),
-                    &program_video_track_id,
+                    &program_output.video_track_id,
                 );
                 let audio = ObswsRecordTrackRun::new(
                     "hls",
                     run_id,
                     &format!("{variant_label}_audio"),
-                    &program_audio_track_id,
+                    &program_output.audio_track_id,
                 );
                 // variant ごとの fps 調整が必要になった場合は、この後段に映像整形を追加する。
-                let needs_scaler = variant
-                    .width
-                    .zip(variant.height)
-                    .is_some_and(|(w, h)| w != canvas_width || h != canvas_height);
+                let needs_scaler = variant.width.zip(variant.height).is_some_and(|(w, h)| {
+                    w != program_output.canvas_width || h != program_output.canvas_height
+                });
                 let scaler_processor_id = if needs_scaler {
                     Some(crate::ProcessorId::new(format!(
                         "obsws:hls:{run_id}:{variant_label}_scaler"
@@ -2227,17 +2238,8 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        if let Err(e) = start_hls_processors(
-            pipeline_handle,
-            &program_video_track_id,
-            &program_audio_track_id,
-            canvas_width,
-            canvas_height,
-            self.input_registry.frame_rate(),
-            &run,
-            &hls_settings,
-        )
-        .await
+        if let Err(e) =
+            start_hls_processors(pipeline_handle, &program_output, &run, &hls_settings).await
         {
             self.input_registry.deactivate_hls();
             let _ = stop_processors_staged_hls(pipeline_handle, &run).await;
@@ -2330,10 +2332,13 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let program_video_track_id = self.program_output.video_track_id.clone();
-        let program_audio_track_id = self.program_output.audio_track_id.clone();
-        let canvas_width = self.input_registry.canvas_width();
-        let canvas_height = self.input_registry.canvas_height();
+        let program_output = ObswsProgramOutputContext {
+            video_track_id: self.program_output.video_track_id.clone(),
+            audio_track_id: self.program_output.audio_track_id.clone(),
+            canvas_width: self.input_registry.canvas_width(),
+            canvas_height: self.input_registry.canvas_height(),
+            frame_rate: self.input_registry.frame_rate(),
+        };
         let is_abr = dash_settings.variants.len() > 1;
         let variant_runs: Vec<ObswsDashVariantRun> = dash_settings
             .variants
@@ -2345,19 +2350,18 @@ impl ObswsCoordinator {
                     "mpeg_dash",
                     run_id,
                     &format!("{variant_label}_video"),
-                    &program_video_track_id,
+                    &program_output.video_track_id,
                 );
                 let audio = ObswsRecordTrackRun::new(
                     "mpeg_dash",
                     run_id,
                     &format!("{variant_label}_audio"),
-                    &program_audio_track_id,
+                    &program_output.audio_track_id,
                 );
                 // variant ごとの fps 調整が必要になった場合は、この後段に映像整形を追加する。
-                let needs_scaler = variant
-                    .width
-                    .zip(variant.height)
-                    .is_some_and(|(w, h)| w != canvas_width || h != canvas_height);
+                let needs_scaler = variant.width.zip(variant.height).is_some_and(|(w, h)| {
+                    w != program_output.canvas_width || h != program_output.canvas_height
+                });
                 let scaler_processor_id = if needs_scaler {
                     Some(crate::ProcessorId::new(format!(
                         "obsws:mpeg_dash:{run_id}:{variant_label}_scaler"
@@ -2516,17 +2520,8 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        if let Err(e) = start_dash_processors(
-            pipeline_handle,
-            &program_video_track_id,
-            &program_audio_track_id,
-            canvas_width,
-            canvas_height,
-            self.input_registry.frame_rate(),
-            &run,
-            &dash_settings,
-        )
-        .await
+        if let Err(e) =
+            start_dash_processors(pipeline_handle, &program_output, &run, &dash_settings).await
         {
             self.input_registry.deactivate_dash();
             let _ = stop_processors_staged_dash(pipeline_handle, &run).await;
@@ -3483,21 +3478,20 @@ fn build_s3_client(
 /// HLS 用プロセッサを起動する
 async fn start_hls_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    program_video_track_id: &crate::TrackId,
-    program_audio_track_id: &crate::TrackId,
-    canvas_width: crate::types::EvenUsize,
-    canvas_height: crate::types::EvenUsize,
-    frame_rate: crate::video::FrameRate,
+    program_output: &ObswsProgramOutputContext,
     run: &crate::obsws::input_registry::ObswsHlsRun,
     hls_settings: &crate::obsws::input_registry::ObswsHlsSettings,
 ) -> crate::Result<()> {
     // HLS 用にキーフレーム間隔を設定する。
     // segment_duration に合わせたフレーム数を計算し、エンコーダーに事前通知する。
-    let fps = frame_rate.numerator.get() as f64 / frame_rate.denumerator.get() as f64;
+    let fps = program_output.frame_rate.numerator.get() as f64
+        / program_output.frame_rate.denumerator.get() as f64;
     let keyframe_interval_frames = (hls_settings.segment_duration * fps).ceil() as u32;
     let keyframe_interval_frames = keyframe_interval_frames.max(1);
-    let encode_params =
-        crate::encoder::encode_config_with_keyframe_interval(keyframe_interval_frames, frame_rate);
+    let encode_params = crate::encoder::encode_config_with_keyframe_interval(
+        keyframe_interval_frames,
+        program_output.frame_rate,
+    );
 
     let is_abr = run.is_abr();
 
@@ -3530,7 +3524,7 @@ async fn start_hls_processors(
             crate::scaler::create_processor(
                 pipeline_handle,
                 crate::scaler::VideoScalerConfig {
-                    input_track_id: program_video_track_id.clone(),
+                    input_track_id: program_output.video_track_id.clone(),
                     output_track_id: scaled_track_id.clone(),
                     width,
                     height,
@@ -3551,7 +3545,7 @@ async fn start_hls_processors(
             crate::types::CodecName::H264,
             std::num::NonZeroUsize::new(variant.video_bitrate_bps)
                 .unwrap_or(std::num::NonZeroUsize::MIN),
-            frame_rate,
+            program_output.frame_rate,
             Some(encode_params.clone()),
             Some(variant_run.video.encoder_processor_id.clone()),
         )
@@ -3560,7 +3554,7 @@ async fn start_hls_processors(
         // オーディオエンコーダー（HLS 仕様で AAC 必須）
         crate::encoder::create_audio_processor(
             pipeline_handle,
-            program_audio_track_id.clone(),
+            program_output.audio_track_id.clone(),
             variant_run.audio.encoded_track_id.clone(),
             crate::types::CodecName::Aac,
             std::num::NonZeroUsize::new(variant.audio_bitrate_bps)
@@ -3634,11 +3628,11 @@ async fn start_hls_processors(
                 let width = variant
                     .width
                     .map(|w| w.get() as u32)
-                    .unwrap_or(canvas_width.get() as u32);
+                    .unwrap_or(program_output.canvas_width.get() as u32);
                 let height = variant
                     .height
                     .map(|h| h.get() as u32)
-                    .unwrap_or(canvas_height.get() as u32);
+                    .unwrap_or(program_output.canvas_height.get() as u32);
                 crate::hls::writer::MasterPlaylistVariant {
                     bandwidth: variant.video_bitrate_bps as u64 + variant.audio_bitrate_bps as u64,
                     width,
@@ -3830,20 +3824,19 @@ async fn stop_processors_staged_hls(
 
 async fn start_dash_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    program_video_track_id: &crate::TrackId,
-    program_audio_track_id: &crate::TrackId,
-    canvas_width: crate::types::EvenUsize,
-    canvas_height: crate::types::EvenUsize,
-    frame_rate: crate::video::FrameRate,
+    program_output: &ObswsProgramOutputContext,
     run: &crate::obsws::input_registry::ObswsDashRun,
     dash_settings: &crate::obsws::input_registry::ObswsDashSettings,
 ) -> crate::Result<()> {
     // MPEG-DASH 用にキーフレーム間隔を設定する
-    let fps = frame_rate.numerator.get() as f64 / frame_rate.denumerator.get() as f64;
+    let fps = program_output.frame_rate.numerator.get() as f64
+        / program_output.frame_rate.denumerator.get() as f64;
     let keyframe_interval_frames = (dash_settings.segment_duration * fps).ceil() as u32;
     let keyframe_interval_frames = keyframe_interval_frames.max(1);
-    let encode_params =
-        crate::encoder::encode_config_with_keyframe_interval(keyframe_interval_frames, frame_rate);
+    let encode_params = crate::encoder::encode_config_with_keyframe_interval(
+        keyframe_interval_frames,
+        program_output.frame_rate,
+    );
 
     let is_abr = run.is_abr();
     let dash_codecs = crate::codec_string::CodecString::h264_aac_default();
@@ -3878,7 +3871,7 @@ async fn start_dash_processors(
             crate::scaler::create_processor(
                 pipeline_handle,
                 crate::scaler::VideoScalerConfig {
-                    input_track_id: program_video_track_id.clone(),
+                    input_track_id: program_output.video_track_id.clone(),
                     output_track_id: scaled_track_id.clone(),
                     width,
                     height,
@@ -3899,7 +3892,7 @@ async fn start_dash_processors(
             crate::types::CodecName::H264,
             std::num::NonZeroUsize::new(variant.video_bitrate_bps)
                 .unwrap_or(std::num::NonZeroUsize::MIN),
-            frame_rate,
+            program_output.frame_rate,
             Some(encode_params.clone()),
             Some(variant_run.video.encoder_processor_id.clone()),
         )
@@ -3908,7 +3901,7 @@ async fn start_dash_processors(
         // オーディオエンコーダー（DASH でも AAC を使用）
         crate::encoder::create_audio_processor(
             pipeline_handle,
-            program_audio_track_id.clone(),
+            program_output.audio_track_id.clone(),
             variant_run.audio.encoded_track_id.clone(),
             crate::types::CodecName::Aac,
             std::num::NonZeroUsize::new(variant.audio_bitrate_bps)
@@ -3983,11 +3976,11 @@ async fn start_dash_processors(
                 let width = variant
                     .width
                     .map(|w| w.get() as u32)
-                    .unwrap_or(canvas_width.get() as u32);
+                    .unwrap_or(program_output.canvas_width.get() as u32);
                 let height = variant
                     .height
                     .map(|h| h.get() as u32)
-                    .unwrap_or(canvas_height.get() as u32);
+                    .unwrap_or(program_output.canvas_height.get() as u32);
                 crate::dash::writer::CombinedMpdVariant {
                     bandwidth: variant.video_bitrate_bps as u64 + variant.audio_bitrate_bps as u64,
                     width,
