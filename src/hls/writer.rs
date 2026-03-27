@@ -296,34 +296,10 @@ enum FormatState {
     Fmp4(Box<Fmp4State>),
 }
 
-/// MPEG-TS の書き込み先バックエンド
-enum MpegTsBackend {
-    /// ファイルシステム: 直接ファイルに書き込む
-    File(BufWriter<std::fs::File>),
-    /// S3: メモリバッファに蓄積し、finalize 時にまとめてアップロードする
-    Buffer(Vec<u8>),
-}
-
-impl Write for MpegTsBackend {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self {
-            Self::File(f) => f.write(buf),
-            Self::Buffer(b) => b.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            Self::File(f) => f.flush(),
-            Self::Buffer(_) => Ok(()),
-        }
-    }
-}
-
 /// MPEG-TS フォーマット固有の状態
 struct MpegTsState {
-    /// 現在のセグメントのライター
-    current_writer: Option<TsPacketWriter<MpegTsBackend>>,
+    /// 現在のセグメントのライター（バッファに蓄積し、finalize 時に storage に書き出す）
+    current_writer: Option<TsPacketWriter<Vec<u8>>>,
     pat_cc: ContinuityCounter,
     pmt_cc: ContinuityCounter,
     video_cc: ContinuityCounter,
@@ -652,20 +628,7 @@ impl HlsWriter {
 
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
-                let backend = match &self.storage {
-                    HlsStorage::Filesystem(fs) => {
-                        let path = fs.output_directory.join(&filename);
-                        let file = std::fs::File::create(&path).map_err(|e| {
-                            crate::Error::new(format!(
-                                "failed to create segment file {}: {e}",
-                                path.display()
-                            ))
-                        })?;
-                        MpegTsBackend::File(BufWriter::new(file))
-                    }
-                    HlsStorage::S3(_) => MpegTsBackend::Buffer(Vec::new()),
-                };
-                let mut writer = TsPacketWriter::new(backend);
+                let mut writer = TsPacketWriter::new(Vec::new());
                 write_pat(state, &mut writer)?;
                 write_pmt(state, &mut writer)?;
                 state.current_writer = Some(writer);
@@ -692,23 +655,12 @@ impl HlsWriter {
             return Ok(());
         };
 
-        let mut segment_byte_size: u64 = 0;
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 if let Some(writer) = state.current_writer.take() {
-                    let mut inner = writer.into_stream();
-                    match &mut inner {
-                        MpegTsBackend::File(f) => {
-                            f.flush().map_err(|e| {
-                                crate::Error::new(format!("failed to flush segment file: {e}"))
-                            })?;
-                        }
-                        MpegTsBackend::Buffer(buf) => {
-                            segment_byte_size = buf.len() as u64;
-                            // S3: バッファの内容をアップロードする
-                            self.storage.write_segment(&info.filename, buf).await?;
-                        }
-                    }
+                    let buf = writer.into_stream();
+                    self.stats.total_segment_byte_size.add(buf.len() as u64);
+                    self.storage.write_segment(&info.filename, &buf).await?;
                 }
             }
             FormatState::Fmp4(state) => {
@@ -760,7 +712,9 @@ impl HlsWriter {
                 let mut segment_data = Vec::with_capacity(metadata.len() + reordered_payload.len());
                 segment_data.extend_from_slice(&metadata);
                 segment_data.extend_from_slice(&reordered_payload);
-                segment_byte_size = segment_data.len() as u64;
+                self.stats
+                    .total_segment_byte_size
+                    .add(segment_data.len() as u64);
                 self.storage
                     .write_segment(&info.filename, &segment_data)
                     .await?;
@@ -777,7 +731,6 @@ impl HlsWriter {
         let duration = duration.max(0.001);
 
         self.stats.total_segment_count.inc();
-        self.stats.total_segment_byte_size.add(segment_byte_size);
 
         self.retained_segments.push_back(RetainedSegment {
             filename: info.filename,
