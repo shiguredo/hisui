@@ -43,12 +43,9 @@ impl HlsWriterStats {
 }
 
 /// S3 操作のステータスコード別カウンタ
-/// S3 操作のステータスコード別カウンタ
 struct S3StatusCounters {
     stats: crate::stats::Stats,
     metric_name: &'static str,
-    /// ステータスコード → カウンタのキャッシュ
-    cache: std::sync::Mutex<std::collections::HashMap<u16, crate::stats::StatsCounter>>,
 }
 
 impl S3StatusCounters {
@@ -56,21 +53,16 @@ impl S3StatusCounters {
         Self {
             stats: stats.clone(),
             metric_name,
-            cache: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
     fn record(&self, status_code: u16) {
-        let mut cache = self
-            .cache
-            .lock()
-            .expect("S3StatusCounters lock() failed unexpectedly");
-        let counter = cache.entry(status_code).or_insert_with(|| {
-            let mut stats = self.stats.clone();
-            stats.set_default_label("status_code", &status_code.to_string());
-            stats.counter(self.metric_name)
-        });
-        counter.inc();
+        // Stats を都度 clone してラベル付きカウンタを取得する。
+        // Stats の内部で同一キーは共有されるため、同じ status_code への加算は 1 つの系列に集約される。
+        // clone + set_default_label のコストは S3 の HTTP 往復に比べて無視できる。
+        let mut stats = self.stats.clone();
+        stats.set_default_label("status_code", &status_code.to_string());
+        stats.counter(self.metric_name).inc();
     }
 }
 
