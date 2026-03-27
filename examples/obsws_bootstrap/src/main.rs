@@ -30,6 +30,7 @@ use tokio::sync::{mpsc, oneshot};
 
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
+const GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_ID: &str = "req-get-bootstrap-webrtc-stats";
 const MAX_FRAMES_PER_POLL: usize = 8;
 const INITIAL_VIDEO_FRAME_GRACE: Duration = Duration::from_secs(2);
 
@@ -587,6 +588,20 @@ fn make_create_mp4_input_request(input_path: &str) -> String {
     .to_string()
 }
 
+fn make_get_bootstrap_webrtc_stats_request() -> String {
+    nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetBootstrapWebRtcStats")?;
+                f.member("requestId", GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_ID)
+            }),
+        )
+    })
+    .to_string()
+}
+
 fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     let json = nojson::RawJson::parse(text).ok()?;
     let root = json.value();
@@ -625,6 +640,48 @@ fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     Some(Err(
         comment.unwrap_or_else(|| "CreateInput request failed".to_owned())
     ))
+}
+
+fn parse_obsws_server_webrtc_stats_response(text: &str) -> Option<Result<String, String>> {
+    let json = nojson::RawJson::parse(text).ok()?;
+    let root = json.value();
+    let op: i64 = root
+        .to_member("op")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if op != 7 {
+        return None;
+    }
+
+    let d = root.to_member("d").ok()?.required().ok()?;
+    let request_id: String = d
+        .to_member("requestId")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if request_id != GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_ID {
+        return None;
+    }
+
+    let request_status = d.to_member("requestStatus").ok()?.required().ok()?;
+    let result: bool = request_status
+        .to_member("result")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if !result {
+        let comment: Option<String> =
+            if let Some(v) = request_status.to_member("comment").ok()?.optional() {
+                v.try_into().ok()
+            } else {
+                None
+            };
+        return Some(Err(comment.unwrap_or_else(|| {
+            "GetBootstrapWebRtcStats request failed".to_owned()
+        })));
+    }
+
+    let response_data = d.to_member("responseData").ok()?.required().ok()?;
+    let stats = response_data.to_member("stats").ok()?.required().ok()?;
+    Some(Ok(stats.as_raw_str().to_owned()))
 }
 
 // --- VP9 SampleEntry ---
@@ -945,6 +1002,125 @@ async fn collect_webrtc_stats_json(pc: &PeerConnection) -> Result<String, String
         .await
         .map_err(|_| "timed out waiting for WebRTC stats".to_owned())?
         .map_err(|_| "WebRTC stats callback channel closed".to_owned())?
+}
+
+async fn request_server_webrtc_stats(
+    retained: &RetainedState,
+    event_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
+) -> Result<String, String> {
+    let Some(dc) = retained.obsws_dc.as_ref() else {
+        return Err("obsws DataChannel is not available".to_owned());
+    };
+    if dc.state() != DataChannelState::Open {
+        return Err("obsws DataChannel is not open".to_owned());
+    }
+
+    let request = make_get_bootstrap_webrtc_stats_request();
+    if !dc.send(request.as_bytes(), false) {
+        return Err("failed to send GetBootstrapWebRtcStats request".to_owned());
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timed out waiting for GetBootstrapWebRtcStats response".to_owned());
+        }
+
+        let event = tokio::time::timeout(remaining, event_rx.recv())
+            .await
+            .map_err(|_| "timed out waiting for GetBootstrapWebRtcStats response".to_owned())?
+            .ok_or_else(|| {
+                "event channel closed while waiting for GetBootstrapWebRtcStats response".to_owned()
+            })?;
+
+        if let ClientEvent::ObswsMessage { data } = event {
+            let text = std::str::from_utf8(&data)
+                .map_err(|e| format!("GetBootstrapWebRtcStats response was not UTF-8: {e}"))?;
+            if let Some(result) = parse_obsws_server_webrtc_stats_response(text) {
+                return result;
+            }
+        }
+    }
+}
+
+fn summarize_webrtc_stats_json(stats_json: &str) -> String {
+    let Ok(json) = nojson::RawJson::parse(stats_json) else {
+        return "failed to parse stats json".to_owned();
+    };
+
+    let mut inbound_audio = 0usize;
+    let mut inbound_video = 0usize;
+    let mut outbound_audio = 0usize;
+    let mut outbound_video = 0usize;
+    let mut remote_inbound_audio = 0usize;
+    let mut remote_inbound_video = 0usize;
+    let mut remote_outbound_audio = 0usize;
+    let mut remote_outbound_video = 0usize;
+    let mut audio_codecs = Vec::new();
+    let mut video_codecs = Vec::new();
+
+    let root = json.value();
+    let Ok(stats_objects) = root.to_object() else {
+        return "stats root is not an object".to_owned();
+    };
+
+    for (_, stats) in stats_objects {
+        let Ok(stats_type) = stats
+            .to_member("type")
+            .and_then(|v| v.required())
+            .and_then(|v| v.to_unquoted_string_str())
+        else {
+            continue;
+        };
+
+        let mut kind = None;
+        if let Ok(kind_member) = stats.to_member("kind")
+            && let Some(kind_value) = kind_member.optional()
+            && let Ok(kind_str) = kind_value.to_unquoted_string_str()
+        {
+            kind = Some(kind_str.to_string());
+        }
+
+        match (stats_type.as_ref(), kind.as_deref()) {
+            ("inbound-rtp", Some("audio")) => inbound_audio += 1,
+            ("inbound-rtp", Some("video")) => inbound_video += 1,
+            ("outbound-rtp", Some("audio")) => outbound_audio += 1,
+            ("outbound-rtp", Some("video")) => outbound_video += 1,
+            ("remote-inbound-rtp", Some("audio")) => remote_inbound_audio += 1,
+            ("remote-inbound-rtp", Some("video")) => remote_inbound_video += 1,
+            ("remote-outbound-rtp", Some("audio")) => remote_outbound_audio += 1,
+            ("remote-outbound-rtp", Some("video")) => remote_outbound_video += 1,
+            ("codec", _) => {
+                let mut mime_type = None;
+                if let Ok(mime_type_member) = stats.to_member("mimeType")
+                    && let Some(mime_type_value) = mime_type_member.optional()
+                    && let Ok(mime_type_str) = mime_type_value.to_unquoted_string_str()
+                {
+                    mime_type = Some(mime_type_str.to_string());
+                }
+                if let Some(mime_type) = mime_type {
+                    if mime_type.starts_with("audio/") {
+                        audio_codecs.push(mime_type);
+                    } else if mime_type.starts_with("video/") {
+                        video_codecs.push(mime_type);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    audio_codecs.sort();
+    audio_codecs.dedup();
+    video_codecs.sort();
+    video_codecs.dedup();
+
+    format!(
+        "inbound_audio={inbound_audio}, inbound_video={inbound_video}, outbound_audio={outbound_audio}, outbound_video={outbound_video}, remote_inbound_audio={remote_inbound_audio}, remote_inbound_video={remote_inbound_video}, remote_outbound_audio={remote_outbound_audio}, remote_outbound_video={remote_outbound_video}, audio_codecs=[{}], video_codecs=[{}]",
+        audio_codecs.join(", "),
+        video_codecs.join(", ")
+    )
 }
 
 fn summarize_sdp_for_log(sdp: &str) -> String {
@@ -1384,6 +1560,7 @@ async fn run_client(
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
+    let mut server_webrtc_stats_json = None;
     let mut playout_interval = tokio::time::interval(Duration::from_millis(10));
     playout_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     'event_loop: loop {
@@ -1619,6 +1796,22 @@ async fn run_client(
         }
     }
 
+    if video_tracks.load(Ordering::Relaxed) > 0 && video_frames.load(Ordering::Relaxed) == 0 {
+        match request_server_webrtc_stats(&retained, &mut event_rx).await {
+            Ok(stats_json) => {
+                tracing::warn!(
+                    "server-side libwebrtc stats summary: {}",
+                    summarize_webrtc_stats_json(&stats_json)
+                );
+                tracing::warn!("server-side libwebrtc stats raw: {stats_json}");
+                server_webrtc_stats_json = Some(stats_json);
+            }
+            Err(e) => {
+                tracing::warn!("failed to fetch server-side libwebrtc stats: {e}");
+            }
+        }
+    }
+
     let webrtc_stats_json = collect_webrtc_stats_json(&pc).await;
     let webrtc_stats_error = match &webrtc_stats_json {
         Ok(_) => String::new(),
@@ -1627,7 +1820,16 @@ async fn run_client(
     if video_frames.load(Ordering::Relaxed) == 0
         && let Ok(stats_json) = &webrtc_stats_json
     {
+        tracing::warn!(
+            "libwebrtc stats summary: {}",
+            summarize_webrtc_stats_json(stats_json)
+        );
         tracing::warn!("libwebrtc stats raw: {stats_json}");
+    }
+    if video_frames.load(Ordering::Relaxed) == 0
+        && let Some(stats_json) = &server_webrtc_stats_json
+    {
+        tracing::debug!("server-side libwebrtc stats length={}", stats_json.len());
     }
     if !webrtc_stats_error.is_empty() {
         tracing::warn!("failed to collect libwebrtc stats: {}", webrtc_stats_error);

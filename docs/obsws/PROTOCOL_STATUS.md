@@ -414,6 +414,29 @@ OBS 側の問題が解消された時点で再実装を検討する。
 
 OBS WebSocket 仕様には存在しない、hisui 固有の拡張機能。
 
+### 独自 Request
+
+以下の `requestType` は OBS WebSocket 仕様には存在しないが、hisui が独自に追加した Request である。
+
+#### `GetBootstrapWebRtcStats`
+
+bootstrap 用の `obsws` DataChannel 経由で、server 側 `PeerConnection::get_stats()` の生 JSON を取得する。
+`examples/obsws_bootstrap` の切り分け用途を想定した独自 Request であり、通常の OBS WebSocket client 互換機能ではない。
+
+**Request:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `requestId` | string | 必須 | Request ID |
+
+**ResponseData:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `stats` | object | 成功時に必須 | libwebrtc `get_stats()` の生 JSON |
+
+- NOTE: `stats` は libwebrtc の JSON 形式をそのまま返すため、構造は libwebrtc 側の出力に従う
+
 ### 独自 Input Kind
 
 以下の `inputKind` は OBS WebSocket 仕様には存在しないが、hisui が独自に追加した入力種別である。
