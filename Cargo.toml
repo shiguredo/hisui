@@ -42,6 +42,9 @@ shiguredo_video_device = "=2026.1.0-canary.3"
 shiguredo_audio_device = "=2026.1.0-canary.0"
 mpeg2ts = "=0.6.0"
 shiguredo_m3u8 = "=2026.1.0-canary.0"
+shiguredo_s3 = { version = "=2026.1.0-canary.1", default-features = false, features = [
+    "aws-lc-rs",
+] }
 nopng = "=0.1.1"
 aws-lc-rs = "=1.16.2"
 libc = "=0.2.183"
@@ -65,7 +68,7 @@ shiguredo_video_toolbox = "=2026.1.0-canary.2"
 tempfile = "3.18.0"
 
 [workspace]
-members = ["examples/obsws_bootstrap", "examples/sora_publish"]
+members = ["examples/obsws_bootstrap", "examples/sora_publish", "examples/hls_s3"]
 
 [workspace.dependencies]
 tracing = "=0.1.44"

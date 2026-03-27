@@ -438,16 +438,6 @@ fn build_output_active_response(
     })
 }
 
-fn build_output_active_record_response(
-    request_type: &str,
-    request_id: &str,
-    output_active: bool,
-) -> nojson::RawJsonOwned {
-    super::build_request_response_success(request_type, request_id, |f| {
-        f.member("outputActive", output_active)
-    })
-}
-
 fn build_stream_output_settings_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
@@ -500,7 +490,7 @@ pub fn build_stop_output_response(request_id: &str) -> nojson::RawJsonOwned {
 }
 
 pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
-    build_output_active_record_response("ToggleRecord", request_id, output_active)
+    build_output_active_response("ToggleRecord", request_id, output_active)
 }
 
 pub fn build_start_record_response(request_id: &str) -> nojson::RawJsonOwned {
@@ -753,8 +743,8 @@ fn build_get_hls_status_as_output_response(
     let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
     let output_timecode = format_timecode(duration);
     let output_path = input_registry
-        .hls_output_directory()
-        .map(|p| p.join("playlist.m3u8").display().to_string())
+        .hls_destination()
+        .map(|d| d.output_path())
         .unwrap_or_default();
     // TODO: outputBytes / outputSkippedFrames / outputTotalFrames は未対応。0 固定。
     super::build_request_response_success("GetOutputStatus", request_id, |f| {
@@ -776,9 +766,134 @@ fn parse_hls_settings(
     output_settings: nojson::RawJsonValue<'_, '_>,
     input_registry: &mut ObswsInputRegistry,
 ) -> Result<(), String> {
-    let output_directory: Option<String> =
-        super::optional_non_empty_string_member(output_settings, "outputDirectory")
-            .map_err(|e| e.to_string())?;
+    // destination オブジェクトのパース
+    let destination: Option<crate::obsws::input_registry::HlsDestination> = if let Some(
+        dest_value,
+    ) = output_settings
+        .to_member("destination")
+        .map_err(|e| e.to_string())?
+        .optional()
+    {
+        let dest_type: String = dest_value
+            .to_member("type")
+            .map_err(|e| e.to_string())?
+            .required()
+            .map_err(|_| "destination.type is required".to_owned())?
+            .try_into()
+            .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+        match dest_type.as_str() {
+            "filesystem" => {
+                let directory: String = dest_value
+                    .to_member("directory")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.directory is required for filesystem".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                if directory.is_empty() {
+                    return Err("destination.directory must not be empty".to_owned());
+                }
+                Some(crate::obsws::input_registry::HlsDestination::Filesystem { directory })
+            }
+            "s3" => {
+                let bucket: String = dest_value
+                    .to_member("bucket")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.bucket is required for s3".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let prefix: String = super::optional_non_empty_string_member(dest_value, "prefix")
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or_default();
+                let region: String = dest_value
+                    .to_member("region")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.region is required for s3".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let endpoint: Option<String> =
+                    super::optional_non_empty_string_member(dest_value, "endpoint")
+                        .map_err(|e| e.to_string())?;
+                let use_path_style: bool = dest_value
+                    .to_member("usePathStyle")
+                    .map_err(|e| e.to_string())?
+                    .optional()
+                    .map(|v| v.try_into())
+                    .transpose()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?
+                    .unwrap_or(false);
+
+                // credentials オブジェクト
+                let creds_value = dest_value
+                    .to_member("credentials")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.credentials is required for s3".to_owned())?;
+                let access_key_id: String = creds_value
+                    .to_member("accessKeyId")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "credentials.accessKeyId is required".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let secret_access_key: String = creds_value
+                    .to_member("secretAccessKey")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "credentials.secretAccessKey is required".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let session_token: Option<String> =
+                    super::optional_non_empty_string_member(creds_value, "sessionToken")
+                        .map_err(|e| e.to_string())?;
+
+                let lifetime_days: Option<u32> = dest_value
+                    .to_member("lifetimeDays")
+                    .map_err(|e| e.to_string())?
+                    .optional()
+                    .map(|v| v.try_into())
+                    .transpose()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+                if bucket.is_empty() {
+                    return Err("destination.bucket must not be empty".to_owned());
+                }
+                if region.is_empty() {
+                    return Err("destination.region must not be empty".to_owned());
+                }
+                if let Some(days) = lifetime_days {
+                    if days == 0 {
+                        return Err("destination.lifetimeDays must be positive".to_owned());
+                    }
+                    if prefix.is_empty() {
+                        return Err("destination.prefix is required when lifetimeDays is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
+                    }
+                }
+
+                Some(crate::obsws::input_registry::HlsDestination::S3 {
+                    bucket,
+                    prefix,
+                    region,
+                    endpoint,
+                    use_path_style,
+                    access_key_id,
+                    secret_access_key,
+                    session_token,
+                    lifetime_days,
+                })
+            }
+            _ => {
+                return Err(format!(
+                    "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
+                ));
+            }
+        }
+    } else {
+        None
+    };
 
     let segment_duration: Option<f64> = output_settings
         .to_member("segmentDuration")
@@ -898,7 +1013,7 @@ fn parse_hls_settings(
 
     let existing = input_registry.hls_settings().clone();
     input_registry.set_hls_settings(crate::obsws::input_registry::ObswsHlsSettings {
-        output_directory: output_directory.or(existing.output_directory),
+        destination: destination.or(existing.destination),
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
         segment_format,

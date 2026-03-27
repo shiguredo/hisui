@@ -182,6 +182,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc-fast"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
+dependencies = [
+ "digest",
+ "spin",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -372,6 +382,7 @@ dependencies = [
  "shiguredo_opus",
  "shiguredo_rtmp",
  "shiguredo_rtsp",
+ "shiguredo_s3",
  "shiguredo_srt",
  "shiguredo_svt_av1",
  "shiguredo_video_device",
@@ -382,6 +393,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "hls_s3"
+version = "0.0.0"
+dependencies = [
+ "noargs",
+ "nojson",
+ "shiguredo_websocket",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1100,6 +1123,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "shiguredo_s3"
+version = "2026.1.0-canary.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a85063822fd7723888e04a1119f0e9fb0cfa02ffba0b41aef83099b7311081f"
+dependencies = [
+ "aws-lc-rs",
+ "base64",
+ "crc-fast",
+ "md-5",
+ "xml",
+]
+
+[[package]]
 name = "shiguredo_srt"
 version = "2026.1.0-canary.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1240,6 +1276,12 @@ dependencies = [
  "tokio",
  "tokio-rustls",
 ]
+
+[[package]]
+name = "spin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
 
 [[package]]
 name = "subtle"
@@ -1867,6 +1909,12 @@ dependencies = [
  "unicode-xid",
  "wasmparser",
 ]
+
+[[package]]
+name = "xml"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8aa498d22c9bbaf482329839bc5620c46be275a19a812e9a22a2b07529a642a"
 
 [[package]]
 name = "zerocopy"

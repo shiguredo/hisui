@@ -6,6 +6,245 @@ use std::time::Duration;
 
 use crate::obsws::input_registry::HlsSegmentFormat;
 
+/// ファイル拡張子から content-type を返す
+fn content_type_for_filename(filename: &str) -> &'static str {
+    if filename.ends_with(".m3u8") {
+        "application/vnd.apple.mpegurl"
+    } else if filename.ends_with(".ts") {
+        "video/mp2t"
+    } else if filename.ends_with(".mp4") || filename.ends_with(".m4s") {
+        "video/mp4"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+/// HLS writer の統計値
+struct HlsWriterStats {
+    total_input_video_frame_count: crate::stats::StatsCounter,
+    total_input_audio_frame_count: crate::stats::StatsCounter,
+    total_segment_count: crate::stats::StatsCounter,
+    total_segment_byte_size: crate::stats::StatsCounter,
+    total_deleted_segment_count: crate::stats::StatsCounter,
+    current_retained_segment_count: crate::stats::StatsGauge,
+}
+
+impl HlsWriterStats {
+    fn new(stats: &mut crate::stats::Stats) -> Self {
+        Self {
+            total_input_video_frame_count: stats.counter("total_input_video_frame_count"),
+            total_input_audio_frame_count: stats.counter("total_input_audio_frame_count"),
+            total_segment_count: stats.counter("total_segment_count"),
+            total_segment_byte_size: stats.counter("total_segment_byte_size"),
+            total_deleted_segment_count: stats.counter("total_deleted_segment_count"),
+            current_retained_segment_count: stats.gauge("current_retained_segment_count"),
+        }
+    }
+}
+
+/// S3 操作のステータスコード別カウンタ
+struct S3StatusCounters {
+    stats: crate::stats::Stats,
+    metric_name: &'static str,
+}
+
+impl S3StatusCounters {
+    fn new(stats: &crate::stats::Stats, metric_name: &'static str) -> Self {
+        Self {
+            stats: stats.clone(),
+            metric_name,
+        }
+    }
+
+    fn record(&self, status_code: u16) {
+        // Stats を都度 clone してラベル付きカウンタを取得する。
+        // Stats の内部で同一キーは共有されるため、同じ status_code への加算は 1 つの系列に集約される。
+        // clone + set_default_label のコストは S3 の HTTP 往復に比べて無視できる。
+        let mut stats = self.stats.clone();
+        stats.set_default_label("status_code", &status_code.to_string());
+        stats.counter(self.metric_name).inc();
+    }
+}
+
+/// HLS 出力先のストレージ抽象
+enum HlsStorage {
+    Filesystem(FilesystemStorage),
+    S3(Box<S3Storage>),
+}
+
+struct FilesystemStorage {
+    output_directory: PathBuf,
+}
+
+struct S3Storage {
+    client: crate::s3::S3HttpClient,
+    bucket: String,
+    prefix: String,
+    put_counts: S3StatusCounters,
+    delete_counts: S3StatusCounters,
+    put_error_count: crate::stats::StatsCounter,
+    delete_error_count: crate::stats::StatsCounter,
+}
+
+impl S3Storage {
+    /// prefix とファイル名から S3 オブジェクトキーを構築する
+    fn object_key(&self, filename: &str) -> String {
+        if self.prefix.is_empty() {
+            filename.to_owned()
+        } else {
+            format!("{}/{filename}", self.prefix)
+        }
+    }
+}
+
+impl HlsStorage {
+    /// セグメントファイルを書き出す
+    async fn write_segment(&self, filename: &str, data: &[u8]) -> crate::Result<()> {
+        match self {
+            Self::Filesystem(fs) => {
+                let path = fs.output_directory.join(filename);
+                let mut file = BufWriter::new(std::fs::File::create(&path).map_err(|e| {
+                    crate::Error::new(format!(
+                        "failed to create segment file {}: {e}",
+                        path.display()
+                    ))
+                })?);
+                file.write_all(data)
+                    .map_err(|e| crate::Error::new(format!("failed to write segment: {e}")))?;
+                file.flush()
+                    .map_err(|e| crate::Error::new(format!("failed to flush segment: {e}")))?;
+                Ok(())
+            }
+            Self::S3(s3) => {
+                let key = s3.object_key(filename);
+                let content_type = content_type_for_filename(filename);
+                let request = s3
+                    .client
+                    .client()
+                    .put_object()
+                    .bucket(&s3.bucket)
+                    .key(&key)
+                    .body(data.to_vec())
+                    .content_type(content_type)
+                    .build_request()?;
+                match s3.client.execute(&request).await {
+                    Ok(response) => {
+                        s3.put_counts.record(response.status_code);
+                        if !response.is_success() {
+                            return Err(crate::Error::new(format!(
+                                "S3 PutObject failed for {key}: status={}",
+                                response.status_code
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        s3.put_error_count.inc();
+                        return Err(e);
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// プレイリストを書き出す（filesystem はアトミック rename、S3 は直接上書き）
+    async fn write_playlist(&self, filename: &str, content: &[u8]) -> crate::Result<()> {
+        match self {
+            Self::Filesystem(fs) => {
+                let playlist_path = fs.output_directory.join(filename);
+                let tmp_path = fs.output_directory.join(format!(".{filename}.tmp"));
+                std::fs::write(&tmp_path, content).map_err(|e| {
+                    crate::Error::new(format!(
+                        "failed to write temporary playlist {}: {e}",
+                        tmp_path.display()
+                    ))
+                })?;
+                std::fs::rename(&tmp_path, &playlist_path).map_err(|e| {
+                    crate::Error::new(format!(
+                        "failed to rename playlist {} -> {}: {e}",
+                        tmp_path.display(),
+                        playlist_path.display()
+                    ))
+                })?;
+                Ok(())
+            }
+            Self::S3(s3) => {
+                let key = s3.object_key(filename);
+                let content_type = content_type_for_filename(filename);
+                let request = s3
+                    .client
+                    .client()
+                    .put_object()
+                    .bucket(&s3.bucket)
+                    .key(&key)
+                    .body(content.to_vec())
+                    .content_type(content_type)
+                    .build_request()?;
+                match s3.client.execute(&request).await {
+                    Ok(response) => {
+                        s3.put_counts.record(response.status_code);
+                        if !response.is_success() {
+                            return Err(crate::Error::new(format!(
+                                "S3 PutObject failed for {key}: status={}",
+                                response.status_code
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        s3.put_error_count.inc();
+                        return Err(e);
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// ファイルを削除する（best-effort、エラーは warning のみ）
+    async fn delete_file(&self, filename: &str) {
+        match self {
+            Self::Filesystem(fs) => {
+                let path = fs.output_directory.join(filename);
+                if let Err(e) = std::fs::remove_file(&path)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!("failed to remove {}: {e}", path.display());
+                }
+            }
+            Self::S3(s3) => {
+                let key = s3.object_key(filename);
+                match s3
+                    .client
+                    .client()
+                    .delete_object()
+                    .bucket(&s3.bucket)
+                    .key(&key)
+                    .build_request()
+                {
+                    Ok(request) => match s3.client.execute(&request).await {
+                        Ok(response) => {
+                            s3.delete_counts.record(response.status_code);
+                            if !response.is_success() {
+                                tracing::warn!(
+                                    "S3 DeleteObject failed for {key}: status={}",
+                                    response.status_code
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            s3.delete_error_count.inc();
+                            tracing::warn!("failed to delete S3 object {key}: {}", e.display());
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("failed to build DeleteObject for {key}: {e}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 use mpeg2ts::es::{StreamId, StreamType};
 use mpeg2ts::pes::PesHeader;
 use mpeg2ts::time::{ClockReference, Timestamp};
@@ -33,7 +272,7 @@ const FMP4_TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1)
 /// エンコード済みの H.264 + AAC フレームを MPEG-TS または fMP4 セグメントに分割し、
 /// M3U8 プレイリストを管理する。
 struct HlsWriter {
-    output_directory: PathBuf,
+    storage: HlsStorage,
     segment_duration_target: f64,
     max_retained_segments: usize,
     segment_sequence: u64,
@@ -41,6 +280,7 @@ struct HlsWriter {
     format_state: FormatState,
     /// 現在のセグメントの共通情報
     current_segment_info: Option<CurrentSegmentInfo>,
+    stats: HlsWriterStats,
 }
 
 /// セグメントの共通情報（フォーマット非依存）
@@ -58,8 +298,8 @@ enum FormatState {
 
 /// MPEG-TS フォーマット固有の状態
 struct MpegTsState {
-    /// 現在のセグメントのライター
-    current_writer: Option<TsPacketWriter<BufWriter<std::fs::File>>>,
+    /// 現在のセグメントのライター（バッファに蓄積し、finalize 時に storage に書き出す）
+    current_writer: Option<TsPacketWriter<Vec<u8>>>,
     pat_cc: ContinuityCounter,
     pmt_cc: ContinuityCounter,
     video_cc: ContinuityCounter,
@@ -95,10 +335,11 @@ struct RetainedSegment {
 
 impl HlsWriter {
     fn new(
-        output_directory: PathBuf,
+        storage: HlsStorage,
         segment_duration_target: f64,
         max_retained_segments: usize,
         segment_format: HlsSegmentFormat,
+        stats: HlsWriterStats,
     ) -> crate::Result<Self> {
         let format_state = match segment_format {
             HlsSegmentFormat::MpegTs => FormatState::MpegTs(Box::new(MpegTsState {
@@ -128,13 +369,14 @@ impl HlsWriter {
         };
 
         Ok(Self {
-            output_directory,
+            storage,
             segment_duration_target,
             max_retained_segments,
             segment_sequence: 0,
             retained_segments: VecDeque::new(),
             format_state,
             current_segment_info: None,
+            stats,
         })
     }
 
@@ -186,7 +428,7 @@ impl HlsWriter {
                 msg = crate::future::recv_or_pending(&mut audio_rx) => {
                     match msg {
                         crate::Message::Media(crate::MediaFrame::Audio(frame)) => {
-                            if let Err(e) = self.handle_audio_frame(&frame) {
+                            if let Err(e) = self.handle_audio_frame(&frame).await {
                                 tracing::warn!("HLS audio frame error: {}", e.display());
                             }
                         }
@@ -199,7 +441,7 @@ impl HlsWriter {
                 msg = crate::future::recv_or_pending(&mut video_rx) => {
                     match msg {
                         crate::Message::Media(crate::MediaFrame::Video(frame)) => {
-                            if let Err(e) = self.handle_video_frame(&frame) {
+                            if let Err(e) = self.handle_video_frame(&frame).await {
                                 tracing::warn!("HLS video frame error: {}", e.display());
                             }
                         }
@@ -213,16 +455,17 @@ impl HlsWriter {
         }
 
         // EOS 受信後: 現在のセグメントを finalize してから cleanup
-        if let Err(e) = self.finalize_current_segment() {
+        if let Err(e) = self.finalize_current_segment().await {
             tracing::warn!("HLS finalize error on EOS: {}", e.display());
         }
-        self.cleanup();
+        self.cleanup().await;
         Ok(())
     }
 
     /// ビデオフレーム処理。
     /// キーフレームかつセグメント尺が target を超えていたらセグメントを切り替える。
-    fn handle_video_frame(&mut self, frame: &crate::VideoFrame) -> crate::Result<()> {
+    async fn handle_video_frame(&mut self, frame: &crate::VideoFrame) -> crate::Result<()> {
+        self.stats.total_input_video_frame_count.inc();
         // キーフレームでセグメント切り替え判定
         if frame.keyframe
             && let Some(ref info) = self.current_segment_info
@@ -232,7 +475,7 @@ impl HlsWriter {
                 .saturating_sub(info.start_timestamp)
                 .as_secs_f64();
             if elapsed >= self.segment_duration_target {
-                self.finalize_current_segment()?;
+                self.finalize_current_segment().await?;
             }
         }
 
@@ -315,7 +558,8 @@ impl HlsWriter {
     }
 
     /// オーディオフレーム処理
-    fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
+    async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
+        self.stats.total_input_audio_frame_count.inc();
         // 最初の video keyframe より前に audio が流れ始めることがある。
         // その場合でも、初回だけ付与される sample_entry は保持しておかないと、
         // セグメント開始後の AAC フレーム群から codec 情報が失われる。
@@ -400,15 +644,7 @@ impl HlsWriter {
 
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
-                let path = self.output_directory.join(&filename);
-                let file = std::fs::File::create(&path).map_err(|e| {
-                    crate::Error::new(format!(
-                        "failed to create segment file {}: {e}",
-                        path.display()
-                    ))
-                })?;
-                let buf_writer = BufWriter::new(file);
-                let mut writer = TsPacketWriter::new(buf_writer);
+                let mut writer = TsPacketWriter::new(Vec::new());
                 write_pat(state, &mut writer)?;
                 write_pmt(state, &mut writer)?;
                 state.current_writer = Some(writer);
@@ -430,7 +666,7 @@ impl HlsWriter {
     }
 
     /// 現在のセグメントを完了し、プレイリストを更新する
-    fn finalize_current_segment(&mut self) -> crate::Result<()> {
+    async fn finalize_current_segment(&mut self) -> crate::Result<()> {
         let Some(info) = self.current_segment_info.take() else {
             return Ok(());
         };
@@ -438,10 +674,9 @@ impl HlsWriter {
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 if let Some(writer) = state.current_writer.take() {
-                    let mut inner = writer.into_stream();
-                    inner.flush().map_err(|e| {
-                        crate::Error::new(format!("failed to flush segment file: {e}"))
-                    })?;
+                    let buf = writer.into_stream();
+                    self.stats.total_segment_byte_size.add(buf.len() as u64);
+                    self.storage.write_segment(&info.filename, &buf).await?;
                 }
             }
             FormatState::Fmp4(state) => {
@@ -483,31 +718,22 @@ impl HlsWriter {
                     let init_bytes = state.muxer.init_segment_bytes().map_err(|e| {
                         crate::Error::new(format!("failed to create fMP4 init segment: {e}"))
                     })?;
-                    let init_path = self.output_directory.join(INIT_SEGMENT_FILENAME);
-                    std::fs::write(&init_path, &init_bytes).map_err(|e| {
-                        crate::Error::new(format!(
-                            "failed to write init segment {}: {e}",
-                            init_path.display()
-                        ))
-                    })?;
+                    self.storage
+                        .write_segment(INIT_SEGMENT_FILENAME, &init_bytes)
+                        .await?;
                     state.init_segment_written = true;
                 }
 
                 // セグメントファイルを書き出す（metadata + payload）
-                let path = self.output_directory.join(&info.filename);
-                let mut file = BufWriter::new(std::fs::File::create(&path).map_err(|e| {
-                    crate::Error::new(format!(
-                        "failed to create segment file {}: {e}",
-                        path.display()
-                    ))
-                })?);
-                file.write_all(&metadata).map_err(|e| {
-                    crate::Error::new(format!("failed to write fMP4 metadata: {e}"))
-                })?;
-                file.write_all(&reordered_payload)
-                    .map_err(|e| crate::Error::new(format!("failed to write fMP4 payload: {e}")))?;
-                file.flush()
-                    .map_err(|e| crate::Error::new(format!("failed to flush fMP4 segment: {e}")))?;
+                let mut segment_data = Vec::with_capacity(metadata.len() + reordered_payload.len());
+                segment_data.extend_from_slice(&metadata);
+                segment_data.extend_from_slice(&reordered_payload);
+                self.stats
+                    .total_segment_byte_size
+                    .add(segment_data.len() as u64);
+                self.storage
+                    .write_segment(&info.filename, &segment_data)
+                    .await?;
 
                 state.current_samples.clear();
                 state.current_payload.clear();
@@ -520,6 +746,8 @@ impl HlsWriter {
             .as_secs_f64();
         let duration = duration.max(0.001);
 
+        self.stats.total_segment_count.inc();
+
         self.retained_segments.push_back(RetainedSegment {
             filename: info.filename,
             duration,
@@ -529,21 +757,22 @@ impl HlsWriter {
         // この順序にしないと、playlist が削除済みセグメントを参照してしまう。
         while self.retained_segments.len() > self.max_retained_segments {
             if let Some(old) = self.retained_segments.pop_front() {
-                let path = self.output_directory.join(&old.filename);
-                if let Err(e) = std::fs::remove_file(&path) {
-                    tracing::warn!("failed to remove old segment {}: {e}", path.display());
-                }
+                self.storage.delete_file(&old.filename).await;
+                self.stats.total_deleted_segment_count.inc();
             }
         }
 
-        self.write_playlist()?;
+        self.stats
+            .current_retained_segment_count
+            .set(self.retained_segments.len() as i64);
+
+        self.write_playlist().await?;
 
         Ok(())
     }
 
     /// M3U8 プレイリストを書き出す。
-    /// 一時ファイルに書いてから rename してアトミックに更新する。
-    fn write_playlist(&self) -> crate::Result<()> {
+    async fn write_playlist(&self) -> crate::Result<()> {
         if self.retained_segments.is_empty() {
             return Ok(());
         }
@@ -582,55 +811,30 @@ impl HlsWriter {
             content.push('\n');
         }
 
-        let playlist_path = self.output_directory.join(PLAYLIST_FILENAME);
-        let tmp_path = self.output_directory.join(".playlist.m3u8.tmp");
-
-        std::fs::write(&tmp_path, content.as_bytes()).map_err(|e| {
-            crate::Error::new(format!(
-                "failed to write temporary playlist {}: {e}",
-                tmp_path.display()
-            ))
-        })?;
-
-        std::fs::rename(&tmp_path, &playlist_path).map_err(|e| {
-            crate::Error::new(format!(
-                "failed to rename playlist {} -> {}: {e}",
-                tmp_path.display(),
-                playlist_path.display()
-            ))
-        })?;
+        self.storage
+            .write_playlist(PLAYLIST_FILENAME, content.as_bytes())
+            .await?;
 
         Ok(())
     }
 
     /// 停止時に全生成ファイルを削除する
-    fn cleanup(&self) {
-        let playlist_path = self.output_directory.join(PLAYLIST_FILENAME);
-        if let Err(e) = std::fs::remove_file(&playlist_path)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            tracing::warn!("failed to remove playlist {}: {e}", playlist_path.display());
+    async fn cleanup(&self) {
+        self.storage.delete_file(PLAYLIST_FILENAME).await;
+
+        // filesystem の場合のみ一時ファイルも削除する
+        if let HlsStorage::Filesystem(fs) = &self.storage {
+            let tmp_path = fs.output_directory.join(".playlist.m3u8.tmp");
+            let _ = std::fs::remove_file(&tmp_path);
         }
-        let tmp_path = self.output_directory.join(".playlist.m3u8.tmp");
-        let _ = std::fs::remove_file(&tmp_path);
 
         // fMP4 の場合は init segment も削除
         if self.is_fmp4() {
-            let init_path = self.output_directory.join(INIT_SEGMENT_FILENAME);
-            if let Err(e) = std::fs::remove_file(&init_path)
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!("failed to remove init segment {}: {e}", init_path.display());
-            }
+            self.storage.delete_file(INIT_SEGMENT_FILENAME).await;
         }
 
         for seg in &self.retained_segments {
-            let path = self.output_directory.join(&seg.filename);
-            if let Err(e) = std::fs::remove_file(&path)
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!("failed to remove segment {}: {e}", path.display());
-            }
+            self.storage.delete_file(&seg.filename).await;
         }
     }
 }
@@ -1070,8 +1274,19 @@ fn extract_aac_config(
 /// - `HlsWriter::run()` の subscribe 部分を条件分岐にする
 /// - `write_pmt()` の ES info を実際の入力トラックに応じて構築する
 /// - fMP4 の `reorder_payload_by_track()` で存在しないトラックをスキップする
+pub enum HlsStorageConfig {
+    /// ローカルファイルシステム
+    Filesystem { output_directory: PathBuf },
+    /// S3 互換オブジェクトストレージ
+    S3 {
+        client: crate::s3::S3HttpClient,
+        bucket: String,
+        prefix: String,
+    },
+}
+
 pub struct HlsWriterConfig {
-    pub output_directory: PathBuf,
+    pub storage: HlsStorageConfig,
     pub input_audio_track_id: crate::TrackId,
     pub input_video_track_id: crate::TrackId,
     pub segment_duration: f64,
@@ -1091,11 +1306,32 @@ pub async fn create_processor(
             processor_id.clone(),
             crate::ProcessorMetadata::new("hls_writer"),
             move |h| async move {
+                let mut stats = h.stats();
+                let writer_stats = HlsWriterStats::new(&mut stats);
+                let storage = match config.storage {
+                    HlsStorageConfig::Filesystem { output_directory } => {
+                        HlsStorage::Filesystem(FilesystemStorage { output_directory })
+                    }
+                    HlsStorageConfig::S3 {
+                        client,
+                        bucket,
+                        prefix,
+                    } => HlsStorage::S3(Box::new(S3Storage {
+                        client,
+                        bucket,
+                        prefix,
+                        put_counts: S3StatusCounters::new(&stats, "total_s3_put_count"),
+                        delete_counts: S3StatusCounters::new(&stats, "total_s3_delete_count"),
+                        put_error_count: stats.clone().counter("total_s3_put_error_count"),
+                        delete_error_count: stats.clone().counter("total_s3_delete_error_count"),
+                    })),
+                };
                 let writer = HlsWriter::new(
-                    config.output_directory,
+                    storage,
                     config.segment_duration,
                     config.max_retained_segments,
                     config.segment_format,
+                    writer_stats,
                 )?;
                 writer
                     .run(h, config.input_audio_track_id, config.input_video_track_id)
@@ -1121,10 +1357,8 @@ pub struct MasterPlaylistVariant {
 
 /// ABR 用のマスタープレイリスト（Multivariant Playlist）を書き出す。
 /// 一時ファイルに書いてから rename してアトミックに更新する。
-pub fn write_master_playlist(
-    output_directory: &Path,
-    variants: &[MasterPlaylistVariant],
-) -> crate::Result<()> {
+/// マスタープレイリストの内容を生成する
+pub fn build_master_playlist_content(variants: &[MasterPlaylistVariant]) -> String {
     let playlist = shiguredo_m3u8::multivariant::MultivariantPlaylist {
         version: None,
         independent_segments: true,
@@ -1165,7 +1399,16 @@ pub fn write_master_playlist(
         session_keys: Vec::new(),
     };
 
-    let content = shiguredo_m3u8::write_multivariant_playlist(&playlist);
+    shiguredo_m3u8::write_multivariant_playlist(&playlist)
+}
+
+/// ABR 用のマスタープレイリストをファイルシステムに書き出す。
+/// 一時ファイルに書いてから rename してアトミックに更新する。
+pub fn write_master_playlist(
+    output_directory: &Path,
+    variants: &[MasterPlaylistVariant],
+) -> crate::Result<()> {
+    let content = build_master_playlist_content(variants);
 
     let playlist_path = output_directory.join(PLAYLIST_FILENAME);
     let tmp_path = output_directory.join(".playlist.m3u8.tmp");

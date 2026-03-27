@@ -521,21 +521,49 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 `variants` に複数のバリアントを指定すると adaptive bitrate (ABR) 出力に対応する。
 
 - `outputKind`: `hls_output`
-- ローカルファイルシステムへの出力のみ対応
+- ローカルファイルシステムまたは S3 互換オブジェクトストレージへの出力に対応
 - 停止時に生成ファイル（playlist.m3u8 + 全セグメント）を自動削除する
 - `outputBytes` / `outputSkippedFrames` / `outputTotalFrames` は現時点では 0 固定
-- `variants` が 1 要素の場合は non-ABR（`outputDirectory` 直下にセグメントとプレイリストを出力）
-- `variants` が 2 要素以上の場合は ABR（`outputDirectory` 直下にマスタープレイリスト、`variant_N/` サブディレクトリにバリアントごとのセグメントとプレイリストを出力）
+- `variants` が 1 要素の場合は non-ABR（出力先直下にセグメントとプレイリストを出力）
+- `variants` が 2 要素以上の場合は ABR（出力先直下にマスタープレイリスト、`variant_N/` サブディレクトリ/prefix にバリアントごとのセグメントとプレイリストを出力）
 
 **outputSettings（`SetOutputSettings` / `GetOutputSettings`）:**
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `outputDirectory` | string | StartOutput 時に必須 | セグメントとプレイリストの出力先ディレクトリ |
+| `destination` | object | StartOutput 時に必須 | 出力先の設定（下記参照） |
 | `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
 | `maxRetainedSegments` | number | - | プレイリストに保持するセグメント数。デフォルト: 6 |
 | `segmentFormat` | string | - | セグメントフォーマット。`"mpegts"` (デフォルト) または `"fmp4"` |
 | `variants` | array | - | バリアント定義の配列。デフォルト: 1 要素（2Mbps video, 128kbps audio） |
+
+**`destination` (filesystem):**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `type` | string | 必須 | `"filesystem"` |
+| `directory` | string | 必須 | セグメントとプレイリストの出力先ディレクトリ |
+
+**`destination` (s3):**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `type` | string | 必須 | `"s3"` |
+| `bucket` | string | 必須 | S3 バケット名 |
+| `prefix` | string | - | オブジェクトキーの prefix。デフォルト: 空文字列 |
+| `region` | string | 必須 | AWS リージョン |
+| `endpoint` | string | - | カスタムエンドポイント URL（MinIO 等） |
+| `usePathStyle` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
+| `credentials` | object | 必須 | 認証情報（下記参照） |
+| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数）。指定時は HLS 開始時にバケットへ lifecycle ルール（prefix スコープの Expiration）を自動設定する |
+
+**`credentials`:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `accessKeyId` | string | 必須 | アクセスキー ID |
+| `secretAccessKey` | string | 必須 | シークレットアクセスキー |
+| `sessionToken` | string | - | セッショントークン（一時認証情報用） |
 
 **`variants` の各要素:**
 
@@ -546,10 +574,10 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 | `width` | number | - | ビデオ幅（偶数）。省略時はキャンバスサイズを使用 |
 | `height` | number | - | ビデオ高さ（偶数）。省略時はキャンバスサイズを使用 |
 
-**ディレクトリ構成（ABR）:**
+**ディレクトリ構成（filesystem, ABR）:**
 
 ```
-outputDirectory/
+<directory>/
 ├── playlist.m3u8          # マスタープレイリスト
 ├── variant_0/
 │   ├── playlist.m3u8      # メディアプレイリスト
@@ -559,16 +587,32 @@ outputDirectory/
 │   └── segment*.ts
 ```
 
+**S3 オブジェクト構成（ABR）:**
+
+```
+<prefix>/playlist.m3u8          # マスタープレイリスト
+<prefix>/variant_0/playlist.m3u8
+<prefix>/variant_0/segment*.ts
+<prefix>/variant_1/playlist.m3u8
+<prefix>/variant_1/segment*.ts
+```
+
+**`GetOutputStatus` の `outputPath`:**
+
+- filesystem: `<directory>/playlist.m3u8`
+- s3: `s3://<bucket>/<prefix>/playlist.m3u8`
+
 **フロー:**
 
-1. `SetOutputSettings` で `outputDirectory` / `variants` 等を設定
+1. `SetOutputSettings` で `destination` / `variants` 等を設定
 2. `StartOutput` で pipeline 生成 + HLS セグメント書き出し開始
 3. `GetOutputStatus` で稼働状態確認（`outputPath` にプレイリストパスを返す）
 4. `StopOutput` で pipeline 停止 + 生成ファイル削除
 
 **エラー条件:**
 
-- `outputDirectory` が未設定の場合: `StartOutput` が失敗
+- `destination` が未設定の場合: `StartOutput` が失敗
+- `destination.type` が `"filesystem"` でも `"s3"` でもない場合: `SetOutputSettings` が失敗
 - `segmentDuration` が 0 以下の場合: `SetOutputSettings` が失敗
 - `maxRetainedSegments` が 0 の場合: `SetOutputSettings` が失敗
 - `variants` が空の場合: `SetOutputSettings` が失敗
