@@ -440,7 +440,16 @@ impl DashWriter {
         }
         // 前のビデオサンプルの duration を確定させる
         if let Some(prev_ts) = self.last_video_timestamp {
-            let duration = frame.timestamp.saturating_sub(prev_ts).as_micros() as u32;
+            // Duration::as_micros() は u128 を返すが、fMP4 の sample duration は u32。
+            // フレーム間隔が約 71.5 分（u32::MAX μs ≈ 4294 秒）を超えると
+            // as u32 キャストで黙って切り捨てられ、誤った duration が書かれる。
+            // 通常のライブストリーミングではまず発生しないが、ネットワーク断や
+            // ソースの一時停止からの復帰で理論上は起こり得る。
+            // 発生した場合、該当セグメントの再生タイミングがずれるが、
+            // 次のキーフレームでセグメントが切り替わるため影響は限定的。
+            // ここでは u32::MAX にサチュレーションして安全側に倒す。
+            let duration =
+                frame.timestamp.saturating_sub(prev_ts).as_micros().min(u32::MAX as u128) as u32;
             if let Some(last) = self
                 .current_samples
                 .iter_mut()
@@ -488,9 +497,10 @@ impl DashWriter {
             return Ok(());
         }
 
-        // 前のオーディオサンプルの duration を確定させる
+        // 前のオーディオサンプルの duration を確定させる（サチュレーションについてはビデオ側のコメント参照）
         if let Some(prev_ts) = self.last_audio_timestamp {
-            let duration = frame.timestamp.saturating_sub(prev_ts).as_micros() as u32;
+            let duration =
+                frame.timestamp.saturating_sub(prev_ts).as_micros().min(u32::MAX as u128) as u32;
             if let Some(last) = self
                 .current_samples
                 .iter_mut()
