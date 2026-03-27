@@ -2134,6 +2134,9 @@ impl ObswsCoordinator {
             start_hls_processors(pipeline_handle, &mut output_plan, &run, &hls_settings).await
         {
             self.input_registry.deactivate_hls();
+            // バリアントループの途中で失敗した場合、未起動のプロセッサが run に含まれるが、
+            // stop_processors_staged_hls 内の wait_or_terminate / terminate_and_wait は
+            // live_processor_ids で生存プロセッサのみをフィルタするため安全にスキップされる。
             let _ = stop_processors_staged_hls(pipeline_handle, &run).await;
             let error_comment = format!("Failed to start HLS: {}", e.display());
             return OutputOperationOutcome::failure(
