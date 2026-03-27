@@ -1045,6 +1045,11 @@ pub struct CombinedMpdVariant {
 
 /// ABR 用の結合 MPD の内容を生成する。
 /// duration ベースの SegmentTemplate を使い、各 Representation にバリアント固有のパスを設定する。
+///
+// TODO: 現在は duration ベースの固定長 SegmentTemplate を使い、起動時に 1 回だけ書き出す。
+// 非 ABR では SegmentTimeline ベースの動的 MPD を毎セグメント更新しているため、
+// ABR 時も SegmentTimeline ベースに統一することで、実際のセグメント尺との乖離を防げる。
+// これには各バリアントライターからセグメント情報を集約する仕組みが必要になる。
 pub fn build_combined_mpd_content(
     variants: &[CombinedMpdVariant],
     segment_duration: f64,
@@ -1208,10 +1213,10 @@ pub fn build_combined_mpd_content(
     shiguredo_mpd::write(&mpd)
 }
 
-/// ABR 用の結合 MPD をファイルシステムに書き出す。
-/// 一時ファイルに書いてから rename してアトミックに更新する。
-pub fn write_combined_mpd(
-    output_directory: &std::path::Path,
+/// ABR 用の結合 MPD を書き出す。
+/// Filesystem / S3 の両方に対応する。
+pub async fn write_combined_mpd(
+    storage_config: DashStorageConfig,
     variants: &[CombinedMpdVariant],
     segment_duration: f64,
     max_retained_segments: usize,
@@ -1219,26 +1224,49 @@ pub fn write_combined_mpd(
 ) -> crate::Result<()> {
     let content =
         build_combined_mpd_content(variants, segment_duration, max_retained_segments, codecs);
+    let storage = storage_from_config(storage_config);
+    storage
+        .write_manifest(MANIFEST_FILENAME, content.as_bytes())
+        .await
+}
 
-    let mpd_path = output_directory.join(MANIFEST_FILENAME);
-    let tmp_path = output_directory.join(format!(".{MANIFEST_FILENAME}.tmp"));
+/// ABR 用の結合 MPD を削除する（ベストエフォート）。
+pub async fn delete_combined_mpd(storage_config: DashStorageConfig) {
+    let storage = storage_from_config(storage_config);
+    storage.delete_file(MANIFEST_FILENAME).await;
+    // filesystem の場合のみ一時ファイルも削除する
+    if let DashStorage::Filesystem(fs) = &storage {
+        let tmp_path = fs
+            .output_directory
+            .join(format!(".{MANIFEST_FILENAME}.tmp"));
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+}
 
-    std::fs::write(&tmp_path, content.as_bytes()).map_err(|e| {
-        crate::Error::new(format!(
-            "failed to write temporary combined MPD {}: {e}",
-            tmp_path.display()
-        ))
-    })?;
-
-    std::fs::rename(&tmp_path, &mpd_path).map_err(|e| {
-        crate::Error::new(format!(
-            "failed to rename combined MPD {} -> {}: {e}",
-            tmp_path.display(),
-            mpd_path.display()
-        ))
-    })?;
-
-    Ok(())
+/// DashStorageConfig から DashStorage を構築する（統計カウンタなし）。
+/// 結合 MPD の書き出し/削除など、ライタープロセッサ外で使う用途。
+fn storage_from_config(config: DashStorageConfig) -> DashStorage {
+    match config {
+        DashStorageConfig::Filesystem { output_directory } => {
+            DashStorage::Filesystem(FilesystemStorage { output_directory })
+        }
+        DashStorageConfig::S3 {
+            client,
+            bucket,
+            prefix,
+        } => {
+            let mut stats = crate::stats::Stats::new();
+            DashStorage::S3(Box::new(S3Storage {
+                client,
+                bucket,
+                prefix,
+                put_counts: S3StatusCounters::new(&stats, "combined_mpd_s3_put_count"),
+                delete_counts: S3StatusCounters::new(&stats, "combined_mpd_s3_delete_count"),
+                put_error_count: stats.clone().counter("combined_mpd_s3_put_error_count"),
+                delete_error_count: stats.counter("combined_mpd_s3_delete_error_count"),
+            }))
+        }
+    }
 }
 
 #[cfg(test)]

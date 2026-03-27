@@ -4030,63 +4030,15 @@ async fn start_dash_processors(
                 }
             })
             .collect();
-        let mpd_content = crate::dash::writer::build_combined_mpd_content(
+        let root_storage_config = build_dash_root_storage_config(&run.destination)?;
+        crate::dash::writer::write_combined_mpd(
+            root_storage_config,
             &mpd_variants,
             dash_settings.segment_duration,
             dash_settings.max_retained_segments,
             &dash_codecs,
-        );
-        match &run.destination {
-            crate::obsws::input_registry::DashDestination::Filesystem { directory } => {
-                crate::dash::writer::write_combined_mpd(
-                    &std::path::PathBuf::from(directory),
-                    &mpd_variants,
-                    dash_settings.segment_duration,
-                    dash_settings.max_retained_segments,
-                    &dash_codecs,
-                )?;
-            }
-            crate::obsws::input_registry::DashDestination::S3 {
-                bucket,
-                prefix,
-                region,
-                endpoint,
-                use_path_style,
-                access_key_id,
-                secret_access_key,
-                session_token,
-                ..
-            } => {
-                let s3_client = build_s3_client(
-                    region,
-                    access_key_id,
-                    secret_access_key,
-                    session_token.as_deref(),
-                    endpoint.as_deref(),
-                    *use_path_style,
-                )?;
-                let key = if prefix.is_empty() {
-                    "manifest.mpd".to_owned()
-                } else {
-                    format!("{prefix}/manifest.mpd")
-                };
-                let request = s3_client
-                    .client()
-                    .put_object()
-                    .bucket(bucket)
-                    .key(&key)
-                    .body(mpd_content.into_bytes())
-                    .content_type("application/dash+xml")
-                    .build_request()?;
-                let response = s3_client.execute(&request).await?;
-                if !response.is_success() {
-                    return Err(crate::Error::new(format!(
-                        "S3 PutObject failed for combined MPD {key}: status={}",
-                        response.status_code
-                    )));
-                }
-            }
-        }
+        )
+        .await?;
     }
 
     crate::obsws::session::output::start_source_processors(
@@ -4161,85 +4113,64 @@ async fn stop_processors_staged_dash(
 
     // ABR の場合は結合 MPD とバリアントディレクトリを削除する
     if run.is_abr() {
-        match &run.destination {
-            crate::obsws::input_registry::DashDestination::Filesystem { directory } => {
-                let mpd_path = std::path::PathBuf::from(directory).join("manifest.mpd");
-                if let Err(e) = std::fs::remove_file(&mpd_path)
+        if let Ok(root_storage_config) = build_dash_root_storage_config(&run.destination) {
+            crate::dash::writer::delete_combined_mpd(root_storage_config).await;
+        }
+        // filesystem の場合はバリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
+        if let crate::obsws::input_registry::DashDestination::Filesystem { .. } = &run.destination {
+            for vr in &run.variant_runs {
+                if let Err(e) = std::fs::remove_dir(&vr.variant_path)
                     && e.kind() != std::io::ErrorKind::NotFound
                 {
-                    tracing::warn!("failed to remove combined MPD {}: {e}", mpd_path.display());
-                }
-                // バリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
-                for vr in &run.variant_runs {
-                    if let Err(e) = std::fs::remove_dir(&vr.variant_path)
-                        && e.kind() != std::io::ErrorKind::NotFound
-                    {
-                        tracing::warn!(
-                            "failed to remove variant directory {}: {e}",
-                            vr.variant_path
-                        );
-                    }
-                }
-            }
-            crate::obsws::input_registry::DashDestination::S3 {
-                bucket,
-                prefix,
-                region,
-                endpoint,
-                use_path_style,
-                access_key_id,
-                secret_access_key,
-                session_token,
-                ..
-            } => {
-                // 結合 MPD を DeleteObject で削除する
-                if let Ok(s3_client) = build_s3_client(
-                    region,
-                    access_key_id,
-                    secret_access_key,
-                    session_token.as_deref(),
-                    endpoint.as_deref(),
-                    *use_path_style,
-                ) {
-                    let key = if prefix.is_empty() {
-                        "manifest.mpd".to_owned()
-                    } else {
-                        format!("{prefix}/manifest.mpd")
-                    };
-                    match s3_client
-                        .client()
-                        .delete_object()
-                        .bucket(bucket)
-                        .key(&key)
-                        .build_request()
-                    {
-                        Ok(request) => match s3_client.execute(&request).await {
-                            Ok(response) if !response.is_success() => {
-                                tracing::warn!(
-                                    "S3 DeleteObject failed for combined MPD {key}: status={}",
-                                    response.status_code
-                                );
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "failed to delete S3 combined MPD {key}: {}",
-                                    e.display()
-                                );
-                            }
-                            _ => {}
-                        },
-                        Err(e) => {
-                            tracing::warn!(
-                                "failed to build DeleteObject for combined MPD {key}: {e}"
-                            );
-                        }
-                    }
+                    tracing::warn!(
+                        "failed to remove variant directory {}: {e}",
+                        vr.variant_path
+                    );
                 }
             }
         }
     }
 
     Ok(())
+}
+
+/// DASH destination からルートディレクトリ/prefix 用の DashStorageConfig を構築する。
+/// 結合 MPD の書き出し・削除に使用する。
+fn build_dash_root_storage_config(
+    destination: &crate::obsws::input_registry::DashDestination,
+) -> crate::Result<crate::dash::writer::DashStorageConfig> {
+    match destination {
+        crate::obsws::input_registry::DashDestination::Filesystem { directory } => {
+            Ok(crate::dash::writer::DashStorageConfig::Filesystem {
+                output_directory: std::path::PathBuf::from(directory),
+            })
+        }
+        crate::obsws::input_registry::DashDestination::S3 {
+            bucket,
+            prefix,
+            region,
+            endpoint,
+            use_path_style,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            ..
+        } => {
+            let client = build_s3_client(
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                endpoint.as_deref(),
+                *use_path_style,
+            )?;
+            Ok(crate::dash::writer::DashStorageConfig::S3 {
+                client,
+                bucket: bucket.clone(),
+                prefix: prefix.clone(),
+            })
+        }
+    }
 }
 
 /// RTMP outbound 用プロセッサを段階的に停止する
