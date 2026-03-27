@@ -874,10 +874,13 @@ fn parse_hls_settings(
                     if region.is_empty() {
                         return Err("destination.region must not be empty".to_owned());
                     }
-                    if let Some(days) = lifetime_days
-                        && days == 0
-                    {
-                        return Err("destination.lifetimeDays must be positive".to_owned());
+                    if let Some(days) = lifetime_days {
+                        if days == 0 {
+                            return Err("destination.lifetimeDays must be positive".to_owned());
+                        }
+                        if prefix.is_empty() {
+                            return Err("destination.prefix is required when lifetimeDays is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
+                        }
                     }
 
                     Some(crate::obsws::input_registry::HlsDestination::S3 {
