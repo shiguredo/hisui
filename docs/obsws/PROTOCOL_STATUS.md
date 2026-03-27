@@ -555,7 +555,13 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 | `endpoint` | string | - | カスタムエンドポイント URL（MinIO 等） |
 | `usePathStyle` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
 | `credentials` | object | 必須 | 認証情報（下記参照） |
-| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数）。指定時は HLS 開始時にバケットへ lifecycle ルール（prefix スコープの Expiration）を自動設定する |
+| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数） |
+
+> **`lifetimeDays` に関する注意:**
+>
+> - `lifetimeDays` を指定すると、hisui は Output 開始時に対象バケットの lifecycle 設定を更新する
+> - この更新は既存ルールとの競合を安全に解決しないため、他の lifecycle ルールへ影響する可能性がある
+> - 既存 lifecycle を運用している共有バケットでの利用は非推奨
 
 **`credentials`:**
 
@@ -661,7 +667,13 @@ MPEG-DASH ライブ出力。H.264 + AAC の fragmented MP4 セグメントを生
 | `endpoint` | string | - | カスタムエンドポイント URL（MinIO 等） |
 | `usePathStyle` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
 | `credentials` | object | 必須 | 認証情報（下記参照） |
-| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数）。指定時は MPEG-DASH 開始時にバケットへ lifecycle ルール（prefix スコープの Expiration）を自動設定する |
+| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数） |
+
+> **`lifetimeDays` に関する注意:**
+>
+> - `lifetimeDays` を指定すると、hisui は Output 開始時に対象バケットの lifecycle 設定を更新する
+> - この更新は既存ルールとの競合を安全に解決しないため、他の lifecycle ルールへ影響する可能性がある
+> - 既存 lifecycle を運用している共有バケットでの利用は非推奨
 
 **`credentials`:**
 

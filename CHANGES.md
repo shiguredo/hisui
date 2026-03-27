@@ -53,8 +53,6 @@
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_m3u8 2026.1.0-canary.0 を追加する
-  - @sile
 - [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0-canary.0 を追加する
   - @sile
 - [ADD] server サブコマンドに `--ui-remote-url` オプションを追加する
