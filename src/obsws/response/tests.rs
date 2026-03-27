@@ -1226,7 +1226,7 @@ fn build_and_parse_request_batch_response_preserves_fields() {
         .expect("requestType must be string");
     assert_eq!(first_request_type, "GetVersion");
 
-    let source_response = build_get_version_response("req-1");
+    let source_response = build_get_version_response("req-1", &[]);
     let parsed = parse_request_response_for_batch_result(&source_response)
         .expect("request response must be parsed");
     assert_eq!(parsed.request_type, "GetVersion");

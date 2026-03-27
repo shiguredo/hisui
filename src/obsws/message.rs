@@ -173,7 +173,7 @@ pub fn handle_request_message_with_pipeline_handle(
     }
 
     let message = match request_type.as_str() {
-        "GetVersion" => crate::obsws::response::build_get_version_response(&request_id),
+        "GetVersion" => crate::obsws::response::build_get_version_response(&request_id, &[]),
         "GetStats" => crate::obsws::response::build_get_stats_response(
             &request_id,
             session_stats,

@@ -437,6 +437,47 @@ WebRTC 接続の切り分けや観測用途を想定した、hisui 独自の Req
 
 - NOTE: `stats` は libwebrtc の JSON 形式をそのまま返すため、構造は libwebrtc 側の出力に従う
 
+#### `SubscribeProgramTracks`
+
+`obsws` DataChannel 経由で、Program 合成結果トラック（mixed_video / mixed_audio）を WebRTC P2P セッションに追加購読する。
+購読後は renegotiation が発生し、client 側で Program の映像・音声トラックを受信できるようになる。
+
+**Request:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `requestId` | string | 必須 | Request ID |
+
+**ResponseData:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `videoTrackId` | string | 成功時に必須 | Program の映像トラック ID（固定値: `obsws:program:0:mixed_video`） |
+| `audioTrackId` | string | 成功時に必須 | Program の音声トラック ID（固定値: `obsws:program:0:mixed_audio`） |
+
+- NOTE: 既に購読中の場合は no-op で成功する（renegotiation は発生しない）
+- NOTE: raw input track の購読とは独立しており、同時に購読可能
+
+#### `UnsubscribeProgramTracks`
+
+`obsws` DataChannel 経由で、Program 合成結果トラックの購読を解除する。
+解除後は renegotiation が発生し、Program の映像・音声トラックの配信が停止する。
+
+**Request:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `requestId` | string | 必須 | Request ID |
+
+**ResponseData:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `videoTrackId` | string | 成功時に必須 | Program の映像トラック ID（固定値: `obsws:program:0:mixed_video`） |
+| `audioTrackId` | string | 成功時に必須 | Program の音声トラック ID（固定値: `obsws:program:0:mixed_audio`） |
+
+- NOTE: 未購読の場合は no-op で成功する（renegotiation は発生しない）
+
 ### 独自 Input Kind
 
 以下の `inputKind` は OBS WebSocket 仕様には存在しないが、hisui が独自に追加した入力種別である。

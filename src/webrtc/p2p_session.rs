@@ -12,6 +12,15 @@ use tokio::sync::{mpsc, oneshot};
 use crate::obsws::session::{ObswsSession, SessionAction};
 
 const GET_WEBRTC_STATS_REQUEST_TYPE: &str = "GetWebRtcStats";
+const SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE: &str = "SubscribeProgramTracks";
+const UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE: &str = "UnsubscribeProgramTracks";
+
+/// bootstrap DataChannel 専用の Request 一覧（GetVersion の availableRequests に追加する）
+const BOOTSTRAP_DC_EXTRA_REQUESTS: &[&str] = &[
+    GET_WEBRTC_STATS_REQUEST_TYPE,
+    SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+    UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+];
 
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
@@ -184,6 +193,10 @@ struct Session {
         std::collections::HashMap<String, crate::obsws::coordinator::BootstrapInputSnapshot>,
     /// bootstrap 差分イベント購読タスクの停止用ハンドル
     bootstrap_event_abort_handle: Option<tokio::task::AbortHandle>,
+    /// Program 出力の固定トラック ID（bootstrap 時に設定）
+    program_track_ids: crate::obsws::coordinator::ProgramTrackIds,
+    /// Program トラックを購読中かどうか
+    program_tracks_subscribed: bool,
 }
 
 impl Drop for Session {
@@ -394,6 +407,10 @@ impl WebRtcP2pSessionManager {
             })?;
 
         let obsws_session = ObswsSession::new_identified(self.coordinator_handle.clone());
+        let program_track_ids = crate::obsws::coordinator::ProgramTrackIds {
+            video_track_id: self.coordinator_handle.program_video_track_id(),
+            audio_track_id: self.coordinator_handle.program_audio_track_id(),
+        };
 
         let mut guard = self.session.lock().await;
         if guard.is_some() {
@@ -409,6 +426,7 @@ impl WebRtcP2pSessionManager {
             self.pipeline_handle.clone(),
             processor_handle,
             obsws_session,
+            program_track_ids,
         )
         .await
         {
@@ -457,6 +475,10 @@ impl WebRtcP2pSessionManager {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bootstrap 初期化に必要なコンテキストを個別に受け取る"
+)]
 async fn bootstrap_internal(
     factory: Arc<PeerConnectionFactory>,
     audio_state: Arc<super::audio::SharedAudioState>,
@@ -465,6 +487,7 @@ async fn bootstrap_internal(
     handle: crate::MediaPipelineHandle,
     processor_handle: crate::ProcessorHandle,
     obsws_session: ObswsSession,
+    program_track_ids: crate::obsws::coordinator::ProgramTrackIds,
 ) -> crate::Result<(String, Session)> {
     let (ice_tx, ice_rx) = tokio::sync::mpsc::unbounded_channel::<IceObserverEvent>();
 
@@ -539,6 +562,8 @@ async fn bootstrap_internal(
         obsws_session,
         bootstrap_tracks: std::collections::HashMap::new(),
         bootstrap_event_abort_handle: None,
+        program_track_ids,
+        program_tracks_subscribed: false,
     };
 
     Ok((answer_sdp, sess))
@@ -763,7 +788,8 @@ async fn handle_obsws_message(sess: &mut Session, data: &[u8]) -> bool {
     };
     tracing::debug!("Received obsws message: {text}");
 
-    if let Some(response) = handle_bootstrap_webrtc_stats_request(sess, text).await {
+    // bootstrap DataChannel 専用リクエストのインターセプト
+    if let Some(response) = handle_bootstrap_dc_request(sess, text).await {
         send_obsws_dc(sess, response.text());
         return false;
     }
@@ -781,8 +807,10 @@ async fn handle_obsws_message(sess: &mut Session, data: &[u8]) -> bool {
     apply_obsws_action_to_dc(sess, action)
 }
 
-async fn handle_bootstrap_webrtc_stats_request(
-    sess: &Session,
+/// bootstrap DataChannel 専用リクエストをディスパッチする。
+/// 該当しないリクエストは None を返し、通常の obsws 処理に委譲する。
+async fn handle_bootstrap_dc_request(
+    sess: &mut Session,
     text: &str,
 ) -> Option<nojson::RawJsonOwned> {
     let crate::obsws::message::ClientMessage::Request(request) =
@@ -791,22 +819,59 @@ async fn handle_bootstrap_webrtc_stats_request(
         return None;
     };
 
-    let request_type = request.request_type.unwrap_or_default();
-    if request_type != GET_WEBRTC_STATS_REQUEST_TYPE {
-        return None;
+    let request_type = request.request_type.as_deref().unwrap_or_default();
+    match request_type {
+        "GetVersion" => Some(handle_bootstrap_get_version(&request)),
+        GET_WEBRTC_STATS_REQUEST_TYPE => Some(handle_bootstrap_webrtc_stats(sess, &request).await),
+        SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE => {
+            Some(handle_subscribe_program_tracks(sess, &request).await)
+        }
+        UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE => {
+            Some(handle_unsubscribe_program_tracks(sess, &request).await)
+        }
+        _ => None,
     }
+}
 
-    let request_id = request.request_id.unwrap_or_default();
+/// requestId の検証を行い、空の場合はエラーレスポンスを返す
+fn validate_request_id(
+    request: &crate::obsws::message::RequestMessage,
+    request_type: &str,
+) -> Result<String, nojson::RawJsonOwned> {
+    let request_id = request.request_id.clone().unwrap_or_default();
     if request_id.is_empty() {
-        return Some(crate::obsws::response::build_request_response_error(
-            GET_WEBRTC_STATS_REQUEST_TYPE,
+        return Err(crate::obsws::response::build_request_response_error(
+            request_type,
             "",
             crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
             "Missing required requestId field",
         ));
     }
+    Ok(request_id)
+}
 
-    Some(match collect_webrtc_stats_json(&sess.pc).await {
+/// bootstrap DataChannel 経由の GetVersion。DC 専用 Request を availableRequests に含める。
+fn handle_bootstrap_get_version(
+    request: &crate::obsws::message::RequestMessage,
+) -> nojson::RawJsonOwned {
+    let request_id = match validate_request_id(request, "GetVersion") {
+        Ok(id) => id,
+        Err(err) => return err,
+    };
+    crate::obsws::response::build_get_version_response(&request_id, BOOTSTRAP_DC_EXTRA_REQUESTS)
+}
+
+/// bootstrap DataChannel 経由の GetWebRtcStats
+async fn handle_bootstrap_webrtc_stats(
+    sess: &Session,
+    request: &crate::obsws::message::RequestMessage,
+) -> nojson::RawJsonOwned {
+    let request_id = match validate_request_id(request, GET_WEBRTC_STATS_REQUEST_TYPE) {
+        Ok(id) => id,
+        Err(err) => return err,
+    };
+
+    match collect_webrtc_stats_json(&sess.pc).await {
         Ok(stats) => crate::obsws::response::build_request_response_success(
             GET_WEBRTC_STATS_REQUEST_TYPE,
             &request_id,
@@ -818,6 +883,93 @@ async fn handle_bootstrap_webrtc_stats_request(
             crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
             &e.reason,
         ),
+    }
+}
+
+/// Program トラックを購読する
+async fn handle_subscribe_program_tracks(
+    sess: &mut Session,
+    request: &crate::obsws::message::RequestMessage,
+) -> nojson::RawJsonOwned {
+    let request_id = match validate_request_id(request, SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE) {
+        Ok(id) => id,
+        Err(err) => return err,
+    };
+
+    if !sess.program_tracks_subscribed {
+        let video_track_id = sess.program_track_ids.video_track_id.clone();
+        let audio_track_id = sess.program_track_ids.audio_track_id.clone();
+
+        if let Err(e) = subscribe_track(sess, video_track_id, TrackKind::Video) {
+            tracing::warn!("failed to subscribe program video track: {}", e.display());
+            return crate::obsws::response::build_request_response_error(
+                SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+                &request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                &format!("failed to subscribe program video track: {}", e.display()),
+            );
+        }
+        if let Err(e) = subscribe_track(sess, audio_track_id, TrackKind::Audio) {
+            tracing::warn!("failed to subscribe program audio track: {}", e.display());
+            return crate::obsws::response::build_request_response_error(
+                SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+                &request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                &format!("failed to subscribe program audio track: {}", e.display()),
+            );
+        }
+
+        sess.program_tracks_subscribed = true;
+
+        if let Err(e) = maybe_send_offer(sess).await {
+            tracing::warn!(
+                "failed to send renegotiation offer after subscribing program tracks: {}",
+                e.display()
+            );
+        }
+    }
+
+    build_program_tracks_response(SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE, &request_id, sess)
+}
+
+/// Program トラックの購読を解除する
+async fn handle_unsubscribe_program_tracks(
+    sess: &mut Session,
+    request: &crate::obsws::message::RequestMessage,
+) -> nojson::RawJsonOwned {
+    let request_id = match validate_request_id(request, UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE) {
+        Ok(id) => id,
+        Err(err) => return err,
+    };
+
+    if sess.program_tracks_subscribed {
+        unsubscribe_track(sess, &sess.program_track_ids.video_track_id.clone());
+        unsubscribe_track(sess, &sess.program_track_ids.audio_track_id.clone());
+
+        sess.program_tracks_subscribed = false;
+
+        if let Err(e) = maybe_send_offer(sess).await {
+            tracing::warn!(
+                "failed to send renegotiation offer after unsubscribing program tracks: {}",
+                e.display()
+            );
+        }
+    }
+
+    build_program_tracks_response(UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE, &request_id, sess)
+}
+
+/// Program トラック系レスポンスを構築する
+fn build_program_tracks_response(
+    request_type: &str,
+    request_id: &str,
+    sess: &Session,
+) -> nojson::RawJsonOwned {
+    let video_track_id = sess.program_track_ids.video_track_id.get().to_owned();
+    let audio_track_id = sess.program_track_ids.audio_track_id.get().to_owned();
+    crate::obsws::response::build_request_response_success(request_type, request_id, |f| {
+        f.member("videoTrackId", video_track_id.as_str())?;
+        f.member("audioTrackId", audio_track_id.as_str())
     })
 }
 
