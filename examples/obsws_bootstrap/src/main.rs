@@ -1315,8 +1315,6 @@ async fn run_client(
                 *connection_state.lock().unwrap() = state_str.to_owned();
             }
             ClientEvent::Track(transceiver) => {
-                // transceiver を保持しないと、ラッパーの寿命次第で受信が不安定になる可能性がある。
-                retained.track_transceivers.push(transceiver.clone());
                 let receiver = transceiver.receiver();
                 let track = receiver.track();
                 let kind = track.kind().unwrap_or_default();
@@ -1354,6 +1352,8 @@ async fn run_client(
                         tracing::warn!("unknown track kind: {kind}");
                     }
                 }
+                // transceiver を保持しないと、ラッパーの寿命次第で受信が不安定になる可能性がある。
+                retained.track_transceivers.push(transceiver);
             }
             ClientEvent::DataChannel(dc, observer) => {
                 let label = dc.label().unwrap_or_default();
