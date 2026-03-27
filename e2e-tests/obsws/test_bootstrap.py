@@ -21,12 +21,17 @@ def _build_bootstrap_command(
     duration: int,
     input_mp4_path: str,
     output_path: str,
+    *,
+    subscribe_program_tracks: bool = False,
 ) -> tuple[list[str], Path]:
     """obsws_bootstrap を cargo run 経由で起動するコマンドを返す"""
     # HISUI_E2E_CARGO_RUN_ARGS には --features fdk-aac など hisui 本体用の
     # オプションが含まれるため、obsws_bootstrap では --release のみ使う
     extra_args = shlex.split(os.environ.get("HISUI_E2E_CARGO_RUN_ARGS", ""))
     release_args = ["--release"] if "--release" in extra_args else []
+    extra_flags = []
+    if subscribe_program_tracks:
+        extra_flags.append("--subscribe-program-tracks")
     return (
         [
             "cargo",
@@ -46,6 +51,7 @@ def _build_bootstrap_command(
             input_mp4_path,
             "--output-path",
             output_path,
+            *extra_flags,
         ],
         REPO_ROOT,
     )
@@ -179,3 +185,65 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     assert inspect.get("audio_sample_count", 0) >= 1, (
         f"expected at least 1 audio sample, got {inspect}"
     )
+
+
+@pytest.mark.timeout(90)
+def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
+    """bootstrap で SubscribeProgramTracks を送信し、Program トラックが受信できることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+    input_mp4 = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
+    output_mp4 = tmp_path / "output.mp4"
+
+    server = ObswsServer(binary_path, host=host, port=port)
+    result = None
+    try:
+        with server:
+            cmd, cwd = _build_bootstrap_command(
+                host,
+                port,
+                10,
+                str(input_mp4),
+                str(output_mp4),
+                subscribe_program_tracks=True,
+            )
+            result = _run_bootstrap_command(cmd, cwd)
+            metrics = _collect_obsws_metrics_snapshot(host, port)
+            print(f"\n--- hisui /metrics after bootstrap ---\n{metrics}")
+            assert result.returncode == 0, (
+                "obsws_bootstrap failed: "
+                f"{_format_process_failure(result)}"
+            )
+            stats = json.loads(result.stdout)
+            print(f"\n--- obsws_bootstrap stats ---\n{json.dumps(stats, indent=2)}")
+            assert stats["program_tracks_subscribed"] is True, (
+                f"expected program_tracks_subscribed=true, got {stats}"
+            )
+            # raw input track + Program track で合計 2 以上の映像・音声トラック
+            assert stats["video_tracks_received"] >= 2, (
+                f"expected at least 2 video tracks (raw + program), got {stats}"
+            )
+            assert stats["audio_tracks_received"] >= 2, (
+                f"expected at least 2 audio tracks (raw + program), got {stats}"
+            )
+            assert stats["video_frames_received"] >= 1, (
+                f"expected at least 1 video frame, got {stats}"
+            )
+            assert stats["audio_frames_received"] >= 1, (
+                f"expected at least 1 audio frame, got {stats}"
+            )
+    except subprocess.TimeoutExpired as e:
+        raise AssertionError(
+            "obsws_bootstrap timed out: "
+            f"stdout={e.stdout}, stderr={e.stderr}, {server.diagnostics()}"
+        ) from e
+    except Exception as e:
+        bootstrap_details = ""
+        if result is not None:
+            bootstrap_details = (
+                f" obsws_bootstrap {_format_process_failure(result)},"
+            )
+        raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e

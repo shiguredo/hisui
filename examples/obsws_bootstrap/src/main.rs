@@ -31,6 +31,7 @@ use tokio::sync::{mpsc, oneshot};
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
 const GET_WEBRTC_STATS_REQUEST_ID: &str = "req-get-webrtc-stats";
+const SUBSCRIBE_PROGRAM_TRACKS_REQUEST_ID: &str = "req-subscribe-program-tracks";
 const MAX_FRAMES_PER_POLL: usize = 8;
 const INITIAL_VIDEO_FRAME_GRACE: Duration = Duration::from_secs(2);
 
@@ -596,6 +597,20 @@ fn make_get_webrtc_stats_request() -> String {
     .to_string()
 }
 
+fn make_subscribe_program_tracks_request() -> String {
+    nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SubscribeProgramTracks")?;
+                f.member("requestId", SUBSCRIBE_PROGRAM_TRACKS_REQUEST_ID)
+            }),
+        )
+    })
+    .to_string()
+}
+
 fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     let json = nojson::RawJson::parse(text).ok()?;
     let root = json.value();
@@ -634,6 +649,46 @@ fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     Some(Err(
         comment.unwrap_or_else(|| "CreateInput request failed".to_owned())
     ))
+}
+
+fn parse_subscribe_program_tracks_response(text: &str) -> Option<Result<(), String>> {
+    let json = nojson::RawJson::parse(text).ok()?;
+    let root = json.value();
+    let op: i64 = root
+        .to_member("op")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if op != 7 {
+        return None;
+    }
+
+    let d = root.to_member("d").ok()?.required().ok()?;
+    let request_id: String = d
+        .to_member("requestId")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if request_id != SUBSCRIBE_PROGRAM_TRACKS_REQUEST_ID {
+        return None;
+    }
+
+    let request_status = d.to_member("requestStatus").ok()?.required().ok()?;
+    let result: bool = request_status
+        .to_member("result")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if result {
+        return Some(Ok(()));
+    }
+
+    let comment: Option<String> =
+        if let Some(v) = request_status.to_member("comment").ok()?.optional() {
+            v.try_into().ok()
+        } else {
+            None
+        };
+    Some(Err(comment.unwrap_or_else(|| {
+        "SubscribeProgramTracks request failed".to_owned()
+    })))
 }
 
 fn parse_obsws_server_webrtc_stats_response(text: &str) -> Option<Result<String, String>> {
@@ -907,6 +962,10 @@ fn main() -> noargs::Result<()> {
         .doc("obsws 経由で入力として追加する MP4 ファイルパス")
         .take(&mut args)
         .then(|o| o.value().parse())?;
+    let subscribe_program_tracks = noargs::flag("subscribe-program-tracks")
+        .doc("Program 合成結果トラックを購読する")
+        .take(&mut args)
+        .is_present();
 
     args.finish()?;
 
@@ -937,6 +996,7 @@ fn main() -> noargs::Result<()> {
                 duration,
                 &output_path,
                 &input_mp4_path,
+                subscribe_program_tracks,
             ))
             .await
     });
@@ -955,7 +1015,8 @@ fn main() -> noargs::Result<()> {
                 f.member("video_samples_written", stats.video_samples_written)?;
                 f.member("audio_samples_written", stats.audio_samples_written)?;
                 f.member("connection_state", stats.connection_state.as_str())?;
-                f.member("webrtc_stats_error", stats.webrtc_stats_error.as_str())
+                f.member("webrtc_stats_error", stats.webrtc_stats_error.as_str())?;
+                f.member("program_tracks_subscribed", stats.program_tracks_subscribed)
             });
             println!("{json}");
             Ok(())
@@ -980,6 +1041,7 @@ struct Stats {
     audio_samples_written: usize,
     connection_state: String,
     webrtc_stats_error: String,
+    program_tracks_subscribed: bool,
 }
 
 async fn collect_webrtc_stats_json(pc: &PeerConnection) -> Result<String, String> {
@@ -1437,6 +1499,7 @@ async fn run_client(
     duration_secs: u64,
     output_path: &str,
     input_mp4_path: &str,
+    subscribe_program_tracks: bool,
 ) -> Result<Stats, String> {
     // WebRTC ファクトリを初期化する
     let mut network = Thread::new_with_socket_server();
@@ -1554,6 +1617,8 @@ async fn run_client(
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
+    let mut obsws_subscribe_program_sent = false;
+    let mut obsws_subscribe_program_succeeded = false;
     let mut server_webrtc_stats_json = None;
     let mut playout_interval = tokio::time::interval(Duration::from_millis(10));
     playout_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1750,9 +1815,38 @@ async fn run_client(
                         match result {
                             Ok(()) => {
                                 obsws_create_input_succeeded = true;
+                                // CreateInput 成功後に SubscribeProgramTracks を送信する
+                                if subscribe_program_tracks
+                                    && !obsws_subscribe_program_sent
+                                    && let Some(dc) = &retained.obsws_dc
+                                    && dc.state() == DataChannelState::Open
+                                {
+                                    let request = make_subscribe_program_tracks_request();
+                                    tracing::warn!("sending SubscribeProgramTracks request");
+                                    if !dc.send(request.as_bytes(), false) {
+                                        return Err(
+                                            "failed to send SubscribeProgramTracks request"
+                                                .to_owned(),
+                                        );
+                                    }
+                                    obsws_subscribe_program_sent = true;
+                                }
                             }
                             Err(reason) => {
                                 return Err(format!("CreateInput request failed: {reason}"));
+                            }
+                        }
+                    }
+                    if let Some(result) = parse_subscribe_program_tracks_response(text) {
+                        match result {
+                            Ok(()) => {
+                                obsws_subscribe_program_succeeded = true;
+                                tracing::warn!("SubscribeProgramTracks succeeded");
+                            }
+                            Err(reason) => {
+                                return Err(format!(
+                                    "SubscribeProgramTracks request failed: {reason}"
+                                ));
                             }
                         }
                     }
@@ -1910,12 +2004,16 @@ async fn run_client(
         tracing::warn!("CreateInput request did not complete before deadline");
         return Err("CreateInput request did not complete".to_owned());
     }
+    if subscribe_program_tracks && !obsws_subscribe_program_succeeded {
+        tracing::warn!("SubscribeProgramTracks request did not complete before deadline");
+        return Err("SubscribeProgramTracks request did not complete".to_owned());
+    }
     let final_connection_state = connection_state
         .lock()
         .expect("connection_state mutex should not be poisoned")
         .clone();
     tracing::warn!(
-        "bootstrap finished: video_tracks={}, video_frames={}, audio_tracks={}, audio_frames={}, video_width={}, video_height={}, video_samples_written={}, audio_samples_written={}, connection_state={}, webrtc_stats_error={}",
+        "bootstrap finished: video_tracks={}, video_frames={}, audio_tracks={}, audio_frames={}, video_width={}, video_height={}, video_samples_written={}, audio_samples_written={}, connection_state={}, webrtc_stats_error={}, program_tracks_subscribed={}",
         video_tracks.load(Ordering::Relaxed),
         video_frames.load(Ordering::Relaxed),
         audio_tracks.load(Ordering::Relaxed),
@@ -1926,6 +2024,7 @@ async fn run_client(
         mp4_writer.audio_sample_count,
         final_connection_state,
         webrtc_stats_error.as_str(),
+        obsws_subscribe_program_succeeded,
     );
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
@@ -1940,6 +2039,7 @@ async fn run_client(
         audio_samples_written: mp4_writer.audio_sample_count,
         connection_state: connection_state.lock().unwrap().clone(),
         webrtc_stats_error,
+        program_tracks_subscribed: obsws_subscribe_program_succeeded,
     })
 }
 
