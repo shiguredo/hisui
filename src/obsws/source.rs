@@ -15,8 +15,6 @@ pub enum ObswsOutputKind {
     Stream,
     Record,
     RtmpOutbound,
-    Hls,
-    MpegDash,
     Program,
 }
 
@@ -26,8 +24,6 @@ impl ObswsOutputKind {
             Self::Stream => "stream",
             Self::Record => "record",
             Self::RtmpOutbound => "rtmp_outbound",
-            Self::Hls => "hls",
-            Self::MpegDash => "mpeg_dash",
             Self::Program => "program",
         }
     }

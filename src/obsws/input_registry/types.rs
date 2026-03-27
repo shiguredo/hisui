@@ -418,9 +418,6 @@ pub struct ObswsRecordRun {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsHlsRun {
-    pub source_processor_ids: Vec<ProcessorId>,
-    pub audio_mixer_processor_id: ProcessorId,
-    pub video_mixer_processor_id: ProcessorId,
     pub destination: HlsDestination,
     /// バリアントごとの実行情報
     pub variant_runs: Vec<ObswsHlsVariantRun>,
@@ -1518,9 +1515,6 @@ impl nojson::DisplayJson for ObswsDashSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsDashRun {
-    pub source_processor_ids: Vec<ProcessorId>,
-    pub audio_mixer_processor_id: ProcessorId,
-    pub video_mixer_processor_id: ProcessorId,
     pub destination: DashDestination,
     /// バリアントごとの実行情報
     pub variant_runs: Vec<ObswsDashVariantRun>,
