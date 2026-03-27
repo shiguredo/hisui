@@ -68,7 +68,7 @@ shiguredo_video_toolbox = "=2026.1.0-canary.2"
 tempfile = "3.18.0"
 
 [workspace]
-members = ["examples/obsws_bootstrap", "examples/sora_publish"]
+members = ["examples/obsws_bootstrap", "examples/sora_publish", "examples/hls_s3"]
 
 [workspace.dependencies]
 tracing = "=0.1.44"
