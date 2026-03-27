@@ -2176,14 +2176,21 @@ impl ObswsCoordinator {
                         .rule(rule)
                         .build_request();
                     match request {
-                        Ok(req) => {
-                            if let Err(e) = client.execute(&req).await {
+                        Ok(req) => match client.execute(&req).await {
+                            Ok(response) if !response.is_success() => {
+                                tracing::warn!(
+                                    "PutBucketLifecycleConfiguration failed: status={}",
+                                    response.status_code
+                                );
+                            }
+                            Err(e) => {
                                 tracing::warn!(
                                     "failed to set S3 lifecycle configuration: {}",
                                     e.display()
                                 );
                             }
-                        }
+                            _ => {}
+                        },
                         Err(e) => {
                             tracing::warn!(
                                 "failed to build PutBucketLifecycleConfiguration request: {e}"
