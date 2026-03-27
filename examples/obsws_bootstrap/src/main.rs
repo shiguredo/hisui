@@ -27,7 +27,7 @@ use shiguredo_webrtc::{
     VideoEncoderFactory, VideoSink, VideoSinkHandler, VideoSinkWants,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
@@ -972,7 +972,8 @@ fn main() -> noargs::Result<()> {
                 f.member("audio_codec", stats.audio_codec.as_str())?;
                 f.member("video_samples_written", stats.video_samples_written)?;
                 f.member("audio_samples_written", stats.audio_samples_written)?;
-                f.member("connection_state", stats.connection_state.as_str())
+                f.member("connection_state", stats.connection_state.as_str())?;
+                f.member("webrtc_stats_error", stats.webrtc_stats_error.as_str())
             });
             println!("{json}");
             Ok(())
@@ -996,6 +997,23 @@ struct Stats {
     video_samples_written: usize,
     audio_samples_written: usize,
     connection_state: String,
+    webrtc_stats_error: String,
+}
+
+async fn collect_webrtc_stats_json(pc: &PeerConnection) -> Result<String, String> {
+    let (tx, rx) = oneshot::channel();
+    pc.get_stats(move |report| {
+        let _ = tx.send(
+            report
+                .to_json()
+                .map_err(|e| format!("failed to serialize WebRTC stats: {e}")),
+        );
+    });
+
+    tokio::time::timeout(Duration::from_secs(2), rx)
+        .await
+        .map_err(|_| "timed out waiting for WebRTC stats".to_owned())?
+        .map_err(|_| "WebRTC stats callback channel closed".to_owned())?
 }
 
 #[derive(Clone)]
@@ -1020,13 +1038,80 @@ struct RetainedState {
 }
 
 struct RetainedVideoSink {
+    track_id: String,
     track: shiguredo_webrtc::VideoTrack,
     sink: VideoSink,
 }
 
 struct RetainedAudioSink {
+    track_id: String,
     track: shiguredo_webrtc::AudioTrack,
     sink: AudioTrackSink,
+}
+
+struct VideoSinkAttachState<'a> {
+    video_frames: &'a Arc<AtomicUsize>,
+    first_video_frame_logged: &'a Arc<AtomicBool>,
+    video_width: &'a Arc<AtomicUsize>,
+    video_height: &'a Arc<AtomicUsize>,
+    frame_tx: &'a std::sync::mpsc::SyncSender<VideoFrameData>,
+}
+
+fn attach_video_sink(
+    retained: &mut RetainedState,
+    track_id: &str,
+    video_track: shiguredo_webrtc::VideoTrack,
+    state: &VideoSinkAttachState<'_>,
+) {
+    if retained
+        .video_sinks
+        .iter()
+        .any(|retained_sink| retained_sink.track_id == track_id)
+    {
+        return;
+    }
+    let mut video_track = video_track;
+    let sink = VideoSink::new_with_handler(Box::new(FrameRecordHandler {
+        frame_count: state.video_frames.clone(),
+        first_frame_logged: state.first_video_frame_logged.clone(),
+        width: state.video_width.clone(),
+        height: state.video_height.clone(),
+        frame_tx: state.frame_tx.clone(),
+    }));
+    let wants = VideoSinkWants::default();
+    video_track.add_or_update_sink(&sink, &wants);
+    retained.video_sinks.push(RetainedVideoSink {
+        track_id: track_id.to_owned(),
+        track: video_track,
+        sink,
+    });
+}
+
+fn attach_audio_sink(
+    retained: &mut RetainedState,
+    track_id: &str,
+    audio_track: shiguredo_webrtc::AudioTrack,
+    audio_frames: &Arc<AtomicUsize>,
+    audio_tx: &std::sync::mpsc::SyncSender<AudioFrameData>,
+) {
+    if retained
+        .audio_sinks
+        .iter()
+        .any(|retained_sink| retained_sink.track_id == track_id)
+    {
+        return;
+    }
+    let mut audio_track = audio_track;
+    let sink = AudioTrackSink::new_with_handler(Box::new(AudioRecordHandler {
+        audio_frame_count: audio_frames.clone(),
+        audio_tx: audio_tx.clone(),
+    }));
+    audio_track.add_sink(&sink);
+    retained.audio_sinks.push(RetainedAudioSink {
+        track_id: track_id.to_owned(),
+        track: audio_track,
+        sink,
+    });
 }
 
 async fn teardown_client(
@@ -1286,6 +1371,39 @@ async fn run_client(
         ice_rx,
         ice_candidates: initial_ice_candidates,
     };
+    let video_sink_attach_state = VideoSinkAttachState {
+        video_frames: &video_frames,
+        first_video_frame_logged: &first_video_frame_logged,
+        video_width: &video_width,
+        video_height: &video_height,
+        frame_tx: &frame_tx,
+    };
+    for index in 0..retained.track_transceivers.len() {
+        let receiver = retained.track_transceivers[index].receiver();
+        let track = receiver.track();
+        let kind = track.kind().unwrap_or_default();
+        let track_id = track.id().unwrap_or_default();
+        match kind.as_str() {
+            "video" => {
+                attach_video_sink(
+                    &mut retained,
+                    &track_id,
+                    track.cast_to_video_track(),
+                    &video_sink_attach_state,
+                );
+            }
+            "audio" => {
+                attach_audio_sink(
+                    &mut retained,
+                    &track_id,
+                    track.cast_to_audio_track(),
+                    &audio_frames,
+                    &audio_tx,
+                );
+            }
+            _ => {}
+        }
+    }
 
     // VP9 エンコーダー（遅延初期化）
     let mut vp9_encoder: Option<shiguredo_libvpx::Encoder> = None;
@@ -1406,50 +1524,23 @@ async fn run_client(
                     "video" => {
                         video_tracks.fetch_add(1, Ordering::Relaxed);
                         tracing::warn!("video track received: track_id={track_id}");
-                        if !track.enabled() {
-                            tracing::warn!(
-                                "video track is disabled on arrival: track_id={track_id}"
-                            );
-                        }
-                        if !track.set_enabled(true) {
-                            tracing::warn!("failed to enable video track: track_id={track_id}");
-                        }
-                        let mut video_track = track.cast_to_video_track();
-                        let sink = VideoSink::new_with_handler(Box::new(FrameRecordHandler {
-                            frame_count: video_frames.clone(),
-                            first_frame_logged: first_video_frame_logged.clone(),
-                            width: video_width.clone(),
-                            height: video_height.clone(),
-                            frame_tx: frame_tx.clone(),
-                        }));
-                        let wants = VideoSinkWants::default();
-                        video_track.add_or_update_sink(&sink, &wants);
-                        retained.video_sinks.push(RetainedVideoSink {
-                            track: video_track,
-                            sink,
-                        });
+                        attach_video_sink(
+                            &mut retained,
+                            &track_id,
+                            track.cast_to_video_track(),
+                            &video_sink_attach_state,
+                        );
                     }
                     "audio" => {
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
                         tracing::warn!("audio track received: track_id={track_id}");
-                        if !track.enabled() {
-                            tracing::warn!(
-                                "audio track is disabled on arrival: track_id={track_id}"
-                            );
-                        }
-                        if !track.set_enabled(true) {
-                            tracing::warn!("failed to enable audio track: track_id={track_id}");
-                        }
-                        let mut audio_track = track.cast_to_audio_track();
-                        let sink = AudioTrackSink::new_with_handler(Box::new(AudioRecordHandler {
-                            audio_frame_count: audio_frames.clone(),
-                            audio_tx: audio_tx.clone(),
-                        }));
-                        audio_track.add_sink(&sink);
-                        retained.audio_sinks.push(RetainedAudioSink {
-                            track: audio_track,
-                            sink,
-                        });
+                        attach_audio_sink(
+                            &mut retained,
+                            &track_id,
+                            track.cast_to_audio_track(),
+                            &audio_frames,
+                            &audio_tx,
+                        );
                     }
                     _ => {
                         tracing::warn!("unknown track kind: {kind}");
@@ -1564,6 +1655,20 @@ async fn run_client(
         }
     }
 
+    let webrtc_stats_json = collect_webrtc_stats_json(&pc).await;
+    let webrtc_stats_error = match &webrtc_stats_json {
+        Ok(_) => String::new(),
+        Err(e) => e.clone(),
+    };
+    if video_frames.load(Ordering::Relaxed) == 0
+        && let Ok(stats_json) = &webrtc_stats_json
+    {
+        tracing::warn!("libwebrtc stats raw: {stats_json}");
+    }
+    if !webrtc_stats_error.is_empty() {
+        tracing::warn!("failed to collect libwebrtc stats: {}", webrtc_stats_error);
+    }
+
     teardown_client(&pc, &mut retained, &audio_state).await;
 
     // 残りのフレームを処理する
@@ -1650,7 +1755,7 @@ async fn run_client(
         .expect("connection_state mutex should not be poisoned")
         .clone();
     tracing::warn!(
-        "bootstrap finished: video_tracks={}, video_frames={}, audio_tracks={}, audio_frames={}, video_width={}, video_height={}, video_samples_written={}, audio_samples_written={}, connection_state={}",
+        "bootstrap finished: video_tracks={}, video_frames={}, audio_tracks={}, audio_frames={}, video_width={}, video_height={}, video_samples_written={}, audio_samples_written={}, connection_state={}, webrtc_stats_error={}",
         video_tracks.load(Ordering::Relaxed),
         video_frames.load(Ordering::Relaxed),
         audio_tracks.load(Ordering::Relaxed),
@@ -1660,6 +1765,7 @@ async fn run_client(
         mp4_writer.video_sample_count,
         mp4_writer.audio_sample_count,
         final_connection_state,
+        webrtc_stats_error.as_str(),
     );
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
@@ -1673,6 +1779,7 @@ async fn run_client(
         video_samples_written: mp4_writer.video_sample_count,
         audio_samples_written: mp4_writer.audio_sample_count,
         connection_state: connection_state.lock().unwrap().clone(),
+        webrtc_stats_error,
     })
 }
 
