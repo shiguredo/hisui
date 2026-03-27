@@ -4017,8 +4017,7 @@ async fn start_dash_processors(
                     .map(|h| h.get() as u32)
                     .unwrap_or(output_plan.canvas_height.get() as u32);
                 crate::dash::writer::CombinedMpdVariant {
-                    bandwidth: variant.video_bitrate_bps as u64
-                        + variant.audio_bitrate_bps as u64,
+                    bandwidth: variant.video_bitrate_bps as u64 + variant.audio_bitrate_bps as u64,
                     width,
                     height,
                     media_path: format!("variant_{i}/segment-$Number%06d$.m4s"),
@@ -4161,10 +4160,7 @@ async fn stop_processors_staged_dash(
                 if let Err(e) = std::fs::remove_file(&mpd_path)
                     && e.kind() != std::io::ErrorKind::NotFound
                 {
-                    tracing::warn!(
-                        "failed to remove combined MPD {}: {e}",
-                        mpd_path.display()
-                    );
+                    tracing::warn!("failed to remove combined MPD {}: {e}", mpd_path.display());
                 }
                 // バリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
                 for vr in &run.variant_runs {

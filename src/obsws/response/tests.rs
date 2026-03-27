@@ -1234,3 +1234,139 @@ fn build_and_parse_request_batch_response_preserves_fields() {
     assert_eq!(parsed.request_status_code, REQUEST_STATUS_SUCCESS);
     assert!(parsed.response_data.is_some());
 }
+
+// --- MPEG-DASH SetOutputSettings バリデーションテスト ---
+
+fn set_dash_output_settings(
+    registry: &mut ObswsInputRegistry,
+    settings_json: &str,
+) -> nojson::RawJsonOwned {
+    let request_data = nojson::RawJsonOwned::parse(&format!(
+        r#"{{"outputName":"mpeg_dash","outputSettings":{settings_json}}}"#
+    ))
+    .expect("request data must be valid json");
+    output::build_set_output_settings_response("test-req", Some(&request_data), registry)
+}
+
+fn assert_set_output_settings_success(response: &nojson::RawJsonOwned) {
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(result, "SetOutputSettings should succeed");
+}
+
+fn assert_set_output_settings_failure(response: &nojson::RawJsonOwned) {
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(!result, "SetOutputSettings should fail");
+}
+
+#[test]
+fn dash_set_output_settings_lifetime_days_requires_prefix() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(
+        &mut registry,
+        r#"{"destination":{"type":"s3","bucket":"b","region":"us-east-1","credentials":{"accessKeyId":"k","secretAccessKey":"s"},"lifetimeDays":7}}"#,
+    );
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_width_only_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(
+        &mut registry,
+        r#"{"variants":[{"videoBitrate":2000000,"audioBitrate":128000,"width":1280}]}"#,
+    );
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_height_only_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(
+        &mut registry,
+        r#"{"variants":[{"videoBitrate":2000000,"audioBitrate":128000,"height":720}]}"#,
+    );
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_multiple_variants_preserved_in_get() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(
+        &mut registry,
+        r#"{"variants":[{"videoBitrate":2000000,"audioBitrate":128000},{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}]}"#,
+    );
+    assert_set_output_settings_success(&response);
+
+    // GetOutputSettings で保持されているか確認
+    let settings = registry.dash_settings();
+    assert_eq!(settings.variants.len(), 2);
+    assert_eq!(settings.variants[0].video_bitrate_bps, 2_000_000);
+    assert_eq!(settings.variants[0].audio_bitrate_bps, 128_000);
+    assert!(settings.variants[0].width.is_none());
+    assert_eq!(settings.variants[1].video_bitrate_bps, 1_000_000);
+    assert_eq!(settings.variants[1].audio_bitrate_bps, 64_000);
+    assert_eq!(settings.variants[1].width.map(|w| w.get()), Some(1280));
+    assert_eq!(settings.variants[1].height.map(|h| h.get()), Some(720));
+}
+
+#[test]
+fn dash_set_output_settings_empty_variants_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"variants":[]}"#);
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_zero_video_bitrate_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(
+        &mut registry,
+        r#"{"variants":[{"videoBitrate":0,"audioBitrate":128000}]}"#,
+    );
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_negative_segment_duration_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"segmentDuration":-1.0}"#);
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_zero_max_retained_segments_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"maxRetainedSegments":0}"#);
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_filesystem_destination_succeeds() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(
+        &mut registry,
+        r#"{"destination":{"type":"filesystem","directory":"/tmp/dash"}}"#,
+    );
+    assert_set_output_settings_success(&response);
+    let dest = registry
+        .dash_settings()
+        .destination
+        .as_ref()
+        .expect("destination must be set");
+    match dest {
+        crate::obsws::input_registry::DashDestination::Filesystem { directory } => {
+            assert_eq!(directory, "/tmp/dash");
+        }
+        _ => panic!("expected filesystem destination"),
+    }
+}

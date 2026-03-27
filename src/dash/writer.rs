@@ -1215,3 +1215,165 @@ pub fn write_combined_mpd(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- 結合 MPD 生成テスト ---
+
+    #[test]
+    fn combined_mpd_contains_multiple_representations() {
+        let variants = vec![
+            CombinedMpdVariant {
+                bandwidth: 2_128_000,
+                width: 1920,
+                height: 1080,
+                media_path: "variant_0/segment-$Number%06d$.m4s".to_owned(),
+                init_path: "variant_0/init.mp4".to_owned(),
+            },
+            CombinedMpdVariant {
+                bandwidth: 1_064_000,
+                width: 1280,
+                height: 720,
+                media_path: "variant_1/segment-$Number%06d$.m4s".to_owned(),
+                init_path: "variant_1/init.mp4".to_owned(),
+            },
+        ];
+        let xml = build_combined_mpd_content(&variants, 2.0, 6);
+        let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
+
+        assert_eq!(
+            mpd.presentation_type,
+            shiguredo_mpd::PresentationType::Dynamic
+        );
+        assert_eq!(mpd.periods.len(), 1);
+
+        let period = &mpd.periods[0];
+        assert_eq!(period.adaptation_sets.len(), 1);
+
+        let adaptation_set = &period.adaptation_sets[0];
+        assert_eq!(adaptation_set.representations.len(), 2);
+
+        // バリアント 0 の Representation を検証
+        let rep0 = &adaptation_set.representations[0];
+        assert_eq!(rep0.id, "variant_0");
+        assert_eq!(rep0.bandwidth, 2_128_000);
+        assert_eq!(rep0.width, Some(1920));
+        assert_eq!(rep0.height, Some(1080));
+        let tmpl0 = rep0
+            .segment_template
+            .as_ref()
+            .expect("SegmentTemplate must exist");
+        assert_eq!(
+            tmpl0.media.as_deref(),
+            Some("variant_0/segment-$Number%06d$.m4s")
+        );
+        assert_eq!(tmpl0.initialization.as_deref(), Some("variant_0/init.mp4"));
+
+        // バリアント 1 の Representation を検証
+        let rep1 = &adaptation_set.representations[1];
+        assert_eq!(rep1.id, "variant_1");
+        assert_eq!(rep1.bandwidth, 1_064_000);
+        assert_eq!(rep1.width, Some(1280));
+        assert_eq!(rep1.height, Some(720));
+        let tmpl1 = rep1
+            .segment_template
+            .as_ref()
+            .expect("SegmentTemplate must exist");
+        assert_eq!(
+            tmpl1.media.as_deref(),
+            Some("variant_1/segment-$Number%06d$.m4s")
+        );
+        assert_eq!(tmpl1.initialization.as_deref(), Some("variant_1/init.mp4"));
+    }
+
+    #[test]
+    fn combined_mpd_uses_duration_based_segment_template() {
+        let variants = vec![CombinedMpdVariant {
+            bandwidth: 2_000_000,
+            width: 1920,
+            height: 1080,
+            media_path: "variant_0/segment-$Number%06d$.m4s".to_owned(),
+            init_path: "variant_0/init.mp4".to_owned(),
+        }];
+        let xml = build_combined_mpd_content(&variants, 2.0, 6);
+        let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
+
+        let rep = &mpd.periods[0].adaptation_sets[0].representations[0];
+        let tmpl = rep
+            .segment_template
+            .as_ref()
+            .expect("SegmentTemplate must exist");
+
+        // duration ベース（SegmentTimeline は使わない）
+        let timescale = FMP4_TIMESCALE.get() as u64;
+        assert_eq!(tmpl.timescale, timescale);
+        assert_eq!(tmpl.duration, Some((2.0 * timescale as f64).round() as u64));
+        assert!(tmpl.segment_timeline.is_none());
+        assert_eq!(tmpl.start_number, 0);
+    }
+
+    #[test]
+    fn combined_mpd_time_shift_buffer_depth_matches_config() {
+        let variants = vec![CombinedMpdVariant {
+            bandwidth: 2_000_000,
+            width: 1920,
+            height: 1080,
+            media_path: "v0/seg-$Number%06d$.m4s".to_owned(),
+            init_path: "v0/init.mp4".to_owned(),
+        }];
+        let xml = build_combined_mpd_content(&variants, 3.0, 5);
+        let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
+
+        // timeShiftBufferDepth = segment_duration * max_retained_segments
+        assert_eq!(mpd.time_shift_buffer_depth, Some(15.0));
+        assert_eq!(mpd.min_buffer_time, 3.0);
+        assert_eq!(mpd.minimum_update_period, Some(3.0));
+    }
+
+    // --- outputPath テスト ---
+
+    #[test]
+    fn dash_destination_filesystem_output_path_returns_manifest_mpd() {
+        let dest = crate::obsws::input_registry::DashDestination::Filesystem {
+            directory: "/tmp/dash-output".to_owned(),
+        };
+        assert_eq!(dest.output_path(), "/tmp/dash-output/manifest.mpd");
+    }
+
+    #[test]
+    fn dash_destination_s3_output_path_returns_manifest_mpd() {
+        let dest = crate::obsws::input_registry::DashDestination::S3 {
+            bucket: "my-bucket".to_owned(),
+            prefix: "live/stream1".to_owned(),
+            region: "us-east-1".to_owned(),
+            endpoint: None,
+            use_path_style: false,
+            access_key_id: "key".to_owned(),
+            secret_access_key: "secret".to_owned(),
+            session_token: None,
+            lifetime_days: None,
+        };
+        assert_eq!(
+            dest.output_path(),
+            "s3://my-bucket/live/stream1/manifest.mpd"
+        );
+    }
+
+    #[test]
+    fn dash_destination_s3_empty_prefix_output_path() {
+        let dest = crate::obsws::input_registry::DashDestination::S3 {
+            bucket: "my-bucket".to_owned(),
+            prefix: String::new(),
+            region: "us-east-1".to_owned(),
+            endpoint: None,
+            use_path_style: false,
+            access_key_id: "key".to_owned(),
+            secret_access_key: "secret".to_owned(),
+            session_token: None,
+            lifetime_days: None,
+        };
+        assert_eq!(dest.output_path(), "s3://my-bucket/manifest.mpd");
+    }
+}
