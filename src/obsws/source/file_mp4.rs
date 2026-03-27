@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
-use crate::mp4::file_reader::{Mp4FileReader, Mp4FileReaderOptions};
+use crate::mp4::reader::{Mp4FileReader, Mp4FileReaderOptions};
 use crate::{ProcessorHandle, Result, TrackId};
 
 #[derive(Debug, Clone)]

@@ -7,7 +7,7 @@ use std::{
 use crate::{
     Error, Result,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
-    mp4::file_reader::{Mp4FileReader, Mp4FileReaderOptions},
+    mp4::reader::{Mp4FileReader, Mp4FileReaderOptions},
     types::{CodecName, ContainerFormat},
     video::h264::H264AnnexBNalUnits,
     video::{VideoFormat, VideoFrame},
