@@ -59,9 +59,6 @@ struct VideoFrameData {
     y: Vec<u8>,
     u: Vec<u8>,
     v: Vec<u8>,
-    stride_y: i32,
-    stride_u: i32,
-    stride_v: i32,
     width: i32,
     height: i32,
     timestamp_us: i64,
@@ -198,9 +195,6 @@ impl VideoSinkHandler for FrameRecordHandler {
             y: buffer.y_data().to_vec(),
             u: buffer.u_data().to_vec(),
             v: buffer.v_data().to_vec(),
-            stride_y: buffer.stride_y(),
-            stride_u: buffer.stride_u(),
-            stride_v: buffer.stride_v(),
             width: w,
             height: h,
             timestamp_us: frame.timestamp_us(),
@@ -1975,30 +1969,15 @@ fn encode_and_write_frame(
 
     let encoder = vp9_encoder.as_mut().unwrap();
 
-    // I420 プレーンデータからストライドを考慮して正しいサイズを構築する
-    let y_plane = build_plane_data(&frame_data.y, frame_data.stride_y, width, height);
-    let u_plane = build_plane_data(
-        &frame_data.u,
-        frame_data.stride_u,
-        width.div_ceil(2),
-        height.div_ceil(2),
-    );
-    let v_plane = build_plane_data(
-        &frame_data.v,
-        frame_data.stride_v,
-        width.div_ceil(2),
-        height.div_ceil(2),
-    );
-
     let encode_options = shiguredo_libvpx::EncodeOptions {
         force_keyframe: false,
     };
     encoder
         .encode(
             &shiguredo_libvpx::ImageData::I420 {
-                y: &y_plane,
-                u: &u_plane,
-                v: &v_plane,
+                y: &frame_data.y,
+                u: &frame_data.u,
+                v: &frame_data.v,
             },
             &encode_options,
         )
@@ -2014,26 +1993,6 @@ fn encode_and_write_frame(
         )?;
     }
     Ok(())
-}
-
-/// ストライドを考慮して plane データを width * height のバイト列に変換する
-fn build_plane_data(data: &[u8], stride: i32, width: usize, height: usize) -> Vec<u8> {
-    let stride = stride as usize;
-    if stride == width {
-        // ストライドと幅が一致する場合はそのまま返す
-        data[..width * height].to_vec()
-    } else {
-        // 行ごとにコピーする
-        let mut result = Vec::with_capacity(width * height);
-        for row in 0..height {
-            let start = row * stride;
-            let end = start + width;
-            if end <= data.len() {
-                result.extend_from_slice(&data[start..end]);
-            }
-        }
-        result
-    }
 }
 
 /// VP9 SampleEntry の値を返す（エンコーダー初期化時に呼ぶ）
