@@ -647,6 +647,7 @@ impl RtspSessionRunner {
                             video_frame,
                         ))))
                         .map_err(SessionError::Fatal)?;
+                    // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
                     if crate::decoder::drain_video_decoder_output(decoder, tx)
                         .map_err(SessionError::Fatal)?
                         == crate::decoder::DrainResult::PipelineClosed
@@ -696,6 +697,7 @@ impl RtspSessionRunner {
                             audio_frame,
                         ))))
                         .map_err(SessionError::Fatal)?;
+                    // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
                     if crate::decoder::drain_audio_decoder_output(decoder, tx)
                         .map_err(SessionError::Fatal)?
                         == crate::decoder::DrainResult::PipelineClosed
