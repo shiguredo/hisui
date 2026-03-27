@@ -16,6 +16,7 @@ pub mod mp4;
 pub mod obsws;
 pub mod optuna;
 pub mod progress;
+pub mod scaler;
 pub mod srt;
 
 pub mod rtmp;

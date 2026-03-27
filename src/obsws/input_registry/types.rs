@@ -419,12 +419,32 @@ pub struct ObswsRecordRun {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsHlsRun {
     pub source_processor_ids: Vec<ProcessorId>,
-    pub video: ObswsRecordTrackRun,
-    pub audio: ObswsRecordTrackRun,
     pub audio_mixer_processor_id: ProcessorId,
     pub video_mixer_processor_id: ProcessorId,
-    pub writer_processor_id: ProcessorId,
     pub output_directory: PathBuf,
+    /// バリアントごとの実行情報
+    pub variant_runs: Vec<ObswsHlsVariantRun>,
+}
+
+impl ObswsHlsRun {
+    /// ABR（マスタープレイリストあり）かどうかを返す
+    pub fn is_abr(&self) -> bool {
+        self.variant_runs.len() > 1
+    }
+}
+
+/// HLS ABR バリアントごとの実行情報
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsHlsVariantRun {
+    pub video: ObswsRecordTrackRun,
+    pub audio: ObswsRecordTrackRun,
+    /// 解像度変換が必要なバリアントのスケーラープロセッサ ID
+    pub scaler_processor_id: Option<ProcessorId>,
+    /// スケーラー出力トラック ID
+    pub scaled_track_id: Option<TrackId>,
+    pub writer_processor_id: ProcessorId,
+    /// バリアントの出力ディレクトリ（ABR 時はサブディレクトリ、non-ABR 時はルート）
+    pub variant_directory: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1087,6 +1107,48 @@ pub const DEFAULT_HLS_MAX_RETAINED_SEGMENTS: usize = 6;
 pub const DEFAULT_HLS_VIDEO_BITRATE_BPS: usize = 2_000_000;
 pub const DEFAULT_HLS_AUDIO_BITRATE_BPS: usize = 128_000;
 
+/// HLS ABR のバリアント定義。
+/// バリアントごとにビットレートと解像度を指定する。
+#[derive(Debug, Clone, PartialEq)]
+pub struct HlsVariant {
+    /// ビデオビットレート (bps)
+    pub video_bitrate_bps: usize,
+    /// オーディオビットレート (bps)
+    pub audio_bitrate_bps: usize,
+    /// ビデオ幅（省略時はミキサーのキャンバスサイズを使用）
+    pub width: Option<crate::types::EvenUsize>,
+    /// ビデオ高さ（省略時はミキサーのキャンバスサイズを使用）
+    pub height: Option<crate::types::EvenUsize>,
+}
+
+impl Default for HlsVariant {
+    fn default() -> Self {
+        Self {
+            video_bitrate_bps: DEFAULT_HLS_VIDEO_BITRATE_BPS,
+            audio_bitrate_bps: DEFAULT_HLS_AUDIO_BITRATE_BPS,
+            width: None,
+            height: None,
+        }
+    }
+}
+
+impl nojson::DisplayJson for HlsVariant {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("videoBitrate", self.video_bitrate_bps)?;
+            f.member("audioBitrate", self.audio_bitrate_bps)?;
+            if let Some(width) = self.width {
+                f.member("width", width.get())?;
+            }
+            if let Some(height) = self.height {
+                f.member("height", height.get())?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
 /// HLS セグメントのフォーマット
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HlsSegmentFormat {
@@ -1130,10 +1192,9 @@ pub struct ObswsHlsSettings {
     pub max_retained_segments: usize,
     /// セグメントフォーマット
     pub segment_format: HlsSegmentFormat,
-    /// ビデオビットレート (bps)
-    pub video_bitrate_bps: usize,
-    /// オーディオビットレート (bps)
-    pub audio_bitrate_bps: usize,
+    /// ABR バリアント定義。
+    /// 要素が 1 つの場合は non-ABR（マスタープレイリストを生成しない）。
+    pub variants: Vec<HlsVariant>,
 }
 
 impl Default for ObswsHlsSettings {
@@ -1143,8 +1204,7 @@ impl Default for ObswsHlsSettings {
             segment_duration: DEFAULT_HLS_SEGMENT_DURATION_SECS,
             max_retained_segments: DEFAULT_HLS_MAX_RETAINED_SEGMENTS,
             segment_format: HlsSegmentFormat::default(),
-            video_bitrate_bps: DEFAULT_HLS_VIDEO_BITRATE_BPS,
-            audio_bitrate_bps: DEFAULT_HLS_AUDIO_BITRATE_BPS,
+            variants: vec![HlsVariant::default()],
         }
     }
 }
@@ -1158,8 +1218,15 @@ impl nojson::DisplayJson for ObswsHlsSettings {
             f.member("segmentDuration", self.segment_duration)?;
             f.member("maxRetainedSegments", self.max_retained_segments)?;
             f.member("segmentFormat", self.segment_format.as_str())?;
-            f.member("videoBitrate", self.video_bitrate_bps)?;
-            f.member("audioBitrate", self.audio_bitrate_bps)
+            f.member(
+                "variants",
+                nojson::array(|f| {
+                    for variant in &self.variants {
+                        f.element(variant)?;
+                    }
+                    Ok(())
+                }),
+            )
         })
         .fmt(f)
     }

@@ -517,12 +517,15 @@ outputSettings は `soraSdkSettings` オブジェクトを含む。
 
 #### `hls`
 
-HLS ライブ出力。H.264 + AAC の MPEG-TS セグメントを生成し、M3U8 プレイリストで管理する。
+HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する。
+`variants` に複数のバリアントを指定すると adaptive bitrate (ABR) 出力に対応する。
 
 - `outputKind`: `hls_output`
 - ローカルファイルシステムへの出力のみ対応
-- 停止時に生成ファイル（playlist.m3u8 + 全 .ts セグメント）を自動削除する
+- 停止時に生成ファイル（playlist.m3u8 + 全セグメント）を自動削除する
 - `outputBytes` / `outputSkippedFrames` / `outputTotalFrames` は現時点では 0 固定
+- `variants` が 1 要素の場合は non-ABR（`outputDirectory` 直下にセグメントとプレイリストを出力）
+- `variants` が 2 要素以上の場合は ABR（`outputDirectory` 直下にマスタープレイリスト、`variant_N/` サブディレクトリにバリアントごとのセグメントとプレイリストを出力）
 
 **outputSettings（`SetOutputSettings` / `GetOutputSettings`）:**
 
@@ -532,12 +535,33 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS セグメントを生成し、M3U8
 | `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
 | `maxRetainedSegments` | number | - | プレイリストに保持するセグメント数。デフォルト: 6 |
 | `segmentFormat` | string | - | セグメントフォーマット。`"mpegts"` (デフォルト) または `"fmp4"` |
-| `videoBitrate` | number | - | ビデオビットレート (bps)。デフォルト: 2000000 |
-| `audioBitrate` | number | - | オーディオビットレート (bps)。デフォルト: 128000 |
+| `variants` | array | - | バリアント定義の配列。デフォルト: 1 要素（2Mbps video, 128kbps audio） |
+
+**`variants` の各要素:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `videoBitrate` | number | 必須 | ビデオビットレート (bps) |
+| `audioBitrate` | number | 必須 | オーディオビットレート (bps) |
+| `width` | number | - | ビデオ幅（偶数）。省略時はキャンバスサイズを使用 |
+| `height` | number | - | ビデオ高さ（偶数）。省略時はキャンバスサイズを使用 |
+
+**ディレクトリ構成（ABR）:**
+
+```
+outputDirectory/
+├── playlist.m3u8          # マスタープレイリスト
+├── variant_0/
+│   ├── playlist.m3u8      # メディアプレイリスト
+│   └── segment*.ts        # セグメントファイル
+├── variant_1/
+│   ├── playlist.m3u8
+│   └── segment*.ts
+```
 
 **フロー:**
 
-1. `SetOutputSettings` で `outputDirectory` 等を設定
+1. `SetOutputSettings` で `outputDirectory` / `variants` 等を設定
 2. `StartOutput` で pipeline 生成 + HLS セグメント書き出し開始
 3. `GetOutputStatus` で稼働状態確認（`outputPath` にプレイリストパスを返す）
 4. `StopOutput` で pipeline 停止 + 生成ファイル削除
@@ -547,7 +571,10 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS セグメントを生成し、M3U8
 - `outputDirectory` が未設定の場合: `StartOutput` が失敗
 - `segmentDuration` が 0 以下の場合: `SetOutputSettings` が失敗
 - `maxRetainedSegments` が 0 の場合: `SetOutputSettings` が失敗
-- `videoBitrate` が 0 の場合: `SetOutputSettings` が失敗
-- `audioBitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants` が空の場合: `SetOutputSettings` が失敗
+- `variants[].videoBitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants[].audioBitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants[].width` / `height` が 0 または奇数の場合: `SetOutputSettings` が失敗
+- `variants[].width` / `height` の片方だけ指定された場合: `SetOutputSettings` が失敗
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す

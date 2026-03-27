@@ -33,8 +33,9 @@
   - @sile
 - [ADD] obsws の Output に HLS ライブ出力 (`outputName: "hls"`) を追加する
   - H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する
-  - `SetOutputSettings` で `outputDirectory` / `segmentDuration` / `maxRetainedSegments` / `segmentFormat` を設定可能
+  - `SetOutputSettings` で `outputDirectory` / `segmentDuration` / `maxRetainedSegments` / `segmentFormat` / `variants` を設定可能
   - `segmentFormat` は `"mpegts"` (デフォルト) または `"fmp4"` を指定可能
+  - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile
 - [ADD] obsws Output に Sora WebRTC Publisher (`outputName: "sora"`) を追加する
   - sora-rust-sdk を使い、Program 出力を Sora に SendOnly で配信する
