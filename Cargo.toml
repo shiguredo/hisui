@@ -43,20 +43,20 @@ shiguredo_audio_device = "=2026.1.0-canary.0"
 mpeg2ts = "=0.6.0"
 shiguredo_m3u8 = "=2026.1.0-canary.0"
 shiguredo_mpd = "=2026.1.0-canary.0"
-shiguredo_s3 = { version = "=2026.1.0-canary.1", default-features = false, features = [
+shiguredo_s3 = { version = "=2026.1.0-canary.2", default-features = false, features = [
     "aws-lc-rs",
 ] }
 nopng = "=0.1.1"
 aws-lc-rs = "=1.16.2"
 libc = "=0.2.183"
 
-shiguredo_dav1d = "=2026.1.0-canary.2"
+shiguredo_dav1d = "=2026.1.0-canary.3"
 shiguredo_libvpx = { workspace = true }
 shiguredo_libyuv = "=2026.1.0-canary.3"
 shiguredo_nvcodec = { version = "=2026.1.0-canary.2", optional = true }
-shiguredo_openh264 = "=2026.1.0-canary.3"
+shiguredo_openh264 = "=2026.1.0-canary.4"
 shiguredo_opus = { workspace = true }
-shiguredo_svt_av1 = "=2026.1.0-canary.1"
+shiguredo_svt_av1 = "=2026.1.0-canary.2"
 shiguredo_websocket = { workspace = true }
 
 shiguredo_fdk_aac = { version = "=2026.1.0-canary.0", optional = true }

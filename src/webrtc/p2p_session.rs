@@ -5,11 +5,13 @@ use shiguredo_webrtc::{
     DataChannelObserverHandler, DataChannelState, IceGatheringState, PeerConnection,
     PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionObserver,
     PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState, RtpSender,
-    StringVector,
+    StringVector, TimestampAligner,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::obsws::session::{ObswsSession, SessionAction};
+
+const GET_WEBRTC_STATS_REQUEST_TYPE: &str = "GetWebRtcStats";
 
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
@@ -207,6 +209,7 @@ enum TrackState {
 
 struct VideoTrackState {
     source: AdaptedVideoTrackSource,
+    timestamp_aligner: TimestampAligner,
     _track: shiguredo_webrtc::VideoTrack,
 }
 
@@ -760,6 +763,11 @@ async fn handle_obsws_message(sess: &mut Session, data: &[u8]) -> bool {
     };
     tracing::debug!("Received obsws message: {text}");
 
+    if let Some(response) = handle_bootstrap_webrtc_stats_request(sess, text).await {
+        send_obsws_dc(sess, response.text());
+        return false;
+    }
+
     // OBS WS メッセージとして処理する
     let action = match sess.obsws_session.on_text_message(text).await {
         Ok(action) => action,
@@ -771,6 +779,66 @@ async fn handle_obsws_message(sess: &mut Session, data: &[u8]) -> bool {
 
     // SessionAction を obsws DataChannel 送信に変換する
     apply_obsws_action_to_dc(sess, action)
+}
+
+async fn handle_bootstrap_webrtc_stats_request(
+    sess: &Session,
+    text: &str,
+) -> Option<nojson::RawJsonOwned> {
+    let crate::obsws::message::ClientMessage::Request(request) =
+        crate::obsws::message::parse_client_message(text).ok()?
+    else {
+        return None;
+    };
+
+    let request_type = request.request_type.unwrap_or_default();
+    if request_type != GET_WEBRTC_STATS_REQUEST_TYPE {
+        return None;
+    }
+
+    let request_id = request.request_id.unwrap_or_default();
+    if request_id.is_empty() {
+        return Some(crate::obsws::response::build_request_response_error(
+            GET_WEBRTC_STATS_REQUEST_TYPE,
+            "",
+            crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            "Missing required requestId field",
+        ));
+    }
+
+    Some(match collect_webrtc_stats_json(&sess.pc).await {
+        Ok(stats) => crate::obsws::response::build_request_response_success(
+            GET_WEBRTC_STATS_REQUEST_TYPE,
+            &request_id,
+            |f| f.member("stats", stats.clone()),
+        ),
+        Err(e) => crate::obsws::response::build_request_response_error(
+            GET_WEBRTC_STATS_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+            &e.reason,
+        ),
+    })
+}
+
+async fn collect_webrtc_stats_json(pc: &PeerConnection) -> crate::Result<nojson::RawJsonOwned> {
+    let (tx, rx) = oneshot::channel();
+    pc.get_stats(move |report| {
+        let _ = tx.send(
+            report
+                .to_json()
+                .map_err(|e| format!("failed to serialize WebRTC stats: {e}")),
+        );
+    });
+
+    let stats_text = tokio::time::timeout(std::time::Duration::from_secs(2), rx)
+        .await
+        .map_err(|_| crate::Error::new("timed out waiting for WebRTC stats"))?
+        .map_err(|_| crate::Error::new("WebRTC stats callback channel closed"))?
+        .map_err(crate::Error::new)?;
+
+    nojson::RawJsonOwned::parse(stats_text)
+        .map_err(|e| crate::Error::new(format!("failed to parse WebRTC stats JSON: {e}")))
 }
 
 /// OBS WS SessionAction を obsws DataChannel 経由で送信する
@@ -830,7 +898,11 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                     let TrackState::Video(state) = &mut subscribed.state else {
                         return;
                     };
-                    if let Err(e) = super::video::push_i420_frame(&mut state.source, &frame) {
+                    if let Err(e) = super::video::push_i420_frame(
+                        &mut state.source,
+                        &mut state.timestamp_aligner,
+                        &frame,
+                    ) {
                         tracing::warn!(
                             "Failed to send video frame for track {track_id}: {}",
                             e.display()
@@ -894,6 +966,7 @@ fn create_video_track(
     Ok((
         VideoTrackState {
             source,
+            timestamp_aligner: TimestampAligner::new(),
             _track: track,
         },
         sender,

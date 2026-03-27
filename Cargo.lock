@@ -139,9 +139,9 @@ dependencies = [
 
 [[package]]
 name = "cmake"
-version = "0.1.57"
+version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75443c44cd6b379beb8c5b45d85d0773baf31cce901fe7bb252f4eff3008ef7d"
+checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
 dependencies = [
  "cc",
 ]
@@ -1032,9 +1032,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_dav1d"
-version = "2026.1.0-canary.2"
+version = "2026.1.0-canary.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86ae228a686e227e11c611abe74b3bf43ed0370dc231530635273a4bddcf0721"
+checksum = "4e67933a122eb4be2838a6be98f61c7a7833eb2c3331289168a564a56df9485d"
 dependencies = [
  "bindgen",
  "shiguredo_toml",
@@ -1109,9 +1109,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_openh264"
-version = "2026.1.0-canary.3"
+version = "2026.1.0-canary.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce416dd537aa1150a03c69a715a4ddb65baa1248524fab7509860393d81cd222"
+checksum = "6f20171292f81c654ded0678b2ef0388661a6e8ded7343e1e4623d298e5f1f5f"
 dependencies = [
  "bindgen",
  "shiguredo_toml",
@@ -1146,9 +1146,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_s3"
-version = "2026.1.0-canary.1"
+version = "2026.1.0-canary.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a85063822fd7723888e04a1119f0e9fb0cfa02ffba0b41aef83099b7311081f"
+checksum = "4b00f1636680da9562f2ea84a77f4d8f31af4168b675f1bbe58a7026c9472e33"
 dependencies = [
  "aws-lc-rs",
  "base64",
@@ -1168,9 +1168,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_svt_av1"
-version = "2026.1.0-canary.1"
+version = "2026.1.0-canary.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36ac82e30ad411e7c53f2f78f22bd4958b016187ad24b18185519871cf94f15e"
+checksum = "1d88ea62768772e76fa62f87096ccd09886bb59414c89cfbb820a2b77e3beab1"
 dependencies = [
  "bindgen",
  "log",
@@ -1247,9 +1247,9 @@ dependencies = [
 
 [[package]]
 name = "simd-adler32"
-version = "0.3.8"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
+checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
 
 [[package]]
 name = "smallvec"

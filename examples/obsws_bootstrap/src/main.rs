@@ -17,20 +17,20 @@ use shiguredo_webrtc::{
     AudioProcessingBuilder, AudioTrackSink, AudioTrackSinkHandler, AudioTransportRef,
     CreateSessionDescriptionObserver, CreateSessionDescriptionObserverHandler, DataChannel,
     DataChannelInit, DataChannelObserver, DataChannelObserverHandler, DataChannelState,
-    IceGatheringState, MediaType, PeerConnection, PeerConnectionDependencies,
-    PeerConnectionFactory, PeerConnectionFactoryDependencies, PeerConnectionObserver,
-    PeerConnectionObserverHandler, PeerConnectionOfferAnswerOptions,
-    PeerConnectionRtcConfiguration, PeerConnectionState, RtcError, RtcEventLogFactory,
-    RtpCodecCapabilityVector, RtpTransceiver, RtpTransceiverDirection, RtpTransceiverInit, SdpType,
-    SessionDescription, SetLocalDescriptionObserver, SetLocalDescriptionObserverHandler,
-    SetRemoteDescriptionObserver, SetRemoteDescriptionObserverHandler, Thread, VideoDecoderFactory,
-    VideoEncoderFactory, VideoSink, VideoSinkHandler, VideoSinkWants,
+    IceGatheringState, PeerConnection, PeerConnectionDependencies, PeerConnectionFactory,
+    PeerConnectionFactoryDependencies, PeerConnectionObserver, PeerConnectionObserverHandler,
+    PeerConnectionOfferAnswerOptions, PeerConnectionRtcConfiguration, PeerConnectionState,
+    RtcError, RtcEventLogFactory, RtpTransceiver, SdpType, SessionDescription,
+    SetLocalDescriptionObserver, SetLocalDescriptionObserverHandler, SetRemoteDescriptionObserver,
+    SetRemoteDescriptionObserverHandler, Thread, VideoDecoderFactory, VideoEncoderFactory,
+    VideoSink, VideoSinkHandler, VideoSinkWants,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
+const GET_WEBRTC_STATS_REQUEST_ID: &str = "req-get-webrtc-stats";
 const MAX_FRAMES_PER_POLL: usize = 8;
 const INITIAL_VIDEO_FRAME_GRACE: Duration = Duration::from_secs(2);
 
@@ -59,9 +59,6 @@ struct VideoFrameData {
     y: Vec<u8>,
     u: Vec<u8>,
     v: Vec<u8>,
-    stride_y: i32,
-    stride_u: i32,
-    stride_v: i32,
     width: i32,
     height: i32,
     timestamp_us: i64,
@@ -198,9 +195,6 @@ impl VideoSinkHandler for FrameRecordHandler {
             y: buffer.y_data().to_vec(),
             u: buffer.u_data().to_vec(),
             v: buffer.v_data().to_vec(),
-            stride_y: buffer.stride_y(),
-            stride_u: buffer.stride_u(),
-            stride_v: buffer.stride_v(),
             width: w,
             height: h,
             timestamp_us: frame.timestamp_us(),
@@ -413,74 +407,6 @@ fn create_answer_sdp(pc: &PeerConnection) -> Result<String, String> {
         .map_err(|_| "create_answer timed out".to_owned())?
 }
 
-fn reorder_video_codec_preferences(
-    factory: &PeerConnectionFactory,
-    transceiver: &mut RtpTransceiver,
-) -> Result<(), String> {
-    let capabilities = factory.get_rtp_sender_capabilities(MediaType::Video);
-    let mut codecs = RtpCodecCapabilityVector::new(0);
-    let preferred = ["VP8", "VP9", "AV1", "H264"];
-
-    for preferred_name in preferred {
-        for index in 0..capabilities.codecs().len() {
-            let Some(codec) = capabilities.codecs().get(index) else {
-                continue;
-            };
-            let Ok(name) = codec.name() else {
-                continue;
-            };
-            if name.eq_ignore_ascii_case(preferred_name) {
-                codecs.push(&codec);
-            }
-        }
-    }
-    for index in 0..capabilities.codecs().len() {
-        let Some(codec) = capabilities.codecs().get(index) else {
-            continue;
-        };
-        let Ok(name) = codec.name() else {
-            continue;
-        };
-        if !preferred
-            .iter()
-            .any(|preferred_name| name.eq_ignore_ascii_case(preferred_name))
-        {
-            codecs.push(&codec);
-        }
-    }
-    if codecs.is_empty() {
-        return Err("no video codecs available for transceiver preferences".to_owned());
-    }
-    transceiver
-        .set_codec_preferences(&codecs)
-        .map_err(|e| format!("failed to set video codec preferences: {e}"))?;
-    Ok(())
-}
-
-fn add_recvonly_transceivers(
-    pc: &PeerConnection,
-    factory: &PeerConnectionFactory,
-) -> Result<Vec<RtpTransceiver>, String> {
-    let mut retained = Vec::new();
-
-    let mut audio_init = RtpTransceiverInit::new();
-    audio_init.set_direction(RtpTransceiverDirection::RecvOnly);
-    retained.push(
-        pc.add_transceiver(MediaType::Audio, &mut audio_init)
-            .map_err(|e| format!("failed to add audio recvonly transceiver: {e}"))?,
-    );
-
-    let mut video_init = RtpTransceiverInit::new();
-    video_init.set_direction(RtpTransceiverDirection::RecvOnly);
-    let mut video_transceiver = pc
-        .add_transceiver(MediaType::Video, &mut video_init)
-        .map_err(|e| format!("failed to add video recvonly transceiver: {e}"))?;
-    reorder_video_codec_preferences(factory, &mut video_transceiver)?;
-    retained.push(video_transceiver);
-
-    Ok(retained)
-}
-
 struct SetLocalSdpHandler {
     tx: std::sync::mpsc::Sender<Option<String>>,
 }
@@ -656,6 +582,20 @@ fn make_create_mp4_input_request(input_path: &str) -> String {
     .to_string()
 }
 
+fn make_get_webrtc_stats_request() -> String {
+    nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetWebRtcStats")?;
+                f.member("requestId", GET_WEBRTC_STATS_REQUEST_ID)
+            }),
+        )
+    })
+    .to_string()
+}
+
 fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     let json = nojson::RawJson::parse(text).ok()?;
     let root = json.value();
@@ -694,6 +634,48 @@ fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     Some(Err(
         comment.unwrap_or_else(|| "CreateInput request failed".to_owned())
     ))
+}
+
+fn parse_obsws_server_webrtc_stats_response(text: &str) -> Option<Result<String, String>> {
+    let json = nojson::RawJson::parse(text).ok()?;
+    let root = json.value();
+    let op: i64 = root
+        .to_member("op")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if op != 7 {
+        return None;
+    }
+
+    let d = root.to_member("d").ok()?.required().ok()?;
+    let request_id: String = d
+        .to_member("requestId")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if request_id != GET_WEBRTC_STATS_REQUEST_ID {
+        return None;
+    }
+
+    let request_status = d.to_member("requestStatus").ok()?.required().ok()?;
+    let result: bool = request_status
+        .to_member("result")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if !result {
+        let comment: Option<String> =
+            if let Some(v) = request_status.to_member("comment").ok()?.optional() {
+                v.try_into().ok()
+            } else {
+                None
+            };
+        return Some(Err(
+            comment.unwrap_or_else(|| "GetWebRtcStats request failed".to_owned())
+        ));
+    }
+
+    let response_data = d.to_member("responseData").ok()?.required().ok()?;
+    let stats = response_data.to_member("stats").ok()?.required().ok()?;
+    Some(Ok(stats.as_raw_str().to_owned()))
 }
 
 // --- VP9 SampleEntry ---
@@ -1016,6 +998,179 @@ async fn collect_webrtc_stats_json(pc: &PeerConnection) -> Result<String, String
         .map_err(|_| "WebRTC stats callback channel closed".to_owned())?
 }
 
+async fn request_server_webrtc_stats(
+    retained: &RetainedState,
+    event_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
+) -> Result<String, String> {
+    let Some(dc) = retained.obsws_dc.as_ref() else {
+        return Err("obsws DataChannel is not available".to_owned());
+    };
+    if dc.state() != DataChannelState::Open {
+        return Err("obsws DataChannel is not open".to_owned());
+    }
+
+    let request = make_get_webrtc_stats_request();
+    if !dc.send(request.as_bytes(), false) {
+        return Err("failed to send GetWebRtcStats request".to_owned());
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timed out waiting for GetWebRtcStats response".to_owned());
+        }
+
+        let event = tokio::time::timeout(remaining, event_rx.recv())
+            .await
+            .map_err(|_| "timed out waiting for GetWebRtcStats response".to_owned())?
+            .ok_or_else(|| {
+                "event channel closed while waiting for GetWebRtcStats response".to_owned()
+            })?;
+
+        if let ClientEvent::ObswsMessage { data } = event {
+            let text = std::str::from_utf8(&data)
+                .map_err(|e| format!("GetWebRtcStats response was not UTF-8: {e}"))?;
+            if let Some(result) = parse_obsws_server_webrtc_stats_response(text) {
+                return result;
+            }
+        }
+    }
+}
+
+fn summarize_webrtc_stats_json(stats_json: &str) -> String {
+    let Ok(json) = nojson::RawJson::parse(stats_json) else {
+        return "failed to parse stats json".to_owned();
+    };
+
+    let mut inbound_audio = 0usize;
+    let mut inbound_video = 0usize;
+    let mut outbound_audio = 0usize;
+    let mut outbound_video = 0usize;
+    let mut remote_inbound_audio = 0usize;
+    let mut remote_inbound_video = 0usize;
+    let mut remote_outbound_audio = 0usize;
+    let mut remote_outbound_video = 0usize;
+    let mut audio_codecs = Vec::new();
+    let mut video_codecs = Vec::new();
+
+    let root = json.value();
+    let Ok(stats_objects) = root.to_object() else {
+        return "stats root is not an object".to_owned();
+    };
+
+    for (_, stats) in stats_objects {
+        let Ok(stats_type) = stats
+            .to_member("type")
+            .and_then(|v| v.required())
+            .and_then(|v| v.to_unquoted_string_str())
+        else {
+            continue;
+        };
+
+        let mut kind = None;
+        if let Ok(kind_member) = stats.to_member("kind")
+            && let Some(kind_value) = kind_member.optional()
+            && let Ok(kind_str) = kind_value.to_unquoted_string_str()
+        {
+            kind = Some(kind_str.to_string());
+        }
+
+        match (stats_type.as_ref(), kind.as_deref()) {
+            ("inbound-rtp", Some("audio")) => inbound_audio += 1,
+            ("inbound-rtp", Some("video")) => inbound_video += 1,
+            ("outbound-rtp", Some("audio")) => outbound_audio += 1,
+            ("outbound-rtp", Some("video")) => outbound_video += 1,
+            ("remote-inbound-rtp", Some("audio")) => remote_inbound_audio += 1,
+            ("remote-inbound-rtp", Some("video")) => remote_inbound_video += 1,
+            ("remote-outbound-rtp", Some("audio")) => remote_outbound_audio += 1,
+            ("remote-outbound-rtp", Some("video")) => remote_outbound_video += 1,
+            ("codec", _) => {
+                let mut mime_type = None;
+                if let Ok(mime_type_member) = stats.to_member("mimeType")
+                    && let Some(mime_type_value) = mime_type_member.optional()
+                    && let Ok(mime_type_str) = mime_type_value.to_unquoted_string_str()
+                {
+                    mime_type = Some(mime_type_str.to_string());
+                }
+                if let Some(mime_type) = mime_type {
+                    if mime_type.starts_with("audio/") {
+                        audio_codecs.push(mime_type);
+                    } else if mime_type.starts_with("video/") {
+                        video_codecs.push(mime_type);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    audio_codecs.sort();
+    audio_codecs.dedup();
+    video_codecs.sort();
+    video_codecs.dedup();
+
+    format!(
+        "inbound_audio={inbound_audio}, inbound_video={inbound_video}, outbound_audio={outbound_audio}, outbound_video={outbound_video}, remote_inbound_audio={remote_inbound_audio}, remote_inbound_video={remote_inbound_video}, remote_outbound_audio={remote_outbound_audio}, remote_outbound_video={remote_outbound_video}, audio_codecs=[{}], video_codecs=[{}]",
+        audio_codecs.join(", "),
+        video_codecs.join(", ")
+    )
+}
+
+fn summarize_sdp_for_log(sdp: &str) -> String {
+    let mut sections = Vec::new();
+    let mut current = Vec::new();
+    for line in sdp.split("\r\n").filter(|line| !line.is_empty()) {
+        if line.starts_with("m=") && !current.is_empty() {
+            sections.push(current);
+            current = Vec::new();
+        }
+        current.push(line);
+    }
+    if !current.is_empty() {
+        sections.push(current);
+    }
+
+    let mut summary = Vec::new();
+    for section in sections {
+        let Some(first_line) = section.first() else {
+            continue;
+        };
+        if !(first_line.starts_with("m=audio")
+            || first_line.starts_with("m=video")
+            || first_line.starts_with("m=application"))
+        {
+            continue;
+        }
+        summary.push((*first_line).to_owned());
+        for line in &section {
+            if line.starts_with("a=mid:")
+                || line == &"a=sendrecv"
+                || line == &"a=sendonly"
+                || line == &"a=recvonly"
+                || line == &"a=inactive"
+                || line.starts_with("a=rtpmap:")
+                || line.starts_with("a=fmtp:")
+            {
+                summary.push(format!("  {line}"));
+            }
+        }
+    }
+    summary.join("\n")
+}
+
+fn log_sdp_summary(label: &str, sdp: &str) {
+    tracing::warn!("{label}:\n{}", summarize_sdp_for_log(sdp));
+}
+
+fn log_transceiver_receiver_state(label: &str, transceiver: &RtpTransceiver) {
+    let receiver = transceiver.receiver();
+    let track = receiver.track();
+    let kind = track.kind().unwrap_or_default();
+    let track_id = track.id().unwrap_or_default();
+    tracing::warn!("{label}: receiver_track_kind={kind}, receiver_track_id={track_id}");
+}
+
 #[derive(Clone)]
 struct GatheredIceCandidate {
     sdp_mid: String,
@@ -1333,15 +1488,17 @@ async fn run_client(
     let dummy_dc = pc
         .create_data_channel("dummy", &mut dc_init)
         .map_err(|e| format!("failed to create dummy DataChannel: {e}"))?;
-    let initial_transceivers = add_recvonly_transceivers(&pc, &factory)?;
     // offer SDP を生成する
     let offer_sdp = create_offer_sdp(&pc)?;
+    log_sdp_summary("initial local offer SDP summary", &offer_sdp);
     set_local_description(&pc, SdpType::Offer, &offer_sdp)?;
     let mut initial_ice_candidates = Vec::new();
     let offer_sdp = finalize_local_sdp(offer_sdp, &mut ice_rx, &mut initial_ice_candidates).await?;
+    log_sdp_summary("initial local offer with ICE SDP summary", &offer_sdp);
 
     // /bootstrap で answer SDP を取得する
     let answer_sdp = http_bootstrap(host, port, &offer_sdp).await?;
+    log_sdp_summary("bootstrap remote answer SDP summary", &answer_sdp);
     set_remote_description(&pc, SdpType::Answer, &answer_sdp)?;
 
     // 統計カウンタ
@@ -1367,7 +1524,7 @@ async fn run_client(
         obsws_dc_observer: None,
         video_sinks: Vec::new(),
         audio_sinks: Vec::new(),
-        track_transceivers: initial_transceivers,
+        track_transceivers: Vec::new(),
         ice_rx,
         ice_candidates: initial_ice_candidates,
     };
@@ -1378,32 +1535,6 @@ async fn run_client(
         video_height: &video_height,
         frame_tx: &frame_tx,
     };
-    for index in 0..retained.track_transceivers.len() {
-        let receiver = retained.track_transceivers[index].receiver();
-        let track = receiver.track();
-        let kind = track.kind().unwrap_or_default();
-        let track_id = track.id().unwrap_or_default();
-        match kind.as_str() {
-            "video" => {
-                attach_video_sink(
-                    &mut retained,
-                    &track_id,
-                    track.cast_to_video_track(),
-                    &video_sink_attach_state,
-                );
-            }
-            "audio" => {
-                attach_audio_sink(
-                    &mut retained,
-                    &track_id,
-                    track.cast_to_audio_track(),
-                    &audio_frames,
-                    &audio_tx,
-                );
-            }
-            _ => {}
-        }
-    }
 
     // VP9 エンコーダー（遅延初期化）
     let mut vp9_encoder: Option<shiguredo_libvpx::Encoder> = None;
@@ -1423,6 +1554,7 @@ async fn run_client(
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
+    let mut server_webrtc_stats_json = None;
     let mut playout_interval = tokio::time::interval(Duration::from_millis(10));
     playout_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     'event_loop: loop {
@@ -1516,6 +1648,7 @@ async fn run_client(
                 *connection_state.lock().unwrap() = state_str.to_owned();
             }
             ClientEvent::Track(transceiver) => {
+                log_transceiver_receiver_state("onTrack transceiver", &transceiver);
                 let receiver = transceiver.receiver();
                 let track = receiver.track();
                 let kind = track.kind().unwrap_or_default();
@@ -1570,6 +1703,7 @@ async fn run_client(
                     tracing::warn!("renegotiation offer received from signaling data channel");
                     // renegotiation: サーバーからの offer に answer を返す
                     if let Some(sdp) = parse_signaling_sdp(&data) {
+                        log_sdp_summary("renegotiation remote offer SDP summary", &sdp);
                         if let Err(e) = set_remote_description(&pc, SdpType::Offer, &sdp) {
                             tracing::warn!("failed to set remote offer: {e}");
                             continue;
@@ -1594,6 +1728,7 @@ async fn run_client(
                                         continue;
                                     }
                                 };
+                                log_sdp_summary("renegotiation local answer SDP summary", &answer);
                                 let answer_json = make_answer_json(&answer);
                                 if let Some(dc) = &retained.signaling_dc {
                                     tracing::warn!(
@@ -1655,6 +1790,22 @@ async fn run_client(
         }
     }
 
+    if video_tracks.load(Ordering::Relaxed) > 0 && video_frames.load(Ordering::Relaxed) == 0 {
+        match request_server_webrtc_stats(&retained, &mut event_rx).await {
+            Ok(stats_json) => {
+                tracing::warn!(
+                    "server-side libwebrtc stats summary: {}",
+                    summarize_webrtc_stats_json(&stats_json)
+                );
+                tracing::warn!("server-side libwebrtc stats raw: {stats_json}");
+                server_webrtc_stats_json = Some(stats_json);
+            }
+            Err(e) => {
+                tracing::warn!("failed to fetch server-side libwebrtc stats: {e}");
+            }
+        }
+    }
+
     let webrtc_stats_json = collect_webrtc_stats_json(&pc).await;
     let webrtc_stats_error = match &webrtc_stats_json {
         Ok(_) => String::new(),
@@ -1663,7 +1814,16 @@ async fn run_client(
     if video_frames.load(Ordering::Relaxed) == 0
         && let Ok(stats_json) = &webrtc_stats_json
     {
+        tracing::warn!(
+            "libwebrtc stats summary: {}",
+            summarize_webrtc_stats_json(stats_json)
+        );
         tracing::warn!("libwebrtc stats raw: {stats_json}");
+    }
+    if video_frames.load(Ordering::Relaxed) == 0
+        && let Some(stats_json) = &server_webrtc_stats_json
+    {
+        tracing::debug!("server-side libwebrtc stats length={}", stats_json.len());
     }
     if !webrtc_stats_error.is_empty() {
         tracing::warn!("failed to collect libwebrtc stats: {}", webrtc_stats_error);
@@ -1809,30 +1969,15 @@ fn encode_and_write_frame(
 
     let encoder = vp9_encoder.as_mut().unwrap();
 
-    // I420 プレーンデータからストライドを考慮して正しいサイズを構築する
-    let y_plane = build_plane_data(&frame_data.y, frame_data.stride_y, width, height);
-    let u_plane = build_plane_data(
-        &frame_data.u,
-        frame_data.stride_u,
-        width.div_ceil(2),
-        height.div_ceil(2),
-    );
-    let v_plane = build_plane_data(
-        &frame_data.v,
-        frame_data.stride_v,
-        width.div_ceil(2),
-        height.div_ceil(2),
-    );
-
     let encode_options = shiguredo_libvpx::EncodeOptions {
         force_keyframe: false,
     };
     encoder
         .encode(
             &shiguredo_libvpx::ImageData::I420 {
-                y: &y_plane,
-                u: &u_plane,
-                v: &v_plane,
+                y: &frame_data.y,
+                u: &frame_data.u,
+                v: &frame_data.v,
             },
             &encode_options,
         )
@@ -1848,26 +1993,6 @@ fn encode_and_write_frame(
         )?;
     }
     Ok(())
-}
-
-/// ストライドを考慮して plane データを width * height のバイト列に変換する
-fn build_plane_data(data: &[u8], stride: i32, width: usize, height: usize) -> Vec<u8> {
-    let stride = stride as usize;
-    if stride == width {
-        // ストライドと幅が一致する場合はそのまま返す
-        data[..width * height].to_vec()
-    } else {
-        // 行ごとにコピーする
-        let mut result = Vec::with_capacity(width * height);
-        for row in 0..height {
-            let start = row * stride;
-            let end = start + width;
-            if end <= data.len() {
-                result.extend_from_slice(&data[start..end]);
-            }
-        }
-        result
-    }
 }
 
 /// VP9 SampleEntry の値を返す（エンコーダー初期化時に呼ぶ）

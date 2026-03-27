@@ -1,7 +1,8 @@
-use shiguredo_webrtc::AdaptedVideoTrackSource;
+use shiguredo_webrtc::{AdaptedVideoTrackSource, TimestampAligner};
 
 pub(crate) fn push_i420_frame(
     source: &mut AdaptedVideoTrackSource,
+    timestamp_aligner: &mut TimestampAligner,
     frame: &crate::VideoFrame,
 ) -> crate::Result<()> {
     if frame.format != crate::video::VideoFormat::I420 {
@@ -16,6 +17,7 @@ pub(crate) fn push_i420_frame(
         .ok_or_else(|| crate::Error::new("video frame size is required"))?;
     let width = size.width;
     let height = size.height;
+    let timestamp_us = i64::try_from(frame.timestamp.as_micros()).unwrap_or(i64::MAX);
 
     let uv_width = width.div_ceil(2);
     let uv_height = height.div_ceil(2);
@@ -53,8 +55,9 @@ pub(crate) fn push_i420_frame(
         );
     }
 
-    let timestamp_us = i64::try_from(frame.timestamp.as_micros()).unwrap_or(i64::MAX);
-    let webrtc_frame = shiguredo_webrtc::VideoFrame::from_i420(&buffer, timestamp_us, 0);
+    let translated_timestamp_us =
+        timestamp_aligner.translate(timestamp_us, shiguredo_webrtc::time_millis() * 1000);
+    let webrtc_frame = shiguredo_webrtc::VideoFrame::from_i420(&buffer, translated_timestamp_us, 0);
     source.on_frame(&webrtc_frame);
     Ok(())
 }
