@@ -426,6 +426,13 @@ pub struct ObswsHlsRun {
     pub variant_runs: Vec<ObswsHlsVariantRun>,
 }
 
+impl ObswsHlsRun {
+    /// ABR（マスタープレイリストあり）かどうかを返す
+    pub fn is_abr(&self) -> bool {
+        self.variant_runs.len() > 1
+    }
+}
+
 /// HLS ABR バリアントごとの実行情報
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObswsHlsVariantRun {

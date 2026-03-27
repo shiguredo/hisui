@@ -3081,7 +3081,7 @@ async fn start_hls_processors(
         output_plan.frame_rate,
     );
 
-    let is_abr = hls_settings.variants.len() > 1;
+    let is_abr = run.is_abr();
 
     // バリアントごとにスケーラー、エンコーダー、ライターを起動する
     for (i, (variant, variant_run)) in hls_settings
@@ -3270,7 +3270,7 @@ async fn stop_processors_staged_hls(
     wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
 
     // ABR の場合はマスタープレイリストを削除する
-    if run.variant_runs.len() > 1 {
+    if run.is_abr() {
         let master_playlist_path = run.output_directory.join("playlist.m3u8");
         if let Err(e) = std::fs::remove_file(&master_playlist_path)
             && e.kind() != std::io::ErrorKind::NotFound
