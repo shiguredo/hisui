@@ -19,10 +19,65 @@ fn content_type_for_filename(filename: &str) -> &'static str {
     }
 }
 
+/// HLS writer の統計値
+struct HlsWriterStats {
+    total_input_video_frame_count: crate::stats::StatsCounter,
+    total_input_audio_frame_count: crate::stats::StatsCounter,
+    total_segment_count: crate::stats::StatsCounter,
+    total_segment_byte_size: crate::stats::StatsCounter,
+    total_deleted_segment_count: crate::stats::StatsCounter,
+    current_retained_segment_count: crate::stats::StatsGauge,
+}
+
+impl HlsWriterStats {
+    fn new(stats: &mut crate::stats::Stats) -> Self {
+        Self {
+            total_input_video_frame_count: stats.counter("total_input_video_frame_count"),
+            total_input_audio_frame_count: stats.counter("total_input_audio_frame_count"),
+            total_segment_count: stats.counter("total_segment_count"),
+            total_segment_byte_size: stats.counter("total_segment_byte_size"),
+            total_deleted_segment_count: stats.counter("total_deleted_segment_count"),
+            current_retained_segment_count: stats.gauge("current_retained_segment_count"),
+        }
+    }
+}
+
+/// S3 操作のステータスコード別カウンタ
+/// S3 操作のステータスコード別カウンタ
+struct S3StatusCounters {
+    stats: crate::stats::Stats,
+    metric_name: &'static str,
+    /// ステータスコード → カウンタのキャッシュ
+    cache: std::sync::Mutex<std::collections::HashMap<u16, crate::stats::StatsCounter>>,
+}
+
+impl S3StatusCounters {
+    fn new(stats: &crate::stats::Stats, metric_name: &'static str) -> Self {
+        Self {
+            stats: stats.clone(),
+            metric_name,
+            cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn record(&self, status_code: u16) {
+        let mut cache = self
+            .cache
+            .lock()
+            .expect("S3StatusCounters lock() failed unexpectedly");
+        let counter = cache.entry(status_code).or_insert_with(|| {
+            let mut stats = self.stats.clone();
+            stats.set_default_label("status_code", &status_code.to_string());
+            stats.counter(self.metric_name)
+        });
+        counter.inc();
+    }
+}
+
 /// HLS 出力先のストレージ抽象
 enum HlsStorage {
     Filesystem(FilesystemStorage),
-    S3(S3Storage),
+    S3(Box<S3Storage>),
 }
 
 struct FilesystemStorage {
@@ -33,6 +88,10 @@ struct S3Storage {
     client: crate::s3::S3HttpClient,
     bucket: String,
     prefix: String,
+    put_counts: S3StatusCounters,
+    delete_counts: S3StatusCounters,
+    put_error_count: crate::stats::StatsCounter,
+    delete_error_count: crate::stats::StatsCounter,
 }
 
 impl S3Storage {
@@ -76,12 +135,20 @@ impl HlsStorage {
                     .body(data.to_vec())
                     .content_type(content_type)
                     .build_request()?;
-                let response = s3.client.execute(&request).await?;
-                if !response.is_success() {
-                    return Err(crate::Error::new(format!(
-                        "S3 PutObject failed for {key}: status={}",
-                        response.status_code
-                    )));
+                match s3.client.execute(&request).await {
+                    Ok(response) => {
+                        s3.put_counts.record(response.status_code);
+                        if !response.is_success() {
+                            return Err(crate::Error::new(format!(
+                                "S3 PutObject failed for {key}: status={}",
+                                response.status_code
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        s3.put_error_count.inc();
+                        return Err(e);
+                    }
                 }
                 Ok(())
             }
@@ -121,12 +188,20 @@ impl HlsStorage {
                     .body(content.to_vec())
                     .content_type(content_type)
                     .build_request()?;
-                let response = s3.client.execute(&request).await?;
-                if !response.is_success() {
-                    return Err(crate::Error::new(format!(
-                        "S3 PutObject failed for {key}: status={}",
-                        response.status_code
-                    )));
+                match s3.client.execute(&request).await {
+                    Ok(response) => {
+                        s3.put_counts.record(response.status_code);
+                        if !response.is_success() {
+                            return Err(crate::Error::new(format!(
+                                "S3 PutObject failed for {key}: status={}",
+                                response.status_code
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        s3.put_error_count.inc();
+                        return Err(e);
+                    }
                 }
                 Ok(())
             }
@@ -155,16 +230,19 @@ impl HlsStorage {
                     .build_request()
                 {
                     Ok(request) => match s3.client.execute(&request).await {
-                        Ok(response) if !response.is_success() => {
-                            tracing::warn!(
-                                "S3 DeleteObject failed for {key}: status={}",
-                                response.status_code
-                            );
+                        Ok(response) => {
+                            s3.delete_counts.record(response.status_code);
+                            if !response.is_success() {
+                                tracing::warn!(
+                                    "S3 DeleteObject failed for {key}: status={}",
+                                    response.status_code
+                                );
+                            }
                         }
                         Err(e) => {
+                            s3.delete_error_count.inc();
                             tracing::warn!("failed to delete S3 object {key}: {}", e.display());
                         }
-                        _ => {}
                     },
                     Err(e) => {
                         tracing::warn!("failed to build DeleteObject for {key}: {e}");
@@ -210,6 +288,7 @@ struct HlsWriter {
     format_state: FormatState,
     /// 現在のセグメントの共通情報
     current_segment_info: Option<CurrentSegmentInfo>,
+    stats: HlsWriterStats,
 }
 
 /// セグメントの共通情報（フォーマット非依存）
@@ -292,6 +371,7 @@ impl HlsWriter {
         segment_duration_target: f64,
         max_retained_segments: usize,
         segment_format: HlsSegmentFormat,
+        stats: HlsWriterStats,
     ) -> crate::Result<Self> {
         let format_state = match segment_format {
             HlsSegmentFormat::MpegTs => FormatState::MpegTs(Box::new(MpegTsState {
@@ -328,6 +408,7 @@ impl HlsWriter {
             retained_segments: VecDeque::new(),
             format_state,
             current_segment_info: None,
+            stats,
         })
     }
 
@@ -400,6 +481,7 @@ impl HlsWriter {
     /// ビデオフレーム処理。
     /// キーフレームかつセグメント尺が target を超えていたらセグメントを切り替える。
     async fn handle_video_frame(&mut self, frame: &crate::VideoFrame) -> crate::Result<()> {
+        self.stats.total_input_video_frame_count.inc();
         // キーフレームでセグメント切り替え判定
         if frame.keyframe
             && let Some(ref info) = self.current_segment_info
@@ -493,6 +575,7 @@ impl HlsWriter {
 
     /// オーディオフレーム処理
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
+        self.stats.total_input_audio_frame_count.inc();
         // 最初の video keyframe より前に audio が流れ始めることがある。
         // その場合でも、初回だけ付与される sample_entry は保持しておかないと、
         // セグメント開始後の AAC フレーム群から codec 情報が失われる。
@@ -617,6 +700,7 @@ impl HlsWriter {
             return Ok(());
         };
 
+        let mut segment_byte_size: u64 = 0;
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 if let Some(writer) = state.current_writer.take() {
@@ -628,6 +712,7 @@ impl HlsWriter {
                             })?;
                         }
                         MpegTsBackend::Buffer(buf) => {
+                            segment_byte_size = buf.len() as u64;
                             // S3: バッファの内容をアップロードする
                             self.storage.write_segment(&info.filename, buf).await?;
                         }
@@ -683,6 +768,7 @@ impl HlsWriter {
                 let mut segment_data = Vec::with_capacity(metadata.len() + reordered_payload.len());
                 segment_data.extend_from_slice(&metadata);
                 segment_data.extend_from_slice(&reordered_payload);
+                segment_byte_size = segment_data.len() as u64;
                 self.storage
                     .write_segment(&info.filename, &segment_data)
                     .await?;
@@ -698,6 +784,9 @@ impl HlsWriter {
             .as_secs_f64();
         let duration = duration.max(0.001);
 
+        self.stats.total_segment_count.inc();
+        self.stats.total_segment_byte_size.add(segment_byte_size);
+
         self.retained_segments.push_back(RetainedSegment {
             filename: info.filename,
             duration,
@@ -708,8 +797,13 @@ impl HlsWriter {
         while self.retained_segments.len() > self.max_retained_segments {
             if let Some(old) = self.retained_segments.pop_front() {
                 self.storage.delete_file(&old.filename).await;
+                self.stats.total_deleted_segment_count.inc();
             }
         }
+
+        self.stats
+            .current_retained_segment_count
+            .set(self.retained_segments.len() as i64);
 
         self.write_playlist().await?;
 
@@ -1251,6 +1345,8 @@ pub async fn create_processor(
             processor_id.clone(),
             crate::ProcessorMetadata::new("hls_writer"),
             move |h| async move {
+                let mut stats = h.stats();
+                let writer_stats = HlsWriterStats::new(&mut stats);
                 let storage = match config.storage {
                     HlsStorageConfig::Filesystem { output_directory } => {
                         HlsStorage::Filesystem(FilesystemStorage { output_directory })
@@ -1259,17 +1355,22 @@ pub async fn create_processor(
                         client,
                         bucket,
                         prefix,
-                    } => HlsStorage::S3(S3Storage {
+                    } => HlsStorage::S3(Box::new(S3Storage {
                         client,
                         bucket,
                         prefix,
-                    }),
+                        put_counts: S3StatusCounters::new(&stats, "total_s3_put_count"),
+                        delete_counts: S3StatusCounters::new(&stats, "total_s3_delete_count"),
+                        put_error_count: stats.clone().counter("total_s3_put_error_count"),
+                        delete_error_count: stats.clone().counter("total_s3_delete_error_count"),
+                    })),
                 };
                 let writer = HlsWriter::new(
                     storage,
                     config.segment_duration,
                     config.max_retained_segments,
                     config.segment_format,
+                    writer_stats,
                 )?;
                 writer
                     .run(h, config.input_audio_track_id, config.input_video_track_id)
