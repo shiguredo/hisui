@@ -3279,7 +3279,14 @@ async fn stop_processors_staged_hls(
         }
         // バリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
         for vr in &run.variant_runs {
-            let _ = std::fs::remove_dir(&vr.variant_directory);
+            if let Err(e) = std::fs::remove_dir(&vr.variant_directory)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(
+                    "failed to remove variant directory {}: {e}",
+                    vr.variant_directory.display()
+                );
+            }
         }
     }
 
