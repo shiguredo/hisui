@@ -652,7 +652,7 @@ impl RtspSessionRunner {
                         .map_err(SessionError::Fatal)?
                         == crate::decoder::DrainResult::PipelineClosed
                     {
-                        return Err(SessionError::Retryable(Error::new(
+                        return Err(SessionError::Fatal(Error::new(
                             "video track pipeline closed",
                         )));
                     }
@@ -702,7 +702,7 @@ impl RtspSessionRunner {
                         .map_err(SessionError::Fatal)?
                         == crate::decoder::DrainResult::PipelineClosed
                     {
-                        return Err(SessionError::Retryable(Error::new(
+                        return Err(SessionError::Fatal(Error::new(
                             "audio track pipeline closed",
                         )));
                     }
