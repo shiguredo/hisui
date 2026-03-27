@@ -17,14 +17,13 @@ use shiguredo_webrtc::{
     AudioProcessingBuilder, AudioTrackSink, AudioTrackSinkHandler, AudioTransportRef,
     CreateSessionDescriptionObserver, CreateSessionDescriptionObserverHandler, DataChannel,
     DataChannelInit, DataChannelObserver, DataChannelObserverHandler, DataChannelState,
-    IceGatheringState, MediaType, PeerConnection, PeerConnectionDependencies,
-    PeerConnectionFactory, PeerConnectionFactoryDependencies, PeerConnectionObserver,
-    PeerConnectionObserverHandler, PeerConnectionOfferAnswerOptions,
-    PeerConnectionRtcConfiguration, PeerConnectionState, RtcError, RtcEventLogFactory,
-    RtpCodecCapabilityVector, RtpTransceiver, RtpTransceiverDirection, RtpTransceiverInit, SdpType,
-    SessionDescription, SetLocalDescriptionObserver, SetLocalDescriptionObserverHandler,
-    SetRemoteDescriptionObserver, SetRemoteDescriptionObserverHandler, Thread, VideoDecoderFactory,
-    VideoEncoderFactory, VideoSink, VideoSinkHandler, VideoSinkWants,
+    IceGatheringState, PeerConnection, PeerConnectionDependencies, PeerConnectionFactory,
+    PeerConnectionFactoryDependencies, PeerConnectionObserver, PeerConnectionObserverHandler,
+    PeerConnectionOfferAnswerOptions, PeerConnectionRtcConfiguration, PeerConnectionState,
+    RtcError, RtcEventLogFactory, RtpTransceiver, SdpType, SessionDescription,
+    SetLocalDescriptionObserver, SetLocalDescriptionObserverHandler, SetRemoteDescriptionObserver,
+    SetRemoteDescriptionObserverHandler, Thread, VideoDecoderFactory, VideoEncoderFactory,
+    VideoSink, VideoSinkHandler, VideoSinkWants,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
@@ -411,74 +410,6 @@ fn create_answer_sdp(pc: &PeerConnection) -> Result<String, String> {
     pc.create_answer(&mut observer, &mut options);
     rx.recv_timeout(SDP_TIMEOUT)
         .map_err(|_| "create_answer timed out".to_owned())?
-}
-
-fn reorder_video_codec_preferences(
-    factory: &PeerConnectionFactory,
-    transceiver: &mut RtpTransceiver,
-) -> Result<(), String> {
-    let capabilities = factory.get_rtp_sender_capabilities(MediaType::Video);
-    let mut codecs = RtpCodecCapabilityVector::new(0);
-    let preferred = ["VP8", "VP9", "AV1", "H264"];
-
-    for preferred_name in preferred {
-        for index in 0..capabilities.codecs().len() {
-            let Some(codec) = capabilities.codecs().get(index) else {
-                continue;
-            };
-            let Ok(name) = codec.name() else {
-                continue;
-            };
-            if name.eq_ignore_ascii_case(preferred_name) {
-                codecs.push(&codec);
-            }
-        }
-    }
-    for index in 0..capabilities.codecs().len() {
-        let Some(codec) = capabilities.codecs().get(index) else {
-            continue;
-        };
-        let Ok(name) = codec.name() else {
-            continue;
-        };
-        if !preferred
-            .iter()
-            .any(|preferred_name| name.eq_ignore_ascii_case(preferred_name))
-        {
-            codecs.push(&codec);
-        }
-    }
-    if codecs.is_empty() {
-        return Err("no video codecs available for transceiver preferences".to_owned());
-    }
-    transceiver
-        .set_codec_preferences(&codecs)
-        .map_err(|e| format!("failed to set video codec preferences: {e}"))?;
-    Ok(())
-}
-
-fn add_recvonly_transceivers(
-    pc: &PeerConnection,
-    factory: &PeerConnectionFactory,
-) -> Result<Vec<RtpTransceiver>, String> {
-    let mut retained = Vec::new();
-
-    let mut audio_init = RtpTransceiverInit::new();
-    audio_init.set_direction(RtpTransceiverDirection::RecvOnly);
-    retained.push(
-        pc.add_transceiver(MediaType::Audio, &mut audio_init)
-            .map_err(|e| format!("failed to add audio recvonly transceiver: {e}"))?,
-    );
-
-    let mut video_init = RtpTransceiverInit::new();
-    video_init.set_direction(RtpTransceiverDirection::RecvOnly);
-    let mut video_transceiver = pc
-        .add_transceiver(MediaType::Video, &mut video_init)
-        .map_err(|e| format!("failed to add video recvonly transceiver: {e}"))?;
-    reorder_video_codec_preferences(factory, &mut video_transceiver)?;
-    retained.push(video_transceiver);
-
-    Ok(retained)
 }
 
 struct SetLocalSdpHandler {
@@ -1387,10 +1318,6 @@ async fn run_client(
     let dummy_dc = pc
         .create_data_channel("dummy", &mut dc_init)
         .map_err(|e| format!("failed to create dummy DataChannel: {e}"))?;
-    let initial_transceivers = add_recvonly_transceivers(&pc, &factory)?;
-    for (index, transceiver) in initial_transceivers.iter().enumerate() {
-        log_transceiver_receiver_state(&format!("initial transceiver[{index}]"), transceiver);
-    }
     // offer SDP を生成する
     let offer_sdp = create_offer_sdp(&pc)?;
     log_sdp_summary("initial local offer SDP summary", &offer_sdp);
@@ -1427,7 +1354,7 @@ async fn run_client(
         obsws_dc_observer: None,
         video_sinks: Vec::new(),
         audio_sinks: Vec::new(),
-        track_transceivers: initial_transceivers,
+        track_transceivers: Vec::new(),
         ice_rx,
         ice_candidates: initial_ice_candidates,
     };
@@ -1438,32 +1365,6 @@ async fn run_client(
         video_height: &video_height,
         frame_tx: &frame_tx,
     };
-    for index in 0..retained.track_transceivers.len() {
-        let receiver = retained.track_transceivers[index].receiver();
-        let track = receiver.track();
-        let kind = track.kind().unwrap_or_default();
-        let track_id = track.id().unwrap_or_default();
-        match kind.as_str() {
-            "video" => {
-                attach_video_sink(
-                    &mut retained,
-                    &track_id,
-                    track.cast_to_video_track(),
-                    &video_sink_attach_state,
-                );
-            }
-            "audio" => {
-                attach_audio_sink(
-                    &mut retained,
-                    &track_id,
-                    track.cast_to_audio_track(),
-                    &audio_frames,
-                    &audio_tx,
-                );
-            }
-            _ => {}
-        }
-    }
 
     // VP9 エンコーダー（遅延初期化）
     let mut vp9_encoder: Option<shiguredo_libvpx::Encoder> = None;
