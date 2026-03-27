@@ -438,15 +438,6 @@ fn build_output_active_response(
     })
 }
 
-fn build_output_active_record_response(
-    request_type: &str,
-    request_id: &str,
-    output_active: bool,
-) -> nojson::RawJsonOwned {
-    super::build_request_response_success(request_type, request_id, |f| {
-        f.member("outputActive", output_active)
-    })
-}
 
 fn build_stream_output_settings_response(
     request_id: &str,
@@ -500,7 +491,7 @@ pub fn build_stop_output_response(request_id: &str) -> nojson::RawJsonOwned {
 }
 
 pub fn build_toggle_record_response(request_id: &str, output_active: bool) -> nojson::RawJsonOwned {
-    build_output_active_record_response("ToggleRecord", request_id, output_active)
+    build_output_active_response("ToggleRecord", request_id, output_active)
 }
 
 pub fn build_start_record_response(request_id: &str) -> nojson::RawJsonOwned {
