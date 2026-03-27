@@ -3244,8 +3244,7 @@ async fn start_hls_processors(
                 }
             })
             .collect();
-        let master_content =
-            crate::hls::writer::build_master_playlist_content(&master_variants);
+        let master_content = crate::hls::writer::build_master_playlist_content(&master_variants);
         match &run.destination {
             crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
                 crate::hls::writer::write_master_playlist(
@@ -3279,9 +3278,9 @@ async fn start_hls_processors(
                 if let Some(ep) = endpoint {
                     config_builder = config_builder.endpoint(ep);
                 }
-                let s3_config = config_builder.build().map_err(|e| {
-                    crate::Error::new(format!("failed to build S3 config: {e}"))
-                })?;
+                let s3_config = config_builder
+                    .build()
+                    .map_err(|e| crate::Error::new(format!("failed to build S3 config: {e}")))?;
                 let s3_client = crate::s3::S3HttpClient::new(s3_config);
                 let key = if prefix.is_empty() {
                     "playlist.m3u8".to_owned()
