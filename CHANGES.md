@@ -33,7 +33,9 @@
   - @sile
 - [ADD] obsws の Output に HLS ライブ出力 (`outputName: "hls"`) を追加する
   - H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する
-  - `SetOutputSettings` で `outputDirectory` / `segmentDuration` / `maxRetainedSegments` / `segmentFormat` / `variants` を設定可能
+  - `SetOutputSettings` で `destination` / `segmentDuration` / `maxRetainedSegments` / `segmentFormat` / `variants` を設定可能
+  - `destination.type` に `"filesystem"` または `"s3"` を指定して出力先を切り替える
+  - S3 出力先にはオブジェクトライフタイム指定（`lifetimeDays`）を設定可能（設定の受け付けのみ。lifecycle ルールの自動設定は未実装）
   - `segmentFormat` は `"mpegts"` (デフォルト) または `"fmp4"` を指定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile

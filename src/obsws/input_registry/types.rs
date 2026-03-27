@@ -421,7 +421,7 @@ pub struct ObswsHlsRun {
     pub source_processor_ids: Vec<ProcessorId>,
     pub audio_mixer_processor_id: ProcessorId,
     pub video_mixer_processor_id: ProcessorId,
-    pub output_directory: PathBuf,
+    pub destination: HlsDestination,
     /// バリアントごとの実行情報
     pub variant_runs: Vec<ObswsHlsVariantRun>,
 }
@@ -443,8 +443,8 @@ pub struct ObswsHlsVariantRun {
     /// スケーラー出力トラック ID
     pub scaled_track_id: Option<TrackId>,
     pub writer_processor_id: ProcessorId,
-    /// バリアントの出力ディレクトリ（ABR 時はサブディレクトリ、non-ABR 時はルート）
-    pub variant_directory: PathBuf,
+    /// バリアントの出力パス（filesystem: ディレクトリパス、S3: prefix）
+    pub variant_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1182,10 +1182,106 @@ impl std::str::FromStr for HlsSegmentFormat {
     }
 }
 
+/// HLS 出力先の設定
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HlsDestination {
+    /// ローカルファイルシステムへの出力
+    Filesystem { directory: String },
+    /// S3 互換オブジェクトストレージへの出力
+    S3 {
+        bucket: String,
+        prefix: String,
+        region: String,
+        endpoint: Option<String>,
+        use_path_style: bool,
+        access_key_id: String,
+        secret_access_key: String,
+        session_token: Option<String>,
+        /// オブジェクトのライフタイム（日数）。
+        /// 指定時はバケットに lifecycle ルールを設定する（セーフティネット用途）。
+        /// 明示的な DeleteObject は常に実行する。
+        lifetime_days: Option<u32>,
+    },
+}
+
+impl nojson::DisplayJson for HlsDestination {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            Self::Filesystem { directory } => nojson::object(|f| {
+                f.member("type", "filesystem")?;
+                f.member("directory", directory)
+            })
+            .fmt(f),
+            Self::S3 {
+                bucket,
+                prefix,
+                region,
+                endpoint,
+                use_path_style,
+                // 認証情報はレスポンスに含めない
+                access_key_id: _,
+                secret_access_key: _,
+                session_token: _,
+                lifetime_days,
+            } => nojson::object(|f| {
+                f.member("type", "s3")?;
+                f.member("bucket", bucket)?;
+                f.member("prefix", prefix)?;
+                f.member("region", region)?;
+                if let Some(endpoint) = endpoint {
+                    f.member("endpoint", endpoint)?;
+                }
+                f.member("usePathStyle", *use_path_style)?;
+                if let Some(days) = lifetime_days {
+                    f.member("lifetimeDays", *days)?;
+                }
+                Ok(())
+            })
+            .fmt(f),
+        }
+    }
+}
+
+impl HlsDestination {
+    /// GetOutputStatus 用の outputPath を生成する
+    pub fn output_path(&self) -> String {
+        match self {
+            Self::Filesystem { directory } => {
+                let path = std::path::PathBuf::from(directory).join("playlist.m3u8");
+                path.display().to_string()
+            }
+            Self::S3 { bucket, prefix, .. } => {
+                if prefix.is_empty() {
+                    format!("s3://{bucket}/playlist.m3u8")
+                } else {
+                    format!("s3://{bucket}/{prefix}/playlist.m3u8")
+                }
+            }
+        }
+    }
+
+    /// バリアント用のサブパスを生成する
+    pub fn variant_path(&self, index: usize) -> String {
+        match self {
+            Self::Filesystem { directory } => std::path::PathBuf::from(directory)
+                .join(format!("variant_{index}"))
+                .display()
+                .to_string(),
+            Self::S3 { prefix, .. } => {
+                if prefix.is_empty() {
+                    format!("variant_{index}")
+                } else {
+                    format!("{prefix}/variant_{index}")
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsHlsSettings {
     // StartOutput 時に必須。登録時点では未指定も許容する。
-    pub output_directory: Option<String>,
+    pub destination: Option<HlsDestination>,
     /// セグメントの目標尺（秒）
     pub segment_duration: f64,
     /// プレイリストに保持するセグメント数
@@ -1200,7 +1296,7 @@ pub struct ObswsHlsSettings {
 impl Default for ObswsHlsSettings {
     fn default() -> Self {
         Self {
-            output_directory: None,
+            destination: None,
             segment_duration: DEFAULT_HLS_SEGMENT_DURATION_SECS,
             max_retained_segments: DEFAULT_HLS_MAX_RETAINED_SEGMENTS,
             segment_format: HlsSegmentFormat::default(),
@@ -1212,8 +1308,8 @@ impl Default for ObswsHlsSettings {
 impl nojson::DisplayJson for ObswsHlsSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
-            if let Some(output_directory) = &self.output_directory {
-                f.member("outputDirectory", output_directory)?;
+            if let Some(destination) = &self.destination {
+                f.member("destination", destination)?;
             }
             f.member("segmentDuration", self.segment_duration)?;
             f.member("maxRetainedSegments", self.max_retained_segments)?;

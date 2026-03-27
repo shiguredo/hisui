@@ -1987,16 +1987,16 @@ impl ObswsCoordinator {
         request_id: &str,
     ) -> OutputOperationOutcome {
         use crate::obsws::input_registry::{
-            ActivateHlsError, ObswsHlsRun, ObswsHlsVariantRun, ObswsRecordTrackRun,
+            ActivateHlsError, HlsDestination, ObswsHlsRun, ObswsHlsVariantRun, ObswsRecordTrackRun,
         };
         let hls_settings = self.input_registry.hls_settings().clone();
-        let Some(ref output_directory_str) = hls_settings.output_directory else {
+        let Some(ref destination) = hls_settings.destination else {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
                     request_id,
                     crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Missing outputSettings.outputDirectory field",
+                    "Missing outputSettings.destination field",
                 ),
             );
         };
@@ -2010,7 +2010,6 @@ impl ObswsCoordinator {
                 ),
             );
         }
-        let output_directory = std::path::PathBuf::from(&output_directory_str);
         let run_id = match self.input_registry.next_hls_run_id() {
             Ok(run_id) => run_id,
             Err(_) => {
@@ -2074,10 +2073,13 @@ impl ObswsCoordinator {
                 let writer_processor_id = crate::ProcessorId::new(format!(
                     "obsws:hls:{run_id}:{variant_label}_hls_writer"
                 ));
-                let variant_directory = if is_abr {
-                    output_directory.join(format!("variant_{i}"))
+                let variant_path = if is_abr {
+                    destination.variant_path(i)
                 } else {
-                    output_directory.clone()
+                    match destination {
+                        HlsDestination::Filesystem { directory } => directory.clone(),
+                        HlsDestination::S3 { prefix, .. } => prefix.clone(),
+                    }
                 };
                 ObswsHlsVariantRun {
                     video,
@@ -2085,7 +2087,7 @@ impl ObswsCoordinator {
                     scaler_processor_id,
                     scaled_track_id,
                     writer_processor_id,
-                    variant_directory,
+                    variant_path,
                 }
             })
             .collect();
@@ -2093,7 +2095,7 @@ impl ObswsCoordinator {
             source_processor_ids: output_plan.source_processor_ids.clone(),
             audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
             video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
-            output_directory: output_directory.clone(),
+            destination: destination.clone(),
             variant_runs,
         };
         if let Err(ActivateHlsError::AlreadyActive) = self.input_registry.activate_hls(run.clone())
@@ -2107,7 +2109,10 @@ impl ObswsCoordinator {
                 ),
             );
         }
-        if let Err(e) = std::fs::create_dir_all(&output_directory) {
+        // filesystem の場合のみ出力ディレクトリを作成する
+        if let HlsDestination::Filesystem { directory } = destination
+            && let Err(e) = std::fs::create_dir_all(directory)
+        {
             self.input_registry.deactivate_hls();
             let error_comment = format!("Failed to create HLS output directory: {e}");
             return OutputOperationOutcome::failure(
@@ -3090,12 +3095,14 @@ async fn start_hls_processors(
         .zip(run.variant_runs.iter())
         .enumerate()
     {
-        // バリアントの出力ディレクトリを作成する
-        if is_abr {
-            std::fs::create_dir_all(&variant_run.variant_directory).map_err(|e| {
+        // filesystem かつ ABR の場合はバリアントのサブディレクトリを作成する
+        if is_abr
+            && let crate::obsws::input_registry::HlsDestination::Filesystem { .. } = run.destination
+        {
+            std::fs::create_dir_all(&variant_run.variant_path).map_err(|e| {
                 crate::Error::new(format!(
                     "failed to create variant directory {}: {e}",
-                    variant_run.variant_directory.display()
+                    variant_run.variant_path
                 ))
             })?;
         }
@@ -3150,10 +3157,51 @@ async fn start_hls_processors(
         .await?;
 
         // HLS ライター
+        let storage_config = match &run.destination {
+            crate::obsws::input_registry::HlsDestination::Filesystem { .. } => {
+                crate::hls::writer::HlsStorageConfig::Filesystem {
+                    output_directory: std::path::PathBuf::from(&variant_run.variant_path),
+                }
+            }
+            crate::obsws::input_registry::HlsDestination::S3 {
+                bucket,
+                region,
+                endpoint,
+                use_path_style,
+                access_key_id,
+                secret_access_key,
+                session_token,
+                ..
+            } => {
+                let credential = match session_token {
+                    Some(token) => shiguredo_s3::Credential::with_session_token(
+                        access_key_id,
+                        secret_access_key,
+                        token,
+                    ),
+                    None => shiguredo_s3::Credential::new(access_key_id, secret_access_key),
+                };
+                let mut config_builder = shiguredo_s3::S3Config::builder()
+                    .region(region)
+                    .credential(credential)
+                    .use_path_style(*use_path_style);
+                if let Some(ep) = endpoint {
+                    config_builder = config_builder.endpoint(ep);
+                }
+                let s3_config = config_builder
+                    .build()
+                    .map_err(|e| crate::Error::new(format!("failed to build S3 config: {e}")))?;
+                crate::hls::writer::HlsStorageConfig::S3 {
+                    client: crate::s3::S3HttpClient::new(s3_config),
+                    bucket: bucket.clone(),
+                    prefix: variant_run.variant_path.clone(),
+                }
+            }
+        };
         crate::hls::writer::create_processor(
             pipeline_handle,
             crate::hls::writer::HlsWriterConfig {
-                output_directory: variant_run.variant_directory.clone(),
+                storage: storage_config,
                 input_audio_track_id: variant_run.audio.encoded_track_id.clone(),
                 input_video_track_id: variant_run.video.encoded_track_id.clone(),
                 segment_duration: hls_settings.segment_duration,
@@ -3168,7 +3216,7 @@ async fn start_hls_processors(
             variant = i,
             video_bitrate = variant.video_bitrate_bps,
             audio_bitrate = variant.audio_bitrate_bps,
-            directory = %variant_run.variant_directory.display(),
+            directory = %variant_run.variant_path,
             "HLS variant processor started"
         );
     }
@@ -3196,7 +3244,16 @@ async fn start_hls_processors(
                 }
             })
             .collect();
-        crate::hls::writer::write_master_playlist(&run.output_directory, &master_variants)?;
+        // filesystem の場合のみローカルファイルとしてマスタープレイリストを書き出す
+        // TODO: S3 の場合は S3 にマスタープレイリストを PutObject する
+        if let crate::obsws::input_registry::HlsDestination::Filesystem { ref directory } =
+            run.destination
+        {
+            crate::hls::writer::write_master_playlist(
+                &std::path::PathBuf::from(directory),
+                &master_variants,
+            )?;
+        }
     }
 
     crate::obsws::session::output::start_source_processors(
@@ -3269,26 +3326,35 @@ async fn stop_processors_staged_hls(
         .collect();
     wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
 
-    // ABR の場合はマスタープレイリストを削除する
+    // ABR の場合はマスタープレイリストとバリアントディレクトリを削除する
     if run.is_abr() {
-        let master_playlist_path = run.output_directory.join("playlist.m3u8");
-        if let Err(e) = std::fs::remove_file(&master_playlist_path)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            tracing::warn!(
-                "failed to remove master playlist {}: {e}",
-                master_playlist_path.display()
-            );
-        }
-        // バリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
-        for vr in &run.variant_runs {
-            if let Err(e) = std::fs::remove_dir(&vr.variant_directory)
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(
-                    "failed to remove variant directory {}: {e}",
-                    vr.variant_directory.display()
-                );
+        match &run.destination {
+            crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
+                let master_playlist_path =
+                    std::path::PathBuf::from(directory).join("playlist.m3u8");
+                if let Err(e) = std::fs::remove_file(&master_playlist_path)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!(
+                        "failed to remove master playlist {}: {e}",
+                        master_playlist_path.display()
+                    );
+                }
+                // バリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
+                for vr in &run.variant_runs {
+                    if let Err(e) = std::fs::remove_dir(&vr.variant_path)
+                        && e.kind() != std::io::ErrorKind::NotFound
+                    {
+                        tracing::warn!(
+                            "failed to remove variant directory {}: {e}",
+                            vr.variant_path
+                        );
+                    }
+                }
+            }
+            crate::obsws::input_registry::HlsDestination::S3 { .. } => {
+                // TODO: S3 のマスタープレイリストを DeleteObject で削除する
+                // バリアント「ディレクトリ」の削除は不要（S3 にディレクトリ概念なし）
             }
         }
     }

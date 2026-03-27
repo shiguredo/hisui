@@ -164,6 +164,20 @@ impl From<std::time::SystemTimeError> for Error {
     }
 }
 
+impl From<shiguredo_http11::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_http11::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
+impl From<shiguredo_s3::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_s3::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
 impl From<shiguredo_rtmp::Error> for Error {
     #[track_caller]
     fn from(e: shiguredo_rtmp::Error) -> Self {

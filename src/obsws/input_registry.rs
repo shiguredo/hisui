@@ -840,11 +840,8 @@ impl ObswsInputRegistry {
             .unwrap_or(Duration::ZERO)
     }
 
-    pub fn hls_output_directory(&self) -> Option<&Path> {
-        self.hls_runtime
-            .run
-            .as_ref()
-            .map(|run| run.output_directory.as_path())
+    pub fn hls_destination(&self) -> Option<&HlsDestination> {
+        self.hls_runtime.run.as_ref().map(|run| &run.destination)
     }
 
     /// 指定した input_uuid を参照するシーンアイテムを全シーンから検索する。

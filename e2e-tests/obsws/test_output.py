@@ -1457,7 +1457,7 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "outputDirectory": str(hls_dir),
+                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
                     },
                 },
             )
@@ -1472,7 +1472,8 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
             )
             assert get_settings_response["d"]["requestStatus"]["result"] is True
             settings = get_settings_response["d"]["responseData"]["outputSettings"]
-            assert settings["outputDirectory"] == str(hls_dir)
+            assert settings["destination"]["type"] == "filesystem"
+            assert settings["destination"]["directory"] == str(hls_dir)
 
             # HLS 出力を開始
             start_response = await _send_obsws_request(
@@ -1603,7 +1604,7 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
                 request_id="req-set-hls-toggle-settings",
                 request_data={
                     "outputName": "hls",
-                    "outputSettings": {"outputDirectory": str(hls_dir)},
+                    "outputSettings": {"destination": {"type": "filesystem", "directory": str(hls_dir)}},
                 },
             )
             assert set_settings_response["d"]["requestStatus"]["result"] is True
@@ -1651,7 +1652,7 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
 
 
 def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Path):
-    """outputDirectory 未設定で HLS StartOutput がエラーになることを確認する"""
+    """destination 未設定で HLS StartOutput がエラーになることを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
@@ -1683,7 +1684,7 @@ def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Pa
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
 
-            # outputDirectory を設定せずに StartOutput
+            # destination を設定せずに StartOutput
             start_response = await _send_obsws_request(
                 ws,
                 request_type="StartOutput",
@@ -1742,7 +1743,7 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "outputDirectory": str(hls_dir),
+                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
                         "segmentFormat": "fmp4",
                     },
                 },
@@ -1884,7 +1885,7 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "outputDirectory": str(hls_dir),
+                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
                         "variants": [
                             {"videoBitrate": 2000000, "audioBitrate": 128000},
                             {"videoBitrate": 800000, "audioBitrate": 96000},
