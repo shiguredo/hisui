@@ -49,6 +49,17 @@ pub enum DecoderRunOutput {
     Finished,
 }
 
+/// `drain_*_decoder_output()` の結果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrainResult {
+    /// デコーダーの出力バッファが空になった（継続可能）
+    Pending,
+    /// 送信先が閉じた（pipeline が終了した）
+    PipelineClosed,
+    /// デコーダーの EOS flush が完了した
+    Finished,
+}
+
 impl AudioDecoder {
     pub fn new(
         #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
@@ -87,11 +98,12 @@ impl AudioDecoder {
 
             self.handle_input_message(message)?;
 
-            let finished = drain_audio_decoder_output(&mut self, &mut output_tx)?;
-
-            if finished {
-                output_tx.send_eos();
-                break;
+            match drain_audio_decoder_output(&mut self, &mut output_tx)? {
+                DrainResult::PipelineClosed | DrainResult::Finished => {
+                    output_tx.send_eos();
+                    break;
+                }
+                DrainResult::Pending => {}
             }
 
             if is_eos {
@@ -362,11 +374,12 @@ impl VideoDecoder {
 
             self.handle_input_message(message)?;
 
-            let finished = drain_video_decoder_output(&mut self, &mut output_tx)?;
-
-            if finished {
-                output_tx.send_eos();
-                break;
+            match drain_video_decoder_output(&mut self, &mut output_tx)? {
+                DrainResult::PipelineClosed | DrainResult::Finished => {
+                    output_tx.send_eos();
+                    break;
+                }
+                DrainResult::Pending => {}
             }
 
             if is_eos {
@@ -465,19 +478,19 @@ impl VideoDecoder {
 pub fn drain_audio_decoder_output(
     decoder: &mut AudioDecoder,
     output_tx: &mut crate::MessageSender,
-) -> Result<bool> {
+) -> Result<DrainResult> {
     loop {
         match decoder.poll_output()? {
             DecoderRunOutput::Processed(sample) => {
                 if !output_tx.send_media(sample) {
-                    return Ok(true);
+                    return Ok(DrainResult::PipelineClosed);
                 }
             }
             DecoderRunOutput::Pending => {
-                return Ok(false);
+                return Ok(DrainResult::Pending);
             }
             DecoderRunOutput::Finished => {
-                return Ok(true);
+                return Ok(DrainResult::Finished);
             }
         }
     }
@@ -486,19 +499,19 @@ pub fn drain_audio_decoder_output(
 pub fn drain_video_decoder_output(
     decoder: &mut VideoDecoder,
     output_tx: &mut crate::MessageSender,
-) -> Result<bool> {
+) -> Result<DrainResult> {
     loop {
         match decoder.poll_output()? {
             DecoderRunOutput::Processed(sample) => {
                 if !output_tx.send_media(sample) {
-                    return Ok(true);
+                    return Ok(DrainResult::PipelineClosed);
                 }
             }
             DecoderRunOutput::Pending => {
-                return Ok(false);
+                return Ok(DrainResult::Pending);
             }
             DecoderRunOutput::Finished => {
-                return Ok(true);
+                return Ok(DrainResult::Finished);
             }
         }
     }

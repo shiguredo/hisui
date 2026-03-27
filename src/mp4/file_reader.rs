@@ -232,7 +232,9 @@ impl Mp4FileReader {
                 decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
                     std::sync::Arc::new(audio_data),
                 )))?;
-                if crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)? {
+                if crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?
+                    != crate::decoder::DrainResult::Pending
+                {
                     return Ok(true);
                 }
             } else if !sender.send_audio(audio_data).await {
@@ -290,7 +292,9 @@ impl Mp4FileReader {
                 decoder.handle_input_sample(Some(crate::MediaFrame::Video(
                     std::sync::Arc::new(video_frame),
                 )))?;
-                if crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)? {
+                if crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?
+                    != crate::decoder::DrainResult::Pending
+                {
                     return Ok(true);
                 }
             } else if !sender.send_video(video_frame).await {
@@ -323,18 +327,19 @@ impl Mp4FileReader {
     }
 
     fn flush_and_send_eos(&mut self) -> Result<()> {
-        // デコーダーの残りのフレームを flush する
+        // デコーダーの残りのフレームを flush する。
+        // EOS flush 中に pipeline が閉じるのは正常な停止シーケンスなので、DrainResult は無視する。
         if let Some(decoder) = self.audio_decoder.as_mut()
             && let Some(sender) = self.audio_sender.as_mut()
         {
             decoder.handle_input_sample(None)?;
-            crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?;
+            let _ = crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?;
         }
         if let Some(decoder) = self.video_decoder.as_mut()
             && let Some(sender) = self.video_sender.as_mut()
         {
             decoder.handle_input_sample(None)?;
-            crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?;
+            let _ = crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?;
         }
         if let Some(sender) = self.audio_sender.as_mut() {
             sender.send_eos();

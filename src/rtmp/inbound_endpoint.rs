@@ -454,7 +454,11 @@ impl RtmpPublisherHandler {
             decoder.handle_input_sample(Some(crate::MediaFrame::Audio(std::sync::Arc::new(
                 audio_data,
             ))))?;
-            crate::decoder::drain_audio_decoder_output(decoder, tx)?;
+            if crate::decoder::drain_audio_decoder_output(decoder, tx)?
+                == crate::decoder::DrainResult::PipelineClosed
+            {
+                return Err(crate::Error::new("audio track pipeline closed"));
+            }
         }
         Ok(())
     }
@@ -476,7 +480,11 @@ impl RtmpPublisherHandler {
             decoder.handle_input_sample(Some(crate::MediaFrame::Video(std::sync::Arc::new(
                 video_frame,
             ))))?;
-            crate::decoder::drain_video_decoder_output(decoder, tx)?;
+            if crate::decoder::drain_video_decoder_output(decoder, tx)?
+                == crate::decoder::DrainResult::PipelineClosed
+            {
+                return Err(crate::Error::new("video track pipeline closed"));
+            }
         }
         Ok(())
     }

@@ -647,8 +647,14 @@ impl RtspSessionRunner {
                             video_frame,
                         ))))
                         .map_err(SessionError::Fatal)?;
-                    crate::decoder::drain_video_decoder_output(decoder, tx)
-                        .map_err(SessionError::Fatal)?;
+                    if crate::decoder::drain_video_decoder_output(decoder, tx)
+                        .map_err(SessionError::Fatal)?
+                        == crate::decoder::DrainResult::PipelineClosed
+                    {
+                        return Err(SessionError::Retryable(Error::new(
+                            "video track pipeline closed",
+                        )));
+                    }
                 }
             }
             return Ok(());
@@ -690,8 +696,14 @@ impl RtspSessionRunner {
                             audio_frame,
                         ))))
                         .map_err(SessionError::Fatal)?;
-                    crate::decoder::drain_audio_decoder_output(decoder, tx)
-                        .map_err(SessionError::Fatal)?;
+                    if crate::decoder::drain_audio_decoder_output(decoder, tx)
+                        .map_err(SessionError::Fatal)?
+                        == crate::decoder::DrainResult::PipelineClosed
+                    {
+                        return Err(SessionError::Retryable(Error::new(
+                            "audio track pipeline closed",
+                        )));
+                    }
                 }
             }
         }

@@ -546,7 +546,11 @@ fn publish_samples(
                     decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
                         std::sync::Arc::new(frame),
                     )))?;
-                    crate::decoder::drain_audio_decoder_output(decoder, tx)?;
+                    if crate::decoder::drain_audio_decoder_output(decoder, tx)?
+                        == crate::decoder::DrainResult::PipelineClosed
+                    {
+                        return Err(crate::Error::new("audio track pipeline closed"));
+                    }
                 }
             }
             TsSample::Video(mut frame) => {
@@ -561,7 +565,11 @@ fn publish_samples(
                     decoder.handle_input_sample(Some(crate::MediaFrame::Video(
                         std::sync::Arc::new(frame),
                     )))?;
-                    crate::decoder::drain_video_decoder_output(decoder, tx)?;
+                    if crate::decoder::drain_video_decoder_output(decoder, tx)?
+                        == crate::decoder::DrainResult::PipelineClosed
+                    {
+                        return Err(crate::Error::new("video track pipeline closed"));
+                    }
                 }
             }
         }
