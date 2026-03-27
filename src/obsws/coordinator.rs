@@ -2124,6 +2124,81 @@ impl ObswsCoordinator {
                 ),
             );
         }
+        // S3 + lifetimeDays 指定時はバケットに lifecycle ルールを設定する
+        if let HlsDestination::S3 {
+            bucket,
+            prefix,
+            region,
+            endpoint,
+            use_path_style,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            lifetime_days: Some(days),
+        } = destination
+        {
+            let s3_client = build_s3_client(
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                endpoint.as_deref(),
+                *use_path_style,
+            );
+            match s3_client {
+                Ok(client) => {
+                    // prefix スコープの expiration ルールを設定する
+                    let rule_id = format!("hisui-hls-{}", prefix.replace('/', "-"));
+                    let rule = shiguredo_s3::types::LifecycleRule {
+                        id: Some(rule_id),
+                        status: shiguredo_s3::types::ExpirationStatus::Enabled,
+                        filter: Some(shiguredo_s3::types::LifecycleRuleFilter {
+                            prefix: Some(prefix.clone()),
+                            tag: None,
+                            object_size_greater_than: None,
+                            object_size_less_than: None,
+                            and: None,
+                        }),
+                        expiration: Some(shiguredo_s3::types::LifecycleExpiration {
+                            days: Some(*days as i32),
+                            date: None,
+                            expired_object_delete_marker: None,
+                        }),
+                        transitions: None,
+                        noncurrent_version_transitions: None,
+                        noncurrent_version_expiration: None,
+                        abort_incomplete_multipart_upload: None,
+                    };
+                    let request = client
+                        .client()
+                        .put_bucket_lifecycle_configuration()
+                        .bucket(bucket)
+                        .rule(rule)
+                        .build_request();
+                    match request {
+                        Ok(req) => {
+                            if let Err(e) = client.execute(&req).await {
+                                tracing::warn!(
+                                    "failed to set S3 lifecycle configuration: {}",
+                                    e.display()
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "failed to build PutBucketLifecycleConfiguration request: {e}"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "failed to build S3 client for lifecycle configuration: {}",
+                        e.display()
+                    );
+                }
+            }
+        }
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
             self.input_registry.deactivate_hls();
             return OutputOperationOutcome::failure(
@@ -3066,6 +3141,34 @@ async fn stop_processors_staged_record(
     Ok(())
 }
 
+/// S3 クライアントを構築する
+fn build_s3_client(
+    region: &str,
+    access_key_id: &str,
+    secret_access_key: &str,
+    session_token: Option<&str>,
+    endpoint: Option<&str>,
+    use_path_style: bool,
+) -> crate::Result<crate::s3::S3HttpClient> {
+    let credential = match session_token {
+        Some(token) => {
+            shiguredo_s3::Credential::with_session_token(access_key_id, secret_access_key, token)
+        }
+        None => shiguredo_s3::Credential::new(access_key_id, secret_access_key),
+    };
+    let mut config_builder = shiguredo_s3::S3Config::builder()
+        .region(region)
+        .credential(credential)
+        .use_path_style(use_path_style);
+    if let Some(ep) = endpoint {
+        config_builder = config_builder.endpoint(ep);
+    }
+    let s3_config = config_builder
+        .build()
+        .map_err(|e| crate::Error::new(format!("failed to build S3 config: {e}")))?;
+    Ok(crate::s3::S3HttpClient::new(s3_config))
+}
+
 /// HLS 用プロセッサを起動する
 async fn start_hls_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
@@ -3173,26 +3276,16 @@ async fn start_hls_processors(
                 session_token,
                 ..
             } => {
-                let credential = match session_token {
-                    Some(token) => shiguredo_s3::Credential::with_session_token(
-                        access_key_id,
-                        secret_access_key,
-                        token,
-                    ),
-                    None => shiguredo_s3::Credential::new(access_key_id, secret_access_key),
-                };
-                let mut config_builder = shiguredo_s3::S3Config::builder()
-                    .region(region)
-                    .credential(credential)
-                    .use_path_style(*use_path_style);
-                if let Some(ep) = endpoint {
-                    config_builder = config_builder.endpoint(ep);
-                }
-                let s3_config = config_builder
-                    .build()
-                    .map_err(|e| crate::Error::new(format!("failed to build S3 config: {e}")))?;
+                let client = build_s3_client(
+                    region,
+                    access_key_id,
+                    secret_access_key,
+                    session_token.as_deref(),
+                    endpoint.as_deref(),
+                    *use_path_style,
+                )?;
                 crate::hls::writer::HlsStorageConfig::S3 {
-                    client: crate::s3::S3HttpClient::new(s3_config),
+                    client,
                     bucket: bucket.clone(),
                     prefix: variant_run.variant_path.clone(),
                 }
@@ -3263,25 +3356,14 @@ async fn start_hls_processors(
                 session_token,
                 ..
             } => {
-                let credential = match session_token {
-                    Some(token) => shiguredo_s3::Credential::with_session_token(
-                        access_key_id,
-                        secret_access_key,
-                        token,
-                    ),
-                    None => shiguredo_s3::Credential::new(access_key_id, secret_access_key),
-                };
-                let mut config_builder = shiguredo_s3::S3Config::builder()
-                    .region(region)
-                    .credential(credential)
-                    .use_path_style(*use_path_style);
-                if let Some(ep) = endpoint {
-                    config_builder = config_builder.endpoint(ep);
-                }
-                let s3_config = config_builder
-                    .build()
-                    .map_err(|e| crate::Error::new(format!("failed to build S3 config: {e}")))?;
-                let s3_client = crate::s3::S3HttpClient::new(s3_config);
+                let s3_client = build_s3_client(
+                    region,
+                    access_key_id,
+                    secret_access_key,
+                    session_token.as_deref(),
+                    endpoint.as_deref(),
+                    *use_path_style,
+                )?;
                 let key = if prefix.is_empty() {
                     "playlist.m3u8".to_owned()
                 } else {
@@ -3415,23 +3497,14 @@ async fn stop_processors_staged_hls(
             } => {
                 // マスタープレイリストを DeleteObject で削除する
                 // バリアント「ディレクトリ」の削除は不要（S3 にディレクトリ概念なし）
-                let credential = match session_token {
-                    Some(token) => shiguredo_s3::Credential::with_session_token(
-                        access_key_id,
-                        secret_access_key,
-                        token,
-                    ),
-                    None => shiguredo_s3::Credential::new(access_key_id, secret_access_key),
-                };
-                let mut config_builder = shiguredo_s3::S3Config::builder()
-                    .region(region)
-                    .credential(credential)
-                    .use_path_style(*use_path_style);
-                if let Some(ep) = endpoint {
-                    config_builder = config_builder.endpoint(ep);
-                }
-                if let Ok(s3_config) = config_builder.build() {
-                    let s3_client = crate::s3::S3HttpClient::new(s3_config);
+                if let Ok(s3_client) = build_s3_client(
+                    region,
+                    access_key_id,
+                    secret_access_key,
+                    session_token.as_deref(),
+                    endpoint.as_deref(),
+                    *use_path_style,
+                ) {
                     let key = if prefix.is_empty() {
                         "playlist.m3u8".to_owned()
                     } else {

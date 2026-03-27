@@ -555,7 +555,7 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 | `endpoint` | string | - | カスタムエンドポイント URL（MinIO 等） |
 | `usePathStyle` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
 | `credentials` | object | 必須 | 認証情報（下記参照） |
-| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数）。設定の受け付けのみ。バケットへの lifecycle ルール自動設定は未実装 |
+| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数）。指定時は HLS 開始時にバケットへ lifecycle ルール（prefix スコープの Expiration）を自動設定する |
 
 **`credentials`:**
 

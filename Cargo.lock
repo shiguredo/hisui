@@ -1124,9 +1124,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_s3"
-version = "2026.1.0-canary.0"
+version = "2026.1.0-canary.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eccec7a8a593cff37be61a25bc864192bc888fffc860012895b1bcd1c14b10d5"
+checksum = "2a85063822fd7723888e04a1119f0e9fb0cfa02ffba0b41aef83099b7311081f"
 dependencies = [
  "aws-lc-rs",
  "base64",
