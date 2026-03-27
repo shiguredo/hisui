@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::obsws::session::{ObswsSession, SessionAction};
 
-const GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_TYPE: &str = "GetBootstrapWebRtcStats";
+const GET_WEBRTC_STATS_REQUEST_TYPE: &str = "GetWebRtcStats";
 
 enum PcEvent {
     ConnectionChange(PeerConnectionState),
@@ -792,14 +792,14 @@ async fn handle_bootstrap_webrtc_stats_request(
     };
 
     let request_type = request.request_type.unwrap_or_default();
-    if request_type != GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_TYPE {
+    if request_type != GET_WEBRTC_STATS_REQUEST_TYPE {
         return None;
     }
 
     let request_id = request.request_id.unwrap_or_default();
     if request_id.is_empty() {
         return Some(crate::obsws::response::build_request_response_error(
-            GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_TYPE,
+            GET_WEBRTC_STATS_REQUEST_TYPE,
             "",
             crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
             "Missing required requestId field",
@@ -808,12 +808,12 @@ async fn handle_bootstrap_webrtc_stats_request(
 
     Some(match collect_webrtc_stats_json(&sess.pc).await {
         Ok(stats) => crate::obsws::response::build_request_response_success(
-            GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_TYPE,
+            GET_WEBRTC_STATS_REQUEST_TYPE,
             &request_id,
             |f| f.member("stats", stats.clone()),
         ),
         Err(e) => crate::obsws::response::build_request_response_error(
-            GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_TYPE,
+            GET_WEBRTC_STATS_REQUEST_TYPE,
             &request_id,
             crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
             &e.reason,

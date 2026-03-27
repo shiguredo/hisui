@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, oneshot};
 
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
-const GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_ID: &str = "req-get-bootstrap-webrtc-stats";
+const GET_WEBRTC_STATS_REQUEST_ID: &str = "req-get-webrtc-stats";
 const MAX_FRAMES_PER_POLL: usize = 8;
 const INITIAL_VIDEO_FRAME_GRACE: Duration = Duration::from_secs(2);
 
@@ -588,14 +588,14 @@ fn make_create_mp4_input_request(input_path: &str) -> String {
     .to_string()
 }
 
-fn make_get_bootstrap_webrtc_stats_request() -> String {
+fn make_get_webrtc_stats_request() -> String {
     nojson::object(|f| {
         f.member("op", 6)?;
         f.member(
             "d",
             nojson::object(|f| {
-                f.member("requestType", "GetBootstrapWebRtcStats")?;
-                f.member("requestId", GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_ID)
+                f.member("requestType", "GetWebRtcStats")?;
+                f.member("requestId", GET_WEBRTC_STATS_REQUEST_ID)
             }),
         )
     })
@@ -658,7 +658,7 @@ fn parse_obsws_server_webrtc_stats_response(text: &str) -> Option<Result<String,
         .to_member("requestId")
         .and_then(|v| v.required()?.try_into())
         .ok()?;
-    if request_id != GET_BOOTSTRAP_WEBRTC_STATS_REQUEST_ID {
+    if request_id != GET_WEBRTC_STATS_REQUEST_ID {
         return None;
     }
 
@@ -674,9 +674,9 @@ fn parse_obsws_server_webrtc_stats_response(text: &str) -> Option<Result<String,
             } else {
                 None
             };
-        return Some(Err(comment.unwrap_or_else(|| {
-            "GetBootstrapWebRtcStats request failed".to_owned()
-        })));
+        return Some(Err(
+            comment.unwrap_or_else(|| "GetWebRtcStats request failed".to_owned())
+        ));
     }
 
     let response_data = d.to_member("responseData").ok()?.required().ok()?;
@@ -1015,28 +1015,28 @@ async fn request_server_webrtc_stats(
         return Err("obsws DataChannel is not open".to_owned());
     }
 
-    let request = make_get_bootstrap_webrtc_stats_request();
+    let request = make_get_webrtc_stats_request();
     if !dc.send(request.as_bytes(), false) {
-        return Err("failed to send GetBootstrapWebRtcStats request".to_owned());
+        return Err("failed to send GetWebRtcStats request".to_owned());
     }
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
-            return Err("timed out waiting for GetBootstrapWebRtcStats response".to_owned());
+            return Err("timed out waiting for GetWebRtcStats response".to_owned());
         }
 
         let event = tokio::time::timeout(remaining, event_rx.recv())
             .await
-            .map_err(|_| "timed out waiting for GetBootstrapWebRtcStats response".to_owned())?
+            .map_err(|_| "timed out waiting for GetWebRtcStats response".to_owned())?
             .ok_or_else(|| {
-                "event channel closed while waiting for GetBootstrapWebRtcStats response".to_owned()
+                "event channel closed while waiting for GetWebRtcStats response".to_owned()
             })?;
 
         if let ClientEvent::ObswsMessage { data } = event {
             let text = std::str::from_utf8(&data)
-                .map_err(|e| format!("GetBootstrapWebRtcStats response was not UTF-8: {e}"))?;
+                .map_err(|e| format!("GetWebRtcStats response was not UTF-8: {e}"))?;
             if let Some(result) = parse_obsws_server_webrtc_stats_response(text) {
                 return result;
             }

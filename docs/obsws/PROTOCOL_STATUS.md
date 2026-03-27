@@ -418,10 +418,10 @@ OBS WebSocket 仕様には存在しない、hisui 固有の拡張機能。
 
 以下の `requestType` は OBS WebSocket 仕様には存在しないが、hisui が独自に追加した Request である。
 
-#### `GetBootstrapWebRtcStats`
+#### `GetWebRtcStats`
 
-bootstrap 用の `obsws` DataChannel 経由で、server 側 `PeerConnection::get_stats()` の生 JSON を取得する。
-`examples/obsws_bootstrap` の切り分け用途を想定した独自 Request であり、通常の OBS WebSocket client 互換機能ではない。
+`obsws` DataChannel 経由で、server 側 `PeerConnection::get_stats()` の生 JSON を取得する。
+WebRTC 接続の切り分けや観測用途を想定した、hisui 独自の Request である。
 
 **Request:**
 
