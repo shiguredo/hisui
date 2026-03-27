@@ -26,6 +26,8 @@ const OBSWS_RECORD_OUTPUT_KIND: &str = "mp4_output";
 const OBSWS_RTMP_OUTBOUND_OUTPUT_KIND: &str = "rtmp_outbound_output";
 const OBSWS_SORA_OUTPUT_KIND: &str = "sora_webrtc_output";
 const OBSWS_HLS_OUTPUT_KIND: &str = "hls_output";
+const OBSWS_MPEG_DASH_OUTPUT_NAME: &str = "mpeg_dash";
+const OBSWS_MPEG_DASH_OUTPUT_KIND: &str = "mpeg_dash_output";
 
 #[derive(Debug, Clone, Copy)]
 struct ObswsOutputEntry {
@@ -136,6 +138,10 @@ pub fn build_get_output_list_response(request_id: &str) -> nojson::RawJsonOwned 
             output_name: OBSWS_HLS_OUTPUT_NAME,
             output_kind: OBSWS_HLS_OUTPUT_KIND,
         },
+        ObswsOutputEntry {
+            output_name: OBSWS_MPEG_DASH_OUTPUT_NAME,
+            output_kind: OBSWS_MPEG_DASH_OUTPUT_KIND,
+        },
     ];
     super::build_request_response_success("GetOutputList", request_id, |f| {
         f.member("outputs", outputs)
@@ -169,6 +175,9 @@ pub fn build_get_output_settings_response(
         }
         OBSWS_SORA_OUTPUT_NAME => build_sora_output_settings_response(request_id, input_registry),
         OBSWS_HLS_OUTPUT_NAME => build_hls_output_settings_response(request_id, input_registry),
+        OBSWS_MPEG_DASH_OUTPUT_NAME => {
+            build_dash_output_settings_response(request_id, input_registry)
+        }
         _ => super::build_request_response_error(
             "GetOutputSettings",
             request_id,
@@ -305,6 +314,20 @@ pub fn build_set_output_settings_response(
                 ),
             }
         }
+        OBSWS_MPEG_DASH_OUTPUT_NAME => {
+            let output_settings = fields.output_settings.value();
+            match parse_dash_settings(output_settings, input_registry) {
+                Ok(()) => {
+                    super::build_request_response_success_no_data("SetOutputSettings", request_id)
+                }
+                Err(error) => super::build_request_response_error(
+                    "SetOutputSettings",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &error,
+                ),
+            }
+        }
         _ => super::build_request_response_error(
             "SetOutputSettings",
             request_id,
@@ -418,6 +441,9 @@ pub fn build_get_output_status_response(
         }
         OBSWS_HLS_OUTPUT_NAME => {
             build_get_hls_status_as_output_response(request_id, input_registry)
+        }
+        OBSWS_MPEG_DASH_OUTPUT_NAME => {
+            build_get_dash_status_as_output_response(request_id, input_registry)
         }
         _ => super::build_request_response_error(
             "GetOutputStatus",
@@ -1017,6 +1043,303 @@ fn parse_hls_settings(
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
         segment_format,
+        variants: variants.unwrap_or(existing.variants),
+    });
+    Ok(())
+}
+
+// --- MPEG-DASH 出力 ---
+
+fn build_dash_output_settings_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let settings = input_registry.dash_settings();
+    super::build_request_response_success("GetOutputSettings", request_id, |f| {
+        f.member("outputName", OBSWS_MPEG_DASH_OUTPUT_NAME)?;
+        f.member("outputKind", OBSWS_MPEG_DASH_OUTPUT_KIND)?;
+        f.member("outputSettings", settings)
+    })
+}
+
+fn build_get_dash_status_as_output_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let active = input_registry.is_dash_active();
+    let duration = if active {
+        input_registry.dash_uptime()
+    } else {
+        std::time::Duration::ZERO
+    };
+    let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+    let output_timecode = format_timecode(duration);
+    let output_path = input_registry
+        .dash_destination()
+        .map(|d| d.output_path())
+        .unwrap_or_default();
+    // TODO: outputBytes / outputSkippedFrames / outputTotalFrames は未対応。0 固定。
+    super::build_request_response_success("GetOutputStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputReconnecting", false)?;
+        f.member("outputTimecode", &output_timecode)?;
+        f.member("outputDuration", output_duration)?;
+        f.member("outputCongestion", 0.0)?;
+        f.member("outputBytes", 0)?;
+        f.member("outputSkippedFrames", 0)?;
+        f.member("outputTotalFrames", 0)?;
+        f.member("outputPath", &output_path)
+    })
+}
+
+/// MPEG-DASH 出力の設定をパースして registry に保存する。
+/// 省略されたフィールドは既存値を維持する。
+fn parse_dash_settings(
+    output_settings: nojson::RawJsonValue<'_, '_>,
+    input_registry: &mut ObswsInputRegistry,
+) -> Result<(), String> {
+    // destination オブジェクトのパース
+    let destination: Option<crate::obsws::input_registry::DashDestination> = if let Some(
+        dest_value,
+    ) = output_settings
+        .to_member("destination")
+        .map_err(|e| e.to_string())?
+        .optional()
+    {
+        let dest_type: String = dest_value
+            .to_member("type")
+            .map_err(|e| e.to_string())?
+            .required()
+            .map_err(|_| "destination.type is required".to_owned())?
+            .try_into()
+            .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+        match dest_type.as_str() {
+            "filesystem" => {
+                let directory: String = dest_value
+                    .to_member("directory")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.directory is required for filesystem".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                if directory.is_empty() {
+                    return Err("destination.directory must not be empty".to_owned());
+                }
+                Some(crate::obsws::input_registry::DashDestination::Filesystem { directory })
+            }
+            "s3" => {
+                let bucket: String = dest_value
+                    .to_member("bucket")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.bucket is required for s3".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let prefix: String = super::optional_non_empty_string_member(dest_value, "prefix")
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or_default();
+                let region: String = dest_value
+                    .to_member("region")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.region is required for s3".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let endpoint: Option<String> =
+                    super::optional_non_empty_string_member(dest_value, "endpoint")
+                        .map_err(|e| e.to_string())?;
+                let use_path_style: bool = dest_value
+                    .to_member("usePathStyle")
+                    .map_err(|e| e.to_string())?
+                    .optional()
+                    .map(|v| v.try_into())
+                    .transpose()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?
+                    .unwrap_or(false);
+
+                // credentials オブジェクト
+                let creds_value = dest_value
+                    .to_member("credentials")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.credentials is required for s3".to_owned())?;
+                let access_key_id: String = creds_value
+                    .to_member("accessKeyId")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "credentials.accessKeyId is required".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let secret_access_key: String = creds_value
+                    .to_member("secretAccessKey")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "credentials.secretAccessKey is required".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let session_token: Option<String> =
+                    super::optional_non_empty_string_member(creds_value, "sessionToken")
+                        .map_err(|e| e.to_string())?;
+
+                let lifetime_days: Option<u32> = dest_value
+                    .to_member("lifetimeDays")
+                    .map_err(|e| e.to_string())?
+                    .optional()
+                    .map(|v| v.try_into())
+                    .transpose()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+                if bucket.is_empty() {
+                    return Err("destination.bucket must not be empty".to_owned());
+                }
+                if region.is_empty() {
+                    return Err("destination.region must not be empty".to_owned());
+                }
+                if let Some(days) = lifetime_days {
+                    if days == 0 {
+                        return Err("destination.lifetimeDays must be positive".to_owned());
+                    }
+                    if prefix.is_empty() {
+                        return Err("destination.prefix is required when lifetimeDays is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
+                    }
+                }
+
+                Some(crate::obsws::input_registry::DashDestination::S3 {
+                    bucket,
+                    prefix,
+                    region,
+                    endpoint,
+                    use_path_style,
+                    access_key_id,
+                    secret_access_key,
+                    session_token,
+                    lifetime_days,
+                })
+            }
+            _ => {
+                return Err(format!(
+                    "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    let segment_duration: Option<f64> = output_settings
+        .to_member("segmentDuration")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    let max_retained_segments: Option<usize> = output_settings
+        .to_member("maxRetainedSegments")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    // variants 配列のパース
+    let variants: Option<Vec<crate::obsws::input_registry::DashVariant>> =
+        if let Some(variants_value) = output_settings
+            .to_member("variants")
+            .map_err(|e| e.to_string())?
+            .optional()
+        {
+            let mut variants = Vec::new();
+            for item in variants_value.to_array().map_err(|e| e.to_string())? {
+                let video_bitrate: usize = item
+                    .to_member("videoBitrate")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "variants[].videoBitrate is required".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let audio_bitrate: usize = item
+                    .to_member("audioBitrate")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "variants[].audioBitrate is required".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let width: Option<usize> = item
+                    .to_member("width")
+                    .map_err(|e| e.to_string())?
+                    .optional()
+                    .map(|v| v.try_into())
+                    .transpose()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                let height: Option<usize> = item
+                    .to_member("height")
+                    .map_err(|e| e.to_string())?
+                    .optional()
+                    .map(|v| v.try_into())
+                    .transpose()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+                if video_bitrate == 0 {
+                    return Err("variants[].videoBitrate must be positive".to_owned());
+                }
+                if audio_bitrate == 0 {
+                    return Err("variants[].audioBitrate must be positive".to_owned());
+                }
+                let width = match width {
+                    Some(0) => return Err("variants[].width must be positive".to_owned()),
+                    Some(w) => Some(
+                        crate::types::EvenUsize::new(w).ok_or("variants[].width must be even")?,
+                    ),
+                    None => None,
+                };
+                let height = match height {
+                    Some(0) => return Err("variants[].height must be positive".to_owned()),
+                    Some(h) => Some(
+                        crate::types::EvenUsize::new(h).ok_or("variants[].height must be even")?,
+                    ),
+                    None => None,
+                };
+                // width と height は両方指定するか両方省略する必要がある
+                if width.is_some() != height.is_some() {
+                    return Err(
+                    "variants[].width and variants[].height must both be specified or both omitted"
+                        .to_owned(),
+                    );
+                }
+
+                variants.push(crate::obsws::input_registry::DashVariant {
+                    video_bitrate_bps: video_bitrate,
+                    audio_bitrate_bps: audio_bitrate,
+                    width,
+                    height,
+                });
+            }
+            if variants.is_empty() {
+                return Err("variants must not be empty".to_owned());
+            }
+            Some(variants)
+        } else {
+            None
+        };
+
+    if let Some(duration) = segment_duration
+        && duration <= 0.0
+    {
+        return Err("segmentDuration must be positive".to_owned());
+    }
+    if let Some(count) = max_retained_segments
+        && count == 0
+    {
+        return Err("maxRetainedSegments must be at least 1".to_owned());
+    }
+
+    let existing = input_registry.dash_settings().clone();
+    input_registry.set_dash_settings(crate::obsws::input_registry::ObswsDashSettings {
+        destination: destination.or(existing.destination),
+        segment_duration: segment_duration.unwrap_or(existing.segment_duration),
+        max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
         variants: variants.unwrap_or(existing.variants),
     });
     Ok(())

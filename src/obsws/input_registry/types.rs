@@ -1328,6 +1328,232 @@ impl nojson::DisplayJson for ObswsHlsSettings {
     }
 }
 
+// MPEG-DASH 設定
+pub const DEFAULT_DASH_SEGMENT_DURATION_SECS: f64 = 2.0;
+pub const DEFAULT_DASH_MAX_RETAINED_SEGMENTS: usize = 6;
+pub const DEFAULT_DASH_VIDEO_BITRATE_BPS: usize = 2_000_000;
+pub const DEFAULT_DASH_AUDIO_BITRATE_BPS: usize = 128_000;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DashVariant {
+    /// ビデオビットレート (bps)
+    pub video_bitrate_bps: usize,
+    /// オーディオビットレート (bps)
+    pub audio_bitrate_bps: usize,
+    /// ビデオ幅（省略時はミキサーのキャンバスサイズを使用）
+    pub width: Option<crate::types::EvenUsize>,
+    /// ビデオ高さ（省略時はミキサーのキャンバスサイズを使用）
+    pub height: Option<crate::types::EvenUsize>,
+}
+
+impl Default for DashVariant {
+    fn default() -> Self {
+        Self {
+            video_bitrate_bps: DEFAULT_DASH_VIDEO_BITRATE_BPS,
+            audio_bitrate_bps: DEFAULT_DASH_AUDIO_BITRATE_BPS,
+            width: None,
+            height: None,
+        }
+    }
+}
+
+impl nojson::DisplayJson for DashVariant {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("videoBitrate", self.video_bitrate_bps)?;
+            f.member("audioBitrate", self.audio_bitrate_bps)?;
+            if let Some(width) = self.width {
+                f.member("width", width.get())?;
+            }
+            if let Some(height) = self.height {
+                f.member("height", height.get())?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+/// MPEG-DASH 出力先の設定
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DashDestination {
+    /// ローカルファイルシステムへの出力
+    Filesystem { directory: String },
+    /// S3 互換オブジェクトストレージへの出力
+    S3 {
+        bucket: String,
+        prefix: String,
+        region: String,
+        endpoint: Option<String>,
+        use_path_style: bool,
+        access_key_id: String,
+        secret_access_key: String,
+        session_token: Option<String>,
+        /// オブジェクトのライフタイム（日数）。
+        /// 指定時はバケットに lifecycle ルールを設定する（セーフティネット用途）。
+        /// 明示的な DeleteObject は常に実行する。
+        lifetime_days: Option<u32>,
+    },
+}
+
+impl nojson::DisplayJson for DashDestination {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            Self::Filesystem { directory } => nojson::object(|f| {
+                f.member("type", "filesystem")?;
+                f.member("directory", directory)
+            })
+            .fmt(f),
+            Self::S3 {
+                bucket,
+                prefix,
+                region,
+                endpoint,
+                use_path_style,
+                // 認証情報はレスポンスに含めない
+                access_key_id: _,
+                secret_access_key: _,
+                session_token: _,
+                lifetime_days,
+            } => nojson::object(|f| {
+                f.member("type", "s3")?;
+                f.member("bucket", bucket)?;
+                f.member("prefix", prefix)?;
+                f.member("region", region)?;
+                if let Some(endpoint) = endpoint {
+                    f.member("endpoint", endpoint)?;
+                }
+                f.member("usePathStyle", *use_path_style)?;
+                if let Some(days) = lifetime_days {
+                    f.member("lifetimeDays", *days)?;
+                }
+                Ok(())
+            })
+            .fmt(f),
+        }
+    }
+}
+
+impl DashDestination {
+    /// GetOutputStatus 用の outputPath を生成する
+    pub fn output_path(&self) -> String {
+        match self {
+            Self::Filesystem { directory } => {
+                let path = std::path::PathBuf::from(directory).join("manifest.mpd");
+                path.display().to_string()
+            }
+            Self::S3 { bucket, prefix, .. } => {
+                if prefix.is_empty() {
+                    format!("s3://{bucket}/manifest.mpd")
+                } else {
+                    format!("s3://{bucket}/{prefix}/manifest.mpd")
+                }
+            }
+        }
+    }
+
+    /// バリアント用のサブパスを生成する
+    pub fn variant_path(&self, index: usize) -> String {
+        match self {
+            Self::Filesystem { directory } => std::path::PathBuf::from(directory)
+                .join(format!("variant_{index}"))
+                .display()
+                .to_string(),
+            Self::S3 { prefix, .. } => {
+                if prefix.is_empty() {
+                    format!("variant_{index}")
+                } else {
+                    format!("{prefix}/variant_{index}")
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObswsDashSettings {
+    // StartOutput 時に必須。登録時点では未指定も許容する。
+    pub destination: Option<DashDestination>,
+    /// セグメントの目標尺（秒）
+    pub segment_duration: f64,
+    /// マニフェストに保持するセグメント数
+    pub max_retained_segments: usize,
+    /// ABR バリアント定義。
+    /// 要素が 1 つの場合は non-ABR。
+    pub variants: Vec<DashVariant>,
+}
+
+impl Default for ObswsDashSettings {
+    fn default() -> Self {
+        Self {
+            destination: None,
+            segment_duration: DEFAULT_DASH_SEGMENT_DURATION_SECS,
+            max_retained_segments: DEFAULT_DASH_MAX_RETAINED_SEGMENTS,
+            variants: vec![DashVariant::default()],
+        }
+    }
+}
+
+impl nojson::DisplayJson for ObswsDashSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(destination) = &self.destination {
+                f.member("destination", destination)?;
+            }
+            f.member("segmentDuration", self.segment_duration)?;
+            f.member("maxRetainedSegments", self.max_retained_segments)?;
+            f.member(
+                "variants",
+                nojson::array(|f| {
+                    for variant in &self.variants {
+                        f.element(variant)?;
+                    }
+                    Ok(())
+                }),
+            )
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsDashRun {
+    pub source_processor_ids: Vec<ProcessorId>,
+    pub audio_mixer_processor_id: ProcessorId,
+    pub video_mixer_processor_id: ProcessorId,
+    pub destination: DashDestination,
+    /// バリアントごとの実行情報
+    pub variant_runs: Vec<ObswsDashVariantRun>,
+}
+
+impl ObswsDashRun {
+    /// ABR かどうかを返す
+    pub fn is_abr(&self) -> bool {
+        self.variant_runs.len() > 1
+    }
+}
+
+/// MPEG-DASH ABR バリアントごとの実行情報
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsDashVariantRun {
+    pub video: ObswsRecordTrackRun,
+    pub audio: ObswsRecordTrackRun,
+    /// 解像度変換が必要なバリアントのスケーラープロセッサ ID
+    pub scaler_processor_id: Option<ProcessorId>,
+    /// スケーラー出力トラック ID
+    pub scaled_track_id: Option<TrackId>,
+    pub writer_processor_id: ProcessorId,
+    /// バリアントの出力パス（filesystem: ディレクトリパス、S3: prefix）
+    pub variant_path: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ObswsDashRuntimeState {
+    pub(crate) active: bool,
+    pub(crate) started_at: Option<Instant>,
+    pub(crate) run: Option<ObswsDashRun>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsSoraPublisherSettings {
     // StartOutput 時に必須。登録時点では未指定も許容する。
@@ -1487,6 +1713,7 @@ pub enum RunIdOverflowError {
     RtmpOutbound,
     SoraPublisher,
     Hls,
+    MpegDash,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1511,6 +1738,11 @@ pub enum ActivateRecordError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivateHlsError {
+    AlreadyActive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateDashError {
     AlreadyActive,
 }
 
@@ -1605,6 +1837,9 @@ pub struct ObswsInputRegistry {
     pub(crate) hls_settings: ObswsHlsSettings,
     pub(crate) hls_runtime: ObswsHlsRuntimeState,
     pub(crate) next_hls_run_id: u64,
+    pub(crate) dash_settings: ObswsDashSettings,
+    pub(crate) dash_runtime: ObswsDashRuntimeState,
+    pub(crate) next_dash_run_id: u64,
     pub(crate) canvas_width: crate::types::EvenUsize,
     pub(crate) canvas_height: crate::types::EvenUsize,
     pub(crate) frame_rate: crate::video::FrameRate,

@@ -1410,6 +1410,10 @@ impl ObswsCoordinator {
                 let outcome = self.handle_start_hls("StartOutput", request_id).await;
                 (outcome, Vec::new())
             }
+            "mpeg_dash" => {
+                let outcome = self.handle_start_mpeg_dash("StartOutput", request_id).await;
+                (outcome, Vec::new())
+            }
             _ => {
                 return self.build_error_result(
                     "StartOutput",
@@ -1500,6 +1504,10 @@ impl ObswsCoordinator {
             }
             "hls" => {
                 let outcome = self.handle_stop_hls("StopOutput", request_id).await;
+                (outcome, Vec::new())
+            }
+            "mpeg_dash" => {
+                let outcome = self.handle_stop_mpeg_dash("StopOutput", request_id).await;
                 (outcome, Vec::new())
             }
             _ => {
@@ -1652,6 +1660,16 @@ impl ObswsCoordinator {
                     self.handle_stop_hls("ToggleOutput", request_id).await
                 } else {
                     self.handle_start_hls("ToggleOutput", request_id).await
+                };
+                (outcome, !was_active, Vec::new())
+            }
+            "mpeg_dash" => {
+                let was_active = self.input_registry.is_dash_active();
+                let outcome = if was_active {
+                    self.handle_stop_mpeg_dash("ToggleOutput", request_id).await
+                } else {
+                    self.handle_start_mpeg_dash("ToggleOutput", request_id)
+                        .await
                 };
                 (outcome, !was_active, Vec::new())
             }
@@ -2264,6 +2282,292 @@ impl ObswsCoordinator {
             && let Err(e) = stop_processors_staged_hls(pipeline_handle, &run).await
         {
             tracing::warn!("failed to stop HLS processors: {}", e.display());
+        }
+        OutputOperationOutcome::success(
+            crate::obsws::response::build_stop_output_response(request_id),
+            None,
+        )
+    }
+
+    async fn handle_start_mpeg_dash(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+    ) -> OutputOperationOutcome {
+        use crate::obsws::input_registry::{
+            ActivateDashError, DashDestination, ObswsDashRun, ObswsDashVariantRun,
+            ObswsRecordTrackRun,
+        };
+        let dash_settings = self.input_registry.dash_settings().clone();
+        let Some(ref destination) = dash_settings.destination else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Missing outputSettings.destination field",
+                ),
+            );
+        };
+        if dash_settings.variants.is_empty() {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "variants must not be empty",
+                ),
+            );
+        }
+        let run_id = match self.input_registry.next_dash_run_id() {
+            Ok(run_id) => run_id,
+            Err(_) => {
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        "MPEG-DASH run ID overflow",
+                    ),
+                );
+            }
+        };
+        let mut output_plan = match build_output_plan_or_error(
+            request_type,
+            request_id,
+            &self.input_registry,
+            crate::obsws::source::ObswsOutputKind::MpegDash,
+            run_id,
+        ) {
+            Ok(plan) => plan,
+            Err(outcome) => return outcome,
+        };
+        let is_abr = dash_settings.variants.len() > 1;
+        let variant_runs: Vec<ObswsDashVariantRun> = dash_settings
+            .variants
+            .iter()
+            .enumerate()
+            .map(|(i, variant)| {
+                let variant_label = format!("v{i}");
+                let video = ObswsRecordTrackRun::new(
+                    "mpeg_dash",
+                    run_id,
+                    &format!("{variant_label}_video"),
+                    &output_plan.video_track_id,
+                );
+                let audio = ObswsRecordTrackRun::new(
+                    "mpeg_dash",
+                    run_id,
+                    &format!("{variant_label}_audio"),
+                    &output_plan.audio_track_id,
+                );
+                let needs_scaler = variant.width.zip(variant.height).is_some_and(|(w, h)| {
+                    w != output_plan.canvas_width || h != output_plan.canvas_height
+                });
+                let scaler_processor_id = if needs_scaler {
+                    Some(crate::ProcessorId::new(format!(
+                        "obsws:mpeg_dash:{run_id}:{variant_label}_scaler"
+                    )))
+                } else {
+                    None
+                };
+                let scaled_track_id = if needs_scaler {
+                    Some(crate::TrackId::new(format!(
+                        "obsws:mpeg_dash:{run_id}:{variant_label}_scaled_video"
+                    )))
+                } else {
+                    None
+                };
+                let writer_processor_id = crate::ProcessorId::new(format!(
+                    "obsws:mpeg_dash:{run_id}:{variant_label}_dash_writer"
+                ));
+                let variant_path = if is_abr {
+                    destination.variant_path(i)
+                } else {
+                    match destination {
+                        DashDestination::Filesystem { directory } => directory.clone(),
+                        DashDestination::S3 { prefix, .. } => prefix.clone(),
+                    }
+                };
+                ObswsDashVariantRun {
+                    video,
+                    audio,
+                    scaler_processor_id,
+                    scaled_track_id,
+                    writer_processor_id,
+                    variant_path,
+                }
+            })
+            .collect();
+        let run = ObswsDashRun {
+            source_processor_ids: output_plan.source_processor_ids.clone(),
+            audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
+            video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
+            destination: destination.clone(),
+            variant_runs,
+        };
+        if let Err(ActivateDashError::AlreadyActive) =
+            self.input_registry.activate_dash(run.clone())
+        {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    "MPEG-DASH is already active",
+                ),
+            );
+        }
+        // filesystem の場合のみ出力ディレクトリを作成する
+        if let DashDestination::Filesystem { directory } = destination
+            && let Err(e) = std::fs::create_dir_all(directory)
+        {
+            self.input_registry.deactivate_dash();
+            let error_comment = format!("Failed to create MPEG-DASH output directory: {e}");
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &error_comment,
+                ),
+            );
+        }
+        // S3 + lifetimeDays 指定時はバケットに lifecycle ルールを設定する
+        if let DashDestination::S3 {
+            bucket,
+            prefix,
+            region,
+            endpoint,
+            use_path_style,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            lifetime_days: Some(days),
+        } = destination
+        {
+            let s3_client = build_s3_client(
+                region,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                endpoint.as_deref(),
+                *use_path_style,
+            );
+            match s3_client {
+                Ok(client) => {
+                    let rule_id = format!("hisui-dash-{}", prefix.replace('/', "-"));
+                    let rule = shiguredo_s3::types::LifecycleRule {
+                        id: Some(rule_id),
+                        status: shiguredo_s3::types::ExpirationStatus::Enabled,
+                        filter: Some(shiguredo_s3::types::LifecycleRuleFilter {
+                            prefix: Some(prefix.clone()),
+                            tag: None,
+                            object_size_greater_than: None,
+                            object_size_less_than: None,
+                            and: None,
+                        }),
+                        expiration: Some(shiguredo_s3::types::LifecycleExpiration {
+                            days: Some(*days as i32),
+                            date: None,
+                            expired_object_delete_marker: None,
+                        }),
+                        transitions: None,
+                        noncurrent_version_transitions: None,
+                        noncurrent_version_expiration: None,
+                        abort_incomplete_multipart_upload: None,
+                    };
+                    let request = client
+                        .client()
+                        .put_bucket_lifecycle_configuration()
+                        .bucket(bucket)
+                        .rule(rule)
+                        .build_request();
+                    match request {
+                        Ok(req) => match client.execute(&req).await {
+                            Ok(response) if !response.is_success() => {
+                                tracing::warn!(
+                                    "PutBucketLifecycleConfiguration failed: status={}",
+                                    response.status_code
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "failed to set S3 lifecycle configuration: {}",
+                                    e.display()
+                                );
+                            }
+                            _ => {}
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                "failed to build PutBucketLifecycleConfiguration request: {e}"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "failed to build S3 client for lifecycle configuration: {}",
+                        e.display()
+                    );
+                }
+            }
+        }
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            self.input_registry.deactivate_dash();
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Pipeline is not initialized",
+                ),
+            );
+        };
+        if let Err(e) =
+            start_dash_processors(pipeline_handle, &mut output_plan, &run, &dash_settings).await
+        {
+            self.input_registry.deactivate_dash();
+            let _ = stop_processors_staged_dash(pipeline_handle, &run).await;
+            let error_comment = format!("Failed to start MPEG-DASH: {}", e.display());
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &error_comment,
+                ),
+            );
+        }
+        OutputOperationOutcome::success(
+            crate::obsws::response::build_start_output_response(request_id),
+            None,
+        )
+    }
+
+    async fn handle_stop_mpeg_dash(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+    ) -> OutputOperationOutcome {
+        let run = match self.input_registry.deactivate_dash() {
+            Some(run) => run,
+            None => {
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                        "MPEG-DASH is not active",
+                    ),
+                );
+            }
+        };
+        if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
+            && let Err(e) = stop_processors_staged_dash(pipeline_handle, &run).await
+        {
+            tracing::warn!("failed to stop MPEG-DASH processors: {}", e.display());
         }
         OutputOperationOutcome::success(
             crate::obsws::response::build_stop_output_response(request_id),
@@ -3546,6 +3850,238 @@ async fn stop_processors_staged_hls(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn start_dash_processors(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
+    run: &crate::obsws::input_registry::ObswsDashRun,
+    dash_settings: &crate::obsws::input_registry::ObswsDashSettings,
+) -> crate::Result<()> {
+    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
+
+    // MPEG-DASH 用にキーフレーム間隔を設定する
+    let fps = output_plan.frame_rate.numerator.get() as f64
+        / output_plan.frame_rate.denumerator.get() as f64;
+    let keyframe_interval_frames = (dash_settings.segment_duration * fps).ceil() as u32;
+    let keyframe_interval_frames = keyframe_interval_frames.max(1);
+    let encode_params = crate::encoder::encode_config_with_keyframe_interval(
+        keyframe_interval_frames,
+        output_plan.frame_rate,
+    );
+
+    let is_abr = run.is_abr();
+
+    // バリアントごとにスケーラー、エンコーダー、ライターを起動する
+    for (i, (variant, variant_run)) in dash_settings
+        .variants
+        .iter()
+        .zip(run.variant_runs.iter())
+        .enumerate()
+    {
+        // filesystem かつ ABR の場合はバリアントのサブディレクトリを作成する
+        if is_abr
+            && let crate::obsws::input_registry::DashDestination::Filesystem { .. } =
+                run.destination
+        {
+            std::fs::create_dir_all(&variant_run.variant_path).map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to create variant directory {}: {e}",
+                    variant_run.variant_path
+                ))
+            })?;
+        }
+
+        // 解像度変換が必要な場合はスケーラーを挿入する
+        let video_encoder_input_track = if let (Some(scaler_id), Some(scaled_track_id)) = (
+            &variant_run.scaler_processor_id,
+            &variant_run.scaled_track_id,
+        ) {
+            let width = variant.width.expect("infallible: scaler requires width");
+            let height = variant.height.expect("infallible: scaler requires height");
+            crate::scaler::create_processor(
+                pipeline_handle,
+                crate::scaler::VideoScalerConfig {
+                    input_track_id: variant_run.video.source_track_id.clone(),
+                    output_track_id: scaled_track_id.clone(),
+                    width,
+                    height,
+                },
+                Some(scaler_id.clone()),
+            )
+            .await?;
+            scaled_track_id.clone()
+        } else {
+            variant_run.video.source_track_id.clone()
+        };
+
+        // ビデオエンコーダー
+        crate::encoder::create_video_processor_with_params(
+            pipeline_handle,
+            video_encoder_input_track,
+            variant_run.video.encoded_track_id.clone(),
+            crate::types::CodecName::H264,
+            std::num::NonZeroUsize::new(variant.video_bitrate_bps)
+                .unwrap_or(std::num::NonZeroUsize::MIN),
+            output_plan.frame_rate,
+            Some(encode_params.clone()),
+            Some(variant_run.video.encoder_processor_id.clone()),
+        )
+        .await?;
+
+        // オーディオエンコーダー（DASH でも AAC を使用）
+        crate::encoder::create_audio_processor(
+            pipeline_handle,
+            variant_run.audio.source_track_id.clone(),
+            variant_run.audio.encoded_track_id.clone(),
+            crate::types::CodecName::Aac,
+            std::num::NonZeroUsize::new(variant.audio_bitrate_bps)
+                .unwrap_or(std::num::NonZeroUsize::MIN),
+            Some(variant_run.audio.encoder_processor_id.clone()),
+        )
+        .await?;
+
+        // DASH ライター
+        let storage_config = match &run.destination {
+            crate::obsws::input_registry::DashDestination::Filesystem { .. } => {
+                crate::dash::writer::DashStorageConfig::Filesystem {
+                    output_directory: std::path::PathBuf::from(&variant_run.variant_path),
+                }
+            }
+            crate::obsws::input_registry::DashDestination::S3 {
+                bucket,
+                region,
+                endpoint,
+                use_path_style,
+                access_key_id,
+                secret_access_key,
+                session_token,
+                ..
+            } => {
+                let client = build_s3_client(
+                    region,
+                    access_key_id,
+                    secret_access_key,
+                    session_token.as_deref(),
+                    endpoint.as_deref(),
+                    *use_path_style,
+                )?;
+                crate::dash::writer::DashStorageConfig::S3 {
+                    client,
+                    bucket: bucket.clone(),
+                    prefix: variant_run.variant_path.clone(),
+                }
+            }
+        };
+        crate::dash::writer::create_processor(
+            pipeline_handle,
+            crate::dash::writer::DashWriterConfig {
+                storage: storage_config,
+                input_audio_track_id: variant_run.audio.encoded_track_id.clone(),
+                input_video_track_id: variant_run.video.encoded_track_id.clone(),
+                segment_duration: dash_settings.segment_duration,
+                max_retained_segments: dash_settings.max_retained_segments,
+            },
+            Some(variant_run.writer_processor_id.clone()),
+        )
+        .await?;
+
+        tracing::info!(
+            variant = i,
+            video_bitrate = variant.video_bitrate_bps,
+            audio_bitrate = variant.audio_bitrate_bps,
+            directory = %variant_run.variant_path,
+            "MPEG-DASH variant processor started"
+        );
+    }
+
+    crate::obsws::session::output::start_source_processors(
+        pipeline_handle,
+        &mut output_plan.source_plans,
+    )
+    .await?;
+    Ok(())
+}
+
+/// MPEG-DASH 用プロセッサを段階的に停止する。
+/// HLS と同じパターン: ソース → ミキサー (EOS) → スケーラー → エンコーダ → ライター
+async fn stop_processors_staged_dash(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    run: &crate::obsws::input_registry::ObswsDashRun,
+) -> crate::Result<()> {
+    // 1. ソースを停止
+    terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
+
+    // 2. ミキサーに Finish RPC を送り、自然終了を試みる
+    let mixer_ids = vec![
+        run.audio_mixer_processor_id.clone(),
+        run.video_mixer_processor_id.clone(),
+    ];
+    if wait_processors_stopped(pipeline_handle, &mixer_ids, Duration::from_secs(1))
+        .await
+        .is_err()
+    {
+        finish_mixer_rpc(pipeline_handle, &run.audio_mixer_processor_id, true).await;
+        finish_mixer_rpc(pipeline_handle, &run.video_mixer_processor_id, false).await;
+        if wait_processors_stopped(pipeline_handle, &mixer_ids, Duration::from_secs(5))
+            .await
+            .is_err()
+        {
+            let live = live_processor_ids(pipeline_handle, &mixer_ids).await;
+            if !live.is_empty() {
+                terminate_and_wait(pipeline_handle, &live).await?;
+            }
+        }
+    }
+
+    // 3. スケーラーの停止（存在する場合のみ）
+    let scaler_ids: Vec<crate::ProcessorId> = run
+        .variant_runs
+        .iter()
+        .filter_map(|vr| vr.scaler_processor_id.clone())
+        .collect();
+    if !scaler_ids.is_empty() {
+        wait_or_terminate(pipeline_handle, &scaler_ids, Duration::from_secs(5)).await?;
+    }
+
+    // 4. 全バリアントのエンコーダーは EOS 伝播での自然終了を優先し、残れば強制停止
+    let encoder_ids: Vec<crate::ProcessorId> = run
+        .variant_runs
+        .iter()
+        .flat_map(|vr| {
+            [
+                vr.video.encoder_processor_id.clone(),
+                vr.audio.encoder_processor_id.clone(),
+            ]
+        })
+        .collect();
+    wait_or_terminate(pipeline_handle, &encoder_ids, Duration::from_secs(5)).await?;
+
+    // 5. 全バリアントの DASH ライターは cleanup を含む自然終了を優先し、残れば強制停止
+    let writer_ids: Vec<crate::ProcessorId> = run
+        .variant_runs
+        .iter()
+        .map(|vr| vr.writer_processor_id.clone())
+        .collect();
+    wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
+
+    // ABR の場合はバリアントディレクトリを削除する
+    if run.is_abr()
+        && let crate::obsws::input_registry::DashDestination::Filesystem { .. } = &run.destination
+    {
+        for vr in &run.variant_runs {
+            if let Err(e) = std::fs::remove_dir(&vr.variant_path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(
+                    "failed to remove variant directory {}: {e}",
+                    vr.variant_path
+                );
             }
         }
     }

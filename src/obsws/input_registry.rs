@@ -96,6 +96,9 @@ impl ObswsInputRegistry {
             hls_settings: ObswsHlsSettings::default(),
             hls_runtime: ObswsHlsRuntimeState::default(),
             next_hls_run_id: 0,
+            dash_settings: ObswsDashSettings::default(),
+            dash_runtime: ObswsDashRuntimeState::default(),
+            next_dash_run_id: 0,
             canvas_width,
             canvas_height,
             frame_rate,
@@ -842,6 +845,55 @@ impl ObswsInputRegistry {
 
     pub fn hls_destination(&self) -> Option<&HlsDestination> {
         self.hls_runtime.run.as_ref().map(|run| &run.destination)
+    }
+
+    pub fn dash_settings(&self) -> &ObswsDashSettings {
+        &self.dash_settings
+    }
+
+    pub fn set_dash_settings(&mut self, settings: ObswsDashSettings) {
+        self.dash_settings = settings;
+    }
+
+    pub fn next_dash_run_id(&mut self) -> Result<u64, RunIdOverflowError> {
+        let run_id = self.next_dash_run_id;
+        self.next_dash_run_id = self
+            .next_dash_run_id
+            .checked_add(1)
+            .ok_or(RunIdOverflowError::MpegDash)?;
+        Ok(run_id)
+    }
+
+    pub fn activate_dash(&mut self, run: ObswsDashRun) -> Result<(), ActivateDashError> {
+        if self.dash_runtime.active {
+            return Err(ActivateDashError::AlreadyActive);
+        }
+        self.dash_runtime.active = true;
+        self.dash_runtime.started_at = Some(Instant::now());
+        self.dash_runtime.run = Some(run);
+        Ok(())
+    }
+
+    pub fn deactivate_dash(&mut self) -> Option<ObswsDashRun> {
+        let run = self.dash_runtime.run.take();
+        self.dash_runtime.active = false;
+        self.dash_runtime.started_at = None;
+        run
+    }
+
+    pub fn is_dash_active(&self) -> bool {
+        self.dash_runtime.active
+    }
+
+    pub fn dash_uptime(&self) -> Duration {
+        self.dash_runtime
+            .started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn dash_destination(&self) -> Option<&DashDestination> {
+        self.dash_runtime.run.as_ref().map(|run| &run.destination)
     }
 
     /// 指定した input_uuid を参照するシーンアイテムを全シーンから検索する。

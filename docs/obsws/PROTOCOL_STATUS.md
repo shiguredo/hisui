@@ -273,19 +273,19 @@
 - [ ] `SaveReplayBuffer`: Replay Buffer を保存する
 - [ ] `GetLastReplayBufferReplay`: 最後の Replay Buffer ファイル情報を取得する
 - [x] `GetOutputList`: 出力一覧を取得する
-  - NOTE: `stream` / `record` / `rtmp_outbound` / `sora` / `hls` の 5 出力を返す
+  - NOTE: `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` の 6 出力を返す
 - [x] `GetOutputStatus`: 出力状態を取得する
-  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` を受理する
 - [x] `ToggleOutput`: 出力をトグルする
-  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` を受理する
 - [x] `StartOutput`: 出力を開始する
-  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` を受理する
 - [x] `StopOutput`: 出力を停止する
-  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` を受理する
 - [x] `GetOutputSettings`: 出力設定を取得する
-  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` を受理する
 - [x] `SetOutputSettings`: 出力設定を更新する
-  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` を受理する
+  - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` を受理する
   - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ更新する
 
 ### Stream
@@ -607,6 +607,115 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 1. `SetOutputSettings` で `destination` / `variants` 等を設定
 2. `StartOutput` で pipeline 生成 + HLS セグメント書き出し開始
 3. `GetOutputStatus` で稼働状態確認（`outputPath` にプレイリストパスを返す）
+4. `StopOutput` で pipeline 停止 + 生成ファイル削除
+
+**エラー条件:**
+
+- `destination` が未設定の場合: `StartOutput` が失敗
+- `destination.type` が `"filesystem"` でも `"s3"` でもない場合: `SetOutputSettings` が失敗
+- `segmentDuration` が 0 以下の場合: `SetOutputSettings` が失敗
+- `maxRetainedSegments` が 0 の場合: `SetOutputSettings` が失敗
+- `variants` が空の場合: `SetOutputSettings` が失敗
+- `variants[].videoBitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants[].audioBitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants[].width` / `height` が 0 または奇数の場合: `SetOutputSettings` が失敗
+- `variants[].width` / `height` の片方だけ指定された場合: `SetOutputSettings` が失敗
+- 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
+- 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す
+
+#### `mpeg_dash`
+
+MPEG-DASH ライブ出力。H.264 + AAC の fragmented MP4 セグメントを生成し、MPD マニフェストで管理する。
+`variants` に複数のバリアントを指定すると adaptive bitrate (ABR) 出力に対応する。
+
+- `outputKind`: `mpeg_dash_output`
+- ローカルファイルシステムまたは S3 互換オブジェクトストレージへの出力に対応
+- 停止時に生成ファイル（manifest.mpd + init.mp4 + 全セグメント）を自動削除する
+- `outputBytes` / `outputSkippedFrames` / `outputTotalFrames` は現時点では 0 固定
+- `variants` が 1 要素の場合は non-ABR（出力先直下にセグメントとマニフェストを出力）
+- `variants` が 2 要素以上の場合は ABR（`variant_N/` サブディレクトリ/prefix にバリアントごとのセグメントとマニフェストを出力）
+
+**outputSettings（`SetOutputSettings` / `GetOutputSettings`）:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `destination` | object | StartOutput 時に必須 | 出力先の設定（下記参照） |
+| `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
+| `maxRetainedSegments` | number | - | マニフェストに保持するセグメント数。デフォルト: 6 |
+| `variants` | array | - | バリアント定義の配列。デフォルト: 1 要素（2Mbps video, 128kbps audio） |
+
+**`destination` (filesystem):**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `type` | string | 必須 | `"filesystem"` |
+| `directory` | string | 必須 | セグメントとマニフェストの出力先ディレクトリ |
+
+**`destination` (s3):**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `type` | string | 必須 | `"s3"` |
+| `bucket` | string | 必須 | S3 バケット名 |
+| `prefix` | string | - | オブジェクトキーの prefix。デフォルト: 空文字列 |
+| `region` | string | 必須 | AWS リージョン |
+| `endpoint` | string | - | カスタムエンドポイント URL（MinIO 等） |
+| `usePathStyle` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
+| `credentials` | object | 必須 | 認証情報（下記参照） |
+| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数）。指定時は MPEG-DASH 開始時にバケットへ lifecycle ルール（prefix スコープの Expiration）を自動設定する |
+
+**`credentials`:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `accessKeyId` | string | 必須 | アクセスキー ID |
+| `secretAccessKey` | string | 必須 | シークレットアクセスキー |
+| `sessionToken` | string | - | セッショントークン（一時認証情報用） |
+
+**`variants` の各要素:**
+
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `videoBitrate` | number | 必須 | ビデオビットレート (bps) |
+| `audioBitrate` | number | 必須 | オーディオビットレート (bps) |
+| `width` | number | - | ビデオ幅（偶数）。省略時はキャンバスサイズを使用 |
+| `height` | number | - | ビデオ高さ（偶数）。省略時はキャンバスサイズを使用 |
+
+**ディレクトリ構成（filesystem, ABR）:**
+
+```
+<directory>/
+├── variant_0/
+│   ├── manifest.mpd
+│   ├── init.mp4
+│   └── segment-*.m4s
+├── variant_1/
+│   ├── manifest.mpd
+│   ├── init.mp4
+│   └── segment-*.m4s
+```
+
+**S3 オブジェクト構成（ABR）:**
+
+```
+<prefix>/variant_0/manifest.mpd
+<prefix>/variant_0/init.mp4
+<prefix>/variant_0/segment-*.m4s
+<prefix>/variant_1/manifest.mpd
+<prefix>/variant_1/init.mp4
+<prefix>/variant_1/segment-*.m4s
+```
+
+**`GetOutputStatus` の `outputPath`:**
+
+- filesystem: `<directory>/manifest.mpd`
+- s3: `s3://<bucket>/<prefix>/manifest.mpd`
+
+**フロー:**
+
+1. `SetOutputSettings` で `destination` / `variants` 等を設定
+2. `StartOutput` で pipeline 生成 + MPEG-DASH セグメント書き出し開始
+3. `GetOutputStatus` で稼働状態確認（`outputPath` にマニフェストパスを返す）
 4. `StopOutput` で pipeline 停止 + 生成ファイル削除
 
 **エラー条件:**
