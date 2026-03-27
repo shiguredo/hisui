@@ -20,7 +20,10 @@ impl S3HttpClient {
         &self.client
     }
 
-    /// S3Request を HTTP/1.1 で送信し、S3Response を返す
+    /// S3Request を HTTP/1.1 で送信し、S3Response を返す。
+    /// リクエストごとに TCP 接続を新規作成する。
+    /// HLS セグメントの書き出し頻度（数秒に 1 回）では接続プールの効果が限定的なため、
+    /// 単純さを優先してこの方式を採用している。
     pub async fn execute(&self, s3_request: &S3Request) -> crate::Result<S3Response> {
         let mut stream =
             TcpOrTlsStream::connect(&s3_request.host, s3_request.port, s3_request.https).await?;
