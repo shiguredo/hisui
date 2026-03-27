@@ -3981,15 +3981,15 @@ async fn start_dash_processors(
                     .height
                     .map(|h| h.get() as u32)
                     .unwrap_or(program_output.canvas_height.get() as u32);
-                crate::dash::writer::CombinedMpdVariant {
+                Ok(crate::dash::writer::CombinedMpdVariant {
                     bandwidth: variant.video_bitrate_bps as u64 + variant.audio_bitrate_bps as u64,
                     width,
                     height,
-                    media_path: format!("variant_{i}/segment-$Number%06d$.m4s"),
-                    init_path: format!("variant_{i}/init.mp4"),
-                }
+                    media_path: dash_variant_media_path(&run.destination, &run.variant_runs[i])?,
+                    init_path: dash_variant_init_path(&run.destination, &run.variant_runs[i])?,
+                })
             })
-            .collect();
+            .collect::<crate::Result<Vec<_>>>()?;
         let root_storage_config = build_dash_root_storage_config(&run.destination)?;
         crate::dash::writer::write_combined_mpd(
             root_storage_config,
@@ -4009,6 +4009,7 @@ async fn stop_processors_staged_dash(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsDashRun,
 ) -> crate::Result<()> {
+    // 1. 各 writer に finalize / cleanup を要求し、停止を待つ。
     let writer_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
@@ -4019,6 +4020,7 @@ async fn stop_processors_staged_dash(
     }
     wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
 
+    // 2. 全バリアントのエンコーダーを停止する。
     let encoder_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
@@ -4031,6 +4033,7 @@ async fn stop_processors_staged_dash(
         .collect();
     terminate_and_wait(pipeline_handle, &encoder_ids).await?;
 
+    // 3. 解像度変換があるバリアントのスケーラーを停止する。
     let scaler_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
@@ -4061,6 +4064,56 @@ async fn stop_processors_staged_dash(
     }
 
     Ok(())
+}
+
+/// 結合 MPD に書く media path を生成する。
+/// writer が実際に使う variant_path と同じ規則から相対パスを導出する。
+fn dash_variant_media_path(
+    destination: &crate::obsws::input_registry::DashDestination,
+    variant_run: &crate::obsws::input_registry::ObswsDashVariantRun,
+) -> crate::Result<String> {
+    let base_path = dash_variant_relative_path(destination, &variant_run.variant_path)?;
+    Ok(format!("{base_path}/segment-$Number%06d$.m4s"))
+}
+
+/// 結合 MPD に書く init segment path を生成する。
+/// writer が実際に使う variant_path と同じ規則から相対パスを導出する。
+fn dash_variant_init_path(
+    destination: &crate::obsws::input_registry::DashDestination,
+    variant_run: &crate::obsws::input_registry::ObswsDashVariantRun,
+) -> crate::Result<String> {
+    let base_path = dash_variant_relative_path(destination, &variant_run.variant_path)?;
+    Ok(format!("{base_path}/init.mp4"))
+}
+
+/// variant_path から結合 MPD 用の相対パス部分を取り出す。
+fn dash_variant_relative_path(
+    destination: &crate::obsws::input_registry::DashDestination,
+    variant_path: &str,
+) -> crate::Result<String> {
+    match destination {
+        crate::obsws::input_registry::DashDestination::Filesystem { directory } => {
+            let root = std::path::Path::new(directory);
+            let path = std::path::Path::new(variant_path);
+            let relative = path.strip_prefix(root).map_err(|_| {
+                crate::Error::new(format!(
+                    "variant path {variant_path} is not under DASH destination root {directory}"
+                ))
+            })?;
+            Ok(relative.to_string_lossy().replace('\\', "/"))
+        }
+        crate::obsws::input_registry::DashDestination::S3 { prefix, .. } => {
+            if prefix.is_empty() {
+                return Ok(variant_path.to_owned());
+            }
+            let Some(relative) = variant_path.strip_prefix(prefix) else {
+                return Err(crate::Error::new(format!(
+                    "variant path {variant_path} does not start with DASH destination prefix {prefix}"
+                )));
+            };
+            Ok(relative.trim_start_matches('/').to_owned())
+        }
+    }
 }
 
 /// DASH destination からルートディレクトリ/prefix 用の DashStorageConfig を構築する。

@@ -35,6 +35,18 @@ struct ObswsOutputEntry {
     output_kind: &'static str,
 }
 
+struct ParsedObswsS3Destination {
+    bucket: String,
+    prefix: String,
+    region: String,
+    endpoint: Option<String>,
+    use_path_style: bool,
+    access_key_id: String,
+    secret_access_key: String,
+    session_token: Option<String>,
+    lifetime_days: Option<u32>,
+}
+
 impl nojson::DisplayJson for ObswsOutputEntry {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
@@ -793,133 +805,57 @@ fn parse_hls_settings(
     input_registry: &mut ObswsInputRegistry,
 ) -> Result<(), String> {
     // destination オブジェクトのパース
-    let destination: Option<crate::obsws::input_registry::HlsDestination> = if let Some(
-        dest_value,
-    ) = output_settings
-        .to_member("destination")
-        .map_err(|e| e.to_string())?
-        .optional()
-    {
-        let dest_type: String = dest_value
-            .to_member("type")
+    let destination: Option<crate::obsws::input_registry::HlsDestination> =
+        if let Some(dest_value) = output_settings
+            .to_member("destination")
             .map_err(|e| e.to_string())?
-            .required()
-            .map_err(|_| "destination.type is required".to_owned())?
-            .try_into()
-            .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            .optional()
+        {
+            let dest_type: String = dest_value
+                .to_member("type")
+                .map_err(|e| e.to_string())?
+                .required()
+                .map_err(|_| "destination.type is required".to_owned())?
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
-        match dest_type.as_str() {
-            "filesystem" => {
-                let directory: String = dest_value
-                    .to_member("directory")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "destination.directory is required for filesystem".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                if directory.is_empty() {
-                    return Err("destination.directory must not be empty".to_owned());
-                }
-                Some(crate::obsws::input_registry::HlsDestination::Filesystem { directory })
-            }
-            "s3" => {
-                let bucket: String = dest_value
-                    .to_member("bucket")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "destination.bucket is required for s3".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let prefix: String = super::optional_non_empty_string_member(dest_value, "prefix")
-                    .map_err(|e| e.to_string())?
-                    .unwrap_or_default();
-                let region: String = dest_value
-                    .to_member("region")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "destination.region is required for s3".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let endpoint: Option<String> =
-                    super::optional_non_empty_string_member(dest_value, "endpoint")
-                        .map_err(|e| e.to_string())?;
-                let use_path_style: bool = dest_value
-                    .to_member("usePathStyle")
-                    .map_err(|e| e.to_string())?
-                    .optional()
-                    .map(|v| v.try_into())
-                    .transpose()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?
-                    .unwrap_or(false);
-
-                // credentials オブジェクト
-                let creds_value = dest_value
-                    .to_member("credentials")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "destination.credentials is required for s3".to_owned())?;
-                let access_key_id: String = creds_value
-                    .to_member("accessKeyId")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "credentials.accessKeyId is required".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let secret_access_key: String = creds_value
-                    .to_member("secretAccessKey")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "credentials.secretAccessKey is required".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let session_token: Option<String> =
-                    super::optional_non_empty_string_member(creds_value, "sessionToken")
-                        .map_err(|e| e.to_string())?;
-
-                let lifetime_days: Option<u32> = dest_value
-                    .to_member("lifetimeDays")
-                    .map_err(|e| e.to_string())?
-                    .optional()
-                    .map(|v| v.try_into())
-                    .transpose()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-
-                if bucket.is_empty() {
-                    return Err("destination.bucket must not be empty".to_owned());
-                }
-                if region.is_empty() {
-                    return Err("destination.region must not be empty".to_owned());
-                }
-                if let Some(days) = lifetime_days {
-                    if days == 0 {
-                        return Err("destination.lifetimeDays must be positive".to_owned());
+            match dest_type.as_str() {
+                "filesystem" => {
+                    let directory: String = dest_value
+                        .to_member("directory")
+                        .map_err(|e| e.to_string())?
+                        .required()
+                        .map_err(|_| "destination.directory is required for filesystem".to_owned())?
+                        .try_into()
+                        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                    if directory.is_empty() {
+                        return Err("destination.directory must not be empty".to_owned());
                     }
-                    if prefix.is_empty() {
-                        return Err("destination.prefix is required when lifetimeDays is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
-                    }
+                    Some(crate::obsws::input_registry::HlsDestination::Filesystem { directory })
                 }
-
-                Some(crate::obsws::input_registry::HlsDestination::S3 {
-                    bucket,
-                    prefix,
-                    region,
-                    endpoint,
-                    use_path_style,
-                    access_key_id,
-                    secret_access_key,
-                    session_token,
-                    lifetime_days,
-                })
+                "s3" => {
+                    let parsed = parse_obsws_s3_destination(dest_value)?;
+                    Some(crate::obsws::input_registry::HlsDestination::S3 {
+                        bucket: parsed.bucket,
+                        prefix: parsed.prefix,
+                        region: parsed.region,
+                        endpoint: parsed.endpoint,
+                        use_path_style: parsed.use_path_style,
+                        access_key_id: parsed.access_key_id,
+                        secret_access_key: parsed.secret_access_key,
+                        session_token: parsed.session_token,
+                        lifetime_days: parsed.lifetime_days,
+                    })
+                }
+                _ => {
+                    return Err(format!(
+                        "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
+                    ));
+                }
             }
-            _ => {
-                return Err(format!(
-                    "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
-                ));
-            }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     let segment_duration: Option<f64> = output_settings
         .to_member("segmentDuration")
@@ -1099,133 +1035,57 @@ fn parse_dash_settings(
     input_registry: &mut ObswsInputRegistry,
 ) -> Result<(), String> {
     // destination オブジェクトのパース
-    let destination: Option<crate::obsws::input_registry::DashDestination> = if let Some(
-        dest_value,
-    ) = output_settings
-        .to_member("destination")
-        .map_err(|e| e.to_string())?
-        .optional()
-    {
-        let dest_type: String = dest_value
-            .to_member("type")
+    let destination: Option<crate::obsws::input_registry::DashDestination> =
+        if let Some(dest_value) = output_settings
+            .to_member("destination")
             .map_err(|e| e.to_string())?
-            .required()
-            .map_err(|_| "destination.type is required".to_owned())?
-            .try_into()
-            .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            .optional()
+        {
+            let dest_type: String = dest_value
+                .to_member("type")
+                .map_err(|e| e.to_string())?
+                .required()
+                .map_err(|_| "destination.type is required".to_owned())?
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
-        match dest_type.as_str() {
-            "filesystem" => {
-                let directory: String = dest_value
-                    .to_member("directory")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "destination.directory is required for filesystem".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                if directory.is_empty() {
-                    return Err("destination.directory must not be empty".to_owned());
-                }
-                Some(crate::obsws::input_registry::DashDestination::Filesystem { directory })
-            }
-            "s3" => {
-                let bucket: String = dest_value
-                    .to_member("bucket")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "destination.bucket is required for s3".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let prefix: String = super::optional_non_empty_string_member(dest_value, "prefix")
-                    .map_err(|e| e.to_string())?
-                    .unwrap_or_default();
-                let region: String = dest_value
-                    .to_member("region")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "destination.region is required for s3".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let endpoint: Option<String> =
-                    super::optional_non_empty_string_member(dest_value, "endpoint")
-                        .map_err(|e| e.to_string())?;
-                let use_path_style: bool = dest_value
-                    .to_member("usePathStyle")
-                    .map_err(|e| e.to_string())?
-                    .optional()
-                    .map(|v| v.try_into())
-                    .transpose()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?
-                    .unwrap_or(false);
-
-                // credentials オブジェクト
-                let creds_value = dest_value
-                    .to_member("credentials")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "destination.credentials is required for s3".to_owned())?;
-                let access_key_id: String = creds_value
-                    .to_member("accessKeyId")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "credentials.accessKeyId is required".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let secret_access_key: String = creds_value
-                    .to_member("secretAccessKey")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "credentials.secretAccessKey is required".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let session_token: Option<String> =
-                    super::optional_non_empty_string_member(creds_value, "sessionToken")
-                        .map_err(|e| e.to_string())?;
-
-                let lifetime_days: Option<u32> = dest_value
-                    .to_member("lifetimeDays")
-                    .map_err(|e| e.to_string())?
-                    .optional()
-                    .map(|v| v.try_into())
-                    .transpose()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-
-                if bucket.is_empty() {
-                    return Err("destination.bucket must not be empty".to_owned());
-                }
-                if region.is_empty() {
-                    return Err("destination.region must not be empty".to_owned());
-                }
-                if let Some(days) = lifetime_days {
-                    if days == 0 {
-                        return Err("destination.lifetimeDays must be positive".to_owned());
+            match dest_type.as_str() {
+                "filesystem" => {
+                    let directory: String = dest_value
+                        .to_member("directory")
+                        .map_err(|e| e.to_string())?
+                        .required()
+                        .map_err(|_| "destination.directory is required for filesystem".to_owned())?
+                        .try_into()
+                        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                    if directory.is_empty() {
+                        return Err("destination.directory must not be empty".to_owned());
                     }
-                    if prefix.is_empty() {
-                        return Err("destination.prefix is required when lifetimeDays is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
-                    }
+                    Some(crate::obsws::input_registry::DashDestination::Filesystem { directory })
                 }
-
-                Some(crate::obsws::input_registry::DashDestination::S3 {
-                    bucket,
-                    prefix,
-                    region,
-                    endpoint,
-                    use_path_style,
-                    access_key_id,
-                    secret_access_key,
-                    session_token,
-                    lifetime_days,
-                })
+                "s3" => {
+                    let parsed = parse_obsws_s3_destination(dest_value)?;
+                    Some(crate::obsws::input_registry::DashDestination::S3 {
+                        bucket: parsed.bucket,
+                        prefix: parsed.prefix,
+                        region: parsed.region,
+                        endpoint: parsed.endpoint,
+                        use_path_style: parsed.use_path_style,
+                        access_key_id: parsed.access_key_id,
+                        secret_access_key: parsed.secret_access_key,
+                        session_token: parsed.session_token,
+                        lifetime_days: parsed.lifetime_days,
+                    })
+                }
+                _ => {
+                    return Err(format!(
+                        "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
+                    ));
+                }
             }
-            _ => {
-                return Err(format!(
-                    "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
-                ));
-            }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     let segment_duration: Option<f64> = output_settings
         .to_member("segmentDuration")
@@ -1343,4 +1203,94 @@ fn parse_dash_settings(
         variants: variants.unwrap_or(existing.variants),
     });
     Ok(())
+}
+
+fn parse_obsws_s3_destination(
+    dest_value: nojson::RawJsonValue<'_, '_>,
+) -> Result<ParsedObswsS3Destination, String> {
+    let bucket: String = dest_value
+        .to_member("bucket")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "destination.bucket is required for s3".to_owned())?
+        .try_into()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    let prefix: String = super::optional_non_empty_string_member(dest_value, "prefix")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    let region: String = dest_value
+        .to_member("region")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "destination.region is required for s3".to_owned())?
+        .try_into()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    let endpoint: Option<String> = super::optional_non_empty_string_member(dest_value, "endpoint")
+        .map_err(|e| e.to_string())?;
+    let use_path_style: bool = dest_value
+        .to_member("usePathStyle")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?
+        .unwrap_or(false);
+
+    let creds_value = dest_value
+        .to_member("credentials")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "destination.credentials is required for s3".to_owned())?;
+    let access_key_id: String = creds_value
+        .to_member("accessKeyId")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "credentials.accessKeyId is required".to_owned())?
+        .try_into()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    let secret_access_key: String = creds_value
+        .to_member("secretAccessKey")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "credentials.secretAccessKey is required".to_owned())?
+        .try_into()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    let session_token: Option<String> =
+        super::optional_non_empty_string_member(creds_value, "sessionToken")
+            .map_err(|e| e.to_string())?;
+
+    let lifetime_days: Option<u32> = dest_value
+        .to_member("lifetimeDays")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    if bucket.is_empty() {
+        return Err("destination.bucket must not be empty".to_owned());
+    }
+    if region.is_empty() {
+        return Err("destination.region must not be empty".to_owned());
+    }
+    if let Some(days) = lifetime_days {
+        if days == 0 {
+            return Err("destination.lifetimeDays must be positive".to_owned());
+        }
+        if prefix.is_empty() {
+            return Err("destination.prefix is required when lifetimeDays is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
+        }
+    }
+
+    Ok(ParsedObswsS3Destination {
+        bucket,
+        prefix,
+        region,
+        endpoint,
+        use_path_style,
+        access_key_id,
+        secret_access_key,
+        session_token,
+        lifetime_days,
+    })
 }

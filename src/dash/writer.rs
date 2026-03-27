@@ -659,6 +659,7 @@ impl DashWriter {
             .as_secs_f64();
         let duration = duration.max(0.001);
 
+        // u64::MAX μs は約 58 万年なので、実用上はそのまま u64 に変換して問題ない。
         let start_time_us = info.start_timestamp.as_micros() as u64;
         let duration_us = info
             .last_timestamp
