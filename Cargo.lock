@@ -1079,6 +1079,8 @@ checksum = "029f44879b590e0b5e50add084b436a7b740e08b2cc4fee662ed93f1cffddc63"
 [[package]]
 name = "shiguredo_mpd"
 version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9006608e639738213aa3a3f9eaa883569eb9db08242962e817738dc5835ba0b3"
 dependencies = [
  "xml",
 ]

@@ -42,7 +42,7 @@ shiguredo_video_device = "=2026.1.0-canary.3"
 shiguredo_audio_device = "=2026.1.0-canary.0"
 mpeg2ts = "=0.6.0"
 shiguredo_m3u8 = "=2026.1.0-canary.0"
-shiguredo_mpd = { path = "../mpd-rs" }
+shiguredo_mpd = "=2026.1.0-canary.0"
 shiguredo_s3 = { version = "=2026.1.0-canary.1", default-features = false, features = [
     "aws-lc-rs",
 ] }
