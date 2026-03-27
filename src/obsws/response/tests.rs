@@ -1241,7 +1241,7 @@ fn set_dash_output_settings(
     registry: &mut ObswsInputRegistry,
     settings_json: &str,
 ) -> nojson::RawJsonOwned {
-    let request_data = nojson::RawJsonOwned::parse(&format!(
+    let request_data = nojson::RawJsonOwned::parse(format!(
         r#"{{"outputName":"mpeg_dash","outputSettings":{settings_json}}}"#
     ))
     .expect("request data must be valid json");
