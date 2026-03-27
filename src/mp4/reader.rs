@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -8,305 +7,583 @@ use std::{
 
 use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
-use crate::{
-    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
-    types::CodecName,
-    video::{VideoFormat, VideoFrame, VideoFrameSize},
-};
+use crate::audio::{AudioFormat, Channels, SampleRate};
+use crate::video::{VideoFormat, VideoFrameSize};
+use crate::{Ack, AudioFrame, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct VideoResolution {
+const MAX_NOACKED_COUNT: u64 = 100;
+
+#[derive(Debug, Clone, Default)]
+pub struct Mp4FileReaderOptions {
+    // true の場合は実時間再生を行う。
+    // 出力 timestamp は実時刻ベースで単調増加するように補正する。
+    pub realtime: bool,
+    pub loop_playback: bool,
+    pub audio_track_id: Option<TrackId>,
+    pub video_track_id: Option<TrackId>,
+}
+
+#[derive(Debug)]
+pub struct Mp4FileReader {
+    path: PathBuf,
+    options: Mp4FileReaderOptions,
+    audio_sender: Option<TrackSender>,
+    video_sender: Option<TrackSender>,
+    audio_decoder: Option<crate::decoder::AudioDecoder>,
+    video_decoder: Option<crate::decoder::VideoDecoder>,
+    base_offset: Duration,
+    last_emitted_end: Duration,
+    start_instant: tokio::time::Instant,
+    last_realtime_timestamp: Option<Duration>,
+    emitted_in_loop: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mp4FileTrackAvailability {
+    pub has_audio: bool,
+    pub has_video: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mp4FileVideoDimensions {
     pub width: usize,
     pub height: usize,
 }
 
-#[derive(Debug)]
-pub struct Mp4VideoReader {
-    file: File,
-    demuxer: Mp4FileDemuxer,
-    format: VideoFormat,
-    width: usize,
-    height: usize,
-
-    pub current_input_file: Option<PathBuf>,
-    pub codec: Option<CodecName>,
-    pub resolutions: BTreeSet<VideoResolution>,
-    pub total_sample_count: u64,
-    pub total_track_duration: Duration,
-    pub track_duration_offset: Duration,
-}
-
-impl Mp4VideoReader {
-    pub fn new<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        let mut file = File::open(&path).map_err(|e| {
-            crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
-        })?;
-        let mut demuxer = Mp4FileDemuxer::new();
-        initialize_mp4_demuxer(&mut file, &mut demuxer, &path)?;
-
+impl Mp4FileReader {
+    pub fn new<P: AsRef<Path>>(path: P, options: Mp4FileReaderOptions) -> Result<Self> {
         Ok(Self {
-            file,
-            demuxer,
-
-            // 後で更新されるので適当な初期値を設定しておく
-            format: VideoFormat::Vp8,
-            width: 0,
-            height: 0,
-            current_input_file: Some(path.as_ref().to_path_buf()),
-            codec: None,
-            resolutions: BTreeSet::new(),
-            total_sample_count: 0,
-            total_track_duration: Duration::ZERO,
-            track_duration_offset: Duration::ZERO,
+            path: path.as_ref().to_path_buf(),
+            options,
+            audio_sender: None,
+            video_sender: None,
+            audio_decoder: None,
+            video_decoder: None,
+            base_offset: Duration::ZERO,
+            last_emitted_end: Duration::ZERO,
+            start_instant: tokio::time::Instant::now(),
+            last_realtime_timestamp: None,
+            emitted_in_loop: false,
         })
     }
 
-    pub fn stats(&self) -> &Self {
-        self
+    /// デコーダーを設定する。設定された場合、encoded frame を decode してから送信する。
+    pub fn set_audio_decoder(&mut self, decoder: crate::decoder::AudioDecoder) {
+        self.audio_decoder = Some(decoder);
     }
 
-    pub fn stats_mut(&mut self) -> &mut Self {
-        self
+    /// デコーダーを設定する。設定された場合、encoded frame を decode してから送信する。
+    pub fn set_video_decoder(&mut self, decoder: crate::decoder::VideoDecoder) {
+        self.video_decoder = Some(decoder);
     }
 
-    pub fn inherit_stats_from(&mut self, prev: &Self) {
-        self.codec = prev.codec;
-        self.resolutions = prev.resolutions.clone();
-        self.total_sample_count = prev.total_sample_count;
-        self.total_track_duration = prev.total_track_duration;
-        self.track_duration_offset = prev.track_duration_offset;
+    pub async fn run(mut self, handle: ProcessorHandle) -> Result<()> {
+        let loop_enabled = self.resolve_loop_enabled();
+        (self.audio_sender, self.video_sender) = self.build_track_senders(&handle).await?;
+        handle.notify_ready();
+
+        if self.audio_sender.is_none() && self.video_sender.is_none() {
+            return Ok(());
+        }
+        handle.wait_subscribers_ready().await?;
+
+        self.start_instant = tokio::time::Instant::now();
+        self.last_realtime_timestamp = None;
+
+        let should_stop = self.run_loop(loop_enabled).await?;
+        if should_stop {
+            return Ok(());
+        }
+
+        self.flush_and_send_eos()?;
+
+        Ok(())
     }
 
-    fn next_sample(&mut self) -> crate::Result<Option<VideoFrame>> {
-        let sample = 'next_sample: loop {
-            match self
-                .demuxer
-                .next_sample()
-                .map_err(|e| crate::Error::new(format!("Read sample error: {e}")))?
-            {
-                None => return Ok(None),
-                Some(sample) if sample.track.kind != TrackKind::Video => {}
-                Some(sample) => break 'next_sample sample,
-            }
+    fn resolve_loop_enabled(&self) -> bool {
+        let mut loop_enabled = self.options.loop_playback;
+        if loop_enabled && !self.options.realtime {
+            tracing::warn!("Loop playback is ignored because realtime is disabled");
+            loop_enabled = false;
+        }
+        loop_enabled
+    }
+
+    async fn build_track_senders(
+        &mut self,
+        handle: &ProcessorHandle,
+    ) -> Result<(Option<TrackSender>, Option<TrackSender>)> {
+        let audio_sender = if let Some(track_id) = self.options.audio_track_id.take() {
+            let sender = handle.publish_track(track_id).await?;
+            Some(TrackSender::new(sender))
+        } else {
+            None
         };
 
+        let video_sender = if let Some(track_id) = self.options.video_track_id.take() {
+            let sender = handle.publish_track(track_id).await?;
+            Some(TrackSender::new(sender))
+        } else {
+            None
+        };
+
+        Ok((audio_sender, video_sender))
+    }
+
+    async fn run_loop(&mut self, loop_enabled: bool) -> Result<bool> {
+        loop {
+            let mut state = ReaderState::open(
+                &self.path,
+                self.audio_sender.is_some(),
+                self.video_sender.is_some(),
+            )?;
+            if state.audio_track_id.is_none() && state.video_track_id.is_none() {
+                break;
+            }
+
+            self.emitted_in_loop = false;
+            while let Some(sample) = state.demuxer.next_sample()? {
+                let context = SampleContext::from_sample(&sample);
+                let should_stop = self.handle_sample(&mut state, context).await?;
+                if should_stop {
+                    return Ok(true);
+                }
+            }
+
+            if loop_enabled {
+                if !self.emitted_in_loop {
+                    tracing::warn!("Loop playback stopped because no samples were read");
+                    break;
+                }
+                self.base_offset = self.last_emitted_end;
+                continue;
+            }
+            break;
+        }
+
+        Ok(false)
+    }
+
+    async fn handle_sample(
+        &mut self,
+        state: &mut ReaderState,
+        context: SampleContext,
+    ) -> Result<bool> {
         // composition_time_offset は未対応
-        if sample.composition_time_offset.is_some() {
-            return Err(crate::Error::new(
+        if context.composition_time_offset.is_some() {
+            return Err(Error::new(
                 "composition_time_offset is not supported yet".to_owned(),
             ));
         }
 
-        let sample_entry = sample.sample_entry.cloned();
-        if let Some(sample_entry) = &sample_entry {
-            // 新しいサンプルエントリーが来たのでハンドリングする
-            let (metadata, format) = match sample_entry {
-                SampleEntry::Avc1(b) => (&b.visual, VideoFormat::H264),
-                SampleEntry::Hev1(b) => (&b.visual, VideoFormat::H265),
-                SampleEntry::Hvc1(b) => (&b.visual, VideoFormat::H265),
-                SampleEntry::Vp08(b) => (&b.visual, VideoFormat::Vp8),
-                SampleEntry::Vp09(b) => (&b.visual, VideoFormat::Vp9),
-                SampleEntry::Av01(b) => (&b.visual, VideoFormat::Av1),
-                entry => {
-                    return Err(crate::Error::new(format!(
-                        "unsupported sample entry: {entry:?}"
-                    )));
-                }
-            };
+        match context.track_kind {
+            TrackKind::Audio => self.handle_audio_sample(state, context).await,
+            TrackKind::Video => self.handle_video_sample(state, context).await,
+        }
+    }
 
-            self.format = format;
-            self.width = metadata.width as usize;
-            self.height = metadata.height as usize;
+    async fn handle_audio_sample(
+        &mut self,
+        state: &mut ReaderState,
+        context: SampleContext,
+    ) -> Result<bool> {
+        if !state.is_audio_enabled(context.track_id) {
+            return Ok(false);
         }
 
-        // サンプルデータを読み込む
-        let mut data = vec![0; sample.data_size];
-        self.file
-            .seek(SeekFrom::Start(sample.data_offset))
-            .map_err(|e| crate::Error::new(format!("Seek error: {e}")))?;
-        self.file
-            .read_exact(&mut data)
-            .map_err(|e| crate::Error::new(format!("Read error: {e}")))?;
-
-        // タイムスタンプを計算する
-        let timescale = sample.track.timescale.get();
-        let timestamp = Duration::from_secs(sample.timestamp) / timescale;
-        let duration = Duration::from_secs(sample.duration as u64) / timescale;
-
-        // 統計値を更新する
-        self.total_sample_count += 1;
-        self.total_track_duration = timestamp + duration;
-        if self.codec.is_none()
-            && let Some(name) = self.format.codec_name()
-        {
-            self.codec = Some(name);
+        if let Some(entry) = &context.sample_entry {
+            state.update_audio_format(entry)?;
         }
-        self.resolutions.insert(VideoResolution {
-            width: self.width,
-            height: self.height,
-        });
 
-        Ok(Some(VideoFrame {
-            sample_entry,
+        let data = state.read_sample_data(context.data_offset, context.data_size)?;
+        let (timestamp, duration) =
+            calculate_timestamps(context.timescale, context.timestamp, context.duration);
+        let effective_timestamp = self.base_offset + timestamp;
+
+        if self.options.realtime {
+            let target = self.start_instant + effective_timestamp;
+            tokio::time::sleep_until(target).await;
+        }
+        let output_timestamp = self.output_timestamp(effective_timestamp);
+
+        let audio_data = AudioFrame {
             data,
-            format: self.format,
-            keyframe: sample.keyframe,
+            format: state.audio_format,
+            channels: state.audio_channels,
+            sample_rate: state.audio_sample_rate,
+            timestamp: output_timestamp,
+            sample_entry: context.sample_entry,
+        };
+
+        if let Some(sender) = self.audio_sender.as_mut() {
+            if let Some(decoder) = self.audio_decoder.as_mut() {
+                // デコーダーが設定されている場合、decode してから送信する
+                decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
+                    std::sync::Arc::new(audio_data),
+                )))?;
+                // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
+                if crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?
+                    == crate::decoder::DrainResult::PipelineClosed
+                {
+                    return Ok(true);
+                }
+            } else if !sender.send_audio(audio_data).await {
+                return Ok(true);
+            }
+            self.emitted_in_loop = true;
+            let end = effective_timestamp + duration;
+            if end > self.last_emitted_end {
+                self.last_emitted_end = end;
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn handle_video_sample(
+        &mut self,
+        state: &mut ReaderState,
+        context: SampleContext,
+    ) -> Result<bool> {
+        if !state.is_video_enabled(context.track_id) {
+            return Ok(false);
+        }
+
+        if let Some(entry) = &context.sample_entry {
+            state.update_video_format(entry)?;
+        }
+
+        let data = state.read_sample_data(context.data_offset, context.data_size)?;
+        let (timestamp, duration) =
+            calculate_timestamps(context.timescale, context.timestamp, context.duration);
+        let effective_timestamp = self.base_offset + timestamp;
+
+        if self.options.realtime {
+            let target = self.start_instant + effective_timestamp;
+            tokio::time::sleep_until(target).await;
+        }
+        let output_timestamp = self.output_timestamp(effective_timestamp);
+
+        let video_frame = VideoFrame {
+            data,
+            format: state.video_format,
+            keyframe: context.keyframe,
             size: Some(VideoFrameSize {
-                width: self.width,
-                height: self.height,
+                width: state.video_width,
+                height: state.video_height,
             }),
-            timestamp,
-        }))
+            timestamp: output_timestamp,
+            sample_entry: context.sample_entry,
+        };
+
+        if let Some(sender) = self.video_sender.as_mut() {
+            if let Some(decoder) = self.video_decoder.as_mut() {
+                // デコーダーが設定されている場合、decode してから送信する
+                decoder.handle_input_sample(Some(crate::MediaFrame::Video(
+                    std::sync::Arc::new(video_frame),
+                )))?;
+                // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
+                if crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?
+                    == crate::decoder::DrainResult::PipelineClosed
+                {
+                    return Ok(true);
+                }
+            } else if !sender.send_video(video_frame).await {
+                return Ok(true);
+            }
+            self.emitted_in_loop = true;
+            let end = effective_timestamp + duration;
+            if end > self.last_emitted_end {
+                self.last_emitted_end = end;
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn output_timestamp(&mut self, effective_timestamp: Duration) -> Duration {
+        if !self.options.realtime {
+            return effective_timestamp;
+        }
+
+        let mut timestamp = self.start_instant.elapsed().max(effective_timestamp);
+        if let Some(last) = self.last_realtime_timestamp {
+            let min_next = last.saturating_add(Duration::from_micros(1));
+            if timestamp < min_next {
+                timestamp = min_next;
+            }
+        }
+        self.last_realtime_timestamp = Some(timestamp);
+        timestamp
+    }
+
+    fn flush_and_send_eos(&mut self) -> Result<()> {
+        // デコーダーの残りのフレームを flush する。
+        // EOS flush 中に pipeline が閉じるのは正常な停止シーケンスなので、DrainResult は無視する。
+        if let Some(decoder) = self.audio_decoder.as_mut()
+            && let Some(sender) = self.audio_sender.as_mut()
+        {
+            decoder.handle_input_sample(None)?;
+            let _ = crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?;
+        }
+        if let Some(decoder) = self.video_decoder.as_mut()
+            && let Some(sender) = self.video_sender.as_mut()
+        {
+            decoder.handle_input_sample(None)?;
+            let _ = crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?;
+        }
+        if let Some(sender) = self.audio_sender.as_mut() {
+            sender.send_eos();
+        }
+        if let Some(sender) = self.video_sender.as_mut() {
+            sender.send_eos();
+        }
+        Ok(())
     }
 }
 
-impl Iterator for Mp4VideoReader {
-    type Item = crate::Result<VideoFrame>;
+pub fn probe_mp4_track_availability<P: AsRef<Path>>(path: P) -> Result<Mp4FileTrackAvailability> {
+    let path = path.as_ref();
+    let mut file = File::open(path)
+        .map_err(|e| Error::new(format!("Cannot open file {}: {e}", path.display())))?;
+    let mut demuxer = Mp4FileDemuxer::new();
+    initialize_mp4_demuxer(&mut file, &mut demuxer, path)?;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_sample().transpose()
+    let has_audio = select_audio_track(demuxer.clone())?.is_some();
+    let has_video = select_video_track(demuxer)?.is_some();
+
+    Ok(Mp4FileTrackAvailability {
+        has_audio,
+        has_video,
+    })
+}
+
+pub fn probe_mp4_video_dimensions<P: AsRef<Path>>(
+    path: P,
+) -> Result<Option<Mp4FileVideoDimensions>> {
+    let path = path.as_ref();
+    let mut file = File::open(path)
+        .map_err(|e| Error::new(format!("Cannot open file {}: {e}", path.display())))?;
+    let mut demuxer = Mp4FileDemuxer::new();
+    initialize_mp4_demuxer(&mut file, &mut demuxer, path)?;
+
+    while let Some(sample) = demuxer.next_sample()? {
+        if sample.track.kind != TrackKind::Video {
+            continue;
+        }
+        let Some(sample_entry) = sample.sample_entry else {
+            continue;
+        };
+        let metadata = match sample_entry {
+            SampleEntry::Avc1(b) => Some(&b.visual),
+            SampleEntry::Hev1(b) => Some(&b.visual),
+            SampleEntry::Hvc1(b) => Some(&b.visual),
+            SampleEntry::Vp08(b) => Some(&b.visual),
+            SampleEntry::Vp09(b) => Some(&b.visual),
+            SampleEntry::Av01(b) => Some(&b.visual),
+            _ => None,
+        };
+        if let Some(metadata) = metadata {
+            return Ok(Some(Mp4FileVideoDimensions {
+                width: metadata.width as usize,
+                height: metadata.height as usize,
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
+#[derive(Debug, Clone)]
+struct SampleContext {
+    track_kind: TrackKind,
+    track_id: u32,
+    timescale: u32,
+    timestamp: u64,
+    duration: u64,
+    data_offset: u64,
+    data_size: usize,
+    keyframe: bool,
+    composition_time_offset: Option<i64>,
+    sample_entry: Option<SampleEntry>,
+}
+
+impl SampleContext {
+    fn from_sample(sample: &shiguredo_mp4::demux::Sample<'_>) -> Self {
+        Self {
+            track_kind: sample.track.kind,
+            track_id: sample.track.track_id,
+            timescale: sample.track.timescale.get(),
+            timestamp: sample.timestamp,
+            duration: sample.duration as u64,
+            data_offset: sample.data_offset,
+            data_size: sample.data_size,
+            keyframe: sample.keyframe,
+            composition_time_offset: sample.composition_time_offset,
+            sample_entry: sample.sample_entry.cloned(),
+        }
     }
 }
 
 #[derive(Debug)]
-pub struct Mp4AudioReader {
+struct TrackSender {
+    sender: MessageSender,
+    ack: Option<Ack>,
+    noacked_sent: u64,
+}
+
+impl TrackSender {
+    fn new(mut sender: MessageSender) -> Self {
+        let ack = Some(sender.send_syn());
+        Self {
+            sender,
+            ack,
+            noacked_sent: 0,
+        }
+    }
+
+    async fn prepare_send(&mut self) {
+        if self.noacked_sent > MAX_NOACKED_COUNT {
+            if let Some(ack) = self.ack.take() {
+                ack.await;
+            }
+            self.ack = Some(self.sender.send_syn());
+            self.noacked_sent = 0;
+        }
+    }
+
+    async fn send_audio(&mut self, data: AudioFrame) -> bool {
+        self.prepare_send().await;
+        let ok = self.sender.send_audio(data);
+        if ok {
+            self.noacked_sent += 1;
+        }
+        ok
+    }
+
+    async fn send_video(&mut self, frame: VideoFrame) -> bool {
+        self.prepare_send().await;
+        let ok = self.sender.send_video(frame);
+        if ok {
+            self.noacked_sent += 1;
+        }
+        ok
+    }
+
+    fn send_eos(&mut self) {
+        let _ = self.sender.send_eos();
+    }
+}
+
+#[derive(Debug)]
+struct ReaderState {
+    path: PathBuf,
     file: File,
     demuxer: Mp4FileDemuxer,
     audio_track_id: Option<u32>,
-    format: AudioFormat,
-    channels: Channels,
-    sample_rate: SampleRate,
-
-    pub current_input_file: Option<PathBuf>,
-    pub codec: Option<CodecName>,
-    pub total_sample_count: u64,
-    pub total_track_duration: Duration,
-    pub track_duration_offset: Duration,
+    video_track_id: Option<u32>,
+    audio_format: AudioFormat,
+    audio_channels: Channels,
+    audio_sample_rate: SampleRate,
+    video_format: VideoFormat,
+    video_width: usize,
+    video_height: usize,
 }
 
-impl Mp4AudioReader {
-    pub fn new<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        let mut file = File::open(&path).map_err(|e| {
-            crate::Error::new(format!("Cannot open file {}: {e}", path.as_ref().display()))
-        })?;
+impl ReaderState {
+    fn open(path: &Path, enable_audio: bool, enable_video: bool) -> Result<Self> {
+        let mut file = File::open(path)
+            .map_err(|e| Error::new(format!("Cannot open file {}: {e}", path.display())))?;
         let mut demuxer = Mp4FileDemuxer::new();
-        initialize_mp4_demuxer(&mut file, &mut demuxer, &path)?;
+        initialize_mp4_demuxer(&mut file, &mut demuxer, path)?;
 
-        // 利用可能な音声トラックがあるかをチェックする
-        //
-        // チェックのためにサンプルエントリーを取得するためには、
-        // demuxer のサンプル読み込みが必要なので、clone して別インスタンスで行っている
-        let audio_track_id = check_audio_track(demuxer.clone())?;
+        let audio_track_id = if enable_audio {
+            select_audio_track(demuxer.clone())?
+        } else {
+            None
+        };
+        let video_track_id = if enable_video {
+            select_video_track(demuxer.clone())?
+        } else {
+            None
+        };
 
         Ok(Self {
+            path: path.to_path_buf(),
             file,
             demuxer,
             audio_track_id,
+            video_track_id,
             // ダミー初期値。実際の値はサンプルエントリー受信時に上書きされる。
-            format: AudioFormat::Opus,
-            channels: Channels::STEREO,
-            sample_rate: SampleRate::HZ_48000,
-            current_input_file: Some(path.as_ref().to_path_buf()),
-            codec: None,
-            total_sample_count: 0,
-            total_track_duration: Duration::ZERO,
-            track_duration_offset: Duration::ZERO,
+            audio_format: AudioFormat::Opus,
+            audio_channels: Channels::STEREO,
+            audio_sample_rate: SampleRate::HZ_48000,
+            video_format: VideoFormat::Vp8,
+            video_width: 0,
+            video_height: 0,
         })
     }
 
-    pub fn stats(&self) -> &Self {
-        self
+    fn is_audio_enabled(&self, track_id: u32) -> bool {
+        self.audio_track_id == Some(track_id)
     }
 
-    pub fn stats_mut(&mut self) -> &mut Self {
-        self
+    fn is_video_enabled(&self, track_id: u32) -> bool {
+        self.video_track_id == Some(track_id)
     }
 
-    pub fn inherit_stats_from(&mut self, prev: &Self) {
-        self.codec = prev.codec;
-        self.total_sample_count = prev.total_sample_count;
-        self.total_track_duration = prev.total_track_duration;
-        self.track_duration_offset = prev.track_duration_offset;
-    }
-
-    fn next_sample(&mut self) -> crate::Result<Option<AudioFrame>> {
-        let sample = 'next_sample: loop {
-            match self
-                .demuxer
-                .next_sample()
-                .map_err(|e| crate::Error::new(format!("Read sample error: {e}")))?
-            {
-                None => return Ok(None),
-                Some(sample) if Some(sample.track.track_id) != self.audio_track_id => {}
-                Some(sample) => break 'next_sample sample,
+    fn update_audio_format(&mut self, sample_entry: &SampleEntry) -> Result<()> {
+        let (metadata, format) = match sample_entry {
+            SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
+            SampleEntry::Mp4a(b) => (&b.audio, AudioFormat::Aac),
+            entry => {
+                return Err(Error::new(format!("unsupported sample entry: {entry:?}")));
             }
         };
 
-        // composition_time_offset は未対応
-        if sample.composition_time_offset.is_some() {
-            return Err(crate::Error::new(
-                "composition_time_offset is not supported yet".to_owned(),
-            ));
-        }
+        self.audio_format = format;
+        self.audio_channels = Channels::from_u16(metadata.channelcount)?;
+        self.audio_sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
 
-        let sample_entry = sample.sample_entry.cloned();
-        if let Some(sample_entry) = &sample_entry {
-            // 新しいサンプルエントリーが来たのでハンドリングする
-            let (metadata, format) = match sample_entry {
-                SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
-                SampleEntry::Mp4a(b) => (&b.audio, AudioFormat::Aac),
-                entry => {
-                    return Err(crate::Error::new(format!(
-                        "unsupported sample entry: {entry:?}"
-                    )));
-                }
-            };
+        Ok(())
+    }
 
-            self.format = format;
-            self.channels = Channels::from_u16(metadata.channelcount)?;
-            self.sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
-        }
+    fn update_video_format(&mut self, sample_entry: &SampleEntry) -> Result<()> {
+        let (metadata, format) = match sample_entry {
+            SampleEntry::Avc1(b) => (&b.visual, VideoFormat::H264),
+            SampleEntry::Hev1(b) => (&b.visual, VideoFormat::H265),
+            SampleEntry::Hvc1(b) => (&b.visual, VideoFormat::H265),
+            SampleEntry::Vp08(b) => (&b.visual, VideoFormat::Vp8),
+            SampleEntry::Vp09(b) => (&b.visual, VideoFormat::Vp9),
+            SampleEntry::Av01(b) => (&b.visual, VideoFormat::Av1),
+            entry => {
+                return Err(Error::new(format!("unsupported sample entry: {entry:?}")));
+            }
+        };
 
-        // サンプルデータを読み込む
-        let mut data = vec![0; sample.data_size];
+        self.video_format = format;
+        self.video_width = metadata.width as usize;
+        self.video_height = metadata.height as usize;
+
+        Ok(())
+    }
+
+    fn read_sample_data(&mut self, data_offset: u64, data_size: usize) -> Result<Vec<u8>> {
+        let mut data = vec![0; data_size];
         self.file
-            .seek(SeekFrom::Start(sample.data_offset))
-            .map_err(|e| crate::Error::new(format!("Seek error: {e}")))?;
+            .seek(SeekFrom::Start(data_offset))
+            .map_err(|e| Error::new(format!("Seek error {}: {e}", self.path.display())))?;
         self.file
             .read_exact(&mut data)
-            .map_err(|e| crate::Error::new(format!("Read error: {e}")))?;
-
-        // タイムスタンプを計算する
-        let timescale = sample.track.timescale.get();
-        let timestamp = Duration::from_secs(sample.timestamp) / timescale;
-        let duration = Duration::from_secs(sample.duration as u64) / timescale;
-
-        // 統計値を更新する
-        self.total_sample_count += 1;
-        self.total_track_duration = timestamp + duration;
-        if self.codec.is_none()
-            && let Some(name) = self.format.codec_name()
-        {
-            self.codec = Some(name);
-        }
-
-        Ok(Some(AudioFrame {
-            data,
-            format: self.format,
-            sample_entry,
-            channels: self.channels,
-            sample_rate: self.sample_rate,
-            timestamp,
-        }))
+            .map_err(|e| Error::new(format!("Read error {}: {e}", self.path.display())))?;
+        Ok(data)
     }
 }
 
-impl Iterator for Mp4AudioReader {
-    type Item = crate::Result<AudioFrame>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_sample().transpose()
-    }
+fn calculate_timestamps(timescale: u32, timestamp: u64, duration: u64) -> (Duration, Duration) {
+    let timestamp = Duration::from_secs(timestamp) / timescale;
+    let duration = Duration::from_secs(duration) / timescale;
+    (timestamp, duration)
 }
 
 /// MP4 ファイルからトラック情報を初期化する
@@ -316,33 +593,31 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
     file: &mut R,
     demuxer: &mut Mp4FileDemuxer,
     path: P,
-) -> crate::Result<()> {
-    // 念のために（壊れたファイルが渡された時のため）、バッファサイズの上限を 100 MBに設定しておく。
+) -> Result<()> {
+    // 念のために（壊れたファイルが渡された時のため）、バッファサイズの上限を 100 MB に設定しておく。
     // 正常なファイルの場合には、これは moov ボックスのサイズ上限となるが、
     // 典型的には、100 MB あれば、MP4 ファイル自体としては数百 GB 程度のものを扱えるため、実用上の問題はない想定。
     const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
 
     while let Some(required) = demuxer.required_input() {
         let size = required.size.ok_or_else(|| {
-            crate::Error::new(format!(
+            Error::new(format!(
                 "MP4 file contains unexpected variable size box {}",
                 path.as_ref().display()
             ))
         })?;
         if size > MAX_BUF_SIZE {
-            return Err(crate::Error::new(format!(
+            return Err(Error::new(format!(
                 "MP4 file contains box larger than maximum allowed size ({size} > {MAX_BUF_SIZE}): {}",
                 path.as_ref().display()
             )));
         }
 
         let mut buf = vec![0; size];
-        file.seek(SeekFrom::Start(required.position)).map_err(|e| {
-            crate::Error::new(format!("Seek error {}: {e}", path.as_ref().display()))
-        })?;
-        file.read_exact(&mut buf).map_err(|e| {
-            crate::Error::new(format!("Read error {}: {e}", path.as_ref().display()))
-        })?;
+        file.seek(SeekFrom::Start(required.position))
+            .map_err(|e| Error::new(format!("Seek error {}: {e}", path.as_ref().display())))?;
+        file.read_exact(&mut buf)
+            .map_err(|e| Error::new(format!("Read error {}: {e}", path.as_ref().display())))?;
         let input = required.to_input(&buf);
         demuxer.handle_input(input);
     }
@@ -350,7 +625,7 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
 }
 
 /// 音声トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
-fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> crate::Result<Option<u32>> {
+fn select_audio_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
     let mut has_audio_track = false;
     while let Some(sample) = demuxer.next_sample()? {
         if sample.track.kind != TrackKind::Audio {
@@ -359,7 +634,6 @@ fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> crate::Result<Option<u32>> 
         has_audio_track = true;
 
         if let Some(sample_entry) = sample.sample_entry {
-            // hisui がサポートしているコーデックかどうかをチェック
             let is_supported = match &sample_entry {
                 SampleEntry::Opus(_) => true,
                 SampleEntry::Mp4a(mp4a) => is_aac_codec(&mp4a.esds_box),
@@ -389,6 +663,49 @@ fn check_audio_track(mut demuxer: Mp4FileDemuxer) -> crate::Result<Option<u32>> 
     }
 }
 
+/// 映像トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
+fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
+    let mut has_video_track = false;
+    while let Some(sample) = demuxer.next_sample()? {
+        if sample.track.kind != TrackKind::Video {
+            continue;
+        }
+        has_video_track = true;
+
+        if let Some(sample_entry) = sample.sample_entry {
+            let is_supported = matches!(
+                sample_entry,
+                SampleEntry::Avc1(_)
+                    | SampleEntry::Hev1(_)
+                    | SampleEntry::Hvc1(_)
+                    | SampleEntry::Vp08(_)
+                    | SampleEntry::Vp09(_)
+                    | SampleEntry::Av01(_)
+            );
+
+            if is_supported {
+                return Ok(Some(sample.track.track_id));
+            } else {
+                tracing::warn!(
+                    "Unsupported video codec in track {}: {:?}",
+                    sample.track.track_id,
+                    sample_entry
+                );
+            }
+        }
+    }
+
+    if has_video_track {
+        // 映像トラックがあるのにサポートしているコーデックがない場合はエラーにする
+        Err(crate::Error::new(
+            "No supported video track found in the file".to_owned(),
+        ))
+    } else {
+        // そもそも映像トラックがない場合には空扱いをする
+        Ok(None)
+    }
+}
+
 /// AAC コーデックであることを確認する
 fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
     // DecoderConfigDescriptor の object_type_indication が AAC を示しているかチェック
@@ -400,4 +717,48 @@ fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
         esds_box.es.dec_config_descr.object_type_indication,
         0x40..=0x43
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_mp4_track_availability_detects_audio_only_file() -> Result<()> {
+        let availability = probe_mp4_track_availability("testdata/beep-aac-audio.mp4")?;
+        assert_eq!(
+            availability,
+            Mp4FileTrackAvailability {
+                has_audio: true,
+                has_video: false,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn probe_mp4_track_availability_detects_video_only_file() -> Result<()> {
+        let availability = probe_mp4_track_availability("testdata/archive-red-320x320-h264.mp4")?;
+        assert_eq!(
+            availability,
+            Mp4FileTrackAvailability {
+                has_audio: false,
+                has_video: true,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn probe_mp4_track_availability_detects_av_file() -> Result<()> {
+        let availability = probe_mp4_track_availability("testdata/red-320x320-h264-aac.mp4")?;
+        assert_eq!(
+            availability,
+            Mp4FileTrackAvailability {
+                has_audio: true,
+                has_video: true,
+            }
+        );
+        Ok(())
+    }
 }

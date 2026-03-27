@@ -14,6 +14,7 @@ pub mod recording_layout_encode_params;
 pub mod recording_layout_region;
 pub mod recording_metadata;
 pub mod recording_mixer_audio;
+pub mod recording_mp4_reader;
 pub mod recording_reader;
 pub mod recording_subcommand_compose;
 pub mod recording_subcommand_tune;

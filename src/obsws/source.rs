@@ -61,16 +61,6 @@ pub enum ObswsSourceRequest {
         subscriber: crate::rtsp::subscriber::RtspSubscriber,
         processor_id: Option<ProcessorId>,
     },
-    CreateVideoDecoder {
-        input_track_id: TrackId,
-        output_track_id: TrackId,
-        processor_id: Option<ProcessorId>,
-    },
-    CreateAudioDecoder {
-        input_track_id: TrackId,
-        output_track_id: TrackId,
-        processor_id: Option<ProcessorId>,
-    },
 }
 
 impl ObswsSourceRequest {
@@ -193,58 +183,6 @@ impl ObswsSourceRequest {
                         processor_id.clone(),
                         ProcessorMetadata::new("rtsp_subscriber"),
                         move |h| subscriber.run(h),
-                    )
-                    .await
-                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
-            }
-            Self::CreateVideoDecoder {
-                input_track_id,
-                output_track_id,
-                processor_id,
-            } => {
-                let processor_id = processor_id
-                    .unwrap_or_else(|| ProcessorId::new(format!("videoDecoder:{input_track_id}")));
-                handle
-                    .spawn_processor(
-                        processor_id.clone(),
-                        ProcessorMetadata::new("video_decoder"),
-                        move |h| async move {
-                            let decoder = crate::decoder::VideoDecoder::new(
-                                crate::decoder::VideoDecoderOptions {
-                                    openh264_lib: h.config().openh264_lib.clone(),
-                                    ..Default::default()
-                                },
-                                h.stats(),
-                            );
-                            decoder.run(h, input_track_id, output_track_id).await
-                        },
-                    )
-                    .await
-                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
-            }
-            Self::CreateAudioDecoder {
-                input_track_id,
-                output_track_id,
-                processor_id,
-            } => {
-                let processor_id = processor_id
-                    .unwrap_or_else(|| ProcessorId::new(format!("audioDecoder:{input_track_id}")));
-                handle
-                    .spawn_processor(
-                        processor_id.clone(),
-                        ProcessorMetadata::new("audio_decoder"),
-                        move |h| async move {
-                            #[cfg(feature = "fdk-aac")]
-                            let fdk_aac_lib = h.config().fdk_aac_lib.clone();
-                            let decoder = crate::decoder::AudioDecoder::new(
-                                #[cfg(feature = "fdk-aac")]
-                                fdk_aac_lib,
-                                h.stats(),
-                            )?;
-                            decoder.run(h, input_track_id, output_track_id).await
-                        },
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;

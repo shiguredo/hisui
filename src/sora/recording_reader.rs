@@ -4,8 +4,8 @@ use std::time::Duration;
 use crate::{
     audio::AudioFrame,
     media::MediaFrame,
-    mp4::reader::{Mp4AudioReader, Mp4VideoReader},
     sora::recording_layout::AggregatedSourceInfo,
+    sora::recording_mp4_reader::{Mp4AudioReader, Mp4VideoReader},
     types::ContainerFormat,
     video::VideoFrame,
     webm::reader::{WebmAudioReader, WebmVideoReader},

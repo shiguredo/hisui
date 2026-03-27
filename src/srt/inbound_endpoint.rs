@@ -162,6 +162,32 @@ impl SrtInboundEndpoint {
         stats.set_listening(true);
         stats.set_connected(false);
 
+        // デコーダーを生成する
+        let mut video_decoder = if self.output_video_track_id.is_some() {
+            let mut decoder_stats = handle.stats();
+            decoder_stats.set_default_label("component", "video_decoder");
+            Some(crate::decoder::VideoDecoder::new(
+                crate::decoder::VideoDecoderOptions {
+                    openh264_lib: handle.config().openh264_lib.clone(),
+                    ..Default::default()
+                },
+                decoder_stats,
+            ))
+        } else {
+            None
+        };
+        let mut audio_decoder = if self.output_audio_track_id.is_some() {
+            let mut decoder_stats = handle.stats();
+            decoder_stats.set_default_label("component", "audio_decoder");
+            Some(crate::decoder::AudioDecoder::new(
+                #[cfg(feature = "fdk-aac")]
+                handle.config().fdk_aac_lib.clone(),
+                decoder_stats,
+            )?)
+        } else {
+            None
+        };
+
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
 
@@ -176,9 +202,11 @@ impl SrtInboundEndpoint {
                             samples,
                             &mut audio_track_tx,
                             &mut video_track_tx,
+                            &mut audio_decoder,
+                            &mut video_decoder,
                             &stats,
                             connection_timestamp_offset,
-                        );
+                        )?;
                     }
                     if should_flush_pending_pes(&event) {
                         let flushed_samples = demuxer.flush_pending()?;
@@ -186,9 +214,11 @@ impl SrtInboundEndpoint {
                             flushed_samples,
                             &mut audio_track_tx,
                             &mut video_track_tx,
+                            &mut audio_decoder,
+                            &mut video_decoder,
                             &stats,
                             connection_timestamp_offset,
-                        );
+                        )?;
                     }
                     let now = now_timestamp(base_time);
                     let mut connection_ctx = SrtConnectionContext {
@@ -497,33 +527,56 @@ fn publish_samples(
     samples: Vec<TsSample>,
     audio_track_tx: &mut Option<crate::media_pipeline::MessageSender>,
     video_track_tx: &mut Option<crate::media_pipeline::MessageSender>,
+    audio_decoder: &mut Option<crate::decoder::AudioDecoder>,
+    video_decoder: &mut Option<crate::decoder::VideoDecoder>,
     stats: &SrtInboundEndpointStats,
     connection_timestamp_offset: Duration,
-) {
+) -> crate::Result<()> {
     for sample in samples {
         match sample {
             TsSample::Audio(mut frame) => {
                 frame.timestamp = frame.timestamp.saturating_add(connection_timestamp_offset);
                 let timestamp = frame.timestamp;
-                if let Some(tx) = audio_track_tx {
-                    tx.send_audio(frame);
-                }
                 stats.set_audio_codec(crate::types::CodecName::Aac);
                 stats.add_input_audio_data_count();
                 stats.set_last_input_audio_timestamp(timestamp);
+                if let Some(decoder) = audio_decoder
+                    && let Some(tx) = audio_track_tx
+                {
+                    decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
+                        std::sync::Arc::new(frame),
+                    )))?;
+                    // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
+                    if crate::decoder::drain_audio_decoder_output(decoder, tx)?
+                        == crate::decoder::DrainResult::PipelineClosed
+                    {
+                        return Err(crate::Error::new("audio track pipeline closed"));
+                    }
+                }
             }
             TsSample::Video(mut frame) => {
                 frame.timestamp = frame.timestamp.saturating_add(connection_timestamp_offset);
                 let timestamp = frame.timestamp;
-                if let Some(tx) = video_track_tx {
-                    tx.send_video(frame);
-                }
                 stats.set_video_codec(crate::types::CodecName::H264);
                 stats.add_input_video_frame_count();
                 stats.set_last_input_video_timestamp(timestamp);
+                if let Some(decoder) = video_decoder
+                    && let Some(tx) = video_track_tx
+                {
+                    decoder.handle_input_sample(Some(crate::MediaFrame::Video(
+                        std::sync::Arc::new(frame),
+                    )))?;
+                    // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
+                    if crate::decoder::drain_video_decoder_output(decoder, tx)?
+                        == crate::decoder::DrainResult::PipelineClosed
+                    {
+                        return Err(crate::Error::new("video track pipeline closed"));
+                    }
+                }
             }
         }
     }
+    Ok(())
 }
 
 fn reset_connection_state(

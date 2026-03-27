@@ -8,7 +8,6 @@ use crate::tcp::{ServerTcpOrTlsStream, create_server_tls_acceptor};
 use crate::{
     Error, MediaFrame, Message, ProcessorHandle, TrackId,
     audio::{AudioFormat, AudioFrame},
-    encoder::VideoEncoderRpcMessage,
     video::{VideoFormat, VideoFrame},
 };
 
@@ -647,9 +646,12 @@ impl RtmpClientHandler {
         let pipeline_handle = self.pipeline_handle.clone();
         let endpoint_processor_id = self.endpoint_processor_id.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                request_video_keyframe_for_rtmp_play_start(&pipeline_handle, &endpoint_processor_id)
-                    .await
+            if let Err(e) = crate::encoder::request_upstream_video_keyframe(
+                &pipeline_handle,
+                &endpoint_processor_id,
+                trigger,
+            )
+            .await
             {
                 tracing::warn!(
                     "failed to request keyframe for RTMP play start: trigger={}, error={}",
@@ -659,52 +661,6 @@ impl RtmpClientHandler {
             }
         });
     }
-}
-
-async fn request_video_keyframe_for_rtmp_play_start(
-    pipeline_handle: &crate::MediaPipelineHandle,
-    endpoint_processor_id: &crate::ProcessorId,
-) -> crate::Result<()> {
-    // [NOTE]
-    // ここは best effort で、経路上に video encoder がない構成（既エンコード入力など）は
-    // 正常系としてキーフレーム要求をスキップする。
-    let maybe_encoder_processor_id = pipeline_handle
-        .find_upstream_video_encoder(endpoint_processor_id)
-        .await
-        .map_err(|_| crate::Error::new("failed to find upstream video encoder"))?;
-    let Some(encoder_processor_id) = maybe_encoder_processor_id else {
-        tracing::debug!(
-            "skip keyframe request for RTMP play start: upstream video encoder not found (endpoint={})",
-            endpoint_processor_id,
-        );
-        return Ok(());
-    };
-
-    // get_rpc_sender() は sender 登録待ちができるため、ここで追加ポーリングは不要。
-    let rpc_sender = pipeline_handle
-        .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<VideoEncoderRpcMessage>>(
-            &encoder_processor_id,
-        )
-        .await
-        .map_err(|e| {
-            crate::Error::new(format!(
-                "failed to get video encoder RPC sender ({encoder_processor_id}): {e}"
-            ))
-        })?;
-
-    rpc_sender
-        .send(VideoEncoderRpcMessage::RequestKeyframe)
-        .map_err(|_| {
-            crate::Error::new(format!(
-                "failed to send keyframe request to video encoder: {encoder_processor_id}"
-            ))
-        })?;
-    tracing::debug!(
-        "requested keyframe for RTMP play start: endpoint={}, encoder={}",
-        endpoint_processor_id,
-        encoder_processor_id
-    );
-    Ok(())
 }
 
 pub async fn create_processor(

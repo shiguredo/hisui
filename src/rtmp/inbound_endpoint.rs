@@ -101,9 +101,36 @@ impl RtmpInboundEndpoint {
 
         let output_audio_track_id = self.output_audio_track_id.clone();
         let output_video_track_id = self.output_video_track_id.clone();
-        let stats = RtmpInboundEndpointStats::new(handle.stats());
-        stats.set_listening(true);
+        let endpoint_stats = RtmpInboundEndpointStats::new(handle.stats());
+        endpoint_stats.set_listening(true);
         let server_started_at = tokio::time::Instant::now();
+
+        // デコーダーを生成する
+        let mut video_decoder = if output_video_track_id.is_some() {
+            let mut decoder_stats = handle.stats();
+            decoder_stats.set_default_label("component", "video_decoder");
+            Some(crate::decoder::VideoDecoder::new(
+                crate::decoder::VideoDecoderOptions {
+                    openh264_lib: handle.config().openh264_lib.clone(),
+                    ..Default::default()
+                },
+                decoder_stats,
+            ))
+        } else {
+            None
+        };
+        let mut audio_decoder = if output_audio_track_id.is_some() {
+            let mut decoder_stats = handle.stats();
+            decoder_stats.set_default_label("component", "audio_decoder");
+            Some(crate::decoder::AudioDecoder::new(
+                #[cfg(feature = "fdk-aac")]
+                handle.config().fdk_aac_lib.clone(),
+                decoder_stats,
+            )?)
+        } else {
+            None
+        };
+
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
 
@@ -127,7 +154,7 @@ impl RtmpInboundEndpoint {
                     let expected_stream_name = url.stream_name.clone();
                     let tls_acceptor = tls_acceptor.clone();
                     let timestamp_offset = server_started_at.elapsed();
-                    let stats = stats.clone();
+                    let endpoint_stats = endpoint_stats.clone();
 
                     match ServerTcpOrTlsStream::accept_with_tls(stream, tls_acceptor.as_ref()).await
                     {
@@ -142,7 +169,9 @@ impl RtmpInboundEndpoint {
                                 timestamp_offset,
                                 video_track_tx.take(),
                                 audio_track_tx.take(),
-                                stats,
+                                video_decoder.take(),
+                                audio_decoder.take(),
+                                endpoint_stats,
                             )
                             .inspect_err(|e| {
                                 tracing::error!(
@@ -156,10 +185,16 @@ impl RtmpInboundEndpoint {
                             if let Err(e) = handler.run().await {
                                 tracing::error!("RTMP publisher handler error: {}", e.display());
                             }
-                            let (restored_video_track_tx, restored_audio_track_tx) =
-                                handler.into_track_senders();
+                            let (
+                                restored_video_track_tx,
+                                restored_audio_track_tx,
+                                restored_video_decoder,
+                                restored_audio_decoder,
+                            ) = handler.into_parts();
                             video_track_tx = restored_video_track_tx;
                             audio_track_tx = restored_audio_track_tx;
+                            video_decoder = restored_video_decoder;
+                            audio_decoder = restored_audio_decoder;
                             tracing::debug!("RTMP publisher disconnected: {peer_addr}");
                         }
                         Err(e) => {
@@ -274,10 +309,16 @@ struct RtmpPublisherHandler {
     frame_handler: crate::rtmp::frame::RtmpIncomingFrameHandler,
     video_track_tx: Option<crate::MessageSender>,
     audio_track_tx: Option<crate::MessageSender>,
+    video_decoder: Option<crate::decoder::VideoDecoder>,
+    audio_decoder: Option<crate::decoder::AudioDecoder>,
     stats: RtmpInboundEndpointStats,
 }
 
 impl RtmpPublisherHandler {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "handler の内部生成関数であり、呼び出し元は run() の 1 箇所のみ"
+    )]
     fn new(
         stream: ServerTcpOrTlsStream,
         expected_app: String,
@@ -285,6 +326,8 @@ impl RtmpPublisherHandler {
         timestamp_offset: std::time::Duration,
         video_track_tx: Option<crate::MessageSender>,
         audio_track_tx: Option<crate::MessageSender>,
+        video_decoder: Option<crate::decoder::VideoDecoder>,
+        audio_decoder: Option<crate::decoder::AudioDecoder>,
         stats: RtmpInboundEndpointStats,
     ) -> crate::Result<Self> {
         Ok(Self {
@@ -296,6 +339,8 @@ impl RtmpPublisherHandler {
             frame_handler: crate::rtmp::frame::RtmpIncomingFrameHandler::new(timestamp_offset)?,
             video_track_tx,
             audio_track_tx,
+            video_decoder,
+            audio_decoder,
             stats,
         })
     }
@@ -327,8 +372,20 @@ impl RtmpPublisherHandler {
         Ok(())
     }
 
-    fn into_track_senders(self) -> (Option<crate::MessageSender>, Option<crate::MessageSender>) {
-        (self.video_track_tx, self.audio_track_tx)
+    fn into_parts(
+        self,
+    ) -> (
+        Option<crate::MessageSender>,
+        Option<crate::MessageSender>,
+        Option<crate::decoder::VideoDecoder>,
+        Option<crate::decoder::AudioDecoder>,
+    ) {
+        (
+            self.video_track_tx,
+            self.audio_track_tx,
+            self.video_decoder,
+            self.audio_decoder,
+        )
     }
 
     /// RTMP イベントを処理する
@@ -381,8 +438,11 @@ impl RtmpPublisherHandler {
     }
 
     /// オーディオフレームを処理する
+    ///
+    /// エンコード済みフレームをデコードし、raw フレームを出力トラックに送信する。
     async fn handle_audio_frame(&mut self, frame: shiguredo_rtmp::AudioFrame) -> crate::Result<()> {
         if let Some(audio_data) = self.frame_handler.process_audio_frame(frame)?
+            && let Some(decoder) = &mut self.audio_decoder
             && let Some(tx) = &mut self.audio_track_tx
         {
             if let Some(codec) = audio_data.format.codec_name() {
@@ -391,14 +451,25 @@ impl RtmpPublisherHandler {
             self.stats.add_input_audio_data_count();
             self.stats
                 .set_last_input_audio_timestamp(audio_data.timestamp);
-            tx.send_media(crate::MediaFrame::Audio(std::sync::Arc::new(audio_data)));
+            decoder.handle_input_sample(Some(crate::MediaFrame::Audio(std::sync::Arc::new(
+                audio_data,
+            ))))?;
+            // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
+            if crate::decoder::drain_audio_decoder_output(decoder, tx)?
+                == crate::decoder::DrainResult::PipelineClosed
+            {
+                return Err(crate::Error::new("audio track pipeline closed"));
+            }
         }
         Ok(())
     }
 
     /// ビデオフレームを処理する
+    ///
+    /// エンコード済みフレームをデコードし、raw フレームを出力トラックに送信する。
     async fn handle_video_frame(&mut self, frame: shiguredo_rtmp::VideoFrame) -> crate::Result<()> {
         if let Some(video_frame) = self.frame_handler.process_video_frame(frame)?
+            && let Some(decoder) = &mut self.video_decoder
             && let Some(tx) = &mut self.video_track_tx
         {
             if let Some(codec) = video_frame.format.codec_name() {
@@ -407,7 +478,15 @@ impl RtmpPublisherHandler {
             self.stats.add_input_video_frame_count();
             self.stats
                 .set_last_input_video_timestamp(video_frame.timestamp);
-            tx.send_media(crate::MediaFrame::Video(std::sync::Arc::new(video_frame)));
+            decoder.handle_input_sample(Some(crate::MediaFrame::Video(std::sync::Arc::new(
+                video_frame,
+            ))))?;
+            // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
+            if crate::decoder::drain_video_decoder_output(decoder, tx)?
+                == crate::decoder::DrainResult::PipelineClosed
+            {
+                return Err(crate::Error::new("video track pipeline closed"));
+            }
         }
         Ok(())
     }

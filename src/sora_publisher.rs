@@ -87,6 +87,20 @@ impl SoraPublisher {
 
         handle.notify_ready();
 
+        // 起動直後に上流 video encoder へキーフレーム要求を送る
+        if let Err(e) = crate::encoder::request_upstream_video_keyframe(
+            &handle.pipeline_handle(),
+            handle.processor_id(),
+            "sora_publisher_start",
+        )
+        .await
+        {
+            tracing::warn!(
+                "failed to request keyframe for Sora publisher start: {}",
+                e.display()
+            );
+        }
+
         // メッセージ受信ループ
         // video/audio 両方の EOS を受け取ってから切断する。
         let mut video_eos = false;
