@@ -220,7 +220,9 @@ const MANIFEST_FILENAME: &str = "manifest.mpd";
 /// fMP4 の init segment ファイル名
 const INIT_SEGMENT_FILENAME: &str = "init.mp4";
 
-/// fMP4 用のタイムスケール（マイクロ秒単位）
+/// fMP4 用のタイムスケール（マイクロ秒単位 = 1,000,000）。
+/// NonZeroU32 リテラルが const で直接構築できないため、
+/// NonZeroU32::MIN (= 1) に 999,999 を加算して 1,000,000 を得ている。
 const FMP4_TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 
 /// DASH セグメントライター。
