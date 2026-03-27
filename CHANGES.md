@@ -11,7 +11,7 @@
 
 ## develop
 
-- [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0-canary.2 にあげる
+- [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0-canary.3 にあげる
   - このバージョンから shiguredo_dav1d crate のリポジトリが https://github.com/shiguredo/dav1d-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.0 にあげる
@@ -20,7 +20,7 @@
 - [UPDATE] shiguredo_opus のバージョンを 2026.1.0-canary.5 にあげる
   - このバージョンから shiguredo_opus crate のリポジトリが https://github.com/shiguredo/opus-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0-canary.1 にあげる
+- [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0-canary.2 にあげる
   - このバージョンから shiguredo_svt_av1 crate のリポジトリが https://github.com/shiguredo/svt-av1-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
@@ -30,6 +30,8 @@
   - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
   - `shiguredo_audio_device` が PulseAudio バックエンドを利用するために必要
+  - @sile
+- [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.2 を追加する
   - @sile
 - [ADD] obsws の Output に HLS ライブ出力 (`outputName: "hls"`) を追加する
   - H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する
@@ -113,7 +115,7 @@
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する
   - @sile
-- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.3 にあげる
+- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.4 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0-canary.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.2 にあげる
