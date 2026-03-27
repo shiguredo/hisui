@@ -651,12 +651,14 @@ fn select_audio_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
     }
 
     if has_audio_track {
-        tracing::warn!("No supported audio track found in the file");
+        // 音声トラックがあるのにサポートしているコーデックがない場合はエラーにする
+        Err(crate::Error::new(
+            "No supported audio track found in the file".to_owned(),
+        ))
     } else {
-        tracing::warn!("No audio track found in the file");
+        // そもそも音声トラックがない場合には空扱いをする
+        Ok(None)
     }
-
-    Ok(None)
 }
 
 /// 映像トラックをチェックして、サポートされているコーデックを持つトラック ID を取得する
@@ -692,12 +694,14 @@ fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
     }
 
     if has_video_track {
-        tracing::warn!("No supported video track found in the file");
+        // 映像トラックがあるのにサポートしているコーデックがない場合はエラーにする
+        Err(crate::Error::new(
+            "No supported video track found in the file".to_owned(),
+        ))
     } else {
-        tracing::warn!("No video track found in the file");
+        // そもそも映像トラックがない場合には空扱いをする
+        Ok(None)
     }
-
-    Ok(None)
 }
 
 /// AAC コーデックであることを確認する
