@@ -2,6 +2,11 @@
 ///
 /// HLS のマスタープレイリスト（`CODECS` 属性）や DASH の MPD（`codecs` 属性）で使われる。
 /// エンコーダーの設定に合わせて coordinator が構築し、各ライターに渡す。
+///
+// TODO: 現在は固定のデフォルト値のみ提供している。
+// エンコーダーが出力する SPS（H.264 の profile_idc / level_idc）や
+// AudioSpecificConfig（AAC の audio_object_type）から正確な値を構築する
+// コンストラクタを追加し、h264_aac_default() の使用箇所を置き換える。
 #[derive(Debug, Clone)]
 pub struct CodecString {
     /// ビデオコーデック文字列（例: "avc1.42e01f"）
