@@ -438,7 +438,6 @@ fn build_output_active_response(
     })
 }
 
-
 fn build_stream_output_settings_response(
     request_id: &str,
     input_registry: &ObswsInputRegistry,
