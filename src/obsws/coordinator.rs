@@ -3244,15 +3244,66 @@ async fn start_hls_processors(
                 }
             })
             .collect();
-        // filesystem の場合のみローカルファイルとしてマスタープレイリストを書き出す
-        // TODO: S3 の場合は S3 にマスタープレイリストを PutObject する
-        if let crate::obsws::input_registry::HlsDestination::Filesystem { ref directory } =
-            run.destination
-        {
-            crate::hls::writer::write_master_playlist(
-                &std::path::PathBuf::from(directory),
-                &master_variants,
-            )?;
+        let master_content =
+            crate::hls::writer::build_master_playlist_content(&master_variants);
+        match &run.destination {
+            crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
+                crate::hls::writer::write_master_playlist(
+                    &std::path::PathBuf::from(directory),
+                    &master_variants,
+                )?;
+            }
+            crate::obsws::input_registry::HlsDestination::S3 {
+                bucket,
+                prefix,
+                region,
+                endpoint,
+                use_path_style,
+                access_key_id,
+                secret_access_key,
+                session_token,
+                ..
+            } => {
+                let credential = match session_token {
+                    Some(token) => shiguredo_s3::Credential::with_session_token(
+                        access_key_id,
+                        secret_access_key,
+                        token,
+                    ),
+                    None => shiguredo_s3::Credential::new(access_key_id, secret_access_key),
+                };
+                let mut config_builder = shiguredo_s3::S3Config::builder()
+                    .region(region)
+                    .credential(credential)
+                    .use_path_style(*use_path_style);
+                if let Some(ep) = endpoint {
+                    config_builder = config_builder.endpoint(ep);
+                }
+                let s3_config = config_builder.build().map_err(|e| {
+                    crate::Error::new(format!("failed to build S3 config: {e}"))
+                })?;
+                let s3_client = crate::s3::S3HttpClient::new(s3_config);
+                let key = if prefix.is_empty() {
+                    "playlist.m3u8".to_owned()
+                } else {
+                    format!("{prefix}/playlist.m3u8")
+                };
+                let request = s3_client
+                    .client()
+                    .put_object()
+                    .bucket(bucket)
+                    .key(&key)
+                    .body(master_content.into_bytes())
+                    .content_type("application/vnd.apple.mpegurl")
+                    .build_request()?;
+                let response = s3_client.execute(&request).await?;
+                if !response.is_success() {
+                    return Err(crate::Error::new(format!(
+                        "S3 PutObject failed for master playlist {key}: status={}",
+                        response.status_code
+                    )));
+                }
+            }
         }
     }
 
@@ -3352,9 +3403,70 @@ async fn stop_processors_staged_hls(
                     }
                 }
             }
-            crate::obsws::input_registry::HlsDestination::S3 { .. } => {
-                // TODO: S3 のマスタープレイリストを DeleteObject で削除する
+            crate::obsws::input_registry::HlsDestination::S3 {
+                bucket,
+                prefix,
+                region,
+                endpoint,
+                use_path_style,
+                access_key_id,
+                secret_access_key,
+                session_token,
+                ..
+            } => {
+                // マスタープレイリストを DeleteObject で削除する
                 // バリアント「ディレクトリ」の削除は不要（S3 にディレクトリ概念なし）
+                let credential = match session_token {
+                    Some(token) => shiguredo_s3::Credential::with_session_token(
+                        access_key_id,
+                        secret_access_key,
+                        token,
+                    ),
+                    None => shiguredo_s3::Credential::new(access_key_id, secret_access_key),
+                };
+                let mut config_builder = shiguredo_s3::S3Config::builder()
+                    .region(region)
+                    .credential(credential)
+                    .use_path_style(*use_path_style);
+                if let Some(ep) = endpoint {
+                    config_builder = config_builder.endpoint(ep);
+                }
+                if let Ok(s3_config) = config_builder.build() {
+                    let s3_client = crate::s3::S3HttpClient::new(s3_config);
+                    let key = if prefix.is_empty() {
+                        "playlist.m3u8".to_owned()
+                    } else {
+                        format!("{prefix}/playlist.m3u8")
+                    };
+                    match s3_client
+                        .client()
+                        .delete_object()
+                        .bucket(bucket)
+                        .key(&key)
+                        .build_request()
+                    {
+                        Ok(request) => match s3_client.execute(&request).await {
+                            Ok(response) if !response.is_success() => {
+                                tracing::warn!(
+                                    "S3 DeleteObject failed for master playlist {key}: status={}",
+                                    response.status_code
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "failed to delete S3 master playlist {key}: {}",
+                                    e.display()
+                                );
+                            }
+                            _ => {}
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                "failed to build DeleteObject for master playlist {key}: {e}"
+                            );
+                        }
+                    }
+                }
             }
         }
     }

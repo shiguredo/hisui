@@ -154,11 +154,18 @@ impl HlsStorage {
                     .key(&key)
                     .build_request()
                 {
-                    Ok(request) => {
-                        if let Err(e) = s3.client.execute(&request).await {
+                    Ok(request) => match s3.client.execute(&request).await {
+                        Ok(response) if !response.is_success() => {
+                            tracing::warn!(
+                                "S3 DeleteObject failed for {key}: status={}",
+                                response.status_code
+                            );
+                        }
+                        Err(e) => {
                             tracing::warn!("failed to delete S3 object {key}: {}", e.display());
                         }
-                    }
+                        _ => {}
+                    },
                     Err(e) => {
                         tracing::warn!("failed to build DeleteObject for {key}: {e}");
                     }
@@ -1288,10 +1295,8 @@ pub struct MasterPlaylistVariant {
 
 /// ABR 用のマスタープレイリスト（Multivariant Playlist）を書き出す。
 /// 一時ファイルに書いてから rename してアトミックに更新する。
-pub fn write_master_playlist(
-    output_directory: &Path,
-    variants: &[MasterPlaylistVariant],
-) -> crate::Result<()> {
+/// マスタープレイリストの内容を生成する
+pub fn build_master_playlist_content(variants: &[MasterPlaylistVariant]) -> String {
     let playlist = shiguredo_m3u8::multivariant::MultivariantPlaylist {
         version: None,
         independent_segments: true,
@@ -1332,7 +1337,16 @@ pub fn write_master_playlist(
         session_keys: Vec::new(),
     };
 
-    let content = shiguredo_m3u8::write_multivariant_playlist(&playlist);
+    shiguredo_m3u8::write_multivariant_playlist(&playlist)
+}
+
+/// ABR 用のマスタープレイリストをファイルシステムに書き出す。
+/// 一時ファイルに書いてから rename してアトミックに更新する。
+pub fn write_master_playlist(
+    output_directory: &Path,
+    variants: &[MasterPlaylistVariant],
+) -> crate::Result<()> {
+    let content = build_master_playlist_content(variants);
 
     let playlist_path = output_directory.join(PLAYLIST_FILENAME);
     let tmp_path = output_directory.join(".playlist.m3u8.tmp");
