@@ -171,6 +171,7 @@ struct Session {
     connection_state: PeerConnectionState,
     in_flight_offer: bool,
     pending_renegotiation: bool,
+    stats: P2pSessionStats,
     subscribed_tracks: std::collections::HashMap<crate::TrackId, SubscribedTrack>,
     event_tx: mpsc::UnboundedSender<PcEvent>,
     ice_rx: tokio::sync::mpsc::UnboundedReceiver<IceObserverEvent>,
@@ -213,6 +214,44 @@ struct AudioTrackState {
     audio_state: Arc<super::audio::SharedAudioState>,
     _source: shiguredo_webrtc::AudioTrackSource,
     _track: shiguredo_webrtc::AudioTrack,
+}
+
+struct P2pSessionStats {
+    total_input_video_frame_count: crate::stats::StatsCounter,
+    total_forwarded_video_frame_count: crate::stats::StatsCounter,
+    total_unsupported_video_format_count: crate::stats::StatsCounter,
+    total_unsubscribed_video_frame_count: crate::stats::StatsCounter,
+    current_input_video_width: crate::stats::StatsGauge,
+    current_input_video_height: crate::stats::StatsGauge,
+    input_video_format: crate::stats::StatsString,
+    total_input_audio_frame_count: crate::stats::StatsCounter,
+    total_forwarded_audio_frame_count: crate::stats::StatsCounter,
+    total_unsupported_audio_format_count: crate::stats::StatsCounter,
+    total_unsubscribed_audio_frame_count: crate::stats::StatsCounter,
+    input_audio_format: crate::stats::StatsString,
+}
+
+impl P2pSessionStats {
+    fn new(mut stats: crate::stats::Stats) -> Self {
+        Self {
+            total_input_video_frame_count: stats.counter("total_input_video_frame_count"),
+            total_forwarded_video_frame_count: stats.counter("total_forwarded_video_frame_count"),
+            total_unsupported_video_format_count: stats
+                .counter("total_unsupported_video_format_count"),
+            total_unsubscribed_video_frame_count: stats
+                .counter("total_unsubscribed_video_frame_count"),
+            current_input_video_width: stats.gauge("current_input_video_width"),
+            current_input_video_height: stats.gauge("current_input_video_height"),
+            input_video_format: stats.string("input_video_format"),
+            total_input_audio_frame_count: stats.counter("total_input_audio_frame_count"),
+            total_forwarded_audio_frame_count: stats.counter("total_forwarded_audio_frame_count"),
+            total_unsupported_audio_format_count: stats
+                .counter("total_unsupported_audio_format_count"),
+            total_unsubscribed_audio_frame_count: stats
+                .counter("total_unsubscribed_audio_frame_count"),
+            input_audio_format: stats.string("input_audio_format"),
+        }
+    }
 }
 
 pub enum BootstrapError {
@@ -473,6 +512,7 @@ async fn bootstrap_internal(
     let mut ice_candidates = Vec::new();
     let mut ice_rx = ice_rx;
     let answer_sdp = finalize_local_sdp(answer_sdp, &mut ice_rx, &mut ice_candidates).await?;
+    let stats = P2pSessionStats::new(processor_handle.stats());
 
     let sess = Session {
         _handle: handle,
@@ -488,6 +528,7 @@ async fn bootstrap_internal(
         connection_state: PeerConnectionState::New,
         in_flight_offer: false,
         pending_renegotiation: false,
+        stats,
         subscribed_tracks: std::collections::HashMap::new(),
         event_tx,
         ice_rx,
@@ -768,7 +809,16 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
     match message {
         crate::Message::Media(sample) => match sample {
             crate::MediaFrame::Video(frame) => {
+                sess.stats.total_input_video_frame_count.inc();
+                sess.stats.input_video_format.set(frame.format.to_string());
+                if let Some(size) = frame.size() {
+                    sess.stats.current_input_video_width.set(size.width as i64);
+                    sess.stats
+                        .current_input_video_height
+                        .set(size.height as i64);
+                }
                 if frame.format != crate::video::VideoFormat::I420 {
+                    sess.stats.total_unsupported_video_format_count.inc();
                     tracing::info!(
                         "Unsupported video format for track {track_id}: {}",
                         frame.format
@@ -785,19 +835,33 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                             "Failed to send video frame for track {track_id}: {}",
                             e.display()
                         );
+                    } else {
+                        sess.stats.total_forwarded_video_frame_count.inc();
                     }
+                } else {
+                    sess.stats.total_unsubscribed_video_frame_count.inc();
                 }
             }
             crate::MediaFrame::Audio(frame) => {
+                sess.stats.total_input_audio_frame_count.inc();
+                sess.stats.input_audio_format.set(frame.format.to_string());
                 if let Some(subscribed) = sess.subscribed_tracks.get_mut(track_id)
                     && let TrackState::Audio(state) = &subscribed.state
-                    && frame.format == crate::audio::AudioFormat::I16Be
-                    && let Err(e) = state.audio_state.push_audio_frame(&frame)
                 {
-                    tracing::warn!(
-                        "Failed to send audio frame for track {track_id}: {}",
-                        e.display()
-                    );
+                    if frame.format == crate::audio::AudioFormat::I16Be {
+                        if let Err(e) = state.audio_state.push_audio_frame(&frame) {
+                            tracing::warn!(
+                                "Failed to send audio frame for track {track_id}: {}",
+                                e.display()
+                            );
+                        } else {
+                            sess.stats.total_forwarded_audio_frame_count.inc();
+                        }
+                    } else {
+                        sess.stats.total_unsupported_audio_format_count.inc();
+                    }
+                } else {
+                    sess.stats.total_unsubscribed_audio_frame_count.inc();
                 }
             }
         },
