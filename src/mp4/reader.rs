@@ -221,8 +221,9 @@ impl Mp4FileReader {
                 decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
                     std::sync::Arc::new(audio_data),
                 )))?;
+                // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
                 if crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?
-                    != crate::decoder::DrainResult::Pending
+                    == crate::decoder::DrainResult::PipelineClosed
                 {
                     return Ok(true);
                 }
@@ -281,8 +282,9 @@ impl Mp4FileReader {
                 decoder.handle_input_sample(Some(crate::MediaFrame::Video(
                     std::sync::Arc::new(video_frame),
                 )))?;
+                // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
                 if crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?
-                    != crate::decoder::DrainResult::Pending
+                    == crate::decoder::DrainResult::PipelineClosed
                 {
                     return Ok(true);
                 }
