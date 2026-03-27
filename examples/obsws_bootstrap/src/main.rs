@@ -937,6 +937,7 @@ struct RetainedState {
     obsws_dc_observer: Option<DataChannelObserver>,
     video_sinks: Vec<RetainedVideoSink>,
     audio_sinks: Vec<RetainedAudioSink>,
+    track_transceivers: Vec<RtpTransceiver>,
     ice_rx: mpsc::UnboundedReceiver<IceObserverEvent>,
     ice_candidates: Vec<GatheredIceCandidate>,
 }
@@ -1202,6 +1203,7 @@ async fn run_client(
         obsws_dc_observer: None,
         video_sinks: Vec::new(),
         audio_sinks: Vec::new(),
+        track_transceivers: Vec::new(),
         ice_rx,
         ice_candidates: initial_ice_candidates,
     };
@@ -1269,8 +1271,15 @@ async fn run_client(
             processed_audio += 1;
         }
 
+        let connection_ready = connection_state.lock().unwrap().as_str() == "connected";
+        let signaling_ready = retained
+            .signaling_dc
+            .as_ref()
+            .is_some_and(|dc| dc.state() == DataChannelState::Open);
         if !obsws_create_input_sent
             && let Some(dc) = &retained.obsws_dc
+            && connection_ready
+            && signaling_ready
             && obsws_ready
             && dc.state() == DataChannelState::Open
         {
@@ -1306,6 +1315,8 @@ async fn run_client(
                 *connection_state.lock().unwrap() = state_str.to_owned();
             }
             ClientEvent::Track(transceiver) => {
+                // transceiver を保持しないと、ラッパーの寿命次第で受信が不安定になる可能性がある。
+                retained.track_transceivers.push(transceiver.clone());
                 let receiver = transceiver.receiver();
                 let track = receiver.track();
                 let kind = track.kind().unwrap_or_default();
