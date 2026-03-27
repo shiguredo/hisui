@@ -789,9 +789,21 @@ async fn handle_obsws_message(sess: &mut Session, data: &[u8]) -> bool {
     tracing::debug!("Received obsws message: {text}");
 
     // bootstrap DataChannel 専用リクエストのインターセプト
-    if let Some(response) = handle_bootstrap_dc_request(sess, text).await {
-        send_obsws_dc(sess, response.text());
-        return false;
+    match handle_bootstrap_dc_request(sess, text).await {
+        BootstrapDcResult::Response(response) => {
+            send_obsws_dc(sess, response.text());
+            return false;
+        }
+        BootstrapDcResult::CloseSession {
+            response,
+            code,
+            reason,
+        } => {
+            send_obsws_dc(sess, response.text());
+            send_close(sess, code, &reason);
+            return true;
+        }
+        BootstrapDcResult::NotHandled => {}
     }
 
     // OBS WS メッセージとして処理する
@@ -807,29 +819,42 @@ async fn handle_obsws_message(sess: &mut Session, data: &[u8]) -> bool {
     apply_obsws_action_to_dc(sess, action)
 }
 
+/// bootstrap DataChannel 専用リクエストの処理結果
+enum BootstrapDcResult {
+    /// レスポンスを返して続行する
+    Response(nojson::RawJsonOwned),
+    /// レスポンスを返した後、セッションを切断する
+    CloseSession {
+        response: nojson::RawJsonOwned,
+        code: &'static str,
+        reason: String,
+    },
+    /// 該当しないリクエスト（通常の obsws 処理に委譲する）
+    NotHandled,
+}
+
 /// bootstrap DataChannel 専用リクエストをディスパッチする。
-/// 該当しないリクエストは None を返し、通常の obsws 処理に委譲する。
-async fn handle_bootstrap_dc_request(
-    sess: &mut Session,
-    text: &str,
-) -> Option<nojson::RawJsonOwned> {
-    let crate::obsws::message::ClientMessage::Request(request) =
-        crate::obsws::message::parse_client_message(text).ok()?
+/// 該当しないリクエストは NotHandled を返し、通常の obsws 処理に委譲する。
+async fn handle_bootstrap_dc_request(sess: &mut Session, text: &str) -> BootstrapDcResult {
+    let Ok(crate::obsws::message::ClientMessage::Request(request)) =
+        crate::obsws::message::parse_client_message(text)
     else {
-        return None;
+        return BootstrapDcResult::NotHandled;
     };
 
     let request_type = request.request_type.as_deref().unwrap_or_default();
     match request_type {
-        "GetVersion" => Some(handle_bootstrap_get_version(&request)),
-        GET_WEBRTC_STATS_REQUEST_TYPE => Some(handle_bootstrap_webrtc_stats(sess, &request).await),
+        "GetVersion" => BootstrapDcResult::Response(handle_bootstrap_get_version(&request)),
+        GET_WEBRTC_STATS_REQUEST_TYPE => {
+            BootstrapDcResult::Response(handle_bootstrap_webrtc_stats(sess, &request).await)
+        }
         SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE => {
-            Some(handle_subscribe_program_tracks(sess, &request).await)
+            handle_subscribe_program_tracks(sess, &request).await
         }
         UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE => {
-            Some(handle_unsubscribe_program_tracks(sess, &request).await)
+            handle_unsubscribe_program_tracks(sess, &request).await
         }
-        _ => None,
+        _ => BootstrapDcResult::NotHandled,
     }
 }
 
@@ -890,10 +915,10 @@ async fn handle_bootstrap_webrtc_stats(
 async fn handle_subscribe_program_tracks(
     sess: &mut Session,
     request: &crate::obsws::message::RequestMessage,
-) -> nojson::RawJsonOwned {
+) -> BootstrapDcResult {
     let request_id = match validate_request_id(request, SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE) {
         Ok(id) => id,
-        Err(err) => return err,
+        Err(err) => return BootstrapDcResult::Response(err),
     };
 
     if !sess.program_tracks_subscribed {
@@ -901,45 +926,70 @@ async fn handle_subscribe_program_tracks(
         let audio_track_id = sess.program_track_ids.audio_track_id.clone();
 
         if let Err(e) = subscribe_track(sess, video_track_id, TrackKind::Video) {
-            tracing::warn!("failed to subscribe program video track: {}", e.display());
-            return crate::obsws::response::build_request_response_error(
-                SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
-                &request_id,
-                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                &format!("failed to subscribe program video track: {}", e.display()),
-            );
+            let reason = format!("failed to subscribe program video track: {}", e.display());
+            tracing::warn!("{reason}");
+            return BootstrapDcResult::CloseSession {
+                response: crate::obsws::response::build_request_response_error(
+                    SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &reason,
+                ),
+                code: "subscribe-failed",
+                reason,
+            };
         }
         if let Err(e) = subscribe_track(sess, audio_track_id, TrackKind::Audio) {
-            tracing::warn!("failed to subscribe program audio track: {}", e.display());
-            return crate::obsws::response::build_request_response_error(
-                SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
-                &request_id,
-                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                &format!("failed to subscribe program audio track: {}", e.display()),
-            );
+            let reason = format!("failed to subscribe program audio track: {}", e.display());
+            tracing::warn!("{reason}");
+            return BootstrapDcResult::CloseSession {
+                response: crate::obsws::response::build_request_response_error(
+                    SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &reason,
+                ),
+                code: "subscribe-failed",
+                reason,
+            };
         }
 
         sess.program_tracks_subscribed = true;
 
         if let Err(e) = maybe_send_offer(sess).await {
-            tracing::warn!(
-                "failed to send renegotiation offer after subscribing program tracks: {}",
+            let reason = format!(
+                "renegotiation failed after subscribing program tracks: {}",
                 e.display()
             );
+            tracing::warn!("{reason}");
+            return BootstrapDcResult::CloseSession {
+                response: crate::obsws::response::build_request_response_error(
+                    SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &reason,
+                ),
+                code: "renegotiation-failed",
+                reason,
+            };
         }
     }
 
-    build_program_tracks_response(SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE, &request_id, sess)
+    BootstrapDcResult::Response(build_program_tracks_response(
+        SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+        &request_id,
+        sess,
+    ))
 }
 
 /// Program トラックの購読を解除する
 async fn handle_unsubscribe_program_tracks(
     sess: &mut Session,
     request: &crate::obsws::message::RequestMessage,
-) -> nojson::RawJsonOwned {
+) -> BootstrapDcResult {
     let request_id = match validate_request_id(request, UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE) {
         Ok(id) => id,
-        Err(err) => return err,
+        Err(err) => return BootstrapDcResult::Response(err),
     };
 
     if sess.program_tracks_subscribed {
@@ -949,14 +999,29 @@ async fn handle_unsubscribe_program_tracks(
         sess.program_tracks_subscribed = false;
 
         if let Err(e) = maybe_send_offer(sess).await {
-            tracing::warn!(
-                "failed to send renegotiation offer after unsubscribing program tracks: {}",
+            let reason = format!(
+                "renegotiation failed after unsubscribing program tracks: {}",
                 e.display()
             );
+            tracing::warn!("{reason}");
+            return BootstrapDcResult::CloseSession {
+                response: crate::obsws::response::build_request_response_error(
+                    UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &reason,
+                ),
+                code: "renegotiation-failed",
+                reason,
+            };
         }
     }
 
-    build_program_tracks_response(UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE, &request_id, sess)
+    BootstrapDcResult::Response(build_program_tracks_response(
+        UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+        &request_id,
+        sess,
+    ))
 }
 
 /// Program トラック系レスポンスを構築する
