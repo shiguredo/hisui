@@ -77,20 +77,9 @@ impl Mp4FileReader {
         self.video_decoder = Some(decoder);
     }
 
-    /// エンコードトラックをパブリッシュして sender を保持する。
-    /// デコーダーのスポーン前に呼ぶことで、デコーダーの subscribe 時に
-    /// publisher が必ず存在する状態を保証できる。
-    pub async fn publish_tracks(&mut self, handle: &ProcessorHandle) -> Result<()> {
-        (self.audio_sender, self.video_sender) = self.build_track_senders(handle).await?;
-        Ok(())
-    }
-
     pub async fn run(mut self, handle: ProcessorHandle) -> Result<()> {
         let loop_enabled = self.resolve_loop_enabled();
-        // publish_tracks() で事前にパブリッシュ済みでなければここでパブリッシュする
-        if self.audio_sender.is_none() && self.video_sender.is_none() {
-            (self.audio_sender, self.video_sender) = self.build_track_senders(&handle).await?;
-        }
+        (self.audio_sender, self.video_sender) = self.build_track_senders(&handle).await?;
         handle.notify_ready();
 
         if self.audio_sender.is_none() && self.video_sender.is_none() {
