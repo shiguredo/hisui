@@ -3189,7 +3189,7 @@ async fn start_hls_processors(
                     .map(|h| h.get() as u32)
                     .unwrap_or(output_plan.canvas_height.get() as u32);
                 crate::hls::writer::MasterPlaylistVariant {
-                    bandwidth: (variant.video_bitrate_bps + variant.audio_bitrate_bps) as u64,
+                    bandwidth: variant.video_bitrate_bps as u64 + variant.audio_bitrate_bps as u64,
                     width,
                     height,
                     playlist_uri: format!("variant_{i}/playlist.m3u8"),
