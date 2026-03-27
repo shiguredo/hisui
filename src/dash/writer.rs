@@ -249,6 +249,8 @@ struct DashWriter {
     current_segment_info: Option<CurrentSegmentInfo>,
     /// MPD の availabilityStartTime（ライター起動時の UTC 時刻）
     availability_start_time: String,
+    /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
+    skip_mpd: bool,
     stats: DashWriterStats,
 }
 
@@ -311,6 +313,7 @@ impl DashWriter {
         storage: DashStorage,
         segment_duration_target: f64,
         max_retained_segments: usize,
+        skip_mpd: bool,
         stats: DashWriterStats,
     ) -> crate::Result<Self> {
         let muxer = shiguredo_mp4::mux::Fmp4SegmentMuxer::new()
@@ -332,6 +335,7 @@ impl DashWriter {
             last_audio_sample_entry: None,
             current_segment_info: None,
             availability_start_time: format_utc_now(),
+            skip_mpd,
             stats,
         })
     }
@@ -633,7 +637,9 @@ impl DashWriter {
             .current_retained_segment_count
             .set(self.retained_segments.len() as i64);
 
-        self.write_mpd().await?;
+        if !self.skip_mpd {
+            self.write_mpd().await?;
+        }
 
         Ok(())
     }
@@ -820,14 +826,17 @@ impl DashWriter {
 
     /// 停止時に全生成ファイルを削除する
     async fn cleanup(&self) {
-        self.storage.delete_file(MANIFEST_FILENAME).await;
+        // ABR 時は結合 MPD を coordinator が管理するため、ライター側では MPD を削除しない
+        if !self.skip_mpd {
+            self.storage.delete_file(MANIFEST_FILENAME).await;
 
-        // filesystem の場合のみ一時ファイルも削除する
-        if let DashStorage::Filesystem(fs) = &self.storage {
-            let tmp_path = fs
-                .output_directory
-                .join(format!(".{MANIFEST_FILENAME}.tmp"));
-            let _ = std::fs::remove_file(&tmp_path);
+            // filesystem の場合のみ一時ファイルも削除する
+            if let DashStorage::Filesystem(fs) = &self.storage {
+                let tmp_path = fs
+                    .output_directory
+                    .join(format!(".{MANIFEST_FILENAME}.tmp"));
+                let _ = std::fs::remove_file(&tmp_path);
+            }
         }
 
         // init segment を削除
@@ -945,6 +954,8 @@ pub struct DashWriterConfig {
     pub input_video_track_id: crate::TrackId,
     pub segment_duration: f64,
     pub max_retained_segments: usize,
+    /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
+    pub skip_mpd: bool,
 }
 
 /// DASH writer プロセッサを作成する
@@ -983,6 +994,7 @@ pub async fn create_processor(
                     storage,
                     config.segment_duration,
                     config.max_retained_segments,
+                    config.skip_mpd,
                     writer_stats,
                 )?;
                 writer
@@ -993,4 +1005,213 @@ pub async fn create_processor(
         .await
         .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
+}
+
+/// 結合 MPD のバリアント情報
+pub struct CombinedMpdVariant {
+    /// バリアントの合計帯域幅（ビデオ + オーディオ、bps）
+    pub bandwidth: u64,
+    /// ビデオ幅
+    pub width: u32,
+    /// ビデオ高さ
+    pub height: u32,
+    /// セグメントファイルのパステンプレート（例: "variant_0/segment-$Number%06d$.m4s"）
+    pub media_path: String,
+    /// init segment のパス（例: "variant_0/init.mp4"）
+    pub init_path: String,
+}
+
+/// ABR 用の結合 MPD の内容を生成する。
+/// duration ベースの SegmentTemplate を使い、各 Representation にバリアント固有のパスを設定する。
+pub fn build_combined_mpd_content(
+    variants: &[CombinedMpdVariant],
+    segment_duration: f64,
+    max_retained_segments: usize,
+) -> String {
+    let timescale = FMP4_TIMESCALE.get() as u64;
+    let duration_scaled = (segment_duration * timescale as f64).round() as u64;
+    let buffer_depth = segment_duration * max_retained_segments as f64;
+
+    let representations: Vec<shiguredo_mpd::Representation> = variants
+        .iter()
+        .enumerate()
+        .map(|(i, v)| shiguredo_mpd::Representation {
+            id: format!("variant_{i}"),
+            bandwidth: v.bandwidth,
+            width: Some(v.width),
+            height: Some(v.height),
+            codecs: None,
+            frame_rate: None,
+            audio_sampling_rate: None,
+            mime_type: None,
+            sar: None,
+            quality_ranking: None,
+            dependency_id: None,
+            max_playout_rate: None,
+            scan_type: None,
+            start_with_sap: None,
+            profiles: None,
+            coding_dependency: None,
+            supplemental_codecs: None,
+            codec_private_data: None,
+            media_stream_structure_id: None,
+            maximum_sap_period: None,
+            segment_profiles: None,
+            base_urls: Vec::new(),
+            audio_channel_configurations: Vec::new(),
+            essential_properties: Vec::new(),
+            supplemental_properties: Vec::new(),
+            frame_packings: Vec::new(),
+            inband_event_streams: Vec::new(),
+            producer_reference_times: Vec::new(),
+            segment_sequence_properties: Vec::new(),
+            sub_representations: Vec::new(),
+            content_protections: Vec::new(),
+            segment_base: None,
+            segment_list: None,
+            segment_template: Some(shiguredo_mpd::SegmentTemplate {
+                media: Some(v.media_path.clone()),
+                initialization: Some(v.init_path.clone()),
+                index: None,
+                timescale,
+                duration: Some(duration_scaled),
+                start_number: 0,
+                end_number: None,
+                presentation_time_offset: 0,
+                availability_time_offset: None,
+                availability_time_complete: None,
+                bitstream_switching_source_url: None,
+                bitstream_switching_range: None,
+                segment_timeline: None,
+            }),
+        })
+        .collect();
+
+    let mpd = shiguredo_mpd::Mpd {
+        id: None,
+        presentation_type: shiguredo_mpd::PresentationType::Dynamic,
+        media_presentation_duration: None,
+        min_buffer_time: segment_duration,
+        minimum_update_period: Some(segment_duration),
+        availability_start_time: Some(format_utc_now()),
+        availability_end_time: None,
+        time_shift_buffer_depth: Some(buffer_depth),
+        suggested_presentation_delay: Some(segment_duration * 2.0),
+        publish_time: None,
+        max_segment_duration: Some(segment_duration),
+        max_subsegment_duration: None,
+        profiles: "urn:mpeg:dash:profile:isoff-live:2011".to_owned(),
+        base_urls: Vec::new(),
+        utc_timings: Vec::new(),
+        locations: Vec::new(),
+        service_descriptions: Vec::new(),
+        content_steering: None,
+        patch_locations: Vec::new(),
+        essential_properties: Vec::new(),
+        supplemental_properties: Vec::new(),
+        metrics: Vec::new(),
+        periods: vec![shiguredo_mpd::Period {
+            id: Some("0".to_owned()),
+            start: Some(0.0),
+            duration: None,
+            xlink_href: None,
+            xlink_actuate: None,
+            base_urls: Vec::new(),
+            supplemental_properties: Vec::new(),
+            essential_properties: Vec::new(),
+            asset_identifier: None,
+            event_streams: Vec::new(),
+            preselections: Vec::new(),
+            subsets: Vec::new(),
+            segment_base: None,
+            segment_list: None,
+            segment_template: None,
+            adaptation_sets: vec![shiguredo_mpd::AdaptationSet {
+                id: Some(0),
+                mime_type: Some("video/mp4".to_owned()),
+                codecs: Some("avc1.42e01f,mp4a.40.2".to_owned()),
+                content_type: Some(shiguredo_mpd::ContentType::Video),
+                lang: None,
+                width: None,
+                height: None,
+                frame_rate: None,
+                min_width: None,
+                min_height: None,
+                min_frame_rate: None,
+                min_bandwidth: None,
+                max_width: None,
+                max_height: None,
+                max_frame_rate: None,
+                max_bandwidth: None,
+                audio_sampling_rate: None,
+                par: None,
+                sar: None,
+                profiles: None,
+                scan_type: None,
+                start_with_sap: Some(1),
+                max_playout_rate: None,
+                selection_priority: None,
+                supplemental_codecs: None,
+                maximum_sap_period: None,
+                segment_profiles: None,
+                coding_dependency: None,
+                segment_alignment: true,
+                subsegment_alignment: false,
+                bitstream_switching: None,
+                base_urls: Vec::new(),
+                roles: Vec::new(),
+                accessibilities: Vec::new(),
+                audio_channel_configurations: Vec::new(),
+                labels: Vec::new(),
+                group_labels: Vec::new(),
+                essential_properties: Vec::new(),
+                supplemental_properties: Vec::new(),
+                viewpoints: Vec::new(),
+                frame_packings: Vec::new(),
+                inband_event_streams: Vec::new(),
+                producer_reference_times: Vec::new(),
+                content_components: Vec::new(),
+                segment_sequence_properties: Vec::new(),
+                event_streams: Vec::new(),
+                content_protections: Vec::new(),
+                segment_base: None,
+                segment_list: None,
+                segment_template: None,
+                representations,
+            }],
+        }],
+    };
+
+    shiguredo_mpd::write(&mpd)
+}
+
+/// ABR 用の結合 MPD をファイルシステムに書き出す。
+/// 一時ファイルに書いてから rename してアトミックに更新する。
+pub fn write_combined_mpd(
+    output_directory: &std::path::Path,
+    variants: &[CombinedMpdVariant],
+    segment_duration: f64,
+    max_retained_segments: usize,
+) -> crate::Result<()> {
+    let content = build_combined_mpd_content(variants, segment_duration, max_retained_segments);
+
+    let mpd_path = output_directory.join(MANIFEST_FILENAME);
+    let tmp_path = output_directory.join(format!(".{MANIFEST_FILENAME}.tmp"));
+
+    std::fs::write(&tmp_path, content.as_bytes()).map_err(|e| {
+        crate::Error::new(format!(
+            "failed to write temporary combined MPD {}: {e}",
+            tmp_path.display()
+        ))
+    })?;
+
+    std::fs::rename(&tmp_path, &mpd_path).map_err(|e| {
+        crate::Error::new(format!(
+            "failed to rename combined MPD {} -> {}: {e}",
+            tmp_path.display(),
+            mpd_path.display()
+        ))
+    })?;
+
+    Ok(())
 }

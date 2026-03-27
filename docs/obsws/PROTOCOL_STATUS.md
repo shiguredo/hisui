@@ -626,14 +626,13 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 #### `mpeg_dash`
 
 MPEG-DASH ライブ出力。H.264 + AAC の fragmented MP4 セグメントを生成し、MPD マニフェストで管理する。
-`variants` に複数のバリアントを指定すると adaptive bitrate (ABR) 出力に対応する。
 
 - `outputKind`: `mpeg_dash_output`
 - ローカルファイルシステムまたは S3 互換オブジェクトストレージへの出力に対応
 - 停止時に生成ファイル（manifest.mpd + init.mp4 + 全セグメント）を自動削除する
 - `outputBytes` / `outputSkippedFrames` / `outputTotalFrames` は現時点では 0 固定
 - `variants` が 1 要素の場合は non-ABR（出力先直下にセグメントとマニフェストを出力）
-- `variants` が 2 要素以上の場合は ABR（`variant_N/` サブディレクトリ/prefix にバリアントごとのセグメントとマニフェストを出力）
+- `variants` が 2 要素以上の場合は ABR（出力先直下に結合 MPD、`variant_N/` サブディレクトリ/prefix にバリアントごとのセグメントを出力）
 
 **outputSettings（`SetOutputSettings` / `GetOutputSettings`）:**
 
@@ -681,27 +680,42 @@ MPEG-DASH ライブ出力。H.264 + AAC の fragmented MP4 セグメントを生
 | `width` | number | - | ビデオ幅（偶数）。省略時はキャンバスサイズを使用 |
 | `height` | number | - | ビデオ高さ（偶数）。省略時はキャンバスサイズを使用 |
 
+**ディレクトリ構成（filesystem, non-ABR）:**
+
+```
+<directory>/
+├── manifest.mpd
+├── init.mp4
+└── segment-*.m4s
+```
+
 **ディレクトリ構成（filesystem, ABR）:**
 
 ```
 <directory>/
+├── manifest.mpd          # 結合 MPD（全バリアントの Representation を含む）
 ├── variant_0/
-│   ├── manifest.mpd
 │   ├── init.mp4
 │   └── segment-*.m4s
 ├── variant_1/
-│   ├── manifest.mpd
 │   ├── init.mp4
 │   └── segment-*.m4s
+```
+
+**S3 オブジェクト構成（non-ABR）:**
+
+```
+<prefix>/manifest.mpd
+<prefix>/init.mp4
+<prefix>/segment-*.m4s
 ```
 
 **S3 オブジェクト構成（ABR）:**
 
 ```
-<prefix>/variant_0/manifest.mpd
+<prefix>/manifest.mpd
 <prefix>/variant_0/init.mp4
 <prefix>/variant_0/segment-*.m4s
-<prefix>/variant_1/manifest.mpd
 <prefix>/variant_1/init.mp4
 <prefix>/variant_1/segment-*.m4s
 ```
