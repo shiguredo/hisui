@@ -1016,6 +1016,60 @@ async fn collect_webrtc_stats_json(pc: &PeerConnection) -> Result<String, String
         .map_err(|_| "WebRTC stats callback channel closed".to_owned())?
 }
 
+fn summarize_sdp_for_log(sdp: &str) -> String {
+    let mut sections = Vec::new();
+    let mut current = Vec::new();
+    for line in sdp.split("\r\n").filter(|line| !line.is_empty()) {
+        if line.starts_with("m=") && !current.is_empty() {
+            sections.push(current);
+            current = Vec::new();
+        }
+        current.push(line);
+    }
+    if !current.is_empty() {
+        sections.push(current);
+    }
+
+    let mut summary = Vec::new();
+    for section in sections {
+        let Some(first_line) = section.first() else {
+            continue;
+        };
+        if !(first_line.starts_with("m=audio")
+            || first_line.starts_with("m=video")
+            || first_line.starts_with("m=application"))
+        {
+            continue;
+        }
+        summary.push((*first_line).to_owned());
+        for line in &section {
+            if line.starts_with("a=mid:")
+                || line == &"a=sendrecv"
+                || line == &"a=sendonly"
+                || line == &"a=recvonly"
+                || line == &"a=inactive"
+                || line.starts_with("a=rtpmap:")
+                || line.starts_with("a=fmtp:")
+            {
+                summary.push(format!("  {line}"));
+            }
+        }
+    }
+    summary.join("\n")
+}
+
+fn log_sdp_summary(label: &str, sdp: &str) {
+    tracing::warn!("{label}:\n{}", summarize_sdp_for_log(sdp));
+}
+
+fn log_transceiver_receiver_state(label: &str, transceiver: &RtpTransceiver) {
+    let receiver = transceiver.receiver();
+    let track = receiver.track();
+    let kind = track.kind().unwrap_or_default();
+    let track_id = track.id().unwrap_or_default();
+    tracing::warn!("{label}: receiver_track_kind={kind}, receiver_track_id={track_id}");
+}
+
 #[derive(Clone)]
 struct GatheredIceCandidate {
     sdp_mid: String,
@@ -1334,14 +1388,20 @@ async fn run_client(
         .create_data_channel("dummy", &mut dc_init)
         .map_err(|e| format!("failed to create dummy DataChannel: {e}"))?;
     let initial_transceivers = add_recvonly_transceivers(&pc, &factory)?;
+    for (index, transceiver) in initial_transceivers.iter().enumerate() {
+        log_transceiver_receiver_state(&format!("initial transceiver[{index}]"), transceiver);
+    }
     // offer SDP を生成する
     let offer_sdp = create_offer_sdp(&pc)?;
+    log_sdp_summary("initial local offer SDP summary", &offer_sdp);
     set_local_description(&pc, SdpType::Offer, &offer_sdp)?;
     let mut initial_ice_candidates = Vec::new();
     let offer_sdp = finalize_local_sdp(offer_sdp, &mut ice_rx, &mut initial_ice_candidates).await?;
+    log_sdp_summary("initial local offer with ICE SDP summary", &offer_sdp);
 
     // /bootstrap で answer SDP を取得する
     let answer_sdp = http_bootstrap(host, port, &offer_sdp).await?;
+    log_sdp_summary("bootstrap remote answer SDP summary", &answer_sdp);
     set_remote_description(&pc, SdpType::Answer, &answer_sdp)?;
 
     // 統計カウンタ
@@ -1516,6 +1576,7 @@ async fn run_client(
                 *connection_state.lock().unwrap() = state_str.to_owned();
             }
             ClientEvent::Track(transceiver) => {
+                log_transceiver_receiver_state("onTrack transceiver", &transceiver);
                 let receiver = transceiver.receiver();
                 let track = receiver.track();
                 let kind = track.kind().unwrap_or_default();
@@ -1570,6 +1631,7 @@ async fn run_client(
                     tracing::warn!("renegotiation offer received from signaling data channel");
                     // renegotiation: サーバーからの offer に answer を返す
                     if let Some(sdp) = parse_signaling_sdp(&data) {
+                        log_sdp_summary("renegotiation remote offer SDP summary", &sdp);
                         if let Err(e) = set_remote_description(&pc, SdpType::Offer, &sdp) {
                             tracing::warn!("failed to set remote offer: {e}");
                             continue;
@@ -1594,6 +1656,7 @@ async fn run_client(
                                         continue;
                                     }
                                 };
+                                log_sdp_summary("renegotiation local answer SDP summary", &answer);
                                 let answer_json = make_answer_json(&answer);
                                 if let Some(dc) = &retained.signaling_dc {
                                     tracing::warn!(
