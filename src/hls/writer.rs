@@ -29,6 +29,13 @@ struct HlsWriterStats {
     current_retained_segment_count: crate::stats::StatsGauge,
 }
 
+pub enum HlsWriterRpcMessage {
+    /// 入力を明示的に閉じ、finalize / cleanup に進ませる。
+    Finish {
+        reply_tx: tokio::sync::oneshot::Sender<()>,
+    },
+}
+
 impl HlsWriterStats {
     fn new(stats: &mut crate::stats::Stats) -> Self {
         Self {
@@ -401,6 +408,11 @@ impl HlsWriter {
     ) -> crate::Result<()> {
         let mut audio_rx = Some(handle.subscribe_track(input_audio_track_id));
         let mut video_rx = Some(handle.subscribe_track(input_video_track_id));
+        let (rpc_tx, mut rpc_rx) = tokio::sync::mpsc::unbounded_channel();
+        handle.register_rpc_sender(rpc_tx).await.map_err(|e| {
+            crate::Error::new(format!("failed to register hls writer RPC sender: {e}"))
+        })?;
+        let mut rpc_rx_enabled = true;
 
         handle.notify_ready();
 
@@ -449,6 +461,22 @@ impl HlsWriter {
                             video_rx = None;
                         }
                         _ => {}
+                    }
+                }
+                rpc_message = recv_hls_writer_rpc_message_or_pending(
+                    rpc_rx_enabled.then_some(&mut rpc_rx)
+                ) => {
+                    let Some(rpc_message) = rpc_message else {
+                        rpc_rx_enabled = false;
+                        continue;
+                    };
+                    match rpc_message {
+                        HlsWriterRpcMessage::Finish { reply_tx } => {
+                            // 入力終了へ遷移し、ループ脱出後の finalize / cleanup を実行する。
+                            audio_rx = None;
+                            video_rx = None;
+                            let _ = reply_tx.send(());
+                        }
                     }
                 }
             }
@@ -836,6 +864,16 @@ impl HlsWriter {
         for seg in &self.retained_segments {
             self.storage.delete_file(&seg.filename).await;
         }
+    }
+}
+
+async fn recv_hls_writer_rpc_message_or_pending(
+    rpc_rx: Option<&mut tokio::sync::mpsc::UnboundedReceiver<HlsWriterRpcMessage>>,
+) -> Option<HlsWriterRpcMessage> {
+    if let Some(rpc_rx) = rpc_rx {
+        rpc_rx.recv().await
+    } else {
+        std::future::pending().await
     }
 }
 

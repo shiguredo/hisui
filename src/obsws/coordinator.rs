@@ -3703,17 +3703,16 @@ async fn stop_processors_staged_hls(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsHlsRun,
 ) -> crate::Result<()> {
-    // 共有 Program 出力は停止しない。
-    let scaler_ids: Vec<crate::ProcessorId> = run
+    let writer_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
-        .filter_map(|vr| vr.scaler_processor_id.clone())
+        .map(|vr| vr.writer_processor_id.clone())
         .collect();
-    if !scaler_ids.is_empty() {
-        wait_or_terminate(pipeline_handle, &scaler_ids, Duration::from_secs(5)).await?;
+    for writer_id in &writer_ids {
+        finish_hls_writer_rpc(pipeline_handle, writer_id).await;
     }
+    wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
 
-    // 4. 全バリアントのエンコーダーは EOS 伝播での自然終了を優先し、残れば強制停止
     let encoder_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
@@ -3724,15 +3723,16 @@ async fn stop_processors_staged_hls(
             ]
         })
         .collect();
-    wait_or_terminate(pipeline_handle, &encoder_ids, Duration::from_secs(5)).await?;
+    terminate_and_wait(pipeline_handle, &encoder_ids).await?;
 
-    // 5. 全バリアントの HLS ライターは cleanup を含む自然終了を優先し、残れば強制停止
-    let writer_ids: Vec<crate::ProcessorId> = run
+    let scaler_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
-        .map(|vr| vr.writer_processor_id.clone())
+        .filter_map(|vr| vr.scaler_processor_id.clone())
         .collect();
-    wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
+    if !scaler_ids.is_empty() {
+        terminate_and_wait(pipeline_handle, &scaler_ids).await?;
+    }
 
     // ABR の場合はマスタープレイリストとバリアントディレクトリを削除する
     if run.is_abr() {
@@ -4009,17 +4009,16 @@ async fn stop_processors_staged_dash(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsDashRun,
 ) -> crate::Result<()> {
-    // 共有 Program 出力は停止しない。
-    let scaler_ids: Vec<crate::ProcessorId> = run
+    let writer_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
-        .filter_map(|vr| vr.scaler_processor_id.clone())
+        .map(|vr| vr.writer_processor_id.clone())
         .collect();
-    if !scaler_ids.is_empty() {
-        wait_or_terminate(pipeline_handle, &scaler_ids, Duration::from_secs(5)).await?;
+    for writer_id in &writer_ids {
+        finish_dash_writer_rpc(pipeline_handle, writer_id).await;
     }
+    wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
 
-    // 4. 全バリアントのエンコーダーは EOS 伝播での自然終了を優先し、残れば強制停止
     let encoder_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
@@ -4030,15 +4029,16 @@ async fn stop_processors_staged_dash(
             ]
         })
         .collect();
-    wait_or_terminate(pipeline_handle, &encoder_ids, Duration::from_secs(5)).await?;
+    terminate_and_wait(pipeline_handle, &encoder_ids).await?;
 
-    // 5. 全バリアントの DASH ライターは cleanup を含む自然終了を優先し、残れば強制停止
-    let writer_ids: Vec<crate::ProcessorId> = run
+    let scaler_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
-        .map(|vr| vr.writer_processor_id.clone())
+        .filter_map(|vr| vr.scaler_processor_id.clone())
         .collect();
-    wait_or_terminate(pipeline_handle, &writer_ids, Duration::from_secs(5)).await?;
+    if !scaler_ids.is_empty() {
+        terminate_and_wait(pipeline_handle, &scaler_ids).await?;
+    }
 
     // ABR の場合は結合 MPD とバリアントディレクトリを削除する
     if run.is_abr() {
@@ -4261,6 +4261,72 @@ async fn finish_mixer_rpc(
                         .await;
                     return;
                 }
+            }
+        }
+    }
+}
+
+/// HLS writer に Finish RPC を送り、finalize / cleanup を促す。失敗時は terminate にフォールバックする。
+async fn finish_hls_writer_rpc(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    processor_id: &crate::ProcessorId,
+) {
+    const RETRY_TIMEOUT: Duration = Duration::from_millis(500);
+    const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+    let deadline = tokio::time::Instant::now() + RETRY_TIMEOUT;
+
+    loop {
+        match pipeline_handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
+                crate::hls::writer::HlsWriterRpcMessage,
+            >>(processor_id)
+            .await
+        {
+            Ok(sender) => {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let _ = sender.send(crate::hls::writer::HlsWriterRpcMessage::Finish { reply_tx });
+                let _ = reply_rx.await;
+                return;
+            }
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(RETRY_INTERVAL).await;
+            }
+            Err(_) => {
+                let _ = pipeline_handle.terminate_processor(processor_id.clone()).await;
+                return;
+            }
+        }
+    }
+}
+
+/// DASH writer に Finish RPC を送り、finalize / cleanup を促す。失敗時は terminate にフォールバックする。
+async fn finish_dash_writer_rpc(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    processor_id: &crate::ProcessorId,
+) {
+    const RETRY_TIMEOUT: Duration = Duration::from_millis(500);
+    const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+    let deadline = tokio::time::Instant::now() + RETRY_TIMEOUT;
+
+    loop {
+        match pipeline_handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
+                crate::dash::writer::DashWriterRpcMessage,
+            >>(processor_id)
+            .await
+        {
+            Ok(sender) => {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let _ = sender.send(crate::dash::writer::DashWriterRpcMessage::Finish { reply_tx });
+                let _ = reply_rx.await;
+                return;
+            }
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(RETRY_INTERVAL).await;
+            }
+            Err(_) => {
+                let _ = pipeline_handle.terminate_processor(processor_id.clone()).await;
+                return;
             }
         }
     }
