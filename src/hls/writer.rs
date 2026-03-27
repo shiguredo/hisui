@@ -162,7 +162,8 @@ impl HlsWriter {
 
         handle.notify_ready();
 
-        // 起動直後に上流 video encoder へキーフレーム要求を送る
+        // 起動直後に上流 video encoder へキーフレーム要求を送る。
+        // HLS writer は video track が必須のためガード不要。
         if let Err(e) = crate::encoder::request_upstream_video_keyframe(
             &handle.pipeline_handle(),
             handle.processor_id(),
