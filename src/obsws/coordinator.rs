@@ -2238,20 +2238,23 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        if let Err(e) =
-            start_hls_processors(pipeline_handle, &program_output, &run, &hls_settings).await
-        {
-            self.input_registry.deactivate_hls();
-            let _ = stop_processors_staged_hls(pipeline_handle, &run).await;
-            let error_comment = format!("Failed to start HLS: {}", e.display());
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    &error_comment,
-                ),
-            );
+        match start_hls_processors(pipeline_handle, &program_output, &run, &hls_settings).await {
+            Ok(master_playlist_task) => {
+                self.input_registry.hls_runtime.master_playlist_task = master_playlist_task;
+            }
+            Err(e) => {
+                self.input_registry.deactivate_hls();
+                let _ = stop_processors_staged_hls(pipeline_handle, &run).await;
+                let error_comment = format!("Failed to start HLS: {}", e.display());
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        &error_comment,
+                    ),
+                );
+            }
         }
         OutputOperationOutcome::success(
             crate::obsws::response::build_start_output_response(request_id),
@@ -3479,12 +3482,14 @@ fn build_s3_client(
 }
 
 /// HLS 用プロセッサを起動する
+/// 戻り値は ABR マスタープレイリスト書き出しタスクの JoinHandle（ABR でない場合は None）。
+/// 呼び出し元は JoinHandle を保持し、出力停止時に abort() すること。
 async fn start_hls_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     program_output: &ObswsProgramOutputContext,
     run: &crate::obsws::input_registry::ObswsHlsRun,
     hls_settings: &crate::obsws::input_registry::ObswsHlsSettings,
-) -> crate::Result<()> {
+) -> crate::Result<Option<tokio::task::JoinHandle<()>>> {
     // HLS 用にキーフレーム間隔を設定する。
     // segment_duration に合わせたフレーム数を計算し、エンコーダーに事前通知する。
     let fps = program_output.frame_rate.numerator.get() as f64
@@ -3497,6 +3502,10 @@ async fn start_hls_processors(
     );
 
     let is_abr = run.is_abr();
+
+    // ABR の場合、各 variant writer が SampleEntry から codec string を確定したら
+    // oneshot channel 経由で通知を受け取り、全 variant の値がそろってからマスタープレイリストを書き出す。
+    let mut codec_string_receivers = Vec::new();
 
     // バリアントごとにスケーラー、エンコーダー、ライターを起動する
     for (i, (variant, variant_run)) in hls_settings
@@ -3598,6 +3607,15 @@ async fn start_hls_processors(
                 }
             }
         };
+        // ABR の場合は codec string 通知用の channel を作成する
+        let codec_string_sender = if is_abr {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            codec_string_receivers.push(rx);
+            Some(tx)
+        } else {
+            None
+        };
+
         crate::hls::writer::create_processor(
             pipeline_handle,
             crate::hls::writer::HlsWriterConfig {
@@ -3607,6 +3625,7 @@ async fn start_hls_processors(
                 segment_duration: hls_settings.segment_duration,
                 max_retained_segments: hls_settings.max_retained_segments,
                 segment_format: hls_settings.segment_format,
+                codec_string_sender,
             },
             Some(variant_run.writer_processor_id.clone()),
         )
@@ -3621,7 +3640,8 @@ async fn start_hls_processors(
         );
     }
 
-    // ABR の場合はマスタープレイリストを書き出す
+    // ABR の場合は各 variant writer が SampleEntry から codec string を確定するのを待ち、
+    // 全 variant の codec string が一致することを検証してからマスタープレイリストを書き出す。
     if is_abr {
         let master_variants: Vec<crate::hls::writer::MasterPlaylistVariant> = hls_settings
             .variants
@@ -3644,65 +3664,120 @@ async fn start_hls_processors(
                 }
             })
             .collect();
-        // TODO: DASH と同様に SampleEntry から正確な codec string を生成する。
-        // 現在は固定値だが、プロファイルやレベルが実際のエンコーダー出力と異なる可能性がある。
-        let hls_codecs = crate::codec_string::CodecString::from_codec_pair(
-            crate::types::CodecName::H264,
-            crate::types::CodecName::Aac,
-        );
-        let master_content =
-            crate::hls::writer::build_master_playlist_content(&master_variants, &hls_codecs);
-        match &run.destination {
-            crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
-                crate::hls::writer::write_master_playlist(
-                    &std::path::PathBuf::from(directory),
-                    &master_variants,
-                    &hls_codecs,
-                )?;
-            }
-            crate::obsws::input_registry::HlsDestination::S3 {
-                bucket,
-                prefix,
-                region,
-                endpoint,
-                use_path_style,
-                access_key_id,
-                secret_access_key,
-                session_token,
-                ..
-            } => {
-                let s3_client = build_s3_client(
-                    region,
-                    access_key_id,
-                    secret_access_key,
-                    session_token.as_deref(),
-                    endpoint.as_deref(),
-                    *use_path_style,
-                )?;
-                let key = if prefix.is_empty() {
-                    "playlist.m3u8".to_owned()
-                } else {
-                    format!("{prefix}/playlist.m3u8")
-                };
-                let request = s3_client
-                    .client()
-                    .put_object()
-                    .bucket(bucket)
-                    .key(&key)
-                    .body(master_content.into_bytes())
-                    .content_type("application/vnd.apple.mpegurl")
-                    .build_request()?;
-                let response = s3_client.execute(&request).await?;
-                if !response.is_success() {
-                    return Err(crate::Error::new(format!(
-                        "S3 PutObject failed for master playlist {key}: status={}",
-                        response.status_code
-                    )));
+
+        let destination = run.destination.clone();
+
+        let handle = tokio::spawn(async move {
+            // 全 variant の codec string を収集する
+            let mut codec_strings = Vec::with_capacity(codec_string_receivers.len());
+            for (i, rx) in codec_string_receivers.into_iter().enumerate() {
+                match rx.await {
+                    Ok(cs) => codec_strings.push(cs),
+                    Err(_) => {
+                        tracing::warn!(
+                            variant = i,
+                            "HLS variant writer dropped codec string sender before resolving codecs"
+                        );
+                        return;
+                    }
                 }
             }
-        }
+
+            // 全 variant の codec string が一致することを検証する
+            let Some(first) = codec_strings.first() else {
+                return;
+            };
+            for (i, cs) in codec_strings.iter().enumerate().skip(1) {
+                if cs.video != first.video || cs.audio != first.audio {
+                    tracing::error!(
+                        variant = i,
+                        expected_video = %first.video,
+                        expected_audio = %first.audio,
+                        actual_video = %cs.video,
+                        actual_audio = %cs.audio,
+                        "HLS ABR variant codec string mismatch: \
+                         all variants must produce identical codec strings"
+                    );
+                    return;
+                }
+            }
+
+            let master_content =
+                crate::hls::writer::build_master_playlist_content(&master_variants, first);
+            match &destination {
+                crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
+                    if let Err(e) = crate::hls::writer::write_master_playlist(
+                        &std::path::PathBuf::from(directory),
+                        &master_variants,
+                        first,
+                    ) {
+                        tracing::error!(error = ?e, "failed to write HLS master playlist");
+                    }
+                }
+                crate::obsws::input_registry::HlsDestination::S3 {
+                    bucket,
+                    prefix,
+                    region,
+                    endpoint,
+                    use_path_style,
+                    access_key_id,
+                    secret_access_key,
+                    session_token,
+                    ..
+                } => {
+                    let s3_client = match build_s3_client(
+                        region,
+                        access_key_id,
+                        secret_access_key,
+                        session_token.as_deref(),
+                        endpoint.as_deref(),
+                        *use_path_style,
+                    ) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!(error = ?e, "failed to create S3 client for HLS master playlist");
+                            return;
+                        }
+                    };
+                    let key = if prefix.is_empty() {
+                        "playlist.m3u8".to_owned()
+                    } else {
+                        format!("{prefix}/playlist.m3u8")
+                    };
+                    let request = match s3_client
+                        .client()
+                        .put_object()
+                        .bucket(bucket)
+                        .key(&key)
+                        .body(master_content.into_bytes())
+                        .content_type("application/vnd.apple.mpegurl")
+                        .build_request()
+                    {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::error!(error = ?e, "failed to build S3 PutObject request for HLS master playlist");
+                            return;
+                        }
+                    };
+                    match s3_client.execute(&request).await {
+                        Ok(response) if !response.is_success() => {
+                            tracing::error!(
+                                status = response.status_code,
+                                "S3 PutObject failed for HLS master playlist {key}"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "failed to upload HLS master playlist to S3");
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        });
+        Ok(Some(handle))
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
 /// HLS 用プロセッサを段階的に停止する。

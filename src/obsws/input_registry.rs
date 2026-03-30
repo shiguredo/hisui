@@ -826,6 +826,9 @@ impl ObswsInputRegistry {
     }
 
     pub fn deactivate_hls(&mut self) -> Option<ObswsHlsRun> {
+        if let Some(handle) = self.hls_runtime.master_playlist_task.take() {
+            handle.abort();
+        }
         let run = self.hls_runtime.run.take();
         self.hls_runtime.active = false;
         self.hls_runtime.started_at = None;

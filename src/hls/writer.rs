@@ -288,6 +288,11 @@ struct HlsWriter {
     format_state: FormatState,
     /// 現在のセグメントの共通情報
     current_segment_info: Option<CurrentSegmentInfo>,
+    /// MPD に記載する codec string の解決状態（DASH の DashWriter と同じ仕組み）
+    codec_resolution: crate::dash::writer::CodecResolutionState,
+    /// ABR マスタープレイリスト用の codec string 通知 channel。
+    /// 送信は 1 回のみ。送信後および non-ABR 時は None。
+    codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
     stats: HlsWriterStats,
 }
 
@@ -347,6 +352,7 @@ impl HlsWriter {
         segment_duration_target: f64,
         max_retained_segments: usize,
         segment_format: HlsSegmentFormat,
+        codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
         stats: HlsWriterStats,
     ) -> crate::Result<Self> {
         let format_state = match segment_format {
@@ -384,8 +390,28 @@ impl HlsWriter {
             retained_segments: VecDeque::new(),
             format_state,
             current_segment_info: None,
+            codec_resolution: crate::dash::writer::CodecResolutionState::Pending,
+            codec_string_sender,
             stats,
         })
+    }
+
+    /// ビデオの codec string が確定した際に状態を遷移させる。
+    fn resolve_video_codec(&mut self, video: String) {
+        if let Some(cs) = self.codec_resolution.resolve_video(video)
+            && let Some(sender) = self.codec_string_sender.take()
+        {
+            let _ = sender.send(cs);
+        }
+    }
+
+    /// オーディオの codec string が確定した際に状態を遷移させる。
+    fn resolve_audio_codec(&mut self, audio: String) {
+        if let Some(cs) = self.codec_resolution.resolve_audio(audio)
+            && let Some(sender) = self.codec_string_sender.take()
+        {
+            let _ = sender.send(cs);
+        }
     }
 
     fn is_fmp4(&self) -> bool {
@@ -517,6 +543,19 @@ impl HlsWriter {
             self.start_new_segment(frame.timestamp)?;
         }
 
+        // SampleEntry から正確な codec string を確定する
+        if let Some(ref entry) = frame.sample_entry
+            && !matches!(
+                self.codec_resolution,
+                crate::dash::writer::CodecResolutionState::VideoOnly(_)
+                    | crate::dash::writer::CodecResolutionState::Resolved(_)
+            )
+            && let Some(codec_str) =
+                crate::codec_string::video_codec_string_from_sample_entry(entry)
+        {
+            self.resolve_video_codec(codec_str);
+        }
+
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
@@ -593,6 +632,20 @@ impl HlsWriter {
         // 最初の video keyframe より前に audio が流れ始めることがある。
         // その場合でも、初回だけ付与される sample_entry は保持しておかないと、
         // セグメント開始後の AAC フレーム群から codec 情報が失われる。
+
+        // SampleEntry から正確な codec string を確定する
+        if let Some(ref entry) = frame.sample_entry
+            && !matches!(
+                self.codec_resolution,
+                crate::dash::writer::CodecResolutionState::AudioOnly(_)
+                    | crate::dash::writer::CodecResolutionState::Resolved(_)
+            )
+            && let Some(codec_str) =
+                crate::codec_string::audio_codec_string_from_sample_entry(entry)
+        {
+            self.resolve_audio_codec(codec_str);
+        }
+
         if frame.sample_entry.is_some() {
             match &mut self.format_state {
                 FormatState::MpegTs(state) => {
@@ -1332,6 +1385,10 @@ pub struct HlsWriterConfig {
     pub segment_duration: f64,
     pub max_retained_segments: usize,
     pub segment_format: HlsSegmentFormat,
+    /// ABR マスタープレイリスト用の codec string 通知 channel。
+    /// ABR 時のみ coordinator が受信側を持ち、全 variant の codec 確定後にマスタープレイリストを書き出す。
+    /// non-ABR では不要（None を渡すこと）。
+    pub codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
 }
 
 /// HLS writer プロセッサを作成する
@@ -1371,6 +1428,7 @@ pub async fn create_processor(
                     config.segment_duration,
                     config.max_retained_segments,
                     config.segment_format,
+                    config.codec_string_sender,
                     writer_stats,
                 )?;
                 writer

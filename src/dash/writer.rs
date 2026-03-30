@@ -233,10 +233,11 @@ const INIT_SEGMENT_FILENAME: &str = "init.mp4";
 /// NonZeroU32::MIN (= 1) に 999,999 を加算して 1,000,000 を得ている。
 const FMP4_TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 
-/// MPD に記載する codec string の解決状態。
+/// マニフェストに記載する codec string の解決状態。
 ///
 /// SampleEntry の到着順に `Pending` → `VideoOnly` / `AudioOnly` → `Resolved` と遷移する。
-enum CodecResolutionState {
+/// DASH / HLS の両方で共用する。
+pub enum CodecResolutionState {
     /// video / audio どちらの SampleEntry もまだ受信していない
     Pending,
     /// video の codec string のみ確定済み
@@ -245,6 +246,50 @@ enum CodecResolutionState {
     AudioOnly(String),
     /// video / audio 両方確定済み
     Resolved(crate::codec_string::CodecString),
+}
+
+impl CodecResolutionState {
+    /// ビデオの codec string が確定した際に状態を遷移させる。
+    /// Resolved に到達した場合は確定した CodecString を返す。
+    pub fn resolve_video(&mut self, video: String) -> Option<crate::codec_string::CodecString> {
+        let prev = std::mem::replace(self, Self::Pending);
+        match prev {
+            Self::Pending => {
+                *self = Self::VideoOnly(video);
+                None
+            }
+            Self::AudioOnly(audio) => {
+                let cs = crate::codec_string::CodecString { video, audio };
+                *self = Self::Resolved(cs.clone());
+                Some(cs)
+            }
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// オーディオの codec string が確定した際に状態を遷移させる。
+    /// Resolved に到達した場合は確定した CodecString を返す。
+    pub fn resolve_audio(&mut self, audio: String) -> Option<crate::codec_string::CodecString> {
+        let prev = std::mem::replace(self, Self::Pending);
+        match prev {
+            Self::Pending => {
+                *self = Self::AudioOnly(audio);
+                None
+            }
+            Self::VideoOnly(video) => {
+                let cs = crate::codec_string::CodecString { video, audio };
+                *self = Self::Resolved(cs.clone());
+                Some(cs)
+            }
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 /// エンコード済みの H.264 + AAC フレームを fMP4 セグメントに分割し、
@@ -739,45 +784,19 @@ impl DashWriter {
 
     /// ビデオの codec string が確定した際に状態を遷移させる。
     fn resolve_video_codec(&mut self, video: String) {
-        self.codec_resolution =
-            match std::mem::replace(&mut self.codec_resolution, CodecResolutionState::Pending) {
-                CodecResolutionState::Pending => CodecResolutionState::VideoOnly(video),
-                CodecResolutionState::AudioOnly(audio) => {
-                    self.notify_codec_resolved(&video, &audio);
-                    CodecResolutionState::Resolved(crate::codec_string::CodecString {
-                        video,
-                        audio,
-                    })
-                }
-                // video が既に確定済みなら何もしない
-                other => other,
-            };
+        if let Some(cs) = self.codec_resolution.resolve_video(video)
+            && let Some(sender) = self.codec_string_sender.take()
+        {
+            let _ = sender.send(cs);
+        }
     }
 
     /// オーディオの codec string が確定した際に状態を遷移させる。
     fn resolve_audio_codec(&mut self, audio: String) {
-        self.codec_resolution =
-            match std::mem::replace(&mut self.codec_resolution, CodecResolutionState::Pending) {
-                CodecResolutionState::Pending => CodecResolutionState::AudioOnly(audio),
-                CodecResolutionState::VideoOnly(video) => {
-                    self.notify_codec_resolved(&video, &audio);
-                    CodecResolutionState::Resolved(crate::codec_string::CodecString {
-                        video,
-                        audio,
-                    })
-                }
-                // audio が既に確定済みなら何もしない
-                other => other,
-            };
-    }
-
-    /// codec string が確定した際に ABR 結合 MPD 用の通知を送る。
-    fn notify_codec_resolved(&mut self, video: &str, audio: &str) {
-        if let Some(sender) = self.codec_string_sender.take() {
-            let _ = sender.send(crate::codec_string::CodecString {
-                video: video.to_owned(),
-                audio: audio.to_owned(),
-            });
+        if let Some(cs) = self.codec_resolution.resolve_audio(audio)
+            && let Some(sender) = self.codec_string_sender.take()
+        {
+            let _ = sender.send(cs);
         }
     }
 

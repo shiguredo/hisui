@@ -32,9 +32,6 @@ impl CodecString {
     ///
     /// 実際のエンコーダー出力とはプロファイルやレベルが異なる可能性がある。
     /// マニフェストの本番用途では [`from_sample_entries`] を使うこと。
-    //
-    // TODO: HLS のマスタープレイリストもこのメソッドに依存しているが、
-    // DASH と同様に SampleEntry ベースの codec string 生成に移行すべき。
     pub fn from_codec_pair(video: crate::types::CodecName, audio: crate::types::CodecName) -> Self {
         use crate::types::CodecName;
 

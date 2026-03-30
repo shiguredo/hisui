@@ -723,11 +723,25 @@ pub(crate) struct ObswsRecordRuntimeState {
     pub(crate) run: Option<ObswsRecordRun>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct ObswsHlsRuntimeState {
     pub(crate) active: bool,
     pub(crate) started_at: Option<Instant>,
     pub(crate) run: Option<ObswsHlsRun>,
+    /// ABR マスタープレイリスト書き出しタスクの JoinHandle。
+    /// 出力停止時に abort() でキャンセルする。
+    pub(crate) master_playlist_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Clone for ObswsHlsRuntimeState {
+    fn clone(&self) -> Self {
+        Self {
+            active: self.active,
+            started_at: self.started_at,
+            run: self.run.clone(),
+            master_playlist_task: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
