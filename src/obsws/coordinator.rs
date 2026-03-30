@@ -3641,7 +3641,10 @@ async fn start_hls_processors(
                 }
             })
             .collect();
-        let hls_codecs = crate::codec_string::CodecString::h264_aac_default();
+        let hls_codecs = crate::codec_string::CodecString::from_codec_pair(
+            crate::types::CodecName::H264,
+            crate::types::CodecName::Aac,
+        );
         let master_content =
             crate::hls::writer::build_master_playlist_content(&master_variants, &hls_codecs);
         match &run.destination {
@@ -3850,7 +3853,10 @@ async fn start_dash_processors(
     );
 
     let is_abr = run.is_abr();
-    let dash_codecs = crate::codec_string::CodecString::h264_aac_default();
+    let dash_codecs = crate::codec_string::CodecString::from_codec_pair(
+        dash_settings.video_codec,
+        dash_settings.audio_codec,
+    );
 
     // バリアントごとにスケーラー、エンコーダー、ライターを起動する
     for (i, (variant, variant_run)) in dash_settings
@@ -3900,7 +3906,7 @@ async fn start_dash_processors(
             pipeline_handle,
             video_encoder_input_track,
             variant_run.video.encoded_track_id.clone(),
-            crate::types::CodecName::H264,
+            dash_settings.video_codec,
             std::num::NonZeroUsize::new(variant.video_bitrate_bps)
                 .unwrap_or(std::num::NonZeroUsize::MIN),
             program_output.frame_rate,
@@ -3909,12 +3915,12 @@ async fn start_dash_processors(
         )
         .await?;
 
-        // オーディオエンコーダー（DASH でも AAC を使用）
+        // オーディオエンコーダー
         crate::encoder::create_audio_processor(
             pipeline_handle,
             program_output.audio_track_id.clone(),
             variant_run.audio.encoded_track_id.clone(),
-            crate::types::CodecName::Aac,
+            dash_settings.audio_codec,
             std::num::NonZeroUsize::new(variant.audio_bitrate_bps)
                 .unwrap_or(std::num::NonZeroUsize::MIN),
             Some(variant_run.audio.encoder_processor_id.clone()),

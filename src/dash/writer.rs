@@ -261,8 +261,21 @@ struct DashWriter {
     availability_start_time: String,
     /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
     skip_mpd: bool,
-    /// MPD の AdaptationSet に設定するコーデック文字列
+    /// MPD の AdaptationSet に設定するコーデック文字列。
+    ///
+    /// 初期値は CodecString::from_codec_pair() のデフォルト値。
+    /// SampleEntry を受信した時点でエンコーダーの実際の出力に基づく正確な値に更新する。
+    ///
+    /// 懸念: 初回 MPD は from_codec_pair() のデフォルト値で書き出される。
+    /// OpenH264 / VideoToolbox では SampleEntry が最初のフレームエンコード後まで
+    /// 得られないため、最初のセグメントの MPD は必ずデフォルト値になる。
+    /// プレーヤーが初回 MPD で接続した場合、codec 切り替わりが見える可能性がある。
+    /// ただし DASH プレーヤーは MPD の定期リロードを行うため、実用上の影響は限定的。
     codecs: crate::codec_string::CodecString,
+    /// ビデオの codec string が SampleEntry から解決済みかどうか
+    video_codec_resolved: bool,
+    /// オーディオの codec string が SampleEntry から解決済みかどうか
+    audio_codec_resolved: bool,
     stats: DashWriterStats,
 }
 
@@ -350,6 +363,8 @@ impl DashWriter {
             availability_start_time: format_utc_now(),
             skip_mpd,
             codecs,
+            video_codec_resolved: false,
+            audio_codec_resolved: false,
             stats,
         })
     }
@@ -471,8 +486,17 @@ impl DashWriter {
         }
 
         // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
-        if frame.sample_entry.is_some() {
+        if let Some(ref entry) = frame.sample_entry {
             self.last_video_sample_entry.clone_from(&frame.sample_entry);
+
+            // SampleEntry から正確な codec string を取得して MPD のデフォルト値を上書きする
+            if !self.video_codec_resolved
+                && let Some(codec_str) =
+                    crate::codec_string::video_codec_string_from_sample_entry(entry)
+                {
+                    self.codecs.video = codec_str;
+                    self.video_codec_resolved = true;
+                }
         }
         // 前のビデオサンプルの duration を確定させる
         if let Some(prev_ts) = self.last_video_timestamp {
@@ -528,8 +552,17 @@ impl DashWriter {
         self.stats.total_input_audio_frame_count.inc();
         // 最初の video keyframe より前に audio が流れ始めることがある。
         // その場合でも、初回だけ付与される sample_entry は保持しておく。
-        if frame.sample_entry.is_some() {
+        if let Some(ref entry) = frame.sample_entry {
             self.last_audio_sample_entry.clone_from(&frame.sample_entry);
+
+            // SampleEntry から正確な codec string を取得して MPD のデフォルト値を上書きする
+            if !self.audio_codec_resolved
+                && let Some(codec_str) =
+                    crate::codec_string::audio_codec_string_from_sample_entry(entry)
+                {
+                    self.codecs.audio = codec_str;
+                    self.audio_codec_resolved = true;
+                }
         }
 
         if self.current_segment_info.is_none() {
@@ -1091,6 +1124,12 @@ pub struct CombinedMpdVariant {
 // 非 ABR では SegmentTimeline ベースの動的 MPD を毎セグメント更新しているため、
 // ABR 時も SegmentTimeline ベースに統一することで、実際のセグメント尺との乖離を防げる。
 // これには各バリアントライターからセグメント情報を集約する仕組みが必要になる。
+//
+// TODO: ABR 結合 MPD の codecs は起動時の from_codec_pair() デフォルト値で書き出される。
+// 各バリアントの DashWriter が SampleEntry から正確な codec string を取得した後に
+// 結合 MPD を再書き出しする仕組みが必要だが、variant 間で異なるタイミングで
+// SampleEntry が届く可能性があるため、全 variant の codec が確定してから
+// 結合 MPD を再生成する必要がある。SegmentTimeline ベースへの統一と合わせて対応する。
 pub fn build_combined_mpd_content(
     variants: &[CombinedMpdVariant],
     segment_duration: f64,
@@ -1338,7 +1377,10 @@ mod tests {
             &variants,
             2.0,
             6,
-            &crate::codec_string::CodecString::h264_aac_default(),
+            &crate::codec_string::CodecString::from_codec_pair(
+                crate::types::CodecName::H264,
+                crate::types::CodecName::Aac,
+            ),
         );
         let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
 
@@ -1400,7 +1442,10 @@ mod tests {
             &variants,
             2.0,
             6,
-            &crate::codec_string::CodecString::h264_aac_default(),
+            &crate::codec_string::CodecString::from_codec_pair(
+                crate::types::CodecName::H264,
+                crate::types::CodecName::Aac,
+            ),
         );
         let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
 
@@ -1431,7 +1476,10 @@ mod tests {
             &variants,
             3.0,
             5,
-            &crate::codec_string::CodecString::h264_aac_default(),
+            &crate::codec_string::CodecString::from_codec_pair(
+                crate::types::CodecName::H264,
+                crate::types::CodecName::Aac,
+            ),
         );
         let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
 

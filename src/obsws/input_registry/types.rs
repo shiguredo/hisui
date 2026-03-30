@@ -1478,6 +1478,10 @@ pub struct ObswsDashSettings {
     /// ABR バリアント定義。
     /// 要素が 1 つの場合は non-ABR。
     pub variants: Vec<DashVariant>,
+    /// ビデオコーデック。全バリアント共通。
+    pub video_codec: crate::types::CodecName,
+    /// オーディオコーデック。全バリアント共通。
+    pub audio_codec: crate::types::CodecName,
 }
 
 impl Default for ObswsDashSettings {
@@ -1487,6 +1491,8 @@ impl Default for ObswsDashSettings {
             segment_duration: DEFAULT_DASH_SEGMENT_DURATION_SECS,
             max_retained_segments: DEFAULT_DASH_MAX_RETAINED_SEGMENTS,
             variants: vec![DashVariant::default()],
+            video_codec: crate::types::CodecName::H264,
+            audio_codec: crate::types::CodecName::Aac,
         }
     }
 }
@@ -1507,7 +1513,9 @@ impl nojson::DisplayJson for ObswsDashSettings {
                     }
                     Ok(())
                 }),
-            )
+            )?;
+            f.member("videoCodec", self.video_codec)?;
+            f.member("audioCodec", self.audio_codec)
         })
         .fmt(f)
     }
