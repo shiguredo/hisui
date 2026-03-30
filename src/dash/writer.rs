@@ -233,7 +233,6 @@ const INIT_SEGMENT_FILENAME: &str = "init.mp4";
 /// NonZeroU32::MIN (= 1) に 999,999 を加算して 1,000,000 を得ている。
 const FMP4_TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 
-/// DASH セグメントライター。
 /// MPD に記載する codec string の解決状態。
 ///
 /// SampleEntry の到着順に `Pending` → `VideoOnly` / `AudioOnly` → `Resolved` と遷移する。
