@@ -227,6 +227,8 @@ struct Session {
         std::collections::HashMap<String, crate::obsws::coordinator::BootstrapInputSnapshot>,
     /// bootstrap 差分イベント購読タスクの停止用ハンドル
     bootstrap_event_abort_handle: Option<tokio::task::AbortHandle>,
+    /// obsws イベント購読タスクの停止用ハンドル
+    obsws_event_abort_handle: Option<tokio::task::AbortHandle>,
     /// Program 出力の固定トラック ID（bootstrap 時に設定）
     program_track_ids: crate::obsws::coordinator::ProgramTrackIds,
     /// Program トラックを購読中かどうか
@@ -240,6 +242,9 @@ struct Session {
 impl Drop for Session {
     fn drop(&mut self) {
         if let Some(handle) = &self.bootstrap_event_abort_handle {
+            handle.abort();
+        }
+        if let Some(handle) = &self.obsws_event_abort_handle {
             handle.abort();
         }
         // attach 済みの remote track を全てクリーンアップし、coordinator の trackId を null に戻す
@@ -542,13 +547,14 @@ impl WebRtcP2pSessionManager {
                 // obsws イベント購読タスクを起動する（InputSettingsChanged 等を p2p_session に転送）
                 let mut obsws_event_rx = self.coordinator_handle.subscribe_obsws_events();
                 let event_tx_for_obsws = sess.event_tx.clone();
-                tokio::spawn(async move {
+                let obsws_event_task = tokio::spawn(async move {
                     while let Ok(event) = obsws_event_rx.recv().await {
                         if event_tx_for_obsws.send(PcEvent::ObswsEvent(event)).is_err() {
                             break;
                         }
                     }
                 });
+                sess.obsws_event_abort_handle = Some(obsws_event_task.abort_handle());
 
                 // トラック追加があるので pending_renegotiation を設定する。
                 // 実際の offer 送信は ConnectionChange(Connected) で行う。
@@ -652,6 +658,7 @@ async fn bootstrap_internal(
         obsws_session,
         bootstrap_tracks: std::collections::HashMap::new(),
         bootstrap_event_abort_handle: None,
+        obsws_event_abort_handle: None,
         program_track_ids,
         program_tracks_subscribed: false,
         remote_video_tracks: std::collections::HashMap::new(),
