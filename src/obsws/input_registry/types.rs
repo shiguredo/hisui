@@ -324,6 +324,7 @@ impl ObswsInputSettings {
                     "backgroundKeyTolerance",
                     &existing.background_key_tolerance,
                 )?;
+                validate_background_key_tolerance(background_key_tolerance)?;
                 Ok(Self::WebRtcSource(ObswsWebRtcSourceSettings {
                     track_id: existing.track_id.clone(),
                     background_key_color,
@@ -914,6 +915,17 @@ fn parse_overlay_bool_setting(
             "Invalid inputSettings.{key} field: {e}"
         ))
     })
+}
+
+fn validate_background_key_tolerance(value: Option<i32>) -> Result<(), ParseInputSettingsError> {
+    if let Some(v) = value
+        && !(0..=255).contains(&v)
+    {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "backgroundKeyTolerance must be 0-255, got {v}"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_optional_i32_setting(
