@@ -1876,4 +1876,5 @@ pub struct ObswsInputRegistry {
     pub(crate) canvas_width: crate::types::EvenUsize,
     pub(crate) canvas_height: crate::types::EvenUsize,
     pub(crate) frame_rate: crate::video::FrameRate,
+    pub(crate) state_file_path: Option<PathBuf>,
 }

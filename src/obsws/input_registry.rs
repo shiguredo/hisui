@@ -60,6 +60,7 @@ impl ObswsInputRegistry {
         canvas_width: crate::types::EvenUsize,
         canvas_height: crate::types::EvenUsize,
         frame_rate: crate::video::FrameRate,
+        state_file_path: Option<PathBuf>,
     ) -> Self {
         let mut scenes_by_name = BTreeMap::new();
         scenes_by_name.insert(
@@ -102,6 +103,7 @@ impl ObswsInputRegistry {
             canvas_width,
             canvas_height,
             frame_rate,
+            state_file_path,
         }
     }
 
@@ -112,7 +114,12 @@ impl ObswsInputRegistry {
             crate::types::EvenUsize::new(1920).unwrap(),
             crate::types::EvenUsize::new(1080).unwrap(),
             crate::video::FrameRate::FPS_30,
+            None,
         )
+    }
+
+    pub fn state_file_path(&self) -> Option<&Path> {
+        self.state_file_path.as_deref()
     }
 
     pub fn list_inputs(&self) -> Vec<ObswsInputEntry> {

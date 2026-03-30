@@ -81,6 +81,7 @@ pub async fn run_server(
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
+    state_file_path: Option<PathBuf>,
 ) -> crate::Result<()> {
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
@@ -108,8 +109,41 @@ pub async fn run_server(
         .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
     tracing::info!("obsws server listening on {scheme}://{addr}");
 
-    let input_registry =
-        ObswsInputRegistry::new(default_record_dir, canvas_width, canvas_height, frame_rate);
+    // state file の読み込みと初期値への反映
+    let (effective_record_dir, initial_stream_settings, resolved_state_file_path) =
+        if let Some(ref path) = state_file_path {
+            let abs_path = std::path::absolute(path).map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to resolve state file path {}: {e}",
+                    path.display()
+                ))
+            })?;
+            let state = crate::obsws::state_file::load_state_file(&abs_path)?;
+            let stream_settings = state
+                .stream
+                .as_ref()
+                .map(crate::obsws::state_file::to_stream_service_settings);
+            let record_dir = state
+                .record
+                .map(|r| r.record_directory)
+                .unwrap_or(default_record_dir);
+            (record_dir, stream_settings, Some(abs_path))
+        } else {
+            (default_record_dir, None, None)
+        };
+
+    let mut input_registry = ObswsInputRegistry::new(
+        effective_record_dir,
+        canvas_width,
+        canvas_height,
+        frame_rate,
+        resolved_state_file_path,
+    );
+
+    // state file から読み込んだ stream 設定を反映する
+    if let Some(settings) = initial_stream_settings {
+        input_registry.set_stream_service_settings(settings);
+    }
 
     let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
     let pipeline_handle = pipeline.handle();
