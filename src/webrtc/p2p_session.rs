@@ -863,9 +863,14 @@ async fn handle_client_offer(sess: &mut Session, sdp: Option<&str>) -> bool {
     };
 
     // glare 解決: hisui 側に in-flight offer がある場合、
-    // set_remote_offer() で暗黙的に rollback される
+    // 明示的に local description を rollback してから client offer を適用する
     if sess.in_flight_offer {
         tracing::info!("Glare detected: rolling back hisui offer to accept client offer");
+        if let Err(e) = super::sdp::rollback_local_description(&sess.pc) {
+            tracing::warn!("failed to rollback local description: {}", e.display());
+            send_close(sess, "rollback-error", &e.reason);
+            return true;
+        }
         sess.in_flight_offer = false;
     }
 
@@ -1514,9 +1519,12 @@ async fn handle_bootstrap_input_created(
     sess: &mut Session,
     snapshot: crate::obsws::coordinator::BootstrapInputSnapshot,
 ) {
+    // webrtc_source は upstream 専用で hisui→client の配信 track を追加しないため
+    // renegotiation offer は不要
+    let needs_renegotiation = snapshot.input_kind != "webrtc_source";
     subscribe_bootstrap_input(sess, &snapshot);
 
-    if let Err(e) = maybe_send_offer(sess).await {
+    if needs_renegotiation && let Err(e) = maybe_send_offer(sess).await {
         tracing::warn!(
             "failed to send renegotiation offer after input created: {}",
             e.display()

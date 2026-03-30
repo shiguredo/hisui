@@ -86,6 +86,10 @@ pub(crate) fn set_local_answer(pc: &PeerConnection, answer_sdp: &str) -> crate::
     set_local_description(pc, SdpType::Answer, answer_sdp, "answer")
 }
 
+pub(crate) fn rollback_local_description(pc: &PeerConnection) -> crate::Result<()> {
+    set_local_description(pc, SdpType::Rollback, "", "rollback")
+}
+
 pub(crate) fn set_remote_offer(pc: &PeerConnection, offer_sdp: &str) -> crate::Result<()> {
     set_remote_description(pc, SdpType::Offer, offer_sdp, "offer")
 }
