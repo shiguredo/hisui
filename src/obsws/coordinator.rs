@@ -299,7 +299,7 @@ impl ObswsCoordinator {
             {
                 tracing::warn!("failed to rebuild program output: {}", e.display());
             }
-            if halt_on_failure && !request_succeeded {
+            if (halt_on_failure && !request_succeeded) || self.should_terminate {
                 break;
             }
         }

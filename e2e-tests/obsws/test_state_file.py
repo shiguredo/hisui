@@ -306,6 +306,24 @@ def test_invalid_version_state_file_causes_startup_failure(
         assert "exited before listening" in str(e)
 
 
+def test_record_without_directory_causes_startup_failure(
+    binary_path: Path, tmp_path: Path
+):
+    """record セクションに recordDirectory がない state file は起動に失敗する"""
+    host = "127.0.0.1"
+    state_file = tmp_path / "no-record-dir.jsonc"
+    state_file.write_text(json.dumps({"version": 1, "record": {}}))
+
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    try:
+        with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+            assert False, "server must not start with record section missing recordDirectory"
+    except AssertionError as e:
+        assert "exited before listening" in str(e)
+
+
 def test_preexisting_state_file_is_loaded_on_startup(
     binary_path: Path, tmp_path: Path
 ):
