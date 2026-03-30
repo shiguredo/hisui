@@ -184,7 +184,7 @@ impl VideoSinkHandler for FrameRecordHandler {
         self.width.store(w as usize, Ordering::Relaxed);
         self.height.store(h as usize, Ordering::Relaxed);
         if previous == 0 && !self.first_frame_logged.swap(true, Ordering::Relaxed) {
-            tracing::warn!(
+            tracing::info!(
                 "first video frame received: width={w}, height={h}, timestamp_us={}",
                 frame.timestamp_us()
             );
@@ -1222,7 +1222,7 @@ fn summarize_sdp_for_log(sdp: &str) -> String {
 }
 
 fn log_sdp_summary(label: &str, sdp: &str) {
-    tracing::warn!("{label}:\n{}", summarize_sdp_for_log(sdp));
+    tracing::info!("{label}:\n{}", summarize_sdp_for_log(sdp));
 }
 
 fn log_transceiver_receiver_state(label: &str, transceiver: &RtpTransceiver) {
@@ -1230,7 +1230,7 @@ fn log_transceiver_receiver_state(label: &str, transceiver: &RtpTransceiver) {
     let track = receiver.track();
     let kind = track.kind().unwrap_or_default();
     let track_id = track.id().unwrap_or_default();
-    tracing::warn!("{label}: receiver_track_kind={kind}, receiver_track_id={track_id}");
+    tracing::info!("{label}: receiver_track_kind={kind}, receiver_track_id={track_id}");
 }
 
 #[derive(Clone)]
@@ -1678,7 +1678,7 @@ async fn run_client(
             && dc.state() == DataChannelState::Open
         {
             let request = make_create_mp4_input_request(input_mp4_path);
-            tracing::warn!(
+            tracing::info!(
                 "sending CreateInput request: input_mp4_path={input_mp4_path}, duration_secs={duration_secs}"
             );
             if !dc.send(request.as_bytes(), false) {
@@ -1700,7 +1700,7 @@ async fn run_client(
 
         match event {
             ClientEvent::ConnectionChange(state) => {
-                tracing::warn!("peer connection state changed: {state:?}");
+                tracing::info!("peer connection state changed: {state:?}");
                 let state_str = match state {
                     PeerConnectionState::New => "new",
                     PeerConnectionState::Connecting => "connecting",
@@ -1721,7 +1721,7 @@ async fn run_client(
                 match kind.as_str() {
                     "video" => {
                         video_tracks.fetch_add(1, Ordering::Relaxed);
-                        tracing::warn!("video track received: track_id={track_id}");
+                        tracing::info!("video track received: track_id={track_id}");
                         attach_video_sink(
                             &mut retained,
                             &track_id,
@@ -1731,7 +1731,7 @@ async fn run_client(
                     }
                     "audio" => {
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
-                        tracing::warn!("audio track received: track_id={track_id}");
+                        tracing::info!("audio track received: track_id={track_id}");
                         attach_audio_sink(
                             &mut retained,
                             &track_id,
@@ -1749,7 +1749,7 @@ async fn run_client(
             }
             ClientEvent::DataChannel(dc, observer) => {
                 let label = dc.label().unwrap_or_default();
-                tracing::warn!(
+                tracing::info!(
                     "data channel received: label={label}, state={:?}",
                     dc.state()
                 );
@@ -1765,7 +1765,7 @@ async fn run_client(
             ClientEvent::SignalingMessage { data } => {
                 let msg_type = parse_signaling_type(&data).unwrap_or_default();
                 if msg_type == "offer" {
-                    tracing::warn!("renegotiation offer received from signaling data channel");
+                    tracing::info!("renegotiation offer received from signaling data channel");
                     // renegotiation: サーバーからの offer に answer を返す
                     if let Some(sdp) = parse_signaling_sdp(&data) {
                         log_sdp_summary("renegotiation remote offer SDP summary", &sdp);
@@ -1796,7 +1796,7 @@ async fn run_client(
                                 log_sdp_summary("renegotiation local answer SDP summary", &answer);
                                 let answer_json = make_answer_json(&answer);
                                 if let Some(dc) = &retained.signaling_dc {
-                                    tracing::warn!(
+                                    tracing::info!(
                                         "sending renegotiation answer on signaling data channel"
                                     );
                                     dc.send(answer_json.as_bytes(), false);
@@ -1822,7 +1822,7 @@ async fn run_client(
                                     && dc.state() == DataChannelState::Open
                                 {
                                     let request = make_subscribe_program_tracks_request();
-                                    tracing::warn!("sending SubscribeProgramTracks request");
+                                    tracing::info!("sending SubscribeProgramTracks request");
                                     if !dc.send(request.as_bytes(), false) {
                                         return Err(
                                             "failed to send SubscribeProgramTracks request"
@@ -1841,7 +1841,7 @@ async fn run_client(
                         match result {
                             Ok(()) => {
                                 obsws_subscribe_program_succeeded = true;
-                                tracing::warn!("SubscribeProgramTracks succeeded");
+                                tracing::info!("SubscribeProgramTracks succeeded");
                             }
                             Err(reason) => {
                                 return Err(format!(
@@ -2012,7 +2012,7 @@ async fn run_client(
         .lock()
         .expect("connection_state mutex should not be poisoned")
         .clone();
-    tracing::warn!(
+    tracing::info!(
         "bootstrap finished: video_tracks={}, video_frames={}, audio_tracks={}, audio_frames={}, video_width={}, video_height={}, video_samples_written={}, audio_samples_written={}, connection_state={}, webrtc_stats_error={}, program_tracks_subscribed={}",
         video_tracks.load(Ordering::Relaxed),
         video_frames.load(Ordering::Relaxed),
