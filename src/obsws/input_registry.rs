@@ -60,6 +60,7 @@ impl ObswsInputRegistry {
         canvas_width: crate::types::EvenUsize,
         canvas_height: crate::types::EvenUsize,
         frame_rate: crate::video::FrameRate,
+        state_file_path: Option<PathBuf>,
     ) -> Self {
         let mut scenes_by_name = BTreeMap::new();
         scenes_by_name.insert(
@@ -102,6 +103,7 @@ impl ObswsInputRegistry {
             canvas_width,
             canvas_height,
             frame_rate,
+            state_file_path,
         }
     }
 
@@ -112,7 +114,12 @@ impl ObswsInputRegistry {
             crate::types::EvenUsize::new(1920).unwrap(),
             crate::types::EvenUsize::new(1080).unwrap(),
             crate::video::FrameRate::FPS_30,
+            None,
         )
+    }
+
+    pub fn state_file_path(&self) -> Option<&Path> {
+        self.state_file_path.as_deref()
     }
 
     pub fn list_inputs(&self) -> Vec<ObswsInputEntry> {
@@ -826,6 +833,9 @@ impl ObswsInputRegistry {
     }
 
     pub fn deactivate_hls(&mut self) -> Option<ObswsHlsRun> {
+        if let Some(handle) = self.hls_runtime.master_playlist_task.take() {
+            handle.abort();
+        }
         let run = self.hls_runtime.run.take();
         self.hls_runtime.active = false;
         self.hls_runtime.started_at = None;
@@ -875,6 +885,10 @@ impl ObswsInputRegistry {
     }
 
     pub fn deactivate_dash(&mut self) -> Option<ObswsDashRun> {
+        // ABR 結合 MPD 書き出しタスクが残っていればキャンセルする
+        if let Some(handle) = self.dash_runtime.combined_mpd_task.take() {
+            handle.abort();
+        }
         let run = self.dash_runtime.run.take();
         self.dash_runtime.active = false;
         self.dash_runtime.started_at = None;

@@ -255,18 +255,30 @@ pub struct ObswsCoordinator {
     bootstrap_event_tx: tokio::sync::broadcast::Sender<BootstrapInputEvent>,
     /// obsws イベント broadcast チャネル（ProcessRequest 経由でない外部変更の通知用）
     obsws_event_tx: tokio::sync::broadcast::Sender<TaggedEvent>,
+    /// state file 保存失敗等の致命的エラーにより終了が必要
+    should_terminate: bool,
+    /// 致命的エラー発生時にサーバーへ通知するための送信側
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
 impl ObswsCoordinator {
     /// actor と handle を生成する。program_output の初期化は呼び出し側で行う。
+    ///
+    /// 返り値の `watch::Receiver<bool>` は致命的エラー発生時に `true` を受信する。
+    /// サーバーの accept loop はこれを監視して graceful shutdown を行う。
     pub fn new(
         input_registry: ObswsInputRegistry,
         program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
-    ) -> (Self, ObswsCoordinatorHandle) {
+    ) -> (
+        Self,
+        ObswsCoordinatorHandle,
+        tokio::sync::watch::Receiver<bool>,
+    ) {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (bootstrap_event_tx, _) = tokio::sync::broadcast::channel(64);
         let (obsws_event_tx, _) = tokio::sync::broadcast::channel(64);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let program_track_ids = ProgramTrackIds {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
@@ -279,6 +291,8 @@ impl ObswsCoordinator {
             input_source_processors: std::collections::BTreeMap::new(),
             obsws_event_tx: obsws_event_tx.clone(),
             bootstrap_event_tx: bootstrap_event_tx.clone(),
+            should_terminate: false,
+            shutdown_tx,
         };
         let handle = ObswsCoordinatorHandle {
             command_tx,
@@ -286,7 +300,7 @@ impl ObswsCoordinator {
             bootstrap_event_tx,
             obsws_event_tx,
         };
-        (actor, handle)
+        (actor, handle, shutdown_rx)
     }
 
     /// actor のイベントループを実行する
@@ -337,6 +351,19 @@ impl ObswsCoordinator {
                     let _ = reply_tx.send(info);
                 }
             }
+
+            // state file 保存失敗等の致命的エラーが発生した場合はループを抜ける。
+            // エラーレスポンスは上で reply_tx 経由で送信済みなので、
+            // クライアントにはエラーが通知された後にサーバーが停止する。
+            if self.should_terminate {
+                tracing::error!(
+                    "coordinator shutting down due to fatal error; \
+                     subsequent requests will fail"
+                );
+                // サーバーの accept loop に終了を通知する
+                let _ = self.shutdown_tx.send(true);
+                return;
+            }
         }
     }
 
@@ -379,7 +406,7 @@ impl ObswsCoordinator {
             {
                 tracing::warn!("failed to rebuild program output: {}", e.display());
             }
-            if halt_on_failure && !request_succeeded {
+            if (halt_on_failure && !request_succeeded) || self.should_terminate {
                 break;
             }
         }
@@ -496,7 +523,32 @@ impl ObswsCoordinator {
                     &mut self.input_registry,
                     self.pipeline_handle.as_ref(),
                 );
-                self.build_result_from_response(response.message, Vec::new())
+                let result = self.build_result_from_response(response.message, Vec::new());
+
+                // 対象リクエストが成功した場合に state file を保存する
+                if result.batch_result.request_status_result
+                    && matches!(
+                        request_type.as_str(),
+                        "SetStreamServiceSettings" | "SetRecordDirectory" | "SetOutputSettings"
+                    )
+                    && let Some(path) = self.input_registry.state_file_path()
+                {
+                    let path = path.to_path_buf();
+                    let state =
+                        crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+                    if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
+                        tracing::error!("failed to save state file: {}", e.display());
+                        self.should_terminate = true;
+                        return self.build_error_result(
+                            &request_type,
+                            &request_id,
+                            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            &format!("state file write failed: {}", e.display()),
+                        );
+                    }
+                }
+
+                result
             }
         }
     }
@@ -2345,20 +2397,23 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        if let Err(e) =
-            start_hls_processors(pipeline_handle, &program_output, &run, &hls_settings).await
-        {
-            self.input_registry.deactivate_hls();
-            let _ = stop_processors_staged_hls(pipeline_handle, &run).await;
-            let error_comment = format!("Failed to start HLS: {}", e.display());
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    &error_comment,
-                ),
-            );
+        match start_hls_processors(pipeline_handle, &program_output, &run, &hls_settings).await {
+            Ok(master_playlist_task) => {
+                self.input_registry.hls_runtime.master_playlist_task = master_playlist_task;
+            }
+            Err(e) => {
+                self.input_registry.deactivate_hls();
+                let _ = stop_processors_staged_hls(pipeline_handle, &run).await;
+                let error_comment = format!("Failed to start HLS: {}", e.display());
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        &error_comment,
+                    ),
+                );
+            }
         }
         OutputOperationOutcome::success(
             crate::obsws::response::build_start_output_response(request_id),
@@ -2627,20 +2682,23 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        if let Err(e) =
-            start_dash_processors(pipeline_handle, &program_output, &run, &dash_settings).await
-        {
-            self.input_registry.deactivate_dash();
-            let _ = stop_processors_staged_dash(pipeline_handle, &run).await;
-            let error_comment = format!("Failed to start MPEG-DASH: {}", e.display());
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    &error_comment,
-                ),
-            );
+        match start_dash_processors(pipeline_handle, &program_output, &run, &dash_settings).await {
+            Ok(combined_mpd_task) => {
+                self.input_registry.dash_runtime.combined_mpd_task = combined_mpd_task;
+            }
+            Err(e) => {
+                self.input_registry.deactivate_dash();
+                let _ = stop_processors_staged_dash(pipeline_handle, &run).await;
+                let error_comment = format!("Failed to start MPEG-DASH: {}", e.display());
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        &error_comment,
+                    ),
+                );
+            }
         }
         OutputOperationOutcome::success(
             crate::obsws::response::build_start_output_response(request_id),
@@ -3636,12 +3694,14 @@ fn build_s3_client(
 }
 
 /// HLS 用プロセッサを起動する
+/// 戻り値は ABR マスタープレイリスト書き出しタスクの JoinHandle（ABR でない場合は None）。
+/// 呼び出し元は JoinHandle を保持し、出力停止時に abort() すること。
 async fn start_hls_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     program_output: &ObswsProgramOutputContext,
     run: &crate::obsws::input_registry::ObswsHlsRun,
     hls_settings: &crate::obsws::input_registry::ObswsHlsSettings,
-) -> crate::Result<()> {
+) -> crate::Result<Option<tokio::task::JoinHandle<()>>> {
     // HLS 用にキーフレーム間隔を設定する。
     // segment_duration に合わせたフレーム数を計算し、エンコーダーに事前通知する。
     let fps = program_output.frame_rate.numerator.get() as f64
@@ -3654,6 +3714,10 @@ async fn start_hls_processors(
     );
 
     let is_abr = run.is_abr();
+
+    // ABR の場合、各 variant writer が SampleEntry から codec string を確定したら
+    // oneshot channel 経由で通知を受け取り、全 variant の値がそろってからマスタープレイリストを書き出す。
+    let mut codec_string_receivers = Vec::new();
 
     // バリアントごとにスケーラー、エンコーダー、ライターを起動する
     for (i, (variant, variant_run)) in hls_settings
@@ -3755,6 +3819,15 @@ async fn start_hls_processors(
                 }
             }
         };
+        // ABR の場合は codec string 通知用の channel を作成する
+        let codec_string_sender = if is_abr {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            codec_string_receivers.push(rx);
+            Some(tx)
+        } else {
+            None
+        };
+
         crate::hls::writer::create_processor(
             pipeline_handle,
             crate::hls::writer::HlsWriterConfig {
@@ -3764,6 +3837,7 @@ async fn start_hls_processors(
                 segment_duration: hls_settings.segment_duration,
                 max_retained_segments: hls_settings.max_retained_segments,
                 segment_format: hls_settings.segment_format,
+                codec_string_sender,
             },
             Some(variant_run.writer_processor_id.clone()),
         )
@@ -3778,7 +3852,8 @@ async fn start_hls_processors(
         );
     }
 
-    // ABR の場合はマスタープレイリストを書き出す
+    // ABR の場合は各 variant writer が SampleEntry から codec string を確定するのを待ち、
+    // 全 variant の codec string が一致することを検証してからマスタープレイリストを書き出す。
     if is_abr {
         let master_variants: Vec<crate::hls::writer::MasterPlaylistVariant> = hls_settings
             .variants
@@ -3801,60 +3876,120 @@ async fn start_hls_processors(
                 }
             })
             .collect();
-        let hls_codecs = crate::codec_string::CodecString::h264_aac_default();
-        let master_content =
-            crate::hls::writer::build_master_playlist_content(&master_variants, &hls_codecs);
-        match &run.destination {
-            crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
-                crate::hls::writer::write_master_playlist(
-                    &std::path::PathBuf::from(directory),
-                    &master_variants,
-                    &hls_codecs,
-                )?;
-            }
-            crate::obsws::input_registry::HlsDestination::S3 {
-                bucket,
-                prefix,
-                region,
-                endpoint,
-                use_path_style,
-                access_key_id,
-                secret_access_key,
-                session_token,
-                ..
-            } => {
-                let s3_client = build_s3_client(
-                    region,
-                    access_key_id,
-                    secret_access_key,
-                    session_token.as_deref(),
-                    endpoint.as_deref(),
-                    *use_path_style,
-                )?;
-                let key = if prefix.is_empty() {
-                    "playlist.m3u8".to_owned()
-                } else {
-                    format!("{prefix}/playlist.m3u8")
-                };
-                let request = s3_client
-                    .client()
-                    .put_object()
-                    .bucket(bucket)
-                    .key(&key)
-                    .body(master_content.into_bytes())
-                    .content_type("application/vnd.apple.mpegurl")
-                    .build_request()?;
-                let response = s3_client.execute(&request).await?;
-                if !response.is_success() {
-                    return Err(crate::Error::new(format!(
-                        "S3 PutObject failed for master playlist {key}: status={}",
-                        response.status_code
-                    )));
+
+        let destination = run.destination.clone();
+
+        let handle = tokio::spawn(async move {
+            // 全 variant の codec string を収集する
+            let mut codec_strings = Vec::with_capacity(codec_string_receivers.len());
+            for (i, rx) in codec_string_receivers.into_iter().enumerate() {
+                match rx.await {
+                    Ok(cs) => codec_strings.push(cs),
+                    Err(_) => {
+                        tracing::warn!(
+                            variant = i,
+                            "HLS variant writer dropped codec string sender before resolving codecs"
+                        );
+                        return;
+                    }
                 }
             }
-        }
+
+            // 全 variant の codec string が一致することを検証する
+            let Some(first) = codec_strings.first() else {
+                return;
+            };
+            for (i, cs) in codec_strings.iter().enumerate().skip(1) {
+                if cs.video != first.video || cs.audio != first.audio {
+                    tracing::error!(
+                        variant = i,
+                        expected_video = %first.video,
+                        expected_audio = %first.audio,
+                        actual_video = %cs.video,
+                        actual_audio = %cs.audio,
+                        "HLS ABR variant codec string mismatch: \
+                         all variants must produce identical codec strings"
+                    );
+                    return;
+                }
+            }
+
+            let master_content =
+                crate::hls::writer::build_master_playlist_content(&master_variants, first);
+            match &destination {
+                crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
+                    if let Err(e) = crate::hls::writer::write_master_playlist(
+                        &std::path::PathBuf::from(directory),
+                        &master_variants,
+                        first,
+                    ) {
+                        tracing::error!(error = ?e, "failed to write HLS master playlist");
+                    }
+                }
+                crate::obsws::input_registry::HlsDestination::S3 {
+                    bucket,
+                    prefix,
+                    region,
+                    endpoint,
+                    use_path_style,
+                    access_key_id,
+                    secret_access_key,
+                    session_token,
+                    ..
+                } => {
+                    let s3_client = match build_s3_client(
+                        region,
+                        access_key_id,
+                        secret_access_key,
+                        session_token.as_deref(),
+                        endpoint.as_deref(),
+                        *use_path_style,
+                    ) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!(error = ?e, "failed to create S3 client for HLS master playlist");
+                            return;
+                        }
+                    };
+                    let key = if prefix.is_empty() {
+                        "playlist.m3u8".to_owned()
+                    } else {
+                        format!("{prefix}/playlist.m3u8")
+                    };
+                    let request = match s3_client
+                        .client()
+                        .put_object()
+                        .bucket(bucket)
+                        .key(&key)
+                        .body(master_content.into_bytes())
+                        .content_type("application/vnd.apple.mpegurl")
+                        .build_request()
+                    {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::error!(error = ?e, "failed to build S3 PutObject request for HLS master playlist");
+                            return;
+                        }
+                    };
+                    match s3_client.execute(&request).await {
+                        Ok(response) if !response.is_success() => {
+                            tracing::error!(
+                                status = response.status_code,
+                                "S3 PutObject failed for HLS master playlist {key}"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "failed to upload HLS master playlist to S3");
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        });
+        Ok(Some(handle))
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
 /// HLS 用プロセッサを段階的に停止する。
@@ -3993,12 +4128,14 @@ async fn stop_processors_staged_hls(
     Ok(())
 }
 
+/// 戻り値は ABR 結合 MPD 書き出しタスクの JoinHandle（ABR でない場合は None）。
+/// 呼び出し元は JoinHandle を保持し、出力停止時に abort() すること。
 async fn start_dash_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     program_output: &ObswsProgramOutputContext,
     run: &crate::obsws::input_registry::ObswsDashRun,
     dash_settings: &crate::obsws::input_registry::ObswsDashSettings,
-) -> crate::Result<()> {
+) -> crate::Result<Option<tokio::task::JoinHandle<()>>> {
     // MPEG-DASH 用にキーフレーム間隔を設定する
     let fps = program_output.frame_rate.numerator.get() as f64
         / program_output.frame_rate.denumerator.get() as f64;
@@ -4010,7 +4147,10 @@ async fn start_dash_processors(
     );
 
     let is_abr = run.is_abr();
-    let dash_codecs = crate::codec_string::CodecString::h264_aac_default();
+
+    // ABR の場合、各 variant writer が SampleEntry から codec string を確定したら
+    // oneshot channel 経由で通知を受け取り、全 variant の値がそろってから結合 MPD を書き出す。
+    let mut codec_string_receivers = Vec::new();
 
     // バリアントごとにスケーラー、エンコーダー、ライターを起動する
     for (i, (variant, variant_run)) in dash_settings
@@ -4060,7 +4200,7 @@ async fn start_dash_processors(
             pipeline_handle,
             video_encoder_input_track,
             variant_run.video.encoded_track_id.clone(),
-            crate::types::CodecName::H264,
+            dash_settings.video_codec,
             std::num::NonZeroUsize::new(variant.video_bitrate_bps)
                 .unwrap_or(std::num::NonZeroUsize::MIN),
             program_output.frame_rate,
@@ -4069,12 +4209,12 @@ async fn start_dash_processors(
         )
         .await?;
 
-        // オーディオエンコーダー（DASH でも AAC を使用）
+        // オーディオエンコーダー
         crate::encoder::create_audio_processor(
             pipeline_handle,
             program_output.audio_track_id.clone(),
             variant_run.audio.encoded_track_id.clone(),
-            crate::types::CodecName::Aac,
+            dash_settings.audio_codec,
             std::num::NonZeroUsize::new(variant.audio_bitrate_bps)
                 .unwrap_or(std::num::NonZeroUsize::MIN),
             Some(variant_run.audio.encoder_processor_id.clone()),
@@ -4113,6 +4253,15 @@ async fn start_dash_processors(
                 }
             }
         };
+        // ABR の場合は codec string 通知用の channel を作成する
+        let codec_string_sender = if is_abr {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            codec_string_receivers.push(rx);
+            Some(tx)
+        } else {
+            None
+        };
+
         crate::dash::writer::create_processor(
             pipeline_handle,
             crate::dash::writer::DashWriterConfig {
@@ -4122,7 +4271,7 @@ async fn start_dash_processors(
                 segment_duration: dash_settings.segment_duration,
                 max_retained_segments: dash_settings.max_retained_segments,
                 skip_mpd: is_abr,
-                codecs: dash_codecs.clone(),
+                codec_string_sender,
             },
             Some(variant_run.writer_processor_id.clone()),
         )
@@ -4137,7 +4286,8 @@ async fn start_dash_processors(
         );
     }
 
-    // ABR の場合は結合 MPD を書き出す
+    // ABR の場合は各 variant writer が SampleEntry から codec string を確定するのを待ち、
+    // 全 variant の codec string が一致することを検証してから結合 MPD を書き出す。
     if is_abr {
         let mpd_variants: Vec<crate::dash::writer::CombinedMpdVariant> = dash_settings
             .variants
@@ -4162,16 +4312,61 @@ async fn start_dash_processors(
             })
             .collect::<crate::Result<Vec<_>>>()?;
         let root_storage_config = build_dash_root_storage_config(&run.destination)?;
-        crate::dash::writer::write_combined_mpd(
-            root_storage_config,
-            &mpd_variants,
-            dash_settings.segment_duration,
-            dash_settings.max_retained_segments,
-            &dash_codecs,
-        )
-        .await?;
+        let segment_duration = dash_settings.segment_duration;
+        let max_retained_segments = dash_settings.max_retained_segments;
+
+        // 各 variant の codec string が確定するのを待ってから結合 MPD を書き出すタスクを起動する。
+        // JoinHandle を呼び出し元に返し、出力停止時に abort() でキャンセルできるようにする。
+        let handle = tokio::spawn(async move {
+            // 全 variant の codec string を収集する
+            let mut codec_strings = Vec::with_capacity(codec_string_receivers.len());
+            for (i, rx) in codec_string_receivers.into_iter().enumerate() {
+                match rx.await {
+                    Ok(cs) => codec_strings.push(cs),
+                    Err(_) => {
+                        tracing::warn!(
+                            variant = i,
+                            "DASH variant writer dropped codec string sender before resolving codecs"
+                        );
+                        return;
+                    }
+                }
+            }
+
+            // 全 variant の codec string が一致することを検証する
+            if let Some(first) = codec_strings.first() {
+                for (i, cs) in codec_strings.iter().enumerate().skip(1) {
+                    if cs.video != first.video || cs.audio != first.audio {
+                        tracing::error!(
+                            variant = i,
+                            expected_video = %first.video,
+                            expected_audio = %first.audio,
+                            actual_video = %cs.video,
+                            actual_audio = %cs.audio,
+                            "DASH ABR variant codec string mismatch: \
+                             all variants must produce identical codec strings"
+                        );
+                        return;
+                    }
+                }
+
+                if let Err(e) = crate::dash::writer::write_combined_mpd(
+                    root_storage_config,
+                    &mpd_variants,
+                    segment_duration,
+                    max_retained_segments,
+                    first,
+                )
+                .await
+                {
+                    tracing::error!(error = ?e, "failed to write combined DASH MPD");
+                }
+            }
+        });
+        Ok(Some(handle))
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
 /// MPEG-DASH 用プロセッサを段階的に停止する。

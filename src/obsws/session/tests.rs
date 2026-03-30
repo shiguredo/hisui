@@ -30,7 +30,7 @@ fn create_coordinator_handle(
     registry: ObswsInputRegistry,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
-    let (actor, handle) =
+    let (actor, handle, _shutdown_rx) =
         crate::obsws::coordinator::ObswsCoordinator::new(registry, program_output, None);
     tokio::spawn(actor.run());
     handle
@@ -47,7 +47,7 @@ fn create_coordinator_handle_with_pipeline(
     pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
-    let (actor, handle) = crate::obsws::coordinator::ObswsCoordinator::new(
+    let (actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
         program_output,
         Some(pipeline_handle),
@@ -91,7 +91,7 @@ async fn create_initialized_coordinator_handle_with_pipeline(
         source_processor_ids: output_plan.source_processor_ids,
     };
 
-    let (mut actor, handle) = crate::obsws::coordinator::ObswsCoordinator::new(
+    let (mut actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
         program_output,
         Some(pipeline_handle),
@@ -1509,6 +1509,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
+        None,
     );
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
@@ -1587,6 +1588,7 @@ async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() ->
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
+        None,
     );
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
@@ -1655,6 +1657,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
+        None,
     );
     for input_name in ["audio-file-1", "audio-file-2"] {
         let input = ObswsInput::from_kind_and_settings(
@@ -1746,6 +1749,7 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
+        None,
     );
 
     let pipeline = crate::MediaPipeline::new()?;
@@ -1992,6 +1996,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
         crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
         crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
         crate::video::FrameRate::FPS_30,
+        None,
     );
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
@@ -2120,6 +2125,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
         crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
         crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
         crate::video::FrameRate::FPS_30,
+        None,
     );
     registry
         .create_scene("Scene B")
@@ -2159,7 +2165,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
             request_type: Some("SetOutputSettings".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(format!(
-                    r#"{{"outputName":"mpeg_dash","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"variants":[{{"videoBitrate":2000000,"audioBitrate":128000}},{{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}}]}}}}"#,
+                    r#"{{"outputName":"mpeg_dash","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"videoCodec":"VP9","audioCodec":"OPUS","variants":[{{"videoBitrate":2000000,"audioBitrate":128000}},{{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}}]}}}}"#,
                     dash_output_dir.display()
                 ))
                 .expect("requestData must be valid json"),
@@ -2189,6 +2195,37 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
     wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v1_scaler", true).await?;
     wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v0_dash_writer", true).await?;
     wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:video_mixer", false).await?;
+
+    // ABR 結合 MPD は SampleEntry から codec string が確定してから書き出される。
+    // manifest.mpd の出現を待ち、codecs 属性が実際の SampleEntry と一致することを検証する。
+    // VP9 + Opus は libvpx / opus が全環境で利用可能なため、エンコーダー不在で失敗しない。
+    let manifest_path = dash_output_dir.join("manifest.mpd");
+    for _ in 0..60 {
+        if manifest_path.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(
+        manifest_path.exists(),
+        "ABR combined manifest.mpd must be written after codec resolution"
+    );
+    let mpd_xml = std::fs::read_to_string(&manifest_path).expect("manifest.mpd must be readable");
+    let mpd = shiguredo_mpd::parse(&mpd_xml).expect("manifest.mpd must be valid MPD XML");
+    let adaptation_set = &mpd.periods[0].adaptation_sets[0];
+    let codecs = adaptation_set
+        .codecs
+        .as_ref()
+        .expect("AdaptationSet.codecs must be present");
+    // VP9 + Opus を指定しているので codecs は vp09 と opus を含むこと
+    assert!(
+        codecs.contains("vp09."),
+        "codecs must contain vp09 prefix from actual SampleEntry, got: {codecs}"
+    );
+    assert!(
+        codecs.contains("opus"),
+        "codecs must contain opus from actual SampleEntry, got: {codecs}"
+    );
 
     let set_scene_action = session
         .handle_request(RequestMessage {

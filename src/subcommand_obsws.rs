@@ -89,6 +89,12 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .default("30")
         .take(args)
         .then(|o| o.value().parse())?;
+    let state_file: Option<PathBuf> = noargs::opt("state-file")
+        .ty("PATH")
+        .env("HISUI_OBSWS_STATE_FILE")
+        .doc("obsws の設定永続化用 state file のパス")
+        .take(args)
+        .present_and_then(|o| o.value().parse())?;
 
     if args.metadata().help_mode {
         return Ok(());
@@ -126,6 +132,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         canvas_width,
         canvas_height,
         frame_rate,
+        state_file,
     )
     .map_err(noargs::Error::from)
 }
@@ -143,6 +150,7 @@ fn run_internal(
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
+    state_file: Option<PathBuf>,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
@@ -179,6 +187,7 @@ fn run_internal(
                 canvas_width,
                 canvas_height,
                 frame_rate,
+                state_file,
             ))
             .await
     })

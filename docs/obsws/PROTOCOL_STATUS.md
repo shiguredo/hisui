@@ -115,8 +115,10 @@
 - [x] `GetStreamServiceSettings`: 配信サービス設定を取得する
 - [x] `SetStreamServiceSettings`: 配信サービス設定を更新する
   - NOTE: 現時点は `streamServiceType = "rtmp_custom"` 前提で `server` / `key` を保持する
+  - NOTE: `--state-file` 指定時は成功時に state file へ永続化する
 - [x] `GetRecordDirectory`: 録画ディレクトリを取得する
 - [x] `SetRecordDirectory`: 録画ディレクトリを設定する
+  - NOTE: `--state-file` 指定時は成功時に state file へ永続化する
 
 ### Sources
 
@@ -287,6 +289,7 @@
 - [x] `SetOutputSettings`: 出力設定を更新する
   - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` を受理する
   - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ更新する
+  - NOTE: `--state-file` 指定時は成功時に state file へ永続化する
 
 ### Stream
 
@@ -800,7 +803,7 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 
 #### `mpeg_dash`
 
-MPEG-DASH ライブ出力。H.264 + AAC の fragmented MP4 セグメントを生成し、MPD マニフェストで管理する。
+MPEG-DASH ライブ出力。指定されたビデオ/オーディオコーデックの fragmented MP4 セグメントを生成し、MPD マニフェストで管理する。ビデオコーデックは H.264 / H.265 / VP8 / VP9 / AV1、オーディオコーデックは AAC / OPUS を選択可能（デフォルト: H.264 + AAC）。
 
 - `outputKind`: `mpeg_dash_output`
 - ローカルファイルシステムまたは S3 互換オブジェクトストレージへの出力に対応
@@ -817,6 +820,8 @@ MPEG-DASH ライブ出力。H.264 + AAC の fragmented MP4 セグメントを生
 | `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
 | `maxRetainedSegments` | number | - | マニフェストに保持するセグメント数。デフォルト: 6 |
 | `variants` | array | - | バリアント定義の配列。デフォルト: 1 要素（2Mbps video, 128kbps audio） |
+| `videoCodec` | string | - | ビデオコーデック（`"H264"` / `"H265"` / `"VP8"` / `"VP9"` / `"AV1"`）。デフォルト: `"H264"` |
+| `audioCodec` | string | - | オーディオコーデック（`"AAC"` / `"OPUS"`）。デフォルト: `"AAC"` |
 
 **`destination` (filesystem):**
 
@@ -924,5 +929,9 @@ MPEG-DASH ライブ出力。H.264 + AAC の fragmented MP4 セグメントを生
 - `variants[].audioBitrate` が 0 の場合: `SetOutputSettings` が失敗
 - `variants[].width` / `height` が 0 または奇数の場合: `SetOutputSettings` が失敗
 - `variants[].width` / `height` の片方だけ指定された場合: `SetOutputSettings` が失敗
+- `videoCodec` にオーディオコーデック名を指定した場合: `SetOutputSettings` が失敗
+- `audioCodec` にビデオコーデック名を指定した場合: `SetOutputSettings` が失敗
+- `videoCodec` / `audioCodec` に未知のコーデック名を指定した場合: `SetOutputSettings` が失敗
+- 利用可能なエンコーダーが存在しないコーデックを指定した場合: `StartOutput` が失敗
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す
