@@ -376,3 +376,271 @@ def test_preexisting_state_file_is_loaded_on_startup(
                 await ws.close()
 
         asyncio.run(_get())
+
+
+def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path):
+    """SetOutputSettings で rtmp_outbound を設定した値が再起動後も復元される"""
+    host = "127.0.0.1"
+    state_file = tmp_path / "state.jsonc"
+
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+
+        async def _set():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "SetOutputSettings",
+                    "set-rtmp-outbound",
+                    {
+                        "outputName": "rtmp_outbound",
+                        "outputSettings": {
+                            "outputUrl": "rtmp://relay:1935/live",
+                            "streamName": "backup",
+                        },
+                    },
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                await ws.close()
+
+        asyncio.run(_set())
+
+    port2, sock2 = reserve_ephemeral_port()
+    sock2.close()
+
+    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+
+        async def _get():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "GetOutputSettings",
+                    "get-rtmp-outbound",
+                    {"outputName": "rtmp_outbound"},
+                )
+                settings = response["d"]["responseData"]["outputSettings"]
+                assert settings["outputUrl"] == "rtmp://relay:1935/live"
+                assert settings["streamName"] == "backup"
+                await ws.close()
+
+        asyncio.run(_get())
+
+
+def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
+    """SetOutputSettings で sora を設定した値が再起動後も復元される"""
+    host = "127.0.0.1"
+    state_file = tmp_path / "state.jsonc"
+
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+
+        async def _set():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "SetOutputSettings",
+                    "set-sora",
+                    {
+                        "outputName": "sora",
+                        "outputSettings": {
+                            "soraSdkSettings": {
+                                "signalingUrls": ["wss://example.com/signaling"],
+                                "channelId": "test-ch",
+                                "metadata": {"key": "value"},
+                            }
+                        },
+                    },
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                await ws.close()
+
+        asyncio.run(_set())
+
+    port2, sock2 = reserve_ephemeral_port()
+    sock2.close()
+
+    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+
+        async def _get():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "GetOutputSettings",
+                    "get-sora",
+                    {"outputName": "sora"},
+                )
+                settings = response["d"]["responseData"]["outputSettings"]
+                sora = settings["soraSdkSettings"]
+                assert sora["signalingUrls"] == ["wss://example.com/signaling"]
+                assert sora["channelId"] == "test-ch"
+                await ws.close()
+
+        asyncio.run(_get())
+
+
+def test_hls_filesystem_persists_across_restart(binary_path: Path, tmp_path: Path):
+    """SetOutputSettings で hls filesystem を設定した値が再起動後も復元される"""
+    host = "127.0.0.1"
+    state_file = tmp_path / "state.jsonc"
+    hls_dir = str(tmp_path / "hls-output")
+
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+
+        async def _set():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "SetOutputSettings",
+                    "set-hls",
+                    {
+                        "outputName": "hls",
+                        "outputSettings": {
+                            "destination": {
+                                "type": "filesystem",
+                                "directory": hls_dir,
+                            },
+                            "segmentDuration": 3.0,
+                            "maxRetainedSegments": 10,
+                            "variants": [
+                                {"videoBitrate": 1500000, "audioBitrate": 96000}
+                            ],
+                        },
+                    },
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                await ws.close()
+
+        asyncio.run(_set())
+
+    port2, sock2 = reserve_ephemeral_port()
+    sock2.close()
+
+    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+
+        async def _get():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "GetOutputSettings",
+                    "get-hls",
+                    {"outputName": "hls"},
+                )
+                settings = response["d"]["responseData"]["outputSettings"]
+                assert settings["destination"]["type"] == "filesystem"
+                assert settings["destination"]["directory"] == hls_dir
+                assert settings["segmentDuration"] == 3.0
+                assert settings["maxRetainedSegments"] == 10
+                assert settings["variants"][0]["videoBitrate"] == 1500000
+                await ws.close()
+
+        asyncio.run(_get())
+
+
+def test_mpeg_dash_filesystem_persists_across_restart(binary_path: Path, tmp_path: Path):
+    """SetOutputSettings で mpeg_dash filesystem を設定した値が再起動後も復元される"""
+    host = "127.0.0.1"
+    state_file = tmp_path / "state.jsonc"
+    dash_dir = str(tmp_path / "dash-output")
+
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+
+        async def _set():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "SetOutputSettings",
+                    "set-dash",
+                    {
+                        "outputName": "mpeg_dash",
+                        "outputSettings": {
+                            "destination": {
+                                "type": "filesystem",
+                                "directory": dash_dir,
+                            },
+                            "segmentDuration": 4.0,
+                            "variants": [
+                                {"videoBitrate": 3000000, "audioBitrate": 192000}
+                            ],
+                            "videoCodec": "H265",
+                            "audioCodec": "OPUS",
+                        },
+                    },
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                await ws.close()
+
+        asyncio.run(_set())
+
+    port2, sock2 = reserve_ephemeral_port()
+    sock2.close()
+
+    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+
+        async def _get():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "GetOutputSettings",
+                    "get-dash",
+                    {"outputName": "mpeg_dash"},
+                )
+                settings = response["d"]["responseData"]["outputSettings"]
+                assert settings["destination"]["type"] == "filesystem"
+                assert settings["destination"]["directory"] == dash_dir
+                assert settings["segmentDuration"] == 4.0
+                assert settings["variants"][0]["videoBitrate"] == 3000000
+                assert settings["videoCodec"] == "H265"
+                assert settings["audioCodec"] == "OPUS"
+                await ws.close()
+
+        asyncio.run(_get())
