@@ -2520,20 +2520,23 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        if let Err(e) =
-            start_dash_processors(pipeline_handle, &program_output, &run, &dash_settings).await
-        {
-            self.input_registry.deactivate_dash();
-            let _ = stop_processors_staged_dash(pipeline_handle, &run).await;
-            let error_comment = format!("Failed to start MPEG-DASH: {}", e.display());
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    &error_comment,
-                ),
-            );
+        match start_dash_processors(pipeline_handle, &program_output, &run, &dash_settings).await {
+            Ok(combined_mpd_task) => {
+                self.input_registry.dash_runtime.combined_mpd_task = combined_mpd_task;
+            }
+            Err(e) => {
+                self.input_registry.deactivate_dash();
+                let _ = stop_processors_staged_dash(pipeline_handle, &run).await;
+                let error_comment = format!("Failed to start MPEG-DASH: {}", e.display());
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        &error_comment,
+                    ),
+                );
+            }
         }
         OutputOperationOutcome::success(
             crate::obsws::response::build_start_output_response(request_id),
@@ -3836,12 +3839,14 @@ async fn stop_processors_staged_hls(
     Ok(())
 }
 
+/// 戻り値は ABR 結合 MPD 書き出しタスクの JoinHandle（ABR でない場合は None）。
+/// 呼び出し元は JoinHandle を保持し、出力停止時に abort() すること。
 async fn start_dash_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     program_output: &ObswsProgramOutputContext,
     run: &crate::obsws::input_registry::ObswsDashRun,
     dash_settings: &crate::obsws::input_registry::ObswsDashSettings,
-) -> crate::Result<()> {
+) -> crate::Result<Option<tokio::task::JoinHandle<()>>> {
     // MPEG-DASH 用にキーフレーム間隔を設定する
     let fps = program_output.frame_rate.numerator.get() as f64
         / program_output.frame_rate.denumerator.get() as f64;
@@ -4021,8 +4026,9 @@ async fn start_dash_processors(
         let segment_duration = dash_settings.segment_duration;
         let max_retained_segments = dash_settings.max_retained_segments;
 
-        // 各 variant の codec string が確定するのを待ってから結合 MPD を書き出すタスクを起動する
-        tokio::spawn(async move {
+        // 各 variant の codec string が確定するのを待ってから結合 MPD を書き出すタスクを起動する。
+        // JoinHandle を呼び出し元に返し、出力停止時に abort() でキャンセルできるようにする。
+        let handle = tokio::spawn(async move {
             // 全 variant の codec string を収集する
             let mut codec_strings = Vec::with_capacity(codec_string_receivers.len());
             for (i, rx) in codec_string_receivers.into_iter().enumerate() {
@@ -4068,8 +4074,10 @@ async fn start_dash_processors(
                 }
             }
         });
+        Ok(Some(handle))
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
 /// MPEG-DASH 用プロセッサを段階的に停止する。

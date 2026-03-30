@@ -875,6 +875,10 @@ impl ObswsInputRegistry {
     }
 
     pub fn deactivate_dash(&mut self) -> Option<ObswsDashRun> {
+        // ABR 結合 MPD 書き出しタスクが残っていればキャンセルする
+        if let Some(handle) = self.dash_runtime.combined_mpd_task.take() {
+            handle.abort();
+        }
         let run = self.dash_runtime.run.take();
         self.dash_runtime.active = false;
         self.dash_runtime.started_at = None;

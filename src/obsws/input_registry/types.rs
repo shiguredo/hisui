@@ -1549,11 +1549,28 @@ pub struct ObswsDashVariantRun {
     pub variant_path: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct ObswsDashRuntimeState {
     pub(crate) active: bool,
     pub(crate) started_at: Option<Instant>,
     pub(crate) run: Option<ObswsDashRun>,
+    /// ABR 結合 MPD 書き出しタスクの JoinHandle。
+    /// 出力停止時に abort() でキャンセルする。
+    pub(crate) combined_mpd_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Clone for ObswsDashRuntimeState {
+    fn clone(&self) -> Self {
+        Self {
+            active: self.active,
+            started_at: self.started_at,
+            run: self.run.clone(),
+            // JoinHandle は clone できないため、clone 時は None にする。
+            // ObswsInputRegistry の clone は coordinator の初期化時のみで、
+            // DASH 出力がアクティブな状態で clone されることはない。
+            combined_mpd_task: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
