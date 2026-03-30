@@ -441,7 +441,7 @@ impl ObswsCoordinator {
                         return self.build_error_result(
                             &request_type,
                             &request_id,
-                            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                             &format!("state file write failed: {}", e.display()),
                         );
                     }
