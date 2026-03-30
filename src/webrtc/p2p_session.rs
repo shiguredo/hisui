@@ -1496,6 +1496,20 @@ async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
     let Some(entry) = sess.bootstrap_tracks.remove(input_uuid) else {
         return;
     };
+
+    // webrtc_source が削除された場合、attach 済みの remote track を detach する
+    if entry.input_kind == "webrtc_source" {
+        let attached_track_id: Option<String> = sess
+            .remote_video_tracks
+            .iter()
+            .find(|(_, v)| v.attached_input_name.as_deref() == Some(entry.input_name.as_str()))
+            .map(|(k, _)| k.clone());
+        if let Some(tid) = attached_track_id {
+            detach_remote_track(sess, &tid);
+        }
+        return;
+    }
+
     if let Some(video_track_id) = &entry.video_track_id {
         unsubscribe_track(sess, video_track_id);
     }
