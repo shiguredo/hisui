@@ -37,15 +37,21 @@ use crate::stats::{
 const MAX_FRAMES_PER_POLL: usize = 8;
 const INITIAL_VIDEO_FRAME_GRACE: Duration = Duration::from_secs(2);
 
-pub async fn run_client(
-    host: &str,
-    port: u16,
-    duration_secs: u64,
-    output_path: &str,
-    input_mp4_path: &str,
-    subscribe_program_tracks: bool,
-) -> Result<Stats, String> {
-    // WebRTC ファクトリを初期化する
+/// bootstrap 初期化の結果。PeerConnectionFactory ～ bootstrap answer 設定までの共通処理を含む。
+struct BootstrapSession {
+    factory: Arc<PeerConnectionFactory>,
+    audio_state: Arc<BootstrapAudioDeviceModuleState>,
+    pc: PeerConnection,
+    pc_observer: PeerConnectionObserver,
+    dummy_dc: shiguredo_webrtc::DataChannel,
+    event_tx: mpsc::UnboundedSender<ClientEvent>,
+    event_rx: mpsc::UnboundedReceiver<ClientEvent>,
+    ice_rx: mpsc::UnboundedReceiver<IceObserverEvent>,
+    ice_candidates: Vec<crate::sdp::GatheredIceCandidate>,
+}
+
+/// WebRTC factory 初期化 → PeerConnection 作成 → offer/answer bootstrap を行う共通処理
+async fn bootstrap_session(host: &str, port: u16) -> Result<BootstrapSession, String> {
     let mut network = Thread::new_with_socket_server();
     let mut worker = Thread::new();
     let mut signaling = Thread::new();
@@ -76,8 +82,7 @@ pub async fn run_client(
             .map_err(|e| format!("failed to create PeerConnectionFactory: {e}"))?,
     );
 
-    // PeerConnection を作成する
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<ClientEvent>();
+    let (event_tx, event_rx) = mpsc::unbounded_channel::<ClientEvent>();
     let (ice_tx, mut ice_rx) = mpsc::unbounded_channel::<IceObserverEvent>();
     let pc_observer = PeerConnectionObserver::new_with_handler(Box::new(ClientPcObserver {
         event_tx: event_tx.clone(),
@@ -88,14 +93,12 @@ pub async fn run_client(
 
     let pc = PeerConnection::create(factory.as_ref(), &mut config, &mut pc_deps)
         .map_err(|e| format!("failed to create PeerConnection: {e}"))?;
-    // server 側の signaling / obsws DataChannel を初回 offer に載せるための
-    // m=application 用ダミー DataChannel
     let mut dc_init = DataChannelInit::new();
     dc_init.set_ordered(true);
     let dummy_dc = pc
         .create_data_channel("dummy", &mut dc_init)
         .map_err(|e| format!("failed to create dummy DataChannel: {e}"))?;
-    // offer SDP を生成する
+
     let offer_sdp = create_offer_sdp(&pc)?;
     log_sdp_summary("initial local offer SDP summary", &offer_sdp);
     set_local_description(&pc, SdpType::Offer, &offer_sdp)?;
@@ -103,10 +106,43 @@ pub async fn run_client(
     let offer_sdp = finalize_local_sdp(offer_sdp, &mut ice_rx, &mut initial_ice_candidates).await?;
     log_sdp_summary("initial local offer with ICE SDP summary", &offer_sdp);
 
-    // /bootstrap で answer SDP を取得する
     let answer_sdp = http_bootstrap(host, port, &offer_sdp).await?;
     log_sdp_summary("bootstrap remote answer SDP summary", &answer_sdp);
     set_remote_description(&pc, SdpType::Answer, &answer_sdp)?;
+
+    Ok(BootstrapSession {
+        factory,
+        audio_state,
+        pc,
+        pc_observer,
+        dummy_dc,
+        event_tx,
+        event_rx,
+        ice_rx,
+        ice_candidates: initial_ice_candidates,
+    })
+}
+
+pub async fn run_client(
+    host: &str,
+    port: u16,
+    duration_secs: u64,
+    output_path: &str,
+    input_mp4_path: &str,
+    subscribe_program_tracks: bool,
+) -> Result<Stats, String> {
+    let session = bootstrap_session(host, port).await?;
+    let BootstrapSession {
+        factory: _factory,
+        audio_state,
+        pc,
+        pc_observer,
+        dummy_dc,
+        event_tx: _event_tx,
+        mut event_rx,
+        ice_rx,
+        ice_candidates: initial_ice_candidates,
+    } = session;
 
     // 統計カウンタ
     let video_tracks = Arc::new(AtomicUsize::new(0));
@@ -646,64 +682,18 @@ pub async fn run_send_video_client(
     send_height: i32,
     send_fps: u32,
 ) -> Result<Stats, String> {
-    // WebRTC ファクトリを初期化する
-    let mut network = Thread::new_with_socket_server();
-    let mut worker = Thread::new();
-    let mut signaling = Thread::new();
-    network.start();
-    worker.start();
-    signaling.start();
-
-    let mut deps = PeerConnectionFactoryDependencies::new();
-    deps.set_network_thread(&network);
-    deps.set_worker_thread(&worker);
-    deps.set_signaling_thread(&signaling);
-    deps.set_event_log_factory(RtcEventLogFactory::new());
-
-    let audio_state = Arc::new(BootstrapAudioDeviceModuleState::new());
-    let adm = AudioDeviceModule::new_with_handler(Box::new(
-        BootstrapAudioDeviceModuleHandler::new(audio_state.clone()),
-    ));
-    deps.set_audio_device_module(&adm);
-    deps.set_audio_encoder_factory(&AudioEncoderFactory::builtin());
-    deps.set_audio_decoder_factory(&AudioDecoderFactory::builtin());
-    deps.set_video_encoder_factory(VideoEncoderFactory::builtin());
-    deps.set_video_decoder_factory(VideoDecoderFactory::builtin());
-    deps.set_audio_processing_builder(AudioProcessingBuilder::new_builtin());
-    deps.enable_media();
-
-    let factory = Arc::new(
-        PeerConnectionFactory::create_modular(&mut deps)
-            .map_err(|e| format!("failed to create PeerConnectionFactory: {e}"))?,
-    );
-
-    // PeerConnection を作成する
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<ClientEvent>();
-    let (ice_tx, mut ice_rx) = mpsc::unbounded_channel::<IceObserverEvent>();
-    let pc_observer = PeerConnectionObserver::new_with_handler(Box::new(ClientPcObserver {
-        event_tx: event_tx.clone(),
-        ice_tx,
-    }));
-    let mut pc_deps = PeerConnectionDependencies::new(&pc_observer);
-    let mut config = shiguredo_webrtc::PeerConnectionRtcConfiguration::new();
-
-    let pc = PeerConnection::create(factory.as_ref(), &mut config, &mut pc_deps)
-        .map_err(|e| format!("failed to create PeerConnection: {e}"))?;
-    let mut dc_init = DataChannelInit::new();
-    dc_init.set_ordered(true);
-    let dummy_dc = pc
-        .create_data_channel("dummy", &mut dc_init)
-        .map_err(|e| format!("failed to create dummy DataChannel: {e}"))?;
-
-    // 初回 offer → bootstrap → answer
-    let offer_sdp = create_offer_sdp(&pc)?;
-    log_sdp_summary("initial local offer SDP summary", &offer_sdp);
-    set_local_description(&pc, SdpType::Offer, &offer_sdp)?;
-    let mut initial_ice_candidates = Vec::new();
-    let offer_sdp = finalize_local_sdp(offer_sdp, &mut ice_rx, &mut initial_ice_candidates).await?;
-    let answer_sdp = http_bootstrap(host, port, &offer_sdp).await?;
-    log_sdp_summary("bootstrap remote answer SDP summary", &answer_sdp);
-    set_remote_description(&pc, SdpType::Answer, &answer_sdp)?;
+    let session = bootstrap_session(host, port).await?;
+    let BootstrapSession {
+        factory,
+        audio_state,
+        pc,
+        pc_observer,
+        dummy_dc,
+        event_tx: _event_tx,
+        mut event_rx,
+        ice_rx,
+        ice_candidates: initial_ice_candidates,
+    } = session;
 
     // 統計カウンタ
     let video_tracks = Arc::new(AtomicUsize::new(0));

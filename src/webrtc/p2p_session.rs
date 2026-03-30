@@ -2038,8 +2038,11 @@ fn resolve_chroma_key_config(
 
 /// フレーム転送タスク: sync channel → pipeline publish
 ///
-/// spawn_local で実行されるため、Receiver を直接保持できる。
-/// tokio::task::yield_now() でフレーム到着をポーリングする。
+/// std::sync::mpsc + 1ms sleep ポーリングを使用している理由:
+/// libwebrtc の VideoSinkHandler::on_frame() は libwebrtc 内部スレッドで呼ばれるため、
+/// tokio::sync::mpsc::Sender（非 Send な場合がある）を直接使えない。
+/// そのため std::sync::mpsc::SyncSender で libwebrtc スレッドからフレームを受け取り、
+/// spawn_local タスクで try_recv + sleep のポーリングで処理している。
 async fn webrtc_source_forward_task(
     frame_rx: std::sync::mpsc::Receiver<RawI420Frame>,
     mut message_sender: crate::MessageSender,
