@@ -57,6 +57,7 @@ enum ClientEvent {
 
 // VideoSinkHandler から送信するフレームデータ
 struct VideoFrameData {
+    track_id: String,
     y: Vec<u8>,
     u: Vec<u8>,
     v: Vec<u8>,
@@ -70,6 +71,7 @@ struct VideoFrameData {
 
 // AudioTrackSinkHandler から送信する音声データ
 struct AudioFrameData {
+    track_id: String,
     pcm: Vec<i16>,
     sample_rate: i32,
     channels: usize,
@@ -172,10 +174,9 @@ impl DataChannelObserverHandler for ObswsDcHandler {
 
 // フレームデータをチャネルで送信するハンドラ
 struct FrameRecordHandler {
+    track_id: String,
     frame_count: Arc<AtomicUsize>,
     first_frame_logged: Arc<AtomicBool>,
-    width: Arc<AtomicUsize>,
-    height: Arc<AtomicUsize>,
     frame_tx: std::sync::mpsc::SyncSender<VideoFrameData>,
 }
 
@@ -184,8 +185,6 @@ impl VideoSinkHandler for FrameRecordHandler {
         let previous = self.frame_count.fetch_add(1, Ordering::Relaxed);
         let w = frame.width();
         let h = frame.height();
-        self.width.store(w as usize, Ordering::Relaxed);
-        self.height.store(h as usize, Ordering::Relaxed);
         if previous == 0 && !self.first_frame_logged.swap(true, Ordering::Relaxed) {
             tracing::info!(
                 "first video frame received: width={w}, height={h}, timestamp_us={}",
@@ -196,6 +195,7 @@ impl VideoSinkHandler for FrameRecordHandler {
         // I420 バッファからプレーンデータをコピーする
         let buffer = frame.buffer();
         let data = VideoFrameData {
+            track_id: self.track_id.clone(),
             y: buffer.y_data().to_vec(),
             u: buffer.u_data().to_vec(),
             v: buffer.v_data().to_vec(),
@@ -213,6 +213,7 @@ impl VideoSinkHandler for FrameRecordHandler {
 
 // 受信音声データをチャネルで送信するハンドラ
 struct AudioRecordHandler {
+    track_id: String,
     audio_frame_count: Arc<AtomicUsize>,
     audio_tx: std::sync::mpsc::SyncSender<AudioFrameData>,
 }
@@ -236,6 +237,7 @@ impl AudioTrackSinkHandler for AudioRecordHandler {
             .map(|chunk| i16::from_ne_bytes([chunk[0], chunk[1]]))
             .collect();
         let _ = self.audio_tx.try_send(AudioFrameData {
+            track_id: self.track_id.clone(),
             pcm,
             sample_rate,
             channels: number_of_channels,
@@ -657,7 +659,12 @@ fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     ))
 }
 
-fn parse_subscribe_program_tracks_response(text: &str) -> Option<Result<(), String>> {
+struct ProgramTrackIds {
+    video_track_id: String,
+    audio_track_id: String,
+}
+
+fn parse_subscribe_program_tracks_response(text: &str) -> Option<Result<ProgramTrackIds, String>> {
     let json = nojson::RawJson::parse(text).ok()?;
     let root = json.value();
     let op: i64 = root
@@ -683,7 +690,19 @@ fn parse_subscribe_program_tracks_response(text: &str) -> Option<Result<(), Stri
         .and_then(|v| v.required()?.try_into())
         .ok()?;
     if result {
-        return Some(Ok(()));
+        let response_data = d.to_member("responseData").ok()?.required().ok()?;
+        let video_track_id: String = response_data
+            .to_member("videoTrackId")
+            .and_then(|v| v.required()?.try_into())
+            .ok()?;
+        let audio_track_id: String = response_data
+            .to_member("audioTrackId")
+            .and_then(|v| v.required()?.try_into())
+            .ok()?;
+        return Some(Ok(ProgramTrackIds {
+            video_track_id,
+            audio_track_id,
+        }));
     }
 
     let comment: Option<String> =
@@ -1275,8 +1294,6 @@ struct RetainedAudioSink {
 struct VideoSinkAttachState<'a> {
     video_frames: &'a Arc<AtomicUsize>,
     first_video_frame_logged: &'a Arc<AtomicBool>,
-    video_width: &'a Arc<AtomicUsize>,
-    video_height: &'a Arc<AtomicUsize>,
     frame_tx: &'a std::sync::mpsc::SyncSender<VideoFrameData>,
 }
 
@@ -1295,10 +1312,9 @@ fn attach_video_sink(
     }
     let mut video_track = video_track;
     let sink = VideoSink::new_with_handler(Box::new(FrameRecordHandler {
+        track_id: track_id.to_owned(),
         frame_count: state.video_frames.clone(),
         first_frame_logged: state.first_video_frame_logged.clone(),
-        width: state.video_width.clone(),
-        height: state.video_height.clone(),
         frame_tx: state.frame_tx.clone(),
     }));
     let wants = VideoSinkWants::default();
@@ -1326,6 +1342,7 @@ fn attach_audio_sink(
     }
     let mut audio_track = audio_track;
     let sink = AudioTrackSink::new_with_handler(Box::new(AudioRecordHandler {
+        track_id: track_id.to_owned(),
         audio_frame_count: audio_frames.clone(),
         audio_tx: audio_tx.clone(),
     }));
@@ -1335,6 +1352,30 @@ fn attach_audio_sink(
         track: audio_track,
         sink,
     });
+}
+
+fn should_write_video_frame(
+    subscribe_program_tracks: bool,
+    track_id: &str,
+    program_video_track_id: Option<&str>,
+) -> bool {
+    if subscribe_program_tracks {
+        program_video_track_id == Some(track_id)
+    } else {
+        true
+    }
+}
+
+fn should_write_audio_frame(
+    subscribe_program_tracks: bool,
+    track_id: &str,
+    program_audio_track_id: Option<&str>,
+) -> bool {
+    if subscribe_program_tracks {
+        program_audio_track_id == Some(track_id)
+    } else {
+        true
+    }
 }
 
 async fn teardown_client(
@@ -1575,10 +1616,12 @@ async fn run_client(
     let audio_tracks = Arc::new(AtomicUsize::new(0));
     let video_frames = Arc::new(AtomicUsize::new(0));
     let audio_frames = Arc::new(AtomicUsize::new(0));
-    let video_width = Arc::new(AtomicUsize::new(0));
-    let video_height = Arc::new(AtomicUsize::new(0));
     let first_video_frame_logged = Arc::new(AtomicBool::new(false));
     let connection_state = Arc::new(std::sync::Mutex::new("new".to_owned()));
+    let mut output_video_width = 0;
+    let mut output_video_height = 0;
+    let mut program_video_track_id: Option<String> = None;
+    let mut program_audio_track_id: Option<String> = None;
 
     // フレームデータ受信用チャネル
     let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<VideoFrameData>(60);
@@ -1600,15 +1643,12 @@ async fn run_client(
     let video_sink_attach_state = VideoSinkAttachState {
         video_frames: &video_frames,
         first_video_frame_logged: &first_video_frame_logged,
-        video_width: &video_width,
-        video_height: &video_height,
         frame_tx: &frame_tx,
     };
 
     // VP9 エンコーダー（遅延初期化）
     let mut vp9_encoder: Option<shiguredo_libvpx::Encoder> = None;
     let mut vp9_sample_entry: Option<SampleEntry> = None;
-    let mut vp9_encoder_size: Option<(usize, usize)> = None;
 
     // Opus エンコーダー（遅延初期化）
     let mut opus_encoder: Option<shiguredo_opus::Encoder> = None;
@@ -1643,12 +1683,20 @@ async fn run_client(
             let Ok(frame_data) = frame_rx.try_recv() else {
                 break;
             };
+            if !should_write_video_frame(
+                subscribe_program_tracks,
+                &frame_data.track_id,
+                program_video_track_id.as_deref(),
+            ) {
+                continue;
+            }
             encode_and_write_frame(
                 &frame_data,
                 &mut vp9_encoder,
                 &mut vp9_sample_entry,
-                &mut vp9_encoder_size,
                 &mut mp4_writer,
+                &mut output_video_width,
+                &mut output_video_height,
             )?;
             processed_frames += 1;
         }
@@ -1662,6 +1710,13 @@ async fn run_client(
             let Ok(audio_data) = audio_rx.try_recv() else {
                 break;
             };
+            if !should_write_audio_frame(
+                subscribe_program_tracks,
+                &audio_data.track_id,
+                program_audio_track_id.as_deref(),
+            ) {
+                continue;
+            }
             audio_channels = audio_data.channels as u8;
             encode_and_write_audio_frame(
                 &audio_data,
@@ -1847,8 +1902,10 @@ async fn run_client(
                     }
                     if let Some(result) = parse_subscribe_program_tracks_response(text) {
                         match result {
-                            Ok(()) => {
+                            Ok(track_ids) => {
                                 obsws_subscribe_program_succeeded = true;
+                                program_video_track_id = Some(track_ids.video_track_id);
+                                program_audio_track_id = Some(track_ids.audio_track_id);
                                 tracing::info!("SubscribeProgramTracks succeeded");
                             }
                             Err(reason) => {
@@ -1878,12 +1935,20 @@ async fn run_client(
         let grace_deadline = tokio::time::Instant::now() + INITIAL_VIDEO_FRAME_GRACE;
         while tokio::time::Instant::now() < grace_deadline {
             while let Ok(frame_data) = frame_rx.try_recv() {
+                if !should_write_video_frame(
+                    subscribe_program_tracks,
+                    &frame_data.track_id,
+                    program_video_track_id.as_deref(),
+                ) {
+                    continue;
+                }
                 encode_and_write_frame(
                     &frame_data,
                     &mut vp9_encoder,
                     &mut vp9_sample_entry,
-                    &mut vp9_encoder_size,
                     &mut mp4_writer,
+                    &mut output_video_width,
+                    &mut output_video_height,
                 )?;
             }
             if video_frames.load(Ordering::Relaxed) > 0 {
@@ -1937,12 +2002,20 @@ async fn run_client(
     // 残りのフレームを処理する
     let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while let Ok(frame_data) = frame_rx.try_recv() {
+        if !should_write_video_frame(
+            subscribe_program_tracks,
+            &frame_data.track_id,
+            program_video_track_id.as_deref(),
+        ) {
+            continue;
+        }
         encode_and_write_frame(
             &frame_data,
             &mut vp9_encoder,
             &mut vp9_sample_entry,
-            &mut vp9_encoder_size,
             &mut mp4_writer,
+            &mut output_video_width,
+            &mut output_video_height,
         )?;
         if tokio::time::Instant::now() >= drain_deadline {
             break;
@@ -1950,6 +2023,13 @@ async fn run_client(
     }
     // 残りの音声フレームを処理する
     while let Ok(audio_data) = audio_rx.try_recv() {
+        if !should_write_audio_frame(
+            subscribe_program_tracks,
+            &audio_data.track_id,
+            program_audio_track_id.as_deref(),
+        ) {
+            continue;
+        }
         audio_channels = audio_data.channels as u8;
         encode_and_write_audio_frame(
             &audio_data,
@@ -2028,8 +2108,8 @@ async fn run_client(
         video_frames.load(Ordering::Relaxed),
         audio_tracks.load(Ordering::Relaxed),
         audio_frames.load(Ordering::Relaxed),
-        video_width.load(Ordering::Relaxed),
-        video_height.load(Ordering::Relaxed),
+        output_video_width,
+        output_video_height,
         mp4_writer.video_sample_count,
         mp4_writer.audio_sample_count,
         final_connection_state,
@@ -2041,8 +2121,8 @@ async fn run_client(
         audio_tracks: audio_tracks.load(Ordering::Relaxed),
         video_frames: video_frames.load(Ordering::Relaxed),
         audio_frames: audio_frames.load(Ordering::Relaxed),
-        video_width: video_width.load(Ordering::Relaxed),
-        video_height: video_height.load(Ordering::Relaxed),
+        video_width: output_video_width,
+        video_height: output_video_height,
         video_codec,
         audio_codec,
         video_samples_written: mp4_writer.video_sample_count,
@@ -2058,8 +2138,9 @@ fn encode_and_write_frame(
     frame_data: &VideoFrameData,
     vp9_encoder: &mut Option<shiguredo_libvpx::Encoder>,
     vp9_sample_entry: &mut Option<SampleEntry>,
-    vp9_encoder_size: &mut Option<(usize, usize)>,
     mp4_writer: &mut SimpleMp4Writer,
+    output_video_width: &mut usize,
+    output_video_height: &mut usize,
 ) -> Result<(), String> {
     let width = frame_data.width as usize;
     let height = frame_data.height as usize;
@@ -2076,22 +2157,9 @@ fn encode_and_write_frame(
             .map_err(|e| format!("failed to create VP9 encoder: {e}"))?;
         *vp9_encoder = Some(encoder);
         *vp9_sample_entry = Some(vp9_sample_entry_value(width, height));
-        *vp9_encoder_size = Some((width, height));
     }
 
     let encoder = vp9_encoder.as_mut().unwrap();
-    if let Some((expected_width, expected_height)) = vp9_encoder_size {
-        if *expected_width != width || *expected_height != height {
-            tracing::info!(
-                "skip frame with different video size: expected={}x{}, got={}x{}",
-                expected_width,
-                expected_height,
-                width,
-                height
-            );
-            return Ok(());
-        }
-    }
     let compact_y = compact_i420_plane(&frame_data.y, width, height, frame_data.stride_y)?;
     let uv_width = width.div_ceil(2);
     let uv_height = height.div_ceil(2);
@@ -2111,6 +2179,8 @@ fn encode_and_write_frame(
             &encode_options,
         )
         .map_err(|e| format!("VP9 encode failed: {e}"))?;
+    *output_video_width = width;
+    *output_video_height = height;
 
     while let Some(frame) = encoder.next_frame() {
         let se = vp9_sample_entry.take();
