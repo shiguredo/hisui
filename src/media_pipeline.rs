@@ -1,6 +1,8 @@
 type LocalProcessorTask = Box<dyn FnOnce() + Send + 'static>;
 type PendingRpcSenderWaiter =
     tokio::sync::oneshot::Sender<Result<ErasedRpcSender, GetProcessorRpcSenderError>>;
+type SubscriberTx = tokio::sync::mpsc::UnboundedSender<Message>;
+type SharedSubscribers = std::sync::Arc<std::sync::Mutex<Vec<SubscriberTx>>>;
 
 pub const PROCESSOR_TYPE_VIDEO_ENCODER: &str = "video_encoder";
 
@@ -260,12 +262,11 @@ impl MediaPipeline {
 
     fn flush_pending_subscribers(&mut self) {
         for track in self.tracks.values_mut() {
-            let Some(publisher_tx) = track.publisher_command_tx.as_ref() else {
-                continue;
-            };
-            for subscriber_tx in track.pending_subscribers.drain(..) {
-                let _ = publisher_tx.send(TrackCommand::AddSubscriber(subscriber_tx));
-            }
+            track
+                .subscribers
+                .lock()
+                .expect("track subscribers mutex poisoned")
+                .extend(track.pending_subscribers.drain(..));
         }
     }
 
@@ -299,15 +300,15 @@ impl MediaPipeline {
         });
 
         if self.initial_ready_open {
-            if let Some(publisher_tx) = &track.publisher_command_tx {
-                let _ = publisher_tx.send(TrackCommand::AddSubscriber(tx));
-            } else {
-                // publisher がまだ登録されていない場合は、subscriber を待機キューに追加
-                tracing::debug!("publisher not yet registered for track: {track_id}");
-                track.pending_subscribers.push(tx);
-
-                // TODO: publisher の再登録に対応する
-            }
+            // [NOTE]
+            // subscriber は publisher ではなく track に紐づけて保持する。
+            // unpublish は EOS ではなく「一時的に publisher が不在」な状態なので、
+            // 既存 subscriber は閉じずに同じ track_id の再 publish を待ち続ける。
+            track
+                .subscribers
+                .lock()
+                .expect("track subscribers mutex poisoned")
+                .push(tx);
         } else {
             // 初期化が完了するまでは接続せず、subscriber を待機キューに追加
             tracing::debug!("initial barrier not open yet for track: {track_id}");
@@ -333,15 +334,13 @@ impl MediaPipeline {
             TrackState::default()
         });
 
-        if track.publisher_command_tx.is_some() {
+        if track.publisher_processor_id.is_some() {
             tracing::warn!(
                 "publisher conflict for track: processor={processor_id}, track={track_id}"
             );
             return Err(PublishTrackError::DuplicateTrackId);
         }
 
-        let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
-        track.publisher_command_tx = Some(command_tx.clone());
         track.publisher_processor_id = Some(processor_id.clone());
         // [NOTE]
         // ここも subscribed_track_ids と同様に、順序保持と実装単純性を優先して Vec を使う。
@@ -351,16 +350,8 @@ impl MediaPipeline {
             state.published_track_ids.push(track_id.clone());
         }
 
-        // 初期バリア開放後のみ、待機中の subscriber に通知
-        if self.initial_ready_open {
-            for subscriber_tx in track.pending_subscribers.drain(..) {
-                let _ = command_tx.send(TrackCommand::AddSubscriber(subscriber_tx));
-            }
-        }
-
         Ok(MessageSender {
-            rx: command_rx,
-            txs: Vec::new(),
+            subscribers: track.subscribers.clone(),
         })
     }
 
@@ -370,11 +361,13 @@ impl MediaPipeline {
         let Some(track) = self.tracks.get_mut(&track_id) else {
             return;
         };
-        // publisher が一致する場合のみクリアする
+        // [NOTE]
+        // unpublish は track の終端ではない。
+        // publisher 登録だけを外し、subscriber は同じ track_id の再 publish を待てる状態に保つ。
+        // publisher が一致する場合のみクリアする。
         if track.publisher_processor_id.as_ref() != Some(&processor_id) {
             return;
         }
-        track.publisher_command_tx = None;
         track.publisher_processor_id = None;
 
         if let Some(state) = self.processors.get_mut(&processor_id) {
@@ -413,7 +406,6 @@ impl MediaPipeline {
                     && track.publisher_processor_id.as_ref() == Some(&processor_id)
                 {
                     track.publisher_processor_id = None;
-                    track.publisher_command_tx = None;
                 }
             }
             for waiter in state.pending_rpc_sender_waiters.drain(..) {
@@ -910,9 +902,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for TrackId {
 
 #[derive(Debug, Default)]
 struct TrackState {
-    publisher_command_tx: Option<tokio::sync::mpsc::UnboundedSender<TrackCommand>>,
     publisher_processor_id: Option<ProcessorId>,
-    pending_subscribers: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
+    subscribers: SharedSubscribers,
+    pending_subscribers: Vec<SubscriberTx>,
 }
 
 #[derive(Clone)]
@@ -1114,33 +1106,32 @@ pub enum Message {
 }
 
 #[derive(Debug)]
-enum TrackCommand {
-    AddSubscriber(tokio::sync::mpsc::UnboundedSender<Message>),
-}
-
-#[derive(Debug)]
 pub struct MessageSender {
-    rx: tokio::sync::mpsc::UnboundedReceiver<TrackCommand>,
-    txs: Vec<tokio::sync::mpsc::UnboundedSender<Message>>,
+    subscribers: SharedSubscribers,
 }
 
 impl MessageSender {
-    // MediaPipeline が途中終了した場合は false が返される
+    // [NOTE]
+    // send() は現在ぶら下がっている subscriber にだけ転送する。
+    // unpublish 中も subscriber 一覧自体は維持されるため、
+    // MessageSender の drop は track の購読終了を意味しない。
+    //
+    // MediaPipeline が途中終了した場合は false が返される。
     pub fn send(&mut self, message: Message) -> bool {
-        if !self.drain_track_commands() {
-            return false;
-        }
-
-        self.txs.retain_mut(|tx| tx.send(message.clone()).is_ok());
+        self.subscribers
+            .lock()
+            .expect("track subscribers mutex poisoned")
+            .retain_mut(|tx| tx.send(message.clone()).is_ok());
         true
     }
 
     pub fn has_subscribers(&mut self) -> bool {
-        if !self.drain_track_commands() {
-            return false;
-        }
-        self.txs.retain(|tx| !tx.is_closed());
-        !self.txs.is_empty()
+        let mut subscribers = self
+            .subscribers
+            .lock()
+            .expect("track subscribers mutex poisoned");
+        subscribers.retain(|tx| !tx.is_closed());
+        !subscribers.is_empty()
     }
 
     pub fn send_media(&mut self, sample: crate::MediaFrame) -> bool {
@@ -1163,23 +1154,6 @@ impl MessageSender {
         let (tx, rx) = tokio::sync::mpsc::channel(1); // NOTE: 0 だとエラーになる
         let _ = self.send(Message::Syn(Syn(tx))); // NOTE: ここでは false を特別扱いする必要はないので無視する
         Ack(rx)
-    }
-
-    fn drain_track_commands(&mut self) -> bool {
-        loop {
-            match self.rx.try_recv() {
-                Ok(TrackCommand::AddSubscriber(tx)) => {
-                    self.txs.push(tx);
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                    return true;
-                }
-                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                    self.txs.clear();
-                    return false;
-                }
-            }
-        }
     }
 }
 
@@ -1485,6 +1459,83 @@ mod tests {
             .await
             .expect("receiver did not get eos");
         assert!(matches!(message, Message::Eos));
+
+        drop(rx);
+        drop(receiver);
+        drop(sender);
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn unpublish_keeps_subscriber_alive_until_republish() {
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let sender = handle
+            .register_processor(
+                ProcessorId::new("reconnect_sender"),
+                metadata("test_sender"),
+            )
+            .await
+            .expect("failed to register sender");
+        let receiver = handle
+            .register_processor(
+                ProcessorId::new("reconnect_receiver"),
+                metadata("test_receiver"),
+            )
+            .await
+            .expect("failed to register receiver");
+        let track_id = TrackId::new("republish-track");
+        let first_tx = sender
+            .publish_track(track_id.clone())
+            .await
+            .expect("failed to publish initial track");
+        let mut rx = receiver.subscribe_track(track_id.clone());
+
+        sender.notify_ready();
+        receiver.notify_ready();
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
+        sender
+            .wait_subscribers_ready()
+            .await
+            .expect("wait_subscribers_ready must succeed");
+
+        sender.unpublish_track(track_id.clone());
+        drop(first_tx);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), rx.recv())
+                .await
+                .is_err(),
+            "subscriber must stay pending after unpublish"
+        );
+
+        let mut second_tx = sender
+            .publish_track(track_id)
+            .await
+            .expect("failed to republish track");
+        let ack = second_tx.send_syn();
+        tokio::pin!(ack);
+
+        let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("receiver did not get message after republish");
+        assert!(matches!(message, Message::Syn(_)));
+
+        drop(message);
+        tokio::time::timeout(Duration::from_secs(2), &mut ack)
+            .await
+            .expect("ack did not complete after republish");
 
         drop(rx);
         drop(receiver);
