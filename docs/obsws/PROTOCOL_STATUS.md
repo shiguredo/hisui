@@ -115,8 +115,10 @@
 - [x] `GetStreamServiceSettings`: 配信サービス設定を取得する
 - [x] `SetStreamServiceSettings`: 配信サービス設定を更新する
   - NOTE: 現時点は `streamServiceType = "rtmp_custom"` 前提で `server` / `key` を保持する
+  - NOTE: `--state-file` 指定時は成功時に state file へ永続化する
 - [x] `GetRecordDirectory`: 録画ディレクトリを取得する
 - [x] `SetRecordDirectory`: 録画ディレクトリを設定する
+  - NOTE: `--state-file` 指定時は成功時に state file へ永続化する
 
 ### Sources
 
@@ -287,6 +289,7 @@
 - [x] `SetOutputSettings`: 出力設定を更新する
   - NOTE: `outputName` は `stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash` を受理する
   - NOTE: `stream` は `streamServiceType` / `streamServiceSettings`、`record` は `recordDirectory` のみ更新する
+  - NOTE: `--state-file` 指定時は成功時に state file へ永続化する
 
 ### Stream
 
