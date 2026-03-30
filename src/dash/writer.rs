@@ -234,6 +234,20 @@ const INIT_SEGMENT_FILENAME: &str = "init.mp4";
 const FMP4_TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
 
 /// DASH セグメントライター。
+/// MPD に記載する codec string の解決状態。
+///
+/// SampleEntry の到着順に `Pending` → `VideoOnly` / `AudioOnly` → `Resolved` と遷移する。
+enum CodecResolutionState {
+    /// video / audio どちらの SampleEntry もまだ受信していない
+    Pending,
+    /// video の codec string のみ確定済み
+    VideoOnly(String),
+    /// audio の codec string のみ確定済み
+    AudioOnly(String),
+    /// video / audio 両方確定済み
+    Resolved(crate::codec_string::CodecString),
+}
+
 /// エンコード済みの H.264 + AAC フレームを fMP4 セグメントに分割し、
 /// MPD マニフェストを管理する。
 struct DashWriter {
@@ -261,15 +275,11 @@ struct DashWriter {
     availability_start_time: String,
     /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
     skip_mpd: bool,
-    /// MPD の AdaptationSet に設定するコーデック文字列。
+    /// MPD の AdaptationSet に設定するコーデック文字列の解決状態。
     ///
-    /// SampleEntry を受信した時点でエンコーダーの実際の出力から確定する。
-    /// video / audio 両方の SampleEntry が揃うまでは None で、MPD は書き出さない。
-    codecs: Option<crate::codec_string::CodecString>,
-    /// ビデオの codec string（SampleEntry から解決済みの場合のみ Some）
-    resolved_video_codec: Option<String>,
-    /// オーディオの codec string（SampleEntry から解決済みの場合のみ Some）
-    resolved_audio_codec: Option<String>,
+    /// SampleEntry を受信するたびに状態が遷移し、video / audio 両方が揃った時点で
+    /// Resolved に到達する。Resolved になるまで MPD は書き出さない。
+    codec_resolution: CodecResolutionState,
     /// ABR 結合 MPD 用の codec string 通知 channel。
     /// 送信は 1 回のみ。送信後および non-ABR 時は None。
     codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
@@ -359,9 +369,7 @@ impl DashWriter {
             current_segment_info: None,
             availability_start_time: format_utc_now(),
             skip_mpd,
-            codecs: None,
-            resolved_video_codec: None,
-            resolved_audio_codec: None,
+            codec_resolution: CodecResolutionState::Pending,
             codec_string_sender,
             stats,
         })
@@ -488,12 +496,13 @@ impl DashWriter {
             self.last_video_sample_entry.clone_from(&frame.sample_entry);
 
             // SampleEntry から正確な codec string を確定する
-            if self.resolved_video_codec.is_none()
-                && let Some(codec_str) =
-                    crate::codec_string::video_codec_string_from_sample_entry(entry)
+            if !matches!(
+                self.codec_resolution,
+                CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
+            ) && let Some(codec_str) =
+                crate::codec_string::video_codec_string_from_sample_entry(entry)
             {
-                self.resolved_video_codec = Some(codec_str);
-                self.try_finalize_codecs();
+                self.resolve_video_codec(codec_str);
             }
         }
         // 前のビデオサンプルの duration を確定させる
@@ -554,12 +563,13 @@ impl DashWriter {
             self.last_audio_sample_entry.clone_from(&frame.sample_entry);
 
             // SampleEntry から正確な codec string を確定する
-            if self.resolved_audio_codec.is_none()
-                && let Some(codec_str) =
-                    crate::codec_string::audio_codec_string_from_sample_entry(entry)
+            if !matches!(
+                self.codec_resolution,
+                CodecResolutionState::AudioOnly(_) | CodecResolutionState::Resolved(_)
+            ) && let Some(codec_str) =
+                crate::codec_string::audio_codec_string_from_sample_entry(entry)
             {
-                self.resolved_audio_codec = Some(codec_str);
-                self.try_finalize_codecs();
+                self.resolve_audio_codec(codec_str);
             }
         }
 
@@ -728,24 +738,47 @@ impl DashWriter {
         Ok(())
     }
 
-    /// video / audio 両方の codec string が確定した時点で CodecString を組み立てる。
-    /// ABR の場合は codec_string_sender を通じて coordinator に通知する。
-    fn try_finalize_codecs(&mut self) {
-        if self.codecs.is_some() {
-            return;
-        }
-        if let (Some(video), Some(audio)) = (&self.resolved_video_codec, &self.resolved_audio_codec)
-        {
-            let codec_string = crate::codec_string::CodecString {
-                video: video.clone(),
-                audio: audio.clone(),
+    /// ビデオの codec string が確定した際に状態を遷移させる。
+    fn resolve_video_codec(&mut self, video: String) {
+        self.codec_resolution =
+            match std::mem::replace(&mut self.codec_resolution, CodecResolutionState::Pending) {
+                CodecResolutionState::Pending => CodecResolutionState::VideoOnly(video),
+                CodecResolutionState::AudioOnly(audio) => {
+                    self.notify_codec_resolved(&video, &audio);
+                    CodecResolutionState::Resolved(crate::codec_string::CodecString {
+                        video,
+                        audio,
+                    })
+                }
+                // video が既に確定済みなら何もしない
+                other => other,
             };
-            // ABR の結合 MPD 用に coordinator へ通知する
-            if let Some(sender) = self.codec_string_sender.take() {
-                // 受信側が既に drop していてもエラーにはしない
-                let _ = sender.send(codec_string.clone());
-            }
-            self.codecs = Some(codec_string);
+    }
+
+    /// オーディオの codec string が確定した際に状態を遷移させる。
+    fn resolve_audio_codec(&mut self, audio: String) {
+        self.codec_resolution =
+            match std::mem::replace(&mut self.codec_resolution, CodecResolutionState::Pending) {
+                CodecResolutionState::Pending => CodecResolutionState::AudioOnly(audio),
+                CodecResolutionState::VideoOnly(video) => {
+                    self.notify_codec_resolved(&video, &audio);
+                    CodecResolutionState::Resolved(crate::codec_string::CodecString {
+                        video,
+                        audio,
+                    })
+                }
+                // audio が既に確定済みなら何もしない
+                other => other,
+            };
+    }
+
+    /// codec string が確定した際に ABR 結合 MPD 用の通知を送る。
+    fn notify_codec_resolved(&mut self, video: &str, audio: &str) {
+        if let Some(sender) = self.codec_string_sender.take() {
+            let _ = sender.send(crate::codec_string::CodecString {
+                video: video.to_owned(),
+                audio: audio.to_owned(),
+            });
         }
     }
 
@@ -755,7 +788,7 @@ impl DashWriter {
             return Ok(());
         }
         // codec string が SampleEntry から確定するまで MPD は書き出さない
-        let Some(codecs) = &self.codecs else {
+        let CodecResolutionState::Resolved(codecs) = &self.codec_resolution else {
             return Ok(());
         };
 
