@@ -1764,9 +1764,9 @@ struct RawI420Frame {
     timestamp_us: i64,
 }
 
-/// VideoSinkHandler: libwebrtc スレッドからフレームを sync channel に送る
+/// VideoSinkHandler: libwebrtc スレッドからフレームを非同期 channel に送る
 struct WebRtcSourceSinkHandler {
-    frame_tx: std::sync::mpsc::SyncSender<RawI420Frame>,
+    frame_tx: tokio::sync::mpsc::Sender<RawI420Frame>,
 }
 
 impl shiguredo_webrtc::VideoSinkHandler for WebRtcSourceSinkHandler {
@@ -1970,8 +1970,9 @@ async fn handle_attach_webrtc_video_track(
     // chroma key 設定を watch channel で共有し、SetInputSettings で動的に更新可能にする
     let (chroma_key_tx, chroma_key_rx) = tokio::sync::watch::channel(chroma_key);
 
-    // sync channel + 転送タスクを構築
-    let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<RawI420Frame>(2);
+    // 非同期 channel + 転送タスクを構築する。
+    // libwebrtc callback 側では try_send のみを行い、満杯時はフレームをドロップする。
+    let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<RawI420Frame>(2);
 
     let sink_handler = WebRtcSourceSinkHandler { frame_tx };
     let sink = shiguredo_webrtc::VideoSink::new_with_handler(Box::new(sink_handler));
@@ -2036,29 +2037,16 @@ fn resolve_chroma_key_config(
     })
 }
 
-/// フレーム転送タスク: sync channel → pipeline publish
+/// フレーム転送タスク: async channel → pipeline publish
 ///
-/// std::sync::mpsc + 1ms sleep ポーリングを使用している理由:
-/// libwebrtc の VideoSinkHandler::on_frame() は libwebrtc 内部スレッドで呼ばれるため、
-/// tokio::sync::mpsc::Sender（非 Send な場合がある）を直接使えない。
-/// そのため std::sync::mpsc::SyncSender で libwebrtc スレッドからフレームを受け取り、
-/// spawn_local タスクで try_recv + sleep のポーリングで処理している。
+/// libwebrtc の callback 側では非同期処理を行わず、try_send で最小限の転送だけを行う。
+/// backpressure が掛かった場合は callback スレッドを block せず、フレームをドロップする。
 async fn webrtc_source_forward_task(
-    frame_rx: std::sync::mpsc::Receiver<RawI420Frame>,
+    mut frame_rx: tokio::sync::mpsc::Receiver<RawI420Frame>,
     mut message_sender: crate::MessageSender,
     chroma_key_rx: tokio::sync::watch::Receiver<Option<ChromaKeyConfig>>,
 ) {
-    loop {
-        // ノンブロッキングで受信を試み、空なら短い sleep で待機する
-        let frame = match frame_rx.try_recv() {
-            Ok(frame) => frame,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-                continue;
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-        };
-
+    while let Some(frame) = frame_rx.recv().await {
         let width = frame.width;
         let height = frame.height;
 
