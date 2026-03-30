@@ -216,6 +216,65 @@ fn build_hevc_codec_string(prefix: &str, hvcc: &shiguredo_mp4::boxes::HvccBox) -
     format!("{prefix}.{profile_space}{profile_idc}.{compat_hex}.{tier}{level}.{constraint_hex}")
 }
 
+/// マニフェストに記載する codec string の解決状態。
+///
+/// SampleEntry の到着順に `Pending` → `VideoOnly` / `AudioOnly` → `Resolved` と遷移する。
+/// DASH の MPD と HLS のマスタープレイリストの両方で共用する。
+pub enum CodecResolutionState {
+    /// video / audio どちらの SampleEntry もまだ受信していない
+    Pending,
+    /// video の codec string のみ確定済み
+    VideoOnly(String),
+    /// audio の codec string のみ確定済み
+    AudioOnly(String),
+    /// video / audio 両方確定済み
+    Resolved(CodecString),
+}
+
+impl CodecResolutionState {
+    /// ビデオの codec string が確定した際に状態を遷移させる。
+    /// Resolved に到達した場合は確定した CodecString を返す。
+    pub fn resolve_video(&mut self, video: String) -> Option<CodecString> {
+        let prev = std::mem::replace(self, Self::Pending);
+        match prev {
+            Self::Pending => {
+                *self = Self::VideoOnly(video);
+                None
+            }
+            Self::AudioOnly(audio) => {
+                let cs = CodecString { video, audio };
+                *self = Self::Resolved(cs.clone());
+                Some(cs)
+            }
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// オーディオの codec string が確定した際に状態を遷移させる。
+    /// Resolved に到達した場合は確定した CodecString を返す。
+    pub fn resolve_audio(&mut self, audio: String) -> Option<CodecString> {
+        let prev = std::mem::replace(self, Self::Pending);
+        match prev {
+            Self::Pending => {
+                *self = Self::AudioOnly(audio);
+                None
+            }
+            Self::VideoOnly(video) => {
+                let cs = CodecString { video, audio };
+                *self = Self::Resolved(cs.clone());
+                Some(cs)
+            }
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

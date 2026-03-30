@@ -4,6 +4,8 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::codec_string::CodecResolutionState;
+
 /// ファイル拡張子から content-type を返す
 fn content_type_for_filename(filename: &str) -> &'static str {
     if filename.ends_with(".mpd") {
@@ -232,65 +234,6 @@ const INIT_SEGMENT_FILENAME: &str = "init.mp4";
 /// NonZeroU32 リテラルが const で直接構築できないため、
 /// NonZeroU32::MIN (= 1) に 999,999 を加算して 1,000,000 を得ている。
 const FMP4_TIMESCALE: NonZeroU32 = NonZeroU32::MIN.saturating_add(1_000_000 - 1);
-
-/// マニフェストに記載する codec string の解決状態。
-///
-/// SampleEntry の到着順に `Pending` → `VideoOnly` / `AudioOnly` → `Resolved` と遷移する。
-/// DASH / HLS の両方で共用する。
-pub enum CodecResolutionState {
-    /// video / audio どちらの SampleEntry もまだ受信していない
-    Pending,
-    /// video の codec string のみ確定済み
-    VideoOnly(String),
-    /// audio の codec string のみ確定済み
-    AudioOnly(String),
-    /// video / audio 両方確定済み
-    Resolved(crate::codec_string::CodecString),
-}
-
-impl CodecResolutionState {
-    /// ビデオの codec string が確定した際に状態を遷移させる。
-    /// Resolved に到達した場合は確定した CodecString を返す。
-    pub fn resolve_video(&mut self, video: String) -> Option<crate::codec_string::CodecString> {
-        let prev = std::mem::replace(self, Self::Pending);
-        match prev {
-            Self::Pending => {
-                *self = Self::VideoOnly(video);
-                None
-            }
-            Self::AudioOnly(audio) => {
-                let cs = crate::codec_string::CodecString { video, audio };
-                *self = Self::Resolved(cs.clone());
-                Some(cs)
-            }
-            other => {
-                *self = other;
-                None
-            }
-        }
-    }
-
-    /// オーディオの codec string が確定した際に状態を遷移させる。
-    /// Resolved に到達した場合は確定した CodecString を返す。
-    pub fn resolve_audio(&mut self, audio: String) -> Option<crate::codec_string::CodecString> {
-        let prev = std::mem::replace(self, Self::Pending);
-        match prev {
-            Self::Pending => {
-                *self = Self::AudioOnly(audio);
-                None
-            }
-            Self::VideoOnly(video) => {
-                let cs = crate::codec_string::CodecString { video, audio };
-                *self = Self::Resolved(cs.clone());
-                Some(cs)
-            }
-            other => {
-                *self = other;
-                None
-            }
-        }
-    }
-}
 
 /// エンコード済みの H.264 + AAC フレームを fMP4 セグメントに分割し、
 /// MPD マニフェストを管理する。

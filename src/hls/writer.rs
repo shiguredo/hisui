@@ -4,6 +4,8 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::codec_string::CodecResolutionState;
+
 use crate::obsws::input_registry::HlsSegmentFormat;
 
 /// ファイル拡張子から content-type を返す
@@ -288,8 +290,8 @@ struct HlsWriter {
     format_state: FormatState,
     /// 現在のセグメントの共通情報
     current_segment_info: Option<CurrentSegmentInfo>,
-    /// MPD に記載する codec string の解決状態（DASH の DashWriter と同じ仕組み）
-    codec_resolution: crate::dash::writer::CodecResolutionState,
+    /// マニフェストに記載する codec string の解決状態
+    codec_resolution: CodecResolutionState,
     /// ABR マスタープレイリスト用の codec string 通知 channel。
     /// 送信は 1 回のみ。送信後および non-ABR 時は None。
     codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
@@ -390,7 +392,7 @@ impl HlsWriter {
             retained_segments: VecDeque::new(),
             format_state,
             current_segment_info: None,
-            codec_resolution: crate::dash::writer::CodecResolutionState::Pending,
+            codec_resolution: CodecResolutionState::Pending,
             codec_string_sender,
             stats,
         })
@@ -547,8 +549,7 @@ impl HlsWriter {
         if let Some(ref entry) = frame.sample_entry
             && !matches!(
                 self.codec_resolution,
-                crate::dash::writer::CodecResolutionState::VideoOnly(_)
-                    | crate::dash::writer::CodecResolutionState::Resolved(_)
+                CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
             )
             && let Some(codec_str) =
                 crate::codec_string::video_codec_string_from_sample_entry(entry)
@@ -637,8 +638,7 @@ impl HlsWriter {
         if let Some(ref entry) = frame.sample_entry
             && !matches!(
                 self.codec_resolution,
-                crate::dash::writer::CodecResolutionState::AudioOnly(_)
-                    | crate::dash::writer::CodecResolutionState::Resolved(_)
+                CodecResolutionState::AudioOnly(_) | CodecResolutionState::Resolved(_)
             )
             && let Some(codec_str) =
                 crate::codec_string::audio_codec_string_from_sample_entry(entry)
