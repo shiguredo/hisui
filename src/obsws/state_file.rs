@@ -87,9 +87,17 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFileR
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
-        let record_directory: Option<String> = value.to_member("recordDirectory")?.try_into()?;
-        let record_directory = record_directory.map(PathBuf::from).unwrap_or_default();
-        Ok(Self { record_directory })
+        let record_directory: String =
+            value.to_member("recordDirectory")?.required()?.try_into()?;
+        if record_directory.is_empty() {
+            return Err(value
+                .to_member("recordDirectory")?
+                .required()?
+                .invalid("recordDirectory must not be empty"));
+        }
+        Ok(Self {
+            record_directory: PathBuf::from(record_directory),
+        })
     }
 }
 
@@ -302,6 +310,28 @@ mod tests {
             "stream": {
                 "streamServiceType": "srt_custom",
                 "streamServiceSettings": {}
+            }
+        }"#;
+        let result = crate::json::parse_str::<ObswsStateFile>(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reject_record_without_record_directory() {
+        let json = r#"{
+            "version": 1,
+            "record": {}
+        }"#;
+        let result = crate::json::parse_str::<ObswsStateFile>(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reject_record_with_empty_record_directory() {
+        let json = r#"{
+            "version": 1,
+            "record": {
+                "recordDirectory": ""
             }
         }"#;
         let result = crate::json::parse_str::<ObswsStateFile>(json);

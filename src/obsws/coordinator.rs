@@ -177,6 +177,8 @@ pub struct ObswsCoordinator {
     input_source_processors: std::collections::BTreeMap<String, InputSourceState>,
     /// bootstrap 用の差分イベント送信チャネル
     bootstrap_event_tx: tokio::sync::broadcast::Sender<BootstrapInputEvent>,
+    /// state file 保存失敗等の致命的エラーにより終了が必要
+    should_terminate: bool,
 }
 
 impl ObswsCoordinator {
@@ -199,6 +201,7 @@ impl ObswsCoordinator {
             command_rx,
             input_source_processors: std::collections::BTreeMap::new(),
             bootstrap_event_tx: bootstrap_event_tx.clone(),
+            should_terminate: false,
         };
         let handle = ObswsCoordinatorHandle {
             command_tx,
@@ -235,6 +238,24 @@ impl ObswsCoordinator {
                     let snapshot = self.build_bootstrap_snapshot();
                     let _ = reply_tx.send(snapshot);
                 }
+            }
+
+            // state file 保存失敗等の致命的エラーが発生した場合はループを抜ける。
+            // エラーレスポンスは上で reply_tx 経由で送信済みなので、
+            // クライアントにはエラーが通知された後にプロセスが終了する。
+            if self.should_terminate {
+                tracing::error!(
+                    "coordinator shutting down due to fatal error; \
+                     subsequent requests will fail"
+                );
+                // command_rx を drop してチャネルを閉じる。
+                // 以降の process_request() は "coordinator has terminated" エラーを返す。
+                drop(self.command_rx);
+                // プロセスを終了させるために少し待ってから exit する。
+                // reply_tx.send() は既に完了しているが、WebSocket フレームが
+                // クライアントに届くまでの猶予を与える。
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                std::process::exit(1);
             }
         }
     }
@@ -410,6 +431,7 @@ impl ObswsCoordinator {
                         crate::obsws::state_file::build_state_from_registry(&self.input_registry);
                     if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                         tracing::error!("failed to save state file: {}", e.display());
+                        self.should_terminate = true;
                         return self.build_error_result(
                             &request_type,
                             &request_id,
