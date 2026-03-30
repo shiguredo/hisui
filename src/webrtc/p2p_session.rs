@@ -1610,14 +1610,11 @@ fn handle_remote_track_removed(sess: &mut Session, track_id: &str) {
     tracing::info!("Remote video track removed: track_id={track_id}");
 
     // attach 済みなら detach する
-    if sess
+    let input_name = sess
         .remote_video_tracks
         .get(track_id)
-        .is_some_and(|r| r.attached_input_name.is_some())
-    {
-        let input_name = sess.remote_video_tracks[track_id]
-            .attached_input_name
-            .clone();
+        .and_then(|r| r.attached_input_name.clone());
+    if input_name.is_some() {
         detach_remote_track(sess, track_id);
         if let Some(name) = input_name {
             sess.coordinator_handle
