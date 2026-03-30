@@ -9,3 +9,4 @@ pub mod obsws_message;
 pub mod sdp;
 pub mod state;
 pub mod stats;
+pub mod video_sender;

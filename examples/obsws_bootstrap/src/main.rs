@@ -1,22 +1,57 @@
+enum Subcommand {
+    Receive,
+    SubscribeProgram,
+    SendVideo {
+        send_width: i32,
+        send_height: i32,
+        send_fps: u32,
+    },
+}
+
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
     args.metadata_mut().app_name = "obsws_bootstrap";
     noargs::HELP_FLAG.take_help(&mut args);
 
     // サブコマンド分岐
-    let subscribe_program_tracks;
+    let subcommand;
     if noargs::cmd("receive")
         .doc("WebRTC bootstrap で raw track を受信して MP4 出力する")
         .take(&mut args)
         .is_present()
     {
-        subscribe_program_tracks = false;
+        subcommand = Subcommand::Receive;
     } else if noargs::cmd("subscribe-program")
         .doc("WebRTC bootstrap で SubscribeProgramTracks を送信し Program track を受信して MP4 出力する")
         .take(&mut args)
         .is_present()
     {
-        subscribe_program_tracks = true;
+        subcommand = Subcommand::SubscribeProgram;
+    } else if noargs::cmd("send-video")
+        .doc("WebRTC で映像を送信し webrtc_source input として合成結果を MP4 出力する")
+        .take(&mut args)
+        .is_present()
+    {
+        let send_width: i32 = noargs::opt("send-width")
+            .default("320")
+            .doc("送信映像の幅")
+            .take(&mut args)
+            .then(|o| o.value().parse())?;
+        let send_height: i32 = noargs::opt("send-height")
+            .default("320")
+            .doc("送信映像の高さ")
+            .take(&mut args)
+            .then(|o| o.value().parse())?;
+        let send_fps: u32 = noargs::opt("send-fps")
+            .default("30")
+            .doc("送信フレームレート")
+            .take(&mut args)
+            .then(|o| o.value().parse())?;
+        subcommand = Subcommand::SendVideo {
+            send_width,
+            send_height,
+            send_fps,
+        };
     } else if let Some(help) = args.finish()? {
         print!("{help}");
         return Ok(());
@@ -76,16 +111,50 @@ fn main() -> noargs::Result<()> {
 
     let result = runtime.block_on(async {
         let local = tokio::task::LocalSet::new();
-        local
-            .run_until(obsws_bootstrap::client::run_client(
-                &host,
-                port,
-                duration,
-                &output_path,
-                &input_mp4_path,
-                subscribe_program_tracks,
-            ))
-            .await
+        match subcommand {
+            Subcommand::Receive => {
+                local
+                    .run_until(obsws_bootstrap::client::run_client(
+                        &host,
+                        port,
+                        duration,
+                        &output_path,
+                        &input_mp4_path,
+                        false,
+                    ))
+                    .await
+            }
+            Subcommand::SubscribeProgram => {
+                local
+                    .run_until(obsws_bootstrap::client::run_client(
+                        &host,
+                        port,
+                        duration,
+                        &output_path,
+                        &input_mp4_path,
+                        true,
+                    ))
+                    .await
+            }
+            Subcommand::SendVideo {
+                send_width,
+                send_height,
+                send_fps,
+            } => {
+                local
+                    .run_until(obsws_bootstrap::client::run_send_video_client(
+                        &host,
+                        port,
+                        duration,
+                        &output_path,
+                        &input_mp4_path,
+                        send_width,
+                        send_height,
+                        send_fps,
+                    ))
+                    .await
+            }
+        }
     });
 
     match result {
