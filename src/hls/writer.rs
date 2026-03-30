@@ -29,6 +29,14 @@ struct HlsWriterStats {
     current_retained_segment_count: crate::stats::StatsGauge,
 }
 
+pub enum HlsWriterRpcMessage {
+    /// 入力を明示的に閉じ、finalize / cleanup に進ませる。
+    /// 上流の残フレームをすべて受け切ることまでは保証しない。
+    Finish {
+        reply_tx: tokio::sync::oneshot::Sender<()>,
+    },
+}
+
 impl HlsWriterStats {
     fn new(stats: &mut crate::stats::Stats) -> Self {
         Self {
@@ -401,6 +409,11 @@ impl HlsWriter {
     ) -> crate::Result<()> {
         let mut audio_rx = Some(handle.subscribe_track(input_audio_track_id));
         let mut video_rx = Some(handle.subscribe_track(input_video_track_id));
+        let (rpc_tx, mut rpc_rx) = tokio::sync::mpsc::unbounded_channel();
+        handle.register_rpc_sender(rpc_tx).await.map_err(|e| {
+            crate::Error::new(format!("failed to register hls writer RPC sender: {e}"))
+        })?;
+        let mut rpc_rx_enabled = true;
 
         handle.notify_ready();
 
@@ -449,6 +462,23 @@ impl HlsWriter {
                             video_rx = None;
                         }
                         _ => {}
+                    }
+                }
+                rpc_message = recv_hls_writer_rpc_message_or_pending(
+                    rpc_rx_enabled.then_some(&mut rpc_rx)
+                ) => {
+                    let Some(rpc_message) = rpc_message else {
+                        rpc_rx_enabled = false;
+                        continue;
+                    };
+                    match rpc_message {
+                        HlsWriterRpcMessage::Finish { reply_tx } => {
+                            // 入力購読を閉じてループ脱出後の finalize / cleanup を実行する。
+                            // 上流の残フレーム排出は別途保証していない。
+                            audio_rx = None;
+                            video_rx = None;
+                            let _ = reply_tx.send(());
+                        }
                     }
                 }
             }
@@ -836,6 +866,16 @@ impl HlsWriter {
         for seg in &self.retained_segments {
             self.storage.delete_file(&seg.filename).await;
         }
+    }
+}
+
+async fn recv_hls_writer_rpc_message_or_pending(
+    rpc_rx: Option<&mut tokio::sync::mpsc::UnboundedReceiver<HlsWriterRpcMessage>>,
+) -> Option<HlsWriterRpcMessage> {
+    if let Some(rpc_rx) = rpc_rx {
+        rpc_rx.recv().await
+    } else {
+        std::future::pending().await
     }
 }
 
@@ -1358,7 +1398,10 @@ pub struct MasterPlaylistVariant {
 /// ABR 用のマスタープレイリスト（Multivariant Playlist）を書き出す。
 /// 一時ファイルに書いてから rename してアトミックに更新する。
 /// マスタープレイリストの内容を生成する
-pub fn build_master_playlist_content(variants: &[MasterPlaylistVariant]) -> String {
+pub fn build_master_playlist_content(
+    variants: &[MasterPlaylistVariant],
+    codecs: &crate::codec_string::CodecString,
+) -> String {
     let playlist = shiguredo_m3u8::multivariant::MultivariantPlaylist {
         version: None,
         independent_segments: true,
@@ -1370,10 +1413,7 @@ pub fn build_master_playlist_content(variants: &[MasterPlaylistVariant]) -> Stri
             .map(|v| shiguredo_m3u8::multivariant::VariantStream {
                 bandwidth: v.bandwidth,
                 average_bandwidth: None,
-                // TODO: エンコーダーの SPS から正確な profile/level を取得すべきだが、
-                // プレイリスト生成時点ではその情報がないため暫定値を使用する。
-                // avc1.42e01f = H.264 Baseline Profile Level 3.1, mp4a.40.2 = AAC-LC
-                codecs: Some("avc1.42e01f,mp4a.40.2".to_owned()),
+                codecs: Some(codecs.as_combined()),
                 supplemental_codecs: None,
                 resolution: Some(shiguredo_m3u8::multivariant::Resolution {
                     width: v.width,
@@ -1407,8 +1447,9 @@ pub fn build_master_playlist_content(variants: &[MasterPlaylistVariant]) -> Stri
 pub fn write_master_playlist(
     output_directory: &Path,
     variants: &[MasterPlaylistVariant],
+    codecs: &crate::codec_string::CodecString,
 ) -> crate::Result<()> {
-    let content = build_master_playlist_content(variants);
+    let content = build_master_playlist_content(variants, codecs);
 
     let playlist_path = output_directory.join(PLAYLIST_FILENAME);
     let tmp_path = output_directory.join(".playlist.m3u8.tmp");

@@ -56,6 +56,51 @@ fn create_coordinator_handle_with_pipeline(
     handle
 }
 
+async fn create_initialized_coordinator_handle_with_pipeline(
+    registry: ObswsInputRegistry,
+    pipeline_handle: crate::MediaPipelineHandle,
+) -> crate::Result<crate::obsws::coordinator::ObswsCoordinatorHandle> {
+    let scene_inputs = registry.list_current_program_scene_input_entries();
+    let output_plan = crate::obsws::output_plan::build_composed_output_plan(
+        &scene_inputs,
+        crate::obsws::source::ObswsOutputKind::Program,
+        0,
+        registry.canvas_width(),
+        registry.canvas_height(),
+        registry.frame_rate(),
+    )
+    .map_err(|e| {
+        crate::Error::new(format!(
+            "failed to build program output plan: {}",
+            e.message()
+        ))
+    })?;
+
+    crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan).await?;
+
+    let scene_uuid = registry
+        .current_program_scene()
+        .map(|scene| scene.scene_uuid)
+        .unwrap_or_default();
+    let program_output = crate::obsws::server::ProgramOutputState {
+        scene_uuid,
+        video_track_id: output_plan.video_track_id,
+        audio_track_id: output_plan.audio_track_id,
+        video_mixer_processor_id: output_plan.video_mixer_processor_id,
+        audio_mixer_processor_id: output_plan.audio_mixer_processor_id,
+        source_processor_ids: output_plan.source_processor_ids,
+    };
+
+    let (mut actor, handle) = crate::obsws::coordinator::ObswsCoordinator::new(
+        registry,
+        program_output,
+        Some(pipeline_handle),
+    );
+    actor.start_initial_input_source_processors().await?;
+    tokio::spawn(actor.run());
+    Ok(handle)
+}
+
 #[tokio::test]
 async fn remove_current_scene_updates_program_output_state_without_pipeline() {
     let mut registry = ObswsInputRegistry::new_for_test();
@@ -251,6 +296,35 @@ fn unwrap_close(action: SessionAction) -> (CloseCode, &'static str) {
         panic!("expected Close");
     };
     (code, reason)
+}
+
+async fn identify_session(session: &mut ObswsSession) {
+    let identify_action = session
+        .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
+        .await
+        .expect("identify must succeed");
+    assert!(matches!(identify_action, SessionAction::SendText { .. }));
+}
+
+async fn wait_for_processor_presence(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    processor_id: &str,
+    expected: bool,
+) -> crate::Result<()> {
+    for _ in 0..20 {
+        let live_processors = pipeline_handle
+            .list_processors()
+            .await
+            .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
+        let found = live_processors.iter().any(|id| id.get() == processor_id);
+        if found == expected {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    Err(crate::Error::new(format!(
+        "processor presence did not converge: {processor_id} expected={expected}"
+    )))
 }
 
 #[tokio::test]
@@ -1606,7 +1680,9 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let handle = create_coordinator_handle_with_pipeline(registry, pipeline_handle.clone());
+    let handle =
+        create_initialized_coordinator_handle_with_pipeline(registry, pipeline_handle.clone())
+            .await?;
     let mut session = ObswsSession::new(None, handle);
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
@@ -1681,7 +1757,9 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let handle = create_coordinator_handle_with_pipeline(registry, pipeline_handle.clone());
+    let handle =
+        create_initialized_coordinator_handle_with_pipeline(registry, pipeline_handle.clone())
+            .await?;
     let mut session = ObswsSession::new(None, handle);
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
@@ -1900,6 +1978,252 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
     let (result, code) = parse_request_status(&text);
     assert!(result);
     assert_eq!(code, 100);
+
+    pipeline_task.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut registry = ObswsInputRegistry::new(
+        temp_dir.path().to_path_buf(),
+        crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
+        crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
+        crate::video::FrameRate::FPS_30,
+    );
+    let input = ObswsInput::from_kind_and_settings(
+        "mp4_file_source",
+        nojson::RawJsonOwned::parse(
+            r#"{"path":"testdata/red-320x320-h264-aac.mp4","loopPlayback":true}"#,
+        )
+        .expect("requestData must be valid json")
+        .value(),
+    )
+    .expect("input settings must be valid");
+    registry
+        .create_input("Scene", "video-file", input, true)
+        .expect("input creation must succeed");
+
+    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    let pipeline_task = tokio::spawn(pipeline.run());
+    let started = pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+    assert!(started);
+
+    let handle = create_coordinator_handle_with_pipeline(registry, pipeline_handle.clone());
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let hls_output_dir = temp_dir.path().join("hls-output");
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-hls-output".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(format!(
+                    r#"{{"outputName":"hls","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"variants":[{{"videoBitrate":2000000,"audioBitrate":128000}},{{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}}]}}}}"#,
+                    hls_output_dir.display()
+                ))
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    let start_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-hls-output".to_owned()),
+            request_type: Some("StartOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"hls"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(start_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:v1_scaler", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:v0_hls_writer", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:video_mixer", false).await?;
+
+    let get_scene_item_id_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-get-hls-scene-item-id".to_owned()),
+            request_type: Some("GetSceneItemId".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene","sourceName":"video-file"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(get_scene_item_id_action);
+    let scene_item_id = parse_response_scene_item_id(&text);
+
+    let set_scene_item_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-disable-hls-scene-item".to_owned()),
+            request_type: Some("SetSceneItemEnabled".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(format!(
+                    r#"{{"sceneName":"Scene","sceneItemId":{},"sceneItemEnabled":false}}"#,
+                    scene_item_id
+                ))
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_scene_item_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:v0_hls_writer", true).await?;
+
+    let stop_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-stop-hls-output".to_owned()),
+            request_type: Some("StopOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"hls"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(stop_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:v0_hls_writer", false).await?;
+
+    pipeline_task.abort();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let mut registry = ObswsInputRegistry::new(
+        temp_dir.path().to_path_buf(),
+        crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
+        crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
+        crate::video::FrameRate::FPS_30,
+    );
+    registry
+        .create_scene("Scene B")
+        .expect("second scene must be created");
+    let input = ObswsInput::from_kind_and_settings(
+        "mp4_file_source",
+        nojson::RawJsonOwned::parse(
+            r#"{"path":"testdata/red-320x320-h264-aac.mp4","loopPlayback":true}"#,
+        )
+        .expect("requestData must be valid json")
+        .value(),
+    )
+    .expect("input settings must be valid");
+    registry
+        .create_input("Scene", "video-file", input, true)
+        .expect("input creation must succeed");
+
+    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline_handle = pipeline.handle();
+    let pipeline_task = tokio::spawn(pipeline.run());
+    let started = pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
+    assert!(started);
+
+    let handle =
+        create_initialized_coordinator_handle_with_pipeline(registry, pipeline_handle.clone())
+            .await?;
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let dash_output_dir = temp_dir.path().join("dash-output");
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-dash-output".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(format!(
+                    r#"{{"outputName":"mpeg_dash","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"variants":[{{"videoBitrate":2000000,"audioBitrate":128000}},{{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}}]}}}}"#,
+                    dash_output_dir.display()
+                ))
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    let start_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-dash-output".to_owned()),
+            request_type: Some("StartOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"mpeg_dash"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(start_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v1_scaler", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v0_dash_writer", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:video_mixer", false).await?;
+
+    let set_scene_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-program-scene-dash".to_owned()),
+            request_type: Some("SetCurrentProgramScene".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"sceneName":"Scene B"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_scene_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v0_dash_writer", true).await?;
+
+    let stop_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-stop-dash-output".to_owned()),
+            request_type: Some("StopOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"mpeg_dash"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(stop_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v0_dash_writer", false)
+        .await?;
 
     pipeline_task.abort();
 

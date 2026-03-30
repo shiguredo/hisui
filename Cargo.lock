@@ -377,6 +377,7 @@ dependencies = [
  "shiguredo_libyuv",
  "shiguredo_m3u8",
  "shiguredo_mp4",
+ "shiguredo_mpd",
  "shiguredo_nvcodec",
  "shiguredo_openh264",
  "shiguredo_opus",
@@ -584,6 +585,18 @@ name = "mpeg2ts"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7541fc1a42604cbd10e8607a4e6d4b231db982888fe8065ccb191b751d6368d6"
+
+[[package]]
+name = "mpeg_dash_s3"
+version = "0.0.0"
+dependencies = [
+ "noargs",
+ "nojson",
+ "shiguredo_websocket",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "noargs"
@@ -1074,6 +1087,15 @@ name = "shiguredo_mp4"
 version = "2026.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "029f44879b590e0b5e50add084b436a7b740e08b2cc4fee662ed93f1cffddc63"
+
+[[package]]
+name = "shiguredo_mpd"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9006608e639738213aa3a3f9eaa883569eb9db08242962e817738dc5835ba0b3"
+dependencies = [
+ "xml",
+]
 
 [[package]]
 name = "shiguredo_nvcodec"

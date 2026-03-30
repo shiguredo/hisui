@@ -1,5 +1,7 @@
 pub mod arg_utils;
 pub mod audio;
+pub mod codec_string;
+pub mod dash;
 pub mod decoder;
 pub mod encoder;
 pub mod endpoint_http_bootstrap;

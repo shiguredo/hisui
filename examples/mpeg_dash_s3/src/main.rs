@@ -79,7 +79,7 @@ fn make_create_input_request(input_mp4_path: &str) -> (String, String) {
                     "requestData",
                     nojson::object(|f| {
                         f.member("sceneName", "Scene")?;
-                        f.member("inputName", "hls-s3-input")?;
+                        f.member("inputName", "mpeg-dash-s3-input")?;
                         f.member("inputKind", "mp4_file_source")?;
                         f.member(
                             "inputSettings",
@@ -98,7 +98,7 @@ fn make_create_input_request(input_mp4_path: &str) -> (String, String) {
     (request_id, msg)
 }
 
-/// HLS 出力の S3 destination 設定を構築する
+/// MPEG-DASH 出力の S3 destination 設定を構築する
 fn make_set_output_settings_request(s3: &S3Params) -> (String, String) {
     let request_id = next_request_id();
     let msg = nojson::object(|f| {
@@ -111,7 +111,7 @@ fn make_set_output_settings_request(s3: &S3Params) -> (String, String) {
                 f.member(
                     "requestData",
                     nojson::object(|f| {
-                        f.member("outputName", "hls")?;
+                        f.member("outputName", "mpeg_dash")?;
                         f.member(
                             "outputSettings",
                             nojson::object(|f| {
@@ -135,8 +135,7 @@ fn make_set_output_settings_request(s3: &S3Params) -> (String, String) {
                                             }),
                                         )
                                     }),
-                                )?;
-                                f.member("segmentFormat", s3.segment_format.as_str())
+                                )
                             }),
                         )
                     }),
@@ -159,7 +158,7 @@ fn make_start_output_request() -> (String, String) {
                 f.member("requestId", request_id.as_str())?;
                 f.member(
                     "requestData",
-                    nojson::object(|f| f.member("outputName", "hls")),
+                    nojson::object(|f| f.member("outputName", "mpeg_dash")),
                 )
             }),
         )
@@ -179,7 +178,7 @@ fn make_stop_output_request() -> (String, String) {
                 f.member("requestId", request_id.as_str())?;
                 f.member(
                     "requestData",
-                    nojson::object(|f| f.member("outputName", "hls")),
+                    nojson::object(|f| f.member("outputName", "mpeg_dash")),
                 )
             }),
         )
@@ -199,7 +198,7 @@ fn make_get_output_status_request() -> (String, String) {
                 f.member("requestId", request_id.as_str())?;
                 f.member(
                     "requestData",
-                    nojson::object(|f| f.member("outputName", "hls")),
+                    nojson::object(|f| f.member("outputName", "mpeg_dash")),
                 )
             }),
         )
@@ -234,7 +233,6 @@ fn parse_request_response(text: &str) -> Option<(String, Result<String, String>)
         .ok()?;
 
     if result {
-        // responseData があれば JSON 文字列として返す
         let response_data = d
             .to_member("responseData")
             .ok()
@@ -339,15 +337,14 @@ struct S3Params {
     use_path_style: bool,
     access_key_id: String,
     secret_access_key: String,
-    segment_format: String,
 }
 
 // --- main ---
 
 fn main() -> noargs::Result<()> {
     let mut args = noargs::raw_args();
-    args.metadata_mut().app_name = "hls_s3";
-    args.metadata_mut().app_description = "S3 に HLS 出力を行うサンプル";
+    args.metadata_mut().app_name = "mpeg_dash_s3";
+    args.metadata_mut().app_description = "S3 に MPEG-DASH 出力を行うサンプル";
     noargs::HELP_FLAG.take_help(&mut args);
 
     let verbose = noargs::flag("verbose")
@@ -377,7 +374,7 @@ fn main() -> noargs::Result<()> {
         .take(&mut args)
         .then(|o| o.value().parse())?;
     let prefix: String = noargs::opt("s3-prefix")
-        .default("hls")
+        .default("dash")
         .doc("S3 オブジェクトキーの prefix")
         .take(&mut args)
         .then(|o| o.value().parse())?;
@@ -405,11 +402,6 @@ fn main() -> noargs::Result<()> {
         .doc("S3 シークレットアクセスキー")
         .take(&mut args)
         .then(|o| o.value().parse())?;
-    let segment_format: String = noargs::opt("segment-format")
-        .default("fmp4")
-        .doc("セグメントフォーマット (mpegts / fmp4)")
-        .take(&mut args)
-        .then(|o| o.value().parse())?;
 
     args.finish()?;
 
@@ -434,7 +426,6 @@ fn main() -> noargs::Result<()> {
         use_path_style,
         access_key_id,
         secret_access_key,
-        segment_format,
     };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -511,7 +502,7 @@ async fn run(host: &str, port: u16, input_mp4_path: &str, s3: &S3Params) -> Resu
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("CreateInput succeeded");
 
-    // 2. SetOutputSettings: HLS S3 設定
+    // 2. SetOutputSettings: MPEG-DASH S3 設定
     let (req_id, msg) = make_set_output_settings_request(s3);
     tracing::info!(
         "SetOutputSettings: bucket={}, prefix={}, endpoint={}",
@@ -522,11 +513,11 @@ async fn run(host: &str, port: u16, input_mp4_path: &str, s3: &S3Params) -> Resu
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("SetOutputSettings succeeded");
 
-    // 3. StartOutput: HLS 出力開始
+    // 3. StartOutput: MPEG-DASH 出力開始
     let (req_id, msg) = make_start_output_request();
     tracing::info!("StartOutput requested");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
-    tracing::info!("HLS S3 output started");
+    tracing::info!("MPEG-DASH S3 output started");
 
     // 4. GetOutputStatus: 出力状態確認
     let (req_id, msg) = make_get_output_status_request();
@@ -539,11 +530,11 @@ async fn run(host: &str, port: u16, input_mp4_path: &str, s3: &S3Params) -> Resu
         .await
         .map_err(|e| format!("failed to wait for Ctrl+C: {e}"))?;
 
-    // 5. StopOutput: HLS 出力停止
+    // 5. StopOutput: MPEG-DASH 出力停止
     let (req_id, msg) = make_stop_output_request();
     tracing::info!("StopOutput requested");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
-    tracing::info!("HLS S3 output stopped");
+    tracing::info!("MPEG-DASH S3 output stopped");
 
     // WebSocket を閉じる
     let _ = ws.close(shiguredo_websocket::CloseCode::NORMAL, "bye");
