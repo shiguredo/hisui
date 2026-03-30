@@ -30,7 +30,7 @@ fn create_coordinator_handle(
     registry: ObswsInputRegistry,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
-    let (actor, handle) =
+    let (actor, handle, _shutdown_rx) =
         crate::obsws::coordinator::ObswsCoordinator::new(registry, program_output, None);
     tokio::spawn(actor.run());
     handle
@@ -47,7 +47,7 @@ fn create_coordinator_handle_with_pipeline(
     pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
-    let (actor, handle) = crate::obsws::coordinator::ObswsCoordinator::new(
+    let (actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
         program_output,
         Some(pipeline_handle),
@@ -91,7 +91,7 @@ async fn create_initialized_coordinator_handle_with_pipeline(
         source_processor_ids: output_plan.source_processor_ids,
     };
 
-    let (mut actor, handle) = crate::obsws::coordinator::ObswsCoordinator::new(
+    let (mut actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
         program_output,
         Some(pipeline_handle),

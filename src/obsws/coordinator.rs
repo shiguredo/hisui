@@ -179,17 +179,27 @@ pub struct ObswsCoordinator {
     bootstrap_event_tx: tokio::sync::broadcast::Sender<BootstrapInputEvent>,
     /// state file 保存失敗等の致命的エラーにより終了が必要
     should_terminate: bool,
+    /// 致命的エラー発生時にサーバーへ通知するための送信側
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
 impl ObswsCoordinator {
     /// actor と handle を生成する。program_output の初期化は呼び出し側で行う。
+    ///
+    /// 返り値の `watch::Receiver<bool>` は致命的エラー発生時に `true` を受信する。
+    /// サーバーの accept loop はこれを監視して graceful shutdown を行う。
     pub fn new(
         input_registry: ObswsInputRegistry,
         program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
-    ) -> (Self, ObswsCoordinatorHandle) {
+    ) -> (
+        Self,
+        ObswsCoordinatorHandle,
+        tokio::sync::watch::Receiver<bool>,
+    ) {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (bootstrap_event_tx, _) = tokio::sync::broadcast::channel(64);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let program_track_ids = ProgramTrackIds {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
@@ -202,13 +212,14 @@ impl ObswsCoordinator {
             input_source_processors: std::collections::BTreeMap::new(),
             bootstrap_event_tx: bootstrap_event_tx.clone(),
             should_terminate: false,
+            shutdown_tx,
         };
         let handle = ObswsCoordinatorHandle {
             command_tx,
             program_track_ids,
             bootstrap_event_tx,
         };
-        (actor, handle)
+        (actor, handle, shutdown_rx)
     }
 
     /// actor のイベントループを実行する
@@ -242,20 +253,15 @@ impl ObswsCoordinator {
 
             // state file 保存失敗等の致命的エラーが発生した場合はループを抜ける。
             // エラーレスポンスは上で reply_tx 経由で送信済みなので、
-            // クライアントにはエラーが通知された後にプロセスが終了する。
+            // クライアントにはエラーが通知された後にサーバーが停止する。
             if self.should_terminate {
                 tracing::error!(
                     "coordinator shutting down due to fatal error; \
                      subsequent requests will fail"
                 );
-                // command_rx を drop してチャネルを閉じる。
-                // 以降の process_request() は "coordinator has terminated" エラーを返す。
-                drop(self.command_rx);
-                // プロセスを終了させるために少し待ってから exit する。
-                // reply_tx.send() は既に完了しているが、WebSocket フレームが
-                // クライアントに届くまでの猶予を与える。
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                std::process::exit(1);
+                // サーバーの accept loop に終了を通知する
+                let _ = self.shutdown_tx.send(true);
+                return;
             }
         }
     }

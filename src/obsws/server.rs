@@ -199,11 +199,12 @@ pub async fn run_server(
 
     // runtime actor を起動する
     // source processor は入力ライフサイクルで管理するため、coordinator 経由で初期起動する
-    let (mut actor, coordinator_handle) = crate::obsws::coordinator::ObswsCoordinator::new(
-        input_registry,
-        program_output,
-        Some(pipeline_handle.clone()),
-    );
+    let (mut actor, coordinator_handle, shutdown_rx) =
+        crate::obsws::coordinator::ObswsCoordinator::new(
+            input_registry,
+            program_output,
+            Some(pipeline_handle.clone()),
+        );
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());
 
@@ -220,6 +221,7 @@ pub async fn run_server(
         coordinator_handle,
         pipeline_handle,
         bootstrap_endpoint,
+        shutdown_rx,
     )
     .await
 }
@@ -241,12 +243,20 @@ async fn run_accept_loop(
     coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> crate::Result<()> {
     loop {
-        let (stream, peer_addr) = listener
-            .accept()
-            .await
-            .map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?;
+        let (stream, peer_addr) = tokio::select! {
+            result = listener.accept() => {
+                result.map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?
+            }
+            _ = shutdown_rx.changed() => {
+                tracing::info!("obsws server shutting down due to coordinator fatal error");
+                return Err(crate::Error::new(
+                    "obsws server terminated: state file write failed"
+                ));
+            }
+        };
         let tls_acceptor = tls_acceptor.clone();
         let upstream_config = upstream_config.clone();
         let password = password.clone();
