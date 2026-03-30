@@ -203,6 +203,7 @@ impl ObswsInputSettings {
                     parse_optional_string_setting(input_settings, "backgroundKeyColor")?;
                 let background_key_tolerance =
                     parse_optional_i32_setting(input_settings, "backgroundKeyTolerance")?;
+                validate_background_key_tolerance(background_key_tolerance)?;
                 Ok(Self::WebRtcSource(ObswsWebRtcSourceSettings {
                     track_id: None,
                     background_key_color,
