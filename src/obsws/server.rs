@@ -122,7 +122,7 @@ pub async fn run_server(
             let stream_settings = state
                 .stream
                 .as_ref()
-                .map(crate::obsws::state_file::to_stream_service_settings);
+                .map(|s| s.to_stream_service_settings());
             let record_dir = state
                 .record
                 .map(|r| r.record_directory)
@@ -235,6 +235,7 @@ fn contains_upgrade_header(buf: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn run_accept_loop(
     listener: TcpListener,
     tls_acceptor: Option<TlsAcceptor>,

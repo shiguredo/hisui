@@ -222,12 +222,14 @@ pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFil
     ObswsStateFile { stream, record }
 }
 
-/// state file の内容を ObswsStreamServiceSettings に変換する。
-pub fn to_stream_service_settings(stream: &ObswsStateFileStream) -> ObswsStreamServiceSettings {
-    ObswsStreamServiceSettings {
-        stream_service_type: stream.stream_service_type.clone(),
-        server: stream.server.clone(),
-        key: stream.key.clone(),
+impl ObswsStateFileStream {
+    /// ObswsStreamServiceSettings に変換する。
+    pub fn to_stream_service_settings(&self) -> ObswsStreamServiceSettings {
+        ObswsStreamServiceSettings {
+            stream_service_type: self.stream_service_type.clone(),
+            server: self.server.clone(),
+            key: self.key.clone(),
+        }
     }
 }
 
