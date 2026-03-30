@@ -3853,10 +3853,10 @@ async fn start_dash_processors(
     );
 
     let is_abr = run.is_abr();
-    let dash_codecs = crate::codec_string::CodecString::from_codec_pair(
-        dash_settings.video_codec,
-        dash_settings.audio_codec,
-    );
+
+    // ABR の場合、各 variant writer が SampleEntry から codec string を確定したら
+    // oneshot channel 経由で通知を受け取り、全 variant の値がそろってから結合 MPD を書き出す。
+    let mut codec_string_receivers = Vec::new();
 
     // バリアントごとにスケーラー、エンコーダー、ライターを起動する
     for (i, (variant, variant_run)) in dash_settings
@@ -3959,6 +3959,15 @@ async fn start_dash_processors(
                 }
             }
         };
+        // ABR の場合は codec string 通知用の channel を作成する
+        let codec_string_sender = if is_abr {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            codec_string_receivers.push(rx);
+            Some(tx)
+        } else {
+            None
+        };
+
         crate::dash::writer::create_processor(
             pipeline_handle,
             crate::dash::writer::DashWriterConfig {
@@ -3968,7 +3977,7 @@ async fn start_dash_processors(
                 segment_duration: dash_settings.segment_duration,
                 max_retained_segments: dash_settings.max_retained_segments,
                 skip_mpd: is_abr,
-                codecs: dash_codecs.clone(),
+                codec_string_sender,
             },
             Some(variant_run.writer_processor_id.clone()),
         )
@@ -3983,7 +3992,8 @@ async fn start_dash_processors(
         );
     }
 
-    // ABR の場合は結合 MPD を書き出す
+    // ABR の場合は各 variant writer が SampleEntry から codec string を確定するのを待ち、
+    // 全 variant の codec string が一致することを検証してから結合 MPD を書き出す。
     if is_abr {
         let mpd_variants: Vec<crate::dash::writer::CombinedMpdVariant> = dash_settings
             .variants
@@ -4008,14 +4018,56 @@ async fn start_dash_processors(
             })
             .collect::<crate::Result<Vec<_>>>()?;
         let root_storage_config = build_dash_root_storage_config(&run.destination)?;
-        crate::dash::writer::write_combined_mpd(
-            root_storage_config,
-            &mpd_variants,
-            dash_settings.segment_duration,
-            dash_settings.max_retained_segments,
-            &dash_codecs,
-        )
-        .await?;
+        let segment_duration = dash_settings.segment_duration;
+        let max_retained_segments = dash_settings.max_retained_segments;
+
+        // 各 variant の codec string が確定するのを待ってから結合 MPD を書き出すタスクを起動する
+        tokio::spawn(async move {
+            // 全 variant の codec string を収集する
+            let mut codec_strings = Vec::with_capacity(codec_string_receivers.len());
+            for (i, rx) in codec_string_receivers.into_iter().enumerate() {
+                match rx.await {
+                    Ok(cs) => codec_strings.push(cs),
+                    Err(_) => {
+                        tracing::warn!(
+                            variant = i,
+                            "DASH variant writer dropped codec string sender before resolving codecs"
+                        );
+                        return;
+                    }
+                }
+            }
+
+            // 全 variant の codec string が一致することを検証する
+            if let Some(first) = codec_strings.first() {
+                for (i, cs) in codec_strings.iter().enumerate().skip(1) {
+                    if cs.video != first.video || cs.audio != first.audio {
+                        tracing::error!(
+                            variant = i,
+                            expected_video = %first.video,
+                            expected_audio = %first.audio,
+                            actual_video = %cs.video,
+                            actual_audio = %cs.audio,
+                            "DASH ABR variant codec string mismatch: \
+                             all variants must produce identical codec strings"
+                        );
+                        return;
+                    }
+                }
+
+                if let Err(e) = crate::dash::writer::write_combined_mpd(
+                    root_storage_config,
+                    &mpd_variants,
+                    segment_duration,
+                    max_retained_segments,
+                    first,
+                )
+                .await
+                {
+                    tracing::error!(error = ?e, "failed to write combined DASH MPD");
+                }
+            }
+        });
     }
     Ok(())
 }

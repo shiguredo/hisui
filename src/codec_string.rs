@@ -11,12 +11,28 @@ pub struct CodecString {
 }
 
 impl CodecString {
-    /// [`CodecName`] のペアからデフォルトの codec string を生成する。
+    /// ビデオとオーディオの SampleEntry から正確な codec string を生成する。
     ///
-    /// 各コーデックについて保守的な代表値を返す。実際のエンコーダー出力とは
-    /// プロファイルやレベルが異なる可能性がある。より正確な値が必要な場合は、
-    /// エンコーダーの SampleEntry から [`video_codec_string_from_sample_entry`] /
-    /// [`audio_codec_string_from_sample_entry`] で取得すること。
+    /// エンコーダーが実際に出力した SampleEntry を情報源とするため、
+    /// MPD や HLS マニフェストに記載する codecs 属性はこのメソッドで生成すべき。
+    /// いずれかの SampleEntry が非対応の場合は `None` を返す。
+    pub fn from_sample_entries(
+        video: &shiguredo_mp4::boxes::SampleEntry,
+        audio: &shiguredo_mp4::boxes::SampleEntry,
+    ) -> Option<Self> {
+        let video_str = video_codec_string_from_sample_entry(video)?;
+        let audio_str = audio_codec_string_from_sample_entry(audio)?;
+        Some(Self {
+            video: video_str,
+            audio: audio_str,
+        })
+    }
+
+    /// [`CodecName`] のペアから代表的な codec string を生成する。
+    ///
+    /// 実際のエンコーダー出力とはプロファイルやレベルが異なる可能性がある。
+    /// MPD 等のマニフェスト本番用途では使わないこと。
+    /// HLS のように codec が固定で SampleEntry を待てない場合のフォールバック用。
     pub fn from_codec_pair(video: crate::types::CodecName, audio: crate::types::CodecName) -> Self {
         use crate::types::CodecName;
 
@@ -67,7 +83,7 @@ impl CodecString {
 /// エンコーダーが出力した実際の SampleEntry からプロファイル・レベル等を読み取り、
 /// MPD や HLS マニフェストに記載する正確な codec string を返す。
 /// 対応していない SampleEntry の場合は `None` を返す。
-pub(crate) fn video_codec_string_from_sample_entry(
+pub fn video_codec_string_from_sample_entry(
     entry: &shiguredo_mp4::boxes::SampleEntry,
 ) -> Option<String> {
     use shiguredo_mp4::boxes::SampleEntry;
@@ -119,7 +135,7 @@ pub(crate) fn video_codec_string_from_sample_entry(
 /// エンコーダーが出力した実際の SampleEntry から AudioSpecificConfig 等を読み取り、
 /// MPD や HLS マニフェストに記載する正確な codec string を返す。
 /// 対応していない SampleEntry の場合は `None` を返す。
-pub(crate) fn audio_codec_string_from_sample_entry(
+pub fn audio_codec_string_from_sample_entry(
     entry: &shiguredo_mp4::boxes::SampleEntry,
 ) -> Option<String> {
     use shiguredo_mp4::boxes::SampleEntry;

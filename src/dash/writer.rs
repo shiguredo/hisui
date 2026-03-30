@@ -263,19 +263,16 @@ struct DashWriter {
     skip_mpd: bool,
     /// MPD の AdaptationSet に設定するコーデック文字列。
     ///
-    /// 初期値は CodecString::from_codec_pair() のデフォルト値。
-    /// SampleEntry を受信した時点でエンコーダーの実際の出力に基づく正確な値に更新する。
-    ///
-    /// 懸念: 初回 MPD は from_codec_pair() のデフォルト値で書き出される。
-    /// OpenH264 / VideoToolbox では SampleEntry が最初のフレームエンコード後まで
-    /// 得られないため、最初のセグメントの MPD は必ずデフォルト値になる。
-    /// プレーヤーが初回 MPD で接続した場合、codec 切り替わりが見える可能性がある。
-    /// ただし DASH プレーヤーは MPD の定期リロードを行うため、実用上の影響は限定的。
-    codecs: crate::codec_string::CodecString,
-    /// ビデオの codec string が SampleEntry から解決済みかどうか
-    video_codec_resolved: bool,
-    /// オーディオの codec string が SampleEntry から解決済みかどうか
-    audio_codec_resolved: bool,
+    /// SampleEntry を受信した時点でエンコーダーの実際の出力から確定する。
+    /// video / audio 両方の SampleEntry が揃うまでは None で、MPD は書き出さない。
+    codecs: Option<crate::codec_string::CodecString>,
+    /// ビデオの codec string（SampleEntry から解決済みの場合のみ Some）
+    resolved_video_codec: Option<String>,
+    /// オーディオの codec string（SampleEntry から解決済みの場合のみ Some）
+    resolved_audio_codec: Option<String>,
+    /// codec string が確定したことを通知する channel（ABR の結合 MPD 用）。
+    /// 送信は 1 回のみ。送信後は None になる。
+    codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
     stats: DashWriterStats,
 }
 
@@ -339,7 +336,7 @@ impl DashWriter {
         segment_duration_target: f64,
         max_retained_segments: usize,
         skip_mpd: bool,
-        codecs: crate::codec_string::CodecString,
+        codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
         stats: DashWriterStats,
     ) -> crate::Result<Self> {
         let muxer = shiguredo_mp4::mux::Fmp4SegmentMuxer::new()
@@ -362,9 +359,10 @@ impl DashWriter {
             current_segment_info: None,
             availability_start_time: format_utc_now(),
             skip_mpd,
-            codecs,
-            video_codec_resolved: false,
-            audio_codec_resolved: false,
+            codecs: None,
+            resolved_video_codec: None,
+            resolved_audio_codec: None,
+            codec_string_sender,
             stats,
         })
     }
@@ -489,14 +487,14 @@ impl DashWriter {
         if let Some(ref entry) = frame.sample_entry {
             self.last_video_sample_entry.clone_from(&frame.sample_entry);
 
-            // SampleEntry から正確な codec string を取得して MPD のデフォルト値を上書きする
-            if !self.video_codec_resolved
+            // SampleEntry から正確な codec string を確定する
+            if self.resolved_video_codec.is_none()
                 && let Some(codec_str) =
                     crate::codec_string::video_codec_string_from_sample_entry(entry)
-            {
-                self.codecs.video = codec_str;
-                self.video_codec_resolved = true;
-            }
+                {
+                    self.resolved_video_codec = Some(codec_str);
+                    self.try_finalize_codecs();
+                }
         }
         // 前のビデオサンプルの duration を確定させる
         if let Some(prev_ts) = self.last_video_timestamp {
@@ -555,14 +553,14 @@ impl DashWriter {
         if let Some(ref entry) = frame.sample_entry {
             self.last_audio_sample_entry.clone_from(&frame.sample_entry);
 
-            // SampleEntry から正確な codec string を取得して MPD のデフォルト値を上書きする
-            if !self.audio_codec_resolved
+            // SampleEntry から正確な codec string を確定する
+            if self.resolved_audio_codec.is_none()
                 && let Some(codec_str) =
                     crate::codec_string::audio_codec_string_from_sample_entry(entry)
-            {
-                self.codecs.audio = codec_str;
-                self.audio_codec_resolved = true;
-            }
+                {
+                    self.resolved_audio_codec = Some(codec_str);
+                    self.try_finalize_codecs();
+                }
         }
 
         if self.current_segment_info.is_none() {
@@ -730,11 +728,36 @@ impl DashWriter {
         Ok(())
     }
 
+    /// video / audio 両方の codec string が確定した時点で CodecString を組み立てる。
+    /// ABR の場合は codec_string_sender を通じて coordinator に通知する。
+    fn try_finalize_codecs(&mut self) {
+        if self.codecs.is_some() {
+            return;
+        }
+        if let (Some(video), Some(audio)) = (&self.resolved_video_codec, &self.resolved_audio_codec)
+        {
+            let codec_string = crate::codec_string::CodecString {
+                video: video.clone(),
+                audio: audio.clone(),
+            };
+            // ABR の結合 MPD 用に coordinator へ通知する
+            if let Some(sender) = self.codec_string_sender.take() {
+                // 受信側が既に drop していてもエラーにはしない
+                let _ = sender.send(codec_string.clone());
+            }
+            self.codecs = Some(codec_string);
+        }
+    }
+
     /// MPD マニフェストを書き出す
     async fn write_mpd(&self) -> crate::Result<()> {
         if self.retained_segments.is_empty() {
             return Ok(());
         }
+        // codec string が SampleEntry から確定するまで MPD は書き出さない
+        let Some(codecs) = &self.codecs else {
+            return Ok(());
+        };
 
         let timescale = FMP4_TIMESCALE.get() as u64;
 
@@ -797,7 +820,7 @@ impl DashWriter {
                 adaptation_sets: vec![shiguredo_mpd::AdaptationSet {
                     id: Some(0),
                     mime_type: Some("video/mp4".to_owned()),
-                    codecs: Some(self.codecs.as_combined()),
+                    codecs: Some(codecs.as_combined()),
                     content_type: Some(shiguredo_mpd::ContentType::Video),
                     lang: None,
                     width: None,
@@ -1049,8 +1072,9 @@ pub struct DashWriterConfig {
     pub max_retained_segments: usize,
     /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
     pub skip_mpd: bool,
-    /// MPD の AdaptationSet に設定するコーデック文字列。
-    pub codecs: crate::codec_string::CodecString,
+    /// codec string が SampleEntry から確定した際の通知 channel（ABR 時に coordinator が受信）。
+    /// non-ABR の場合は None。
+    pub codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
 }
 
 /// DASH writer プロセッサを作成する
@@ -1090,7 +1114,7 @@ pub async fn create_processor(
                     config.segment_duration,
                     config.max_retained_segments,
                     config.skip_mpd,
-                    config.codecs,
+                    config.codec_string_sender,
                     writer_stats,
                 )?;
                 writer
@@ -1125,11 +1149,9 @@ pub struct CombinedMpdVariant {
 // ABR 時も SegmentTimeline ベースに統一することで、実際のセグメント尺との乖離を防げる。
 // これには各バリアントライターからセグメント情報を集約する仕組みが必要になる。
 //
-// TODO: ABR 結合 MPD の codecs は起動時の from_codec_pair() デフォルト値で書き出される。
-// 各バリアントの DashWriter が SampleEntry から正確な codec string を取得した後に
-// 結合 MPD を再書き出しする仕組みが必要だが、variant 間で異なるタイミングで
-// SampleEntry が届く可能性があるため、全 variant の codec が確定してから
-// 結合 MPD を再生成する必要がある。SegmentTimeline ベースへの統一と合わせて対応する。
+// NOTE: ABR 結合 MPD の codecs は、各 variant の DashWriter が SampleEntry から確定した
+// codec string を oneshot channel 経由で coordinator に通知し、全 variant の値が一致する
+// ことを検証してから書き出す設計になっている。
 pub fn build_combined_mpd_content(
     variants: &[CombinedMpdVariant],
     segment_duration: f64,
