@@ -491,10 +491,10 @@ impl DashWriter {
             if self.resolved_video_codec.is_none()
                 && let Some(codec_str) =
                     crate::codec_string::video_codec_string_from_sample_entry(entry)
-                {
-                    self.resolved_video_codec = Some(codec_str);
-                    self.try_finalize_codecs();
-                }
+            {
+                self.resolved_video_codec = Some(codec_str);
+                self.try_finalize_codecs();
+            }
         }
         // 前のビデオサンプルの duration を確定させる
         if let Some(prev_ts) = self.last_video_timestamp {
@@ -557,10 +557,10 @@ impl DashWriter {
             if self.resolved_audio_codec.is_none()
                 && let Some(codec_str) =
                     crate::codec_string::audio_codec_string_from_sample_entry(entry)
-                {
-                    self.resolved_audio_codec = Some(codec_str);
-                    self.try_finalize_codecs();
-                }
+            {
+                self.resolved_audio_codec = Some(codec_str);
+                self.try_finalize_codecs();
+            }
         }
 
         if self.current_segment_info.is_none() {
@@ -1416,6 +1416,11 @@ mod tests {
         assert_eq!(period.adaptation_sets.len(), 1);
 
         let adaptation_set = &period.adaptation_sets[0];
+        // AdaptationSet.codecs が指定した codec string を反映していること
+        assert_eq!(
+            adaptation_set.codecs.as_deref(),
+            Some("avc1.42e01f,mp4a.40.2")
+        );
         assert_eq!(adaptation_set.representations.len(), 2);
 
         // バリアント 0 の Representation を検証
@@ -1509,6 +1514,82 @@ mod tests {
         assert_eq!(mpd.time_shift_buffer_depth, Some(15.0));
         assert_eq!(mpd.min_buffer_time, 3.0);
         assert_eq!(mpd.minimum_update_period, Some(3.0));
+    }
+
+    /// H.265 + AAC の codec string が結合 MPD の AdaptationSet.codecs にそのまま反映されること
+    #[test]
+    fn combined_mpd_codecs_reflects_given_codec_string_h265_aac() {
+        let variants = vec![CombinedMpdVariant {
+            bandwidth: 2_000_000,
+            width: 1920,
+            height: 1080,
+            media_path: "variant_0/segment-$Number%06d$.m4s".to_owned(),
+            init_path: "variant_0/init.mp4".to_owned(),
+        }];
+        // 実際の Hvc1 SampleEntry から生成される codec string を模擬する
+        let codecs = crate::codec_string::CodecString {
+            video: "hvc1.1.6.L123.B0".to_owned(),
+            audio: "mp4a.40.2".to_owned(),
+        };
+        let xml = build_combined_mpd_content(&variants, 2.0, 6, &codecs);
+        let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
+
+        let adaptation_set = &mpd.periods[0].adaptation_sets[0];
+        assert_eq!(
+            adaptation_set.codecs.as_deref(),
+            Some("hvc1.1.6.L123.B0,mp4a.40.2"),
+            "AdaptationSet.codecs must contain the exact given codec string"
+        );
+    }
+
+    /// AV1 + Opus の codec string が結合 MPD の AdaptationSet.codecs にそのまま反映されること
+    #[test]
+    fn combined_mpd_codecs_reflects_given_codec_string_av1_opus() {
+        let variants = vec![CombinedMpdVariant {
+            bandwidth: 2_000_000,
+            width: 1920,
+            height: 1080,
+            media_path: "variant_0/segment-$Number%06d$.m4s".to_owned(),
+            init_path: "variant_0/init.mp4".to_owned(),
+        }];
+        let codecs = crate::codec_string::CodecString {
+            video: "av01.0.00M.08".to_owned(),
+            audio: "opus".to_owned(),
+        };
+        let xml = build_combined_mpd_content(&variants, 2.0, 6, &codecs);
+        let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
+
+        let adaptation_set = &mpd.periods[0].adaptation_sets[0];
+        assert_eq!(
+            adaptation_set.codecs.as_deref(),
+            Some("av01.0.00M.08,opus"),
+            "AdaptationSet.codecs must contain the exact given codec string"
+        );
+    }
+
+    /// VP9 + Opus の codec string が結合 MPD の AdaptationSet.codecs にそのまま反映されること
+    #[test]
+    fn combined_mpd_codecs_reflects_given_codec_string_vp9_opus() {
+        let variants = vec![CombinedMpdVariant {
+            bandwidth: 2_000_000,
+            width: 1920,
+            height: 1080,
+            media_path: "variant_0/segment-$Number%06d$.m4s".to_owned(),
+            init_path: "variant_0/init.mp4".to_owned(),
+        }];
+        let codecs = crate::codec_string::CodecString {
+            video: "vp09.00.00.08".to_owned(),
+            audio: "opus".to_owned(),
+        };
+        let xml = build_combined_mpd_content(&variants, 2.0, 6, &codecs);
+        let mpd = shiguredo_mpd::parse(&xml).expect("combined MPD must be valid XML");
+
+        let adaptation_set = &mpd.periods[0].adaptation_sets[0];
+        assert_eq!(
+            adaptation_set.codecs.as_deref(),
+            Some("vp09.00.00.08,opus"),
+            "AdaptationSet.codecs must contain the exact given codec string"
+        );
     }
 
     // --- outputPath テスト ---

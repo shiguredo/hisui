@@ -2190,6 +2190,36 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
     wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v0_dash_writer", true).await?;
     wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:video_mixer", false).await?;
 
+    // ABR 結合 MPD は SampleEntry から codec string が確定してから書き出される。
+    // manifest.mpd の出現を待ち、codecs 属性が実際の SampleEntry と一致することを検証する。
+    let manifest_path = dash_output_dir.join("manifest.mpd");
+    for _ in 0..40 {
+        if manifest_path.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        manifest_path.exists(),
+        "ABR combined manifest.mpd must be written after codec resolution"
+    );
+    let mpd_xml = std::fs::read_to_string(&manifest_path).expect("manifest.mpd must be readable");
+    let mpd = shiguredo_mpd::parse(&mpd_xml).expect("manifest.mpd must be valid MPD XML");
+    let adaptation_set = &mpd.periods[0].adaptation_sets[0];
+    let codecs = adaptation_set
+        .codecs
+        .as_ref()
+        .expect("AdaptationSet.codecs must be present");
+    // テスト素材は H.264 + AAC なので codecs は avc1 と mp4a を含むこと
+    assert!(
+        codecs.contains("avc1."),
+        "codecs must contain avc1 prefix from actual SampleEntry, got: {codecs}"
+    );
+    assert!(
+        codecs.contains("mp4a.40."),
+        "codecs must contain mp4a.40 prefix from actual SampleEntry, got: {codecs}"
+    );
+
     let set_scene_action = session
         .handle_request(RequestMessage {
             request_id: Some("req-set-program-scene-dash".to_owned()),

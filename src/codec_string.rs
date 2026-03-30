@@ -390,6 +390,177 @@ mod tests {
         );
     }
 
+    /// H.265 の SampleEntry は src/video/h265.rs の h265_sample_entry() が生成する値と一致すること
+    #[test]
+    fn video_codec_string_from_hvc1_sample_entry() {
+        use shiguredo_mp4::Uint;
+        use shiguredo_mp4::boxes::*;
+
+        // src/video/h265.rs の h265_sample_entry() と同じフィールド値
+        let entry = SampleEntry::Hvc1(Hvc1Box {
+            visual: test_visual_fields(),
+            hvcc_box: HvccBox {
+                general_profile_compatibility_flags: 0x60000000,
+                general_constraint_indicator_flags: Uint::new(0xb00000000000),
+                general_level_idc: 123,
+                general_profile_space: Uint::new(0),
+                general_tier_flag: Uint::new(0),
+                num_temporal_layers: Uint::new(0),
+                temporal_id_nested: Uint::new(0),
+                min_spatial_segmentation_idc: Uint::new(0),
+                parallelism_type: Uint::new(0),
+                avg_frame_rate: 30,
+                constant_frame_rate: Uint::new(1),
+                length_size_minus_one: Uint::new(3),
+                nalu_arrays: vec![],
+                chroma_format_idc: Uint::new(1),
+                general_profile_idc: Uint::new(1),
+                bit_depth_luma_minus8: Uint::new(0),
+                bit_depth_chroma_minus8: Uint::new(0),
+            },
+            unknown_boxes: vec![],
+        });
+
+        let codec_str = video_codec_string_from_sample_entry(&entry);
+        assert!(codec_str.is_some(), "Hvc1 should produce a codec string");
+        let codec_str = codec_str.expect("infallible");
+        // Hvc1 は "hvc1" プレフィックスであること（hev1 ではない）
+        assert!(
+            codec_str.starts_with("hvc1."),
+            "Hvc1 box must produce hvc1 prefix, got: {codec_str}"
+        );
+        // profile_idc=1 であること
+        assert!(
+            codec_str.starts_with("hvc1.1."),
+            "profile_idc must be 1, got: {codec_str}"
+        );
+    }
+
+    /// AV1 の SampleEntry は src/video/av1.rs の av1_sample_entry() が生成する値と一致すること
+    #[test]
+    fn video_codec_string_from_av01_sample_entry() {
+        use shiguredo_mp4::Uint;
+        use shiguredo_mp4::boxes::*;
+
+        // src/video/av1.rs の av1_sample_entry() と同じフィールド値
+        let entry = SampleEntry::Av01(Av01Box {
+            visual: test_visual_fields(),
+            av1c_box: Av1cBox {
+                seq_profile: Uint::new(0),
+                seq_level_idx_0: Uint::new(0),
+                seq_tier_0: Uint::new(0),
+                high_bitdepth: Uint::new(0),
+                twelve_bit: Uint::new(0),
+                monochrome: Uint::new(0),
+                chroma_subsampling_x: Uint::new(1),
+                chroma_subsampling_y: Uint::new(1),
+                chroma_sample_position: Uint::new(0),
+                initial_presentation_delay_minus_one: None,
+                config_obus: vec![],
+            },
+            unknown_boxes: vec![],
+        });
+
+        assert_eq!(
+            video_codec_string_from_sample_entry(&entry),
+            // Profile 0, Level 0, Main Tier, 8-bit
+            Some("av01.0.00M.08".to_owned())
+        );
+    }
+
+    /// VP9 の SampleEntry は src/encoder/libvpx.rs の vp9_sample_entry() が生成する値と一致すること
+    #[test]
+    fn video_codec_string_from_vp09_sample_entry() {
+        use shiguredo_mp4::Uint;
+        use shiguredo_mp4::boxes::*;
+
+        // src/encoder/libvpx.rs の vp9_sample_entry() と同じフィールド値
+        let entry = SampleEntry::Vp09(Vp09Box {
+            visual: test_visual_fields(),
+            vpcc_box: VpccBox {
+                profile: 0,
+                level: 0,
+                bit_depth: Uint::new(8),
+                chroma_subsampling: Uint::new(1),
+                video_full_range_flag: Uint::new(0),
+                colour_primaries: 1,
+                transfer_characteristics: 1,
+                matrix_coefficients: 1,
+                codec_initialization_data: vec![],
+            },
+            unknown_boxes: vec![],
+        });
+
+        assert_eq!(
+            video_codec_string_from_sample_entry(&entry),
+            // Profile 0, Level 0, 8-bit
+            Some("vp09.00.00.08".to_owned())
+        );
+    }
+
+    /// from_sample_entries() がビデオとオーディオの SampleEntry から正確な CodecString を生成すること
+    #[test]
+    fn from_sample_entries_hvc1_aac() {
+        use shiguredo_mp4::Uint;
+        use shiguredo_mp4::boxes::*;
+
+        let video = SampleEntry::Hvc1(Hvc1Box {
+            visual: test_visual_fields(),
+            hvcc_box: HvccBox {
+                general_profile_compatibility_flags: 0x60000000,
+                general_constraint_indicator_flags: Uint::new(0xb00000000000),
+                general_level_idc: 123,
+                general_profile_space: Uint::new(0),
+                general_tier_flag: Uint::new(0),
+                num_temporal_layers: Uint::new(0),
+                temporal_id_nested: Uint::new(0),
+                min_spatial_segmentation_idc: Uint::new(0),
+                parallelism_type: Uint::new(0),
+                avg_frame_rate: 30,
+                constant_frame_rate: Uint::new(1),
+                length_size_minus_one: Uint::new(3),
+                nalu_arrays: vec![],
+                chroma_format_idc: Uint::new(1),
+                general_profile_idc: Uint::new(1),
+                bit_depth_luma_minus8: Uint::new(0),
+                bit_depth_chroma_minus8: Uint::new(0),
+            },
+            unknown_boxes: vec![],
+        });
+
+        let audio = SampleEntry::Mp4a(Mp4aBox {
+            audio: test_audio_fields(),
+            esds_box: EsdsBox {
+                es: shiguredo_mp4::descriptors::EsDescriptor {
+                    es_id: 1,
+                    stream_priority: Uint::new(0),
+                    depends_on_es_id: None,
+                    url_string: None,
+                    ocr_es_id: None,
+                    dec_config_descr: shiguredo_mp4::descriptors::DecoderConfigDescriptor {
+                        object_type_indication: 0x40,
+                        stream_type: Uint::new(0x05),
+                        up_stream: Uint::new(0),
+                        buffer_size_db: Uint::new(0),
+                        max_bitrate: 128000,
+                        avg_bitrate: 128000,
+                        dec_specific_info: Some(shiguredo_mp4::descriptors::DecoderSpecificInfo {
+                            payload: vec![0x11, 0x90],
+                        }),
+                    },
+                    sl_config_descr: shiguredo_mp4::descriptors::SlConfigDescriptor,
+                },
+            },
+            unknown_boxes: vec![],
+        });
+
+        let cs = CodecString::from_sample_entries(&video, &audio);
+        assert!(cs.is_some(), "Hvc1 + Mp4a should produce a CodecString");
+        let cs = cs.expect("infallible");
+        assert!(cs.video.starts_with("hvc1."), "video should be hvc1");
+        assert_eq!(cs.audio, "mp4a.40.2");
+    }
+
     #[test]
     fn video_codec_string_returns_none_for_audio() {
         use shiguredo_mp4::boxes::*;
