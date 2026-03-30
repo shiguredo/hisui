@@ -29,9 +29,7 @@ def _build_bootstrap_command(
     # オプションが含まれるため、obsws_bootstrap では --release のみ使う
     extra_args = shlex.split(os.environ.get("HISUI_E2E_CARGO_RUN_ARGS", ""))
     release_args = ["--release"] if "--release" in extra_args else []
-    extra_flags = []
-    if subscribe_program_tracks:
-        extra_flags.append("--subscribe-program-tracks")
+    subcommand = "subscribe-program" if subscribe_program_tracks else "receive"
     return (
         [
             "cargo",
@@ -41,6 +39,7 @@ def _build_bootstrap_command(
             "-p",
             "obsws_bootstrap",
             "--",
+            subcommand,
             "--host",
             host,
             "--port",
@@ -51,7 +50,6 @@ def _build_bootstrap_command(
             input_mp4_path,
             "--output-path",
             output_path,
-            *extra_flags,
         ],
         REPO_ROOT,
     )
