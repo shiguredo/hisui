@@ -62,6 +62,9 @@ struct VideoFrameData {
     v: Vec<u8>,
     width: i32,
     height: i32,
+    stride_y: usize,
+    stride_u: usize,
+    stride_v: usize,
     timestamp_us: i64,
 }
 
@@ -198,6 +201,9 @@ impl VideoSinkHandler for FrameRecordHandler {
             v: buffer.v_data().to_vec(),
             width: w,
             height: h,
+            stride_y: buffer.stride_y() as usize,
+            stride_u: buffer.stride_u() as usize,
+            stride_v: buffer.stride_v() as usize,
             timestamp_us: frame.timestamp_us(),
         };
         // バッファがいっぱいの場合はフレームを捨てる
@@ -2068,6 +2074,11 @@ fn encode_and_write_frame(
     }
 
     let encoder = vp9_encoder.as_mut().unwrap();
+    let compact_y = compact_i420_plane(&frame_data.y, width, height, frame_data.stride_y)?;
+    let uv_width = width.div_ceil(2);
+    let uv_height = height.div_ceil(2);
+    let compact_u = compact_i420_plane(&frame_data.u, uv_width, uv_height, frame_data.stride_u)?;
+    let compact_v = compact_i420_plane(&frame_data.v, uv_width, uv_height, frame_data.stride_v)?;
 
     let encode_options = shiguredo_libvpx::EncodeOptions {
         force_keyframe: false,
@@ -2075,9 +2086,9 @@ fn encode_and_write_frame(
     encoder
         .encode(
             &shiguredo_libvpx::ImageData::I420 {
-                y: &frame_data.y,
-                u: &frame_data.u,
-                v: &frame_data.v,
+                y: &compact_y,
+                u: &compact_u,
+                v: &compact_v,
             },
             &encode_options,
         )
@@ -2093,6 +2104,38 @@ fn encode_and_write_frame(
         )?;
     }
     Ok(())
+}
+
+fn compact_i420_plane(
+    plane: &[u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+) -> Result<Vec<u8>, String> {
+    if stride < width {
+        return Err(format!(
+            "invalid I420 stride: stride={stride}, width={width}, height={height}"
+        ));
+    }
+    let required_len = stride
+        .checked_mul(height)
+        .ok_or_else(|| format!("I420 plane size overflow: stride={stride}, height={height}"))?;
+    if plane.len() < required_len {
+        return Err(format!(
+            "insufficient I420 plane data: expected at least {required_len} bytes, got {}",
+            plane.len()
+        ));
+    }
+    if stride == width {
+        return Ok(plane[..width * height].to_vec());
+    }
+
+    let mut compact = Vec::with_capacity(width * height);
+    for row in 0..height {
+        let offset = row * stride;
+        compact.extend_from_slice(&plane[offset..offset + width]);
+    }
+    Ok(compact)
 }
 
 /// VP9 SampleEntry の値を返す（エンコーダー初期化時に呼ぶ）
