@@ -3703,6 +3703,17 @@ async fn stop_processors_staged_hls(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsHlsRun,
 ) -> crate::Result<()> {
+    // NOTE:
+    // ライブ用途では StopOutput / ToggleOutput への応答遅延を避けることを優先し、
+    // ここでは writer に finalize / cleanup を先行させる。
+    // この経路は上流 encoder / scaler の完全 drain を保証しないため、
+    // 停止直前の数フレームが最終セグメントに含まれない可能性がある。
+    //
+    // TODO:
+    // 末尾欠損まで解消するには、writer を先に閉じるのではなく、
+    // 上流から EOS 相当を伝播させる明示的な finish 経路が必要になる。
+    // terminate_processor() は abort ベースで停止するだけなので、
+    // encoder / scaler の残フレーム排出には使えない。
     let writer_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
@@ -4009,6 +4020,17 @@ async fn stop_processors_staged_dash(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsDashRun,
 ) -> crate::Result<()> {
+    // NOTE:
+    // ライブ用途では StopOutput / ToggleOutput への応答遅延を避けることを優先し、
+    // ここでは writer に finalize / cleanup を先行させる。
+    // この経路は上流 encoder / scaler の完全 drain を保証しないため、
+    // 停止直前の数フレームが最終 segment や MPD に反映されない可能性がある。
+    //
+    // TODO:
+    // 末尾欠損まで解消するには、writer を先に閉じるのではなく、
+    // 上流から EOS 相当を伝播させる明示的な finish 経路が必要になる。
+    // terminate_processor() は abort ベースで停止するだけなので、
+    // encoder / scaler の残フレーム排出には使えない。
     // 1. 各 writer に finalize / cleanup を要求し、停止を待つ。
     let writer_ids: Vec<crate::ProcessorId> = run
         .variant_runs
@@ -4319,7 +4341,9 @@ async fn finish_mixer_rpc(
     }
 }
 
-/// HLS writer に Finish RPC を送り、finalize / cleanup を促す。失敗時は terminate にフォールバックする。
+/// HLS writer に Finish RPC を送り、finalize / cleanup を促す。
+/// これは writer 側の入力購読を閉じるためのもので、上流の完全 drain は保証しない。
+/// 失敗時は terminate にフォールバックする。
 async fn finish_hls_writer_rpc(
     pipeline_handle: &crate::MediaPipelineHandle,
     processor_id: &crate::ProcessorId,
@@ -4352,7 +4376,9 @@ async fn finish_hls_writer_rpc(
     }
 }
 
-/// DASH writer に Finish RPC を送り、finalize / cleanup を促す。失敗時は terminate にフォールバックする。
+/// DASH writer に Finish RPC を送り、finalize / cleanup を促す。
+/// これは writer 側の入力購読を閉じるためのもので、上流の完全 drain は保証しない。
+/// 失敗時は terminate にフォールバックする。
 async fn finish_dash_writer_rpc(
     pipeline_handle: &crate::MediaPipelineHandle,
     processor_id: &crate::ProcessorId,
