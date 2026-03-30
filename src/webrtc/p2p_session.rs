@@ -2107,7 +2107,7 @@ async fn webrtc_source_forward_task(
                 width: width as usize,
                 height: height as usize,
             }),
-            timestamp: std::time::Duration::from_micros(frame.timestamp_us as u64),
+            timestamp: std::time::Duration::from_micros(frame.timestamp_us.max(0) as u64),
             sample_entry: None,
             data,
         };
