@@ -52,6 +52,10 @@ enum PcEvent {
     RemoteTrack {
         transceiver: RtpTransceiver,
     },
+    /// client が remote track を削除した
+    RemoteTrackRemoved {
+        track_id: String,
+    },
 }
 
 enum IceObserverEvent {
@@ -134,6 +138,12 @@ impl PeerConnectionObserverHandler for P2pPcObserverHandler {
 
     fn on_track(&mut self, transceiver: RtpTransceiver) {
         let _ = self.event_tx.send(PcEvent::RemoteTrack { transceiver });
+    }
+
+    fn on_remove_track(&mut self, receiver: shiguredo_webrtc::RtpReceiver) {
+        let track = receiver.track();
+        let track_id = track.id().unwrap_or_default();
+        let _ = self.event_tx.send(PcEvent::RemoteTrackRemoved { track_id });
     }
 
     fn on_ice_candidate(&mut self, candidate: shiguredo_webrtc::IceCandidateRef<'_>) {
@@ -421,6 +431,9 @@ impl WebRtcP2pSessionManager {
                     }
                     PcEvent::RemoteTrack { transceiver } => {
                         handle_remote_track(sess, transceiver);
+                    }
+                    PcEvent::RemoteTrackRemoved { track_id } => {
+                        handle_remote_track_removed(sess, &track_id);
                     }
                 }
             }
@@ -1551,6 +1564,30 @@ fn handle_remote_track(sess: &mut Session, transceiver: RtpTransceiver) {
     );
 }
 
+/// client が remote track を削除した際のハンドラ
+fn handle_remote_track_removed(sess: &mut Session, track_id: &str) {
+    tracing::info!("Remote video track removed: track_id={track_id}");
+
+    // attach 済みなら detach する
+    if sess
+        .remote_video_tracks
+        .get(track_id)
+        .is_some_and(|r| r.attached_input_name.is_some())
+    {
+        let input_name = sess.remote_video_tracks[track_id]
+            .attached_input_name
+            .clone();
+        detach_remote_track(sess, track_id);
+        // coordinator の trackId を null に戻す
+        if let Some(name) = input_name {
+            sess.coordinator_handle
+                .update_webrtc_source_track_id(&name, None);
+        }
+    }
+
+    sess.remote_video_tracks.remove(track_id);
+}
+
 enum TrackKind {
     Video,
     Audio,
@@ -1858,12 +1895,11 @@ async fn webrtc_source_forward_task(
     chroma_key: Option<ChromaKeyConfig>,
 ) {
     loop {
-        // ノンブロッキングで受信を試みる
+        // ノンブロッキングで受信を試み、空なら短い sleep で待機する
         let frame = match frame_rx.try_recv() {
             Ok(frame) => frame,
             Err(std::sync::mpsc::TryRecvError::Empty) => {
-                // フレームがないので一旦 yield して次のイテレーションで再試行
-                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                 continue;
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
@@ -1964,6 +2000,31 @@ fn handle_detach_webrtc_video_track(
         }
     };
 
+    // inputName の存在と kind を検証する
+    let snapshot = sess
+        .bootstrap_tracks
+        .values()
+        .find(|s| s.input_name == input_name);
+    let Some(snapshot) = snapshot else {
+        return crate::obsws::response::build_request_response_error(
+            DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            &format!("input '{}' not found", input_name),
+        );
+    };
+    if snapshot.input_kind != "webrtc_source" {
+        return crate::obsws::response::build_request_response_error(
+            DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
+            &format!(
+                "input '{}' is not a webrtc_source (kind: {})",
+                input_name, snapshot.input_kind
+            ),
+        );
+    }
+
     // inputName に attach されている track を検索して detach
     let attached_track_id: Option<String> = sess
         .remote_video_tracks
@@ -2005,6 +2066,17 @@ fn detach_remote_track(sess: &mut Session, track_id: &str) {
     }
     if let Some(sink) = remote._sink.take() {
         remote.track.remove_sink(&sink);
+    }
+    // pipeline の publisher 登録を解除して再 attach 可能にする
+    if let Some(ref input_name) = remote.attached_input_name {
+        let video_track_id = sess
+            .bootstrap_tracks
+            .values()
+            .find(|s| s.input_name == *input_name)
+            .and_then(|s| s.video_track_id.clone());
+        if let Some(vid) = video_track_id {
+            sess.processor_handle.unpublish_track(vid);
+        }
     }
     remote.attached_input_name = None;
 }

@@ -123,6 +123,12 @@ impl MediaPipeline {
                 let result = self.handle_publish_track(processor_id, track_id);
                 let _ = reply_tx.send(result);
             }
+            MediaPipelineCommand::UnpublishTrack {
+                processor_id,
+                track_id,
+            } => {
+                self.handle_unpublish_track(processor_id, track_id);
+            }
             MediaPipelineCommand::SubscribeTrack {
                 processor_id,
                 track_id,
@@ -356,6 +362,24 @@ impl MediaPipeline {
             rx: command_rx,
             txs: Vec::new(),
         })
+    }
+
+    fn handle_unpublish_track(&mut self, processor_id: ProcessorId, track_id: TrackId) {
+        tracing::debug!("unpublish track: processor={processor_id}, track={track_id}");
+
+        let Some(track) = self.tracks.get_mut(&track_id) else {
+            return;
+        };
+        // publisher が一致する場合のみクリアする
+        if track.publisher_processor_id.as_ref() != Some(&processor_id) {
+            return;
+        }
+        track.publisher_command_tx = None;
+        track.publisher_processor_id = None;
+
+        if let Some(state) = self.processors.get_mut(&processor_id) {
+            state.published_track_ids.retain(|id| *id != track_id);
+        }
     }
 
     fn handle_register_processor(
@@ -747,6 +771,10 @@ pub(crate) enum MediaPipelineCommand {
         track_id: TrackId,
         reply_tx: tokio::sync::oneshot::Sender<Result<MessageSender, PublishTrackError>>,
     },
+    UnpublishTrack {
+        processor_id: ProcessorId,
+        track_id: TrackId,
+    },
     SubscribeTrack {
         processor_id: ProcessorId,
         track_id: TrackId,
@@ -983,6 +1011,14 @@ impl ProcessorHandle {
             Ok(result) => result,
             Err(_) => Err(PublishTrackError::PipelineTerminated),
         }
+    }
+
+    pub fn unpublish_track(&self, track_id: TrackId) {
+        let command = MediaPipelineCommand::UnpublishTrack {
+            processor_id: self.processor_id.clone(),
+            track_id,
+        };
+        self.pipeline_handle.send(command);
     }
 
     pub fn subscribe_track(&self, track_id: TrackId) -> MessageReceiver {
