@@ -1608,6 +1608,7 @@ async fn run_client(
     // VP9 エンコーダー（遅延初期化）
     let mut vp9_encoder: Option<shiguredo_libvpx::Encoder> = None;
     let mut vp9_sample_entry: Option<SampleEntry> = None;
+    let mut vp9_encoder_size: Option<(usize, usize)> = None;
 
     // Opus エンコーダー（遅延初期化）
     let mut opus_encoder: Option<shiguredo_opus::Encoder> = None;
@@ -1646,6 +1647,7 @@ async fn run_client(
                 &frame_data,
                 &mut vp9_encoder,
                 &mut vp9_sample_entry,
+                &mut vp9_encoder_size,
                 &mut mp4_writer,
             )?;
             processed_frames += 1;
@@ -1880,6 +1882,7 @@ async fn run_client(
                     &frame_data,
                     &mut vp9_encoder,
                     &mut vp9_sample_entry,
+                    &mut vp9_encoder_size,
                     &mut mp4_writer,
                 )?;
             }
@@ -1938,6 +1941,7 @@ async fn run_client(
             &frame_data,
             &mut vp9_encoder,
             &mut vp9_sample_entry,
+            &mut vp9_encoder_size,
             &mut mp4_writer,
         )?;
         if tokio::time::Instant::now() >= drain_deadline {
@@ -2054,6 +2058,7 @@ fn encode_and_write_frame(
     frame_data: &VideoFrameData,
     vp9_encoder: &mut Option<shiguredo_libvpx::Encoder>,
     vp9_sample_entry: &mut Option<SampleEntry>,
+    vp9_encoder_size: &mut Option<(usize, usize)>,
     mp4_writer: &mut SimpleMp4Writer,
 ) -> Result<(), String> {
     let width = frame_data.width as usize;
@@ -2071,9 +2076,22 @@ fn encode_and_write_frame(
             .map_err(|e| format!("failed to create VP9 encoder: {e}"))?;
         *vp9_encoder = Some(encoder);
         *vp9_sample_entry = Some(vp9_sample_entry_value(width, height));
+        *vp9_encoder_size = Some((width, height));
     }
 
     let encoder = vp9_encoder.as_mut().unwrap();
+    if let Some((expected_width, expected_height)) = vp9_encoder_size {
+        if *expected_width != width || *expected_height != height {
+            tracing::info!(
+                "skip frame with different video size: expected={}x{}, got={}x{}",
+                expected_width,
+                expected_height,
+                width,
+                height
+            );
+            return Ok(());
+        }
+    }
     let compact_y = compact_i420_plane(&frame_data.y, width, height, frame_data.stride_y)?;
     let uv_width = width.div_ceil(2);
     let uv_height = height.div_ceil(2);
