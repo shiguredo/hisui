@@ -2159,7 +2159,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
             request_type: Some("SetOutputSettings".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(format!(
-                    r#"{{"outputName":"mpeg_dash","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"variants":[{{"videoBitrate":2000000,"audioBitrate":128000}},{{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}}]}}}}"#,
+                    r#"{{"outputName":"mpeg_dash","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"videoCodec":"VP9","audioCodec":"OPUS","variants":[{{"videoBitrate":2000000,"audioBitrate":128000}},{{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}}]}}}}"#,
                     dash_output_dir.display()
                 ))
                 .expect("requestData must be valid json"),
@@ -2192,6 +2192,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
 
     // ABR 結合 MPD は SampleEntry から codec string が確定してから書き出される。
     // manifest.mpd の出現を待ち、codecs 属性が実際の SampleEntry と一致することを検証する。
+    // VP9 + Opus は libvpx / opus が全環境で利用可能なため、エンコーダー不在で失敗しない。
     let manifest_path = dash_output_dir.join("manifest.mpd");
     for _ in 0..60 {
         if manifest_path.exists() {
@@ -2210,14 +2211,14 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
         .codecs
         .as_ref()
         .expect("AdaptationSet.codecs must be present");
-    // テスト素材は H.264 + AAC なので codecs は avc1 と mp4a を含むこと
+    // VP9 + Opus を指定しているので codecs は vp09 と opus を含むこと
     assert!(
-        codecs.contains("avc1."),
-        "codecs must contain avc1 prefix from actual SampleEntry, got: {codecs}"
+        codecs.contains("vp09."),
+        "codecs must contain vp09 prefix from actual SampleEntry, got: {codecs}"
     );
     assert!(
-        codecs.contains("mp4a.40."),
-        "codecs must contain mp4a.40 prefix from actual SampleEntry, got: {codecs}"
+        codecs.contains("opus"),
+        "codecs must contain opus from actual SampleEntry, got: {codecs}"
     );
 
     let set_scene_action = session
