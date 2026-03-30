@@ -48,6 +48,11 @@ struct BootstrapSession {
     event_rx: mpsc::UnboundedReceiver<ClientEvent>,
     ice_rx: mpsc::UnboundedReceiver<IceObserverEvent>,
     ice_candidates: Vec<crate::sdp::GatheredIceCandidate>,
+    // libwebrtc の Thread は PeerConnectionFactory が内部で参照し続けるため、
+    // Session のライフタイム全体にわたって保持する必要がある。
+    _network: Thread,
+    _worker: Thread,
+    _signaling: Thread,
 }
 
 /// WebRTC factory 初期化 → PeerConnection 作成 → offer/answer bootstrap を行う共通処理
@@ -120,6 +125,9 @@ async fn bootstrap_session(host: &str, port: u16) -> Result<BootstrapSession, St
         event_rx,
         ice_rx,
         ice_candidates: initial_ice_candidates,
+        _network: network,
+        _worker: worker,
+        _signaling: signaling,
     })
 }
 
@@ -142,6 +150,7 @@ pub async fn run_client(
         mut event_rx,
         ice_rx,
         ice_candidates: initial_ice_candidates,
+        ..
     } = session;
 
     // 統計カウンタ
@@ -693,6 +702,7 @@ pub async fn run_send_video_client(
         mut event_rx,
         ice_rx,
         ice_candidates: initial_ice_candidates,
+        ..
     } = session;
 
     // 統計カウンタ
