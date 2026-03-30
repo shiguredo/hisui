@@ -31,6 +31,7 @@ use tokio::sync::{mpsc, oneshot};
 const SDP_TIMEOUT: Duration = Duration::from_secs(5);
 const CREATE_INPUT_REQUEST_ID: &str = "req-create-input";
 const GET_WEBRTC_STATS_REQUEST_ID: &str = "req-get-webrtc-stats";
+const SUBSCRIBE_PROGRAM_TRACKS_REQUEST_ID: &str = "req-subscribe-program-tracks";
 const MAX_FRAMES_PER_POLL: usize = 8;
 const INITIAL_VIDEO_FRAME_GRACE: Duration = Duration::from_secs(2);
 
@@ -56,16 +57,21 @@ enum ClientEvent {
 
 // VideoSinkHandler から送信するフレームデータ
 struct VideoFrameData {
+    track_id: String,
     y: Vec<u8>,
     u: Vec<u8>,
     v: Vec<u8>,
     width: i32,
     height: i32,
+    stride_y: usize,
+    stride_u: usize,
+    stride_v: usize,
     timestamp_us: i64,
 }
 
 // AudioTrackSinkHandler から送信する音声データ
 struct AudioFrameData {
+    track_id: String,
     pcm: Vec<i16>,
     sample_rate: i32,
     channels: usize,
@@ -168,10 +174,9 @@ impl DataChannelObserverHandler for ObswsDcHandler {
 
 // フレームデータをチャネルで送信するハンドラ
 struct FrameRecordHandler {
+    track_id: String,
     frame_count: Arc<AtomicUsize>,
     first_frame_logged: Arc<AtomicBool>,
-    width: Arc<AtomicUsize>,
-    height: Arc<AtomicUsize>,
     frame_tx: std::sync::mpsc::SyncSender<VideoFrameData>,
 }
 
@@ -180,10 +185,8 @@ impl VideoSinkHandler for FrameRecordHandler {
         let previous = self.frame_count.fetch_add(1, Ordering::Relaxed);
         let w = frame.width();
         let h = frame.height();
-        self.width.store(w as usize, Ordering::Relaxed);
-        self.height.store(h as usize, Ordering::Relaxed);
         if previous == 0 && !self.first_frame_logged.swap(true, Ordering::Relaxed) {
-            tracing::warn!(
+            tracing::info!(
                 "first video frame received: width={w}, height={h}, timestamp_us={}",
                 frame.timestamp_us()
             );
@@ -192,11 +195,15 @@ impl VideoSinkHandler for FrameRecordHandler {
         // I420 バッファからプレーンデータをコピーする
         let buffer = frame.buffer();
         let data = VideoFrameData {
+            track_id: self.track_id.clone(),
             y: buffer.y_data().to_vec(),
             u: buffer.u_data().to_vec(),
             v: buffer.v_data().to_vec(),
             width: w,
             height: h,
+            stride_y: buffer.stride_y() as usize,
+            stride_u: buffer.stride_u() as usize,
+            stride_v: buffer.stride_v() as usize,
             timestamp_us: frame.timestamp_us(),
         };
         // バッファがいっぱいの場合はフレームを捨てる
@@ -206,6 +213,7 @@ impl VideoSinkHandler for FrameRecordHandler {
 
 // 受信音声データをチャネルで送信するハンドラ
 struct AudioRecordHandler {
+    track_id: String,
     audio_frame_count: Arc<AtomicUsize>,
     audio_tx: std::sync::mpsc::SyncSender<AudioFrameData>,
 }
@@ -229,6 +237,7 @@ impl AudioTrackSinkHandler for AudioRecordHandler {
             .map(|chunk| i16::from_ne_bytes([chunk[0], chunk[1]]))
             .collect();
         let _ = self.audio_tx.try_send(AudioFrameData {
+            track_id: self.track_id.clone(),
             pcm,
             sample_rate,
             channels: number_of_channels,
@@ -596,6 +605,20 @@ fn make_get_webrtc_stats_request() -> String {
     .to_string()
 }
 
+fn make_subscribe_program_tracks_request() -> String {
+    nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "SubscribeProgramTracks")?;
+                f.member("requestId", SUBSCRIBE_PROGRAM_TRACKS_REQUEST_ID)
+            }),
+        )
+    })
+    .to_string()
+}
+
 fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     let json = nojson::RawJson::parse(text).ok()?;
     let root = json.value();
@@ -634,6 +657,63 @@ fn parse_obsws_request_response(text: &str) -> Option<Result<(), String>> {
     Some(Err(
         comment.unwrap_or_else(|| "CreateInput request failed".to_owned())
     ))
+}
+
+struct ProgramTrackIds {
+    video_track_id: String,
+    audio_track_id: String,
+}
+
+fn parse_subscribe_program_tracks_response(text: &str) -> Option<Result<ProgramTrackIds, String>> {
+    let json = nojson::RawJson::parse(text).ok()?;
+    let root = json.value();
+    let op: i64 = root
+        .to_member("op")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if op != 7 {
+        return None;
+    }
+
+    let d = root.to_member("d").ok()?.required().ok()?;
+    let request_id: String = d
+        .to_member("requestId")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if request_id != SUBSCRIBE_PROGRAM_TRACKS_REQUEST_ID {
+        return None;
+    }
+
+    let request_status = d.to_member("requestStatus").ok()?.required().ok()?;
+    let result: bool = request_status
+        .to_member("result")
+        .and_then(|v| v.required()?.try_into())
+        .ok()?;
+    if result {
+        let response_data = d.to_member("responseData").ok()?.required().ok()?;
+        let video_track_id: String = response_data
+            .to_member("videoTrackId")
+            .and_then(|v| v.required()?.try_into())
+            .ok()?;
+        let audio_track_id: String = response_data
+            .to_member("audioTrackId")
+            .and_then(|v| v.required()?.try_into())
+            .ok()?;
+        return Some(Ok(ProgramTrackIds {
+            video_track_id,
+            audio_track_id,
+        }));
+    }
+
+    let comment: Option<String> =
+        if let Some(v) = request_status.to_member("comment").ok()?.optional() {
+            v.try_into().ok()
+        } else {
+            None
+        };
+    Some(Err(comment.unwrap_or_else(|| {
+        "SubscribeProgramTracks request failed".to_owned()
+    })))
 }
 
 fn parse_obsws_server_webrtc_stats_response(text: &str) -> Option<Result<String, String>> {
@@ -907,6 +987,10 @@ fn main() -> noargs::Result<()> {
         .doc("obsws 経由で入力として追加する MP4 ファイルパス")
         .take(&mut args)
         .then(|o| o.value().parse())?;
+    let subscribe_program_tracks = noargs::flag("subscribe-program-tracks")
+        .doc("Program 合成結果トラックを購読する")
+        .take(&mut args)
+        .is_present();
 
     args.finish()?;
 
@@ -937,6 +1021,7 @@ fn main() -> noargs::Result<()> {
                 duration,
                 &output_path,
                 &input_mp4_path,
+                subscribe_program_tracks,
             ))
             .await
     });
@@ -955,7 +1040,8 @@ fn main() -> noargs::Result<()> {
                 f.member("video_samples_written", stats.video_samples_written)?;
                 f.member("audio_samples_written", stats.audio_samples_written)?;
                 f.member("connection_state", stats.connection_state.as_str())?;
-                f.member("webrtc_stats_error", stats.webrtc_stats_error.as_str())
+                f.member("webrtc_stats_error", stats.webrtc_stats_error.as_str())?;
+                f.member("program_tracks_subscribed", stats.program_tracks_subscribed)
             });
             println!("{json}");
             Ok(())
@@ -980,6 +1066,7 @@ struct Stats {
     audio_samples_written: usize,
     connection_state: String,
     webrtc_stats_error: String,
+    program_tracks_subscribed: bool,
 }
 
 async fn collect_webrtc_stats_json(pc: &PeerConnection) -> Result<String, String> {
@@ -1160,7 +1247,7 @@ fn summarize_sdp_for_log(sdp: &str) -> String {
 }
 
 fn log_sdp_summary(label: &str, sdp: &str) {
-    tracing::warn!("{label}:\n{}", summarize_sdp_for_log(sdp));
+    tracing::info!("{label}:\n{}", summarize_sdp_for_log(sdp));
 }
 
 fn log_transceiver_receiver_state(label: &str, transceiver: &RtpTransceiver) {
@@ -1168,7 +1255,7 @@ fn log_transceiver_receiver_state(label: &str, transceiver: &RtpTransceiver) {
     let track = receiver.track();
     let kind = track.kind().unwrap_or_default();
     let track_id = track.id().unwrap_or_default();
-    tracing::warn!("{label}: receiver_track_kind={kind}, receiver_track_id={track_id}");
+    tracing::info!("{label}: receiver_track_kind={kind}, receiver_track_id={track_id}");
 }
 
 #[derive(Clone)]
@@ -1207,8 +1294,6 @@ struct RetainedAudioSink {
 struct VideoSinkAttachState<'a> {
     video_frames: &'a Arc<AtomicUsize>,
     first_video_frame_logged: &'a Arc<AtomicBool>,
-    video_width: &'a Arc<AtomicUsize>,
-    video_height: &'a Arc<AtomicUsize>,
     frame_tx: &'a std::sync::mpsc::SyncSender<VideoFrameData>,
 }
 
@@ -1227,10 +1312,9 @@ fn attach_video_sink(
     }
     let mut video_track = video_track;
     let sink = VideoSink::new_with_handler(Box::new(FrameRecordHandler {
+        track_id: track_id.to_owned(),
         frame_count: state.video_frames.clone(),
         first_frame_logged: state.first_video_frame_logged.clone(),
-        width: state.video_width.clone(),
-        height: state.video_height.clone(),
         frame_tx: state.frame_tx.clone(),
     }));
     let wants = VideoSinkWants::default();
@@ -1258,6 +1342,7 @@ fn attach_audio_sink(
     }
     let mut audio_track = audio_track;
     let sink = AudioTrackSink::new_with_handler(Box::new(AudioRecordHandler {
+        track_id: track_id.to_owned(),
         audio_frame_count: audio_frames.clone(),
         audio_tx: audio_tx.clone(),
     }));
@@ -1267,6 +1352,30 @@ fn attach_audio_sink(
         track: audio_track,
         sink,
     });
+}
+
+fn should_write_video_frame(
+    subscribe_program_tracks: bool,
+    track_id: &str,
+    program_video_track_id: Option<&str>,
+) -> bool {
+    if subscribe_program_tracks {
+        program_video_track_id == Some(track_id)
+    } else {
+        true
+    }
+}
+
+fn should_write_audio_frame(
+    subscribe_program_tracks: bool,
+    track_id: &str,
+    program_audio_track_id: Option<&str>,
+) -> bool {
+    if subscribe_program_tracks {
+        program_audio_track_id == Some(track_id)
+    } else {
+        true
+    }
 }
 
 async fn teardown_client(
@@ -1437,6 +1546,7 @@ async fn run_client(
     duration_secs: u64,
     output_path: &str,
     input_mp4_path: &str,
+    subscribe_program_tracks: bool,
 ) -> Result<Stats, String> {
     // WebRTC ファクトリを初期化する
     let mut network = Thread::new_with_socket_server();
@@ -1506,10 +1616,12 @@ async fn run_client(
     let audio_tracks = Arc::new(AtomicUsize::new(0));
     let video_frames = Arc::new(AtomicUsize::new(0));
     let audio_frames = Arc::new(AtomicUsize::new(0));
-    let video_width = Arc::new(AtomicUsize::new(0));
-    let video_height = Arc::new(AtomicUsize::new(0));
     let first_video_frame_logged = Arc::new(AtomicBool::new(false));
     let connection_state = Arc::new(std::sync::Mutex::new("new".to_owned()));
+    let mut output_video_width = 0;
+    let mut output_video_height = 0;
+    let mut program_video_track_id: Option<String> = None;
+    let mut program_audio_track_id: Option<String> = None;
 
     // フレームデータ受信用チャネル
     let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<VideoFrameData>(60);
@@ -1531,8 +1643,6 @@ async fn run_client(
     let video_sink_attach_state = VideoSinkAttachState {
         video_frames: &video_frames,
         first_video_frame_logged: &first_video_frame_logged,
-        video_width: &video_width,
-        video_height: &video_height,
         frame_tx: &frame_tx,
     };
 
@@ -1554,6 +1664,8 @@ async fn run_client(
     let mut obsws_create_input_sent = false;
     let mut obsws_create_input_succeeded = false;
     let mut obsws_ready = false;
+    let mut obsws_subscribe_program_sent = false;
+    let mut obsws_subscribe_program_succeeded = false;
     let mut server_webrtc_stats_json = None;
     let mut playout_interval = tokio::time::interval(Duration::from_millis(10));
     playout_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1571,11 +1683,20 @@ async fn run_client(
             let Ok(frame_data) = frame_rx.try_recv() else {
                 break;
             };
+            if !should_write_video_frame(
+                subscribe_program_tracks,
+                &frame_data.track_id,
+                program_video_track_id.as_deref(),
+            ) {
+                continue;
+            }
             encode_and_write_frame(
                 &frame_data,
                 &mut vp9_encoder,
                 &mut vp9_sample_entry,
                 &mut mp4_writer,
+                &mut output_video_width,
+                &mut output_video_height,
             )?;
             processed_frames += 1;
         }
@@ -1589,6 +1710,13 @@ async fn run_client(
             let Ok(audio_data) = audio_rx.try_recv() else {
                 break;
             };
+            if !should_write_audio_frame(
+                subscribe_program_tracks,
+                &audio_data.track_id,
+                program_audio_track_id.as_deref(),
+            ) {
+                continue;
+            }
             audio_channels = audio_data.channels as u8;
             encode_and_write_audio_frame(
                 &audio_data,
@@ -1613,7 +1741,7 @@ async fn run_client(
             && dc.state() == DataChannelState::Open
         {
             let request = make_create_mp4_input_request(input_mp4_path);
-            tracing::warn!(
+            tracing::info!(
                 "sending CreateInput request: input_mp4_path={input_mp4_path}, duration_secs={duration_secs}"
             );
             if !dc.send(request.as_bytes(), false) {
@@ -1635,7 +1763,7 @@ async fn run_client(
 
         match event {
             ClientEvent::ConnectionChange(state) => {
-                tracing::warn!("peer connection state changed: {state:?}");
+                tracing::info!("peer connection state changed: {state:?}");
                 let state_str = match state {
                     PeerConnectionState::New => "new",
                     PeerConnectionState::Connecting => "connecting",
@@ -1656,7 +1784,7 @@ async fn run_client(
                 match kind.as_str() {
                     "video" => {
                         video_tracks.fetch_add(1, Ordering::Relaxed);
-                        tracing::warn!("video track received: track_id={track_id}");
+                        tracing::info!("video track received: track_id={track_id}");
                         attach_video_sink(
                             &mut retained,
                             &track_id,
@@ -1666,7 +1794,7 @@ async fn run_client(
                     }
                     "audio" => {
                         audio_tracks.fetch_add(1, Ordering::Relaxed);
-                        tracing::warn!("audio track received: track_id={track_id}");
+                        tracing::info!("audio track received: track_id={track_id}");
                         attach_audio_sink(
                             &mut retained,
                             &track_id,
@@ -1684,7 +1812,7 @@ async fn run_client(
             }
             ClientEvent::DataChannel(dc, observer) => {
                 let label = dc.label().unwrap_or_default();
-                tracing::warn!(
+                tracing::info!(
                     "data channel received: label={label}, state={:?}",
                     dc.state()
                 );
@@ -1700,7 +1828,7 @@ async fn run_client(
             ClientEvent::SignalingMessage { data } => {
                 let msg_type = parse_signaling_type(&data).unwrap_or_default();
                 if msg_type == "offer" {
-                    tracing::warn!("renegotiation offer received from signaling data channel");
+                    tracing::info!("renegotiation offer received from signaling data channel");
                     // renegotiation: サーバーからの offer に answer を返す
                     if let Some(sdp) = parse_signaling_sdp(&data) {
                         log_sdp_summary("renegotiation remote offer SDP summary", &sdp);
@@ -1731,7 +1859,7 @@ async fn run_client(
                                 log_sdp_summary("renegotiation local answer SDP summary", &answer);
                                 let answer_json = make_answer_json(&answer);
                                 if let Some(dc) = &retained.signaling_dc {
-                                    tracing::warn!(
+                                    tracing::info!(
                                         "sending renegotiation answer on signaling data channel"
                                     );
                                     dc.send(answer_json.as_bytes(), false);
@@ -1750,9 +1878,40 @@ async fn run_client(
                         match result {
                             Ok(()) => {
                                 obsws_create_input_succeeded = true;
+                                // CreateInput 成功後に SubscribeProgramTracks を送信する
+                                if subscribe_program_tracks
+                                    && !obsws_subscribe_program_sent
+                                    && let Some(dc) = &retained.obsws_dc
+                                    && dc.state() == DataChannelState::Open
+                                {
+                                    let request = make_subscribe_program_tracks_request();
+                                    tracing::info!("sending SubscribeProgramTracks request");
+                                    if !dc.send(request.as_bytes(), false) {
+                                        return Err(
+                                            "failed to send SubscribeProgramTracks request"
+                                                .to_owned(),
+                                        );
+                                    }
+                                    obsws_subscribe_program_sent = true;
+                                }
                             }
                             Err(reason) => {
                                 return Err(format!("CreateInput request failed: {reason}"));
+                            }
+                        }
+                    }
+                    if let Some(result) = parse_subscribe_program_tracks_response(text) {
+                        match result {
+                            Ok(track_ids) => {
+                                obsws_subscribe_program_succeeded = true;
+                                program_video_track_id = Some(track_ids.video_track_id);
+                                program_audio_track_id = Some(track_ids.audio_track_id);
+                                tracing::info!("SubscribeProgramTracks succeeded");
+                            }
+                            Err(reason) => {
+                                return Err(format!(
+                                    "SubscribeProgramTracks request failed: {reason}"
+                                ));
                             }
                         }
                     }
@@ -1776,11 +1935,20 @@ async fn run_client(
         let grace_deadline = tokio::time::Instant::now() + INITIAL_VIDEO_FRAME_GRACE;
         while tokio::time::Instant::now() < grace_deadline {
             while let Ok(frame_data) = frame_rx.try_recv() {
+                if !should_write_video_frame(
+                    subscribe_program_tracks,
+                    &frame_data.track_id,
+                    program_video_track_id.as_deref(),
+                ) {
+                    continue;
+                }
                 encode_and_write_frame(
                     &frame_data,
                     &mut vp9_encoder,
                     &mut vp9_sample_entry,
                     &mut mp4_writer,
+                    &mut output_video_width,
+                    &mut output_video_height,
                 )?;
             }
             if video_frames.load(Ordering::Relaxed) > 0 {
@@ -1834,11 +2002,20 @@ async fn run_client(
     // 残りのフレームを処理する
     let drain_deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while let Ok(frame_data) = frame_rx.try_recv() {
+        if !should_write_video_frame(
+            subscribe_program_tracks,
+            &frame_data.track_id,
+            program_video_track_id.as_deref(),
+        ) {
+            continue;
+        }
         encode_and_write_frame(
             &frame_data,
             &mut vp9_encoder,
             &mut vp9_sample_entry,
             &mut mp4_writer,
+            &mut output_video_width,
+            &mut output_video_height,
         )?;
         if tokio::time::Instant::now() >= drain_deadline {
             break;
@@ -1846,6 +2023,13 @@ async fn run_client(
     }
     // 残りの音声フレームを処理する
     while let Ok(audio_data) = audio_rx.try_recv() {
+        if !should_write_audio_frame(
+            subscribe_program_tracks,
+            &audio_data.track_id,
+            program_audio_track_id.as_deref(),
+        ) {
+            continue;
+        }
         audio_channels = audio_data.channels as u8;
         encode_and_write_audio_frame(
             &audio_data,
@@ -1910,36 +2094,42 @@ async fn run_client(
         tracing::warn!("CreateInput request did not complete before deadline");
         return Err("CreateInput request did not complete".to_owned());
     }
+    if subscribe_program_tracks && !obsws_subscribe_program_succeeded {
+        tracing::warn!("SubscribeProgramTracks request did not complete before deadline");
+        return Err("SubscribeProgramTracks request did not complete".to_owned());
+    }
     let final_connection_state = connection_state
         .lock()
         .expect("connection_state mutex should not be poisoned")
         .clone();
-    tracing::warn!(
-        "bootstrap finished: video_tracks={}, video_frames={}, audio_tracks={}, audio_frames={}, video_width={}, video_height={}, video_samples_written={}, audio_samples_written={}, connection_state={}, webrtc_stats_error={}",
+    tracing::info!(
+        "bootstrap finished: video_tracks={}, video_frames={}, audio_tracks={}, audio_frames={}, video_width={}, video_height={}, video_samples_written={}, audio_samples_written={}, connection_state={}, webrtc_stats_error={}, program_tracks_subscribed={}",
         video_tracks.load(Ordering::Relaxed),
         video_frames.load(Ordering::Relaxed),
         audio_tracks.load(Ordering::Relaxed),
         audio_frames.load(Ordering::Relaxed),
-        video_width.load(Ordering::Relaxed),
-        video_height.load(Ordering::Relaxed),
+        output_video_width,
+        output_video_height,
         mp4_writer.video_sample_count,
         mp4_writer.audio_sample_count,
         final_connection_state,
         webrtc_stats_error.as_str(),
+        obsws_subscribe_program_succeeded,
     );
     Ok(Stats {
         video_tracks: video_tracks.load(Ordering::Relaxed),
         audio_tracks: audio_tracks.load(Ordering::Relaxed),
         video_frames: video_frames.load(Ordering::Relaxed),
         audio_frames: audio_frames.load(Ordering::Relaxed),
-        video_width: video_width.load(Ordering::Relaxed),
-        video_height: video_height.load(Ordering::Relaxed),
+        video_width: output_video_width,
+        video_height: output_video_height,
         video_codec,
         audio_codec,
         video_samples_written: mp4_writer.video_sample_count,
         audio_samples_written: mp4_writer.audio_sample_count,
         connection_state: connection_state.lock().unwrap().clone(),
         webrtc_stats_error,
+        program_tracks_subscribed: obsws_subscribe_program_succeeded,
     })
 }
 
@@ -1949,6 +2139,8 @@ fn encode_and_write_frame(
     vp9_encoder: &mut Option<shiguredo_libvpx::Encoder>,
     vp9_sample_entry: &mut Option<SampleEntry>,
     mp4_writer: &mut SimpleMp4Writer,
+    output_video_width: &mut usize,
+    output_video_height: &mut usize,
 ) -> Result<(), String> {
     let width = frame_data.width as usize;
     let height = frame_data.height as usize;
@@ -1968,6 +2160,11 @@ fn encode_and_write_frame(
     }
 
     let encoder = vp9_encoder.as_mut().unwrap();
+    let compact_y = compact_i420_plane(&frame_data.y, width, height, frame_data.stride_y)?;
+    let uv_width = width.div_ceil(2);
+    let uv_height = height.div_ceil(2);
+    let compact_u = compact_i420_plane(&frame_data.u, uv_width, uv_height, frame_data.stride_u)?;
+    let compact_v = compact_i420_plane(&frame_data.v, uv_width, uv_height, frame_data.stride_v)?;
 
     let encode_options = shiguredo_libvpx::EncodeOptions {
         force_keyframe: false,
@@ -1975,13 +2172,15 @@ fn encode_and_write_frame(
     encoder
         .encode(
             &shiguredo_libvpx::ImageData::I420 {
-                y: &frame_data.y,
-                u: &frame_data.u,
-                v: &frame_data.v,
+                y: &compact_y,
+                u: &compact_u,
+                v: &compact_v,
             },
             &encode_options,
         )
         .map_err(|e| format!("VP9 encode failed: {e}"))?;
+    *output_video_width = width;
+    *output_video_height = height;
 
     while let Some(frame) = encoder.next_frame() {
         let se = vp9_sample_entry.take();
@@ -1993,6 +2192,38 @@ fn encode_and_write_frame(
         )?;
     }
     Ok(())
+}
+
+fn compact_i420_plane(
+    plane: &[u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+) -> Result<Vec<u8>, String> {
+    if stride < width {
+        return Err(format!(
+            "invalid I420 stride: stride={stride}, width={width}, height={height}"
+        ));
+    }
+    let required_len = stride
+        .checked_mul(height)
+        .ok_or_else(|| format!("I420 plane size overflow: stride={stride}, height={height}"))?;
+    if plane.len() < required_len {
+        return Err(format!(
+            "insufficient I420 plane data: expected at least {required_len} bytes, got {}",
+            plane.len()
+        ));
+    }
+    if stride == width {
+        return Ok(plane[..width * height].to_vec());
+    }
+
+    let mut compact = Vec::with_capacity(width * height);
+    for row in 0..height {
+        let offset = row * stride;
+        compact.extend_from_slice(&plane[offset..offset + width]);
+    }
+    Ok(compact)
 }
 
 /// VP9 SampleEntry の値を返す（エンコーダー初期化時に呼ぶ）
