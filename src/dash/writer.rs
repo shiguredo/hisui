@@ -270,8 +270,8 @@ struct DashWriter {
     resolved_video_codec: Option<String>,
     /// オーディオの codec string（SampleEntry から解決済みの場合のみ Some）
     resolved_audio_codec: Option<String>,
-    /// codec string が確定したことを通知する channel（ABR の結合 MPD 用）。
-    /// 送信は 1 回のみ。送信後は None になる。
+    /// ABR 結合 MPD 用の codec string 通知 channel。
+    /// 送信は 1 回のみ。送信後および non-ABR 時は None。
     codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
     stats: DashWriterStats,
 }
@@ -1072,8 +1072,9 @@ pub struct DashWriterConfig {
     pub max_retained_segments: usize,
     /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
     pub skip_mpd: bool,
-    /// codec string が SampleEntry から確定した際の通知 channel（ABR 時に coordinator が受信）。
-    /// non-ABR の場合は None。
+    /// ABR 結合 MPD 用の codec string 通知 channel。
+    /// ABR 時のみ coordinator が受信側を持ち、全 variant の codec 確定後に結合 MPD を書き出す。
+    /// non-ABR では DashWriter 自身が MPD を書くため不要（None を渡すこと）。
     pub codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
 }
 
