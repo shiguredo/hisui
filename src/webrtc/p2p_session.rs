@@ -940,6 +940,11 @@ async fn handle_subscribe_program_tracks(
             };
         }
         if let Err(e) = subscribe_track(sess, audio_track_id, TrackKind::Audio) {
+            // video 側の明示的ロールバックは行わない。
+            // CloseSession により *guard = None → Session drop → pc.close() で
+            // PeerConnection ごと閉じられ、processor_handle の drop で
+            // subscribe_track が spawn した受信タスクのチャネルも切れるため、
+            // 部分的に追加された video sender / task は自動的に解放される。
             let reason = format!("failed to subscribe program audio track: {}", e.display());
             tracing::warn!("{reason}");
             return BootstrapDcResult::CloseSession {
