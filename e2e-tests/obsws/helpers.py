@@ -40,6 +40,7 @@ class ObswsServer:
         ui_remote_url: str | None = None,
         https_cert_path: Path | None = None,
         https_key_path: Path | None = None,
+        state_file: Path | None = None,
         use_env: bool = False,
     ):
         self.binary_path = binary_path
@@ -50,6 +51,7 @@ class ObswsServer:
         self.ui_remote_url = ui_remote_url
         self.https_cert_path = https_cert_path
         self.https_key_path = https_key_path
+        self.state_file = state_file
         self.use_env = use_env
         self._process: subprocess.Popen[str] | None = None
         self._stdout = ""
@@ -84,6 +86,8 @@ class ObswsServer:
                 env["HISUI_OBSWS_PASSWORD"] = self.password
             if self.default_record_dir is not None:
                 env["HISUI_DEFAULT_RECORD_DIR"] = str(self.default_record_dir)
+            if self.state_file is not None:
+                env["HISUI_OBSWS_STATE_FILE"] = str(self.state_file)
         else:
             args.extend(
                 [
@@ -108,6 +112,8 @@ class ObswsServer:
                         str(self.https_key_path),
                     ]
                 )
+            if self.state_file is not None:
+                args.extend(["--state-file", str(self.state_file)])
             if openh264_path:
                 args.extend(["--openh264", openh264_path])
 

@@ -81,6 +81,7 @@ pub async fn run_server(
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
+    state_file_path: Option<PathBuf>,
 ) -> crate::Result<()> {
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
@@ -108,8 +109,41 @@ pub async fn run_server(
         .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
     tracing::info!("obsws server listening on {scheme}://{addr}");
 
-    let input_registry =
-        ObswsInputRegistry::new(default_record_dir, canvas_width, canvas_height, frame_rate);
+    // state file の読み込みと初期値への反映
+    let (effective_record_dir, initial_stream_settings, resolved_state_file_path) =
+        if let Some(ref path) = state_file_path {
+            let abs_path = std::path::absolute(path).map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to resolve state file path {}: {e}",
+                    path.display()
+                ))
+            })?;
+            let state = crate::obsws::state_file::load_state_file(&abs_path)?;
+            let stream_settings = state
+                .stream
+                .as_ref()
+                .map(|s| s.to_stream_service_settings());
+            let record_dir = state
+                .record
+                .map(|r| r.record_directory)
+                .unwrap_or(default_record_dir);
+            (record_dir, stream_settings, Some(abs_path))
+        } else {
+            (default_record_dir, None, None)
+        };
+
+    let mut input_registry = ObswsInputRegistry::new(
+        effective_record_dir,
+        canvas_width,
+        canvas_height,
+        frame_rate,
+        resolved_state_file_path,
+    );
+
+    // state file から読み込んだ stream 設定を反映する
+    if let Some(settings) = initial_stream_settings {
+        input_registry.set_stream_service_settings(settings);
+    }
 
     let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
     let pipeline_handle = pipeline.handle();
@@ -165,11 +199,12 @@ pub async fn run_server(
 
     // runtime actor を起動する
     // source processor は入力ライフサイクルで管理するため、coordinator 経由で初期起動する
-    let (mut actor, coordinator_handle) = crate::obsws::coordinator::ObswsCoordinator::new(
-        input_registry,
-        program_output,
-        Some(pipeline_handle.clone()),
-    );
+    let (mut actor, coordinator_handle, shutdown_rx) =
+        crate::obsws::coordinator::ObswsCoordinator::new(
+            input_registry,
+            program_output,
+            Some(pipeline_handle.clone()),
+        );
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());
 
@@ -186,6 +221,7 @@ pub async fn run_server(
         coordinator_handle,
         pipeline_handle,
         bootstrap_endpoint,
+        shutdown_rx,
     )
     .await
 }
@@ -199,6 +235,7 @@ fn contains_upgrade_header(buf: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn run_accept_loop(
     listener: TcpListener,
     tls_acceptor: Option<TlsAcceptor>,
@@ -207,12 +244,20 @@ async fn run_accept_loop(
     coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> crate::Result<()> {
     loop {
-        let (stream, peer_addr) = listener
-            .accept()
-            .await
-            .map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?;
+        let (stream, peer_addr) = tokio::select! {
+            result = listener.accept() => {
+                result.map_err(|e| crate::Error::new(format!("failed to accept obsws connection: {e}")))?
+            }
+            _ = shutdown_rx.changed() => {
+                tracing::info!("obsws server shutting down due to coordinator fatal error");
+                return Err(crate::Error::new(
+                    "obsws server terminated: state file write failed"
+                ));
+            }
+        };
         let tls_acceptor = tls_acceptor.clone();
         let upstream_config = upstream_config.clone();
         let password = password.clone();

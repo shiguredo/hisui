@@ -177,17 +177,29 @@ pub struct ObswsCoordinator {
     input_source_processors: std::collections::BTreeMap<String, InputSourceState>,
     /// bootstrap 用の差分イベント送信チャネル
     bootstrap_event_tx: tokio::sync::broadcast::Sender<BootstrapInputEvent>,
+    /// state file 保存失敗等の致命的エラーにより終了が必要
+    should_terminate: bool,
+    /// 致命的エラー発生時にサーバーへ通知するための送信側
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
 impl ObswsCoordinator {
     /// actor と handle を生成する。program_output の初期化は呼び出し側で行う。
+    ///
+    /// 返り値の `watch::Receiver<bool>` は致命的エラー発生時に `true` を受信する。
+    /// サーバーの accept loop はこれを監視して graceful shutdown を行う。
     pub fn new(
         input_registry: ObswsInputRegistry,
         program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
-    ) -> (Self, ObswsCoordinatorHandle) {
+    ) -> (
+        Self,
+        ObswsCoordinatorHandle,
+        tokio::sync::watch::Receiver<bool>,
+    ) {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (bootstrap_event_tx, _) = tokio::sync::broadcast::channel(64);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let program_track_ids = ProgramTrackIds {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
@@ -199,13 +211,15 @@ impl ObswsCoordinator {
             command_rx,
             input_source_processors: std::collections::BTreeMap::new(),
             bootstrap_event_tx: bootstrap_event_tx.clone(),
+            should_terminate: false,
+            shutdown_tx,
         };
         let handle = ObswsCoordinatorHandle {
             command_tx,
             program_track_ids,
             bootstrap_event_tx,
         };
-        (actor, handle)
+        (actor, handle, shutdown_rx)
     }
 
     /// actor のイベントループを実行する
@@ -235,6 +249,19 @@ impl ObswsCoordinator {
                     let snapshot = self.build_bootstrap_snapshot();
                     let _ = reply_tx.send(snapshot);
                 }
+            }
+
+            // state file 保存失敗等の致命的エラーが発生した場合はループを抜ける。
+            // エラーレスポンスは上で reply_tx 経由で送信済みなので、
+            // クライアントにはエラーが通知された後にサーバーが停止する。
+            if self.should_terminate {
+                tracing::error!(
+                    "coordinator shutting down due to fatal error; \
+                     subsequent requests will fail"
+                );
+                // サーバーの accept loop に終了を通知する
+                let _ = self.shutdown_tx.send(true);
+                return;
             }
         }
     }
@@ -278,7 +305,7 @@ impl ObswsCoordinator {
             {
                 tracing::warn!("failed to rebuild program output: {}", e.display());
             }
-            if halt_on_failure && !request_succeeded {
+            if (halt_on_failure && !request_succeeded) || self.should_terminate {
                 break;
             }
         }
@@ -395,7 +422,32 @@ impl ObswsCoordinator {
                     &mut self.input_registry,
                     self.pipeline_handle.as_ref(),
                 );
-                self.build_result_from_response(response.message, Vec::new())
+                let result = self.build_result_from_response(response.message, Vec::new());
+
+                // 対象リクエストが成功した場合に state file を保存する
+                if result.batch_result.request_status_result
+                    && matches!(
+                        request_type.as_str(),
+                        "SetStreamServiceSettings" | "SetRecordDirectory" | "SetOutputSettings"
+                    )
+                    && let Some(path) = self.input_registry.state_file_path()
+                {
+                    let path = path.to_path_buf();
+                    let state =
+                        crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+                    if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
+                        tracing::error!("failed to save state file: {}", e.display());
+                        self.should_terminate = true;
+                        return self.build_error_result(
+                            &request_type,
+                            &request_id,
+                            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            &format!("state file write failed: {}", e.display()),
+                        );
+                    }
+                }
+
+                result
             }
         }
     }
