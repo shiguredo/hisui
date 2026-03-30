@@ -1595,6 +1595,10 @@ fn handle_remote_track(sess: &mut Session, transceiver: RtpTransceiver) {
 }
 
 /// client が remote track を削除した際のハンドラ
+///
+/// on_remove_track は renegotiation の過渡的な状態でも呼ばれるため、
+/// remote_video_tracks からの即削除は行わない。attach 済みなら detach のみ行う。
+/// track が本当に不要になった場合は session close 時にクリーンアップされる。
 fn handle_remote_track_removed(sess: &mut Session, track_id: &str) {
     tracing::info!("Remote video track removed: track_id={track_id}");
 
@@ -1608,14 +1612,11 @@ fn handle_remote_track_removed(sess: &mut Session, track_id: &str) {
             .attached_input_name
             .clone();
         detach_remote_track(sess, track_id);
-        // coordinator の trackId を null に戻す
         if let Some(name) = input_name {
             sess.coordinator_handle
                 .update_webrtc_source_track_id(&name, None);
         }
     }
-
-    sess.remote_video_tracks.remove(track_id);
 }
 
 /// obsws イベントを処理して、attach 済み webrtc_source の状態を更新する
