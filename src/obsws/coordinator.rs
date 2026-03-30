@@ -3644,6 +3644,8 @@ async fn start_hls_processors(
                 }
             })
             .collect();
+        // TODO: DASH と同様に SampleEntry から正確な codec string を生成する。
+        // 現在は固定値だが、プロファイルやレベルが実際のエンコーダー出力と異なる可能性がある。
         let hls_codecs = crate::codec_string::CodecString::from_codec_pair(
             crate::types::CodecName::H264,
             crate::types::CodecName::Aac,
