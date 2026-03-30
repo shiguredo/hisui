@@ -493,10 +493,10 @@ impl DashWriter {
             if !self.video_codec_resolved
                 && let Some(codec_str) =
                     crate::codec_string::video_codec_string_from_sample_entry(entry)
-                {
-                    self.codecs.video = codec_str;
-                    self.video_codec_resolved = true;
-                }
+            {
+                self.codecs.video = codec_str;
+                self.video_codec_resolved = true;
+            }
         }
         // 前のビデオサンプルの duration を確定させる
         if let Some(prev_ts) = self.last_video_timestamp {
@@ -559,10 +559,10 @@ impl DashWriter {
             if !self.audio_codec_resolved
                 && let Some(codec_str) =
                     crate::codec_string::audio_codec_string_from_sample_entry(entry)
-                {
-                    self.codecs.audio = codec_str;
-                    self.audio_codec_resolved = true;
-                }
+            {
+                self.codecs.audio = codec_str;
+                self.audio_codec_resolved = true;
+            }
         }
 
         if self.current_segment_info.is_none() {
