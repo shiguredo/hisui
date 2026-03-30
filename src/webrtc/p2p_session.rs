@@ -221,6 +221,8 @@ struct Session {
     program_tracks_subscribed: bool,
     /// client から受信した remote video track (key: track_id)
     remote_video_tracks: std::collections::HashMap<String, RemoteVideoTrack>,
+    /// coordinator handle（webrtc_source の settings 取得・更新用）
+    coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
 }
 
 impl Drop for Session {
@@ -228,7 +230,7 @@ impl Drop for Session {
         if let Some(handle) = &self.bootstrap_event_abort_handle {
             handle.abort();
         }
-        // attach 済みの remote track を全てクリーンアップする
+        // attach 済みの remote track を全てクリーンアップし、coordinator の trackId を null に戻す
         for remote in self.remote_video_tracks.values_mut() {
             if let Some(handle) = remote.forward_task_abort.take() {
                 handle.abort();
@@ -236,7 +238,10 @@ impl Drop for Session {
             if let Some(sink) = remote._sink.take() {
                 remote.track.remove_sink(&sink);
             }
-            remote.attached_input_name = None;
+            if let Some(input_name) = remote.attached_input_name.take() {
+                self.coordinator_handle
+                    .update_webrtc_source_track_id(&input_name, None);
+            }
         }
         tracing::info!("Closing PeerConnection");
         self.pc.close();
@@ -477,6 +482,7 @@ impl WebRtcP2pSessionManager {
             processor_handle,
             obsws_session,
             program_track_ids,
+            self.coordinator_handle.clone(),
         )
         .await
         {
@@ -538,6 +544,7 @@ async fn bootstrap_internal(
     processor_handle: crate::ProcessorHandle,
     obsws_session: ObswsSession,
     program_track_ids: crate::obsws::coordinator::ProgramTrackIds,
+    coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
 ) -> crate::Result<(String, Session)> {
     let (ice_tx, ice_rx) = tokio::sync::mpsc::unbounded_channel::<IceObserverEvent>();
 
@@ -615,6 +622,7 @@ async fn bootstrap_internal(
         program_track_ids,
         program_tracks_subscribed: false,
         remote_video_tracks: std::collections::HashMap::new(),
+        coordinator_handle,
     };
 
     Ok((answer_sdp, sess))
@@ -1750,10 +1758,18 @@ async fn handle_attach_webrtc_video_track(
         }
     };
 
-    // TODO: coordinator から webrtc_source の最新 settings を取得して chroma key を解決する。
-    // 現時点では Session から coordinator_handle にアクセスする経路がないため、
-    // chroma key は None（透過なし）として進める。
-    let chroma_key: Option<ChromaKeyConfig> = None;
+    // coordinator から webrtc_source の最新 settings を取得して chroma key を解決する
+    let chroma_key = match sess
+        .coordinator_handle
+        .get_webrtc_source_settings(&input_name)
+        .await
+    {
+        Ok(Some(settings)) => resolve_chroma_key_config(
+            settings.background_key_color.as_deref(),
+            settings.background_key_tolerance,
+        ),
+        _ => None,
+    };
 
     // sync channel + 転送タスクを構築
     let (frame_tx, frame_rx) = std::sync::mpsc::sync_channel::<RawI420Frame>(2);
@@ -1779,6 +1795,10 @@ async fn handle_attach_webrtc_video_track(
     remote._sink = Some(sink);
     remote.forward_task_abort = Some(forward_task.abort_handle());
 
+    // coordinator の input settings に trackId を反映する
+    sess.coordinator_handle
+        .update_webrtc_source_track_id(&input_name, Some(track_id.clone()));
+
     let input_name_clone = input_name.clone();
     let track_id_clone = track_id.clone();
     BootstrapDcResult::Response(crate::obsws::response::build_request_response_success(
@@ -1799,7 +1819,6 @@ struct ChromaKeyConfig {
 }
 
 /// webrtc_source の settings から chroma key 設定を解決する
-#[expect(dead_code, reason = "coordinator 連携で Attach 時に呼び出し予定")]
 fn resolve_chroma_key_config(
     background_key_color: Option<&str>,
     background_key_tolerance: Option<i32>,
@@ -1940,6 +1959,9 @@ fn handle_detach_webrtc_video_track(
 
     let detached_track_id = if let Some(tid) = attached_track_id {
         detach_remote_track(sess, &tid);
+        // coordinator の input settings の trackId を null に戻す
+        sess.coordinator_handle
+            .update_webrtc_source_track_id(&input_name, None);
         Some(tid)
     } else {
         None // 未接続 → no-op 成功

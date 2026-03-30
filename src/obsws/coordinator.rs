@@ -37,6 +37,18 @@ pub enum ObswsCoordinatorCommand {
     GetBootstrapSnapshot {
         reply_tx: tokio::sync::oneshot::Sender<Vec<BootstrapInputSnapshot>>,
     },
+    /// webrtc_source の settings を取得する
+    GetWebRtcSourceSettings {
+        input_name: String,
+        reply_tx: tokio::sync::oneshot::Sender<
+            Option<crate::obsws::input_registry::ObswsWebRtcSourceSettings>,
+        >,
+    },
+    /// webrtc_source の trackId を更新する
+    UpdateWebRtcSourceTrackId {
+        input_name: String,
+        track_id: Option<String>,
+    },
 }
 
 /// bootstrap 用の入力 snapshot
@@ -152,6 +164,33 @@ impl ObswsCoordinatorHandle {
             .map_err(|_| crate::Error::new("coordinator dropped reply channel"))
     }
 
+    /// webrtc_source の settings を取得する
+    pub async fn get_webrtc_source_settings(
+        &self,
+        input_name: &str,
+    ) -> crate::Result<Option<crate::obsws::input_registry::ObswsWebRtcSourceSettings>> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.command_tx
+            .send(ObswsCoordinatorCommand::GetWebRtcSourceSettings {
+                input_name: input_name.to_owned(),
+                reply_tx,
+            })
+            .map_err(|_| crate::Error::new("coordinator has terminated"))?;
+        reply_rx
+            .await
+            .map_err(|_| crate::Error::new("coordinator dropped reply channel"))
+    }
+
+    /// webrtc_source の trackId を更新する
+    pub fn update_webrtc_source_track_id(&self, input_name: &str, track_id: Option<String>) {
+        let _ = self
+            .command_tx
+            .send(ObswsCoordinatorCommand::UpdateWebRtcSourceTrackId {
+                input_name: input_name.to_owned(),
+                track_id,
+            });
+    }
+
     /// bootstrap 用の差分イベントを購読する
     pub fn subscribe_bootstrap_events(
         &self,
@@ -234,6 +273,19 @@ impl ObswsCoordinator {
                 ObswsCoordinatorCommand::GetBootstrapSnapshot { reply_tx } => {
                     let snapshot = self.build_bootstrap_snapshot();
                     let _ = reply_tx.send(snapshot);
+                }
+                ObswsCoordinatorCommand::GetWebRtcSourceSettings {
+                    input_name,
+                    reply_tx,
+                } => {
+                    let settings = self.get_webrtc_source_settings(&input_name);
+                    let _ = reply_tx.send(settings);
+                }
+                ObswsCoordinatorCommand::UpdateWebRtcSourceTrackId {
+                    input_name,
+                    track_id,
+                } => {
+                    self.update_webrtc_source_track_id(&input_name, track_id);
                 }
             }
         }
@@ -2949,6 +3001,35 @@ impl ObswsCoordinator {
                 })
             })
             .collect()
+    }
+
+    /// webrtc_source の settings を取得する
+    fn get_webrtc_source_settings(
+        &self,
+        input_name: &str,
+    ) -> Option<crate::obsws::input_registry::ObswsWebRtcSourceSettings> {
+        let entry = self.input_registry.find_input(None, Some(input_name))?;
+        match &entry.input.settings {
+            crate::obsws::input_registry::ObswsInputSettings::WebRtcSource(settings) => {
+                Some(settings.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// webrtc_source の trackId を更新する
+    fn update_webrtc_source_track_id(&mut self, input_name: &str, track_id: Option<String>) {
+        let Some(uuid) = self.input_registry.uuids_by_name.get(input_name).cloned() else {
+            return;
+        };
+        let Some(entry) = self.input_registry.inputs_by_uuid.get_mut(&uuid) else {
+            return;
+        };
+        if let crate::obsws::input_registry::ObswsInputSettings::WebRtcSource(ref mut settings) =
+            entry.input.settings
+        {
+            settings.track_id = track_id;
+        }
     }
 
     /// 入力ライフサイクルの source processor を起動する
