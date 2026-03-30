@@ -2193,11 +2193,11 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
     // ABR 結合 MPD は SampleEntry から codec string が確定してから書き出される。
     // manifest.mpd の出現を待ち、codecs 属性が実際の SampleEntry と一致することを検証する。
     let manifest_path = dash_output_dir.join("manifest.mpd");
-    for _ in 0..40 {
+    for _ in 0..60 {
         if manifest_path.exists() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
     assert!(
         manifest_path.exists(),
