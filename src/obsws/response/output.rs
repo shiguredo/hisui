@@ -1184,6 +1184,32 @@ fn parse_dash_settings(
             None
         };
 
+    // ビデオコーデックのパース
+    let video_codec: Option<crate::types::CodecName> = output_settings
+        .to_member("videoCodec")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| -> Result<crate::types::CodecName, String> {
+            let s: String = v
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            crate::types::CodecName::parse_video(&s)
+        })
+        .transpose()?;
+
+    // オーディオコーデックのパース
+    let audio_codec: Option<crate::types::CodecName> = output_settings
+        .to_member("audioCodec")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| -> Result<crate::types::CodecName, String> {
+            let s: String = v
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            crate::types::CodecName::parse_audio(&s)
+        })
+        .transpose()?;
+
     if let Some(duration) = segment_duration
         && duration <= 0.0
     {
@@ -1201,6 +1227,8 @@ fn parse_dash_settings(
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
         variants: variants.unwrap_or(existing.variants),
+        video_codec: video_codec.unwrap_or(existing.video_codec),
+        audio_codec: audio_codec.unwrap_or(existing.audio_codec),
     });
     Ok(())
 }

@@ -32,8 +32,10 @@
   - `shiguredo_audio_device` が PulseAudio バックエンドを利用するために必要
   - @sile
 - [ADD] obsws の Output に MPEG-DASH ライブ出力 (`outputName: "mpeg_dash"`) を追加する
-  - H.264 + AAC の fragmented MP4 セグメントを生成し、MPD マニフェストで管理する
-  - `SetOutputSettings` で `destination` / `segmentDuration` / `maxRetainedSegments` / `variants` を設定可能
+  - 指定されたビデオ/オーディオコーデックの fragmented MP4 セグメントを生成し、MPD マニフェストで管理する
+  - `SetOutputSettings` で `destination` / `segmentDuration` / `maxRetainedSegments` / `variants` / `videoCodec` / `audioCodec` を設定可能
+  - `videoCodec` で `"H264"` / `"H265"` / `"VP8"` / `"VP9"` / `"AV1"` を指定可能（デフォルト: `"H264"`）
+  - `audioCodec` で `"AAC"` / `"OPUS"` を指定可能（デフォルト: `"AAC"`）
   - `destination.type` に `"filesystem"` または `"s3"` を指定して出力先を切り替える
   - S3 出力先にはオブジェクトライフタイム指定（`lifetimeDays`）を設定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する

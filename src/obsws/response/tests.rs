@@ -1370,3 +1370,101 @@ fn dash_set_output_settings_filesystem_destination_succeeds() {
         _ => panic!("expected filesystem destination"),
     }
 }
+
+#[test]
+fn dash_set_output_settings_video_codec_h265_succeeds() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"videoCodec":"H265"}"#);
+    assert_set_output_settings_success(&response);
+    assert_eq!(
+        registry.dash_settings().video_codec,
+        crate::types::CodecName::H265
+    );
+    // オーディオはデフォルトのまま
+    assert_eq!(
+        registry.dash_settings().audio_codec,
+        crate::types::CodecName::Aac
+    );
+}
+
+#[test]
+fn dash_set_output_settings_audio_codec_opus_succeeds() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"audioCodec":"OPUS"}"#);
+    assert_set_output_settings_success(&response);
+    assert_eq!(
+        registry.dash_settings().audio_codec,
+        crate::types::CodecName::Opus
+    );
+}
+
+#[test]
+fn dash_set_output_settings_vp9_opus_succeeds() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response =
+        set_dash_output_settings(&mut registry, r#"{"videoCodec":"VP9","audioCodec":"OPUS"}"#);
+    assert_set_output_settings_success(&response);
+    assert_eq!(
+        registry.dash_settings().video_codec,
+        crate::types::CodecName::Vp9
+    );
+    assert_eq!(
+        registry.dash_settings().audio_codec,
+        crate::types::CodecName::Opus
+    );
+}
+
+#[test]
+fn dash_set_output_settings_av1_aac_succeeds() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"videoCodec":"AV1"}"#);
+    assert_set_output_settings_success(&response);
+    assert_eq!(
+        registry.dash_settings().video_codec,
+        crate::types::CodecName::Av1
+    );
+}
+
+#[test]
+fn dash_set_output_settings_audio_codec_as_video_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"videoCodec":"AAC"}"#);
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_video_codec_as_audio_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"audioCodec":"H264"}"#);
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_unknown_video_codec_fails() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let response = set_dash_output_settings(&mut registry, r#"{"videoCodec":"UNKNOWN"}"#);
+    assert_set_output_settings_failure(&response);
+}
+
+#[test]
+fn dash_set_output_settings_codec_preserved_across_updates() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    // 最初に H265 + OPUS を設定する
+    let response = set_dash_output_settings(
+        &mut registry,
+        r#"{"videoCodec":"H265","audioCodec":"OPUS"}"#,
+    );
+    assert_set_output_settings_success(&response);
+    // videoCodec のみ変更し、audioCodec は省略する
+    let response = set_dash_output_settings(&mut registry, r#"{"videoCodec":"AV1"}"#);
+    assert_set_output_settings_success(&response);
+    // videoCodec は更新され、audioCodec は前回の値が保持される
+    assert_eq!(
+        registry.dash_settings().video_codec,
+        crate::types::CodecName::Av1
+    );
+    assert_eq!(
+        registry.dash_settings().audio_codec,
+        crate::types::CodecName::Opus
+    );
+}

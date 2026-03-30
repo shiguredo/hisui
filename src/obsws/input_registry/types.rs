@@ -723,11 +723,25 @@ pub(crate) struct ObswsRecordRuntimeState {
     pub(crate) run: Option<ObswsRecordRun>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct ObswsHlsRuntimeState {
     pub(crate) active: bool,
     pub(crate) started_at: Option<Instant>,
     pub(crate) run: Option<ObswsHlsRun>,
+    /// ABR マスタープレイリスト書き出しタスクの JoinHandle。
+    /// 出力停止時に abort() でキャンセルする。
+    pub(crate) master_playlist_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Clone for ObswsHlsRuntimeState {
+    fn clone(&self) -> Self {
+        Self {
+            active: self.active,
+            started_at: self.started_at,
+            run: self.run.clone(),
+            master_playlist_task: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1478,6 +1492,10 @@ pub struct ObswsDashSettings {
     /// ABR バリアント定義。
     /// 要素が 1 つの場合は non-ABR。
     pub variants: Vec<DashVariant>,
+    /// ビデオコーデック。全バリアント共通。
+    pub video_codec: crate::types::CodecName,
+    /// オーディオコーデック。全バリアント共通。
+    pub audio_codec: crate::types::CodecName,
 }
 
 impl Default for ObswsDashSettings {
@@ -1487,6 +1505,8 @@ impl Default for ObswsDashSettings {
             segment_duration: DEFAULT_DASH_SEGMENT_DURATION_SECS,
             max_retained_segments: DEFAULT_DASH_MAX_RETAINED_SEGMENTS,
             variants: vec![DashVariant::default()],
+            video_codec: crate::types::CodecName::H264,
+            audio_codec: crate::types::CodecName::Aac,
         }
     }
 }
@@ -1507,7 +1527,9 @@ impl nojson::DisplayJson for ObswsDashSettings {
                     }
                     Ok(())
                 }),
-            )
+            )?;
+            f.member("videoCodec", self.video_codec)?;
+            f.member("audioCodec", self.audio_codec)
         })
         .fmt(f)
     }
@@ -1541,11 +1563,28 @@ pub struct ObswsDashVariantRun {
     pub variant_path: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct ObswsDashRuntimeState {
     pub(crate) active: bool,
     pub(crate) started_at: Option<Instant>,
     pub(crate) run: Option<ObswsDashRun>,
+    /// ABR 結合 MPD 書き出しタスクの JoinHandle。
+    /// 出力停止時に abort() でキャンセルする。
+    pub(crate) combined_mpd_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Clone for ObswsDashRuntimeState {
+    fn clone(&self) -> Self {
+        Self {
+            active: self.active,
+            started_at: self.started_at,
+            run: self.run.clone(),
+            // JoinHandle は clone できないため、clone 時は None にする。
+            // ObswsInputRegistry の clone は coordinator の初期化時のみで、
+            // DASH 出力がアクティブな状態で clone されることはない。
+            combined_mpd_task: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

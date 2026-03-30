@@ -826,6 +826,9 @@ impl ObswsInputRegistry {
     }
 
     pub fn deactivate_hls(&mut self) -> Option<ObswsHlsRun> {
+        if let Some(handle) = self.hls_runtime.master_playlist_task.take() {
+            handle.abort();
+        }
         let run = self.hls_runtime.run.take();
         self.hls_runtime.active = false;
         self.hls_runtime.started_at = None;
@@ -875,6 +878,10 @@ impl ObswsInputRegistry {
     }
 
     pub fn deactivate_dash(&mut self) -> Option<ObswsDashRun> {
+        // ABR 結合 MPD 書き出しタスクが残っていればキャンセルする
+        if let Some(handle) = self.dash_runtime.combined_mpd_task.take() {
+            handle.abort();
+        }
         let run = self.dash_runtime.run.take();
         self.dash_runtime.active = false;
         self.dash_runtime.started_at = None;
