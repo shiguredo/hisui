@@ -247,6 +247,7 @@ impl Mp4FileReader {
         let should_stop = self.run_loop(loop_enabled).await?;
         if should_stop {
             self.update_playback_status(MediaPlaybackState::Stopped, self.last_emitted_end);
+            self.send_media_event(MediaInputEvent::PlaybackEnded);
             return Ok(());
         }
 
@@ -415,6 +416,7 @@ impl Mp4FileReader {
     fn restart_playback(&mut self) {
         self.is_paused = false;
         self.pause_started_at = None;
+        self.send_media_event(MediaInputEvent::PlaybackEnded);
         self.base_offset = self.last_emitted_end;
         self.start_instant = tokio::time::Instant::now();
         self.last_realtime_timestamp = None;

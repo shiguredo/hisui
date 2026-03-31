@@ -1237,8 +1237,8 @@ impl ObswsCoordinator {
                         "mediaState",
                         crate::mp4::reader::MediaPlaybackState::None.as_obs_str(),
                     )?;
-                    f.member("mediaDuration", 0)?;
-                    f.member("mediaCursor", 0)
+                    f.member("mediaDuration", 0i64)?;
+                    f.member("mediaCursor", 0i64)
                 },
             );
             return self.build_result_from_response(response, Vec::new());

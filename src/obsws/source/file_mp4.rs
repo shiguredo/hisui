@@ -16,7 +16,7 @@ pub struct Mp4FileSource {
 
 impl Mp4FileSource {
     /// reader を作成し、メディア再生制御ハンドルを返す。
-    /// spawn_processor のクロージャ内で run_with_reader を呼ぶことで、
+    /// spawn_processor のクロージャ内で run_reader を呼ぶことで、
     /// ハンドルを外部に返しつつ reader を起動できる。
     pub fn create_reader(&self) -> Result<(Mp4FileReader, Option<MediaInputHandle>)> {
         let options = Mp4FileReaderOptions {
