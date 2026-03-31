@@ -156,7 +156,7 @@ impl ObswsInputRegistry {
                 )));
             }
 
-            let obsws_input =
+            let mut obsws_input =
                 ObswsInput::from_kind_and_settings(&input.input_kind, input.input_settings.value())
                     .map_err(|e| {
                         crate::Error::new(format!(
@@ -164,6 +164,10 @@ impl ObswsInputRegistry {
                             input.input_name,
                         ))
                     })?;
+            obsws_input.input_muted = input.input_muted;
+            if let Some(vol) = crate::types::NonNegFiniteF64::new(input.input_volume_mul) {
+                obsws_input.input_volume_mul = vol;
+            }
             inputs_by_uuid.insert(
                 input.input_uuid.clone(),
                 ObswsInputEntry {

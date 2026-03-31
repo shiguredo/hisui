@@ -3568,6 +3568,9 @@ fn is_state_persisted_request(request_type: &str) -> bool {
             | "RemoveInput"
             | "SetInputSettings"
             | "SetInputName"
+            | "SetInputMute"
+            | "ToggleInputMute"
+            | "SetInputVolume"
             // scene item
             | "CreateSceneItem"
             | "RemoveSceneItem"

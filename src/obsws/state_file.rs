@@ -59,6 +59,8 @@ pub struct StateFileInput {
     pub input_name: String,
     pub input_kind: String,
     pub input_settings: nojson::RawJsonOwned,
+    pub input_muted: bool,
+    pub input_volume_mul: f64,
 }
 
 /// state file の stream セクション
@@ -657,11 +659,17 @@ fn parse_optional_inputs(
         let input_kind: String = elem.to_member("inputKind")?.required()?.try_into()?;
         let input_settings: nojson::RawJsonOwned =
             elem.to_member("inputSettings")?.required()?.try_into()?;
+        let input_muted: Option<bool> = elem.to_member("inputMuted")?.try_into()?;
+        let input_muted = input_muted.unwrap_or(false);
+        let input_volume_mul: Option<f64> = elem.to_member("inputVolumeMul")?.try_into()?;
+        let input_volume_mul = input_volume_mul.unwrap_or(1.0);
         inputs.push(StateFileInput {
             input_uuid,
             input_name,
             input_kind,
             input_settings,
+            input_muted,
+            input_volume_mul,
         });
     }
     Ok(Some(inputs))
@@ -1142,7 +1150,9 @@ impl nojson::DisplayJson for StateFileInput {
             f.member("inputUuid", &self.input_uuid)?;
             f.member("inputName", &self.input_name)?;
             f.member("inputKind", &self.input_kind)?;
-            f.member("inputSettings", &self.input_settings)
+            f.member("inputSettings", &self.input_settings)?;
+            f.member("inputMuted", self.input_muted)?;
+            f.member("inputVolumeMul", self.input_volume_mul)
         })
         .fmt(f)
     }
@@ -1304,6 +1314,8 @@ pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFil
                 input_name: entry.input_name.clone(),
                 input_kind: entry.input.kind_name().to_owned(),
                 input_settings,
+                input_muted: entry.input.input_muted,
+                input_volume_mul: entry.input.input_volume_mul.get(),
             });
         }
         Some(input_list)
@@ -2242,6 +2254,8 @@ mod tests {
                 input_name: "TestInput".to_owned(),
                 input_kind: "rtmp_inbound".to_owned(),
                 input_settings,
+                input_muted: false,
+                input_volume_mul: 1.0,
             }]),
             current_program_scene: None,
             current_preview_scene: None,
