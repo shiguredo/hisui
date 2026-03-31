@@ -3453,8 +3453,47 @@ impl ObswsCoordinator {
 
         self.program_output.scene_uuid = current_scene_uuid;
 
+        // mixer の入力トラック更新後に、各入力のミュート・音量を同期する。
+        // state file から復元した値や、前回の SetInputMute/SetInputVolume の結果を反映する。
+        self.sync_all_input_mute_volume().await;
+
         tracing::info!("program output rebuilt for scene change");
         Ok(())
+    }
+
+    /// 全入力のミュート・音量を audio mixer に同期する
+    async fn sync_all_input_mute_volume(&self) {
+        for (input_uuid, source_state) in &self.input_source_processors {
+            let Some(ref audio_track_id) = source_state.audio_track_id else {
+                continue;
+            };
+            let Some(entry) = self.input_registry.find_input(Some(input_uuid), None) else {
+                continue;
+            };
+            // デフォルト値（unmuted, 1.0）の場合は通知を省略する
+            if !entry.input.input_muted
+                && entry.input.input_volume_mul == crate::types::NonNegFiniteF64::ONE
+            {
+                continue;
+            }
+            let Some(pipeline_handle) = &self.pipeline_handle else {
+                return;
+            };
+            if let Err(e) = crate::mixer::audio::set_track_mute_volume(
+                pipeline_handle,
+                &self.program_output.audio_mixer_processor_id,
+                audio_track_id.clone(),
+                entry.input.input_muted,
+                entry.input.input_volume_mul,
+            )
+            .await
+            {
+                tracing::warn!(
+                    "failed to sync mute/volume for input {input_uuid}: {}",
+                    e.display()
+                );
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
