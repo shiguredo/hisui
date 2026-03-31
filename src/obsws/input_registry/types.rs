@@ -115,7 +115,11 @@ impl ObswsInput {
         self.settings.kind_name()
     }
 
-    /// 音量を dB 値で取得する
+    /// 音量を dB 値で取得する。
+    ///
+    /// mul == 0.0 の場合は `f64::NEG_INFINITY` を返す。
+    /// nojson は非有限値を JSON `null` として出力するため、
+    /// `inputVolumeDb: null` は「音量ゼロ（-∞ dB）」を意味する。
     pub fn input_volume_db(&self) -> f64 {
         let mul = self.input_volume_mul.get();
         if mul <= 0.0 {

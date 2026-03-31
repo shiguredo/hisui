@@ -164,6 +164,10 @@ impl ObswsInputRegistry {
                             input.input_name,
                         ))
                     })?;
+            // NOTE: ここで復元した mute/volume は input_registry 上の状態に反映されるが、
+            // audio mixer の InputTrackState には即座には反映されない。
+            // mixer は後から起動・rebuild されるため、起動直後は初期値 (unmuted, 1.0) で動作する。
+            // SetInputMute / SetInputVolume が呼ばれた時点で mixer に RPC 通知される。
             obsws_input.input_muted = input.input_muted;
             if let Some(vol) = crate::types::NonNegFiniteF64::new(input.input_volume_mul) {
                 obsws_input.input_volume_mul = vol;
