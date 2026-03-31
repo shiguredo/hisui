@@ -792,9 +792,11 @@ mod tests {
         let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
 
         // VideoToolbox 対応環境なら VideoToolbox、非対応なら Libvpx が選ばれる
+        #[cfg(target_os = "macos")]
         let is_valid = matches!(decoder.inner, VideoDecoderInner::Libvpx(_))
-            || cfg!(target_os = "macos")
-                && matches!(decoder.inner, VideoDecoderInner::VideoToolbox(_));
+            || matches!(decoder.inner, VideoDecoderInner::VideoToolbox(_));
+        #[cfg(not(target_os = "macos"))]
+        let is_valid = matches!(decoder.inner, VideoDecoderInner::Libvpx(_));
         assert!(
             is_valid,
             "expected Libvpx or VideoToolbox decoder, got {:?}",
