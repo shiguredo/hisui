@@ -620,6 +620,7 @@ impl nojson::DisplayJson for SoraSection<'_> {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         let sora = self.0;
         nojson::object(|f| {
+            // 空配列は省略する。読み戻し時は unwrap_or_default() で空 Vec に復元されるため同義。
             if !sora.signaling_urls.is_empty() {
                 f.member("signalingUrls", &sora.signaling_urls)?;
             }
