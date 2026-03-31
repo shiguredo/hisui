@@ -1822,6 +1822,15 @@ pub enum ParseInputSettingsError {
     InvalidInputSettings(String),
 }
 
+impl std::fmt::Display for ParseInputSettingsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedInputKind => write!(f, "unsupported input kind"),
+            Self::InvalidInputSettings(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateInputError {
     UnsupportedSceneName,

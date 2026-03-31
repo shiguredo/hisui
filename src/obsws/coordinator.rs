@@ -382,6 +382,26 @@ impl ObswsCoordinator {
         {
             tracing::warn!("failed to rebuild program output: {}", e.display());
         }
+
+        // state file 保存: 対象リクエストが成功した場合に永続化する
+        if request_succeeded
+            && is_state_persisted_request(&request_type)
+            && let Some(path) = self.input_registry.state_file_path()
+        {
+            let path = path.to_path_buf();
+            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
+                tracing::error!("failed to save state file: {}", e.display());
+                self.should_terminate = true;
+                return self.build_error_result(
+                    &request_type,
+                    &result.batch_result.request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &format!("state file write failed: {}", e.display()),
+                );
+            }
+        }
+
         result
     }
 
@@ -394,10 +414,14 @@ impl ObswsCoordinator {
     ) -> BatchCommandResult {
         let mut results = Vec::new();
         let mut events = Vec::new();
+        let mut needs_save = false;
         for request in requests {
             let request_type = request.request_type.clone().unwrap_or_default();
             let result = self.dispatch_request(request, session_stats).await;
             let request_succeeded = result.batch_result.request_status_result;
+            if request_succeeded && is_state_persisted_request(&request_type) {
+                needs_save = true;
+            }
             results.push(result.batch_result);
             events.extend(result.events);
             if let Err(e) = self
@@ -410,6 +434,39 @@ impl ObswsCoordinator {
                 break;
             }
         }
+
+        // バッチ内で state 変更があった場合にまとめて保存する。
+        // halt_on_failure で途中中断した場合でも、成功済みリクエストの副作用は
+        // ロールバックしないため、それまでの変更を保存する。
+        if needs_save
+            && !self.should_terminate
+            && let Some(path) = self.input_registry.state_file_path()
+        {
+            let path = path.to_path_buf();
+            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
+                tracing::error!("failed to save state file: {}", e.display());
+                self.should_terminate = true;
+                // バッチ結果に保存失敗エラーを追加する。
+                // TODO: バッチの保存はループ後にまとめて行うため、特定のリクエストに
+                // 紐付けられない。request_id / request_type が空文字列になるが、
+                // クライアント側で対応付けできない点は将来的に改善を検討する。
+                let error_result = crate::obsws::response::RequestBatchResult {
+                    request_id: String::new(),
+                    request_type: String::new(),
+                    request_status_result: false,
+                    request_status_code:
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    request_status_comment: Some(format!(
+                        "state file write failed: {}",
+                        e.display()
+                    )),
+                    response_data: None,
+                };
+                results.push(error_result);
+            }
+        }
+
         BatchCommandResult { results, events }
     }
 
@@ -523,32 +580,7 @@ impl ObswsCoordinator {
                     &mut self.input_registry,
                     self.pipeline_handle.as_ref(),
                 );
-                let result = self.build_result_from_response(response.message, Vec::new());
-
-                // 対象リクエストが成功した場合に state file を保存する
-                if result.batch_result.request_status_result
-                    && matches!(
-                        request_type.as_str(),
-                        "SetStreamServiceSettings" | "SetRecordDirectory" | "SetOutputSettings"
-                    )
-                    && let Some(path) = self.input_registry.state_file_path()
-                {
-                    let path = path.to_path_buf();
-                    let state =
-                        crate::obsws::state_file::build_state_from_registry(&self.input_registry);
-                    if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
-                        tracing::error!("failed to save state file: {}", e.display());
-                        self.should_terminate = true;
-                        return self.build_error_result(
-                            &request_type,
-                            &request_id,
-                            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                            &format!("state file write failed: {}", e.display()),
-                        );
-                    }
-                }
-
-                result
+                self.build_result_from_response(response.message, Vec::new())
             }
         }
     }
@@ -3370,6 +3402,38 @@ impl OutputOperationOutcome {
 // -----------------------------------------------------------------------
 // ユーティリティ関数
 // -----------------------------------------------------------------------
+
+/// state file への保存対象となるリクエストかどうかを判定する。
+/// スタジオモードを実装した場合は SetCurrentPreviewScene も追加すること。
+fn is_state_persisted_request(request_type: &str) -> bool {
+    matches!(
+        request_type,
+        // output 設定
+        "SetStreamServiceSettings"
+            | "SetRecordDirectory"
+            | "SetOutputSettings"
+            // scene
+            | "CreateScene"
+            | "RemoveScene"
+            | "SetCurrentProgramScene"
+            // input
+            | "CreateInput"
+            | "RemoveInput"
+            | "SetInputSettings"
+            | "SetInputName"
+            // scene item
+            | "CreateSceneItem"
+            | "RemoveSceneItem"
+            | "DuplicateSceneItem"
+            | "SetSceneItemEnabled"
+            | "SetSceneItemLocked"
+            | "SetSceneItemIndex"
+            | "SetSceneItemBlendMode"
+            | "SetSceneItemTransform"
+            // transition override
+            | "SetSceneSceneTransitionOverride"
+    )
+}
 
 fn parse_required_non_empty_string_field(
     request_data: Option<&nojson::RawJsonOwned>,

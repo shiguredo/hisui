@@ -118,6 +118,212 @@ impl ObswsInputRegistry {
         )
     }
 
+    /// state file から読み込んだ scene / input を一括復元する。
+    ///
+    /// デフォルト scene を置き換え、全 scene / input / scene item を再構築する。
+    /// ID カウンタも復元する。
+    #[expect(clippy::too_many_arguments)]
+    pub fn restore_scenes_and_inputs(
+        &mut self,
+        scenes: Vec<crate::obsws::state_file::StateFileScene>,
+        inputs: Vec<crate::obsws::state_file::StateFileInput>,
+        current_program_scene: Option<String>,
+        current_preview_scene: Option<String>,
+        next_input_id: Option<u64>,
+        next_scene_id: Option<u64>,
+        next_scene_item_id: Option<i64>,
+    ) -> crate::Result<()> {
+        // scenes が空の場合はエラーにする（最低 1 scene が必要）
+        if scenes.is_empty() {
+            return Err(crate::Error::new("scenes must contain at least one scene"));
+        }
+
+        // input を復元する
+        let mut inputs_by_uuid = BTreeMap::new();
+        let mut uuids_by_name = BTreeMap::new();
+        for input in &inputs {
+            // 重複チェック
+            if inputs_by_uuid.contains_key(&input.input_uuid) {
+                return Err(crate::Error::new(format!(
+                    "duplicate input UUID \"{}\"",
+                    input.input_uuid,
+                )));
+            }
+            if uuids_by_name.contains_key(&input.input_name) {
+                return Err(crate::Error::new(format!(
+                    "duplicate input name \"{}\"",
+                    input.input_name,
+                )));
+            }
+
+            let obsws_input =
+                ObswsInput::from_kind_and_settings(&input.input_kind, input.input_settings.value())
+                    .map_err(|e| {
+                        crate::Error::new(format!(
+                            "failed to restore input \"{}\": {e}",
+                            input.input_name,
+                        ))
+                    })?;
+            inputs_by_uuid.insert(
+                input.input_uuid.clone(),
+                ObswsInputEntry {
+                    input_uuid: input.input_uuid.clone(),
+                    input_name: input.input_name.clone(),
+                    input: obsws_input,
+                },
+            );
+            uuids_by_name.insert(input.input_name.clone(), input.input_uuid.clone());
+        }
+
+        // scene を復元する
+        let mut scenes_by_name = BTreeMap::new();
+        let mut scene_uuids = std::collections::BTreeSet::new();
+        let mut scene_order = Vec::new();
+        let mut scene_transition_overrides = BTreeMap::new();
+
+        for scene in &scenes {
+            // 重複チェック
+            if scenes_by_name.contains_key(&scene.scene_name) {
+                return Err(crate::Error::new(format!(
+                    "duplicate scene name \"{}\"",
+                    scene.scene_name,
+                )));
+            }
+            if !scene_uuids.insert(scene.scene_uuid.clone()) {
+                return Err(crate::Error::new(format!(
+                    "duplicate scene UUID \"{}\"",
+                    scene.scene_uuid,
+                )));
+            }
+            // scene item ID の重複チェック
+            {
+                let mut item_ids = std::collections::BTreeSet::new();
+                for item in &scene.items {
+                    if !item_ids.insert(item.scene_item_id) {
+                        return Err(crate::Error::new(format!(
+                            "duplicate sceneItemId {} in scene \"{}\"",
+                            item.scene_item_id, scene.scene_name,
+                        )));
+                    }
+                }
+            }
+            // scene item の inputUuid が inputs に存在するか検証する
+            for item in &scene.items {
+                if !inputs_by_uuid.contains_key(&item.input_uuid) {
+                    return Err(crate::Error::new(format!(
+                        "scene \"{}\" references unknown input UUID \"{}\"",
+                        scene.scene_name, item.input_uuid,
+                    )));
+                }
+            }
+
+            let items = scene
+                .items
+                .iter()
+                .map(|item| {
+                    // パーサーで検証済みのため、ここでの失敗は実装バグ
+                    let blend_mode = ObswsSceneItemBlendMode::parse(&item.blend_mode)
+                        .expect("blend_mode was validated during parse");
+                    ObswsSceneItemState {
+                        scene_item_id: item.scene_item_id,
+                        input_uuid: item.input_uuid.clone(),
+                        enabled: item.enabled,
+                        locked: item.locked,
+                        blend_mode,
+                        transform: item.transform.clone(),
+                    }
+                })
+                .collect();
+
+            scenes_by_name.insert(
+                scene.scene_name.clone(),
+                ObswsSceneState {
+                    scene_uuid: scene.scene_uuid.clone(),
+                    items,
+                },
+            );
+            scene_order.push(scene.scene_name.clone());
+
+            if let Some(ref transition) = scene.transition_override {
+                scene_transition_overrides.insert(
+                    scene.scene_name.clone(),
+                    ObswsSceneTransitionOverride {
+                        transition_name: transition.transition_name.clone(),
+                        transition_duration: transition.transition_duration,
+                    },
+                );
+            }
+        }
+
+        // currentProgramScene / currentPreviewScene の検証
+        // scenes が空でないことは上で検証済み
+        let program_scene = current_program_scene
+            .unwrap_or_else(|| scene_order.first().expect("scenes is not empty").clone());
+        if !scenes_by_name.contains_key(&program_scene) {
+            return Err(crate::Error::new(format!(
+                "currentProgramScene \"{}\" does not exist in scenes",
+                program_scene,
+            )));
+        }
+        let preview_scene = current_preview_scene.unwrap_or_else(|| program_scene.clone());
+        if !scenes_by_name.contains_key(&preview_scene) {
+            return Err(crate::Error::new(format!(
+                "currentPreviewScene \"{}\" does not exist in scenes",
+                preview_scene,
+            )));
+        }
+
+        // ID カウンタの復元（未指定時は最大値から算出）
+        let effective_next_input_id = next_input_id.unwrap_or_else(|| {
+            inputs_by_uuid
+                .keys()
+                .filter_map(|uuid| {
+                    // UUID フォーマット: "00000000-0000-0000-0000-{id:012x}"
+                    uuid.rsplit('-')
+                        .next()
+                        .and_then(|s| u64::from_str_radix(s, 16).ok())
+                })
+                .max()
+                .map_or(0, |max| max + 1)
+        });
+        let effective_next_scene_id = next_scene_id.unwrap_or_else(|| {
+            scenes_by_name
+                .values()
+                .filter_map(|scene| {
+                    // UUID フォーマット: "10000000-0000-0000-0000-{id:012x}"
+                    scene
+                        .scene_uuid
+                        .rsplit('-')
+                        .next()
+                        .and_then(|s| u64::from_str_radix(s, 16).ok())
+                })
+                .max()
+                .map_or(0, |max| max + 1)
+        });
+        let effective_next_scene_item_id = next_scene_item_id.unwrap_or_else(|| {
+            scenes_by_name
+                .values()
+                .flat_map(|scene| scene.items.iter())
+                .map(|item| item.scene_item_id)
+                .max()
+                .map_or(1, |max| max + 1)
+        });
+
+        // registry に反映する
+        self.inputs_by_uuid = inputs_by_uuid;
+        self.uuids_by_name = uuids_by_name;
+        self.scenes_by_name = scenes_by_name;
+        self.scene_order = scene_order;
+        self.current_program_scene_name = program_scene;
+        self.current_preview_scene_name = preview_scene;
+        self.scene_transition_overrides = scene_transition_overrides;
+        self.next_input_id = effective_next_input_id;
+        self.next_scene_id = effective_next_scene_id;
+        self.next_scene_item_id = effective_next_scene_item_id;
+
+        Ok(())
+    }
+
     pub fn state_file_path(&self) -> Option<&Path> {
         self.state_file_path.as_deref()
     }
