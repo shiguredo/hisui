@@ -160,7 +160,7 @@ impl ObswsInputRegistry {
                 ObswsInput::from_kind_and_settings(&input.input_kind, input.input_settings.value())
                     .map_err(|e| {
                         crate::Error::new(format!(
-                            "failed to restore input \"{}\": {e:?}",
+                            "failed to restore input \"{}\": {e}",
                             input.input_name,
                         ))
                     })?;
