@@ -17,7 +17,7 @@
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.0 にあげる
   - このバージョンから shiguredo_fdk_aac crate のリポジトリが https://github.com/shiguredo/fdk-aac-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_opus のバージョンを 2026.1.0-canary.5 にあげる
+- [UPDATE] shiguredo_opus のバージョンを 2026.1.0 にあげる
   - このバージョンから shiguredo_opus crate のリポジトリが https://github.com/shiguredo/opus-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0-canary.2 にあげる
