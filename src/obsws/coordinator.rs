@@ -435,7 +435,9 @@ impl ObswsCoordinator {
             }
         }
 
-        // バッチ内で state 変更があった場合にまとめて保存する
+        // バッチ内で state 変更があった場合にまとめて保存する。
+        // halt_on_failure で途中中断した場合でも、成功済みリクエストの副作用は
+        // ロールバックしないため、それまでの変更を保存する。
         if needs_save
             && !self.should_terminate
             && let Some(path) = self.input_registry.state_file_path()
@@ -445,7 +447,10 @@ impl ObswsCoordinator {
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
-                // バッチ結果に保存失敗エラーを追加する
+                // バッチ結果に保存失敗エラーを追加する。
+                // TODO: バッチの保存はループ後にまとめて行うため、特定のリクエストに
+                // 紐付けられない。request_id / request_type が空文字列になるが、
+                // クライアント側で対応付けできない点は将来的に改善を検討する。
                 let error_result = crate::obsws::response::RequestBatchResult {
                     request_id: String::new(),
                     request_type: String::new(),
