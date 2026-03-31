@@ -1002,6 +1002,61 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_all_sections() {
+        let state = ObswsStateFile {
+            stream: Some(ObswsStateFileStream {
+                stream_service_type: "rtmp_custom".to_owned(),
+                server: Some("rtmp://127.0.0.1:1935/live".to_owned()),
+                key: Some("key".to_owned()),
+            }),
+            record: Some(ObswsStateFileRecord {
+                record_directory: PathBuf::from("/tmp/rec"),
+            }),
+            rtmp_outbound: Some(ObswsRtmpOutboundSettings {
+                output_url: Some("rtmp://relay/live".to_owned()),
+                stream_name: Some("backup".to_owned()),
+            }),
+            sora: Some(ObswsSoraPublisherSettings {
+                signaling_urls: vec!["wss://s.example.com/signaling".to_owned()],
+                channel_id: Some("ch".to_owned()),
+                client_id: None,
+                bundle_id: None,
+                metadata: None,
+            }),
+            hls: Some(ObswsHlsSettings {
+                destination: Some(HlsDestination::Filesystem {
+                    directory: "/tmp/hls".to_owned(),
+                }),
+                segment_duration: 2.0,
+                max_retained_segments: 6,
+                segment_format: HlsSegmentFormat::MpegTs,
+                variants: vec![HlsVariant::default()],
+            }),
+            dash: Some(ObswsDashSettings {
+                destination: Some(DashDestination::Filesystem {
+                    directory: "/tmp/dash".to_owned(),
+                }),
+                segment_duration: 2.0,
+                max_retained_segments: 6,
+                variants: vec![DashVariant::default()],
+                video_codec: crate::types::CodecName::H264,
+                audio_codec: crate::types::CodecName::Aac,
+            }),
+        };
+
+        let json_text = crate::json::to_pretty_string(&state);
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip must succeed");
+
+        assert!(parsed.stream.is_some());
+        assert!(parsed.record.is_some());
+        assert!(parsed.rtmp_outbound.is_some());
+        assert!(parsed.sora.is_some());
+        assert!(parsed.hls.is_some());
+        assert!(parsed.dash.is_some());
+    }
+
+    #[test]
     fn save_and_load_state_file() {
         let dir = tempfile::tempdir().expect("tempdir must be created");
         let path = dir.path().join("state.jsonc");
