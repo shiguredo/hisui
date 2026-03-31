@@ -133,10 +133,29 @@ impl ObswsInputRegistry {
         next_scene_id: Option<u64>,
         next_scene_item_id: Option<i64>,
     ) -> crate::Result<()> {
+        // scenes が空の場合はエラーにする（最低 1 scene が必要）
+        if scenes.is_empty() {
+            return Err(crate::Error::new("scenes must contain at least one scene"));
+        }
+
         // input を復元する
         let mut inputs_by_uuid = BTreeMap::new();
         let mut uuids_by_name = BTreeMap::new();
         for input in &inputs {
+            // 重複チェック
+            if inputs_by_uuid.contains_key(&input.input_uuid) {
+                return Err(crate::Error::new(format!(
+                    "duplicate input UUID \"{}\"",
+                    input.input_uuid,
+                )));
+            }
+            if uuids_by_name.contains_key(&input.input_name) {
+                return Err(crate::Error::new(format!(
+                    "duplicate input name \"{}\"",
+                    input.input_name,
+                )));
+            }
+
             let obsws_input =
                 ObswsInput::from_kind_and_settings(&input.input_kind, input.input_settings.value())
                     .map_err(|e| {
@@ -162,6 +181,13 @@ impl ObswsInputRegistry {
         let mut scene_transition_overrides = BTreeMap::new();
 
         for scene in &scenes {
+            // 重複チェック
+            if scenes_by_name.contains_key(&scene.scene_name) {
+                return Err(crate::Error::new(format!(
+                    "duplicate scene name \"{}\"",
+                    scene.scene_name,
+                )));
+            }
             // scene item の inputUuid が inputs に存在するか検証する
             for item in &scene.items {
                 if !inputs_by_uuid.contains_key(&item.input_uuid) {
@@ -210,8 +236,9 @@ impl ObswsInputRegistry {
         }
 
         // currentProgramScene / currentPreviewScene の検証
+        // scenes が空でないことは上で検証済み
         let program_scene = current_program_scene
-            .unwrap_or_else(|| scene_order.first().cloned().unwrap_or_default());
+            .unwrap_or_else(|| scene_order.first().expect("scenes is not empty").clone());
         if !scenes_by_name.contains_key(&program_scene) {
             return Err(crate::Error::new(format!(
                 "currentProgramScene \"{}\" does not exist in scenes",

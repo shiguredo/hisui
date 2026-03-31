@@ -414,10 +414,14 @@ impl ObswsCoordinator {
     ) -> BatchCommandResult {
         let mut results = Vec::new();
         let mut events = Vec::new();
+        let mut needs_save = false;
         for request in requests {
             let request_type = request.request_type.clone().unwrap_or_default();
             let result = self.dispatch_request(request, session_stats).await;
             let request_succeeded = result.batch_result.request_status_result;
+            if request_succeeded && is_state_persisted_request(&request_type) {
+                needs_save = true;
+            }
             results.push(result.batch_result);
             events.extend(result.events);
             if let Err(e) = self
@@ -430,6 +434,20 @@ impl ObswsCoordinator {
                 break;
             }
         }
+
+        // バッチ内で state 変更があった場合にまとめて保存する
+        if needs_save
+            && !self.should_terminate
+            && let Some(path) = self.input_registry.state_file_path()
+        {
+            let path = path.to_path_buf();
+            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
+                tracing::error!("failed to save state file: {}", e.display());
+                self.should_terminate = true;
+            }
+        }
+
         BatchCommandResult { results, events }
     }
 

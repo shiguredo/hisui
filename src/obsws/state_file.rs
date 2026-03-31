@@ -527,10 +527,8 @@ fn parse_optional_scenes(
 fn parse_scene_items(
     scene_value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<Vec<StateFileSceneItem>, nojson::JsonParseError> {
-    let member: Option<nojson::RawJsonOwned> = scene_value.to_member("items")?.try_into()?;
-    let Some(ref items_json) = member else {
-        return Ok(Vec::new());
-    };
+    let items_json: nojson::RawJsonOwned =
+        scene_value.to_member("items")?.required()?.try_into()?;
     let arr = items_json.value().to_array()?;
     let mut items = Vec::new();
     for elem in arr {

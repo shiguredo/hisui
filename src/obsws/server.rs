@@ -156,6 +156,11 @@ pub async fn run_server(
         }
         // scene / input の復元
         if let Some(scenes) = state.scenes {
+            if state.inputs.is_none() && scenes.iter().any(|s| !s.items.is_empty()) {
+                return Err(crate::Error::new(
+                    "state file has scenes with items but no inputs section",
+                ));
+            }
             let inputs = state.inputs.unwrap_or_default();
             input_registry.restore_scenes_and_inputs(
                 scenes,
