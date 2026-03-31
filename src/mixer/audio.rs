@@ -216,6 +216,12 @@ pub enum AudioRealtimeMixerRpcMessage {
         input_tracks: Vec<AudioRealtimeInputTrack>,
         reply_tx: tokio::sync::oneshot::Sender<crate::Result<AudioRealtimeMixerUpdateInputsResult>>,
     },
+    /// 指定トラックのミュート・音量を変更する
+    SetTrackMuteVolume {
+        track_id: TrackId,
+        muted: bool,
+        volume_mul: f64,
+    },
     Finish {
         reply_tx: tokio::sync::oneshot::Sender<()>,
     },
@@ -345,6 +351,10 @@ struct InputTrackState {
     queue_head_timestamp: Option<Duration>,
     sample_queue: VecDeque<i16>,
     eos: bool,
+    /// ミュート状態（true の場合、合成時にサンプルをスキップする）
+    muted: bool,
+    /// 音量乗算係数（デフォルト 1.0 = 0dB）
+    volume_mul: f64,
 }
 
 impl InputTrackState {
@@ -361,6 +371,8 @@ impl InputTrackState {
             queue_head_timestamp: None,
             sample_queue: VecDeque::new(),
             eos: false,
+            muted: false,
+            volume_mul: 1.0,
         }
     }
 
@@ -569,6 +581,16 @@ impl AudioRealtimeMixerRunner<'_> {
                 let result = self.update_inputs(input_tracks);
                 let _ = reply_tx.send(result);
             }
+            AudioRealtimeMixerRpcMessage::SetTrackMuteVolume {
+                track_id,
+                muted,
+                volume_mul,
+            } => {
+                if let Some(state) = self.states.get_mut(&track_id) {
+                    state.muted = muted;
+                    state.volume_mul = volume_mul;
+                }
+            }
             AudioRealtimeMixerRpcMessage::Finish { reply_tx } => {
                 self.finishing = true;
                 let _ = reply_tx.send(());
@@ -679,9 +701,23 @@ impl AudioRealtimeMixerRunner<'_> {
     fn mix_next_audio_frame(&mut self, timestamp: Duration) -> AudioFrame {
         let mut accum = vec![0i32; self.config.frame_samples_total];
         for state in self.states.values_mut() {
+            if state.muted {
+                // ミュート時はサンプルをドレインするが合成には加えない
+                let _ = state.drain_samples_for_tick(timestamp, self.config, &self.stats);
+                continue;
+            }
             let samples = state.drain_samples_for_tick(timestamp, self.config, &self.stats);
-            for (acc, sample) in accum.iter_mut().zip(samples.into_iter()) {
-                *acc = acc.saturating_add(i32::from(sample));
+            if (state.volume_mul - 1.0).abs() < f64::EPSILON {
+                // 音量 1.0（0dB）の場合はそのまま加算
+                for (acc, sample) in accum.iter_mut().zip(samples.into_iter()) {
+                    *acc = acc.saturating_add(i32::from(sample));
+                }
+            } else {
+                // 音量を適用して加算
+                for (acc, sample) in accum.iter_mut().zip(samples.into_iter()) {
+                    let scaled = (f64::from(sample) * state.volume_mul) as i32;
+                    *acc = acc.saturating_add(scaled);
+                }
             }
         }
 
@@ -951,6 +987,35 @@ pub async fn finish_audio_mixer(
     reply_rx
         .await
         .map_err(|_| crate::Error::new("audio mixer RPC response channel is closed".to_owned()))?;
+    Ok(())
+}
+
+/// 指定トラックのミュート・音量を変更する（fire-and-forget）
+pub async fn set_track_mute_volume(
+    handle: &crate::MediaPipelineHandle,
+    processor_id: &crate::ProcessorId,
+    track_id: TrackId,
+    muted: bool,
+    volume_mul: f64,
+) -> crate::Result<()> {
+    let sender = handle
+        .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<AudioRealtimeMixerRpcMessage>>(
+            processor_id,
+        )
+        .await
+        .map_err(|e| {
+            crate::Error::new(format!(
+                "audio mixer mute/volume RPC error for {processor_id}: {e}"
+            ))
+        })?;
+
+    sender
+        .send(AudioRealtimeMixerRpcMessage::SetTrackMuteVolume {
+            track_id,
+            muted,
+            volume_mul,
+        })
+        .map_err(|_| crate::Error::new("audio mixer RPC sender channel is closed".to_owned()))?;
     Ok(())
 }
 

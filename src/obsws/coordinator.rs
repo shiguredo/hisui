@@ -466,12 +466,15 @@ impl ObswsCoordinator {
             }
             "SetInputMute" => {
                 self.handle_set_input_mute(&request_id, request.request_data.as_ref())
+                    .await
             }
             "ToggleInputMute" => {
                 self.handle_toggle_input_mute(&request_id, request.request_data.as_ref())
+                    .await
             }
             "SetInputVolume" => {
                 self.handle_set_input_volume(&request_id, request.request_data.as_ref())
+                    .await
             }
             "SetInputName" => {
                 self.handle_set_input_name(&request_id, request.request_data.as_ref())
@@ -912,7 +915,7 @@ impl ObswsCoordinator {
         self.build_result_from_response(response_text, events)
     }
 
-    fn handle_set_input_mute(
+    async fn handle_set_input_mute(
         &mut self,
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
@@ -929,6 +932,12 @@ impl ObswsCoordinator {
                 execution.input_name.as_deref(),
             )
         {
+            self.notify_audio_mixer_mute_volume(
+                &entry.input_uuid,
+                entry.input.input_muted,
+                entry.input.input_volume_mul,
+            )
+            .await;
             events.push(TaggedEvent {
                 text: crate::obsws::response::build_input_mute_state_changed_event(
                     &entry.input_name,
@@ -941,7 +950,7 @@ impl ObswsCoordinator {
         self.build_result_from_response(execution.response_text, events)
     }
 
-    fn handle_toggle_input_mute(
+    async fn handle_toggle_input_mute(
         &mut self,
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
@@ -958,6 +967,12 @@ impl ObswsCoordinator {
                 execution.input_name.as_deref(),
             )
         {
+            self.notify_audio_mixer_mute_volume(
+                &entry.input_uuid,
+                entry.input.input_muted,
+                entry.input.input_volume_mul,
+            )
+            .await;
             events.push(TaggedEvent {
                 text: crate::obsws::response::build_input_mute_state_changed_event(
                     &entry.input_name,
@@ -970,7 +985,7 @@ impl ObswsCoordinator {
         self.build_result_from_response(execution.response_text, events)
     }
 
-    fn handle_set_input_volume(
+    async fn handle_set_input_volume(
         &mut self,
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
@@ -987,6 +1002,12 @@ impl ObswsCoordinator {
                 execution.input_name.as_deref(),
             )
         {
+            self.notify_audio_mixer_mute_volume(
+                &entry.input_uuid,
+                entry.input.input_muted,
+                entry.input.input_volume_mul,
+            )
+            .await;
             events.push(TaggedEvent {
                 text: crate::obsws::response::build_input_volume_changed_event(
                     &entry.input_name,
@@ -998,6 +1019,30 @@ impl ObswsCoordinator {
             });
         }
         self.build_result_from_response(execution.response_text, events)
+    }
+
+    /// audio mixer に入力のミュート・音量設定を通知する
+    async fn notify_audio_mixer_mute_volume(&self, input_uuid: &str, muted: bool, volume_mul: f64) {
+        let Some(source_state) = self.input_source_processors.get(input_uuid) else {
+            return;
+        };
+        let Some(audio_track_id) = &source_state.audio_track_id else {
+            return;
+        };
+        let Some(pipeline_handle) = &self.pipeline_handle else {
+            return;
+        };
+        if let Err(e) = crate::mixer::audio::set_track_mute_volume(
+            pipeline_handle,
+            &self.program_output.audio_mixer_processor_id,
+            audio_track_id.clone(),
+            muted,
+            volume_mul,
+        )
+        .await
+        {
+            tracing::warn!("failed to notify audio mixer mute/volume: {}", e.display());
+        }
     }
 
     fn handle_set_input_name(
