@@ -1152,12 +1152,9 @@ impl ObswsCoordinator {
     }
 
     /// メディア入力からのイベントをポーリングして obsws セッションに配信する
-    fn drain_media_input_events(&self) {
-        for (input_uuid, source_state) in &self.input_source_processors {
-            let Some(handle) = &source_state.media_handle else {
-                continue;
-            };
-            let Ok(mut event_rx) = handle.event_rx.lock() else {
+    fn drain_media_input_events(&mut self) {
+        for (input_uuid, source_state) in &mut self.input_source_processors {
+            let Some(handle) = &mut source_state.media_handle else {
                 continue;
             };
             let Some(entry) = self
@@ -1166,7 +1163,7 @@ impl ObswsCoordinator {
             else {
                 continue;
             };
-            while let Ok(event) = event_rx.try_recv() {
+            while let Ok(event) = handle.event_rx.try_recv() {
                 let tagged_event = match event {
                     crate::mp4::reader::MediaInputEvent::PlaybackStarted => TaggedEvent {
                         text: crate::obsws::response::build_media_input_playback_started_event(
@@ -1248,19 +1245,12 @@ impl ObswsCoordinator {
         };
 
         let (state_str, cursor_ms, duration_ms) = if let Some(handle) = &source_state.media_handle {
-            if let Ok(status) = handle.status.lock() {
-                (
-                    status.state.as_obs_str(),
-                    status.media_cursor_ms,
-                    status.media_duration_ms,
-                )
-            } else {
-                (
-                    crate::mp4::reader::MediaPlaybackState::None.as_obs_str(),
-                    0,
-                    0,
-                )
-            }
+            let status = handle.status.borrow();
+            (
+                status.state.as_obs_str(),
+                status.media_cursor_ms,
+                status.media_duration_ms,
+            )
         } else {
             (
                 crate::mp4::reader::MediaPlaybackState::None.as_obs_str(),

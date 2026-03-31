@@ -2,7 +2,6 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -104,34 +103,34 @@ pub enum MediaInputEvent {
 }
 
 /// メディア入力の制御ハンドル（coordinator が保持する）
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MediaInputHandle {
-    pub status: Arc<Mutex<MediaPlaybackStatus>>,
+    pub status: tokio::sync::watch::Receiver<MediaPlaybackStatus>,
     pub command_tx: tokio::sync::mpsc::Sender<MediaInputCommand>,
-    pub event_rx: Arc<Mutex<tokio::sync::mpsc::Receiver<MediaInputEvent>>>,
+    pub event_rx: tokio::sync::mpsc::Receiver<MediaInputEvent>,
 }
 
 /// `MediaInputHandle` の作成結果（reader 側で受け取る部分）
 #[derive(Debug)]
 struct MediaInputChannels {
-    status: Arc<Mutex<MediaPlaybackStatus>>,
+    status_tx: tokio::sync::watch::Sender<MediaPlaybackStatus>,
     command_rx: tokio::sync::mpsc::Receiver<MediaInputCommand>,
     event_tx: tokio::sync::mpsc::Sender<MediaInputEvent>,
 }
 
 /// メディア入力のハンドルとチャネルを作成する
 fn create_media_input_channels() -> (MediaInputHandle, MediaInputChannels) {
-    let status = Arc::new(Mutex::new(MediaPlaybackStatus::default()));
+    let (status_tx, status_rx) = tokio::sync::watch::channel(MediaPlaybackStatus::default());
     let (command_tx, command_rx) = tokio::sync::mpsc::channel(8);
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(8);
 
     let handle = MediaInputHandle {
-        status: Arc::clone(&status),
+        status: status_rx,
         command_tx,
-        event_rx: Arc::new(Mutex::new(event_rx)),
+        event_rx,
     };
     let channels = MediaInputChannels {
-        status,
+        status_tx,
         command_rx,
         event_tx,
     };
@@ -436,15 +435,15 @@ impl Mp4FileReader {
 
     /// 再生状態を更新する
     fn update_playback_status(&self, state: MediaPlaybackState, cursor: Duration) {
-        if let Some(channels) = &self.media_channels
-            && let Ok(mut status) = channels.status.lock()
-        {
-            status.state = state;
+        if let Some(channels) = &self.media_channels {
             // ループ再生の場合、cursor はファイル内での相対位置を示す
             // base_offset を引いてファイル内の位置に変換する
             let file_cursor = cursor.saturating_sub(self.base_offset);
-            status.media_cursor_ms = file_cursor.as_millis() as i64;
-            status.media_duration_ms = self.media_duration_ms;
+            let _ = channels.status_tx.send(MediaPlaybackStatus {
+                state,
+                media_cursor_ms: file_cursor.as_millis() as i64,
+                media_duration_ms: self.media_duration_ms,
+            });
         }
     }
 
