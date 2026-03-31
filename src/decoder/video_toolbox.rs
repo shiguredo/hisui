@@ -95,7 +95,6 @@ impl VideoToolboxDecoder {
         width: u32,
         height: u32,
     ) -> crate::Result<Self> {
-
         let inner =
             shiguredo_video_toolbox::Decoder::new(shiguredo_video_toolbox::DecoderConfig {
                 codec,

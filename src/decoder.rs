@@ -445,7 +445,7 @@ impl VideoDecoder {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
-                {
+                if EngineName::VideoToolbox.is_available_video_decode_codec(codec) {
                     engines.push(EngineName::VideoToolbox);
                 }
                 engines.push(EngineName::Libvpx);
@@ -479,7 +479,7 @@ impl VideoDecoder {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
-                {
+                if EngineName::VideoToolbox.is_available_video_decode_codec(codec) {
                     engines.push(EngineName::VideoToolbox);
                 }
                 engines.push(EngineName::Dav1d);
