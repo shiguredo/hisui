@@ -1,5 +1,5 @@
 //! 雑多な型定義をまとめたモジュール
-use std::{path::Path, str::FromStr, time::Duration};
+use std::{path::Path, str::FromStr, sync::OnceLock, time::Duration};
 
 /// コーデック名
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -136,6 +136,68 @@ pub enum EngineName {
     VideoToolbox,
 }
 
+// ハードウェア対応状況はプロセス実行中に変化しないため、初回の結果をキャッシュして
+// エンジン選択のたびに各クレートの supported_codecs() を呼ぶオーバーヘッドを避ける
+
+#[cfg(target_os = "macos")]
+fn video_toolbox_supported_codecs() -> &'static [shiguredo_video_toolbox::CodecInfo] {
+    static CACHE: OnceLock<Vec<shiguredo_video_toolbox::CodecInfo>> = OnceLock::new();
+    CACHE.get_or_init(shiguredo_video_toolbox::supported_codecs)
+}
+
+// ソフトウェアコーデックの結果は常に同じだが、VideoToolbox と統一したパターンとしてキャッシュする
+fn libvpx_supported_codecs() -> &'static [shiguredo_libvpx::CodecInfo] {
+    static CACHE: OnceLock<Vec<shiguredo_libvpx::CodecInfo>> = OnceLock::new();
+    CACHE.get_or_init(shiguredo_libvpx::supported_codecs)
+}
+
+fn dav1d_supported_codecs() -> &'static [shiguredo_dav1d::CodecInfo] {
+    static CACHE: OnceLock<Vec<shiguredo_dav1d::CodecInfo>> = OnceLock::new();
+    CACHE.get_or_init(shiguredo_dav1d::supported_codecs)
+}
+
+fn svt_av1_supported_codecs() -> &'static [shiguredo_svt_av1::CodecInfo] {
+    static CACHE: OnceLock<Vec<shiguredo_svt_av1::CodecInfo>> = OnceLock::new();
+    CACHE.get_or_init(shiguredo_svt_av1::supported_codecs)
+}
+
+/// CodecName から shiguredo_video_toolbox の VideoCodecType へのマッピング
+#[cfg(target_os = "macos")]
+fn to_video_toolbox_codec(codec: CodecName) -> Option<shiguredo_video_toolbox::VideoCodecType> {
+    match codec {
+        CodecName::H264 => Some(shiguredo_video_toolbox::VideoCodecType::H264),
+        CodecName::H265 => Some(shiguredo_video_toolbox::VideoCodecType::Hevc),
+        CodecName::Vp9 => Some(shiguredo_video_toolbox::VideoCodecType::Vp9),
+        CodecName::Av1 => Some(shiguredo_video_toolbox::VideoCodecType::Av1),
+        _ => None,
+    }
+}
+
+/// CodecName から shiguredo_libvpx の VideoCodecType へのマッピング
+fn to_libvpx_codec(codec: CodecName) -> Option<shiguredo_libvpx::VideoCodecType> {
+    match codec {
+        CodecName::Vp8 => Some(shiguredo_libvpx::VideoCodecType::Vp8),
+        CodecName::Vp9 => Some(shiguredo_libvpx::VideoCodecType::Vp9),
+        _ => None,
+    }
+}
+
+/// CodecName から shiguredo_dav1d の VideoCodecType へのマッピング
+fn to_dav1d_codec(codec: CodecName) -> Option<shiguredo_dav1d::VideoCodecType> {
+    match codec {
+        CodecName::Av1 => Some(shiguredo_dav1d::VideoCodecType::Av1),
+        _ => None,
+    }
+}
+
+/// CodecName から shiguredo_svt_av1 の VideoCodecType へのマッピング
+fn to_svt_av1_codec(codec: CodecName) -> Option<shiguredo_svt_av1::VideoCodecType> {
+    match codec {
+        CodecName::Av1 => Some(shiguredo_svt_av1::VideoCodecType::Av1),
+        _ => None,
+    }
+}
+
 impl EngineName {
     // NOTE: 先頭の方が優先順位が高い
     pub fn default_video_decoders(is_openh264_enabled: bool) -> Vec<Self> {
@@ -160,7 +222,11 @@ impl EngineName {
 
     pub fn is_available_video_decode_codec(self, codec: CodecName) -> bool {
         match self {
-            EngineName::Libvpx => matches!(codec, CodecName::Vp8 | CodecName::Vp9),
+            EngineName::Libvpx => to_libvpx_codec(codec).is_some_and(|c| {
+                libvpx_supported_codecs()
+                    .iter()
+                    .any(|info| info.codec == c && info.decoding.supported)
+            }),
             #[cfg(feature = "nvcodec")]
             EngineName::Nvcodec => {
                 matches!(
@@ -173,9 +239,17 @@ impl EngineName {
                 )
             }
             EngineName::Openh264 => matches!(codec, CodecName::H264),
-            EngineName::Dav1d => matches!(codec, CodecName::Av1),
+            EngineName::Dav1d => to_dav1d_codec(codec).is_some_and(|c| {
+                dav1d_supported_codecs()
+                    .iter()
+                    .any(|info| info.codec == c && info.decoding.supported)
+            }),
             #[cfg(target_os = "macos")]
-            EngineName::VideoToolbox => matches!(codec, CodecName::H264 | CodecName::H265),
+            EngineName::VideoToolbox => to_video_toolbox_codec(codec).is_some_and(|c| {
+                video_toolbox_supported_codecs()
+                    .iter()
+                    .any(|info| info.codec == c && info.decoding.supported)
+            }),
             _ => false,
         }
     }
@@ -203,15 +277,27 @@ impl EngineName {
 
     pub fn is_available_video_encode_codec(self, codec: CodecName) -> bool {
         match self {
-            EngineName::Libvpx => matches!(codec, CodecName::Vp8 | CodecName::Vp9),
+            EngineName::Libvpx => to_libvpx_codec(codec).is_some_and(|c| {
+                libvpx_supported_codecs()
+                    .iter()
+                    .any(|info| info.codec == c && info.encoding.supported)
+            }),
             #[cfg(feature = "nvcodec")]
             EngineName::Nvcodec => {
                 matches!(codec, CodecName::H264 | CodecName::H265 | CodecName::Av1)
             }
             EngineName::Openh264 => matches!(codec, CodecName::H264),
-            EngineName::SvtAv1 => matches!(codec, CodecName::Av1),
+            EngineName::SvtAv1 => to_svt_av1_codec(codec).is_some_and(|c| {
+                svt_av1_supported_codecs()
+                    .iter()
+                    .any(|info| info.codec == c && info.encoding.supported)
+            }),
             #[cfg(target_os = "macos")]
-            EngineName::VideoToolbox => matches!(codec, CodecName::H264 | CodecName::H265),
+            EngineName::VideoToolbox => to_video_toolbox_codec(codec).is_some_and(|c| {
+                video_toolbox_supported_codecs()
+                    .iter()
+                    .any(|info| info.codec == c && info.encoding.supported)
+            }),
             _ => false,
         }
     }

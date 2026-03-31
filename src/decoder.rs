@@ -432,10 +432,21 @@ impl VideoDecoder {
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
         let mut engines = Vec::new();
         match codec {
-            CodecName::Vp8 | CodecName::Vp9 => {
+            CodecName::Vp8 => {
                 #[cfg(feature = "nvcodec")]
                 if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
+                }
+                engines.push(EngineName::Libvpx);
+            }
+            CodecName::Vp9 => {
+                #[cfg(feature = "nvcodec")]
+                if shiguredo_nvcodec::is_cuda_library_available() {
+                    engines.push(EngineName::Nvcodec);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
                 }
                 engines.push(EngineName::Libvpx);
             }
@@ -466,6 +477,10 @@ impl VideoDecoder {
                 #[cfg(feature = "nvcodec")]
                 if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    engines.push(EngineName::VideoToolbox);
                 }
                 engines.push(EngineName::Dav1d);
             }
@@ -591,6 +606,18 @@ impl VideoDecoderInner {
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
                 *self = VideoToolboxDecoder::new_h265(frame)
+                    .map(Box::new)
+                    .map(Self::VideoToolbox)?;
+            }
+            #[cfg(target_os = "macos")]
+            (Some(EngineName::VideoToolbox), CodecName::Vp9) => {
+                *self = VideoToolboxDecoder::new_vp9(frame)
+                    .map(Box::new)
+                    .map(Self::VideoToolbox)?;
+            }
+            #[cfg(target_os = "macos")]
+            (Some(EngineName::VideoToolbox), CodecName::Av1) => {
+                *self = VideoToolboxDecoder::new_av1(frame)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }

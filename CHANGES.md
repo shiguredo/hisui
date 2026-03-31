@@ -157,6 +157,10 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtmp を追加する
   - @sile
+- [ADD] VideoToolbox デコーダーで VP9 と AV1 のハードウェアデコードに対応する
+  - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
+  - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
+  - @sile
 - [CHANGE] FDK-AAC を `fdk-aac` feature フラグによるビルド時有効化と、`--fdk-aac` オプションによる実行時の共有ライブラリ指定を併用する方式に変更する
   - @sile
 - [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
@@ -190,6 +194,8 @@
 
 ### misc
 
+- [UPDATE] 映像コーデックエンジンの選択を各コーデック crate の `supported_codecs()` を使った実行時検出に統一する
+  - @sile
 - libvpx feature を削除して shiguredo_libvpx を常に有効にする
   - shiguredo_libvpx のリポジトリを外出ししたことで、ビルドに時間が大幅に短縮されたので feature にする必要がなくなったため
   - @sile
