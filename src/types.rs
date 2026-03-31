@@ -162,6 +162,8 @@ fn svt_av1_supported_codecs() -> &'static [shiguredo_svt_av1::CodecInfo] {
 }
 
 /// CodecName から shiguredo_video_toolbox の VideoCodecType へのマッピング
+///
+/// VideoToolbox は VP8 に対応していないため、VP8 は None を返す。
 #[cfg(target_os = "macos")]
 fn to_video_toolbox_codec(codec: CodecName) -> Option<shiguredo_video_toolbox::VideoCodecType> {
     match codec {

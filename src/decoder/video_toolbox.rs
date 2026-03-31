@@ -12,13 +12,13 @@ pub struct VideoToolboxDecoder {
     decoded: Option<VideoFrame>,
 
     // デコーダーの再初期化が必要かどうかの判定に使うフィールド
-    // H264/H265: VPS/SPS/PPS の変化で判定
-    // VP9/AV1: 解像度の変化で判定
+    //
+    // H264/H265: VPS/SPS/PPS の変化で判定（resolution は未使用）
+    // VP9/AV1: 解像度の変化で判定（vps/sps/pps は未使用）
     vps: Vec<u8>,
     sps: Vec<u8>,
     pps: Vec<u8>,
-    width: u32,
-    height: u32,
+    resolution: Option<(u32, u32)>,
 }
 
 impl VideoToolboxDecoder {
@@ -41,8 +41,7 @@ impl VideoToolboxDecoder {
             vps: Vec::new(),
             sps,
             pps,
-            width: 0,
-            height: 0,
+            resolution: None,
         })
     }
 
@@ -66,46 +65,40 @@ impl VideoToolboxDecoder {
             vps: vps.to_vec(),
             sps: sps.to_vec(),
             pps: pps.to_vec(),
-            width: 0,
-            height: 0,
+            resolution: None,
         })
     }
 
     pub fn new_vp9(frame: &VideoFrame) -> crate::Result<Self> {
-        let size = frame.size.ok_or_else(|| {
-            crate::Error::new("VP9 frame size is required for VideoToolbox decoder")
-        })?;
-        let width = size.width as u32;
-        let height = size.height as u32;
+        let (width, height) = get_frame_resolution(frame, "VP9")?;
         tracing::debug!("Initialize VP9 decoder: width={width}, height={height}");
-
-        let inner =
-            shiguredo_video_toolbox::Decoder::new(shiguredo_video_toolbox::DecoderConfig {
-                codec: shiguredo_video_toolbox::DecoderCodec::Vp9 { width, height },
-                pixel_format: shiguredo_video_toolbox::PixelFormat::I420,
-            })?;
-        Ok(Self {
-            inner,
-            decoded: None,
-            vps: Vec::new(),
-            sps: Vec::new(),
-            pps: Vec::new(),
+        Self::new_raw_codec(
+            shiguredo_video_toolbox::DecoderCodec::Vp9 { width, height },
             width,
             height,
-        })
+        )
     }
 
     pub fn new_av1(frame: &VideoFrame) -> crate::Result<Self> {
-        let size = frame.size.ok_or_else(|| {
-            crate::Error::new("AV1 frame size is required for VideoToolbox decoder")
-        })?;
-        let width = size.width as u32;
-        let height = size.height as u32;
+        let (width, height) = get_frame_resolution(frame, "AV1")?;
         tracing::debug!("Initialize AV1 decoder: width={width}, height={height}");
+        Self::new_raw_codec(
+            shiguredo_video_toolbox::DecoderCodec::Av1 { width, height },
+            width,
+            height,
+        )
+    }
+
+    /// VP9/AV1 共通のデコーダー生成
+    fn new_raw_codec(
+        codec: shiguredo_video_toolbox::DecoderCodec<'_>,
+        width: u32,
+        height: u32,
+    ) -> crate::Result<Self> {
 
         let inner =
             shiguredo_video_toolbox::Decoder::new(shiguredo_video_toolbox::DecoderConfig {
-                codec: shiguredo_video_toolbox::DecoderCodec::Av1 { width, height },
+                codec,
                 pixel_format: shiguredo_video_toolbox::PixelFormat::I420,
             })?;
         Ok(Self {
@@ -114,8 +107,7 @@ impl VideoToolboxDecoder {
             vps: Vec::new(),
             sps: Vec::new(),
             pps: Vec::new(),
-            width,
-            height,
+            resolution: Some((width, height)),
         })
     }
 
@@ -163,25 +155,29 @@ impl VideoToolboxDecoder {
                 }
             }
             VideoFormat::Vp9 | VideoFormat::Av1 => {
-                if let Some(size) = frame.size {
-                    let new_width = size.width as u32;
-                    let new_height = size.height as u32;
-                    if new_width == self.width && new_height == self.height {
-                        return Ok(());
-                    }
-
-                    if self.decoded.is_some() {
-                        return Err(crate::Error::new(
-                            "cannot reinitialize decoder while decoded frame is pending",
-                        ));
-                    }
-
-                    // 解像度が変わったのでデコーダーを再作成する
+                let (new_width, new_height) = get_frame_resolution(
+                    frame,
                     if frame.format == VideoFormat::Vp9 {
-                        *self = Self::new_vp9(frame)?;
+                        "VP9"
                     } else {
-                        *self = Self::new_av1(frame)?;
-                    }
+                        "AV1"
+                    },
+                )?;
+                if Some((new_width, new_height)) == self.resolution {
+                    return Ok(());
+                }
+
+                if self.decoded.is_some() {
+                    return Err(crate::Error::new(
+                        "cannot reinitialize decoder while decoded frame is pending",
+                    ));
+                }
+
+                // 解像度が変わったのでデコーダーを再作成する
+                if frame.format == VideoFormat::Vp9 {
+                    *self = Self::new_vp9(frame)?;
+                } else {
+                    *self = Self::new_av1(frame)?;
                 }
             }
             _ => {}
@@ -301,6 +297,16 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
     }
 
     Ok((sps, pps))
+}
+
+/// VP9/AV1 フレームから解像度を取得する
+fn get_frame_resolution(frame: &VideoFrame, codec_name: &str) -> crate::Result<(u32, u32)> {
+    let size = frame.size.ok_or_else(|| {
+        crate::Error::new(format!(
+            "{codec_name} frame size is required for VideoToolbox decoder"
+        ))
+    })?;
+    Ok((size.width as u32, size.height as u32))
 }
 
 fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8])> {
