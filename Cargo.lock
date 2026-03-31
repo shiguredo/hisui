@@ -1109,9 +1109,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_openh264"
-version = "2026.1.0-canary.5"
+version = "2026.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9b630b0ee5d116b1092ebdebe3b608a8e7acf0c5461c2998a52a8d3339973c8"
+checksum = "08588733ad03a7110b7132a250d560b496be9a8616ef2e2833fdcccee88f88d0"
 dependencies = [
  "bindgen",
  "shiguredo_toml",

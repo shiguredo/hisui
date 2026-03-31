@@ -128,8 +128,8 @@
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する
   - @sile
-- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.5 にあげる
-  - shiguredo_openh264 crate のリポジトリは 2026.1.0-canary.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
+- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0 にあげる
+  - shiguredo_openh264 crate のリポジトリは 2026.1.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.2 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが https://github.com/shiguredo/nvcodec-rs に独立したので、hisui のワークスペースからは削除されている
