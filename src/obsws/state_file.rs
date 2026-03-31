@@ -559,7 +559,19 @@ fn parse_s3_fields(d: nojson::RawJsonValue<'_, '_>) -> Result<S3Fields, nojson::
     let creds_member: nojson::RawJsonOwned = d.to_member("credentials")?.required()?.try_into()?;
     let c = creds_member.value();
     let access_key_id: String = c.to_member("accessKeyId")?.required()?.try_into()?;
+    if access_key_id.is_empty() {
+        return Err(c
+            .to_member("accessKeyId")?
+            .required()?
+            .invalid("accessKeyId must not be empty"));
+    }
     let secret_access_key: String = c.to_member("secretAccessKey")?.required()?.try_into()?;
+    if secret_access_key.is_empty() {
+        return Err(c
+            .to_member("secretAccessKey")?
+            .required()?
+            .invalid("secretAccessKey must not be empty"));
+    }
     let session_token: Option<String> = c.to_member("sessionToken")?.try_into()?;
 
     let lifetime_days: Option<u32> = d.to_member("lifetimeDays")?.try_into()?;
