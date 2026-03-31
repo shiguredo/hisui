@@ -459,7 +459,7 @@ impl VideoDecoder {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
-                {
+                if EngineName::VideoToolbox.is_available_video_decode_codec(codec) {
                     engines.push(EngineName::VideoToolbox);
                 }
             }
@@ -469,7 +469,7 @@ impl VideoDecoder {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
-                {
+                if EngineName::VideoToolbox.is_available_video_decode_codec(codec) {
                     engines.push(EngineName::VideoToolbox);
                 }
             }
