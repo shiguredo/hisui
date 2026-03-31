@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use nojson::DisplayJson as _;
+
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
@@ -1254,6 +1256,53 @@ impl nojson::DisplayJson for HlsDestination {
 }
 
 impl HlsDestination {
+    /// state file 用: 認証情報を含めて JSON オブジェクトとして出力する
+    pub fn fmt_with_credentials(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            Self::Filesystem { directory } => nojson::object(|f| {
+                f.member("type", "filesystem")?;
+                f.member("directory", directory)
+            })
+            .fmt(f),
+            Self::S3 {
+                bucket,
+                prefix,
+                region,
+                endpoint,
+                use_path_style,
+                access_key_id,
+                secret_access_key,
+                session_token,
+                lifetime_days,
+            } => nojson::object(|f| {
+                f.member("type", "s3")?;
+                f.member("bucket", bucket)?;
+                f.member("prefix", prefix)?;
+                f.member("region", region)?;
+                if let Some(endpoint) = endpoint {
+                    f.member("endpoint", endpoint)?;
+                }
+                f.member("usePathStyle", *use_path_style)?;
+                f.member(
+                    "credentials",
+                    nojson::object(|f| {
+                        f.member("accessKeyId", access_key_id)?;
+                        f.member("secretAccessKey", secret_access_key)?;
+                        if let Some(token) = session_token {
+                            f.member("sessionToken", token)?;
+                        }
+                        Ok(())
+                    }),
+                )?;
+                if let Some(days) = lifetime_days {
+                    f.member("lifetimeDays", *days)?;
+                }
+                Ok(())
+            })
+            .fmt(f),
+        }
+    }
+
     /// GetOutputStatus 用の outputPath を生成する
     pub fn output_path(&self) -> String {
         match self {
@@ -1446,6 +1495,53 @@ impl nojson::DisplayJson for DashDestination {
 }
 
 impl DashDestination {
+    /// state file 用: 認証情報を含めて JSON オブジェクトとして出力する
+    pub fn fmt_with_credentials(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            Self::Filesystem { directory } => nojson::object(|f| {
+                f.member("type", "filesystem")?;
+                f.member("directory", directory)
+            })
+            .fmt(f),
+            Self::S3 {
+                bucket,
+                prefix,
+                region,
+                endpoint,
+                use_path_style,
+                access_key_id,
+                secret_access_key,
+                session_token,
+                lifetime_days,
+            } => nojson::object(|f| {
+                f.member("type", "s3")?;
+                f.member("bucket", bucket)?;
+                f.member("prefix", prefix)?;
+                f.member("region", region)?;
+                if let Some(endpoint) = endpoint {
+                    f.member("endpoint", endpoint)?;
+                }
+                f.member("usePathStyle", *use_path_style)?;
+                f.member(
+                    "credentials",
+                    nojson::object(|f| {
+                        f.member("accessKeyId", access_key_id)?;
+                        f.member("secretAccessKey", secret_access_key)?;
+                        if let Some(token) = session_token {
+                            f.member("sessionToken", token)?;
+                        }
+                        Ok(())
+                    }),
+                )?;
+                if let Some(days) = lifetime_days {
+                    f.member("lifetimeDays", *days)?;
+                }
+                Ok(())
+            })
+            .fmt(f),
+        }
+    }
+
     /// GetOutputStatus 用の outputPath を生成する
     pub fn output_path(&self) -> String {
         match self {
