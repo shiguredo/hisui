@@ -253,9 +253,9 @@ fn parse_hls_variants(
     let Some(ref variants_json) = variants_member else {
         return Ok(vec![HlsVariant::default()]);
     };
-    let mut arr = variants_json.value().to_array()?;
+    let arr = variants_json.value().to_array()?;
     let mut variants = Vec::new();
-    for elem in arr.by_ref() {
+    for elem in arr {
         let video_bitrate: usize = elem.to_member("videoBitrate")?.required()?.try_into()?;
         let audio_bitrate: usize = elem.to_member("audioBitrate")?.required()?.try_into()?;
         if video_bitrate == 0 {
@@ -402,9 +402,9 @@ fn parse_dash_variants(
     let Some(ref variants_json) = variants_member else {
         return Ok(vec![DashVariant::default()]);
     };
-    let mut arr = variants_json.value().to_array()?;
+    let arr = variants_json.value().to_array()?;
     let mut variants = Vec::new();
-    for elem in arr.by_ref() {
+    for elem in arr {
         let video_bitrate: usize = elem.to_member("videoBitrate")?.required()?.try_into()?;
         let audio_bitrate: usize = elem.to_member("audioBitrate")?.required()?.try_into()?;
         if video_bitrate == 0 {
