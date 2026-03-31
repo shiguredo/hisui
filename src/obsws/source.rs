@@ -9,6 +9,7 @@ mod rtmp_inbound;
 mod rtsp_subscriber;
 mod srt_inbound;
 pub mod video_device;
+pub mod webrtc_source;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObswsOutputKind {
@@ -246,6 +247,9 @@ pub fn build_record_source_plan(
         }
         ObswsInputSettings::RtspSubscriber(settings) => {
             rtsp_subscriber::build_record_source_plan(settings, output_kind, run_id, source_key)
+        }
+        ObswsInputSettings::WebRtcSource(_) => {
+            webrtc_source::build_record_source_plan(output_kind, source_key)
         }
     }
 }

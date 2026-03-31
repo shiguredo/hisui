@@ -7,7 +7,7 @@ use nojson::DisplayJson as _;
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
-pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 7] = [
+pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 8] = [
     "image_source",
     "video_capture_device",
     "audio_capture_device",
@@ -15,6 +15,7 @@ pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 7] = [
     "rtmp_inbound",
     "srt_inbound",
     "rtsp_subscriber",
+    "webrtc_source",
 ];
 pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 7] = [
     "fade_transition",
@@ -113,6 +114,7 @@ pub enum ObswsInputSettings {
     RtmpInbound(ObswsRtmpInboundSettings),
     SrtInbound(ObswsSrtInboundSettings),
     RtspSubscriber(ObswsRtspSubscriberSettings),
+    WebRtcSource(ObswsWebRtcSourceSettings),
 }
 
 impl ObswsInputSettings {
@@ -129,6 +131,7 @@ impl ObswsInputSettings {
             "rtmp_inbound" => Ok(Self::RtmpInbound(ObswsRtmpInboundSettings::default())),
             "srt_inbound" => Ok(Self::SrtInbound(ObswsSrtInboundSettings::default())),
             "rtsp_subscriber" => Ok(Self::RtspSubscriber(ObswsRtspSubscriberSettings::default())),
+            "webrtc_source" => Ok(Self::WebRtcSource(ObswsWebRtcSourceSettings::default())),
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -196,6 +199,19 @@ impl ObswsInputSettings {
                     input_url,
                 }))
             }
+            "webrtc_source" => {
+                // trackId は Attach/Detach で制御するため、CreateInput 時は無視する
+                let background_key_color =
+                    parse_optional_string_setting(input_settings, "backgroundKeyColor")?;
+                let background_key_tolerance =
+                    parse_optional_i32_setting(input_settings, "backgroundKeyTolerance")?;
+                validate_background_key_tolerance(background_key_tolerance)?;
+                Ok(Self::WebRtcSource(ObswsWebRtcSourceSettings {
+                    track_id: None,
+                    background_key_color,
+                    background_key_tolerance,
+                }))
+            }
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -211,6 +227,7 @@ impl ObswsInputSettings {
             Self::RtmpInbound(_) => "rtmp_inbound",
             Self::SrtInbound(_) => "srt_inbound",
             Self::RtspSubscriber(_) => "rtsp_subscriber",
+            Self::WebRtcSource(_) => "webrtc_source",
         }
     }
 
@@ -297,6 +314,25 @@ impl ObswsInputSettings {
                     input_url,
                 }))
             }
+            Self::WebRtcSource(existing) => {
+                // trackId は Attach/Detach で制御するため overlay 対象外
+                let background_key_color = parse_overlay_string_setting(
+                    input_settings,
+                    "backgroundKeyColor",
+                    &existing.background_key_color,
+                )?;
+                let background_key_tolerance = parse_overlay_i32_setting(
+                    input_settings,
+                    "backgroundKeyTolerance",
+                    &existing.background_key_tolerance,
+                )?;
+                validate_background_key_tolerance(background_key_tolerance)?;
+                Ok(Self::WebRtcSource(ObswsWebRtcSourceSettings {
+                    track_id: existing.track_id.clone(),
+                    background_key_color,
+                    background_key_tolerance,
+                }))
+            }
         }
     }
 }
@@ -311,6 +347,7 @@ impl nojson::DisplayJson for ObswsInputSettings {
             Self::RtmpInbound(settings) => settings.fmt(f),
             Self::SrtInbound(settings) => settings.fmt(f),
             Self::RtspSubscriber(settings) => settings.fmt(f),
+            Self::WebRtcSource(settings) => settings.fmt(f),
         }
     }
 }
@@ -882,6 +919,17 @@ fn parse_overlay_bool_setting(
     })
 }
 
+fn validate_background_key_tolerance(value: Option<i32>) -> Result<(), ParseInputSettingsError> {
+    if let Some(v) = value
+        && !(0..=255).contains(&v)
+    {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "backgroundKeyTolerance must be 0-255, got {v}"
+        )));
+    }
+    Ok(())
+}
+
 fn parse_optional_i32_setting(
     settings: nojson::RawJsonValue<'_, '_>,
     key: &str,
@@ -1099,6 +1147,37 @@ impl nojson::DisplayJson for ObswsRtspSubscriberSettings {
         nojson::object(|f| {
             if let Some(input_url) = &self.input_url {
                 f.member("inputUrl", input_url)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsWebRtcSourceSettings {
+    // trackId は Attach/Detach Request で制御する。SetInputSettings では変更不可。
+    pub track_id: Option<String>,
+    // 透過対象の背景色。#RRGGBB 形式。null は透過なし。
+    pub background_key_color: Option<String>,
+    // key color 許容差。0 以上 255 以下の整数。null は透過なし。
+    pub background_key_tolerance: Option<i32>,
+}
+
+impl nojson::DisplayJson for ObswsWebRtcSourceSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(track_id) = &self.track_id {
+                f.member("trackId", track_id)?;
+            }
+            if let Some(background_key_color) = &self.background_key_color {
+                f.member("backgroundKeyColor", background_key_color)?;
+            }
+            if let Some(background_key_tolerance) = self.background_key_tolerance {
+                f.member(
+                    "backgroundKeyTolerance",
+                    i64::from(background_key_tolerance),
+                )?;
             }
             Ok(())
         })

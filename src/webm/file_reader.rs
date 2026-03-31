@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    Ack, AudioFrame, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame,
+    Ack, AudioFrame, Error, ProcessorHandle, Result, TrackId, TrackPublisher, VideoFrame,
     webm::reader::{WebmAudioReader, WebmVideoReader},
 };
 
@@ -236,13 +236,13 @@ enum PendingSample {
 
 #[derive(Debug)]
 struct TrackSender {
-    sender: MessageSender,
+    sender: TrackPublisher,
     ack: Option<Ack>,
     noacked_sent: u64,
 }
 
 impl TrackSender {
-    fn new(mut sender: MessageSender) -> Self {
+    fn new(mut sender: TrackPublisher) -> Self {
         let ack = Some(sender.send_syn());
         Self {
             sender,

@@ -486,7 +486,7 @@ impl InputTrackState {
 struct AudioRealtimeMixerRunner<'a> {
     config: AudioRealtimeMixerConfig,
     processor_handle: ProcessorHandle,
-    output_tx: &'a mut crate::MessageSender,
+    output_tx: &'a mut crate::TrackPublisher,
     states: HashMap<TrackId, InputTrackState>,
     input_track_ids: Vec<TrackId>,
     input_receivers: HashMap<TrackId, InputReceiverHandle>,

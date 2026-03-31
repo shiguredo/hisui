@@ -44,8 +44,8 @@ pub use error::Error;
 pub use media::MediaFrame;
 pub use media_pipeline::{
     Ack, MediaPipeline, MediaPipelineConfig, MediaPipelineHandle, Message, MessageReceiver,
-    MessageSender, PipelineTerminated, ProcessorHandle, ProcessorId, ProcessorMetadata,
-    PublishTrackError, RegisterProcessorError, Syn, TrackId,
+    PipelineTerminated, ProcessorHandle, ProcessorId, ProcessorMetadata, PublishTrackError,
+    RegisterProcessorError, Syn, TrackId, TrackPublisher,
 };
 pub use video::VideoFrame;
 

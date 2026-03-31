@@ -5,7 +5,7 @@ use shiguredo_webrtc::{
     DataChannelObserverHandler, DataChannelState, IceGatheringState, PeerConnection,
     PeerConnectionDependencies, PeerConnectionFactory, PeerConnectionObserver,
     PeerConnectionObserverHandler, PeerConnectionRtcConfiguration, PeerConnectionState, RtpSender,
-    StringVector, TimestampAligner,
+    RtpTransceiver, StringVector, TimestampAligner, VideoSinkWants,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -14,12 +14,18 @@ use crate::obsws::session::{ObswsSession, SessionAction};
 const GET_WEBRTC_STATS_REQUEST_TYPE: &str = "GetWebRtcStats";
 const SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE: &str = "SubscribeProgramTracks";
 const UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE: &str = "UnsubscribeProgramTracks";
+const LIST_WEBRTC_VIDEO_TRACKS_REQUEST_TYPE: &str = "ListWebRtcVideoTracks";
+const ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE: &str = "AttachWebRtcVideoTrack";
+const DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE: &str = "DetachWebRtcVideoTrack";
 
 /// bootstrap DataChannel 専用の Request 一覧（GetVersion の availableRequests に追加する）
 const BOOTSTRAP_DC_EXTRA_REQUESTS: &[&str] = &[
     GET_WEBRTC_STATS_REQUEST_TYPE,
     SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
     UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE,
+    LIST_WEBRTC_VIDEO_TRACKS_REQUEST_TYPE,
+    ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+    DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
 ];
 
 enum PcEvent {
@@ -42,6 +48,16 @@ enum PcEvent {
     BootstrapInputRemoved {
         input_uuid: String,
     },
+    /// client から remote track を受信した
+    RemoteTrack {
+        transceiver: RtpTransceiver,
+    },
+    /// client が remote track を削除した
+    RemoteTrackRemoved {
+        track_id: String,
+    },
+    /// obsws イベント（InputSettingsChanged 等）
+    ObswsEvent(crate::obsws::coordinator::TaggedEvent),
 }
 
 enum IceObserverEvent {
@@ -94,6 +110,14 @@ fn make_offer_json(sdp: &str) -> String {
     .to_string()
 }
 
+fn make_answer_json(sdp: &str) -> String {
+    nojson::object(|f| {
+        f.member("type", "answer")?;
+        f.member("sdp", sdp)
+    })
+    .to_string()
+}
+
 struct P2pPcObserverHandler {
     event_tx: mpsc::UnboundedSender<PcEvent>,
     ice_tx: tokio::sync::mpsc::UnboundedSender<IceObserverEvent>,
@@ -112,6 +136,16 @@ impl PeerConnectionObserverHandler for P2pPcObserverHandler {
         if state == IceGatheringState::Complete {
             let _ = self.ice_tx.send(IceObserverEvent::Complete);
         }
+    }
+
+    fn on_track(&mut self, transceiver: RtpTransceiver) {
+        let _ = self.event_tx.send(PcEvent::RemoteTrack { transceiver });
+    }
+
+    fn on_remove_track(&mut self, receiver: shiguredo_webrtc::RtpReceiver) {
+        let track = receiver.track();
+        let track_id = track.id().unwrap_or_default();
+        let _ = self.event_tx.send(PcEvent::RemoteTrackRemoved { track_id });
     }
 
     fn on_ice_candidate(&mut self, candidate: shiguredo_webrtc::IceCandidateRef<'_>) {
@@ -193,16 +227,38 @@ struct Session {
         std::collections::HashMap<String, crate::obsws::coordinator::BootstrapInputSnapshot>,
     /// bootstrap 差分イベント購読タスクの停止用ハンドル
     bootstrap_event_abort_handle: Option<tokio::task::AbortHandle>,
+    /// obsws イベント購読タスクの停止用ハンドル
+    obsws_event_abort_handle: Option<tokio::task::AbortHandle>,
     /// Program 出力の固定トラック ID（bootstrap 時に設定）
     program_track_ids: crate::obsws::coordinator::ProgramTrackIds,
     /// Program トラックを購読中かどうか
     program_tracks_subscribed: bool,
+    /// client から受信した remote video track (key: track_id)
+    remote_video_tracks: std::collections::HashMap<String, RemoteVideoTrack>,
+    /// coordinator handle（webrtc_source の settings 取得・更新用）
+    coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
         if let Some(handle) = &self.bootstrap_event_abort_handle {
             handle.abort();
+        }
+        if let Some(handle) = &self.obsws_event_abort_handle {
+            handle.abort();
+        }
+        // attach 済みの remote track を全てクリーンアップし、coordinator の trackId を null に戻す
+        for remote in self.remote_video_tracks.values_mut() {
+            if let Some(handle) = remote.forward_task_abort.take() {
+                handle.abort();
+            }
+            if let Some(sink) = remote._sink.take() {
+                remote.track.remove_sink(&sink);
+            }
+            if let Some(input_name) = remote.attached_input_name.take() {
+                self.coordinator_handle
+                    .update_webrtc_source_track_id(&input_name, None);
+            }
         }
         tracing::info!("Closing PeerConnection");
         self.pc.close();
@@ -213,6 +269,23 @@ struct SubscribedTrack {
     state: TrackState,
     sender: RtpSender,
     abort_handle: tokio::task::AbortHandle,
+}
+
+/// client から受信した remote video track の状態
+struct RemoteVideoTrack {
+    track: shiguredo_webrtc::VideoTrack,
+    /// attach 先の input 名。None は未接続。
+    attached_input_name: Option<String>,
+    /// attach 先の pipeline video track ID（unpublish 用）。None は未接続。
+    attached_video_track_id: Option<crate::TrackId>,
+    /// VideoSink のライフタイム保持
+    _sink: Option<shiguredo_webrtc::VideoSink>,
+    /// フレーム転送タスクの停止用ハンドル
+    forward_task_abort: Option<tokio::task::AbortHandle>,
+    /// chroma key 設定の動的更新用 watch sender
+    chroma_key_tx: Option<tokio::sync::watch::Sender<Option<ChromaKeyConfig>>>,
+    /// transceiver のライフタイム保持
+    _transceiver: RtpTransceiver,
 }
 
 enum TrackState {
@@ -367,6 +440,15 @@ impl WebRtcP2pSessionManager {
                     PcEvent::BootstrapInputRemoved { input_uuid } => {
                         handle_bootstrap_input_removed(sess, &input_uuid).await;
                     }
+                    PcEvent::RemoteTrack { transceiver } => {
+                        handle_remote_track(sess, transceiver);
+                    }
+                    PcEvent::RemoteTrackRemoved { track_id } => {
+                        handle_remote_track_removed(sess, &track_id);
+                    }
+                    PcEvent::ObswsEvent(event) => {
+                        handle_obsws_input_event(sess, &event);
+                    }
                 }
             }
         });
@@ -427,6 +509,7 @@ impl WebRtcP2pSessionManager {
             processor_handle,
             obsws_session,
             program_track_ids,
+            self.coordinator_handle.clone(),
         )
         .await
         {
@@ -461,6 +544,18 @@ impl WebRtcP2pSessionManager {
                 });
                 sess.bootstrap_event_abort_handle = Some(bootstrap_task.abort_handle());
 
+                // obsws イベント購読タスクを起動する（InputSettingsChanged 等を p2p_session に転送）
+                let mut obsws_event_rx = self.coordinator_handle.subscribe_obsws_events();
+                let event_tx_for_obsws = sess.event_tx.clone();
+                let obsws_event_task = tokio::spawn(async move {
+                    while let Ok(event) = obsws_event_rx.recv().await {
+                        if event_tx_for_obsws.send(PcEvent::ObswsEvent(event)).is_err() {
+                            break;
+                        }
+                    }
+                });
+                sess.obsws_event_abort_handle = Some(obsws_event_task.abort_handle());
+
                 // トラック追加があるので pending_renegotiation を設定する。
                 // 実際の offer 送信は ConnectionChange(Connected) で行う。
                 if !sess.subscribed_tracks.is_empty() {
@@ -488,6 +583,7 @@ async fn bootstrap_internal(
     processor_handle: crate::ProcessorHandle,
     obsws_session: ObswsSession,
     program_track_ids: crate::obsws::coordinator::ProgramTrackIds,
+    coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
 ) -> crate::Result<(String, Session)> {
     let (ice_tx, ice_rx) = tokio::sync::mpsc::unbounded_channel::<IceObserverEvent>();
 
@@ -562,8 +658,11 @@ async fn bootstrap_internal(
         obsws_session,
         bootstrap_tracks: std::collections::HashMap::new(),
         bootstrap_event_abort_handle: None,
+        obsws_event_abort_handle: None,
         program_track_ids,
         program_tracks_subscribed: false,
+        remote_video_tracks: std::collections::HashMap::new(),
+        coordinator_handle,
     };
 
     Ok((answer_sdp, sess))
@@ -714,11 +813,7 @@ async fn handle_dc_message(sess: &mut Session, data: &[u8]) -> bool {
 
     match msg.msg_type.as_str() {
         "answer" => handle_answer(sess, msg.sdp.as_deref()).await,
-        "offer" => {
-            // client からの offer は無視する
-            tracing::info!("Ignoring offer from client");
-            false
-        }
+        "offer" => handle_client_offer(sess, msg.sdp.as_deref()).await,
         "disconnect" => {
             // client からの切断要求 (close は送信しない)
             tracing::info!("Received disconnect from client");
@@ -764,6 +859,66 @@ async fn handle_answer(sess: &mut Session, sdp: Option<&str>) -> bool {
             return true;
         }
     }
+    false
+}
+
+/// client からの renegotiation offer を処理する。true を返した場合はセッションを終了する。
+async fn handle_client_offer(sess: &mut Session, sdp: Option<&str>) -> bool {
+    let Some(sdp) = sdp else {
+        send_close(sess, "missing-sdp", "sdp field is required");
+        return true;
+    };
+
+    // glare 解決: hisui 側に in-flight offer がある場合、
+    // 明示的に local description を rollback してから client offer を適用する
+    if sess.in_flight_offer {
+        tracing::info!("Glare detected: rolling back hisui offer to accept client offer");
+        if let Err(e) = super::sdp::rollback_local_description(&sess.pc) {
+            tracing::warn!("failed to rollback local description: {}", e.display());
+            send_close(sess, "rollback-error", &e.reason);
+            return true;
+        }
+        sess.in_flight_offer = false;
+    }
+
+    if let Err(e) = super::sdp::set_remote_offer(&sess.pc, sdp) {
+        send_close(sess, "srd-error", &e.reason);
+        return true;
+    }
+
+    let answer_sdp = match super::sdp::create_answer_sdp(&sess.pc) {
+        Ok(sdp) => sdp,
+        Err(e) => {
+            send_close(sess, "sdp-error", &e.reason);
+            return true;
+        }
+    };
+
+    if let Err(e) = super::sdp::set_local_answer(&sess.pc, &answer_sdp) {
+        send_close(sess, "sld-error", &e.reason);
+        return true;
+    }
+
+    let answer_sdp =
+        match finalize_local_sdp(answer_sdp, &mut sess.ice_rx, &mut sess.ice_candidates).await {
+            Ok(sdp) => sdp,
+            Err(e) => {
+                send_close(sess, "ice-error", &e.reason);
+                return true;
+            }
+        };
+
+    send_dc(sess, &make_answer_json(&answer_sdp));
+
+    // rollback 後に hisui 側の pending_renegotiation があればチェーン
+    if sess.pending_renegotiation {
+        sess.pending_renegotiation = false;
+        if let Err(e) = maybe_send_offer(sess).await {
+            send_close(sess, "sdp-error", &e.reason);
+            return true;
+        }
+    }
+
     false
 }
 
@@ -853,6 +1008,15 @@ async fn handle_bootstrap_dc_request(sess: &mut Session, text: &str) -> Bootstra
         }
         UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE => {
             handle_unsubscribe_program_tracks(sess, &request).await
+        }
+        LIST_WEBRTC_VIDEO_TRACKS_REQUEST_TYPE => {
+            BootstrapDcResult::Response(handle_list_webrtc_video_tracks(sess, &request))
+        }
+        ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE => {
+            handle_attach_webrtc_video_track(sess, &request).await
+        }
+        DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE => {
+            BootstrapDcResult::Response(handle_detach_webrtc_video_track(sess, &request).await)
         }
         _ => BootstrapDcResult::NotHandled,
     }
@@ -1326,6 +1490,14 @@ fn subscribe_bootstrap_input(
     session: &mut Session,
     snapshot: &crate::obsws::coordinator::BootstrapInputSnapshot,
 ) {
+    // webrtc_source は upstream 専用のため、browser 向け配信（hisui→client）をスキップする
+    if snapshot.input_kind == "webrtc_source" {
+        session
+            .bootstrap_tracks
+            .insert(snapshot.input_uuid.clone(), snapshot.clone());
+        return;
+    }
+
     if let Some(video_track_id) = &snapshot.video_track_id
         && let Err(e) = subscribe_track(session, video_track_id.clone(), TrackKind::Video)
     {
@@ -1354,9 +1526,12 @@ async fn handle_bootstrap_input_created(
     sess: &mut Session,
     snapshot: crate::obsws::coordinator::BootstrapInputSnapshot,
 ) {
+    // webrtc_source は upstream 専用で hisui→client の配信 track を追加しないため
+    // renegotiation offer は不要
+    let needs_renegotiation = snapshot.input_kind != "webrtc_source";
     subscribe_bootstrap_input(sess, &snapshot);
 
-    if let Err(e) = maybe_send_offer(sess).await {
+    if needs_renegotiation && let Err(e) = maybe_send_offer(sess).await {
         tracing::warn!(
             "failed to send renegotiation offer after input created: {}",
             e.display()
@@ -1369,6 +1544,20 @@ async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
     let Some(entry) = sess.bootstrap_tracks.remove(input_uuid) else {
         return;
     };
+
+    // webrtc_source が削除された場合、attach 済みの remote track を detach する
+    if entry.input_kind == "webrtc_source" {
+        let attached_track_id: Option<String> = sess
+            .remote_video_tracks
+            .iter()
+            .find(|(_, v)| v.attached_input_name.as_deref() == Some(entry.input_name.as_str()))
+            .map(|(k, _)| k.clone());
+        if let Some(tid) = attached_track_id {
+            detach_remote_track(sess, &tid);
+        }
+        return;
+    }
+
     if let Some(video_track_id) = &entry.video_track_id {
         unsubscribe_track(sess, video_track_id);
     }
@@ -1384,7 +1573,655 @@ async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
     }
 }
 
+/// client から remote track を受信した際のハンドラ
+fn handle_remote_track(sess: &mut Session, transceiver: RtpTransceiver) {
+    let receiver = transceiver.receiver();
+    let track = receiver.track();
+    let kind = track.kind().unwrap_or_default();
+    let track_id = track.id().unwrap_or_default();
+
+    if kind != "video" {
+        // 初版は映像のみ対象。audio は無視する。
+        tracing::info!("Ignoring non-video remote track: kind={kind}, track_id={track_id}");
+        return;
+    }
+
+    tracing::info!("Remote video track received: track_id={track_id}");
+    sess.remote_video_tracks.insert(
+        track_id,
+        RemoteVideoTrack {
+            track: track.cast_to_video_track(),
+            attached_input_name: None,
+            attached_video_track_id: None,
+            _sink: None,
+            forward_task_abort: None,
+            chroma_key_tx: None,
+            _transceiver: transceiver,
+        },
+    );
+}
+
+/// client が remote track を削除した際のハンドラ
+///
+/// on_remove_track は renegotiation の過渡的な状態でも呼ばれるため、
+/// remote_video_tracks からの即削除は行わない。attach 済みなら detach のみ行う。
+/// track が本当に不要になった場合は session close 時にクリーンアップされる。
+fn handle_remote_track_removed(sess: &mut Session, track_id: &str) {
+    tracing::info!("Remote video track removed: track_id={track_id}");
+
+    // attach 済みなら detach する
+    let input_name = sess
+        .remote_video_tracks
+        .get(track_id)
+        .and_then(|r| r.attached_input_name.clone());
+    if input_name.is_some() {
+        detach_remote_track(sess, track_id);
+        if let Some(name) = input_name {
+            sess.coordinator_handle
+                .update_webrtc_source_track_id(&name, None);
+        }
+    }
+}
+
+/// obsws イベントを処理して、attach 済み webrtc_source の状態を更新する
+///
+/// - InputSettingsChanged: chroma key を動的に更新する
+/// - InputNameChanged: attached_input_name を新しい名前に追従させる
+fn handle_obsws_input_event(sess: &mut Session, event: &crate::obsws::coordinator::TaggedEvent) {
+    let Ok(json) = nojson::RawJson::parse(event.text.text()) else {
+        return;
+    };
+    let root = json.value();
+    let Ok(d) = root.to_member("d").and_then(|v| v.required()) else {
+        return;
+    };
+    let event_type: String = d
+        .to_member("eventType")
+        .and_then(|v| v.required()?.try_into())
+        .unwrap_or_default();
+    let Ok(event_data) = d.to_member("eventData").and_then(|v| v.required()) else {
+        return;
+    };
+
+    match event_type.as_str() {
+        "InputSettingsChanged" => {
+            let input_name: String = event_data
+                .to_member("inputName")
+                .and_then(|v| v.required()?.try_into())
+                .unwrap_or_default();
+            if input_name.is_empty() {
+                return;
+            }
+            let Some(remote) = sess
+                .remote_video_tracks
+                .values_mut()
+                .find(|r| r.attached_input_name.as_deref() == Some(input_name.as_str()))
+            else {
+                return;
+            };
+            if let Some(ref tx) = remote.chroma_key_tx {
+                let Ok(input_settings) = event_data
+                    .to_member("inputSettings")
+                    .and_then(|v| v.required())
+                else {
+                    return;
+                };
+                let background_key_color: Option<String> = input_settings
+                    .to_member("backgroundKeyColor")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| v.try_into().ok());
+                let background_key_tolerance: Option<i32> = input_settings
+                    .to_member("backgroundKeyTolerance")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| v.try_into().ok());
+                let new_config = resolve_chroma_key_config(
+                    background_key_color.as_deref(),
+                    background_key_tolerance,
+                );
+                let _ = tx.send(new_config);
+            }
+        }
+        "InputNameChanged" => {
+            let new_name: String = event_data
+                .to_member("inputName")
+                .and_then(|v| v.required()?.try_into())
+                .unwrap_or_default();
+            let old_name: String = event_data
+                .to_member("oldInputName")
+                .and_then(|v| v.required()?.try_into())
+                .unwrap_or_default();
+            if old_name.is_empty() || new_name.is_empty() {
+                return;
+            }
+            // attached_input_name を新しい名前に更新する
+            for remote in sess.remote_video_tracks.values_mut() {
+                if remote.attached_input_name.as_deref() == Some(old_name.as_str()) {
+                    tracing::info!(
+                        "updating attached_input_name: '{}' -> '{}'",
+                        old_name,
+                        new_name
+                    );
+                    remote.attached_input_name = Some(new_name.clone());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 enum TrackKind {
     Video,
     Audio,
+}
+
+// --- webrtc_source 独自 Request ハンドラ ---
+
+/// client 送信中の video track 一覧を返す
+fn handle_list_webrtc_video_tracks(
+    sess: &Session,
+    request: &crate::obsws::message::RequestMessage,
+) -> nojson::RawJsonOwned {
+    let request_id = match validate_request_id(request, LIST_WEBRTC_VIDEO_TRACKS_REQUEST_TYPE) {
+        Ok(id) => id,
+        Err(err) => return err,
+    };
+
+    crate::obsws::response::build_request_response_success(
+        LIST_WEBRTC_VIDEO_TRACKS_REQUEST_TYPE,
+        &request_id,
+        |f| {
+            f.member(
+                "tracks",
+                nojson::array(|f| {
+                    for (track_id, remote_track) in &sess.remote_video_tracks {
+                        f.element(nojson::object(|f| {
+                            f.member("trackId", track_id.as_str())?;
+                            match &remote_track.attached_input_name {
+                                Some(name) => f.member("attachedInputName", name.as_str()),
+                                None => f.member("attachedInputName", Option::<&str>::None),
+                            }
+                        }))?;
+                    }
+                    Ok(())
+                }),
+            )
+        },
+    )
+}
+
+/// I420 フレームデータ（sync channel 経由で転送する）
+struct RawI420Frame {
+    y: Vec<u8>,
+    u: Vec<u8>,
+    v: Vec<u8>,
+    width: u32,
+    height: u32,
+    timestamp_us: i64,
+}
+
+/// VideoSinkHandler: libwebrtc スレッドからフレームを非同期 channel に送る
+struct WebRtcSourceSinkHandler {
+    frame_tx: tokio::sync::mpsc::Sender<RawI420Frame>,
+}
+
+impl shiguredo_webrtc::VideoSinkHandler for WebRtcSourceSinkHandler {
+    fn on_frame(&mut self, frame: shiguredo_webrtc::VideoFrameRef<'_>) {
+        let width = frame.width() as u32;
+        let height = frame.height() as u32;
+        let timestamp_us = frame.timestamp_us();
+        let buffer = frame.buffer();
+
+        let y = buffer.y_data().to_vec();
+        let u = buffer.u_data().to_vec();
+        let v = buffer.v_data().to_vec();
+
+        // 満杯時はドロップ（backpressure）
+        let _ = self.frame_tx.try_send(RawI420Frame {
+            y,
+            u,
+            v,
+            width,
+            height,
+            timestamp_us,
+        });
+    }
+}
+
+/// webrtc_source input に WebRTC video track を接続する
+async fn handle_attach_webrtc_video_track(
+    sess: &mut Session,
+    request: &crate::obsws::message::RequestMessage,
+) -> BootstrapDcResult {
+    let request_id = match validate_request_id(request, ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE) {
+        Ok(id) => id,
+        Err(err) => return BootstrapDcResult::Response(err),
+    };
+
+    // requestData のパース
+    let Some(request_data) = &request.request_data else {
+        return BootstrapDcResult::Response(crate::obsws::response::build_request_response_error(
+            ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_DATA,
+            "requestData is required",
+        ));
+    };
+    let data = request_data.value();
+    let input_name: String = match data
+        .to_member("inputName")
+        .and_then(|v| v.required()?.try_into())
+    {
+        Ok(v) => v,
+        Err(_) => {
+            return BootstrapDcResult::Response(
+                crate::obsws::response::build_request_response_error(
+                    ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "inputName is required",
+                ),
+            );
+        }
+    };
+    let track_id: String = match data
+        .to_member("trackId")
+        .and_then(|v| v.required()?.try_into())
+    {
+        Ok(v) => v,
+        Err(_) => {
+            return BootstrapDcResult::Response(
+                crate::obsws::response::build_request_response_error(
+                    ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "trackId is required",
+                ),
+            );
+        }
+    };
+
+    // coordinator から最新の input 情報を解決する（名前変更後も正しく解決する）
+    let resolved = match sess
+        .coordinator_handle
+        .resolve_input_by_name(&input_name)
+        .await
+    {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            return BootstrapDcResult::Response(
+                crate::obsws::response::build_request_response_error(
+                    ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    &format!("input '{}' not found", input_name),
+                ),
+            );
+        }
+        Err(e) => {
+            return BootstrapDcResult::Response(
+                crate::obsws::response::build_request_response_error(
+                    ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &format!("failed to resolve input: {}", e.display()),
+                ),
+            );
+        }
+    };
+    if resolved.input_kind != "webrtc_source" {
+        return BootstrapDcResult::Response(crate::obsws::response::build_request_response_error(
+            ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
+            &format!(
+                "input '{}' is not a webrtc_source (kind: {})",
+                input_name, resolved.input_kind
+            ),
+        ));
+    }
+    let video_track_id = match resolved.video_track_id {
+        Some(id) => id,
+        None => {
+            return BootstrapDcResult::Response(
+                crate::obsws::response::build_request_response_error(
+                    ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "webrtc_source has no video track ID",
+                ),
+            );
+        }
+    };
+
+    // trackId が存在し、他の input に attach されていないことを確認
+    if !sess.remote_video_tracks.contains_key(&track_id) {
+        return BootstrapDcResult::Response(crate::obsws::response::build_request_response_error(
+            ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            &format!("video track '{}' not found", track_id),
+        ));
+    }
+    // 別 input に attach 済みの track はエラー
+    if let Some(remote) = sess.remote_video_tracks.get(&track_id)
+        && let Some(ref attached) = remote.attached_input_name
+        && *attached != input_name
+    {
+        return BootstrapDcResult::Response(crate::obsws::response::build_request_response_error(
+            ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+            &format!(
+                "track '{}' is already attached to input '{}'",
+                track_id, attached
+            ),
+        ));
+    }
+
+    // 既にこの input に別 track が attach 済みなら旧 track を detach
+    let prev_track_id: Option<String> = sess
+        .remote_video_tracks
+        .iter()
+        .find(|(_, v)| v.attached_input_name.as_deref() == Some(&input_name))
+        .map(|(k, _)| k.clone());
+    if let Some(prev_id) = prev_track_id {
+        detach_remote_track(sess, &prev_id);
+    }
+
+    // pipeline に publish track を取得
+    let message_sender = match sess
+        .processor_handle
+        .publish_track(video_track_id.clone())
+        .await
+    {
+        Ok(sender) => sender,
+        Err(e) => {
+            let reason = format!("failed to publish track: {e:?}");
+            tracing::warn!("{reason}");
+            return BootstrapDcResult::Response(
+                crate::obsws::response::build_request_response_error(
+                    ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                    &request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &reason,
+                ),
+            );
+        }
+    };
+
+    // coordinator から webrtc_source の最新 settings を取得して chroma key を解決する
+    let chroma_key = match sess
+        .coordinator_handle
+        .get_webrtc_source_settings(&input_name)
+        .await
+    {
+        Ok(Some(settings)) => resolve_chroma_key_config(
+            settings.background_key_color.as_deref(),
+            settings.background_key_tolerance,
+        ),
+        _ => None,
+    };
+
+    // chroma key 設定を watch channel で共有し、SetInputSettings で動的に更新可能にする
+    let (chroma_key_tx, chroma_key_rx) = tokio::sync::watch::channel(chroma_key);
+
+    // 非同期 channel + 転送タスクを構築する。
+    // libwebrtc callback 側では try_send のみを行い、満杯時はフレームをドロップする。
+    let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<RawI420Frame>(2);
+
+    let sink_handler = WebRtcSourceSinkHandler { frame_tx };
+    let sink = shiguredo_webrtc::VideoSink::new_with_handler(Box::new(sink_handler));
+    let wants = VideoSinkWants::new();
+
+    let remote = sess
+        .remote_video_tracks
+        .get_mut(&track_id)
+        .expect("track existence was already verified");
+    remote.track.add_or_update_sink(&sink, &wants);
+
+    // 非同期フレーム転送タスク
+    let forward_task = tokio::task::spawn_local(webrtc_source_forward_task(
+        frame_rx,
+        message_sender,
+        chroma_key_rx,
+    ));
+
+    remote.attached_input_name = Some(input_name.clone());
+    remote.attached_video_track_id = Some(video_track_id);
+    remote._sink = Some(sink);
+    remote.forward_task_abort = Some(forward_task.abort_handle());
+    remote.chroma_key_tx = Some(chroma_key_tx);
+
+    // coordinator の input settings に trackId を反映する
+    sess.coordinator_handle
+        .update_webrtc_source_track_id(&input_name, Some(track_id.clone()));
+
+    let input_name_clone = input_name.clone();
+    let track_id_clone = track_id.clone();
+    BootstrapDcResult::Response(crate::obsws::response::build_request_response_success(
+        ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+        &request_id,
+        |f| {
+            f.member("inputName", input_name_clone.as_str())?;
+            f.member("trackId", track_id_clone.as_str())
+        },
+    ))
+}
+
+/// chroma key パラメータ
+#[derive(Clone)]
+struct ChromaKeyConfig {
+    key_u: u8,
+    key_v: u8,
+    tolerance: i32,
+}
+
+/// webrtc_source の settings から chroma key 設定を解決する
+fn resolve_chroma_key_config(
+    background_key_color: Option<&str>,
+    background_key_tolerance: Option<i32>,
+) -> Option<ChromaKeyConfig> {
+    let color = background_key_color?;
+    let tolerance = background_key_tolerance?;
+    let (r, g, b) = crate::obsws::source::webrtc_source::parse_hex_color(color)?;
+    let (key_u, key_v) = crate::obsws::source::webrtc_source::rgb_to_uv_bt601(r, g, b);
+    Some(ChromaKeyConfig {
+        key_u,
+        key_v,
+        tolerance,
+    })
+}
+
+/// フレーム転送タスク: async channel → pipeline publish
+///
+/// libwebrtc の callback 側では非同期処理を行わず、try_send で最小限の転送だけを行う。
+/// backpressure が掛かった場合は callback スレッドを block せず、フレームをドロップする。
+async fn webrtc_source_forward_task(
+    mut frame_rx: tokio::sync::mpsc::Receiver<RawI420Frame>,
+    mut message_sender: crate::TrackPublisher,
+    chroma_key_rx: tokio::sync::watch::Receiver<Option<ChromaKeyConfig>>,
+) {
+    while let Some(frame) = frame_rx.recv().await {
+        let width = frame.width;
+        let height = frame.height;
+
+        // I420 コンパクトデータを構築（stride を詰める）
+        let y_size = (width * height) as usize;
+        let uv_width = (width as usize).div_ceil(2);
+        let uv_height = (height as usize).div_ceil(2);
+        let uv_size = uv_width * uv_height;
+
+        let stride_y = frame.y.len() / height as usize;
+        let stride_u = frame.u.len() / uv_height;
+        let stride_v = frame.v.len() / uv_height;
+
+        let mut i420_data = Vec::with_capacity(y_size + uv_size * 2);
+        // stride を考慮してコンパクト化
+        for row in 0..height as usize {
+            let start = row * stride_y;
+            i420_data.extend_from_slice(&frame.y[start..start + width as usize]);
+        }
+        for row in 0..uv_height {
+            let start = row * stride_u;
+            i420_data.extend_from_slice(&frame.u[start..start + uv_width]);
+        }
+        for row in 0..uv_height {
+            let start = row * stride_v;
+            i420_data.extend_from_slice(&frame.v[start..start + uv_width]);
+        }
+
+        // chroma key が設定されていれば I420→I420A に変換（watch から最新値を取得）
+        let current_chroma_key = chroma_key_rx.borrow().clone();
+        let (data, format) = if let Some(ref ck) = current_chroma_key {
+            let i420a_data = crate::obsws::source::webrtc_source::apply_chroma_key(
+                &i420_data,
+                width as usize,
+                height as usize,
+                ck.key_u,
+                ck.key_v,
+                ck.tolerance,
+            );
+            (i420a_data, crate::video::VideoFormat::I420A)
+        } else {
+            (i420_data, crate::video::VideoFormat::I420)
+        };
+
+        let video_frame = crate::VideoFrame {
+            format,
+            keyframe: true,
+            size: Some(crate::video::VideoFrameSize {
+                width: width as usize,
+                height: height as usize,
+            }),
+            timestamp: std::time::Duration::from_micros(frame.timestamp_us.max(0) as u64),
+            sample_entry: None,
+            data,
+        };
+
+        if !message_sender.send_video(video_frame) {
+            break;
+        }
+    }
+}
+
+/// webrtc_source input と video track の接続を外す
+async fn handle_detach_webrtc_video_track(
+    sess: &mut Session,
+    request: &crate::obsws::message::RequestMessage,
+) -> nojson::RawJsonOwned {
+    let request_id = match validate_request_id(request, DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE) {
+        Ok(id) => id,
+        Err(err) => return err,
+    };
+
+    let Some(request_data) = &request.request_data else {
+        return crate::obsws::response::build_request_response_error(
+            DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_DATA,
+            "requestData is required",
+        );
+    };
+    let data = request_data.value();
+    let input_name: String = match data
+        .to_member("inputName")
+        .and_then(|v| v.required()?.try_into())
+    {
+        Ok(v) => v,
+        Err(_) => {
+            return crate::obsws::response::build_request_response_error(
+                DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                &request_id,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "inputName is required",
+            );
+        }
+    };
+
+    // coordinator から最新の input 情報を解決する
+    let resolved = match sess
+        .coordinator_handle
+        .resolve_input_by_name(&input_name)
+        .await
+    {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            return crate::obsws::response::build_request_response_error(
+                DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                &request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                &format!("input '{}' not found", input_name),
+            );
+        }
+        Err(e) => {
+            return crate::obsws::response::build_request_response_error(
+                DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+                &request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                &format!("failed to resolve input: {}", e.display()),
+            );
+        }
+    };
+    if resolved.input_kind != "webrtc_source" {
+        return crate::obsws::response::build_request_response_error(
+            DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+            &request_id,
+            crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
+            &format!(
+                "input '{}' is not a webrtc_source (kind: {})",
+                input_name, resolved.input_kind
+            ),
+        );
+    }
+
+    // inputName に attach されている track を検索して detach
+    let attached_track_id: Option<String> = sess
+        .remote_video_tracks
+        .iter()
+        .find(|(_, v)| v.attached_input_name.as_deref() == Some(input_name.as_str()))
+        .map(|(k, _)| k.clone());
+
+    let detached_track_id = if let Some(tid) = attached_track_id {
+        detach_remote_track(sess, &tid);
+        // coordinator の input settings の trackId を null に戻す
+        sess.coordinator_handle
+            .update_webrtc_source_track_id(&input_name, None);
+        Some(tid)
+    } else {
+        None // 未接続 → no-op 成功
+    };
+
+    let input_name_clone = input_name.clone();
+    crate::obsws::response::build_request_response_success(
+        DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE,
+        &request_id,
+        |f| {
+            f.member("inputName", input_name_clone.as_str())?;
+            match &detached_track_id {
+                Some(tid) => f.member("trackId", tid.as_str()),
+                None => f.member("trackId", Option::<&str>::None),
+            }
+        },
+    )
+}
+
+/// remote track の attach 状態を解除する
+fn detach_remote_track(sess: &mut Session, track_id: &str) {
+    let Some(remote) = sess.remote_video_tracks.get_mut(track_id) else {
+        return;
+    };
+    if let Some(handle) = remote.forward_task_abort.take() {
+        handle.abort();
+    }
+    if let Some(sink) = remote._sink.take() {
+        remote.track.remove_sink(&sink);
+    }
+    // pipeline の publisher 登録を解除して再 attach 可能にする
+    if let Some(vid) = remote.attached_video_track_id.take() {
+        sess.processor_handle.unpublish_track(vid);
+    }
+    remote.chroma_key_tx = None;
+    remote.attached_input_name = None;
 }

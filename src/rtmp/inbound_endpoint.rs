@@ -307,8 +307,8 @@ struct RtmpPublisherHandler {
     expected_app: String,
     expected_stream_name: String,
     frame_handler: crate::rtmp::frame::RtmpIncomingFrameHandler,
-    video_track_tx: Option<crate::MessageSender>,
-    audio_track_tx: Option<crate::MessageSender>,
+    video_track_tx: Option<crate::TrackPublisher>,
+    audio_track_tx: Option<crate::TrackPublisher>,
     video_decoder: Option<crate::decoder::VideoDecoder>,
     audio_decoder: Option<crate::decoder::AudioDecoder>,
     stats: RtmpInboundEndpointStats,
@@ -324,8 +324,8 @@ impl RtmpPublisherHandler {
         expected_app: String,
         expected_stream_name: String,
         timestamp_offset: std::time::Duration,
-        video_track_tx: Option<crate::MessageSender>,
-        audio_track_tx: Option<crate::MessageSender>,
+        video_track_tx: Option<crate::TrackPublisher>,
+        audio_track_tx: Option<crate::TrackPublisher>,
         video_decoder: Option<crate::decoder::VideoDecoder>,
         audio_decoder: Option<crate::decoder::AudioDecoder>,
         stats: RtmpInboundEndpointStats,
@@ -375,8 +375,8 @@ impl RtmpPublisherHandler {
     fn into_parts(
         self,
     ) -> (
-        Option<crate::MessageSender>,
-        Option<crate::MessageSender>,
+        Option<crate::TrackPublisher>,
+        Option<crate::TrackPublisher>,
         Option<crate::decoder::VideoDecoder>,
         Option<crate::decoder::AudioDecoder>,
     ) {

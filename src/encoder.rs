@@ -264,7 +264,7 @@ fn default_audio_converter() -> AudioConverter {
 
 fn drain_audio_encoder_output(
     encoder: &mut AudioEncoder,
-    output_tx: &mut crate::MessageSender,
+    output_tx: &mut crate::TrackPublisher,
 ) -> Result<bool> {
     loop {
         match encoder.poll_output()? {
@@ -768,7 +768,7 @@ impl VideoEncoder {
 
 fn drain_video_encoder_output(
     encoder: &mut VideoEncoder,
-    output_tx: &mut crate::MessageSender,
+    output_tx: &mut crate::TrackPublisher,
 ) -> Result<bool> {
     loop {
         match encoder.poll_output()? {
