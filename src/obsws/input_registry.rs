@@ -221,8 +221,9 @@ impl ObswsInputRegistry {
                 .items
                 .iter()
                 .map(|item| {
-                    let blend_mode =
-                        ObswsSceneItemBlendMode::parse(&item.blend_mode).unwrap_or_default();
+                    // パーサーで検証済みのため、ここでの失敗は実装バグ
+                    let blend_mode = ObswsSceneItemBlendMode::parse(&item.blend_mode)
+                        .expect("blend_mode was validated during parse");
                     ObswsSceneItemState {
                         scene_item_id: item.scene_item_id,
                         input_uuid: item.input_uuid.clone(),

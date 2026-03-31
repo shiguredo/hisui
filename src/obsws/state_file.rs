@@ -1238,37 +1238,40 @@ pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFil
     let scenes = {
         let mut scene_list = Vec::new();
         for scene_name in &registry.scene_order {
-            if let Some(scene_state) = registry.scenes_by_name.get(scene_name) {
-                let items = scene_state
-                    .items
-                    .iter()
-                    .map(|item| {
-                        // input settings を JSON 文字列にシリアライズして RawJsonOwned にする
-                        StateFileSceneItem {
-                            scene_item_id: item.scene_item_id,
-                            input_uuid: item.input_uuid.clone(),
-                            enabled: item.enabled,
-                            locked: item.locked,
-                            blend_mode: item.blend_mode.as_str().to_owned(),
-                            transform: item.transform.clone(),
-                        }
-                    })
-                    .collect();
-                let transition_override =
-                    registry
-                        .scene_transition_overrides
-                        .get(scene_name)
-                        .map(|o| StateFileTransitionOverride {
-                            transition_name: o.transition_name.clone(),
-                            transition_duration: o.transition_duration,
-                        });
-                scene_list.push(StateFileScene {
-                    scene_name: scene_name.clone(),
-                    scene_uuid: scene_state.scene_uuid.clone(),
-                    items,
-                    transition_override,
-                });
-            }
+            let Some(scene_state) = registry.scenes_by_name.get(scene_name) else {
+                // scene_order と scenes_by_name の不整合は実装バグ
+                tracing::warn!(
+                    "scene_order contains \"{}\" but scenes_by_name does not; skipping",
+                    scene_name
+                );
+                continue;
+            };
+            let items = scene_state
+                .items
+                .iter()
+                .map(|item| StateFileSceneItem {
+                    scene_item_id: item.scene_item_id,
+                    input_uuid: item.input_uuid.clone(),
+                    enabled: item.enabled,
+                    locked: item.locked,
+                    blend_mode: item.blend_mode.as_str().to_owned(),
+                    transform: item.transform.clone(),
+                })
+                .collect();
+            let transition_override =
+                registry
+                    .scene_transition_overrides
+                    .get(scene_name)
+                    .map(|o| StateFileTransitionOverride {
+                        transition_name: o.transition_name.clone(),
+                        transition_duration: o.transition_duration,
+                    });
+            scene_list.push(StateFileScene {
+                scene_name: scene_name.clone(),
+                scene_uuid: scene_state.scene_uuid.clone(),
+                items,
+                transition_override,
+            });
         }
         Some(scene_list)
     };
