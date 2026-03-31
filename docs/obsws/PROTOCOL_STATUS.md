@@ -133,6 +133,8 @@
 
 ### Scenes
 
+NOTE: `--state-file` 指定時、scene の作成・削除・切替・transition override の変更は state file へ永続化される。
+
 - [x] `GetSceneList`: シーン一覧を取得する
 - [x] `GetGroupList`: グループ一覧を取得する
   - NOTE: 現時点では group 非対応のため空配列を返す
@@ -152,6 +154,8 @@
   - NOTE: `transitionName = null` かつ `transitionDuration = null` で override を解除する
 
 ### Inputs
+
+NOTE: `--state-file` 指定時、input の作成・削除・設定変更・名前変更は state file へ永続化される。
 
 - [x] `GetInputList`: 入力一覧を取得する
   - NOTE: `inputKindCaps` は現状 `0` 固定。OBS は `OBS_INPUT_CAP_AUDIO` / `OBS_INPUT_CAP_VIDEO` 等のビットフラグを返す（例: image_source = 32769）
@@ -233,6 +237,8 @@
 - [ ] `SetSourceFilterEnabled`: フィルター有効状態を設定する
 
 ### Scene Items
+
+NOTE: `--state-file` 指定時、scene item の作成・削除・有効/無効・ロック・並び替え・transform・blend mode の変更は state file へ永続化される。
 
 - [x] `Scene Item` の実描画合成（ 複数 `Scene Item` の合成描画 ）
   - NOTE: `position` と `scale`（width/height）と `crop` に対応。`rotation` は未対応
