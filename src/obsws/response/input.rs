@@ -406,3 +406,283 @@ pub fn build_remove_input_response(
 
     super::build_request_response_success_no_data("RemoveInput", request_id)
 }
+
+// --- Mute / Volume ---
+
+pub fn build_get_input_mute_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let (input_uuid, input_name) = match parse_request_data_or_error_response(
+        "GetInputMute",
+        request_id,
+        request_data,
+        parse_input_lookup_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    let Some(muted) = input_registry.get_input_mute(input_uuid.as_deref(), input_name.as_deref())
+    else {
+        return super::build_request_response_error(
+            "GetInputMute",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Input not found",
+        );
+    };
+
+    super::build_request_response_success("GetInputMute", request_id, |f| {
+        f.member("inputMuted", muted)
+    })
+}
+
+pub fn build_set_input_mute_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> SetInputMuteExecution {
+    let (input_uuid, input_name, input_muted) = match parse_request_data_or_error_response(
+        "SetInputMute",
+        request_id,
+        request_data,
+        parse_set_input_mute_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => {
+            return SetInputMuteExecution {
+                response_text: response,
+                request_succeeded: false,
+                input_uuid: None,
+                input_name: None,
+            };
+        }
+    };
+
+    if input_registry
+        .set_input_mute(input_uuid.as_deref(), input_name.as_deref(), input_muted)
+        .is_none()
+    {
+        return SetInputMuteExecution {
+            response_text: super::build_request_response_error(
+                "SetInputMute",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            ),
+            request_succeeded: false,
+            input_uuid,
+            input_name,
+        };
+    }
+
+    SetInputMuteExecution {
+        response_text: super::build_request_response_success_no_data("SetInputMute", request_id),
+        request_succeeded: true,
+        input_uuid,
+        input_name,
+    }
+}
+
+pub struct SetInputMuteExecution {
+    pub response_text: nojson::RawJsonOwned,
+    pub request_succeeded: bool,
+    pub input_uuid: Option<String>,
+    pub input_name: Option<String>,
+}
+
+pub fn build_toggle_input_mute_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> ToggleInputMuteExecution {
+    let (input_uuid, input_name) = match parse_request_data_or_error_response(
+        "ToggleInputMute",
+        request_id,
+        request_data,
+        parse_input_lookup_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => {
+            return ToggleInputMuteExecution {
+                response_text: response,
+                request_succeeded: false,
+                input_uuid: None,
+                input_name: None,
+            };
+        }
+    };
+
+    let Some(new_muted) =
+        input_registry.toggle_input_mute(input_uuid.as_deref(), input_name.as_deref())
+    else {
+        return ToggleInputMuteExecution {
+            response_text: super::build_request_response_error(
+                "ToggleInputMute",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            ),
+            request_succeeded: false,
+            input_uuid,
+            input_name,
+        };
+    };
+
+    ToggleInputMuteExecution {
+        response_text: super::build_request_response_success("ToggleInputMute", request_id, |f| {
+            f.member("inputMuted", new_muted)
+        }),
+        request_succeeded: true,
+        input_uuid,
+        input_name,
+    }
+}
+
+pub struct ToggleInputMuteExecution {
+    pub response_text: nojson::RawJsonOwned,
+    pub request_succeeded: bool,
+    pub input_uuid: Option<String>,
+    pub input_name: Option<String>,
+}
+
+pub fn build_get_input_volume_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let (input_uuid, input_name) = match parse_request_data_or_error_response(
+        "GetInputVolume",
+        request_id,
+        request_data,
+        parse_input_lookup_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    let Some((volume_db, volume_mul)) =
+        input_registry.get_input_volume(input_uuid.as_deref(), input_name.as_deref())
+    else {
+        return super::build_request_response_error(
+            "GetInputVolume",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Input not found",
+        );
+    };
+
+    super::build_request_response_success("GetInputVolume", request_id, |f| {
+        f.member("inputVolumeDb", volume_db)?;
+        f.member("inputVolumeMul", volume_mul)
+    })
+}
+
+pub fn build_set_input_volume_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> SetInputVolumeExecution {
+    let fields = match parse_request_data_or_error_response(
+        "SetInputVolume",
+        request_id,
+        request_data,
+        parse_set_input_volume_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => {
+            return SetInputVolumeExecution {
+                response_text: response,
+                request_succeeded: false,
+                input_uuid: None,
+                input_name: None,
+            };
+        }
+    };
+
+    if input_registry
+        .set_input_volume(
+            fields.input_uuid.as_deref(),
+            fields.input_name.as_deref(),
+            fields.volume_db,
+            fields.volume_mul,
+        )
+        .is_none()
+    {
+        return SetInputVolumeExecution {
+            response_text: super::build_request_response_error(
+                "SetInputVolume",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            ),
+            request_succeeded: false,
+            input_uuid: fields.input_uuid,
+            input_name: fields.input_name,
+        };
+    }
+
+    SetInputVolumeExecution {
+        response_text: super::build_request_response_success_no_data("SetInputVolume", request_id),
+        request_succeeded: true,
+        input_uuid: fields.input_uuid,
+        input_name: fields.input_name,
+    }
+}
+
+pub struct SetInputVolumeExecution {
+    pub response_text: nojson::RawJsonOwned,
+    pub request_succeeded: bool,
+    pub input_uuid: Option<String>,
+    pub input_name: Option<String>,
+}
+
+struct SetInputVolumeFields {
+    input_uuid: Option<String>,
+    input_name: Option<String>,
+    volume_db: Option<f64>,
+    volume_mul: Option<f64>,
+}
+
+fn parse_set_input_mute_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(Option<String>, Option<String>, bool), nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+    let input_muted: bool = request_data
+        .to_member("inputMuted")?
+        .required()?
+        .try_into()?;
+    Ok((input_uuid, input_name, input_muted))
+}
+
+fn parse_set_input_volume_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<SetInputVolumeFields, nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+
+    let volume_db: Option<f64> = request_data
+        .to_member("inputVolumeDb")?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()?;
+    let volume_mul: Option<f64> = request_data
+        .to_member("inputVolumeMul")?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()?;
+
+    if volume_db.is_none() && volume_mul.is_none() {
+        return Err(
+            request_data.invalid("required member 'inputVolumeDb or inputVolumeMul' is missing")
+        );
+    }
+
+    Ok(SetInputVolumeFields {
+        input_uuid,
+        input_name,
+        volume_db,
+        volume_mul,
+    })
+}

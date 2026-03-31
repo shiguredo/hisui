@@ -1062,6 +1062,80 @@ impl ObswsInputRegistry {
         self.inputs_by_uuid.get(input_uuid)
     }
 
+    fn find_input_mut(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Option<&mut ObswsInputEntry> {
+        if let Some(input_uuid) = input_uuid {
+            return self.inputs_by_uuid.get_mut(input_uuid);
+        }
+        let input_name = input_name?;
+        let input_uuid = self.uuids_by_name.get(input_name)?.clone();
+        self.inputs_by_uuid.get_mut(&input_uuid)
+    }
+
+    /// ミュート状態を取得する
+    pub fn get_input_mute(
+        &self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Option<bool> {
+        self.find_input(input_uuid, input_name)
+            .map(|entry| entry.input.input_muted)
+    }
+
+    /// ミュート状態を設定する。変更があった場合は新しい状態を返す。
+    pub fn set_input_mute(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+        muted: bool,
+    ) -> Option<bool> {
+        let entry = self.find_input_mut(input_uuid, input_name)?;
+        entry.input.input_muted = muted;
+        Some(entry.input.input_muted)
+    }
+
+    /// ミュート状態をトグルする。新しい状態を返す。
+    pub fn toggle_input_mute(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Option<bool> {
+        let entry = self.find_input_mut(input_uuid, input_name)?;
+        entry.input.input_muted = !entry.input.input_muted;
+        Some(entry.input.input_muted)
+    }
+
+    /// 音量を (dB, mul) で取得する
+    pub fn get_input_volume(
+        &self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Option<(f64, f64)> {
+        let entry = self.find_input(input_uuid, input_name)?;
+        Some((entry.input.input_volume_db(), entry.input.input_volume_mul))
+    }
+
+    /// 音量を設定する。dB か mul のいずれかを指定する。
+    pub fn set_input_volume(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+        volume_db: Option<f64>,
+        volume_mul: Option<f64>,
+    ) -> Option<(f64, f64)> {
+        let entry = self.find_input_mut(input_uuid, input_name)?;
+        if let Some(db) = volume_db {
+            entry.input.set_volume_from_db(db);
+        }
+        if let Some(mul) = volume_mul {
+            entry.input.input_volume_mul = mul.max(0.0);
+        }
+        Some((entry.input.input_volume_db(), entry.input.input_volume_mul))
+    }
+
     #[cfg(test)]
     pub fn insert_for_test(&mut self, entry: ObswsInputEntry) {
         self.uuids_by_name

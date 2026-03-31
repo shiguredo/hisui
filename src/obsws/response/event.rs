@@ -244,6 +244,58 @@ pub fn build_input_name_changed_event(
     })
 }
 
+pub fn build_input_mute_state_changed_event(
+    input_name: &str,
+    input_uuid: &str,
+    input_muted: bool,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "InputMuteStateChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)?;
+                        f.member("inputMuted", input_muted)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
+pub fn build_input_volume_changed_event(
+    input_name: &str,
+    input_uuid: &str,
+    input_volume_db: f64,
+    input_volume_mul: f64,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "InputVolumeChanged")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)?;
+                        f.member("inputVolumeDb", input_volume_db)?;
+                        f.member("inputVolumeMul", input_volume_mul)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
 pub fn build_custom_event(event_data: &nojson::RawJsonOwned) -> nojson::RawJsonOwned {
     nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;

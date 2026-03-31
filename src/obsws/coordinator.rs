@@ -464,6 +464,15 @@ impl ObswsCoordinator {
             "SetInputSettings" => {
                 self.handle_set_input_settings(&request_id, request.request_data.as_ref())
             }
+            "SetInputMute" => {
+                self.handle_set_input_mute(&request_id, request.request_data.as_ref())
+            }
+            "ToggleInputMute" => {
+                self.handle_toggle_input_mute(&request_id, request.request_data.as_ref())
+            }
+            "SetInputVolume" => {
+                self.handle_set_input_volume(&request_id, request.request_data.as_ref())
+            }
             "SetInputName" => {
                 self.handle_set_input_name(&request_id, request.request_data.as_ref())
             }
@@ -901,6 +910,94 @@ impl ObswsCoordinator {
             events.push(event);
         }
         self.build_result_from_response(response_text, events)
+    }
+
+    fn handle_set_input_mute(
+        &mut self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let execution = crate::obsws::response::build_set_input_mute_response(
+            request_id,
+            request_data,
+            &mut self.input_registry,
+        );
+        let mut events = Vec::new();
+        if execution.request_succeeded
+            && let Some(entry) = self.input_registry.find_input(
+                execution.input_uuid.as_deref(),
+                execution.input_name.as_deref(),
+            )
+        {
+            events.push(TaggedEvent {
+                text: crate::obsws::response::build_input_mute_state_changed_event(
+                    &entry.input_name,
+                    &entry.input_uuid,
+                    entry.input.input_muted,
+                ),
+                subscription_flag: OBSWS_EVENT_SUB_INPUTS,
+            });
+        }
+        self.build_result_from_response(execution.response_text, events)
+    }
+
+    fn handle_toggle_input_mute(
+        &mut self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let execution = crate::obsws::response::build_toggle_input_mute_response(
+            request_id,
+            request_data,
+            &mut self.input_registry,
+        );
+        let mut events = Vec::new();
+        if execution.request_succeeded
+            && let Some(entry) = self.input_registry.find_input(
+                execution.input_uuid.as_deref(),
+                execution.input_name.as_deref(),
+            )
+        {
+            events.push(TaggedEvent {
+                text: crate::obsws::response::build_input_mute_state_changed_event(
+                    &entry.input_name,
+                    &entry.input_uuid,
+                    entry.input.input_muted,
+                ),
+                subscription_flag: OBSWS_EVENT_SUB_INPUTS,
+            });
+        }
+        self.build_result_from_response(execution.response_text, events)
+    }
+
+    fn handle_set_input_volume(
+        &mut self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let execution = crate::obsws::response::build_set_input_volume_response(
+            request_id,
+            request_data,
+            &mut self.input_registry,
+        );
+        let mut events = Vec::new();
+        if execution.request_succeeded
+            && let Some(entry) = self.input_registry.find_input(
+                execution.input_uuid.as_deref(),
+                execution.input_name.as_deref(),
+            )
+        {
+            events.push(TaggedEvent {
+                text: crate::obsws::response::build_input_volume_changed_event(
+                    &entry.input_name,
+                    &entry.input_uuid,
+                    entry.input.input_volume_db(),
+                    entry.input.input_volume_mul,
+                ),
+                subscription_flag: OBSWS_EVENT_SUB_INPUTS,
+            });
+        }
+        self.build_result_from_response(execution.response_text, events)
     }
 
     fn handle_set_input_name(

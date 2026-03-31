@@ -177,11 +177,16 @@
 - [x] `SetInputSettings`: 入力設定を更新する
   - NOTE: `overlay` 未指定時は `true` として扱う
   - NOTE: 成功時は Inputs 購読中セッションへ `InputSettingsChanged` を配信する
-- [ ] `GetInputMute`: ミュート状態を取得する
-- [ ] `SetInputMute`: ミュート状態を設定する
-- [ ] `ToggleInputMute`: ミュート状態をトグルする
-- [ ] `GetInputVolume`: 音量を取得する
-- [ ] `SetInputVolume`: 音量を設定する
+- [x] `GetInputMute`: ミュート状態を取得する
+- [x] `SetInputMute`: ミュート状態を設定する
+  - NOTE: 成功時は Inputs 購読中セッションへ `InputMuteStateChanged` を配信する
+- [x] `ToggleInputMute`: ミュート状態をトグルする
+  - NOTE: 成功時は Inputs 購読中セッションへ `InputMuteStateChanged` を配信する
+- [x] `GetInputVolume`: 音量を取得する
+  - NOTE: `inputVolumeDb` と `inputVolumeMul` の両方を返す
+- [x] `SetInputVolume`: 音量を設定する
+  - NOTE: `inputVolumeDb` または `inputVolumeMul` のいずれかを指定する
+  - NOTE: 成功時は Inputs 購読中セッションへ `InputVolumeChanged` を配信する
 - [ ] `GetInputAudioBalance`: 音声バランスを取得する
 - [ ] `SetInputAudioBalance`: 音声バランスを設定する
 - [ ] `GetInputAudioSyncOffset`: 音声同期オフセットを取得する
