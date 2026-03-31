@@ -644,3 +644,203 @@ def test_mpeg_dash_filesystem_persists_across_restart(binary_path: Path, tmp_pat
                 await ws.close()
 
         asyncio.run(_get())
+
+
+def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
+    """CreateScene で作成した scene が再起動後も復元される"""
+    host = "127.0.0.1"
+    state_file = tmp_path / "state.jsonc"
+
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+
+        async def _set():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                # scene を作成
+                response = await _send_obsws_request(
+                    ws,
+                    "CreateScene",
+                    "create-scene",
+                    {"sceneName": "MyScene"},
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                # program scene を変更
+                response = await _send_obsws_request(
+                    ws,
+                    "SetCurrentProgramScene",
+                    "set-program",
+                    {"sceneName": "MyScene"},
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                await ws.close()
+
+        asyncio.run(_set())
+
+    port2, sock2 = reserve_ephemeral_port()
+    sock2.close()
+
+    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+
+        async def _get():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                # scene 一覧を取得
+                response = await _send_obsws_request(ws, "GetSceneList", "get-scenes")
+                data = response["d"]["responseData"]
+                scene_names = [s["sceneName"] for s in data["scenes"]]
+                assert "Scene" in scene_names
+                assert "MyScene" in scene_names
+                assert data["currentProgramSceneName"] == "MyScene"
+                await ws.close()
+
+        asyncio.run(_get())
+
+
+def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
+    """CreateInput で作成した input が再起動後も復元される"""
+    host = "127.0.0.1"
+    state_file = tmp_path / "state.jsonc"
+
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+
+        async def _set():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "CreateInput",
+                    "create-input",
+                    {
+                        "sceneName": "Scene",
+                        "inputName": "test-image",
+                        "inputKind": "image_source",
+                        "inputSettings": {"file": "/tmp/test.png"},
+                    },
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                await ws.close()
+
+        asyncio.run(_set())
+
+    port2, sock2 = reserve_ephemeral_port()
+    sock2.close()
+
+    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+
+        async def _get():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                # input 一覧を取得
+                response = await _send_obsws_request(ws, "GetInputList", "get-inputs")
+                inputs = response["d"]["responseData"]["inputs"]
+                input_names = [i["inputName"] for i in inputs]
+                assert "test-image" in input_names
+                # scene item も復元されているか確認
+                response = await _send_obsws_request(
+                    ws,
+                    "GetSceneItemList",
+                    "get-items",
+                    {"sceneName": "Scene"},
+                )
+                items = response["d"]["responseData"]["sceneItems"]
+                item_names = [i["sourceName"] for i in items]
+                assert "test-image" in item_names
+                await ws.close()
+
+        asyncio.run(_get())
+
+
+def test_scene_item_enabled_persists_across_restart(binary_path: Path, tmp_path: Path):
+    """SetSceneItemEnabled の変更が再起動後も復元される"""
+    host = "127.0.0.1"
+    state_file = tmp_path / "state.jsonc"
+
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+
+        async def _set():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                # input を作成
+                response = await _send_obsws_request(
+                    ws,
+                    "CreateInput",
+                    "create-input",
+                    {
+                        "sceneName": "Scene",
+                        "inputName": "disable-test",
+                        "inputKind": "image_source",
+                        "inputSettings": {},
+                    },
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                scene_item_id = response["d"]["responseData"]["sceneItemId"]
+                # scene item を無効にする
+                response = await _send_obsws_request(
+                    ws,
+                    "SetSceneItemEnabled",
+                    "disable-item",
+                    {
+                        "sceneName": "Scene",
+                        "sceneItemId": scene_item_id,
+                        "sceneItemEnabled": False,
+                    },
+                )
+                assert response["d"]["requestStatus"]["result"] is True
+                await ws.close()
+
+        asyncio.run(_set())
+
+    port2, sock2 = reserve_ephemeral_port()
+    sock2.close()
+
+    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+
+        async def _get():
+            timeout = aiohttp.ClientTimeout(total=10.0)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                ws = await session.ws_connect(
+                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                )
+                await _identify_with_optional_password(ws, password=None)
+                response = await _send_obsws_request(
+                    ws,
+                    "GetSceneItemList",
+                    "get-items",
+                    {"sceneName": "Scene"},
+                )
+                items = response["d"]["responseData"]["sceneItems"]
+                target = [i for i in items if i["sourceName"] == "disable-test"]
+                assert len(target) == 1
+                assert target[0]["sceneItemEnabled"] is False
+                await ws.close()
+
+        asyncio.run(_get())

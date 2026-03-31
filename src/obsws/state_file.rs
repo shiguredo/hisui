@@ -1,14 +1,15 @@
 //! obsws の永続 state file の読み書きを行うモジュール。
 //!
 //! state file は obsws の output 設定を再起動後も復元するための JSONC ファイルである。
-//! 永続化対象: stream / record / rtmp_outbound / sora / hls / mpeg_dash
+//! 永続化対象: stream / record / rtmp_outbound / sora / hls / mpeg_dash / scenes / inputs
 
 use std::path::{Path, PathBuf};
 
 use crate::obsws::input_registry::{
     DashDestination, DashVariant, HlsDestination, HlsSegmentFormat, HlsVariant, ObswsDashSettings,
-    ObswsHlsSettings, ObswsInputRegistry, ObswsRtmpOutboundSettings, ObswsSoraPublisherSettings,
-    ObswsStreamServiceSettings,
+    ObswsHlsSettings, ObswsInputRegistry, ObswsRtmpOutboundSettings, ObswsSceneItemBlendMode,
+    ObswsSceneItemTransform, ObswsSoraPublisherSettings, ObswsSrtInboundSettings,
+    ObswsStreamServiceSettings, ObswsWebRtcSourceSettings,
 };
 
 /// state file のトップレベル構造
@@ -19,6 +20,45 @@ pub struct ObswsStateFile {
     pub sora: Option<ObswsSoraPublisherSettings>,
     pub hls: Option<ObswsHlsSettings>,
     pub dash: Option<ObswsDashSettings>,
+    pub scenes: Option<Vec<StateFileScene>>,
+    pub inputs: Option<Vec<StateFileInput>>,
+    pub current_program_scene: Option<String>,
+    pub current_preview_scene: Option<String>,
+    pub next_input_id: Option<u64>,
+    pub next_scene_id: Option<u64>,
+    pub next_scene_item_id: Option<i64>,
+}
+
+/// state file のシーン定義
+pub struct StateFileScene {
+    pub scene_name: String,
+    pub scene_uuid: String,
+    pub items: Vec<StateFileSceneItem>,
+    pub transition_override: Option<StateFileTransitionOverride>,
+}
+
+/// state file のシーンアイテム定義
+pub struct StateFileSceneItem {
+    pub scene_item_id: i64,
+    pub input_uuid: String,
+    pub enabled: bool,
+    pub locked: bool,
+    pub blend_mode: String,
+    pub transform: ObswsSceneItemTransform,
+}
+
+/// state file のトランジションオーバーライド
+pub struct StateFileTransitionOverride {
+    pub transition_name: Option<String>,
+    pub transition_duration: Option<i64>,
+}
+
+/// state file のインプット定義
+pub struct StateFileInput {
+    pub input_uuid: String,
+    pub input_name: String,
+    pub input_kind: String,
+    pub input_settings: nojson::RawJsonOwned,
 }
 
 /// state file の stream セクション
@@ -58,6 +98,17 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFile 
         let hls = parse_optional_hls(value)?;
         let dash = parse_optional_dash(value)?;
 
+        // scene / input セクション
+        let scenes = parse_optional_scenes(value)?;
+        let inputs = parse_optional_inputs(value)?;
+        let current_program_scene: Option<String> =
+            value.to_member("currentProgramScene")?.try_into()?;
+        let current_preview_scene: Option<String> =
+            value.to_member("currentPreviewScene")?.try_into()?;
+        let next_input_id: Option<u64> = value.to_member("nextInputId")?.try_into()?;
+        let next_scene_id: Option<u64> = value.to_member("nextSceneId")?.try_into()?;
+        let next_scene_item_id: Option<i64> = value.to_member("nextSceneItemId")?.try_into()?;
+
         Ok(Self {
             stream,
             record,
@@ -65,6 +116,13 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFile 
             sora,
             hls,
             dash,
+            scenes,
+            inputs,
+            current_program_scene,
+            current_preview_scene,
+            next_input_id,
+            next_scene_id,
+            next_scene_item_id,
         })
     }
 }
@@ -439,6 +497,176 @@ fn parse_dash_variants(
 }
 
 // ---------------------------------------------------------------------------
+// scenes parse
+// ---------------------------------------------------------------------------
+
+fn parse_optional_scenes(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<Option<Vec<StateFileScene>>, nojson::JsonParseError> {
+    let member: Option<nojson::RawJsonOwned> = value.to_member("scenes")?.try_into()?;
+    let Some(ref scenes_json) = member else {
+        return Ok(None);
+    };
+    let arr = scenes_json.value().to_array()?;
+    let mut scenes = Vec::new();
+    for elem in arr {
+        let scene_name: String = elem.to_member("sceneName")?.required()?.try_into()?;
+        let scene_uuid: String = elem.to_member("sceneUuid")?.required()?.try_into()?;
+        let items = parse_scene_items(elem)?;
+        let transition_override = parse_optional_transition_override(elem)?;
+        scenes.push(StateFileScene {
+            scene_name,
+            scene_uuid,
+            items,
+            transition_override,
+        });
+    }
+    Ok(Some(scenes))
+}
+
+fn parse_scene_items(
+    scene_value: nojson::RawJsonValue<'_, '_>,
+) -> Result<Vec<StateFileSceneItem>, nojson::JsonParseError> {
+    let member: Option<nojson::RawJsonOwned> = scene_value.to_member("items")?.try_into()?;
+    let Some(ref items_json) = member else {
+        return Ok(Vec::new());
+    };
+    let arr = items_json.value().to_array()?;
+    let mut items = Vec::new();
+    for elem in arr {
+        let scene_item_id: i64 = elem.to_member("sceneItemId")?.required()?.try_into()?;
+        let input_uuid: String = elem.to_member("inputUuid")?.required()?.try_into()?;
+        let enabled: bool = elem.to_member("enabled")?.required()?.try_into()?;
+        let locked: bool = elem.to_member("locked")?.required()?.try_into()?;
+        let blend_mode: String = elem.to_member("blendMode")?.required()?.try_into()?;
+        // blend_mode のバリデーション
+        if ObswsSceneItemBlendMode::parse(&blend_mode).is_none() {
+            return Err(elem
+                .to_member("blendMode")?
+                .required()?
+                .invalid(format!("unknown blend mode: \"{blend_mode}\"")));
+        }
+        let transform_member: nojson::RawJsonOwned =
+            elem.to_member("transform")?.required()?.try_into()?;
+        let transform = parse_scene_item_transform(transform_member.value())?;
+        items.push(StateFileSceneItem {
+            scene_item_id,
+            input_uuid,
+            enabled,
+            locked,
+            blend_mode,
+            transform,
+        });
+    }
+    Ok(items)
+}
+
+fn parse_scene_item_transform(
+    v: nojson::RawJsonValue<'_, '_>,
+) -> Result<ObswsSceneItemTransform, nojson::JsonParseError> {
+    let position_x: f64 = v.to_member("positionX")?.required()?.try_into()?;
+    let position_y: f64 = v.to_member("positionY")?.required()?.try_into()?;
+    let rotation: f64 = v.to_member("rotation")?.required()?.try_into()?;
+    let scale_x_raw: f64 = v.to_member("scaleX")?.required()?.try_into()?;
+    let scale_x = crate::types::PositiveFiniteF64::new(scale_x_raw).ok_or_else(|| {
+        v.to_member("scaleX")
+            .expect("already accessed")
+            .required()
+            .expect("already accessed")
+            .invalid("scaleX must be a positive finite number")
+    })?;
+    let scale_y_raw: f64 = v.to_member("scaleY")?.required()?.try_into()?;
+    let scale_y = crate::types::PositiveFiniteF64::new(scale_y_raw).ok_or_else(|| {
+        v.to_member("scaleY")
+            .expect("already accessed")
+            .required()
+            .expect("already accessed")
+            .invalid("scaleY must be a positive finite number")
+    })?;
+    let alignment: i64 = v.to_member("alignment")?.required()?.try_into()?;
+    let bounds_type: String = v.to_member("boundsType")?.required()?.try_into()?;
+    let bounds_alignment: i64 = v.to_member("boundsAlignment")?.required()?.try_into()?;
+    let bounds_width: f64 = v.to_member("boundsWidth")?.required()?.try_into()?;
+    let bounds_height: f64 = v.to_member("boundsHeight")?.required()?.try_into()?;
+    let crop_top: i64 = v.to_member("cropTop")?.required()?.try_into()?;
+    let crop_bottom: i64 = v.to_member("cropBottom")?.required()?.try_into()?;
+    let crop_left: i64 = v.to_member("cropLeft")?.required()?.try_into()?;
+    let crop_right: i64 = v.to_member("cropRight")?.required()?.try_into()?;
+    let crop_to_bounds: bool = v.to_member("cropToBounds")?.required()?.try_into()?;
+    let source_width: f64 = v.to_member("sourceWidth")?.required()?.try_into()?;
+    let source_height: f64 = v.to_member("sourceHeight")?.required()?.try_into()?;
+    let width: f64 = v.to_member("width")?.required()?.try_into()?;
+    let height: f64 = v.to_member("height")?.required()?.try_into()?;
+    Ok(ObswsSceneItemTransform {
+        position_x,
+        position_y,
+        rotation,
+        scale_x,
+        scale_y,
+        alignment,
+        bounds_type,
+        bounds_alignment,
+        bounds_width,
+        bounds_height,
+        crop_top,
+        crop_bottom,
+        crop_left,
+        crop_right,
+        crop_to_bounds,
+        source_width,
+        source_height,
+        width,
+        height,
+    })
+}
+
+fn parse_optional_transition_override(
+    scene_value: nojson::RawJsonValue<'_, '_>,
+) -> Result<Option<StateFileTransitionOverride>, nojson::JsonParseError> {
+    let member: Option<nojson::RawJsonOwned> =
+        scene_value.to_member("transitionOverride")?.try_into()?;
+    let Some(ref override_json) = member else {
+        return Ok(None);
+    };
+    let v = override_json.value();
+    let transition_name: Option<String> = v.to_member("transitionName")?.try_into()?;
+    let transition_duration: Option<i64> = v.to_member("transitionDuration")?.try_into()?;
+    Ok(Some(StateFileTransitionOverride {
+        transition_name,
+        transition_duration,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// inputs parse
+// ---------------------------------------------------------------------------
+
+fn parse_optional_inputs(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<Option<Vec<StateFileInput>>, nojson::JsonParseError> {
+    let member: Option<nojson::RawJsonOwned> = value.to_member("inputs")?.try_into()?;
+    let Some(ref inputs_json) = member else {
+        return Ok(None);
+    };
+    let arr = inputs_json.value().to_array()?;
+    let mut inputs = Vec::new();
+    for elem in arr {
+        let input_uuid: String = elem.to_member("inputUuid")?.required()?.try_into()?;
+        let input_name: String = elem.to_member("inputName")?.required()?.try_into()?;
+        let input_kind: String = elem.to_member("inputKind")?.required()?.try_into()?;
+        let input_settings: nojson::RawJsonOwned =
+            elem.to_member("inputSettings")?.required()?.try_into()?;
+        inputs.push(StateFileInput {
+            input_uuid,
+            input_name,
+            input_kind,
+            input_settings,
+        });
+    }
+    Ok(Some(inputs))
+}
+
+// ---------------------------------------------------------------------------
 // destination parse（HLS / DASH 共通パターン）
 // ---------------------------------------------------------------------------
 
@@ -709,6 +937,54 @@ impl nojson::DisplayJson for DashSection<'_> {
     }
 }
 
+/// SRT inbound settings を passphrase 込みで出力するための wrapper
+///
+/// 通常の DisplayJson は passphrase を省略するが、state file には永続化する必要がある
+struct SrtInboundSettingsWithPassphrase<'a>(&'a ObswsSrtInboundSettings);
+
+impl nojson::DisplayJson for SrtInboundSettingsWithPassphrase<'_> {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        let s = self.0;
+        nojson::object(|f| {
+            if let Some(input_url) = &s.input_url {
+                f.member("inputUrl", input_url)?;
+            }
+            if let Some(stream_id) = &s.stream_id {
+                f.member("streamId", stream_id)?;
+            }
+            if let Some(passphrase) = &s.passphrase {
+                f.member("passphrase", passphrase)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+/// WebRTC source settings を track_id なしで出力するための wrapper
+///
+/// track_id はランタイム専用のため state file には含めない
+struct WebRtcSourceSettingsWithoutTrackId<'a>(&'a ObswsWebRtcSourceSettings);
+
+impl nojson::DisplayJson for WebRtcSourceSettingsWithoutTrackId<'_> {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        let s = self.0;
+        nojson::object(|f| {
+            if let Some(background_key_color) = &s.background_key_color {
+                f.member("backgroundKeyColor", background_key_color)?;
+            }
+            if let Some(background_key_tolerance) = s.background_key_tolerance {
+                f.member(
+                    "backgroundKeyTolerance",
+                    i64::from(background_key_tolerance),
+                )?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
 impl nojson::DisplayJson for ObswsStateFile {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
@@ -730,6 +1006,43 @@ impl nojson::DisplayJson for ObswsStateFile {
             }
             if let Some(dash) = &self.dash {
                 f.member("mpegDash", DashSection(dash))?;
+            }
+            if let Some(scenes) = &self.scenes {
+                f.member(
+                    "scenes",
+                    nojson::array(|f| {
+                        for scene in scenes {
+                            f.element(scene)?;
+                        }
+                        Ok(())
+                    }),
+                )?;
+            }
+            if let Some(inputs) = &self.inputs {
+                f.member(
+                    "inputs",
+                    nojson::array(|f| {
+                        for input in inputs {
+                            f.element(input)?;
+                        }
+                        Ok(())
+                    }),
+                )?;
+            }
+            if let Some(current_program_scene) = &self.current_program_scene {
+                f.member("currentProgramScene", current_program_scene)?;
+            }
+            if let Some(current_preview_scene) = &self.current_preview_scene {
+                f.member("currentPreviewScene", current_preview_scene)?;
+            }
+            if let Some(next_input_id) = self.next_input_id {
+                f.member("nextInputId", next_input_id)?;
+            }
+            if let Some(next_scene_id) = self.next_scene_id {
+                f.member("nextSceneId", next_scene_id)?;
+            }
+            if let Some(next_scene_item_id) = self.next_scene_item_id {
+                f.member("nextSceneItemId", next_scene_item_id)?;
             }
             Ok(())
         })
@@ -770,6 +1083,70 @@ impl nojson::DisplayJson for ObswsStateFileRecord {
     }
 }
 
+impl nojson::DisplayJson for StateFileScene {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("sceneName", &self.scene_name)?;
+            f.member("sceneUuid", &self.scene_uuid)?;
+            f.member(
+                "items",
+                nojson::array(|f| {
+                    for item in &self.items {
+                        f.element(item)?;
+                    }
+                    Ok(())
+                }),
+            )?;
+            if let Some(transition_override) = &self.transition_override {
+                f.member("transitionOverride", transition_override)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+impl nojson::DisplayJson for StateFileSceneItem {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("sceneItemId", self.scene_item_id)?;
+            f.member("inputUuid", &self.input_uuid)?;
+            f.member("enabled", self.enabled)?;
+            f.member("locked", self.locked)?;
+            f.member("blendMode", &self.blend_mode)?;
+            f.member("transform", &self.transform)
+        })
+        .fmt(f)
+    }
+}
+
+impl nojson::DisplayJson for StateFileTransitionOverride {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(transition_name) = &self.transition_name {
+                f.member("transitionName", transition_name)?;
+            }
+            if let Some(transition_duration) = self.transition_duration {
+                f.member("transitionDuration", transition_duration)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+impl nojson::DisplayJson for StateFileInput {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("inputUuid", &self.input_uuid)?;
+            f.member("inputName", &self.input_name)?;
+            f.member("inputKind", &self.input_kind)?;
+            f.member("inputSettings", &self.input_settings)
+        })
+        .fmt(f)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 公開関数
 // ---------------------------------------------------------------------------
@@ -787,6 +1164,13 @@ pub fn load_state_file(path: &Path) -> crate::Result<ObswsStateFile> {
             sora: None,
             hls: None,
             dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         });
     }
     crate::json::parse_file(path)
@@ -851,6 +1235,82 @@ pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFil
     let sora = Some(registry.sora_publisher_settings().clone());
     let hls = Some(registry.hls_settings().clone());
     let dash = Some(registry.dash_settings().clone());
+
+    // scenes を scene_order の順序で構築する
+    let scenes = {
+        let mut scene_list = Vec::new();
+        for scene_name in &registry.scene_order {
+            if let Some(scene_state) = registry.scenes_by_name.get(scene_name) {
+                let items = scene_state
+                    .items
+                    .iter()
+                    .map(|item| {
+                        // input settings を JSON 文字列にシリアライズして RawJsonOwned にする
+                        StateFileSceneItem {
+                            scene_item_id: item.scene_item_id,
+                            input_uuid: item.input_uuid.clone(),
+                            enabled: item.enabled,
+                            locked: item.locked,
+                            blend_mode: item.blend_mode.as_str().to_owned(),
+                            transform: item.transform.clone(),
+                        }
+                    })
+                    .collect();
+                let transition_override =
+                    registry
+                        .scene_transition_overrides
+                        .get(scene_name)
+                        .map(|o| StateFileTransitionOverride {
+                            transition_name: o.transition_name.clone(),
+                            transition_duration: o.transition_duration,
+                        });
+                scene_list.push(StateFileScene {
+                    scene_name: scene_name.clone(),
+                    scene_uuid: scene_state.scene_uuid.clone(),
+                    items,
+                    transition_override,
+                });
+            }
+        }
+        Some(scene_list)
+    };
+
+    // inputs を構築する
+    let inputs = {
+        let mut input_list = Vec::new();
+        for (uuid, entry) in &registry.inputs_by_uuid {
+            // input settings を適切な DisplayJson でシリアライズする
+            let settings_json = match &entry.input.settings {
+                crate::obsws::input_registry::ObswsInputSettings::SrtInbound(srt) => {
+                    // SRT inbound は passphrase を含めて出力する
+                    crate::json::to_pretty_string(SrtInboundSettingsWithPassphrase(srt))
+                }
+                crate::obsws::input_registry::ObswsInputSettings::WebRtcSource(webrtc) => {
+                    // WebRTC source は track_id を除外する
+                    crate::json::to_pretty_string(WebRtcSourceSettingsWithoutTrackId(webrtc))
+                }
+                other => crate::json::to_pretty_string(other),
+            };
+            let raw =
+                nojson::RawJson::parse(&settings_json).expect("serialized JSON must be valid");
+            let input_settings = nojson::RawJsonOwned::try_from(raw.value())
+                .expect("RawJsonOwned conversion must succeed");
+            input_list.push(StateFileInput {
+                input_uuid: uuid.clone(),
+                input_name: entry.input_name.clone(),
+                input_kind: entry.input.kind_name().to_owned(),
+                input_settings,
+            });
+        }
+        Some(input_list)
+    };
+
+    let current_program_scene = Some(registry.current_program_scene_name.clone());
+    let current_preview_scene = Some(registry.current_preview_scene_name.clone());
+    let next_input_id = Some(registry.next_input_id);
+    let next_scene_id = Some(registry.next_scene_id);
+    let next_scene_item_id = Some(registry.next_scene_item_id);
+
     ObswsStateFile {
         stream,
         record,
@@ -858,6 +1318,13 @@ pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFil
         sora,
         hls,
         dash,
+        scenes,
+        inputs,
+        current_program_scene,
+        current_preview_scene,
+        next_input_id,
+        next_scene_id,
+        next_scene_item_id,
     }
 }
 
@@ -999,6 +1466,13 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
 
         let json_text = crate::json::to_pretty_string(&state);
@@ -1054,6 +1528,13 @@ mod tests {
                 video_codec: crate::types::CodecName::H264,
                 audio_codec: crate::types::CodecName::Aac,
             }),
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
 
         let json_text = crate::json::to_pretty_string(&state);
@@ -1105,6 +1586,13 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
 
         save_state_file(&path, &state).expect("save must succeed");
@@ -1138,6 +1626,13 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
 
         save_state_file(&path, &state).expect("save must succeed");
@@ -1192,6 +1687,13 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -1239,6 +1741,13 @@ mod tests {
             }),
             hls: None,
             dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -1360,6 +1869,13 @@ mod tests {
                 }],
             }),
             dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -1397,6 +1913,13 @@ mod tests {
                 variants: vec![HlsVariant::default()],
             }),
             dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -1488,6 +2011,13 @@ mod tests {
                 video_codec: crate::types::CodecName::H264,
                 audio_codec: crate::types::CodecName::Aac,
             }),
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -1520,5 +2050,455 @@ mod tests {
         }"#;
         let result = crate::json::parse_str::<ObswsStateFile>(json);
         assert!(result.is_err());
+    }
+
+    // --- scenes / inputs ---
+
+    #[test]
+    fn parse_scenes_with_items() {
+        let json = r#"{
+            "version": 1,
+            "scenes": [
+                {
+                    "sceneName": "Main",
+                    "sceneUuid": "uuid-scene-1",
+                    "items": [
+                        {
+                            "sceneItemId": 1,
+                            "inputUuid": "uuid-input-1",
+                            "enabled": true,
+                            "locked": false,
+                            "blendMode": "OBS_BLEND_NORMAL",
+                            "transform": {
+                                "positionX": 0.0,
+                                "positionY": 0.0,
+                                "rotation": 0.0,
+                                "scaleX": 1.0,
+                                "scaleY": 1.0,
+                                "alignment": 5,
+                                "boundsType": "OBS_BOUNDS_NONE",
+                                "boundsAlignment": 0,
+                                "boundsWidth": 0.0,
+                                "boundsHeight": 0.0,
+                                "cropTop": 0,
+                                "cropBottom": 0,
+                                "cropLeft": 0,
+                                "cropRight": 0,
+                                "cropToBounds": false,
+                                "sourceWidth": 1920.0,
+                                "sourceHeight": 1080.0,
+                                "width": 1920.0,
+                                "height": 1080.0
+                            }
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let state: ObswsStateFile = crate::json::parse_str(json).expect("parse must succeed");
+        let scenes = state.scenes.expect("scenes must be present");
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].scene_name, "Main");
+        assert_eq!(scenes[0].scene_uuid, "uuid-scene-1");
+        assert_eq!(scenes[0].items.len(), 1);
+        assert_eq!(scenes[0].items[0].scene_item_id, 1);
+        assert_eq!(scenes[0].items[0].input_uuid, "uuid-input-1");
+        assert!(scenes[0].items[0].enabled);
+        assert!(!scenes[0].items[0].locked);
+        assert_eq!(scenes[0].items[0].blend_mode, "OBS_BLEND_NORMAL");
+        assert_eq!(scenes[0].items[0].transform.source_width, 1920.0);
+    }
+
+    #[test]
+    fn roundtrip_scenes_with_items() {
+        let state = ObswsStateFile {
+            stream: None,
+            record: None,
+            rtmp_outbound: None,
+            sora: None,
+            hls: None,
+            dash: None,
+            scenes: Some(vec![StateFileScene {
+                scene_name: "Scene1".to_owned(),
+                scene_uuid: "uuid-s1".to_owned(),
+                items: vec![StateFileSceneItem {
+                    scene_item_id: 42,
+                    input_uuid: "uuid-i1".to_owned(),
+                    enabled: true,
+                    locked: true,
+                    blend_mode: "OBS_BLEND_ADDITIVE".to_owned(),
+                    transform: ObswsSceneItemTransform::default(),
+                }],
+                transition_override: None,
+            }]),
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
+        };
+        let json_text = crate::json::to_pretty_string(&state);
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip must succeed");
+        let scenes = parsed.scenes.expect("scenes must be present");
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].scene_name, "Scene1");
+        assert_eq!(scenes[0].items[0].scene_item_id, 42);
+        assert_eq!(scenes[0].items[0].blend_mode, "OBS_BLEND_ADDITIVE");
+        assert!(scenes[0].items[0].locked);
+    }
+
+    #[test]
+    fn parse_inputs_all_kinds() {
+        // 8 つの input kind すべてをパースできることを確認する
+        let json = r##"{
+            "version": 1,
+            "inputs": [
+                {
+                    "inputUuid": "uuid-1",
+                    "inputName": "Image",
+                    "inputKind": "image_source",
+                    "inputSettings": {"file": "/tmp/test.png"}
+                },
+                {
+                    "inputUuid": "uuid-2",
+                    "inputName": "Camera",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {"device_id": "cam0"}
+                },
+                {
+                    "inputUuid": "uuid-3",
+                    "inputName": "Mic",
+                    "inputKind": "audio_capture_device",
+                    "inputSettings": {"device_id": "mic0"}
+                },
+                {
+                    "inputUuid": "uuid-4",
+                    "inputName": "MP4",
+                    "inputKind": "mp4_file_source",
+                    "inputSettings": {"path": "/tmp/video.mp4", "loopPlayback": true}
+                },
+                {
+                    "inputUuid": "uuid-5",
+                    "inputName": "RTMP",
+                    "inputKind": "rtmp_inbound",
+                    "inputSettings": {"inputUrl": "rtmp://localhost/live", "streamName": "test"}
+                },
+                {
+                    "inputUuid": "uuid-6",
+                    "inputName": "SRT",
+                    "inputKind": "srt_inbound",
+                    "inputSettings": {"inputUrl": "srt://localhost:9000", "passphrase": "secret12"}
+                },
+                {
+                    "inputUuid": "uuid-7",
+                    "inputName": "RTSP",
+                    "inputKind": "rtsp_subscriber",
+                    "inputSettings": {"inputUrl": "rtsp://localhost/stream"}
+                },
+                {
+                    "inputUuid": "uuid-8",
+                    "inputName": "WebRTC",
+                    "inputKind": "webrtc_source",
+                    "inputSettings": {"backgroundKeyColor": "#00FF00"}
+                }
+            ]
+        }"##;
+        let state: ObswsStateFile = crate::json::parse_str(json).expect("parse must succeed");
+        let inputs = state.inputs.expect("inputs must be present");
+        assert_eq!(inputs.len(), 8);
+        assert_eq!(inputs[0].input_kind, "image_source");
+        assert_eq!(inputs[1].input_kind, "video_capture_device");
+        assert_eq!(inputs[2].input_kind, "audio_capture_device");
+        assert_eq!(inputs[3].input_kind, "mp4_file_source");
+        assert_eq!(inputs[4].input_kind, "rtmp_inbound");
+        assert_eq!(inputs[5].input_kind, "srt_inbound");
+        assert_eq!(inputs[6].input_kind, "rtsp_subscriber");
+        assert_eq!(inputs[7].input_kind, "webrtc_source");
+    }
+
+    #[test]
+    fn roundtrip_inputs() {
+        let settings_json = r#"{"inputUrl": "rtmp://test/live"}"#;
+        let raw = nojson::RawJson::parse(settings_json).expect("valid json");
+        let input_settings =
+            nojson::RawJsonOwned::try_from(raw.value()).expect("conversion must succeed");
+
+        let state = ObswsStateFile {
+            stream: None,
+            record: None,
+            rtmp_outbound: None,
+            sora: None,
+            hls: None,
+            dash: None,
+            scenes: None,
+            inputs: Some(vec![StateFileInput {
+                input_uuid: "uuid-1".to_owned(),
+                input_name: "TestInput".to_owned(),
+                input_kind: "rtmp_inbound".to_owned(),
+                input_settings,
+            }]),
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: Some(5),
+            next_scene_id: Some(3),
+            next_scene_item_id: Some(10),
+        };
+        let json_text = crate::json::to_pretty_string(&state);
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip must succeed");
+        let inputs = parsed.inputs.expect("inputs must be present");
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].input_uuid, "uuid-1");
+        assert_eq!(inputs[0].input_name, "TestInput");
+        assert_eq!(inputs[0].input_kind, "rtmp_inbound");
+        assert_eq!(parsed.next_input_id, Some(5));
+        assert_eq!(parsed.next_scene_id, Some(3));
+        assert_eq!(parsed.next_scene_item_id, Some(10));
+    }
+
+    #[test]
+    fn roundtrip_scene_item_transform() {
+        use crate::types::PositiveFiniteF64;
+
+        let transform = ObswsSceneItemTransform {
+            position_x: 100.0,
+            position_y: 200.0,
+            rotation: 45.0,
+            scale_x: PositiveFiniteF64::new(2.0).expect("valid"),
+            scale_y: PositiveFiniteF64::new(0.5).expect("valid"),
+            alignment: 5,
+            bounds_type: "OBS_BOUNDS_STRETCH".to_owned(),
+            bounds_alignment: 0,
+            bounds_width: 1920.0,
+            bounds_height: 1080.0,
+            crop_top: 10,
+            crop_bottom: 20,
+            crop_left: 30,
+            crop_right: 40,
+            crop_to_bounds: true,
+            source_width: 1920.0,
+            source_height: 1080.0,
+            width: 3840.0,
+            height: 540.0,
+        };
+
+        let state = ObswsStateFile {
+            stream: None,
+            record: None,
+            rtmp_outbound: None,
+            sora: None,
+            hls: None,
+            dash: None,
+            scenes: Some(vec![StateFileScene {
+                scene_name: "TransformTest".to_owned(),
+                scene_uuid: "uuid-tf".to_owned(),
+                items: vec![StateFileSceneItem {
+                    scene_item_id: 1,
+                    input_uuid: "uuid-input".to_owned(),
+                    enabled: true,
+                    locked: false,
+                    blend_mode: "OBS_BLEND_NORMAL".to_owned(),
+                    transform: transform.clone(),
+                }],
+                transition_override: None,
+            }]),
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
+        };
+        let json_text = crate::json::to_pretty_string(&state);
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip must succeed");
+        let scenes = parsed.scenes.expect("scenes must be present");
+        let parsed_transform = &scenes[0].items[0].transform;
+        assert_eq!(parsed_transform.position_x, 100.0);
+        assert_eq!(parsed_transform.position_y, 200.0);
+        assert_eq!(parsed_transform.rotation, 45.0);
+        assert_eq!(
+            parsed_transform.scale_x,
+            PositiveFiniteF64::new(2.0).expect("valid")
+        );
+        assert_eq!(
+            parsed_transform.scale_y,
+            PositiveFiniteF64::new(0.5).expect("valid")
+        );
+        assert_eq!(parsed_transform.bounds_type, "OBS_BOUNDS_STRETCH");
+        assert_eq!(parsed_transform.bounds_width, 1920.0);
+        assert_eq!(parsed_transform.crop_top, 10);
+        assert_eq!(parsed_transform.crop_bottom, 20);
+        assert_eq!(parsed_transform.crop_left, 30);
+        assert_eq!(parsed_transform.crop_right, 40);
+        assert!(parsed_transform.crop_to_bounds);
+        assert_eq!(parsed_transform.width, 3840.0);
+        assert_eq!(parsed_transform.height, 540.0);
+    }
+
+    #[test]
+    fn parse_scene_with_transition_override() {
+        let json = r#"{
+            "version": 1,
+            "scenes": [
+                {
+                    "sceneName": "WithOverride",
+                    "sceneUuid": "uuid-override",
+                    "items": [],
+                    "transitionOverride": {
+                        "transitionName": "Cut",
+                        "transitionDuration": 500
+                    }
+                }
+            ]
+        }"#;
+        let state: ObswsStateFile = crate::json::parse_str(json).expect("parse must succeed");
+        let scenes = state.scenes.expect("scenes must be present");
+        assert_eq!(scenes.len(), 1);
+        let to = scenes[0]
+            .transition_override
+            .as_ref()
+            .expect("transitionOverride must be present");
+        assert_eq!(to.transition_name.as_deref(), Some("Cut"));
+        assert_eq!(to.transition_duration, Some(500));
+    }
+
+    #[test]
+    fn roundtrip_scene_with_transition_override() {
+        let state = ObswsStateFile {
+            stream: None,
+            record: None,
+            rtmp_outbound: None,
+            sora: None,
+            hls: None,
+            dash: None,
+            scenes: Some(vec![StateFileScene {
+                scene_name: "OverrideScene".to_owned(),
+                scene_uuid: "uuid-os".to_owned(),
+                items: Vec::new(),
+                transition_override: Some(StateFileTransitionOverride {
+                    transition_name: Some("Fade".to_owned()),
+                    transition_duration: Some(300),
+                }),
+            }]),
+            inputs: None,
+            current_program_scene: Some("OverrideScene".to_owned()),
+            current_preview_scene: Some("OverrideScene".to_owned()),
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
+        };
+        let json_text = crate::json::to_pretty_string(&state);
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip must succeed");
+        let scenes = parsed.scenes.expect("scenes must be present");
+        let to = scenes[0]
+            .transition_override
+            .as_ref()
+            .expect("transitionOverride must be present");
+        assert_eq!(to.transition_name.as_deref(), Some("Fade"));
+        assert_eq!(to.transition_duration, Some(300));
+        assert_eq!(
+            parsed.current_program_scene.as_deref(),
+            Some("OverrideScene")
+        );
+        assert_eq!(
+            parsed.current_preview_scene.as_deref(),
+            Some("OverrideScene")
+        );
+    }
+
+    #[test]
+    fn reject_invalid_blend_mode() {
+        let json = r#"{
+            "version": 1,
+            "scenes": [
+                {
+                    "sceneName": "Bad",
+                    "sceneUuid": "uuid-bad",
+                    "items": [
+                        {
+                            "sceneItemId": 1,
+                            "inputUuid": "uuid-input",
+                            "enabled": true,
+                            "locked": false,
+                            "blendMode": "OBS_BLEND_INVALID",
+                            "transform": {
+                                "positionX": 0.0,
+                                "positionY": 0.0,
+                                "rotation": 0.0,
+                                "scaleX": 1.0,
+                                "scaleY": 1.0,
+                                "alignment": 5,
+                                "boundsType": "OBS_BOUNDS_NONE",
+                                "boundsAlignment": 0,
+                                "boundsWidth": 0.0,
+                                "boundsHeight": 0.0,
+                                "cropTop": 0,
+                                "cropBottom": 0,
+                                "cropLeft": 0,
+                                "cropRight": 0,
+                                "cropToBounds": false,
+                                "sourceWidth": 0.0,
+                                "sourceHeight": 0.0,
+                                "width": 0.0,
+                                "height": 0.0
+                            }
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let result = crate::json::parse_str::<ObswsStateFile>(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_empty_state_has_none_for_new_fields() {
+        let json = r#"{ "version": 1 }"#;
+        let state: ObswsStateFile = crate::json::parse_str(json).expect("parse must succeed");
+        assert!(state.scenes.is_none());
+        assert!(state.inputs.is_none());
+        assert!(state.current_program_scene.is_none());
+        assert!(state.current_preview_scene.is_none());
+        assert!(state.next_input_id.is_none());
+        assert!(state.next_scene_id.is_none());
+        assert!(state.next_scene_item_id.is_none());
+    }
+
+    #[test]
+    fn roundtrip_srt_inbound_with_passphrase() {
+        // SrtInboundSettingsWithPassphrase が passphrase を含めて出力することを検証する
+        let srt = ObswsSrtInboundSettings {
+            input_url: Some("srt://127.0.0.1:9000".to_owned()),
+            stream_id: Some("test".to_owned()),
+            passphrase: Some("my-secret-pass".to_owned()),
+        };
+        let json_text =
+            crate::json::to_pretty_string(super::SrtInboundSettingsWithPassphrase(&srt));
+        assert!(json_text.contains("passphrase"));
+        assert!(json_text.contains("my-secret-pass"));
+
+        // 通常の DisplayJson では passphrase が含まれないことを確認する
+        let normal_text = crate::json::to_pretty_string(&srt);
+        assert!(!normal_text.contains("passphrase"));
+    }
+
+    #[test]
+    fn roundtrip_webrtc_source_without_track_id() {
+        // WebRtcSourceSettingsWithoutTrackId が track_id を除外することを検証する
+        let webrtc = ObswsWebRtcSourceSettings {
+            track_id: Some("runtime-track-id".to_owned()),
+            background_key_color: Some("#00FF00".to_owned()),
+            background_key_tolerance: Some(30),
+        };
+        let json_text =
+            crate::json::to_pretty_string(super::WebRtcSourceSettingsWithoutTrackId(&webrtc));
+        assert!(!json_text.contains("trackId"));
+        assert!(!json_text.contains("runtime-track-id"));
+        assert!(json_text.contains("backgroundKeyColor"));
+        assert!(json_text.contains("#00FF00"));
     }
 }

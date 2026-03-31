@@ -110,46 +110,24 @@ pub async fn run_server(
     tracing::info!("obsws server listening on {scheme}://{addr}");
 
     // state file の読み込みと初期値への反映
-    let (
-        effective_record_dir,
-        initial_stream_settings,
-        initial_rtmp_outbound,
-        initial_sora,
-        initial_hls,
-        initial_dash,
-        resolved_state_file_path,
-    ) = if let Some(ref path) = state_file_path {
-        let abs_path = std::path::absolute(path).map_err(|e| {
-            crate::Error::new(format!(
-                "failed to resolve state file path {}: {e}",
-                path.display()
-            ))
-        })?;
-        let state = crate::obsws::state_file::load_state_file(&abs_path)?;
-        let stream_settings = state
-            .stream
-            .as_ref()
-            .map(|s| s.to_stream_service_settings());
-        let record_dir = state
-            .record
-            .map(|r| r.record_directory)
-            .unwrap_or(default_record_dir);
-        let rtmp_outbound = state.rtmp_outbound;
-        let sora = state.sora;
-        let hls = state.hls;
-        let dash = state.dash;
-        (
-            record_dir,
-            stream_settings,
-            rtmp_outbound,
-            sora,
-            hls,
-            dash,
-            Some(abs_path),
-        )
-    } else {
-        (default_record_dir, None, None, None, None, None, None)
-    };
+    let (effective_record_dir, loaded_state, resolved_state_file_path) =
+        if let Some(ref path) = state_file_path {
+            let abs_path = std::path::absolute(path).map_err(|e| {
+                crate::Error::new(format!(
+                    "failed to resolve state file path {}: {e}",
+                    path.display()
+                ))
+            })?;
+            let state = crate::obsws::state_file::load_state_file(&abs_path)?;
+            let record_dir = state
+                .record
+                .as_ref()
+                .map(|r| r.record_directory.clone())
+                .unwrap_or(default_record_dir);
+            (record_dir, Some(state), Some(abs_path))
+        } else {
+            (default_record_dir, None, None)
+        };
 
     let mut input_registry = ObswsInputRegistry::new(
         effective_record_dir,
@@ -160,20 +138,35 @@ pub async fn run_server(
     );
 
     // state file から読み込んだ設定を反映する
-    if let Some(settings) = initial_stream_settings {
-        input_registry.set_stream_service_settings(settings);
-    }
-    if let Some(settings) = initial_rtmp_outbound {
-        input_registry.set_rtmp_outbound_settings(settings);
-    }
-    if let Some(settings) = initial_sora {
-        input_registry.set_sora_publisher_settings(settings);
-    }
-    if let Some(settings) = initial_hls {
-        input_registry.set_hls_settings(settings);
-    }
-    if let Some(settings) = initial_dash {
-        input_registry.set_dash_settings(settings);
+    if let Some(state) = loaded_state {
+        if let Some(stream) = &state.stream {
+            input_registry.set_stream_service_settings(stream.to_stream_service_settings());
+        }
+        if let Some(settings) = state.rtmp_outbound {
+            input_registry.set_rtmp_outbound_settings(settings);
+        }
+        if let Some(settings) = state.sora {
+            input_registry.set_sora_publisher_settings(settings);
+        }
+        if let Some(settings) = state.hls {
+            input_registry.set_hls_settings(settings);
+        }
+        if let Some(settings) = state.dash {
+            input_registry.set_dash_settings(settings);
+        }
+        // scene / input の復元
+        if let Some(scenes) = state.scenes {
+            let inputs = state.inputs.unwrap_or_default();
+            input_registry.restore_scenes_and_inputs(
+                scenes,
+                inputs,
+                state.current_program_scene,
+                state.current_preview_scene,
+                state.next_input_id,
+                state.next_scene_id,
+                state.next_scene_item_id,
+            )?;
+        }
     }
 
     let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
