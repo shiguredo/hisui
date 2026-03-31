@@ -205,6 +205,7 @@ fn parse_optional_hls(
     let segment_duration: Option<f64> = v.to_member("segmentDuration")?.try_into()?;
     let segment_duration =
         segment_duration.unwrap_or(crate::obsws::input_registry::DEFAULT_HLS_SEGMENT_DURATION_SECS);
+    // NaN / Infinity は JSON 仕様上パーサが弾くため、ここでは正値チェックのみ行う
     if segment_duration <= 0.0 {
         return Err(v
             .to_member("segmentDuration")?
@@ -340,6 +341,7 @@ fn parse_optional_dash(
     let segment_duration: Option<f64> = v.to_member("segmentDuration")?.try_into()?;
     let segment_duration = segment_duration
         .unwrap_or(crate::obsws::input_registry::DEFAULT_DASH_SEGMENT_DURATION_SECS);
+    // NaN / Infinity は JSON 仕様上パーサが弾くため、ここでは正値チェックのみ行う
     if segment_duration <= 0.0 {
         return Err(v
             .to_member("segmentDuration")?
