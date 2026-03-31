@@ -305,7 +305,11 @@ fn get_frame_resolution(frame: &VideoFrame, codec_name: &str) -> crate::Result<(
             "{codec_name} frame size is required for VideoToolbox decoder"
         ))
     })?;
-    Ok((size.width as u32, size.height as u32))
+    let width =
+        u32::try_from(size.width).expect("frame width exceeds u32::MAX");
+    let height =
+        u32::try_from(size.height).expect("frame height exceeds u32::MAX");
+    Ok((width, height))
 }
 
 fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8])> {
