@@ -1060,12 +1060,27 @@ mod tests {
         let parsed: ObswsStateFile =
             crate::json::parse_str(&json_text).expect("roundtrip must succeed");
 
-        assert!(parsed.stream.is_some());
-        assert!(parsed.record.is_some());
-        assert!(parsed.rtmp_outbound.is_some());
-        assert!(parsed.sora.is_some());
-        assert!(parsed.hls.is_some());
-        assert!(parsed.dash.is_some());
+        let stream = parsed.stream.expect("stream must be present");
+        assert_eq!(stream.key.as_deref(), Some("key"));
+
+        let record = parsed.record.expect("record must be present");
+        assert_eq!(record.record_directory, PathBuf::from("/tmp/rec"));
+
+        let rtmp = parsed.rtmp_outbound.expect("rtmpOutbound must be present");
+        assert_eq!(rtmp.output_url.as_deref(), Some("rtmp://relay/live"));
+        assert_eq!(rtmp.stream_name.as_deref(), Some("backup"));
+
+        let sora = parsed.sora.expect("sora must be present");
+        assert_eq!(sora.signaling_urls, vec!["wss://s.example.com/signaling"]);
+        assert_eq!(sora.channel_id.as_deref(), Some("ch"));
+
+        let hls = parsed.hls.expect("hls must be present");
+        assert!(matches!(hls.destination, Some(HlsDestination::Filesystem { ref directory }) if directory == "/tmp/hls"));
+        assert_eq!(hls.segment_duration, 2.0);
+
+        let dash = parsed.dash.expect("dash must be present");
+        assert!(matches!(dash.destination, Some(DashDestination::Filesystem { ref directory }) if directory == "/tmp/dash"));
+        assert_eq!(dash.video_codec, crate::types::CodecName::H264);
     }
 
     #[test]
