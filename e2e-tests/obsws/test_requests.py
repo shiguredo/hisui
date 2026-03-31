@@ -1860,7 +1860,8 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         assert vol_data2["inputVolumeMul"] == 0.5
         assert abs(vol_data2["inputVolumeDb"] - (-6.0206)) < 0.01
 
-        # --- GetInputList に inputMuted / inputVolumeMul が含まれる ---
+        # GetInputList の各入力に inputKindCaps が含まれることを確認する
+        # （OBS 互換: GetInputList には inputMuted / inputVolumeMul は含めない）
         list_response = asyncio.run(
             _connect_identify_and_request(
                 f"ws://{host}:{port}/",
@@ -1870,6 +1871,6 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         )
         inputs = list_response["d"]["responseData"]["inputs"]
         test_input = next(i for i in inputs if i["inputName"] == "mute-vol-test")
-        assert "inputMuted" in test_input
-        assert "inputVolumeMul" in test_input
-        assert "inputVolumeDb" in test_input
+        assert "inputKindCaps" in test_input
+        assert "inputMuted" not in test_input
+        assert "inputVolumeMul" not in test_input

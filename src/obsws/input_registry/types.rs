@@ -81,9 +81,6 @@ impl nojson::DisplayJson for ObswsInputEntry {
             // 使っていないため、unversionedInputKind は inputKind と同値になる。
             f.member("unversionedInputKind", self.input.kind_name())?;
             f.member("inputUuid", &self.input_uuid)?;
-            f.member("inputMuted", self.input.input_muted)?;
-            f.member("inputVolumeMul", self.input.input_volume_mul)?;
-            f.member("inputVolumeDb", self.input.input_volume_db())?;
             f.member("inputKindCaps", 0)
         })
         .fmt(f)
