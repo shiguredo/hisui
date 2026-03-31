@@ -692,7 +692,10 @@ impl VideoEncoder {
                 self.initialize_inner(size.width, size.height)?;
             }
             if self.keyframe_request_pending {
-                self.apply_pending_keyframe_request()?;
+                if let Some(inner) = self.inner.as_mut() {
+                    inner.request_keyframe();
+                }
+                self.keyframe_request_pending = false;
             }
 
             self.total_input_video_frame_count_metric.inc();
@@ -705,26 +708,6 @@ impl VideoEncoder {
         }
 
         self.drain_encoded_frames();
-        Ok(())
-    }
-
-    fn apply_pending_keyframe_request(&mut self) -> Result<()> {
-        debug_assert!(
-            self.inner.is_some(),
-            "apply_pending_keyframe_request must be called after initialize_inner"
-        );
-        let request_supported = match self.inner.as_mut() {
-            Some(inner) => inner.request_keyframe(),
-            None => false,
-        };
-        if !request_supported {
-            self.drain_encoded_frames();
-            let recreated = self.create_inner()?;
-            self.engine_metric.set(recreated.name().as_str());
-            self.codec_metric.set(recreated.codec().as_str());
-            self.inner = Some(recreated);
-        }
-        self.keyframe_request_pending = false;
         Ok(())
     }
 
@@ -895,24 +878,15 @@ impl VideoEncoderInner {
         }
     }
 
-    fn request_keyframe(&mut self) -> bool {
+    fn request_keyframe(&mut self) {
         match self {
-            Self::Libvpx(encoder) => {
-                encoder.request_keyframe();
-                true
-            }
-            Self::Openh264(encoder) => {
-                encoder.request_keyframe();
-                true
-            }
-            Self::SvtAv1(_) => false,
+            Self::Libvpx(encoder) => encoder.request_keyframe(),
+            Self::Openh264(encoder) => encoder.request_keyframe(),
+            Self::SvtAv1(encoder) => encoder.request_keyframe(),
             #[cfg(target_os = "macos")]
-            Self::VideoToolbox(_) => false,
+            Self::VideoToolbox(encoder) => encoder.request_keyframe(),
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(encoder) => {
-                encoder.request_keyframe();
-                true
-            }
+            Self::Nvcodec(encoder) => encoder.request_keyframe(),
         }
     }
 

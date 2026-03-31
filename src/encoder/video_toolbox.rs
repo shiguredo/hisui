@@ -23,6 +23,7 @@ pub struct VideoToolboxEncoder {
     height: EvenUsize,
     format: VideoFormat,
     fps: FrameRate,
+    keyframe_request_pending: bool,
 }
 
 impl VideoToolboxEncoder {
@@ -52,6 +53,7 @@ impl VideoToolboxEncoder {
             height,
             format: VideoFormat::H264,
             fps: options.frame_rate,
+            keyframe_request_pending: false,
         })
     }
 
@@ -81,6 +83,7 @@ impl VideoToolboxEncoder {
             height,
             format: VideoFormat::H265,
             fps: options.frame_rate,
+            keyframe_request_pending: false,
         })
     }
 
@@ -100,8 +103,11 @@ impl VideoToolboxEncoder {
                 u: u_plane,
                 v: v_plane,
             },
-            &shiguredo_video_toolbox::EncodeOptions::default(),
+            &shiguredo_video_toolbox::EncodeOptions {
+                force_key_frame: self.keyframe_request_pending,
+            },
         )?;
+        self.keyframe_request_pending = false;
 
         // Video Toolbox のエンコーダーは非同期で動作し、
         // エンコードが終わるまでは入力バッファへの参照を保持する必要があるので、
@@ -122,6 +128,10 @@ impl VideoToolboxEncoder {
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
+    }
+
+    pub fn request_keyframe(&mut self) {
+        self.keyframe_request_pending = true;
     }
 
     fn handle_encoded(&mut self) -> crate::Result<()> {

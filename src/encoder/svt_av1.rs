@@ -17,6 +17,7 @@ pub struct SvtAv1Encoder {
     sample_entry: Option<SampleEntry>,
     width: EvenUsize,
     height: EvenUsize,
+    keyframe_request_pending: bool,
 }
 
 impl SvtAv1Encoder {
@@ -41,6 +42,7 @@ impl SvtAv1Encoder {
             sample_entry: Some(sample_entry),
             width,
             height,
+            keyframe_request_pending: false,
         })
     }
 
@@ -52,9 +54,10 @@ impl SvtAv1Encoder {
             v: v_plane,
         };
         let options = shiguredo_svt_av1::EncodeOptions {
-            force_keyframe: false,
+            force_keyframe: self.keyframe_request_pending,
         };
         self.inner.encode(&frame_data, &options)?;
+        self.keyframe_request_pending = false;
         self.input_queue.push_back(frame);
         self.handle_encoded_frames()?;
 
@@ -69,6 +72,10 @@ impl SvtAv1Encoder {
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
         self.output_queue.pop_front()
+    }
+
+    pub fn request_keyframe(&mut self) {
+        self.keyframe_request_pending = true;
     }
 
     fn handle_encoded_frames(&mut self) -> crate::Result<()> {
