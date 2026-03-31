@@ -716,3 +716,89 @@ impl VideoDecoderInner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::video::{VideoFormat, VideoFrame, VideoFrameSize};
+
+    /// size: None の VP9 フレームで VideoToolbox がスキップされ Libvpx が選ばれることを確認する
+    #[test]
+    fn vp9_without_size_skips_video_toolbox() {
+        let frame = VideoFrame {
+            data: vec![],
+            format: VideoFormat::Vp9,
+            keyframe: true,
+            size: None,
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+
+        let stats = crate::stats::Stats::new();
+        let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
+        // デコーダーを初期化する（空データなのでデコード自体は失敗するが、エンジン選択は成功するはず）
+        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+
+        // Libvpx が選択されていることを確認
+        assert!(
+            matches!(decoder.inner, VideoDecoderInner::Libvpx(_)),
+            "expected Libvpx decoder, got {:?}",
+            std::mem::discriminant(&decoder.inner)
+        );
+    }
+
+    /// size: None の AV1 フレームで VideoToolbox がスキップされ Dav1d が選ばれることを確認する
+    #[test]
+    fn av1_without_size_skips_video_toolbox() {
+        let frame = VideoFrame {
+            data: vec![],
+            format: VideoFormat::Av1,
+            keyframe: true,
+            size: None,
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+
+        let stats = crate::stats::Stats::new();
+        let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
+        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+
+        assert!(
+            matches!(decoder.inner, VideoDecoderInner::Dav1d(_)),
+            "expected Dav1d decoder, got {:?}",
+            std::mem::discriminant(&decoder.inner)
+        );
+    }
+
+    /// size ありの VP9 フレームでは macOS 対応環境なら VideoToolbox、非対応なら Libvpx が選ばれることを確認する
+    #[test]
+    fn vp9_with_size_selects_available_engine() {
+        let frame = VideoFrame {
+            data: vec![],
+            format: VideoFormat::Vp9,
+            keyframe: true,
+            size: Some(VideoFrameSize {
+                width: 1920,
+                height: 1080,
+            }),
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+
+        let stats = crate::stats::Stats::new();
+        let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
+        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+
+        // VideoToolbox 対応環境なら VideoToolbox、非対応なら Libvpx が選ばれる
+        let is_valid = matches!(decoder.inner, VideoDecoderInner::Libvpx(_))
+            || cfg!(target_os = "macos")
+                && matches!(decoder.inner, VideoDecoderInner::VideoToolbox(_));
+        assert!(
+            is_valid,
+            "expected Libvpx or VideoToolbox decoder, got {:?}",
+            std::mem::discriminant(&decoder.inner)
+        );
+    }
+}
