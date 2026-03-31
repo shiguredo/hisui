@@ -647,13 +647,15 @@ def test_mpeg_dash_filesystem_persists_across_restart(binary_path: Path, tmp_pat
 
 
 def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
-    """CreateScene で作成した scene が再起動後も復元される"""
+    """CreateScene で作成した scene が再起動後も復元され、sceneUuid が保持される"""
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
     port, sock = reserve_ephemeral_port()
     sock.close()
 
+    # 1 回目の起動: scene を作成し、sceneUuid を記録する
+    created = {}
     with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
 
         async def _set():
@@ -671,6 +673,7 @@ def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
                     {"sceneName": "MyScene"},
                 )
                 assert response["d"]["requestStatus"]["result"] is True
+                created["sceneUuid"] = response["d"]["responseData"]["sceneUuid"]
                 # program scene を変更
                 response = await _send_obsws_request(
                     ws,
@@ -683,6 +686,9 @@ def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
 
         asyncio.run(_set())
 
+    assert created["sceneUuid"], "sceneUuid must be captured"
+
+    # 2 回目の起動: sceneUuid が同一であることを確認する
     port2, sock2 = reserve_ephemeral_port()
     sock2.close()
 
@@ -695,26 +701,31 @@ def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
                     f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
-                # scene 一覧を取得
                 response = await _send_obsws_request(ws, "GetSceneList", "get-scenes")
                 data = response["d"]["responseData"]
                 scene_names = [s["sceneName"] for s in data["scenes"]]
                 assert "Scene" in scene_names
                 assert "MyScene" in scene_names
                 assert data["currentProgramSceneName"] == "MyScene"
+                # sceneUuid の保持を確認
+                my_scene = [s for s in data["scenes"] if s["sceneName"] == "MyScene"]
+                assert len(my_scene) == 1
+                assert my_scene[0]["sceneUuid"] == created["sceneUuid"]
                 await ws.close()
 
         asyncio.run(_get())
 
 
 def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
-    """CreateInput で作成した input が再起動後も復元される"""
+    """CreateInput で作成した input が再起動後も復元され、UUID と sceneItemId が保持される"""
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
     port, sock = reserve_ephemeral_port()
     sock.close()
 
+    # 1 回目の起動: input を作成し、UUID と sceneItemId を記録する
+    created = {}
     with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
 
         async def _set():
@@ -736,10 +747,16 @@ def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
                     },
                 )
                 assert response["d"]["requestStatus"]["result"] is True
+                data = response["d"]["responseData"]
+                created["inputUuid"] = data["inputUuid"]
+                created["sceneItemId"] = data["sceneItemId"]
                 await ws.close()
 
         asyncio.run(_set())
 
+    assert created["inputUuid"], "inputUuid must be captured"
+
+    # 2 回目の起動: UUID と sceneItemId が同一であることを確認する
     port2, sock2 = reserve_ephemeral_port()
     sock2.close()
 
@@ -752,12 +769,13 @@ def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
                     f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
-                # input 一覧を取得
+                # inputUuid の保持を確認
                 response = await _send_obsws_request(ws, "GetInputList", "get-inputs")
                 inputs = response["d"]["responseData"]["inputs"]
-                input_names = [i["inputName"] for i in inputs]
-                assert "test-image" in input_names
-                # scene item も復元されているか確認
+                target = [i for i in inputs if i["inputName"] == "test-image"]
+                assert len(target) == 1
+                assert target[0]["inputUuid"] == created["inputUuid"]
+                # sceneItemId の保持を確認
                 response = await _send_obsws_request(
                     ws,
                     "GetSceneItemList",
@@ -765,8 +783,9 @@ def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
                     {"sceneName": "Scene"},
                 )
                 items = response["d"]["responseData"]["sceneItems"]
-                item_names = [i["sourceName"] for i in items]
-                assert "test-image" in item_names
+                target_items = [i for i in items if i["sourceName"] == "test-image"]
+                assert len(target_items) == 1
+                assert target_items[0]["sceneItemId"] == created["sceneItemId"]
                 await ws.close()
 
         asyncio.run(_get())
