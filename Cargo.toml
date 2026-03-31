@@ -37,7 +37,7 @@ shiguredo_rtmp = "=2026.1.0-canary.5"
 shiguredo_rtsp = "=2026.1.0-canary.0"
 shiguredo_srt = "=2026.1.0-canary.0"
 shiguredo_webrtc = { workspace = true }
-sora_sdk = "=2026.1.0-canary.3"
+sora_sdk = "=2026.1.0-canary.4"
 shiguredo_video_device = "=2026.1.0-canary.3"
 shiguredo_audio_device = "=2026.1.0-canary.0"
 mpeg2ts = "=0.6.0"
@@ -54,7 +54,7 @@ shiguredo_dav1d = "=2026.1.0-canary.3"
 shiguredo_libvpx = { workspace = true }
 shiguredo_libyuv = "=2026.1.0-canary.3"
 shiguredo_nvcodec = { version = "=2026.1.0-canary.2", optional = true }
-shiguredo_openh264 = "=2026.1.0-canary.4"
+shiguredo_openh264 = "=2026.1.0-canary.5"
 shiguredo_opus = { workspace = true }
 shiguredo_svt_av1 = "=2026.1.0-canary.2"
 shiguredo_websocket = { workspace = true }
@@ -85,7 +85,7 @@ tokio = { version = "=1.50.0", features = [
     "sync",
     "time",
 ] }
-shiguredo_webrtc = "=0.146.2-canary.3"
+shiguredo_webrtc = "=0.146.2-canary.5"
 shiguredo_http11 = "=2026.1.1"
 shiguredo_libvpx = "=2026.1.0-canary.3"
 shiguredo_opus = "=2026.1.0-canary.5"

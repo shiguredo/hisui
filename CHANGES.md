@@ -55,6 +55,8 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.4 を追加する
+  - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0-canary.0 を追加する
@@ -77,7 +79,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.146.2-canary3 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.146.2-canary.5 を追加する
   - @sile
 - [ADD] 実験的な `obsws` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui obsws` で WebSocket サーバーを起動できる
@@ -126,7 +128,7 @@
 - [UPDATE] hvc1 ボックスを含む入力 MP4 ファイルに対応する
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する
   - @sile
-- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.4 にあげる
+- [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0-canary.5 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0-canary.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.2 にあげる
