@@ -280,7 +280,7 @@ pub struct SetInputSettingsExecution {
     pub request_succeeded: bool,
 }
 
-fn parse_input_lookup_fields(
+pub(crate) fn parse_input_lookup_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
     let input_name = optional_non_empty_string_member(request_data, "inputName")?;
@@ -898,7 +898,7 @@ pub(crate) fn parse_set_scene_item_enabled_fields_for_session(
     ))
 }
 
-fn parse_request_data_or_error_response<T, F>(
+pub(crate) fn parse_request_data_or_error_response<T, F>(
     request_type: &str,
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,

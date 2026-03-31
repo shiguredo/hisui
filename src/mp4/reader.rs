@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -12,6 +13,140 @@ use crate::video::{VideoFormat, VideoFrameSize};
 use crate::{Ack, AudioFrame, Error, ProcessorHandle, Result, TrackId, TrackPublisher, VideoFrame};
 
 const MAX_NOACKED_COUNT: u64 = 100;
+
+/// OBS 互換のメディア再生状態
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaPlaybackState {
+    /// 再生していない
+    None,
+    /// 再生中
+    Playing,
+    /// 一時停止中
+    Paused,
+    /// 停止済み（再生が終了した、または明示的に停止された）
+    Stopped,
+    /// 終了済み（ループなしで最後まで再生し切った）
+    Ended,
+}
+
+impl MediaPlaybackState {
+    /// OBS WebSocket プロトコルの文字列表現を返す
+    pub fn as_obs_str(self) -> &'static str {
+        match self {
+            Self::None => "OBS_MEDIA_STATE_NONE",
+            Self::Playing => "OBS_MEDIA_STATE_PLAYING",
+            Self::Paused => "OBS_MEDIA_STATE_PAUSED",
+            Self::Stopped => "OBS_MEDIA_STATE_STOPPED",
+            Self::Ended => "OBS_MEDIA_STATE_ENDED",
+        }
+    }
+}
+
+/// メディア入力の再生状況（外部から参照可能）
+#[derive(Debug, Clone)]
+pub struct MediaPlaybackStatus {
+    pub state: MediaPlaybackState,
+    /// 現在の再生位置（ミリ秒）
+    pub media_cursor_ms: i64,
+    /// 総時間（ミリ秒）。不明な場合は 0
+    pub media_duration_ms: i64,
+}
+
+impl Default for MediaPlaybackStatus {
+    fn default() -> Self {
+        Self {
+            state: MediaPlaybackState::None,
+            media_cursor_ms: 0,
+            media_duration_ms: 0,
+        }
+    }
+}
+
+/// メディア入力への再生制御コマンド
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaInputCommand {
+    Play,
+    Pause,
+    Stop,
+    Restart,
+}
+
+impl MediaInputCommand {
+    /// OBS WebSocket プロトコルの文字列表現を返す
+    pub fn as_obs_str(self) -> &'static str {
+        match self {
+            Self::Play => "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY",
+            Self::Pause => "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE",
+            Self::Stop => "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP",
+            Self::Restart => "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART",
+        }
+    }
+
+    /// OBS WebSocket プロトコルの文字列表現からパースする
+    pub fn from_obs_str(s: &str) -> Option<Self> {
+        match s {
+            "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY" => Some(Self::Play),
+            "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE" => Some(Self::Pause),
+            "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP" => Some(Self::Stop),
+            "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART" => Some(Self::Restart),
+            _ => None,
+        }
+    }
+}
+
+/// メディア入力からのイベント通知
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaInputEvent {
+    /// 再生が開始された
+    PlaybackStarted,
+    /// 再生が終了した（EOS に到達）
+    PlaybackEnded,
+}
+
+/// メディア入力の制御ハンドル（coordinator が保持する）
+#[derive(Debug, Clone)]
+pub struct MediaInputHandle {
+    pub status: Arc<Mutex<MediaPlaybackStatus>>,
+    pub command_tx: tokio::sync::mpsc::Sender<MediaInputCommand>,
+    pub event_rx: Arc<Mutex<tokio::sync::mpsc::Receiver<MediaInputEvent>>>,
+}
+
+/// `MediaInputHandle` の作成結果（reader 側で受け取る部分）
+#[derive(Debug)]
+struct MediaInputChannels {
+    status: Arc<Mutex<MediaPlaybackStatus>>,
+    command_rx: tokio::sync::mpsc::Receiver<MediaInputCommand>,
+    event_tx: tokio::sync::mpsc::Sender<MediaInputEvent>,
+}
+
+/// メディア入力のハンドルとチャネルを作成する
+fn create_media_input_channels() -> (MediaInputHandle, MediaInputChannels) {
+    let status = Arc::new(Mutex::new(MediaPlaybackStatus::default()));
+    let (command_tx, command_rx) = tokio::sync::mpsc::channel(8);
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel(8);
+
+    let handle = MediaInputHandle {
+        status: Arc::clone(&status),
+        command_tx,
+        event_rx: Arc::new(Mutex::new(event_rx)),
+    };
+    let channels = MediaInputChannels {
+        status,
+        command_rx,
+        event_tx,
+    };
+    (handle, channels)
+}
+
+/// run_loop 内のコマンド処理結果
+enum MediaLoopAction {
+    /// サンプル処理を続行する
+    Continue,
+    /// 再生を停止する
+    Stop,
+    /// ファイル先頭からリスタートする
+    Restart,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Mp4FileReaderOptions {
@@ -36,6 +171,12 @@ pub struct Mp4FileReader {
     start_instant: tokio::time::Instant,
     last_realtime_timestamp: Option<Duration>,
     emitted_in_loop: bool,
+    // メディア再生制御
+    media_channels: Option<MediaInputChannels>,
+    is_paused: bool,
+    pause_started_at: Option<tokio::time::Instant>,
+    total_paused_duration: Duration,
+    media_duration_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +205,30 @@ impl Mp4FileReader {
             start_instant: tokio::time::Instant::now(),
             last_realtime_timestamp: None,
             emitted_in_loop: false,
+            media_channels: None,
+            is_paused: false,
+            pause_started_at: None,
+            total_paused_duration: Duration::ZERO,
+            media_duration_ms: 0,
         })
+    }
+
+    /// メディア再生制御のハンドルを作成して返す。
+    /// reader に制御チャネルを設定し、外部からの再生制御を可能にする。
+    pub fn create_media_handle(&mut self) -> MediaInputHandle {
+        let (handle, channels) = create_media_input_channels();
+        self.media_channels = Some(channels);
+        handle
+    }
+
+    /// 音声トラックが設定されているかどうかを返す
+    pub fn has_audio_track(&self) -> bool {
+        self.options.audio_track_id.is_some()
+    }
+
+    /// 映像トラックが設定されているかどうかを返す
+    pub fn has_video_track(&self) -> bool {
+        self.options.video_track_id.is_some()
     }
 
     /// デコーダーを設定する。設定された場合、encoded frame を decode してから送信する。
@@ -87,15 +251,23 @@ impl Mp4FileReader {
         }
         handle.wait_subscribers_ready().await?;
 
+        // 総時間を事前に取得する
+        self.media_duration_ms = probe_mp4_duration_ms(&self.path).unwrap_or(0);
+        self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
+        self.send_media_event(MediaInputEvent::PlaybackStarted);
+
         self.start_instant = tokio::time::Instant::now();
         self.last_realtime_timestamp = None;
 
         let should_stop = self.run_loop(loop_enabled).await?;
         if should_stop {
+            self.update_playback_status(MediaPlaybackState::Stopped, self.last_emitted_end);
             return Ok(());
         }
 
         self.flush_and_send_eos()?;
+        self.update_playback_status(MediaPlaybackState::Ended, self.last_emitted_end);
+        self.send_media_event(MediaInputEvent::PlaybackEnded);
 
         Ok(())
     }
@@ -131,7 +303,7 @@ impl Mp4FileReader {
     }
 
     async fn run_loop(&mut self, loop_enabled: bool) -> Result<bool> {
-        loop {
+        'outer: loop {
             let mut state = ReaderState::open(
                 &self.path,
                 self.audio_sender.is_some(),
@@ -143,6 +315,22 @@ impl Mp4FileReader {
 
             self.emitted_in_loop = false;
             while let Some(sample) = state.demuxer.next_sample()? {
+                // 一時停止中はコマンドを待つ
+                if self.is_paused {
+                    match self.wait_while_paused().await {
+                        MediaLoopAction::Continue => {}
+                        MediaLoopAction::Stop => return Ok(true),
+                        MediaLoopAction::Restart => continue 'outer,
+                    }
+                }
+
+                // 非一時停止中もコマンドをポーリングで確認する
+                match self.poll_media_command() {
+                    MediaLoopAction::Continue => {}
+                    MediaLoopAction::Stop => return Ok(true),
+                    MediaLoopAction::Restart => continue 'outer,
+                }
+
                 let context = SampleContext::from_sample(&sample);
                 let should_stop = self.handle_sample(&mut state, context).await?;
                 if should_stop {
@@ -155,13 +343,117 @@ impl Mp4FileReader {
                     tracing::warn!("Loop playback stopped because no samples were read");
                     break;
                 }
+                self.send_media_event(MediaInputEvent::PlaybackEnded);
                 self.base_offset = self.last_emitted_end;
+                self.send_media_event(MediaInputEvent::PlaybackStarted);
                 continue;
             }
             break;
         }
 
         Ok(false)
+    }
+
+    /// 一時停止中にコマンドを待つ
+    async fn wait_while_paused(&mut self) -> MediaLoopAction {
+        let Some(channels) = self.media_channels.as_mut() else {
+            return MediaLoopAction::Continue;
+        };
+        loop {
+            match channels.command_rx.recv().await {
+                Some(MediaInputCommand::Play) => {
+                    self.resume_from_pause();
+                    return MediaLoopAction::Continue;
+                }
+                Some(MediaInputCommand::Pause) => {
+                    // 既に一時停止中なので何もしない
+                }
+                Some(MediaInputCommand::Stop) => {
+                    self.is_paused = false;
+                    return MediaLoopAction::Stop;
+                }
+                Some(MediaInputCommand::Restart) => {
+                    self.restart_playback();
+                    return MediaLoopAction::Restart;
+                }
+                None => {
+                    // チャネルが閉じられた
+                    self.is_paused = false;
+                    return MediaLoopAction::Stop;
+                }
+            }
+        }
+    }
+
+    /// 非一時停止中にコマンドをポーリングで確認する
+    fn poll_media_command(&mut self) -> MediaLoopAction {
+        let Some(channels) = self.media_channels.as_mut() else {
+            return MediaLoopAction::Continue;
+        };
+        match channels.command_rx.try_recv() {
+            Ok(MediaInputCommand::Play) => {
+                // 既に再生中なので何もしない
+                MediaLoopAction::Continue
+            }
+            Ok(MediaInputCommand::Pause) => {
+                self.is_paused = true;
+                self.pause_started_at = Some(tokio::time::Instant::now());
+                self.update_playback_status(MediaPlaybackState::Paused, self.last_emitted_end);
+                MediaLoopAction::Continue
+            }
+            Ok(MediaInputCommand::Stop) => MediaLoopAction::Stop,
+            Ok(MediaInputCommand::Restart) => {
+                self.restart_playback();
+                MediaLoopAction::Restart
+            }
+            Err(_) => MediaLoopAction::Continue,
+        }
+    }
+
+    /// 一時停止から復帰する
+    fn resume_from_pause(&mut self) {
+        if let Some(pause_start) = self.pause_started_at.take() {
+            self.total_paused_duration += pause_start.elapsed();
+        }
+        self.is_paused = false;
+        // start_instant を一時停止分だけ進めて、再生速度制御のタイミングを維持する
+        self.start_instant += self.total_paused_duration;
+        self.total_paused_duration = Duration::ZERO;
+        self.update_playback_status(MediaPlaybackState::Playing, self.last_emitted_end);
+    }
+
+    /// 再生を先頭からリスタートする
+    fn restart_playback(&mut self) {
+        self.is_paused = false;
+        self.pause_started_at = None;
+        self.total_paused_duration = Duration::ZERO;
+        self.base_offset = self.last_emitted_end;
+        self.start_instant = tokio::time::Instant::now();
+        self.last_realtime_timestamp = None;
+        self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
+        self.send_media_event(MediaInputEvent::PlaybackStarted);
+    }
+
+    /// 再生状態を更新する
+    fn update_playback_status(&self, state: MediaPlaybackState, cursor: Duration) {
+        if let Some(channels) = &self.media_channels
+            && let Ok(mut status) = channels.status.lock()
+        {
+            status.state = state;
+            // ループ再生の場合、cursor はファイル内での相対位置を示す
+            // base_offset を引いてファイル内の位置に変換する
+            let file_cursor = cursor.saturating_sub(self.base_offset);
+            status.media_cursor_ms = file_cursor.as_millis() as i64;
+            status.media_duration_ms = self.media_duration_ms;
+        }
+    }
+
+    /// メディアイベントを送信する
+    fn send_media_event(&self, event: MediaInputEvent) {
+        if let Some(channels) = &self.media_channels {
+            // バッファが一杯の場合はドロップする
+            let _ = channels.event_tx.try_send(event);
+        }
     }
 
     async fn handle_sample(
@@ -234,6 +526,7 @@ impl Mp4FileReader {
             let end = effective_timestamp + duration;
             if end > self.last_emitted_end {
                 self.last_emitted_end = end;
+                self.update_playback_status(MediaPlaybackState::Playing, end);
             }
         }
 
@@ -295,6 +588,7 @@ impl Mp4FileReader {
             let end = effective_timestamp + duration;
             if end > self.last_emitted_end {
                 self.last_emitted_end = end;
+                self.update_playback_status(MediaPlaybackState::Playing, end);
             }
         }
 
@@ -392,6 +686,29 @@ pub fn probe_mp4_video_dimensions<P: AsRef<Path>>(
     }
 
     Ok(None)
+}
+
+/// MP4 ファイルの総時間をミリ秒で取得する。
+/// 映像トラックと音声トラックの duration のうち、最大のものを返す。
+pub fn probe_mp4_duration_ms<P: AsRef<Path>>(path: P) -> Result<i64> {
+    let path = path.as_ref();
+    let mut file = File::open(path)
+        .map_err(|e| Error::new(format!("Cannot open file {}: {e}", path.display())))?;
+    let mut demuxer = Mp4FileDemuxer::new();
+    initialize_mp4_demuxer(&mut file, &mut demuxer, path)?;
+
+    let tracks = demuxer
+        .tracks()
+        .map_err(|e| Error::new(format!("Failed to read tracks {}: {e}", path.display())))?;
+    let mut max_duration_ms: i64 = 0;
+    for track in tracks {
+        let duration_secs = track.duration as f64 / track.timescale.get() as f64;
+        let duration_ms = (duration_secs * 1000.0) as i64;
+        if duration_ms > max_duration_ms {
+            max_duration_ms = duration_ms;
+        }
+    }
+    Ok(max_duration_ms)
 }
 
 #[derive(Debug, Clone)]

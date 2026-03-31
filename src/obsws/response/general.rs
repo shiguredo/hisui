@@ -76,6 +76,8 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "StartRecord",
     "StopRecord",
     "Sleep",
+    "GetMediaInputStatus",
+    "TriggerMediaInputAction",
 ];
 
 pub fn build_get_version_response(

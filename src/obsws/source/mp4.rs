@@ -40,6 +40,7 @@ pub(super) fn build_record_source_plan(
         loop_playback: settings.loop_playback,
         audio_track_id: source_audio_track_id.clone(),
         video_track_id: source_video_track_id.clone(),
+        enable_media_control: true,
     };
 
     Ok(ObswsRecordSourcePlan {

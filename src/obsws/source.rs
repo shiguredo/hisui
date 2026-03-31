@@ -67,8 +67,18 @@ pub enum ObswsSourceRequest {
     },
 }
 
+/// ソースリクエスト実行結果
+pub struct SourceRequestResult {
+    pub processor_id: ProcessorId,
+    /// mp4_file_source の場合のメディア再生制御ハンドル
+    pub media_handle: Option<crate::mp4::reader::MediaInputHandle>,
+}
+
 impl ObswsSourceRequest {
-    pub async fn execute(self, handle: &crate::MediaPipelineHandle) -> crate::Result<ProcessorId> {
+    pub async fn execute(
+        self,
+        handle: &crate::MediaPipelineHandle,
+    ) -> crate::Result<SourceRequestResult> {
         match self {
             Self::CreateMp4FileSource {
                 source,
@@ -76,15 +86,19 @@ impl ObswsSourceRequest {
             } => {
                 let processor_id = processor_id
                     .unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
+                let (reader, media_handle) = source.create_reader()?;
                 handle
                     .spawn_processor(
                         processor_id.clone(),
                         ProcessorMetadata::new("mp4_file_source"),
-                        move |h| source.run(h),
+                        move |h| file_mp4::Mp4FileSource::run_reader(reader, h),
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok(SourceRequestResult {
+                    processor_id,
+                    media_handle,
+                })
             }
             Self::CreatePngFileSource {
                 source,
@@ -100,7 +114,10 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok(SourceRequestResult {
+                    processor_id,
+                    media_handle: None,
+                })
             }
             Self::CreateColorSource {
                 source,
@@ -115,7 +132,10 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok(SourceRequestResult {
+                    processor_id,
+                    media_handle: None,
+                })
             }
             Self::CreateVideoDeviceSource {
                 source,
@@ -136,7 +156,10 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok(SourceRequestResult {
+                    processor_id,
+                    media_handle: None,
+                })
             }
             Self::CreateAudioDeviceSource {
                 source,
@@ -157,7 +180,10 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok(SourceRequestResult {
+                    processor_id,
+                    media_handle: None,
+                })
             }
             Self::CreateRtmpInboundEndpoint {
                 endpoint,
@@ -173,7 +199,10 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok(SourceRequestResult {
+                    processor_id,
+                    media_handle: None,
+                })
             }
             Self::CreateSrtInboundEndpoint {
                 endpoint,
@@ -189,7 +218,10 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok(SourceRequestResult {
+                    processor_id,
+                    media_handle: None,
+                })
             }
             Self::CreateRtspSubscriber {
                 subscriber,
@@ -205,7 +237,10 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok(SourceRequestResult {
+                    processor_id,
+                    media_handle: None,
+                })
             }
         }
     }

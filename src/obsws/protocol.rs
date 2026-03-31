@@ -22,6 +22,7 @@ pub const OBSWS_EVENT_SUB_SCENES: u32 = 1 << 2;
 pub const OBSWS_EVENT_SUB_INPUTS: u32 = 1 << 3;
 pub const OBSWS_EVENT_SUB_OUTPUTS: u32 = 1 << 6;
 pub const OBSWS_EVENT_SUB_SCENE_ITEMS: u32 = 1 << 7;
+pub const OBSWS_EVENT_SUB_MEDIA_INPUTS: u32 = 1 << 8;
 pub const OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED: u32 = 1 << 19;
 
 /// OBS WebSocket プロトコルにおける EventSubscription::All のデフォルト値。
