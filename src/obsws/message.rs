@@ -431,7 +431,7 @@ mod tests {
                     device_id: Some("camera-1".to_owned()),
                 }),
                 input_muted: false,
-                input_volume_mul: 1.0,
+                input_volume_mul: crate::types::NonNegFiniteF64::ONE,
             },
         ));
         registry

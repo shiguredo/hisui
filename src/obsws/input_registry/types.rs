@@ -4,6 +4,8 @@ use std::time::Instant;
 
 use nojson::DisplayJson as _;
 
+use crate::types::NonNegFiniteF64;
+
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
@@ -79,6 +81,9 @@ impl nojson::DisplayJson for ObswsInputEntry {
             // 使っていないため、unversionedInputKind は inputKind と同値になる。
             f.member("unversionedInputKind", self.input.kind_name())?;
             f.member("inputUuid", &self.input_uuid)?;
+            f.member("inputMuted", self.input.input_muted)?;
+            f.member("inputVolumeMul", self.input.input_volume_mul)?;
+            f.member("inputVolumeDb", self.input.input_volume_db())?;
             f.member("inputKindCaps", 0)
         })
         .fmt(f)
@@ -90,8 +95,8 @@ pub struct ObswsInput {
     pub settings: ObswsInputSettings,
     /// ミュート状態
     pub input_muted: bool,
-    /// 音量乗算係数（0.0 以上、デフォルト 1.0 = 0dB）
-    pub input_volume_mul: f64,
+    /// 音量乗算係数（0.0 以上の有限値、デフォルト 1.0 = 0dB）
+    pub input_volume_mul: NonNegFiniteF64,
 }
 
 impl ObswsInput {
@@ -102,7 +107,7 @@ impl ObswsInput {
         Ok(Self {
             settings: ObswsInputSettings::from_kind_and_settings(input_kind, input_settings)?,
             input_muted: false,
-            input_volume_mul: 1.0,
+            input_volume_mul: NonNegFiniteF64::ONE,
         })
     }
 
@@ -112,16 +117,19 @@ impl ObswsInput {
 
     /// 音量を dB 値で取得する
     pub fn input_volume_db(&self) -> f64 {
-        if self.input_volume_mul <= 0.0 {
+        let mul = self.input_volume_mul.get();
+        if mul <= 0.0 {
             f64::NEG_INFINITY
         } else {
-            20.0 * self.input_volume_mul.log10()
+            20.0 * mul.log10()
         }
     }
 
     /// 音量を dB 値から mul に変換して設定する
     pub fn set_volume_from_db(&mut self, db: f64) {
-        self.input_volume_mul = 10.0_f64.powf(db / 20.0);
+        let mul = 10.0_f64.powf(db / 20.0);
+        // dB が有限なら mul も有限かつ正になる
+        self.input_volume_mul = NonNegFiniteF64::new(mul).unwrap_or(NonNegFiniteF64::ZERO);
     }
 }
 

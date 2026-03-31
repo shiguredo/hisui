@@ -472,6 +472,64 @@ impl std::fmt::Display for PositiveFiniteF64 {
     }
 }
 
+/// 0.0 以上の有限な f64 値。
+///
+/// 非負の有限値のみを保持するため、NaN や無限が存在せず全順序が成立する。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NonNegFiniteF64(f64);
+
+impl Eq for NonNegFiniteF64 {}
+
+impl Ord for NonNegFiniteF64 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+impl PartialOrd for NonNegFiniteF64 {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl NonNegFiniteF64 {
+    pub const ZERO: Self = Self(0.0);
+    pub const ONE: Self = Self(1.0);
+
+    pub fn new(n: f64) -> Option<Self> {
+        if n.is_finite() && n >= 0.0 {
+            Some(Self(n))
+        } else {
+            None
+        }
+    }
+
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl nojson::DisplayJson for NonNegFiniteF64 {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.value(self.0)
+    }
+}
+
+impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for NonNegFiniteF64 {
+    type Error = nojson::JsonParseError;
+
+    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let n: f64 = value.try_into()?;
+        Self::new(n).ok_or_else(|| value.invalid("expected non-negative finite number"))
+    }
+}
+
+impl std::fmt::Display for NonNegFiniteF64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 // タイムオフセット
 //
 // フォーマット:

@@ -935,7 +935,7 @@ impl ObswsCoordinator {
             self.notify_audio_mixer_mute_volume(
                 &entry.input_uuid,
                 entry.input.input_muted,
-                entry.input.input_volume_mul,
+                entry.input.input_volume_mul.get(),
             )
             .await;
             events.push(TaggedEvent {
@@ -970,7 +970,7 @@ impl ObswsCoordinator {
             self.notify_audio_mixer_mute_volume(
                 &entry.input_uuid,
                 entry.input.input_muted,
-                entry.input.input_volume_mul,
+                entry.input.input_volume_mul.get(),
             )
             .await;
             events.push(TaggedEvent {
@@ -1005,7 +1005,7 @@ impl ObswsCoordinator {
             self.notify_audio_mixer_mute_volume(
                 &entry.input_uuid,
                 entry.input.input_muted,
-                entry.input.input_volume_mul,
+                entry.input.input_volume_mul.get(),
             )
             .await;
             events.push(TaggedEvent {
@@ -1013,7 +1013,7 @@ impl ObswsCoordinator {
                     &entry.input_name,
                     &entry.input_uuid,
                     entry.input.input_volume_db(),
-                    entry.input.input_volume_mul,
+                    entry.input.input_volume_mul.get(),
                 ),
                 subscription_flag: OBSWS_EVENT_SUB_INPUTS,
             });

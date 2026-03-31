@@ -679,6 +679,18 @@ fn parse_set_input_volume_fields(
         );
     }
 
+    // 有限値チェック
+    if let Some(db) = volume_db
+        && !db.is_finite()
+    {
+        return Err(request_data.invalid("inputVolumeDb must be a finite number"));
+    }
+    if let Some(mul) = volume_mul
+        && (!mul.is_finite() || mul < 0.0)
+    {
+        return Err(request_data.invalid("inputVolumeMul must be a finite non-negative number"));
+    }
+
     Ok(SetInputVolumeFields {
         input_uuid,
         input_name,

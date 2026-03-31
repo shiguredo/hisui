@@ -1115,10 +1115,13 @@ impl ObswsInputRegistry {
         input_name: Option<&str>,
     ) -> Option<(f64, f64)> {
         let entry = self.find_input(input_uuid, input_name)?;
-        Some((entry.input.input_volume_db(), entry.input.input_volume_mul))
+        Some((
+            entry.input.input_volume_db(),
+            entry.input.input_volume_mul.get(),
+        ))
     }
 
-    /// 音量を設定する。dB か mul のいずれかを指定する。
+    /// 音量を設定する。両方指定時は inputVolumeMul を優先する（OBS 互換）。
     pub fn set_input_volume(
         &mut self,
         input_uuid: Option<&str>,
@@ -1127,13 +1130,17 @@ impl ObswsInputRegistry {
         volume_mul: Option<f64>,
     ) -> Option<(f64, f64)> {
         let entry = self.find_input_mut(input_uuid, input_name)?;
-        if let Some(db) = volume_db {
+        // 両方指定時は mul を優先する（OBS 互換）
+        if let Some(mul) = volume_mul {
+            entry.input.input_volume_mul = crate::types::NonNegFiniteF64::new(mul)
+                .unwrap_or(crate::types::NonNegFiniteF64::ZERO);
+        } else if let Some(db) = volume_db {
             entry.input.set_volume_from_db(db);
         }
-        if let Some(mul) = volume_mul {
-            entry.input.input_volume_mul = mul.max(0.0);
-        }
-        Some((entry.input.input_volume_db(), entry.input.input_volume_mul))
+        Some((
+            entry.input.input_volume_db(),
+            entry.input.input_volume_mul.get(),
+        ))
     }
 
     #[cfg(test)]
