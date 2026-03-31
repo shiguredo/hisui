@@ -13,7 +13,7 @@ use shiguredo_rtsp::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
-    Error, MessageSender, ProcessorHandle, TrackId,
+    Error, ProcessorHandle, TrackId, TrackPublisher,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     timestamp::mapper::TimestampMapper,
     video::{VideoFormat, VideoFrame},
@@ -270,8 +270,8 @@ struct SelectedTracks {
 #[derive(Debug)]
 /// subscriber の出力先（トラック sender）とデコーダーをまとめた構造体
 struct RtspOutputContext<'a> {
-    audio_track_tx: &'a mut Option<MessageSender>,
-    video_track_tx: &'a mut Option<MessageSender>,
+    audio_track_tx: &'a mut Option<TrackPublisher>,
+    video_track_tx: &'a mut Option<TrackPublisher>,
     audio_decoder: &'a mut Option<crate::decoder::AudioDecoder>,
     video_decoder: &'a mut Option<crate::decoder::VideoDecoder>,
 }

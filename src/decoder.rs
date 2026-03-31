@@ -477,7 +477,7 @@ impl VideoDecoder {
 
 pub fn drain_audio_decoder_output(
     decoder: &mut AudioDecoder,
-    output_tx: &mut crate::MessageSender,
+    output_tx: &mut crate::TrackPublisher,
 ) -> Result<DrainResult> {
     loop {
         match decoder.poll_output()? {
@@ -498,7 +498,7 @@ pub fn drain_audio_decoder_output(
 
 pub fn drain_video_decoder_output(
     decoder: &mut VideoDecoder,
-    output_tx: &mut crate::MessageSender,
+    output_tx: &mut crate::TrackPublisher,
 ) -> Result<DrainResult> {
     loop {
         match decoder.poll_output()? {

@@ -525,8 +525,8 @@ fn pseudo_random_u32() -> crate::Result<u32> {
 
 fn publish_samples(
     samples: Vec<TsSample>,
-    audio_track_tx: &mut Option<crate::media_pipeline::MessageSender>,
-    video_track_tx: &mut Option<crate::media_pipeline::MessageSender>,
+    audio_track_tx: &mut Option<crate::media_pipeline::TrackPublisher>,
+    video_track_tx: &mut Option<crate::media_pipeline::TrackPublisher>,
     audio_decoder: &mut Option<crate::decoder::AudioDecoder>,
     video_decoder: &mut Option<crate::decoder::VideoDecoder>,
     stats: &SrtInboundEndpointStats,

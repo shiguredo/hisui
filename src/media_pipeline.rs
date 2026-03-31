@@ -2,7 +2,12 @@ type LocalProcessorTask = Box<dyn FnOnce() + Send + 'static>;
 type PendingRpcSenderWaiter =
     tokio::sync::oneshot::Sender<Result<ErasedRpcSender, GetProcessorRpcSenderError>>;
 type SubscriberTx = tokio::sync::mpsc::UnboundedSender<Message>;
-type SharedSubscribers = std::sync::Arc<std::sync::Mutex<Vec<SubscriberTx>>>;
+
+/// TrackPublisher の Drop 時に subscriber を pipeline に返却するためのペイロード
+struct ReturnSubscribersPayload {
+    track_id: TrackId,
+    subscribers: Vec<SubscriberTx>,
+}
 
 pub const PROCESSOR_TYPE_VIDEO_ENCODER: &str = "video_encoder";
 
@@ -27,6 +32,9 @@ impl std::fmt::Debug for MediaPipelineConfig {
 pub struct MediaPipeline {
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<MediaPipelineCommand>>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<MediaPipelineCommand>,
+    /// TrackPublisher の Drop 時に subscriber を返却するための同期チャネル
+    return_tx: std::sync::mpsc::Sender<ReturnSubscribersPayload>,
+    return_rx: std::sync::mpsc::Receiver<ReturnSubscribersPayload>,
     local_processor_task_tx: Option<tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>>,
     local_processor_thread: std::thread::JoinHandle<()>,
     registration_closed: bool,
@@ -46,6 +54,7 @@ impl MediaPipeline {
 
     pub fn new_with_config(config: MediaPipelineConfig) -> crate::Result<Self> {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (return_tx, return_rx) = std::sync::mpsc::channel();
         let (local_processor_task_tx, local_processor_task_rx) =
             tokio::sync::mpsc::unbounded_channel();
         let local_processor_thread = std::thread::Builder::new()
@@ -59,6 +68,8 @@ impl MediaPipeline {
         Ok(Self {
             command_tx: Some(command_tx),
             command_rx,
+            return_tx,
+            return_rx,
             local_processor_task_tx: Some(local_processor_task_tx),
             local_processor_thread,
             registration_closed: false,
@@ -91,6 +102,9 @@ impl MediaPipeline {
         self.local_processor_task_tx = None; // 参照カウントから自分を外すために None にする
 
         loop {
+            // TrackPublisher の Drop で返却された subscriber をドレインする
+            self.drain_returned_subscribers();
+
             tokio::select! {
                 Some(command) = self.command_rx.recv() => self.handle_command(command),
                 else => break,
@@ -102,6 +116,21 @@ impl MediaPipeline {
         }
 
         tracing::debug!("MediaPipeline stopped");
+    }
+
+    /// TrackPublisher の Drop で返却された subscriber を pending_subscribers に戻す
+    fn drain_returned_subscribers(&mut self) {
+        while let Ok(payload) = self.return_rx.try_recv() {
+            let Some(track) = self.tracks.get_mut(&payload.track_id) else {
+                continue;
+            };
+            let alive: Vec<_> = payload
+                .subscribers
+                .into_iter()
+                .filter(|tx| !tx.is_closed())
+                .collect();
+            track.pending_subscribers.extend(alive);
+        }
     }
 
     fn handle_command(&mut self, command: MediaPipelineCommand) {
@@ -261,12 +290,15 @@ impl MediaPipeline {
     }
 
     fn flush_pending_subscribers(&mut self) {
+        // initial_ready_open 前に subscribe された pending_subscribers を
+        // publish 中の TrackPublisher に転送する
         for track in self.tracks.values_mut() {
-            track
-                .subscribers
-                .lock()
-                .expect("track subscribers mutex poisoned")
-                .extend(track.pending_subscribers.drain(..));
+            let Some(ref subscriber_tx) = track.new_subscriber_tx else {
+                continue;
+            };
+            for tx in track.pending_subscribers.drain(..) {
+                let _ = subscriber_tx.send(tx);
+            }
         }
     }
 
@@ -299,19 +331,22 @@ impl MediaPipeline {
             TrackState::default()
         });
 
-        if self.initial_ready_open {
-            // [NOTE]
-            // subscriber は publisher ではなく track に紐づけて保持する。
-            // unpublish は EOS ではなく「一時的に publisher が不在」な状態なので、
-            // 既存 subscriber は閉じずに同じ track_id の再 publish を待ち続ける。
-            track
-                .subscribers
-                .lock()
-                .expect("track subscribers mutex poisoned")
-                .push(tx);
-        } else {
-            // 初期化が完了するまでは接続せず、subscriber を待機キューに追加
+        // initial_ready_open 前は pending_subscribers に追加する（flush 待ち）。
+        // initial_ready_open 後で publisher がいる場合は直接 publisher に転送する。
+        // publisher 不在時は pending_subscribers に追加して次の publish を待つ。
+        if !self.initial_ready_open {
             tracing::debug!("initial barrier not open yet for track: {track_id}");
+            track.pending_subscribers.push(tx);
+        } else if let Some(ref subscriber_tx) = track.new_subscriber_tx {
+            match subscriber_tx.send(tx) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::SendError(tx)) => {
+                    tracing::debug!("publisher channel closed for track: {track_id}");
+                    track.new_subscriber_tx = None;
+                    track.pending_subscribers.push(tx);
+                }
+            }
+        } else {
             track.pending_subscribers.push(tx);
         }
     }
@@ -320,7 +355,7 @@ impl MediaPipeline {
         &mut self,
         processor_id: ProcessorId,
         track_id: TrackId,
-    ) -> Result<MessageSender, PublishTrackError> {
+    ) -> Result<TrackPublisher, PublishTrackError> {
         tracing::debug!("publish track: processor={processor_id}, track={track_id}");
 
         if !self.processors.contains_key(&processor_id) {
@@ -342,16 +377,26 @@ impl MediaPipeline {
         }
 
         track.publisher_processor_id = Some(processor_id.clone());
-        // [NOTE]
-        // ここも subscribed_track_ids と同様に、順序保持と実装単純性を優先して Vec を使う。
         if let Some(state) = self.processors.get_mut(&processor_id)
             && !state.published_track_ids.contains(&track_id)
         {
             state.published_track_ids.push(track_id.clone());
         }
 
-        Ok(MessageSender {
-            subscribers: track.subscribers.clone(),
+        // pending_subscribers を TrackPublisher に移す
+        let subscribers = std::mem::take(&mut track.pending_subscribers);
+
+        // publish 後に追加される subscriber を publisher に転送するチャネル
+        let (new_subscriber_tx, new_subscriber_rx) = tokio::sync::mpsc::unbounded_channel();
+        track.new_subscriber_tx = Some(new_subscriber_tx);
+
+        Ok(TrackPublisher {
+            subscribers,
+            new_subscriber_rx,
+            eos_sent: false,
+            return_tx: self.return_tx.clone(),
+            processor_id,
+            track_id,
         })
     }
 
@@ -369,6 +414,7 @@ impl MediaPipeline {
             return;
         }
         track.publisher_processor_id = None;
+        track.new_subscriber_tx = None;
 
         if let Some(state) = self.processors.get_mut(&processor_id) {
             state.published_track_ids.retain(|id| *id != track_id);
@@ -406,6 +452,7 @@ impl MediaPipeline {
                     && track.publisher_processor_id.as_ref() == Some(&processor_id)
                 {
                     track.publisher_processor_id = None;
+                    track.new_subscriber_tx = None;
                 }
             }
             for waiter in state.pending_rpc_sender_waiters.drain(..) {
@@ -761,7 +808,7 @@ pub(crate) enum MediaPipelineCommand {
     PublishTrack {
         processor_id: ProcessorId,
         track_id: TrackId,
-        reply_tx: tokio::sync::oneshot::Sender<Result<MessageSender, PublishTrackError>>,
+        reply_tx: tokio::sync::oneshot::Sender<Result<TrackPublisher, PublishTrackError>>,
     },
     UnpublishTrack {
         processor_id: ProcessorId,
@@ -903,8 +950,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for TrackId {
 #[derive(Debug, Default)]
 struct TrackState {
     publisher_processor_id: Option<ProcessorId>,
-    subscribers: SharedSubscribers,
+    /// publisher 不在時に待機中の subscriber。publish_track() で TrackPublisher に移される。
     pending_subscribers: Vec<SubscriberTx>,
+    /// publish 中に追加される subscriber を publisher に転送するためのチャネル。
+    /// publish_track() で作成され、unpublish / deregister で None にリセットされる。
+    new_subscriber_tx: Option<tokio::sync::mpsc::UnboundedSender<SubscriberTx>>,
 }
 
 #[derive(Clone)]
@@ -991,7 +1041,7 @@ impl ProcessorHandle {
     pub async fn publish_track(
         &self,
         track_id: TrackId,
-    ) -> Result<MessageSender, PublishTrackError> {
+    ) -> Result<TrackPublisher, PublishTrackError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let command = MediaPipelineCommand::PublishTrack {
             processor_id: self.processor_id.clone(),
@@ -1105,33 +1155,86 @@ pub enum Message {
     Syn(Syn),
 }
 
-#[derive(Debug)]
-pub struct MessageSender {
-    subscribers: SharedSubscribers,
+/// track を publish している所有者。subscriber への送信と、Drop 時の subscriber 返却を担う。
+pub struct TrackPublisher {
+    subscribers: Vec<SubscriberTx>,
+    /// publish 後に追加された subscriber を受け取るためのチャネル
+    new_subscriber_rx: tokio::sync::mpsc::UnboundedReceiver<SubscriberTx>,
+    /// EOS 送信済みフラグ。true の場合、Drop 時に subscriber を pipeline に返却しない。
+    eos_sent: bool,
+    /// subscriber 返却用の同期チャネル（tokio mpsc の参照カウントに影響しない）
+    return_tx: std::sync::mpsc::Sender<ReturnSubscribersPayload>,
+    processor_id: ProcessorId,
+    track_id: TrackId,
 }
 
-impl MessageSender {
-    // [NOTE]
-    // send() は現在ぶら下がっている subscriber にだけ転送する。
-    // unpublish 中も subscriber 一覧自体は維持されるため、
-    // MessageSender の drop は track の購読終了を意味しない。
-    //
-    // MediaPipeline が途中終了した場合は false が返される。
+// TrackPublisher は subscribers の中身が Debug でないため手動実装
+impl std::fmt::Debug for TrackPublisher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrackPublisher")
+            .field("track_id", &self.track_id)
+            .field("processor_id", &self.processor_id)
+            .field("subscriber_count", &self.subscribers.len())
+            .field("eos_sent", &self.eos_sent)
+            .finish()
+    }
+}
+
+impl Drop for TrackPublisher {
+    fn drop(&mut self) {
+        if self.eos_sent {
+            return;
+        }
+        // 未受信の new subscriber もドレインして返却対象にする
+        self.drain_new_subscribers();
+        let subscribers = std::mem::take(&mut self.subscribers);
+        if subscribers.is_empty() {
+            return;
+        }
+        let _ = self.return_tx.send(ReturnSubscribersPayload {
+            track_id: self.track_id.clone(),
+            subscribers,
+        });
+    }
+}
+
+impl TrackPublisher {
+    /// 送信前に、publish 後に追加された subscriber をドレインして取り込む。
+    /// pipeline が終了（チャネル切断）した場合は subscriber を全て破棄して false を返す。
+    fn drain_new_subscribers(&mut self) -> bool {
+        loop {
+            match self.new_subscriber_rx.try_recv() {
+                Ok(tx) => {
+                    self.subscribers.push(tx);
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    return true;
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    // pipeline が終了した場合は subscriber を全て破棄する
+                    self.subscribers.clear();
+                    return false;
+                }
+            }
+        }
+    }
+
+    /// MediaPipeline が途中終了した場合は false が返される
     pub fn send(&mut self, message: Message) -> bool {
+        if !self.drain_new_subscribers() {
+            return false;
+        }
         self.subscribers
-            .lock()
-            .expect("track subscribers mutex poisoned")
             .retain_mut(|tx| tx.send(message.clone()).is_ok());
         true
     }
 
     pub fn has_subscribers(&mut self) -> bool {
-        let mut subscribers = self
-            .subscribers
-            .lock()
-            .expect("track subscribers mutex poisoned");
-        subscribers.retain(|tx| !tx.is_closed());
-        !subscribers.is_empty()
+        if !self.drain_new_subscribers() {
+            return false;
+        }
+        self.subscribers.retain(|tx| !tx.is_closed());
+        !self.subscribers.is_empty()
     }
 
     pub fn send_media(&mut self, sample: crate::MediaFrame) -> bool {
@@ -1147,12 +1250,16 @@ impl MessageSender {
     }
 
     pub fn send_eos(&mut self) -> bool {
-        self.send(Message::Eos)
+        let result = self.send(Message::Eos);
+        // EOS 送信後は subscriber を空にし、Drop 時に pipeline に返却しない
+        self.subscribers.clear();
+        self.eos_sent = true;
+        result
     }
 
     pub fn send_syn(&mut self) -> Ack {
-        let (tx, rx) = tokio::sync::mpsc::channel(1); // NOTE: 0 だとエラーになる
-        let _ = self.send(Message::Syn(Syn(tx))); // NOTE: ここでは false を特別扱いする必要はないので無視する
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let _ = self.send(Message::Syn(Syn(tx)));
         Ack(rx)
     }
 }

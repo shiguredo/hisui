@@ -9,7 +9,7 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::audio::{AudioFormat, Channels, SampleRate};
 use crate::video::{VideoFormat, VideoFrameSize};
-use crate::{Ack, AudioFrame, Error, MessageSender, ProcessorHandle, Result, TrackId, VideoFrame};
+use crate::{Ack, AudioFrame, Error, ProcessorHandle, Result, TrackId, TrackPublisher, VideoFrame};
 
 const MAX_NOACKED_COUNT: u64 = 100;
 
@@ -427,13 +427,13 @@ impl SampleContext {
 
 #[derive(Debug)]
 struct TrackSender {
-    sender: MessageSender,
+    sender: TrackPublisher,
     ack: Option<Ack>,
     noacked_sent: u64,
 }
 
 impl TrackSender {
-    fn new(mut sender: MessageSender) -> Self {
+    fn new(mut sender: TrackPublisher) -> Self {
         let ack = Some(sender.send_syn());
         Self {
             sender,

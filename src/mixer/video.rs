@@ -281,7 +281,7 @@ struct VideoRealtimeMixerRunner {
     canvas_width: usize,
     canvas_height: usize,
     frame_rate: FrameRate,
-    output_tx: crate::MessageSender,
+    output_tx: crate::TrackPublisher,
     input_tracks: Vec<InputTrack>,
     draw_order: Vec<DrawOrder>,
     states: HashMap<TrackId, InputTrackState>,

@@ -2040,7 +2040,7 @@ fn resolve_chroma_key_config(
 /// backpressure が掛かった場合は callback スレッドを block せず、フレームをドロップする。
 async fn webrtc_source_forward_task(
     mut frame_rx: tokio::sync::mpsc::Receiver<RawI420Frame>,
-    mut message_sender: crate::MessageSender,
+    mut message_sender: crate::TrackPublisher,
     chroma_key_rx: tokio::sync::watch::Receiver<Option<ChromaKeyConfig>>,
 ) {
     while let Some(frame) = frame_rx.recv().await {
