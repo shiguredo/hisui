@@ -393,7 +393,6 @@ impl MediaPipeline {
         Ok(TrackPublisher {
             subscribers,
             new_subscriber_rx,
-            eos_sent: false,
             return_tx: self.return_tx.clone(),
             processor_id,
             track_id,
@@ -1160,8 +1159,6 @@ pub struct TrackPublisher {
     subscribers: Vec<SubscriberTx>,
     /// publish 後に追加された subscriber を受け取るためのチャネル
     new_subscriber_rx: tokio::sync::mpsc::UnboundedReceiver<SubscriberTx>,
-    /// EOS 送信済みフラグ。true の場合、Drop 時に subscriber を pipeline に返却しない。
-    eos_sent: bool,
     /// subscriber 返却用の同期チャネル（tokio mpsc の参照カウントに影響しない）
     return_tx: std::sync::mpsc::Sender<ReturnSubscribersPayload>,
     processor_id: ProcessorId,
@@ -1175,16 +1172,12 @@ impl std::fmt::Debug for TrackPublisher {
             .field("track_id", &self.track_id)
             .field("processor_id", &self.processor_id)
             .field("subscriber_count", &self.subscribers.len())
-            .field("eos_sent", &self.eos_sent)
             .finish()
     }
 }
 
 impl Drop for TrackPublisher {
     fn drop(&mut self) {
-        if self.eos_sent {
-            return;
-        }
         // 未受信の new subscriber もドレインして返却対象にする
         self.drain_new_subscribers();
         let subscribers = std::mem::take(&mut self.subscribers);
@@ -1250,11 +1243,7 @@ impl TrackPublisher {
     }
 
     pub fn send_eos(&mut self) -> bool {
-        let result = self.send(Message::Eos);
-        // EOS 送信後は subscriber を空にし、Drop 時に pipeline に返却しない
-        self.subscribers.clear();
-        self.eos_sent = true;
-        result
+        self.send(Message::Eos)
     }
 
     pub fn send_syn(&mut self) -> Ack {
