@@ -2,6 +2,7 @@ use crate::obsws::input_registry::{ObswsInputEntry, ObswsInputSettings};
 use crate::{ProcessorId, ProcessorMetadata, TrackId};
 
 pub mod audio_device;
+pub mod color_source;
 pub mod file_mp4;
 mod mp4;
 pub mod png_file;
@@ -38,6 +39,10 @@ pub enum ObswsSourceRequest {
     },
     CreatePngFileSource {
         source: self::png_file::PngFileSource,
+        processor_id: Option<ProcessorId>,
+    },
+    CreateColorSource {
+        source: self::color_source::ColorSource,
         processor_id: Option<ProcessorId>,
     },
     CreateVideoDeviceSource {
@@ -91,6 +96,21 @@ impl ObswsSourceRequest {
                     .spawn_processor(
                         processor_id.clone(),
                         ProcessorMetadata::new("png_file_source"),
+                        move |h| source.run(h),
+                    )
+                    .await
+                    .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
+                Ok(processor_id)
+            }
+            Self::CreateColorSource {
+                source,
+                processor_id,
+            } => {
+                let processor_id = processor_id.unwrap_or_else(|| ProcessorId::new("color_source"));
+                handle
+                    .spawn_processor(
+                        processor_id.clone(),
+                        ProcessorMetadata::new("color_source"),
                         move |h| source.run(h),
                     )
                     .await
@@ -230,6 +250,13 @@ pub fn build_record_source_plan(
             source_key,
             frame_rate,
         ),
+        ObswsInputSettings::ColorSource(settings) => color_source::build_record_source_plan(
+            settings,
+            output_kind,
+            run_id,
+            source_key,
+            frame_rate,
+        ),
         ObswsInputSettings::Mp4FileSource(settings) => {
             mp4::build_record_source_plan(settings, output_kind, run_id, source_key)
         }
@@ -252,4 +279,12 @@ pub fn build_record_source_plan(
             webrtc_source::build_record_source_plan(output_kind, source_key)
         }
     }
+}
+
+pub(crate) fn frames_to_timestamp(
+    frame_rate: crate::video::FrameRate,
+    frames: u64,
+) -> std::time::Duration {
+    std::time::Duration::from_secs(frames.saturating_mul(frame_rate.denumerator.get() as u64))
+        / frame_rate.numerator.get() as u32
 }

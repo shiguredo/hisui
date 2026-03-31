@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::path::{Path, PathBuf};
 
 use crate::{
     Error, ProcessorHandle, Result, TrackId,
@@ -38,7 +35,7 @@ impl PngFileSource {
         let start = tokio::time::Instant::now();
         let mut ack = tx.send_syn();
         loop {
-            let timestamp = frames_to_timestamp(self.frame_rate, frame_index);
+            let timestamp = super::frames_to_timestamp(self.frame_rate, frame_index);
             tokio::time::sleep_until(start + timestamp).await;
 
             if noacked_sent > MAX_NOACKED_COUNT {
@@ -68,11 +65,6 @@ impl PngFileSource {
 
         Ok(())
     }
-}
-
-fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
-    Duration::from_secs(frames.saturating_mul(frame_rate.denumerator.get() as u64))
-        / frame_rate.numerator.get() as u32
 }
 
 fn decode_png_to_i420a(path: &Path) -> Result<DecodedPngI420A> {

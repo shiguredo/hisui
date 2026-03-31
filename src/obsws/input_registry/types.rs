@@ -9,8 +9,9 @@ use crate::types::NonNegFiniteF64;
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
-pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 8] = [
+pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 9] = [
     "image_source",
+    "color_source",
     "video_capture_device",
     "audio_capture_device",
     "mp4_file_source",
@@ -137,6 +138,7 @@ impl ObswsInput {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObswsInputSettings {
     ImageSource(ObswsImageSourceSettings),
+    ColorSource(ObswsColorSourceSettings),
     VideoCaptureDevice(ObswsVideoCaptureDeviceSettings),
     AudioCaptureDevice(ObswsAudioCaptureDeviceSettings),
     Mp4FileSource(ObswsMp4FileSourceSettings),
@@ -150,6 +152,7 @@ impl ObswsInputSettings {
     pub fn default_for_kind(input_kind: &str) -> Result<Self, ParseInputSettingsError> {
         match input_kind {
             "image_source" => Ok(Self::ImageSource(ObswsImageSourceSettings::default())),
+            "color_source" => Ok(Self::ColorSource(ObswsColorSourceSettings::default())),
             "video_capture_device" => Ok(Self::VideoCaptureDevice(
                 ObswsVideoCaptureDeviceSettings::default(),
             )),
@@ -179,6 +182,11 @@ impl ObswsInputSettings {
             "image_source" => {
                 let file = parse_optional_string_setting(input_settings, "file")?;
                 Ok(Self::ImageSource(ObswsImageSourceSettings { file }))
+            }
+            "color_source" => {
+                let color = parse_optional_string_setting(input_settings, "color")?;
+                validate_hex_color(&color)?;
+                Ok(Self::ColorSource(ObswsColorSourceSettings { color }))
             }
             "video_capture_device" => {
                 let device_id = parse_optional_string_setting(input_settings, "device_id")?;
@@ -248,6 +256,7 @@ impl ObswsInputSettings {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::ImageSource(_) => "image_source",
+            Self::ColorSource(_) => "color_source",
             // TODO: `video_capture_device` は将来的に `video_device_source` へ rename して、
             // `*_source` 命名へ統一する。今回は既存 API 影響を避けるため据え置く。
             Self::VideoCaptureDevice(_) => "video_capture_device",
@@ -270,6 +279,7 @@ impl ObswsInputSettings {
         const AUDIO: u32 = 2;
         match self {
             Self::ImageSource(_) => VIDEO,
+            Self::ColorSource(_) => VIDEO,
             Self::VideoCaptureDevice(_) => VIDEO,
             Self::AudioCaptureDevice(_) => AUDIO,
             Self::Mp4FileSource(_) => VIDEO | AUDIO,
@@ -294,6 +304,11 @@ impl ObswsInputSettings {
             Self::ImageSource(existing) => {
                 let file = parse_overlay_string_setting(input_settings, "file", &existing.file)?;
                 Ok(Self::ImageSource(ObswsImageSourceSettings { file }))
+            }
+            Self::ColorSource(existing) => {
+                let color = parse_overlay_string_setting(input_settings, "color", &existing.color)?;
+                validate_hex_color(&color)?;
+                Ok(Self::ColorSource(ObswsColorSourceSettings { color }))
             }
             Self::VideoCaptureDevice(existing) => {
                 let device_id =
@@ -390,6 +405,7 @@ impl nojson::DisplayJson for ObswsInputSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self {
             Self::ImageSource(settings) => settings.fmt(f),
+            Self::ColorSource(settings) => settings.fmt(f),
             Self::VideoCaptureDevice(settings) => settings.fmt(f),
             Self::AudioCaptureDevice(settings) => settings.fmt(f),
             Self::Mp4FileSource(settings) => settings.fmt(f),
@@ -968,6 +984,17 @@ fn parse_overlay_bool_setting(
     })
 }
 
+fn validate_hex_color(color: &Option<String>) -> Result<(), ParseInputSettingsError> {
+    if let Some(c) = color
+        && crate::obsws::source::webrtc_source::parse_hex_color(c).is_none()
+    {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "invalid color format: expected #RRGGBB, got {c}"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_background_key_tolerance(value: Option<i32>) -> Result<(), ParseInputSettingsError> {
     if let Some(v) = value
         && !(0..=255).contains(&v)
@@ -1059,6 +1086,24 @@ impl nojson::DisplayJson for ObswsImageSourceSettings {
         nojson::object(|f| {
             if let Some(file) = &self.file {
                 f.member("file", file)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsColorSourceSettings {
+    /// `#RRGGBB` 形式の色指定。未指定時は実行時に `#000000`（黒）として扱う
+    pub color: Option<String>,
+}
+
+impl nojson::DisplayJson for ObswsColorSourceSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(color) = &self.color {
+                f.member("color", color)?;
             }
             Ok(())
         })
