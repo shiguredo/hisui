@@ -568,9 +568,25 @@ impl VideoDecoderInner {
             .engines
             .unwrap_or_else(|| VideoDecoder::get_engines(codec, options.openh264_lib.is_some()));
 
+        // TODO: デコーダー初期化が失敗したときに次の候補エンジンにフォールバックする仕組みを入れる
+        //       （例: HWA が解像度が小さすぎるケースで失敗する場合など）
         let engine = candidate_engines
             .iter()
-            .find(|engine| engine.is_available_video_decode_codec(codec))
+            .find(|engine| {
+                if !engine.is_available_video_decode_codec(codec) {
+                    return false;
+                }
+                // VideoToolbox の VP9/AV1 デコーダーは CMVideoFormatDescriptionCreate に
+                // width/height が必須なので、frame.size が無い入力では選択しない
+                #[cfg(target_os = "macos")]
+                if **engine == EngineName::VideoToolbox
+                    && matches!(codec, CodecName::Vp9 | CodecName::Av1)
+                    && frame.size.is_none()
+                {
+                    return false;
+                }
+                true
+            })
             .copied();
         if let Some(engine) = engine {
             engine_metric.set(engine.as_str());
