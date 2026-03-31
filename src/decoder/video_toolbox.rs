@@ -305,10 +305,8 @@ fn get_frame_resolution(frame: &VideoFrame, codec_name: &str) -> crate::Result<(
             "{codec_name} frame size is required for VideoToolbox decoder"
         ))
     })?;
-    let width =
-        u32::try_from(size.width).expect("frame width exceeds u32::MAX");
-    let height =
-        u32::try_from(size.height).expect("frame height exceeds u32::MAX");
+    let width = u32::try_from(size.width).expect("frame width exceeds u32::MAX");
+    let height = u32::try_from(size.height).expect("frame height exceeds u32::MAX");
     Ok((width, height))
 }
 
