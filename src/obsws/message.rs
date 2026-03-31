@@ -322,6 +322,16 @@ pub fn handle_request_message_with_pipeline_handle(
             request.request_data.as_ref(),
             input_registry,
         ),
+        "GetInputMute" => crate::obsws::response::build_get_input_mute_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "GetInputVolume" => crate::obsws::response::build_get_input_volume_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "SetInputSettings" => crate::obsws::response::build_set_input_settings_response(
             &request_id,
             request.request_data.as_ref(),
@@ -420,6 +430,8 @@ mod tests {
                 settings: ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
                     device_id: Some("camera-1".to_owned()),
                 }),
+                input_muted: false,
+                input_volume_mul: crate::types::NonNegFiniteF64::ONE,
             },
         ));
         registry

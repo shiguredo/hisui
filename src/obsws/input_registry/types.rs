@@ -4,6 +4,8 @@ use std::time::Instant;
 
 use nojson::DisplayJson as _;
 
+use crate::types::NonNegFiniteF64;
+
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
@@ -88,6 +90,10 @@ impl nojson::DisplayJson for ObswsInputEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObswsInput {
     pub settings: ObswsInputSettings,
+    /// ミュート状態
+    pub input_muted: bool,
+    /// 音量乗算係数（0.0 以上の有限値、デフォルト 1.0 = 0dB）
+    pub input_volume_mul: NonNegFiniteF64,
 }
 
 impl ObswsInput {
@@ -97,11 +103,34 @@ impl ObswsInput {
     ) -> Result<Self, ParseInputSettingsError> {
         Ok(Self {
             settings: ObswsInputSettings::from_kind_and_settings(input_kind, input_settings)?,
+            input_muted: false,
+            input_volume_mul: NonNegFiniteF64::ONE,
         })
     }
 
     pub fn kind_name(&self) -> &'static str {
         self.settings.kind_name()
+    }
+
+    /// 音量を dB 値で取得する。
+    ///
+    /// mul == 0.0 の場合は `f64::NEG_INFINITY` を返す。
+    /// nojson は非有限値を JSON `null` として出力するため、
+    /// `inputVolumeDb: null` は「音量ゼロ（-∞ dB）」を意味する。
+    pub fn input_volume_db(&self) -> f64 {
+        let mul = self.input_volume_mul.get();
+        if mul <= 0.0 {
+            f64::NEG_INFINITY
+        } else {
+            20.0 * mul.log10()
+        }
+    }
+
+    /// 音量を dB 値から mul に変換して設定する
+    pub fn set_volume_from_db(&mut self, db: f64) {
+        let mul = 10.0_f64.powf(db / 20.0);
+        // dB が有限なら mul も有限かつ正になる
+        self.input_volume_mul = NonNegFiniteF64::new(mul).unwrap_or(NonNegFiniteF64::ZERO);
     }
 }
 

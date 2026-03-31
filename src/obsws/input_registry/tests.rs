@@ -10,6 +10,8 @@ fn empty_video_capture_device_input() -> ObswsInput {
         settings: ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: None,
         }),
+        input_muted: false,
+        input_volume_mul: crate::types::NonNegFiniteF64::ONE,
     }
 }
 

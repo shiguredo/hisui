@@ -156,7 +156,7 @@ impl ObswsInputRegistry {
                 )));
             }
 
-            let obsws_input =
+            let mut obsws_input =
                 ObswsInput::from_kind_and_settings(&input.input_kind, input.input_settings.value())
                     .map_err(|e| {
                         crate::Error::new(format!(
@@ -164,6 +164,17 @@ impl ObswsInputRegistry {
                             input.input_name,
                         ))
                     })?;
+            // NOTE: ここで復元した mute/volume は input_registry 上の状態に反映される。
+            // audio mixer への反映は rebuild_program_output() 後の
+            // sync_all_input_mute_volume() で行われる。
+            obsws_input.input_muted = input.input_muted;
+            obsws_input.input_volume_mul =
+                crate::types::NonNegFiniteF64::new(input.input_volume_mul).ok_or_else(|| {
+                    crate::Error::new(format!(
+                        "invalid inputVolumeMul for input \"{}\": {}",
+                        input.input_name, input.input_volume_mul,
+                    ))
+                })?;
             inputs_by_uuid.insert(
                 input.input_uuid.clone(),
                 ObswsInputEntry {
@@ -1266,6 +1277,87 @@ impl ObswsInputRegistry {
         let input_name = input_name?;
         let input_uuid = self.uuids_by_name.get(input_name)?;
         self.inputs_by_uuid.get(input_uuid)
+    }
+
+    fn find_input_mut(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Option<&mut ObswsInputEntry> {
+        if let Some(input_uuid) = input_uuid {
+            return self.inputs_by_uuid.get_mut(input_uuid);
+        }
+        let input_name = input_name?;
+        let input_uuid = self.uuids_by_name.get(input_name)?.clone();
+        self.inputs_by_uuid.get_mut(&input_uuid)
+    }
+
+    /// ミュート状態を取得する
+    pub fn get_input_mute(
+        &self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Option<bool> {
+        self.find_input(input_uuid, input_name)
+            .map(|entry| entry.input.input_muted)
+    }
+
+    /// ミュート状態を設定する。変更があった場合は新しい状態を返す。
+    pub fn set_input_mute(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+        muted: bool,
+    ) -> Option<bool> {
+        let entry = self.find_input_mut(input_uuid, input_name)?;
+        entry.input.input_muted = muted;
+        Some(entry.input.input_muted)
+    }
+
+    /// ミュート状態をトグルする。新しい状態を返す。
+    pub fn toggle_input_mute(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Option<bool> {
+        let entry = self.find_input_mut(input_uuid, input_name)?;
+        entry.input.input_muted = !entry.input.input_muted;
+        Some(entry.input.input_muted)
+    }
+
+    /// 音量を (dB, mul) で取得する
+    pub fn get_input_volume(
+        &self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+    ) -> Option<(f64, f64)> {
+        let entry = self.find_input(input_uuid, input_name)?;
+        Some((
+            entry.input.input_volume_db(),
+            entry.input.input_volume_mul.get(),
+        ))
+    }
+
+    /// 音量を設定する。両方指定時は inputVolumeMul を優先する（OBS 互換）。
+    pub fn set_input_volume(
+        &mut self,
+        input_uuid: Option<&str>,
+        input_name: Option<&str>,
+        volume_db: Option<f64>,
+        volume_mul: Option<f64>,
+    ) -> Option<(f64, f64)> {
+        let entry = self.find_input_mut(input_uuid, input_name)?;
+        // 両方指定時は mul を優先する（OBS 互換）
+        if let Some(mul) = volume_mul {
+            entry.input.input_volume_mul = crate::types::NonNegFiniteF64::new(mul)
+                .unwrap_or(crate::types::NonNegFiniteF64::ZERO);
+        } else if let Some(db) = volume_db {
+            entry.input.set_volume_from_db(db);
+        }
+        Some((
+            entry.input.input_volume_db(),
+            entry.input.input_volume_mul.get(),
+        ))
     }
 
     #[cfg(test)]

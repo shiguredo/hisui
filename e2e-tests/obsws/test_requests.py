@@ -1750,3 +1750,127 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
         asyncio.run(_run())
+
+
+def test_obsws_input_mute_and_volume_requests(binary_path: Path):
+    """obsws の入力ミュート・音量制御 API が正しく動作することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+        # まず入力を作成する
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "mute-vol-test",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        # --- GetInputMute: 初期状態は false ---
+        mute_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputMute",
+                request_id="req-get-mute",
+                request_data={"inputName": "mute-vol-test"},
+            )
+        )
+        assert mute_response["d"]["requestStatus"]["result"] is True
+        assert mute_response["d"]["responseData"]["inputMuted"] is False
+
+        # --- SetInputMute: ミュート有効化 ---
+        set_mute_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputMute",
+                request_id="req-set-mute",
+                request_data={"inputName": "mute-vol-test", "inputMuted": True},
+            )
+        )
+        assert set_mute_response["d"]["requestStatus"]["result"] is True
+
+        # --- GetInputMute: ミュート有効確認 ---
+        mute_response2 = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputMute",
+                request_id="req-get-mute-2",
+                request_data={"inputName": "mute-vol-test"},
+            )
+        )
+        assert mute_response2["d"]["responseData"]["inputMuted"] is True
+
+        # --- ToggleInputMute: トグルで false に戻る ---
+        toggle_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="ToggleInputMute",
+                request_id="req-toggle-mute",
+                request_data={"inputName": "mute-vol-test"},
+            )
+        )
+        assert toggle_response["d"]["requestStatus"]["result"] is True
+        assert toggle_response["d"]["responseData"]["inputMuted"] is False
+
+        # --- GetInputVolume: 初期状態は 0dB / 1.0 ---
+        vol_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputVolume",
+                request_id="req-get-vol",
+                request_data={"inputName": "mute-vol-test"},
+            )
+        )
+        assert vol_response["d"]["requestStatus"]["result"] is True
+        vol_data = vol_response["d"]["responseData"]
+        assert vol_data["inputVolumeMul"] == 1.0
+        assert abs(vol_data["inputVolumeDb"] - 0.0) < 0.01
+
+        # --- SetInputVolume: mul で設定 ---
+        set_vol_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="SetInputVolume",
+                request_id="req-set-vol",
+                request_data={"inputName": "mute-vol-test", "inputVolumeMul": 0.5},
+            )
+        )
+        assert set_vol_response["d"]["requestStatus"]["result"] is True
+
+        # --- GetInputVolume: 0.5 mul ≈ -6.02 dB ---
+        vol_response2 = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputVolume",
+                request_id="req-get-vol-2",
+                request_data={"inputName": "mute-vol-test"},
+            )
+        )
+        vol_data2 = vol_response2["d"]["responseData"]
+        assert vol_data2["inputVolumeMul"] == 0.5
+        assert abs(vol_data2["inputVolumeDb"] - (-6.0206)) < 0.01
+
+        # GetInputList の各入力に inputKindCaps が含まれることを確認する
+        # （OBS 互換: GetInputList には inputMuted / inputVolumeMul は含めない）
+        list_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputList",
+                request_id="req-get-list",
+            )
+        )
+        inputs = list_response["d"]["responseData"]["inputs"]
+        test_input = next(i for i in inputs if i["inputName"] == "mute-vol-test")
+        assert "inputKindCaps" in test_input
+        assert "inputMuted" not in test_input
+        assert "inputVolumeMul" not in test_input
