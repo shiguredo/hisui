@@ -661,8 +661,11 @@ fn parse_optional_inputs(
             elem.to_member("inputSettings")?.required()?.try_into()?;
         let input_muted: Option<bool> = elem.to_member("inputMuted")?.try_into()?;
         let input_muted = input_muted.unwrap_or(false);
-        let input_volume_mul: Option<f64> = elem.to_member("inputVolumeMul")?.try_into()?;
-        let input_volume_mul = input_volume_mul.unwrap_or(1.0);
+        let input_volume_mul: Option<crate::types::NonNegFiniteF64> =
+            elem.to_member("inputVolumeMul")?.try_into()?;
+        let input_volume_mul = input_volume_mul
+            .unwrap_or(crate::types::NonNegFiniteF64::ONE)
+            .get();
         inputs.push(StateFileInput {
             input_uuid,
             input_name,

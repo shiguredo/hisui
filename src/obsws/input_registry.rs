@@ -168,9 +168,13 @@ impl ObswsInputRegistry {
             // audio mixer への反映は rebuild_program_output() 後の
             // sync_all_input_mute_volume() で行われる。
             obsws_input.input_muted = input.input_muted;
-            if let Some(vol) = crate::types::NonNegFiniteF64::new(input.input_volume_mul) {
-                obsws_input.input_volume_mul = vol;
-            }
+            obsws_input.input_volume_mul =
+                crate::types::NonNegFiniteF64::new(input.input_volume_mul).ok_or_else(|| {
+                    crate::Error::new(format!(
+                        "invalid inputVolumeMul for input \"{}\": {}",
+                        input.input_name, input.input_volume_mul,
+                    ))
+                })?;
             inputs_by_uuid.insert(
                 input.input_uuid.clone(),
                 ObswsInputEntry {
