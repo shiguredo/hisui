@@ -1178,8 +1178,12 @@ impl std::fmt::Debug for TrackPublisher {
 
 impl Drop for TrackPublisher {
     fn drop(&mut self) {
-        // 未受信の new subscriber もドレインして返却対象にする
-        self.drain_new_subscribers();
+        // 未受信の new subscriber を取り込む。
+        // drain_new_subscribers() は Disconnected 時に既存 subscriber をクリアするため
+        // ここでは使わず、取れるものだけ取って既存 subscriber は常に返却する。
+        while let Ok(tx) = self.new_subscriber_rx.try_recv() {
+            self.subscribers.push(tx);
+        }
         let subscribers = std::mem::take(&mut self.subscribers);
         if subscribers.is_empty() {
             return;
