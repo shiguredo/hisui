@@ -155,22 +155,29 @@ pub async fn run_server(
             input_registry.set_dash_settings(settings);
         }
         // scene / input の復元
-        if let Some(scenes) = state.scenes {
-            if state.inputs.is_none() && scenes.iter().any(|s| !s.items.is_empty()) {
+        match (state.scenes, state.inputs) {
+            (Some(scenes), inputs) => {
+                if inputs.is_none() && scenes.iter().any(|s| !s.items.is_empty()) {
+                    return Err(crate::Error::new(
+                        "state file has scenes with items but no inputs section",
+                    ));
+                }
+                input_registry.restore_scenes_and_inputs(
+                    scenes,
+                    inputs.unwrap_or_default(),
+                    state.current_program_scene,
+                    state.current_preview_scene,
+                    state.next_input_id,
+                    state.next_scene_id,
+                    state.next_scene_item_id,
+                )?;
+            }
+            (None, Some(_)) => {
                 return Err(crate::Error::new(
-                    "state file has scenes with items but no inputs section",
+                    "state file has inputs section but no scenes section",
                 ));
             }
-            let inputs = state.inputs.unwrap_or_default();
-            input_registry.restore_scenes_and_inputs(
-                scenes,
-                inputs,
-                state.current_program_scene,
-                state.current_preview_scene,
-                state.next_input_id,
-                state.next_scene_id,
-                state.next_scene_item_id,
-            )?;
+            (None, None) => {}
         }
     }
 

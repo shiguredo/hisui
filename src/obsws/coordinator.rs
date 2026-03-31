@@ -445,6 +445,20 @@ impl ObswsCoordinator {
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
+                // バッチ結果に保存失敗エラーを追加する
+                let error_result = crate::obsws::response::RequestBatchResult {
+                    request_id: String::new(),
+                    request_type: String::new(),
+                    request_status_result: false,
+                    request_status_code:
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    request_status_comment: Some(format!(
+                        "state file write failed: {}",
+                        e.display()
+                    )),
+                    response_data: None,
+                };
+                results.push(error_result);
             }
         }
 

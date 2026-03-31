@@ -177,6 +177,7 @@ impl ObswsInputRegistry {
 
         // scene を復元する
         let mut scenes_by_name = BTreeMap::new();
+        let mut scene_uuids = std::collections::BTreeSet::new();
         let mut scene_order = Vec::new();
         let mut scene_transition_overrides = BTreeMap::new();
 
@@ -187,6 +188,24 @@ impl ObswsInputRegistry {
                     "duplicate scene name \"{}\"",
                     scene.scene_name,
                 )));
+            }
+            if !scene_uuids.insert(scene.scene_uuid.clone()) {
+                return Err(crate::Error::new(format!(
+                    "duplicate scene UUID \"{}\"",
+                    scene.scene_uuid,
+                )));
+            }
+            // scene item ID の重複チェック
+            {
+                let mut item_ids = std::collections::BTreeSet::new();
+                for item in &scene.items {
+                    if !item_ids.insert(item.scene_item_id) {
+                        return Err(crate::Error::new(format!(
+                            "duplicate sceneItemId {} in scene \"{}\"",
+                            item.scene_item_id, scene.scene_name,
+                        )));
+                    }
+                }
             }
             // scene item の inputUuid が inputs に存在するか検証する
             for item in &scene.items {
