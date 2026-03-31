@@ -935,7 +935,7 @@ impl ObswsCoordinator {
             self.notify_audio_mixer_mute_volume(
                 &entry.input_uuid,
                 entry.input.input_muted,
-                entry.input.input_volume_mul.get(),
+                entry.input.input_volume_mul,
             )
             .await;
             events.push(TaggedEvent {
@@ -970,7 +970,7 @@ impl ObswsCoordinator {
             self.notify_audio_mixer_mute_volume(
                 &entry.input_uuid,
                 entry.input.input_muted,
-                entry.input.input_volume_mul.get(),
+                entry.input.input_volume_mul,
             )
             .await;
             events.push(TaggedEvent {
@@ -1005,7 +1005,7 @@ impl ObswsCoordinator {
             self.notify_audio_mixer_mute_volume(
                 &entry.input_uuid,
                 entry.input.input_muted,
-                entry.input.input_volume_mul.get(),
+                entry.input.input_volume_mul,
             )
             .await;
             events.push(TaggedEvent {
@@ -1022,7 +1022,12 @@ impl ObswsCoordinator {
     }
 
     /// audio mixer に入力のミュート・音量設定を通知する
-    async fn notify_audio_mixer_mute_volume(&self, input_uuid: &str, muted: bool, volume_mul: f64) {
+    async fn notify_audio_mixer_mute_volume(
+        &self,
+        input_uuid: &str,
+        muted: bool,
+        volume_mul: crate::types::NonNegFiniteF64,
+    ) {
         let Some(source_state) = self.input_source_processors.get(input_uuid) else {
             return;
         };

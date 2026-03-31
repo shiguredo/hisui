@@ -220,7 +220,7 @@ pub enum AudioRealtimeMixerRpcMessage {
     SetTrackMuteVolume {
         track_id: TrackId,
         muted: bool,
-        volume_mul: f64,
+        volume_mul: crate::types::NonNegFiniteF64,
     },
     Finish {
         reply_tx: tokio::sync::oneshot::Sender<()>,
@@ -354,7 +354,7 @@ struct InputTrackState {
     /// ミュート状態（true の場合、合成時にサンプルをスキップする）
     muted: bool,
     /// 音量乗算係数（デフォルト 1.0 = 0dB）
-    volume_mul: f64,
+    volume_mul: crate::types::NonNegFiniteF64,
 }
 
 impl InputTrackState {
@@ -372,7 +372,7 @@ impl InputTrackState {
             sample_queue: VecDeque::new(),
             eos: false,
             muted: false,
-            volume_mul: 1.0,
+            volume_mul: crate::types::NonNegFiniteF64::ONE,
         }
     }
 
@@ -707,7 +707,8 @@ impl AudioRealtimeMixerRunner<'_> {
                 continue;
             }
             let samples = state.drain_samples_for_tick(timestamp, self.config, &self.stats);
-            if (state.volume_mul - 1.0).abs() < f64::EPSILON {
+            let vol = state.volume_mul.get();
+            if (vol - 1.0).abs() < f64::EPSILON {
                 // 音量 1.0（0dB）の場合はそのまま加算
                 for (acc, sample) in accum.iter_mut().zip(samples.into_iter()) {
                     *acc = acc.saturating_add(i32::from(sample));
@@ -715,7 +716,7 @@ impl AudioRealtimeMixerRunner<'_> {
             } else {
                 // 音量を適用して加算
                 for (acc, sample) in accum.iter_mut().zip(samples.into_iter()) {
-                    let scaled = (f64::from(sample) * state.volume_mul) as i32;
+                    let scaled = (f64::from(sample) * vol) as i32;
                     *acc = acc.saturating_add(scaled);
                 }
             }
@@ -996,7 +997,7 @@ pub async fn set_track_mute_volume(
     processor_id: &crate::ProcessorId,
     track_id: TrackId,
     muted: bool,
-    volume_mul: f64,
+    volume_mul: crate::types::NonNegFiniteF64,
 ) -> crate::Result<()> {
     let sender = handle
         .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<AudioRealtimeMixerRpcMessage>>(
