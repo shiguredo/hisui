@@ -1075,11 +1075,15 @@ mod tests {
         assert_eq!(sora.channel_id.as_deref(), Some("ch"));
 
         let hls = parsed.hls.expect("hls must be present");
-        assert!(matches!(hls.destination, Some(HlsDestination::Filesystem { ref directory }) if directory == "/tmp/hls"));
+        assert!(
+            matches!(hls.destination, Some(HlsDestination::Filesystem { ref directory }) if directory == "/tmp/hls")
+        );
         assert_eq!(hls.segment_duration, 2.0);
 
         let dash = parsed.dash.expect("dash must be present");
-        assert!(matches!(dash.destination, Some(DashDestination::Filesystem { ref directory }) if directory == "/tmp/dash"));
+        assert!(
+            matches!(dash.destination, Some(DashDestination::Filesystem { ref directory }) if directory == "/tmp/dash")
+        );
         assert_eq!(dash.video_codec, crate::types::CodecName::H264);
     }
 
