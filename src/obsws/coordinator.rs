@@ -3403,7 +3403,8 @@ impl OutputOperationOutcome {
 // ユーティリティ関数
 // -----------------------------------------------------------------------
 
-/// state file への保存対象となるリクエストかどうかを判定する
+/// state file への保存対象となるリクエストかどうかを判定する。
+/// スタジオモードを実装した場合は SetCurrentPreviewScene も追加すること。
 fn is_state_persisted_request(request_type: &str) -> bool {
     matches!(
         request_type,
