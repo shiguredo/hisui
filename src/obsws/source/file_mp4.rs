@@ -66,6 +66,7 @@ impl Mp4FileSource {
         reader.run(processor).await
     }
 
+    #[cfg(test)]
     pub async fn run(self, processor: ProcessorHandle) -> Result<()> {
         let (reader, _media_handle) = self.create_reader()?;
         Self::run_reader(reader, processor).await

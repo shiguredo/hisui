@@ -95,9 +95,9 @@ pub async fn start_source_processors(
     let mut media_handle = None;
     for source_plan in source_plans {
         for request in source_plan.requests.drain(..) {
-            let result = request.execute(pipeline_handle).await?;
-            if result.media_handle.is_some() && media_handle.is_none() {
-                media_handle = result.media_handle;
+            let (_processor_id, handle) = request.execute(pipeline_handle).await?;
+            if handle.is_some() && media_handle.is_none() {
+                media_handle = handle;
             }
         }
     }

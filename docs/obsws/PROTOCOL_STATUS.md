@@ -69,9 +69,12 @@
 - [x] `SceneItemListReindexed`: Scene Item の並び順変更を通知する
 - [x] `MediaInputPlaybackStarted`: メディア入力の再生開始を通知する
   - NOTE: mp4_file_source の再生開始時およびループ再生の各ループ開始時に発火する
+  - NOTE: coordinator がリクエスト処理のたびにポーリングして配信するため、リクエストが来ない間は配信が遅延する
 - [x] `MediaInputPlaybackEnded`: メディア入力の再生終了を通知する
   - NOTE: mp4_file_source の再生終了（EOS 到達）時およびループ再生の各ループ終了時に発火する
+  - NOTE: coordinator がリクエスト処理のたびにポーリングして配信するため、リクエストが来ない間は配信が遅延する
 - [x] `MediaInputActionTriggered`: メディア入力アクションの実行を通知する
+  - NOTE: 現時点では `mp4_file_source` のみ対応する
 
 ## RequestType 実装状況
 

@@ -45,18 +45,18 @@ impl MediaPlaybackState {
 #[derive(Debug, Clone)]
 pub struct MediaPlaybackStatus {
     pub state: MediaPlaybackState,
-    /// 現在の再生位置（ミリ秒）
-    pub media_cursor_ms: i64,
-    /// 総時間（ミリ秒）。不明な場合は 0
-    pub media_duration_ms: i64,
+    /// 現在の再生位置
+    pub cursor: Duration,
+    /// 総時間
+    pub duration: Duration,
 }
 
 impl Default for MediaPlaybackStatus {
     fn default() -> Self {
         Self {
             state: MediaPlaybackState::None,
-            media_cursor_ms: 0,
-            media_duration_ms: 0,
+            cursor: Duration::ZERO,
+            duration: Duration::ZERO,
         }
     }
 }
@@ -71,16 +71,6 @@ pub enum MediaInputCommand {
 }
 
 impl MediaInputCommand {
-    /// OBS WebSocket プロトコルの文字列表現を返す
-    pub fn as_obs_str(self) -> &'static str {
-        match self {
-            Self::Play => "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY",
-            Self::Pause => "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE",
-            Self::Stop => "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP",
-            Self::Restart => "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART",
-        }
-    }
-
     /// OBS WebSocket プロトコルの文字列表現からパースする
     pub fn from_obs_str(s: &str) -> Option<Self> {
         match s {
@@ -174,8 +164,7 @@ pub struct Mp4FileReader {
     media_channels: Option<MediaInputChannels>,
     is_paused: bool,
     pause_started_at: Option<tokio::time::Instant>,
-    total_paused_duration: Duration,
-    media_duration_ms: i64,
+    media_duration: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,8 +196,7 @@ impl Mp4FileReader {
             media_channels: None,
             is_paused: false,
             pause_started_at: None,
-            total_paused_duration: Duration::ZERO,
-            media_duration_ms: 0,
+            media_duration: Duration::ZERO,
         })
     }
 
@@ -250,8 +238,6 @@ impl Mp4FileReader {
         }
         handle.wait_subscribers_ready().await?;
 
-        // 総時間を事前に取得する
-        self.media_duration_ms = probe_mp4_duration_ms(&self.path).unwrap_or(0);
         self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
         self.send_media_event(MediaInputEvent::PlaybackStarted);
 
@@ -311,23 +297,26 @@ impl Mp4FileReader {
             if state.audio_track_id.is_none() && state.video_track_id.is_none() {
                 break;
             }
+            // 最初の open で総時間を取得する
+            if self.media_duration == Duration::ZERO {
+                self.media_duration = state.duration;
+            }
 
             self.emitted_in_loop = false;
             while let Some(sample) = state.demuxer.next_sample()? {
-                // 一時停止中はコマンドを待つ
+                // コマンドをポーリングで確認する
+                match self.poll_media_command() {
+                    MediaLoopAction::Continue => {}
+                    MediaLoopAction::Stop => return Ok(true),
+                    MediaLoopAction::Restart => continue 'outer,
+                }
+                // 一時停止中はコマンドを非同期で待つ
                 if self.is_paused {
                     match self.wait_while_paused().await {
                         MediaLoopAction::Continue => {}
                         MediaLoopAction::Stop => return Ok(true),
                         MediaLoopAction::Restart => continue 'outer,
                     }
-                }
-
-                // 非一時停止中もコマンドをポーリングで確認する
-                match self.poll_media_command() {
-                    MediaLoopAction::Continue => {}
-                    MediaLoopAction::Stop => return Ok(true),
-                    MediaLoopAction::Restart => continue 'outer,
                 }
 
                 let context = SampleContext::from_sample(&sample);
@@ -411,13 +400,14 @@ impl Mp4FileReader {
 
     /// 一時停止から復帰する
     fn resume_from_pause(&mut self) {
-        if let Some(pause_start) = self.pause_started_at.take() {
-            self.total_paused_duration += pause_start.elapsed();
-        }
+        let paused = self
+            .pause_started_at
+            .take()
+            .map(|t| t.elapsed())
+            .unwrap_or(Duration::ZERO);
         self.is_paused = false;
         // start_instant を一時停止分だけ進めて、再生速度制御のタイミングを維持する
-        self.start_instant += self.total_paused_duration;
-        self.total_paused_duration = Duration::ZERO;
+        self.start_instant += paused;
         self.update_playback_status(MediaPlaybackState::Playing, self.last_emitted_end);
     }
 
@@ -425,7 +415,6 @@ impl Mp4FileReader {
     fn restart_playback(&mut self) {
         self.is_paused = false;
         self.pause_started_at = None;
-        self.total_paused_duration = Duration::ZERO;
         self.base_offset = self.last_emitted_end;
         self.start_instant = tokio::time::Instant::now();
         self.last_realtime_timestamp = None;
@@ -441,8 +430,8 @@ impl Mp4FileReader {
             let file_cursor = cursor.saturating_sub(self.base_offset);
             let _ = channels.status_tx.send(MediaPlaybackStatus {
                 state,
-                media_cursor_ms: file_cursor.as_millis() as i64,
-                media_duration_ms: self.media_duration_ms,
+                cursor: file_cursor,
+                duration: self.media_duration,
             });
         }
     }
@@ -687,29 +676,6 @@ pub fn probe_mp4_video_dimensions<P: AsRef<Path>>(
     Ok(None)
 }
 
-/// MP4 ファイルの総時間をミリ秒で取得する。
-/// 映像トラックと音声トラックの duration のうち、最大のものを返す。
-pub fn probe_mp4_duration_ms<P: AsRef<Path>>(path: P) -> Result<i64> {
-    let path = path.as_ref();
-    let mut file = File::open(path)
-        .map_err(|e| Error::new(format!("Cannot open file {}: {e}", path.display())))?;
-    let mut demuxer = Mp4FileDemuxer::new();
-    initialize_mp4_demuxer(&mut file, &mut demuxer, path)?;
-
-    let tracks = demuxer
-        .tracks()
-        .map_err(|e| Error::new(format!("Failed to read tracks {}: {e}", path.display())))?;
-    let mut max_duration_ms: i64 = 0;
-    for track in tracks {
-        let duration_secs = track.duration as f64 / track.timescale.get() as f64;
-        let duration_ms = (duration_secs * 1000.0) as i64;
-        if duration_ms > max_duration_ms {
-            max_duration_ms = duration_ms;
-        }
-    }
-    Ok(max_duration_ms)
-}
-
 #[derive(Debug, Clone)]
 struct SampleContext {
     track_kind: TrackKind,
@@ -804,6 +770,8 @@ struct ReaderState {
     video_format: VideoFormat,
     video_width: usize,
     video_height: usize,
+    /// トラックの最大 duration
+    duration: Duration,
 }
 
 impl ReaderState {
@@ -824,6 +792,17 @@ impl ReaderState {
             None
         };
 
+        let duration = demuxer
+            .tracks()
+            .ok()
+            .and_then(|tracks| {
+                tracks
+                    .iter()
+                    .map(|t| Duration::from_secs(t.duration) / t.timescale.get())
+                    .max()
+            })
+            .unwrap_or(Duration::ZERO);
+
         Ok(Self {
             path: path.to_path_buf(),
             file,
@@ -837,6 +816,7 @@ impl ReaderState {
             video_format: VideoFormat::Vp8,
             video_width: 0,
             video_height: 0,
+            duration,
         })
     }
 

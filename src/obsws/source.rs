@@ -67,18 +67,13 @@ pub enum ObswsSourceRequest {
     },
 }
 
-/// ソースリクエスト実行結果
-pub struct SourceRequestResult {
-    pub processor_id: ProcessorId,
-    /// mp4_file_source の場合のメディア再生制御ハンドル
-    pub media_handle: Option<crate::mp4::reader::MediaInputHandle>,
-}
-
 impl ObswsSourceRequest {
+    /// ソースプロセッサを起動する。
+    /// 返り値は (processor_id, mp4_file_source の場合のメディア再生制御ハンドル)。
     pub async fn execute(
         self,
         handle: &crate::MediaPipelineHandle,
-    ) -> crate::Result<SourceRequestResult> {
+    ) -> crate::Result<(ProcessorId, Option<crate::mp4::reader::MediaInputHandle>)> {
         match self {
             Self::CreateMp4FileSource {
                 source,
@@ -95,10 +90,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(SourceRequestResult {
-                    processor_id,
-                    media_handle,
-                })
+                Ok((processor_id, media_handle))
             }
             Self::CreatePngFileSource {
                 source,
@@ -114,10 +106,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(SourceRequestResult {
-                    processor_id,
-                    media_handle: None,
-                })
+                Ok((processor_id, None))
             }
             Self::CreateColorSource {
                 source,
@@ -132,10 +121,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(SourceRequestResult {
-                    processor_id,
-                    media_handle: None,
-                })
+                Ok((processor_id, None))
             }
             Self::CreateVideoDeviceSource {
                 source,
@@ -156,10 +142,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(SourceRequestResult {
-                    processor_id,
-                    media_handle: None,
-                })
+                Ok((processor_id, None))
             }
             Self::CreateAudioDeviceSource {
                 source,
@@ -180,10 +163,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(SourceRequestResult {
-                    processor_id,
-                    media_handle: None,
-                })
+                Ok((processor_id, None))
             }
             Self::CreateRtmpInboundEndpoint {
                 endpoint,
@@ -199,10 +179,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(SourceRequestResult {
-                    processor_id,
-                    media_handle: None,
-                })
+                Ok((processor_id, None))
             }
             Self::CreateSrtInboundEndpoint {
                 endpoint,
@@ -218,10 +195,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(SourceRequestResult {
-                    processor_id,
-                    media_handle: None,
-                })
+                Ok((processor_id, None))
             }
             Self::CreateRtspSubscriber {
                 subscriber,
@@ -237,10 +211,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(SourceRequestResult {
-                    processor_id,
-                    media_handle: None,
-                })
+                Ok((processor_id, None))
             }
         }
     }

@@ -1248,14 +1248,14 @@ impl ObswsCoordinator {
             let status = handle.status.borrow();
             (
                 status.state.as_obs_str(),
-                status.media_cursor_ms,
-                status.media_duration_ms,
+                status.cursor.as_millis() as i64,
+                status.duration.as_millis() as i64,
             )
         } else {
             (
                 crate::mp4::reader::MediaPlaybackState::None.as_obs_str(),
-                0,
-                0,
+                0i64,
+                0i64,
             )
         };
 
@@ -1276,45 +1276,16 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let Some(request_data) = request_data else {
-            return self.build_error_result(
+        let (input_uuid, input_name, media_action_str) =
+            match crate::obsws::response::parse_request_data_or_error_response(
                 "TriggerMediaInputAction",
                 request_id,
-                REQUEST_STATUS_MISSING_REQUEST_DATA,
-                "Missing required requestData field",
-            );
-        };
-
-        // inputName / inputUuid のパース
-        let (input_uuid, input_name) =
-            match crate::obsws::response::parse_input_lookup_fields_for_session(
-                request_data.value(),
+                request_data,
+                crate::obsws::response::parse_trigger_media_input_action_fields,
             ) {
-                Ok(fields) => fields,
-                Err(error) => {
-                    return self.build_parse_error_result(
-                        "TriggerMediaInputAction",
-                        request_id,
-                        &error,
-                    );
-                }
+                Ok(v) => v,
+                Err(response) => return self.build_result_from_response(response, Vec::new()),
             };
-
-        // mediaAction のパース
-        let media_action_str: Option<String> = request_data
-            .value()
-            .to_member("mediaAction")
-            .ok()
-            .and_then(|v| v.optional())
-            .and_then(|v| v.try_into().ok());
-        let Some(media_action_str) = media_action_str else {
-            return self.build_error_result(
-                "TriggerMediaInputAction",
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing or invalid mediaAction field",
-            );
-        };
 
         let Some(command) = crate::mp4::reader::MediaInputCommand::from_obs_str(&media_action_str)
         else {
