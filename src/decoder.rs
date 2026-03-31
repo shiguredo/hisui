@@ -724,6 +724,17 @@ mod tests {
     use super::*;
     use crate::video::{VideoFormat, VideoFrame, VideoFrameSize};
 
+    /// VideoToolbox と SW デコーダーのみを候補にしたオプションを作る
+    ///
+    /// Nvcodec を候補から除外することで、CUDA 環境の有無に関わらず
+    /// VideoToolbox のスキップ判定をテストできるようにする。
+    fn options_without_nvcodec(engines: Vec<EngineName>) -> VideoDecoderOptions {
+        VideoDecoderOptions {
+            engines: Some(engines),
+            ..Default::default()
+        }
+    }
+
     /// size: None の VP9 フレームで VideoToolbox がスキップされ Libvpx が選ばれることを確認する
     #[test]
     fn vp9_without_size_skips_video_toolbox() {
@@ -736,12 +747,12 @@ mod tests {
             sample_entry: None,
         };
 
+        let engines = vec![EngineName::VideoToolbox, EngineName::Libvpx];
         let stats = crate::stats::Stats::new();
-        let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
+        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
         // デコーダーを初期化する（空データなのでデコード自体は失敗するが、エンジン選択は成功するはず）
         let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
 
-        // Libvpx が選択されていることを確認
         assert!(
             matches!(decoder.inner, VideoDecoderInner::Libvpx(_)),
             "expected Libvpx decoder, got {:?}",
@@ -761,8 +772,9 @@ mod tests {
             sample_entry: None,
         };
 
+        let engines = vec![EngineName::VideoToolbox, EngineName::Dav1d];
         let stats = crate::stats::Stats::new();
-        let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
+        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
         let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
 
         assert!(
@@ -787,8 +799,9 @@ mod tests {
             sample_entry: None,
         };
 
+        let engines = vec![EngineName::VideoToolbox, EngineName::Libvpx];
         let stats = crate::stats::Stats::new();
-        let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
+        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
         let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
 
         // VideoToolbox 対応環境なら VideoToolbox、非対応なら Libvpx が選ばれる
