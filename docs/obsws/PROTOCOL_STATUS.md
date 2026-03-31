@@ -158,7 +158,7 @@ NOTE: `--state-file` 指定時、scene の作成・削除・切替・transition 
 NOTE: `--state-file` 指定時、input の作成・削除・設定変更・名前変更は state file へ永続化される。
 
 - [x] `GetInputList`: 入力一覧を取得する
-  - NOTE: `inputKindCaps` は現状 `0` 固定。OBS は `OBS_INPUT_CAP_AUDIO` / `OBS_INPUT_CAP_VIDEO` 等のビットフラグを返す（例: image_source = 32769）
+  - NOTE: `inputKindCaps` は `OBS_SOURCE_VIDEO (1)` / `OBS_SOURCE_AUDIO (2)` のビットフラグを返す。OBS は `OBS_SOURCE_SRGB` 等の追加フラグも含むため、同一 kind でも値が異なる場合がある（例: OBS の image_source = 32769）
 - [x] `GetInputKindList`: 入力種別一覧を取得する
   - NOTE: hisui の inputKind 一覧は OBS と異なる。共通は `image_source` のみ。hisui 固有の種別は「hisui 独自拡張」セクション参照
 - [ ] `GetSpecialInputs`: 特殊入力設定を取得する

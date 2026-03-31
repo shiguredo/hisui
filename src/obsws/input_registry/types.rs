@@ -81,7 +81,7 @@ impl nojson::DisplayJson for ObswsInputEntry {
             // 使っていないため、unversionedInputKind は inputKind と同値になる。
             f.member("unversionedInputKind", self.input.kind_name())?;
             f.member("inputUuid", &self.input_uuid)?;
-            f.member("inputKindCaps", 0)
+            f.member("inputKindCaps", self.input.settings.input_kind_caps())
         })
         .fmt(f)
     }
@@ -257,6 +257,26 @@ impl ObswsInputSettings {
             Self::SrtInbound(_) => "srt_inbound",
             Self::RtspSubscriber(_) => "rtsp_subscriber",
             Self::WebRtcSource(_) => "webrtc_source",
+        }
+    }
+
+    /// OBS WebSocket の `inputKindCaps` に相当するビットフラグを返す。
+    ///
+    /// OBS の `obs_source_info::output_flags` に対応する。
+    /// - bit 0 (`OBS_SOURCE_VIDEO`): 映像出力を持つ
+    /// - bit 1 (`OBS_SOURCE_AUDIO`): 音声出力を持つ
+    pub fn input_kind_caps(&self) -> u32 {
+        const VIDEO: u32 = 1;
+        const AUDIO: u32 = 2;
+        match self {
+            Self::ImageSource(_) => VIDEO,
+            Self::VideoCaptureDevice(_) => VIDEO,
+            Self::AudioCaptureDevice(_) => AUDIO,
+            Self::Mp4FileSource(_) => VIDEO | AUDIO,
+            Self::RtmpInbound(_) => VIDEO | AUDIO,
+            Self::SrtInbound(_) => VIDEO | AUDIO,
+            Self::RtspSubscriber(_) => VIDEO | AUDIO,
+            Self::WebRtcSource(_) => VIDEO,
         }
     }
 

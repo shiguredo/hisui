@@ -164,7 +164,7 @@ pub fn build_input_created_event(
                         f.member("inputUuid", input_uuid)?;
                         f.member("inputKind", input_kind)?;
                         f.member("unversionedInputKind", input_kind)?;
-                        f.member("inputKindCaps", 0)?;
+                        f.member("inputKindCaps", input_settings.input_kind_caps())?;
                         f.member("inputSettings", input_settings)?;
                         f.member("defaultInputSettings", default_input_settings)
                     }),
