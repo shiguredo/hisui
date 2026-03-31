@@ -804,7 +804,9 @@ mod tests {
         let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
         let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
 
-        // VideoToolbox 対応環境なら VideoToolbox、非対応なら Libvpx が選ばれる
+        // size ありなら VideoToolbox がスキップされずにエンジン選択が行われることを確認する。
+        // どちらが選ばれるかは実行環境の VP9 ハードウェアデコード対応状況に依存するため、
+        // ここでは「いずれかの有効なエンジンが選択されること」のみを検証する。
         #[cfg(target_os = "macos")]
         let is_valid = matches!(decoder.inner, VideoDecoderInner::Libvpx(_))
             || matches!(decoder.inner, VideoDecoderInner::VideoToolbox(_));
