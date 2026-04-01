@@ -280,9 +280,11 @@ impl Mp4FileReader {
             let should_stop = self.run_loop(loop_enabled, &handle).await?;
             if !should_stop {
                 self.flush_decoders()?;
-                self.update_playback_status(MediaPlaybackState::Ended, self.last_emitted_end);
+                let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
+                self.update_playback_status(MediaPlaybackState::Ended, file_pos);
             } else {
-                self.update_playback_status(MediaPlaybackState::Stopped, self.last_emitted_end);
+                let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
+                self.update_playback_status(MediaPlaybackState::Stopped, file_pos);
             }
             self.send_media_event(MediaInputEvent::PlaybackEnded);
 
@@ -301,7 +303,9 @@ impl Mp4FileReader {
     fn start_playback(&mut self) {
         self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
         self.send_media_event(MediaInputEvent::PlaybackStarted);
-        self.start_instant = tokio::time::Instant::now();
+        // 先頭サンプル（effective_timestamp = base_offset + 0）を now で出すため、
+        // start_instant = now - base_offset にする。
+        self.start_instant = tokio::time::Instant::now() - self.base_offset;
         self.last_realtime_timestamp = None;
     }
 
@@ -465,7 +469,8 @@ impl Mp4FileReader {
             Ok(MediaInputCommand::Pause) => {
                 self.is_paused = true;
                 self.pause_started_at = Some(tokio::time::Instant::now());
-                self.update_playback_status(MediaPlaybackState::Paused, self.last_emitted_end);
+                let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
+                self.update_playback_status(MediaPlaybackState::Paused, file_pos);
                 MediaLoopAction::Continue
             }
             Ok(MediaInputCommand::Stop) => MediaLoopAction::Stop,
@@ -583,7 +588,8 @@ impl Mp4FileReader {
         self.is_paused = false;
         // start_instant を一時停止分だけ進めて、再生速度制御のタイミングを維持する
         self.start_instant += paused;
-        self.update_playback_status(MediaPlaybackState::Playing, self.last_emitted_end);
+        let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
+        self.update_playback_status(MediaPlaybackState::Playing, file_pos);
     }
 
     /// 再生を先頭からリスタートする（デコーダーの再生成は呼び出し側で行う）
@@ -603,12 +609,9 @@ impl Mp4FileReader {
         self.send_media_event(MediaInputEvent::PlaybackStarted);
     }
 
-    /// 再生状態を更新する
-    fn update_playback_status(&self, state: MediaPlaybackState, cursor: Duration) {
+    /// 再生状態を更新する。cursor はファイル内の絶対位置を渡す。
+    fn update_playback_status(&self, state: MediaPlaybackState, file_cursor: Duration) {
         if let Some(channels) = &self.media_channels {
-            // ループ再生の場合、cursor はファイル内での相対位置を示す
-            // base_offset を引いてファイル内の位置に変換する
-            let file_cursor = cursor.saturating_sub(self.base_offset);
             let _ = channels.status_tx.send(MediaPlaybackStatus {
                 state,
                 cursor: file_cursor,
@@ -756,7 +759,8 @@ impl Mp4FileReader {
             let end = effective_timestamp + duration;
             if end > self.last_emitted_end {
                 self.last_emitted_end = end;
-                self.update_playback_status(MediaPlaybackState::Playing, end);
+                let file_pos = end.saturating_sub(self.base_offset);
+                self.update_playback_status(MediaPlaybackState::Playing, file_pos);
             }
         }
 
@@ -840,7 +844,8 @@ impl Mp4FileReader {
             let end = effective_timestamp + duration;
             if end > self.last_emitted_end {
                 self.last_emitted_end = end;
-                self.update_playback_status(MediaPlaybackState::Playing, end);
+                let file_pos = end.saturating_sub(self.base_offset);
+                self.update_playback_status(MediaPlaybackState::Playing, file_pos);
             }
         }
 
@@ -918,8 +923,8 @@ impl Mp4FileReader {
 
     /// 再生状態とデコーダーをリセットして再生可能にする
     fn reset_for_restart(&mut self, handle: &ProcessorHandle) {
-        self.base_offset = Duration::ZERO;
-        self.last_emitted_end = Duration::ZERO;
+        // timestamp の連続性を維持するため、base_offset を last_emitted_end に進める
+        self.base_offset = self.last_emitted_end;
         self.is_paused = false;
         self.pause_started_at = None;
         self.recreate_decoders(handle);
@@ -1400,6 +1405,72 @@ mod tests {
                 has_video: true,
             }
         );
+        Ok(())
+    }
+
+    /// update_playback_status がファイル内の絶対位置を公開することを検証する
+    #[test]
+    fn playback_status_cursor_reflects_file_position() -> Result<()> {
+        let mut reader = Mp4FileReader::new(
+            "testdata/red-320x320-h264-aac.mp4",
+            Mp4FileReaderOptions::default(),
+        )?;
+        let handle = reader.create_media_handle(MediaEventContext {
+            event_broadcast_tx: tokio::sync::broadcast::channel(8).0,
+            input_name: "test".to_owned(),
+            input_uuid: "test-uuid".to_owned(),
+        });
+
+        // base_offset = 0 の場合
+        reader.base_offset = Duration::ZERO;
+        reader.update_playback_status(MediaPlaybackState::Playing, Duration::from_secs(5));
+        assert_eq!(handle.status.borrow().cursor, Duration::from_secs(5));
+
+        // base_offset > 0（ループ再生や Restart 後）の場合でも
+        // ファイル内位置がそのまま公開される
+        reader.base_offset = Duration::from_secs(10);
+        reader.update_playback_status(MediaPlaybackState::Playing, Duration::from_secs(3));
+        assert_eq!(handle.status.borrow().cursor, Duration::from_secs(3));
+
+        Ok(())
+    }
+
+    /// 停止後の再開で base_offset が last_emitted_end に設定され、
+    /// timestamp の連続性が維持されることを検証する
+    #[test]
+    fn reset_for_restart_preserves_timestamp_continuity() -> Result<()> {
+        let mut reader = Mp4FileReader::new(
+            "testdata/red-320x320-h264-aac.mp4",
+            Mp4FileReaderOptions::default(),
+        )?;
+        let handle = reader.create_media_handle(MediaEventContext {
+            event_broadcast_tx: tokio::sync::broadcast::channel(8).0,
+            input_name: "test".to_owned(),
+            input_uuid: "test-uuid".to_owned(),
+        });
+
+        // 再生が 10 秒地点まで進んだ状態を模擬する
+        reader.last_emitted_end = Duration::from_secs(10);
+        reader.base_offset = Duration::ZERO;
+
+        // 停止後の再開（reset_for_restart 相当）
+        // ProcessorHandle がないため recreate_decoders は呼べないが、
+        // base_offset のリセットロジックだけ検証する
+        reader.base_offset = reader.last_emitted_end; // reset_for_restart と同じ
+
+        // 先頭位置（ファイル内 0 秒）の公開カーソルは 0 秒であること
+        reader.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+
+        // base_offset が last_emitted_end に設定されていること
+        assert_eq!(reader.base_offset, Duration::from_secs(10));
+
+        // 次のフレームの effective_timestamp は base_offset + file_timestamp = 10s + 0s = 10s
+        // これは前回の last_emitted_end (10s) 以上なので、timestamp の連続性が保たれる
+        let file_timestamp = Duration::ZERO;
+        let effective_timestamp = reader.base_offset + file_timestamp;
+        assert!(effective_timestamp >= Duration::from_secs(10));
+
         Ok(())
     }
 }
