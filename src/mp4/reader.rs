@@ -213,6 +213,9 @@ pub struct Mp4FileReader {
     pending_seek: Option<Duration>,
     /// warm-up 中の目標位置。この位置に到達するまでデコーダーに流すが publish しない
     warmup_target: Option<Duration>,
+    /// seek 適用済みだが未 publish のファイル内カーソル位置。
+    /// relative seek の基準として使い、フレーム publish で last_emitted_end が進んだらクリアする。
+    logical_cursor: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +250,7 @@ impl Mp4FileReader {
             media_duration: Duration::ZERO,
             pending_seek: None,
             warmup_target: None,
+            logical_cursor: None,
         })
     }
 
@@ -290,7 +294,6 @@ impl Mp4FileReader {
 
         // メディア制御が無効なら従来通り一度だけ再生して終了
         if self.media_channels.is_none() {
-            self.start_playback();
             let result = self.run_loop(loop_enabled, &handle).await?;
             if matches!(result, RunLoopResult::Eof) {
                 self.flush_decoders()?;
@@ -301,7 +304,6 @@ impl Mp4FileReader {
 
         // メディア制御が有効: 停止後もコマンド待機ループを回す
         loop {
-            self.start_playback();
             let result = self.run_loop(loop_enabled, &handle).await?;
             let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
             match result {
@@ -385,6 +387,7 @@ impl Mp4FileReader {
         loop_enabled: bool,
         handle: &ProcessorHandle,
     ) -> Result<RunLoopResult> {
+        let mut started = false;
         'outer: loop {
             let mut state = ReaderState::open(
                 &self.path,
@@ -397,6 +400,11 @@ impl Mp4FileReader {
             // 最初の open で総時間を取得する
             if self.media_duration == Duration::ZERO {
                 self.media_duration = state.duration;
+            }
+            // 初回 open 成功時に再生開始を通知する
+            if !started {
+                self.start_playback();
+                started = true;
             }
 
             // pending_seek が設定されている場合（停止中にシーク済み）、先に適用する
@@ -578,6 +586,8 @@ impl Mp4FileReader {
         // start_instant = now - (base_offset + position) にする。
         self.start_instant = tokio::time::Instant::now() - self.base_offset - position;
         self.last_realtime_timestamp = None;
+        // seek 適用済みの論理カーソルを設定する（次フレーム publish まで relative seek の基準になる）
+        self.logical_cursor = Some(position);
         self.update_playback_status(MediaPlaybackState::Playing, position);
         Ok(())
     }
@@ -666,15 +676,18 @@ impl Mp4FileReader {
         self.pause_started_at = None;
         self.pending_seek = None;
         self.warmup_target = None;
+        self.logical_cursor = None;
         self.base_offset = self.last_emitted_end;
         self.start_instant = tokio::time::Instant::now() - self.base_offset;
         self.last_realtime_timestamp = None;
         self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
     }
 
-    /// 現在のファイル内カーソル位置を取得する
+    /// 現在のファイル内カーソル位置を取得する。
+    /// pending_seek > logical_cursor（seek 適用済み未 publish）> last_emitted_end の優先順で参照する。
     fn current_file_cursor(&self) -> Duration {
         self.pending_seek
+            .or(self.logical_cursor)
             .unwrap_or_else(|| self.last_emitted_end.saturating_sub(self.base_offset))
     }
 
@@ -854,6 +867,7 @@ impl Mp4FileReader {
                 return Ok(true);
             }
             self.emitted_in_loop = true;
+            self.logical_cursor = None;
             let end = effective_timestamp + duration;
             if end > self.last_emitted_end {
                 self.last_emitted_end = end;
@@ -939,6 +953,7 @@ impl Mp4FileReader {
                 return Ok(true);
             }
             self.emitted_in_loop = true;
+            self.logical_cursor = None;
             let end = effective_timestamp + duration;
             if end > self.last_emitted_end {
                 self.last_emitted_end = end;
@@ -1027,6 +1042,7 @@ impl Mp4FileReader {
         self.base_offset = self.last_emitted_end;
         self.is_paused = false;
         self.pause_started_at = None;
+        self.logical_cursor = None;
         self.recreate_decoders(handle);
     }
 
@@ -1778,5 +1794,27 @@ mod tests {
         assert_eq!(status.state, MediaPlaybackState::Playing);
         assert_eq!(status.cursor, Duration::from_secs(10));
         assert_eq!(reader.pending_seek, Some(Duration::from_secs(10)));
+    }
+
+    /// seek 適用直後の relative seek が新しい位置基準で計算される
+    #[test]
+    fn relative_seek_after_apply_uses_logical_cursor() {
+        let (mut reader, _handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(60);
+        reader.base_offset = Duration::ZERO;
+        reader.last_emitted_end = Duration::from_secs(10);
+
+        // 30 秒への seek を模擬（apply_seek は ReaderState が必要なので logical_cursor を直接設定）
+        reader.logical_cursor = Some(Duration::from_secs(30));
+
+        // +5000ms → 35 秒（30s + 5s）
+        let pos = reader.resolve_offset_seek(5000);
+        assert_eq!(pos, Duration::from_secs(35));
+
+        // フレーム publish で logical_cursor がクリアされると last_emitted_end 基準に戻る
+        reader.logical_cursor = None;
+        reader.last_emitted_end = Duration::from_secs(32);
+        let pos = reader.resolve_offset_seek(5000);
+        assert_eq!(pos, Duration::from_secs(37));
     }
 }
