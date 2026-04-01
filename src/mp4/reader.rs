@@ -186,6 +186,8 @@ pub struct Mp4FileReader {
     media_duration: Duration,
     /// コマンドで受け取ったシーク位置。次の再生開始時に適用する
     pending_seek: Option<Duration>,
+    /// warm-up 中の目標位置。この位置に到達するまでデコーダーに流すが publish しない
+    warmup_target: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +221,7 @@ impl Mp4FileReader {
             pause_started_at: None,
             media_duration: Duration::ZERO,
             pending_seek: None,
+            warmup_target: None,
         })
     }
 
@@ -465,18 +468,74 @@ impl Mp4FileReader {
         }
     }
 
-    /// demuxer をシークし、タイミング情報を再計算する
+    /// demuxer をシークし、タイミング情報を再計算する。
+    /// 映像トラックがある場合、シーク先が非キーフレームなら直前のキーフレームまで遡り
+    /// warm-up モードに入る。
     fn apply_seek(&mut self, state: &mut ReaderState, position: Duration) -> Result<()> {
         state
             .demuxer
             .seek(position)
             .map_err(|e| Error::new(format!("seek failed: {e}")))?;
+
+        // 映像トラックがある場合、シーク先がキーフレームかどうかを確認し、
+        // 非キーフレームなら直前のキーフレームまで遡る
+        self.warmup_target = None;
+        if state.video_track_id.is_some() {
+            self.seek_to_previous_keyframe(state, position)?;
+        }
+
         // base_offset を調整して、シーク先からの相対位置が正しくなるようにする
         self.base_offset = self.last_emitted_end.saturating_sub(position);
         // realtime 再生のタイミングを再計算する
         self.start_instant = tokio::time::Instant::now() - position;
         self.last_realtime_timestamp = None;
         self.update_playback_status(MediaPlaybackState::Playing, position);
+        Ok(())
+    }
+
+    /// シーク後の最初の映像サンプルがキーフレームでない場合、
+    /// prev_sample() で直前のキーフレームまで遡り warmup_target を設定する。
+    fn seek_to_previous_keyframe(
+        &mut self,
+        state: &mut ReaderState,
+        target_position: Duration,
+    ) -> Result<()> {
+        // シーク後の最初のサンプルを確認する
+        let needs_warmup = match state.demuxer.next_sample() {
+            Ok(Some(sample)) => {
+                let is_video_non_keyframe =
+                    sample.track.kind == shiguredo_mp4::TrackKind::Video && !sample.keyframe;
+                // 読み進めた分を戻す
+                let _ = state.demuxer.prev_sample();
+                is_video_non_keyframe
+            }
+            Ok(None) => false, // EOF: warm-up 不要
+            Err(e) => return Err(Error::new(format!("failed to check keyframe: {e}"))),
+        };
+
+        if !needs_warmup {
+            return Ok(());
+        }
+
+        // prev_sample() で直前の映像キーフレームまで遡る
+        loop {
+            match state.demuxer.prev_sample() {
+                Ok(Some(sample)) => {
+                    if sample.track.kind == shiguredo_mp4::TrackKind::Video && sample.keyframe {
+                        // キーフレームを見つけた。demuxer はこの位置に戻っている
+                        break;
+                    }
+                    // 映像の非キーフレームか音声サンプル → さらに遡る
+                }
+                Ok(None) => {
+                    // ファイル先頭に到達。ここから warm-up する
+                    break;
+                }
+                Err(e) => return Err(Error::new(format!("failed to find keyframe: {e}"))),
+            }
+        }
+
+        self.warmup_target = Some(target_position);
         Ok(())
     }
 
@@ -560,9 +619,30 @@ impl Mp4FileReader {
             ));
         }
 
+        // warm-up 中かどうかを判定する
+        let suppress_publish = if let Some(target) = self.warmup_target {
+            let (timestamp, _) =
+                calculate_timestamps(context.timescale, context.timestamp, context.duration);
+            if timestamp >= target {
+                // warm-up 完了
+                self.warmup_target = None;
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+
         match context.track_kind {
-            TrackKind::Audio => self.handle_audio_sample(state, context).await,
-            TrackKind::Video => self.handle_video_sample(state, context).await,
+            TrackKind::Audio => {
+                self.handle_audio_sample(state, context, suppress_publish)
+                    .await
+            }
+            TrackKind::Video => {
+                self.handle_video_sample(state, context, suppress_publish)
+                    .await
+            }
         }
     }
 
@@ -570,6 +650,7 @@ impl Mp4FileReader {
         &mut self,
         state: &mut ReaderState,
         context: SampleContext,
+        suppress_publish: bool,
     ) -> Result<bool> {
         if !state.is_audio_enabled(context.track_id) {
             return Ok(false);
@@ -583,6 +664,24 @@ impl Mp4FileReader {
         let (timestamp, duration) =
             calculate_timestamps(context.timescale, context.timestamp, context.duration);
         let effective_timestamp = self.base_offset + timestamp;
+
+        // warm-up 中はデコーダーに入力のみ行い、realtime sleep も publish もスキップする
+        if suppress_publish {
+            if let Some(decoder) = self.audio_decoder.as_mut() {
+                let frame = AudioFrame {
+                    data,
+                    format: state.audio_format,
+                    channels: state.audio_channels,
+                    sample_rate: state.audio_sample_rate,
+                    timestamp: Duration::ZERO,
+                    sample_entry: context.sample_entry,
+                };
+                decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
+                    std::sync::Arc::new(frame),
+                )))?;
+            }
+            return Ok(false);
+        }
 
         if self.options.realtime {
             let target = self.start_instant + effective_timestamp;
@@ -601,11 +700,9 @@ impl Mp4FileReader {
 
         if let Some(sender) = self.audio_sender.as_mut() {
             if let Some(decoder) = self.audio_decoder.as_mut() {
-                // デコーダーが設定されている場合、decode してから送信する
                 decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
                     std::sync::Arc::new(audio_data),
                 )))?;
-                // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
                 if crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?
                     == crate::decoder::DrainResult::PipelineClosed
                 {
@@ -629,6 +726,7 @@ impl Mp4FileReader {
         &mut self,
         state: &mut ReaderState,
         context: SampleContext,
+        suppress_publish: bool,
     ) -> Result<bool> {
         if !state.is_video_enabled(context.track_id) {
             return Ok(false);
@@ -642,6 +740,27 @@ impl Mp4FileReader {
         let (timestamp, duration) =
             calculate_timestamps(context.timescale, context.timestamp, context.duration);
         let effective_timestamp = self.base_offset + timestamp;
+
+        // warm-up 中はデコーダーに入力のみ行い、realtime sleep も publish もスキップする
+        if suppress_publish {
+            if let Some(decoder) = self.video_decoder.as_mut() {
+                let frame = VideoFrame {
+                    data,
+                    format: state.video_format,
+                    keyframe: context.keyframe,
+                    size: Some(VideoFrameSize {
+                        width: state.video_width,
+                        height: state.video_height,
+                    }),
+                    timestamp: Duration::ZERO,
+                    sample_entry: context.sample_entry,
+                };
+                decoder.handle_input_sample(Some(crate::MediaFrame::Video(
+                    std::sync::Arc::new(frame),
+                )))?;
+            }
+            return Ok(false);
+        }
 
         if self.options.realtime {
             let target = self.start_instant + effective_timestamp;
@@ -663,11 +782,9 @@ impl Mp4FileReader {
 
         if let Some(sender) = self.video_sender.as_mut() {
             if let Some(decoder) = self.video_decoder.as_mut() {
-                // デコーダーが設定されている場合、decode してから送信する
                 decoder.handle_input_sample(Some(crate::MediaFrame::Video(
                     std::sync::Arc::new(video_frame),
                 )))?;
-                // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
                 if crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?
                     == crate::decoder::DrainResult::PipelineClosed
                 {
