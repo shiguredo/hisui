@@ -8,6 +8,7 @@ mod mp4;
 pub mod png_file;
 mod rtmp_inbound;
 mod rtsp_subscriber;
+pub mod sora_source;
 mod srt_inbound;
 pub mod video_device;
 pub mod webrtc_source;
@@ -277,6 +278,9 @@ pub fn build_record_source_plan(
         }
         ObswsInputSettings::WebRtcSource(_) => {
             webrtc_source::build_record_source_plan(output_kind, source_key)
+        }
+        ObswsInputSettings::SoraSource(_) => {
+            sora_source::build_record_source_plan(output_kind, source_key)
         }
     }
 }

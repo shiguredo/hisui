@@ -76,6 +76,15 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "StartRecord",
     "StopRecord",
     "Sleep",
+    // SoraSubscriber / sora_source
+    "CreateSoraSubscriber",
+    "RemoveSoraSubscriber",
+    "StartSoraSubscriber",
+    "StopSoraSubscriber",
+    "ListSoraSubscribers",
+    "ListSoraSourceTracks",
+    "AttachSoraSourceTrack",
+    "DetachSoraSourceTrack",
 ];
 
 pub fn build_get_version_response(

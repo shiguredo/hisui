@@ -9,7 +9,7 @@ use crate::types::NonNegFiniteF64;
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
-pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 9] = [
+pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 10] = [
     "image_source",
     "color_source",
     "video_capture_device",
@@ -19,6 +19,7 @@ pub(crate) const OBSWS_SUPPORTED_INPUT_KINDS: [&str; 9] = [
     "srt_inbound",
     "rtsp_subscriber",
     "webrtc_source",
+    "sora_source",
 ];
 pub(crate) const OBSWS_SUPPORTED_TRANSITION_KINDS: [&str; 7] = [
     "fade_transition",
@@ -146,6 +147,7 @@ pub enum ObswsInputSettings {
     SrtInbound(ObswsSrtInboundSettings),
     RtspSubscriber(ObswsRtspSubscriberSettings),
     WebRtcSource(ObswsWebRtcSourceSettings),
+    SoraSource(ObswsSoraSourceInputSettings),
 }
 
 impl ObswsInputSettings {
@@ -164,6 +166,7 @@ impl ObswsInputSettings {
             "srt_inbound" => Ok(Self::SrtInbound(ObswsSrtInboundSettings::default())),
             "rtsp_subscriber" => Ok(Self::RtspSubscriber(ObswsRtspSubscriberSettings::default())),
             "webrtc_source" => Ok(Self::WebRtcSource(ObswsWebRtcSourceSettings::default())),
+            "sora_source" => Ok(Self::SoraSource(ObswsSoraSourceInputSettings::default())),
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -249,6 +252,10 @@ impl ObswsInputSettings {
                     background_key_tolerance,
                 }))
             }
+            "sora_source" => {
+                // trackId は Attach/Detach で制御するため、CreateInput 時は無視する
+                Ok(Self::SoraSource(ObswsSoraSourceInputSettings::default()))
+            }
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
         }
     }
@@ -266,6 +273,7 @@ impl ObswsInputSettings {
             Self::SrtInbound(_) => "srt_inbound",
             Self::RtspSubscriber(_) => "rtsp_subscriber",
             Self::WebRtcSource(_) => "webrtc_source",
+            Self::SoraSource(_) => "sora_source",
         }
     }
 
@@ -287,6 +295,7 @@ impl ObswsInputSettings {
             Self::SrtInbound(_) => VIDEO | AUDIO,
             Self::RtspSubscriber(_) => VIDEO | AUDIO,
             Self::WebRtcSource(_) => VIDEO,
+            Self::SoraSource(_) => VIDEO | AUDIO,
         }
     }
 
@@ -397,6 +406,10 @@ impl ObswsInputSettings {
                     background_key_tolerance,
                 }))
             }
+            Self::SoraSource(existing) => {
+                // trackId は Attach/Detach で制御するため overlay 対象外
+                Ok(Self::SoraSource(existing.clone()))
+            }
         }
     }
 }
@@ -413,6 +426,7 @@ impl nojson::DisplayJson for ObswsInputSettings {
             Self::SrtInbound(settings) => settings.fmt(f),
             Self::RtspSubscriber(settings) => settings.fmt(f),
             Self::WebRtcSource(settings) => settings.fmt(f),
+            Self::SoraSource(settings) => settings.fmt(f),
         }
     }
 }
@@ -1272,6 +1286,62 @@ impl nojson::DisplayJson for ObswsWebRtcSourceSettings {
                     "backgroundKeyTolerance",
                     i64::from(background_key_tolerance),
                 )?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsSoraSourceInputSettings {
+    // video/audio の trackId は Attach/Detach で制御する。SetInputSettings では変更不可。
+    pub video_track_id: Option<String>,
+    pub audio_track_id: Option<String>,
+}
+
+impl nojson::DisplayJson for ObswsSoraSourceInputSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(video_track_id) = &self.video_track_id {
+                f.member("videoTrackId", video_track_id)?;
+            }
+            if let Some(audio_track_id) = &self.audio_track_id {
+                f.member("audioTrackId", audio_track_id)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+/// SoraSubscriber の接続設定。CreateSoraSubscriber で登録する。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ObswsSoraSubscriberSettings {
+    pub signaling_urls: Vec<String>,
+    pub channel_id: Option<String>,
+    pub client_id: Option<String>,
+    pub bundle_id: Option<String>,
+    pub metadata: Option<nojson::RawJsonOwned>,
+}
+
+impl nojson::DisplayJson for ObswsSoraSubscriberSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if !self.signaling_urls.is_empty() {
+                f.member("signalingUrls", &self.signaling_urls)?;
+            }
+            if let Some(channel_id) = &self.channel_id {
+                f.member("channelId", channel_id)?;
+            }
+            if let Some(client_id) = &self.client_id {
+                f.member("clientId", client_id)?;
+            }
+            if let Some(bundle_id) = &self.bundle_id {
+                f.member("bundleId", bundle_id)?;
+            }
+            if let Some(metadata) = &self.metadata {
+                f.member("metadata", metadata)?;
             }
             Ok(())
         })
