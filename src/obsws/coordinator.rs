@@ -5030,25 +5030,18 @@ impl ObswsCoordinator {
                     return;
                 }
 
-                // on_notify で収集済みの接続情報からマッチを試みる
-                let (connection_id, client_id) =
-                    if let Some(state) = self.sora_subscribers.get(&subscriber_name) {
-                        // 直近に追加された（まだトラックが割り当てられていない）接続を探す
-                        let mut found = None;
-                        for (cid, info) in &state.connections {
-                            let has_track = state
-                                .remote_tracks
-                                .values()
-                                .any(|rt| rt.connection_id == *cid);
-                            if !has_track {
-                                found = Some((cid.clone(), info.client_id.clone()));
-                                break;
-                            }
-                        }
-                        found.unwrap_or_else(|| (track_id.clone(), None))
-                    } else {
-                        (track_id.clone(), None)
-                    };
+                // track_id は "{connection_id}-{video|audio}" 形式
+                let connection_id = track_id
+                    .rsplit_once('-')
+                    .map(|(prefix, _suffix)| prefix.to_owned())
+                    .unwrap_or_else(|| track_id.clone());
+
+                // on_notify の connection.created で収集済みの接続情報から client_id を取得する
+                let client_id = self
+                    .sora_subscribers
+                    .get(&subscriber_name)
+                    .and_then(|state| state.connections.get(&connection_id))
+                    .and_then(|info| info.client_id.clone());
 
                 if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
                     // holder タスクを起動して WebRTC 型の所有権を移す
