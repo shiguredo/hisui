@@ -5761,10 +5761,10 @@ impl ObswsCoordinator {
         let rt = self
             .sora_subscribers
             .get_mut(&sub_name)
-            .unwrap()
+            .expect("BUG: subscriber not found after lookup")
             .remote_tracks
             .get_mut(&found_track_id)
-            .unwrap();
+            .expect("BUG: track not found after lookup");
         rt.attached_input_name = Some(input_name.clone());
         rt.attached_pipeline_track_id = Some(pipeline_track_id.clone());
         if let Some(uuid) = self.input_registry.uuids_by_name.get(&input_name)
@@ -5855,10 +5855,10 @@ impl ObswsCoordinator {
         let rt = self
             .sora_subscribers
             .get_mut(&sub_name)
-            .unwrap()
+            .expect("BUG: subscriber not found after lookup")
             .remote_tracks
             .get_mut(&track_id)
-            .unwrap();
+            .expect("BUG: track not found after lookup");
         // holder タスクに Detach コマンドを送信
         let _ = rt
             .command_tx
