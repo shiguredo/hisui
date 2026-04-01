@@ -303,13 +303,14 @@ impl Mp4FileReader {
         Ok(())
     }
 
-    /// 再生開始時の状態を初期化する
+    /// 再生開始時の状態を初期化する。
+    /// pending_seek がある場合はその位置を公開カーソルに反映する（実際の seek は run_loop 冒頭で適用）。
     fn start_playback(&mut self) {
-        self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
+        let start_pos = self.pending_seek.unwrap_or(Duration::ZERO);
+        self.update_playback_status(MediaPlaybackState::Playing, start_pos);
         self.send_media_event(MediaInputEvent::PlaybackStarted);
-        // 先頭サンプル（effective_timestamp = base_offset + 0）を now で出すため、
-        // start_instant = now - base_offset にする。
-        self.start_instant = tokio::time::Instant::now() - self.base_offset;
+        // 開始位置のサンプル（effective_timestamp = base_offset + start_pos）を now で出す
+        self.start_instant = tokio::time::Instant::now() - self.base_offset - start_pos;
         self.last_realtime_timestamp = None;
     }
 
@@ -360,7 +361,7 @@ impl Mp4FileReader {
 
             // pending_seek が設定されている場合（停止中にシーク済み）、先に適用する
             if let Some(position) = self.pending_seek.take() {
-                self.apply_seek(&mut state, position)?;
+                self.apply_seek(&mut state, position, handle)?;
             }
 
             self.emitted_in_loop = false;
@@ -374,12 +375,12 @@ impl Mp4FileReader {
                         continue 'outer;
                     }
                     MediaLoopAction::Seek(position) => {
-                        self.apply_seek(&mut state, position)?;
+                        self.apply_seek(&mut state, position, handle)?;
                         continue;
                     }
                     MediaLoopAction::OffsetSeek(offset_ms) => {
                         let position = self.resolve_offset_seek(offset_ms);
-                        self.apply_seek(&mut state, position)?;
+                        self.apply_seek(&mut state, position, handle)?;
                         continue;
                     }
                 }
@@ -393,12 +394,12 @@ impl Mp4FileReader {
                             continue 'outer;
                         }
                         MediaLoopAction::Seek(position) => {
-                            self.apply_seek(&mut state, position)?;
+                            self.apply_seek(&mut state, position, handle)?;
                             continue;
                         }
                         MediaLoopAction::OffsetSeek(offset_ms) => {
                             let position = self.resolve_offset_seek(offset_ms);
-                            self.apply_seek(&mut state, position)?;
+                            self.apply_seek(&mut state, position, handle)?;
                             continue;
                         }
                     }
@@ -503,7 +504,15 @@ impl Mp4FileReader {
     /// demuxer をシークし、タイミング情報を再計算する。
     /// 映像トラックがある場合、シーク先が非キーフレームなら直前のキーフレームまで遡り
     /// warm-up モードに入る。
-    fn apply_seek(&mut self, state: &mut ReaderState, position: Duration) -> Result<()> {
+    fn apply_seek(
+        &mut self,
+        state: &mut ReaderState,
+        position: Duration,
+        handle: &ProcessorHandle,
+    ) -> Result<()> {
+        // デコーダーの残留状態を捨ててから seek する
+        self.recreate_decoders(handle);
+
         // duration が取得済みなら上限を clamp する
         let position = if self.media_duration > Duration::ZERO {
             position.min(self.media_duration)
@@ -1653,5 +1662,39 @@ mod tests {
         // -3000ms の relative seek は 7 秒になる
         let pos = reader.resolve_offset_seek(-3000);
         assert_eq!(pos, Duration::from_secs(7));
+    }
+
+    /// 停止中に seek してから start_playback すると、
+    /// 公開 cursor が pending_seek の値で Playing になる
+    #[test]
+    fn start_playback_reflects_pending_seek() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.base_offset = Duration::from_secs(10);
+
+        // 停止状態で 15 秒にシーク
+        reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(20));
+        reader.set_pending_seek(Duration::from_secs(15));
+        assert_eq!(handle.status.borrow().cursor, Duration::from_secs(15));
+
+        // Play 開始
+        reader.start_playback();
+        let status = handle.status.borrow().clone();
+        assert_eq!(status.state, MediaPlaybackState::Playing);
+        assert_eq!(status.cursor, Duration::from_secs(15));
+        // pending_seek は take されていない（run_loop 冒頭で take する）
+        assert_eq!(reader.pending_seek, Some(Duration::from_secs(15)));
+    }
+
+    /// seek なしの通常 start_playback は 0 秒で始まる
+    #[test]
+    fn start_playback_without_pending_seek_starts_at_zero() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.pending_seek = None;
+
+        reader.start_playback();
+        let status = handle.status.borrow().clone();
+        assert_eq!(status.state, MediaPlaybackState::Playing);
+        assert_eq!(status.cursor, Duration::ZERO);
     }
 }
