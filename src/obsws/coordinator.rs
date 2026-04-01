@@ -5067,58 +5067,64 @@ impl ObswsCoordinator {
                 subscriber_name,
                 json,
             } => {
+                // Sora の notify は必ず JSON であるべき
+                let Ok(parsed) = nojson::RawJsonOwned::parse(&json) else {
+                    tracing::warn!(
+                        "SoraSubscriberNotify: invalid JSON from Sora, dropping: {}",
+                        &json[..json.len().min(200)]
+                    );
+                    return;
+                };
+
                 // connection.created / connection.destroyed をパースして接続情報を管理する
-                if let Ok(parsed) = nojson::RawJson::parse(&json) {
-                    let v = parsed.value();
-                    let event_type: Option<String> = v
-                        .to_member("event_type")
-                        .ok()
-                        .and_then(|m| m.optional())
-                        .and_then(|v| v.try_into().ok());
-                    match event_type.as_deref() {
-                        Some("connection.created") => {
-                            let connection_id: Option<String> = v
-                                .to_member("connection_id")
-                                .ok()
-                                .and_then(|m| m.optional())
-                                .and_then(|v| v.try_into().ok());
-                            let Some(cid) = connection_id else {
-                                // Sora のプロトコル上 connection_id は必須
-                                tracing::warn!("connection.created notify missing connection_id");
-                                return;
-                            };
-                            let client_id: Option<String> = v
-                                .to_member("client_id")
-                                .ok()
-                                .and_then(|m| m.optional())
-                                .and_then(|v| v.try_into().ok());
-                            if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
-                                state
-                                    .connections
-                                    .insert(cid, SoraConnectionInfo { client_id });
-                            }
+                let v = parsed.value();
+                let event_type: Option<String> = v
+                    .to_member("event_type")
+                    .ok()
+                    .and_then(|m| m.optional())
+                    .and_then(|v| v.try_into().ok());
+                match event_type.as_deref() {
+                    Some("connection.created") => {
+                        let connection_id: Option<String> = v
+                            .to_member("connection_id")
+                            .ok()
+                            .and_then(|m| m.optional())
+                            .and_then(|v| v.try_into().ok());
+                        let Some(cid) = connection_id else {
+                            tracing::warn!("connection.created notify missing connection_id");
+                            return;
+                        };
+                        let client_id: Option<String> = v
+                            .to_member("client_id")
+                            .ok()
+                            .and_then(|m| m.optional())
+                            .and_then(|v| v.try_into().ok());
+                        if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
+                            state
+                                .connections
+                                .insert(cid, SoraConnectionInfo { client_id });
                         }
-                        Some("connection.destroyed") => {
-                            let connection_id: Option<String> = v
-                                .to_member("connection_id")
-                                .ok()
-                                .and_then(|m| m.optional())
-                                .and_then(|v| v.try_into().ok());
-                            let Some(cid) = connection_id else {
-                                tracing::warn!("connection.destroyed notify missing connection_id");
-                                return;
-                            };
-                            if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
-                                state.connections.remove(&cid);
-                            }
-                        }
-                        _ => {}
                     }
+                    Some("connection.destroyed") => {
+                        let connection_id: Option<String> = v
+                            .to_member("connection_id")
+                            .ok()
+                            .and_then(|m| m.optional())
+                            .and_then(|v| v.try_into().ok());
+                        let Some(cid) = connection_id else {
+                            tracing::warn!("connection.destroyed notify missing connection_id");
+                            return;
+                        };
+                        if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
+                            state.connections.remove(&cid);
+                        }
+                    }
+                    _ => {}
                 }
 
                 let event = crate::obsws::response::build_sora_subscriber_notify_event(
                     &subscriber_name,
-                    &json,
+                    &parsed,
                 );
                 let _ = self.obsws_event_tx.send(TaggedEvent {
                     text: event,

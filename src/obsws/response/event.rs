@@ -561,7 +561,7 @@ pub fn build_sora_subscriber_disconnected_event(
 
 pub fn build_sora_subscriber_notify_event(
     subscriber_name: &str,
-    json: &str,
+    notify: &nojson::RawJsonOwned,
 ) -> nojson::RawJsonOwned {
     nojson::RawJsonOwned::object(|f| {
         f.member("op", OBSWS_OP_EVENT)?;
@@ -574,8 +574,7 @@ pub fn build_sora_subscriber_notify_event(
                     "eventData",
                     nojson::object(|f| {
                         f.member("subscriberName", subscriber_name)?;
-                        // シグナリング通知の JSON をそのまま文字列として埋め込む
-                        f.member("notify", json)
+                        f.member("notify", notify)
                     }),
                 )
             }),
