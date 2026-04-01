@@ -545,6 +545,12 @@ impl ObswsCoordinator {
             "TriggerMediaInputAction" => {
                 self.handle_trigger_media_input_action(&request_id, request.request_data.as_ref())
             }
+            "SetMediaInputCursor" => {
+                self.handle_set_media_input_cursor(&request_id, request.request_data.as_ref())
+            }
+            "OffsetMediaInputCursor" => {
+                self.handle_offset_media_input_cursor(&request_id, request.request_data.as_ref())
+            }
             // SceneItem 系
             "CreateSceneItem" => {
                 self.handle_create_scene_item(&request_id, request.request_data.as_ref())
@@ -1324,6 +1330,172 @@ impl ObswsCoordinator {
             request_id,
         );
         self.build_result_from_response(response, events)
+    }
+
+    fn handle_set_media_input_cursor(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let (input_uuid, input_name, cursor_ms) =
+            match crate::obsws::response::parse_request_data_or_error_response(
+                "SetMediaInputCursor",
+                request_id,
+                request_data,
+                crate::obsws::response::parse_set_media_input_cursor_fields,
+            ) {
+                Ok(v) => v,
+                Err(response) => return self.build_result_from_response(response, Vec::new()),
+            };
+
+        self.send_seek_command(
+            "SetMediaInputCursor",
+            request_id,
+            &input_uuid,
+            &input_name,
+            cursor_ms,
+        )
+    }
+
+    fn handle_offset_media_input_cursor(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let (input_uuid, input_name, offset_ms) =
+            match crate::obsws::response::parse_request_data_or_error_response(
+                "OffsetMediaInputCursor",
+                request_id,
+                request_data,
+                crate::obsws::response::parse_offset_media_input_cursor_fields,
+            ) {
+                Ok(v) => v,
+                Err(response) => return self.build_result_from_response(response, Vec::new()),
+            };
+
+        // 現在のカーソル位置を取得して offset を加算する
+        let entry = match self.find_media_input(
+            "OffsetMediaInputCursor",
+            request_id,
+            &input_uuid,
+            &input_name,
+        ) {
+            Ok(e) => e,
+            Err(result) => return *result,
+        };
+        let source_state = match self.input_source_processors.get(&entry.input_uuid) {
+            Some(s) => s,
+            None => {
+                return self.build_error_result(
+                    "OffsetMediaInputCursor",
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Input source processor not found",
+                );
+            }
+        };
+        let current_cursor_ms = source_state
+            .media_handle
+            .as_ref()
+            .map(|h| h.status.borrow().cursor.as_millis() as i64)
+            .unwrap_or(0);
+
+        let absolute_ms = current_cursor_ms.saturating_add(offset_ms);
+        self.send_seek_command(
+            "OffsetMediaInputCursor",
+            request_id,
+            &input_uuid,
+            &input_name,
+            absolute_ms,
+        )
+    }
+
+    /// メディア入力を検索して mp4_file_source であることを検証する
+    fn find_media_input(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        input_uuid: &Option<String>,
+        input_name: &Option<String>,
+    ) -> Result<crate::obsws::input_registry::ObswsInputEntry, Box<CommandResult>> {
+        let Some(entry) = self
+            .input_registry
+            .find_input(input_uuid.as_deref(), input_name.as_deref())
+        else {
+            return Err(Box::new(self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            )));
+        };
+
+        if entry.input.kind_name() != "mp4_file_source" {
+            return Err(Box::new(self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Input is not a media input",
+            )));
+        }
+
+        Ok(entry.clone())
+    }
+
+    /// シークコマンドをメディア入力に送信する共通処理
+    fn send_seek_command(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        input_uuid: &Option<String>,
+        input_name: &Option<String>,
+        cursor_ms: i64,
+    ) -> CommandResult {
+        let entry = match self.find_media_input(request_type, request_id, input_uuid, input_name) {
+            Ok(e) => e,
+            Err(result) => return *result,
+        };
+
+        let Some(source_state) = self.input_source_processors.get(&entry.input_uuid) else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input source processor not found",
+            );
+        };
+        let Some(handle) = &source_state.media_handle else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Media input handle not available",
+            );
+        };
+
+        // duration を取得して clamp する
+        let duration_ms = handle.status.borrow().duration.as_millis() as i64;
+        let clamped_ms = cursor_ms.max(0).min(duration_ms);
+        let position = std::time::Duration::from_millis(clamped_ms as u64);
+
+        if handle
+            .command_tx
+            .try_send(crate::mp4::reader::MediaInputCommand::Seek(position))
+            .is_err()
+        {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "Failed to send seek command",
+            );
+        }
+
+        let response = crate::obsws::response::build_request_response_success_no_data(
+            request_type,
+            request_id,
+        );
+        self.build_result_from_response(response, Vec::new())
     }
 
     // -----------------------------------------------------------------------

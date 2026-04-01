@@ -77,6 +77,8 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "StopRecord",
     "Sleep",
     "GetMediaInputStatus",
+    "SetMediaInputCursor",
+    "OffsetMediaInputCursor",
     "TriggerMediaInputAction",
 ];
 

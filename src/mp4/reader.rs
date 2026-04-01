@@ -62,12 +62,14 @@ impl Default for MediaPlaybackStatus {
 }
 
 /// メディア入力への再生制御コマンド
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MediaInputCommand {
     Play,
     Pause,
     Stop,
     Restart,
+    /// 指定した絶対位置へシークする
+    Seek(Duration),
 }
 
 impl MediaInputCommand {
@@ -150,6 +152,8 @@ enum MediaLoopAction {
     Stop,
     /// ファイル先頭からリスタートする
     Restart,
+    /// 指定位置へシークする
+    Seek(Duration),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -180,6 +184,8 @@ pub struct Mp4FileReader {
     is_paused: bool,
     pause_started_at: Option<tokio::time::Instant>,
     media_duration: Duration,
+    /// コマンドで受け取ったシーク位置。次の再生開始時に適用する
+    pending_seek: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,6 +218,7 @@ impl Mp4FileReader {
             is_paused: false,
             pause_started_at: None,
             media_duration: Duration::ZERO,
+            pending_seek: None,
         })
     }
 
@@ -340,6 +347,11 @@ impl Mp4FileReader {
                 self.media_duration = state.duration;
             }
 
+            // pending_seek が設定されている場合（停止中にシーク済み）、先に適用する
+            if let Some(position) = self.pending_seek.take() {
+                self.apply_seek(&mut state, position)?;
+            }
+
             self.emitted_in_loop = false;
             while let Some(sample) = state.demuxer.next_sample()? {
                 // コマンドをポーリングで確認する
@@ -347,6 +359,10 @@ impl Mp4FileReader {
                     MediaLoopAction::Continue => {}
                     MediaLoopAction::Stop => return Ok(true),
                     MediaLoopAction::Restart => continue 'outer,
+                    MediaLoopAction::Seek(position) => {
+                        self.apply_seek(&mut state, position)?;
+                        continue;
+                    }
                 }
                 // 一時停止中はコマンドを非同期で待つ
                 if self.is_paused {
@@ -354,6 +370,10 @@ impl Mp4FileReader {
                         MediaLoopAction::Continue => {}
                         MediaLoopAction::Stop => return Ok(true),
                         MediaLoopAction::Restart => continue 'outer,
+                        MediaLoopAction::Seek(position) => {
+                            self.apply_seek(&mut state, position)?;
+                            continue;
+                        }
                     }
                 }
 
@@ -382,11 +402,14 @@ impl Mp4FileReader {
 
     /// 一時停止中にコマンドを待つ
     async fn wait_while_paused(&mut self) -> MediaLoopAction {
-        let Some(channels) = self.media_channels.as_mut() else {
-            return MediaLoopAction::Continue;
-        };
         loop {
-            match channels.command_rx.recv().await {
+            let command = {
+                let Some(channels) = self.media_channels.as_mut() else {
+                    return MediaLoopAction::Continue;
+                };
+                channels.command_rx.recv().await
+            };
+            match command {
                 Some(MediaInputCommand::Play) => {
                     self.resume_from_pause();
                     return MediaLoopAction::Continue;
@@ -401,6 +424,11 @@ impl Mp4FileReader {
                 Some(MediaInputCommand::Restart) => {
                     self.restart_playback();
                     return MediaLoopAction::Restart;
+                }
+                Some(MediaInputCommand::Seek(position)) => {
+                    // 一時停止中のシーク: 公開カーソルのみ更新
+                    self.pending_seek = Some(position);
+                    self.update_playback_status(MediaPlaybackState::Paused, position);
                 }
                 None => {
                     // チャネルが閉じられた
@@ -432,8 +460,24 @@ impl Mp4FileReader {
                 self.restart_playback();
                 MediaLoopAction::Restart
             }
+            Ok(MediaInputCommand::Seek(position)) => MediaLoopAction::Seek(position),
             Err(_) => MediaLoopAction::Continue,
         }
+    }
+
+    /// demuxer をシークし、タイミング情報を再計算する
+    fn apply_seek(&mut self, state: &mut ReaderState, position: Duration) -> Result<()> {
+        state
+            .demuxer
+            .seek(position)
+            .map_err(|e| Error::new(format!("seek failed: {e}")))?;
+        // base_offset を調整して、シーク先からの相対位置が正しくなるようにする
+        self.base_offset = self.last_emitted_end.saturating_sub(position);
+        // realtime 再生のタイミングを再計算する
+        self.start_instant = tokio::time::Instant::now() - position;
+        self.last_realtime_timestamp = None;
+        self.update_playback_status(MediaPlaybackState::Playing, position);
+        Ok(())
     }
 
     /// 一時停止から復帰する
@@ -690,14 +734,22 @@ impl Mp4FileReader {
     /// Ended / Stopped 状態で Play / Restart コマンドを待つ。
     /// チャネルクローズ時は false を返す。
     async fn wait_for_restart_command(&mut self) -> bool {
-        let Some(channels) = self.media_channels.as_mut() else {
-            return false;
-        };
         loop {
-            match channels.command_rx.recv().await {
+            let command = {
+                let Some(channels) = self.media_channels.as_mut() else {
+                    return false;
+                };
+                channels.command_rx.recv().await
+            };
+            match command {
                 Some(MediaInputCommand::Play | MediaInputCommand::Restart) => return true,
                 Some(MediaInputCommand::Pause | MediaInputCommand::Stop) => {
                     // 既に停止済みなので無視
+                }
+                Some(MediaInputCommand::Seek(position)) => {
+                    // 停止中のシーク: 公開カーソルと pending_seek のみ更新
+                    self.pending_seek = Some(position);
+                    self.update_playback_status(MediaPlaybackState::Stopped, position);
                 }
                 None => return false,
             }

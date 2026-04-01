@@ -306,6 +306,32 @@ pub(crate) fn parse_trigger_media_input_action_fields(
     Ok((input_uuid, input_name, media_action))
 }
 
+/// SetMediaInputCursor のリクエストフィールドをパースする。
+/// (input_uuid, input_name, mediaCursor) を返す。
+pub(crate) fn parse_set_media_input_cursor_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(Option<String>, Option<String>, i64), nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+    let cursor: Option<i64> = request_data.to_member("mediaCursor")?.try_into()?;
+    let Some(cursor) = cursor else {
+        return Err(request_data.invalid("required member 'mediaCursor' is missing"));
+    };
+    Ok((input_uuid, input_name, cursor))
+}
+
+/// OffsetMediaInputCursor のリクエストフィールドをパースする。
+/// (input_uuid, input_name, mediaCursorOffset) を返す。
+pub(crate) fn parse_offset_media_input_cursor_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(Option<String>, Option<String>, i64), nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+    let offset: Option<i64> = request_data.to_member("mediaCursorOffset")?.try_into()?;
+    let Some(offset) = offset else {
+        return Err(request_data.invalid("required member 'mediaCursorOffset' is missing"));
+    };
+    Ok((input_uuid, input_name, offset))
+}
+
 fn optional_non_empty_string_member(
     object: nojson::RawJsonValue<'_, '_>,
     member_name: &str,
