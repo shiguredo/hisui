@@ -352,10 +352,6 @@ impl ObswsInputRegistry {
         self.persistent_data.insert(slot_name, slot_value);
     }
 
-    pub fn remove_persistent_data(&mut self, slot_name: &str) {
-        self.persistent_data.remove(slot_name);
-    }
-
     /// state file から読み込んだ persistent data を一括復元する。
     pub fn restore_persistent_data(&mut self, data: BTreeMap<String, nojson::RawJsonOwned>) {
         self.persistent_data = data;

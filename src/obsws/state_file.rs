@@ -2581,4 +2581,88 @@ mod tests {
         assert!(json_text.contains("backgroundKeyColor"));
         assert!(json_text.contains("#00FF00"));
     }
+
+    #[test]
+    fn roundtrip_persistent_data() {
+        let mut persistent_data = std::collections::BTreeMap::new();
+        let val1 = nojson::RawJson::parse(r#"{"key": "value", "num": 42}"#).expect("valid json");
+        persistent_data.insert(
+            "slot1".to_owned(),
+            nojson::RawJsonOwned::try_from(val1.value()).expect("conversion must succeed"),
+        );
+        let val2 = nojson::RawJson::parse(r#""hello""#).expect("valid json");
+        persistent_data.insert(
+            "slot2".to_owned(),
+            nojson::RawJsonOwned::try_from(val2.value()).expect("conversion must succeed"),
+        );
+
+        let state = ObswsStateFile {
+            stream: None,
+            record: None,
+            rtmp_outbound: None,
+            sora: None,
+            hls: None,
+            dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
+            persistent_data: Some(persistent_data),
+        };
+
+        let json_text = crate::json::to_pretty_string(&state);
+        assert!(json_text.contains("persistentData"));
+        assert!(json_text.contains("slot1"));
+        assert!(json_text.contains("slot2"));
+
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip parse must succeed");
+        let data = parsed
+            .persistent_data
+            .expect("persistent_data must be present");
+        assert_eq!(data.len(), 2);
+        assert!(data.contains_key("slot1"));
+        assert!(data.contains_key("slot2"));
+
+        // slot1 の値がオブジェクトであることを確認
+        let slot1_text = crate::json::to_pretty_string(data.get("slot1").unwrap());
+        assert!(slot1_text.contains("\"key\""));
+        assert!(slot1_text.contains("\"value\""));
+        assert!(slot1_text.contains("42"));
+
+        // slot2 の値が文字列であることを確認
+        let slot2_text = crate::json::to_pretty_string(data.get("slot2").unwrap());
+        assert!(slot2_text.contains("hello"));
+    }
+
+    #[test]
+    fn roundtrip_persistent_data_empty() {
+        let state = ObswsStateFile {
+            stream: None,
+            record: None,
+            rtmp_outbound: None,
+            sora: None,
+            hls: None,
+            dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
+            persistent_data: None,
+        };
+
+        let json_text = crate::json::to_pretty_string(&state);
+        // persistent_data が None の場合はフィールド自体を出力しない
+        assert!(!json_text.contains("persistentData"));
+
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip parse must succeed");
+        assert!(parsed.persistent_data.is_none());
+    }
 }

@@ -44,8 +44,9 @@ hisui にはプロファイルの概念がないため、**`OBS_WEBSOCKET_DATA_R
 
 ## slotValue に null を指定した場合
 
-`SetPersistentData` で `slotValue` に `null` を指定すると、該当スロットが**削除**される。
-これは OBS 本家の挙動に準拠している。
+`SetPersistentData` で `slotValue` に `null` を指定すると、
+`REQUEST_STATUS_MISSING_REQUEST_FIELD` (300) エラーを返す。
+これは OBS 本家の挙動に準拠している（`ValidateBasic` で null は欠落扱い）。
 
 ## 永続化
 

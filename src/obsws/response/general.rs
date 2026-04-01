@@ -362,25 +362,22 @@ pub fn build_set_persistent_data_response(
         return response;
     }
 
-    // slotValue が JSON の null の場合はスロットを削除する（OBS 本家の挙動に準拠）
-    if slot_value.value().kind().is_null() {
-        input_registry.remove_persistent_data(&fields.slot_name);
-    } else {
-        input_registry.set_persistent_data(fields.slot_name, slot_value);
-    }
+    input_registry.set_persistent_data(fields.slot_name, slot_value);
     super::build_request_response_success_no_data("SetPersistentData", request_id)
 }
 
 /// SetPersistentData 用のフィールドをパースする。
-/// slotValue は任意の JSON 値なので RawJsonOwned としてそのまま保持する。
+/// slotValue は任意の JSON 値（null 以外）を受け付ける。
+/// OBS 本家では slotValue が null の場合は MissingRequestField エラーを返す。
 fn parse_set_persistent_data_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<(super::PersistentDataFields, nojson::RawJsonOwned), nojson::JsonParseError> {
     let fields = parse_persistent_data_fields(request_data)?;
-    let slot_value: nojson::RawJsonOwned = request_data
-        .to_member("slotValue")?
-        .required()?
-        .try_into()?;
+    let slot_raw = request_data.to_member("slotValue")?.required()?;
+    if slot_raw.kind().is_null() {
+        return Err(slot_raw.invalid("required member 'slotValue' is missing"));
+    }
+    let slot_value: nojson::RawJsonOwned = slot_raw.try_into()?;
     Ok((fields, slot_value))
 }
 
