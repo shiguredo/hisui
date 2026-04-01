@@ -138,10 +138,6 @@ pub async fn run_server(
     );
 
     // state file から読み込んだ設定を反映する
-    // sora_subscribers は coordinator に反映するため、ここでは取り出しておく
-    let loaded_sora_subscribers = loaded_state
-        .as_ref()
-        .and_then(|s| s.sora_subscribers.clone());
     if let Some(state) = loaded_state {
         if let Some(stream) = &state.stream {
             input_registry.set_stream_service_settings(stream.to_stream_service_settings());
@@ -245,10 +241,6 @@ pub async fn run_server(
             program_output,
             Some(pipeline_handle.clone()),
         );
-    // state file から SoraSubscriber 設定を復元する
-    if let Some(subscribers) = loaded_sora_subscribers {
-        actor.load_sora_subscribers(subscribers);
-    }
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());
 

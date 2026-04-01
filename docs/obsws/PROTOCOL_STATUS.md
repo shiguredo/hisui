@@ -722,16 +722,14 @@ outputSettings は `soraSdkSettings` オブジェクトを含む。
 
 Sora WebRTC Subscriber。sora-rust-sdk を使い、Sora チャネルに RecvOnly で接続してリモートトラック（映像・音声）を受信する。受信したトラックは `sora_source` 入力タイプを通じて obsws のシーンに配置できる。
 
-複数の SoraSubscriber を同時に作成し、異なるチャネルに接続できる。
+複数の SoraSubscriber を同時に接続し、異なるチャネルから受信できる。
 
 #### 専用リクエスト
 
 | リクエスト | 説明 | requestData |
 |---|---|---|
-| `CreateSoraSubscriber` | subscriber を登録（設定込み） | `subscriberName`, `signalingUrls`, `channelId`, `clientId`, `bundleId`, `metadata` |
-| `RemoveSoraSubscriber` | subscriber を削除（停止済みであること） | `subscriberName` |
-| `StartSoraSubscriber` | RecvOnly 接続を開始 | `subscriberName` |
-| `StopSoraSubscriber` | 接続を停止 | `subscriberName` |
+| `StartSoraSubscriber` | subscriber を作成して RecvOnly 接続を開始 | `subscriberName`, `signalingUrls`, `channelId`, `clientId`, `bundleId`, `metadata` |
+| `StopSoraSubscriber` | 接続を停止して subscriber を削除 | `subscriberName` |
 | `ListSoraSubscribers` | 全 subscriber の一覧・状態・設定を取得 | - |
 | `ListSoraSourceTracks` | 受信中のリモートトラック一覧 | `subscriberName`（省略時は全 subscriber） |
 | `AttachSoraSourceTrack` | トラックを `sora_source` 入力に紐付け | `inputName`, `connectionId`, `trackKind` (`"video"` or `"audio"`) |
@@ -758,25 +756,21 @@ Sora WebRTC Subscriber。sora-rust-sdk を使い、Sora チャネルに RecvOnly
 
 **フロー:**
 
-1. `CreateSoraSubscriber` で subscriber を登録
-2. `CreateInput` で `sora_source` 入力を作成（シーンに配置）
-3. `StartSoraSubscriber` で RecvOnly 接続を開始
-4. `SoraSourceTrackPublished` イベントでトラック到着を検知
-5. `AttachSoraSourceTrack` でトラックを入力に紐付け
-6. 接続切断時: `SoraSourceTrackUnpublished` で自動 detach（入力自体は残る）
-7. 再接続時: 新しい `connectionId` で再 attach → mixer 配置はそのまま
+1. `CreateInput` で `sora_source` 入力を作成（シーンに配置）
+2. `StartSoraSubscriber` で subscriber を作成して RecvOnly 接続を開始
+3. `SoraSourceTrackPublished` イベントでトラック到着を検知
+4. `AttachSoraSourceTrack` でトラックを入力に紐付け
+5. 接続切断時: `SoraSourceTrackUnpublished` で自動 detach（入力自体は残る）
+6. 再接続時: 新しい `connectionId` で再 attach → mixer 配置はそのまま
+7. `StopSoraSubscriber` で接続を停止し subscriber を削除
 
 **エラー条件:**
 
-- subscriber 名の重複: `CreateSoraSubscriber` が `RESOURCE_ALREADY_EXISTS` を返す
-- 未登録の subscriber: `StartSoraSubscriber` 等が `RESOURCE_NOT_FOUND` を返す
-- `signalingUrls` が空、または `channelId` が未設定: `StartSoraSubscriber` が失敗
-- 稼働中の subscriber を削除: `RemoveSoraSubscriber` が `OUTPUT_RUNNING` を返す
+- 同名の subscriber が既に稼働中: `StartSoraSubscriber` が `OUTPUT_RUNNING` を返す
+- `signalingUrls` が空: `StartSoraSubscriber` が `INVALID_REQUEST_FIELD` を返す
+- `channelId` が未設定: `StartSoraSubscriber` が `MISSING_REQUEST_FIELD` を返す
+- 未登録の subscriber を停止: `StopSoraSubscriber` が `RESOURCE_NOT_FOUND` を返す
 - `sora_source` 以外の入力への attach: `AttachSoraSourceTrack` が失敗
-
-**永続化:**
-
-`CreateSoraSubscriber` / `RemoveSoraSubscriber` の設定変更は state file に永続化される。再起動時に subscriber 設定が自動復元される（接続状態は復元されないため、`StartSoraSubscriber` は手動で再実行する必要がある）。
 
 #### `hls`
 

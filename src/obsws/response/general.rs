@@ -77,8 +77,6 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "StopRecord",
     "Sleep",
     // SoraSubscriber / sora_source
-    "CreateSoraSubscriber",
-    "RemoveSoraSubscriber",
     "StartSoraSubscriber",
     "StopSoraSubscriber",
     "ListSoraSubscribers",

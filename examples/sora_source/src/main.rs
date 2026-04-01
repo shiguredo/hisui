@@ -132,7 +132,7 @@ fn make_request_no_data(request_type: &str) -> (String, String) {
     (request_id, msg)
 }
 
-fn make_create_sora_subscriber_request(
+fn make_start_sora_subscriber_request(
     subscriber_name: &str,
     signaling_url: &str,
     channel_id: &str,
@@ -140,30 +140,16 @@ fn make_create_sora_subscriber_request(
     let name = subscriber_name.to_owned();
     let url = signaling_url.to_owned();
     let ch = channel_id.to_owned();
-    make_request("CreateSoraSubscriber", move |f| {
+    make_request("StartSoraSubscriber", move |f| {
         f.member("subscriberName", name.as_str())?;
         f.member("signalingUrls", [url.as_str()])?;
         f.member("channelId", ch.as_str())
     })
 }
 
-fn make_start_sora_subscriber_request(subscriber_name: &str) -> (String, String) {
-    let name = subscriber_name.to_owned();
-    make_request("StartSoraSubscriber", move |f| {
-        f.member("subscriberName", name.as_str())
-    })
-}
-
 fn make_stop_sora_subscriber_request(subscriber_name: &str) -> (String, String) {
     let name = subscriber_name.to_owned();
     make_request("StopSoraSubscriber", move |f| {
-        f.member("subscriberName", name.as_str())
-    })
-}
-
-fn make_remove_sora_subscriber_request(subscriber_name: &str) -> (String, String) {
-    let name = subscriber_name.to_owned();
-    make_request("RemoveSoraSubscriber", move |f| {
         f.member("subscriberName", name.as_str())
     })
 }
@@ -722,13 +708,9 @@ async fn run(
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
     tracing::info!("録画先ディレクトリ設定: {output_dir}");
 
-    // SoraSubscriber 登録・接続
+    // SoraSubscriber 接続開始
     let (req_id, msg) =
-        make_create_sora_subscriber_request(subscriber_name, signaling_url, channel_id);
-    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
-    tracing::info!("CreateSoraSubscriber 成功");
-
-    let (req_id, msg) = make_start_sora_subscriber_request(subscriber_name);
+        make_start_sora_subscriber_request(subscriber_name, signaling_url, channel_id);
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
     tracing::info!("StartSoraSubscriber 成功: signaling={signaling_url}, channel={channel_id}");
 
@@ -805,13 +787,6 @@ async fn run(
         send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await
     {
         tracing::warn!("StopSoraSubscriber 失敗: {e}");
-    }
-
-    let (req_id, msg) = make_remove_sora_subscriber_request(subscriber_name);
-    if let Err(e) =
-        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await
-    {
-        tracing::warn!("RemoveSoraSubscriber 失敗: {e}");
     }
 
     let _ = ws.close(shiguredo_websocket::CloseCode::NORMAL, "bye");

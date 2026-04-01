@@ -352,25 +352,6 @@ impl ObswsCoordinator {
         (actor, handle, shutdown_rx)
     }
 
-    /// state file から読み込んだ SoraSubscriber 設定を復元する。
-    /// actor の run() 開始前に呼ぶこと。
-    pub fn load_sora_subscribers(
-        &mut self,
-        subscribers: Vec<crate::obsws::state_file::StateFileSoraSubscriber>,
-    ) {
-        for sub in subscribers {
-            self.sora_subscribers.insert(
-                sub.subscriber_name,
-                SoraSubscriberState {
-                    settings: sub.settings,
-                    run: None,
-                    remote_tracks: std::collections::HashMap::new(),
-                    connections: std::collections::HashMap::new(),
-                },
-            );
-        }
-    }
-
     /// actor のイベントループを実行する
     pub async fn run(mut self) {
         loop {
@@ -464,10 +445,7 @@ impl ObswsCoordinator {
             && let Some(path) = self.input_registry.state_file_path()
         {
             let path = path.to_path_buf();
-            let mut state =
-                crate::obsws::state_file::build_state_from_registry(&self.input_registry);
-            // SoraSubscriber の設定を state file に注入する
-            state.sora_subscribers = Some(self.build_sora_subscribers_for_state_file());
+            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -521,9 +499,7 @@ impl ObswsCoordinator {
             && let Some(path) = self.input_registry.state_file_path()
         {
             let path = path.to_path_buf();
-            let mut state =
-                crate::obsws::state_file::build_state_from_registry(&self.input_registry);
-            state.sora_subscribers = Some(self.build_sora_subscribers_for_state_file());
+            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -661,16 +637,6 @@ impl ObswsCoordinator {
                     .await
             }
             // --- SoraSubscriber 管理 ---
-            "CreateSoraSubscriber" => self.handle_create_sora_subscriber(
-                &request_type,
-                &request_id,
-                request.request_data.as_ref(),
-            ),
-            "RemoveSoraSubscriber" => self.handle_remove_sora_subscriber(
-                &request_type,
-                &request_id,
-                request.request_data.as_ref(),
-            ),
             "StartSoraSubscriber" => {
                 self.handle_start_sora_subscriber(
                     &request_type,
@@ -3725,9 +3691,6 @@ fn is_state_persisted_request(request_type: &str) -> bool {
             | "SetSceneItemTransform"
             // transition override
             | "SetSceneSceneTransitionOverride"
-            // SoraSubscriber
-            | "CreateSoraSubscriber"
-            | "RemoveSoraSubscriber"
     )
 }
 
@@ -5215,7 +5178,7 @@ impl ObswsCoordinator {
         }
     }
 
-    fn handle_create_sora_subscriber(
+    async fn handle_start_sora_subscriber(
         &mut self,
         request_type: &str,
         request_id: &str,
@@ -5229,40 +5192,55 @@ impl ObswsCoordinator {
                 "Missing requestData",
             );
         };
-        let json = data.value();
-        let subscriber_name: String = match json
-            .to_member("subscriberName")
-            .and_then(|v| v.required()?.try_into())
-        {
+        // requestData から全パラメータをパースする
+        let subscriber_name = match Self::parse_subscriber_name(data) {
             Ok(name) => name,
-            Err(_) => {
+            Err(msg) => {
                 return self.build_error_result(
                     request_type,
                     request_id,
                     REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    "Missing subscriberName field",
+                    &msg,
                 );
             }
         };
+        // 同名の subscriber が既に存在する場合はエラー
         if self.sora_subscribers.contains_key(&subscriber_name) {
             return self.build_error_result(
                 request_type,
                 request_id,
-                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-                "Subscriber already exists",
+                crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                "Subscriber is already active",
             );
         }
+        let json = data.value();
         let signaling_urls: Vec<String> = json
             .to_member("signalingUrls")
             .ok()
             .and_then(|v| v.optional())
             .and_then(|v| v.try_into().ok())
             .unwrap_or_default();
+        if signaling_urls.is_empty() {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "signalingUrls must not be empty",
+            );
+        }
         let channel_id: Option<String> = json
             .to_member("channelId")
             .ok()
             .and_then(|v| v.optional())
             .and_then(|v| v.try_into().ok());
+        let Some(channel_id) = channel_id else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing channelId field",
+            );
+        };
         let client_id: Option<String> = json
             .to_member("clientId")
             .ok()
@@ -5279,138 +5257,27 @@ impl ObswsCoordinator {
             .and_then(|v| v.optional())
             .filter(|v| v.kind().is_object())
             .map(|v| v.extract().into_owned());
+        // SoraSubscriberState を作成して挿入する
+        let settings = crate::obsws::input_registry::ObswsSoraSubscriberSettings {
+            signaling_urls,
+            channel_id: Some(channel_id.clone()),
+            client_id,
+            bundle_id,
+            metadata,
+        };
         self.sora_subscribers.insert(
-            subscriber_name,
+            subscriber_name.clone(),
             SoraSubscriberState {
-                settings: crate::obsws::input_registry::ObswsSoraSubscriberSettings {
-                    signaling_urls,
-                    channel_id,
-                    client_id,
-                    bundle_id,
-                    metadata,
-                },
+                settings,
                 run: None,
                 remote_tracks: std::collections::HashMap::new(),
                 connections: std::collections::HashMap::new(),
             },
         );
-        self.build_result_from_response(
-            crate::obsws::response::build_request_response_success_no_data(
-                request_type,
-                request_id,
-            ),
-            Vec::new(),
-        )
-    }
-
-    fn handle_remove_sora_subscriber(
-        &mut self,
-        request_type: &str,
-        request_id: &str,
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> CommandResult {
-        let Some(data) = request_data else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_DATA,
-                "Missing requestData",
-            );
-        };
-        let subscriber_name = match Self::parse_subscriber_name(data) {
-            Ok(name) => name,
-            Err(msg) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    &msg,
-                );
-            }
-        };
-        let Some(state) = self.sora_subscribers.get(&subscriber_name) else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Subscriber not found",
-            );
-        };
-        if state.run.is_some() {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
-                "Subscriber is currently active; stop it before removing",
-            );
-        }
-        self.sora_subscribers.remove(&subscriber_name);
-        self.build_result_from_response(
-            crate::obsws::response::build_request_response_success_no_data(
-                request_type,
-                request_id,
-            ),
-            Vec::new(),
-        )
-    }
-
-    async fn handle_start_sora_subscriber(
-        &mut self,
-        request_type: &str,
-        request_id: &str,
-        request_data: Option<&nojson::RawJsonOwned>,
-    ) -> CommandResult {
-        let Some(data) = request_data else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_DATA,
-                "Missing requestData",
-            );
-        };
-        let subscriber_name = match Self::parse_subscriber_name(data) {
-            Ok(name) => name,
-            Err(msg) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                    &msg,
-                );
-            }
-        };
-        let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Subscriber not found",
-            );
-        };
-        if state.run.is_some() {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
-                "Subscriber is already active",
-            );
-        }
-        if state.settings.signaling_urls.is_empty() {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "Missing signalingUrls in subscriber settings",
-            );
-        }
-        let Some(channel_id) = state.settings.channel_id.clone() else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "Missing channelId in subscriber settings",
-            );
-        };
+        let state = self
+            .sora_subscribers
+            .get_mut(&subscriber_name)
+            .expect("subscriber was just inserted");
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
             return self.build_error_result(
                 request_type,
@@ -5479,29 +5346,48 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Subscriber not found",
-            );
-        };
-        let Some(run) = state.run.take() else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                "Subscriber is not active",
-            );
-        };
+        // subscriber の存在と稼働状態を確認する
+        let is_active = self
+            .sora_subscribers
+            .get(&subscriber_name)
+            .map(|s| s.run.is_some());
+        match is_active {
+            None => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Subscriber not found",
+                );
+            }
+            Some(false) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Subscriber is not active",
+                );
+            }
+            Some(true) => {}
+        }
+        // subscriber を削除して所有権を取得する
+        let mut removed_state = self
+            .sora_subscribers
+            .remove(&subscriber_name)
+            .expect("subscriber existence was just verified");
+        let run = removed_state
+            .run
+            .take()
+            .expect("subscriber was verified as active");
         if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
             && let Err(e) =
                 terminate_and_wait(pipeline_handle, std::slice::from_ref(&run.processor_id)).await
         {
             tracing::warn!("failed to stop sora subscriber processor: {}", e.display());
         }
-        let drained: Vec<(String, SoraSourceRemoteTrack)> = state.remote_tracks.drain().collect();
+        // remote_tracks をクリーンアップする
+        let drained: Vec<(String, SoraSourceRemoteTrack)> =
+            removed_state.remote_tracks.into_iter().collect();
         for (_track_id, rt) in drained {
             rt.holder_abort.abort();
             if let Some(input_name) = &rt.attached_input_name {
@@ -5880,20 +5766,5 @@ impl ObswsCoordinator {
         json.to_member("subscriberName")
             .and_then(|v| v.required()?.try_into())
             .map_err(|_| "Missing subscriberName field".to_string())
-    }
-
-    /// state file 保存用に SoraSubscriber の設定一覧を構築する
-    fn build_sora_subscribers_for_state_file(
-        &self,
-    ) -> Vec<crate::obsws::state_file::StateFileSoraSubscriber> {
-        self.sora_subscribers
-            .iter()
-            .map(
-                |(name, state)| crate::obsws::state_file::StateFileSoraSubscriber {
-                    subscriber_name: name.clone(),
-                    settings: state.settings.clone(),
-                },
-            )
-            .collect()
     }
 }
