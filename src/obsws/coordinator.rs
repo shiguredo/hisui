@@ -406,14 +406,6 @@ impl ObswsCoordinator {
                 }
                 event = self.sora_source_event_rx.recv() => {
                     if let Some(event) = event {
-                        let event_name = match &event {
-                            crate::sora_source::SoraSourceEvent::TrackReceived { .. } => "TrackReceived",
-                            crate::sora_source::SoraSourceEvent::TrackRemoved { .. } => "TrackRemoved",
-                            crate::sora_source::SoraSourceEvent::Notify { .. } => "Notify",
-                            crate::sora_source::SoraSourceEvent::WebSocketClose { .. } => "WebSocketClose",
-                            crate::sora_source::SoraSourceEvent::Disconnected { .. } => "Disconnected",
-                        };
-                        tracing::debug!("coordinator received sora_source event: {}", event_name);
                         self.handle_sora_source_event(event);
                     }
                 }
@@ -4998,7 +4990,7 @@ impl ObswsCoordinator {
                 let track = receiver.track();
                 let track_id = track.id().unwrap_or_default();
                 let track_kind = track.kind().unwrap_or_default();
-                tracing::info!(
+                tracing::debug!(
                     "TrackReceived: subscriber={}, track_id={}, kind={}",
                     subscriber_name,
                     track_id,
@@ -5717,7 +5709,7 @@ impl ObswsCoordinator {
                 });
                 match reply_rx.await {
                     Ok(Ok(publisher)) => {
-                        tracing::info!(
+                        tracing::debug!(
                             "AttachSoraSourceTrack: publish_track succeeded, track_id={}, sending Attach command",
                             pipeline_track_id
                         );

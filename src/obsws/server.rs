@@ -425,12 +425,20 @@ async fn handle_ws_connection(
                 }
                 event = broadcast_rx.recv() => {
                     if let Ok(event) = event {
-                        // subscription flag でフィルタリング
-                        if (session.event_subscriptions() & event.subscription_flag) != 0
-                            && let Err(e) = ws.send_text(&event.text.to_string()) {
+                        // broadcast イベントのうち、WebSocket セッションで配信するのは
+                        // リクエスト処理の外部で発生するイベントのみ。
+                        // InputSettingsChanged 等のリクエスト由来のイベントは
+                        // CommandResult.events 経由で送信されるため、ここでは除外する。
+                        let is_broadcast_only_event =
+                            event.subscription_flag == crate::obsws::protocol::OBSWS_EVENT_SUB_SORA_SOURCE;
+                        if is_broadcast_only_event
+                            && (session.event_subscriptions() & event.subscription_flag) != 0
+                        {
+                            if let Err(e) = ws.send_text(&event.text.to_string()) {
                                 tracing::warn!("failed to send broadcast event: {e}");
                                 break;
                             }
+                        }
                     }
                     // Lagged エラーの場合は無視して続行
                 }

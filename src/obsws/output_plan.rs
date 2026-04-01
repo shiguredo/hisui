@@ -103,13 +103,30 @@ pub fn build_composed_output_plan(
         .filter_map(|(plan, scene_input)| {
             let video_track_id = plan.source_video_track_id.as_ref()?;
             let transform = &scene_input.transform;
-            let width = if transform.width > 0.0 {
-                Some(round_to_even(transform.width))
+            // width/height が 0（ソースサイズ未確定）の場合、bounds をフォールバックとして使用する。
+            // sora_source のような外部フレーム供給型のソースでは、
+            // フレーム到着前に source_width/height が確定しないため。
+            let effective_width = if transform.width > 0.0 {
+                transform.width
+            } else if transform.bounds_width > 0.0 {
+                transform.bounds_width
+            } else {
+                0.0
+            };
+            let effective_height = if transform.height > 0.0 {
+                transform.height
+            } else if transform.bounds_height > 0.0 {
+                transform.bounds_height
+            } else {
+                0.0
+            };
+            let width = if effective_width > 0.0 {
+                Some(round_to_even(effective_width))
             } else {
                 None
             };
-            let height = if transform.height > 0.0 {
-                Some(round_to_even(transform.height))
+            let height = if effective_height > 0.0 {
+                Some(round_to_even(effective_height))
             } else {
                 None
             };
