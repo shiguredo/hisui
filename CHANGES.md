@@ -131,7 +131,7 @@
 - [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0-canary.2 にあげる
+- [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが https://github.com/shiguredo/nvcodec-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_libvpx のバージョンを 2026.1.0-canary.3 にあげる
@@ -156,6 +156,10 @@
   - バージョンが `-canary.X` は `.devX` 形式に変換される
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtmp を追加する
+  - @sile
+- [ADD] VideoToolbox デコーダーで VP9 と AV1 のハードウェアデコードに対応する
+  - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
+  - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
 - [CHANGE] FDK-AAC を `fdk-aac` feature フラグによるビルド時有効化と、`--fdk-aac` オプションによる実行時の共有ライブラリ指定を併用する方式に変更する
   - @sile
@@ -190,8 +194,7 @@
 
 ### misc
 
-- libvpx feature を削除して shiguredo_libvpx を常に有効にする
-  - shiguredo_libvpx のリポジトリを外出ししたことで、ビルドに時間が大幅に短縮されたので feature にする必要がなくなったため
+- [UPDATE] 映像コーデックエンジンの選択を各コーデック crate の `supported_codecs()` を使った実行時検出に統一する
   - @sile
 - [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
   - @sile
@@ -213,6 +216,9 @@
 - [ADD] python/tests に Hisui Python バインディングのテストコードを追加する
   - @voluntas
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
+  - @sile
+- [CHANGE] libvpx feature を削除して shiguredo_libvpx を常に有効にする
+  - shiguredo_libvpx のリポジトリを外出ししたことで、ビルドに時間が大幅に短縮されたので feature にする必要がなくなったため
   - @sile
 - [CHANGE] Slack 通知を rtCamp/action-slack-notify から shiguredo/github-actions の slack-notify に置き換える
   - @voluntas

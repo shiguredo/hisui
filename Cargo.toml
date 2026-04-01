@@ -53,7 +53,7 @@ libc = "=0.2.183"
 shiguredo_dav1d = "=2026.1.0-canary.3"
 shiguredo_libvpx = { workspace = true }
 shiguredo_libyuv = "=2026.1.0-canary.3"
-shiguredo_nvcodec = { version = "=2026.1.0-canary.2", optional = true }
+shiguredo_nvcodec = { version = "=2026.1.0", optional = true }
 shiguredo_openh264 = "=2026.1.0"
 shiguredo_opus = { workspace = true }
 shiguredo_svt_av1 = "=2026.1.0-canary.2"

@@ -12,9 +12,13 @@ pub struct VideoToolboxDecoder {
     decoded: Option<VideoFrame>,
 
     // デコーダーの再初期化が必要かどうかの判定に使うフィールド
+    //
+    // H264/H265: VPS/SPS/PPS の変化で判定（resolution は未使用）
+    // VP9/AV1: 解像度の変化で判定（vps/sps/pps は未使用）
     vps: Vec<u8>,
     sps: Vec<u8>,
     pps: Vec<u8>,
+    resolution: Option<(u32, u32)>,
 }
 
 impl VideoToolboxDecoder {
@@ -37,6 +41,7 @@ impl VideoToolboxDecoder {
             vps: Vec::new(),
             sps,
             pps,
+            resolution: None,
         })
     }
 
@@ -60,10 +65,55 @@ impl VideoToolboxDecoder {
             vps: vps.to_vec(),
             sps: sps.to_vec(),
             pps: pps.to_vec(),
+            resolution: None,
         })
     }
 
-    // VPS / SPS / PPS の情報が変わっていたらデコーダーを再初期化する
+    pub fn new_vp9(frame: &VideoFrame) -> crate::Result<Self> {
+        let (width, height) = get_frame_resolution(frame, "VP9")?;
+        tracing::debug!("Initialize VP9 decoder: width={width}, height={height}");
+        Self::new_raw_codec(
+            shiguredo_video_toolbox::DecoderCodec::Vp9 { width, height },
+            width,
+            height,
+        )
+    }
+
+    pub fn new_av1(frame: &VideoFrame) -> crate::Result<Self> {
+        let (width, height) = get_frame_resolution(frame, "AV1")?;
+        tracing::debug!("Initialize AV1 decoder: width={width}, height={height}");
+        Self::new_raw_codec(
+            shiguredo_video_toolbox::DecoderCodec::Av1 { width, height },
+            width,
+            height,
+        )
+    }
+
+    /// VP9/AV1 共通のデコーダー生成
+    fn new_raw_codec(
+        codec: shiguredo_video_toolbox::DecoderCodec<'_>,
+        width: u32,
+        height: u32,
+    ) -> crate::Result<Self> {
+        let inner =
+            shiguredo_video_toolbox::Decoder::new(shiguredo_video_toolbox::DecoderConfig {
+                codec,
+                pixel_format: shiguredo_video_toolbox::PixelFormat::I420,
+            })?;
+        Ok(Self {
+            inner,
+            decoded: None,
+            vps: Vec::new(),
+            sps: Vec::new(),
+            pps: Vec::new(),
+            resolution: Some((width, height)),
+        })
+    }
+
+    // デコーダーの再初期化が必要かどうかを判定し、必要であれば再初期化する
+    //
+    // H264/H265: VPS/SPS/PPS の変化で判定
+    // VP9/AV1: 解像度の変化で判定
     //
     // [NOTE] WebM 対応がなくなったら VideoDecoder 側でサンプルエントリーの変更を見てハンドリングできる
     fn reinitialize_if_need(&mut self, frame: &VideoFrame) -> crate::Result<()> {
@@ -72,47 +122,79 @@ impl VideoToolboxDecoder {
             return Ok(());
         }
 
-        if frame.format == VideoFormat::H265 {
-            // [NOTE] VPS / SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
-            if let Ok((vps, sps, pps)) = get_h265_vps_sps_pps(frame) {
-                if vps == self.vps && sps == self.sps && pps == self.pps {
-                    // 情報は変わっていない
-                    return Ok(());
-                }
+        match frame.format {
+            VideoFormat::H265 => {
+                // [NOTE] VPS / SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
+                if let Ok((vps, sps, pps)) = get_h265_vps_sps_pps(frame) {
+                    if vps == self.vps && sps == self.sps && pps == self.pps {
+                        return Ok(());
+                    }
 
-                // 変わっているので再初期化
-                if self.decoded.is_some() {
-                    return Err(crate::Error::new(
-                        "cannot reinitialize decoder while decoded frame is pending",
-                    ));
+                    if self.decoded.is_some() {
+                        return Err(crate::Error::new(
+                            "cannot reinitialize decoder while decoded frame is pending",
+                        ));
+                    }
+                    *self = Self::new_h265(frame)?;
                 }
-                *self = Self::new_h265(frame)?;
             }
-        } else {
-            // [NOTE] VPS / SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
-            if let Ok((sps, pps)) = get_h264_sps_pps(frame) {
-                if sps == self.sps && pps == self.pps {
-                    // 情報は変わっていない
-                    return Ok(());
-                }
+            VideoFormat::H264 | VideoFormat::H264AnnexB => {
+                // [NOTE] SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
+                if let Ok((sps, pps)) = get_h264_sps_pps(frame) {
+                    if sps == self.sps && pps == self.pps {
+                        return Ok(());
+                    }
 
-                // 変わっているので再初期化
-                if self.decoded.is_some() {
-                    return Err(crate::Error::new(
-                        "cannot reinitialize decoder while decoded frame is pending",
-                    ));
+                    if self.decoded.is_some() {
+                        return Err(crate::Error::new(
+                            "cannot reinitialize decoder while decoded frame is pending",
+                        ));
+                    }
+                    *self = Self::new_h264(frame)?;
                 }
-                *self = Self::new_h264(frame)?;
             }
+            VideoFormat::Vp9 => {
+                self.reinitialize_raw_codec_if_need(frame, "VP9", Self::new_vp9)?;
+            }
+            VideoFormat::Av1 => {
+                self.reinitialize_raw_codec_if_need(frame, "AV1", Self::new_av1)?;
+            }
+            _ => {}
         }
 
+        Ok(())
+    }
+
+    /// VP9/AV1 の解像度変更時にデコーダーを再作成する
+    fn reinitialize_raw_codec_if_need(
+        &mut self,
+        frame: &VideoFrame,
+        codec_name: &str,
+        constructor: fn(&VideoFrame) -> crate::Result<Self>,
+    ) -> crate::Result<()> {
+        let (new_width, new_height) = get_frame_resolution(frame, codec_name)?;
+        if Some((new_width, new_height)) == self.resolution {
+            return Ok(());
+        }
+
+        if self.decoded.is_some() {
+            return Err(crate::Error::new(
+                "cannot reinitialize decoder while decoded frame is pending",
+            ));
+        }
+
+        *self = constructor(frame)?;
         Ok(())
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !matches!(
             frame.format,
-            VideoFormat::H264 | VideoFormat::H264AnnexB | VideoFormat::H265
+            VideoFormat::H264
+                | VideoFormat::H264AnnexB
+                | VideoFormat::H265
+                | VideoFormat::Vp9
+                | VideoFormat::Av1
         ) {
             return Err(crate::Error::new(format!(
                 "unsupported input format for VideoToolbox decoder: {:?}",
@@ -132,6 +214,7 @@ impl VideoToolboxDecoder {
             }
             self.inner.decode(&data)?
         } else {
+            // VP9/AV1 はデータをそのまま渡す（NALU 変換不要）
             self.inner.decode(&frame.data)?
         };
         let Some(decoded) = decoded else {
@@ -215,6 +298,18 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
     }
 
     Ok((sps, pps))
+}
+
+/// VP9/AV1 フレームから解像度を取得する
+fn get_frame_resolution(frame: &VideoFrame, codec_name: &str) -> crate::Result<(u32, u32)> {
+    let size = frame.size.ok_or_else(|| {
+        crate::Error::new(format!(
+            "{codec_name} frame size is required for VideoToolbox decoder"
+        ))
+    })?;
+    let width = u32::try_from(size.width).expect("frame width exceeds u32::MAX");
+    let height = u32::try_from(size.height).expect("frame height exceeds u32::MAX");
+    Ok((width, height))
 }
 
 fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8])> {
