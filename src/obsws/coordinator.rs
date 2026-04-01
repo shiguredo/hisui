@@ -3594,8 +3594,10 @@ impl OutputOperationOutcome {
 fn is_state_persisted_request(request_type: &str) -> bool {
     matches!(
         request_type,
-        // output 設定
-        "SetStreamServiceSettings"
+        // config
+        "SetPersistentData"
+            // output 設定
+            | "SetStreamServiceSettings"
             | "SetRecordDirectory"
             | "SetOutputSettings"
             // scene

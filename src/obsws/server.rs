@@ -154,6 +154,10 @@ pub async fn run_server(
         if let Some(settings) = state.dash {
             input_registry.set_dash_settings(settings);
         }
+        // persistent data の復元
+        if let Some(data) = state.persistent_data {
+            input_registry.restore_persistent_data(data);
+        }
         // scene / input の復元
         match (state.scenes, state.inputs) {
             (Some(scenes), inputs) => {

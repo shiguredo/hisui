@@ -104,6 +104,7 @@ impl ObswsInputRegistry {
             canvas_height,
             frame_rate,
             state_file_path,
+            persistent_data: BTreeMap::new(),
         }
     }
 
@@ -337,6 +338,23 @@ impl ObswsInputRegistry {
 
     pub fn state_file_path(&self) -> Option<&Path> {
         self.state_file_path.as_deref()
+    }
+
+    pub fn persistent_data(&self) -> &BTreeMap<String, nojson::RawJsonOwned> {
+        &self.persistent_data
+    }
+
+    pub fn get_persistent_data(&self, slot_name: &str) -> Option<&nojson::RawJsonOwned> {
+        self.persistent_data.get(slot_name)
+    }
+
+    pub fn set_persistent_data(&mut self, slot_name: String, slot_value: nojson::RawJsonOwned) {
+        self.persistent_data.insert(slot_name, slot_value);
+    }
+
+    /// state file から読み込んだ persistent data を一括復元する。
+    pub fn restore_persistent_data(&mut self, data: BTreeMap<String, nojson::RawJsonOwned>) {
+        self.persistent_data = data;
     }
 
     pub fn list_inputs(&self) -> Vec<ObswsInputEntry> {

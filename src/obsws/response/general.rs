@@ -1,6 +1,10 @@
 use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::message::ObswsSessionStats;
-use crate::obsws::protocol::{OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION};
+use crate::obsws::protocol::{
+    OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_DATA,
+    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+};
 #[cfg(unix)]
 use std::ffi::CString;
 #[cfg(unix)]
@@ -56,6 +60,8 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "GetInputDefaultSettings",
     "CreateInput",
     "RemoveInput",
+    "GetPersistentData",
+    "SetPersistentData",
     "GetStreamServiceSettings",
     "SetStreamServiceSettings",
     "GetOutputList",
@@ -310,4 +316,224 @@ pub fn build_get_scene_list_response(
         f.member("currentPreviewSceneUuid", Option::<&str>::None)?;
         f.member("scenes", &scenes)
     })
+}
+
+pub fn build_get_persistent_data_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let Some(request_data) = request_data else {
+        return super::build_request_response_error(
+            "GetPersistentData",
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_DATA,
+            "Missing required requestData field",
+        );
+    };
+
+    let realm: Option<String> = match request_data.value().to_member("realm") {
+        Ok(m) => match m.try_into() {
+            Ok(v) => v,
+            Err(e) => {
+                return super::build_request_response_error(
+                    "GetPersistentData",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e.to_string(),
+                );
+            }
+        },
+        Err(e) => {
+            return super::build_request_response_error(
+                "GetPersistentData",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                &e.to_string(),
+            );
+        }
+    };
+    let Some(realm) = realm.filter(|s| !s.is_empty()) else {
+        return super::build_request_response_error(
+            "GetPersistentData",
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            "Missing required field: realm",
+        );
+    };
+    if let Err(response) = validate_realm("GetPersistentData", request_id, &realm) {
+        return response;
+    }
+
+    let slot_name: Option<String> = match request_data.value().to_member("slotName") {
+        Ok(m) => match m.try_into() {
+            Ok(v) => v,
+            Err(e) => {
+                return super::build_request_response_error(
+                    "GetPersistentData",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e.to_string(),
+                );
+            }
+        },
+        Err(e) => {
+            return super::build_request_response_error(
+                "GetPersistentData",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                &e.to_string(),
+            );
+        }
+    };
+    let Some(slot_name) = slot_name.filter(|s| !s.is_empty()) else {
+        return super::build_request_response_error(
+            "GetPersistentData",
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            "Missing required field: slotName",
+        );
+    };
+
+    let slot_value = input_registry.get_persistent_data(&slot_name);
+    super::build_request_response_success("GetPersistentData", request_id, |f| match slot_value {
+        Some(value) => f.member("slotValue", value),
+        None => f.member("slotValue", Option::<&str>::None),
+    })
+}
+
+pub fn build_set_persistent_data_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let Some(request_data) = request_data else {
+        return super::build_request_response_error(
+            "SetPersistentData",
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_DATA,
+            "Missing required requestData field",
+        );
+    };
+
+    let realm: Option<String> = match request_data.value().to_member("realm") {
+        Ok(m) => match m.try_into() {
+            Ok(v) => v,
+            Err(e) => {
+                return super::build_request_response_error(
+                    "SetPersistentData",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e.to_string(),
+                );
+            }
+        },
+        Err(e) => {
+            return super::build_request_response_error(
+                "SetPersistentData",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                &e.to_string(),
+            );
+        }
+    };
+    let Some(realm) = realm.filter(|s| !s.is_empty()) else {
+        return super::build_request_response_error(
+            "SetPersistentData",
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            "Missing required field: realm",
+        );
+    };
+    if let Err(response) = validate_realm("SetPersistentData", request_id, &realm) {
+        return response;
+    }
+
+    let slot_name: Option<String> = match request_data.value().to_member("slotName") {
+        Ok(m) => match m.try_into() {
+            Ok(v) => v,
+            Err(e) => {
+                return super::build_request_response_error(
+                    "SetPersistentData",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e.to_string(),
+                );
+            }
+        },
+        Err(e) => {
+            return super::build_request_response_error(
+                "SetPersistentData",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                &e.to_string(),
+            );
+        }
+    };
+    let Some(slot_name) = slot_name.filter(|s| !s.is_empty()) else {
+        return super::build_request_response_error(
+            "SetPersistentData",
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            "Missing required field: slotName",
+        );
+    };
+
+    // slotValue を RawJsonOwned としてそのまま取り出す
+    let slot_value_member = request_data.value().to_member("slotValue");
+    let slot_value: Option<nojson::RawJsonOwned> = match slot_value_member {
+        Ok(m) => match m.try_into() {
+            Ok(v) => v,
+            Err(e) => {
+                return super::build_request_response_error(
+                    "SetPersistentData",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e.to_string(),
+                );
+            }
+        },
+        Err(e) => {
+            return super::build_request_response_error(
+                "SetPersistentData",
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                &e.to_string(),
+            );
+        }
+    };
+    let Some(slot_value) = slot_value else {
+        return super::build_request_response_error(
+            "SetPersistentData",
+            request_id,
+            REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            "Missing required field: slotValue",
+        );
+    };
+
+    input_registry.set_persistent_data(slot_name, slot_value);
+    super::build_request_response_success_no_data("SetPersistentData", request_id)
+}
+
+/// realm の値を検証する。GLOBAL のみ対応。
+fn validate_realm(
+    request_type: &str,
+    request_id: &str,
+    realm: &str,
+) -> Result<(), nojson::RawJsonOwned> {
+    match realm {
+        "OBS_WEBSOCKET_DATA_REALM_GLOBAL" => Ok(()),
+        "OBS_WEBSOCKET_DATA_REALM_PROFILE" => Err(super::build_request_response_error(
+            request_type,
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "Unsupported realm: only OBS_WEBSOCKET_DATA_REALM_GLOBAL is supported",
+        )),
+        _ => Err(super::build_request_response_error(
+            request_type,
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "Invalid realm value",
+        )),
+    }
 }
