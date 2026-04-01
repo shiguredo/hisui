@@ -23,6 +23,9 @@ pub const OBSWS_EVENT_SUB_INPUTS: u32 = 1 << 3;
 pub const OBSWS_EVENT_SUB_OUTPUTS: u32 = 1 << 6;
 pub const OBSWS_EVENT_SUB_SCENE_ITEMS: u32 = 1 << 7;
 pub const OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED: u32 = 1 << 19;
+/// SoraSubscriber / sora_source 関連イベント用の subscription flag。
+/// OBS WebSocket 標準の bit 0-9 とは別の範囲を使い、明示的に subscribe したクライアントのみに配信する。
+pub const OBSWS_EVENT_SUB_SORA_SOURCE: u32 = 1 << 20;
 
 /// OBS WebSocket プロトコルにおける EventSubscription::All のデフォルト値。
 /// Identify の eventSubscriptions が省略された場合に使用する。

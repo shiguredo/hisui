@@ -26,6 +26,7 @@ pub mod rtsp;
 pub mod s3;
 pub mod sora;
 pub(crate) mod sora_publisher;
+pub(crate) mod sora_source;
 pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;

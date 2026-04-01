@@ -64,14 +64,14 @@ mod tests {
                 path: Some("testdata/beep-aac-audio.mp4".to_owned()),
                 loop_playback: true,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
         .expect("audio-only mp4 source plan must succeed");
         assert_eq!(
             plan.source_audio_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:record:1:source:0:raw_audio")
+            Some("obsws:program:1:source:0:raw_audio")
         );
         assert_eq!(plan.source_video_track_id, None);
 
@@ -93,7 +93,7 @@ mod tests {
                 path: Some("testdata/archive-red-320x320-h264.mp4".to_owned()),
                 loop_playback: false,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             2,
             "0",
         )
@@ -101,7 +101,7 @@ mod tests {
         assert_eq!(plan.source_audio_track_id, None);
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:record:2:source:0:raw_video")
+            Some("obsws:program:2:source:0:raw_video")
         );
 
         assert_eq!(plan.requests.len(), 1);

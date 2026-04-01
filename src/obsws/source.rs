@@ -8,24 +8,19 @@ mod mp4;
 pub mod png_file;
 mod rtmp_inbound;
 mod rtsp_subscriber;
+pub mod sora_source;
 mod srt_inbound;
 pub mod video_device;
 pub mod webrtc_source;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObswsOutputKind {
-    Stream,
-    Record,
-    RtmpOutbound,
     Program,
 }
 
 impl ObswsOutputKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Stream => "stream",
-            Self::Record => "record",
-            Self::RtmpOutbound => "rtmp_outbound",
             Self::Program => "program",
         }
     }
@@ -277,6 +272,9 @@ pub fn build_record_source_plan(
         }
         ObswsInputSettings::WebRtcSource(_) => {
             webrtc_source::build_record_source_plan(output_kind, source_key)
+        }
+        ObswsInputSettings::SoraSource(_) => {
+            sora_source::build_record_source_plan(output_kind, source_key)
         }
     }
 }

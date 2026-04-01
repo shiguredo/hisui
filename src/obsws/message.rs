@@ -1051,7 +1051,6 @@ mod tests {
         let mut input_registry = input_registry();
         input_registry
             .activate_stream(ObswsStreamRun {
-                source_processor_ids: vec![ProcessorId::new("source")],
                 video: ObswsRecordTrackRun {
                     encoder_processor_id: ProcessorId::new("encoder"),
                     source_track_id: TrackId::new("source-track"),
@@ -1062,8 +1061,6 @@ mod tests {
                     source_track_id: TrackId::new("audio-source-track"),
                     encoded_track_id: TrackId::new("audio-encoded-track"),
                 },
-                audio_mixer_processor_id: ProcessorId::new("audio-mixer"),
-                video_mixer_processor_id: ProcessorId::new("video-mixer"),
                 publisher_processor_id: ProcessorId::new("publisher"),
             })
             .expect("stream activation must succeed");
@@ -1128,7 +1125,6 @@ mod tests {
         let mut input_registry = ObswsInputRegistry::new_for_test();
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_ids: vec![ProcessorId::new("source")],
                 video: ObswsRecordTrackRun {
                     encoder_processor_id: ProcessorId::new("encoder"),
                     source_track_id: TrackId::new("source-track"),
@@ -1139,8 +1135,6 @@ mod tests {
                     source_track_id: TrackId::new("audio-source-track"),
                     encoded_track_id: TrackId::new("audio-encoded-track"),
                 },
-                audio_mixer_processor_id: ProcessorId::new("audio-mixer"),
-                video_mixer_processor_id: ProcessorId::new("video-mixer"),
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: output_path.clone(),
             })
@@ -1285,7 +1279,6 @@ mod tests {
         let mut input_registry = input_registry();
         input_registry
             .activate_stream(ObswsStreamRun {
-                source_processor_ids: vec![ProcessorId::new("source")],
                 video: ObswsRecordTrackRun {
                     encoder_processor_id: ProcessorId::new("encoder"),
                     source_track_id: TrackId::new("source-track"),
@@ -1296,14 +1289,11 @@ mod tests {
                     source_track_id: TrackId::new("audio-source-track"),
                     encoded_track_id: TrackId::new("audio-encoded-track"),
                 },
-                audio_mixer_processor_id: ProcessorId::new("audio-mixer"),
-                video_mixer_processor_id: ProcessorId::new("video-mixer"),
                 publisher_processor_id: ProcessorId::new("publisher"),
             })
             .expect("stream activation must succeed");
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_ids: vec![ProcessorId::new("source")],
                 video: ObswsRecordTrackRun {
                     encoder_processor_id: ProcessorId::new("encoder-record"),
                     source_track_id: TrackId::new("record-source-track"),
@@ -1314,8 +1304,6 @@ mod tests {
                     source_track_id: TrackId::new("record-audio-source-track"),
                     encoded_track_id: TrackId::new("record-audio-encoded-track"),
                 },
-                audio_mixer_processor_id: ProcessorId::new("audio-mixer-record"),
-                video_mixer_processor_id: ProcessorId::new("video-mixer-record"),
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })
@@ -2017,7 +2005,6 @@ mod tests {
         let mut input_registry = input_registry();
         input_registry
             .activate_record(ObswsRecordRun {
-                source_processor_ids: vec![ProcessorId::new("source")],
                 video: ObswsRecordTrackRun {
                     encoder_processor_id: ProcessorId::new("encoder"),
                     source_track_id: TrackId::new("source-track"),
@@ -2028,8 +2015,6 @@ mod tests {
                     source_track_id: TrackId::new("audio-source-track"),
                     encoded_track_id: TrackId::new("audio-encoded-track"),
                 },
-                audio_mixer_processor_id: ProcessorId::new("audio-mixer"),
-                video_mixer_processor_id: ProcessorId::new("video-mixer"),
                 writer_processor_id: ProcessorId::new("writer"),
                 output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
             })

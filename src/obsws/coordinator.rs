@@ -3,7 +3,7 @@ use crate::obsws::message::ObswsSessionStats;
 use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
     OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED, OBSWS_EVENT_SUB_SCENE_ITEMS,
-    OBSWS_EVENT_SUB_SCENES, REQUEST_STATUS_MISSING_REQUEST_DATA,
+    OBSWS_EVENT_SUB_SCENES, OBSWS_EVENT_SUB_SORA_SOURCE, REQUEST_STATUS_MISSING_REQUEST_DATA,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
@@ -259,6 +259,57 @@ pub struct ObswsCoordinator {
     should_terminate: bool,
     /// 致命的エラー発生時にサーバーへ通知するための送信側
     shutdown_tx: tokio::sync::watch::Sender<bool>,
+    /// SoraSubscriber の状態管理（subscriberName → 状態）
+    sora_subscribers: std::collections::BTreeMap<String, SoraSubscriberState>,
+    /// SoraSubscriber からのイベント受信チャネル
+    sora_source_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::sora_source::SoraSourceEvent>,
+    /// SoraSubscriber からのイベント送信チャネル（processor に渡す）
+    sora_source_event_tx: tokio::sync::mpsc::UnboundedSender<crate::sora_source::SoraSourceEvent>,
+}
+
+/// SoraSubscriber の状態
+struct SoraSubscriberState {
+    settings: crate::obsws::input_registry::ObswsSoraSubscriberSettings,
+    run: Option<SoraSubscriberRun>,
+    /// 受信中のリモートトラック（trackId → トラック情報）
+    remote_tracks: std::collections::HashMap<String, SoraSourceRemoteTrack>,
+    /// on_notify から抽出した接続情報（connection_id → info）
+    connections: std::collections::HashMap<String, SoraConnectionInfo>,
+}
+
+/// 実行中の SoraSubscriber の情報
+#[derive(Clone)]
+struct SoraSubscriberRun {
+    processor_id: crate::ProcessorId,
+}
+
+/// SoraSubscriber から受信したリモートトラックのメタデータ。
+///
+/// WebRTC の型（RtpTransceiver, VideoSink 等）は !Sync のため coordinator に直接保持できない。
+/// 実際のフレーム転送は coordinator の外のタスクで管理し、coordinator はメタデータのみ保持する。
+struct SoraSourceRemoteTrack {
+    connection_id: String,
+    client_id: Option<String>,
+    track_kind: String,
+    /// attach 先の input 名
+    attached_input_name: Option<String>,
+    /// attach 先の pipeline track ID
+    attached_pipeline_track_id: Option<crate::TrackId>,
+    /// holder タスクへのコマンド送信チャネル（Send+Sync）
+    command_tx: tokio::sync::mpsc::UnboundedSender<crate::sora_source::SoraTrackCommand>,
+    /// holder タスクの停止用ハンドル
+    holder_abort: tokio::task::AbortHandle,
+}
+
+impl Drop for SoraSourceRemoteTrack {
+    fn drop(&mut self) {
+        self.holder_abort.abort();
+    }
+}
+
+/// SoraSubscriber の on_notify から抽出した接続情報
+struct SoraConnectionInfo {
+    client_id: Option<String>,
 }
 
 impl ObswsCoordinator {
@@ -279,6 +330,7 @@ impl ObswsCoordinator {
         let (bootstrap_event_tx, _) = tokio::sync::broadcast::channel(64);
         let (obsws_event_tx, _) = tokio::sync::broadcast::channel(64);
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        let (sora_source_event_tx, sora_source_event_rx) = tokio::sync::mpsc::unbounded_channel();
         let program_track_ids = ProgramTrackIds {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
@@ -293,6 +345,9 @@ impl ObswsCoordinator {
             bootstrap_event_tx: bootstrap_event_tx.clone(),
             should_terminate: false,
             shutdown_tx,
+            sora_subscribers: std::collections::BTreeMap::new(),
+            sora_source_event_rx,
+            sora_source_event_tx,
         };
         let handle = ObswsCoordinatorHandle {
             command_tx,
@@ -305,62 +360,69 @@ impl ObswsCoordinator {
 
     /// actor のイベントループを実行する
     pub async fn run(mut self) {
-        while let Some(command) = self.command_rx.recv().await {
-            match command {
-                ObswsCoordinatorCommand::ProcessRequest {
-                    request,
-                    session_stats,
-                    reply_tx,
-                } => {
-                    let result = self.handle_request(request, &session_stats).await;
-                    let _ = reply_tx.send(result);
+        loop {
+            tokio::select! {
+                command = self.command_rx.recv() => {
+                    let Some(command) = command else { break; };
+                    match command {
+                        ObswsCoordinatorCommand::ProcessRequest {
+                            request,
+                            session_stats,
+                            reply_tx,
+                        } => {
+                            let result = self.handle_request(request, &session_stats).await;
+                            let _ = reply_tx.send(result);
+                        }
+                        ObswsCoordinatorCommand::ProcessRequestBatch {
+                            requests,
+                            session_stats,
+                            halt_on_failure,
+                            reply_tx,
+                        } => {
+                            let result = self
+                                .handle_request_batch(requests, &session_stats, halt_on_failure)
+                                .await;
+                            let _ = reply_tx.send(result);
+                        }
+                        ObswsCoordinatorCommand::GetBootstrapSnapshot { reply_tx } => {
+                            let snapshot = self.build_bootstrap_snapshot();
+                            let _ = reply_tx.send(snapshot);
+                        }
+                        ObswsCoordinatorCommand::GetWebRtcSourceSettings {
+                            input_name,
+                            reply_tx,
+                        } => {
+                            let settings = self.get_webrtc_source_settings(&input_name);
+                            let _ = reply_tx.send(settings);
+                        }
+                        ObswsCoordinatorCommand::UpdateWebRtcSourceTrackId {
+                            input_name,
+                            track_id,
+                        } => {
+                            self.update_webrtc_source_track_id(&input_name, track_id);
+                        }
+                        ObswsCoordinatorCommand::ResolveInputByName {
+                            input_name,
+                            reply_tx,
+                        } => {
+                            let info = self.resolve_input_by_name(&input_name);
+                            let _ = reply_tx.send(info);
+                        }
+                    }
                 }
-                ObswsCoordinatorCommand::ProcessRequestBatch {
-                    requests,
-                    session_stats,
-                    halt_on_failure,
-                    reply_tx,
-                } => {
-                    let result = self
-                        .handle_request_batch(requests, &session_stats, halt_on_failure)
-                        .await;
-                    let _ = reply_tx.send(result);
-                }
-                ObswsCoordinatorCommand::GetBootstrapSnapshot { reply_tx } => {
-                    let snapshot = self.build_bootstrap_snapshot();
-                    let _ = reply_tx.send(snapshot);
-                }
-                ObswsCoordinatorCommand::GetWebRtcSourceSettings {
-                    input_name,
-                    reply_tx,
-                } => {
-                    let settings = self.get_webrtc_source_settings(&input_name);
-                    let _ = reply_tx.send(settings);
-                }
-                ObswsCoordinatorCommand::UpdateWebRtcSourceTrackId {
-                    input_name,
-                    track_id,
-                } => {
-                    self.update_webrtc_source_track_id(&input_name, track_id);
-                }
-                ObswsCoordinatorCommand::ResolveInputByName {
-                    input_name,
-                    reply_tx,
-                } => {
-                    let info = self.resolve_input_by_name(&input_name);
-                    let _ = reply_tx.send(info);
+                event = self.sora_source_event_rx.recv() => {
+                    if let Some(event) = event {
+                        self.handle_sora_source_event(event);
+                    }
                 }
             }
 
             // state file 保存失敗等の致命的エラーが発生した場合はループを抜ける。
-            // エラーレスポンスは上で reply_tx 経由で送信済みなので、
-            // クライアントにはエラーが通知された後にサーバーが停止する。
             if self.should_terminate {
                 tracing::error!(
                     "coordinator shutting down due to fatal error; \
                      subsequent requests will fail"
                 );
-                // サーバーの accept loop に終了を通知する
                 let _ = self.shutdown_tx.send(true);
                 return;
             }
@@ -580,6 +642,40 @@ impl ObswsCoordinator {
                 self.handle_toggle_output_request(&request_id, request.request_data.as_ref())
                     .await
             }
+            // --- SoraSubscriber 管理 ---
+            "StartSoraSubscriber" => {
+                self.handle_start_sora_subscriber(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "StopSoraSubscriber" => {
+                self.handle_stop_sora_subscriber(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "ListSoraSubscribers" => self.handle_list_sora_subscribers(&request_id),
+            "ListSoraSourceTracks" => {
+                self.handle_list_sora_source_tracks(&request_id, request.request_data.as_ref())
+            }
+            "AttachSoraSourceTrack" => {
+                self.handle_attach_sora_source_track(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "DetachSoraSourceTrack" => self.handle_detach_sora_source_track(
+                &request_type,
+                &request_id,
+                request.request_data.as_ref(),
+            ),
             // --- レジストリ状態変更なし ---
             "BroadcastCustomEvent" => {
                 self.handle_broadcast_custom_event(&request_id, request.request_data.as_ref())
@@ -2087,26 +2183,21 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let mut output_plan = match build_output_plan_or_error(
-            request_type,
-            request_id,
-            &self.input_registry,
-            crate::obsws::source::ObswsOutputKind::Stream,
+        let video = ObswsRecordTrackRun::new(
+            "stream",
             run_id,
-        ) {
-            Ok(plan) => plan,
-            Err(outcome) => return outcome,
-        };
-        let video =
-            ObswsRecordTrackRun::new("stream", run_id, "video", &output_plan.video_track_id);
-        let audio =
-            ObswsRecordTrackRun::new("stream", run_id, "audio", &output_plan.audio_track_id);
+            "video",
+            &self.program_output.video_track_id,
+        );
+        let audio = ObswsRecordTrackRun::new(
+            "stream",
+            run_id,
+            "audio",
+            &self.program_output.audio_track_id,
+        );
         let run = ObswsStreamRun {
-            source_processor_ids: output_plan.source_processor_ids.clone(),
             video,
             audio,
-            audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
-            video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
             publisher_processor_id: crate::ProcessorId::new(format!(
                 "obsws:stream:{run_id}:rtmp_publisher"
             )),
@@ -2134,12 +2225,13 @@ impl ObswsCoordinator {
                 ),
             );
         };
+        let frame_rate = self.input_registry.frame_rate();
         if let Err(e) = start_stream_processors(
             pipeline_handle,
-            &mut output_plan,
             &output_url,
             stream_service_settings.key.as_deref(),
             &run,
+            frame_rate,
         )
         .await
         {
@@ -2221,20 +2313,18 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let mut output_plan = match build_output_plan_or_error(
-            request_type,
-            request_id,
-            &self.input_registry,
-            crate::obsws::source::ObswsOutputKind::Record,
+        let video = ObswsRecordTrackRun::new(
+            "record",
             run_id,
-        ) {
-            Ok(plan) => plan,
-            Err(outcome) => return outcome,
-        };
-        let video =
-            ObswsRecordTrackRun::new("record", run_id, "video", &output_plan.video_track_id);
-        let audio =
-            ObswsRecordTrackRun::new("record", run_id, "audio", &output_plan.audio_track_id);
+            "video",
+            &self.program_output.video_track_id,
+        );
+        let audio = ObswsRecordTrackRun::new(
+            "record",
+            run_id,
+            "audio",
+            &self.program_output.audio_track_id,
+        );
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
@@ -2244,11 +2334,8 @@ impl ObswsCoordinator {
             .record_directory()
             .join(format!("obsws-record-{timestamp}.mp4"));
         let run = ObswsRecordRun {
-            source_processor_ids: output_plan.source_processor_ids.clone(),
             video,
             audio,
-            audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
-            video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
             writer_processor_id: crate::ProcessorId::new(format!(
                 "obsws:record:{run_id}:mp4_writer"
             )),
@@ -2291,8 +2378,9 @@ impl ObswsCoordinator {
                 ),
             );
         };
+        let frame_rate = self.input_registry.frame_rate();
         if let Err(e) =
-            start_record_processors(pipeline_handle, &mut output_plan, &output_path, &run).await
+            start_record_processors(pipeline_handle, &output_path, &run, frame_rate).await
         {
             self.input_registry.deactivate_record();
             let _ = stop_processors_staged_record(pipeline_handle, &run).await;
@@ -2946,34 +3034,21 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let mut output_plan = match build_output_plan_or_error(
-            request_type,
-            request_id,
-            &self.input_registry,
-            crate::obsws::source::ObswsOutputKind::RtmpOutbound,
-            run_id,
-        ) {
-            Ok(plan) => plan,
-            Err(outcome) => return outcome,
-        };
         let video = ObswsRecordTrackRun::new(
             "rtmp_outbound",
             run_id,
             "video",
-            &output_plan.video_track_id,
+            &self.program_output.video_track_id,
         );
         let audio = ObswsRecordTrackRun::new(
             "rtmp_outbound",
             run_id,
             "audio",
-            &output_plan.audio_track_id,
+            &self.program_output.audio_track_id,
         );
         let run = ObswsRtmpOutboundRun {
-            source_processor_ids: output_plan.source_processor_ids.clone(),
             video,
             audio,
-            audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
-            video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
             endpoint_processor_id: crate::ProcessorId::new(format!(
                 "obsws:rtmp_outbound:{run_id}:rtmp_outbound_endpoint"
             )),
@@ -3001,12 +3076,13 @@ impl ObswsCoordinator {
                 ),
             );
         };
+        let frame_rate = self.input_registry.frame_rate();
         if let Err(e) = start_rtmp_outbound_processors(
             pipeline_handle,
-            &mut output_plan,
             &output_url,
             rtmp_outbound_settings.stream_name.as_deref(),
             &run,
+            frame_rate,
         )
         .await
         {
@@ -3652,48 +3728,19 @@ fn parse_custom_event_data(
     nojson::RawJsonOwned::try_from(event_data)
 }
 
-fn build_output_plan_or_error(
-    request_type: &str,
-    request_id: &str,
-    input_registry: &ObswsInputRegistry,
-    output_kind: crate::obsws::source::ObswsOutputKind,
-    run_id: u64,
-) -> Result<crate::obsws::output_plan::ObswsComposedOutputPlan, OutputOperationOutcome> {
-    let scene_inputs = input_registry.list_current_program_scene_input_entries();
-    crate::obsws::output_plan::build_composed_output_plan(
-        &scene_inputs,
-        output_kind,
-        run_id,
-        input_registry.canvas_width(),
-        input_registry.canvas_height(),
-        input_registry.frame_rate(),
-    )
-    .map_err(|error| OutputOperationOutcome {
-        response_text: crate::obsws::response::build_request_response_error(
-            request_type,
-            request_id,
-            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            &error.message(),
-        ),
-        success: false,
-        output_path: None,
-    })
-}
-
 // -----------------------------------------------------------------------
 // Output プロセッサ起動/停止 自由関数
 // -----------------------------------------------------------------------
 
-/// ストリーム用プロセッサを起動する: ミキサー → エンコーダー → パブリッシャー → ソース
+/// ストリーム用プロセッサを起動する: エンコーダー → パブリッシャー
+/// program mixer の出力トラックを直接エンコーダーに入力するため、ミキサーとソースの起動は不要。
 async fn start_stream_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_url: &str,
     stream_key: Option<&str>,
     run: &crate::obsws::input_registry::ObswsStreamRun,
+    frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
-    // ミキサーを起動する（pub 関数を利用）
-    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     // ビデオエンコーダーを起動する
     crate::encoder::create_video_processor(
         pipeline_handle,
@@ -3701,7 +3748,7 @@ async fn start_stream_processors(
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
         std::num::NonZeroUsize::new(2_000_000).unwrap(),
-        output_plan.frame_rate,
+        frame_rate,
         Some(run.video.encoder_processor_id.clone()),
     )
     .await?;
@@ -3729,30 +3776,24 @@ async fn start_stream_processors(
         Some(run.publisher_processor_id.clone()),
     )
     .await?;
-    // ソースプロセッサを起動する
-    crate::obsws::session::output::start_source_processors(
-        pipeline_handle,
-        &mut output_plan.source_plans,
-    )
-    .await?;
     Ok(())
 }
 
-/// レコード用プロセッサを起動する: ミキサー → エンコーダー → MP4 ライター → ソース
+/// レコード用プロセッサを起動する: エンコーダー → MP4 ライター
+/// program mixer の出力トラックを直接エンコーダーに入力するため、ミキサーとソースの起動は不要。
 async fn start_record_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_path: &std::path::Path,
     run: &crate::obsws::input_registry::ObswsRecordRun,
+    frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
-    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     crate::encoder::create_video_processor(
         pipeline_handle,
         run.video.source_track_id.clone(),
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
         std::num::NonZeroUsize::new(2_000_000).unwrap(),
-        output_plan.frame_rate,
+        frame_rate,
         Some(run.video.encoder_processor_id.clone()),
     )
     .await?;
@@ -3774,30 +3815,25 @@ async fn start_record_processors(
         Some(run.writer_processor_id.clone()),
     )
     .await?;
-    crate::obsws::session::output::start_source_processors(
-        pipeline_handle,
-        &mut output_plan.source_plans,
-    )
-    .await?;
     Ok(())
 }
 
-/// RTMP outbound 用プロセッサを起動する
+/// RTMP outbound 用プロセッサを起動する: エンコーダー → RTMP エンドポイント
+/// program mixer の出力トラックを直接エンコーダーに入力するため、ミキサーとソースの起動は不要。
 async fn start_rtmp_outbound_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_url: &str,
     stream_name: Option<&str>,
     run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
+    frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
-    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     crate::encoder::create_video_processor(
         pipeline_handle,
         run.video.source_track_id.clone(),
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
         std::num::NonZeroUsize::new(2_000_000).unwrap(),
-        output_plan.frame_rate,
+        frame_rate,
         Some(run.video.encoder_processor_id.clone()),
     )
     .await?;
@@ -3824,28 +3860,14 @@ async fn start_rtmp_outbound_processors(
         Some(run.endpoint_processor_id.clone()),
     )
     .await?;
-    crate::obsws::session::output::start_source_processors(
-        pipeline_handle,
-        &mut output_plan.source_plans,
-    )
-    .await?;
     Ok(())
 }
 
-/// ストリーム用プロセッサを段階的に停止する: ソース → ミキサー → エンコーダー → パブリッシャー
+/// ストリーム用プロセッサを段階的に停止する: エンコーダー → パブリッシャー
 async fn stop_processors_staged_stream(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsStreamRun,
 ) -> crate::Result<()> {
-    terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
-    terminate_and_wait(
-        pipeline_handle,
-        &[
-            run.audio_mixer_processor_id.clone(),
-            run.video_mixer_processor_id.clone(),
-        ],
-    )
-    .await?;
     terminate_and_wait(
         pipeline_handle,
         &[
@@ -3863,51 +3885,15 @@ async fn stop_processors_staged_stream(
 }
 
 /// レコード用プロセッサを段階的に停止する。
-/// ミキサーには Finish RPC を送信して EOS を発行させ、下流は EOS 伝播で自然終了させる。
+/// エンコーダーを terminate し、ライターは EOS 伝播で自然終了させる。
 async fn stop_processors_staged_record(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsRecordRun,
 ) -> crate::Result<()> {
-    // 1. ソースを停止
-    terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
+    // 1. MP4 writer に Finish RPC を送信して finalize を促す
+    finish_mp4_writer_rpc(pipeline_handle, &run.writer_processor_id).await;
 
-    // 2. ミキサーに Finish RPC を送り、自然終了を試みる
-    let mixer_ids = vec![
-        run.audio_mixer_processor_id.clone(),
-        run.video_mixer_processor_id.clone(),
-    ];
-    // まずソース停止後の自然終了を短時間待つ
-    if wait_processors_stopped(pipeline_handle, &mixer_ids, Duration::from_secs(1))
-        .await
-        .is_err()
-    {
-        // Finish RPC を送信して EOS 発行を要求する
-        finish_mixer_rpc(pipeline_handle, &run.audio_mixer_processor_id, true).await;
-        finish_mixer_rpc(pipeline_handle, &run.video_mixer_processor_id, false).await;
-        // Finish 後の終了を待ち、タイムアウトなら強制停止
-        if wait_processors_stopped(pipeline_handle, &mixer_ids, Duration::from_secs(5))
-            .await
-            .is_err()
-        {
-            let live = live_processor_ids(pipeline_handle, &mixer_ids).await;
-            if !live.is_empty() {
-                terminate_and_wait(pipeline_handle, &live).await?;
-            }
-        }
-    }
-
-    // 3. エンコーダーは EOS 伝播での自然終了を優先し、残れば強制停止
-    wait_or_terminate(
-        pipeline_handle,
-        &[
-            run.video.encoder_processor_id.clone(),
-            run.audio.encoder_processor_id.clone(),
-        ],
-        Duration::from_secs(5),
-    )
-    .await?;
-
-    // 4. ライターは finalize を優先し、残れば強制停止
+    // 2. writer の自然終了を待ち、タイムアウト時は強制停止
     wait_or_terminate(
         pipeline_handle,
         std::slice::from_ref(&run.writer_processor_id),
@@ -3915,7 +3901,53 @@ async fn stop_processors_staged_record(
     )
     .await?;
 
+    // 3. エンコーダーを停止する
+    terminate_and_wait(
+        pipeline_handle,
+        &[
+            run.video.encoder_processor_id.clone(),
+            run.audio.encoder_processor_id.clone(),
+        ],
+    )
+    .await?;
+
     Ok(())
+}
+
+/// MP4 writer に Finish RPC を送り、finalize を促す。
+async fn finish_mp4_writer_rpc(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    processor_id: &crate::ProcessorId,
+) {
+    const RETRY_TIMEOUT: Duration = Duration::from_millis(500);
+    const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+    let deadline = tokio::time::Instant::now() + RETRY_TIMEOUT;
+
+    loop {
+        match pipeline_handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
+                crate::mp4::writer::Mp4WriterRpcMessage,
+            >>(processor_id)
+            .await
+        {
+            Ok(sender) => {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let _ =
+                    sender.send(crate::mp4::writer::Mp4WriterRpcMessage::Finish { reply_tx });
+                let _ = reply_rx.await;
+                return;
+            }
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(RETRY_INTERVAL).await;
+            }
+            Err(_) => {
+                let _ = pipeline_handle
+                    .terminate_processor(processor_id.clone())
+                    .await;
+                return;
+            }
+        }
+    }
 }
 
 /// S3 クライアントを構築する
@@ -4785,20 +4817,11 @@ fn build_dash_root_storage_config(
     }
 }
 
-/// RTMP outbound 用プロセッサを段階的に停止する
+/// RTMP outbound 用プロセッサを段階的に停止する: エンコーダー → エンドポイント
 async fn stop_processors_staged_rtmp_outbound(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
 ) -> crate::Result<()> {
-    terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
-    terminate_and_wait(
-        pipeline_handle,
-        &[
-            run.audio_mixer_processor_id.clone(),
-            run.video_mixer_processor_id.clone(),
-        ],
-    )
-    .await?;
     terminate_and_wait(
         pipeline_handle,
         &[
@@ -4880,75 +4903,6 @@ async fn live_processor_ids(
         .collect()
 }
 
-/// ミキサーに Finish RPC を送信する。失敗時は terminate にフォールバックする。
-async fn finish_mixer_rpc(
-    pipeline_handle: &crate::MediaPipelineHandle,
-    processor_id: &crate::ProcessorId,
-    is_audio: bool,
-) {
-    const RETRY_TIMEOUT: Duration = Duration::from_millis(500);
-    const RETRY_INTERVAL: Duration = Duration::from_millis(10);
-    let deadline = tokio::time::Instant::now() + RETRY_TIMEOUT;
-
-    if is_audio {
-        loop {
-            match pipeline_handle
-                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
-                    crate::mixer::audio::AudioRealtimeMixerRpcMessage,
-                >>(processor_id)
-                .await
-            {
-                Ok(sender) => {
-                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                    let _ =
-                        sender.send(crate::mixer::audio::AudioRealtimeMixerRpcMessage::Finish {
-                            reply_tx,
-                        });
-                    let _ = reply_rx.await;
-                    return;
-                }
-                Err(_) if tokio::time::Instant::now() < deadline => {
-                    tokio::time::sleep(RETRY_INTERVAL).await;
-                }
-                Err(_) => {
-                    let _ = pipeline_handle
-                        .terminate_processor(processor_id.clone())
-                        .await;
-                    return;
-                }
-            }
-        }
-    } else {
-        loop {
-            match pipeline_handle
-                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
-                    crate::mixer::video::VideoRealtimeMixerRpcMessage,
-                >>(processor_id)
-                .await
-            {
-                Ok(sender) => {
-                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                    let _ =
-                        sender.send(crate::mixer::video::VideoRealtimeMixerRpcMessage::Finish {
-                            reply_tx,
-                        });
-                    let _ = reply_rx.await;
-                    return;
-                }
-                Err(_) if tokio::time::Instant::now() < deadline => {
-                    tokio::time::sleep(RETRY_INTERVAL).await;
-                }
-                Err(_) => {
-                    let _ = pipeline_handle
-                        .terminate_processor(processor_id.clone())
-                        .await;
-                    return;
-                }
-            }
-        }
-    }
-}
-
 /// HLS writer に Finish RPC を送り、finalize / cleanup を促す。
 /// これは writer 側の入力購読を閉じるためのもので、上流の完全 drain は保証しない。
 /// 失敗時は terminate にフォールバックする。
@@ -5016,5 +4970,812 @@ async fn finish_dash_writer_rpc(
                 return;
             }
         }
+    }
+}
+
+// --- SoraSubscriber / sora_source ハンドラ ---
+
+impl ObswsCoordinator {
+    fn handle_sora_source_event(&mut self, event: crate::sora_source::SoraSourceEvent) {
+        match event {
+            crate::sora_source::SoraSourceEvent::TrackReceived {
+                subscriber_name,
+                transceiver,
+            } => {
+                let receiver = transceiver.receiver();
+                let track = receiver.track();
+                let track_id = track.id().unwrap_or_default();
+                let track_kind = track.kind().unwrap_or_default();
+                tracing::debug!(
+                    "TrackReceived: subscriber={}, track_id={}, kind={}",
+                    subscriber_name,
+                    track_id,
+                    track_kind
+                );
+
+                // 空の track_id や kind をスキップ
+                if track_id.is_empty() || track_kind.is_empty() {
+                    tracing::debug!("skipping track with empty id or kind");
+                    return;
+                }
+
+                // track_id は "{connection_id}-{video|audio}" 形式
+                let connection_id = track_id
+                    .rsplit_once('-')
+                    .map(|(prefix, _suffix)| prefix.to_owned())
+                    .unwrap_or_else(|| track_id.clone());
+
+                // on_notify の connection.created で収集済みの接続情報から client_id を取得する
+                let client_id = self
+                    .sora_subscribers
+                    .get(&subscriber_name)
+                    .and_then(|state| state.connections.get(&connection_id))
+                    .and_then(|info| info.client_id.clone());
+
+                if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
+                    // holder タスクを起動して WebRTC 型の所有権を移す
+                    let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+                    let holder_task = tokio::spawn(crate::sora_source::sora_track_holder_task(
+                        transceiver,
+                        track_kind.clone(),
+                        command_rx,
+                    ));
+
+                    state.remote_tracks.insert(
+                        track_id.clone(),
+                        SoraSourceRemoteTrack {
+                            connection_id: connection_id.clone(),
+                            client_id: client_id.clone(),
+                            track_kind: track_kind.clone(),
+                            attached_input_name: None,
+                            attached_pipeline_track_id: None,
+                            command_tx,
+                            holder_abort: holder_task.abort_handle(),
+                        },
+                    );
+                    let event = crate::obsws::response::build_sora_source_track_published_event(
+                        &subscriber_name,
+                        &connection_id,
+                        client_id.as_deref(),
+                        &track_kind,
+                        &track_id,
+                    );
+                    let _ = self.obsws_event_tx.send(TaggedEvent {
+                        text: event,
+                        subscription_flag: OBSWS_EVENT_SUB_SORA_SOURCE,
+                    });
+                }
+            }
+            crate::sora_source::SoraSourceEvent::TrackRemoved {
+                subscriber_name,
+                track_id,
+            } => {
+                if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name)
+                    && let Some(remote_track) = state.remote_tracks.remove(&track_id)
+                {
+                    remote_track.holder_abort.abort();
+                    if let Some(input_name) = &remote_track.attached_input_name {
+                        self.clear_sora_source_track_id(input_name, &remote_track.track_kind);
+                    }
+                    let event = crate::obsws::response::build_sora_source_track_unpublished_event(
+                        &subscriber_name,
+                        &remote_track.connection_id,
+                        &remote_track.track_kind,
+                        &track_id,
+                    );
+                    let _ = self.obsws_event_tx.send(TaggedEvent {
+                        text: event,
+                        subscription_flag: OBSWS_EVENT_SUB_SORA_SOURCE,
+                    });
+                }
+            }
+            crate::sora_source::SoraSourceEvent::Notify {
+                subscriber_name,
+                json,
+            } => {
+                // Sora の notify は必ず JSON であるべき
+                let Ok(parsed) = nojson::RawJsonOwned::parse(&json) else {
+                    tracing::warn!(
+                        "SoraSubscriberNotify: invalid JSON from Sora, dropping: {}",
+                        &json[..json.len().min(200)]
+                    );
+                    return;
+                };
+
+                // connection.created / connection.destroyed をパースして接続情報を管理する
+                let v = parsed.value();
+                let event_type: Option<String> = v
+                    .to_member("event_type")
+                    .ok()
+                    .and_then(|m| m.optional())
+                    .and_then(|v| v.try_into().ok());
+                match event_type.as_deref() {
+                    Some("connection.created") => {
+                        let connection_id: Option<String> = v
+                            .to_member("connection_id")
+                            .ok()
+                            .and_then(|m| m.optional())
+                            .and_then(|v| v.try_into().ok());
+                        let Some(cid) = connection_id else {
+                            tracing::warn!("connection.created notify missing connection_id");
+                            return;
+                        };
+                        let client_id: Option<String> = v
+                            .to_member("client_id")
+                            .ok()
+                            .and_then(|m| m.optional())
+                            .and_then(|v| v.try_into().ok());
+                        if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
+                            state
+                                .connections
+                                .insert(cid, SoraConnectionInfo { client_id });
+                        }
+                    }
+                    Some("connection.destroyed") => {
+                        let connection_id: Option<String> = v
+                            .to_member("connection_id")
+                            .ok()
+                            .and_then(|m| m.optional())
+                            .and_then(|v| v.try_into().ok());
+                        let Some(cid) = connection_id else {
+                            tracing::warn!("connection.destroyed notify missing connection_id");
+                            return;
+                        };
+                        if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
+                            state.connections.remove(&cid);
+                        }
+                    }
+                    _ => {}
+                }
+
+                let event = crate::obsws::response::build_sora_subscriber_notify_event(
+                    &subscriber_name,
+                    &parsed,
+                );
+                let _ = self.obsws_event_tx.send(TaggedEvent {
+                    text: event,
+                    subscription_flag: OBSWS_EVENT_SUB_SORA_SOURCE,
+                });
+            }
+            crate::sora_source::SoraSourceEvent::WebSocketClose {
+                subscriber_name,
+                code,
+                reason,
+            } => {
+                let event = crate::obsws::response::build_sora_subscriber_disconnected_event(
+                    &subscriber_name,
+                    code,
+                    &reason,
+                );
+                let _ = self.obsws_event_tx.send(TaggedEvent {
+                    text: event,
+                    subscription_flag: OBSWS_EVENT_SUB_SORA_SOURCE,
+                });
+            }
+            crate::sora_source::SoraSourceEvent::Disconnected { subscriber_name } => {
+                let drained: Vec<_> = self
+                    .sora_subscribers
+                    .get_mut(&subscriber_name)
+                    .map(|state| {
+                        state.run = None;
+                        state.remote_tracks.drain().collect()
+                    })
+                    .unwrap_or_default();
+                for (track_id, remote_track) in drained {
+                    remote_track.holder_abort.abort();
+                    if let Some(input_name) = &remote_track.attached_input_name {
+                        self.clear_sora_source_track_id(input_name, &remote_track.track_kind);
+                    }
+                    let event = crate::obsws::response::build_sora_source_track_unpublished_event(
+                        &subscriber_name,
+                        &remote_track.connection_id,
+                        &remote_track.track_kind,
+                        &track_id,
+                    );
+                    let _ = self.obsws_event_tx.send(TaggedEvent {
+                        text: event,
+                        subscription_flag: OBSWS_EVENT_SUB_SORA_SOURCE,
+                    });
+                }
+            }
+        }
+    }
+
+    fn clear_sora_source_track_id(&mut self, input_name: &str, track_kind: &str) {
+        if let Some(uuid) = self.input_registry.uuids_by_name.get(input_name)
+            && let Some(entry) = self.input_registry.inputs_by_uuid.get_mut(uuid)
+            && let crate::obsws::input_registry::ObswsInputSettings::SoraSource(ref mut s) =
+                entry.input.settings
+        {
+            match track_kind {
+                "video" => s.video_track_id = None,
+                "audio" => s.audio_track_id = None,
+                _ => {}
+            }
+        }
+    }
+
+    async fn handle_start_sora_subscriber(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let Some(data) = request_data else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_DATA,
+                "Missing requestData",
+            );
+        };
+        // requestData から全パラメータをパースする
+        let subscriber_name = match Self::parse_subscriber_name(data) {
+            Ok(name) => name,
+            Err(msg) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    &msg,
+                );
+            }
+        };
+        // 同名の subscriber が既に存在する場合はエラー
+        if self.sora_subscribers.contains_key(&subscriber_name) {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                "Subscriber is already active",
+            );
+        }
+        let json = data.value();
+        let signaling_urls: Vec<String> = json
+            .to_member("signalingUrls")
+            .ok()
+            .and_then(|v| v.optional())
+            .and_then(|v| v.try_into().ok())
+            .unwrap_or_default();
+        if signaling_urls.is_empty() {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "signalingUrls must not be empty",
+            );
+        }
+        let channel_id: Option<String> = json
+            .to_member("channelId")
+            .ok()
+            .and_then(|v| v.optional())
+            .and_then(|v| v.try_into().ok());
+        let Some(channel_id) = channel_id else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing channelId field",
+            );
+        };
+        let client_id: Option<String> = json
+            .to_member("clientId")
+            .ok()
+            .and_then(|v| v.optional())
+            .and_then(|v| v.try_into().ok());
+        let bundle_id: Option<String> = json
+            .to_member("bundleId")
+            .ok()
+            .and_then(|v| v.optional())
+            .and_then(|v| v.try_into().ok());
+        let metadata: Option<nojson::RawJsonOwned> = json
+            .to_member("metadata")
+            .ok()
+            .and_then(|v| v.optional())
+            .filter(|v| v.kind().is_object())
+            .map(|v| v.extract().into_owned());
+        // SoraSubscriberState を作成して挿入する
+        let settings = crate::obsws::input_registry::ObswsSoraSubscriberSettings {
+            signaling_urls,
+            channel_id: Some(channel_id.clone()),
+            client_id,
+            bundle_id,
+            metadata,
+        };
+        self.sora_subscribers.insert(
+            subscriber_name.clone(),
+            SoraSubscriberState {
+                settings,
+                run: None,
+                remote_tracks: std::collections::HashMap::new(),
+                connections: std::collections::HashMap::new(),
+            },
+        );
+        let state = self
+            .sora_subscribers
+            .get_mut(&subscriber_name)
+            .expect("subscriber was just inserted");
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            self.sora_subscribers.remove(&subscriber_name);
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "Pipeline is not initialized",
+            );
+        };
+        let processor_id =
+            crate::ProcessorId::new(format!("obsws:sora_subscriber:{}", subscriber_name));
+        let subscriber = crate::sora_source::SoraSubscriber {
+            subscriber_name: subscriber_name.clone(),
+            signaling_urls: state.settings.signaling_urls.clone(),
+            channel_id,
+            client_id: state.settings.client_id.clone(),
+            bundle_id: state.settings.bundle_id.clone(),
+            metadata: state.settings.metadata.clone(),
+            event_tx: self.sora_source_event_tx.clone(),
+        };
+        if let Err(e) = crate::sora_source::create_processor(
+            pipeline_handle,
+            subscriber,
+            Some(processor_id.clone()),
+        )
+        .await
+        {
+            self.sora_subscribers.remove(&subscriber_name);
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                &format!("Failed to start sora subscriber: {}", e.display()),
+            );
+        }
+        state.run = Some(SoraSubscriberRun { processor_id });
+        self.build_result_from_response(
+            crate::obsws::response::build_request_response_success_no_data(
+                request_type,
+                request_id,
+            ),
+            Vec::new(),
+        )
+    }
+
+    async fn handle_stop_sora_subscriber(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let Some(data) = request_data else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_DATA,
+                "Missing requestData",
+            );
+        };
+        let subscriber_name = match Self::parse_subscriber_name(data) {
+            Ok(name) => name,
+            Err(msg) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    &msg,
+                );
+            }
+        };
+        // subscriber の存在と稼働状態を確認する
+        if !self.sora_subscribers.contains_key(&subscriber_name) {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Subscriber not found",
+            );
+        }
+        // subscriber を削除して所有権を取得する
+        let mut removed_state = self
+            .sora_subscribers
+            .remove(&subscriber_name)
+            .expect("BUG: subscriber existence was just verified");
+        // run が Some の場合のみ processor を停止する
+        // （Disconnected で run = None になった場合はスキップ）
+        if let Some(run) = removed_state.run.take()
+            && let Some(pipeline_handle) = self.pipeline_handle.as_ref()
+            && let Err(e) =
+                terminate_and_wait(pipeline_handle, std::slice::from_ref(&run.processor_id)).await
+        {
+            tracing::warn!("failed to stop sora subscriber processor: {}", e.display());
+        }
+        // remote_tracks をクリーンアップし、各トラックの Unpublished イベントを送信する
+        for (track_id, rt) in removed_state.remote_tracks {
+            rt.holder_abort.abort();
+            if let Some(input_name) = &rt.attached_input_name {
+                self.clear_sora_source_track_id(input_name, &rt.track_kind);
+            }
+            let event = crate::obsws::response::build_sora_source_track_unpublished_event(
+                &subscriber_name,
+                &rt.connection_id,
+                &rt.track_kind,
+                &track_id,
+            );
+            let _ = self.obsws_event_tx.send(TaggedEvent {
+                text: event,
+                subscription_flag: OBSWS_EVENT_SUB_SORA_SOURCE,
+            });
+        }
+        self.build_result_from_response(
+            crate::obsws::response::build_request_response_success_no_data(
+                request_type,
+                request_id,
+            ),
+            Vec::new(),
+        )
+    }
+
+    fn handle_list_sora_subscribers(&self, request_id: &str) -> CommandResult {
+        let response_text = crate::obsws::response::build_request_response_success(
+            "ListSoraSubscribers",
+            request_id,
+            |f| {
+                f.member(
+                    "subscribers",
+                    nojson::array(|f| {
+                        for (name, state) in &self.sora_subscribers {
+                            f.element(nojson::object(|f| {
+                                f.member("subscriberName", name.as_str())?;
+                                f.member("active", state.run.is_some())?;
+                                f.member("settings", &state.settings)
+                            }))?;
+                        }
+                        Ok(())
+                    }),
+                )
+            },
+        );
+        self.build_result_from_response(response_text, Vec::new())
+    }
+
+    fn handle_list_sora_source_tracks(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let filter_name: Option<String> = request_data.and_then(|data| {
+            data.value()
+                .to_member("subscriberName")
+                .ok()?
+                .optional()
+                .and_then(|v| v.try_into().ok())
+        });
+
+        let response_text = crate::obsws::response::build_request_response_success(
+            "ListSoraSourceTracks",
+            request_id,
+            |f| {
+                f.member(
+                    "tracks",
+                    nojson::array(|f| {
+                        for (name, state) in &self.sora_subscribers {
+                            if let Some(ref filter) = filter_name
+                                && name != filter
+                            {
+                                continue;
+                            }
+                            for (track_id, rt) in &state.remote_tracks {
+                                f.element(nojson::object(|f| {
+                                    f.member("subscriberName", name.as_str())?;
+                                    f.member("connectionId", rt.connection_id.as_str())?;
+                                    f.member("clientId", rt.client_id.as_deref())?;
+                                    f.member("trackId", track_id.as_str())?;
+                                    f.member("trackKind", rt.track_kind.as_str())?;
+                                    f.member("attachedInputName", rt.attached_input_name.as_deref())
+                                }))?;
+                            }
+                        }
+                        Ok(())
+                    }),
+                )
+            },
+        );
+        self.build_result_from_response(response_text, Vec::new())
+    }
+
+    async fn handle_attach_sora_source_track(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let Some(data) = request_data else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_DATA,
+                "Missing requestData",
+            );
+        };
+        let json = data.value();
+        let input_name: String = match json
+            .to_member("inputName")
+            .and_then(|v| v.required()?.try_into())
+        {
+            Ok(n) => n,
+            Err(_) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing inputName",
+                );
+            }
+        };
+        let connection_id: String = match json
+            .to_member("connectionId")
+            .and_then(|v| v.required()?.try_into())
+        {
+            Ok(n) => n,
+            Err(_) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing connectionId",
+                );
+            }
+        };
+        let track_kind: String = match json
+            .to_member("trackKind")
+            .and_then(|v| v.required()?.try_into())
+        {
+            Ok(n) => n,
+            Err(_) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing trackKind",
+                );
+            }
+        };
+        if track_kind != "video" && track_kind != "audio" {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "trackKind must be 'video' or 'audio'",
+            );
+        }
+        let resolved = self.resolve_input_by_name(&input_name);
+        let Some(resolved) = resolved else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input not found",
+            );
+        };
+        if resolved.input_kind != "sora_source" {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Input is not a sora_source",
+            );
+        }
+        let mut found: Option<(String, String)> = None;
+        for (sub_name, state) in &self.sora_subscribers {
+            for (tid, rt) in &state.remote_tracks {
+                if rt.connection_id == connection_id && rt.track_kind == track_kind {
+                    found = Some((sub_name.clone(), tid.clone()));
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        let Some((sub_name, found_track_id)) = found else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "No matching remote track found",
+            );
+        };
+        if self.sora_subscribers[&sub_name].remote_tracks[&found_track_id]
+            .attached_input_name
+            .is_some()
+        {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
+                "Track is already attached",
+            );
+        }
+        let pipeline_track_id = match track_kind.as_str() {
+            "video" => resolved.video_track_id.clone(),
+            "audio" => self
+                .input_source_processors
+                .get(&resolved.input_uuid)
+                .and_then(|s| s.audio_track_id.clone()),
+            _ => None,
+        };
+        let Some(pipeline_track_id) = pipeline_track_id else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "Pipeline track not found",
+            );
+        };
+        // pipeline から TrackPublisher を取得してフレーム転送を開始する
+        if let Some(pipeline_handle) = self.pipeline_handle.as_ref() {
+            let state = self
+                .sora_subscribers
+                .get(&sub_name)
+                .expect("subscriber should exist");
+            if let Some(run) = &state.run {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                pipeline_handle.send(crate::media_pipeline::MediaPipelineCommand::PublishTrack {
+                    processor_id: run.processor_id.clone(),
+                    track_id: pipeline_track_id.clone(),
+                    reply_tx,
+                });
+                match reply_rx.await {
+                    Ok(Ok(publisher)) => {
+                        tracing::debug!(
+                            "AttachSoraSourceTrack: publish_track succeeded, track_id={}, sending Attach command",
+                            pipeline_track_id
+                        );
+                        let rt = &state.remote_tracks[&found_track_id];
+                        let _ = rt
+                            .command_tx
+                            .send(crate::sora_source::SoraTrackCommand::Attach { publisher });
+                    }
+                    Ok(Err(e)) => {
+                        return self.build_error_result(
+                            request_type,
+                            request_id,
+                            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            &format!("Failed to publish track: {e:?}"),
+                        );
+                    }
+                    Err(_) => {
+                        return self.build_error_result(
+                            request_type,
+                            request_id,
+                            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            "Pipeline terminated during publish_track",
+                        );
+                    }
+                }
+            }
+        }
+
+        let rt = self
+            .sora_subscribers
+            .get_mut(&sub_name)
+            .expect("BUG: subscriber not found after lookup")
+            .remote_tracks
+            .get_mut(&found_track_id)
+            .expect("BUG: track not found after lookup");
+        rt.attached_input_name = Some(input_name.clone());
+        rt.attached_pipeline_track_id = Some(pipeline_track_id.clone());
+        if let Some(uuid) = self.input_registry.uuids_by_name.get(&input_name)
+            && let Some(entry) = self.input_registry.inputs_by_uuid.get_mut(uuid)
+            && let crate::obsws::input_registry::ObswsInputSettings::SoraSource(ref mut s) =
+                entry.input.settings
+        {
+            match track_kind.as_str() {
+                "video" => s.video_track_id = Some(found_track_id.clone()),
+                "audio" => s.audio_track_id = Some(found_track_id.clone()),
+                _ => {}
+            }
+        }
+        self.build_result_from_response(
+            crate::obsws::response::build_request_response_success_no_data(
+                request_type,
+                request_id,
+            ),
+            Vec::new(),
+        )
+    }
+
+    fn handle_detach_sora_source_track(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> CommandResult {
+        let Some(data) = request_data else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_DATA,
+                "Missing requestData",
+            );
+        };
+        let json = data.value();
+        let input_name: String = match json
+            .to_member("inputName")
+            .and_then(|v| v.required()?.try_into())
+        {
+            Ok(n) => n,
+            Err(_) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing inputName",
+                );
+            }
+        };
+        let track_kind: String = match json
+            .to_member("trackKind")
+            .and_then(|v| v.required()?.try_into())
+        {
+            Ok(n) => n,
+            Err(_) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing trackKind",
+                );
+            }
+        };
+        let mut found: Option<(String, String)> = None;
+        for (sub_name, state) in &self.sora_subscribers {
+            for (tid, rt) in &state.remote_tracks {
+                if rt.attached_input_name.as_deref() == Some(&input_name)
+                    && rt.track_kind == track_kind
+                {
+                    found = Some((sub_name.clone(), tid.clone()));
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        let Some((sub_name, track_id)) = found else {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "No track attached to this input with the specified trackKind",
+            );
+        };
+        let rt = self
+            .sora_subscribers
+            .get_mut(&sub_name)
+            .expect("BUG: subscriber not found after lookup")
+            .remote_tracks
+            .get_mut(&track_id)
+            .expect("BUG: track not found after lookup");
+        // holder タスクに Detach コマンドを送信
+        let _ = rt
+            .command_tx
+            .send(crate::sora_source::SoraTrackCommand::Detach);
+        rt.attached_input_name = None;
+        rt.attached_pipeline_track_id = None;
+        self.clear_sora_source_track_id(&input_name, &track_kind);
+        self.build_result_from_response(
+            crate::obsws::response::build_request_response_success_no_data(
+                request_type,
+                request_id,
+            ),
+            Vec::new(),
+        )
+    }
+
+    fn parse_subscriber_name(data: &nojson::RawJsonOwned) -> Result<String, String> {
+        let json = data.value();
+        json.to_member("subscriberName")
+            .and_then(|v| v.required()?.try_into())
+            .map_err(|_| "Missing subscriberName field".to_string())
     }
 }
