@@ -53,7 +53,7 @@ impl LibvpxDecoder {
     }
 
     fn handle_decoded_frames(&mut self) -> crate::Result<()> {
-        while let Some(image) = self.inner.next_frame() {
+        while let Some(image) = self.inner.next_frame()? {
             if image.is_high_depth() {
                 // 高ビット深度データの処理
                 let input_frame = self.input_queue.pop_front().ok_or_else(|| {
