@@ -779,12 +779,8 @@ fn parse_optional_persistent_data(
     };
     let mut map = std::collections::BTreeMap::new();
     for (key, value) in obj_json.value().to_object()? {
-        let slot_name: String = key
-            .to_unquoted_string_str()
-            .expect("object key must be a valid string")
-            .into_owned();
-        let raw = nojson::RawJsonOwned::try_from(value)
-            .expect("RawJsonOwned conversion from parsed value must succeed");
+        let slot_name: String = key.to_unquoted_string_str()?.into_owned();
+        let raw = nojson::RawJsonOwned::try_from(value)?;
         map.insert(slot_name, raw);
     }
     Ok(Some(map))

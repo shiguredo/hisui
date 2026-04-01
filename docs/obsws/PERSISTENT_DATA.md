@@ -42,6 +42,11 @@ hisui にはプロファイルの概念がないため、**`OBS_WEBSOCKET_DATA_R
 - GLOBAL と PROFILE を同一視して透過的に処理する案もあるが、仕様との乖離を生むため採用しない
 - PROFILE realm が必要になった場合は、プロファイル機能の実装と合わせて対応する
 
+## slotValue に null を指定した場合
+
+`SetPersistentData` で `slotValue` に `null` を指定すると、該当スロットが**削除**される。
+これは OBS 本家の挙動に準拠している。
+
 ## 永続化
 
 - `--state-file` 指定時に限り、state file の `persistentData` フィールドに永続化する

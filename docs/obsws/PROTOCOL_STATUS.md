@@ -101,7 +101,6 @@
 
 - [x] `GetPersistentData`: 永続データを取得する
   - NOTE: `OBS_WEBSOCKET_DATA_REALM_GLOBAL` のみ対応。`OBS_WEBSOCKET_DATA_REALM_PROFILE` はエラーを返す
-  - NOTE: `--state-file` 指定時は state file に永続化する
 - [x] `SetPersistentData`: 永続データを設定する
   - NOTE: `OBS_WEBSOCKET_DATA_REALM_GLOBAL` のみ対応。`OBS_WEBSOCKET_DATA_REALM_PROFILE` はエラーを返す
   - NOTE: `--state-file` 指定時は成功時に state file へ永続化する

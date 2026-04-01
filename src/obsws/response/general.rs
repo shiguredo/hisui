@@ -2,13 +2,14 @@ use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::message::ObswsSessionStats;
 use crate::obsws::protocol::{
     OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
-    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_DATA,
-    REQUEST_STATUS_MISSING_REQUEST_FIELD,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD,
 };
 #[cfg(unix)]
 use std::ffi::CString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+
+use super::{parse_persistent_data_fields, parse_request_data_or_error_response};
 
 /// 基本の availableRequests 一覧
 const BASE_AVAILABLE_REQUESTS: &[&str] = &[
@@ -323,79 +324,20 @@ pub fn build_get_persistent_data_response(
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &ObswsInputRegistry,
 ) -> nojson::RawJsonOwned {
-    let Some(request_data) = request_data else {
-        return super::build_request_response_error(
-            "GetPersistentData",
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_DATA,
-            "Missing required requestData field",
-        );
+    let fields = match parse_request_data_or_error_response(
+        "GetPersistentData",
+        request_id,
+        request_data,
+        parse_persistent_data_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
     };
-
-    let realm: Option<String> = match request_data.value().to_member("realm") {
-        Ok(m) => match m.try_into() {
-            Ok(v) => v,
-            Err(e) => {
-                return super::build_request_response_error(
-                    "GetPersistentData",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e.to_string(),
-                );
-            }
-        },
-        Err(e) => {
-            return super::build_request_response_error(
-                "GetPersistentData",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                &e.to_string(),
-            );
-        }
-    };
-    let Some(realm) = realm.filter(|s| !s.is_empty()) else {
-        return super::build_request_response_error(
-            "GetPersistentData",
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_FIELD,
-            "Missing required field: realm",
-        );
-    };
-    if let Err(response) = validate_realm("GetPersistentData", request_id, &realm) {
+    if let Err(response) = validate_realm("GetPersistentData", request_id, &fields.realm) {
         return response;
     }
 
-    let slot_name: Option<String> = match request_data.value().to_member("slotName") {
-        Ok(m) => match m.try_into() {
-            Ok(v) => v,
-            Err(e) => {
-                return super::build_request_response_error(
-                    "GetPersistentData",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e.to_string(),
-                );
-            }
-        },
-        Err(e) => {
-            return super::build_request_response_error(
-                "GetPersistentData",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                &e.to_string(),
-            );
-        }
-    };
-    let Some(slot_name) = slot_name.filter(|s| !s.is_empty()) else {
-        return super::build_request_response_error(
-            "GetPersistentData",
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_FIELD,
-            "Missing required field: slotName",
-        );
-    };
-
-    let slot_value = input_registry.get_persistent_data(&slot_name);
+    let slot_value = input_registry.get_persistent_data(&fields.slot_name);
     super::build_request_response_success("GetPersistentData", request_id, |f| match slot_value {
         Some(value) => f.member("slotValue", value),
         None => f.member("slotValue", Option::<&str>::None),
@@ -407,112 +349,39 @@ pub fn build_set_persistent_data_response(
     request_data: Option<&nojson::RawJsonOwned>,
     input_registry: &mut ObswsInputRegistry,
 ) -> nojson::RawJsonOwned {
-    let Some(request_data) = request_data else {
-        return super::build_request_response_error(
-            "SetPersistentData",
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_DATA,
-            "Missing required requestData field",
-        );
+    let (fields, slot_value) = match parse_request_data_or_error_response(
+        "SetPersistentData",
+        request_id,
+        request_data,
+        parse_set_persistent_data_fields,
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
     };
-
-    let realm: Option<String> = match request_data.value().to_member("realm") {
-        Ok(m) => match m.try_into() {
-            Ok(v) => v,
-            Err(e) => {
-                return super::build_request_response_error(
-                    "SetPersistentData",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e.to_string(),
-                );
-            }
-        },
-        Err(e) => {
-            return super::build_request_response_error(
-                "SetPersistentData",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                &e.to_string(),
-            );
-        }
-    };
-    let Some(realm) = realm.filter(|s| !s.is_empty()) else {
-        return super::build_request_response_error(
-            "SetPersistentData",
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_FIELD,
-            "Missing required field: realm",
-        );
-    };
-    if let Err(response) = validate_realm("SetPersistentData", request_id, &realm) {
+    if let Err(response) = validate_realm("SetPersistentData", request_id, &fields.realm) {
         return response;
     }
 
-    let slot_name: Option<String> = match request_data.value().to_member("slotName") {
-        Ok(m) => match m.try_into() {
-            Ok(v) => v,
-            Err(e) => {
-                return super::build_request_response_error(
-                    "SetPersistentData",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e.to_string(),
-                );
-            }
-        },
-        Err(e) => {
-            return super::build_request_response_error(
-                "SetPersistentData",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                &e.to_string(),
-            );
-        }
-    };
-    let Some(slot_name) = slot_name.filter(|s| !s.is_empty()) else {
-        return super::build_request_response_error(
-            "SetPersistentData",
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_FIELD,
-            "Missing required field: slotName",
-        );
-    };
-
-    // slotValue を RawJsonOwned としてそのまま取り出す
-    let slot_value_member = request_data.value().to_member("slotValue");
-    let slot_value: Option<nojson::RawJsonOwned> = match slot_value_member {
-        Ok(m) => match m.try_into() {
-            Ok(v) => v,
-            Err(e) => {
-                return super::build_request_response_error(
-                    "SetPersistentData",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e.to_string(),
-                );
-            }
-        },
-        Err(e) => {
-            return super::build_request_response_error(
-                "SetPersistentData",
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                &e.to_string(),
-            );
-        }
-    };
-    let Some(slot_value) = slot_value else {
-        return super::build_request_response_error(
-            "SetPersistentData",
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_FIELD,
-            "Missing required field: slotValue",
-        );
-    };
-
-    input_registry.set_persistent_data(slot_name, slot_value);
+    // slotValue が JSON の null の場合はスロットを削除する（OBS 本家の挙動に準拠）
+    if slot_value.value().kind().is_null() {
+        input_registry.remove_persistent_data(&fields.slot_name);
+    } else {
+        input_registry.set_persistent_data(fields.slot_name, slot_value);
+    }
     super::build_request_response_success_no_data("SetPersistentData", request_id)
+}
+
+/// SetPersistentData 用のフィールドをパースする。
+/// slotValue は任意の JSON 値なので RawJsonOwned としてそのまま保持する。
+fn parse_set_persistent_data_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(super::PersistentDataFields, nojson::RawJsonOwned), nojson::JsonParseError> {
+    let fields = parse_persistent_data_fields(request_data)?;
+    let slot_value: nojson::RawJsonOwned = request_data
+        .to_member("slotValue")?
+        .required()?
+        .try_into()?;
+    Ok((fields, slot_value))
 }
 
 /// realm の値を検証する。GLOBAL のみ対応。
