@@ -181,6 +181,12 @@ enum MediaLoopAction {
     OffsetSeek(i64),
 }
 
+enum SampleProcessingResult {
+    Continue,
+    PipelineClosed,
+    Action(MediaLoopAction),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Mp4FileReaderOptions {
     // true の場合は実時間再生を行う。
@@ -467,9 +473,28 @@ impl Mp4FileReader {
                 }
 
                 let context = SampleContext::from_sample(&sample);
-                let pipeline_closed = self.handle_sample(&mut state, context).await?;
-                if pipeline_closed {
-                    return Ok(RunLoopResult::PipelineClosed);
+                match self.handle_sample(&mut state, context).await? {
+                    SampleProcessingResult::Continue => {}
+                    SampleProcessingResult::PipelineClosed => {
+                        return Ok(RunLoopResult::PipelineClosed);
+                    }
+                    SampleProcessingResult::Action(action) => match action {
+                        MediaLoopAction::Continue => {}
+                        MediaLoopAction::Stop => return Ok(RunLoopResult::Stopped),
+                        MediaLoopAction::Restart => {
+                            self.recreate_decoders(handle);
+                            continue 'outer;
+                        }
+                        MediaLoopAction::Seek(position) => {
+                            self.apply_seek(&mut state, position, handle)?;
+                            continue;
+                        }
+                        MediaLoopAction::OffsetSeek(offset_ms) => {
+                            let position = self.resolve_offset_seek(offset_ms);
+                            self.apply_seek(&mut state, position, handle)?;
+                            continue;
+                        }
+                    },
                 }
             }
 
@@ -552,7 +577,10 @@ impl Mp4FileReader {
                 self.update_playback_status(MediaPlaybackState::Paused, file_pos);
                 MediaLoopAction::Continue
             }
-            Ok(MediaInputCommand::Stop) => MediaLoopAction::Stop,
+            Ok(MediaInputCommand::Stop) => {
+                self.stop_and_reset_to_zero();
+                MediaLoopAction::Stop
+            }
             Ok(MediaInputCommand::Restart) => {
                 self.restart_playback();
                 MediaLoopAction::Restart
@@ -797,11 +825,66 @@ impl Mp4FileReader {
                 });
     }
 
+    /// realtime 再生時の待機中もコマンドを受け付ける。
+    /// Pause はこの場で待機し、Stop / Restart / Seek は呼び出し元へ返す。
+    async fn wait_until_realtime_target(
+        &mut self,
+        effective_timestamp: Duration,
+    ) -> MediaLoopAction {
+        loop {
+            let target = self.start_instant + effective_timestamp;
+            let sleep = tokio::time::sleep_until(target);
+            tokio::pin!(sleep);
+
+            let command = {
+                let Some(channels) = self.media_channels.as_mut() else {
+                    sleep.await;
+                    return MediaLoopAction::Continue;
+                };
+                tokio::select! {
+                    _ = &mut sleep => return MediaLoopAction::Continue,
+                    command = channels.command_rx.recv() => command,
+                }
+            };
+
+            match command {
+                Some(MediaInputCommand::Play) => {
+                    // 既に再生中なので何もしない
+                }
+                Some(MediaInputCommand::Pause) => {
+                    self.is_paused = true;
+                    self.pause_started_at = Some(tokio::time::Instant::now());
+                    let file_pos = self.current_file_cursor();
+                    self.update_playback_status(MediaPlaybackState::Paused, file_pos);
+                    match self.wait_while_paused().await {
+                        MediaLoopAction::Continue => {}
+                        action => return action,
+                    }
+                }
+                Some(MediaInputCommand::Stop) => {
+                    self.stop_and_reset_to_zero();
+                    return MediaLoopAction::Stop;
+                }
+                Some(MediaInputCommand::Restart) => {
+                    self.restart_playback();
+                    return MediaLoopAction::Restart;
+                }
+                Some(MediaInputCommand::Seek(position)) => {
+                    return MediaLoopAction::Seek(position);
+                }
+                Some(MediaInputCommand::OffsetSeek(offset_ms)) => {
+                    return MediaLoopAction::OffsetSeek(offset_ms);
+                }
+                None => return MediaLoopAction::Stop,
+            }
+        }
+    }
+
     async fn handle_sample(
         &mut self,
         state: &mut ReaderState,
         context: SampleContext,
-    ) -> Result<bool> {
+    ) -> Result<SampleProcessingResult> {
         // composition_time_offset は未対応
         if context.composition_time_offset.is_some() {
             return Err(Error::new(
@@ -841,9 +924,9 @@ impl Mp4FileReader {
         state: &mut ReaderState,
         context: SampleContext,
         suppress_publish: bool,
-    ) -> Result<bool> {
+    ) -> Result<SampleProcessingResult> {
         if !state.is_audio_enabled(context.track_id) {
-            return Ok(false);
+            return Ok(SampleProcessingResult::Continue);
         }
 
         if let Some(entry) = &context.sample_entry {
@@ -872,12 +955,14 @@ impl Mp4FileReader {
                 // デコーダーの出力を drain して捨てる（内部バッファの蓄積を防ぐ）
                 discard_decoder_output(decoder)?;
             }
-            return Ok(false);
+            return Ok(SampleProcessingResult::Continue);
         }
 
         if self.options.realtime {
-            let target = self.start_instant + effective_timestamp;
-            tokio::time::sleep_until(target).await;
+            match self.wait_until_realtime_target(effective_timestamp).await {
+                MediaLoopAction::Continue => {}
+                action => return Ok(SampleProcessingResult::Action(action)),
+            }
         }
         let output_timestamp = self.output_timestamp(effective_timestamp);
 
@@ -898,10 +983,10 @@ impl Mp4FileReader {
                 if crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?
                     == crate::decoder::DrainResult::PipelineClosed
                 {
-                    return Ok(true);
+                    return Ok(SampleProcessingResult::PipelineClosed);
                 }
             } else if !sender.send_audio(audio_data).await {
-                return Ok(true);
+                return Ok(SampleProcessingResult::PipelineClosed);
             }
             self.emitted_in_loop = true;
             self.logical_cursor = None;
@@ -913,7 +998,7 @@ impl Mp4FileReader {
             }
         }
 
-        Ok(false)
+        Ok(SampleProcessingResult::Continue)
     }
 
     async fn handle_video_sample(
@@ -921,9 +1006,9 @@ impl Mp4FileReader {
         state: &mut ReaderState,
         context: SampleContext,
         suppress_publish: bool,
-    ) -> Result<bool> {
+    ) -> Result<SampleProcessingResult> {
         if !state.is_video_enabled(context.track_id) {
-            return Ok(false);
+            return Ok(SampleProcessingResult::Continue);
         }
 
         if let Some(entry) = &context.sample_entry {
@@ -955,12 +1040,14 @@ impl Mp4FileReader {
                 // デコーダーの出力を drain して捨てる（内部バッファの蓄積を防ぐ）
                 discard_video_decoder_output(decoder)?;
             }
-            return Ok(false);
+            return Ok(SampleProcessingResult::Continue);
         }
 
         if self.options.realtime {
-            let target = self.start_instant + effective_timestamp;
-            tokio::time::sleep_until(target).await;
+            match self.wait_until_realtime_target(effective_timestamp).await {
+                MediaLoopAction::Continue => {}
+                action => return Ok(SampleProcessingResult::Action(action)),
+            }
         }
         let output_timestamp = self.output_timestamp(effective_timestamp);
 
@@ -984,10 +1071,10 @@ impl Mp4FileReader {
                 if crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?
                     == crate::decoder::DrainResult::PipelineClosed
                 {
-                    return Ok(true);
+                    return Ok(SampleProcessingResult::PipelineClosed);
                 }
             } else if !sender.send_video(video_frame).await {
-                return Ok(true);
+                return Ok(SampleProcessingResult::PipelineClosed);
             }
             self.emitted_in_loop = true;
             self.logical_cursor = None;
@@ -999,7 +1086,7 @@ impl Mp4FileReader {
             }
         }
 
-        Ok(false)
+        Ok(SampleProcessingResult::Continue)
     }
 
     fn output_timestamp(&mut self, effective_timestamp: Duration) -> Duration {
@@ -1920,6 +2007,47 @@ mod tests {
 
         // run() 側の停止後最終更新を模擬しても 0 のまま
         reader.update_playback_status(MediaPlaybackState::Stopped, reader.stopped_file_cursor());
+        assert_eq!(handle.status.borrow().state, MediaPlaybackState::Stopped);
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+    }
+
+    /// 再生中の Stop でも cursor=0 に戻る
+    #[test]
+    fn stop_while_playing_resets_cursor_to_zero() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.base_offset = Duration::ZERO;
+        reader.last_emitted_end = Duration::from_secs(12);
+        reader.update_playback_status(MediaPlaybackState::Playing, Duration::from_secs(12));
+
+        handle
+            .command_tx
+            .try_send(MediaInputCommand::Stop)
+            .expect("send Stop must succeed");
+
+        let action = reader.poll_media_command();
+        assert!(matches!(action, MediaLoopAction::Stop));
+        assert_eq!(handle.status.borrow().state, MediaPlaybackState::Stopped);
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+        assert!(reader.stopped_at_zero);
+    }
+
+    /// realtime 待機中でも Stop を即座に処理できる
+    #[tokio::test]
+    async fn realtime_wait_processes_stop_command() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.start_instant = tokio::time::Instant::now();
+
+        handle
+            .command_tx
+            .send(MediaInputCommand::Stop)
+            .await
+            .expect("send Stop must succeed");
+
+        let action = reader
+            .wait_until_realtime_target(Duration::from_secs(5))
+            .await;
+        assert!(matches!(action, MediaLoopAction::Stop));
         assert_eq!(handle.status.borrow().state, MediaPlaybackState::Stopped);
         assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
     }
