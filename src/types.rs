@@ -161,6 +161,26 @@ fn svt_av1_supported_codecs() -> &'static [shiguredo_svt_av1::CodecInfo] {
     CACHE.get_or_init(shiguredo_svt_av1::supported_codecs)
 }
 
+#[cfg(feature = "nvcodec")]
+fn nvcodec_supported_codecs() -> &'static [shiguredo_nvcodec::CodecInfo] {
+    // TODO: デバイス ID は現在 0 固定。将来的には環境変数等で指定可能にすることを検討する
+    static CACHE: OnceLock<Vec<shiguredo_nvcodec::CodecInfo>> = OnceLock::new();
+    CACHE.get_or_init(|| shiguredo_nvcodec::supported_codecs(0).unwrap_or_default())
+}
+
+/// CodecName から shiguredo_nvcodec の VideoCodecType へのマッピング
+#[cfg(feature = "nvcodec")]
+fn to_nvcodec_codec(codec: CodecName) -> Option<shiguredo_nvcodec::VideoCodecType> {
+    match codec {
+        CodecName::H264 => Some(shiguredo_nvcodec::VideoCodecType::H264),
+        CodecName::H265 => Some(shiguredo_nvcodec::VideoCodecType::Hevc),
+        CodecName::Vp8 => Some(shiguredo_nvcodec::VideoCodecType::Vp8),
+        CodecName::Vp9 => Some(shiguredo_nvcodec::VideoCodecType::Vp9),
+        CodecName::Av1 => Some(shiguredo_nvcodec::VideoCodecType::Av1),
+        _ => None,
+    }
+}
+
 /// CodecName から shiguredo_video_toolbox の VideoCodecType へのマッピング
 ///
 /// VideoToolbox は VP8 に対応していないため、VP8 は None を返す。
@@ -230,16 +250,12 @@ impl EngineName {
                     .any(|info| info.codec == c && info.decoding.supported)
             }),
             #[cfg(feature = "nvcodec")]
-            EngineName::Nvcodec => {
-                matches!(
-                    codec,
-                    CodecName::H264
-                        | CodecName::H265
-                        | CodecName::Vp8
-                        | CodecName::Vp9
-                        | CodecName::Av1
-                )
-            }
+            EngineName::Nvcodec => to_nvcodec_codec(codec).is_some_and(|c| {
+                nvcodec_supported_codecs()
+                    .iter()
+                    .any(|info| info.codec == c && info.decoding.supported)
+            }),
+            // OpenH264 は動的ライブラリロードで有無を判定するため supported_codecs() は使わない
             EngineName::Openh264 => matches!(codec, CodecName::H264),
             EngineName::Dav1d => to_dav1d_codec(codec).is_some_and(|c| {
                 dav1d_supported_codecs()
@@ -285,9 +301,11 @@ impl EngineName {
                     .any(|info| info.codec == c && info.encoding.supported)
             }),
             #[cfg(feature = "nvcodec")]
-            EngineName::Nvcodec => {
-                matches!(codec, CodecName::H264 | CodecName::H265 | CodecName::Av1)
-            }
+            EngineName::Nvcodec => to_nvcodec_codec(codec).is_some_and(|c| {
+                nvcodec_supported_codecs()
+                    .iter()
+                    .any(|info| info.codec == c && info.encoding.supported)
+            }),
             EngineName::Openh264 => matches!(codec, CodecName::H264),
             EngineName::SvtAv1 => to_svt_av1_codec(codec).is_some_and(|c| {
                 svt_av1_supported_codecs()
