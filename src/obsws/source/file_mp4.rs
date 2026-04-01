@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
-use crate::mp4::reader::{MediaInputHandle, Mp4FileReader, Mp4FileReaderOptions};
+use crate::mp4::reader::{
+    MediaEventContext, MediaInputHandle, Mp4FileReader, Mp4FileReaderOptions,
+};
 use crate::{ProcessorHandle, Result, TrackId};
 
 #[derive(Debug, Clone)]
@@ -10,15 +12,16 @@ pub struct Mp4FileSource {
     pub loop_playback: bool,
     pub audio_track_id: Option<TrackId>,
     pub video_track_id: Option<TrackId>,
-    /// メディア再生制御を有効にするかどうか
-    pub enable_media_control: bool,
 }
 
 impl Mp4FileSource {
     /// reader を作成し、メディア再生制御ハンドルを返す。
     /// spawn_processor のクロージャ内で run_reader を呼ぶことで、
     /// ハンドルを外部に返しつつ reader を起動できる。
-    pub fn create_reader(&self) -> Result<(Mp4FileReader, Option<MediaInputHandle>)> {
+    pub fn create_reader(
+        &self,
+        event_ctx: Option<MediaEventContext>,
+    ) -> Result<(Mp4FileReader, Option<MediaInputHandle>)> {
         let options = Mp4FileReaderOptions {
             realtime: true,
             loop_playback: self.loop_playback,
@@ -27,11 +30,7 @@ impl Mp4FileSource {
         };
 
         let mut reader = Mp4FileReader::new(&self.path, options)?;
-        let media_handle = if self.enable_media_control {
-            Some(reader.create_media_handle())
-        } else {
-            None
-        };
+        let media_handle = event_ctx.map(|ctx| reader.create_media_handle(ctx));
 
         Ok((reader, media_handle))
     }
@@ -68,7 +67,7 @@ impl Mp4FileSource {
 
     #[cfg(test)]
     pub async fn run(self, processor: ProcessorHandle) -> Result<()> {
-        let (reader, _media_handle) = self.create_reader()?;
+        let (reader, _media_handle) = self.create_reader(None)?;
         Self::run_reader(reader, processor).await
     }
 }
@@ -108,7 +107,6 @@ mod tests {
                 loop_playback: false,
                 audio_track_id: None,
                 video_track_id: Some(video_track_id.clone()),
-                enable_media_control: false,
             };
             handle
                 .spawn_processor(
@@ -180,7 +178,6 @@ mod tests {
                     loop_playback: false,
                     audio_track_id: None,
                     video_track_id: Some(video_track_id.clone()),
-                    enable_media_control: false,
                 };
                 handle
                     .spawn_processor(

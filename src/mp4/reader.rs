@@ -97,7 +97,22 @@ pub enum MediaInputEvent {
 pub struct MediaInputHandle {
     pub status: tokio::sync::watch::Receiver<MediaPlaybackStatus>,
     pub command_tx: tokio::sync::mpsc::Sender<MediaInputCommand>,
-    pub event_rx: tokio::sync::mpsc::Receiver<MediaInputEvent>,
+}
+
+/// メディアイベント直接配信に必要な情報
+pub struct MediaEventContext {
+    pub event_broadcast_tx: tokio::sync::broadcast::Sender<crate::obsws::coordinator::TaggedEvent>,
+    pub input_name: String,
+    pub input_uuid: String,
+}
+
+impl std::fmt::Debug for MediaEventContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MediaEventContext")
+            .field("input_name", &self.input_name)
+            .field("input_uuid", &self.input_uuid)
+            .finish()
+    }
 }
 
 /// `MediaInputHandle` の作成結果（reader 側で受け取る部分）
@@ -105,24 +120,24 @@ pub struct MediaInputHandle {
 struct MediaInputChannels {
     status_tx: tokio::sync::watch::Sender<MediaPlaybackStatus>,
     command_rx: tokio::sync::mpsc::Receiver<MediaInputCommand>,
-    event_tx: tokio::sync::mpsc::Sender<MediaInputEvent>,
+    event_ctx: MediaEventContext,
 }
 
 /// メディア入力のハンドルとチャネルを作成する
-fn create_media_input_channels() -> (MediaInputHandle, MediaInputChannels) {
+fn create_media_input_channels(
+    event_ctx: MediaEventContext,
+) -> (MediaInputHandle, MediaInputChannels) {
     let (status_tx, status_rx) = tokio::sync::watch::channel(MediaPlaybackStatus::default());
     let (command_tx, command_rx) = tokio::sync::mpsc::channel(8);
-    let (event_tx, event_rx) = tokio::sync::mpsc::channel(8);
 
     let handle = MediaInputHandle {
         status: status_rx,
         command_tx,
-        event_rx,
     };
     let channels = MediaInputChannels {
         status_tx,
         command_rx,
-        event_tx,
+        event_ctx,
     };
     (handle, channels)
 }
@@ -202,8 +217,8 @@ impl Mp4FileReader {
 
     /// メディア再生制御のハンドルを作成して返す。
     /// reader に制御チャネルを設定し、外部からの再生制御を可能にする。
-    pub fn create_media_handle(&mut self) -> MediaInputHandle {
-        let (handle, channels) = create_media_input_channels();
+    pub fn create_media_handle(&mut self, event_ctx: MediaEventContext) -> MediaInputHandle {
+        let (handle, channels) = create_media_input_channels(event_ctx);
         self.media_channels = Some(channels);
         handle
     }
@@ -238,24 +253,46 @@ impl Mp4FileReader {
         }
         handle.wait_subscribers_ready().await?;
 
-        self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
-        self.send_media_event(MediaInputEvent::PlaybackStarted);
-
-        self.start_instant = tokio::time::Instant::now();
-        self.last_realtime_timestamp = None;
-
-        let should_stop = self.run_loop(loop_enabled).await?;
-        if should_stop {
-            self.update_playback_status(MediaPlaybackState::Stopped, self.last_emitted_end);
-            self.send_media_event(MediaInputEvent::PlaybackEnded);
+        // メディア制御が無効なら従来通り一度だけ再生して終了
+        if self.media_channels.is_none() {
+            self.start_playback();
+            let should_stop = self.run_loop(loop_enabled).await?;
+            if !should_stop {
+                self.flush_decoders()?;
+            }
+            self.send_eos_to_tracks();
             return Ok(());
         }
 
-        self.flush_and_send_eos()?;
-        self.update_playback_status(MediaPlaybackState::Ended, self.last_emitted_end);
-        self.send_media_event(MediaInputEvent::PlaybackEnded);
+        // メディア制御が有効: 停止後もコマンド待機ループを回す
+        loop {
+            self.start_playback();
+            let should_stop = self.run_loop(loop_enabled).await?;
+            if !should_stop {
+                self.flush_decoders()?;
+                self.update_playback_status(MediaPlaybackState::Ended, self.last_emitted_end);
+            } else {
+                self.update_playback_status(MediaPlaybackState::Stopped, self.last_emitted_end);
+            }
+            self.send_media_event(MediaInputEvent::PlaybackEnded);
 
+            // Play / Restart を待つ。チャネルクローズなら終了
+            if !self.wait_for_restart_command().await {
+                break;
+            }
+            self.reset_for_restart(&handle);
+        }
+
+        self.send_eos_to_tracks();
         Ok(())
+    }
+
+    /// 再生開始時の状態を初期化する
+    fn start_playback(&mut self) {
+        self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
+        self.send_media_event(MediaInputEvent::PlaybackStarted);
+        self.start_instant = tokio::time::Instant::now();
+        self.last_realtime_timestamp = None;
     }
 
     fn resolve_loop_enabled(&self) -> bool {
@@ -438,12 +475,33 @@ impl Mp4FileReader {
         }
     }
 
-    /// メディアイベントを送信する
+    /// メディアイベントを obsws セッションに直接配信する
     fn send_media_event(&self, event: MediaInputEvent) {
-        if let Some(channels) = &self.media_channels {
-            // バッファが一杯の場合はドロップする
-            let _ = channels.event_tx.try_send(event);
-        }
+        let Some(channels) = &self.media_channels else {
+            return;
+        };
+        let text = match event {
+            MediaInputEvent::PlaybackStarted => {
+                crate::obsws::response::build_media_input_playback_started_event(
+                    &channels.event_ctx.input_name,
+                    &channels.event_ctx.input_uuid,
+                )
+            }
+            MediaInputEvent::PlaybackEnded => {
+                crate::obsws::response::build_media_input_playback_ended_event(
+                    &channels.event_ctx.input_name,
+                    &channels.event_ctx.input_uuid,
+                )
+            }
+        };
+        let _ =
+            channels
+                .event_ctx
+                .event_broadcast_tx
+                .send(crate::obsws::coordinator::TaggedEvent {
+                    text,
+                    subscription_flag: crate::obsws::protocol::OBSWS_EVENT_SUB_MEDIA_INPUTS,
+                });
     }
 
     async fn handle_sample(
@@ -601,8 +659,8 @@ impl Mp4FileReader {
         timestamp
     }
 
-    fn flush_and_send_eos(&mut self) -> Result<()> {
-        // デコーダーの残りのフレームを flush する。
+    /// デコーダーの残りのフレームを flush する。EOS は送らない。
+    fn flush_decoders(&mut self) -> Result<()> {
         // EOS flush 中に pipeline が閉じるのは正常な停止シーケンスなので、DrainResult は無視する。
         if let Some(decoder) = self.audio_decoder.as_mut()
             && let Some(sender) = self.audio_sender.as_mut()
@@ -616,13 +674,74 @@ impl Mp4FileReader {
             decoder.handle_input_sample(None)?;
             let _ = crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?;
         }
+        Ok(())
+    }
+
+    /// トラックに EOS を送信する
+    fn send_eos_to_tracks(&mut self) {
         if let Some(sender) = self.audio_sender.as_mut() {
             sender.send_eos();
         }
         if let Some(sender) = self.video_sender.as_mut() {
             sender.send_eos();
         }
-        Ok(())
+    }
+
+    /// Ended / Stopped 状態で Play / Restart コマンドを待つ。
+    /// チャネルクローズ時は false を返す。
+    async fn wait_for_restart_command(&mut self) -> bool {
+        let Some(channels) = self.media_channels.as_mut() else {
+            return false;
+        };
+        loop {
+            match channels.command_rx.recv().await {
+                Some(MediaInputCommand::Play | MediaInputCommand::Restart) => return true,
+                Some(MediaInputCommand::Pause | MediaInputCommand::Stop) => {
+                    // 既に停止済みなので無視
+                }
+                None => return false,
+            }
+        }
+    }
+
+    /// 再生状態とデコーダーをリセットして再生可能にする
+    fn reset_for_restart(&mut self, handle: &ProcessorHandle) {
+        self.base_offset = Duration::ZERO;
+        self.last_emitted_end = Duration::ZERO;
+        self.is_paused = false;
+        self.pause_started_at = None;
+        self.recreate_decoders(handle);
+    }
+
+    /// デコーダーを再生成する
+    fn recreate_decoders(&mut self, handle: &ProcessorHandle) {
+        if self.audio_decoder.is_some() {
+            let mut decoder_stats = handle.stats();
+            decoder_stats.set_default_label("component", "audio_decoder");
+            match crate::decoder::AudioDecoder::new(
+                #[cfg(feature = "fdk-aac")]
+                handle.config().fdk_aac_lib.clone(),
+                decoder_stats,
+            ) {
+                Ok(decoder) => self.audio_decoder = Some(decoder),
+                Err(e) => {
+                    tracing::warn!("failed to recreate audio decoder: {}", e.display());
+                    self.audio_decoder = None;
+                }
+            }
+        }
+        if self.video_decoder.is_some() {
+            let mut decoder_stats = handle.stats();
+            decoder_stats.set_default_label("component", "video_decoder");
+            let decoder = crate::decoder::VideoDecoder::new(
+                crate::decoder::VideoDecoderOptions {
+                    openh264_lib: handle.config().openh264_lib.clone(),
+                    ..Default::default()
+                },
+                decoder_stats,
+            );
+            self.video_decoder = Some(decoder);
+        }
     }
 }
 

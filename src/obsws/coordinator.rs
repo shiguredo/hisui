@@ -354,9 +354,6 @@ impl ObswsCoordinator {
                 }
             }
 
-            // メディア入力からのイベントをポーリングして配信する
-            self.drain_media_input_events();
-
             // state file 保存失敗等の致命的エラーが発生した場合はループを抜ける。
             // エラーレスポンスは上で reply_tx 経由で送信済みなので、
             // クライアントにはエラーが通知された後にサーバーが停止する。
@@ -1149,40 +1146,6 @@ impl ObswsCoordinator {
             events.push(event);
         }
         self.build_result_from_response(response_text, events)
-    }
-
-    /// メディア入力からのイベントをポーリングして obsws セッションに配信する
-    fn drain_media_input_events(&mut self) {
-        for (input_uuid, source_state) in &mut self.input_source_processors {
-            let Some(handle) = &mut source_state.media_handle else {
-                continue;
-            };
-            let Some(entry) = self
-                .input_registry
-                .find_input(Some(input_uuid.as_str()), None)
-            else {
-                continue;
-            };
-            while let Ok(event) = handle.event_rx.try_recv() {
-                let tagged_event = match event {
-                    crate::mp4::reader::MediaInputEvent::PlaybackStarted => TaggedEvent {
-                        text: crate::obsws::response::build_media_input_playback_started_event(
-                            &entry.input_name,
-                            &entry.input_uuid,
-                        ),
-                        subscription_flag: OBSWS_EVENT_SUB_MEDIA_INPUTS,
-                    },
-                    crate::mp4::reader::MediaInputEvent::PlaybackEnded => TaggedEvent {
-                        text: crate::obsws::response::build_media_input_playback_ended_event(
-                            &entry.input_name,
-                            &entry.input_uuid,
-                        ),
-                        subscription_flag: OBSWS_EVENT_SUB_MEDIA_INPUTS,
-                    },
-                };
-                let _ = self.obsws_event_tx.send(tagged_event);
-            }
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -3580,7 +3543,7 @@ impl ObswsCoordinator {
         let Some(pipeline_handle) = &self.pipeline_handle else {
             return Ok(());
         };
-        let source_plan = crate::obsws::source::build_record_source_plan(
+        let mut source_plan = crate::obsws::source::build_record_source_plan(
             input_entry,
             crate::obsws::source::ObswsOutputKind::Program,
             0,
@@ -3588,6 +3551,20 @@ impl ObswsCoordinator {
             self.input_registry.frame_rate(),
         )
         .map_err(|e| crate::Error::new(format!("failed to build source plan: {}", e.message())))?;
+
+        // mp4_file_source のイベント直接配信用コンテキストを注入する
+        for request in &mut source_plan.requests {
+            if let crate::obsws::source::ObswsSourceRequest::CreateMp4FileSource {
+                event_ctx, ..
+            } = request
+            {
+                *event_ctx = Some(crate::mp4::reader::MediaEventContext {
+                    event_broadcast_tx: self.obsws_event_tx.clone(),
+                    input_name: input_entry.input_name.clone(),
+                    input_uuid: input_entry.input_uuid.clone(),
+                });
+            }
+        }
 
         let mut state = InputSourceState {
             processor_ids: source_plan.source_processor_ids.clone(),

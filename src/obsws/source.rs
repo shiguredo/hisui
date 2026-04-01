@@ -36,6 +36,7 @@ pub enum ObswsSourceRequest {
     CreateMp4FileSource {
         source: self::file_mp4::Mp4FileSource,
         processor_id: Option<ProcessorId>,
+        event_ctx: Option<crate::mp4::reader::MediaEventContext>,
     },
     CreatePngFileSource {
         source: self::png_file::PngFileSource,
@@ -78,10 +79,11 @@ impl ObswsSourceRequest {
             Self::CreateMp4FileSource {
                 source,
                 processor_id,
+                event_ctx,
             } => {
                 let processor_id = processor_id
                     .unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
-                let (reader, media_handle) = source.create_reader()?;
+                let (reader, media_handle) = source.create_reader(event_ctx)?;
                 handle
                     .spawn_processor(
                         processor_id.clone(),
