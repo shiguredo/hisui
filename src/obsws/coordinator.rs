@@ -1473,9 +1473,8 @@ impl ObswsCoordinator {
             );
         };
 
-        // duration を取得して clamp する
-        let duration_ms = handle.status.borrow().duration.as_millis() as i64;
-        let clamped_ms = cursor_ms.max(0).min(duration_ms);
+        // 負の値は 0 に clamp する。上限の clamp は reader 側で duration を使って行う
+        let clamped_ms = cursor_ms.max(0);
         let position = std::time::Duration::from_millis(clamped_ms as u64);
 
         if handle

@@ -266,7 +266,7 @@ impl Mp4FileReader {
         // メディア制御が無効なら従来通り一度だけ再生して終了
         if self.media_channels.is_none() {
             self.start_playback();
-            let should_stop = self.run_loop(loop_enabled).await?;
+            let should_stop = self.run_loop(loop_enabled, &handle).await?;
             if !should_stop {
                 self.flush_decoders()?;
             }
@@ -277,7 +277,7 @@ impl Mp4FileReader {
         // メディア制御が有効: 停止後もコマンド待機ループを回す
         loop {
             self.start_playback();
-            let should_stop = self.run_loop(loop_enabled).await?;
+            let should_stop = self.run_loop(loop_enabled, &handle).await?;
             if !should_stop {
                 self.flush_decoders()?;
                 self.update_playback_status(MediaPlaybackState::Ended, self.last_emitted_end);
@@ -335,7 +335,7 @@ impl Mp4FileReader {
         Ok((audio_sender, video_sender))
     }
 
-    async fn run_loop(&mut self, loop_enabled: bool) -> Result<bool> {
+    async fn run_loop(&mut self, loop_enabled: bool, handle: &ProcessorHandle) -> Result<bool> {
         'outer: loop {
             let mut state = ReaderState::open(
                 &self.path,
@@ -361,7 +361,10 @@ impl Mp4FileReader {
                 match self.poll_media_command() {
                     MediaLoopAction::Continue => {}
                     MediaLoopAction::Stop => return Ok(true),
-                    MediaLoopAction::Restart => continue 'outer,
+                    MediaLoopAction::Restart => {
+                        self.recreate_decoders(handle);
+                        continue 'outer;
+                    }
                     MediaLoopAction::Seek(position) => {
                         self.apply_seek(&mut state, position)?;
                         continue;
@@ -372,7 +375,10 @@ impl Mp4FileReader {
                     match self.wait_while_paused().await {
                         MediaLoopAction::Continue => {}
                         MediaLoopAction::Stop => return Ok(true),
-                        MediaLoopAction::Restart => continue 'outer,
+                        MediaLoopAction::Restart => {
+                            self.recreate_decoders(handle);
+                            continue 'outer;
+                        }
                         MediaLoopAction::Seek(position) => {
                             self.apply_seek(&mut state, position)?;
                             continue;
@@ -476,6 +482,12 @@ impl Mp4FileReader {
     /// 映像トラックがある場合、シーク先が非キーフレームなら直前のキーフレームまで遡り
     /// warm-up モードに入る。
     fn apply_seek(&mut self, state: &mut ReaderState, position: Duration) -> Result<()> {
+        // duration が取得済みなら上限を clamp する
+        let position = if self.media_duration > Duration::ZERO {
+            position.min(self.media_duration)
+        } else {
+            position
+        };
         state
             .demuxer
             .seek(position)
@@ -574,7 +586,7 @@ impl Mp4FileReader {
         self.update_playback_status(MediaPlaybackState::Playing, self.last_emitted_end);
     }
 
-    /// 再生を先頭からリスタートする
+    /// 再生を先頭からリスタートする（デコーダーの再生成は呼び出し側で行う）
     fn restart_playback(&mut self) {
         self.is_paused = false;
         self.pause_started_at = None;
