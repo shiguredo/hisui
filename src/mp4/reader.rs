@@ -70,6 +70,8 @@ pub enum MediaInputCommand {
     Restart,
     /// 指定した絶対位置へシークする
     Seek(Duration),
+    /// 現在位置からの相対シーク（ミリ秒、負値は後方）
+    OffsetSeek(i64),
 }
 
 impl MediaInputCommand {
@@ -154,6 +156,8 @@ enum MediaLoopAction {
     Restart,
     /// 指定位置へシークする
     Seek(Duration),
+    /// 現在位置からの相対シーク（ミリ秒）
+    OffsetSeek(i64),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -373,6 +377,11 @@ impl Mp4FileReader {
                         self.apply_seek(&mut state, position)?;
                         continue;
                     }
+                    MediaLoopAction::OffsetSeek(offset_ms) => {
+                        let position = self.resolve_offset_seek(offset_ms);
+                        self.apply_seek(&mut state, position)?;
+                        continue;
+                    }
                 }
                 // 一時停止中はコマンドを非同期で待つ
                 if self.is_paused {
@@ -384,6 +393,11 @@ impl Mp4FileReader {
                             continue 'outer;
                         }
                         MediaLoopAction::Seek(position) => {
+                            self.apply_seek(&mut state, position)?;
+                            continue;
+                        }
+                        MediaLoopAction::OffsetSeek(offset_ms) => {
+                            let position = self.resolve_offset_seek(offset_ms);
                             self.apply_seek(&mut state, position)?;
                             continue;
                         }
@@ -443,9 +457,11 @@ impl Mp4FileReader {
                     return MediaLoopAction::Restart;
                 }
                 Some(MediaInputCommand::Seek(position)) => {
-                    // 一時停止中のシーク: 公開カーソルのみ更新
-                    self.pending_seek = Some(position);
-                    self.update_playback_status(MediaPlaybackState::Paused, position);
+                    self.set_pending_seek(position);
+                }
+                Some(MediaInputCommand::OffsetSeek(offset_ms)) => {
+                    let position = self.resolve_offset_seek(offset_ms);
+                    self.set_pending_seek(position);
                 }
                 None => {
                     // チャネルが閉じられた
@@ -479,6 +495,7 @@ impl Mp4FileReader {
                 MediaLoopAction::Restart
             }
             Ok(MediaInputCommand::Seek(position)) => MediaLoopAction::Seek(position),
+            Ok(MediaInputCommand::OffsetSeek(offset_ms)) => MediaLoopAction::OffsetSeek(offset_ms),
             Err(_) => MediaLoopAction::Continue,
         }
     }
@@ -607,6 +624,40 @@ impl Mp4FileReader {
         self.last_realtime_timestamp = None;
         self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
         self.send_media_event(MediaInputEvent::PlaybackStarted);
+    }
+
+    /// 現在のファイル内カーソル位置を取得する
+    fn current_file_cursor(&self) -> Duration {
+        self.pending_seek
+            .unwrap_or_else(|| self.last_emitted_end.saturating_sub(self.base_offset))
+    }
+
+    /// 位置を 0..=media_duration に clamp する
+    fn clamp_position(&self, position: Duration) -> Duration {
+        if self.media_duration > Duration::ZERO {
+            position.min(self.media_duration)
+        } else {
+            position
+        }
+    }
+
+    /// 相対オフセット（ミリ秒）を絶対位置に変換する
+    fn resolve_offset_seek(&self, offset_ms: i64) -> Duration {
+        let current_ms = self.current_file_cursor().as_millis() as i64;
+        let target_ms = current_ms.saturating_add(offset_ms).max(0);
+        self.clamp_position(Duration::from_millis(target_ms as u64))
+    }
+
+    /// seek 位置を clamp して pending_seek と公開ステータスを更新する。
+    /// 現在の公開状態（Paused / Stopped / Ended）はそのまま維持する。
+    fn set_pending_seek(&mut self, position: Duration) {
+        let clamped = self.clamp_position(position);
+        self.pending_seek = Some(clamped);
+        // 現在の公開状態を維持したまま cursor だけ更新する
+        if let Some(channels) = &self.media_channels {
+            let current_state = channels.status_tx.borrow().state;
+            self.update_playback_status(current_state, clamped);
+        }
     }
 
     /// 再生状態を更新する。cursor はファイル内の絶対位置を渡す。
@@ -912,9 +963,11 @@ impl Mp4FileReader {
                     // 既に停止済みなので無視
                 }
                 Some(MediaInputCommand::Seek(position)) => {
-                    // 停止中のシーク: 公開カーソルと pending_seek のみ更新
-                    self.pending_seek = Some(position);
-                    self.update_playback_status(MediaPlaybackState::Stopped, position);
+                    self.set_pending_seek(position);
+                }
+                Some(MediaInputCommand::OffsetSeek(offset_ms)) => {
+                    let position = self.resolve_offset_seek(offset_ms);
+                    self.set_pending_seek(position);
                 }
                 None => return false,
             }
@@ -1472,5 +1525,133 @@ mod tests {
         assert!(effective_timestamp >= Duration::from_secs(10));
 
         Ok(())
+    }
+
+    /// テスト用: メディア制御付き reader を作成するヘルパー
+    fn reader_with_media_control() -> (Mp4FileReader, MediaInputHandle) {
+        let mut reader = Mp4FileReader::new(
+            "testdata/red-320x320-h264-aac.mp4",
+            Mp4FileReaderOptions::default(),
+        )
+        .expect("test file must be readable");
+        let handle = reader.create_media_handle(MediaEventContext {
+            event_broadcast_tx: tokio::sync::broadcast::channel(8).0,
+            input_name: "test".to_owned(),
+            input_uuid: "test-uuid".to_owned(),
+        });
+        (reader, handle)
+    }
+
+    /// 一時停止中の seek で Paused を維持し、cursor が clamp 済みで更新される
+    #[test]
+    fn seek_during_paused_preserves_state_and_clamps() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.update_playback_status(MediaPlaybackState::Paused, Duration::from_secs(5));
+
+        // 絶対位置シーク: duration 内
+        reader.set_pending_seek(Duration::from_secs(10));
+        let status = handle.status.borrow().clone();
+        assert_eq!(status.state, MediaPlaybackState::Paused);
+        assert_eq!(status.cursor, Duration::from_secs(10));
+
+        // 絶対位置シーク: duration を超える → clamp される
+        reader.set_pending_seek(Duration::from_secs(50));
+        let status = handle.status.borrow().clone();
+        assert_eq!(status.state, MediaPlaybackState::Paused);
+        assert_eq!(status.cursor, Duration::from_secs(30));
+    }
+
+    /// Stopped 中の seek で Stopped を維持する
+    #[test]
+    fn seek_during_stopped_preserves_state() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(15));
+
+        reader.set_pending_seek(Duration::from_secs(5));
+        let status = handle.status.borrow().clone();
+        assert_eq!(status.state, MediaPlaybackState::Stopped);
+        assert_eq!(status.cursor, Duration::from_secs(5));
+    }
+
+    /// Ended 中の seek で Ended を維持し、Stopped へ変わらない
+    #[test]
+    fn seek_during_ended_preserves_state() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.update_playback_status(MediaPlaybackState::Ended, Duration::from_secs(30));
+
+        reader.set_pending_seek(Duration::from_secs(10));
+        let status = handle.status.borrow().clone();
+        assert_eq!(status.state, MediaPlaybackState::Ended);
+        assert_eq!(status.cursor, Duration::from_secs(10));
+    }
+
+    /// duration 未取得時は seek 位置が 0 に固定されず、取得後は mediaDuration を超えない
+    #[test]
+    fn seek_clamp_depends_on_duration_availability() {
+        let (mut reader, handle) = reader_with_media_control();
+
+        // duration 未取得（0）: clamp されない
+        reader.media_duration = Duration::ZERO;
+        reader.set_pending_seek(Duration::from_secs(100));
+        assert_eq!(handle.status.borrow().cursor, Duration::from_secs(100));
+
+        // duration 取得済み: clamp される
+        reader.media_duration = Duration::from_secs(30);
+        reader.set_pending_seek(Duration::from_secs(100));
+        assert_eq!(handle.status.borrow().cursor, Duration::from_secs(30));
+    }
+
+    /// resolve_offset_seek が現在位置基準で正しく計算する
+    #[test]
+    fn resolve_offset_seek_uses_current_cursor() {
+        let (mut reader, _handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(60);
+
+        // 現在位置を 10 秒に設定
+        reader.base_offset = Duration::ZERO;
+        reader.last_emitted_end = Duration::from_secs(10);
+
+        // +5000ms → 15 秒
+        let pos = reader.resolve_offset_seek(5000);
+        assert_eq!(pos, Duration::from_secs(15));
+
+        // -3000ms → 7 秒
+        let pos = reader.resolve_offset_seek(-3000);
+        assert_eq!(pos, Duration::from_secs(7));
+
+        // -20000ms → 0 に clamp
+        let pos = reader.resolve_offset_seek(-20000);
+        assert_eq!(pos, Duration::ZERO);
+
+        // +100000ms → duration に clamp
+        let pos = reader.resolve_offset_seek(100000);
+        assert_eq!(pos, Duration::from_secs(60));
+    }
+
+    /// backward seek 直後にさらに relative seek しても正しい位置に進む
+    #[test]
+    fn backward_seek_then_relative_seek_uses_correct_base() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(60);
+
+        // 100 秒地点を模擬（base_offset=0, last_emitted_end=100s はあり得ないが
+        // current_file_cursor() のテストなので duration 内の値で）
+        reader.base_offset = Duration::ZERO;
+        reader.last_emitted_end = Duration::from_secs(30);
+
+        // 10 秒へ backward seek
+        reader.set_pending_seek(Duration::from_secs(10));
+        assert_eq!(handle.status.borrow().cursor, Duration::from_secs(10));
+
+        // さらに +5000ms の relative seek は pending_seek=10s を基準に 15 秒になる
+        let pos = reader.resolve_offset_seek(5000);
+        assert_eq!(pos, Duration::from_secs(15));
+
+        // -3000ms の relative seek は 7 秒になる
+        let pos = reader.resolve_offset_seek(-3000);
+        assert_eq!(pos, Duration::from_secs(7));
     }
 }

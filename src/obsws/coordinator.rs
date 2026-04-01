@@ -1373,7 +1373,7 @@ impl ObswsCoordinator {
                 Err(response) => return self.build_result_from_response(response, Vec::new()),
             };
 
-        // 現在のカーソル位置を取得して offset を加算する
+        // 相対 offset はそのまま reader に渡す（reader 側で現在位置に加算する）
         let entry = match self.find_media_input(
             "OffsetMediaInputCursor",
             request_id,
@@ -1383,31 +1383,42 @@ impl ObswsCoordinator {
             Ok(e) => e,
             Err(result) => return *result,
         };
-        let source_state = match self.input_source_processors.get(&entry.input_uuid) {
-            Some(s) => s,
-            None => {
-                return self.build_error_result(
-                    "OffsetMediaInputCursor",
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Input source processor not found",
-                );
-            }
-        };
-        let current_cursor_ms = source_state
-            .media_handle
-            .as_ref()
-            .map(|h| h.status.borrow().cursor.as_millis() as i64)
-            .unwrap_or(0);
 
-        let absolute_ms = current_cursor_ms.saturating_add(offset_ms);
-        self.send_seek_command(
+        let Some(source_state) = self.input_source_processors.get(&entry.input_uuid) else {
+            return self.build_error_result(
+                "OffsetMediaInputCursor",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Input source processor not found",
+            );
+        };
+        let Some(handle) = &source_state.media_handle else {
+            return self.build_error_result(
+                "OffsetMediaInputCursor",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Media input handle not available",
+            );
+        };
+
+        if handle
+            .command_tx
+            .try_send(crate::mp4::reader::MediaInputCommand::OffsetSeek(offset_ms))
+            .is_err()
+        {
+            return self.build_error_result(
+                "OffsetMediaInputCursor",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "Failed to send seek command",
+            );
+        }
+
+        let response = crate::obsws::response::build_request_response_success_no_data(
             "OffsetMediaInputCursor",
             request_id,
-            &input_uuid,
-            &input_name,
-            absolute_ms,
-        )
+        );
+        self.build_result_from_response(response, Vec::new())
     }
 
     /// メディア入力を検索して mp4_file_source であることを検証する
