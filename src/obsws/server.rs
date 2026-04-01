@@ -433,12 +433,10 @@ async fn handle_ws_connection(
                             event.subscription_flag == crate::obsws::protocol::OBSWS_EVENT_SUB_SORA_SOURCE;
                         if is_broadcast_only_event
                             && (session.event_subscriptions() & event.subscription_flag) != 0
-                        {
-                            if let Err(e) = ws.send_text(&event.text.to_string()) {
+                            && let Err(e) = ws.send_text(&event.text.to_string()) {
                                 tracing::warn!("failed to send broadcast event: {e}");
                                 break;
                             }
-                        }
                     }
                     // Lagged エラーの場合は無視して続行
                 }
