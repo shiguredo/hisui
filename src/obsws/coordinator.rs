@@ -2195,26 +2195,21 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let mut output_plan = match build_output_plan_or_error(
-            request_type,
-            request_id,
-            &self.input_registry,
-            crate::obsws::source::ObswsOutputKind::Stream,
+        let video = ObswsRecordTrackRun::new(
+            "stream",
             run_id,
-        ) {
-            Ok(plan) => plan,
-            Err(outcome) => return outcome,
-        };
-        let video =
-            ObswsRecordTrackRun::new("stream", run_id, "video", &output_plan.video_track_id);
-        let audio =
-            ObswsRecordTrackRun::new("stream", run_id, "audio", &output_plan.audio_track_id);
+            "video",
+            &self.program_output.video_track_id,
+        );
+        let audio = ObswsRecordTrackRun::new(
+            "stream",
+            run_id,
+            "audio",
+            &self.program_output.audio_track_id,
+        );
         let run = ObswsStreamRun {
-            source_processor_ids: output_plan.source_processor_ids.clone(),
             video,
             audio,
-            audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
-            video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
             publisher_processor_id: crate::ProcessorId::new(format!(
                 "obsws:stream:{run_id}:rtmp_publisher"
             )),
@@ -2242,12 +2237,13 @@ impl ObswsCoordinator {
                 ),
             );
         };
+        let frame_rate = self.input_registry.frame_rate();
         if let Err(e) = start_stream_processors(
             pipeline_handle,
-            &mut output_plan,
             &output_url,
             stream_service_settings.key.as_deref(),
             &run,
+            frame_rate,
         )
         .await
         {
@@ -2329,20 +2325,18 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let mut output_plan = match build_output_plan_or_error(
-            request_type,
-            request_id,
-            &self.input_registry,
-            crate::obsws::source::ObswsOutputKind::Record,
+        let video = ObswsRecordTrackRun::new(
+            "record",
             run_id,
-        ) {
-            Ok(plan) => plan,
-            Err(outcome) => return outcome,
-        };
-        let video =
-            ObswsRecordTrackRun::new("record", run_id, "video", &output_plan.video_track_id);
-        let audio =
-            ObswsRecordTrackRun::new("record", run_id, "audio", &output_plan.audio_track_id);
+            "video",
+            &self.program_output.video_track_id,
+        );
+        let audio = ObswsRecordTrackRun::new(
+            "record",
+            run_id,
+            "audio",
+            &self.program_output.audio_track_id,
+        );
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
@@ -2352,11 +2346,8 @@ impl ObswsCoordinator {
             .record_directory()
             .join(format!("obsws-record-{timestamp}.mp4"));
         let run = ObswsRecordRun {
-            source_processor_ids: output_plan.source_processor_ids.clone(),
             video,
             audio,
-            audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
-            video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
             writer_processor_id: crate::ProcessorId::new(format!(
                 "obsws:record:{run_id}:mp4_writer"
             )),
@@ -2399,8 +2390,9 @@ impl ObswsCoordinator {
                 ),
             );
         };
+        let frame_rate = self.input_registry.frame_rate();
         if let Err(e) =
-            start_record_processors(pipeline_handle, &mut output_plan, &output_path, &run).await
+            start_record_processors(pipeline_handle, &output_path, &run, frame_rate).await
         {
             self.input_registry.deactivate_record();
             let _ = stop_processors_staged_record(pipeline_handle, &run).await;
@@ -3054,34 +3046,21 @@ impl ObswsCoordinator {
                 );
             }
         };
-        let mut output_plan = match build_output_plan_or_error(
-            request_type,
-            request_id,
-            &self.input_registry,
-            crate::obsws::source::ObswsOutputKind::RtmpOutbound,
-            run_id,
-        ) {
-            Ok(plan) => plan,
-            Err(outcome) => return outcome,
-        };
         let video = ObswsRecordTrackRun::new(
             "rtmp_outbound",
             run_id,
             "video",
-            &output_plan.video_track_id,
+            &self.program_output.video_track_id,
         );
         let audio = ObswsRecordTrackRun::new(
             "rtmp_outbound",
             run_id,
             "audio",
-            &output_plan.audio_track_id,
+            &self.program_output.audio_track_id,
         );
         let run = ObswsRtmpOutboundRun {
-            source_processor_ids: output_plan.source_processor_ids.clone(),
             video,
             audio,
-            audio_mixer_processor_id: output_plan.audio_mixer_processor_id.clone(),
-            video_mixer_processor_id: output_plan.video_mixer_processor_id.clone(),
             endpoint_processor_id: crate::ProcessorId::new(format!(
                 "obsws:rtmp_outbound:{run_id}:rtmp_outbound_endpoint"
             )),
@@ -3109,12 +3088,13 @@ impl ObswsCoordinator {
                 ),
             );
         };
+        let frame_rate = self.input_registry.frame_rate();
         if let Err(e) = start_rtmp_outbound_processors(
             pipeline_handle,
-            &mut output_plan,
             &output_url,
             rtmp_outbound_settings.stream_name.as_deref(),
             &run,
+            frame_rate,
         )
         .await
         {
@@ -3760,48 +3740,19 @@ fn parse_custom_event_data(
     nojson::RawJsonOwned::try_from(event_data)
 }
 
-fn build_output_plan_or_error(
-    request_type: &str,
-    request_id: &str,
-    input_registry: &ObswsInputRegistry,
-    output_kind: crate::obsws::source::ObswsOutputKind,
-    run_id: u64,
-) -> Result<crate::obsws::output_plan::ObswsComposedOutputPlan, OutputOperationOutcome> {
-    let scene_inputs = input_registry.list_current_program_scene_input_entries();
-    crate::obsws::output_plan::build_composed_output_plan(
-        &scene_inputs,
-        output_kind,
-        run_id,
-        input_registry.canvas_width(),
-        input_registry.canvas_height(),
-        input_registry.frame_rate(),
-    )
-    .map_err(|error| OutputOperationOutcome {
-        response_text: crate::obsws::response::build_request_response_error(
-            request_type,
-            request_id,
-            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            &error.message(),
-        ),
-        success: false,
-        output_path: None,
-    })
-}
-
 // -----------------------------------------------------------------------
 // Output プロセッサ起動/停止 自由関数
 // -----------------------------------------------------------------------
 
-/// ストリーム用プロセッサを起動する: ミキサー → エンコーダー → パブリッシャー → ソース
+/// ストリーム用プロセッサを起動する: エンコーダー → パブリッシャー
+/// program mixer の出力トラックを直接エンコーダーに入力するため、ミキサーとソースの起動は不要。
 async fn start_stream_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_url: &str,
     stream_key: Option<&str>,
     run: &crate::obsws::input_registry::ObswsStreamRun,
+    frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
-    // ミキサーを起動する（pub 関数を利用）
-    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     // ビデオエンコーダーを起動する
     crate::encoder::create_video_processor(
         pipeline_handle,
@@ -3809,7 +3760,7 @@ async fn start_stream_processors(
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
         std::num::NonZeroUsize::new(2_000_000).unwrap(),
-        output_plan.frame_rate,
+        frame_rate,
         Some(run.video.encoder_processor_id.clone()),
     )
     .await?;
@@ -3837,30 +3788,24 @@ async fn start_stream_processors(
         Some(run.publisher_processor_id.clone()),
     )
     .await?;
-    // ソースプロセッサを起動する
-    crate::obsws::session::output::start_source_processors(
-        pipeline_handle,
-        &mut output_plan.source_plans,
-    )
-    .await?;
     Ok(())
 }
 
-/// レコード用プロセッサを起動する: ミキサー → エンコーダー → MP4 ライター → ソース
+/// レコード用プロセッサを起動する: エンコーダー → MP4 ライター
+/// program mixer の出力トラックを直接エンコーダーに入力するため、ミキサーとソースの起動は不要。
 async fn start_record_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_path: &std::path::Path,
     run: &crate::obsws::input_registry::ObswsRecordRun,
+    frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
-    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     crate::encoder::create_video_processor(
         pipeline_handle,
         run.video.source_track_id.clone(),
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
         std::num::NonZeroUsize::new(2_000_000).unwrap(),
-        output_plan.frame_rate,
+        frame_rate,
         Some(run.video.encoder_processor_id.clone()),
     )
     .await?;
@@ -3882,30 +3827,25 @@ async fn start_record_processors(
         Some(run.writer_processor_id.clone()),
     )
     .await?;
-    crate::obsws::session::output::start_source_processors(
-        pipeline_handle,
-        &mut output_plan.source_plans,
-    )
-    .await?;
     Ok(())
 }
 
-/// RTMP outbound 用プロセッサを起動する
+/// RTMP outbound 用プロセッサを起動する: エンコーダー → RTMP エンドポイント
+/// program mixer の出力トラックを直接エンコーダーに入力するため、ミキサーとソースの起動は不要。
 async fn start_rtmp_outbound_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    output_plan: &mut crate::obsws::output_plan::ObswsComposedOutputPlan,
     output_url: &str,
     stream_name: Option<&str>,
     run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
+    frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
-    crate::obsws::session::output::start_mixer_processors(pipeline_handle, output_plan).await?;
     crate::encoder::create_video_processor(
         pipeline_handle,
         run.video.source_track_id.clone(),
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
         std::num::NonZeroUsize::new(2_000_000).unwrap(),
-        output_plan.frame_rate,
+        frame_rate,
         Some(run.video.encoder_processor_id.clone()),
     )
     .await?;
@@ -3932,28 +3872,14 @@ async fn start_rtmp_outbound_processors(
         Some(run.endpoint_processor_id.clone()),
     )
     .await?;
-    crate::obsws::session::output::start_source_processors(
-        pipeline_handle,
-        &mut output_plan.source_plans,
-    )
-    .await?;
     Ok(())
 }
 
-/// ストリーム用プロセッサを段階的に停止する: ソース → ミキサー → エンコーダー → パブリッシャー
+/// ストリーム用プロセッサを段階的に停止する: エンコーダー → パブリッシャー
 async fn stop_processors_staged_stream(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsStreamRun,
 ) -> crate::Result<()> {
-    terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
-    terminate_and_wait(
-        pipeline_handle,
-        &[
-            run.audio_mixer_processor_id.clone(),
-            run.video_mixer_processor_id.clone(),
-        ],
-    )
-    .await?;
     terminate_and_wait(
         pipeline_handle,
         &[
@@ -3971,51 +3897,15 @@ async fn stop_processors_staged_stream(
 }
 
 /// レコード用プロセッサを段階的に停止する。
-/// ミキサーには Finish RPC を送信して EOS を発行させ、下流は EOS 伝播で自然終了させる。
+/// エンコーダーを terminate し、ライターは EOS 伝播で自然終了させる。
 async fn stop_processors_staged_record(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsRecordRun,
 ) -> crate::Result<()> {
-    // 1. ソースを停止
-    terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
+    // 1. MP4 writer に Finish RPC を送信して finalize を促す
+    finish_mp4_writer_rpc(pipeline_handle, &run.writer_processor_id).await;
 
-    // 2. ミキサーに Finish RPC を送り、自然終了を試みる
-    let mixer_ids = vec![
-        run.audio_mixer_processor_id.clone(),
-        run.video_mixer_processor_id.clone(),
-    ];
-    // まずソース停止後の自然終了を短時間待つ
-    if wait_processors_stopped(pipeline_handle, &mixer_ids, Duration::from_secs(1))
-        .await
-        .is_err()
-    {
-        // Finish RPC を送信して EOS 発行を要求する
-        finish_mixer_rpc(pipeline_handle, &run.audio_mixer_processor_id, true).await;
-        finish_mixer_rpc(pipeline_handle, &run.video_mixer_processor_id, false).await;
-        // Finish 後の終了を待ち、タイムアウトなら強制停止
-        if wait_processors_stopped(pipeline_handle, &mixer_ids, Duration::from_secs(5))
-            .await
-            .is_err()
-        {
-            let live = live_processor_ids(pipeline_handle, &mixer_ids).await;
-            if !live.is_empty() {
-                terminate_and_wait(pipeline_handle, &live).await?;
-            }
-        }
-    }
-
-    // 3. エンコーダーは EOS 伝播での自然終了を優先し、残れば強制停止
-    wait_or_terminate(
-        pipeline_handle,
-        &[
-            run.video.encoder_processor_id.clone(),
-            run.audio.encoder_processor_id.clone(),
-        ],
-        Duration::from_secs(5),
-    )
-    .await?;
-
-    // 4. ライターは finalize を優先し、残れば強制停止
+    // 2. writer の自然終了を待ち、タイムアウト時は強制停止
     wait_or_terminate(
         pipeline_handle,
         std::slice::from_ref(&run.writer_processor_id),
@@ -4023,7 +3913,53 @@ async fn stop_processors_staged_record(
     )
     .await?;
 
+    // 3. エンコーダーを停止する
+    terminate_and_wait(
+        pipeline_handle,
+        &[
+            run.video.encoder_processor_id.clone(),
+            run.audio.encoder_processor_id.clone(),
+        ],
+    )
+    .await?;
+
     Ok(())
+}
+
+/// MP4 writer に Finish RPC を送り、finalize を促す。
+async fn finish_mp4_writer_rpc(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    processor_id: &crate::ProcessorId,
+) {
+    const RETRY_TIMEOUT: Duration = Duration::from_millis(500);
+    const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+    let deadline = tokio::time::Instant::now() + RETRY_TIMEOUT;
+
+    loop {
+        match pipeline_handle
+            .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
+                crate::mp4::writer::Mp4WriterRpcMessage,
+            >>(processor_id)
+            .await
+        {
+            Ok(sender) => {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                let _ =
+                    sender.send(crate::mp4::writer::Mp4WriterRpcMessage::Finish { reply_tx });
+                let _ = reply_rx.await;
+                return;
+            }
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(RETRY_INTERVAL).await;
+            }
+            Err(_) => {
+                let _ = pipeline_handle
+                    .terminate_processor(processor_id.clone())
+                    .await;
+                return;
+            }
+        }
+    }
 }
 
 /// S3 クライアントを構築する
@@ -4893,20 +4829,11 @@ fn build_dash_root_storage_config(
     }
 }
 
-/// RTMP outbound 用プロセッサを段階的に停止する
+/// RTMP outbound 用プロセッサを段階的に停止する: エンコーダー → エンドポイント
 async fn stop_processors_staged_rtmp_outbound(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
 ) -> crate::Result<()> {
-    terminate_and_wait(pipeline_handle, &run.source_processor_ids).await?;
-    terminate_and_wait(
-        pipeline_handle,
-        &[
-            run.audio_mixer_processor_id.clone(),
-            run.video_mixer_processor_id.clone(),
-        ],
-    )
-    .await?;
     terminate_and_wait(
         pipeline_handle,
         &[
@@ -4986,75 +4913,6 @@ async fn live_processor_ids(
         .filter(|id| live.contains(id))
         .cloned()
         .collect()
-}
-
-/// ミキサーに Finish RPC を送信する。失敗時は terminate にフォールバックする。
-async fn finish_mixer_rpc(
-    pipeline_handle: &crate::MediaPipelineHandle,
-    processor_id: &crate::ProcessorId,
-    is_audio: bool,
-) {
-    const RETRY_TIMEOUT: Duration = Duration::from_millis(500);
-    const RETRY_INTERVAL: Duration = Duration::from_millis(10);
-    let deadline = tokio::time::Instant::now() + RETRY_TIMEOUT;
-
-    if is_audio {
-        loop {
-            match pipeline_handle
-                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
-                    crate::mixer::audio::AudioRealtimeMixerRpcMessage,
-                >>(processor_id)
-                .await
-            {
-                Ok(sender) => {
-                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                    let _ =
-                        sender.send(crate::mixer::audio::AudioRealtimeMixerRpcMessage::Finish {
-                            reply_tx,
-                        });
-                    let _ = reply_rx.await;
-                    return;
-                }
-                Err(_) if tokio::time::Instant::now() < deadline => {
-                    tokio::time::sleep(RETRY_INTERVAL).await;
-                }
-                Err(_) => {
-                    let _ = pipeline_handle
-                        .terminate_processor(processor_id.clone())
-                        .await;
-                    return;
-                }
-            }
-        }
-    } else {
-        loop {
-            match pipeline_handle
-                .get_rpc_sender::<tokio::sync::mpsc::UnboundedSender<
-                    crate::mixer::video::VideoRealtimeMixerRpcMessage,
-                >>(processor_id)
-                .await
-            {
-                Ok(sender) => {
-                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                    let _ =
-                        sender.send(crate::mixer::video::VideoRealtimeMixerRpcMessage::Finish {
-                            reply_tx,
-                        });
-                    let _ = reply_rx.await;
-                    return;
-                }
-                Err(_) if tokio::time::Instant::now() < deadline => {
-                    tokio::time::sleep(RETRY_INTERVAL).await;
-                }
-                Err(_) => {
-                    let _ = pipeline_handle
-                        .terminate_processor(processor_id.clone())
-                        .await;
-                    return;
-                }
-            }
-        }
-    }
 }
 
 /// HLS writer に Finish RPC を送り、finalize / cleanup を促す。
@@ -5857,11 +5715,25 @@ impl ObswsCoordinator {
                     track_id: pipeline_track_id.clone(),
                     reply_tx,
                 });
-                if let Ok(Ok(publisher)) = reply_rx.await {
-                    let rt = &state.remote_tracks[&found_track_id];
-                    let _ = rt
-                        .command_tx
-                        .send(crate::sora_source::SoraTrackCommand::Attach { publisher });
+                match reply_rx.await {
+                    Ok(Ok(publisher)) => {
+                        tracing::info!(
+                            "AttachSoraSourceTrack: publish_track succeeded, track_id={}, sending Attach command",
+                            pipeline_track_id
+                        );
+                        let rt = &state.remote_tracks[&found_track_id];
+                        let _ = rt
+                            .command_tx
+                            .send(crate::sora_source::SoraTrackCommand::Attach { publisher });
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!("AttachSoraSourceTrack: publish_track failed: {:?}", e);
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "AttachSoraSourceTrack: publish_track reply channel dropped"
+                        );
+                    }
                 }
             }
         }

@@ -232,7 +232,7 @@ mod tests {
             &ObswsVideoCaptureDeviceSettings {
                 device_id: Some("camera0".to_owned()),
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
@@ -275,7 +275,7 @@ mod tests {
     fn build_record_source_plan_without_device_id() {
         let plan = build_record_source_plan(
             &ObswsVideoCaptureDeviceSettings { device_id: None },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             2,
             "1",
         )

@@ -57,7 +57,7 @@ mod tests {
                 input_url: Some("rtmp://127.0.0.1:1935".to_owned()),
                 stream_name: Some("live".to_owned()),
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
@@ -97,7 +97,7 @@ mod tests {
                 input_url: Some("rtmp://127.0.0.1:1935".to_owned()),
                 stream_name: None,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             2,
             "1",
         )
@@ -118,7 +118,7 @@ mod tests {
                 input_url: None,
                 stream_name: None,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         );

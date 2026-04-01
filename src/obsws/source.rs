@@ -15,18 +15,12 @@ pub mod webrtc_source;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObswsOutputKind {
-    Stream,
-    Record,
-    RtmpOutbound,
     Program,
 }
 
 impl ObswsOutputKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Stream => "stream",
-            Self::Record => "record",
-            Self::RtmpOutbound => "rtmp_outbound",
             Self::Program => "program",
         }
     }

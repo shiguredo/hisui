@@ -169,7 +169,7 @@ mod tests {
                 sample_rate: None,
                 channels: None,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
@@ -216,7 +216,7 @@ mod tests {
                 sample_rate: None,
                 channels: None,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             2,
             "1",
         )

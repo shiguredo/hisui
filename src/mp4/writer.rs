@@ -57,6 +57,10 @@ pub enum Mp4WriterRpcMessage {
     Resume {
         reply_tx: tokio::sync::oneshot::Sender<crate::Result<()>>,
     },
+    /// writer を finalize して正常終了する
+    Finish {
+        reply_tx: tokio::sync::oneshot::Sender<()>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -751,7 +755,10 @@ impl Mp4Writer {
                                 rpc_message = recv_mp4_writer_rpc_message_or_pending(
                                     rpc_rx_enabled.then_some(&mut rpc_rx)
                                 ) => {
-                                    self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)?;
+                                    if self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)? {
+                                        audio_rx = None;
+                                        video_rx = None;
+                                    }
                                 }
                             }
                         }
@@ -763,7 +770,10 @@ impl Mp4Writer {
                                 rpc_message = recv_mp4_writer_rpc_message_or_pending(
                                     rpc_rx_enabled.then_some(&mut rpc_rx)
                                 ) => {
-                                    self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)?;
+                                    if self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)? {
+                                        audio_rx = None;
+                                        video_rx = None;
+                                    }
                                 }
                             }
                         }
@@ -790,7 +800,10 @@ impl Mp4Writer {
                                 rpc_message = recv_mp4_writer_rpc_message_or_pending(
                                     rpc_rx_enabled.then_some(&mut rpc_rx)
                                 ) => {
-                                    self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)?;
+                                    if self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)? {
+                                        audio_rx = None;
+                                        video_rx = None;
+                                    }
                                 }
                             }
                         }
@@ -803,14 +816,15 @@ impl Mp4Writer {
         Ok(())
     }
 
+    /// RPC メッセージを処理する。Finish を受け取った場合は true を返す。
     fn handle_rpc_message(
         &mut self,
         rpc_message: Option<Mp4WriterRpcMessage>,
         rpc_rx_enabled: &mut bool,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<bool> {
         let Some(rpc_message) = rpc_message else {
             *rpc_rx_enabled = false;
-            return Ok(());
+            return Ok(false);
         };
 
         match rpc_message {
@@ -820,8 +834,16 @@ impl Mp4Writer {
             Mp4WriterRpcMessage::Resume { reply_tx } => {
                 let _ = reply_tx.send(self.resume_recording());
             }
+            Mp4WriterRpcMessage::Finish { reply_tx } => {
+                let _ = reply_tx.send(());
+                *rpc_rx_enabled = false;
+                // 入力トラックを閉じて finalize に遷移させる
+                self.input_video_track_id = None;
+                self.input_audio_track_id = None;
+                return Ok(true);
+            }
         }
-        Ok(())
+        Ok(false)
     }
 
     fn handle_audio_message(

@@ -60,7 +60,7 @@ mod tests {
                 stream_id: Some("test-stream".to_owned()),
                 passphrase: Some("secret123456".to_owned()),
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
@@ -102,7 +102,7 @@ mod tests {
                 stream_id: None,
                 passphrase: None,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             2,
             "1",
         )
@@ -125,7 +125,7 @@ mod tests {
                 stream_id: None,
                 passphrase: None,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         );

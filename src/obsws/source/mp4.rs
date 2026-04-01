@@ -64,7 +64,7 @@ mod tests {
                 path: Some("testdata/beep-aac-audio.mp4".to_owned()),
                 loop_playback: true,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
@@ -93,7 +93,7 @@ mod tests {
                 path: Some("testdata/archive-red-320x320-h264.mp4".to_owned()),
                 loop_playback: false,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             2,
             "0",
         )

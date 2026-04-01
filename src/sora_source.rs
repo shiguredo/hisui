@@ -421,7 +421,12 @@ async fn video_forward_task(
             data: i420_data,
         };
 
-        if !publisher.send_video(video_frame) {
+        let sent = publisher.send_video(video_frame);
+        if frame_count == 1 {
+            tracing::info!("video_forward_task: first frame send_video result={}", sent);
+        }
+        if !sent {
+            tracing::warn!("video_forward_task: send_video returned false, stopping");
             break;
         }
     }

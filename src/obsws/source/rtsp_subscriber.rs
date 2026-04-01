@@ -54,7 +54,7 @@ mod tests {
             &ObswsRtspSubscriberSettings {
                 input_url: Some("rtsp://127.0.0.1:554/stream".to_owned()),
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
@@ -90,7 +90,7 @@ mod tests {
     fn build_record_source_plan_requires_input_url() {
         let result = build_record_source_plan(
             &ObswsRtspSubscriberSettings { input_url: None },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         );
