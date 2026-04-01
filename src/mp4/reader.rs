@@ -488,10 +488,12 @@ impl Mp4FileReader {
             self.seek_to_previous_keyframe(state, position)?;
         }
 
-        // base_offset を調整して、シーク先からの相対位置が正しくなるようにする
+        // base_offset を調整して、出力タイムスタンプの連続性を維持する
         self.base_offset = self.last_emitted_end.saturating_sub(position);
-        // realtime 再生のタイミングを再計算する
-        self.start_instant = tokio::time::Instant::now() - position;
+        // realtime 再生のタイミングを再計算する。
+        // シーク先のサンプル（effective_timestamp = base_offset + position）を now で出すため、
+        // start_instant = now - (base_offset + position) にする。
+        self.start_instant = tokio::time::Instant::now() - self.base_offset - position;
         self.last_realtime_timestamp = None;
         self.update_playback_status(MediaPlaybackState::Playing, position);
         Ok(())
@@ -578,7 +580,9 @@ impl Mp4FileReader {
         self.pause_started_at = None;
         self.send_media_event(MediaInputEvent::PlaybackEnded);
         self.base_offset = self.last_emitted_end;
-        self.start_instant = tokio::time::Instant::now();
+        // 先頭サンプル（effective_timestamp = base_offset + 0）を now で出すため、
+        // start_instant = now - base_offset にする。
+        self.start_instant = tokio::time::Instant::now() - self.base_offset;
         self.last_realtime_timestamp = None;
         self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
         self.send_media_event(MediaInputEvent::PlaybackStarted);
