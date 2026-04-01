@@ -94,6 +94,8 @@ pub enum MediaInputEvent {
     PlaybackStarted,
     /// 再生が終了した（EOS に到達）
     PlaybackEnded,
+    /// 再生アクションが実際に処理された
+    ActionTriggered(&'static str),
 }
 
 /// メディア入力の制御ハンドル（coordinator が保持する）
@@ -224,6 +226,8 @@ pub struct Mp4FileReader {
     logical_cursor: Option<Duration>,
     /// Stop により再生位置を先頭へ戻した直後かどうか
     stopped_at_zero: bool,
+    /// 出力先 subscriber の初回準備完了を確認済みかどうか
+    subscribers_ready: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,6 +264,7 @@ impl Mp4FileReader {
             warmup_target: None,
             logical_cursor: None,
             stopped_at_zero: false,
+            subscribers_ready: false,
         })
     }
 
@@ -299,10 +304,11 @@ impl Mp4FileReader {
         if self.audio_sender.is_none() && self.video_sender.is_none() {
             return Ok(());
         }
-        handle.wait_subscribers_ready().await?;
 
         // メディア制御が無効なら従来通り一度だけ再生して終了
         if self.media_channels.is_none() {
+            handle.wait_subscribers_ready().await?;
+            self.subscribers_ready = true;
             self.start_instant = tokio::time::Instant::now();
             self.last_realtime_timestamp = None;
             let result = self.run_loop(loop_enabled, &handle).await?;
@@ -475,7 +481,7 @@ impl Mp4FileReader {
                 }
 
                 let context = SampleContext::from_sample(&sample);
-                match self.handle_sample(&mut state, context).await? {
+                match self.handle_sample(&mut state, context, handle).await? {
                     SampleProcessingResult::Continue => {}
                     SampleProcessingResult::PipelineClosed => {
                         return Ok(RunLoopResult::PipelineClosed);
@@ -528,6 +534,7 @@ impl Mp4FileReader {
             };
             match command {
                 Some(MediaInputCommand::Play) => {
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY");
                     self.resume_from_pause();
                     // 一時停止中にシークが行われていた場合、その位置を適用する
                     if let Some(position) = self.pending_seek.take() {
@@ -541,10 +548,12 @@ impl Mp4FileReader {
                 Some(MediaInputCommand::Stop) => {
                     self.is_paused = false;
                     self.stop_and_reset_to_zero();
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP");
                     return MediaLoopAction::Stop;
                 }
                 Some(MediaInputCommand::Restart) => {
                     self.restart_playback();
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART");
                     return MediaLoopAction::Restart;
                 }
                 Some(MediaInputCommand::Seek(position)) => {
@@ -571,6 +580,7 @@ impl Mp4FileReader {
         match channels.command_rx.try_recv() {
             Ok(MediaInputCommand::Play) => {
                 // 既に再生中なので何もしない
+                self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY");
                 MediaLoopAction::Continue
             }
             Ok(MediaInputCommand::Pause) => {
@@ -578,14 +588,17 @@ impl Mp4FileReader {
                 self.pause_started_at = Some(tokio::time::Instant::now());
                 let file_pos = self.current_file_cursor();
                 self.update_playback_status(MediaPlaybackState::Paused, file_pos);
+                self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE");
                 MediaLoopAction::Continue
             }
             Ok(MediaInputCommand::Stop) => {
                 self.stop_and_reset_to_zero();
+                self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP");
                 MediaLoopAction::Stop
             }
             Ok(MediaInputCommand::Restart) => {
                 self.restart_playback();
+                self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART");
                 MediaLoopAction::Restart
             }
             Ok(MediaInputCommand::Seek(position)) => MediaLoopAction::Seek(position),
@@ -824,6 +837,13 @@ impl Mp4FileReader {
                     &channels.event_ctx.input_uuid,
                 )
             }
+            MediaInputEvent::ActionTriggered(media_action) => {
+                crate::obsws::response::build_media_input_action_triggered_event(
+                    &input_name,
+                    &channels.event_ctx.input_uuid,
+                    media_action,
+                )
+            }
         };
         let _ =
             channels
@@ -833,6 +853,75 @@ impl Mp4FileReader {
                     text,
                     subscription_flag: crate::obsws::protocol::OBSWS_EVENT_SUB_MEDIA_INPUTS,
                 });
+    }
+
+    fn send_media_action_triggered(&self, media_action: &'static str) {
+        self.send_media_event(MediaInputEvent::ActionTriggered(media_action));
+    }
+
+    /// subscriber 準備完了待ち中もコマンドを受け付ける。
+    async fn wait_until_subscribers_ready(
+        &mut self,
+        handle: &ProcessorHandle,
+    ) -> Result<MediaLoopAction> {
+        if self.subscribers_ready {
+            return Ok(MediaLoopAction::Continue);
+        }
+
+        loop {
+            let wait_ready = handle.wait_subscribers_ready();
+            tokio::pin!(wait_ready);
+
+            let command = {
+                let Some(channels) = self.media_channels.as_mut() else {
+                    wait_ready.await.map_err(|e| Error::new(format!("{e}")))?;
+                    self.subscribers_ready = true;
+                    return Ok(MediaLoopAction::Continue);
+                };
+                tokio::select! {
+                    ready = &mut wait_ready => {
+                        ready.map_err(|e| Error::new(format!("{e}")))?;
+                        self.subscribers_ready = true;
+                        return Ok(MediaLoopAction::Continue);
+                    }
+                    command = channels.command_rx.recv() => command,
+                }
+            };
+
+            match command {
+                Some(MediaInputCommand::Play) => {
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY");
+                }
+                Some(MediaInputCommand::Pause) => {
+                    self.is_paused = true;
+                    self.pause_started_at = Some(tokio::time::Instant::now());
+                    let file_pos = self.current_file_cursor();
+                    self.update_playback_status(MediaPlaybackState::Paused, file_pos);
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE");
+                    match self.wait_while_paused().await {
+                        MediaLoopAction::Continue => {}
+                        action => return Ok(action),
+                    }
+                }
+                Some(MediaInputCommand::Stop) => {
+                    self.stop_and_reset_to_zero();
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP");
+                    return Ok(MediaLoopAction::Stop);
+                }
+                Some(MediaInputCommand::Restart) => {
+                    self.restart_playback();
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART");
+                    return Ok(MediaLoopAction::Restart);
+                }
+                Some(MediaInputCommand::Seek(position)) => {
+                    return Ok(MediaLoopAction::Seek(position));
+                }
+                Some(MediaInputCommand::OffsetSeek(offset_ms)) => {
+                    return Ok(MediaLoopAction::OffsetSeek(offset_ms));
+                }
+                None => return Ok(MediaLoopAction::Stop),
+            }
+        }
     }
 
     /// realtime 再生時の待機中もコマンドを受け付ける。
@@ -860,12 +949,14 @@ impl Mp4FileReader {
             match command {
                 Some(MediaInputCommand::Play) => {
                     // 既に再生中なので何もしない
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY");
                 }
                 Some(MediaInputCommand::Pause) => {
                     self.is_paused = true;
                     self.pause_started_at = Some(tokio::time::Instant::now());
                     let file_pos = self.current_file_cursor();
                     self.update_playback_status(MediaPlaybackState::Paused, file_pos);
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE");
                     match self.wait_while_paused().await {
                         MediaLoopAction::Continue => {}
                         action => return action,
@@ -873,10 +964,12 @@ impl Mp4FileReader {
                 }
                 Some(MediaInputCommand::Stop) => {
                     self.stop_and_reset_to_zero();
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP");
                     return MediaLoopAction::Stop;
                 }
                 Some(MediaInputCommand::Restart) => {
                     self.restart_playback();
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART");
                     return MediaLoopAction::Restart;
                 }
                 Some(MediaInputCommand::Seek(position)) => {
@@ -894,6 +987,7 @@ impl Mp4FileReader {
         &mut self,
         state: &mut ReaderState,
         context: SampleContext,
+        handle: &ProcessorHandle,
     ) -> Result<SampleProcessingResult> {
         // composition_time_offset は未対応
         if context.composition_time_offset.is_some() {
@@ -919,11 +1013,11 @@ impl Mp4FileReader {
 
         match context.track_kind {
             TrackKind::Audio => {
-                self.handle_audio_sample(state, context, suppress_publish)
+                self.handle_audio_sample(state, context, suppress_publish, handle)
                     .await
             }
             TrackKind::Video => {
-                self.handle_video_sample(state, context, suppress_publish)
+                self.handle_video_sample(state, context, suppress_publish, handle)
                     .await
             }
         }
@@ -934,6 +1028,7 @@ impl Mp4FileReader {
         state: &mut ReaderState,
         context: SampleContext,
         suppress_publish: bool,
+        handle: &ProcessorHandle,
     ) -> Result<SampleProcessingResult> {
         if !state.is_audio_enabled(context.track_id) {
             return Ok(SampleProcessingResult::Continue);
@@ -973,6 +1068,10 @@ impl Mp4FileReader {
                 MediaLoopAction::Continue => {}
                 action => return Ok(SampleProcessingResult::Action(action)),
             }
+        }
+        match self.wait_until_subscribers_ready(handle).await? {
+            MediaLoopAction::Continue => {}
+            action => return Ok(SampleProcessingResult::Action(action)),
         }
         let output_timestamp = self.output_timestamp(effective_timestamp);
 
@@ -1016,6 +1115,7 @@ impl Mp4FileReader {
         state: &mut ReaderState,
         context: SampleContext,
         suppress_publish: bool,
+        handle: &ProcessorHandle,
     ) -> Result<SampleProcessingResult> {
         if !state.is_video_enabled(context.track_id) {
             return Ok(SampleProcessingResult::Continue);
@@ -1058,6 +1158,10 @@ impl Mp4FileReader {
                 MediaLoopAction::Continue => {}
                 action => return Ok(SampleProcessingResult::Action(action)),
             }
+        }
+        match self.wait_until_subscribers_ready(handle).await? {
+            MediaLoopAction::Continue => {}
+            action => return Ok(SampleProcessingResult::Action(action)),
         }
         let output_timestamp = self.output_timestamp(effective_timestamp);
 
@@ -1153,14 +1257,21 @@ impl Mp4FileReader {
                 channels.command_rx.recv().await
             };
             match command {
-                Some(MediaInputCommand::Play) => return WaitResult::Play,
-                Some(MediaInputCommand::Restart) => return WaitResult::Restart,
+                Some(MediaInputCommand::Play) => {
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY");
+                    return WaitResult::Play;
+                }
+                Some(MediaInputCommand::Restart) => {
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART");
+                    return WaitResult::Restart;
+                }
                 Some(MediaInputCommand::Pause) => {
                     // 既に停止済みなので無視
                 }
                 Some(MediaInputCommand::Stop) => {
                     // 保留中の seek を破棄して先頭に戻す
                     self.stop_and_reset_to_zero();
+                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP");
                 }
                 Some(MediaInputCommand::Seek(position)) => {
                     self.set_pending_seek(position);

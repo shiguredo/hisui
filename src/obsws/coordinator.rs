@@ -1,11 +1,10 @@
 use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::message::ObswsSessionStats;
 use crate::obsws::protocol::{
-    OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_MEDIA_INPUTS,
-    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
-    OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, OBSWS_EVENT_SUB_SORA_SOURCE,
-    REQUEST_STATUS_MISSING_REQUEST_DATA, REQUEST_STATUS_MISSING_REQUEST_FIELD,
-    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+    OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
+    OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED, OBSWS_EVENT_SUB_SCENE_ITEMS,
+    OBSWS_EVENT_SUB_SCENES, OBSWS_EVENT_SUB_SORA_SOURCE, REQUEST_STATUS_MISSING_REQUEST_DATA,
+    REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
 
 use std::time::Duration;
@@ -1421,16 +1420,6 @@ impl ObswsCoordinator {
                 "Failed to send media input command",
             );
         }
-
-        // 全セッションへ配信する（リクエスト元だけでなく全 MediaInputs 購読者）
-        let _ = self.obsws_event_tx.send(TaggedEvent {
-            text: crate::obsws::response::build_media_input_action_triggered_event(
-                &entry.input_name,
-                &entry.input_uuid,
-                &media_action_str,
-            ),
-            subscription_flag: OBSWS_EVENT_SUB_MEDIA_INPUTS,
-        });
 
         let response = crate::obsws::response::build_request_response_success_no_data(
             "TriggerMediaInputAction",
