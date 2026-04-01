@@ -367,7 +367,7 @@ impl Mp4FileReader {
         self.update_playback_status(MediaPlaybackState::Playing, start_pos);
         self.send_media_event(MediaInputEvent::PlaybackStarted);
         // 開始位置のサンプル（effective_timestamp = base_offset + start_pos）を now で出す
-        self.start_instant = tokio::time::Instant::now() - self.base_offset - start_pos;
+        self.start_instant = self.realtime_start_instant(self.base_offset + start_pos);
         self.last_realtime_timestamp = None;
     }
 
@@ -505,6 +505,7 @@ impl Mp4FileReader {
                 }
                 self.send_media_event(MediaInputEvent::PlaybackEnded);
                 self.base_offset = self.last_emitted_end;
+                self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
                 self.send_media_event(MediaInputEvent::PlaybackStarted);
                 continue;
             }
@@ -626,7 +627,7 @@ impl Mp4FileReader {
         // realtime 再生のタイミングを再計算する。
         // シーク先のサンプル（effective_timestamp = base_offset + position）を now で出すため、
         // start_instant = now - (base_offset + position) にする。
-        self.start_instant = tokio::time::Instant::now() - self.base_offset - position;
+        self.start_instant = self.realtime_start_instant(self.base_offset + position);
         self.last_realtime_timestamp = None;
         // seek 適用済みの論理カーソルを設定する（次フレーム publish まで relative seek の基準になる）
         self.logical_cursor = Some(position);
@@ -742,9 +743,16 @@ impl Mp4FileReader {
         self.clear_seek_state();
         self.stopped_at_zero = false;
         self.base_offset = self.last_emitted_end;
-        self.start_instant = tokio::time::Instant::now() - self.base_offset;
+        self.start_instant = self.realtime_start_instant(self.base_offset);
         self.last_realtime_timestamp = None;
         self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
+    }
+
+    /// realtime 再生で使う開始基準時刻を安全に計算する。
+    /// 単調時刻の現在値より大きいオフセットは引けないため、その場合は now に丸める。
+    fn realtime_start_instant(&self, offset: Duration) -> tokio::time::Instant {
+        let now = tokio::time::Instant::now();
+        now.checked_sub(offset).unwrap_or(now)
     }
 
     /// 現在のファイル内カーソル位置を取得する。
@@ -1880,6 +1888,15 @@ mod tests {
         assert_eq!(status.cursor, Duration::ZERO);
     }
 
+    /// realtime_start_instant は大きすぎる offset でも panic せず now に丸める
+    #[test]
+    fn realtime_start_instant_clamps_large_offset() {
+        let (reader, _handle) = reader_with_media_control();
+        let now = tokio::time::Instant::now();
+        let start = reader.realtime_start_instant(Duration::from_secs(60 * 60 * 24 * 365));
+        assert!(start <= now);
+    }
+
     /// Stopped 中に Seek(10s) 後 Restart → pending_seek がクリアされ 0 秒から始まる
     #[test]
     fn restart_after_seek_clears_pending_seek() {
@@ -2049,6 +2066,21 @@ mod tests {
             .await;
         assert!(matches!(action, MediaLoopAction::Stop));
         assert_eq!(handle.status.borrow().state, MediaPlaybackState::Stopped);
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+    }
+
+    /// ループ開始時は playback started と同時に cursor=0 を公開する
+    #[test]
+    fn loop_restart_updates_cursor_to_zero() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.last_emitted_end = Duration::from_secs(12);
+        reader.base_offset = Duration::ZERO;
+        reader.update_playback_status(MediaPlaybackState::Playing, Duration::from_secs(12));
+
+        reader.base_offset = reader.last_emitted_end;
+        reader.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
+
+        assert_eq!(handle.status.borrow().state, MediaPlaybackState::Playing);
         assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
     }
 
