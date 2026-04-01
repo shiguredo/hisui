@@ -146,6 +146,16 @@ fn create_media_input_channels(
     (handle, channels)
 }
 
+/// run_loop の終了理由
+enum RunLoopResult {
+    /// コマンドによる明示停止
+    Stopped,
+    /// ファイル末尾に到達（自然終了）
+    Eof,
+    /// pipeline が閉じた
+    PipelineClosed,
+}
+
 /// run_loop 内のコマンド処理結果
 enum MediaLoopAction {
     /// サンプル処理を続行する
@@ -270,8 +280,8 @@ impl Mp4FileReader {
         // メディア制御が無効なら従来通り一度だけ再生して終了
         if self.media_channels.is_none() {
             self.start_playback();
-            let should_stop = self.run_loop(loop_enabled, &handle).await?;
-            if !should_stop {
+            let result = self.run_loop(loop_enabled, &handle).await?;
+            if matches!(result, RunLoopResult::Eof) {
                 self.flush_decoders()?;
             }
             self.send_eos_to_tracks();
@@ -281,16 +291,22 @@ impl Mp4FileReader {
         // メディア制御が有効: 停止後もコマンド待機ループを回す
         loop {
             self.start_playback();
-            let should_stop = self.run_loop(loop_enabled, &handle).await?;
-            if !should_stop {
-                self.flush_decoders()?;
-                let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
-                self.update_playback_status(MediaPlaybackState::Ended, file_pos);
-            } else {
-                let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
-                self.update_playback_status(MediaPlaybackState::Stopped, file_pos);
+            let result = self.run_loop(loop_enabled, &handle).await?;
+            let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
+            match result {
+                RunLoopResult::Eof => {
+                    self.flush_decoders()?;
+                    self.update_playback_status(MediaPlaybackState::Ended, file_pos);
+                    self.send_media_event(MediaInputEvent::PlaybackEnded);
+                }
+                RunLoopResult::Stopped => {
+                    // 明示停止: PlaybackEnded は送らない
+                    self.update_playback_status(MediaPlaybackState::Stopped, file_pos);
+                }
+                RunLoopResult::PipelineClosed => {
+                    self.update_playback_status(MediaPlaybackState::Stopped, file_pos);
+                }
             }
-            self.send_media_event(MediaInputEvent::PlaybackEnded);
 
             // Play / Restart を待つ。チャネルクローズなら終了
             if !self.wait_for_restart_command().await {
@@ -344,7 +360,11 @@ impl Mp4FileReader {
         Ok((audio_sender, video_sender))
     }
 
-    async fn run_loop(&mut self, loop_enabled: bool, handle: &ProcessorHandle) -> Result<bool> {
+    async fn run_loop(
+        &mut self,
+        loop_enabled: bool,
+        handle: &ProcessorHandle,
+    ) -> Result<RunLoopResult> {
         'outer: loop {
             let mut state = ReaderState::open(
                 &self.path,
@@ -369,7 +389,7 @@ impl Mp4FileReader {
                 // コマンドをポーリングで確認する
                 match self.poll_media_command() {
                     MediaLoopAction::Continue => {}
-                    MediaLoopAction::Stop => return Ok(true),
+                    MediaLoopAction::Stop => return Ok(RunLoopResult::Stopped),
                     MediaLoopAction::Restart => {
                         self.recreate_decoders(handle);
                         continue 'outer;
@@ -388,7 +408,7 @@ impl Mp4FileReader {
                 if self.is_paused {
                     match self.wait_while_paused().await {
                         MediaLoopAction::Continue => {}
-                        MediaLoopAction::Stop => return Ok(true),
+                        MediaLoopAction::Stop => return Ok(RunLoopResult::Stopped),
                         MediaLoopAction::Restart => {
                             self.recreate_decoders(handle);
                             continue 'outer;
@@ -406,9 +426,9 @@ impl Mp4FileReader {
                 }
 
                 let context = SampleContext::from_sample(&sample);
-                let should_stop = self.handle_sample(&mut state, context).await?;
-                if should_stop {
-                    return Ok(true);
+                let pipeline_closed = self.handle_sample(&mut state, context).await?;
+                if pipeline_closed {
+                    return Ok(RunLoopResult::PipelineClosed);
                 }
             }
 
@@ -425,7 +445,7 @@ impl Mp4FileReader {
             break;
         }
 
-        Ok(false)
+        Ok(RunLoopResult::Eof)
     }
 
     /// 一時停止中にコマンドを待つ
@@ -618,21 +638,18 @@ impl Mp4FileReader {
         self.update_playback_status(MediaPlaybackState::Playing, file_pos);
     }
 
-    /// 再生を先頭からリスタートする（デコーダーの再生成は呼び出し側で行う）
+    /// 再生を先頭からリスタートする（デコーダーの再生成は呼び出し側で行う）。
+    /// 手動 Restart の通知は MediaInputActionTriggered で行うため、
+    /// ここでは PlaybackEnded / PlaybackStarted は送らない。
     fn restart_playback(&mut self) {
         self.is_paused = false;
         self.pause_started_at = None;
-        // Restart は常に先頭からの新規再生なので、seek / warm-up 状態は引き継がない
         self.pending_seek = None;
         self.warmup_target = None;
-        self.send_media_event(MediaInputEvent::PlaybackEnded);
         self.base_offset = self.last_emitted_end;
-        // 先頭サンプル（effective_timestamp = base_offset + 0）を now で出すため、
-        // start_instant = now - base_offset にする。
         self.start_instant = tokio::time::Instant::now() - self.base_offset;
         self.last_realtime_timestamp = None;
         self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
-        self.send_media_event(MediaInputEvent::PlaybackStarted);
     }
 
     /// 現在のファイル内カーソル位置を取得する

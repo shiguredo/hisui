@@ -1316,20 +1316,21 @@ impl ObswsCoordinator {
             );
         }
 
-        let events = vec![TaggedEvent {
+        // 全セッションへ配信する（リクエスト元だけでなく全 MediaInputs 購読者）
+        let _ = self.obsws_event_tx.send(TaggedEvent {
             text: crate::obsws::response::build_media_input_action_triggered_event(
                 &entry.input_name,
                 &entry.input_uuid,
                 &media_action_str,
             ),
             subscription_flag: OBSWS_EVENT_SUB_MEDIA_INPUTS,
-        }];
+        });
 
         let response = crate::obsws::response::build_request_response_success_no_data(
             "TriggerMediaInputAction",
             request_id,
         );
-        self.build_result_from_response(response, events)
+        self.build_result_from_response(response, Vec::new())
     }
 
     fn handle_set_media_input_cursor(
