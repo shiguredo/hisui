@@ -138,6 +138,10 @@ pub async fn run_server(
     );
 
     // state file から読み込んだ設定を反映する
+    // sora_subscribers は coordinator に反映するため、ここでは取り出しておく
+    let loaded_sora_subscribers = loaded_state
+        .as_ref()
+        .and_then(|s| s.sora_subscribers.clone());
     if let Some(state) = loaded_state {
         if let Some(stream) = &state.stream {
             input_registry.set_stream_service_settings(stream.to_stream_service_settings());
@@ -241,6 +245,10 @@ pub async fn run_server(
             program_output,
             Some(pipeline_handle.clone()),
         );
+    // state file から SoraSubscriber 設定を復元する
+    if let Some(subscribers) = loaded_sora_subscribers {
+        actor.load_sora_subscribers(subscribers);
+    }
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());
 
@@ -429,6 +437,10 @@ async fn handle_ws_connection(
                         // リクエスト処理の外部で発生するイベントのみ。
                         // InputSettingsChanged 等のリクエスト由来のイベントは
                         // CommandResult.events 経由で送信されるため、ここでは除外する。
+                        //
+                        // 現在 broadcast-only のイベントは OBSWS_EVENT_SUB_SORA_SOURCE のみ。
+                        // 将来的に別の broadcast-only イベントが追加された場合は
+                        // ここの条件を拡張する必要がある。
                         let is_broadcast_only_event =
                             event.subscription_flag == crate::obsws::protocol::OBSWS_EVENT_SUB_SORA_SOURCE;
                         if is_broadcast_only_event

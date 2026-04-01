@@ -66,6 +66,7 @@ pub struct StateFileInput {
 }
 
 /// state file の SoraSubscriber 定義
+#[derive(Clone)]
 pub struct StateFileSoraSubscriber {
     pub subscriber_name: String,
     pub settings: crate::obsws::input_registry::ObswsSoraSubscriberSettings,

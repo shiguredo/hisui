@@ -774,6 +774,10 @@ Sora WebRTC Subscriber。sora-rust-sdk を使い、Sora チャネルに RecvOnly
 - 稼働中の subscriber を削除: `RemoveSoraSubscriber` が `OUTPUT_RUNNING` を返す
 - `sora_source` 以外の入力への attach: `AttachSoraSourceTrack` が失敗
 
+**永続化:**
+
+`CreateSoraSubscriber` / `RemoveSoraSubscriber` の設定変更は state file に永続化される。再起動時に subscriber 設定が自動復元される（接続状態は復元されないため、`StartSoraSubscriber` は手動で再実行する必要がある）。
+
 #### `hls`
 
 HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する。

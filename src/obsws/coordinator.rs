@@ -352,6 +352,25 @@ impl ObswsCoordinator {
         (actor, handle, shutdown_rx)
     }
 
+    /// state file から読み込んだ SoraSubscriber 設定を復元する。
+    /// actor の run() 開始前に呼ぶこと。
+    pub fn load_sora_subscribers(
+        &mut self,
+        subscribers: Vec<crate::obsws::state_file::StateFileSoraSubscriber>,
+    ) {
+        for sub in subscribers {
+            self.sora_subscribers.insert(
+                sub.subscriber_name,
+                SoraSubscriberState {
+                    settings: sub.settings,
+                    run: None,
+                    remote_tracks: std::collections::HashMap::new(),
+                    connections: std::collections::HashMap::new(),
+                },
+            );
+        }
+    }
+
     /// actor のイベントループを実行する
     pub async fn run(mut self) {
         loop {
@@ -445,7 +464,10 @@ impl ObswsCoordinator {
             && let Some(path) = self.input_registry.state_file_path()
         {
             let path = path.to_path_buf();
-            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            let mut state =
+                crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            // SoraSubscriber の設定を state file に注入する
+            state.sora_subscribers = Some(self.build_sora_subscribers_for_state_file());
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -499,7 +521,9 @@ impl ObswsCoordinator {
             && let Some(path) = self.input_registry.state_file_path()
         {
             let path = path.to_path_buf();
-            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            let mut state =
+                crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            state.sora_subscribers = Some(self.build_sora_subscribers_for_state_file());
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -3701,6 +3725,9 @@ fn is_state_persisted_request(request_type: &str) -> bool {
             | "SetSceneItemTransform"
             // transition override
             | "SetSceneSceneTransitionOverride"
+            // SoraSubscriber
+            | "CreateSoraSubscriber"
+            | "RemoveSoraSubscriber"
     )
 }
 
@@ -5852,5 +5879,20 @@ impl ObswsCoordinator {
         json.to_member("subscriberName")
             .and_then(|v| v.required()?.try_into())
             .map_err(|_| "Missing subscriberName field".to_string())
+    }
+
+    /// state file 保存用に SoraSubscriber の設定一覧を構築する
+    fn build_sora_subscribers_for_state_file(
+        &self,
+    ) -> Vec<crate::obsws::state_file::StateFileSoraSubscriber> {
+        self.sora_subscribers
+            .iter()
+            .map(
+                |(name, state)| crate::obsws::state_file::StateFileSoraSubscriber {
+                    subscriber_name: name.clone(),
+                    settings: state.settings.clone(),
+                },
+            )
+            .collect()
     }
 }
