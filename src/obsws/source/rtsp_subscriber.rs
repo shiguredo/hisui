@@ -63,18 +63,18 @@ mod tests {
         assert_eq!(plan.source_processor_ids.len(), 1);
         assert_eq!(
             plan.source_processor_ids[0].get(),
-            "obsws:record:1:source:0:rtsp_subscriber"
+            "obsws:program:1:source:0:rtsp_subscriber"
         );
 
         assert_eq!(plan.requests.len(), 1);
 
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:record:1:source:0:raw_video")
+            Some("obsws:program:1:source:0:raw_video")
         );
         assert_eq!(
             plan.source_audio_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:record:1:source:0:raw_audio")
+            Some("obsws:program:1:source:0:raw_audio")
         );
 
         // CreateRtspSubscriber のパラメータを検証する

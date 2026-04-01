@@ -241,14 +241,14 @@ mod tests {
         assert_eq!(plan.source_processor_ids.len(), 1);
         assert_eq!(
             plan.source_processor_ids[0].get(),
-            "obsws:record:1:source:0:video_device_source"
+            "obsws:program:1:source:0:video_device_source"
         );
 
         assert_eq!(plan.requests.len(), 1);
 
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:record:1:source:0:raw_video")
+            Some("obsws:program:1:source:0:raw_video")
         );
         assert!(plan.source_audio_track_id.is_none());
 
@@ -259,12 +259,12 @@ mod tests {
             } => {
                 assert_eq!(
                     source.output_video_track_id.get(),
-                    "obsws:record:1:source:0:raw_video"
+                    "obsws:program:1:source:0:raw_video"
                 );
                 assert_eq!(source.device_id.as_deref(), Some("camera0"));
                 assert_eq!(
                     processor_id.as_ref().map(|p| p.get()),
-                    Some("obsws:record:1:source:0:video_device_source")
+                    Some("obsws:program:1:source:0:video_device_source")
                 );
             }
             _ => panic!("expected CreateVideoDeviceSource"),
