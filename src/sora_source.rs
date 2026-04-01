@@ -106,6 +106,14 @@ impl SoraSubscriber {
                 code,
                 reason: reason.to_owned(),
             });
+        })
+        .on_signaling_message(move |sig_type, direction, message| {
+            tracing::debug!(
+                "SoraSubscriber signaling: type={:?}, direction={:?}, message={}",
+                sig_type,
+                direction,
+                &message[..message.len().min(200)]
+            );
         });
 
         if let Some(client_id) = &self.client_id {
@@ -126,16 +134,29 @@ impl SoraSubscriber {
             .build()
             .map_err(|e| crate::Error::new(format!("failed to build SoraClient: {e}")))?;
 
+        tracing::info!(
+            "SoraSubscriber '{}': SoraClient built, starting connection...",
+            subscriber_name
+        );
+
         // Sora 接続を開始（バックグラウンドタスク）
         let disconnected_name = subscriber_name.clone();
         let disconnected_tx = event_tx.clone();
         let mut client_task = tokio::spawn(async move {
+            tracing::info!(
+                "SoraSubscriber '{}': client.run() starting",
+                disconnected_name
+            );
             if let Err(e) = client.run().await {
                 tracing::warn!(
                     "SoraSubscriber '{}' terminated with error: {e}",
                     disconnected_name
                 );
             }
+            tracing::info!(
+                "SoraSubscriber '{}': client.run() finished",
+                disconnected_name
+            );
             let _ = disconnected_tx.send(SoraSourceEvent::Disconnected {
                 subscriber_name: disconnected_name,
             });

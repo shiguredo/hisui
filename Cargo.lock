@@ -1301,6 +1301,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sora_source"
+version = "0.0.0"
+dependencies = [
+ "noargs",
+ "nojson",
+ "shiguredo_websocket",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "spin"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

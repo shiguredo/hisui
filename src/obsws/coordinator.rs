@@ -406,6 +406,14 @@ impl ObswsCoordinator {
                 }
                 event = self.sora_source_event_rx.recv() => {
                     if let Some(event) = event {
+                        let event_name = match &event {
+                            crate::sora_source::SoraSourceEvent::TrackReceived { .. } => "TrackReceived",
+                            crate::sora_source::SoraSourceEvent::TrackRemoved { .. } => "TrackRemoved",
+                            crate::sora_source::SoraSourceEvent::Notify { .. } => "Notify",
+                            crate::sora_source::SoraSourceEvent::WebSocketClose { .. } => "WebSocketClose",
+                            crate::sora_source::SoraSourceEvent::Disconnected { .. } => "Disconnected",
+                        };
+                        tracing::debug!("coordinator received sora_source event: {}", event_name);
                         self.handle_sora_source_event(event);
                     }
                 }

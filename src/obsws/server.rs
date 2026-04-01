@@ -395,7 +395,10 @@ async fn handle_ws_connection(
         .as_deref()
         .map(ObswsAuthentication::new)
         .transpose()?;
-    let mut session = ObswsSession::new(auth, coordinator_handle);
+    let mut session = ObswsSession::new(auth, coordinator_handle.clone());
+
+    // coordinator の broadcast イベントを購読する
+    let mut broadcast_rx = coordinator_handle.subscribe_obsws_events();
 
     // route_connection で読み取った最初のデータを先に処理する
     let mut pending_initial: Option<Vec<u8>> = Some(initial_buf);
@@ -407,16 +410,30 @@ async fn handle_ws_connection(
                 break;
             }
         } else {
-            let n = stream
-                .read(&mut buf)
-                .await
-                .map_err(|e| crate::Error::new(format!("failed to read from obsws socket: {e}")))?;
-            if n == 0 {
-                break;
-            }
-            if let Err(e) = ws.feed_recv_buf(&buf[..n]) {
-                tracing::warn!("obsws protocol error from {peer_addr}: {e}");
-                break;
+            // TCP 受信と broadcast イベント受信を同時に待つ
+            tokio::select! {
+                result = stream.read(&mut buf) => {
+                    let n = result
+                        .map_err(|e| crate::Error::new(format!("failed to read from obsws socket: {e}")))?;
+                    if n == 0 {
+                        break;
+                    }
+                    if let Err(e) = ws.feed_recv_buf(&buf[..n]) {
+                        tracing::warn!("obsws protocol error from {peer_addr}: {e}");
+                        break;
+                    }
+                }
+                event = broadcast_rx.recv() => {
+                    if let Ok(event) = event {
+                        // subscription flag でフィルタリング
+                        if (session.event_subscriptions() & event.subscription_flag) != 0
+                            && let Err(e) = ws.send_text(&event.text.to_string()) {
+                                tracing::warn!("failed to send broadcast event: {e}");
+                                break;
+                            }
+                    }
+                    // Lagged エラーの場合は無視して続行
+                }
             }
         }
 
