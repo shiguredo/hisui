@@ -273,6 +273,8 @@ struct SoraSubscriberState {
     run: Option<SoraSubscriberRun>,
     /// 受信中のリモートトラック（trackId → トラック情報）
     remote_tracks: std::collections::HashMap<String, SoraSourceRemoteTrack>,
+    /// on_notify から抽出した接続情報（connection_id → info）
+    connections: std::collections::HashMap<String, SoraConnectionInfo>,
 }
 
 /// 実行中の SoraSubscriber の情報
@@ -293,8 +295,15 @@ struct SoraSourceRemoteTrack {
     attached_input_name: Option<String>,
     /// attach 先の pipeline track ID
     attached_pipeline_track_id: Option<crate::TrackId>,
-    /// フレーム転送タスクの停止用ハンドル
-    forward_task_abort: Option<tokio::task::AbortHandle>,
+    /// holder タスクへのコマンド送信チャネル（Send+Sync）
+    command_tx: tokio::sync::mpsc::UnboundedSender<crate::sora_source::SoraTrackCommand>,
+    /// holder タスクの停止用ハンドル
+    holder_abort: tokio::task::AbortHandle,
+}
+
+/// SoraSubscriber の on_notify から抽出した接続情報
+struct SoraConnectionInfo {
+    client_id: Option<String>,
 }
 
 impl ObswsCoordinator {
@@ -5123,11 +5132,36 @@ impl ObswsCoordinator {
                 let track = receiver.track();
                 let track_id = track.id().unwrap_or_default();
                 let track_kind = track.kind().unwrap_or_default();
-                // TODO: on_notify の connection.created から connection_id と client_id を管理する
-                let connection_id = track_id.clone();
-                let client_id: Option<String> = None;
+
+                // on_notify で収集済みの接続情報からマッチを試みる
+                let (connection_id, client_id) =
+                    if let Some(state) = self.sora_subscribers.get(&subscriber_name) {
+                        // 直近に追加された（まだトラックが割り当てられていない）接続を探す
+                        let mut found = None;
+                        for (cid, info) in &state.connections {
+                            let has_track = state
+                                .remote_tracks
+                                .values()
+                                .any(|rt| rt.connection_id == *cid);
+                            if !has_track {
+                                found = Some((cid.clone(), info.client_id.clone()));
+                                break;
+                            }
+                        }
+                        found.unwrap_or_else(|| (track_id.clone(), None))
+                    } else {
+                        (track_id.clone(), None)
+                    };
 
                 if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
+                    // holder タスクを起動して WebRTC 型の所有権を移す
+                    let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+                    let holder_task = tokio::spawn(crate::sora_source::sora_track_holder_task(
+                        transceiver,
+                        track_kind.clone(),
+                        command_rx,
+                    ));
+
                     state.remote_tracks.insert(
                         track_id.clone(),
                         SoraSourceRemoteTrack {
@@ -5136,7 +5170,8 @@ impl ObswsCoordinator {
                             track_kind: track_kind.clone(),
                             attached_input_name: None,
                             attached_pipeline_track_id: None,
-                            forward_task_abort: None,
+                            command_tx,
+                            holder_abort: holder_task.abort_handle(),
                         },
                     );
                     let event = crate::obsws::response::build_sora_source_track_published_event(
@@ -5159,9 +5194,7 @@ impl ObswsCoordinator {
                 if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name)
                     && let Some(remote_track) = state.remote_tracks.remove(&track_id)
                 {
-                    if let Some(abort) = remote_track.forward_task_abort {
-                        abort.abort();
-                    }
+                    remote_track.holder_abort.abort();
                     if let Some(input_name) = &remote_track.attached_input_name {
                         self.clear_sora_source_track_id(input_name, &remote_track.track_kind);
                     }
@@ -5181,6 +5214,50 @@ impl ObswsCoordinator {
                 subscriber_name,
                 json,
             } => {
+                // connection.created / connection.destroyed をパースして接続情報を管理する
+                if let Ok(parsed) = nojson::RawJson::parse(&json) {
+                    let v = parsed.value();
+                    let event_type: Option<String> = v
+                        .to_member("event_type")
+                        .ok()
+                        .and_then(|m| m.optional())
+                        .and_then(|v| v.try_into().ok());
+                    match event_type.as_deref() {
+                        Some("connection.created") => {
+                            let connection_id: Option<String> = v
+                                .to_member("connection_id")
+                                .ok()
+                                .and_then(|m| m.optional())
+                                .and_then(|v| v.try_into().ok());
+                            let client_id: Option<String> = v
+                                .to_member("client_id")
+                                .ok()
+                                .and_then(|m| m.optional())
+                                .and_then(|v| v.try_into().ok());
+                            if let Some(cid) = connection_id
+                                && let Some(state) = self.sora_subscribers.get_mut(&subscriber_name)
+                            {
+                                state
+                                    .connections
+                                    .insert(cid.clone(), SoraConnectionInfo { client_id });
+                            }
+                        }
+                        Some("connection.destroyed") => {
+                            let connection_id: Option<String> = v
+                                .to_member("connection_id")
+                                .ok()
+                                .and_then(|m| m.optional())
+                                .and_then(|v| v.try_into().ok());
+                            if let Some(cid) = connection_id
+                                && let Some(state) = self.sora_subscribers.get_mut(&subscriber_name)
+                            {
+                                state.connections.remove(&cid);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
                 let event = crate::obsws::response::build_sora_subscriber_notify_event(
                     &subscriber_name,
                     &json,
@@ -5215,9 +5292,7 @@ impl ObswsCoordinator {
                     })
                     .unwrap_or_default();
                 for (track_id, remote_track) in drained {
-                    if let Some(abort) = remote_track.forward_task_abort {
-                        abort.abort();
-                    }
+                    remote_track.holder_abort.abort();
                     if let Some(input_name) = &remote_track.attached_input_name {
                         self.clear_sora_source_track_id(input_name, &remote_track.track_kind);
                     }
@@ -5326,6 +5401,7 @@ impl ObswsCoordinator {
                 },
                 run: None,
                 remote_tracks: std::collections::HashMap::new(),
+                connections: std::collections::HashMap::new(),
             },
         );
         self.build_result_from_response(
@@ -5535,11 +5611,9 @@ impl ObswsCoordinator {
         {
             tracing::warn!("failed to stop sora subscriber processor: {}", e.display());
         }
-        let drained: Vec<_> = state.remote_tracks.drain().collect();
+        let drained: Vec<(String, SoraSourceRemoteTrack)> = state.remote_tracks.drain().collect();
         for (_track_id, rt) in drained {
-            if let Some(abort) = rt.forward_task_abort {
-                abort.abort();
-            }
+            rt.holder_abort.abort();
             if let Some(input_name) = &rt.attached_input_name {
                 self.clear_sora_source_track_id(input_name, &rt.track_kind);
             }
@@ -5750,7 +5824,28 @@ impl ObswsCoordinator {
                 "Pipeline track not found",
             );
         };
-        // TODO: フレーム転送タスクの起動は後続実装
+        // pipeline から TrackPublisher を取得してフレーム転送を開始する
+        if let Some(pipeline_handle) = self.pipeline_handle.as_ref() {
+            let state = self
+                .sora_subscribers
+                .get(&sub_name)
+                .expect("subscriber should exist");
+            if let Some(run) = &state.run {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                pipeline_handle.send(crate::media_pipeline::MediaPipelineCommand::PublishTrack {
+                    processor_id: run.processor_id.clone(),
+                    track_id: pipeline_track_id.clone(),
+                    reply_tx,
+                });
+                if let Ok(Ok(publisher)) = reply_rx.await {
+                    let rt = &state.remote_tracks[&found_track_id];
+                    let _ = rt
+                        .command_tx
+                        .send(crate::sora_source::SoraTrackCommand::Attach { publisher });
+                }
+            }
+        }
+
         let rt = self
             .sora_subscribers
             .get_mut(&sub_name)
@@ -5759,7 +5854,7 @@ impl ObswsCoordinator {
             .get_mut(&found_track_id)
             .unwrap();
         rt.attached_input_name = Some(input_name.clone());
-        rt.attached_pipeline_track_id = Some(pipeline_track_id);
+        rt.attached_pipeline_track_id = Some(pipeline_track_id.clone());
         if let Some(uuid) = self.input_registry.uuids_by_name.get(&input_name)
             && let Some(entry) = self.input_registry.inputs_by_uuid.get_mut(uuid)
             && let crate::obsws::input_registry::ObswsInputSettings::SoraSource(ref mut s) =
@@ -5852,9 +5947,10 @@ impl ObswsCoordinator {
             .remote_tracks
             .get_mut(&track_id)
             .unwrap();
-        if let Some(abort) = rt.forward_task_abort.take() {
-            abort.abort();
-        }
+        // holder タスクに Detach コマンドを送信
+        let _ = rt
+            .command_tx
+            .send(crate::sora_source::SoraTrackCommand::Detach);
         rt.attached_input_name = None;
         rt.attached_pipeline_track_id = None;
         self.clear_sora_source_track_id(&input_name, &track_kind);

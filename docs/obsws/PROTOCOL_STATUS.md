@@ -718,6 +718,62 @@ outputSettings は `soraSdkSettings` オブジェクトを含む。
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す
 
+### SoraSubscriber（独自拡張）
+
+Sora WebRTC Subscriber。sora-rust-sdk を使い、Sora チャネルに RecvOnly で接続してリモートトラック（映像・音声）を受信する。受信したトラックは `sora_source` 入力タイプを通じて obsws のシーンに配置できる。
+
+複数の SoraSubscriber を同時に作成し、異なるチャネルに接続できる。
+
+#### 専用リクエスト
+
+| リクエスト | 説明 | requestData |
+|---|---|---|
+| `CreateSoraSubscriber` | subscriber を登録（設定込み） | `subscriberName`, `signalingUrls`, `channelId`, `clientId`, `bundleId`, `metadata` |
+| `RemoveSoraSubscriber` | subscriber を削除（停止済みであること） | `subscriberName` |
+| `StartSoraSubscriber` | RecvOnly 接続を開始 | `subscriberName` |
+| `StopSoraSubscriber` | 接続を停止 | `subscriberName` |
+| `ListSoraSubscribers` | 全 subscriber の一覧・状態・設定を取得 | - |
+| `ListSoraSourceTracks` | 受信中のリモートトラック一覧 | `subscriberName`（省略時は全 subscriber） |
+| `AttachSoraSourceTrack` | トラックを `sora_source` 入力に紐付け | `inputName`, `connectionId`, `trackKind` (`"video"` or `"audio"`) |
+| `DetachSoraSourceTrack` | トラックを `sora_source` 入力から解除 | `inputName`, `trackKind` |
+
+#### 専用イベント
+
+これらのイベントは `eventIntent` が `1 << 20` のビットフラグを持つ。明示的に subscribe したクライアントのみが受信する。
+
+| イベント | 説明 | eventData |
+|---|---|---|
+| `SoraSourceTrackPublished` | リモートトラック到着 | `subscriberName`, `connectionId`, `clientId`, `trackKind`, `trackId` |
+| `SoraSourceTrackUnpublished` | リモートトラック消失（自動 detach を伴う） | `subscriberName`, `connectionId`, `trackKind`, `trackId` |
+| `SoraSubscriberDisconnected` | 接続が切断された | `subscriberName`, `code`, `reason` |
+| `SoraSubscriberNotify` | Sora シグナリング通知の転送 | `subscriberName`, `notify` (シグナリング通知の JSON 文字列) |
+
+#### `sora_source` 入力タイプ
+
+`sora_source` は SoraSubscriber 経由で受信したリモートトラックの映像・音声を受ける入力ソース。`CreateInput` で `inputKind: "sora_source"` を指定して作成する。
+
+- `inputKindCaps`: `VIDEO | AUDIO`
+- 自律的な source processor を持たない（`AttachSoraSourceTrack` でトラックを紐付けてフレーム転送を開始する）
+- 接続の切断・再接続をまたいでシーン上の配置を保持する
+
+**フロー:**
+
+1. `CreateSoraSubscriber` で subscriber を登録
+2. `CreateInput` で `sora_source` 入力を作成（シーンに配置）
+3. `StartSoraSubscriber` で RecvOnly 接続を開始
+4. `SoraSourceTrackPublished` イベントでトラック到着を検知
+5. `AttachSoraSourceTrack` でトラックを入力に紐付け
+6. 接続切断時: `SoraSourceTrackUnpublished` で自動 detach（入力自体は残る）
+7. 再接続時: 新しい `connectionId` で再 attach → mixer 配置はそのまま
+
+**エラー条件:**
+
+- subscriber 名の重複: `CreateSoraSubscriber` が `RESOURCE_ALREADY_EXISTS` を返す
+- 未登録の subscriber: `StartSoraSubscriber` 等が `RESOURCE_NOT_FOUND` を返す
+- `signalingUrls` が空、または `channelId` が未設定: `StartSoraSubscriber` が失敗
+- 稼働中の subscriber を削除: `RemoveSoraSubscriber` が `OUTPUT_RUNNING` を返す
+- `sora_source` 以外の入力への attach: `AttachSoraSourceTrack` が失敗
+
 #### `hls`
 
 HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する。

@@ -18,6 +18,8 @@ pub struct ObswsStateFile {
     pub record: Option<ObswsStateFileRecord>,
     pub rtmp_outbound: Option<ObswsRtmpOutboundSettings>,
     pub sora: Option<ObswsSoraPublisherSettings>,
+    /// SoraSubscriber の設定一覧（subscriberName → settings）
+    pub sora_subscribers: Option<Vec<StateFileSoraSubscriber>>,
     pub hls: Option<ObswsHlsSettings>,
     pub dash: Option<ObswsDashSettings>,
     pub scenes: Option<Vec<StateFileScene>>,
@@ -63,6 +65,12 @@ pub struct StateFileInput {
     pub input_volume_mul: f64,
 }
 
+/// state file の SoraSubscriber 定義
+pub struct StateFileSoraSubscriber {
+    pub subscriber_name: String,
+    pub settings: crate::obsws::input_registry::ObswsSoraSubscriberSettings,
+}
+
 /// state file の stream セクション
 pub struct ObswsStateFileStream {
     pub stream_service_type: String,
@@ -97,6 +105,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFile 
         // 新規 section
         let rtmp_outbound = parse_optional_rtmp_outbound(value)?;
         let sora = parse_optional_sora(value)?;
+        let sora_subscribers = parse_optional_sora_subscribers(value)?;
         let hls = parse_optional_hls(value)?;
         let dash = parse_optional_dash(value)?;
 
@@ -116,6 +125,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFile 
             record,
             rtmp_outbound,
             sora,
+            sora_subscribers,
             hls,
             dash,
             scenes,
@@ -245,6 +255,49 @@ fn parse_optional_sora(
         bundle_id,
         metadata: metadata_member,
     }))
+}
+
+fn parse_optional_sora_subscribers(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<Option<Vec<StateFileSoraSubscriber>>, nojson::JsonParseError> {
+    let member: Option<nojson::RawJsonOwned> = value.to_member("soraSubscribers")?.try_into()?;
+    let Some(ref section) = member else {
+        return Ok(None);
+    };
+
+    let arr = section.value().to_array()?;
+    let mut result = Vec::new();
+    for element in arr {
+        let subscriber_name: String = element
+            .to_member("subscriberName")?
+            .required()?
+            .try_into()?;
+        let signaling_urls: Option<Vec<String>> = element.to_member("signalingUrls")?.try_into()?;
+        let channel_id: Option<String> = element.to_member("channelId")?.try_into()?;
+        let client_id: Option<String> = element.to_member("clientId")?.try_into()?;
+        let bundle_id: Option<String> = element.to_member("bundleId")?.try_into()?;
+        let metadata_member: Option<nojson::RawJsonOwned> =
+            element.to_member("metadata")?.try_into()?;
+        if let Some(ref m) = metadata_member
+            && m.value().to_object().is_err()
+        {
+            return Err(element
+                .to_member("metadata")?
+                .required()?
+                .invalid("metadata must be a JSON object"));
+        }
+        result.push(StateFileSoraSubscriber {
+            subscriber_name,
+            settings: crate::obsws::input_registry::ObswsSoraSubscriberSettings {
+                signaling_urls: signaling_urls.unwrap_or_default(),
+                channel_id,
+                client_id,
+                bundle_id,
+                metadata: metadata_member,
+            },
+        });
+    }
+    Ok(Some(result))
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,6 +1066,20 @@ impl nojson::DisplayJson for ObswsStateFile {
             if let Some(sora) = &self.sora {
                 f.member("sora", SoraSection(sora))?;
             }
+            if let Some(subscribers) = &self.sora_subscribers {
+                f.member(
+                    "soraSubscribers",
+                    nojson::array(|f| {
+                        for sub in subscribers {
+                            f.element(nojson::object(|f| {
+                                f.member("subscriberName", sub.subscriber_name.as_str())?;
+                                f.member("settings", &sub.settings)
+                            }))?;
+                        }
+                        Ok(())
+                    }),
+                )?;
+            }
             if let Some(hls) = &self.hls {
                 f.member("hls", HlsSection(hls))?;
             }
@@ -1176,6 +1243,7 @@ pub fn load_state_file(path: &Path) -> crate::Result<ObswsStateFile> {
             record: None,
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: None,
@@ -1330,11 +1398,17 @@ pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFil
     let next_scene_id = Some(registry.next_scene_id);
     let next_scene_item_id = Some(registry.next_scene_item_id);
 
+    // sora_subscribers は coordinator が管理しているため、
+    // registry からは取得できない。
+    // coordinator の save_state で上書きする。
+    let sora_subscribers = None;
+
     ObswsStateFile {
         stream,
         record,
         rtmp_outbound,
         sora,
+        sora_subscribers,
         hls,
         dash,
         scenes,
@@ -1483,6 +1557,7 @@ mod tests {
             }),
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: None,
@@ -1528,6 +1603,7 @@ mod tests {
                 bundle_id: None,
                 metadata: None,
             }),
+            sora_subscribers: None,
             hls: Some(ObswsHlsSettings {
                 destination: Some(HlsDestination::Filesystem {
                     directory: "/tmp/hls".to_owned(),
@@ -1603,6 +1679,7 @@ mod tests {
             }),
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: None,
@@ -1643,6 +1720,7 @@ mod tests {
             }),
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: None,
@@ -1704,6 +1782,7 @@ mod tests {
                 stream_name: Some("name".to_owned()),
             }),
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: None,
@@ -1758,6 +1837,7 @@ mod tests {
                 bundle_id: None,
                 metadata: Some(metadata),
             }),
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: None,
@@ -1873,6 +1953,7 @@ mod tests {
             record: None,
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: Some(ObswsHlsSettings {
                 destination: Some(HlsDestination::Filesystem {
                     directory: "/tmp/hls".to_owned(),
@@ -1914,6 +1995,7 @@ mod tests {
             record: None,
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: Some(ObswsHlsSettings {
                 destination: Some(HlsDestination::S3 {
                     bucket: "bucket".to_owned(),
@@ -2011,6 +2093,7 @@ mod tests {
             record: None,
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: Some(ObswsDashSettings {
                 destination: Some(DashDestination::S3 {
@@ -2135,6 +2218,7 @@ mod tests {
             record: None,
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: Some(vec![StateFileScene {
@@ -2249,6 +2333,7 @@ mod tests {
             record: None,
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: None,
@@ -2310,6 +2395,7 @@ mod tests {
             record: None,
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: Some(vec![StateFileScene {
@@ -2393,6 +2479,7 @@ mod tests {
             record: None,
             rtmp_outbound: None,
             sora: None,
+            sora_subscribers: None,
             hls: None,
             dash: None,
             scenes: Some(vec![StateFileScene {
