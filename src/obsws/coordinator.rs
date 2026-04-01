@@ -5140,6 +5140,18 @@ impl ObswsCoordinator {
                 let track = receiver.track();
                 let track_id = track.id().unwrap_or_default();
                 let track_kind = track.kind().unwrap_or_default();
+                tracing::info!(
+                    "TrackReceived: subscriber={}, track_id={}, kind={}",
+                    subscriber_name,
+                    track_id,
+                    track_kind
+                );
+
+                // 空の track_id や kind をスキップ
+                if track_id.is_empty() || track_kind.is_empty() {
+                    tracing::debug!("skipping track with empty id or kind");
+                    return;
+                }
 
                 // on_notify で収集済みの接続情報からマッチを試みる
                 let (connection_id, client_id) =

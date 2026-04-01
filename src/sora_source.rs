@@ -313,6 +313,10 @@ pub async fn sora_track_holder_task(
     while let Some(cmd) = command_rx.recv().await {
         match cmd {
             SoraTrackCommand::Attach { publisher } => {
+                tracing::info!(
+                    "sora_track_holder: Attach command received, kind={}",
+                    track_kind
+                );
                 if let Some(abort) = forward_abort.take() {
                     abort.abort();
                 }
@@ -321,6 +325,7 @@ pub async fn sora_track_holder_task(
 
                 match &mut variant {
                     TrackVariant::Video(video_track) => {
+                        tracing::info!("sora_track_holder: setting up video sink");
                         let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<RawI420Frame>(2);
                         let sink_handler = VideoFrameSinkHandler { frame_tx };
                         let sink = VideoSink::new_with_handler(Box::new(sink_handler));
@@ -367,7 +372,18 @@ async fn video_forward_task(
     mut frame_rx: tokio::sync::mpsc::Receiver<RawI420Frame>,
     mut publisher: crate::TrackPublisher,
 ) {
+    tracing::info!("video_forward_task: started, waiting for frames...");
+    let mut frame_count: u64 = 0;
     while let Some(frame) = frame_rx.recv().await {
+        frame_count += 1;
+        if frame_count == 1 || frame_count % 100 == 0 {
+            tracing::info!(
+                "video_forward_task: frame #{}, {}x{}",
+                frame_count,
+                frame.width,
+                frame.height
+            );
+        }
         let width = frame.width as usize;
         let height = frame.height as usize;
 

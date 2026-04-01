@@ -427,11 +427,13 @@ async fn recv_text_timeout(
 }
 
 /// リクエストを送信し、対応するレスポンスを待つ。成功時は responseData の JSON 文字列を返す。
+/// 待機中に受信したイベントは event_queue に蓄積する。
 async fn send_request_and_wait(
     ws: &mut WebSocketClientConnection<SecureRandom>,
     stream: &mut TcpStream,
     request_id: &str,
     message: &str,
+    event_queue: &mut Vec<String>,
 ) -> Result<String, String> {
     ws.send_text(message)
         .map_err(|e| format!("failed to send request: {e}"))?;
@@ -444,16 +446,99 @@ async fn send_request_and_wait(
         {
             return result;
         }
+        // レスポンス以外のメッセージ（イベント等）はキューに蓄積
+        event_queue.push(text);
     }
 }
 
 // --- グリッドレイアウト ---
+
+/// イベントメッセージを処理する
+async fn handle_event_message(
+    text: &str,
+    state: &mut GridState,
+    recording: &mut bool,
+    ws: &mut WebSocketClientConnection<SecureRandom>,
+    stream: &mut TcpStream,
+    event_queue: &mut Vec<String>,
+) -> Result<(), String> {
+    let Some(event) = parse_event(text) else {
+        return Ok(());
+    };
+
+    match event {
+        ObswsEvent::SoraSourceTrackPublished {
+            connection_id,
+            track_kind,
+            track_id,
+        } => {
+            if track_kind != "video" {
+                tracing::debug!("非映像トラックをスキップ: kind={track_kind}, id={track_id}");
+                return Ok(());
+            }
+
+            tracing::info!(
+                "トラック到着: connection={connection_id}, kind={track_kind}, id={track_id}"
+            );
+
+            let input_name = format!("sora_track_{}", state.video_tracks.len());
+            let (req_id, msg) = make_create_sora_source_input_request(&input_name);
+            let response_data =
+                send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await?;
+            let scene_item_id = parse_scene_item_id(&response_data).unwrap_or(0);
+            tracing::info!("CreateInput 成功: {input_name} (sceneItemId={scene_item_id})");
+
+            let (req_id, msg) =
+                make_attach_sora_source_track_request(&input_name, &connection_id, "video");
+            send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await?;
+            tracing::info!("AttachSoraSourceTrack 成功: {input_name} <- {connection_id}");
+
+            state.video_tracks.push(TrackEntry {
+                track_id,
+                input_name,
+                scene_item_id,
+                connection_id,
+            });
+
+            update_grid_layout(ws, stream, state, event_queue).await?;
+
+            if !*recording {
+                let (req_id, msg) = make_start_record_request();
+                send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await?;
+                *recording = true;
+                tracing::info!("録画開始");
+            }
+        }
+        ObswsEvent::SoraSourceTrackUnpublished { track_id } => {
+            if let Some(pos) = state
+                .video_tracks
+                .iter()
+                .position(|t| t.track_id == track_id)
+            {
+                let entry = state.video_tracks.remove(pos);
+                tracing::info!("トラック消失: id={track_id}, input={}", entry.input_name);
+
+                let (req_id, msg) = make_remove_input_request(&entry.input_name);
+                if let Err(e) = send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await
+                {
+                    tracing::warn!("RemoveInput 失敗: {e}");
+                }
+
+                update_grid_layout(ws, stream, state, event_queue).await?;
+            }
+        }
+        ObswsEvent::Other => {}
+    }
+
+    Ok(())
+}
 
 /// 全入力のグリッドレイアウトを再計算して SetSceneItemTransform を送信する
 async fn update_grid_layout(
     ws: &mut WebSocketClientConnection<SecureRandom>,
     stream: &mut TcpStream,
     state: &GridState,
+    event_queue: &mut Vec<String>,
 ) -> Result<(), String> {
     let count = state.video_tracks.len();
     if count == 0 {
@@ -479,7 +564,7 @@ async fn update_grid_layout(
             cell_width,
             cell_height,
         );
-        send_request_and_wait(ws, stream, &req_id, &msg).await?;
+        send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await?;
     }
 
     tracing::info!(
@@ -625,23 +710,26 @@ async fn run(
     let _identified = recv_text(&mut ws, &mut stream).await?;
     tracing::info!("obsws セッション確立");
 
+    // イベントキュー: send_request_and_wait 中に受信したイベントを蓄積する
+    let mut event_queue: Vec<String> = Vec::new();
+
     // 録画先ディレクトリ設定
     let output_dir = std::path::Path::new(output_path)
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| ".".to_string());
     let (req_id, msg) = make_set_record_directory_request(&output_dir);
-    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
     tracing::info!("録画先ディレクトリ設定: {output_dir}");
 
     // SoraSubscriber 登録・接続
     let (req_id, msg) =
         make_create_sora_subscriber_request(subscriber_name, signaling_url, channel_id);
-    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
     tracing::info!("CreateSoraSubscriber 成功");
 
     let (req_id, msg) = make_start_sora_subscriber_request(subscriber_name);
-    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
     tracing::info!("StartSoraSubscriber 成功: signaling={signaling_url}, channel={channel_id}");
 
     // イベント待受ループ
@@ -656,6 +744,20 @@ async fn run(
     );
 
     loop {
+        // まずキューに蓄積済みのイベントを処理する
+        let queued = std::mem::take(&mut event_queue);
+        for text in &queued {
+            handle_event_message(
+                text,
+                &mut state,
+                &mut recording,
+                &mut ws,
+                &mut stream,
+                &mut event_queue,
+            )
+            .await?;
+        }
+
         tokio::select! {
             _ = &mut ctrl_c => {
                 tracing::info!("Ctrl+C 受信");
@@ -674,76 +776,15 @@ async fn run(
                         break;
                     }
                 };
-
-                // イベントを処理する
-                if let Some(event) = parse_event(&text) {
-                    match event {
-                        ObswsEvent::SoraSourceTrackPublished {
-                            connection_id,
-                            track_kind,
-                            track_id,
-                        } => {
-                            // 映像トラックのみ処理
-                            if track_kind != "video" {
-                                tracing::debug!("非映像トラックをスキップ: kind={track_kind}, id={track_id}");
-                                continue;
-                            }
-
-                            tracing::info!("トラック到着: connection={connection_id}, kind={track_kind}, id={track_id}");
-
-                            // sora_source 入力を作成
-                            let input_name = format!("sora_track_{}", state.video_tracks.len());
-                            let (req_id, msg) = make_create_sora_source_input_request(&input_name);
-                            let response_data = send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
-                            let scene_item_id = parse_scene_item_id(&response_data).unwrap_or(0);
-                            tracing::info!("CreateInput 成功: {input_name} (sceneItemId={scene_item_id})");
-
-                            // トラックを attach
-                            let (req_id, msg) = make_attach_sora_source_track_request(
-                                &input_name,
-                                &connection_id,
-                                "video",
-                            );
-                            send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
-                            tracing::info!("AttachSoraSourceTrack 成功: {input_name} <- {connection_id}");
-
-                            state.video_tracks.push(TrackEntry {
-                                track_id,
-                                input_name,
-                                scene_item_id,
-                                connection_id,
-                            });
-
-                            // グリッドレイアウト再計算
-                            update_grid_layout(&mut ws, &mut stream, &state).await?;
-
-                            // 最初のトラック到着時に録画開始
-                            if !recording {
-                                let (req_id, msg) = make_start_record_request();
-                                send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
-                                recording = true;
-                                tracing::info!("録画開始");
-                            }
-                        }
-                        ObswsEvent::SoraSourceTrackUnpublished { track_id } => {
-                            // 該当トラックを削除
-                            if let Some(pos) = state.video_tracks.iter().position(|t| t.track_id == track_id) {
-                                let entry = state.video_tracks.remove(pos);
-                                tracing::info!("トラック消失: id={track_id}, input={}", entry.input_name);
-
-                                // 入力を削除
-                                let (req_id, msg) = make_remove_input_request(&entry.input_name);
-                                if let Err(e) = send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await {
-                                    tracing::warn!("RemoveInput 失敗: {e}");
-                                }
-
-                                // グリッドレイアウト再計算
-                                update_grid_layout(&mut ws, &mut stream, &state).await?;
-                            }
-                        }
-                        ObswsEvent::Other => {}
-                    }
-                }
+                handle_event_message(
+                    &text,
+                    &mut state,
+                    &mut recording,
+                    &mut ws,
+                    &mut stream,
+                    &mut event_queue,
+                )
+                .await?;
             }
         }
     }
@@ -751,19 +792,25 @@ async fn run(
     // クリーンアップ
     if recording {
         let (req_id, msg) = make_stop_record_request();
-        if let Err(e) = send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await {
+        if let Err(e) =
+            send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await
+        {
             tracing::warn!("StopRecord 失敗: {e}");
         }
         tracing::info!("録画停止");
     }
 
     let (req_id, msg) = make_stop_sora_subscriber_request(subscriber_name);
-    if let Err(e) = send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await {
+    if let Err(e) =
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await
+    {
         tracing::warn!("StopSoraSubscriber 失敗: {e}");
     }
 
     let (req_id, msg) = make_remove_sora_subscriber_request(subscriber_name);
-    if let Err(e) = send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await {
+    if let Err(e) =
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await
+    {
         tracing::warn!("RemoveSoraSubscriber 失敗: {e}");
     }
 
