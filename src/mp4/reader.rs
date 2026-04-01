@@ -415,6 +415,10 @@ impl Mp4FileReader {
             match command {
                 Some(MediaInputCommand::Play) => {
                     self.resume_from_pause();
+                    // 一時停止中にシークが行われていた場合、その位置を適用する
+                    if let Some(position) = self.pending_seek.take() {
+                        return MediaLoopAction::Seek(position);
+                    }
                     return MediaLoopAction::Continue;
                 }
                 Some(MediaInputCommand::Pause) => {
@@ -500,17 +504,33 @@ impl Mp4FileReader {
         state: &mut ReaderState,
         target_position: Duration,
     ) -> Result<()> {
-        // シーク後の最初のサンプルを確認する
-        let needs_warmup = match state.demuxer.next_sample() {
-            Ok(Some(sample)) => {
-                let is_video_non_keyframe =
-                    sample.track.kind == shiguredo_mp4::TrackKind::Video && !sample.keyframe;
-                // 読み進めた分を戻す
-                let _ = state.demuxer.prev_sample();
-                is_video_non_keyframe
+        // シーク後の最初の映像サンプルを見つけて、キーフレームかどうかを判定する。
+        // 音声サンプルが先に来る場合があるため、映像サンプルが見つかるまで読み進める。
+        let mut samples_read = 0u32;
+        let needs_warmup = loop {
+            match state.demuxer.next_sample() {
+                Ok(Some(sample)) => {
+                    samples_read += 1;
+                    if sample.track.kind == shiguredo_mp4::TrackKind::Video {
+                        let is_keyframe = sample.keyframe;
+                        // 読み進めた分をすべて戻す
+                        for _ in 0..samples_read {
+                            let _ = state.demuxer.prev_sample();
+                        }
+                        break !is_keyframe;
+                    }
+                    // 音声サンプル → さらに読み進める
+                }
+                Ok(None) => {
+                    // EOF に到達（映像サンプルが見つからなかった）: warm-up 不要
+                    // 読み進めた分を戻す
+                    for _ in 0..samples_read {
+                        let _ = state.demuxer.prev_sample();
+                    }
+                    break false;
+                }
+                Err(e) => return Err(Error::new(format!("failed to check keyframe: {e}"))),
             }
-            Ok(None) => false, // EOF: warm-up 不要
-            Err(e) => return Err(Error::new(format!("failed to check keyframe: {e}"))),
         };
 
         if !needs_warmup {
@@ -665,7 +685,7 @@ impl Mp4FileReader {
             calculate_timestamps(context.timescale, context.timestamp, context.duration);
         let effective_timestamp = self.base_offset + timestamp;
 
-        // warm-up 中はデコーダーに入力のみ行い、realtime sleep も publish もスキップする
+        // warm-up 中はデコーダーに入力して出力を捨てる。publish や realtime sleep はスキップする
         if suppress_publish {
             if let Some(decoder) = self.audio_decoder.as_mut() {
                 let frame = AudioFrame {
@@ -679,6 +699,8 @@ impl Mp4FileReader {
                 decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
                     std::sync::Arc::new(frame),
                 )))?;
+                // デコーダーの出力を drain して捨てる（内部バッファの蓄積を防ぐ）
+                discard_decoder_output(decoder)?;
             }
             return Ok(false);
         }
@@ -741,7 +763,7 @@ impl Mp4FileReader {
             calculate_timestamps(context.timescale, context.timestamp, context.duration);
         let effective_timestamp = self.base_offset + timestamp;
 
-        // warm-up 中はデコーダーに入力のみ行い、realtime sleep も publish もスキップする
+        // warm-up 中はデコーダーに入力して出力を捨てる。publish や realtime sleep はスキップする
         if suppress_publish {
             if let Some(decoder) = self.video_decoder.as_mut() {
                 let frame = VideoFrame {
@@ -758,6 +780,8 @@ impl Mp4FileReader {
                 decoder.handle_input_sample(Some(crate::MediaFrame::Video(
                     std::sync::Arc::new(frame),
                 )))?;
+                // デコーダーの出力を drain して捨てる（内部バッファの蓄積を防ぐ）
+                discard_video_decoder_output(decoder)?;
             }
             return Ok(false);
         }
@@ -912,6 +936,18 @@ impl Mp4FileReader {
             self.video_decoder = Some(decoder);
         }
     }
+}
+
+/// デコーダーの出力を drain して捨てる（warm-up 中の内部バッファ蓄積を防ぐ）
+fn discard_decoder_output(decoder: &mut crate::decoder::AudioDecoder) -> Result<()> {
+    while let crate::decoder::DecoderRunOutput::Processed(_) = decoder.poll_output()? {}
+    Ok(())
+}
+
+/// デコーダーの出力を drain して捨てる（warm-up 中の内部バッファ蓄積を防ぐ）
+fn discard_video_decoder_output(decoder: &mut crate::decoder::VideoDecoder) -> Result<()> {
+    while let crate::decoder::DecoderRunOutput::Processed(_) = decoder.poll_output()? {}
+    Ok(())
 }
 
 pub fn probe_mp4_track_availability<P: AsRef<Path>>(path: P) -> Result<Mp4FileTrackAvailability> {
