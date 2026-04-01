@@ -396,6 +396,8 @@ async fn video_forward_task(
             format: crate::video::VideoFormat::I420,
             keyframe: true,
             size: Some(crate::video::VideoFrameSize { width, height }),
+            // TODO: VideoFrameRef::timestamp_us() のエポック（起点）を確認する。
+            // libwebrtc の内部タイムスタンプであり UNIX epoch ではない可能性がある。
             timestamp: std::time::Duration::from_micros(frame.timestamp_us.max(0) as u64),
             sample_entry: None,
             data: i420_data,
@@ -436,7 +438,9 @@ async fn audio_forward_task(
             format: crate::audio::AudioFormat::I16Be,
             channels,
             sample_rate,
-            timestamp: std::time::Duration::ZERO,
+            // TODO: AudioTrackSinkHandler::on_data はタイムスタンプを提供しない。
+            // sora_sdk がタイムスタンプ取得 API を提供したら正確な値に置き換える。
+            timestamp: std::time::UNIX_EPOCH.elapsed().unwrap_or_default(),
             sample_entry: None,
         };
 
