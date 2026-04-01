@@ -106,14 +106,15 @@ pub struct MediaInputHandle {
 /// メディアイベント直接配信に必要な情報
 pub struct MediaEventContext {
     pub event_broadcast_tx: tokio::sync::broadcast::Sender<crate::obsws::coordinator::TaggedEvent>,
-    pub input_name: String,
+    /// 最新の input_name を追従する watch receiver
+    pub input_name_rx: tokio::sync::watch::Receiver<String>,
     pub input_uuid: String,
 }
 
 impl std::fmt::Debug for MediaEventContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MediaEventContext")
-            .field("input_name", &self.input_name)
+            .field("input_name", &*self.input_name_rx.borrow())
             .field("input_uuid", &self.input_uuid)
             .finish()
     }
@@ -154,6 +155,16 @@ enum RunLoopResult {
     Eof,
     /// pipeline が閉じた
     PipelineClosed,
+}
+
+/// wait_for_restart_command の結果
+enum WaitResult {
+    /// Play コマンド（pending_seek を維持して再開）
+    Play,
+    /// Restart コマンド（先頭から再生）
+    Restart,
+    /// チャネルクローズ
+    Closed,
 }
 
 /// run_loop 内のコマンド処理結果
@@ -308,11 +319,20 @@ impl Mp4FileReader {
                 }
             }
 
-            // Play / Restart を待つ。チャネルクローズなら終了
-            if !self.wait_for_restart_command().await {
-                break;
+            // Play / Restart を待つ
+            match self.wait_for_restart_command().await {
+                WaitResult::Play => {
+                    // pending_seek を維持したまま再開
+                    self.reset_for_restart(&handle);
+                }
+                WaitResult::Restart => {
+                    // 先頭再生: pending_seek / warmup_target をクリア
+                    self.pending_seek = None;
+                    self.warmup_target = None;
+                    self.reset_for_restart(&handle);
+                }
+                WaitResult::Closed => break,
             }
-            self.reset_for_restart(&handle);
         }
 
         self.send_eos_to_tracks();
@@ -702,16 +722,17 @@ impl Mp4FileReader {
         let Some(channels) = &self.media_channels else {
             return;
         };
+        let input_name = channels.event_ctx.input_name_rx.borrow().clone();
         let text = match event {
             MediaInputEvent::PlaybackStarted => {
                 crate::obsws::response::build_media_input_playback_started_event(
-                    &channels.event_ctx.input_name,
+                    &input_name,
                     &channels.event_ctx.input_uuid,
                 )
             }
             MediaInputEvent::PlaybackEnded => {
                 crate::obsws::response::build_media_input_playback_ended_event(
-                    &channels.event_ctx.input_name,
+                    &input_name,
                     &channels.event_ctx.input_uuid,
                 )
             }
@@ -974,17 +995,17 @@ impl Mp4FileReader {
     }
 
     /// Ended / Stopped 状態で Play / Restart コマンドを待つ。
-    /// チャネルクローズ時は false を返す。
-    async fn wait_for_restart_command(&mut self) -> bool {
+    async fn wait_for_restart_command(&mut self) -> WaitResult {
         loop {
             let command = {
                 let Some(channels) = self.media_channels.as_mut() else {
-                    return false;
+                    return WaitResult::Closed;
                 };
                 channels.command_rx.recv().await
             };
             match command {
-                Some(MediaInputCommand::Play | MediaInputCommand::Restart) => return true,
+                Some(MediaInputCommand::Play) => return WaitResult::Play,
+                Some(MediaInputCommand::Restart) => return WaitResult::Restart,
                 Some(MediaInputCommand::Pause | MediaInputCommand::Stop) => {
                     // 既に停止済みなので無視
                 }
@@ -995,7 +1016,7 @@ impl Mp4FileReader {
                     let position = self.resolve_offset_seek(offset_ms);
                     self.set_pending_seek(position);
                 }
-                None => return false,
+                None => return WaitResult::Closed,
             }
         }
     }
@@ -1496,7 +1517,7 @@ mod tests {
         )?;
         let handle = reader.create_media_handle(MediaEventContext {
             event_broadcast_tx: tokio::sync::broadcast::channel(8).0,
-            input_name: "test".to_owned(),
+            input_name_rx: tokio::sync::watch::channel("test".to_owned()).1,
             input_uuid: "test-uuid".to_owned(),
         });
 
@@ -1524,7 +1545,7 @@ mod tests {
         )?;
         let handle = reader.create_media_handle(MediaEventContext {
             event_broadcast_tx: tokio::sync::broadcast::channel(8).0,
-            input_name: "test".to_owned(),
+            input_name_rx: tokio::sync::watch::channel("test".to_owned()).1,
             input_uuid: "test-uuid".to_owned(),
         });
 
@@ -1562,7 +1583,7 @@ mod tests {
         .expect("test file must be readable");
         let handle = reader.create_media_handle(MediaEventContext {
             event_broadcast_tx: tokio::sync::broadcast::channel(8).0,
-            input_name: "test".to_owned(),
+            input_name_rx: tokio::sync::watch::channel("test".to_owned()).1,
             input_uuid: "test-uuid".to_owned(),
         });
         (reader, handle)
@@ -1713,5 +1734,49 @@ mod tests {
         let status = handle.status.borrow().clone();
         assert_eq!(status.state, MediaPlaybackState::Playing);
         assert_eq!(status.cursor, Duration::ZERO);
+    }
+
+    /// Stopped 中に Seek(10s) 後 Restart → pending_seek がクリアされ 0 秒から始まる
+    #[test]
+    fn restart_after_seek_clears_pending_seek() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+
+        // 停止中に 10 秒にシーク
+        reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(20));
+        reader.set_pending_seek(Duration::from_secs(10));
+        assert_eq!(reader.pending_seek, Some(Duration::from_secs(10)));
+
+        // Restart 相当の処理: pending_seek をクリアしてリセット
+        reader.pending_seek = None;
+        reader.warmup_target = None;
+        // reset_for_restart は ProcessorHandle が必要なので base_offset だけ手動設定
+        reader.base_offset = reader.last_emitted_end;
+
+        reader.start_playback();
+        let status = handle.status.borrow().clone();
+        assert_eq!(status.state, MediaPlaybackState::Playing);
+        assert_eq!(status.cursor, Duration::ZERO);
+        assert_eq!(reader.pending_seek, None);
+    }
+
+    /// Stopped 中に Seek(10s) 後 Play → pending_seek が維持され 10 秒から始まる
+    #[test]
+    fn play_after_seek_preserves_pending_seek() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+
+        // 停止中に 10 秒にシーク
+        reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(20));
+        reader.set_pending_seek(Duration::from_secs(10));
+
+        // Play 相当: pending_seek を維持してリセット
+        reader.base_offset = reader.last_emitted_end;
+
+        reader.start_playback();
+        let status = handle.status.borrow().clone();
+        assert_eq!(status.state, MediaPlaybackState::Playing);
+        assert_eq!(status.cursor, Duration::from_secs(10));
+        assert_eq!(reader.pending_seek, Some(Duration::from_secs(10)));
     }
 }

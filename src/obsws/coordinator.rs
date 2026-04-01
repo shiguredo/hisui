@@ -243,6 +243,8 @@ pub struct InputSourceState {
     pub audio_track_id: Option<crate::TrackId>,
     /// メディア入力の再生制御ハンドル（mp4_file_source の場合のみ）
     pub media_handle: Option<crate::mp4::reader::MediaInputHandle>,
+    /// input_name の最新値を配信する watch sender（SetInputName 時に更新）
+    pub input_name_tx: Option<tokio::sync::watch::Sender<String>>,
 }
 
 /// obsws の状態変更・副作用・Program 出力同期を調停する coordinator
@@ -1150,6 +1152,13 @@ impl ObswsCoordinator {
             // p2p_session にも通知する（attached_input_name の追従用）
             let _ = self.obsws_event_tx.send(event.clone());
             events.push(event);
+
+            // メディア入力のイベント配信用 input_name も更新する
+            if let Some(source_state) = self.input_source_processors.get(&updated_input.input_uuid)
+                && let Some(tx) = &source_state.input_name_tx
+            {
+                let _ = tx.send(updated_input.input_name.clone());
+            }
         }
         self.build_result_from_response(response_text, events)
     }
@@ -3736,6 +3745,8 @@ impl ObswsCoordinator {
         .map_err(|e| crate::Error::new(format!("failed to build source plan: {}", e.message())))?;
 
         // mp4_file_source のイベント直接配信用コンテキストを注入する
+        let (input_name_tx, input_name_rx) =
+            tokio::sync::watch::channel(input_entry.input_name.clone());
         for request in &mut source_plan.requests {
             if let crate::obsws::source::ObswsSourceRequest::CreateMp4FileSource {
                 event_ctx, ..
@@ -3743,7 +3754,7 @@ impl ObswsCoordinator {
             {
                 *event_ctx = Some(crate::mp4::reader::MediaEventContext {
                     event_broadcast_tx: self.obsws_event_tx.clone(),
-                    input_name: input_entry.input_name.clone(),
+                    input_name_rx: input_name_rx.clone(),
                     input_uuid: input_entry.input_uuid.clone(),
                 });
             }
@@ -3754,6 +3765,7 @@ impl ObswsCoordinator {
             video_track_id: source_plan.source_video_track_id.clone(),
             audio_track_id: source_plan.source_audio_track_id.clone(),
             media_handle: None,
+            input_name_tx: Some(input_name_tx),
         };
 
         let media_handle = crate::obsws::session::output::start_source_processors(
