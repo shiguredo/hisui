@@ -5296,6 +5296,7 @@ impl ObswsCoordinator {
             .get_mut(&subscriber_name)
             .expect("subscriber was just inserted");
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            self.sora_subscribers.remove(&subscriber_name);
             return self.build_error_result(
                 request_type,
                 request_id,
@@ -5321,6 +5322,7 @@ impl ObswsCoordinator {
         )
         .await
         {
+            self.sora_subscribers.remove(&subscriber_name);
             return self.build_error_result(
                 request_type,
                 request_id,
