@@ -362,6 +362,11 @@ async fn video_forward_task(
         let width = frame.width as usize;
         let height = frame.height as usize;
 
+        assert!(
+            width > 0 && height > 0,
+            "BUG: received zero-size video frame ({width}x{height})"
+        );
+
         // I420 コンパクトデータを構築（stride を詰める）
         let y_size = width * height;
         let uv_width = width.div_ceil(2);

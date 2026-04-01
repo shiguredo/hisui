@@ -5082,17 +5082,20 @@ impl ObswsCoordinator {
                                 .ok()
                                 .and_then(|m| m.optional())
                                 .and_then(|v| v.try_into().ok());
+                            let Some(cid) = connection_id else {
+                                // Sora のプロトコル上 connection_id は必須
+                                tracing::warn!("connection.created notify missing connection_id");
+                                return;
+                            };
                             let client_id: Option<String> = v
                                 .to_member("client_id")
                                 .ok()
                                 .and_then(|m| m.optional())
                                 .and_then(|v| v.try_into().ok());
-                            if let Some(cid) = connection_id
-                                && let Some(state) = self.sora_subscribers.get_mut(&subscriber_name)
-                            {
+                            if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
                                 state
                                     .connections
-                                    .insert(cid.clone(), SoraConnectionInfo { client_id });
+                                    .insert(cid, SoraConnectionInfo { client_id });
                             }
                         }
                         Some("connection.destroyed") => {
@@ -5101,9 +5104,11 @@ impl ObswsCoordinator {
                                 .ok()
                                 .and_then(|m| m.optional())
                                 .and_then(|v| v.try_into().ok());
-                            if let Some(cid) = connection_id
-                                && let Some(state) = self.sora_subscribers.get_mut(&subscriber_name)
-                            {
+                            let Some(cid) = connection_id else {
+                                tracing::warn!("connection.destroyed notify missing connection_id");
+                                return;
+                            };
+                            if let Some(state) = self.sora_subscribers.get_mut(&subscriber_name) {
                                 state.connections.remove(&cid);
                             }
                         }
