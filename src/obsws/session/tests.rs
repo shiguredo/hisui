@@ -1705,24 +1705,9 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
     assert!(result);
     assert_eq!(code, 100);
 
-    // actor が registry を所有しているため record_run() に直接アクセスできない。
-    // パイプライン上に audio_mixer プロセッサが存在することを確認する。
-    let mut found_audio_mixer = false;
-    for _ in 0..20 {
-        let live_processors = pipeline_handle
-            .list_processors()
-            .await
-            .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
-        if live_processors
-            .iter()
-            .any(|id| id.get() == "obsws:record:0:audio_mixer")
-        {
-            found_audio_mixer = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    assert!(found_audio_mixer);
+    // record は program mixer の出力を直接使用するため、
+    // record 独自の mixer プロセッサは存在しない。
+    // start/stop が成功することのみ確認する。
 
     let stop_action = session
         .handle_request(RequestMessage {
@@ -1783,24 +1768,8 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
     assert!(result);
     assert_eq!(code, 100);
 
-    // actor が registry を所有しているため record_run() に直接アクセスできない。
-    // パイプライン上に audio_mixer プロセッサが存在することを確認する。
-    let mut found_audio_mixer = false;
-    for _ in 0..20 {
-        let live_processors = pipeline_handle
-            .list_processors()
-            .await
-            .map_err(|_| crate::Error::new("failed to list processors: pipeline has terminated"))?;
-        if live_processors
-            .iter()
-            .any(|id| id.get() == "obsws:record:0:audio_mixer")
-        {
-            found_audio_mixer = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    assert!(found_audio_mixer);
+    // record は program mixer の出力を直接使用するため、
+    // record 独自の mixer プロセッサは存在しない。
 
     let stop_action = session
         .handle_request(RequestMessage {

@@ -1259,7 +1259,6 @@ fn stream_runtime_state_changes_on_activate_and_deactivate() {
 
     registry
         .activate_stream(ObswsStreamRun {
-            source_processor_ids: vec![ProcessorId::new("source")],
             video: ObswsRecordTrackRun {
                 encoder_processor_id: ProcessorId::new("encoder"),
                 source_track_id: TrackId::new("source-track"),
@@ -1270,8 +1269,6 @@ fn stream_runtime_state_changes_on_activate_and_deactivate() {
                 source_track_id: TrackId::new("audio-source-track"),
                 encoded_track_id: TrackId::new("audio-encoded-track"),
             },
-            audio_mixer_processor_id: ProcessorId::new("audio-mixer"),
-            video_mixer_processor_id: ProcessorId::new("video-mixer"),
             publisher_processor_id: ProcessorId::new("publisher"),
         })
         .expect("stream activation must succeed");
@@ -1290,7 +1287,6 @@ fn record_runtime_state_changes_on_activate_and_deactivate() {
 
     registry
         .activate_record(ObswsRecordRun {
-            source_processor_ids: vec![ProcessorId::new("source")],
             video: ObswsRecordTrackRun {
                 encoder_processor_id: ProcessorId::new("encoder"),
                 source_track_id: TrackId::new("source-track"),
@@ -1301,8 +1297,6 @@ fn record_runtime_state_changes_on_activate_and_deactivate() {
                 source_track_id: TrackId::new("audio-source-track"),
                 encoded_track_id: TrackId::new("audio-encoded-track"),
             },
-            audio_mixer_processor_id: ProcessorId::new("audio-mixer"),
-            video_mixer_processor_id: ProcessorId::new("video-mixer"),
             writer_processor_id: ProcessorId::new("writer"),
             output_path: PathBuf::from("recordings-for-test/output.mp4"),
         })

@@ -186,7 +186,7 @@ mod tests {
         let settings = crate::obsws::input_registry::ObswsColorSourceSettings { color: None };
         let plan = build_record_source_plan(
             &settings,
-            super::super::ObswsOutputKind::Record,
+            super::super::ObswsOutputKind::Program,
             1,
             "test",
             FrameRate::FPS_30,
@@ -204,7 +204,7 @@ mod tests {
         };
         let plan = build_record_source_plan(
             &settings,
-            super::super::ObswsOutputKind::Stream,
+            super::super::ObswsOutputKind::Program,
             2,
             "red",
             FrameRate::FPS_30,

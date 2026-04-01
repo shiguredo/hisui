@@ -45,6 +45,11 @@ pub struct ObswsSession {
 }
 
 impl ObswsSession {
+    /// 現在の event subscription ビットフラグを返す
+    pub fn event_subscriptions(&self) -> u32 {
+        self.event_subscriptions
+    }
+
     pub fn new(
         auth: Option<ObswsAuthentication>,
         coordinator_handle: ObswsCoordinatorHandle,

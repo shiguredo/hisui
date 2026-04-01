@@ -54,7 +54,7 @@ mod tests {
             &ObswsRtspSubscriberSettings {
                 input_url: Some("rtsp://127.0.0.1:554/stream".to_owned()),
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
@@ -63,18 +63,18 @@ mod tests {
         assert_eq!(plan.source_processor_ids.len(), 1);
         assert_eq!(
             plan.source_processor_ids[0].get(),
-            "obsws:record:1:source:0:rtsp_subscriber"
+            "obsws:program:1:source:0:rtsp_subscriber"
         );
 
         assert_eq!(plan.requests.len(), 1);
 
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:record:1:source:0:raw_video")
+            Some("obsws:program:1:source:0:raw_video")
         );
         assert_eq!(
             plan.source_audio_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:record:1:source:0:raw_audio")
+            Some("obsws:program:1:source:0:raw_audio")
         );
 
         // CreateRtspSubscriber のパラメータを検証する
@@ -90,7 +90,7 @@ mod tests {
     fn build_record_source_plan_requires_input_url() {
         let result = build_record_source_plan(
             &ObswsRtspSubscriberSettings { input_url: None },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         );

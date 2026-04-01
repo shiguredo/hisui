@@ -103,13 +103,41 @@ pub fn build_composed_output_plan(
         .filter_map(|(plan, scene_input)| {
             let video_track_id = plan.source_video_track_id.as_ref()?;
             let transform = &scene_input.transform;
-            let width = if transform.width > 0.0 {
-                Some(round_to_even(transform.width))
+            // width/height が 0（ソースサイズ未確定）の場合、bounds をフォールバックとして使用する。
+            //
+            // sora_source や webrtc_source のような外部フレーム供給型のソースでは、
+            // フレーム到着前に source_width/height が確定しない。mixer は width/height が
+            // None の場合にフレームの元サイズをそのまま使って描画するが、それでは bounds
+            // によるスケーリング指定が反映されない。
+            //
+            // 暫定対応として、width/height が 0 かつ boundsType が指定されている場合に
+            // bounds_width/bounds_height をそのまま描画サイズとして使う。
+            //
+            // 将来的な改善: 初回フレーム到着時に source_width/source_height を動的に
+            // 更新し、OBS 互換の boundsType に基づくスケーリング計算
+            // （アスペクト比保持等）を正確に行う。
+            let has_bounds = transform.bounds_type != "OBS_BOUNDS_NONE";
+            let effective_width = if transform.width > 0.0 {
+                transform.width
+            } else if has_bounds && transform.bounds_width > 0.0 {
+                transform.bounds_width
+            } else {
+                0.0
+            };
+            let effective_height = if transform.height > 0.0 {
+                transform.height
+            } else if has_bounds && transform.bounds_height > 0.0 {
+                transform.bounds_height
+            } else {
+                0.0
+            };
+            let width = if effective_width > 0.0 {
+                Some(round_to_even(effective_width))
             } else {
                 None
             };
-            let height = if transform.height > 0.0 {
-                Some(round_to_even(transform.height))
+            let height = if effective_height > 0.0 {
+                Some(round_to_even(effective_height))
             } else {
                 None
             };

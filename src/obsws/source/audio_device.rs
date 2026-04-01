@@ -169,7 +169,7 @@ mod tests {
                 sample_rate: None,
                 channels: None,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             1,
             "0",
         )
@@ -178,7 +178,7 @@ mod tests {
         assert_eq!(plan.source_processor_ids.len(), 1);
         assert_eq!(
             plan.source_processor_ids[0].get(),
-            "obsws:record:1:source:0:audio_device_source"
+            "obsws:program:1:source:0:audio_device_source"
         );
 
         assert_eq!(plan.requests.len(), 1);
@@ -186,7 +186,7 @@ mod tests {
         assert!(plan.source_video_track_id.is_none());
         assert_eq!(
             plan.source_audio_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:record:1:source:0:raw_audio")
+            Some("obsws:program:1:source:0:raw_audio")
         );
 
         match &plan.requests[0] {
@@ -196,12 +196,12 @@ mod tests {
             } => {
                 assert_eq!(
                     source.output_audio_track_id.get(),
-                    "obsws:record:1:source:0:raw_audio"
+                    "obsws:program:1:source:0:raw_audio"
                 );
                 assert_eq!(source.device_id.as_deref(), Some("mic0"));
                 assert_eq!(
                     processor_id.as_ref().map(|p| p.get()),
-                    Some("obsws:record:1:source:0:audio_device_source")
+                    Some("obsws:program:1:source:0:audio_device_source")
                 );
             }
             _ => panic!("expected CreateAudioDeviceSource"),
@@ -216,7 +216,7 @@ mod tests {
                 sample_rate: None,
                 channels: None,
             },
-            ObswsOutputKind::Record,
+            ObswsOutputKind::Program,
             2,
             "1",
         )

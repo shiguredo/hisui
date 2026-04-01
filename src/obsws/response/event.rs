@@ -4,7 +4,8 @@ use crate::obsws::input_registry::{
 use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_MEDIA_INPUTS,
     OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
-    OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, OBSWS_OP_EVENT,
+    OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, OBSWS_EVENT_SUB_SORA_SOURCE,
+    OBSWS_OP_EVENT,
 };
 
 pub fn build_stream_state_changed_event(
@@ -540,6 +541,112 @@ pub fn build_media_input_action_triggered_event(
                         f.member("inputName", input_name)?;
                         f.member("inputUuid", input_uuid)?;
                         f.member("mediaAction", media_action)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
+// --- SoraSubscriber / sora_source イベント ---
+
+pub fn build_sora_source_track_published_event(
+    subscriber_name: &str,
+    connection_id: &str,
+    client_id: Option<&str>,
+    track_kind: &str,
+    track_id: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "SoraSourceTrackPublished")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SORA_SOURCE)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("subscriberName", subscriber_name)?;
+                        f.member("connectionId", connection_id)?;
+                        f.member("clientId", client_id)?;
+                        f.member("trackKind", track_kind)?;
+                        f.member("trackId", track_id)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
+pub fn build_sora_source_track_unpublished_event(
+    subscriber_name: &str,
+    connection_id: &str,
+    track_kind: &str,
+    track_id: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "SoraSourceTrackUnpublished")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SORA_SOURCE)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("subscriberName", subscriber_name)?;
+                        f.member("connectionId", connection_id)?;
+                        f.member("trackKind", track_kind)?;
+                        f.member("trackId", track_id)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
+pub fn build_sora_subscriber_disconnected_event(
+    subscriber_name: &str,
+    code: Option<u16>,
+    reason: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "SoraSubscriberDisconnected")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SORA_SOURCE)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("subscriberName", subscriber_name)?;
+                        f.member("code", code.map(i64::from))?;
+                        f.member("reason", reason)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
+pub fn build_sora_subscriber_notify_event(
+    subscriber_name: &str,
+    notify: &nojson::RawJsonOwned,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "SoraSubscriberNotify")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_SORA_SOURCE)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("subscriberName", subscriber_name)?;
+                        f.member("notify", notify)
                     }),
                 )
             }),
