@@ -216,6 +216,8 @@ pub struct Mp4FileReader {
     /// seek 適用済みだが未 publish のファイル内カーソル位置。
     /// relative seek の基準として使い、フレーム publish で last_emitted_end が進んだらクリアする。
     logical_cursor: Option<Duration>,
+    /// Stop により再生位置を先頭へ戻した直後かどうか
+    stopped_at_zero: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +253,7 @@ impl Mp4FileReader {
             pending_seek: None,
             warmup_target: None,
             logical_cursor: None,
+            stopped_at_zero: false,
         })
     }
 
@@ -305,19 +308,29 @@ impl Mp4FileReader {
         // メディア制御が有効: 停止後もコマンド待機ループを回す
         loop {
             let result = self.run_loop(loop_enabled, &handle).await?;
-            let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
             match result {
                 RunLoopResult::Eof => {
                     self.flush_decoders()?;
-                    self.update_playback_status(MediaPlaybackState::Ended, file_pos);
+                    self.stopped_at_zero = false;
+                    self.update_playback_status(
+                        MediaPlaybackState::Ended,
+                        self.last_emitted_end.saturating_sub(self.base_offset),
+                    );
                     self.send_media_event(MediaInputEvent::PlaybackEnded);
                 }
                 RunLoopResult::Stopped => {
                     // 明示停止: PlaybackEnded は送らない
-                    self.update_playback_status(MediaPlaybackState::Stopped, file_pos);
+                    self.update_playback_status(
+                        MediaPlaybackState::Stopped,
+                        self.stopped_file_cursor(),
+                    );
                 }
                 RunLoopResult::PipelineClosed => {
-                    self.update_playback_status(MediaPlaybackState::Stopped, file_pos);
+                    self.stopped_at_zero = false;
+                    self.update_playback_status(
+                        MediaPlaybackState::Stopped,
+                        self.last_emitted_end.saturating_sub(self.base_offset),
+                    );
                 }
             }
 
@@ -328,9 +341,8 @@ impl Mp4FileReader {
                     self.reset_for_restart(&handle);
                 }
                 WaitResult::Restart => {
-                    // 先頭再生: pending_seek / warmup_target をクリア
-                    self.pending_seek = None;
-                    self.warmup_target = None;
+                    // 先頭再生: seek 状態をクリア
+                    self.clear_seek_state();
                     self.reset_for_restart(&handle);
                 }
                 WaitResult::Closed => break,
@@ -344,6 +356,7 @@ impl Mp4FileReader {
     /// 再生開始時の状態を初期化する。
     /// pending_seek がある場合はその位置を公開カーソルに反映する（実際の seek は run_loop 冒頭で適用）。
     fn start_playback(&mut self) {
+        self.stopped_at_zero = false;
         let start_pos = self.pending_seek.unwrap_or(Duration::ZERO);
         self.update_playback_status(MediaPlaybackState::Playing, start_pos);
         self.send_media_event(MediaInputEvent::PlaybackStarted);
@@ -499,6 +512,7 @@ impl Mp4FileReader {
                 }
                 Some(MediaInputCommand::Stop) => {
                     self.is_paused = false;
+                    self.stop_and_reset_to_zero();
                     return MediaLoopAction::Stop;
                 }
                 Some(MediaInputCommand::Restart) => {
@@ -668,15 +682,37 @@ impl Mp4FileReader {
         self.update_playback_status(MediaPlaybackState::Playing, file_pos);
     }
 
+    /// 保留中の seek 関連状態をクリアする
+    fn clear_seek_state(&mut self) {
+        self.pending_seek = None;
+        self.warmup_target = None;
+        self.logical_cursor = None;
+    }
+
+    /// Stop 後に最終公開するファイル内カーソル位置を返す
+    fn stopped_file_cursor(&self) -> Duration {
+        if self.stopped_at_zero {
+            Duration::ZERO
+        } else {
+            self.last_emitted_end.saturating_sub(self.base_offset)
+        }
+    }
+
+    /// Stop により再生位置を先頭へ戻し、その状態を最終 status まで維持する
+    fn stop_and_reset_to_zero(&mut self) {
+        self.clear_seek_state();
+        self.stopped_at_zero = true;
+        self.update_playback_status(MediaPlaybackState::Stopped, Duration::ZERO);
+    }
+
     /// 再生を先頭からリスタートする（デコーダーの再生成は呼び出し側で行う）。
     /// 手動 Restart の通知は MediaInputActionTriggered で行うため、
     /// ここでは PlaybackEnded / PlaybackStarted は送らない。
     fn restart_playback(&mut self) {
         self.is_paused = false;
         self.pause_started_at = None;
-        self.pending_seek = None;
-        self.warmup_target = None;
-        self.logical_cursor = None;
+        self.clear_seek_state();
+        self.stopped_at_zero = false;
         self.base_offset = self.last_emitted_end;
         self.start_instant = tokio::time::Instant::now() - self.base_offset;
         self.last_realtime_timestamp = None;
@@ -712,6 +748,7 @@ impl Mp4FileReader {
     fn set_pending_seek(&mut self, position: Duration) {
         let clamped = self.clamp_position(position);
         self.pending_seek = Some(clamped);
+        self.stopped_at_zero = false;
         // 現在の公開状態を維持したまま cursor だけ更新する
         if let Some(channels) = &self.media_channels {
             let current_state = channels.status_tx.borrow().state;
@@ -1021,8 +1058,12 @@ impl Mp4FileReader {
             match command {
                 Some(MediaInputCommand::Play) => return WaitResult::Play,
                 Some(MediaInputCommand::Restart) => return WaitResult::Restart,
-                Some(MediaInputCommand::Pause | MediaInputCommand::Stop) => {
+                Some(MediaInputCommand::Pause) => {
                     // 既に停止済みなので無視
+                }
+                Some(MediaInputCommand::Stop) => {
+                    // 保留中の seek を破棄して先頭に戻す
+                    self.stop_and_reset_to_zero();
                 }
                 Some(MediaInputCommand::Seek(position)) => {
                     self.set_pending_seek(position);
@@ -1816,5 +1857,143 @@ mod tests {
         reader.last_emitted_end = Duration::from_secs(32);
         let pos = reader.resolve_offset_seek(5000);
         assert_eq!(pos, Duration::from_secs(37));
+    }
+
+    /// Pause → Seek → Stop を wait_while_paused() の実経路で通し、
+    /// pending_seek がクリアされ state=Stopped, cursor=0 になることを確認する
+    #[tokio::test]
+    async fn pause_seek_stop_clears_seek_via_wait_while_paused() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.is_paused = true;
+
+        // コマンドを送信: Seek(10s) → Stop
+        handle
+            .command_tx
+            .send(MediaInputCommand::Seek(Duration::from_secs(10)))
+            .await
+            .expect("send Seek must succeed");
+        handle
+            .command_tx
+            .send(MediaInputCommand::Stop)
+            .await
+            .expect("send Stop must succeed");
+
+        // wait_while_paused を実行
+        let action = reader.wait_while_paused().await;
+        assert!(matches!(action, MediaLoopAction::Stop));
+
+        // seek 状態がクリアされ、cursor=0, state=Stopped
+        assert_eq!(reader.pending_seek, None);
+        assert_eq!(reader.logical_cursor, None);
+        assert_eq!(handle.status.borrow().state, MediaPlaybackState::Stopped);
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+
+        // Play 開始は 0 秒
+        reader.base_offset = reader.last_emitted_end;
+        reader.start_playback();
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+    }
+
+    /// Pause → Seek → Stop 後、run() 側の最終 status 更新でも cursor=0 が維持される
+    #[tokio::test]
+    async fn pause_seek_stop_keeps_zero_after_final_status_update() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.is_paused = true;
+        reader.base_offset = Duration::ZERO;
+        reader.last_emitted_end = Duration::from_secs(12);
+
+        handle
+            .command_tx
+            .send(MediaInputCommand::Seek(Duration::from_secs(10)))
+            .await
+            .expect("send Seek must succeed");
+        handle
+            .command_tx
+            .send(MediaInputCommand::Stop)
+            .await
+            .expect("send Stop must succeed");
+
+        let action = reader.wait_while_paused().await;
+        assert!(matches!(action, MediaLoopAction::Stop));
+
+        // run() 側の停止後最終更新を模擬しても 0 のまま
+        reader.update_playback_status(MediaPlaybackState::Stopped, reader.stopped_file_cursor());
+        assert_eq!(handle.status.borrow().state, MediaPlaybackState::Stopped);
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+    }
+
+    /// Stopped → Seek → Stop を wait_for_restart_command() の実経路で通し、
+    /// cursor が 0 に戻ることを確認する
+    #[tokio::test]
+    async fn stopped_seek_stop_clears_seek_via_wait_for_restart() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(20));
+
+        // コマンドを送信: Seek(10s) → Stop → Play
+        handle
+            .command_tx
+            .send(MediaInputCommand::Seek(Duration::from_secs(10)))
+            .await
+            .expect("send Seek must succeed");
+        handle
+            .command_tx
+            .send(MediaInputCommand::Stop)
+            .await
+            .expect("send Stop must succeed");
+        handle
+            .command_tx
+            .send(MediaInputCommand::Play)
+            .await
+            .expect("send Play must succeed");
+
+        // wait_for_restart_command を実行
+        // Seek → Stop → Play の順で処理され、Stop で seek がクリア、Play で復帰
+        let result = reader.wait_for_restart_command().await;
+        assert!(matches!(result, WaitResult::Play));
+
+        // Stop で seek がクリアされ cursor=0
+        assert_eq!(reader.pending_seek, None);
+
+        // Play 開始は 0 秒
+        reader.base_offset = reader.last_emitted_end;
+        reader.start_playback();
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+    }
+
+    /// Ended → Seek → Stop を wait_for_restart_command() の実経路で通し、
+    /// Stopped に遷移し cursor が 0 に戻ることを確認する
+    #[tokio::test]
+    async fn ended_seek_stop_transitions_to_stopped_via_wait_for_restart() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(30);
+        reader.update_playback_status(MediaPlaybackState::Ended, Duration::from_secs(30));
+
+        // コマンドを送信: Seek(10s) → Stop → Play
+        handle
+            .command_tx
+            .send(MediaInputCommand::Seek(Duration::from_secs(10)))
+            .await
+            .expect("send Seek must succeed");
+        handle
+            .command_tx
+            .send(MediaInputCommand::Stop)
+            .await
+            .expect("send Stop must succeed");
+        handle
+            .command_tx
+            .send(MediaInputCommand::Play)
+            .await
+            .expect("send Play must succeed");
+
+        let result = reader.wait_for_restart_command().await;
+        assert!(matches!(result, WaitResult::Play));
+
+        // Seek 後に Stop で Stopped に遷移し、cursor=0
+        assert_eq!(handle.status.borrow().state, MediaPlaybackState::Stopped);
+        assert_eq!(handle.status.borrow().cursor, Duration::ZERO);
+        assert_eq!(reader.pending_seek, None);
     }
 }
