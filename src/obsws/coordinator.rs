@@ -5404,14 +5404,22 @@ impl ObswsCoordinator {
         {
             tracing::warn!("failed to stop sora subscriber processor: {}", e.display());
         }
-        // remote_tracks をクリーンアップする
-        let drained: Vec<(String, SoraSourceRemoteTrack)> =
-            removed_state.remote_tracks.into_iter().collect();
-        for (_track_id, rt) in drained {
+        // remote_tracks をクリーンアップし、各トラックの Unpublished イベントを送信する
+        for (track_id, rt) in removed_state.remote_tracks {
             rt.holder_abort.abort();
             if let Some(input_name) = &rt.attached_input_name {
                 self.clear_sora_source_track_id(input_name, &rt.track_kind);
             }
+            let event = crate::obsws::response::build_sora_source_track_unpublished_event(
+                &subscriber_name,
+                &rt.connection_id,
+                &rt.track_kind,
+                &track_id,
+            );
+            let _ = self.obsws_event_tx.send(TaggedEvent {
+                text: event,
+                subscription_flag: OBSWS_EVENT_SUB_SORA_SOURCE,
+            });
         }
         self.build_result_from_response(
             crate::obsws::response::build_request_response_success_no_data(
