@@ -301,6 +301,12 @@ struct SoraSourceRemoteTrack {
     holder_abort: tokio::task::AbortHandle,
 }
 
+impl Drop for SoraSourceRemoteTrack {
+    fn drop(&mut self) {
+        self.holder_abort.abort();
+    }
+}
+
 /// SoraSubscriber の on_notify から抽出した接続情報
 struct SoraConnectionInfo {
     client_id: Option<String>,
