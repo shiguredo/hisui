@@ -303,6 +303,8 @@ impl Mp4FileReader {
 
         // メディア制御が無効なら従来通り一度だけ再生して終了
         if self.media_channels.is_none() {
+            self.start_instant = tokio::time::Instant::now();
+            self.last_realtime_timestamp = None;
             let result = self.run_loop(loop_enabled, &handle).await?;
             if matches!(result, RunLoopResult::Eof) {
                 self.flush_decoders()?;
