@@ -153,35 +153,37 @@ impl VideoToolboxDecoder {
                     *self = Self::new_h264(frame)?;
                 }
             }
-            VideoFormat::Vp9 | VideoFormat::Av1 => {
-                let (new_width, new_height) = get_frame_resolution(
-                    frame,
-                    if frame.format == VideoFormat::Vp9 {
-                        "VP9"
-                    } else {
-                        "AV1"
-                    },
-                )?;
-                if Some((new_width, new_height)) == self.resolution {
-                    return Ok(());
-                }
-
-                if self.decoded.is_some() {
-                    return Err(crate::Error::new(
-                        "cannot reinitialize decoder while decoded frame is pending",
-                    ));
-                }
-
-                // 解像度が変わったのでデコーダーを再作成する
-                if frame.format == VideoFormat::Vp9 {
-                    *self = Self::new_vp9(frame)?;
-                } else {
-                    *self = Self::new_av1(frame)?;
-                }
+            VideoFormat::Vp9 => {
+                self.reinitialize_raw_codec_if_need(frame, "VP9", Self::new_vp9)?;
+            }
+            VideoFormat::Av1 => {
+                self.reinitialize_raw_codec_if_need(frame, "AV1", Self::new_av1)?;
             }
             _ => {}
         }
 
+        Ok(())
+    }
+
+    /// VP9/AV1 の解像度変更時にデコーダーを再作成する
+    fn reinitialize_raw_codec_if_need(
+        &mut self,
+        frame: &VideoFrame,
+        codec_name: &str,
+        constructor: fn(&VideoFrame) -> crate::Result<Self>,
+    ) -> crate::Result<()> {
+        let (new_width, new_height) = get_frame_resolution(frame, codec_name)?;
+        if Some((new_width, new_height)) == self.resolution {
+            return Ok(());
+        }
+
+        if self.decoded.is_some() {
+            return Err(crate::Error::new(
+                "cannot reinitialize decoder while decoded frame is pending",
+            ));
+        }
+
+        *self = constructor(frame)?;
         Ok(())
     }
 
