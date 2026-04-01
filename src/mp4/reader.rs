@@ -590,6 +590,9 @@ impl Mp4FileReader {
     fn restart_playback(&mut self) {
         self.is_paused = false;
         self.pause_started_at = None;
+        // Restart は常に先頭からの新規再生なので、seek / warm-up 状態は引き継がない
+        self.pending_seek = None;
+        self.warmup_target = None;
         self.send_media_event(MediaInputEvent::PlaybackEnded);
         self.base_offset = self.last_emitted_end;
         // 先頭サンプル（effective_timestamp = base_offset + 0）を now で出すため、
