@@ -5739,11 +5739,19 @@ impl ObswsCoordinator {
                             .send(crate::sora_source::SoraTrackCommand::Attach { publisher });
                     }
                     Ok(Err(e)) => {
-                        tracing::warn!("AttachSoraSourceTrack: publish_track failed: {:?}", e);
+                        return self.build_error_result(
+                            request_type,
+                            request_id,
+                            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            &format!("Failed to publish track: {e:?}"),
+                        );
                     }
                     Err(_) => {
-                        tracing::warn!(
-                            "AttachSoraSourceTrack: publish_track reply channel dropped"
+                        return self.build_error_result(
+                            request_type,
+                            request_id,
+                            crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                            "Pipeline terminated during publish_track",
                         );
                     }
                 }
