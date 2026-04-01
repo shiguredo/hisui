@@ -574,7 +574,7 @@ impl Mp4FileReader {
             Ok(MediaInputCommand::Pause) => {
                 self.is_paused = true;
                 self.pause_started_at = Some(tokio::time::Instant::now());
-                let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
+                let file_pos = self.current_file_cursor();
                 self.update_playback_status(MediaPlaybackState::Paused, file_pos);
                 MediaLoopAction::Continue
             }
@@ -707,7 +707,7 @@ impl Mp4FileReader {
         self.is_paused = false;
         // start_instant を一時停止分だけ進めて、再生速度制御のタイミングを維持する
         self.start_instant += paused;
-        let file_pos = self.last_emitted_end.saturating_sub(self.base_offset);
+        let file_pos = self.current_file_cursor();
         self.update_playback_status(MediaPlaybackState::Playing, file_pos);
     }
 
@@ -1961,6 +1961,29 @@ mod tests {
         reader.last_emitted_end = Duration::from_secs(32);
         let pos = reader.resolve_offset_seek(5000);
         assert_eq!(pos, Duration::from_secs(37));
+    }
+
+    /// seek 適用直後の Pause / Resume でも logical_cursor を維持する
+    #[test]
+    fn pause_and_resume_after_seek_use_logical_cursor() {
+        let (mut reader, handle) = reader_with_media_control();
+        reader.base_offset = Duration::ZERO;
+        reader.last_emitted_end = Duration::from_secs(10);
+        reader.logical_cursor = Some(Duration::from_secs(30));
+
+        handle
+            .command_tx
+            .try_send(MediaInputCommand::Pause)
+            .expect("send Pause must succeed");
+        let action = reader.poll_media_command();
+        assert!(matches!(action, MediaLoopAction::Continue));
+        assert_eq!(handle.status.borrow().state, MediaPlaybackState::Paused);
+        assert_eq!(handle.status.borrow().cursor, Duration::from_secs(30));
+
+        reader.pause_started_at = Some(tokio::time::Instant::now());
+        reader.resume_from_pause();
+        assert_eq!(handle.status.borrow().state, MediaPlaybackState::Playing);
+        assert_eq!(handle.status.borrow().cursor, Duration::from_secs(30));
     }
 
     /// Pause → Seek → Stop を wait_while_paused() の実経路で通し、
