@@ -5366,39 +5366,23 @@ impl ObswsCoordinator {
             }
         };
         // subscriber の存在と稼働状態を確認する
-        let is_active = self
-            .sora_subscribers
-            .get(&subscriber_name)
-            .map(|s| s.run.is_some());
-        match is_active {
-            None => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Subscriber not found",
-                );
-            }
-            Some(false) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                    "Subscriber is not active",
-                );
-            }
-            Some(true) => {}
+        if !self.sora_subscribers.contains_key(&subscriber_name) {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Subscriber not found",
+            );
         }
         // subscriber を削除して所有権を取得する
         let mut removed_state = self
             .sora_subscribers
             .remove(&subscriber_name)
-            .expect("subscriber existence was just verified");
-        let run = removed_state
-            .run
-            .take()
-            .expect("subscriber was verified as active");
-        if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
+            .expect("BUG: subscriber existence was just verified");
+        // run が Some の場合のみ processor を停止する
+        // （Disconnected で run = None になった場合はスキップ）
+        if let Some(run) = removed_state.run.take()
+            && let Some(pipeline_handle) = self.pipeline_handle.as_ref()
             && let Err(e) =
                 terminate_and_wait(pipeline_handle, std::slice::from_ref(&run.processor_id)).await
         {
