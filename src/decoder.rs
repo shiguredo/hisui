@@ -432,10 +432,21 @@ impl VideoDecoder {
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
         let mut engines = Vec::new();
         match codec {
-            CodecName::Vp8 | CodecName::Vp9 => {
+            CodecName::Vp8 => {
                 #[cfg(feature = "nvcodec")]
                 if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
+                }
+                engines.push(EngineName::Libvpx);
+            }
+            CodecName::Vp9 => {
+                #[cfg(feature = "nvcodec")]
+                if shiguredo_nvcodec::is_cuda_library_available() {
+                    engines.push(EngineName::Nvcodec);
+                }
+                #[cfg(target_os = "macos")]
+                if EngineName::VideoToolbox.is_available_video_decode_codec(codec) {
+                    engines.push(EngineName::VideoToolbox);
                 }
                 engines.push(EngineName::Libvpx);
             }
@@ -448,7 +459,7 @@ impl VideoDecoder {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
-                {
+                if EngineName::VideoToolbox.is_available_video_decode_codec(codec) {
                     engines.push(EngineName::VideoToolbox);
                 }
             }
@@ -458,7 +469,7 @@ impl VideoDecoder {
                     engines.push(EngineName::Nvcodec);
                 }
                 #[cfg(target_os = "macos")]
-                {
+                if EngineName::VideoToolbox.is_available_video_decode_codec(codec) {
                     engines.push(EngineName::VideoToolbox);
                 }
             }
@@ -466,6 +477,10 @@ impl VideoDecoder {
                 #[cfg(feature = "nvcodec")]
                 if shiguredo_nvcodec::is_cuda_library_available() {
                     engines.push(EngineName::Nvcodec);
+                }
+                #[cfg(target_os = "macos")]
+                if EngineName::VideoToolbox.is_available_video_decode_codec(codec) {
+                    engines.push(EngineName::VideoToolbox);
                 }
                 engines.push(EngineName::Dav1d);
             }
@@ -553,9 +568,25 @@ impl VideoDecoderInner {
             .engines
             .unwrap_or_else(|| VideoDecoder::get_engines(codec, options.openh264_lib.is_some()));
 
+        // TODO: デコーダー初期化が失敗したときに次の候補エンジンにフォールバックする仕組みを入れる
+        //       （例: HWA が解像度が小さすぎるケースで失敗する場合など）
         let engine = candidate_engines
             .iter()
-            .find(|engine| engine.is_available_video_decode_codec(codec))
+            .find(|engine| {
+                if !engine.is_available_video_decode_codec(codec) {
+                    return false;
+                }
+                // VideoToolbox の VP9/AV1 デコーダーは CMVideoFormatDescriptionCreate に
+                // width/height が必須なので、frame.size が無い入力では選択しない
+                #[cfg(target_os = "macos")]
+                if **engine == EngineName::VideoToolbox
+                    && matches!(codec, CodecName::Vp9 | CodecName::Av1)
+                    && frame.size.is_none()
+                {
+                    return false;
+                }
+                true
+            })
             .copied();
         if let Some(engine) = engine {
             engine_metric.set(engine.as_str());
@@ -591,6 +622,18 @@ impl VideoDecoderInner {
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
                 *self = VideoToolboxDecoder::new_h265(frame)
+                    .map(Box::new)
+                    .map(Self::VideoToolbox)?;
+            }
+            #[cfg(target_os = "macos")]
+            (Some(EngineName::VideoToolbox), CodecName::Vp9) => {
+                *self = VideoToolboxDecoder::new_vp9(frame)
+                    .map(Box::new)
+                    .map(Self::VideoToolbox)?;
+            }
+            #[cfg(target_os = "macos")]
+            (Some(EngineName::VideoToolbox), CodecName::Av1) => {
+                *self = VideoToolboxDecoder::new_av1(frame)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
@@ -671,5 +714,108 @@ impl VideoDecoderInner {
             #[cfg(feature = "nvcodec")]
             Self::Nvcodec(decoder) => decoder.next_decoded_frame(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::video::{VideoFormat, VideoFrame, VideoFrameSize};
+
+    /// VideoToolbox と SW デコーダーのみを候補にしたオプションを作る
+    ///
+    /// Nvcodec を候補から除外することで、CUDA 環境の有無に関わらず
+    /// VideoToolbox のスキップ判定をテストできるようにする。
+    fn options_without_nvcodec(engines: Vec<EngineName>) -> VideoDecoderOptions {
+        VideoDecoderOptions {
+            engines: Some(engines),
+            ..Default::default()
+        }
+    }
+
+    /// size: None の VP9 フレームで VideoToolbox がスキップされ Libvpx が選ばれることを確認する
+    #[test]
+    fn vp9_without_size_skips_video_toolbox() {
+        let frame = VideoFrame {
+            data: vec![],
+            format: VideoFormat::Vp9,
+            keyframe: true,
+            size: None,
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+
+        let engines = vec![EngineName::VideoToolbox, EngineName::Libvpx];
+        let stats = crate::stats::Stats::new();
+        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
+        // デコーダーを初期化する（空データなのでデコード自体は失敗するが、エンジン選択は成功するはず）
+        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+
+        assert!(
+            matches!(decoder.inner, VideoDecoderInner::Libvpx(_)),
+            "expected Libvpx decoder, got {:?}",
+            std::mem::discriminant(&decoder.inner)
+        );
+    }
+
+    /// size: None の AV1 フレームで VideoToolbox がスキップされ Dav1d が選ばれることを確認する
+    #[test]
+    fn av1_without_size_skips_video_toolbox() {
+        let frame = VideoFrame {
+            data: vec![],
+            format: VideoFormat::Av1,
+            keyframe: true,
+            size: None,
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+
+        let engines = vec![EngineName::VideoToolbox, EngineName::Dav1d];
+        let stats = crate::stats::Stats::new();
+        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
+        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+
+        assert!(
+            matches!(decoder.inner, VideoDecoderInner::Dav1d(_)),
+            "expected Dav1d decoder, got {:?}",
+            std::mem::discriminant(&decoder.inner)
+        );
+    }
+
+    /// size ありの VP9 フレームでは macOS 対応環境なら VideoToolbox、非対応なら Libvpx が選ばれることを確認する
+    #[test]
+    fn vp9_with_size_selects_available_engine() {
+        let frame = VideoFrame {
+            data: vec![],
+            format: VideoFormat::Vp9,
+            keyframe: true,
+            size: Some(VideoFrameSize {
+                width: 1920,
+                height: 1080,
+            }),
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+
+        let engines = vec![EngineName::VideoToolbox, EngineName::Libvpx];
+        let stats = crate::stats::Stats::new();
+        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
+        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+
+        // size ありなら VideoToolbox がスキップされずにエンジン選択が行われることを確認する。
+        // どちらが選ばれるかは実行環境の VP9 ハードウェアデコード対応状況に依存するため、
+        // ここでは「いずれかの有効なエンジンが選択されること」のみを検証する。
+        #[cfg(target_os = "macos")]
+        let is_valid = matches!(decoder.inner, VideoDecoderInner::Libvpx(_))
+            || matches!(decoder.inner, VideoDecoderInner::VideoToolbox(_));
+        #[cfg(not(target_os = "macos"))]
+        let is_valid = matches!(decoder.inner, VideoDecoderInner::Libvpx(_));
+        assert!(
+            is_valid,
+            "expected Libvpx or VideoToolbox decoder, got {:?}",
+            std::mem::discriminant(&decoder.inner)
+        );
     }
 }
