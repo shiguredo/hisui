@@ -134,19 +134,12 @@ impl SoraSubscriber {
             .build()
             .map_err(|e| crate::Error::new(format!("failed to build SoraClient: {e}")))?;
 
-        tracing::info!(
-            "SoraSubscriber '{}': SoraClient built, starting connection...",
-            subscriber_name
-        );
+        tracing::info!("SoraSubscriber '{}': starting connection", subscriber_name);
 
         // Sora 接続を開始（バックグラウンドタスク）
         let disconnected_name = subscriber_name.clone();
         let disconnected_tx = event_tx.clone();
         let mut client_task = tokio::spawn(async move {
-            tracing::info!(
-                "SoraSubscriber '{}': client.run() starting",
-                disconnected_name
-            );
             if let Err(e) = client.run().await {
                 tracing::warn!(
                     "SoraSubscriber '{}' terminated with error: {e}",
@@ -154,7 +147,7 @@ impl SoraSubscriber {
                 );
             }
             tracing::info!(
-                "SoraSubscriber '{}': client.run() finished",
+                "SoraSubscriber '{}': connection finished",
                 disconnected_name
             );
             let _ = disconnected_tx.send(SoraSourceEvent::Disconnected {
@@ -272,10 +265,6 @@ impl shiguredo_webrtc::AudioTrackSinkHandler for AudioFrameSinkHandler {
     }
 }
 
-/// リモートトラックの WebRTC 型を保持し、コマンドに応じてフレーム転送を制御するタスク。
-///
-/// coordinator は !Sync な WebRTC 型を直接保持できないため、
-/// このタスクに所有権を移して管理する。
 /// リモートトラックの WebRTC 型を保持し、コマンドに応じてフレーム転送を制御するタスク。
 ///
 /// coordinator は !Sync な WebRTC 型を直接保持できないため、

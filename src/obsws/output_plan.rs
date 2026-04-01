@@ -106,16 +106,17 @@ pub fn build_composed_output_plan(
             // width/height が 0（ソースサイズ未確定）の場合、bounds をフォールバックとして使用する。
             // sora_source のような外部フレーム供給型のソースでは、
             // フレーム到着前に source_width/height が確定しないため。
+            let has_bounds = transform.bounds_type != "OBS_BOUNDS_NONE";
             let effective_width = if transform.width > 0.0 {
                 transform.width
-            } else if transform.bounds_width > 0.0 {
+            } else if has_bounds && transform.bounds_width > 0.0 {
                 transform.bounds_width
             } else {
                 0.0
             };
             let effective_height = if transform.height > 0.0 {
                 transform.height
-            } else if transform.bounds_height > 0.0 {
+            } else if has_bounds && transform.bounds_height > 0.0 {
                 transform.bounds_height
             } else {
                 0.0
