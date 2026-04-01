@@ -438,10 +438,9 @@ async fn audio_forward_task(
             format: crate::audio::AudioFormat::I16Be,
             channels,
             sample_rate,
-            // NOTE: AudioTrackSinkHandler::on_data はタイムスタンプを提供しないため
-            // 現在時刻を使用する。mixer が入力ごとにタイムスタンプを正規化するため、
-            // エポックの違いは問題にならない。
-            // TODO: sora_sdk がタイムスタンプ取得 API を提供したら正確な値に置き換える。
+            // NOTE: libwebrtc の AudioTrackSinkHandler は生音声のタイムスタンプを
+            // 提供しないため現在時刻を使用する。mixer が入力ごとにタイムスタンプを
+            // 正規化するため、エポックの違いは問題にならない。
             timestamp: std::time::UNIX_EPOCH.elapsed().unwrap_or_default(),
             sample_entry: None,
         };
