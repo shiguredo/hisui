@@ -1393,22 +1393,13 @@ impl ObswsCoordinator {
             );
         }
 
-        let Some(source_state) = self.input_source_processors.get(&entry.input_uuid) else {
-            return self.build_error_result(
-                "TriggerMediaInputAction",
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Input source processor not found",
-            );
-        };
-
-        let Some(handle) = &source_state.media_handle else {
-            return self.build_error_result(
-                "TriggerMediaInputAction",
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Media input handle not available",
-            );
+        let handle = match self.get_media_input_handle_or_error(
+            "TriggerMediaInputAction",
+            request_id,
+            &entry.input_uuid,
+        ) {
+            Ok(handle) => handle,
+            Err(result) => return *result,
         };
 
         // コマンドを送信（バッファが一杯の場合はエラー）
@@ -1480,21 +1471,13 @@ impl ObswsCoordinator {
             Err(result) => return *result,
         };
 
-        let Some(source_state) = self.input_source_processors.get(&entry.input_uuid) else {
-            return self.build_error_result(
-                "OffsetMediaInputCursor",
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Input source processor not found",
-            );
-        };
-        let Some(handle) = &source_state.media_handle else {
-            return self.build_error_result(
-                "OffsetMediaInputCursor",
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Media input handle not available",
-            );
+        let handle = match self.get_media_input_handle_or_error(
+            "OffsetMediaInputCursor",
+            request_id,
+            &entry.input_uuid,
+        ) {
+            Ok(handle) => handle,
+            Err(result) => return *result,
         };
 
         if handle
@@ -1563,22 +1546,12 @@ impl ObswsCoordinator {
             Err(result) => return *result,
         };
 
-        let Some(source_state) = self.input_source_processors.get(&entry.input_uuid) else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Input source processor not found",
-            );
-        };
-        let Some(handle) = &source_state.media_handle else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Media input handle not available",
-            );
-        };
+        let handle =
+            match self.get_media_input_handle_or_error(request_type, request_id, &entry.input_uuid)
+            {
+                Ok(handle) => handle,
+                Err(result) => return *result,
+            };
 
         // 負の値は 0 に clamp する。上限の clamp は reader 側で duration を使って行う
         let clamped_ms = cursor_ms.max(0);
@@ -1602,6 +1575,26 @@ impl ObswsCoordinator {
             request_id,
         );
         self.build_result_from_response(response, Vec::new())
+    }
+
+    fn get_media_input_handle_or_error<'a>(
+        &'a self,
+        request_type: &str,
+        request_id: &str,
+        input_uuid: &str,
+    ) -> std::result::Result<&'a crate::mp4::reader::MediaInputHandle, Box<CommandResult>> {
+        let handle = self
+            .input_source_processors
+            .get(input_uuid)
+            .and_then(|state| state.media_handle.as_ref());
+        handle.ok_or_else(|| {
+            Box::new(self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "Media input processor is not available",
+            ))
+        })
     }
 
     // -----------------------------------------------------------------------

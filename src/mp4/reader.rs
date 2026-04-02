@@ -580,7 +580,6 @@ impl Mp4FileReader {
         match channels.command_rx.try_recv() {
             Ok(MediaInputCommand::Play) => {
                 // 既に再生中なので何もしない
-                self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY");
                 MediaLoopAction::Continue
             }
             Ok(MediaInputCommand::Pause) => {
@@ -889,9 +888,7 @@ impl Mp4FileReader {
             };
 
             match command {
-                Some(MediaInputCommand::Play) => {
-                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY");
-                }
+                Some(MediaInputCommand::Play) => {}
                 Some(MediaInputCommand::Pause) => {
                     self.is_paused = true;
                     self.pause_started_at = Some(tokio::time::Instant::now());
@@ -949,7 +946,6 @@ impl Mp4FileReader {
             match command {
                 Some(MediaInputCommand::Play) => {
                     // 既に再生中なので何もしない
-                    self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY");
                 }
                 Some(MediaInputCommand::Pause) => {
                     self.is_paused = true;
@@ -1854,6 +1850,25 @@ mod tests {
         (reader, handle)
     }
 
+    fn reader_with_media_control_and_event_rx() -> (
+        Mp4FileReader,
+        MediaInputHandle,
+        tokio::sync::broadcast::Receiver<crate::obsws::coordinator::TaggedEvent>,
+    ) {
+        let mut reader = Mp4FileReader::new(
+            "testdata/red-320x320-h264-aac.mp4",
+            Mp4FileReaderOptions::default(),
+        )
+        .expect("test file must be readable");
+        let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
+        let handle = reader.create_media_handle(MediaEventContext {
+            event_broadcast_tx: event_tx,
+            input_name_rx: tokio::sync::watch::channel("test".to_owned()).1,
+            input_uuid: "test-uuid".to_owned(),
+        });
+        (reader, handle, event_rx)
+    }
+
     /// 一時停止中の seek で Paused を維持し、cursor が clamp 済みで更新される
     #[test]
     fn seek_during_paused_preserves_state_and_clamps() {
@@ -1872,6 +1887,24 @@ mod tests {
         let status = handle.status.borrow().clone();
         assert_eq!(status.state, MediaPlaybackState::Paused);
         assert_eq!(status.cursor, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn play_while_playing_does_not_emit_action_event() {
+        let (mut reader, handle, mut event_rx) = reader_with_media_control_and_event_rx();
+        reader.update_playback_status(MediaPlaybackState::Playing, Duration::from_secs(5));
+
+        handle
+            .command_tx
+            .try_send(MediaInputCommand::Play)
+            .expect("send Play must succeed");
+        let action = reader.poll_media_command();
+
+        assert!(matches!(action, MediaLoopAction::Continue));
+        assert!(matches!(
+            event_rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
     }
 
     /// Stopped 中の seek で Stopped を維持する
