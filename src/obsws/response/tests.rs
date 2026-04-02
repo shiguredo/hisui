@@ -4,6 +4,7 @@ use crate::obsws::input_registry::{
 };
 use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_OP_EVENT,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_SUCCESS,
 };
 
@@ -1467,4 +1468,165 @@ fn dash_set_output_settings_codec_preserved_across_updates() {
         registry.dash_settings().audio_codec,
         crate::types::CodecName::Opus
     );
+}
+
+// --- PersistentData テスト ---
+
+#[test]
+fn set_persistent_data_rejects_null_slot_value() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let request_data = nojson::RawJsonOwned::parse(
+        r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_GLOBAL","slotName":"s","slotValue":null}"#,
+    )
+    .expect("requestData must be valid json");
+    let response =
+        build_set_persistent_data_response("req-set-null", Some(&request_data), &mut registry);
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(!result);
+    let code: i64 = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "code"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("code must be i64");
+    assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
+}
+
+#[test]
+fn set_persistent_data_rejects_profile_realm() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let request_data = nojson::RawJsonOwned::parse(
+        r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_PROFILE","slotName":"s","slotValue":1}"#,
+    )
+    .expect("requestData must be valid json");
+    let response = build_set_persistent_data_response(
+        "req-set-profile",
+        Some(&request_data),
+        &mut registry,
+    );
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(!result);
+    let code: i64 = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "code"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("code must be i64");
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[test]
+fn get_persistent_data_rejects_profile_realm() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let request_data = nojson::RawJsonOwned::parse(
+        r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_PROFILE","slotName":"s"}"#,
+    )
+    .expect("requestData must be valid json");
+    let response =
+        build_get_persistent_data_response("req-get-profile", Some(&request_data), &registry);
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(!result);
+    let code: i64 = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "code"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("code must be i64");
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[test]
+fn get_persistent_data_returns_null_for_nonexistent_slot() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let request_data = nojson::RawJsonOwned::parse(
+        r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_GLOBAL","slotName":"nonexistent"}"#,
+    )
+    .expect("requestData must be valid json");
+    let response = build_get_persistent_data_response(
+        "req-get-nonexistent",
+        Some(&request_data),
+        &registry,
+    );
+    let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
+    let result: bool = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(result);
+    let slot_value = json
+        .value()
+        .to_path_member(&["d", "responseData", "slotValue"])
+        .and_then(|v| v.required())
+        .expect("slotValue must be present");
+    assert!(slot_value.kind().is_null());
+}
+
+#[test]
+fn set_then_get_persistent_data_roundtrip() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+
+    // Set
+    let set_request_data = nojson::RawJsonOwned::parse(
+        r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_GLOBAL","slotName":"mySlot","slotValue":{"key":"value","num":42}}"#,
+    )
+    .expect("requestData must be valid json");
+    let set_response = build_set_persistent_data_response(
+        "req-set",
+        Some(&set_request_data),
+        &mut registry,
+    );
+    let set_json =
+        nojson::RawJson::parse(set_response.text()).expect("response must be valid json");
+    let set_result: bool = set_json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(set_result);
+
+    // Get
+    let get_request_data = nojson::RawJsonOwned::parse(
+        r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_GLOBAL","slotName":"mySlot"}"#,
+    )
+    .expect("requestData must be valid json");
+    let get_response =
+        build_get_persistent_data_response("req-get", Some(&get_request_data), &registry);
+    let get_json =
+        nojson::RawJson::parse(get_response.text()).expect("response must be valid json");
+    let get_result: bool = get_json
+        .value()
+        .to_path_member(&["d", "requestStatus", "result"])
+        .and_then(|v| v.required()?.try_into())
+        .expect("result must be bool");
+    assert!(get_result);
+
+    // slotValue の中身を検証
+    let slot_value = get_json
+        .value()
+        .to_path_member(&["d", "responseData", "slotValue"])
+        .and_then(|v| v.required())
+        .expect("slotValue must be present");
+    let key: String = slot_value
+        .to_member("key")
+        .and_then(|v| v.required()?.try_into())
+        .expect("key must be string");
+    assert_eq!(key, "value");
+    let num: i64 = slot_value
+        .to_member("num")
+        .and_then(|v| v.required()?.try_into())
+        .expect("num must be i64");
+    assert_eq!(num, 42);
 }
