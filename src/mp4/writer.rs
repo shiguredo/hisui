@@ -687,20 +687,11 @@ impl Mp4Writer {
 
     fn poll_output(&mut self) -> crate::Result<WriterRunOutput> {
         loop {
-            let waiting_video =
-                self.input_video_track_id.is_some() && self.input_video_queue.is_empty();
-            let waiting_audio =
-                self.input_audio_track_id.is_some() && self.input_audio_queue.is_empty();
-
-            if waiting_video && waiting_audio {
-                return Ok(WriterRunOutput::Pending {
-                    awaiting_track_kind: None,
-                });
-            } else if waiting_video && self.input_audio_track_id.is_none() {
+            if self.input_video_track_id.is_some() && self.input_video_queue.is_empty() {
                 return Ok(WriterRunOutput::Pending {
                     awaiting_track_kind: Some(InputTrackKind::Video),
                 });
-            } else if waiting_audio && self.input_video_track_id.is_none() {
+            } else if self.input_audio_track_id.is_some() && self.input_audio_queue.is_empty() {
                 return Ok(WriterRunOutput::Pending {
                     awaiting_track_kind: Some(InputTrackKind::Audio),
                 });
@@ -1955,19 +1946,6 @@ mod tests {
         }
     }
 
-    fn make_mp4_writer() -> crate::Result<(tempfile::TempDir, Mp4Writer)> {
-        let temp_dir = tempfile::tempdir()?;
-        let output_path = temp_dir.path().join("test.mp4");
-        let writer = Mp4Writer::new(
-            &output_path,
-            None,
-            Some(TrackId::new("audio")),
-            Some(TrackId::new("video")),
-            crate::stats::Stats::new(),
-        )?;
-        Ok((temp_dir, writer))
-    }
-
     fn make_video_frame(sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>) -> VideoFrame {
         VideoFrame {
             data: vec![0x00, 0x00, 0x00, 0x01],
@@ -2027,25 +2005,6 @@ mod tests {
             writer.fragment_video_samples[0].sample_entry,
             Some(sample_entry)
         );
-        Ok(())
-    }
-
-    #[test]
-    fn mp4_writer_consumes_audio_queue_before_waiting_for_video() -> crate::Result<()> {
-        let (_temp_dir, mut writer) = make_mp4_writer()?;
-        writer
-            .input_audio_queue
-            .push_back(Arc::new(make_audio_frame(None)));
-
-        let output = writer.poll_output()?;
-
-        assert!(matches!(
-            output,
-            WriterRunOutput::Pending {
-                awaiting_track_kind: None
-            }
-        ));
-        assert!(writer.pending_audio_sample.is_some());
         Ok(())
     }
 
