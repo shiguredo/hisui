@@ -31,7 +31,8 @@ impl VideoDeviceSource {
             width: self.width.unwrap_or(default_config.width),
             height: self.height.unwrap_or(default_config.height),
             fps: self.fps.unwrap_or(default_config.fps),
-            pixel_format: Some(shiguredo_video_device::PixelFormat::I420),
+            // デバイスがサポートするフォーマットに任せる（例えば I420 固定だと macOS カメラで非対応の場合がある）
+            pixel_format: None,
         };
 
         let (frame_tx, mut frame_rx) =
