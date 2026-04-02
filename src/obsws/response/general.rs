@@ -83,6 +83,10 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "StartRecord",
     "StopRecord",
     "Sleep",
+    "GetMediaInputStatus",
+    "SetMediaInputCursor",
+    "OffsetMediaInputCursor",
+    "TriggerMediaInputAction",
     // SoraSubscriber / sora_source
     "StartSoraSubscriber",
     "StopSoraSubscriber",

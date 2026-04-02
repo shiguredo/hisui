@@ -86,17 +86,22 @@ pub async fn start_mixer_processors(
     Ok(())
 }
 
-/// ソースプロセッサ群を起動する
+/// ソースプロセッサ群を起動する。
+/// 返り値は最初に見つかった MediaInputHandle（mp4_file_source の場合のみ）。
 pub async fn start_source_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     source_plans: &mut [crate::obsws::source::ObswsRecordSourcePlan],
-) -> crate::Result<()> {
+) -> crate::Result<Option<crate::mp4::reader::MediaInputHandle>> {
+    let mut media_handle = None;
     for source_plan in source_plans {
         for request in source_plan.requests.drain(..) {
-            request.execute(pipeline_handle).await?;
+            let (_processor_id, handle) = request.execute(pipeline_handle).await?;
+            if handle.is_some() && media_handle.is_none() {
+                media_handle = handle;
+            }
         }
     }
-    Ok(())
+    Ok(media_handle)
 }
 
 /// ソースプロセッサ群を停止する

@@ -57,7 +57,7 @@ enum PcEvent {
         track_id: String,
     },
     /// obsws イベント（InputSettingsChanged 等）
-    ObswsEvent(crate::obsws::coordinator::TaggedEvent),
+    ObswsEvent(crate::obsws::event::TaggedEvent),
 }
 
 enum IceObserverEvent {
@@ -1627,7 +1627,7 @@ fn handle_remote_track_removed(sess: &mut Session, track_id: &str) {
 ///
 /// - InputSettingsChanged: chroma key を動的に更新する
 /// - InputNameChanged: attached_input_name を新しい名前に追従させる
-fn handle_obsws_input_event(sess: &mut Session, event: &crate::obsws::coordinator::TaggedEvent) {
+fn handle_obsws_input_event(sess: &mut Session, event: &crate::obsws::event::TaggedEvent) {
     let Ok(json) = nojson::RawJson::parse(event.text.text()) else {
         return;
     };

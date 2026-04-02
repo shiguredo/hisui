@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod coordinator;
+pub mod event;
 pub mod input_registry;
 pub mod message;
 mod output_plan;

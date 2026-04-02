@@ -31,6 +31,7 @@ pub enum ObswsSourceRequest {
     CreateMp4FileSource {
         source: self::file_mp4::Mp4FileSource,
         processor_id: Option<ProcessorId>,
+        event_ctx: Option<crate::mp4::reader::MediaEventContext>,
     },
     CreatePngFileSource {
         source: self::png_file::PngFileSource,
@@ -63,23 +64,30 @@ pub enum ObswsSourceRequest {
 }
 
 impl ObswsSourceRequest {
-    pub async fn execute(self, handle: &crate::MediaPipelineHandle) -> crate::Result<ProcessorId> {
+    /// ソースプロセッサを起動する。
+    /// 返り値は (processor_id, mp4_file_source の場合のメディア再生制御ハンドル)。
+    pub async fn execute(
+        self,
+        handle: &crate::MediaPipelineHandle,
+    ) -> crate::Result<(ProcessorId, Option<crate::mp4::reader::MediaInputHandle>)> {
         match self {
             Self::CreateMp4FileSource {
                 source,
                 processor_id,
+                event_ctx,
             } => {
                 let processor_id = processor_id
                     .unwrap_or_else(|| ProcessorId::new(source.path.display().to_string()));
+                let (reader, media_handle) = source.create_reader(event_ctx)?;
                 handle
                     .spawn_processor(
                         processor_id.clone(),
                         ProcessorMetadata::new("mp4_file_source"),
-                        move |h| source.run(h),
+                        move |h| file_mp4::Mp4FileSource::run_reader(reader, h),
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok((processor_id, media_handle))
             }
             Self::CreatePngFileSource {
                 source,
@@ -95,7 +103,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok((processor_id, None))
             }
             Self::CreateColorSource {
                 source,
@@ -110,7 +118,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok((processor_id, None))
             }
             Self::CreateVideoDeviceSource {
                 source,
@@ -131,7 +139,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok((processor_id, None))
             }
             Self::CreateAudioDeviceSource {
                 source,
@@ -152,7 +160,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok((processor_id, None))
             }
             Self::CreateRtmpInboundEndpoint {
                 endpoint,
@@ -168,7 +176,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok((processor_id, None))
             }
             Self::CreateSrtInboundEndpoint {
                 endpoint,
@@ -184,7 +192,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok((processor_id, None))
             }
             Self::CreateRtspSubscriber {
                 subscriber,
@@ -200,7 +208,7 @@ impl ObswsSourceRequest {
                     )
                     .await
                     .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
-                Ok(processor_id)
+                Ok((processor_id, None))
             }
         }
     }

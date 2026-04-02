@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
-use crate::mp4::reader::{Mp4FileReader, Mp4FileReaderOptions};
+use crate::mp4::reader::{
+    MediaEventContext, MediaInputHandle, Mp4FileReader, Mp4FileReaderOptions,
+};
 use crate::{ProcessorHandle, Result, TrackId};
 
 #[derive(Debug, Clone)]
@@ -13,7 +15,13 @@ pub struct Mp4FileSource {
 }
 
 impl Mp4FileSource {
-    pub async fn run(self, processor: ProcessorHandle) -> Result<()> {
+    /// reader を作成し、メディア再生制御ハンドルを返す。
+    /// spawn_processor のクロージャ内で run_reader を呼ぶことで、
+    /// ハンドルを外部に返しつつ reader を起動できる。
+    pub fn create_reader(
+        &self,
+        event_ctx: Option<MediaEventContext>,
+    ) -> Result<(Mp4FileReader, Option<MediaInputHandle>)> {
         let options = Mp4FileReaderOptions {
             realtime: true,
             loop_playback: self.loop_playback,
@@ -22,9 +30,15 @@ impl Mp4FileSource {
         };
 
         let mut reader = Mp4FileReader::new(&self.path, options)?;
+        let media_handle = event_ctx.map(|ctx| reader.create_media_handle(ctx));
 
+        Ok((reader, media_handle))
+    }
+
+    /// reader にデコーダーを設定して起動する
+    pub async fn run_reader(mut reader: Mp4FileReader, processor: ProcessorHandle) -> Result<()> {
         // デコーダーを生成して reader に設定する
-        if self.audio_track_id.is_some() {
+        if reader.has_audio_track() {
             let mut decoder_stats = processor.stats();
             decoder_stats.set_default_label("component", "audio_decoder");
             let decoder = AudioDecoder::new(
@@ -34,7 +48,7 @@ impl Mp4FileSource {
             )?;
             reader.set_audio_decoder(decoder);
         }
-        if self.video_track_id.is_some() {
+        if reader.has_video_track() {
             let mut decoder_stats = processor.stats();
             decoder_stats.set_default_label("component", "video_decoder");
             let decoder = VideoDecoder::new(
@@ -49,6 +63,12 @@ impl Mp4FileSource {
 
         // raw トラックに直接パブリッシュし、reader 内でデコードしてから送信する
         reader.run(processor).await
+    }
+
+    #[cfg(test)]
+    pub async fn run(self, processor: ProcessorHandle) -> Result<()> {
+        let (reader, _media_handle) = self.create_reader(None)?;
+        Self::run_reader(reader, processor).await
     }
 }
 

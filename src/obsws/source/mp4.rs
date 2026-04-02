@@ -49,6 +49,7 @@ pub(super) fn build_record_source_plan(
         requests: vec![ObswsSourceRequest::CreateMp4FileSource {
             source,
             processor_id: Some(source_processor_id),
+            event_ctx: None,
         }],
     })
 }

@@ -2,9 +2,10 @@ use crate::obsws::input_registry::{
     ObswsInputSettings, ObswsSceneItemIndexEntry, ObswsSceneItemTransform,
 };
 use crate::obsws::protocol::{
-    OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_OUTPUTS,
-    OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED, OBSWS_EVENT_SUB_SCENE_ITEMS,
-    OBSWS_EVENT_SUB_SCENES, OBSWS_EVENT_SUB_SORA_SOURCE, OBSWS_OP_EVENT,
+    OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_MEDIA_INPUTS,
+    OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
+    OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, OBSWS_EVENT_SUB_SORA_SOURCE,
+    OBSWS_OP_EVENT,
 };
 
 pub fn build_stream_state_changed_event(
@@ -469,6 +470,77 @@ pub fn build_scene_item_list_reindexed_event(
                         f.member("sceneName", scene_name)?;
                         f.member("sceneUuid", scene_uuid)?;
                         f.member("sceneItems", scene_items)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
+pub fn build_media_input_playback_started_event(
+    input_name: &str,
+    input_uuid: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "MediaInputPlaybackStarted")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_MEDIA_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
+pub fn build_media_input_playback_ended_event(
+    input_name: &str,
+    input_uuid: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "MediaInputPlaybackEnded")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_MEDIA_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)
+                    }),
+                )
+            }),
+        )
+    })
+}
+
+pub fn build_media_input_action_triggered_event(
+    input_name: &str,
+    input_uuid: &str,
+    media_action: &str,
+) -> nojson::RawJsonOwned {
+    nojson::RawJsonOwned::object(|f| {
+        f.member("op", OBSWS_OP_EVENT)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("eventType", "MediaInputActionTriggered")?;
+                f.member("eventIntent", OBSWS_EVENT_SUB_MEDIA_INPUTS)?;
+                f.member(
+                    "eventData",
+                    nojson::object(|f| {
+                        f.member("inputName", input_name)?;
+                        f.member("inputUuid", input_uuid)?;
+                        f.member("mediaAction", media_action)
                     }),
                 )
             }),
