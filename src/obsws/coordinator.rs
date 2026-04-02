@@ -1371,27 +1371,15 @@ impl ObswsCoordinator {
             );
         };
 
-        let Some(entry) = self
-            .input_registry
-            .find_input(input_uuid.as_deref(), input_name.as_deref())
-        else {
-            return self.build_error_result(
-                "TriggerMediaInputAction",
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Input not found",
-            );
+        let entry = match self.find_media_input(
+            "TriggerMediaInputAction",
+            request_id,
+            &input_uuid,
+            &input_name,
+        ) {
+            Ok(entry) => entry,
+            Err(result) => return *result,
         };
-
-        // メディア入力（mp4_file_source）のみ対応
-        if entry.input.kind_name() != "mp4_file_source" {
-            return self.build_error_result(
-                "TriggerMediaInputAction",
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "Input is not a media input",
-            );
-        }
 
         let handle = match self.get_media_input_handle_or_error(
             "TriggerMediaInputAction",

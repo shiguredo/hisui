@@ -107,6 +107,7 @@ pub struct MediaInputHandle {
 
 /// メディアイベント直接配信に必要な情報
 pub struct MediaEventContext {
+    // TODO: reader が coordinator の型へ直接依存しているため、将来的には共通モジュールへ切り出す余地がある。
     pub event_broadcast_tx: tokio::sync::broadcast::Sender<crate::obsws::coordinator::TaggedEvent>,
     /// 最新の input_name を追従する watch receiver
     pub input_name_rx: tokio::sync::watch::Receiver<String>,
@@ -427,7 +428,9 @@ impl Mp4FileReader {
             if state.audio_track_id.is_none() && state.video_track_id.is_none() {
                 break;
             }
-            // 最初の open で総時間を取得する
+            // 最初の open で総時間を取得する。
+            // この reader では 0 を未初期化の番兵値として扱うため、実 duration = 0 の MP4 とは区別できない。
+            // ただし通常の MP4 で duration = 0 はかなり特殊なので、実用上ここが問題になる可能性は低い。
             if self.media_duration == Duration::ZERO {
                 self.media_duration = state.duration;
             }
@@ -812,7 +815,9 @@ impl Mp4FileReader {
     fn resolve_offset_seek(&self, offset_ms: i64) -> Duration {
         let current_ms = i64::try_from(self.current_file_cursor().as_millis()).unwrap_or(i64::MAX);
         let target_ms = current_ms.saturating_add(offset_ms).max(0);
-        self.clamp_position(Duration::from_millis(target_ms as u64))
+        self.clamp_position(Duration::from_millis(
+            u64::try_from(target_ms).expect("clamped to non-negative"),
+        ))
     }
 
     /// seek 位置を clamp して pending_seek と公開ステータスを更新する。
