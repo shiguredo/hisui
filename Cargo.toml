@@ -48,7 +48,7 @@ shiguredo_s3 = { version = "=2026.1.0-canary.2", default-features = false, featu
 ] }
 nopng = "=0.1.1"
 aws-lc-rs = "=1.16.2"
-libc = "=0.2.183"
+libc = "=0.2.184"
 
 shiguredo_dav1d = "=2026.1.0"
 shiguredo_libvpx = { workspace = true }
@@ -63,7 +63,7 @@ shiguredo_fdk_aac = { version = "=2026.1.0-canary.1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = "=2026.1.0-canary.0"
-shiguredo_video_toolbox = "=2026.1.0-canary.4"
+shiguredo_video_toolbox = "=2026.1.1"
 
 [dev-dependencies]
 tempfile = "3.18.0"

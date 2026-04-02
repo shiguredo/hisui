@@ -349,6 +349,16 @@ pub fn handle_request_message_with_pipeline_handle(
                 input_registry,
             )
         }
+        "GetPersistentData" => crate::obsws::response::build_get_persistent_data_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
+        "SetPersistentData" => crate::obsws::response::build_set_persistent_data_response(
+            &request_id,
+            request.request_data.as_ref(),
+            input_registry,
+        ),
         "GetStreamServiceSettings" => {
             crate::obsws::response::build_get_stream_service_settings_response(
                 &request_id,

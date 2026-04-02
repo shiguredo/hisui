@@ -904,6 +904,21 @@ fn required_non_empty_string_member(
     Ok(value)
 }
 
+struct PersistentDataFields {
+    realm: String,
+    slot_name: String,
+}
+
+/// GetPersistentData / SetPersistentData 共通のフィールドをパースする。
+/// realm の値の妥当性検証（GLOBAL のみ許可）は呼び出し側で行う。
+fn parse_persistent_data_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<PersistentDataFields, nojson::JsonParseError> {
+    let realm = required_non_empty_string_member(request_data, "realm")?;
+    let slot_name = required_non_empty_string_member(request_data, "slotName")?;
+    Ok(PersistentDataFields { realm, slot_name })
+}
+
 pub(crate) fn parse_input_lookup_fields_for_session(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<(Option<String>, Option<String>), nojson::JsonParseError> {
