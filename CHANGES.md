@@ -25,7 +25,7 @@
   - @sile
 - [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
   - @voluntas
-- [UPDATE] `libc` 0.2.183 を direct dependency に追加する
+- [UPDATE] `libc` 0.2.184 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
   - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
@@ -140,7 +140,7 @@
 - [UPDATE] shiguredo_libyuv のバージョンを 2026.1.0 にあげる
   - このバージョンから shiguredo_libyuv crate のリポジトリが https://github.com/shiguredo/libyuv-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.0-canary.4 にあげる
+- [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.1 にあげる
   - このバージョンから shiguredo_video_toolbox crate のリポジトリが https://github.com/shiguredo/video-toolbox-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.1.0-canary.0 にあげる

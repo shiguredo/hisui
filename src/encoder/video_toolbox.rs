@@ -135,7 +135,7 @@ impl VideoToolboxEncoder {
     }
 
     fn handle_encoded(&mut self) -> crate::Result<()> {
-        while let Some(frame) = self.inner.next_frame() {
+        while let Some(frame) = self.inner.next_frame()? {
             let input_frame = self
                 .input_queue
                 .pop_front()
