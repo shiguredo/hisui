@@ -8,9 +8,11 @@ use std::{
     time::Duration,
 };
 
-use shiguredo_mp4::{BoxHeader, BoxSize, Encode, Either};
-use shiguredo_mp4::boxes::{FreeBox, FtypBox, Brand, HdlrBox, MdatBox};
-use shiguredo_mp4::mux::{Fmp4SegmentMuxer, Mp4FileMuxer, Mp4FileMuxerOptions, SegmentMuxerOptions};
+use shiguredo_mp4::boxes::{Brand, FreeBox, FtypBox, HdlrBox, MdatBox};
+use shiguredo_mp4::mux::{
+    Fmp4SegmentMuxer, Mp4FileMuxer, Mp4FileMuxerOptions, SegmentMuxerOptions,
+};
+use shiguredo_mp4::{BoxHeader, BoxSize, Either, Encode};
 
 use crate::{
     TrackId,
@@ -1011,6 +1013,9 @@ pub struct HybridMp4Writer {
     fragment_audio_samples: Vec<shiguredo_mp4::mux::Sample>,
     // フラグメント内の蓄積時間（自動フラッシュ判定用）
     fragment_accumulated_duration: Duration,
+    // エンコーダーは sample_entry を初回のみ付与することがあるため保持する
+    last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
 
     // 既存 Mp4Writer と同じフィールド群
     input_audio_track_id: Option<TrackId>,
@@ -1040,9 +1045,8 @@ impl HybridMp4Writer {
         let creation_timestamp = std::time::UNIX_EPOCH.elapsed()?;
 
         // fMP4 フラグメント生成用 muxer
-        let fmp4_muxer = Fmp4SegmentMuxer::with_options(SegmentMuxerOptions {
-            creation_timestamp,
-        })?;
+        let fmp4_muxer =
+            Fmp4SegmentMuxer::with_options(SegmentMuxerOptions { creation_timestamp })?;
 
         // finalize 時の標準 MP4 moov 生成用 muxer
         let mut mp4_muxer = Mp4FileMuxer::with_options(Mp4FileMuxerOptions {
@@ -1101,6 +1105,8 @@ impl HybridMp4Writer {
             fragment_video_samples: Vec::new(),
             fragment_audio_samples: Vec::new(),
             fragment_accumulated_duration: Duration::ZERO,
+            last_audio_sample_entry: None,
+            last_video_sample_entry: None,
             input_audio_track_id,
             input_video_track_id,
             input_audio_queue: VecDeque::new(),
@@ -1217,10 +1223,17 @@ impl HybridMp4Writer {
             self.stats.set_video_codec(name);
         }
 
+        if frame.sample_entry.is_some() {
+            self.last_video_sample_entry.clone_from(&frame.sample_entry);
+        }
+
         self.fragment_video_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Video,
-                sample_entry: frame.sample_entry.clone(),
+                sample_entry: frame
+                    .sample_entry
+                    .clone()
+                    .or_else(|| self.last_video_sample_entry.clone()),
                 keyframe: frame.keyframe,
                 timescale: TIMESCALE,
                 duration: duration.as_micros() as u32,
@@ -1245,10 +1258,18 @@ impl HybridMp4Writer {
             self.stats.set_audio_codec(name);
         }
 
+        if sample.sample_entry.is_some() {
+            self.last_audio_sample_entry
+                .clone_from(&sample.sample_entry);
+        }
+
         self.fragment_audio_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Audio,
-                sample_entry: sample.sample_entry.clone(),
+                sample_entry: sample
+                    .sample_entry
+                    .clone()
+                    .or_else(|| self.last_audio_sample_entry.clone()),
                 keyframe: true,
                 timescale: TIMESCALE,
                 duration: duration.as_micros() as u32,
@@ -1352,7 +1373,11 @@ impl HybridMp4Writer {
             Err(shiguredo_mp4::mux::MuxError::EmptyTracks) => {
                 return Ok(());
             }
-            Err(e) => return Err(crate::Error::new(format!("failed to get init segment: {e}"))),
+            Err(e) => {
+                return Err(crate::Error::new(format!(
+                    "failed to get init segment: {e}"
+                )));
+            }
         };
 
         // init_segment_bytes（ftyp + moov）から moov 部分を取得する
@@ -1453,11 +1478,10 @@ impl HybridMp4Writer {
                 self.process_next_audio_sample()?;
             }
             (Some(audio_timestamp), Some(video_timestamp)) => {
-                if self.appending_video_chunk
-                    && video_timestamp.saturating_sub(audio_timestamp) > MAX_CHUNK_DURATION
-                {
-                    self.process_next_audio_sample()?;
-                } else if !self.appending_video_chunk && video_timestamp > audio_timestamp {
+                let should_process_audio = (self.appending_video_chunk
+                    && video_timestamp.saturating_sub(audio_timestamp) > MAX_CHUNK_DURATION)
+                    || (!self.appending_video_chunk && video_timestamp > audio_timestamp);
+                if should_process_audio {
                     self.process_next_audio_sample()?;
                 } else {
                     self.process_next_video_frame()?;
@@ -1568,12 +1592,8 @@ fn extract_moov_from_init_segment(init_bytes: &[u8]) -> crate::Result<&[u8]> {
             "init segment is too small to contain ftyp box",
         ));
     }
-    let ftyp_size = u32::from_be_bytes([
-        init_bytes[0],
-        init_bytes[1],
-        init_bytes[2],
-        init_bytes[3],
-    ]) as usize;
+    let ftyp_size =
+        u32::from_be_bytes([init_bytes[0], init_bytes[1], init_bytes[2], init_bytes[3]]) as usize;
     if ftyp_size > init_bytes.len() {
         return Err(crate::Error::new("ftyp box size exceeds init segment size"));
     }
@@ -1862,8 +1882,7 @@ pub async fn create_hybrid_processor(
         )));
     }
 
-    let processor_id =
-        processor_id.unwrap_or_else(|| crate::ProcessorId::new("hybridMp4Writer"));
+    let processor_id = processor_id.unwrap_or_else(|| crate::ProcessorId::new("hybridMp4Writer"));
     handle
         .spawn_processor(
             processor_id.clone(),
@@ -1883,4 +1902,100 @@ pub async fn create_hybrid_processor(
         .await
         .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::{
+        audio::{AudioFormat, Channels, SampleRate},
+        types::EvenUsize,
+        video::VideoFormat,
+    };
+
+    fn make_hybrid_writer() -> crate::Result<(tempfile::TempDir, HybridMp4Writer)> {
+        let temp_dir = tempfile::tempdir()?;
+        let output_path = temp_dir.path().join("test.mp4");
+        let writer = HybridMp4Writer::new(
+            &output_path,
+            Some(TrackId::new("audio")),
+            Some(TrackId::new("video")),
+            crate::stats::Stats::new(),
+        )?;
+        Ok((temp_dir, writer))
+    }
+
+    fn make_audio_frame(sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>) -> AudioFrame {
+        AudioFrame {
+            data: vec![0x11, 0x22, 0x33],
+            format: AudioFormat::Aac,
+            channels: Channels::STEREO,
+            sample_rate: SampleRate::HZ_48000,
+            timestamp: Duration::ZERO,
+            sample_entry,
+        }
+    }
+
+    fn make_video_frame(sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>) -> VideoFrame {
+        VideoFrame {
+            data: vec![0x00, 0x00, 0x00, 0x01],
+            format: VideoFormat::Av1,
+            keyframe: true,
+            size: Some(crate::video::VideoFrameSize {
+                width: 16,
+                height: 16,
+            }),
+            timestamp: Duration::ZERO,
+            sample_entry,
+        }
+    }
+
+    #[test]
+    fn hybrid_writer_keeps_audio_sample_entry_across_fragments() -> crate::Result<()> {
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let sample_entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+
+        writer.append_audio_to_fragment(
+            &make_audio_frame(Some(sample_entry.clone())),
+            DEFAULT_SAMPLE_DURATION,
+        );
+        writer.flush_fragment()?;
+        writer.append_audio_to_fragment(&make_audio_frame(None), DEFAULT_SAMPLE_DURATION);
+
+        assert_eq!(writer.fragment_audio_samples.len(), 1);
+        assert_eq!(
+            writer.fragment_audio_samples[0].sample_entry,
+            Some(sample_entry)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_keeps_video_sample_entry_across_fragments() -> crate::Result<()> {
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let sample_entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+
+        writer.append_video_to_fragment(
+            &make_video_frame(Some(sample_entry.clone())),
+            DEFAULT_SAMPLE_DURATION,
+        );
+        writer.flush_fragment()?;
+        writer.append_video_to_fragment(&make_video_frame(None), DEFAULT_SAMPLE_DURATION);
+
+        assert_eq!(writer.fragment_video_samples.len(), 1);
+        assert_eq!(
+            writer.fragment_video_samples[0].sample_entry,
+            Some(sample_entry)
+        );
+        Ok(())
+    }
 }

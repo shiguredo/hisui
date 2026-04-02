@@ -3892,24 +3892,24 @@ async fn stop_processors_staged_record(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsRecordRun,
 ) -> crate::Result<()> {
-    // 1. MP4 writer に Finish RPC を送信して finalize を促す
-    finish_mp4_writer_rpc(pipeline_handle, &run.writer_processor_id).await;
-
-    // 2. writer の自然終了を待ち、タイムアウト時は強制停止
-    wait_or_terminate(
-        pipeline_handle,
-        std::slice::from_ref(&run.writer_processor_id),
-        Duration::from_secs(5),
-    )
-    .await?;
-
-    // 3. エンコーダーを停止する
+    // 1. エンコーダーを停止して writer へ EOS を流す
     terminate_and_wait(
         pipeline_handle,
         &[
             run.video.encoder_processor_id.clone(),
             run.audio.encoder_processor_id.clone(),
         ],
+    )
+    .await?;
+
+    // 2. 上流が止まった時点で writer に finalize を促す
+    finish_mp4_writer_rpc(pipeline_handle, &run.writer_processor_id).await;
+
+    // 3. writer の自然終了を待ち、タイムアウト時は強制停止
+    wait_or_terminate(
+        pipeline_handle,
+        std::slice::from_ref(&run.writer_processor_id),
+        Duration::from_secs(5),
     )
     .await?;
 
