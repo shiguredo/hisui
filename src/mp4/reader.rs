@@ -217,7 +217,7 @@ pub struct Mp4FileReader {
     media_channels: Option<MediaInputChannels>,
     is_paused: bool,
     pause_started_at: Option<tokio::time::Instant>,
-    media_duration: Duration,
+    media_duration: Option<Duration>,
     /// コマンドで受け取ったシーク位置。次の再生開始時に適用する
     pending_seek: Option<Duration>,
     /// warm-up 中の目標位置。この位置に到達するまでデコーダーに流すが publish しない
@@ -260,7 +260,7 @@ impl Mp4FileReader {
             media_channels: None,
             is_paused: false,
             pause_started_at: None,
-            media_duration: Duration::ZERO,
+            media_duration: None,
             pending_seek: None,
             warmup_target: None,
             logical_cursor: None,
@@ -429,10 +429,8 @@ impl Mp4FileReader {
                 break;
             }
             // 最初の open で総時間を取得する。
-            // この reader では 0 を未初期化の番兵値として扱うため、実 duration = 0 の MP4 とは区別できない。
-            // ただし通常の MP4 で duration = 0 はかなり特殊なので、実用上ここが問題になる可能性は低い。
-            if self.media_duration == Duration::ZERO {
-                self.media_duration = state.duration;
+            if self.media_duration.is_none() {
+                self.media_duration = Some(state.duration);
             }
             // 初回 open 成功時に再生開始を通知する
             if !started {
@@ -625,11 +623,7 @@ impl Mp4FileReader {
         self.recreate_decoders(handle);
 
         // duration が取得済みなら上限を clamp する
-        let position = if self.media_duration > Duration::ZERO {
-            position.min(self.media_duration)
-        } else {
-            position
-        };
+        let position = self.clamp_position(position);
         state
             .demuxer
             .seek(position)
@@ -804,11 +798,9 @@ impl Mp4FileReader {
 
     /// 位置を 0..=media_duration に clamp する
     fn clamp_position(&self, position: Duration) -> Duration {
-        if self.media_duration > Duration::ZERO {
-            position.min(self.media_duration)
-        } else {
-            position
-        }
+        self.media_duration
+            .map(|duration| position.min(duration))
+            .unwrap_or(position)
     }
 
     /// 相対オフセット（ミリ秒）を絶対位置に変換する
@@ -839,7 +831,8 @@ impl Mp4FileReader {
             let _ = channels.status_tx.send(MediaPlaybackStatus {
                 state,
                 cursor: file_cursor,
-                duration: self.media_duration,
+                // 外部 API は OBS 互換のため、duration 未取得時も 0 を返す。
+                duration: self.media_duration.unwrap_or(Duration::ZERO),
             });
         }
     }
@@ -1910,7 +1903,7 @@ mod tests {
     #[test]
     fn seek_during_paused_preserves_state_and_clamps() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.update_playback_status(MediaPlaybackState::Paused, Duration::from_secs(5));
 
         // 絶対位置シーク: duration 内
@@ -1947,7 +1940,7 @@ mod tests {
     #[test]
     fn offset_seek_after_stop_uses_zero_cursor_base() {
         let (mut reader, _handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(60);
+        reader.media_duration = Some(Duration::from_secs(60));
         reader.last_emitted_end = Duration::from_secs(12);
         reader.base_offset = Duration::ZERO;
         reader.stop_and_reset_to_zero();
@@ -1960,7 +1953,7 @@ mod tests {
     #[test]
     fn seek_during_stopped_preserves_state() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(15));
 
         reader.set_pending_seek(Duration::from_secs(5));
@@ -1973,7 +1966,7 @@ mod tests {
     #[test]
     fn seek_during_ended_preserves_state() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.update_playback_status(MediaPlaybackState::Ended, Duration::from_secs(30));
 
         reader.set_pending_seek(Duration::from_secs(10));
@@ -1988,12 +1981,12 @@ mod tests {
         let (mut reader, handle) = reader_with_media_control();
 
         // duration 未取得（0）: clamp されない
-        reader.media_duration = Duration::ZERO;
+        reader.media_duration = None;
         reader.set_pending_seek(Duration::from_secs(100));
         assert_eq!(handle.status.borrow().cursor, Duration::from_secs(100));
 
         // duration 取得済み: clamp される
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.set_pending_seek(Duration::from_secs(100));
         assert_eq!(handle.status.borrow().cursor, Duration::from_secs(30));
     }
@@ -2002,7 +1995,7 @@ mod tests {
     #[test]
     fn resolve_offset_seek_uses_current_cursor() {
         let (mut reader, _handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(60);
+        reader.media_duration = Some(Duration::from_secs(60));
 
         // 現在位置を 10 秒に設定
         reader.base_offset = Duration::ZERO;
@@ -2029,7 +2022,7 @@ mod tests {
     #[test]
     fn backward_seek_then_relative_seek_uses_correct_base() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(60);
+        reader.media_duration = Some(Duration::from_secs(60));
 
         // 100 秒地点を模擬（base_offset=0, last_emitted_end=100s はあり得ないが
         // current_file_cursor() のテストなので duration 内の値で）
@@ -2054,7 +2047,7 @@ mod tests {
     #[test]
     fn start_playback_reflects_pending_seek() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.base_offset = Duration::from_secs(10);
 
         // 停止状態で 15 秒にシーク
@@ -2109,7 +2102,7 @@ mod tests {
     #[test]
     fn restart_after_seek_clears_pending_seek() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
 
         // 停止中に 10 秒にシーク
         reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(20));
@@ -2133,7 +2126,7 @@ mod tests {
     #[test]
     fn play_after_seek_preserves_pending_seek() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
 
         // 停止中に 10 秒にシーク
         reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(20));
@@ -2153,7 +2146,7 @@ mod tests {
     #[test]
     fn relative_seek_after_apply_uses_logical_cursor() {
         let (mut reader, _handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(60);
+        reader.media_duration = Some(Duration::from_secs(60));
         reader.base_offset = Duration::ZERO;
         reader.last_emitted_end = Duration::from_secs(10);
 
@@ -2199,7 +2192,7 @@ mod tests {
     #[tokio::test]
     async fn pause_seek_stop_clears_seek_via_wait_while_paused() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.is_paused = true;
 
         // コマンドを送信: Seek(10s) → Stop
@@ -2234,7 +2227,7 @@ mod tests {
     #[tokio::test]
     async fn pause_seek_stop_keeps_zero_after_final_status_update() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.is_paused = true;
         reader.base_offset = Duration::ZERO;
         reader.last_emitted_end = Duration::from_secs(12);
@@ -2263,7 +2256,7 @@ mod tests {
     #[test]
     fn stop_while_playing_resets_cursor_to_zero() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.base_offset = Duration::ZERO;
         reader.last_emitted_end = Duration::from_secs(12);
         reader.update_playback_status(MediaPlaybackState::Playing, Duration::from_secs(12));
@@ -2320,7 +2313,7 @@ mod tests {
     #[tokio::test]
     async fn stopped_seek_stop_clears_seek_via_wait_for_restart() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.update_playback_status(MediaPlaybackState::Stopped, Duration::from_secs(20));
 
         // コマンドを送信: Seek(10s) → Stop → Play
@@ -2359,7 +2352,7 @@ mod tests {
     #[tokio::test]
     async fn ended_seek_stop_transitions_to_stopped_via_wait_for_restart() {
         let (mut reader, handle) = reader_with_media_control();
-        reader.media_duration = Duration::from_secs(30);
+        reader.media_duration = Some(Duration::from_secs(30));
         reader.update_playback_status(MediaPlaybackState::Ended, Duration::from_secs(30));
 
         // コマンドを送信: Seek(10s) → Stop → Play
