@@ -69,7 +69,7 @@ shiguredo_video_toolbox = "=2026.1.1"
 tempfile = "3.18.0"
 
 [workspace]
-members = ["examples/obsws_bootstrap", "examples/sora_publish", "examples/sora_source", "examples/hls_s3", "examples/mpeg_dash_s3"]
+members = ["examples/obsws_bootstrap", "examples/sora_publish", "examples/sora_source", "examples/hls_s3", "examples/mpeg_dash_s3", "examples/camera_record"]
 
 [workspace.dependencies]
 tracing = "=0.1.44"
