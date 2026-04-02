@@ -27,14 +27,14 @@ Hisui の実装は、大まかには以下の 3 層に分かれます。
 
 ```mermaid
 flowchart TD
-    main[src/main.rs]
-    compose[compose サブコマンド]
-    obsws_server[obsws::server]
-    obsws_coord[obsws::coordinator]
-    bootstrap[/bootstrap endpoint]
-    pipeline[media_pipeline]
-    processors[source / mixer / encoder / writer]
-    external[外部入力 / 外部出力]
+    main["src/main.rs"]
+    compose["compose サブコマンド"]
+    obsws_server["obsws::server"]
+    obsws_coord["obsws::coordinator"]
+    bootstrap["/bootstrap endpoint"]
+    pipeline["media_pipeline"]
+    processors["source / mixer / encoder / writer"]
+    external["外部入力 / 外部出力"]
 
     main --> compose
     main --> obsws_server
