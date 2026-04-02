@@ -1322,8 +1322,8 @@ impl ObswsCoordinator {
             let status = handle.status.borrow();
             (
                 status.state.as_obs_str(),
-                status.cursor.as_millis() as i64,
-                status.duration.as_millis() as i64,
+                i64::try_from(status.cursor.as_millis()).unwrap_or(i64::MAX),
+                i64::try_from(status.duration.as_millis()).unwrap_or(i64::MAX),
             )
         } else {
             (
@@ -1555,7 +1555,9 @@ impl ObswsCoordinator {
 
         // 負の値は 0 に clamp する。上限の clamp は reader 側で duration を使って行う
         let clamped_ms = cursor_ms.max(0);
-        let position = std::time::Duration::from_millis(clamped_ms as u64);
+        let position = std::time::Duration::from_millis(
+            u64::try_from(clamped_ms).expect("clamped to non-negative"),
+        );
 
         if handle
             .command_tx

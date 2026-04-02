@@ -810,7 +810,7 @@ impl Mp4FileReader {
 
     /// 相対オフセット（ミリ秒）を絶対位置に変換する
     fn resolve_offset_seek(&self, offset_ms: i64) -> Duration {
-        let current_ms = self.current_file_cursor().as_millis() as i64;
+        let current_ms = i64::try_from(self.current_file_cursor().as_millis()).unwrap_or(i64::MAX);
         let target_ms = current_ms.saturating_add(offset_ms).max(0);
         self.clamp_position(Duration::from_millis(target_ms as u64))
     }
@@ -919,6 +919,8 @@ impl Mp4FileReader {
                     let file_pos = self.current_file_cursor();
                     self.update_playback_status(MediaPlaybackState::Paused, file_pos);
                     self.send_media_action_triggered("OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE");
+                    // subscriber 準備完了前の Pause -> Resume では一時的に start_instant を調整するが、
+                    // 実際の publish 開始時に reset_realtime_clock() で基準時刻を再初期化する。
                     match self.wait_while_paused().await {
                         MediaLoopAction::Continue => {}
                         action => return Ok(action),
