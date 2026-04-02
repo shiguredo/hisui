@@ -99,8 +99,11 @@
 
 ### Config
 
-- [ ] `GetPersistentData`: 永続データを取得する
-- [ ] `SetPersistentData`: 永続データを設定する
+- [x] `GetPersistentData`: 永続データを取得する
+  - NOTE: `OBS_WEBSOCKET_DATA_REALM_GLOBAL` のみ対応。`OBS_WEBSOCKET_DATA_REALM_PROFILE` はエラーを返す
+- [x] `SetPersistentData`: 永続データを設定する
+  - NOTE: `OBS_WEBSOCKET_DATA_REALM_GLOBAL` のみ対応。`OBS_WEBSOCKET_DATA_REALM_PROFILE` はエラーを返す
+  - NOTE: `--state-file` 指定時は成功時に state file へ永続化する
 - [ ] `GetSceneCollectionList`: シーンコレクション一覧を取得する
 - [ ] `SetCurrentSceneCollection`: 現在のシーンコレクションを切り替える
 - [ ] `CreateSceneCollection`: シーンコレクションを作成する

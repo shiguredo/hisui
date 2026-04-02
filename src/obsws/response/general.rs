@@ -1,10 +1,15 @@
 use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::message::ObswsSessionStats;
-use crate::obsws::protocol::{OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION};
+use crate::obsws::protocol::{
+    OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
+    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+};
 #[cfg(unix)]
 use std::ffi::CString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+
+use super::{parse_persistent_data_fields, parse_request_data_or_error_response};
 
 /// 基本の availableRequests 一覧
 const BASE_AVAILABLE_REQUESTS: &[&str] = &[
@@ -56,6 +61,8 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "GetInputDefaultSettings",
     "CreateInput",
     "RemoveInput",
+    "GetPersistentData",
+    "SetPersistentData",
     "GetStreamServiceSettings",
     "SetStreamServiceSettings",
     "GetOutputList",
@@ -317,4 +324,89 @@ pub fn build_get_scene_list_response(
         f.member("currentPreviewSceneUuid", Option::<&str>::None)?;
         f.member("scenes", &scenes)
     })
+}
+
+pub fn build_get_persistent_data_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let fields = match parse_request_data_or_error_response(
+        "GetPersistentData",
+        request_id,
+        request_data,
+        parse_persistent_data_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+    if let Err(response) = validate_realm("GetPersistentData", request_id, &fields.realm) {
+        return response;
+    }
+
+    let slot_value = input_registry.get_persistent_data(&fields.slot_name);
+    super::build_request_response_success("GetPersistentData", request_id, |f| match slot_value {
+        Some(value) => f.member("slotValue", value),
+        None => f.member("slotValue", Option::<&str>::None),
+    })
+}
+
+pub fn build_set_persistent_data_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &mut ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let (fields, slot_value) = match parse_request_data_or_error_response(
+        "SetPersistentData",
+        request_id,
+        request_data,
+        parse_set_persistent_data_fields,
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+    if let Err(response) = validate_realm("SetPersistentData", request_id, &fields.realm) {
+        return response;
+    }
+
+    input_registry.set_persistent_data(fields.slot_name, slot_value);
+    super::build_request_response_success_no_data("SetPersistentData", request_id)
+}
+
+/// SetPersistentData 用のフィールドをパースする。
+/// slotValue は任意の JSON 値（null 以外）を受け付ける。
+/// OBS 本家では slotValue が null の場合は MissingRequestField エラーを返す。
+fn parse_set_persistent_data_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<(super::PersistentDataFields, nojson::RawJsonOwned), nojson::JsonParseError> {
+    let fields = parse_persistent_data_fields(request_data)?;
+    let slot_raw = request_data.to_member("slotValue")?.required()?;
+    if slot_raw.kind().is_null() {
+        return Err(slot_raw.invalid("required member 'slotValue' is missing"));
+    }
+    let slot_value: nojson::RawJsonOwned = slot_raw.try_into()?;
+    Ok((fields, slot_value))
+}
+
+/// realm の値を検証する。GLOBAL のみ対応。
+fn validate_realm(
+    request_type: &str,
+    request_id: &str,
+    realm: &str,
+) -> Result<(), nojson::RawJsonOwned> {
+    match realm {
+        "OBS_WEBSOCKET_DATA_REALM_GLOBAL" => Ok(()),
+        "OBS_WEBSOCKET_DATA_REALM_PROFILE" => Err(super::build_request_response_error(
+            request_type,
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "Unsupported realm: only OBS_WEBSOCKET_DATA_REALM_GLOBAL is supported",
+        )),
+        _ => Err(super::build_request_response_error(
+            request_type,
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "Invalid realm value",
+        )),
+    }
 }

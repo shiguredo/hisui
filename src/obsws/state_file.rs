@@ -1,7 +1,7 @@
 //! obsws の永続 state file の読み書きを行うモジュール。
 //!
 //! state file は obsws の output 設定を再起動後も復元するための JSONC ファイルである。
-//! 永続化対象: stream / record / rtmp_outbound / sora / hls / mpeg_dash / scenes / inputs
+//! 永続化対象: stream / record / rtmp_outbound / sora / hls / mpeg_dash / scenes / inputs / persistentData
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +27,7 @@ pub struct ObswsStateFile {
     pub next_input_id: Option<u64>,
     pub next_scene_id: Option<u64>,
     pub next_scene_item_id: Option<i64>,
+    pub persistent_data: Option<std::collections::BTreeMap<String, nojson::RawJsonOwned>>,
 }
 
 /// state file のシーン定義
@@ -111,6 +112,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFile 
         let next_scene_id: Option<u64> = value.to_member("nextSceneId")?.try_into()?;
         let next_scene_item_id: Option<i64> = value.to_member("nextSceneItemId")?.try_into()?;
 
+        // persistentData セクション: { slotName: slotValue, ... } 形式のオブジェクト
+        let persistent_data = parse_optional_persistent_data(value)?;
+
         Ok(Self {
             stream,
             record,
@@ -125,6 +129,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFile 
             next_input_id,
             next_scene_id,
             next_scene_item_id,
+            persistent_data,
         })
     }
 }
@@ -762,6 +767,30 @@ fn parse_optional_dash_destination(
     }
 }
 
+/// persistentData セクションをパースする。
+/// 各メンバーの値を RawJsonOwned としてそのまま保持する。
+/// null 値のスロットはスキップする（API からは null を書き込めないため、
+/// state file 手動編集で混入した場合に「存在しない」と同等に扱う）。
+fn parse_optional_persistent_data(
+    v: nojson::RawJsonValue<'_, '_>,
+) -> Result<Option<std::collections::BTreeMap<String, nojson::RawJsonOwned>>, nojson::JsonParseError>
+{
+    let member: Option<nojson::RawJsonOwned> = v.to_member("persistentData")?.try_into()?;
+    let Some(ref obj_json) = member else {
+        return Ok(None);
+    };
+    let mut map = std::collections::BTreeMap::new();
+    for (key, value) in obj_json.value().to_object()? {
+        if value.kind().is_null() {
+            continue;
+        }
+        let slot_name: String = key.to_unquoted_string_str()?.into_owned();
+        let raw = nojson::RawJsonOwned::try_from(value)?;
+        map.insert(slot_name, raw);
+    }
+    Ok(Some(map))
+}
+
 /// S3 destination の共通フィールドをパースする
 struct S3Fields {
     bucket: String,
@@ -1056,6 +1085,19 @@ impl nojson::DisplayJson for ObswsStateFile {
             if let Some(next_scene_item_id) = self.next_scene_item_id {
                 f.member("nextSceneItemId", next_scene_item_id)?;
             }
+            if let Some(persistent_data) = &self.persistent_data
+                && !persistent_data.is_empty()
+            {
+                f.member(
+                    "persistentData",
+                    nojson::object(|f| {
+                        for (key, value) in persistent_data {
+                            f.member(key, value)?;
+                        }
+                        Ok(())
+                    }),
+                )?;
+            }
             Ok(())
         })
         .fmt(f)
@@ -1185,6 +1227,7 @@ pub fn load_state_file(path: &Path) -> crate::Result<ObswsStateFile> {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         });
     }
     crate::json::parse_file(path)
@@ -1344,6 +1387,14 @@ pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFil
         next_input_id,
         next_scene_id,
         next_scene_item_id,
+        persistent_data: {
+            let data = registry.persistent_data();
+            if data.is_empty() {
+                None
+            } else {
+                Some(data.clone())
+            }
+        },
     }
 }
 
@@ -1492,6 +1543,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
 
         let json_text = crate::json::to_pretty_string(&state);
@@ -1554,6 +1606,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
 
         let json_text = crate::json::to_pretty_string(&state);
@@ -1612,6 +1665,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
 
         save_state_file(&path, &state).expect("save must succeed");
@@ -1652,6 +1706,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
 
         save_state_file(&path, &state).expect("save must succeed");
@@ -1713,6 +1768,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -1767,6 +1823,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -1895,6 +1952,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -1939,6 +1997,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -2037,6 +2096,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -2156,6 +2216,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -2265,6 +2326,7 @@ mod tests {
             next_input_id: Some(5),
             next_scene_id: Some(3),
             next_scene_item_id: Some(10),
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -2331,6 +2393,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -2410,6 +2473,7 @@ mod tests {
             next_input_id: None,
             next_scene_id: None,
             next_scene_item_id: None,
+            persistent_data: None,
         };
         let json_text = crate::json::to_pretty_string(&state);
         let parsed: ObswsStateFile =
@@ -2521,5 +2585,89 @@ mod tests {
         assert!(!json_text.contains("runtime-track-id"));
         assert!(json_text.contains("backgroundKeyColor"));
         assert!(json_text.contains("#00FF00"));
+    }
+
+    #[test]
+    fn roundtrip_persistent_data() {
+        let mut persistent_data = std::collections::BTreeMap::new();
+        let val1 = nojson::RawJson::parse(r#"{"key": "value", "num": 42}"#).expect("valid json");
+        persistent_data.insert(
+            "slot1".to_owned(),
+            nojson::RawJsonOwned::try_from(val1.value()).expect("conversion must succeed"),
+        );
+        let val2 = nojson::RawJson::parse(r#""hello""#).expect("valid json");
+        persistent_data.insert(
+            "slot2".to_owned(),
+            nojson::RawJsonOwned::try_from(val2.value()).expect("conversion must succeed"),
+        );
+
+        let state = ObswsStateFile {
+            stream: None,
+            record: None,
+            rtmp_outbound: None,
+            sora: None,
+            hls: None,
+            dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
+            persistent_data: Some(persistent_data),
+        };
+
+        let json_text = crate::json::to_pretty_string(&state);
+        assert!(json_text.contains("persistentData"));
+        assert!(json_text.contains("slot1"));
+        assert!(json_text.contains("slot2"));
+
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip parse must succeed");
+        let data = parsed
+            .persistent_data
+            .expect("persistent_data must be present");
+        assert_eq!(data.len(), 2);
+        assert!(data.contains_key("slot1"));
+        assert!(data.contains_key("slot2"));
+
+        // slot1 の値がオブジェクトであることを確認
+        let slot1_text = crate::json::to_pretty_string(data.get("slot1").unwrap());
+        assert!(slot1_text.contains("\"key\""));
+        assert!(slot1_text.contains("\"value\""));
+        assert!(slot1_text.contains("42"));
+
+        // slot2 の値が文字列であることを確認
+        let slot2_text = crate::json::to_pretty_string(data.get("slot2").unwrap());
+        assert!(slot2_text.contains("hello"));
+    }
+
+    #[test]
+    fn roundtrip_persistent_data_empty() {
+        let state = ObswsStateFile {
+            stream: None,
+            record: None,
+            rtmp_outbound: None,
+            sora: None,
+            hls: None,
+            dash: None,
+            scenes: None,
+            inputs: None,
+            current_program_scene: None,
+            current_preview_scene: None,
+            next_input_id: None,
+            next_scene_id: None,
+            next_scene_item_id: None,
+            persistent_data: None,
+        };
+
+        let json_text = crate::json::to_pretty_string(&state);
+        // persistent_data が None の場合はフィールド自体を出力しない
+        assert!(!json_text.contains("persistentData"));
+
+        let parsed: ObswsStateFile =
+            crate::json::parse_str(&json_text).expect("roundtrip parse must succeed");
+        assert!(parsed.persistent_data.is_none());
     }
 }
