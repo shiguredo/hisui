@@ -374,9 +374,12 @@ impl Mp4FileReader {
         let start_pos = self.pending_seek.unwrap_or(Duration::ZERO);
         self.update_playback_status(MediaPlaybackState::Playing, start_pos);
         self.send_media_event(MediaInputEvent::PlaybackStarted);
-        // 開始位置のサンプル（effective_timestamp = base_offset + start_pos）を now で出す
-        self.start_instant = self.realtime_start_instant(self.base_offset + start_pos);
-        self.last_realtime_timestamp = None;
+        if self.subscribers_ready {
+            // 開始位置のサンプル（effective_timestamp = base_offset + start_pos）を now で出す
+            self.reset_realtime_clock(self.base_offset + start_pos);
+        } else {
+            self.last_realtime_timestamp = None;
+        }
     }
 
     fn resolve_loop_enabled(&self) -> bool {
@@ -641,8 +644,11 @@ impl Mp4FileReader {
         // realtime 再生のタイミングを再計算する。
         // シーク先のサンプル（effective_timestamp = base_offset + position）を now で出すため、
         // start_instant = now - (base_offset + position) にする。
-        self.start_instant = self.realtime_start_instant(self.base_offset + position);
-        self.last_realtime_timestamp = None;
+        if self.subscribers_ready {
+            self.reset_realtime_clock(self.base_offset + position);
+        } else {
+            self.last_realtime_timestamp = None;
+        }
         // seek 適用済みの論理カーソルを設定する（次フレーム publish まで relative seek の基準になる）
         self.logical_cursor = Some(position);
         self.update_playback_status(MediaPlaybackState::Playing, position);
@@ -757,8 +763,11 @@ impl Mp4FileReader {
         self.clear_seek_state();
         self.stopped_at_zero = false;
         self.base_offset = self.last_emitted_end;
-        self.start_instant = self.realtime_start_instant(self.base_offset);
-        self.last_realtime_timestamp = None;
+        if self.subscribers_ready {
+            self.reset_realtime_clock(self.base_offset);
+        } else {
+            self.last_realtime_timestamp = None;
+        }
         self.update_playback_status(MediaPlaybackState::Playing, Duration::ZERO);
     }
 
@@ -769,12 +778,25 @@ impl Mp4FileReader {
         now.checked_sub(offset).unwrap_or(now)
     }
 
+    /// realtime 再生の基準時刻を現在のサンプル位置から再初期化する。
+    fn reset_realtime_clock(&mut self, effective_timestamp: Duration) {
+        self.start_instant = self.realtime_start_instant(effective_timestamp);
+        self.last_realtime_timestamp = None;
+    }
+
     /// 現在のファイル内カーソル位置を取得する。
-    /// pending_seek > logical_cursor（seek 適用済み未 publish）> last_emitted_end の優先順で参照する。
+    /// pending_seek > logical_cursor（seek 適用済み未 publish）> stopped_at_zero > last_emitted_end
+    /// の優先順で参照する。
     fn current_file_cursor(&self) -> Duration {
         self.pending_seek
             .or(self.logical_cursor)
-            .unwrap_or_else(|| self.last_emitted_end.saturating_sub(self.base_offset))
+            .unwrap_or_else(|| {
+                if self.stopped_at_zero {
+                    Duration::ZERO
+                } else {
+                    self.last_emitted_end.saturating_sub(self.base_offset)
+                }
+            })
     }
 
     /// 位置を 0..=media_duration に clamp する
@@ -862,6 +884,7 @@ impl Mp4FileReader {
     async fn wait_until_subscribers_ready(
         &mut self,
         handle: &ProcessorHandle,
+        effective_timestamp: Duration,
     ) -> Result<MediaLoopAction> {
         if self.subscribers_ready {
             return Ok(MediaLoopAction::Continue);
@@ -881,6 +904,7 @@ impl Mp4FileReader {
                     ready = &mut wait_ready => {
                         ready.map_err(|e| Error::new(format!("{e}")))?;
                         self.subscribers_ready = true;
+                        self.reset_realtime_clock(effective_timestamp);
                         return Ok(MediaLoopAction::Continue);
                     }
                     command = channels.command_rx.recv() => command,
@@ -1059,15 +1083,18 @@ impl Mp4FileReader {
             return Ok(SampleProcessingResult::Continue);
         }
 
+        match self
+            .wait_until_subscribers_ready(handle, effective_timestamp)
+            .await?
+        {
+            MediaLoopAction::Continue => {}
+            action => return Ok(SampleProcessingResult::Action(action)),
+        }
         if self.options.realtime {
             match self.wait_until_realtime_target(effective_timestamp).await {
                 MediaLoopAction::Continue => {}
                 action => return Ok(SampleProcessingResult::Action(action)),
             }
-        }
-        match self.wait_until_subscribers_ready(handle).await? {
-            MediaLoopAction::Continue => {}
-            action => return Ok(SampleProcessingResult::Action(action)),
         }
         let output_timestamp = self.output_timestamp(effective_timestamp);
 
@@ -1149,15 +1176,18 @@ impl Mp4FileReader {
             return Ok(SampleProcessingResult::Continue);
         }
 
+        match self
+            .wait_until_subscribers_ready(handle, effective_timestamp)
+            .await?
+        {
+            MediaLoopAction::Continue => {}
+            action => return Ok(SampleProcessingResult::Action(action)),
+        }
         if self.options.realtime {
             match self.wait_until_realtime_target(effective_timestamp).await {
                 MediaLoopAction::Continue => {}
                 action => return Ok(SampleProcessingResult::Action(action)),
             }
-        }
-        match self.wait_until_subscribers_ready(handle).await? {
-            MediaLoopAction::Continue => {}
-            action => return Ok(SampleProcessingResult::Action(action)),
         }
         let output_timestamp = self.output_timestamp(effective_timestamp);
 
@@ -1907,6 +1937,18 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn offset_seek_after_stop_uses_zero_cursor_base() {
+        let (mut reader, _handle) = reader_with_media_control();
+        reader.media_duration = Duration::from_secs(60);
+        reader.last_emitted_end = Duration::from_secs(12);
+        reader.base_offset = Duration::ZERO;
+        reader.stop_and_reset_to_zero();
+
+        let pos = reader.resolve_offset_seek(5000);
+        assert_eq!(pos, Duration::from_secs(5));
+    }
+
     /// Stopped 中の seek で Stopped を維持する
     #[test]
     fn seek_during_stopped_preserves_state() {
@@ -2032,6 +2074,19 @@ mod tests {
         let status = handle.status.borrow().clone();
         assert_eq!(status.state, MediaPlaybackState::Playing);
         assert_eq!(status.cursor, Duration::ZERO);
+    }
+
+    #[test]
+    fn start_playback_does_not_start_clock_before_subscribers_ready() {
+        let (mut reader, _handle) = reader_with_media_control();
+        reader.subscribers_ready = false;
+        reader.base_offset = Duration::from_secs(10);
+        let start_instant = reader.start_instant;
+
+        reader.start_playback();
+
+        assert_eq!(reader.start_instant, start_instant);
+        assert_eq!(reader.last_realtime_timestamp, None);
     }
 
     /// realtime_start_instant は大きすぎる offset でも panic せず now に丸める
