@@ -8,9 +8,9 @@ use std::{
     time::Duration,
 };
 
-use shiguredo_mp4::Either;
-use shiguredo_mp4::boxes::HdlrBox;
-use shiguredo_mp4::mux::{Mp4FileMuxer, Mp4FileMuxerOptions};
+use shiguredo_mp4::{BoxHeader, BoxSize, Encode, Either};
+use shiguredo_mp4::boxes::{FreeBox, FtypBox, Brand, HdlrBox, MdatBox};
+use shiguredo_mp4::mux::{Fmp4SegmentMuxer, Mp4FileMuxer, Mp4FileMuxerOptions, SegmentMuxerOptions};
 
 use crate::{
     TrackId,
@@ -954,6 +954,923 @@ pub async fn create_processor(
                 let writer = Mp4Writer::new(
                     &output_path,
                     None,
+                    input_audio_track_id.clone(),
+                    input_video_track_id.clone(),
+                    h.stats(),
+                )?;
+                writer
+                    .run(h, input_audio_track_id, input_video_track_id)
+                    .await
+            },
+        )
+        .await
+        .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
+    Ok(processor_id)
+}
+
+// hybrid MP4 のリカバリ用 moov を格納するための free ボックスの予約サイズ（バイト単位）
+//
+// 録画中に fMP4 用の moov をこの領域内に定期的に上書きすることで、
+// クラッシュ時にも再生可能なファイルを維持する。
+// moov のサイズはトラック数やサンプル数に依存するが、
+// fMP4 の moov は mvex/trex ベースで stbl が空のため比較的小さい。
+const HYBRID_FREE_BOX_RESERVED_SIZE: usize = 512 * 1024;
+
+// フラグメントを自動フラッシュするまでの最大蓄積時間
+const HYBRID_FRAGMENT_MAX_DURATION: Duration = Duration::from_secs(2);
+
+/// Hybrid MP4 ライター
+///
+/// 録画中は fMP4（fragmented MP4）形式で書き込み、
+/// 正常終了時に標準 MP4 に変換する。
+/// プロセスクラッシュ時にはフラグメント単位で再生可能なファイルが残る。
+///
+/// ファイルレイアウト:
+/// - 録画中: `[ftyp][moov(fMP4用)][free][moof1][mdat1][moof2][mdat2]...`
+/// - finalize 後: `[ftyp][mdat(全データ)][moov(標準MP4)]`
+#[derive(Debug)]
+pub struct HybridMp4Writer {
+    file: BufWriter<File>,
+
+    // fMP4 フラグメント生成用
+    fmp4_muxer: Fmp4SegmentMuxer,
+    // finalize 時の標準 MP4 moov 生成用
+    mp4_muxer: Mp4FileMuxer,
+
+    // ファイルレイアウト
+    ftyp_end_offset: u64,
+    free_box_total_size: u64,
+    next_position: u64,
+
+    // フラグメントバッファ（トラック別に管理する）
+    // Fmp4SegmentMuxer は同一トラックのサンプルが mdat 内で連続配置されることを要求するため、
+    // 映像と音声を分離して蓄積し、フラッシュ時に [映像データ][音声データ] として結合する。
+    fragment_video_payload: Vec<u8>,
+    fragment_audio_payload: Vec<u8>,
+    fragment_video_samples: Vec<shiguredo_mp4::mux::Sample>,
+    fragment_audio_samples: Vec<shiguredo_mp4::mux::Sample>,
+    // フラグメント内の蓄積時間（自動フラッシュ判定用）
+    fragment_accumulated_duration: Duration,
+
+    // 既存 Mp4Writer と同じフィールド群
+    input_audio_track_id: Option<TrackId>,
+    input_video_track_id: Option<TrackId>,
+    input_audio_queue: VecDeque<Arc<AudioFrame>>,
+    input_video_queue: VecDeque<Arc<VideoFrame>>,
+    pending_audio_sample: Option<Arc<AudioFrame>>,
+    pending_video_frame: Option<Arc<VideoFrame>>,
+    last_audio_duration: Option<Duration>,
+    last_video_duration: Option<Duration>,
+    paused: bool,
+    resume_waiting_for_keyframe: bool,
+    resume_offset_update_pending: bool,
+    pause_anchor_timestamp: Option<Duration>,
+    timeline_timestamp_offset: Duration,
+    appending_video_chunk: bool,
+    stats: Mp4WriterStats,
+}
+
+impl HybridMp4Writer {
+    pub fn new<P: AsRef<Path>>(
+        path: P,
+        input_audio_track_id: Option<TrackId>,
+        input_video_track_id: Option<TrackId>,
+        mut stats: crate::stats::Stats,
+    ) -> crate::Result<Self> {
+        let creation_timestamp = std::time::UNIX_EPOCH.elapsed()?;
+
+        // fMP4 フラグメント生成用 muxer
+        let fmp4_muxer = Fmp4SegmentMuxer::with_options(SegmentMuxerOptions {
+            creation_timestamp,
+        })?;
+
+        // finalize 時の標準 MP4 moov 生成用 muxer
+        let mut mp4_muxer = Mp4FileMuxer::with_options(Mp4FileMuxerOptions {
+            creation_timestamp,
+            reserved_moov_box_size: 0,
+        })?;
+
+        // ファイルを作成
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
+
+        // ftyp ボックスを書き出す
+        let ftyp_box = FtypBox {
+            major_brand: Brand::ISOM,
+            minor_version: 0,
+            compatible_brands: vec![Brand::ISOM, Brand::ISO2, Brand::MP41],
+        };
+        let ftyp_bytes = ftyp_box.encode_to_vec()?;
+        file.write_all(&ftyp_bytes)?;
+        let ftyp_end_offset = ftyp_bytes.len() as u64;
+
+        // free ボックスを書き出す（リカバリ用 moov の予約領域）
+        let free_payload_size = HYBRID_FREE_BOX_RESERVED_SIZE;
+        let free_box = FreeBox {
+            payload: vec![0; free_payload_size],
+        };
+        let free_bytes = free_box.encode_to_vec()?;
+        let free_box_total_size = free_bytes.len() as u64;
+        file.write_all(&free_bytes)?;
+
+        let next_position = ftyp_end_offset + free_box_total_size;
+
+        // mp4_muxer の内部 next_position を実ファイル位置に合わせる
+        // mp4_muxer は initial_boxes_bytes 分の next_position を持っているので、
+        // 実ファイル位置との差分を advance_position で調整する
+        let mp4_initial_size = mp4_muxer.initial_boxes_bytes().len() as u64;
+        if next_position > mp4_initial_size {
+            mp4_muxer.advance_position(next_position - mp4_initial_size)?;
+        }
+
+        let stats = Mp4WriterStats::new(&mut stats, 0);
+
+        Ok(Self {
+            file: BufWriter::new(file),
+            fmp4_muxer,
+            mp4_muxer,
+            ftyp_end_offset,
+            free_box_total_size,
+            next_position,
+            fragment_video_payload: Vec::new(),
+            fragment_audio_payload: Vec::new(),
+            fragment_video_samples: Vec::new(),
+            fragment_audio_samples: Vec::new(),
+            fragment_accumulated_duration: Duration::ZERO,
+            input_audio_track_id,
+            input_video_track_id,
+            input_audio_queue: VecDeque::new(),
+            input_video_queue: VecDeque::new(),
+            pending_audio_sample: None,
+            pending_video_frame: None,
+            last_audio_duration: None,
+            last_video_duration: None,
+            paused: false,
+            resume_waiting_for_keyframe: false,
+            resume_offset_update_pending: false,
+            pause_anchor_timestamp: None,
+            timeline_timestamp_offset: Duration::ZERO,
+            appending_video_chunk: true,
+            stats,
+        })
+    }
+
+    pub fn stats(&self) -> &Mp4WriterStats {
+        &self.stats
+    }
+
+    pub fn current_duration(&self) -> Duration {
+        self.stats
+            .total_audio_track_duration()
+            .max(self.stats.total_video_track_duration())
+    }
+
+    fn pause_recording(&mut self) -> crate::Result<()> {
+        if self.paused {
+            return Err(crate::Error::new("recording is already paused"));
+        }
+        self.paused = true;
+        self.resume_waiting_for_keyframe = false;
+        self.resume_offset_update_pending = false;
+        Ok(())
+    }
+
+    fn resume_recording(&mut self) -> crate::Result<()> {
+        if !self.paused {
+            return Err(crate::Error::new("recording is not paused"));
+        }
+        self.paused = false;
+        self.resume_waiting_for_keyframe = self.input_video_track_id.is_some();
+        self.resume_offset_update_pending = true;
+        Ok(())
+    }
+
+    fn maybe_set_pause_anchor(&mut self, timestamp: Duration) {
+        if self.pause_anchor_timestamp.is_none() {
+            self.pause_anchor_timestamp = Some(timestamp);
+        }
+    }
+
+    fn maybe_apply_pause_offset(&mut self, resume_timestamp: Duration) {
+        if !self.resume_offset_update_pending {
+            return;
+        }
+        if let Some(pause_anchor_timestamp) = self.pause_anchor_timestamp.take() {
+            let paused_duration = resume_timestamp.saturating_sub(pause_anchor_timestamp);
+            self.timeline_timestamp_offset += paused_duration;
+        }
+        self.resume_offset_update_pending = false;
+    }
+
+    fn apply_timestamp_offset(&self, timestamp: Duration) -> Duration {
+        timestamp.saturating_sub(self.timeline_timestamp_offset)
+    }
+
+    fn prepare_audio_for_queue(&mut self, sample: Arc<AudioFrame>) -> Option<Arc<AudioFrame>> {
+        if self.paused {
+            self.maybe_set_pause_anchor(sample.timestamp);
+            return None;
+        }
+        if self.resume_waiting_for_keyframe {
+            self.stats.add_keyframe_wait_dropped_audio_sample();
+            return None;
+        }
+        self.maybe_apply_pause_offset(sample.timestamp);
+        let mut sample = sample.as_ref().clone();
+        sample.timestamp = self.apply_timestamp_offset(sample.timestamp);
+        Some(Arc::new(sample))
+    }
+
+    fn prepare_video_for_queue(&mut self, frame: Arc<VideoFrame>) -> Option<Arc<VideoFrame>> {
+        if self.paused {
+            self.maybe_set_pause_anchor(frame.timestamp);
+            return None;
+        }
+        if self.resume_waiting_for_keyframe {
+            if !frame.keyframe {
+                self.stats.add_keyframe_wait_dropped_video_frame();
+                return None;
+            }
+            self.maybe_apply_pause_offset(frame.timestamp);
+            self.resume_waiting_for_keyframe = false;
+        } else {
+            self.maybe_apply_pause_offset(frame.timestamp);
+        }
+        let mut frame = frame.as_ref().clone();
+        frame.timestamp = self.apply_timestamp_offset(frame.timestamp);
+        Some(Arc::new(frame))
+    }
+
+    /// フラグメントにビデオサンプルを追加する
+    fn append_video_to_fragment(&mut self, frame: &VideoFrame, duration: Duration) {
+        // 映像 payload 内の相対オフセット（フラッシュ時に音声分をオフセットして最終位置を計算する）
+        let offset_in_video = self.fragment_video_payload.len() as u64;
+        self.fragment_video_payload.extend_from_slice(&frame.data);
+
+        if self.stats.video_codec().is_none()
+            && let Some(name) = frame.format.codec_name()
+        {
+            self.stats.set_video_codec(name);
+        }
+
+        self.fragment_video_samples
+            .push(shiguredo_mp4::mux::Sample {
+                track_kind: shiguredo_mp4::TrackKind::Video,
+                sample_entry: frame.sample_entry.clone(),
+                keyframe: frame.keyframe,
+                timescale: TIMESCALE,
+                duration: duration.as_micros() as u32,
+                composition_time_offset: None,
+                data_offset: offset_in_video,
+                data_size: frame.data.len(),
+            });
+
+        self.stats.add_video_sample(frame.data.len(), duration);
+        self.last_video_duration = Some(duration);
+        self.fragment_accumulated_duration += duration;
+    }
+
+    /// フラグメントにオーディオサンプルを追加する
+    fn append_audio_to_fragment(&mut self, sample: &AudioFrame, duration: Duration) {
+        let offset_in_audio = self.fragment_audio_payload.len() as u64;
+        self.fragment_audio_payload.extend_from_slice(&sample.data);
+
+        if self.stats.audio_codec().is_none()
+            && let Some(name) = sample.format.codec_name()
+        {
+            self.stats.set_audio_codec(name);
+        }
+
+        self.fragment_audio_samples
+            .push(shiguredo_mp4::mux::Sample {
+                track_kind: shiguredo_mp4::TrackKind::Audio,
+                sample_entry: sample.sample_entry.clone(),
+                keyframe: true,
+                timescale: TIMESCALE,
+                duration: duration.as_micros() as u32,
+                composition_time_offset: None,
+                data_offset: offset_in_audio,
+                data_size: sample.data.len(),
+            });
+
+        self.stats.add_audio_sample(sample.data.len(), duration);
+        self.last_audio_duration = Some(duration);
+        self.fragment_accumulated_duration += duration;
+    }
+
+    fn has_fragment_samples(&self) -> bool {
+        !self.fragment_video_samples.is_empty() || !self.fragment_audio_samples.is_empty()
+    }
+
+    /// 蓄積されたフラグメントをファイルに書き出す
+    ///
+    /// mdat payload 内のレイアウトは [映像データ][音声データ] の順。
+    /// Fmp4SegmentMuxer は同一トラックのサンプルが連続配置されることを要求するため、
+    /// トラックごとに分離して蓄積したデータをこの順序で結合する。
+    fn flush_fragment(&mut self) -> crate::Result<()> {
+        if !self.has_fragment_samples() {
+            return Ok(());
+        }
+
+        // fmp4_muxer 用のサンプルリストを構築する
+        // レイアウト: [映像サンプル群][音声サンプル群]
+        // 音声の data_offset は映像データの合計サイズ分だけオフセットする
+        let video_total_size = self.fragment_video_payload.len() as u64;
+        let mut fmp4_samples = self.fragment_video_samples.clone();
+        for sample in &self.fragment_audio_samples {
+            let mut s = sample.clone();
+            s.data_offset += video_total_size;
+            fmp4_samples.push(s);
+        }
+
+        // fmp4_muxer でメディアセグメントメタデータ（moof + mdat ヘッダ）を生成する
+        let metadata_bytes = self
+            .fmp4_muxer
+            .create_media_segment_metadata(&fmp4_samples)?;
+
+        // ファイルに metadata + payload を書き出す
+        // payload は [映像データ][音声データ] の順
+        self.file.seek(SeekFrom::Start(self.next_position))?;
+        self.file.write_all(&metadata_bytes)?;
+        let payload_start = self.next_position + metadata_bytes.len() as u64;
+        self.file.write_all(&self.fragment_video_payload)?;
+        self.file.write_all(&self.fragment_audio_payload)?;
+
+        // mp4_muxer: metadata 分のギャップを進める
+        self.mp4_muxer
+            .advance_position(metadata_bytes.len() as u64)?;
+
+        // mp4_muxer: 映像サンプル → 音声サンプルの順で追加する
+        // data_offset は実ファイル上の絶対位置
+        let mut offset = payload_start;
+        for sample in &self.fragment_video_samples {
+            let mut s = sample.clone();
+            s.data_offset = offset;
+            self.mp4_muxer.append_sample(&s)?;
+            offset += s.data_size as u64;
+        }
+        for sample in &self.fragment_audio_samples {
+            let mut s = sample.clone();
+            s.data_offset = offset;
+            self.mp4_muxer.append_sample(&s)?;
+            offset += s.data_size as u64;
+        }
+
+        self.next_position = offset;
+
+        // フラグメントバッファをクリア
+        self.fragment_video_payload.clear();
+        self.fragment_audio_payload.clear();
+        self.fragment_video_samples.clear();
+        self.fragment_audio_samples.clear();
+        self.fragment_accumulated_duration = Duration::ZERO;
+
+        // リカバリ用 moov を更新する
+        self.update_recovery_moov()?;
+
+        Ok(())
+    }
+
+    /// 蓄積時間が閾値を超えた場合にフラグメントをフラッシュする
+    fn maybe_flush_fragment_by_duration(&mut self) -> crate::Result<()> {
+        if self.fragment_accumulated_duration >= HYBRID_FRAGMENT_MAX_DURATION
+            && self.has_fragment_samples()
+        {
+            self.flush_fragment()?;
+        }
+        Ok(())
+    }
+
+    /// free ボックス領域にリカバリ用の fMP4 moov を書き込む
+    fn update_recovery_moov(&mut self) -> crate::Result<()> {
+        let init_bytes = match self.fmp4_muxer.init_segment_bytes() {
+            Ok(bytes) => bytes,
+            Err(shiguredo_mp4::mux::MuxError::EmptyTracks) => {
+                return Ok(());
+            }
+            Err(e) => return Err(crate::Error::new(format!("failed to get init segment: {e}"))),
+        };
+
+        // init_segment_bytes（ftyp + moov）から moov 部分を取得する
+        let moov_bytes = extract_moov_from_init_segment(&init_bytes)?;
+        let moov_size = moov_bytes.len() as u64;
+
+        // free ボックスの最小サイズは 8 バイト（ヘッダのみ）
+        const MIN_FREE_BOX_SIZE: u64 = 8;
+
+        if moov_size + MIN_FREE_BOX_SIZE > self.free_box_total_size
+            && moov_size != self.free_box_total_size
+        {
+            tracing::warn!(
+                moov_size,
+                free_box_total_size = self.free_box_total_size,
+                "recovery moov exceeds reserved free box size, skipping update"
+            );
+            return Ok(());
+        }
+
+        // free 領域に [moov][free(残余パディング)] を書き込む
+        self.file.seek(SeekFrom::Start(self.ftyp_end_offset))?;
+        self.file.write_all(moov_bytes)?;
+
+        let remaining = self.free_box_total_size - moov_size;
+        if remaining > 0 {
+            let free_box = FreeBox {
+                payload: vec![0; remaining as usize - 8],
+            };
+            let free_bytes = free_box.encode_to_vec()?;
+            self.file.write_all(&free_bytes)?;
+        }
+
+        self.file.flush()?;
+
+        Ok(())
+    }
+
+    /// 録画を finalize して標準 MP4 に変換する
+    fn finalize(&mut self) -> crate::Result<()> {
+        // 残りのフラグメントをフラッシュ
+        self.flush_fragment()?;
+
+        // free ボックスのヘッダを mdat ヘッダに書き換える
+        // mdat のサイズ = next_position - ftyp_end_offset
+        let mdat_size = self.next_position - self.ftyp_end_offset;
+        let mdat_header = BoxHeader {
+            box_type: MdatBox::TYPE,
+            box_size: BoxSize::U64(mdat_size),
+        };
+        let mdat_header_bytes = mdat_header.encode_to_vec()?;
+
+        self.file.seek(SeekFrom::Start(self.ftyp_end_offset))?;
+        self.file.write_all(&mdat_header_bytes)?;
+
+        // mp4_muxer を finalize して標準 MP4 の moov を取得する
+        let finalized = self.mp4_muxer.finalize()?;
+        let actual_moov_size = finalized.moov_box_size() as u64;
+        self.stats.set_actual_moov_box_size(actual_moov_size);
+
+        // moov を EOF に追記する
+        // offset_and_bytes_pairs は (0, head_boxes), (moov_offset, moov_bytes),
+        // (mdat_offset, mdat_header) の順で返す。
+        // hybrid MP4 では moov_bytes のみを使う（head_boxes と mdat_header は不要）。
+        // moov は offset が最大のエントリとして取得する。
+        self.file.seek(SeekFrom::Start(self.next_position))?;
+        if let Some((_offset, moov_bytes)) = finalized
+            .offset_and_bytes_pairs()
+            .max_by_key(|(offset, _)| *offset)
+        {
+            self.file.write_all(moov_bytes)?;
+        }
+
+        self.file.flush()?;
+
+        Ok(())
+    }
+
+    fn handle_next_audio_and_video(&mut self) -> crate::Result<bool> {
+        self.flush_pending_audio_if_ready()?;
+        self.flush_pending_video_if_ready()?;
+
+        let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
+        let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
+        match (audio_timestamp, video_timestamp) {
+            (None, None) => {
+                if self.pending_audio_sample.is_some() || self.pending_video_frame.is_some() {
+                    return Ok(true);
+                }
+                // 全入力の処理が完了 → finalize
+                self.finalize()?;
+                return Ok(false);
+            }
+            (None, Some(_)) => {
+                self.process_next_video_frame()?;
+            }
+            (Some(_), None) => {
+                self.process_next_audio_sample()?;
+            }
+            (Some(audio_timestamp), Some(video_timestamp)) => {
+                if self.appending_video_chunk
+                    && video_timestamp.saturating_sub(audio_timestamp) > MAX_CHUNK_DURATION
+                {
+                    self.process_next_audio_sample()?;
+                } else if !self.appending_video_chunk && video_timestamp > audio_timestamp {
+                    self.process_next_audio_sample()?;
+                } else {
+                    self.process_next_video_frame()?;
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn process_next_video_frame(&mut self) -> crate::Result<()> {
+        let frame = self
+            .input_video_queue
+            .pop_front()
+            .ok_or_else(|| crate::Error::new("video input queue is unexpectedly empty"))?;
+
+        // キーフレーム到着時にフラグメントを区切る
+        if frame.keyframe && self.has_fragment_samples() {
+            self.flush_fragment()?;
+        }
+
+        if let Some(pending) = self.pending_video_frame.as_ref() {
+            let duration = Self::sample_duration_from_timestamps(
+                pending.timestamp,
+                frame.timestamp,
+                self.last_video_duration,
+            );
+            let pending = pending.clone();
+            self.append_video_to_fragment(&pending, duration);
+
+            // 蓄積時間が閾値を超えた場合もフラッシュする
+            self.maybe_flush_fragment_by_duration()?;
+        }
+        self.pending_video_frame = Some(frame);
+        self.appending_video_chunk = true;
+        Ok(())
+    }
+
+    fn process_next_audio_sample(&mut self) -> crate::Result<()> {
+        let data = self
+            .input_audio_queue
+            .pop_front()
+            .ok_or_else(|| crate::Error::new("audio input queue is unexpectedly empty"))?;
+
+        if let Some(pending) = self.pending_audio_sample.as_ref() {
+            let duration = Self::sample_duration_from_timestamps(
+                pending.timestamp,
+                data.timestamp,
+                self.last_audio_duration,
+            );
+            let pending = pending.clone();
+            self.append_audio_to_fragment(&pending, duration);
+
+            self.maybe_flush_fragment_by_duration()?;
+        }
+        self.pending_audio_sample = Some(data);
+        self.appending_video_chunk = false;
+        Ok(())
+    }
+
+    fn flush_pending_audio_if_ready(&mut self) -> crate::Result<()> {
+        if self.input_audio_track_id.is_none()
+            && self.input_audio_queue.is_empty()
+            && self.pending_audio_sample.is_some()
+        {
+            let duration = self.last_audio_duration.unwrap_or(DEFAULT_SAMPLE_DURATION);
+            let pending = self
+                .pending_audio_sample
+                .take()
+                .expect("pending audio sample is unexpectedly empty");
+            self.append_audio_to_fragment(&pending, duration);
+        }
+        Ok(())
+    }
+
+    fn flush_pending_video_if_ready(&mut self) -> crate::Result<()> {
+        if self.input_video_track_id.is_none()
+            && self.input_video_queue.is_empty()
+            && self.pending_video_frame.is_some()
+        {
+            let duration = self.last_video_duration.unwrap_or(DEFAULT_SAMPLE_DURATION);
+            let pending = self
+                .pending_video_frame
+                .take()
+                .expect("pending video frame is unexpectedly empty");
+            self.append_video_to_fragment(&pending, duration);
+        }
+        Ok(())
+    }
+
+    fn sample_duration_from_timestamps(
+        current_timestamp: Duration,
+        next_timestamp: Duration,
+        last_duration: Option<Duration>,
+    ) -> Duration {
+        if next_timestamp > current_timestamp {
+            next_timestamp.saturating_sub(current_timestamp)
+        } else {
+            last_duration.unwrap_or(DEFAULT_SAMPLE_DURATION)
+        }
+    }
+}
+
+/// init_segment_bytes（ftyp + moov）から moov 部分のバイト列を取得する
+fn extract_moov_from_init_segment(init_bytes: &[u8]) -> crate::Result<&[u8]> {
+    if init_bytes.len() < 8 {
+        return Err(crate::Error::new(
+            "init segment is too small to contain ftyp box",
+        ));
+    }
+    let ftyp_size = u32::from_be_bytes([
+        init_bytes[0],
+        init_bytes[1],
+        init_bytes[2],
+        init_bytes[3],
+    ]) as usize;
+    if ftyp_size > init_bytes.len() {
+        return Err(crate::Error::new("ftyp box size exceeds init segment size"));
+    }
+    Ok(&init_bytes[ftyp_size..])
+}
+
+// HybridMp4Writer の async 入力処理と RPC ハンドリング
+impl HybridMp4Writer {
+    fn handle_input_sample(
+        &mut self,
+        track_kind: InputTrackKind,
+        sample: Option<MediaFrame>,
+    ) -> crate::Result<()> {
+        match (track_kind, sample) {
+            (InputTrackKind::Audio, Some(MediaFrame::Audio(sample))) => {
+                if let Some(sample) = self.prepare_audio_for_queue(sample) {
+                    self.input_audio_queue.push_back(sample);
+                }
+            }
+            (InputTrackKind::Audio, None) => {
+                self.input_audio_track_id = None;
+            }
+            (InputTrackKind::Video, Some(MediaFrame::Video(sample))) => {
+                if let Some(sample) = self.prepare_video_for_queue(sample) {
+                    self.input_video_queue.push_back(sample);
+                }
+            }
+            (InputTrackKind::Video, None) => {
+                self.input_video_track_id = None;
+                self.resume_waiting_for_keyframe = false;
+            }
+            _ => {
+                self.stats.set_error();
+                return Err(crate::Error::new("BUG: unexpected input stream"));
+            }
+        }
+        Ok(())
+    }
+
+    fn poll_output(&mut self) -> crate::Result<WriterRunOutput> {
+        loop {
+            if self.input_video_track_id.is_some() && self.input_video_queue.is_empty() {
+                return Ok(WriterRunOutput::Pending {
+                    awaiting_track_kind: Some(InputTrackKind::Video),
+                });
+            } else if self.input_audio_track_id.is_some() && self.input_audio_queue.is_empty() {
+                return Ok(WriterRunOutput::Pending {
+                    awaiting_track_kind: Some(InputTrackKind::Audio),
+                });
+            }
+
+            let in_progress = self.handle_next_audio_and_video()?;
+
+            if !in_progress {
+                return Ok(WriterRunOutput::Finished);
+            }
+        }
+    }
+
+    pub async fn run(
+        mut self,
+        handle: crate::ProcessorHandle,
+        input_audio_track_id: Option<crate::TrackId>,
+        input_video_track_id: Option<crate::TrackId>,
+    ) -> crate::Result<()> {
+        let mut audio_rx = input_audio_track_id.map(|id| handle.subscribe_track(id));
+        let mut video_rx = input_video_track_id.map(|id| handle.subscribe_track(id));
+        let (rpc_tx, mut rpc_rx) = tokio::sync::mpsc::unbounded_channel();
+        handle.register_rpc_sender(rpc_tx).await.map_err(|e| {
+            crate::Error::new(format!("failed to register mp4 writer RPC sender: {e}"))
+        })?;
+
+        handle.notify_ready();
+
+        if video_rx.is_some()
+            && let Err(e) = crate::encoder::request_upstream_video_keyframe(
+                &handle.pipeline_handle(),
+                handle.processor_id(),
+                "hybrid_mp4_writer_start",
+            )
+            .await
+        {
+            tracing::warn!(
+                "failed to request keyframe for hybrid mp4 writer start: {}",
+                e.display()
+            );
+        }
+        let mut rpc_rx_enabled = true;
+
+        let mut output = self.poll_output()?;
+        loop {
+            match output {
+                WriterRunOutput::Finished => break,
+                WriterRunOutput::Pending {
+                    awaiting_track_kind,
+                } => {
+                    if audio_rx.is_none() && video_rx.is_none() {
+                        output = self.poll_output()?;
+                        continue;
+                    }
+
+                    match awaiting_track_kind {
+                        Some(InputTrackKind::Audio) if audio_rx.is_some() => {
+                            tokio::select! {
+                                msg = crate::future::recv_or_pending(&mut audio_rx) => {
+                                    self.handle_audio_message(msg, &mut audio_rx)?;
+                                }
+                                rpc_message = recv_mp4_writer_rpc_message_or_pending(
+                                    rpc_rx_enabled.then_some(&mut rpc_rx)
+                                ) => {
+                                    if self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)? {
+                                        audio_rx = None;
+                                        video_rx = None;
+                                    }
+                                }
+                            }
+                        }
+                        Some(InputTrackKind::Video) if video_rx.is_some() => {
+                            tokio::select! {
+                                msg = crate::future::recv_or_pending(&mut video_rx) => {
+                                    self.handle_video_message(msg, &mut video_rx)?;
+                                }
+                                rpc_message = recv_mp4_writer_rpc_message_or_pending(
+                                    rpc_rx_enabled.then_some(&mut rpc_rx)
+                                ) => {
+                                    if self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)? {
+                                        audio_rx = None;
+                                        video_rx = None;
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            let audio_len = self.input_audio_queue.len();
+                            let video_len = self.input_video_queue.len();
+                            let mut suppress_audio = false;
+                            let mut suppress_video = false;
+                            if audio_rx.is_some() && video_rx.is_some() {
+                                if audio_len > video_len + MAX_INPUT_QUEUE_GAP {
+                                    suppress_audio = true;
+                                } else if video_len > audio_len + MAX_INPUT_QUEUE_GAP {
+                                    suppress_video = true;
+                                }
+                            }
+
+                            tokio::select! {
+                                msg = crate::future::recv_or_pending(&mut audio_rx), if !suppress_audio => {
+                                    self.handle_audio_message(msg, &mut audio_rx)?;
+                                }
+                                msg = crate::future::recv_or_pending(&mut video_rx), if !suppress_video => {
+                                    self.handle_video_message(msg, &mut video_rx)?;
+                                }
+                                rpc_message = recv_mp4_writer_rpc_message_or_pending(
+                                    rpc_rx_enabled.then_some(&mut rpc_rx)
+                                ) => {
+                                    if self.handle_rpc_message(rpc_message, &mut rpc_rx_enabled)? {
+                                        audio_rx = None;
+                                        video_rx = None;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    output = self.poll_output()?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_rpc_message(
+        &mut self,
+        rpc_message: Option<Mp4WriterRpcMessage>,
+        rpc_rx_enabled: &mut bool,
+    ) -> crate::Result<bool> {
+        let Some(rpc_message) = rpc_message else {
+            *rpc_rx_enabled = false;
+            return Ok(false);
+        };
+
+        match rpc_message {
+            Mp4WriterRpcMessage::Pause { reply_tx } => {
+                let _ = reply_tx.send(self.pause_recording());
+            }
+            Mp4WriterRpcMessage::Resume { reply_tx } => {
+                let _ = reply_tx.send(self.resume_recording());
+            }
+            Mp4WriterRpcMessage::Finish { reply_tx } => {
+                let _ = reply_tx.send(());
+                *rpc_rx_enabled = false;
+                self.input_video_track_id = None;
+                self.input_audio_track_id = None;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn handle_audio_message(
+        &mut self,
+        msg: crate::Message,
+        audio_rx: &mut Option<crate::MessageReceiver>,
+    ) -> crate::Result<()> {
+        match msg {
+            crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
+                self.stats.add_received_audio_data();
+                if self.input_audio_track_id.is_some() {
+                    self.handle_input_sample(
+                        InputTrackKind::Audio,
+                        Some(crate::MediaFrame::Audio(sample)),
+                    )?;
+                }
+            }
+            crate::Message::Eos => {
+                self.stats.add_received_audio_eos();
+                if self.input_audio_track_id.is_some() {
+                    self.handle_input_sample(InputTrackKind::Audio, None)?;
+                }
+                *audio_rx = None;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_video_message(
+        &mut self,
+        msg: crate::Message,
+        video_rx: &mut Option<crate::MessageReceiver>,
+    ) -> crate::Result<()> {
+        match msg {
+            crate::Message::Media(crate::MediaFrame::Video(sample)) => {
+                self.stats.add_received_video_data();
+                if self.input_video_track_id.is_some() {
+                    self.handle_input_sample(
+                        InputTrackKind::Video,
+                        Some(crate::MediaFrame::Video(sample)),
+                    )?;
+                }
+            }
+            crate::Message::Eos => {
+                self.stats.add_received_video_eos();
+                if self.input_video_track_id.is_some() {
+                    self.handle_input_sample(InputTrackKind::Video, None)?;
+                }
+                *video_rx = None;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+pub async fn create_hybrid_processor(
+    handle: &crate::MediaPipelineHandle,
+    output_path: std::path::PathBuf,
+    input_audio_track_id: Option<crate::TrackId>,
+    input_video_track_id: Option<crate::TrackId>,
+    processor_id: Option<crate::ProcessorId>,
+) -> crate::Result<crate::ProcessorId> {
+    if input_audio_track_id.is_none() && input_video_track_id.is_none() {
+        return Err(crate::Error::new(
+            "inputAudioTrackId or inputVideoTrackId is required".to_owned(),
+        ));
+    }
+
+    let is_mp4 = output_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
+    if !is_mp4 {
+        return Err(crate::Error::new(format!(
+            "outputPath must be an mp4 file: {}",
+            output_path.display()
+        )));
+    }
+
+    if let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        return Err(crate::Error::new(format!(
+            "outputPath parent directory does not exist: {}",
+            parent.display()
+        )));
+    }
+
+    let processor_id =
+        processor_id.unwrap_or_else(|| crate::ProcessorId::new("hybridMp4Writer"));
+    handle
+        .spawn_processor(
+            processor_id.clone(),
+            crate::ProcessorMetadata::new("hybrid_mp4_writer"),
+            move |h| async move {
+                let writer = HybridMp4Writer::new(
+                    &output_path,
                     input_audio_track_id.clone(),
                     input_video_track_id.clone(),
                     h.stats(),

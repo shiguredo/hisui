@@ -3809,7 +3809,7 @@ async fn start_record_processors(
         Some(run.audio.encoder_processor_id.clone()),
     )
     .await?;
-    crate::mp4::writer::create_processor(
+    crate::mp4::writer::create_hybrid_processor(
         pipeline_handle,
         output_path.to_path_buf(),
         Some(run.audio.encoded_track_id.clone()),
