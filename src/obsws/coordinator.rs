@@ -1,3 +1,4 @@
+use crate::obsws::event::TaggedEvent;
 use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::message::ObswsSessionStats;
 use crate::obsws::protocol::{
@@ -92,13 +93,6 @@ pub struct CommandResult {
 pub struct BatchCommandResult {
     pub results: Vec<crate::obsws::response::RequestBatchResult>,
     pub events: Vec<TaggedEvent>,
-}
-
-/// イベントの subscription flag 付きテキスト
-#[derive(Clone)]
-pub struct TaggedEvent {
-    pub text: nojson::RawJsonOwned,
-    pub subscription_flag: u32,
 }
 
 /// Program 出力の固定トラック ID

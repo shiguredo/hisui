@@ -107,8 +107,7 @@ pub struct MediaInputHandle {
 
 /// メディアイベント直接配信に必要な情報
 pub struct MediaEventContext {
-    // TODO: reader が coordinator の型へ直接依存しているため、将来的には共通モジュールへ切り出す余地がある。
-    pub event_broadcast_tx: tokio::sync::broadcast::Sender<crate::obsws::coordinator::TaggedEvent>,
+    pub event_broadcast_tx: tokio::sync::broadcast::Sender<crate::obsws::event::TaggedEvent>,
     /// 最新の input_name を追従する watch receiver
     pub input_name_rx: tokio::sync::watch::Receiver<String>,
     pub input_uuid: String,
@@ -864,14 +863,13 @@ impl Mp4FileReader {
                 )
             }
         };
-        let _ =
-            channels
-                .event_ctx
-                .event_broadcast_tx
-                .send(crate::obsws::coordinator::TaggedEvent {
-                    text,
-                    subscription_flag: crate::obsws::protocol::OBSWS_EVENT_SUB_MEDIA_INPUTS,
-                });
+        let _ = channels
+            .event_ctx
+            .event_broadcast_tx
+            .send(crate::obsws::event::TaggedEvent {
+                text,
+                subscription_flag: crate::obsws::protocol::OBSWS_EVENT_SUB_MEDIA_INPUTS,
+            });
     }
 
     fn send_media_action_triggered(&self, media_action: &'static str) {
@@ -1883,7 +1881,7 @@ mod tests {
     fn reader_with_media_control_and_event_rx() -> (
         Mp4FileReader,
         MediaInputHandle,
-        tokio::sync::broadcast::Receiver<crate::obsws::coordinator::TaggedEvent>,
+        tokio::sync::broadcast::Receiver<crate::obsws::event::TaggedEvent>,
     ) {
         let mut reader = Mp4FileReader::new(
             "testdata/red-320x320-h264-aac.mp4",
