@@ -1503,11 +1503,8 @@ fn set_persistent_data_rejects_profile_realm() {
         r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_PROFILE","slotName":"s","slotValue":1}"#,
     )
     .expect("requestData must be valid json");
-    let response = build_set_persistent_data_response(
-        "req-set-profile",
-        Some(&request_data),
-        &mut registry,
-    );
+    let response =
+        build_set_persistent_data_response("req-set-profile", Some(&request_data), &mut registry);
     let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
@@ -1554,11 +1551,8 @@ fn get_persistent_data_returns_null_for_nonexistent_slot() {
         r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_GLOBAL","slotName":"nonexistent"}"#,
     )
     .expect("requestData must be valid json");
-    let response = build_get_persistent_data_response(
-        "req-get-nonexistent",
-        Some(&request_data),
-        &registry,
-    );
+    let response =
+        build_get_persistent_data_response("req-get-nonexistent", Some(&request_data), &registry);
     let json = nojson::RawJson::parse(response.text()).expect("response must be valid json");
     let result: bool = json
         .value()
@@ -1583,11 +1577,8 @@ fn set_then_get_persistent_data_roundtrip() {
         r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_GLOBAL","slotName":"mySlot","slotValue":{"key":"value","num":42}}"#,
     )
     .expect("requestData must be valid json");
-    let set_response = build_set_persistent_data_response(
-        "req-set",
-        Some(&set_request_data),
-        &mut registry,
-    );
+    let set_response =
+        build_set_persistent_data_response("req-set", Some(&set_request_data), &mut registry);
     let set_json =
         nojson::RawJson::parse(set_response.text()).expect("response must be valid json");
     let set_result: bool = set_json

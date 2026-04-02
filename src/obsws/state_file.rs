@@ -769,6 +769,8 @@ fn parse_optional_dash_destination(
 
 /// persistentData セクションをパースする。
 /// 各メンバーの値を RawJsonOwned としてそのまま保持する。
+/// null 値のスロットはスキップする（API からは null を書き込めないため、
+/// state file 手動編集で混入した場合に「存在しない」と同等に扱う）。
 fn parse_optional_persistent_data(
     v: nojson::RawJsonValue<'_, '_>,
 ) -> Result<Option<std::collections::BTreeMap<String, nojson::RawJsonOwned>>, nojson::JsonParseError>
@@ -779,6 +781,9 @@ fn parse_optional_persistent_data(
     };
     let mut map = std::collections::BTreeMap::new();
     for (key, value) in obj_json.value().to_object()? {
+        if value.kind().is_null() {
+            continue;
+        }
         let slot_name: String = key.to_unquoted_string_str()?.into_owned();
         let raw = nojson::RawJsonOwned::try_from(value)?;
         map.insert(slot_name, raw);
