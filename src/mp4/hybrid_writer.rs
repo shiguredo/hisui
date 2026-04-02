@@ -29,6 +29,13 @@ use super::writer::{
 // fMP4 の moov は mvex/trex ベースで stbl が空のため比較的小さい。
 const HYBRID_FREE_BOX_RESERVED_SIZE: usize = 512 * 1024;
 
+// ftyp ボックスの予約サイズ（バイト単位）
+//
+// 初期 ftyp は isom/iso2/mp41 の 3 ブランドで 28 バイトだが、
+// finalize 時にコーデック固有のブランド（avc1, hev1 等）が追加されうるため、
+// 拡張用のスペースを確保しておく。
+const FTYP_RESERVED_SIZE: u64 = 64;
+
 // フラグメントを自動フラッシュするまでの最大蓄積時間
 const HYBRID_FRAGMENT_MAX_DURATION: Duration = Duration::from_secs(2);
 
@@ -51,7 +58,7 @@ pub struct HybridMp4Writer {
     mp4_muxer: Mp4FileMuxer,
 
     // ファイルレイアウト
-    ftyp_end_offset: u64,
+    mdat_start_offset: u64,
     free_box_total_size: u64,
     next_position: u64,
 
@@ -114,6 +121,7 @@ impl HybridMp4Writer {
             .open(path)?;
 
         // ftyp ボックスを書き出す
+        // finalize 時にコーデック固有ブランドで更新するため、拡張用の free ボックスを後続に配置する
         let ftyp_box = FtypBox {
             major_brand: Brand::ISOM,
             minor_version: 0,
@@ -121,18 +129,27 @@ impl HybridMp4Writer {
         };
         let ftyp_bytes = ftyp_box.encode_to_vec()?;
         file.write_all(&ftyp_bytes)?;
-        let ftyp_end_offset = ftyp_bytes.len() as u64;
 
-        // free ボックスを書き出す（リカバリ用 moov の予約領域）
-        let free_payload_size = HYBRID_FREE_BOX_RESERVED_SIZE;
+        // ftyp 拡張用の free ボックスを書き出す
+        let ftyp_padding_size = FTYP_RESERVED_SIZE - ftyp_bytes.len() as u64;
+        if ftyp_padding_size >= 8 {
+            let ftyp_padding = FreeBox {
+                payload: vec![0; ftyp_padding_size as usize - 8],
+            };
+            file.write_all(&ftyp_padding.encode_to_vec()?)?;
+        }
+        // mdat ヘッダおよびリカバリ用 moov の書き込み先オフセット
+        let mdat_start_offset = FTYP_RESERVED_SIZE;
+
+        // リカバリ用 moov の予約領域（free ボックス）を書き出す
         let free_box = FreeBox {
-            payload: vec![0; free_payload_size],
+            payload: vec![0; HYBRID_FREE_BOX_RESERVED_SIZE],
         };
         let free_bytes = free_box.encode_to_vec()?;
         let free_box_total_size = free_bytes.len() as u64;
         file.write_all(&free_bytes)?;
 
-        let next_position = ftyp_end_offset + free_box_total_size;
+        let next_position = mdat_start_offset + free_box_total_size;
 
         // mp4_muxer の内部 next_position を実ファイル位置に合わせる
         // mp4_muxer は initial_boxes_bytes 分の next_position を持っているので、
@@ -148,7 +165,7 @@ impl HybridMp4Writer {
             file: BufWriter::new(file),
             fmp4_muxer,
             mp4_muxer,
-            ftyp_end_offset,
+            mdat_start_offset,
             free_box_total_size,
             next_position,
             fragment_video_payload: Vec::new(),
@@ -400,10 +417,65 @@ impl HybridMp4Writer {
         self.fragment_video_samples.clear();
         self.fragment_audio_samples.clear();
         self.fragment_accumulated_duration = Duration::ZERO;
-
         // リカバリ用 moov を更新する
         self.update_recovery_moov()?;
 
+        Ok(())
+    }
+
+    /// pending サンプルから recovery 用 moov を先行生成する
+    ///
+    /// pending サンプルは通常、次のサンプル到着時に duration が確定してからフラグメントに追加されるが、
+    /// 最初のサンプルだけを受け取った直後にクラッシュすると、フラグメントもリカバリ用 moov も
+    /// 書かれないまま終了してしまう。
+    /// これを防ぐために、pending を仮の duration で一時 muxer にだけ反映して
+    /// recovery 用 moov を生成する。
+    fn maybe_flush_initial_pending(&mut self) -> crate::Result<()> {
+        let mut samples = Vec::new();
+        let mut data_offset = 0;
+
+        if let Some(pending) = self.pending_video_frame.as_ref()
+            && let Some(sample_entry) = pending
+                .sample_entry
+                .clone()
+                .or_else(|| self.last_video_sample_entry.clone())
+        {
+            samples.push(shiguredo_mp4::mux::Sample {
+                track_kind: shiguredo_mp4::TrackKind::Video,
+                sample_entry: Some(sample_entry),
+                keyframe: pending.keyframe,
+                timescale: TIMESCALE,
+                duration: DEFAULT_SAMPLE_DURATION.as_micros() as u32,
+                composition_time_offset: None,
+                data_offset,
+                data_size: pending.data.len(),
+            });
+            data_offset += pending.data.len() as u64;
+        }
+
+        if let Some(pending) = self.pending_audio_sample.as_ref()
+            && let Some(sample_entry) = pending
+                .sample_entry
+                .clone()
+                .or_else(|| self.last_audio_sample_entry.clone())
+        {
+            samples.push(shiguredo_mp4::mux::Sample {
+                track_kind: shiguredo_mp4::TrackKind::Audio,
+                sample_entry: Some(sample_entry),
+                keyframe: true,
+                timescale: TIMESCALE,
+                duration: DEFAULT_SAMPLE_DURATION.as_micros() as u32,
+                composition_time_offset: None,
+                data_offset,
+                data_size: pending.data.len(),
+            });
+        }
+
+        if !samples.is_empty() {
+            let mut muxer = self.fmp4_muxer.clone();
+            muxer.create_media_segment_metadata(&samples)?;
+            self.update_recovery_moov_from_muxer(&muxer)?;
+        }
         Ok(())
     }
 
@@ -419,7 +491,13 @@ impl HybridMp4Writer {
 
     /// free ボックス領域にリカバリ用の fMP4 moov を書き込む
     fn update_recovery_moov(&mut self) -> crate::Result<()> {
-        let init_bytes = match self.fmp4_muxer.init_segment_bytes() {
+        let muxer = self.fmp4_muxer.clone();
+        self.update_recovery_moov_from_muxer(&muxer)
+    }
+
+    /// 指定された muxer の状態から recovery 用の fMP4 moov を書き込む
+    fn update_recovery_moov_from_muxer(&mut self, muxer: &Fmp4SegmentMuxer) -> crate::Result<()> {
+        let init_bytes = match muxer.init_segment_bytes() {
             Ok(bytes) => bytes,
             Err(shiguredo_mp4::mux::MuxError::EmptyTracks) => {
                 return Ok(());
@@ -450,7 +528,7 @@ impl HybridMp4Writer {
         }
 
         // free 領域に [moov][free(残余パディング)] を書き込む
-        self.file.seek(SeekFrom::Start(self.ftyp_end_offset))?;
+        self.file.seek(SeekFrom::Start(self.mdat_start_offset))?;
         self.file.write_all(moov_bytes)?;
 
         let remaining = self.free_box_total_size - moov_size;
@@ -472,31 +550,53 @@ impl HybridMp4Writer {
         // 残りのフラグメントをフラッシュ
         self.flush_fragment()?;
 
-        // free ボックスのヘッダを mdat ヘッダに書き換える
-        // mdat のサイズ = next_position - ftyp_end_offset
-        let mdat_size = self.next_position - self.ftyp_end_offset;
-        let mdat_header = BoxHeader {
-            box_type: MdatBox::TYPE,
-            box_size: BoxSize::U64(mdat_size),
-        };
-        let mdat_header_bytes = mdat_header.encode_to_vec()?;
-
-        self.file.seek(SeekFrom::Start(self.ftyp_end_offset))?;
-        self.file.write_all(&mdat_header_bytes)?;
-
-        // mp4_muxer を finalize して標準 MP4 の moov を取得する
+        // mp4_muxer を finalize して標準 MP4 の moov と更新済み ftyp を取得する
         let finalized = self.mp4_muxer.finalize()?;
         let actual_moov_size = finalized.moov_box_size() as u64;
         self.stats.set_actual_moov_box_size(actual_moov_size);
 
+        let pairs: Vec<_> = finalized.offset_and_bytes_pairs().collect();
+
+        // head_boxes（更新済み ftyp + free）をファイル先頭に書き戻す
+        // Mp4FileMuxer が構築した head_boxes にはコーデック固有の compatible brand を含む
+        // ftyp が入っている。hybrid MP4 では ftyp 部分のみを抽出して予約領域に書き込む。
+        if let Some((_, head_boxes)) = pairs.first() {
+            let ftyp_size = if head_boxes.len() >= 4 {
+                u32::from_be_bytes([head_boxes[0], head_boxes[1], head_boxes[2], head_boxes[3]])
+                    as u64
+            } else {
+                0
+            };
+            if ftyp_size > 0 && ftyp_size <= self.mdat_start_offset {
+                self.file.seek(SeekFrom::Start(0))?;
+                self.file
+                    .write_all(&head_boxes[..ftyp_size as usize])?;
+
+                // ftyp と mdat_start_offset の間を free ボックスで埋める
+                let padding = self.mdat_start_offset - ftyp_size;
+                if padding >= 8 {
+                    let free_box = FreeBox {
+                        payload: vec![0; padding as usize - 8],
+                    };
+                    self.file.write_all(&free_box.encode_to_vec()?)?;
+                }
+            }
+        }
+
+        // free ボックスのヘッダを mdat ヘッダに書き換える
+        let mdat_size = self.next_position - self.mdat_start_offset;
+        let mdat_header = BoxHeader {
+            box_type: MdatBox::TYPE,
+            box_size: BoxSize::U64(mdat_size),
+        };
+        self.file.seek(SeekFrom::Start(self.mdat_start_offset))?;
+        self.file.write_all(&mdat_header.encode_to_vec()?)?;
+
         // moov を EOF に追記する
-        // offset_and_bytes_pairs は (0, head_boxes), (moov_offset, moov_bytes),
-        // (mdat_offset, mdat_header) の順で返す。
-        // hybrid MP4 では moov_bytes のみを使う（head_boxes と mdat_header は不要）。
-        // moov は offset が最大のエントリとして取得する。
+        // moov は offset が最大のエントリ
         self.file.seek(SeekFrom::Start(self.next_position))?;
-        if let Some((_offset, moov_bytes)) = finalized
-            .offset_and_bytes_pairs()
+        if let Some((_offset, moov_bytes)) = pairs
+            .iter()
             .max_by_key(|(offset, _)| *offset)
         {
             self.file.write_all(moov_bytes)?;
@@ -549,11 +649,8 @@ impl HybridMp4Writer {
             .pop_front()
             .ok_or_else(|| crate::Error::new("video input queue is unexpectedly empty"))?;
 
-        // キーフレーム到着時にフラグメントを区切る
-        if frame.keyframe && self.has_fragment_samples() {
-            self.flush_fragment()?;
-        }
-
+        // pending フレームを現在のフラグメントに追加する（flush の前に行うことで
+        // GOP の最後のフレームが正しく前のフラグメントに含まれるようにする）
         if let Some(pending) = self.pending_video_frame.as_ref() {
             let duration = Self::sample_duration_from_timestamps(
                 pending.timestamp,
@@ -562,12 +659,24 @@ impl HybridMp4Writer {
             );
             let pending = pending.clone();
             self.append_video_to_fragment(&pending, duration);
-
-            // 蓄積時間が閾値を超えた場合もフラッシュする
-            self.maybe_flush_fragment_by_duration()?;
         }
+
+        // キーフレーム到着時にフラグメントを区切る
+        // pending は既にフラグメントに追加済みなので、ここでフラッシュすると
+        // 前の GOP が完全な形でフラグメントに書き出される
+        if frame.keyframe && self.has_fragment_samples() {
+            self.flush_fragment()?;
+        }
+
+        // 蓄積時間が閾値を超えた場合もフラッシュする
+        self.maybe_flush_fragment_by_duration()?;
+
         self.pending_video_frame = Some(frame);
         self.appending_video_chunk = true;
+
+        // 最初のサンプルしか届いていない段階でも recovery 用 moov を先行更新する。
+        self.maybe_flush_initial_pending()?;
+
         Ok(())
     }
 
@@ -590,6 +699,9 @@ impl HybridMp4Writer {
         }
         self.pending_audio_sample = Some(data);
         self.appending_video_chunk = false;
+
+        self.maybe_flush_initial_pending()?;
+
         Ok(())
     }
 
@@ -1076,6 +1188,40 @@ mod tests {
             }
         ));
         assert!(writer.pending_audio_sample.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_does_not_duplicate_initial_pending_audio_sample() -> crate::Result<()> {
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let sample_entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        let first = AudioFrame {
+            timestamp: Duration::ZERO,
+            ..make_audio_frame(Some(sample_entry))
+        };
+        let second = AudioFrame {
+            timestamp: DEFAULT_SAMPLE_DURATION,
+            ..make_audio_frame(None)
+        };
+
+        writer.pending_audio_sample = Some(Arc::new(first.clone()));
+        writer.maybe_flush_initial_pending()?;
+
+        assert!(writer.fragment_audio_samples.is_empty());
+        assert!(writer.pending_audio_sample.is_some());
+
+        writer.input_audio_queue.push_back(Arc::new(second));
+        writer.process_next_audio_sample()?;
+
+        assert_eq!(writer.fragment_audio_samples.len(), 1);
+        assert_eq!(
+            writer.fragment_audio_samples[0].data_size,
+            first.data.len()
+        );
         Ok(())
     }
 }
