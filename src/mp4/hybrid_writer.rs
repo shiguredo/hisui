@@ -43,7 +43,9 @@ const HYBRID_FRAGMENT_MAX_DURATION: Duration = Duration::from_secs(2);
 ///
 /// 録画中は fMP4（fragmented MP4）形式で書き込み、
 /// 正常終了時に標準 MP4 に変換する。
-/// プロセスクラッシュ時にはフラグメント単位で再生可能なファイルが残る。
+/// プロセスクラッシュ時には、最後に flush 済みのフラグメントまでは
+/// 再生可能なファイルが残る。
+/// ただし、直近の未 flush 区間（途中のフラグメント）は失われうる。
 ///
 /// ファイルレイアウト:
 /// - 録画中: `[ftyp][moov(fMP4用)][free][moof1][mdat1][moof2][mdat2]...`
@@ -193,10 +195,18 @@ impl HybridMp4Writer {
         })
     }
 
+    /// 統計情報を返す
+    ///
+    /// `recoverable_media_duration()` は異常終了時に回復可能な範囲
+    /// （最後に flush 済みのフラグメントまで）を表す。
+    /// 一方で `current_duration()` は未 flush 区間も含む現在の論理尺を返す。
     pub fn stats(&self) -> &Mp4WriterStats {
         &self.stats
     }
 
+    /// 現在の論理尺を返す
+    ///
+    /// この値には未 flush 区間も含まれるため、異常終了時の回復保証範囲とは一致しない。
     pub fn current_duration(&self) -> Duration {
         self.stats
             .total_audio_track_duration()
@@ -313,6 +323,7 @@ impl HybridMp4Writer {
         self.stats.add_video_sample(frame.data.len(), duration);
         self.last_video_duration = Some(duration);
         self.fragment_accumulated_duration += duration;
+        self.update_unflushed_fragment_metrics();
     }
 
     /// フラグメントにオーディオサンプルを追加する
@@ -349,10 +360,22 @@ impl HybridMp4Writer {
         self.stats.add_audio_sample(sample.data.len(), duration);
         self.last_audio_duration = Some(duration);
         self.fragment_accumulated_duration += duration;
+        self.update_unflushed_fragment_metrics();
     }
 
     fn has_fragment_samples(&self) -> bool {
         !self.fragment_video_samples.is_empty() || !self.fragment_audio_samples.is_empty()
+    }
+
+    fn update_unflushed_fragment_metrics(&self) {
+        self.stats.set_current_unflushed_fragment_duration(self.fragment_accumulated_duration);
+        self.stats.set_current_unflushed_video_sample_count(self.fragment_video_samples.len() as u64);
+        self.stats.set_current_unflushed_audio_sample_count(self.fragment_audio_samples.len() as u64);
+    }
+
+    fn update_recoverable_media_metrics(&self) {
+        self.stats.add_flushed_fragment();
+        self.stats.set_recoverable_media_duration(self.current_duration());
     }
 
     /// 蓄積されたフラグメントをファイルに書き出す
@@ -417,8 +440,10 @@ impl HybridMp4Writer {
         self.fragment_video_samples.clear();
         self.fragment_audio_samples.clear();
         self.fragment_accumulated_duration = Duration::ZERO;
+        self.update_unflushed_fragment_metrics();
         // リカバリ用 moov を更新する
         self.update_recovery_moov()?;
+        self.update_recoverable_media_metrics();
 
         Ok(())
     }
@@ -430,6 +455,11 @@ impl HybridMp4Writer {
     /// 書かれないまま終了してしまう。
     /// これを防ぐために、pending を仮の duration で一時 muxer にだけ反映して
     /// recovery 用 moov を生成する。
+    ///
+    /// ここでは moov だけを先行更新し、対応する moof / mdat と payload 自体は
+    /// flush 時までディスクへ書かない。
+    /// そのため、異常終了時に回復できるのは最後に flush 済みのフラグメントまでであり、
+    /// 直近の未 flush 区間が失われることは許容する。
     fn maybe_flush_initial_pending(&mut self) -> crate::Result<()> {
         let mut samples = Vec::new();
         let mut data_offset = 0;
@@ -541,6 +571,7 @@ impl HybridMp4Writer {
         }
 
         self.file.flush()?;
+        self.stats.add_recovery_moov_update();
 
         Ok(())
     }
@@ -1222,6 +1253,55 @@ mod tests {
             writer.fragment_audio_samples[0].data_size,
             first.data.len()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_recovery_guarantee_stops_at_last_flushed_fragment() -> crate::Result<()> {
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+
+        let first = AudioFrame {
+            timestamp: Duration::ZERO,
+            ..make_audio_frame(Some(crate::audio::aac::create_mp4a_sample_entry(
+                &[0x12, 0x10],
+                SampleRate::HZ_48000,
+                Channels::STEREO,
+            )?))
+        };
+        let second = AudioFrame {
+            timestamp: DEFAULT_SAMPLE_DURATION,
+            ..make_audio_frame(None)
+        };
+        let third = AudioFrame {
+            timestamp: DEFAULT_SAMPLE_DURATION.saturating_mul(2),
+            ..make_audio_frame(None)
+        };
+
+        writer.pending_audio_sample = Some(Arc::new(first));
+        writer.input_audio_queue.push_back(Arc::new(second));
+        writer.process_next_audio_sample()?;
+        writer.flush_fragment()?;
+
+        assert_eq!(writer.stats().total_flushed_fragment_count(), 1);
+        assert_eq!(
+            writer.stats().recoverable_media_duration(),
+            DEFAULT_SAMPLE_DURATION
+        );
+        assert_eq!(writer.stats().current_unflushed_fragment_duration(), Duration::ZERO);
+
+        writer.input_audio_queue.push_back(Arc::new(third));
+        writer.process_next_audio_sample()?;
+
+        assert_eq!(
+            writer.stats().recoverable_media_duration(),
+            DEFAULT_SAMPLE_DURATION
+        );
+        assert_eq!(
+            writer.stats().current_unflushed_fragment_duration(),
+            DEFAULT_SAMPLE_DURATION
+        );
+        assert_eq!(writer.stats().current_unflushed_audio_sample_count(), 1);
+        assert_eq!(writer.current_duration(), DEFAULT_SAMPLE_DURATION.saturating_mul(2));
         Ok(())
     }
 }

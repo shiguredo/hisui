@@ -75,6 +75,12 @@ pub struct Mp4WriterStats {
     video_codec: crate::stats::StatsString,
     reserved_moov_box_size: crate::stats::StatsGauge,
     actual_moov_box_size: crate::stats::StatsGauge,
+    total_flushed_fragment_count: crate::stats::StatsCounter,
+    total_recovery_moov_update_count: crate::stats::StatsCounter,
+    recoverable_media_duration: crate::stats::StatsDuration,
+    current_unflushed_fragment_duration: crate::stats::StatsDuration,
+    current_unflushed_video_sample_count: crate::stats::StatsGauge,
+    current_unflushed_audio_sample_count: crate::stats::StatsGauge,
     total_audio_chunk_count: crate::stats::StatsGauge,
     total_video_chunk_count: crate::stats::StatsGauge,
     total_audio_sample_count: crate::stats::StatsCounter,
@@ -97,6 +103,12 @@ impl Mp4WriterStats {
         let reserved_moov_box_size_metric = stats.gauge("reserved_moov_box_size");
         reserved_moov_box_size_metric.set(reserved_moov_box_size as i64);
         let actual_moov_box_size = stats.gauge("actual_moov_box_size");
+        let total_flushed_fragment_count = stats.counter("total_flushed_fragment_count");
+        let total_recovery_moov_update_count = stats.counter("total_recovery_moov_update_count");
+        let recoverable_media_duration = stats.duration("recoverable_media_seconds");
+        let current_unflushed_fragment_duration = stats.duration("current_unflushed_fragment_seconds");
+        let current_unflushed_video_sample_count = stats.gauge("current_unflushed_video_sample_count");
+        let current_unflushed_audio_sample_count = stats.gauge("current_unflushed_audio_sample_count");
         let total_audio_chunk_count = stats.gauge("total_audio_chunk_count");
         let total_video_chunk_count = stats.gauge("total_video_chunk_count");
         let video_codec = stats.string("video_codec");
@@ -122,6 +134,12 @@ impl Mp4WriterStats {
             video_codec,
             reserved_moov_box_size: reserved_moov_box_size_metric,
             actual_moov_box_size,
+            total_flushed_fragment_count,
+            total_recovery_moov_update_count,
+            recoverable_media_duration,
+            current_unflushed_fragment_duration,
+            current_unflushed_video_sample_count,
+            current_unflushed_audio_sample_count,
             total_audio_chunk_count,
             total_video_chunk_count,
             total_audio_sample_count,
@@ -146,6 +164,30 @@ impl Mp4WriterStats {
 
     pub(crate) fn set_actual_moov_box_size(&self, size: u64) {
         self.actual_moov_box_size.set(size as i64);
+    }
+
+    pub(crate) fn add_flushed_fragment(&self) {
+        self.total_flushed_fragment_count.inc();
+    }
+
+    pub(crate) fn add_recovery_moov_update(&self) {
+        self.total_recovery_moov_update_count.inc();
+    }
+
+    pub(crate) fn set_recoverable_media_duration(&self, duration: Duration) {
+        self.recoverable_media_duration.set(duration);
+    }
+
+    pub(crate) fn set_current_unflushed_fragment_duration(&self, duration: Duration) {
+        self.current_unflushed_fragment_duration.set(duration);
+    }
+
+    pub(crate) fn set_current_unflushed_video_sample_count(&self, count: u64) {
+        self.current_unflushed_video_sample_count.set(count as i64);
+    }
+
+    pub(crate) fn set_current_unflushed_audio_sample_count(&self, count: u64) {
+        self.current_unflushed_audio_sample_count.set(count as i64);
     }
 
     pub(crate) fn set_total_audio_chunk_count(&self, count: u64) {
@@ -214,6 +256,30 @@ impl Mp4WriterStats {
 
     pub fn actual_moov_box_size(&self) -> u64 {
         self.actual_moov_box_size.get().max(0) as u64
+    }
+
+    pub fn total_flushed_fragment_count(&self) -> u64 {
+        self.total_flushed_fragment_count.get()
+    }
+
+    pub fn total_recovery_moov_update_count(&self) -> u64 {
+        self.total_recovery_moov_update_count.get()
+    }
+
+    pub fn recoverable_media_duration(&self) -> Duration {
+        self.recoverable_media_duration.get()
+    }
+
+    pub fn current_unflushed_fragment_duration(&self) -> Duration {
+        self.current_unflushed_fragment_duration.get()
+    }
+
+    pub fn current_unflushed_video_sample_count(&self) -> u64 {
+        self.current_unflushed_video_sample_count.get().max(0) as u64
+    }
+
+    pub fn current_unflushed_audio_sample_count(&self) -> u64 {
+        self.current_unflushed_audio_sample_count.get().max(0) as u64
     }
 
     pub fn total_audio_chunk_count(&self) -> u64 {
