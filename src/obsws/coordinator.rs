@@ -77,6 +77,11 @@ pub enum ObswsCoordinatorCommand {
         input_name: String,
         reply_tx: tokio::sync::oneshot::Sender<Option<ResolvedInputInfo>>,
     },
+    #[cfg(feature = "player")]
+    /// player のライフサイクルイベントを処理する
+    HandlePlayerLifecycleEvent {
+        event: crate::obsws::player::PlayerLifecycleEvent,
+    },
 }
 
 /// inputName から解決した input 情報
@@ -276,13 +281,17 @@ impl ObswsCoordinator {
                             let info = self.resolve_input_by_name(&input_name);
                             let _ = reply_tx.send(info);
                         }
+                        #[cfg(feature = "player")]
+                        ObswsCoordinatorCommand::HandlePlayerLifecycleEvent { event } => {
+                            self.handle_player_lifecycle_event(event);
+                        }
                     }
-                }
+                },
                 event = self.sora_source_event_rx.recv() => {
                     if let Some(event) = event {
                         self.handle_sora_source_event(event);
                     }
-                }
+                },
             }
 
             // state file 保存失敗等の致命的エラーが発生した場合はループを抜ける。
@@ -293,6 +302,18 @@ impl ObswsCoordinator {
                 );
                 let _ = self.shutdown_tx.send(true);
                 return;
+            }
+        }
+    }
+
+    #[cfg(feature = "player")]
+    fn handle_player_lifecycle_event(&mut self, event: crate::obsws::player::PlayerLifecycleEvent) {
+        match event {
+            crate::obsws::player::PlayerLifecycleEvent::Stopped => {
+                if let Some(handle) = self.player_subscriber_handle.take() {
+                    handle.abort();
+                }
+                self.input_registry.deactivate_player();
             }
         }
     }

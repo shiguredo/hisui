@@ -10,7 +10,7 @@ impl ObswsCoordinator {
         request_type: &str,
         request_id: &str,
     ) -> OutputOperationOutcome {
-        if let Err(()) = self.input_registry.activate_player() {
+        if self.input_registry.is_player_active() {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -23,32 +23,9 @@ impl ObswsCoordinator {
 
         let canvas_width = self.input_registry.canvas_width().get() as i32;
         let canvas_height = self.input_registry.canvas_height().get() as i32;
-
-        // メインスレッドにウィンドウ作成を指示する
-        if self
-            .player_command_tx
-            .send(crate::obsws::player::PlayerCommand::Start {
-                canvas_width,
-                canvas_height,
-            })
-            .is_err()
-        {
-            self.input_registry.deactivate_player();
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    "Player control channel is closed",
-                ),
-            );
-        }
-
-        // フレーム転送タスクを起動する
         let pipeline_handle = match self.pipeline_handle.as_ref() {
             Some(h) => h.clone(),
             None => {
-                self.input_registry.deactivate_player();
                 return OutputOperationOutcome::failure(
                     crate::obsws::response::build_request_response_error(
                         request_type,
@@ -59,6 +36,65 @@ impl ObswsCoordinator {
                 );
             }
         };
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+
+        // メインスレッドにウィンドウ作成を指示する
+        if self
+            .player_command_tx
+            .send(crate::obsws::player::PlayerCommand::Start {
+                canvas_width,
+                canvas_height,
+                reply_tx,
+            })
+            .is_err()
+        {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    "Player control channel is closed",
+                ),
+            );
+        }
+
+        match reply_rx.await {
+            Ok(Ok(())) => {}
+            Ok(Err(message)) => {
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        &message,
+                    ),
+                );
+            }
+            Err(_) => {
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        "Player startup reply channel is closed",
+                    ),
+                );
+            }
+        }
+
+        if let Err(()) = self.input_registry.activate_player() {
+            let _ = self
+                .player_command_tx
+                .send(crate::obsws::player::PlayerCommand::Stop);
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    "Player is already running",
+                ),
+            );
+        }
 
         let video_track_id = self.program_output.video_track_id.clone();
         let audio_track_id = self.program_output.audio_track_id.clone();

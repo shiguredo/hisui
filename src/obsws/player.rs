@@ -3,9 +3,16 @@ pub enum PlayerCommand {
     Start {
         canvas_width: i32,
         canvas_height: i32,
+        reply_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     Stop,
     Terminate,
+}
+
+/// player のライフサイクルイベント
+#[derive(Debug)]
+pub enum PlayerLifecycleEvent {
+    Stopped,
 }
 
 /// メインスレッド（SDL）に渡すメディアデータ

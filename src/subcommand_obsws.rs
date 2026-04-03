@@ -181,6 +181,8 @@ fn run_internal(
             std::sync::mpsc::sync_channel::<crate::obsws::player::PlayerCommand>(4);
         let (media_tx, media_rx) =
             std::sync::mpsc::sync_channel::<crate::obsws::player::PlayerMediaMessage>(8);
+        let (lifecycle_tx, lifecycle_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::obsws::player::PlayerLifecycleEvent>();
 
         let runtime_thread = std::thread::Builder::new()
             .name("hisui-tokio-main".to_owned())
@@ -204,13 +206,15 @@ fn run_internal(
                             command_tx,
                             #[cfg(feature = "player")]
                             media_tx,
+                            #[cfg(feature = "player")]
+                            lifecycle_rx,
                         ))
                         .await
                 })
             })
             .map_err(|e| crate::Error::new(format!("failed to spawn runtime thread: {e}")))?;
 
-        run_player_control_loop(command_rx, media_rx);
+        run_player_control_loop(command_rx, media_rx, lifecycle_tx);
 
         return runtime_thread
             .join()
@@ -247,8 +251,9 @@ fn run_internal(
 fn run_player_control_loop(
     command_rx: std::sync::mpsc::Receiver<crate::obsws::player::PlayerCommand>,
     media_rx: std::sync::mpsc::Receiver<crate::obsws::player::PlayerMediaMessage>,
+    lifecycle_tx: tokio::sync::mpsc::UnboundedSender<crate::obsws::player::PlayerLifecycleEvent>,
 ) {
-    use crate::obsws::player::{PlayerCommand, PlayerMediaMessage};
+    use crate::obsws::player::{PlayerCommand, PlayerLifecycleEvent, PlayerMediaMessage};
 
     // チャネルが閉じたら（= tokio ランタイムが終了したら）ループ終了
     while let Ok(command) = command_rx.recv() {
@@ -256,8 +261,10 @@ fn run_player_control_loop(
             PlayerCommand::Start {
                 canvas_width,
                 canvas_height,
+                reply_tx,
             } => {
                 if let Err(e) = raw_player::init() {
+                    let _ = reply_tx.send(Err(format!("Failed to initialize player: {e}")));
                     tracing::error!("failed to init raw_player: {e}");
                     continue;
                 }
@@ -265,6 +272,8 @@ fn run_player_control_loop(
                     match raw_player::VideoPlayer::new(canvas_width, canvas_height, "hisui") {
                         Ok(p) => p,
                         Err(e) => {
+                            let _ =
+                                reply_tx.send(Err(format!("Failed to create player window: {e}")));
                             tracing::error!("failed to create raw_player window: {e}");
                             // SAFETY: SDL リソース（player）は直前で close 済みのため安全
                             unsafe { raw_player::quit() };
@@ -272,12 +281,14 @@ fn run_player_control_loop(
                         }
                     };
                 if let Err(e) = player.play() {
+                    let _ = reply_tx.send(Err(format!("Failed to start player playback: {e}")));
                     tracing::error!("failed to start raw_player playback: {e}");
                     player.close();
                     // SAFETY: SDL リソース（player）は直前で close 済みのため安全
                     unsafe { raw_player::quit() };
                     continue;
                 }
+                let _ = reply_tx.send(Ok(()));
 
                 // フレーム受信 + SDL イベントループ
                 'frame_loop: loop {
@@ -339,6 +350,7 @@ fn run_player_control_loop(
                 player.close();
                 // SAFETY: SDL リソース（player）は直前で close 済みのため安全
                 unsafe { raw_player::quit() };
+                let _ = lifecycle_tx.send(PlayerLifecycleEvent::Stopped);
 
                 // メディアチャネルに残っているフレームを破棄する
                 while media_rx.try_recv().is_ok() {}
