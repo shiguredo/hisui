@@ -658,6 +658,37 @@ pub(crate) async fn live_processor_ids(
         .collect()
 }
 
+/// ビデオエンコーダーとオーディオエンコーダーのプロセッサを起動する。
+/// 各 output エンジン（record / stream / rtmp_outbound）で共通のエンコーダー起動処理。
+pub(crate) async fn start_encoder_processors(
+    pipeline_handle: &crate::MediaPipelineHandle,
+    video: &crate::obsws::input_registry::ObswsRecordTrackRun,
+    audio: &crate::obsws::input_registry::ObswsRecordTrackRun,
+    audio_codec: crate::types::CodecName,
+    frame_rate: crate::video::FrameRate,
+) -> crate::Result<()> {
+    crate::encoder::create_video_processor(
+        pipeline_handle,
+        video.source_track_id.clone(),
+        video.encoded_track_id.clone(),
+        crate::types::CodecName::H264,
+        std::num::NonZeroUsize::new(2_000_000).expect("non-zero constant"),
+        frame_rate,
+        Some(video.encoder_processor_id.clone()),
+    )
+    .await?;
+    crate::encoder::create_audio_processor(
+        pipeline_handle,
+        audio.source_track_id.clone(),
+        audio.encoded_track_id.clone(),
+        audio_codec,
+        std::num::NonZeroUsize::new(128_000).expect("non-zero constant"),
+        Some(audio.encoder_processor_id.clone()),
+    )
+    .await?;
+    Ok(())
+}
+
 /// S3 クライアントを構築する
 pub(crate) fn build_s3_client(
     region: &str,

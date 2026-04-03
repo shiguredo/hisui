@@ -147,24 +147,13 @@ async fn start_rtmp_outbound_processors(
     run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
-    crate::encoder::create_video_processor(
-        pipeline_handle,
-        run.video.source_track_id.clone(),
-        run.video.encoded_track_id.clone(),
-        crate::types::CodecName::H264,
-        std::num::NonZeroUsize::new(2_000_000).expect("non-zero constant"),
-        frame_rate,
-        Some(run.video.encoder_processor_id.clone()),
-    )
-    .await?;
     // RTMP outbound は AAC エンコーディングを使用する（RTMP の制約）
-    crate::encoder::create_audio_processor(
+    super::output::start_encoder_processors(
         pipeline_handle,
-        run.audio.source_track_id.clone(),
-        run.audio.encoded_track_id.clone(),
+        &run.video,
+        &run.audio,
         crate::types::CodecName::Aac,
-        std::num::NonZeroUsize::new(128_000).expect("non-zero constant"),
-        Some(run.audio.encoder_processor_id.clone()),
+        frame_rate,
     )
     .await?;
     let endpoint = crate::rtmp::outbound_endpoint::RtmpOutboundEndpoint {
