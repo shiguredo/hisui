@@ -198,7 +198,9 @@
   - @sile
 - [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
   - @sile
-- [UPDATE] shiguredo_video_device のバージョンを 2026.1.0-canary.3 にあげる
+- [UPDATE] nojson のバージョンを 0.3.10 にあげる
+  - @sile
+- [UPDATE] shiguredo_video_device のバージョンを 2026.1.0-canary.5 にあげる
   - @sile
 - [ADD] 内部用に VideoDeviceSource 構造体を追加する
   - Video Device からの読み込みと I420 への変換を行い、映像トラックに出力する
