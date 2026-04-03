@@ -218,11 +218,14 @@ impl shiguredo_webrtc::VideoSinkHandler for VideoFrameSinkHandler {
         let width = frame.width() as u32;
         let height = frame.height() as u32;
         let timestamp_us = frame.timestamp_us();
-        let buffer = frame.buffer();
+        let mut buffer = frame.buffer();
+        let Some(i420) = buffer.to_i420() else {
+            return;
+        };
 
-        let y = buffer.y_data().to_vec();
-        let u = buffer.u_data().to_vec();
-        let v = buffer.v_data().to_vec();
+        let y = i420.y_data().to_vec();
+        let u = i420.u_data().to_vec();
+        let v = i420.v_data().to_vec();
 
         // 満杯時はドロップ（backpressure）
         let _ = self.frame_tx.try_send(RawI420Frame {

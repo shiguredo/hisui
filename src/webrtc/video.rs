@@ -30,24 +30,24 @@ pub(crate) fn push_i420_frame(
     let (y_plane, rest) = frame.data.split_at(y_size);
     let (u_plane, v_plane) = rest.split_at(uv_size);
 
-    let buffer = shiguredo_webrtc::I420Buffer::new(width as i32, height as i32);
+    let mut buffer = shiguredo_webrtc::I420Buffer::new(width as i32, height as i32);
     unsafe {
         copy_plane(
-            buffer.y_data().as_ptr() as *mut u8,
+            buffer.y_data_mut().as_mut_ptr(),
             buffer.stride_y() as usize,
             y_plane,
             width,
             height,
         );
         copy_plane(
-            buffer.u_data().as_ptr() as *mut u8,
+            buffer.u_data_mut().as_mut_ptr(),
             buffer.stride_u() as usize,
             u_plane,
             uv_width,
             uv_height,
         );
         copy_plane(
-            buffer.v_data().as_ptr() as *mut u8,
+            buffer.v_data_mut().as_mut_ptr(),
             buffer.stride_v() as usize,
             v_plane,
             uv_width,
@@ -57,7 +57,11 @@ pub(crate) fn push_i420_frame(
 
     let translated_timestamp_us =
         timestamp_aligner.translate(timestamp_us, shiguredo_webrtc::time_millis() * 1000);
-    let webrtc_frame = shiguredo_webrtc::VideoFrame::from_i420(&buffer, translated_timestamp_us, 0);
+    let frame_buffer = buffer.cast_to_video_frame_buffer();
+    let webrtc_frame = shiguredo_webrtc::VideoFrame::builder(&frame_buffer)
+        .set_timestamp_us(translated_timestamp_us)
+        .set_timestamp_rtp(0)
+        .build();
     source.on_frame(&webrtc_frame);
     Ok(())
 }

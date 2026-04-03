@@ -113,17 +113,20 @@ impl VideoSinkHandler for FrameRecordHandler {
         }
 
         // I420 バッファからプレーンデータをコピーする
-        let buffer = frame.buffer();
+        let mut frame_buffer = frame.buffer();
+        let Some(i420) = frame_buffer.to_i420() else {
+            return;
+        };
         let data = VideoFrameData {
             track_id: self.track_id.clone(),
-            y: buffer.y_data().to_vec(),
-            u: buffer.u_data().to_vec(),
-            v: buffer.v_data().to_vec(),
+            y: i420.y_data().to_vec(),
+            u: i420.u_data().to_vec(),
+            v: i420.v_data().to_vec(),
             width: w,
             height: h,
-            stride_y: buffer.stride_y() as usize,
-            stride_u: buffer.stride_u() as usize,
-            stride_v: buffer.stride_v() as usize,
+            stride_y: i420.stride_y() as usize,
+            stride_u: i420.stride_u() as usize,
+            stride_v: i420.stride_v() as usize,
             timestamp_us: frame.timestamp_us(),
         };
         // バッファがいっぱいの場合はフレームを捨てる

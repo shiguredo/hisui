@@ -59,12 +59,17 @@ pub async fn send_frames_task(
         }
 
         let mut buffer = I420Buffer::new(width, height);
-        buffer.fill_y(y_val);
-        buffer.fill_uv(u_val, v_val);
+        buffer.y_data_mut().fill(y_val);
+        buffer.u_data_mut().fill(u_val);
+        buffer.v_data_mut().fill(v_val);
 
         let timestamp_us = shiguredo_webrtc::time_millis() * 1000;
         let translated = aligner.translate(timestamp_us, timestamp_us);
-        let frame = VideoFrame::from_i420(&buffer, translated, 0);
+        let frame_buffer = buffer.cast_to_video_frame_buffer();
+        let frame = VideoFrame::builder(&frame_buffer)
+            .set_timestamp_us(translated)
+            .set_timestamp_rtp(0)
+            .build();
         source.on_frame(&frame);
     }
 }
