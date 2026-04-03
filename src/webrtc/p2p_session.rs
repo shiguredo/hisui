@@ -361,7 +361,7 @@ impl WebRtcP2pSessionManager {
         handle: crate::MediaPipelineHandle,
         coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
     ) -> crate::Result<Self> {
-        #[allow(clippy::arc_with_non_send_sync)]
+        #[expect(clippy::arc_with_non_send_sync)]
         let factory_bundle = Arc::new(super::factory::WebRtcFactoryBundle::new()?);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<PcEvent>();
         let session: Arc<tokio::sync::Mutex<Option<Session>>> =

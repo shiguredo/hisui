@@ -574,8 +574,9 @@ impl HlsWriter {
                 let pts = duration_to_timestamp(frame.timestamp)?;
                 write_pes_packets_mpegts(
                     state,
-                    Pid::new(VIDEO_PID).unwrap(),
-                    StreamId::new_video(StreamId::VIDEO_MIN).unwrap(),
+                    Pid::new(VIDEO_PID).expect("VIDEO_PID is a valid PID"),
+                    StreamId::new_video(StreamId::VIDEO_MIN)
+                        .expect("VIDEO_MIN is a valid video stream ID"),
                     &annexb_data,
                     Some(pts),
                     true,
@@ -672,7 +673,7 @@ impl HlsWriter {
                 let pts = duration_to_timestamp(frame.timestamp)?;
                 write_pes_packets_mpegts(
                     state,
-                    Pid::new(AUDIO_PID).unwrap(),
+                    Pid::new(AUDIO_PID).expect("AUDIO_PID is a valid PID"),
                     StreamId::new(StreamId::AUDIO_MIN),
                     &adts_data,
                     Some(pts),
@@ -954,7 +955,7 @@ fn write_pat<W: Write>(
             version_number: VersionNumber::new(),
             table: vec![ProgramAssociation {
                 program_num: 1,
-                program_map_pid: Pid::new(PMT_PID).unwrap(),
+                program_map_pid: Pid::new(PMT_PID).expect("PMT_PID is a valid PID"),
             }],
         })),
     };
@@ -974,25 +975,25 @@ fn write_pmt<W: Write>(
         header: TsHeader {
             transport_error_indicator: false,
             transport_priority: false,
-            pid: Pid::new(PMT_PID).unwrap(),
+            pid: Pid::new(PMT_PID).expect("PMT_PID is a valid PID"),
             transport_scrambling_control: TransportScramblingControl::NotScrambled,
             continuity_counter: cc,
         },
         adaptation_field: None,
         payload: Some(TsPayload::Pmt(Pmt {
             program_num: 1,
-            pcr_pid: Some(Pid::new(VIDEO_PID).unwrap()),
+            pcr_pid: Some(Pid::new(VIDEO_PID).expect("VIDEO_PID is a valid PID")),
             version_number: VersionNumber::new(),
             program_info: vec![],
             es_info: vec![
                 EsInfo {
                     stream_type: StreamType::H264,
-                    elementary_pid: Pid::new(VIDEO_PID).unwrap(),
+                    elementary_pid: Pid::new(VIDEO_PID).expect("VIDEO_PID is a valid PID"),
                     descriptors: vec![],
                 },
                 EsInfo {
                     stream_type: StreamType::AdtsAac,
-                    elementary_pid: Pid::new(AUDIO_PID).unwrap(),
+                    elementary_pid: Pid::new(AUDIO_PID).expect("AUDIO_PID is a valid PID"),
                     descriptors: vec![],
                 },
             ],

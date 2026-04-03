@@ -112,8 +112,8 @@ impl ObswsInputRegistry {
     pub fn new_for_test() -> Self {
         Self::new(
             PathBuf::from("recordings-for-test"),
-            crate::types::EvenUsize::new(1920).unwrap(),
-            crate::types::EvenUsize::new(1080).unwrap(),
+            crate::types::EvenUsize::new(1920).expect("1920 is even"),
+            crate::types::EvenUsize::new(1080).expect("1080 is even"),
             crate::video::FrameRate::FPS_30,
             None,
         )

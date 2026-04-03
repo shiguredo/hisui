@@ -22,7 +22,10 @@ impl SharedAudioState {
             return Ok(());
         }
 
-        let guard = self.transport.lock().unwrap();
+        let guard = self
+            .transport
+            .lock()
+            .expect("transport mutex is not poisoned");
         let Some(transport) = guard.as_ref() else {
             return Ok(());
         };
@@ -73,7 +76,11 @@ impl HisuiAudioDeviceModuleHandler {
 
 impl AudioDeviceModuleHandler for HisuiAudioDeviceModuleHandler {
     fn register_audio_callback(&self, audio_transport: Option<AudioTransportRef>) -> i32 {
-        let mut guard = self.state.transport.lock().unwrap();
+        let mut guard = self
+            .state
+            .transport
+            .lock()
+            .expect("transport mutex is not poisoned");
         *guard = audio_transport;
         0
     }
