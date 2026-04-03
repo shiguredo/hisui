@@ -1096,9 +1096,9 @@ checksum = "33c686e9773e36ea91141a001ae4c3140b992b7e1d56b2c414fba547cd396e46"
 
 [[package]]
 name = "shiguredo_mp4"
-version = "2026.2.0"
+version = "2026.3.0-canary.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "029f44879b590e0b5e50add084b436a7b740e08b2cc4fee662ed93f1cffddc63"
+checksum = "bfeb49cd7709ad63b68fb78bd72610da8562e1878dffbffa5b9be4ae4ef72a7e"
 
 [[package]]
 name = "shiguredo_mpd"

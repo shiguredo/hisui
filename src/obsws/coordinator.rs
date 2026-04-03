@@ -4177,7 +4177,7 @@ async fn start_record_processors(
         Some(run.audio.encoder_processor_id.clone()),
     )
     .await?;
-    crate::mp4::writer::create_processor(
+    crate::mp4::hybrid_writer::create_processor(
         pipeline_handle,
         output_path.to_path_buf(),
         Some(run.audio.encoded_track_id.clone()),
@@ -4260,24 +4260,38 @@ async fn stop_processors_staged_record(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsRecordRun,
 ) -> crate::Result<()> {
-    // 1. MP4 writer に Finish RPC を送信して finalize を促す
-    finish_mp4_writer_rpc(pipeline_handle, &run.writer_processor_id).await;
-
-    // 2. writer の自然終了を待ち、タイムアウト時は強制停止
-    wait_or_terminate(
-        pipeline_handle,
-        std::slice::from_ref(&run.writer_processor_id),
-        Duration::from_secs(5),
-    )
-    .await?;
-
-    // 3. エンコーダーを停止する
+    // NOTE:
+    // この経路は terminate_processor() ベースで encoder を停止するため、
+    // encoder の inner.finish() / drain を保証しない。
+    // その結果、AAC や遅延出力を持つ video encoder では、
+    // 停止直前の数サンプル / 数フレームが最終 MP4 に含まれない可能性がある。
+    // また、encoder 停止完了直後でも writer 側の購読チャネルには終端付近の
+    // データや Eos が未処理で残りうるが、現状はその時点で Finish RPC を送って
+    // finalize を促すため、それらを読み切る前に末尾の一部を捨てるレースもある。
+    // 現時点では StopRecord の応答性と実装単純性を優先し、この挙動を許容する。
+    //
+    // NOTE:
+    // writer に Finish を送るのと同時に encoder へ非同期 finish RPC を送る方式は採用しない。
+    // writer 側の Finish は入力トラックを即座に閉じるため、
+    // encoder の drain 完了前に writer が finalize へ進み、かえって末尾欠損を固定化しうる。
+    // 1. エンコーダーを停止して writer へ EOS を流す
     terminate_and_wait(
         pipeline_handle,
         &[
             run.video.encoder_processor_id.clone(),
             run.audio.encoder_processor_id.clone(),
         ],
+    )
+    .await?;
+
+    // 2. 上流が止まった時点で writer に finalize を促す
+    finish_mp4_writer_rpc(pipeline_handle, &run.writer_processor_id).await;
+
+    // 3. writer の自然終了を待ち、タイムアウト時は強制停止
+    wait_or_terminate(
+        pipeline_handle,
+        std::slice::from_ref(&run.writer_processor_id),
+        Duration::from_secs(5),
     )
     .await?;
 

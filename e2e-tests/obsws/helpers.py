@@ -145,6 +145,19 @@ class ObswsServer:
         self._stderr = stderr
         self._process = None
 
+    def kill(self):
+        """SIGKILL でプロセスを強制停止する"""
+        process = self._process
+        if process is None:
+            return
+        if process.poll() is None:
+            process.send_signal(signal.SIGKILL)
+            process.wait(timeout=5.0)
+        stdout, stderr = process.communicate(timeout=1.0)
+        self._stdout = stdout
+        self._stderr = stderr
+        self._process = None
+
     def _wait_until_listening(self, timeout: float = 10.0):
         deadline = time.time() + timeout
         while time.time() < deadline:

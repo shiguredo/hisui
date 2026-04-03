@@ -136,6 +136,13 @@ impl From<shiguredo_mp4::mux::MuxError> for Error {
     }
 }
 
+impl From<shiguredo_mp4::Error> for Error {
+    #[track_caller]
+    fn from(e: shiguredo_mp4::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
 impl From<std::num::ParseIntError> for Error {
     #[track_caller]
     fn from(e: std::num::ParseIntError) -> Self {
