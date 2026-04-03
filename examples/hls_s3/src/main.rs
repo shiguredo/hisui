@@ -188,6 +188,46 @@ fn make_stop_output_request() -> (String, String) {
     (request_id, msg)
 }
 
+fn make_start_player_request() -> (String, String) {
+    let request_id = next_request_id();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StartOutput")?;
+                f.member("requestId", request_id.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| f.member("outputName", "player")),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
+fn make_stop_player_request() -> (String, String) {
+    let request_id = next_request_id();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StopOutput")?;
+                f.member("requestId", request_id.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| f.member("outputName", "player")),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
 fn make_get_output_status_request() -> (String, String) {
     let request_id = next_request_id();
     let msg = nojson::object(|f| {
@@ -410,6 +450,10 @@ fn main() -> noargs::Result<()> {
         .doc("セグメントフォーマット (mpegts / fmp4)")
         .take(&mut args)
         .then(|o| o.value().parse())?;
+    let player = noargs::flag("player")
+        .doc("player output を起動してウィンドウ表示する")
+        .take(&mut args)
+        .is_present();
 
     args.finish()?;
 
@@ -442,7 +486,7 @@ fn main() -> noargs::Result<()> {
         .build()
         .expect("failed to build tokio runtime");
 
-    let result = runtime.block_on(run(&host, port, &input_mp4_path, &s3));
+    let result = runtime.block_on(run(&host, port, &input_mp4_path, &s3, player));
 
     match result {
         Ok(()) => Ok(()),
@@ -453,7 +497,13 @@ fn main() -> noargs::Result<()> {
     }
 }
 
-async fn run(host: &str, port: u16, input_mp4_path: &str, s3: &S3Params) -> Result<(), String> {
+async fn run(
+    host: &str,
+    port: u16,
+    input_mp4_path: &str,
+    s3: &S3Params,
+    player: bool,
+) -> Result<(), String> {
     // TCP 接続
     let addr = format!("{host}:{port}");
     let mut stream = TcpStream::connect(&addr)
@@ -522,7 +572,15 @@ async fn run(host: &str, port: u16, input_mp4_path: &str, s3: &S3Params) -> Resu
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("SetOutputSettings succeeded");
 
-    // 3. StartOutput: HLS 出力開始
+    // 3. StartOutput: player 表示開始（オプション）
+    if player {
+        let (req_id, msg) = make_start_player_request();
+        tracing::info!("StartOutput (player) requested");
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+        tracing::info!("player output started");
+    }
+
+    // 4. StartOutput: HLS 出力開始
     let (req_id, msg) = make_start_output_request();
     tracing::info!("StartOutput requested");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
@@ -539,11 +597,19 @@ async fn run(host: &str, port: u16, input_mp4_path: &str, s3: &S3Params) -> Resu
         .await
         .map_err(|e| format!("failed to wait for Ctrl+C: {e}"))?;
 
-    // 5. StopOutput: HLS 出力停止
+    // 6. StopOutput: HLS 出力停止
     let (req_id, msg) = make_stop_output_request();
     tracing::info!("StopOutput requested");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("HLS S3 output stopped");
+
+    // 7. StopOutput: player 表示停止（オプション）
+    if player {
+        let (req_id, msg) = make_stop_player_request();
+        tracing::info!("StopOutput (player) requested");
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+        tracing::info!("player output stopped");
+    }
 
     // WebSocket を閉じる
     let _ = ws.close(shiguredo_websocket::CloseCode::NORMAL, "bye");

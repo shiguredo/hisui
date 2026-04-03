@@ -173,6 +173,46 @@ fn make_stop_output_request() -> (String, String) {
     (request_id, msg)
 }
 
+fn make_start_player_request() -> (String, String) {
+    let request_id = next_request_id();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StartOutput")?;
+                f.member("requestId", request_id.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| f.member("outputName", "player")),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
+fn make_stop_player_request() -> (String, String) {
+    let request_id = next_request_id();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StopOutput")?;
+                f.member("requestId", request_id.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| f.member("outputName", "player")),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
 // --- obsws レスポンスパース ---
 
 /// op=7 のレスポンスから requestId と成否を取得する。
@@ -331,6 +371,10 @@ fn main() -> noargs::Result<()> {
         .doc("Sora チャネル ID")
         .take(&mut args)
         .then(|o| o.value().parse())?;
+    let player = noargs::flag("player")
+        .doc("player output を起動してウィンドウ表示する")
+        .take(&mut args)
+        .is_present();
 
     args.finish()?;
 
@@ -358,6 +402,7 @@ fn main() -> noargs::Result<()> {
         &input_mp4_path,
         &signaling_url,
         &channel_id,
+        player,
     ));
 
     match result {
@@ -375,6 +420,7 @@ async fn run(
     input_mp4_path: &str,
     signaling_url: &str,
     channel_id: &str,
+    player: bool,
 ) -> Result<(), String> {
     // TCP 接続
     let addr = format!("{host}:{port}");
@@ -439,7 +485,15 @@ async fn run(
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("SetOutputSettings 成功");
 
-    // 3. StartOutput: Sora 配信開始
+    // 3. StartOutput: player 表示開始（オプション）
+    if player {
+        let (req_id, msg) = make_start_player_request();
+        tracing::info!("StartOutput (player) 送信");
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+        tracing::info!("player 表示開始");
+    }
+
+    // 4. StartOutput: Sora 配信開始
     let (req_id, msg) = make_start_output_request();
     tracing::info!("StartOutput 送信");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
@@ -451,11 +505,19 @@ async fn run(
         .await
         .map_err(|e| format!("failed to wait for Ctrl+C: {e}"))?;
 
-    // 4. StopOutput: Sora 配信停止
+    // 5. StopOutput: Sora 配信停止
     let (req_id, msg) = make_stop_output_request();
     tracing::info!("StopOutput 送信");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("Sora 配信停止");
+
+    // 6. StopOutput: player 表示停止（オプション）
+    if player {
+        let (req_id, msg) = make_stop_player_request();
+        tracing::info!("StopOutput (player) 送信");
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+        tracing::info!("player 表示停止");
+    }
 
     // WebSocket を閉じる
     let _ = ws.close(shiguredo_websocket::CloseCode::NORMAL, "bye");
