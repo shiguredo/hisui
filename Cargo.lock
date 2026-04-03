@@ -1096,9 +1096,9 @@ checksum = "33c686e9773e36ea91141a001ae4c3140b992b7e1d56b2c414fba547cd396e46"
 
 [[package]]
 name = "shiguredo_mp4"
-version = "2026.3.0-canary.0"
+version = "2026.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfeb49cd7709ad63b68fb78bd72610da8562e1878dffbffa5b9be4ae4ef72a7e"
+checksum = "b135058874815f8f13edae644ceedb659f7238fe4a9e2b1bdceecc72dc659b35"
 
 [[package]]
 name = "shiguredo_mpd"
@@ -1220,9 +1220,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_webrtc"
-version = "0.146.2-canary.5"
+version = "0.146.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62798ad0c47d528709f6b231165b3da4b289460705daebb8d55d23e2d1fbba68"
+checksum = "bbf2a9ac93fa60dfebac3951a2dbc57a900cb817550ca3e4d1c6c9bb3a73f09a"
 dependencies = [
  "bindgen",
  "nojson",
@@ -1294,9 +1294,9 @@ dependencies = [
 
 [[package]]
 name = "sora_sdk"
-version = "2026.1.0-canary.4"
+version = "2026.1.0-canary.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bff5c32c56aa62727d983b3f42d58aa3ef498115be4ed2ca99689d96b3a7c7a"
+checksum = "9edcbd0bc5fecd0131bdf66e89182b410ba88848aa4b1b992497490a36b49da2"
 dependencies = [
  "aws-lc-rs",
  "flate2",
@@ -1306,6 +1306,7 @@ dependencies = [
  "rustls-platform-verifier",
  "rustls-webpki",
  "shiguredo_http11",
+ "shiguredo_mp4",
  "shiguredo_webrtc",
  "shiguredo_websocket",
  "tokio",

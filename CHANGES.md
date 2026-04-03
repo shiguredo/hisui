@@ -55,7 +55,7 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.4 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.5 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
@@ -79,7 +79,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.146.2-canary.5 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.146.3 を追加する
   - @sile
 - [ADD] 実験的な `obsws` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui obsws` で WebSocket サーバーを起動できる
@@ -146,7 +146,7 @@
 - [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.1.0-canary.0 にあげる
   - このバージョンから shiguredo_audio_toolbox crate のリポジトリが https://github.com/shiguredo/audio-toolbox-rs に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_mp4 のバージョンを 2026.3.0-canary.0 にあげる
+- [UPDATE] shiguredo_mp4 のバージョンを 2026.3.0 にあげる
   - @sile
 - [ADD] FDK-AAC を使った AAC デコードに対応する
   - @sile
