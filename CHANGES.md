@@ -161,6 +161,10 @@
   - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
   - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
+- [CHANGE] ログ出力の時刻形式を UNIX タイムスタンプから ISO 8601 UTC 形式に変更する
+  - ターミナル出力時は severity に応じて行全体を色付けする
+  - `NO_COLOR` 環境変数が設定されている場合は色付けを無効にする
+  - @sile
 - [CHANGE] FDK-AAC を `fdk-aac` feature フラグによるビルド時有効化と、`--fdk-aac` オプションによる実行時の共有ライブラリ指定を併用する方式に変更する
   - @sile
 - [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
