@@ -37,6 +37,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo check --workspace
       - run: cargo clippy --workspace --all-targets -- --deny warnings
+      - run: cargo check --workspace --no-default-features
+      - run: cargo clippy --workspace --no-default-features -- --deny warnings
       - run: cargo test
   test-nvidia-video-codec:
     runs-on:
