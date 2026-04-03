@@ -1,9 +1,7 @@
 use std::{
-    collections::VecDeque,
     fs::File,
     io::{BufWriter, Seek, SeekFrom, Write},
     path::Path,
-    sync::Arc,
     time::Duration,
 };
 
@@ -13,11 +11,11 @@ use shiguredo_mp4::mux::{
 };
 use shiguredo_mp4::{BoxHeader, BoxSize, Encode};
 
-use crate::{TrackId, audio::AudioFrame, media::MediaFrame, video::VideoFrame};
+use crate::{TrackId, audio::AudioFrame, video::VideoFrame};
 
 use super::writer::{
     DEFAULT_SAMPLE_DURATION, InputTrackKind, MAX_CHUNK_DURATION, MAX_INPUT_QUEUE_GAP,
-    Mp4WriterRpcMessage, Mp4WriterStats, TIMESCALE, WriterRunOutput,
+    Mp4WriterRpcMessage, Mp4WriterStats, TIMESCALE, WriterCore, WriterRunOutput,
     recv_mp4_writer_rpc_message_or_pending,
 };
 
@@ -79,22 +77,8 @@ pub struct HybridMp4Writer {
     last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
     last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
 
-    // 既存 Mp4Writer と同じフィールド群
-    input_audio_track_id: Option<TrackId>,
-    input_video_track_id: Option<TrackId>,
-    input_audio_queue: VecDeque<Arc<AudioFrame>>,
-    input_video_queue: VecDeque<Arc<VideoFrame>>,
-    pending_audio_sample: Option<Arc<AudioFrame>>,
-    pending_video_frame: Option<Arc<VideoFrame>>,
-    last_audio_duration: Option<Duration>,
-    last_video_duration: Option<Duration>,
-    paused: bool,
-    resume_waiting_for_keyframe: bool,
-    resume_offset_update_pending: bool,
-    pause_anchor_timestamp: Option<Duration>,
-    timeline_timestamp_offset: Duration,
-    appending_video_chunk: bool,
-    stats: Mp4WriterStats,
+    // Mp4Writer と共有する入力キュー・一時停止管理・統計情報
+    core: WriterCore,
 }
 
 impl HybridMp4Writer {
@@ -183,21 +167,7 @@ impl HybridMp4Writer {
             fragment_accumulated_duration: Duration::ZERO,
             last_audio_sample_entry: None,
             last_video_sample_entry: None,
-            input_audio_track_id,
-            input_video_track_id,
-            input_audio_queue: VecDeque::new(),
-            input_video_queue: VecDeque::new(),
-            pending_audio_sample: None,
-            pending_video_frame: None,
-            last_audio_duration: None,
-            last_video_duration: None,
-            paused: false,
-            resume_waiting_for_keyframe: false,
-            resume_offset_update_pending: false,
-            pause_anchor_timestamp: None,
-            timeline_timestamp_offset: Duration::ZERO,
-            appending_video_chunk: true,
-            stats,
+            core: WriterCore::new(input_audio_track_id, input_video_track_id, stats),
         })
     }
 
@@ -207,92 +177,17 @@ impl HybridMp4Writer {
     /// （最後に flush 済みのフラグメントまで）を表す。
     /// 一方で `current_duration()` は未 flush 区間も含む現在の論理尺を返す。
     pub fn stats(&self) -> &Mp4WriterStats {
-        &self.stats
+        &self.core.stats
     }
 
     /// 現在の論理尺を返す
     ///
     /// この値には未 flush 区間も含まれるため、異常終了時の回復保証範囲とは一致しない。
     pub fn current_duration(&self) -> Duration {
-        self.stats
+        self.core
+            .stats
             .total_audio_track_duration()
-            .max(self.stats.total_video_track_duration())
-    }
-
-    fn pause_recording(&mut self) -> crate::Result<()> {
-        if self.paused {
-            return Err(crate::Error::new("recording is already paused"));
-        }
-        self.paused = true;
-        self.resume_waiting_for_keyframe = false;
-        self.resume_offset_update_pending = false;
-        Ok(())
-    }
-
-    fn resume_recording(&mut self) -> crate::Result<()> {
-        if !self.paused {
-            return Err(crate::Error::new("recording is not paused"));
-        }
-        self.paused = false;
-        self.resume_waiting_for_keyframe = self.input_video_track_id.is_some();
-        self.resume_offset_update_pending = true;
-        Ok(())
-    }
-
-    fn maybe_set_pause_anchor(&mut self, timestamp: Duration) {
-        if self.pause_anchor_timestamp.is_none() {
-            self.pause_anchor_timestamp = Some(timestamp);
-        }
-    }
-
-    fn maybe_apply_pause_offset(&mut self, resume_timestamp: Duration) {
-        if !self.resume_offset_update_pending {
-            return;
-        }
-        if let Some(pause_anchor_timestamp) = self.pause_anchor_timestamp.take() {
-            let paused_duration = resume_timestamp.saturating_sub(pause_anchor_timestamp);
-            self.timeline_timestamp_offset += paused_duration;
-        }
-        self.resume_offset_update_pending = false;
-    }
-
-    fn apply_timestamp_offset(&self, timestamp: Duration) -> Duration {
-        timestamp.saturating_sub(self.timeline_timestamp_offset)
-    }
-
-    fn prepare_audio_for_queue(&mut self, sample: Arc<AudioFrame>) -> Option<Arc<AudioFrame>> {
-        if self.paused {
-            self.maybe_set_pause_anchor(sample.timestamp);
-            return None;
-        }
-        if self.resume_waiting_for_keyframe {
-            self.stats.add_keyframe_wait_dropped_audio_sample();
-            return None;
-        }
-        self.maybe_apply_pause_offset(sample.timestamp);
-        let mut sample = sample.as_ref().clone();
-        sample.timestamp = self.apply_timestamp_offset(sample.timestamp);
-        Some(Arc::new(sample))
-    }
-
-    fn prepare_video_for_queue(&mut self, frame: Arc<VideoFrame>) -> Option<Arc<VideoFrame>> {
-        if self.paused {
-            self.maybe_set_pause_anchor(frame.timestamp);
-            return None;
-        }
-        if self.resume_waiting_for_keyframe {
-            if !frame.keyframe {
-                self.stats.add_keyframe_wait_dropped_video_frame();
-                return None;
-            }
-            self.maybe_apply_pause_offset(frame.timestamp);
-            self.resume_waiting_for_keyframe = false;
-        } else {
-            self.maybe_apply_pause_offset(frame.timestamp);
-        }
-        let mut frame = frame.as_ref().clone();
-        frame.timestamp = self.apply_timestamp_offset(frame.timestamp);
-        Some(Arc::new(frame))
+            .max(self.core.stats.total_video_track_duration())
     }
 
     /// フラグメントにビデオサンプルを追加する
@@ -301,10 +196,10 @@ impl HybridMp4Writer {
         let offset_in_video = self.fragment_video_payload.len() as u64;
         self.fragment_video_payload.extend_from_slice(&frame.data);
 
-        if self.stats.video_codec().is_none()
+        if self.core.stats.video_codec().is_none()
             && let Some(name) = frame.format.codec_name()
         {
-            self.stats.set_video_codec(name);
+            self.core.stats.set_video_codec(name);
         }
 
         if frame.sample_entry.is_some() {
@@ -326,8 +221,8 @@ impl HybridMp4Writer {
                 data_size: frame.data.len(),
             });
 
-        self.stats.add_video_sample(frame.data.len(), duration);
-        self.last_video_duration = Some(duration);
+        self.core.stats.add_video_sample(frame.data.len(), duration);
+        self.core.last_video_duration = Some(duration);
         self.update_fragment_time_range(frame.timestamp, duration);
         self.update_unflushed_fragment_metrics();
     }
@@ -337,10 +232,10 @@ impl HybridMp4Writer {
         let offset_in_audio = self.fragment_audio_payload.len() as u64;
         self.fragment_audio_payload.extend_from_slice(&sample.data);
 
-        if self.stats.audio_codec().is_none()
+        if self.core.stats.audio_codec().is_none()
             && let Some(name) = sample.format.codec_name()
         {
-            self.stats.set_audio_codec(name);
+            self.core.stats.set_audio_codec(name);
         }
 
         if sample.sample_entry.is_some() {
@@ -363,8 +258,10 @@ impl HybridMp4Writer {
                 data_size: sample.data.len(),
             });
 
-        self.stats.add_audio_sample(sample.data.len(), duration);
-        self.last_audio_duration = Some(duration);
+        self.core
+            .stats
+            .add_audio_sample(sample.data.len(), duration);
+        self.core.last_audio_duration = Some(duration);
         self.update_fragment_time_range(sample.timestamp, duration);
         self.update_unflushed_fragment_metrics();
     }
@@ -390,17 +287,21 @@ impl HybridMp4Writer {
     }
 
     fn update_unflushed_fragment_metrics(&self) {
-        self.stats
+        self.core
+            .stats
             .set_current_unflushed_fragment_duration(self.fragment_accumulated_duration);
-        self.stats
+        self.core
+            .stats
             .set_current_unflushed_video_sample_count(self.fragment_video_samples.len() as u64);
-        self.stats
+        self.core
+            .stats
             .set_current_unflushed_audio_sample_count(self.fragment_audio_samples.len() as u64);
     }
 
     fn update_recoverable_media_metrics(&self) {
-        self.stats.add_flushed_fragment();
-        self.stats
+        self.core.stats.add_flushed_fragment();
+        self.core
+            .stats
             .set_recoverable_media_duration(self.current_duration());
     }
 
@@ -492,7 +393,7 @@ impl HybridMp4Writer {
         let mut samples = Vec::new();
         let mut data_offset = 0;
 
-        if let Some(pending) = self.pending_video_frame.as_ref()
+        if let Some(pending) = self.core.pending_video_frame.as_ref()
             && let Some(sample_entry) = pending
                 .sample_entry
                 .clone()
@@ -511,7 +412,7 @@ impl HybridMp4Writer {
             data_offset += pending.data.len() as u64;
         }
 
-        if let Some(pending) = self.pending_audio_sample.as_ref()
+        if let Some(pending) = self.core.pending_audio_sample.as_ref()
             && let Some(sample_entry) = pending
                 .sample_entry
                 .clone()
@@ -598,7 +499,7 @@ impl HybridMp4Writer {
         }
 
         self.file.flush()?;
-        self.stats.add_recovery_moov_update();
+        self.core.stats.add_recovery_moov_update();
 
         Ok(())
     }
@@ -611,7 +512,7 @@ impl HybridMp4Writer {
         // mp4_muxer を finalize して標準 MP4 の moov と更新済み ftyp を取得する
         let finalized = self.mp4_muxer.finalize()?;
         let actual_moov_size = finalized.moov_box_size() as u64;
-        self.stats.set_actual_moov_box_size(actual_moov_size);
+        self.core.stats.set_actual_moov_box_size(actual_moov_size);
 
         let pairs: Vec<_> = finalized.offset_and_bytes_pairs().collect();
 
@@ -667,11 +568,13 @@ impl HybridMp4Writer {
         self.flush_pending_audio_if_ready()?;
         self.flush_pending_video_if_ready()?;
 
-        let audio_timestamp = self.input_audio_queue.front().map(|x| x.timestamp);
-        let video_timestamp = self.input_video_queue.front().map(|x| x.timestamp);
+        let audio_timestamp = self.core.input_audio_queue.front().map(|x| x.timestamp);
+        let video_timestamp = self.core.input_video_queue.front().map(|x| x.timestamp);
         match (audio_timestamp, video_timestamp) {
             (None, None) => {
-                if self.pending_audio_sample.is_some() || self.pending_video_frame.is_some() {
+                if self.core.pending_audio_sample.is_some()
+                    || self.core.pending_video_frame.is_some()
+                {
                     return Ok(true);
                 }
                 // 全入力の処理が完了 → finalize
@@ -685,9 +588,9 @@ impl HybridMp4Writer {
                 self.process_next_audio_sample()?;
             }
             (Some(audio_timestamp), Some(video_timestamp)) => {
-                let should_process_audio = (self.appending_video_chunk
+                let should_process_audio = (self.core.appending_video_chunk
                     && video_timestamp.saturating_sub(audio_timestamp) > MAX_CHUNK_DURATION)
-                    || (!self.appending_video_chunk && video_timestamp > audio_timestamp);
+                    || (!self.core.appending_video_chunk && video_timestamp > audio_timestamp);
                 if should_process_audio {
                     self.process_next_audio_sample()?;
                 } else {
@@ -701,17 +604,18 @@ impl HybridMp4Writer {
 
     fn process_next_video_frame(&mut self) -> crate::Result<()> {
         let frame = self
+            .core
             .input_video_queue
             .pop_front()
             .ok_or_else(|| crate::Error::new("video input queue is unexpectedly empty"))?;
 
         // pending フレームを現在のフラグメントに追加する（flush の前に行うことで
         // GOP の最後のフレームが正しく前のフラグメントに含まれるようにする）
-        if let Some(pending) = self.pending_video_frame.as_ref() {
-            let duration = Self::sample_duration_from_timestamps(
+        if let Some(pending) = self.core.pending_video_frame.as_ref() {
+            let duration = WriterCore::sample_duration_from_timestamps(
                 pending.timestamp,
                 frame.timestamp,
-                self.last_video_duration,
+                self.core.last_video_duration,
             );
             let pending = pending.clone();
             self.append_video_to_fragment(&pending, duration);
@@ -727,8 +631,8 @@ impl HybridMp4Writer {
         // 蓄積時間が閾値を超えた場合もフラッシュする
         self.maybe_flush_fragment_by_duration()?;
 
-        self.pending_video_frame = Some(frame);
-        self.appending_video_chunk = true;
+        self.core.pending_video_frame = Some(frame);
+        self.core.appending_video_chunk = true;
 
         // 最初のサンプルしか届いていない段階でも recovery 用 moov を先行更新する。
         self.maybe_flush_initial_pending()?;
@@ -738,23 +642,24 @@ impl HybridMp4Writer {
 
     fn process_next_audio_sample(&mut self) -> crate::Result<()> {
         let data = self
+            .core
             .input_audio_queue
             .pop_front()
             .ok_or_else(|| crate::Error::new("audio input queue is unexpectedly empty"))?;
 
-        if let Some(pending) = self.pending_audio_sample.as_ref() {
-            let duration = Self::sample_duration_from_timestamps(
+        if let Some(pending) = self.core.pending_audio_sample.as_ref() {
+            let duration = WriterCore::sample_duration_from_timestamps(
                 pending.timestamp,
                 data.timestamp,
-                self.last_audio_duration,
+                self.core.last_audio_duration,
             );
             let pending = pending.clone();
             self.append_audio_to_fragment(&pending, duration);
 
             self.maybe_flush_fragment_by_duration()?;
         }
-        self.pending_audio_sample = Some(data);
-        self.appending_video_chunk = false;
+        self.core.pending_audio_sample = Some(data);
+        self.core.appending_video_chunk = false;
 
         self.maybe_flush_initial_pending()?;
 
@@ -762,12 +667,16 @@ impl HybridMp4Writer {
     }
 
     fn flush_pending_audio_if_ready(&mut self) -> crate::Result<()> {
-        if self.input_audio_track_id.is_none()
-            && self.input_audio_queue.is_empty()
-            && self.pending_audio_sample.is_some()
+        if self.core.input_audio_track_id.is_none()
+            && self.core.input_audio_queue.is_empty()
+            && self.core.pending_audio_sample.is_some()
         {
-            let duration = self.last_audio_duration.unwrap_or(DEFAULT_SAMPLE_DURATION);
+            let duration = self
+                .core
+                .last_audio_duration
+                .unwrap_or(DEFAULT_SAMPLE_DURATION);
             let pending = self
+                .core
                 .pending_audio_sample
                 .take()
                 .expect("pending audio sample is unexpectedly empty");
@@ -777,30 +686,22 @@ impl HybridMp4Writer {
     }
 
     fn flush_pending_video_if_ready(&mut self) -> crate::Result<()> {
-        if self.input_video_track_id.is_none()
-            && self.input_video_queue.is_empty()
-            && self.pending_video_frame.is_some()
+        if self.core.input_video_track_id.is_none()
+            && self.core.input_video_queue.is_empty()
+            && self.core.pending_video_frame.is_some()
         {
-            let duration = self.last_video_duration.unwrap_or(DEFAULT_SAMPLE_DURATION);
+            let duration = self
+                .core
+                .last_video_duration
+                .unwrap_or(DEFAULT_SAMPLE_DURATION);
             let pending = self
+                .core
                 .pending_video_frame
                 .take()
                 .expect("pending video frame is unexpectedly empty");
             self.append_video_to_fragment(&pending, duration);
         }
         Ok(())
-    }
-
-    fn sample_duration_from_timestamps(
-        current_timestamp: Duration,
-        next_timestamp: Duration,
-        last_duration: Option<Duration>,
-    ) -> Duration {
-        if next_timestamp > current_timestamp {
-            next_timestamp.saturating_sub(current_timestamp)
-        } else {
-            last_duration.unwrap_or(DEFAULT_SAMPLE_DURATION)
-        }
     }
 }
 
@@ -821,53 +722,22 @@ fn extract_moov_from_init_segment(init_bytes: &[u8]) -> crate::Result<&[u8]> {
 
 // HybridMp4Writer の async 入力処理と RPC ハンドリング
 impl HybridMp4Writer {
-    fn handle_input_sample(
-        &mut self,
-        track_kind: InputTrackKind,
-        sample: Option<MediaFrame>,
-    ) -> crate::Result<()> {
-        match (track_kind, sample) {
-            (InputTrackKind::Audio, Some(MediaFrame::Audio(sample))) => {
-                if let Some(sample) = self.prepare_audio_for_queue(sample) {
-                    self.input_audio_queue.push_back(sample);
-                }
-            }
-            (InputTrackKind::Audio, None) => {
-                self.input_audio_track_id = None;
-            }
-            (InputTrackKind::Video, Some(MediaFrame::Video(sample))) => {
-                if let Some(sample) = self.prepare_video_for_queue(sample) {
-                    self.input_video_queue.push_back(sample);
-                }
-            }
-            (InputTrackKind::Video, None) => {
-                self.input_video_track_id = None;
-                self.resume_waiting_for_keyframe = false;
-            }
-            _ => {
-                self.stats.set_error();
-                return Err(crate::Error::new("BUG: unexpected input stream"));
-            }
-        }
-        Ok(())
-    }
-
     fn poll_output(&mut self) -> crate::Result<WriterRunOutput> {
         loop {
             let waiting_video =
-                self.input_video_track_id.is_some() && self.input_video_queue.is_empty();
+                self.core.input_video_track_id.is_some() && self.core.input_video_queue.is_empty();
             let waiting_audio =
-                self.input_audio_track_id.is_some() && self.input_audio_queue.is_empty();
+                self.core.input_audio_track_id.is_some() && self.core.input_audio_queue.is_empty();
 
             if waiting_video && waiting_audio {
                 return Ok(WriterRunOutput::Pending {
                     awaiting_track_kind: None,
                 });
-            } else if waiting_video && self.input_audio_track_id.is_none() {
+            } else if waiting_video && self.core.input_audio_track_id.is_none() {
                 return Ok(WriterRunOutput::Pending {
                     awaiting_track_kind: Some(InputTrackKind::Video),
                 });
-            } else if waiting_audio && self.input_video_track_id.is_none() {
+            } else if waiting_audio && self.core.input_video_track_id.is_none() {
                 return Ok(WriterRunOutput::Pending {
                     awaiting_track_kind: Some(InputTrackKind::Audio),
                 });
@@ -955,8 +825,8 @@ impl HybridMp4Writer {
                             }
                         }
                         _ => {
-                            let audio_len = self.input_audio_queue.len();
-                            let video_len = self.input_video_queue.len();
+                            let audio_len = self.core.input_audio_queue.len();
+                            let video_len = self.core.input_video_queue.len();
                             let mut suppress_audio = false;
                             let mut suppress_video = false;
                             if audio_rx.is_some() && video_rx.is_some() {
@@ -1005,16 +875,16 @@ impl HybridMp4Writer {
 
         match rpc_message {
             Mp4WriterRpcMessage::Pause { reply_tx } => {
-                let _ = reply_tx.send(self.pause_recording());
+                let _ = reply_tx.send(self.core.pause_recording());
             }
             Mp4WriterRpcMessage::Resume { reply_tx } => {
-                let _ = reply_tx.send(self.resume_recording());
+                let _ = reply_tx.send(self.core.resume_recording());
             }
             Mp4WriterRpcMessage::Finish { reply_tx } => {
                 let _ = reply_tx.send(());
                 *rpc_rx_enabled = false;
-                self.input_video_track_id = None;
-                self.input_audio_track_id = None;
+                self.core.input_video_track_id = None;
+                self.core.input_audio_track_id = None;
                 return Ok(true);
             }
         }
@@ -1028,18 +898,18 @@ impl HybridMp4Writer {
     ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
-                self.stats.add_received_audio_data();
-                if self.input_audio_track_id.is_some() {
-                    self.handle_input_sample(
+                self.core.stats.add_received_audio_data();
+                if self.core.input_audio_track_id.is_some() {
+                    self.core.handle_input_sample(
                         InputTrackKind::Audio,
                         Some(crate::MediaFrame::Audio(sample)),
                     )?;
                 }
             }
             crate::Message::Eos => {
-                self.stats.add_received_audio_eos();
-                if self.input_audio_track_id.is_some() {
-                    self.handle_input_sample(InputTrackKind::Audio, None)?;
+                self.core.stats.add_received_audio_eos();
+                if self.core.input_audio_track_id.is_some() {
+                    self.core.handle_input_sample(InputTrackKind::Audio, None)?;
                 }
                 *audio_rx = None;
             }
@@ -1055,18 +925,18 @@ impl HybridMp4Writer {
     ) -> crate::Result<()> {
         match msg {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
-                self.stats.add_received_video_data();
-                if self.input_video_track_id.is_some() {
-                    self.handle_input_sample(
+                self.core.stats.add_received_video_data();
+                if self.core.input_video_track_id.is_some() {
+                    self.core.handle_input_sample(
                         InputTrackKind::Video,
                         Some(crate::MediaFrame::Video(sample)),
                     )?;
                 }
             }
             crate::Message::Eos => {
-                self.stats.add_received_video_eos();
-                if self.input_video_track_id.is_some() {
-                    self.handle_input_sample(InputTrackKind::Video, None)?;
+                self.core.stats.add_received_video_eos();
+                if self.core.input_video_track_id.is_some() {
+                    self.core.handle_input_sample(InputTrackKind::Video, None)?;
                 }
                 *video_rx = None;
             }
@@ -1134,6 +1004,8 @@ pub async fn create_processor(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::mp4::writer::DEFAULT_SAMPLE_DURATION;
 
@@ -1232,6 +1104,7 @@ mod tests {
     fn hybrid_writer_consumes_audio_queue_before_waiting_for_video() -> crate::Result<()> {
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         writer
+            .core
             .input_audio_queue
             .push_back(Arc::new(make_audio_frame(None)));
 
@@ -1243,7 +1116,7 @@ mod tests {
                 awaiting_track_kind: None
             }
         ));
-        assert!(writer.pending_audio_sample.is_some());
+        assert!(writer.core.pending_audio_sample.is_some());
         Ok(())
     }
 
@@ -1264,13 +1137,13 @@ mod tests {
             ..make_audio_frame(None)
         };
 
-        writer.pending_audio_sample = Some(Arc::new(first.clone()));
+        writer.core.pending_audio_sample = Some(Arc::new(first.clone()));
         writer.maybe_flush_initial_pending()?;
 
         assert!(writer.fragment_audio_samples.is_empty());
-        assert!(writer.pending_audio_sample.is_some());
+        assert!(writer.core.pending_audio_sample.is_some());
 
-        writer.input_audio_queue.push_back(Arc::new(second));
+        writer.core.input_audio_queue.push_back(Arc::new(second));
         writer.process_next_audio_sample()?;
 
         assert_eq!(writer.fragment_audio_samples.len(), 1);
@@ -1299,8 +1172,8 @@ mod tests {
             ..make_audio_frame(None)
         };
 
-        writer.pending_audio_sample = Some(Arc::new(first));
-        writer.input_audio_queue.push_back(Arc::new(second));
+        writer.core.pending_audio_sample = Some(Arc::new(first));
+        writer.core.input_audio_queue.push_back(Arc::new(second));
         writer.process_next_audio_sample()?;
         writer.flush_fragment()?;
 
@@ -1314,7 +1187,7 @@ mod tests {
             Duration::ZERO
         );
 
-        writer.input_audio_queue.push_back(Arc::new(third));
+        writer.core.input_audio_queue.push_back(Arc::new(third));
         writer.process_next_audio_sample()?;
 
         assert_eq!(
