@@ -90,6 +90,8 @@ flowchart TD
 `obsws` は WebSocket セッションを受けるだけの薄い層ではありません。
 OBS WebSocket 互換 API と内部状態、そして `media_pipeline` 上の実処理をつなぐ制御層です。
 
+`obsws` 単体の責務分割や状態調停の仕組みについては、 [`obsws` の仕組み](obsws.md) を参照してください。
+
 主な責務は以下です。
 
 - `server`
@@ -219,6 +221,8 @@ Hisui の `obsws` 実装では、この 2 つを分離して持ち、 `coordinat
   - OBS WebSocket 互換機能の実装状況
 - `docs/internals/media_pipeline.md`
   - `media_pipeline` の processor / publisher / subscriber、同期、 RPC の仕組み
+- `docs/internals/obsws.md`
+  - `obsws` の `server` / `session` / `coordinator` / `input_registry` の責務分割
 - `docs/command_compose.md`
   - `compose` の利用方法と公開仕様
 - `src/obsws/source/`

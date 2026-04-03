@@ -8,3 +8,4 @@
 
 - [全体アーキテクチャ](architecture_overview.md)
 - [`media_pipeline` の仕組み](media_pipeline.md)
+- [`obsws` の仕組み](obsws.md)
