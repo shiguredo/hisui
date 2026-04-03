@@ -3897,6 +3897,9 @@ async fn stop_processors_staged_record(
     // encoder の inner.finish() / drain を保証しない。
     // その結果、AAC や遅延出力を持つ video encoder では、
     // 停止直前の数サンプル / 数フレームが最終 MP4 に含まれない可能性がある。
+    // また、encoder 停止完了直後でも writer 側の購読チャネルには終端付近の
+    // データや Eos が未処理で残りうるが、現状はその時点で Finish RPC を送って
+    // finalize を促すため、それらを読み切る前に末尾の一部を捨てるレースもある。
     // 現時点では StopRecord の応答性と実装単純性を優先し、この挙動を許容する。
     //
     // NOTE:
