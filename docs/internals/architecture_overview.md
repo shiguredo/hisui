@@ -71,6 +71,8 @@ flowchart TD
 `src/media_pipeline.rs` は Hisui の共通メディア処理基盤です。
 責務は「映像や音声をどう処理するか」そのものではなく、「processor 間をどう接続し、どう起動し、どう流すか」を管理することにあります。
 
+`media_pipeline` 単体の仕組みについては、 [`media_pipeline` の仕組み](media_pipeline.md) を参照してください。
+
 主な責務は以下です。
 
 - processor の登録と解除
@@ -215,6 +217,8 @@ Hisui の `obsws` 実装では、この 2 つを分離して持ち、 `coordinat
 
 - `docs/obsws/PROTOCOL_STATUS.md`
   - OBS WebSocket 互換機能の実装状況
+- `docs/internals/media_pipeline.md`
+  - `media_pipeline` の processor / publisher / subscriber、同期、 RPC の仕組み
 - `docs/command_compose.md`
   - `compose` の利用方法と公開仕様
 - `src/obsws/source/`
