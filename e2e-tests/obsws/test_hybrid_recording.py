@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import signal
 import subprocess
 import time
 from pathlib import Path
@@ -113,19 +112,9 @@ def test_hybrid_mp4_sigkill_produces_readable_file(binary_path: Path, tmp_path: 
     server.start()
     try:
         asyncio.run(_start_recording(server))
-
-        # SIGKILL でプロセスを強制停止
-        process = server._process
-        assert process is not None
-        process.send_signal(signal.SIGKILL)
-        process.wait(timeout=5.0)
     finally:
-        if server._process is not None and server._process.poll() is not None:
-            try:
-                server._process.communicate(timeout=1.0)
-            except Exception:
-                pass
-            server._process = None
+        # SIGKILL でプロセスを強制停止
+        server.kill()
 
     # 録画ファイルを探す
     mp4_files = list(record_dir.glob("*.mp4"))
