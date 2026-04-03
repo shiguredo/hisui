@@ -82,6 +82,9 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
+    #[cfg(feature = "monitor")] monitor_frame_tx: Option<
+        std::sync::mpsc::SyncSender<crate::obsws::monitor::RawPlayerFrame>,
+    >,
 ) -> crate::Result<()> {
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
@@ -236,6 +239,16 @@ pub async fn run_server(
             source_processor_ids: output_plan.source_processor_ids,
         }
     };
+
+    // モニターウィンドウ用のサブスクライバタスクを起動する
+    #[cfg(feature = "monitor")]
+    if let Some(frame_tx) = monitor_frame_tx {
+        let ph = pipeline_handle.clone();
+        let vtid = program_output.video_track_id.clone();
+        tokio::spawn(async move {
+            crate::obsws::monitor::run_monitor_subscriber(ph, vtid, frame_tx).await;
+        });
+    }
 
     // runtime actor を起動する
     // source processor は入力ライフサイクルで管理するため、coordinator 経由で初期起動する

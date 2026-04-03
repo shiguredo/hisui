@@ -68,6 +68,11 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .doc("FDK-AAC の共有ライブラリのパス")
         .take(args)
         .present_and_then(|o| o.value().parse())?;
+    #[cfg(feature = "monitor")]
+    let monitor: bool = noargs::flag("monitor")
+        .doc("Program 出力をモニターウィンドウに表示する")
+        .take(args)
+        .is_present();
     let canvas_width: crate::types::EvenUsize = noargs::opt("canvas-width")
         .ty("WIDTH")
         .env("HISUI_OBSWS_CANVAS_WIDTH")
@@ -129,6 +134,8 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         openh264,
         #[cfg(feature = "fdk-aac")]
         fdk_aac,
+        #[cfg(feature = "monitor")]
+        monitor,
         canvas_width,
         canvas_height,
         frame_rate,
@@ -147,6 +154,7 @@ fn run_internal(
     https_key_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
     #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
+    #[cfg(feature = "monitor")] monitor: bool,
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
@@ -171,6 +179,56 @@ fn run_internal(
         .build()
         .map_err(crate::Error::from)?;
 
+    // SDL3 は macOS でメインスレッド必須のため、--monitor 指定時はスレッドモデルを変更する:
+    // メインスレッド → SDL3 イベントループ、バックグラウンドスレッド → tokio ランタイム
+    #[cfg(feature = "monitor")]
+    if monitor {
+        raw_player::init()
+            .map_err(|e| crate::Error::new(format!("failed to init raw_player: {e}")))?;
+        let player = raw_player::VideoPlayer::new(
+            canvas_width.get() as i32,
+            canvas_height.get() as i32,
+            "hisui",
+        )
+        .map_err(|e| crate::Error::new(format!("failed to create raw_player window: {e}")))?;
+
+        let (frame_tx, frame_rx) =
+            std::sync::mpsc::sync_channel::<crate::obsws::monitor::RawPlayerFrame>(2);
+
+        let runtime_thread = std::thread::Builder::new()
+            .name("hisui-tokio-main".to_owned())
+            .spawn(move || {
+                runtime.block_on(async move {
+                    let local = tokio::task::LocalSet::new();
+                    local
+                        .run_until(crate::obsws::server::run_server(
+                            addr,
+                            password,
+                            default_record_dir,
+                            ui_remote_url,
+                            https_cert_path,
+                            https_key_path,
+                            pipeline_config,
+                            canvas_width,
+                            canvas_height,
+                            frame_rate,
+                            state_file,
+                            #[cfg(feature = "monitor")]
+                            Some(frame_tx),
+                        ))
+                        .await
+                })
+            })
+            .map_err(|e| crate::Error::new(format!("failed to spawn runtime thread: {e}")))?;
+
+        run_monitor_event_loop(player, frame_rx);
+
+        // ウィンドウが閉じた後、サーバーの終了を待つ
+        return runtime_thread
+            .join()
+            .map_err(|_| crate::Error::new("runtime thread panicked"))?;
+    }
+
     runtime.block_on(async move {
         // WebRtcP2pSessionManager が spawn_local() で !Send タスクを起動するため、
         // obsws サーバーの実行コンテキストは LocalSet 上で動かす必要がある。
@@ -188,9 +246,48 @@ fn run_internal(
                 canvas_height,
                 frame_rate,
                 state_file,
+                #[cfg(feature = "monitor")]
+                None,
             ))
             .await
     })
+}
+
+#[cfg(feature = "monitor")]
+fn run_monitor_event_loop(
+    player: raw_player::VideoPlayer,
+    frame_rx: std::sync::mpsc::Receiver<crate::obsws::monitor::RawPlayerFrame>,
+) {
+    if let Err(e) = player.play() {
+        tracing::error!("failed to start raw_player playback: {e}");
+        return;
+    }
+    loop {
+        // ノンブロッキングでフレームを取得して enqueue
+        while let Ok(frame) = frame_rx.try_recv() {
+            if let Err(e) = player.enqueue_video_i420(
+                &frame.y,
+                &frame.u,
+                &frame.v,
+                frame.width,
+                frame.height,
+                frame.pts_us,
+            ) {
+                tracing::warn!("failed to enqueue video frame: {e}");
+            }
+        }
+        // SDL3 イベント処理とレンダリング
+        match player.poll_events() {
+            Ok(true) => {}
+            Ok(false) => break,
+            Err(e) => {
+                tracing::error!("raw_player poll_events error: {e}");
+                break;
+            }
+        }
+    }
+    player.close();
+    raw_player::quit();
 }
 
 fn resolve_default_record_dir(configured: Option<PathBuf>) -> crate::Result<PathBuf> {

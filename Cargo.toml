@@ -13,6 +13,7 @@ readme = "README.md"
 [features]
 fdk-aac = ["shiguredo_fdk_aac"]
 nvcodec = ["shiguredo_nvcodec"]
+monitor = ["raw_player"]
 
 [dependencies]
 # NOTE: 通常の依存は突然挙動が変わることが内容に、バージョンは厳密一致で指定している
@@ -60,6 +61,8 @@ shiguredo_svt_av1 = "=2026.1.0"
 shiguredo_websocket = { workspace = true }
 
 shiguredo_fdk_aac = { version = "=2026.1.0-canary.1", optional = true }
+
+raw_player = { version = "=2026.1.0-canary.2", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = "=2026.1.0-canary.0"
