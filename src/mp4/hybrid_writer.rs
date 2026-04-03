@@ -431,6 +431,10 @@ impl HybridMp4Writer {
         }
 
         if !samples.is_empty() {
+            // create_media_segment_metadata は内部状態（sequence_number, decode_time 等）を
+            // 変更するため、本物の fmp4_muxer に副作用を与えないよう clone したコピーを使う。
+            // has_flushed_once ガードにより、この clone は最初のフラッシュ前（muxer がほぼ空の状態）
+            // でのみ実行されるため、コストは無視できる。
             let mut muxer = self.fmp4_muxer.clone();
             muxer.create_media_segment_metadata(&samples)?;
             self.update_recovery_moov_from_muxer(&muxer)?;
