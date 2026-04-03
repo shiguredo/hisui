@@ -588,12 +588,11 @@ impl HybridMp4Writer {
         self.file.write_all(moov_bytes)?;
 
         let remaining = self.free_box_total_size - moov_size;
-        if remaining > 0 {
+        if let Some(payload_size) = remaining.checked_sub(MIN_FREE_BOX_SIZE) {
             let free_box = FreeBox {
-                payload: vec![0; remaining as usize - 8],
+                payload: vec![0; payload_size as usize],
             };
-            let free_bytes = free_box.encode_to_vec()?;
-            self.file.write_all(&free_bytes)?;
+            self.file.write_all(&free_box.encode_to_vec()?)?;
         }
 
         self.file.flush()?;
