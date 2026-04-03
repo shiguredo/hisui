@@ -3892,6 +3892,17 @@ async fn stop_processors_staged_record(
     pipeline_handle: &crate::MediaPipelineHandle,
     run: &crate::obsws::input_registry::ObswsRecordRun,
 ) -> crate::Result<()> {
+    // NOTE:
+    // この経路は terminate_processor() ベースで encoder を停止するため、
+    // encoder の inner.finish() / drain を保証しない。
+    // その結果、AAC や遅延出力を持つ video encoder では、
+    // 停止直前の数サンプル / 数フレームが最終 MP4 に含まれない可能性がある。
+    // 現時点では StopRecord の応答性と実装単純性を優先し、この挙動を許容する。
+    //
+    // NOTE:
+    // writer に Finish を送るのと同時に encoder へ非同期 finish RPC を送る方式は採用しない。
+    // writer 側の Finish は入力トラックを即座に閉じるため、
+    // encoder の drain 完了前に writer が finalize へ進み、かえって末尾欠損を固定化しうる。
     // 1. エンコーダーを停止して writer へ EOS を流す
     terminate_and_wait(
         pipeline_handle,
