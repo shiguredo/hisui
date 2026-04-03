@@ -10,3 +10,4 @@
 - [`media_pipeline` の仕組み](media_pipeline.md)
 - [`obsws` の仕組み](obsws.md)
 - [`stats` / メトリクスの仕組み](stats.md)
+- [`/bootstrap` の仕組み](bootstrap.md)

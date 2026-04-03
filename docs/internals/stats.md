@@ -294,3 +294,4 @@ label は便利ですが、以下の影響があります。
 - [全体アーキテクチャ](architecture_overview.md)
 - [`media_pipeline` の仕組み](media_pipeline.md)
 - [`obsws` の仕組み](obsws.md)
+- [`/bootstrap` の仕組み](bootstrap.md)

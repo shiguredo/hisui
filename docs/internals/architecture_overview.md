@@ -226,6 +226,8 @@ Hisui の `obsws` 実装では、この 2 つを分離して持ち、 `coordinat
   - `obsws` の `server` / `session` / `coordinator` / `input_registry` の責務分割
 - `docs/internals/stats.md`
   - 共通統計基盤と `/metrics` 公開の仕組み
+- `docs/internals/bootstrap.md`
+  - `/bootstrap` endpoint と WebRTC P2P セッション管理の仕組み
 - `docs/command_compose.md`
   - `compose` の利用方法と公開仕様
 - `src/obsws/source/`
