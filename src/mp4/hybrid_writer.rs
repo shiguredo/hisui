@@ -135,10 +135,12 @@ impl HybridMp4Writer {
         file.write_all(&ftyp_bytes)?;
 
         // ftyp 拡張用の free ボックスを書き出す
-        let ftyp_padding_size = FTYP_RESERVED_SIZE - ftyp_bytes.len() as u64;
-        if ftyp_padding_size >= 8 {
+        if let Some(free_payload_size) = FTYP_RESERVED_SIZE
+            .checked_sub(ftyp_bytes.len() as u64)
+            .and_then(|padding| padding.checked_sub(8))
+        {
             let ftyp_padding = FreeBox {
-                payload: vec![0; ftyp_padding_size as usize - 8],
+                payload: vec![0; free_payload_size as usize],
             };
             file.write_all(&ftyp_padding.encode_to_vec()?)?;
         }
