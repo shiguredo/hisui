@@ -30,8 +30,15 @@ fn create_coordinator_handle(
     registry: ObswsInputRegistry,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
-    let (actor, handle, _shutdown_rx) =
-        crate::obsws::coordinator::ObswsCoordinator::new(registry, program_output, None);
+    let (actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
+        registry,
+        program_output,
+        None,
+        #[cfg(feature = "player")]
+        test_player_command_tx(),
+        #[cfg(feature = "player")]
+        test_player_media_tx(),
+    );
     tokio::spawn(actor.run());
     handle
 }
@@ -39,6 +46,16 @@ fn create_coordinator_handle(
 /// デフォルトのテスト用ランタイムハンドルを生成する
 fn default_coordinator_handle() -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     create_coordinator_handle(ObswsInputRegistry::new_for_test())
+}
+
+#[cfg(feature = "player")]
+fn test_player_command_tx() -> std::sync::mpsc::SyncSender<crate::obsws::player::PlayerCommand> {
+    std::sync::mpsc::sync_channel(1).0
+}
+
+#[cfg(feature = "player")]
+fn test_player_media_tx() -> std::sync::mpsc::SyncSender<crate::obsws::player::PlayerMediaMessage> {
+    std::sync::mpsc::sync_channel(1).0
 }
 
 /// パイプライン付きのランタイムハンドルを生成する
@@ -51,6 +68,10 @@ fn create_coordinator_handle_with_pipeline(
         registry,
         program_output,
         Some(pipeline_handle),
+        #[cfg(feature = "player")]
+        test_player_command_tx(),
+        #[cfg(feature = "player")]
+        test_player_media_tx(),
     );
     tokio::spawn(actor.run());
     handle
@@ -95,6 +116,10 @@ async fn create_initialized_coordinator_handle_with_pipeline(
         registry,
         program_output,
         Some(pipeline_handle),
+        #[cfg(feature = "player")]
+        test_player_command_tx(),
+        #[cfg(feature = "player")]
+        test_player_media_tx(),
     );
     actor.start_initial_input_source_processors().await?;
     tokio::spawn(actor.run());
