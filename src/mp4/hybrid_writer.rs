@@ -54,6 +54,8 @@ pub struct HybridMp4Writer {
 
     // fMP4 フラグメント生成用
     fmp4_muxer: Fmp4SegmentMuxer,
+    // 最初の実フラッシュ前に recovery 用 moov を先行更新するための専用 muxer
+    initial_recovery_muxer: Option<Fmp4SegmentMuxer>,
     // finalize 時の標準 MP4 moov 生成用
     mp4_muxer: Mp4FileMuxer,
 
@@ -76,6 +78,7 @@ pub struct HybridMp4Writer {
     // エンコーダーは sample_entry を初回のみ付与することがあるため保持する
     last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
     last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    has_flushed_fragment: bool,
 
     // Mp4Writer と共有する入力キュー・一時停止管理・統計情報
     core: WriterCore,
@@ -154,6 +157,9 @@ impl HybridMp4Writer {
         Ok(Self {
             file: BufWriter::new(file),
             fmp4_muxer,
+            initial_recovery_muxer: Some(Fmp4SegmentMuxer::with_options(SegmentMuxerOptions {
+                creation_timestamp,
+            })?),
             mp4_muxer,
             mdat_start_offset,
             free_box_total_size,
@@ -167,6 +173,7 @@ impl HybridMp4Writer {
             fragment_accumulated_duration: Duration::ZERO,
             last_audio_sample_entry: None,
             last_video_sample_entry: None,
+            has_flushed_fragment: false,
             core: WriterCore::new(input_audio_track_id, input_video_track_id, stats),
         })
     }
@@ -369,6 +376,8 @@ impl HybridMp4Writer {
         self.fragment_start_timestamp = None;
         self.fragment_end_timestamp = None;
         self.fragment_accumulated_duration = Duration::ZERO;
+        self.has_flushed_fragment = true;
+        self.initial_recovery_muxer = None;
         self.update_unflushed_fragment_metrics();
         // リカバリ用 moov を更新する
         self.update_recovery_moov()?;
@@ -382,14 +391,18 @@ impl HybridMp4Writer {
     /// pending サンプルは通常、次のサンプル到着時に duration が確定してからフラグメントに追加されるが、
     /// 最初のサンプルだけを受け取った直後にクラッシュすると、フラグメントもリカバリ用 moov も
     /// 書かれないまま終了してしまう。
-    /// これを防ぐために、pending を仮の duration で一時 muxer にだけ反映して
+    /// これを防ぐために、pending を仮の duration で初回専用の recovery muxer にだけ反映して
     /// recovery 用 moov を生成する。
     ///
     /// ここでは moov だけを先行更新し、対応する moof / mdat と payload 自体は
     /// flush 時までディスクへ書かない。
     /// そのため、異常終了時に回復できるのは最後に flush 済みのフラグメントまでであり、
     /// 直近の未 flush 区間が失われることは許容する。
+    /// 最初の実フラグメントを flush した後は、この経路は無効化される。
     fn maybe_flush_initial_pending(&mut self) -> crate::Result<()> {
+        if self.has_flushed_fragment {
+            return Ok(());
+        }
         let mut samples = Vec::new();
         let mut data_offset = 0;
 
@@ -431,13 +444,15 @@ impl HybridMp4Writer {
         }
 
         if !samples.is_empty() {
-            // create_media_segment_metadata は内部状態（sequence_number, decode_time 等）を
-            // 変更するため、本物の fmp4_muxer に副作用を与えないよう clone したコピーを使う。
-            // has_flushed_once ガードにより、この clone は最初のフラッシュ前（muxer がほぼ空の状態）
-            // でのみ実行されるため、コストは無視できる。
-            let mut muxer = self.fmp4_muxer.clone();
-            muxer.create_media_segment_metadata(&samples)?;
-            self.update_recovery_moov_from_muxer(&muxer)?;
+            let Some(mut muxer) = self.initial_recovery_muxer.take() else {
+                return Ok(());
+            };
+            let result = (|| -> crate::Result<()> {
+                muxer.create_media_segment_metadata(&samples)?;
+                self.update_recovery_moov_from_muxer(&muxer)
+            })();
+            self.initial_recovery_muxer = Some(muxer);
+            result?;
         }
         Ok(())
     }
@@ -533,8 +548,7 @@ impl HybridMp4Writer {
             };
             if ftyp_size > 0 && ftyp_size <= self.mdat_start_offset {
                 self.file.seek(SeekFrom::Start(0))?;
-                self.file
-                    .write_all(&head_boxes[..ftyp_size as usize])?;
+                self.file.write_all(&head_boxes[..ftyp_size as usize])?;
 
                 // ftyp と mdat_start_offset の間を free ボックスで埋める
                 if let Some(free_payload_size) = self
@@ -1207,6 +1221,65 @@ mod tests {
             writer.current_duration(),
             DEFAULT_SAMPLE_DURATION.saturating_mul(2)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_disables_initial_recovery_path_after_first_flush() -> crate::Result<()> {
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let sample_entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        writer.core.pending_audio_sample = Some(Arc::new(AudioFrame {
+            timestamp: Duration::ZERO,
+            ..make_audio_frame(Some(sample_entry))
+        }));
+
+        writer.maybe_flush_initial_pending()?;
+        assert!(writer.initial_recovery_muxer.is_some());
+
+        writer.core.input_audio_track_id = None;
+        writer.flush_pending_audio_if_ready()?;
+        writer.flush_fragment()?;
+
+        assert!(writer.has_flushed_fragment);
+        assert!(writer.initial_recovery_muxer.is_none());
+
+        let recovery_updates = writer.stats().total_recovery_moov_update_count();
+        writer.maybe_flush_initial_pending()?;
+        assert_eq!(
+            writer.stats().total_recovery_moov_update_count(),
+            recovery_updates
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_does_not_double_update_recovery_moov_after_flush() -> crate::Result<()> {
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let sample_entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        writer.core.pending_audio_sample = Some(Arc::new(AudioFrame {
+            timestamp: Duration::ZERO,
+            ..make_audio_frame(Some(sample_entry))
+        }));
+        writer.maybe_flush_initial_pending()?;
+        writer
+            .core
+            .input_audio_queue
+            .push_back(Arc::new(AudioFrame {
+                timestamp: HYBRID_FRAGMENT_MAX_DURATION.saturating_add(DEFAULT_SAMPLE_DURATION),
+                ..make_audio_frame(None)
+            }));
+
+        writer.process_next_audio_sample()?;
+
+        assert_eq!(writer.stats().total_recovery_moov_update_count(), 2);
         Ok(())
     }
 
