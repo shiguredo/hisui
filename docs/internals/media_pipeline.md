@@ -343,4 +343,5 @@ pipeline の中心は `MediaPipelineCommand` を受ける command channel です
 ## 関連ドキュメント
 
 - [全体アーキテクチャ](architecture_overview.md)
+- [`stats` / メトリクスの仕組み](stats.md)
 - `src/media_pipeline.rs`

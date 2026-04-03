@@ -84,6 +84,7 @@ flowchart TD
 
 この設計により、個々の processor は「自分が入力を購読し、出力 track を公開する」という共通モデルで実装できます。
 `media_pipeline` 自体は source、 mixer、 encoder の具体的な中身を知りません。
+統計値基盤については、 [`stats` / メトリクスの仕組み](stats.md) を参照してください。
 
 ### 3. `obsws`
 
@@ -223,6 +224,8 @@ Hisui の `obsws` 実装では、この 2 つを分離して持ち、 `coordinat
   - `media_pipeline` の processor / publisher / subscriber、同期、 RPC の仕組み
 - `docs/internals/obsws.md`
   - `obsws` の `server` / `session` / `coordinator` / `input_registry` の責務分割
+- `docs/internals/stats.md`
+  - 共通統計基盤と `/metrics` 公開の仕組み
 - `docs/command_compose.md`
   - `compose` の利用方法と公開仕様
 - `src/obsws/source/`
