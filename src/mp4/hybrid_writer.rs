@@ -71,7 +71,9 @@ pub struct HybridMp4Writer {
     fragment_audio_payload: Vec<u8>,
     fragment_video_samples: Vec<shiguredo_mp4::mux::Sample>,
     fragment_audio_samples: Vec<shiguredo_mp4::mux::Sample>,
-    // フラグメント内の蓄積時間（自動フラッシュ判定用）
+    // フラグメントがカバーする実時間の範囲（自動フラッシュ判定用）
+    fragment_start_timestamp: Option<Duration>,
+    fragment_end_timestamp: Option<Duration>,
     fragment_accumulated_duration: Duration,
     // エンコーダーは sample_entry を初回のみ付与することがあるため保持する
     last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
@@ -174,6 +176,8 @@ impl HybridMp4Writer {
             fragment_audio_payload: Vec::new(),
             fragment_video_samples: Vec::new(),
             fragment_audio_samples: Vec::new(),
+            fragment_start_timestamp: None,
+            fragment_end_timestamp: None,
             fragment_accumulated_duration: Duration::ZERO,
             last_audio_sample_entry: None,
             last_video_sample_entry: None,
@@ -322,7 +326,7 @@ impl HybridMp4Writer {
 
         self.stats.add_video_sample(frame.data.len(), duration);
         self.last_video_duration = Some(duration);
-        self.fragment_accumulated_duration += duration;
+        self.update_fragment_time_range(frame.timestamp, duration);
         self.update_unflushed_fragment_metrics();
     }
 
@@ -359,7 +363,7 @@ impl HybridMp4Writer {
 
         self.stats.add_audio_sample(sample.data.len(), duration);
         self.last_audio_duration = Some(duration);
-        self.fragment_accumulated_duration += duration;
+        self.update_fragment_time_range(sample.timestamp, duration);
         self.update_unflushed_fragment_metrics();
     }
 
@@ -367,15 +371,35 @@ impl HybridMp4Writer {
         !self.fragment_video_samples.is_empty() || !self.fragment_audio_samples.is_empty()
     }
 
+    fn update_fragment_time_range(&mut self, timestamp: Duration, duration: Duration) {
+        let sample_end = timestamp.saturating_add(duration);
+        self.fragment_start_timestamp = Some(
+            self.fragment_start_timestamp
+                .map_or(timestamp, |current| current.min(timestamp)),
+        );
+        self.fragment_end_timestamp = Some(
+            self.fragment_end_timestamp
+                .map_or(sample_end, |current| current.max(sample_end)),
+        );
+        self.fragment_accumulated_duration = self
+            .fragment_start_timestamp
+            .zip(self.fragment_end_timestamp)
+            .map_or(Duration::ZERO, |(start, end)| end.saturating_sub(start));
+    }
+
     fn update_unflushed_fragment_metrics(&self) {
-        self.stats.set_current_unflushed_fragment_duration(self.fragment_accumulated_duration);
-        self.stats.set_current_unflushed_video_sample_count(self.fragment_video_samples.len() as u64);
-        self.stats.set_current_unflushed_audio_sample_count(self.fragment_audio_samples.len() as u64);
+        self.stats
+            .set_current_unflushed_fragment_duration(self.fragment_accumulated_duration);
+        self.stats
+            .set_current_unflushed_video_sample_count(self.fragment_video_samples.len() as u64);
+        self.stats
+            .set_current_unflushed_audio_sample_count(self.fragment_audio_samples.len() as u64);
     }
 
     fn update_recoverable_media_metrics(&self) {
         self.stats.add_flushed_fragment();
-        self.stats.set_recoverable_media_duration(self.current_duration());
+        self.stats
+            .set_recoverable_media_duration(self.current_duration());
     }
 
     /// 蓄積されたフラグメントをファイルに書き出す
@@ -439,6 +463,8 @@ impl HybridMp4Writer {
         self.fragment_audio_payload.clear();
         self.fragment_video_samples.clear();
         self.fragment_audio_samples.clear();
+        self.fragment_start_timestamp = None;
+        self.fragment_end_timestamp = None;
         self.fragment_accumulated_duration = Duration::ZERO;
         self.update_unflushed_fragment_metrics();
         // リカバリ用 moov を更新する
@@ -600,8 +626,7 @@ impl HybridMp4Writer {
             };
             if ftyp_size > 0 && ftyp_size <= self.mdat_start_offset {
                 self.file.seek(SeekFrom::Start(0))?;
-                self.file
-                    .write_all(&head_boxes[..ftyp_size as usize])?;
+                self.file.write_all(&head_boxes[..ftyp_size as usize])?;
 
                 // ftyp と mdat_start_offset の間を free ボックスで埋める
                 let padding = self.mdat_start_offset - ftyp_size;
@@ -615,6 +640,8 @@ impl HybridMp4Writer {
         }
 
         // free ボックスのヘッダを mdat ヘッダに書き換える
+        // hybrid MP4 では録画中の recovery 用予約領域と、各フラグメントの metadata
+        // オーバーヘッドを詰め直さず、そのまま最終 MP4 の mdat 内に残す。
         let mdat_size = self.next_position - self.mdat_start_offset;
         let mdat_header = BoxHeader {
             box_type: MdatBox::TYPE,
@@ -626,10 +653,7 @@ impl HybridMp4Writer {
         // moov を EOF に追記する
         // moov は offset が最大のエントリ
         self.file.seek(SeekFrom::Start(self.next_position))?;
-        if let Some((_offset, moov_bytes)) = pairs
-            .iter()
-            .max_by_key(|(offset, _)| *offset)
-        {
+        if let Some((_offset, moov_bytes)) = pairs.iter().max_by_key(|(offset, _)| *offset) {
             self.file.write_all(moov_bytes)?;
         }
 
@@ -1249,10 +1273,7 @@ mod tests {
         writer.process_next_audio_sample()?;
 
         assert_eq!(writer.fragment_audio_samples.len(), 1);
-        assert_eq!(
-            writer.fragment_audio_samples[0].data_size,
-            first.data.len()
-        );
+        assert_eq!(writer.fragment_audio_samples[0].data_size, first.data.len());
         Ok(())
     }
 
@@ -1287,7 +1308,10 @@ mod tests {
             writer.stats().recoverable_media_duration(),
             DEFAULT_SAMPLE_DURATION
         );
-        assert_eq!(writer.stats().current_unflushed_fragment_duration(), Duration::ZERO);
+        assert_eq!(
+            writer.stats().current_unflushed_fragment_duration(),
+            Duration::ZERO
+        );
 
         writer.input_audio_queue.push_back(Arc::new(third));
         writer.process_next_audio_sample()?;
@@ -1301,7 +1325,38 @@ mod tests {
             DEFAULT_SAMPLE_DURATION
         );
         assert_eq!(writer.stats().current_unflushed_audio_sample_count(), 1);
-        assert_eq!(writer.current_duration(), DEFAULT_SAMPLE_DURATION.saturating_mul(2));
+        assert_eq!(
+            writer.current_duration(),
+            DEFAULT_SAMPLE_DURATION.saturating_mul(2)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_fragment_duration_uses_wall_clock_span() -> crate::Result<()> {
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+
+        writer.append_video_to_fragment(
+            &VideoFrame {
+                timestamp: Duration::ZERO,
+                ..make_video_frame(None)
+            },
+            DEFAULT_SAMPLE_DURATION,
+        );
+        writer.append_audio_to_fragment(
+            &AudioFrame {
+                timestamp: Duration::ZERO,
+                ..make_audio_frame(None)
+            },
+            DEFAULT_SAMPLE_DURATION,
+        );
+
+        assert_eq!(
+            writer.stats().current_unflushed_fragment_duration(),
+            DEFAULT_SAMPLE_DURATION
+        );
+        assert_eq!(writer.stats().current_unflushed_video_sample_count(), 1);
+        assert_eq!(writer.stats().current_unflushed_audio_sample_count(), 1);
         Ok(())
     }
 }

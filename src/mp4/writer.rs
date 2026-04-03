@@ -106,9 +106,12 @@ impl Mp4WriterStats {
         let total_flushed_fragment_count = stats.counter("total_flushed_fragment_count");
         let total_recovery_moov_update_count = stats.counter("total_recovery_moov_update_count");
         let recoverable_media_duration = stats.duration("recoverable_media_seconds");
-        let current_unflushed_fragment_duration = stats.duration("current_unflushed_fragment_seconds");
-        let current_unflushed_video_sample_count = stats.gauge("current_unflushed_video_sample_count");
-        let current_unflushed_audio_sample_count = stats.gauge("current_unflushed_audio_sample_count");
+        let current_unflushed_fragment_duration =
+            stats.duration("current_unflushed_fragment_seconds");
+        let current_unflushed_video_sample_count =
+            stats.gauge("current_unflushed_video_sample_count");
+        let current_unflushed_audio_sample_count =
+            stats.gauge("current_unflushed_audio_sample_count");
         let total_audio_chunk_count = stats.gauge("total_audio_chunk_count");
         let total_video_chunk_count = stats.gauge("total_video_chunk_count");
         let video_codec = stats.string("video_codec");
