@@ -742,6 +742,10 @@ fn extract_moov_from_init_segment(init_bytes: &[u8]) -> crate::Result<&[u8]> {
 impl HybridMp4Writer {
     fn poll_output(&mut self) -> crate::Result<WriterRunOutput> {
         loop {
+            // Hybrid MP4 writer は crash recovery 用 fragment を継続的に進めたいので、
+            // A/V 両トラックがある場合でも「両方とも空」のときだけ待機する。
+            // そのため、映像待ち中でも音声キューにデータがあれば先に消化する。
+            // この点は通常の Mp4Writer と意図的に異なる。
             let waiting_video =
                 self.core.input_video_track_id.is_some() && self.core.input_video_queue.is_empty();
             let waiting_audio =

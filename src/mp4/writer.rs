@@ -791,6 +791,9 @@ impl Mp4Writer {
 impl Mp4Writer {
     fn poll_output(&mut self) -> crate::Result<WriterRunOutput> {
         loop {
+            // 通常の MP4 writer は、映像トラックがある場合は映像を優先して待つ。
+            // ここで音声キューだけを先に消化すると、既存のチャンク分割と統計値が変わるため、
+            // 音声が溜まっていても即座に映像待ちへ入る。
             if self.core.input_video_track_id.is_some() && self.core.input_video_queue.is_empty() {
                 return Ok(WriterRunOutput::Pending {
                     awaiting_track_kind: Some(InputTrackKind::Video),
