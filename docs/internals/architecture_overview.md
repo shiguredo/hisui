@@ -85,6 +85,7 @@ flowchart TD
 この設計により、個々の processor は「自分が入力を購読し、出力 track を公開する」という共通モデルで実装できます。
 `media_pipeline` 自体は source、 mixer、 encoder の具体的な中身を知りません。
 統計値基盤については、 [`stats` / メトリクスの仕組み](stats.md) を参照してください。
+代表的な realtime processor の設計については、 [`mixer` の仕組み](mixer.md) を参照してください。
 
 ### 3. `obsws`
 
@@ -222,6 +223,10 @@ Hisui の `obsws` 実装では、この 2 つを分離して持ち、 `coordinat
   - OBS WebSocket 互換機能の実装状況
 - `docs/internals/media_pipeline.md`
   - `media_pipeline` の processor / publisher / subscriber、同期、 RPC の仕組み
+- `docs/internals/mixer.md`
+  - realtime audio / video mixer の入力集約、出力 cadence、 RPC 更新
+- `docs/internals/timestamp.md`
+  - wrap 補正と sample 数ベース timestamp 安定化の仕組み
 - `docs/internals/obsws.md`
   - `obsws` の `server` / `session` / `coordinator` / `input_registry` の責務分割
 - `docs/internals/stats.md`

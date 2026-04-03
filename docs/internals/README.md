@@ -8,6 +8,8 @@
 
 - [全体アーキテクチャ](architecture_overview.md)
 - [`media_pipeline` の仕組み](media_pipeline.md)
+- [`mixer` の仕組み](mixer.md)
+- [`timestamp` の仕組み](timestamp.md)
 - [`obsws` の仕組み](obsws.md)
 - [`stats` / メトリクスの仕組み](stats.md)
 - [`/bootstrap` の仕組み](bootstrap.md)
