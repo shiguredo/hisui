@@ -164,7 +164,7 @@ async fn start_record_processors(
         run.video.source_track_id.clone(),
         run.video.encoded_track_id.clone(),
         crate::types::CodecName::H264,
-        std::num::NonZeroUsize::new(2_000_000).unwrap(),
+        std::num::NonZeroUsize::new(2_000_000).expect("non-zero constant"),
         frame_rate,
         Some(run.video.encoder_processor_id.clone()),
     )
@@ -175,7 +175,7 @@ async fn start_record_processors(
         run.audio.source_track_id.clone(),
         run.audio.encoded_track_id.clone(),
         crate::types::CodecName::Opus,
-        std::num::NonZeroUsize::new(128_000).unwrap(),
+        std::num::NonZeroUsize::new(128_000).expect("non-zero constant"),
         Some(run.audio.encoder_processor_id.clone()),
     )
     .await?;
