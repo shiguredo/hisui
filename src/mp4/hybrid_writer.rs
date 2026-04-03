@@ -9,7 +9,7 @@ use shiguredo_mp4::boxes::{Brand, FreeBox, FtypBox, MdatBox};
 use shiguredo_mp4::mux::{
     Fmp4SegmentMuxer, Mp4FileMuxer, Mp4FileMuxerOptions, SegmentMuxerOptions,
 };
-use shiguredo_mp4::{BoxHeader, BoxSize, Encode};
+use shiguredo_mp4::{BoxHeader, BoxSize, Decode, Encode};
 
 use crate::{TrackId, audio::AudioFrame, video::VideoFrame};
 
@@ -520,21 +520,26 @@ impl HybridMp4Writer {
         // Mp4FileMuxer が構築した head_boxes にはコーデック固有の compatible brand を含む
         // ftyp が入っている。hybrid MP4 では ftyp 部分のみを抽出して予約領域に書き込む。
         if let Some((_, head_boxes)) = pairs.first() {
-            let ftyp_size = if head_boxes.len() >= 4 {
-                u32::from_be_bytes([head_boxes[0], head_boxes[1], head_boxes[2], head_boxes[3]])
-                    as u64
-            } else {
-                0
+            let ftyp_size = match BoxHeader::decode(head_boxes) {
+                Ok((header, _)) => header.box_size.get(),
+                Err(e) => {
+                    tracing::warn!("failed to decode ftyp box header: {e}");
+                    0
+                }
             };
             if ftyp_size > 0 && ftyp_size <= self.mdat_start_offset {
                 self.file.seek(SeekFrom::Start(0))?;
-                self.file.write_all(&head_boxes[..ftyp_size as usize])?;
+                self.file
+                    .write_all(&head_boxes[..ftyp_size as usize])?;
 
                 // ftyp と mdat_start_offset の間を free ボックスで埋める
-                let padding = self.mdat_start_offset - ftyp_size;
-                if padding >= 8 {
+                if let Some(free_payload_size) = self
+                    .mdat_start_offset
+                    .checked_sub(ftyp_size)
+                    .and_then(|padding| padding.checked_sub(8))
+                {
                     let free_box = FreeBox {
-                        payload: vec![0; padding as usize - 8],
+                        payload: vec![0; free_payload_size as usize],
                     };
                     self.file.write_all(&free_box.encode_to_vec()?)?;
                 }
@@ -707,13 +712,8 @@ impl HybridMp4Writer {
 
 /// init_segment_bytes（ftyp + moov）から moov 部分のバイト列を取得する
 fn extract_moov_from_init_segment(init_bytes: &[u8]) -> crate::Result<&[u8]> {
-    if init_bytes.len() < 8 {
-        return Err(crate::Error::new(
-            "init segment is too small to contain ftyp box",
-        ));
-    }
-    let ftyp_size =
-        u32::from_be_bytes([init_bytes[0], init_bytes[1], init_bytes[2], init_bytes[3]]) as usize;
+    let (header, _) = BoxHeader::decode(init_bytes)?;
+    let ftyp_size = header.box_size.get() as usize;
     if ftyp_size > init_bytes.len() {
         return Err(crate::Error::new("ftyp box size exceeds init segment size"));
     }
