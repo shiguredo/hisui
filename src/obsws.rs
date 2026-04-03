@@ -3,9 +3,9 @@ pub mod coordinator;
 pub mod event;
 pub mod input_registry;
 pub mod message;
-#[cfg(feature = "monitor")]
-pub mod monitor;
 mod output_plan;
+#[cfg(feature = "player")]
+pub mod player;
 pub mod protocol;
 pub mod response;
 pub mod server;

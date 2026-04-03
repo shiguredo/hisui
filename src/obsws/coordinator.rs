@@ -18,6 +18,8 @@ mod input;
 mod output;
 mod output_dash;
 mod output_hls;
+#[cfg(feature = "player")]
+mod output_player;
 mod output_record;
 mod output_rtmp;
 mod output_sora;
@@ -155,6 +157,15 @@ pub struct ObswsCoordinator {
     sora_source_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::sora_source::SoraSourceEvent>,
     /// SoraSubscriber からのイベント送信チャネル（processor に渡す）
     sora_source_event_tx: tokio::sync::mpsc::UnboundedSender<crate::sora_source::SoraSourceEvent>,
+    /// player output 用の制御・メディアチャネル
+    #[cfg(feature = "player")]
+    pub(crate) player_command_tx: std::sync::mpsc::SyncSender<crate::obsws::player::PlayerCommand>,
+    #[cfg(feature = "player")]
+    pub(crate) player_media_tx:
+        std::sync::mpsc::SyncSender<crate::obsws::player::PlayerMediaMessage>,
+    /// player output のサブスクライバタスクハンドル
+    #[cfg(feature = "player")]
+    pub(crate) player_subscriber_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ObswsCoordinator {
@@ -166,6 +177,12 @@ impl ObswsCoordinator {
         input_registry: ObswsInputRegistry,
         program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
+        #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
+            crate::obsws::player::PlayerCommand,
+        >,
+        #[cfg(feature = "player")] player_media_tx: std::sync::mpsc::SyncSender<
+            crate::obsws::player::PlayerMediaMessage,
+        >,
     ) -> (
         Self,
         handle::ObswsCoordinatorHandle,
@@ -193,6 +210,12 @@ impl ObswsCoordinator {
             sora_subscribers: std::collections::BTreeMap::new(),
             sora_source_event_rx,
             sora_source_event_tx,
+            #[cfg(feature = "player")]
+            player_command_tx,
+            #[cfg(feature = "player")]
+            player_media_tx,
+            #[cfg(feature = "player")]
+            player_subscriber_handle: None,
         };
         let handle = handle::ObswsCoordinatorHandle::new(
             command_tx,

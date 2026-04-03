@@ -82,8 +82,11 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
-    #[cfg(feature = "monitor")] monitor_frame_tx: Option<
-        std::sync::mpsc::SyncSender<crate::obsws::monitor::RawPlayerFrame>,
+    #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
+        crate::obsws::player::PlayerCommand,
+    >,
+    #[cfg(feature = "player")] player_media_tx: std::sync::mpsc::SyncSender<
+        crate::obsws::player::PlayerMediaMessage,
     >,
 ) -> crate::Result<()> {
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
@@ -240,16 +243,6 @@ pub async fn run_server(
         }
     };
 
-    // モニターウィンドウ用のサブスクライバタスクを起動する
-    #[cfg(feature = "monitor")]
-    if let Some(frame_tx) = monitor_frame_tx {
-        let ph = pipeline_handle.clone();
-        let vtid = program_output.video_track_id.clone();
-        tokio::spawn(async move {
-            crate::obsws::monitor::run_monitor_subscriber(ph, vtid, frame_tx).await;
-        });
-    }
-
     // runtime actor を起動する
     // source processor は入力ライフサイクルで管理するため、coordinator 経由で初期起動する
     let (mut actor, coordinator_handle, shutdown_rx) =
@@ -257,6 +250,10 @@ pub async fn run_server(
             input_registry,
             program_output,
             Some(pipeline_handle.clone()),
+            #[cfg(feature = "player")]
+            player_command_tx,
+            #[cfg(feature = "player")]
+            player_media_tx,
         );
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());

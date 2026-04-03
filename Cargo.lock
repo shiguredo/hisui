@@ -768,9 +768,9 @@ dependencies = [
 
 [[package]]
 name = "raw_player"
-version = "2026.1.0-canary.2"
+version = "2026.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7b9900430366c5d19abfb7da82f9d36b65c659c96d15235ca7a95184db1fba1"
+checksum = "c46d1156fc20fedf7b29df24f89b3ae7cdf220d4b5f9c4ee359fed0ee125b5bb"
 dependencies = [
  "bindgen",
  "shiguredo_cmake",

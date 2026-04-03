@@ -100,6 +100,8 @@ impl ObswsInputRegistry {
             dash_settings: ObswsDashSettings::default(),
             dash_runtime: ObswsDashRuntimeState::default(),
             next_dash_run_id: 0,
+            #[cfg(feature = "player")]
+            player_active: false,
             canvas_width,
             canvas_height,
             frame_rate,
@@ -1143,6 +1145,25 @@ impl ObswsInputRegistry {
 
     pub fn dash_destination(&self) -> Option<&DashDestination> {
         self.dash_runtime.run.as_ref().map(|run| &run.destination)
+    }
+
+    #[cfg(feature = "player")]
+    pub fn is_player_active(&self) -> bool {
+        self.player_active
+    }
+
+    #[cfg(feature = "player")]
+    pub fn activate_player(&mut self) -> Result<(), ()> {
+        if self.player_active {
+            return Err(());
+        }
+        self.player_active = true;
+        Ok(())
+    }
+
+    #[cfg(feature = "player")]
+    pub fn deactivate_player(&mut self) {
+        self.player_active = false;
     }
 
     /// 指定した input_uuid を参照するシーンアイテムを全シーンから検索する。

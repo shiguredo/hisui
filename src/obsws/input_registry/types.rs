@@ -2212,6 +2212,8 @@ pub struct ObswsInputRegistry {
     pub(crate) dash_settings: ObswsDashSettings,
     pub(crate) dash_runtime: ObswsDashRuntimeState,
     pub(crate) next_dash_run_id: u64,
+    #[cfg(feature = "player")]
+    pub(crate) player_active: bool,
     pub(crate) canvas_width: crate::types::EvenUsize,
     pub(crate) canvas_height: crate::types::EvenUsize,
     pub(crate) frame_rate: crate::video::FrameRate,
