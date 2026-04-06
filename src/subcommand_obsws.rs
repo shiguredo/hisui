@@ -298,7 +298,9 @@ fn run_player_control_loop(
                     // 制御コマンドをノンブロッキングで確認
                     match command_rx.try_recv() {
                         Ok(PlayerCommand::Stop) | Ok(PlayerCommand::Terminate) => break 'frame_loop,
-                        Ok(PlayerCommand::Start { .. }) => {} // 既に起動中なので無視
+                        Ok(PlayerCommand::Start { reply_tx, .. }) => {
+                            let _ = reply_tx.send(Err("Player is already running".to_owned()));
+                        }
                         Err(std::sync::mpsc::TryRecvError::Empty) => {}
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => break 'frame_loop,
                     }
