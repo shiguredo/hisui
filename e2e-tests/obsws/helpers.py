@@ -106,7 +106,7 @@ class ObswsServer:
             if self.default_record_dir is not None:
                 args.extend(["--default-record-dir", str(self.default_record_dir)])
             if self.ui:
-                args.append("--ui")
+                args.extend(["--ui", "--no-open"])
             if self.ui_remote_url is not None:
                 args.extend(["--ui-remote-url", self.ui_remote_url])
             if self.https_cert_path is not None and self.https_key_path is not None:

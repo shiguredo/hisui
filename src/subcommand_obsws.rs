@@ -49,8 +49,8 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .doc("UI 用リモートサーバーの URL（デフォルト: https://hisui-devtools.shiguredo.app/）")
         .take(args)
         .present_and_then(|o| Ok::<_, std::convert::Infallible>(o.value().to_string()))?;
-    let open: bool = noargs::flag("open")
-        .doc("--ui 指定時にブラウザで UI を開く")
+    let no_open: bool = noargs::flag("no-open")
+        .doc("--ui 指定時にブラウザで UI を自動で開かない")
         .take(args)
         .is_present();
     let https_cert_path: Option<PathBuf> = noargs::opt("https-cert-path")
@@ -111,8 +111,8 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
     if !ui && ui_remote_url.is_some() {
         return Err(noargs::Error::other(args, "--ui-remote-url requires --ui"));
     }
-    if !ui && open {
-        return Err(noargs::Error::other(args, "--open requires --ui"));
+    if !ui && no_open {
+        return Err(noargs::Error::other(args, "--no-open requires --ui"));
     }
 
     let ui_remote_url: Option<String> = if ui {
@@ -145,7 +145,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         password,
         resolve_default_record_dir(default_record_dir)?,
         ui_remote_url,
-        open,
+        !no_open,
         https_cert_path,
         https_key_path,
         openh264,
