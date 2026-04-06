@@ -349,6 +349,13 @@ pub fn handle_request_message_with_pipeline_handle(
                 input_registry,
             )
         }
+        "GetInputPropertiesListPropertyItems" => {
+            crate::obsws::response::build_get_input_properties_list_property_items_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetPersistentData" => crate::obsws::response::build_get_persistent_data_response(
             &request_id,
             request.request_data.as_ref(),
@@ -439,6 +446,8 @@ mod tests {
             ObswsInput {
                 settings: ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
                     device_id: Some("camera-1".to_owned()),
+                    pixel_format: None,
+                    fps: None,
                 }),
                 input_muted: false,
                 input_volume_mul: crate::types::NonNegFiniteF64::ONE,
@@ -2229,6 +2238,111 @@ mod tests {
             .required()?
             .try_into()?;
         assert!(!result);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_for_unsupported_input_kind_property_items()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-prop-items".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputKind":"browser_source","propertyName":"device_id"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let result: bool = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])?
+            .required()?
+            .try_into()?;
+        assert!(!result);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_for_unsupported_property_name()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-prop-items".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputKind":"video_capture_device","propertyName":"unknown_property"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let result: bool = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])?
+            .required()?
+            .try_into()?;
+        assert!(!result);
+        let comment: String = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "comment"])?
+            .required()?
+            .try_into()?;
+        assert!(comment.contains("unsupported property name"));
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_for_missing_property_name()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-prop-items".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(r#"{"inputKind":"video_capture_device"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let result: bool = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])?
+            .required()?
+            .try_into()?;
+        assert!(!result);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_property_items_for_video_capture_device()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-prop-items".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputKind":"video_capture_device","propertyName":"device_id"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let result: bool = json
+            .value()
+            .to_path_member(&["d", "requestStatus", "result"])?
+            .required()?
+            .try_into()?;
+        assert!(result);
+        let property_items = json
+            .value()
+            .to_path_member(&["d", "responseData", "propertyItems"])?
+            .required()?;
+        assert_eq!(property_items.kind(), nojson::JsonValueKind::Array);
         Ok(())
     }
 }

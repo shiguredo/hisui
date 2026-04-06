@@ -9,10 +9,18 @@ use crate::obsws::protocol::{
 
 use super::{
     CreateInputCreated, CreateInputExecution, SetInputSettingsExecution, parse_create_input_fields,
-    parse_get_input_default_settings_fields, parse_input_lookup_fields,
-    parse_request_data_or_error_response, parse_set_input_name_fields,
+    parse_get_input_default_settings_fields, parse_get_input_properties_list_property_items_fields,
+    parse_input_lookup_fields, parse_request_data_or_error_response, parse_set_input_name_fields,
     parse_set_input_settings_fields,
 };
+
+/// GetInputPropertiesListPropertyItems のレスポンスに含まれるプロパティアイテム
+#[derive(Debug, Clone)]
+pub struct ObswsPropertyItem {
+    pub item_name: String,
+    pub item_value: String,
+    pub item_enabled: bool,
+}
 
 pub fn build_get_input_list_response(
     request_id: &str,
@@ -697,4 +705,131 @@ fn parse_set_input_volume_fields(
         volume_db,
         volume_mul,
     })
+}
+
+/// video-device-rs からデバイス情報を列挙して propertyItems を返す
+pub fn build_get_input_properties_list_property_items_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let fields = match parse_request_data_or_error_response(
+        "GetInputPropertiesListPropertyItems",
+        request_id,
+        request_data,
+        parse_get_input_properties_list_property_items_fields,
+    ) {
+        Ok(fields) => fields,
+        Err(response) => return response,
+    };
+
+    if !input_registry
+        .supported_input_kinds()
+        .contains(&fields.input_kind.as_str())
+    {
+        return super::build_request_response_error(
+            "GetInputPropertiesListPropertyItems",
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "unsupported input kind",
+        );
+    }
+
+    if fields.input_kind != "video_capture_device" {
+        return super::build_request_response_error(
+            "GetInputPropertiesListPropertyItems",
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "property enumeration is only supported for video_capture_device",
+        );
+    }
+
+    let property_items = match enumerate_video_device_property_items(
+        &fields.property_name,
+        fields.device_id.as_deref(),
+    ) {
+        Ok(items) => items,
+        Err(error_message) => {
+            return super::build_request_response_error(
+                "GetInputPropertiesListPropertyItems",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &error_message,
+            );
+        }
+    };
+
+    super::build_request_response_success("GetInputPropertiesListPropertyItems", request_id, |f| {
+        f.member(
+            "propertyItems",
+            nojson::array(|f| {
+                for item in &property_items {
+                    f.element(nojson::object(|f| {
+                        f.member("itemName", item.item_name.as_str())?;
+                        f.member("itemValue", item.item_value.as_str())?;
+                        f.member("itemEnabled", item.item_enabled)
+                    }))?;
+                }
+                Ok(())
+            }),
+        )
+    })
+}
+
+/// video-device-rs を使って指定されたプロパティのアイテムを列挙する
+fn enumerate_video_device_property_items(
+    property_name: &str,
+    device_id: Option<&str>,
+) -> Result<Vec<ObswsPropertyItem>, String> {
+    let device_list = shiguredo_video_device::VideoDeviceList::enumerate()
+        .map_err(|e| format!("failed to enumerate video devices: {e}"))?;
+
+    match property_name {
+        "device_id" => {
+            let mut items = Vec::new();
+            for device in device_list.devices() {
+                let name = device.name().unwrap_or_else(|_| "Unknown".to_owned());
+                let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                items.push(ObswsPropertyItem {
+                    item_name: name,
+                    item_value: unique_id,
+                    item_enabled: true,
+                });
+            }
+            Ok(items)
+        }
+        "formats" => {
+            let mut items = Vec::new();
+            for device in device_list.devices() {
+                // device_id が指定されている場合はそのデバイスだけフィルタする
+                if let Some(target_id) = device_id {
+                    let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                    if unique_id != target_id {
+                        continue;
+                    }
+                }
+                for format in device.formats() {
+                    let fps = format.max_fps.round() as i32;
+                    let pixel_format_name = format.pixel_format.name();
+                    let item_name = format!(
+                        "{}x{} / {} fps / {}",
+                        format.width, format.height, fps, pixel_format_name
+                    );
+                    let item_value = format!(
+                        "{}x{}_{}_{}",
+                        format.width, format.height, fps, pixel_format_name
+                    );
+                    items.push(ObswsPropertyItem {
+                        item_name,
+                        item_value,
+                        item_enabled: true,
+                    });
+                }
+            }
+            Ok(items)
+        }
+        _ => Err(format!(
+            "unsupported property name for video_capture_device: {property_name}"
+        )),
+    }
 }

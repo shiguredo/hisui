@@ -9,6 +9,8 @@ fn empty_video_capture_device_input() -> ObswsInput {
     ObswsInput {
         settings: ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: None,
+            pixel_format: None,
+            fps: None,
         }),
         input_muted: false,
         input_volume_mul: crate::types::NonNegFiniteF64::ONE,
@@ -102,6 +104,8 @@ fn parse_video_capture_device_settings_reads_device_id() {
         input.settings,
         ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-1".to_owned()),
+            pixel_format: None,
+            fps: None,
         })
     );
 }
@@ -226,6 +230,8 @@ fn set_input_settings_with_overlay_updates_specified_fields_only() {
         untouched.input.settings,
         ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-1".to_owned()),
+            pixel_format: None,
+            fps: None,
         })
     );
 
@@ -244,6 +250,8 @@ fn set_input_settings_with_overlay_updates_specified_fields_only() {
         updated.input.settings,
         ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-2".to_owned()),
+            pixel_format: None,
+            fps: None,
         })
     );
 }
@@ -273,7 +281,11 @@ fn set_input_settings_without_overlay_replaces_existing_settings() {
         .expect("input must exist");
     assert_eq!(
         updated.input.settings,
-        ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings { device_id: None })
+        ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
+            device_id: None,
+            pixel_format: None,
+            fps: None,
+        })
     );
 }
 

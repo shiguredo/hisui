@@ -193,8 +193,12 @@ impl ObswsInputSettings {
             }
             "video_capture_device" => {
                 let device_id = parse_optional_string_setting(input_settings, "device_id")?;
+                let pixel_format = parse_optional_string_setting(input_settings, "pixel_format")?;
+                let fps = parse_optional_i32_setting(input_settings, "fps")?;
                 Ok(Self::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
                     device_id,
+                    pixel_format,
+                    fps,
                 }))
             }
             "audio_capture_device" => {
@@ -322,8 +326,16 @@ impl ObswsInputSettings {
             Self::VideoCaptureDevice(existing) => {
                 let device_id =
                     parse_overlay_string_setting(input_settings, "device_id", &existing.device_id)?;
+                let pixel_format = parse_overlay_string_setting(
+                    input_settings,
+                    "pixel_format",
+                    &existing.pixel_format,
+                )?;
+                let fps = parse_overlay_i32_setting(input_settings, "fps", &existing.fps)?;
                 Ok(Self::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
                     device_id,
+                    pixel_format,
+                    fps,
                 }))
             }
             Self::AudioCaptureDevice(existing) => {
@@ -1120,6 +1132,8 @@ impl nojson::DisplayJson for ObswsColorSourceSettings {
 pub struct ObswsVideoCaptureDeviceSettings {
     // OBS 互換のため、video_capture_device は device_id 未指定の状態も有効として扱う
     pub device_id: Option<String>,
+    pub pixel_format: Option<String>,
+    pub fps: Option<i32>,
 }
 
 impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
@@ -1127,6 +1141,12 @@ impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
         nojson::object(|f| {
             if let Some(device_id) = &self.device_id {
                 f.member("device_id", device_id)?;
+            }
+            if let Some(pixel_format) = &self.pixel_format {
+                f.member("pixel_format", pixel_format)?;
+            }
+            if let Some(fps) = &self.fps {
+                f.member("fps", fps)?;
             }
             Ok(())
         })

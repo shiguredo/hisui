@@ -6,6 +6,7 @@ use crate::{Error, ProcessorHandle, Result, TrackId, VideoFrame};
 pub struct VideoDeviceSource {
     pub output_video_track_id: TrackId,
     pub device_id: Option<String>,
+    pub pixel_format: Option<String>,
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub fps: Option<i32>,
@@ -26,13 +27,13 @@ impl VideoDeviceSource {
         handle.wait_subscribers_ready().await?;
 
         let default_config = shiguredo_video_device::VideoCaptureConfig::default();
+        let pixel_format = self.pixel_format.as_deref().and_then(parse_pixel_format);
         let config = shiguredo_video_device::VideoCaptureConfig {
             device_id: self.device_id.clone(),
             width: self.width.unwrap_or(default_config.width),
             height: self.height.unwrap_or(default_config.height),
             fps: self.fps.unwrap_or(default_config.fps),
-            // デバイスがサポートするフォーマットに任せる（例えば I420 固定だと macOS カメラで非対応の場合がある）
-            pixel_format: None,
+            pixel_format,
         };
 
         let (frame_tx, mut frame_rx) =
@@ -57,6 +58,16 @@ impl VideoDeviceSource {
         output_video_sender.send_eos();
 
         Ok(())
+    }
+}
+
+/// 文字列からピクセルフォーマットに変換する
+fn parse_pixel_format(name: &str) -> Option<shiguredo_video_device::PixelFormat> {
+    match name {
+        "NV12" => Some(shiguredo_video_device::PixelFormat::Nv12),
+        "YUY2" => Some(shiguredo_video_device::PixelFormat::Yuy2),
+        "I420" => Some(shiguredo_video_device::PixelFormat::I420),
+        _ => None,
     }
 }
 
@@ -205,9 +216,10 @@ pub(super) fn build_record_source_plan(
     let source = VideoDeviceSource {
         output_video_track_id: raw_video_track_id.clone(),
         device_id: settings.device_id.clone(),
+        pixel_format: settings.pixel_format.clone(),
         width: None,
         height: None,
-        fps: None,
+        fps: settings.fps,
     };
 
     Ok(super::ObswsRecordSourcePlan {
@@ -232,6 +244,8 @@ mod tests {
         let plan = build_record_source_plan(
             &ObswsVideoCaptureDeviceSettings {
                 device_id: Some("camera0".to_owned()),
+                pixel_format: None,
+                fps: None,
             },
             ObswsOutputKind::Program,
             1,
@@ -275,7 +289,11 @@ mod tests {
     #[test]
     fn build_record_source_plan_without_device_id() {
         let plan = build_record_source_plan(
-            &ObswsVideoCaptureDeviceSettings { device_id: None },
+            &ObswsVideoCaptureDeviceSettings {
+                device_id: None,
+                pixel_format: None,
+                fps: None,
+            },
             ObswsOutputKind::Program,
             2,
             "1",
