@@ -38,8 +38,8 @@ shiguredo_rtsp = "=2026.1.0-canary.0"
 shiguredo_srt = "=2026.1.0-canary.0"
 shiguredo_webrtc = { workspace = true }
 sora_sdk = "=2026.1.0-canary.5"
-shiguredo_video_device = "=2026.1.0-canary.5"
-shiguredo_audio_device = "=2026.1.0-canary.0"
+shiguredo_video_device = "=2026.1.0"
+shiguredo_audio_device = "=2026.1.0"
 mpeg2ts = "=0.6.0"
 shiguredo_m3u8 = "=2026.1.0-canary.0"
 shiguredo_mpd = "=2026.1.0-canary.0"
@@ -76,7 +76,7 @@ tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["fmt", "std"] }
 noargs = "=0.4.2"
 nojson = "=0.3.10"
-tokio = { version = "=1.50.0", features = [
+tokio = { version = "=1.51.0", features = [
     "rt",
     "rt-multi-thread",
     "net",

@@ -59,7 +59,9 @@
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0-canary.0 を追加する
+- [ADD] 依存ライブラリに tokio 1.51.0 を追加する
+  - @sile
+- [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0 を追加する
   - @sile
 - [ADD] server サブコマンドに `--ui-remote-url` オプションを追加する
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
@@ -204,7 +206,7 @@
   - @sile
 - [UPDATE] nojson のバージョンを 0.3.10 にあげる
   - @sile
-- [UPDATE] shiguredo_video_device のバージョンを 2026.1.0-canary.5 にあげる
+- [UPDATE] shiguredo_video_device のバージョンを 2026.1.0 にあげる
   - @sile
 - [ADD] 内部用に VideoDeviceSource 構造体を追加する
   - Video Device からの読み込みと I420 への変換を行い、映像トラックに出力する
