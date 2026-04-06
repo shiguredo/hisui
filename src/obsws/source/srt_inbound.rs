@@ -4,17 +4,21 @@ use crate::obsws::source::{
 };
 use crate::{ProcessorId, TrackId};
 
+/// source processor を起動できる設定が揃っているかを返す
+pub(super) fn is_source_startable(settings: &ObswsSrtInboundSettings) -> bool {
+    settings.input_url.is_some()
+}
+
 pub(super) fn build_record_source_plan(
     settings: &ObswsSrtInboundSettings,
     output_kind: ObswsOutputKind,
     run_id: u64,
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
-    let Some(input_url) = settings.input_url.as_deref() else {
-        return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
-            "inputUrl",
-        ));
-    };
+    let input_url = settings
+        .input_url
+        .as_deref()
+        .expect("is_source_startable() で inputUrl の存在は確認済み");
 
     let kind = output_kind.as_str();
     let source_processor_id = ProcessorId::new(format!(
@@ -118,22 +122,16 @@ mod tests {
     }
 
     #[test]
-    fn build_record_source_plan_requires_input_url() {
-        let result = build_record_source_plan(
-            &ObswsSrtInboundSettings {
-                input_url: None,
-                stream_id: None,
-                passphrase: None,
-            },
-            ObswsOutputKind::Program,
-            1,
-            "0",
-        );
-        assert!(matches!(
-            result,
-            Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
-                "inputUrl"
-            ))
-        ));
+    fn is_source_startable_requires_input_url() {
+        assert!(!is_source_startable(&ObswsSrtInboundSettings {
+            input_url: None,
+            stream_id: None,
+            passphrase: None,
+        }));
+        assert!(is_source_startable(&ObswsSrtInboundSettings {
+            input_url: Some("srt://127.0.0.1:9000".to_owned()),
+            stream_id: None,
+            passphrase: None,
+        }));
     }
 }

@@ -188,6 +188,13 @@ fn convert_captured_frame_to_i420(
     }
 }
 
+/// source processor を起動できる設定が揃っているかを返す
+pub(super) fn is_source_startable(
+    settings: &crate::obsws::input_registry::ObswsVideoCaptureDeviceSettings,
+) -> bool {
+    settings.device_id.is_some()
+}
+
 pub(super) fn build_record_source_plan(
     settings: &crate::obsws::input_registry::ObswsVideoCaptureDeviceSettings,
     output_kind: super::ObswsOutputKind,

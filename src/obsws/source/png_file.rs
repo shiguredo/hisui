@@ -260,6 +260,13 @@ fn grayscale_like_to_i420a(
     Ok((data, width, height))
 }
 
+/// source processor を起動できる設定が揃っているかを返す
+pub(super) fn is_source_startable(
+    settings: &crate::obsws::input_registry::ObswsImageSourceSettings,
+) -> bool {
+    settings.file.is_some()
+}
+
 pub(super) fn build_record_source_plan(
     settings: &crate::obsws::input_registry::ObswsImageSourceSettings,
     output_kind: super::ObswsOutputKind,
@@ -267,9 +274,10 @@ pub(super) fn build_record_source_plan(
     source_key: &str,
     frame_rate: crate::video::FrameRate,
 ) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
-    let Some(path) = settings.file.as_deref() else {
-        return Err(super::BuildObswsRecordSourcePlanError::MissingRequiredField("file"));
-    };
+    let path = settings
+        .file
+        .as_deref()
+        .expect("is_source_startable() で file の存在は確認済み");
 
     let source_processor_id = crate::ProcessorId::new(format!(
         "obsws:{}:{run_id}:source:{source_key}:png_source",

@@ -223,18 +223,29 @@ pub struct ObswsRecordSourcePlan {
 
 #[derive(Debug)]
 pub enum BuildObswsRecordSourcePlanError {
-    MissingRequiredField(&'static str),
     InvalidInput(String),
 }
 
 impl BuildObswsRecordSourcePlanError {
     pub fn message(&self) -> String {
         match self {
-            Self::MissingRequiredField(field_name) => {
-                format!("inputSettings.{field_name} is required")
-            }
             Self::InvalidInput(message) => message.clone(),
         }
+    }
+}
+
+/// source processor を起動できる設定が揃っているかを返す
+pub fn is_source_startable(settings: &ObswsInputSettings) -> bool {
+    match settings {
+        ObswsInputSettings::ImageSource(s) => png_file::is_source_startable(s),
+        ObswsInputSettings::ColorSource(s) => color_source::is_source_startable(s),
+        ObswsInputSettings::VideoCaptureDevice(s) => video_device::is_source_startable(s),
+        ObswsInputSettings::AudioCaptureDevice(s) => audio_device::is_source_startable(s),
+        ObswsInputSettings::Mp4FileSource(s) => mp4::is_source_startable(s),
+        ObswsInputSettings::RtmpInbound(s) => rtmp_inbound::is_source_startable(s),
+        ObswsInputSettings::SrtInbound(s) => srt_inbound::is_source_startable(s),
+        ObswsInputSettings::RtspSubscriber(s) => rtsp_subscriber::is_source_startable(s),
+        ObswsInputSettings::WebRtcSource(_) | ObswsInputSettings::SoraSource(_) => false,
     }
 }
 
