@@ -9,6 +9,8 @@ fn empty_video_capture_device_input() -> ObswsInput {
     ObswsInput {
         settings: ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: None,
+            pixel_format: None,
+            fps: None,
         }),
         input_muted: false,
         input_volume_mul: crate::types::NonNegFiniteF64::ONE,
@@ -102,6 +104,23 @@ fn parse_video_capture_device_settings_reads_device_id() {
         input.settings,
         ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-1".to_owned()),
+            pixel_format: None,
+            fps: None,
+        })
+    );
+}
+
+#[test]
+fn parse_video_capture_device_settings_reads_pixel_format_and_fps() {
+    let settings = parse_owned_json(r#"{"device_id":"camera-1","pixel_format":"NV12","fps":30}"#);
+    let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+        .expect("video_capture_device settings must be accepted");
+    assert_eq!(
+        input.settings,
+        ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
+            device_id: Some("camera-1".to_owned()),
+            pixel_format: Some("NV12".to_owned()),
+            fps: Some(30),
         })
     );
 }
@@ -135,6 +154,33 @@ fn parse_input_settings_rejects_invalid_known_field_type() {
 }
 
 #[test]
+fn parse_video_capture_device_settings_rejects_unsupported_pixel_format() {
+    let settings = parse_owned_json(r#"{"pixel_format":"UNKNOWN"}"#);
+    let error = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+        .expect_err("unsupported pixel format must be rejected");
+    assert_eq!(
+        error,
+        ParseInputSettingsError::InvalidInputSettings(
+            "Invalid inputSettings.pixel_format field: unsupported pixel format: UNKNOWN"
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn parse_video_capture_device_settings_rejects_non_positive_fps() {
+    let settings = parse_owned_json(r#"{"fps":0}"#);
+    let error = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
+        .expect_err("non positive fps must be rejected");
+    assert_eq!(
+        error,
+        ParseInputSettingsError::InvalidInputSettings(
+            "Invalid inputSettings.fps field: positive integer is required, got 0".to_owned()
+        )
+    );
+}
+
+#[test]
 fn parse_input_settings_ignores_unknown_fields() {
     let settings = parse_owned_json(r#"{"unknown_key":"value"}"#);
     let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
@@ -148,6 +194,34 @@ fn parse_input_settings_ignores_unknown_fields() {
             .expect("member access must succeed")
             .optional()
             .is_none()
+    );
+}
+
+#[test]
+fn set_input_settings_with_overlay_rejects_non_positive_fps() {
+    let mut registry = ObswsInputRegistry::new_for_test();
+    let input = ObswsInput::from_kind_and_settings(
+        "video_capture_device",
+        parse_owned_json(r#"{"device_id":"camera-1","fps":30}"#).value(),
+    )
+    .expect("input settings must be valid");
+    registry
+        .create_input(OBSWS_DEFAULT_SCENE_NAME, "camera-1", input, true)
+        .expect("input creation must succeed");
+
+    let error = registry
+        .set_input_settings(
+            None,
+            Some("camera-1"),
+            parse_owned_json(r#"{"fps":0}"#).value(),
+            true,
+        )
+        .expect_err("non positive fps must be rejected");
+    assert_eq!(
+        error,
+        SetInputSettingsError::InvalidInputSettings(
+            "Invalid inputSettings.fps field: positive integer is required, got 0".to_owned()
+        )
     );
 }
 
@@ -226,6 +300,8 @@ fn set_input_settings_with_overlay_updates_specified_fields_only() {
         untouched.input.settings,
         ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-1".to_owned()),
+            pixel_format: None,
+            fps: None,
         })
     );
 
@@ -244,6 +320,8 @@ fn set_input_settings_with_overlay_updates_specified_fields_only() {
         updated.input.settings,
         ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-2".to_owned()),
+            pixel_format: None,
+            fps: None,
         })
     );
 }
@@ -273,7 +351,11 @@ fn set_input_settings_without_overlay_replaces_existing_settings() {
         .expect("input must exist");
     assert_eq!(
         updated.input.settings,
-        ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings { device_id: None })
+        ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
+            device_id: None,
+            pixel_format: None,
+            fps: None,
+        })
     );
 }
 

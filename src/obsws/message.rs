@@ -447,6 +447,8 @@ mod tests {
             ObswsInput {
                 settings: ObswsInputSettings::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
                     device_id: Some("camera-1".to_owned()),
+                    pixel_format: None,
+                    fps: None,
                 }),
                 input_muted: false,
                 input_volume_mul: crate::types::NonNegFiniteF64::ONE,
@@ -1829,11 +1831,83 @@ mod tests {
             .value()
             .to_path_member(&["d", "responseData"])?
             .required()?;
-        let property_items: Vec<String> = response_data
-            .to_member("propertyItems")?
-            .required()?
-            .try_into()?;
-        assert!(property_items.is_empty());
+        let property_items = response_data.to_member("propertyItems")?.required()?;
+        assert_eq!(property_items.kind(), nojson::JsonValueKind::Array);
+        for item in property_items.to_array()? {
+            let value: String = item.to_member("itemValue")?.required()?.try_into()?;
+            assert_ne!(value, "Unknown");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_pixel_format_property_items_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-pixel-format".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-1","propertyName":"pixel_format"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        assert!(result);
+
+        let response_data = json
+            .value()
+            .to_path_member(&["d", "responseData"])?
+            .required()?;
+        let property_items = response_data.to_member("propertyItems")?.required()?;
+        assert_eq!(property_items.kind(), nojson::JsonValueKind::Array);
+        for item in property_items.to_array()? {
+            let value: String = item.to_member("itemValue")?.required()?.try_into()?;
+            assert_ne!(value, "Unknown");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_fps_property_items_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-fps".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-1","propertyName":"fps"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        assert!(result);
+
+        let response_data = json
+            .value()
+            .to_path_member(&["d", "responseData"])?
+            .required()?;
+        let property_items = response_data.to_member("propertyItems")?.required()?;
+        assert_eq!(property_items.kind(), nojson::JsonValueKind::Array);
+        for item in property_items.to_array()? {
+            let value: String = item.to_member("itemValue")?.required()?.try_into()?;
+            let fps: i32 = value.parse()?;
+            assert!(fps > 0);
+        }
         Ok(())
     }
 

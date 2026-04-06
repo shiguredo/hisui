@@ -315,6 +315,8 @@ fn build_input_settings_changed_event_contains_expected_fields() {
     let input_settings = ObswsInputSettings::VideoCaptureDevice(
         crate::obsws::input_registry::ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-1".to_owned()),
+            pixel_format: None,
+            fps: None,
         },
     );
     let event =

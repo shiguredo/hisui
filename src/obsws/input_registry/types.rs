@@ -193,8 +193,14 @@ impl ObswsInputSettings {
             }
             "video_capture_device" => {
                 let device_id = parse_optional_string_setting(input_settings, "device_id")?;
+                let pixel_format = parse_optional_string_setting(input_settings, "pixel_format")?;
+                validate_video_capture_pixel_format(&pixel_format)?;
+                let fps = parse_optional_i32_setting(input_settings, "fps")?;
+                validate_video_capture_fps(fps)?;
                 Ok(Self::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
                     device_id,
+                    pixel_format,
+                    fps,
                 }))
             }
             "audio_capture_device" => {
@@ -322,8 +328,18 @@ impl ObswsInputSettings {
             Self::VideoCaptureDevice(existing) => {
                 let device_id =
                     parse_overlay_string_setting(input_settings, "device_id", &existing.device_id)?;
+                let pixel_format = parse_overlay_string_setting(
+                    input_settings,
+                    "pixel_format",
+                    &existing.pixel_format,
+                )?;
+                validate_video_capture_pixel_format(&pixel_format)?;
+                let fps = parse_overlay_i32_setting(input_settings, "fps", &existing.fps)?;
+                validate_video_capture_fps(fps)?;
                 Ok(Self::VideoCaptureDevice(ObswsVideoCaptureDeviceSettings {
                     device_id,
+                    pixel_format,
+                    fps,
                 }))
             }
             Self::AudioCaptureDevice(existing) => {
@@ -1000,6 +1016,28 @@ fn validate_hex_color(color: &Option<String>) -> Result<(), ParseInputSettingsEr
     Ok(())
 }
 
+fn validate_video_capture_pixel_format(
+    pixel_format: &Option<String>,
+) -> Result<(), ParseInputSettingsError> {
+    match pixel_format.as_deref() {
+        None | Some("NV12" | "YUY2" | "I420") => Ok(()),
+        Some(value) => Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.pixel_format field: unsupported pixel format: {value}"
+        ))),
+    }
+}
+
+fn validate_video_capture_fps(fps: Option<i32>) -> Result<(), ParseInputSettingsError> {
+    if let Some(value) = fps
+        && value <= 0
+    {
+        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
+            "Invalid inputSettings.fps field: positive integer is required, got {value}"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_background_key_tolerance(value: Option<i32>) -> Result<(), ParseInputSettingsError> {
     if let Some(v) = value
         && !(0..=255).contains(&v)
@@ -1120,6 +1158,8 @@ impl nojson::DisplayJson for ObswsColorSourceSettings {
 pub struct ObswsVideoCaptureDeviceSettings {
     // OBS 互換のため、video_capture_device は device_id 未指定でも入力としては受理する
     pub device_id: Option<String>,
+    pub pixel_format: Option<String>,
+    pub fps: Option<i32>,
 }
 
 impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
@@ -1127,6 +1167,12 @@ impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
         nojson::object(|f| {
             if let Some(device_id) = &self.device_id {
                 f.member("device_id", device_id)?;
+            }
+            if let Some(pixel_format) = &self.pixel_format {
+                f.member("pixel_format", pixel_format)?;
+            }
+            if let Some(fps) = &self.fps {
+                f.member("fps", fps)?;
             }
             Ok(())
         })

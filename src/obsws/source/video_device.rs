@@ -6,6 +6,7 @@ use crate::{Error, ProcessorHandle, Result, TrackId, VideoFrame};
 pub struct VideoDeviceSource {
     pub output_video_track_id: TrackId,
     pub device_id: Option<String>,
+    pub pixel_format: Option<String>,
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub fps: Option<i32>,
@@ -26,13 +27,13 @@ impl VideoDeviceSource {
         handle.wait_subscribers_ready().await?;
 
         let default_config = shiguredo_video_device::VideoCaptureConfig::default();
+        let pixel_format = parse_pixel_format(self.pixel_format.as_deref())?;
         let config = shiguredo_video_device::VideoCaptureConfig {
             device_id: self.device_id.clone(),
             width: self.width.unwrap_or(default_config.width),
             height: self.height.unwrap_or(default_config.height),
             fps: self.fps.unwrap_or(default_config.fps),
-            // デバイスがサポートするフォーマットに任せる（例えば I420 固定だと macOS カメラで非対応の場合がある）
-            pixel_format: None,
+            pixel_format,
         };
 
         let (frame_tx, mut frame_rx) =
@@ -57,6 +58,17 @@ impl VideoDeviceSource {
         output_video_sender.send_eos();
 
         Ok(())
+    }
+}
+
+/// 文字列からピクセルフォーマットに変換する
+fn parse_pixel_format(name: Option<&str>) -> Result<Option<shiguredo_video_device::PixelFormat>> {
+    match name {
+        None => Ok(None),
+        Some("NV12") => Ok(Some(shiguredo_video_device::PixelFormat::Nv12)),
+        Some("YUY2") => Ok(Some(shiguredo_video_device::PixelFormat::Yuy2)),
+        Some("I420") => Ok(Some(shiguredo_video_device::PixelFormat::I420)),
+        Some(name) => Err(Error::new(format!("unsupported pixel format: {name}"))),
     }
 }
 
@@ -212,9 +224,10 @@ pub(super) fn build_record_source_plan(
     let source = VideoDeviceSource {
         output_video_track_id: raw_video_track_id.clone(),
         device_id: settings.device_id.clone(),
+        pixel_format: settings.pixel_format.clone(),
         width: None,
         height: None,
-        fps: None,
+        fps: settings.fps,
     };
 
     Ok(super::ObswsRecordSourcePlan {
@@ -239,6 +252,8 @@ mod tests {
         let plan = build_record_source_plan(
             &ObswsVideoCaptureDeviceSettings {
                 device_id: Some("camera0".to_owned()),
+                pixel_format: None,
+                fps: None,
             },
             ObswsOutputKind::Program,
             1,
@@ -281,7 +296,11 @@ mod tests {
 
     #[test]
     fn build_record_source_plan_without_device_id_keeps_input_dormant() {
-        let settings = ObswsVideoCaptureDeviceSettings { device_id: None };
+        let settings = ObswsVideoCaptureDeviceSettings {
+            device_id: None,
+            pixel_format: None,
+            fps: None,
+        };
         let plan = build_record_source_plan(&settings, ObswsOutputKind::Program, 2, "1")
             .expect("video_capture_device source plan without device_id must succeed");
 
@@ -296,6 +315,30 @@ mod tests {
             }
             _ => panic!("expected CreateVideoDeviceSource"),
         }
+    }
+
+    #[test]
+    fn parse_pixel_format_accepts_supported_names() {
+        assert!(matches!(
+            parse_pixel_format(Some("NV12")),
+            Ok(Some(shiguredo_video_device::PixelFormat::Nv12))
+        ));
+        assert!(matches!(
+            parse_pixel_format(Some("YUY2")),
+            Ok(Some(shiguredo_video_device::PixelFormat::Yuy2))
+        ));
+        assert!(matches!(
+            parse_pixel_format(Some("I420")),
+            Ok(Some(shiguredo_video_device::PixelFormat::I420))
+        ));
+        assert!(matches!(parse_pixel_format(None), Ok(None)));
+    }
+
+    #[test]
+    fn parse_pixel_format_rejects_unsupported_name() {
+        let error =
+            parse_pixel_format(Some("UNKNOWN")).expect_err("unsupported pixel format must fail");
+        assert_eq!(error.display(), "unsupported pixel format: UNKNOWN");
     }
 
     #[test]

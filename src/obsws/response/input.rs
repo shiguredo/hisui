@@ -714,7 +714,7 @@ pub fn build_get_input_properties_list_property_items_response(
         Err(response) => return response,
     };
 
-    let Some(_input) =
+    let Some(input) =
         input_registry.find_input(fields.input_uuid.as_deref(), fields.input_name.as_deref())
     else {
         return super::build_request_response_error(
@@ -725,9 +725,173 @@ pub fn build_get_input_properties_list_property_items_response(
         );
     };
 
-    // 暫定実装: 常に空配列を返す
-    let _ = fields.property_name;
+    if input.input.settings.kind_name() != "video_capture_device" {
+        return super::build_request_response_error(
+            "GetInputPropertiesListPropertyItems",
+            request_id,
+            REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "property enumeration is only supported for video_capture_device",
+        );
+    }
+
+    // video_capture_device の device_id を取得する
+    let input_device_id = match &input.input.settings {
+        crate::obsws::input_registry::ObswsInputSettings::VideoCaptureDevice(settings) => {
+            settings.device_id.as_deref()
+        }
+        _ => None,
+    };
+
+    let property_items =
+        match enumerate_video_device_property_items(&fields.property_name, input_device_id) {
+            Ok(items) => items,
+            Err(error_message) => {
+                return super::build_request_response_error(
+                    "GetInputPropertiesListPropertyItems",
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &error_message,
+                );
+            }
+        };
+
     super::build_request_response_success("GetInputPropertiesListPropertyItems", request_id, |f| {
-        f.member("propertyItems", nojson::array(|_f| Ok(())))
+        f.member(
+            "propertyItems",
+            nojson::array(|f| {
+                for item in &property_items {
+                    f.element(nojson::object(|f| {
+                        f.member("itemName", item.item_name.as_str())?;
+                        f.member("itemValue", item.item_value.as_str())?;
+                        f.member("itemEnabled", item.item_enabled)
+                    }))?;
+                }
+                Ok(())
+            }),
+        )
     })
+}
+
+/// GetInputPropertiesListPropertyItems のレスポンスに含まれるプロパティアイテム
+struct ObswsPropertyItem {
+    item_name: String,
+    item_value: String,
+    item_enabled: bool,
+}
+
+/// video_capture_device の指定されたプロパティのアイテムを列挙する
+fn enumerate_video_device_property_items(
+    property_name: &str,
+    device_id: Option<&str>,
+) -> Result<Vec<ObswsPropertyItem>, String> {
+    use std::collections::BTreeSet;
+
+    let device_list = shiguredo_video_device::VideoDeviceList::enumerate()
+        .map_err(|e| format!("failed to enumerate video devices: {e}"))?;
+
+    match property_name {
+        "device_id" => {
+            let mut items = Vec::new();
+            for device in device_list.devices() {
+                let name = device.name().unwrap_or_else(|_| "Unknown".to_owned());
+                let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                items.push(ObswsPropertyItem {
+                    item_name: name,
+                    item_value: unique_id,
+                    item_enabled: true,
+                });
+            }
+            Ok(items)
+        }
+        "formats" => {
+            let mut items = Vec::new();
+            for device in device_list.devices() {
+                // device_id が指定されている場合はそのデバイスだけフィルタする
+                if let Some(target_id) = device_id {
+                    let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                    if unique_id != target_id {
+                        continue;
+                    }
+                }
+                for format in device.formats() {
+                    let fps = format.max_fps.round() as i32;
+                    let pixel_format_name = format.pixel_format.name();
+                    let item_name = format!(
+                        "{}x{} / {} fps / {}",
+                        format.width, format.height, fps, pixel_format_name
+                    );
+                    let item_value = format!(
+                        "{}x{}_{}_{}",
+                        format.width, format.height, fps, pixel_format_name
+                    );
+                    items.push(ObswsPropertyItem {
+                        item_name,
+                        item_value,
+                        item_enabled: true,
+                    });
+                }
+            }
+            Ok(items)
+        }
+        "pixel_format" => {
+            let mut values = BTreeSet::new();
+            for device in device_list.devices() {
+                if let Some(target_id) = device_id {
+                    let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                    if unique_id != target_id {
+                        continue;
+                    }
+                }
+                for format in device.formats() {
+                    match format.pixel_format {
+                        shiguredo_video_device::PixelFormat::Nv12 => {
+                            values.insert("NV12".to_owned());
+                        }
+                        shiguredo_video_device::PixelFormat::Yuy2 => {
+                            values.insert("YUY2".to_owned());
+                        }
+                        shiguredo_video_device::PixelFormat::I420 => {
+                            values.insert("I420".to_owned());
+                        }
+                        shiguredo_video_device::PixelFormat::Unknown(_) => {}
+                    }
+                }
+            }
+
+            Ok(values
+                .into_iter()
+                .map(|value| ObswsPropertyItem {
+                    item_name: value.clone(),
+                    item_value: value,
+                    item_enabled: true,
+                })
+                .collect())
+        }
+        "fps" => {
+            let mut values = BTreeSet::new();
+            for device in device_list.devices() {
+                if let Some(target_id) = device_id {
+                    let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                    if unique_id != target_id {
+                        continue;
+                    }
+                }
+                for format in device.formats() {
+                    values.insert((format.max_fps.round() as i32).to_string());
+                }
+            }
+
+            Ok(values
+                .into_iter()
+                .map(|value| ObswsPropertyItem {
+                    item_name: value.clone(),
+                    item_value: value,
+                    item_enabled: true,
+                })
+                .collect())
+        }
+        _ => Err(format!(
+            "unsupported property name for video_capture_device: {property_name}"
+        )),
+    }
 }
