@@ -266,8 +266,7 @@ impl super::ObswsCoordinator {
                             updated_input.input_uuid,
                             e.display()
                         );
-                    }
-                    if let Err(e) = self.start_input_source_processor(&updated_input).await {
+                    } else if let Err(e) = self.start_input_source_processor(&updated_input).await {
                         tracing::warn!(
                             "failed to restart source processor for input {}: {}",
                             updated_input.input_uuid,
