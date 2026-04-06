@@ -171,6 +171,9 @@ pub struct ObswsCoordinator {
     /// player output のサブスクライバタスクハンドル
     #[cfg(feature = "player")]
     pub(crate) player_subscriber_handle: Option<tokio::task::JoinHandle<()>>,
+    /// player セッションの世代 ID（古い Stopped イベントを無視するために使用）
+    #[cfg(feature = "player")]
+    pub(crate) player_generation: u64,
 }
 
 impl ObswsCoordinator {
@@ -221,6 +224,8 @@ impl ObswsCoordinator {
             player_media_tx,
             #[cfg(feature = "player")]
             player_subscriber_handle: None,
+            #[cfg(feature = "player")]
+            player_generation: 0,
         };
         let handle = handle::ObswsCoordinatorHandle::new(
             command_tx,
@@ -309,7 +314,11 @@ impl ObswsCoordinator {
     #[cfg(feature = "player")]
     fn handle_player_lifecycle_event(&mut self, event: crate::obsws::player::PlayerLifecycleEvent) {
         match event {
-            crate::obsws::player::PlayerLifecycleEvent::Stopped => {
+            crate::obsws::player::PlayerLifecycleEvent::Stopped { generation } => {
+                // 古い世代の Stopped イベントは無視する（Stop→Start の直後に届く場合がある）
+                if generation != self.player_generation {
+                    return;
+                }
                 if let Some(handle) = self.player_subscriber_handle.take() {
                     handle.abort();
                 }

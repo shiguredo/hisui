@@ -36,6 +36,8 @@ impl ObswsCoordinator {
                 );
             }
         };
+        self.player_generation = self.player_generation.wrapping_add(1);
+        let generation = self.player_generation;
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
 
         // メインスレッドにウィンドウ作成を指示する
@@ -44,6 +46,7 @@ impl ObswsCoordinator {
             .send(crate::obsws::player::PlayerCommand::Start {
                 canvas_width,
                 canvas_height,
+                generation,
                 reply_tx,
             })
             .is_err()

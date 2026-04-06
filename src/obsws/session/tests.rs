@@ -2545,7 +2545,7 @@ async fn player_lifecycle_stop_updates_output_status() {
     assert!(parse_output_active(&get_active_text));
 
     player_lifecycle_tx
-        .send(crate::obsws::player::PlayerLifecycleEvent::Stopped)
+        .send(crate::obsws::player::PlayerLifecycleEvent::Stopped { generation: 1 })
         .expect("player lifecycle event must be sent");
     tokio::task::yield_now().await;
 

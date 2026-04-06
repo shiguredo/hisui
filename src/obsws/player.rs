@@ -3,6 +3,8 @@ pub enum PlayerCommand {
     Start {
         canvas_width: i32,
         canvas_height: i32,
+        /// 世代 ID。Stopped イベントに含めて返すことで、古い停止イベントを無視できる
+        generation: u64,
         reply_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     Stop,
@@ -12,7 +14,11 @@ pub enum PlayerCommand {
 /// player のライフサイクルイベント
 #[derive(Debug)]
 pub enum PlayerLifecycleEvent {
-    Stopped,
+    /// ウィンドウが閉じられた、または SDL エラーで停止した
+    Stopped {
+        /// Start 時に渡された世代 ID
+        generation: u64,
+    },
 }
 
 /// メインスレッド（SDL）に渡すメディアデータ

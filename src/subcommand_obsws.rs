@@ -261,6 +261,7 @@ fn run_player_control_loop(
             PlayerCommand::Start {
                 canvas_width,
                 canvas_height,
+                generation,
                 reply_tx,
             } => {
                 if let Err(e) = raw_player::init() {
@@ -350,7 +351,7 @@ fn run_player_control_loop(
                 player.close();
                 // SAFETY: SDL リソース（player）は直前で close 済みのため安全
                 unsafe { raw_player::quit() };
-                let _ = lifecycle_tx.send(PlayerLifecycleEvent::Stopped);
+                let _ = lifecycle_tx.send(PlayerLifecycleEvent::Stopped { generation });
 
                 // メディアチャネルに残っているフレームを破棄する
                 while media_rx.try_recv().is_ok() {}
