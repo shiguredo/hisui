@@ -313,6 +313,11 @@ impl ObswsCoordinator {
                 let outcome = self.handle_start_mpeg_dash("StartOutput", request_id).await;
                 (outcome, Vec::new())
             }
+            #[cfg(feature = "player")]
+            "player" => {
+                let outcome = self.handle_start_player("StartOutput", request_id).await;
+                (outcome, Vec::new())
+            }
             _ => {
                 return self.build_error_result(
                     "StartOutput",
@@ -407,6 +412,11 @@ impl ObswsCoordinator {
             }
             "mpeg_dash" => {
                 let outcome = self.handle_stop_mpeg_dash("StopOutput", request_id).await;
+                (outcome, Vec::new())
+            }
+            #[cfg(feature = "player")]
+            "player" => {
+                let outcome = self.handle_stop_player("StopOutput", request_id).await;
                 (outcome, Vec::new())
             }
             _ => {
@@ -569,6 +579,16 @@ impl ObswsCoordinator {
                 } else {
                     self.handle_start_mpeg_dash("ToggleOutput", request_id)
                         .await
+                };
+                (outcome, !was_active, Vec::new())
+            }
+            #[cfg(feature = "player")]
+            "player" => {
+                let was_active = self.input_registry.is_player_active();
+                let outcome = if was_active {
+                    self.handle_stop_player("ToggleOutput", request_id).await
+                } else {
+                    self.handle_start_player("ToggleOutput", request_id).await
                 };
                 (outcome, !was_active, Vec::new())
             }

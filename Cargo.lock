@@ -378,6 +378,7 @@ dependencies = [
  "noargs",
  "nojson",
  "nopng",
+ "raw_player",
  "rustls",
  "rustls-platform-verifier",
  "shiguredo_audio_device",
@@ -763,6 +764,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
+]
+
+[[package]]
+name = "raw_player"
+version = "2026.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c46d1156fc20fedf7b29df24f89b3ae7cdf220d4b5f9c4ee359fed0ee125b5bb"
+dependencies = [
+ "bindgen",
+ "shiguredo_cmake",
+ "shiguredo_toml",
 ]
 
 [[package]]

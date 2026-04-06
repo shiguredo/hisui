@@ -121,6 +121,13 @@ impl ObswsCoordinatorHandle {
             });
     }
 
+    #[cfg(feature = "player")]
+    pub fn notify_player_lifecycle_event(&self, event: crate::obsws::player::PlayerLifecycleEvent) {
+        let _ = self
+            .command_tx
+            .send(ObswsCoordinatorCommand::HandlePlayerLifecycleEvent { event });
+    }
+
     /// inputName から最新の input 情報を解決する
     pub async fn resolve_input_by_name(
         &self,

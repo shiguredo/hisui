@@ -82,7 +82,19 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
+    #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
+        crate::obsws::player::PlayerCommand,
+    >,
+    #[cfg(feature = "player")] player_media_tx: std::sync::mpsc::SyncSender<
+        crate::obsws::player::PlayerMediaMessage,
+    >,
+    #[cfg(feature = "player")] player_lifecycle_rx: tokio::sync::mpsc::UnboundedReceiver<
+        crate::obsws::player::PlayerLifecycleEvent,
+    >,
 ) -> crate::Result<()> {
+    #[cfg(feature = "player")]
+    let mut player_lifecycle_rx = player_lifecycle_rx;
+
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
     // TLS が指定されている場合は TlsAcceptor を作成する
@@ -244,9 +256,22 @@ pub async fn run_server(
             input_registry,
             program_output,
             Some(pipeline_handle.clone()),
+            #[cfg(feature = "player")]
+            player_command_tx,
+            #[cfg(feature = "player")]
+            player_media_tx,
         );
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());
+    #[cfg(feature = "player")]
+    {
+        let coordinator_handle = coordinator_handle.clone();
+        tokio::task::spawn_local(async move {
+            while let Some(event) = player_lifecycle_rx.recv().await {
+                coordinator_handle.notify_player_lifecycle_event(event);
+            }
+        });
+    }
 
     let bootstrap_endpoint = Rc::new(
         BootstrapEndpoint::new(pipeline_handle.clone(), coordinator_handle.clone())

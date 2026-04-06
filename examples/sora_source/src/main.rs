@@ -225,6 +225,14 @@ fn make_stop_record_request() -> (String, String) {
     make_request_no_data("StopRecord")
 }
 
+fn make_start_player_request() -> (String, String) {
+    make_request("StartOutput", |f| f.member("outputName", "player"))
+}
+
+fn make_stop_player_request() -> (String, String) {
+    make_request("StopOutput", |f| f.member("outputName", "player"))
+}
+
 // --- obsws レスポンス / イベントパース ---
 
 /// op=7 のレスポンスから requestId と成否を取得する。
@@ -604,6 +612,10 @@ fn main() -> noargs::Result<()> {
         .doc("録画時間（秒）")
         .take(&mut args)
         .then(|o| o.value().parse())?;
+    let player = noargs::flag("player")
+        .doc("player output を起動してウィンドウ表示する")
+        .take(&mut args)
+        .is_present();
 
     args.finish()?;
 
@@ -632,6 +644,7 @@ fn main() -> noargs::Result<()> {
         &channel_id,
         &output_path,
         duration,
+        player,
     ));
 
     match result {
@@ -650,6 +663,7 @@ async fn run(
     channel_id: &str,
     output_path: &str,
     duration: u64,
+    player: bool,
 ) -> Result<(), String> {
     let subscriber_name = "sora_source_example";
 
@@ -707,6 +721,13 @@ async fn run(
     let (req_id, msg) = make_set_record_directory_request(&output_dir);
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
     tracing::info!("録画先ディレクトリ設定: {output_dir}");
+
+    // player ウィンドウ表示（--player 指定時）
+    if player {
+        let (req_id, msg) = make_start_player_request();
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
+        tracing::info!("player 開始");
+    }
 
     // SoraSubscriber 接続開始
     let (req_id, msg) =
@@ -787,6 +808,17 @@ async fn run(
         send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await
     {
         tracing::warn!("StopSoraSubscriber 失敗: {e}");
+    }
+
+    // player 停止（--player 指定時）
+    if player {
+        let (req_id, msg) = make_stop_player_request();
+        if let Err(e) =
+            send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await
+        {
+            tracing::warn!("StopOutput player 失敗: {e}");
+        }
+        tracing::info!("player 停止");
     }
 
     let _ = ws.close(shiguredo_websocket::CloseCode::NORMAL, "bye");

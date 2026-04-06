@@ -28,6 +28,10 @@ const OBSWS_SORA_OUTPUT_KIND: &str = "sora_webrtc_output";
 const OBSWS_HLS_OUTPUT_KIND: &str = "hls_output";
 const OBSWS_MPEG_DASH_OUTPUT_NAME: &str = "mpeg_dash";
 const OBSWS_MPEG_DASH_OUTPUT_KIND: &str = "mpeg_dash_output";
+#[cfg(feature = "player")]
+const OBSWS_PLAYER_OUTPUT_NAME: &str = "player";
+#[cfg(feature = "player")]
+const OBSWS_PLAYER_OUTPUT_KIND: &str = "player_output";
 
 #[derive(Debug, Clone, Copy)]
 struct ObswsOutputEntry {
@@ -129,7 +133,8 @@ pub fn build_get_stream_status_response(
 }
 
 pub fn build_get_output_list_response(request_id: &str) -> nojson::RawJsonOwned {
-    let outputs = [
+    #[cfg_attr(not(feature = "player"), expect(unused_mut))]
+    let mut outputs = vec![
         ObswsOutputEntry {
             output_name: OBSWS_STREAM_OUTPUT_NAME,
             output_kind: OBSWS_STREAM_OUTPUT_KIND,
@@ -155,8 +160,13 @@ pub fn build_get_output_list_response(request_id: &str) -> nojson::RawJsonOwned 
             output_kind: OBSWS_MPEG_DASH_OUTPUT_KIND,
         },
     ];
+    #[cfg(feature = "player")]
+    outputs.push(ObswsOutputEntry {
+        output_name: OBSWS_PLAYER_OUTPUT_NAME,
+        output_kind: OBSWS_PLAYER_OUTPUT_KIND,
+    });
     super::build_request_response_success("GetOutputList", request_id, |f| {
-        f.member("outputs", outputs)
+        f.member("outputs", outputs.as_slice())
     })
 }
 
@@ -189,6 +199,13 @@ pub fn build_get_output_settings_response(
         OBSWS_HLS_OUTPUT_NAME => build_hls_output_settings_response(request_id, input_registry),
         OBSWS_MPEG_DASH_OUTPUT_NAME => {
             build_dash_output_settings_response(request_id, input_registry)
+        }
+        #[cfg(feature = "player")]
+        OBSWS_PLAYER_OUTPUT_NAME => {
+            // player には設定がないため空の outputSettings を返す
+            super::build_request_response_success("GetOutputSettings", request_id, |f| {
+                f.member("outputSettings", nojson::object(|_| Ok(())))
+            })
         }
         _ => super::build_request_response_error(
             "GetOutputSettings",
@@ -340,6 +357,11 @@ pub fn build_set_output_settings_response(
                 ),
             }
         }
+        #[cfg(feature = "player")]
+        OBSWS_PLAYER_OUTPUT_NAME => {
+            // player には設定がないため何もしない
+            super::build_request_response_success_no_data("SetOutputSettings", request_id)
+        }
         _ => super::build_request_response_error(
             "SetOutputSettings",
             request_id,
@@ -456,6 +478,10 @@ pub fn build_get_output_status_response(
         }
         OBSWS_MPEG_DASH_OUTPUT_NAME => {
             build_get_dash_status_as_output_response(request_id, input_registry)
+        }
+        #[cfg(feature = "player")]
+        OBSWS_PLAYER_OUTPUT_NAME => {
+            build_get_player_status_as_output_response(request_id, input_registry)
         }
         _ => super::build_request_response_error(
             "GetOutputStatus",
@@ -1320,5 +1346,23 @@ fn parse_obsws_s3_destination(
         secret_access_key,
         session_token,
         lifetime_days,
+    })
+}
+
+#[cfg(feature = "player")]
+fn build_get_player_status_as_output_response(
+    request_id: &str,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let active = input_registry.is_player_active();
+    super::build_request_response_success("GetOutputStatus", request_id, |f| {
+        f.member("outputActive", active)?;
+        f.member("outputReconnecting", false)?;
+        f.member("outputTimecode", "00:00:00.000")?;
+        f.member("outputDuration", 0i64)?;
+        f.member("outputCongestion", 0.0f64)?;
+        f.member("outputBytes", 0u64)?;
+        f.member("outputSkippedFrames", 0u64)?;
+        f.member("outputTotalFrames", 0u64)
     })
 }
