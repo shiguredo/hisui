@@ -68,7 +68,7 @@ answer を返した後、 PeerConnection の ICE / DTLS ハンドシェイクが
 この過程でサーバー側は DataChannel を 2 本用意します。
 
 - `label: "signaling"`
-- `label: "obsws"`
+- `label: "obsdc"`
 
 ### 3. DataChannel 制御フェーズ
 

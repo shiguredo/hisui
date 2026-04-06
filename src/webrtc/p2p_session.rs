@@ -609,9 +609,9 @@ async fn bootstrap_internal(
 
     let mut obsws_dc_init = DataChannelInit::new();
     obsws_dc_init.set_ordered(true);
-    obsws_dc_init.set_protocol("obsws");
+    obsws_dc_init.set_protocol("obsdc");
     let mut obsws_dc = pc
-        .create_data_channel("obsws", &mut obsws_dc_init)
+        .create_data_channel("obsdc", &mut obsws_dc_init)
         .map_err(|e| crate::Error::new(format!("Failed to create obsws DataChannel: {e}")))?;
 
     // DataChannel に observer を設定
@@ -624,7 +624,7 @@ async fn bootstrap_internal(
     // obsws 用 DataChannel に observer を設定
     let obsws_observer = DataChannelObserver::new_with_handler(Box::new(ObswsMessageHandler {
         event_tx: event_tx.clone(),
-        label: "obsws",
+        label: "obsdc",
     }));
     obsws_dc.register_observer(&obsws_observer);
 
