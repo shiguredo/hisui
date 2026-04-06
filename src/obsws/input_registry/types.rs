@@ -1118,7 +1118,7 @@ impl nojson::DisplayJson for ObswsColorSourceSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsVideoCaptureDeviceSettings {
-    // OBS 互換のため、video_capture_device は device_id 未指定の状態も有効として扱う
+    // OBS 互換のため、video_capture_device は device_id 未指定でも入力としては受理する
     pub device_id: Option<String>,
 }
 
@@ -1136,7 +1136,7 @@ impl nojson::DisplayJson for ObswsVideoCaptureDeviceSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsAudioCaptureDeviceSettings {
-    // OBS 互換のため、audio_capture_device は device_id 未指定の状態も有効として扱う
+    // OBS 互換のため、audio_capture_device は device_id 未指定でも入力としては受理する
     pub device_id: Option<String>,
     pub sample_rate: Option<i32>,
     pub channels: Option<i32>,

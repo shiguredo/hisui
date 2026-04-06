@@ -280,14 +280,15 @@ mod tests {
     }
 
     #[test]
-    fn build_record_source_plan_without_device_id() {
-        let plan = build_record_source_plan(
-            &ObswsVideoCaptureDeviceSettings { device_id: None },
-            ObswsOutputKind::Program,
-            2,
-            "1",
-        )
-        .expect("video_capture_device source plan without device_id must succeed");
+    fn build_record_source_plan_without_device_id_keeps_input_dormant() {
+        let settings = ObswsVideoCaptureDeviceSettings { device_id: None };
+        let plan = build_record_source_plan(&settings, ObswsOutputKind::Program, 2, "1")
+            .expect("video_capture_device source plan without device_id must succeed");
+
+        assert!(
+            !is_source_startable(&settings),
+            "video_capture_device without device_id must remain dormant"
+        );
 
         match &plan.requests[0] {
             ObswsSourceRequest::CreateVideoDeviceSource { source, .. } => {
