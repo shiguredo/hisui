@@ -274,10 +274,11 @@ pub(super) fn build_record_source_plan(
     source_key: &str,
     frame_rate: crate::video::FrameRate,
 ) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
-    let path = settings
-        .file
-        .as_deref()
-        .expect("is_source_startable() で file の存在は確認済み");
+    let Some(path) = settings.file.as_deref() else {
+        return Err(super::BuildObswsRecordSourcePlanError::InvalidInput(
+            "inputSettings.file is required".to_owned(),
+        ));
+    };
 
     let source_processor_id = crate::ProcessorId::new(format!(
         "obsws:{}:{run_id}:source:{source_key}:png_source",

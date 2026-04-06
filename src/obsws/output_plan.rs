@@ -62,7 +62,11 @@ pub fn build_composed_output_plan(
     frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsComposedOutputPlan, BuildObswsComposedOutputPlanError> {
     let mut source_plans = Vec::with_capacity(scene_inputs.len());
+    let mut active_scene_inputs = Vec::with_capacity(scene_inputs.len());
     for scene_input in scene_inputs.iter() {
+        if !source::is_source_startable(&scene_input.input.input.settings) {
+            continue;
+        }
         let source_plan = source::build_record_source_plan(
             &scene_input.input,
             output_kind,
@@ -72,6 +76,7 @@ pub fn build_composed_output_plan(
         )
         .map_err(BuildObswsComposedOutputPlanError::Source)?;
         source_plans.push(source_plan);
+        active_scene_inputs.push(scene_input);
     }
 
     // 常にオーディオミキサーを使用する。
@@ -96,10 +101,10 @@ pub fn build_composed_output_plan(
         output_kind.as_str()
     ));
 
-    // source_plans と scene_inputs は同じ順序・同じ長さ
+    // source_plans と active_scene_inputs は同じ順序・同じ長さ
     let video_mixer_input_tracks = source_plans
         .iter()
-        .zip(scene_inputs.iter())
+        .zip(active_scene_inputs.iter())
         .filter_map(|(plan, scene_input)| {
             let video_track_id = plan.source_video_track_id.as_ref()?;
             let transform = &scene_input.transform;

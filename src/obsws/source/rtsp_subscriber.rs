@@ -15,10 +15,11 @@ pub(super) fn build_record_source_plan(
     run_id: u64,
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
-    let input_url = settings
-        .input_url
-        .as_deref()
-        .expect("is_source_startable() で inputUrl の存在は確認済み");
+    let Some(input_url) = settings.input_url.as_deref() else {
+        return Err(BuildObswsRecordSourcePlanError::InvalidInput(
+            "inputSettings.inputUrl is required".to_owned(),
+        ));
+    };
 
     let kind = output_kind.as_str();
     let source_processor_id = ProcessorId::new(format!(

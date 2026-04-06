@@ -822,6 +822,9 @@ impl super::ObswsCoordinator {
         let Some(pipeline_handle) = &self.pipeline_handle else {
             return Ok(());
         };
+        if !crate::obsws::source::is_source_startable(&input_entry.input.settings) {
+            return Ok(());
+        }
         let mut source_plan = crate::obsws::source::build_record_source_plan(
             input_entry,
             crate::obsws::source::ObswsOutputKind::Program,

@@ -15,10 +15,11 @@ pub(super) fn build_record_source_plan(
     run_id: u64,
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
-    let path = settings
-        .path
-        .as_deref()
-        .expect("is_source_startable() で path の存在は確認済み");
+    let Some(path) = settings.path.as_deref() else {
+        return Err(BuildObswsRecordSourcePlanError::InvalidInput(
+            "inputSettings.path is required".to_owned(),
+        ));
+    };
 
     let source_processor_id = ProcessorId::new(format!(
         "obsws:{}:{run_id}:source:{source_key}:mp4_source",
