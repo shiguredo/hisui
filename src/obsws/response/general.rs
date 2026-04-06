@@ -59,6 +59,7 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "SetInputSettings",
     "SetInputName",
     "GetInputDefaultSettings",
+    "GetInputPropertiesListPropertyItems",
     "CreateInput",
     "RemoveInput",
     "GetPersistentData",

@@ -9,8 +9,8 @@ use crate::obsws::protocol::{
 
 use super::{
     CreateInputCreated, CreateInputExecution, SetInputSettingsExecution, parse_create_input_fields,
-    parse_get_input_default_settings_fields, parse_input_lookup_fields,
-    parse_request_data_or_error_response, parse_set_input_name_fields,
+    parse_get_input_default_settings_fields, parse_get_input_properties_list_property_items_fields,
+    parse_input_lookup_fields, parse_request_data_or_error_response, parse_set_input_name_fields,
     parse_set_input_settings_fields,
 };
 
@@ -696,5 +696,38 @@ fn parse_set_input_volume_fields(
         input_name,
         volume_db,
         volume_mul,
+    })
+}
+
+pub fn build_get_input_properties_list_property_items_response(
+    request_id: &str,
+    request_data: Option<&nojson::RawJsonOwned>,
+    input_registry: &ObswsInputRegistry,
+) -> nojson::RawJsonOwned {
+    let fields = match parse_request_data_or_error_response(
+        "GetInputPropertiesListPropertyItems",
+        request_id,
+        request_data,
+        parse_get_input_properties_list_property_items_fields,
+    ) {
+        Ok(v) => v,
+        Err(response) => return response,
+    };
+
+    let Some(_input) =
+        input_registry.find_input(fields.input_uuid.as_deref(), fields.input_name.as_deref())
+    else {
+        return super::build_request_response_error(
+            "GetInputPropertiesListPropertyItems",
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Input not found",
+        );
+    };
+
+    // 暫定実装: 常に空配列を返す
+    let _ = fields.property_name;
+    super::build_request_response_success("GetInputPropertiesListPropertyItems", request_id, |f| {
+        f.member("propertyItems", nojson::array(|_f| Ok(())))
     })
 }

@@ -349,6 +349,13 @@ pub fn handle_request_message_with_pipeline_handle(
                 input_registry,
             )
         }
+        "GetInputPropertiesListPropertyItems" => {
+            crate::obsws::response::build_get_input_properties_list_property_items_response(
+                &request_id,
+                request.request_data.as_ref(),
+                input_registry,
+            )
+        }
         "GetPersistentData" => crate::obsws::response::build_get_persistent_data_response(
             &request_id,
             request.request_data.as_ref(),

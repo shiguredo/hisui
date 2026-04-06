@@ -411,6 +411,24 @@ fn parse_get_input_default_settings_fields(
     Ok(GetInputDefaultSettingsFields { input_kind })
 }
 
+pub(crate) fn parse_get_input_properties_list_property_items_fields(
+    request_data: nojson::RawJsonValue<'_, '_>,
+) -> Result<GetInputPropertiesListPropertyItemsFields, nojson::JsonParseError> {
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
+    let property_name = required_non_empty_string_member(request_data, "propertyName")?;
+    Ok(GetInputPropertiesListPropertyItemsFields {
+        input_uuid,
+        input_name,
+        property_name,
+    })
+}
+
+pub(crate) struct GetInputPropertiesListPropertyItemsFields {
+    pub input_uuid: Option<String>,
+    pub input_name: Option<String>,
+    pub property_name: String,
+}
+
 fn parse_create_scene_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<CreateSceneFields, nojson::JsonParseError> {
