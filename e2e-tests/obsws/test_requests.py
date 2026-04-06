@@ -47,6 +47,7 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "SetInputSettings" in response_data["availableRequests"]
         assert "SetInputName" in response_data["availableRequests"]
         assert "GetInputDefaultSettings" in response_data["availableRequests"]
+        assert "GetInputPropertiesListPropertyItems" in response_data["availableRequests"]
         assert "CreateInput" in response_data["availableRequests"]
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
@@ -611,6 +612,95 @@ def test_obsws_get_input_default_settings_request(binary_path: Path):
         unsupported_status = unsupported_response["d"]["requestStatus"]
         assert unsupported_status["result"] is False
         assert unsupported_status["code"] == 400
+
+
+def test_obsws_get_input_properties_list_property_items_request(binary_path: Path):
+    """obsws が GetInputPropertiesListPropertyItems request に応答することを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    with ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        use_env=False,
+    ):
+        # テスト用 input を作成する
+        create_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="CreateInput",
+                request_id="req-create-input-for-props-list",
+                request_data={
+                    "sceneName": "Scene",
+                    "inputName": "obsws-props-list-input",
+                    "inputKind": "video_capture_device",
+                    "inputSettings": {},
+                    "sceneItemEnabled": True,
+                },
+            )
+        )
+        assert create_response["d"]["requestStatus"]["result"] is True
+
+        # 正常系: 空の propertyItems を返す
+        response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputPropertiesListPropertyItems",
+                request_id="req-get-props-list",
+                request_data={
+                    "inputName": "obsws-props-list-input",
+                    "propertyName": "device_id",
+                },
+            )
+        )
+        status = response["d"]["requestStatus"]
+        assert status["result"] is True
+        assert status["code"] == 100
+        response_data = response["d"]["responseData"]
+        assert response_data["propertyItems"] == []
+
+        # 存在しない input でエラー
+        not_found_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputPropertiesListPropertyItems",
+                request_id="req-get-props-list-not-found",
+                request_data={
+                    "inputName": "nonexistent",
+                    "propertyName": "device_id",
+                },
+            )
+        )
+        not_found_status = not_found_response["d"]["requestStatus"]
+        assert not_found_status["result"] is False
+        assert not_found_status["code"] == 601
+
+        # propertyName 欠落でエラー
+        missing_prop_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputPropertiesListPropertyItems",
+                request_id="req-get-props-list-no-prop",
+                request_data={"inputName": "obsws-props-list-input"},
+            )
+        )
+        missing_prop_status = missing_prop_response["d"]["requestStatus"]
+        assert missing_prop_status["result"] is False
+        assert missing_prop_status["code"] == 300
+
+        # requestData 空でエラー
+        empty_data_response = asyncio.run(
+            _connect_identify_and_request(
+                f"ws://{host}:{port}/",
+                request_type="GetInputPropertiesListPropertyItems",
+                request_id="req-get-props-list-empty",
+                request_data={},
+            )
+        )
+        empty_data_status = empty_data_response["d"]["requestStatus"]
+        assert empty_data_status["result"] is False
 
 
 def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
