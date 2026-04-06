@@ -46,6 +46,7 @@ pub async fn run_player_subscriber(
     video_track_id: crate::TrackId,
     audio_track_id: crate::TrackId,
     media_tx: std::sync::mpsc::SyncSender<PlayerMediaMessage>,
+    startup_reply_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
 ) {
     let processor_handle = match pipeline_handle
         .register_processor(
@@ -54,8 +55,12 @@ pub async fn run_player_subscriber(
         )
         .await
     {
-        Ok(h) => h,
+        Ok(h) => {
+            let _ = startup_reply_tx.send(Ok(()));
+            h
+        }
         Err(e) => {
+            let _ = startup_reply_tx.send(Err(format!("Failed to register player processor: {e}")));
             tracing::error!("failed to register player processor: {e}");
             return;
         }

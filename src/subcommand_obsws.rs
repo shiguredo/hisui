@@ -293,6 +293,8 @@ fn run_player_control_loop(
 
                 // フレーム受信 + SDL イベントループ
                 'frame_loop: loop {
+                    let mut received_media = false;
+
                     // 制御コマンドをノンブロッキングで確認
                     match command_rx.try_recv() {
                         Ok(PlayerCommand::Stop) | Ok(PlayerCommand::Terminate) => break 'frame_loop,
@@ -303,6 +305,7 @@ fn run_player_control_loop(
 
                     // メディアフレームをノンブロッキングで取得して enqueue
                     while let Ok(msg) = media_rx.try_recv() {
+                        received_media = true;
                         match msg {
                             PlayerMediaMessage::Video {
                                 y,
@@ -345,6 +348,12 @@ fn run_player_control_loop(
                             tracing::error!("raw_player poll_events error: {e}");
                             break 'frame_loop;
                         }
+                    }
+
+                    // NOTE: SDL のイベント待ち API を直接使っていないため、
+                    // player 用ループでは短い sleep で CPU の占有を避ける。
+                    if !received_media {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
                     }
                 }
 

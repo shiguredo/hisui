@@ -38,7 +38,18 @@ impl ObswsCoordinator {
         };
         self.player_generation = self.player_generation.wrapping_add(1);
         let generation = self.player_generation;
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let (window_start_reply_tx, window_start_reply_rx) = tokio::sync::oneshot::channel();
+
+        if let Err(()) = self.input_registry.activate_player() {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    "Player is already running",
+                ),
+            );
+        }
 
         // メインスレッドにウィンドウ作成を指示する
         if self
@@ -47,10 +58,11 @@ impl ObswsCoordinator {
                 canvas_width,
                 canvas_height,
                 generation,
-                reply_tx,
+                reply_tx: window_start_reply_tx,
             })
             .is_err()
         {
+            self.input_registry.deactivate_player();
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -61,9 +73,10 @@ impl ObswsCoordinator {
             );
         }
 
-        match reply_rx.await {
+        match window_start_reply_rx.await {
             Ok(Ok(())) => {}
             Ok(Err(message)) => {
+                self.input_registry.deactivate_player();
                 return OutputOperationOutcome::failure(
                     crate::obsws::response::build_request_response_error(
                         request_type,
@@ -74,6 +87,7 @@ impl ObswsCoordinator {
                 );
             }
             Err(_) => {
+                self.input_registry.deactivate_player();
                 return OutputOperationOutcome::failure(
                     crate::obsws::response::build_request_response_error(
                         request_type,
@@ -85,33 +99,56 @@ impl ObswsCoordinator {
             }
         }
 
-        if let Err(()) = self.input_registry.activate_player() {
-            let _ = self
-                .player_command_tx
-                .send(crate::obsws::player::PlayerCommand::Stop);
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
-                    "Player is already running",
-                ),
-            );
-        }
-
         let video_track_id = self.program_output.video_track_id.clone();
         let audio_track_id = self.program_output.audio_track_id.clone();
         let media_tx = self.player_media_tx.clone();
+        let (subscriber_startup_reply_tx, subscriber_startup_reply_rx) =
+            tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
             crate::obsws::player::run_player_subscriber(
                 pipeline_handle,
                 video_track_id,
                 audio_track_id,
                 media_tx,
+                subscriber_startup_reply_tx,
             )
             .await;
         });
-        self.player_subscriber_handle = Some(handle);
+        match subscriber_startup_reply_rx.await {
+            Ok(Ok(())) => {
+                self.player_subscriber_handle = Some(handle);
+            }
+            Ok(Err(message)) => {
+                handle.abort();
+                self.input_registry.deactivate_player();
+                let _ = self
+                    .player_command_tx
+                    .send(crate::obsws::player::PlayerCommand::Stop);
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        &message,
+                    ),
+                );
+            }
+            Err(_) => {
+                handle.abort();
+                self.input_registry.deactivate_player();
+                let _ = self
+                    .player_command_tx
+                    .send(crate::obsws::player::PlayerCommand::Stop);
+                return OutputOperationOutcome::failure(
+                    crate::obsws::response::build_request_response_error(
+                        request_type,
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        "Player subscriber startup reply channel is closed",
+                    ),
+                );
+            }
+        }
 
         OutputOperationOutcome::success(
             crate::obsws::response::build_start_output_response(request_id),
