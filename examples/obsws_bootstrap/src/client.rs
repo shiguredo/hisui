@@ -361,7 +361,7 @@ pub async fn run_client(
                 if label == "signaling" {
                     retained.signaling_dc = Some(dc);
                     retained.signaling_dc_observer = observer;
-                } else if label == "obsws" {
+                } else if label == "obsdc" {
                     obsws_ready = dc.state() == DataChannelState::Open;
                     retained.obsws_dc = Some(dc);
                     retained.obsws_dc_observer = observer;
@@ -1025,7 +1025,7 @@ pub async fn run_send_video_client(
                 if label == "signaling" {
                     retained.signaling_dc = Some(dc);
                     retained.signaling_dc_observer = observer;
-                } else if label == "obsws" {
+                } else if label == "obsdc" {
                     obsws_ready = dc.state() == DataChannelState::Open;
                     retained.obsws_dc = Some(dc);
                     retained.obsws_dc_observer = observer;

@@ -171,6 +171,57 @@ fn run_internal(
         .build()
         .map_err(crate::Error::from)?;
 
+    // SDL3 は macOS でメインスレッド必須のため、player feature 有効時は常にスレッドモデルを変更する:
+    // メインスレッド → player 制御ループ（SDL）、バックグラウンドスレッド → tokio ランタイム
+    // cfg(not(feature = "player")) ブロックが後続するため return が必要
+    #[expect(clippy::needless_return)]
+    #[cfg(feature = "player")]
+    {
+        let (command_tx, command_rx) =
+            std::sync::mpsc::sync_channel::<crate::obsws::player::PlayerCommand>(4);
+        let (media_tx, media_rx) =
+            std::sync::mpsc::sync_channel::<crate::obsws::player::PlayerMediaMessage>(8);
+        let (lifecycle_tx, lifecycle_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::obsws::player::PlayerLifecycleEvent>();
+
+        let runtime_thread = std::thread::Builder::new()
+            .name("hisui-tokio-main".to_owned())
+            .spawn(move || {
+                runtime.block_on(async move {
+                    let local = tokio::task::LocalSet::new();
+                    local
+                        .run_until(crate::obsws::server::run_server(
+                            addr,
+                            password,
+                            default_record_dir,
+                            ui_remote_url,
+                            https_cert_path,
+                            https_key_path,
+                            pipeline_config,
+                            canvas_width,
+                            canvas_height,
+                            frame_rate,
+                            state_file,
+                            #[cfg(feature = "player")]
+                            command_tx,
+                            #[cfg(feature = "player")]
+                            media_tx,
+                            #[cfg(feature = "player")]
+                            lifecycle_rx,
+                        ))
+                        .await
+                })
+            })
+            .map_err(|e| crate::Error::new(format!("failed to spawn runtime thread: {e}")))?;
+
+        run_player_control_loop(command_rx, media_rx, lifecycle_tx);
+
+        return runtime_thread
+            .join()
+            .map_err(|_| crate::Error::new("runtime thread panicked"))?;
+    }
+
+    #[cfg(not(feature = "player"))]
     runtime.block_on(async move {
         // WebRtcP2pSessionManager が spawn_local() で !Send タスクを起動するため、
         // obsws サーバーの実行コンテキストは LocalSet 上で動かす必要がある。
@@ -191,6 +242,137 @@ fn run_internal(
             ))
             .await
     })
+}
+
+/// メインスレッドで player の制御ループを実行する。
+/// StartOutput で Start コマンドが届いたら SDL ウィンドウを開き、
+/// StopOutput やウィンドウ閉じで待機に戻る。Terminate でループ終了。
+#[cfg(feature = "player")]
+fn run_player_control_loop(
+    command_rx: std::sync::mpsc::Receiver<crate::obsws::player::PlayerCommand>,
+    media_rx: std::sync::mpsc::Receiver<crate::obsws::player::PlayerMediaMessage>,
+    lifecycle_tx: tokio::sync::mpsc::UnboundedSender<crate::obsws::player::PlayerLifecycleEvent>,
+) {
+    use crate::obsws::player::{PlayerCommand, PlayerLifecycleEvent, PlayerMediaMessage};
+
+    // チャネルが閉じたら（= tokio ランタイムが終了したら）ループ終了
+    while let Ok(command) = command_rx.recv() {
+        match command {
+            PlayerCommand::Start {
+                canvas_width,
+                canvas_height,
+                generation,
+                reply_tx,
+            } => {
+                if let Err(e) = raw_player::init() {
+                    let _ = reply_tx.send(Err(format!("Failed to initialize player: {e}")));
+                    tracing::error!("failed to init raw_player: {e}");
+                    continue;
+                }
+                let player =
+                    match raw_player::VideoPlayer::new(canvas_width, canvas_height, "hisui") {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let _ =
+                                reply_tx.send(Err(format!("Failed to create player window: {e}")));
+                            tracing::error!("failed to create raw_player window: {e}");
+                            // SAFETY: SDL リソース（player）は直前で close 済みのため安全
+                            unsafe { raw_player::quit() };
+                            continue;
+                        }
+                    };
+                if let Err(e) = player.play() {
+                    let _ = reply_tx.send(Err(format!("Failed to start player playback: {e}")));
+                    tracing::error!("failed to start raw_player playback: {e}");
+                    player.close();
+                    // SAFETY: SDL リソース（player）は直前で close 済みのため安全
+                    unsafe { raw_player::quit() };
+                    continue;
+                }
+                let _ = reply_tx.send(Ok(()));
+
+                // フレーム受信 + SDL イベントループ
+                'frame_loop: loop {
+                    let mut received_media = false;
+
+                    // 制御コマンドをノンブロッキングで確認
+                    match command_rx.try_recv() {
+                        Ok(PlayerCommand::Stop) | Ok(PlayerCommand::Terminate) => break 'frame_loop,
+                        Ok(PlayerCommand::Start { reply_tx, .. }) => {
+                            let _ = reply_tx.send(Err("Player is already running".to_owned()));
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => break 'frame_loop,
+                    }
+
+                    // メディアフレームをノンブロッキングで取得して enqueue
+                    while let Ok(msg) = media_rx.try_recv() {
+                        received_media = true;
+                        match msg {
+                            PlayerMediaMessage::Video {
+                                y,
+                                u,
+                                v,
+                                width,
+                                height,
+                                pts_us,
+                            } => {
+                                if let Err(e) =
+                                    player.enqueue_video_i420(&y, &u, &v, width, height, pts_us)
+                                {
+                                    tracing::warn!("failed to enqueue video frame: {e}");
+                                }
+                            }
+                            PlayerMediaMessage::Audio {
+                                data,
+                                pts_us,
+                                sample_rate,
+                                channels,
+                            } => {
+                                if let Err(e) = player.enqueue_audio(
+                                    &data,
+                                    pts_us,
+                                    sample_rate,
+                                    channels,
+                                    raw_player::AudioFormat::S16,
+                                ) {
+                                    tracing::warn!("failed to enqueue audio frame: {e}");
+                                }
+                            }
+                        }
+                    }
+
+                    // SDL3 イベント処理とレンダリング
+                    match player.poll_events() {
+                        Ok(true) => {}
+                        Ok(false) => break 'frame_loop, // ウィンドウが閉じられた
+                        Err(e) => {
+                            tracing::error!("raw_player poll_events error: {e}");
+                            break 'frame_loop;
+                        }
+                    }
+
+                    // NOTE: SDL のイベント待ち API を直接使っていないため、
+                    // player 用ループでは短い sleep で CPU の占有を避ける。
+                    if !received_media {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
+
+                player.close();
+                // SAFETY: SDL リソース（player）は直前で close 済みのため安全
+                unsafe { raw_player::quit() };
+                let _ = lifecycle_tx.send(PlayerLifecycleEvent::Stopped { generation });
+
+                // メディアチャネルに残っているフレームを破棄する
+                while media_rx.try_recv().is_ok() {}
+            }
+            PlayerCommand::Stop => {
+                // 既に停止中なので無視
+            }
+            PlayerCommand::Terminate => break,
+        }
+    }
 }
 
 fn resolve_default_record_dir(configured: Option<PathBuf>) -> crate::Result<PathBuf> {

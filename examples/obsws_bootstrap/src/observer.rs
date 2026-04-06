@@ -30,7 +30,7 @@ impl PeerConnectionObserverHandler for ClientPcObserver {
             }));
             dc.register_observer(&observer);
             Some(observer)
-        } else if label == "obsws" {
+        } else if label == "obsdc" {
             let observer = DataChannelObserver::new_with_handler(Box::new(ObswsDcHandler {
                 event_tx: self.event_tx.clone(),
             }));

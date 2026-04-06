@@ -4,6 +4,8 @@ pub mod event;
 pub mod input_registry;
 pub mod message;
 mod output_plan;
+#[cfg(feature = "player")]
+pub mod player;
 pub mod protocol;
 pub mod response;
 pub mod server;

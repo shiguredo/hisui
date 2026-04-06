@@ -45,12 +45,6 @@ struct GetInputDefaultSettingsFields {
     input_kind: String,
 }
 
-pub(crate) struct GetInputPropertiesListPropertyItemsFields {
-    pub(crate) input_kind: String,
-    pub(crate) property_name: String,
-    pub(crate) device_id: Option<String>,
-}
-
 struct CreateSceneFields {
     scene_name: String,
 }
@@ -420,16 +414,20 @@ fn parse_get_input_default_settings_fields(
 pub(crate) fn parse_get_input_properties_list_property_items_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<GetInputPropertiesListPropertyItemsFields, nojson::JsonParseError> {
-    let input_kind = required_non_empty_string_member(request_data, "inputKind")?;
+    let (input_uuid, input_name) = parse_input_lookup_fields(request_data)?;
     let property_name = required_non_empty_string_member(request_data, "propertyName")?;
-    let device_id = optional_non_empty_string_member(request_data, "deviceId")?;
     Ok(GetInputPropertiesListPropertyItemsFields {
-        input_kind,
+        input_uuid,
+        input_name,
         property_name,
-        device_id,
     })
 }
 
+pub(crate) struct GetInputPropertiesListPropertyItemsFields {
+    pub input_uuid: Option<String>,
+    pub input_name: Option<String>,
+    pub property_name: String,
+}
 fn parse_create_scene_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<CreateSceneFields, nojson::JsonParseError> {

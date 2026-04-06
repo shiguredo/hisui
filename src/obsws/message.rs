@@ -434,7 +434,8 @@ mod tests {
     };
     use crate::obsws::protocol::{
         OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
-        REQUEST_STATUS_MISSING_REQUEST_DATA, REQUEST_STATUS_SUCCESS,
+        REQUEST_STATUS_MISSING_REQUEST_DATA, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+        REQUEST_STATUS_SUCCESS,
     };
     use crate::{ProcessorId, TrackId};
 
@@ -1801,6 +1802,114 @@ mod tests {
             .required()?
             .try_into()?;
         assert_eq!(position_x, 123.0);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_get_input_properties_list_property_items_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-list".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-1","propertyName":"device_id"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        assert!(result);
+
+        let response_data = json
+            .value()
+            .to_path_member(&["d", "responseData"])?
+            .required()?;
+        let property_items: Vec<String> = response_data
+            .to_member("propertyItems")?
+            .required()?
+            .try_into()?;
+        assert!(property_items.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_when_get_input_properties_list_property_items_missing_request_data()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-list-no-data".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: None,
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_DATA);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_when_get_input_properties_list_property_items_input_not_found()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-list-not-found".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"nonexistent","propertyName":"device_id"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_error_when_get_input_properties_list_property_items_missing_property_name()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-list-no-prop".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut input_registry = input_registry();
+        let response = handle_request_message(request, &session_stats, &mut input_registry);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_MISSING_REQUEST_FIELD);
         Ok(())
     }
 

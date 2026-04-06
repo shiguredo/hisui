@@ -171,6 +171,46 @@ fn make_stop_record_request() -> (String, String) {
     (request_id, msg)
 }
 
+fn make_start_player_request() -> (String, String) {
+    let request_id = next_request_id();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StartOutput")?;
+                f.member("requestId", request_id.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| f.member("outputName", "player")),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
+fn make_stop_player_request() -> (String, String) {
+    let request_id = next_request_id();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "StopOutput")?;
+                f.member("requestId", request_id.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| f.member("outputName", "player")),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
 // --- obsws レスポンスパース ---
 
 /// op=7 のレスポンスから requestId と成否を取得する。
@@ -326,6 +366,10 @@ fn main() -> noargs::Result<()> {
         .doc("カメラのみ使用する（マイクなし）")
         .take(&mut args)
         .is_present();
+    let player = noargs::flag("player")
+        .doc("player output を起動してウィンドウ表示する")
+        .take(&mut args)
+        .is_present();
 
     args.finish()?;
 
@@ -347,7 +391,7 @@ fn main() -> noargs::Result<()> {
         .build()
         .expect("failed to build tokio runtime");
 
-    let result = runtime.block_on(run(&host, port, &record_directory, camera_only));
+    let result = runtime.block_on(run(&host, port, &record_directory, camera_only, player));
 
     match result {
         Ok(()) => Ok(()),
@@ -363,6 +407,7 @@ async fn run(
     port: u16,
     record_directory: &str,
     camera_only: bool,
+    player: bool,
 ) -> Result<(), String> {
     // TCP 接続
     let addr = format!("{host}:{port}");
@@ -435,7 +480,15 @@ async fn run(
         tracing::info!("CreateInput 成功: microphone");
     }
 
-    // 4. StartRecord: 録画開始
+    // 4. StartOutput player: player ウィンドウ表示（--player 指定時）
+    if player {
+        let (req_id, msg) = make_start_player_request();
+        tracing::info!("StartOutput player 送信");
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+        tracing::info!("player 開始");
+    }
+
+    // 5. StartRecord: 録画開始
     let (req_id, msg) = make_start_record_request();
     tracing::info!("StartRecord 送信");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
@@ -447,11 +500,19 @@ async fn run(
         .await
         .map_err(|e| format!("failed to wait for Ctrl+C: {e}"))?;
 
-    // 5. StopRecord: 録画停止
+    // 6. StopRecord: 録画停止
     let (req_id, msg) = make_stop_record_request();
     tracing::info!("StopRecord 送信");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("録画停止");
+
+    // 7. StopOutput player: player ウィンドウ閉じ（--player 指定時）
+    if player {
+        let (req_id, msg) = make_stop_player_request();
+        tracing::info!("StopOutput player 送信");
+        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+        tracing::info!("player 停止");
+    }
 
     // WebSocket を閉じる
     let _ = ws.close(shiguredo_websocket::CloseCode::NORMAL, "bye");

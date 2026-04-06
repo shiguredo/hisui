@@ -707,7 +707,6 @@ fn parse_set_input_volume_fields(
     })
 }
 
-/// video-device-rs からデバイス情報を列挙して propertyItems を返す
 pub fn build_get_input_properties_list_property_items_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
@@ -719,34 +718,36 @@ pub fn build_get_input_properties_list_property_items_response(
         request_data,
         parse_get_input_properties_list_property_items_fields,
     ) {
-        Ok(fields) => fields,
+        Ok(v) => v,
         Err(response) => return response,
     };
 
-    if !input_registry
-        .supported_input_kinds()
-        .contains(&fields.input_kind.as_str())
-    {
+    let Some(input_entry) =
+        input_registry.find_input(fields.input_uuid.as_deref(), fields.input_name.as_deref())
+    else {
         return super::build_request_response_error(
             "GetInputPropertiesListPropertyItems",
             request_id,
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            "unsupported input kind",
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Input not found",
         );
-    }
+    };
 
-    if fields.input_kind != "video_capture_device" {
+    // video_capture_device のみプロパティ列挙をサポートする
+    let crate::obsws::input_registry::ObswsInputSettings::VideoCaptureDevice(vcd_settings) =
+        &input_entry.input.settings
+    else {
         return super::build_request_response_error(
             "GetInputPropertiesListPropertyItems",
             request_id,
             REQUEST_STATUS_INVALID_REQUEST_FIELD,
             "property enumeration is only supported for video_capture_device",
         );
-    }
+    };
 
     let property_items = match enumerate_video_device_property_items(
         &fields.property_name,
-        fields.device_id.as_deref(),
+        vcd_settings.device_id.as_deref(),
     ) {
         Ok(items) => items,
         Err(error_message) => {

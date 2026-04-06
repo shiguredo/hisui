@@ -18,6 +18,8 @@ mod input;
 mod output;
 mod output_dash;
 mod output_hls;
+#[cfg(feature = "player")]
+mod output_player;
 mod output_record;
 mod output_rtmp;
 mod output_sora;
@@ -74,6 +76,11 @@ pub enum ObswsCoordinatorCommand {
     ResolveInputByName {
         input_name: String,
         reply_tx: tokio::sync::oneshot::Sender<Option<ResolvedInputInfo>>,
+    },
+    #[cfg(feature = "player")]
+    /// player のライフサイクルイベントを処理する
+    HandlePlayerLifecycleEvent {
+        event: crate::obsws::player::PlayerLifecycleEvent,
     },
 }
 
@@ -155,6 +162,18 @@ pub struct ObswsCoordinator {
     sora_source_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::sora_source::SoraSourceEvent>,
     /// SoraSubscriber からのイベント送信チャネル（processor に渡す）
     sora_source_event_tx: tokio::sync::mpsc::UnboundedSender<crate::sora_source::SoraSourceEvent>,
+    /// player output 用の制御・メディアチャネル
+    #[cfg(feature = "player")]
+    pub(crate) player_command_tx: std::sync::mpsc::SyncSender<crate::obsws::player::PlayerCommand>,
+    #[cfg(feature = "player")]
+    pub(crate) player_media_tx:
+        std::sync::mpsc::SyncSender<crate::obsws::player::PlayerMediaMessage>,
+    /// player output のサブスクライバタスクハンドル
+    #[cfg(feature = "player")]
+    pub(crate) player_subscriber_handle: Option<tokio::task::JoinHandle<()>>,
+    /// player セッションの世代 ID（古い Stopped イベントを無視するために使用）
+    #[cfg(feature = "player")]
+    pub(crate) player_generation: u64,
 }
 
 impl ObswsCoordinator {
@@ -166,6 +185,12 @@ impl ObswsCoordinator {
         input_registry: ObswsInputRegistry,
         program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
+        #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
+            crate::obsws::player::PlayerCommand,
+        >,
+        #[cfg(feature = "player")] player_media_tx: std::sync::mpsc::SyncSender<
+            crate::obsws::player::PlayerMediaMessage,
+        >,
     ) -> (
         Self,
         handle::ObswsCoordinatorHandle,
@@ -193,6 +218,14 @@ impl ObswsCoordinator {
             sora_subscribers: std::collections::BTreeMap::new(),
             sora_source_event_rx,
             sora_source_event_tx,
+            #[cfg(feature = "player")]
+            player_command_tx,
+            #[cfg(feature = "player")]
+            player_media_tx,
+            #[cfg(feature = "player")]
+            player_subscriber_handle: None,
+            #[cfg(feature = "player")]
+            player_generation: 0,
         };
         let handle = handle::ObswsCoordinatorHandle::new(
             command_tx,
@@ -253,13 +286,17 @@ impl ObswsCoordinator {
                             let info = self.resolve_input_by_name(&input_name);
                             let _ = reply_tx.send(info);
                         }
+                        #[cfg(feature = "player")]
+                        ObswsCoordinatorCommand::HandlePlayerLifecycleEvent { event } => {
+                            self.handle_player_lifecycle_event(event);
+                        }
                     }
-                }
+                },
                 event = self.sora_source_event_rx.recv() => {
                     if let Some(event) = event {
                         self.handle_sora_source_event(event);
                     }
-                }
+                },
             }
 
             // state file 保存失敗等の致命的エラーが発生した場合はループを抜ける。
@@ -270,6 +307,22 @@ impl ObswsCoordinator {
                 );
                 let _ = self.shutdown_tx.send(true);
                 return;
+            }
+        }
+    }
+
+    #[cfg(feature = "player")]
+    fn handle_player_lifecycle_event(&mut self, event: crate::obsws::player::PlayerLifecycleEvent) {
+        match event {
+            crate::obsws::player::PlayerLifecycleEvent::Stopped { generation } => {
+                // 古い世代の Stopped イベントは無視する（Stop→Start の直後に届く場合がある）
+                if generation != self.player_generation {
+                    return;
+                }
+                if let Some(handle) = self.player_subscriber_handle.take() {
+                    handle.abort();
+                }
+                self.input_registry.deactivate_player();
             }
         }
     }
