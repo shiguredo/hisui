@@ -1,3 +1,12 @@
+// shiguredo_audio_toolbox の内部型 (OpaqueAudioConverter) が Send を実装していないため、
+// tokio のマルチスレッドランタイム上で直接使用できない。
+// そのため専用のネイティブスレッドで Audio Toolbox のエンコード処理を実行し、
+// std::sync::mpsc チャネル経由で同期的に通信する。
+//
+// チャネルには tokio::sync ではなく std::sync::mpsc を使用している。
+// エンコード処理は専用のネイティブスレッド上で同期的に実行され、
+// 呼び出し側も結果を同期的に待つため、tokio の非同期チャネルを使う必要がない。
+
 use std::{collections::VecDeque, num::NonZeroUsize, time::Duration};
 
 use shiguredo_mp4::{
@@ -8,9 +17,18 @@ use shiguredo_mp4::{
 
 use crate::audio::{self, AudioFormat, AudioFrame, Channels, SampleRate};
 
+enum EncoderCommand {
+    Encode(Vec<i16>),
+    Finish,
+}
+
+type EncoderInitializationResponse = Result<(), String>;
+type EncoderResponse = Result<Vec<shiguredo_audio_toolbox::EncodedFrame>, String>;
+
 #[derive(Debug)]
 pub struct AudioToolboxEncoder {
-    inner: shiguredo_audio_toolbox::Encoder,
+    cmd_tx: std::sync::mpsc::Sender<EncoderCommand>,
+    result_rx: std::sync::mpsc::Receiver<EncoderResponse>,
     buffered_frames: VecDeque<shiguredo_audio_toolbox::EncodedFrame>,
     sample_entry: Option<SampleEntry>,
     total_encoded_samples: u64,
@@ -20,19 +38,74 @@ impl AudioToolboxEncoder {
     pub fn new(bitrate: NonZeroUsize) -> crate::Result<Self> {
         let bitrate_u32 = u32::try_from(bitrate.get())
             .map_err(|_| crate::Error::new("audio encoder bitrate does not fit into u32"))?;
-        let inner =
-            shiguredo_audio_toolbox::Encoder::new(shiguredo_audio_toolbox::EncoderConfig {
-                codec: shiguredo_audio_toolbox::EncoderCodec::AacLc,
-                sample_rate: SampleRate::HZ_48000.get(),
-                channels: Channels::STEREO.get(),
-                bitrate: Some(bitrate_u32),
-                bitrate_control_mode: None,
-                codec_quality: None,
-                vbr_quality: None,
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<EncoderCommand>();
+        let (init_tx, init_rx) = std::sync::mpsc::channel::<EncoderInitializationResponse>();
+        let (result_tx, result_rx) = std::sync::mpsc::channel::<EncoderResponse>();
+
+        std::thread::Builder::new()
+            .name("audio-toolbox-encoder".into())
+            .spawn(move || {
+                let encoder =
+                    shiguredo_audio_toolbox::Encoder::new(shiguredo_audio_toolbox::EncoderConfig {
+                        codec: shiguredo_audio_toolbox::EncoderCodec::AacLc,
+                        sample_rate: SampleRate::HZ_48000.get(),
+                        channels: Channels::STEREO.get(),
+                        bitrate: Some(bitrate_u32),
+                        bitrate_control_mode: None,
+                        codec_quality: None,
+                        vbr_quality: None,
+                    });
+                let mut encoder = match encoder {
+                    Ok(e) => e,
+                    Err(e) => {
+                        let _ = init_tx.send(Err(e.to_string()));
+                        return;
+                    }
+                };
+                if init_tx.send(Ok(())).is_err() {
+                    return;
+                }
+
+                fn collect_frames(
+                    encoder: &mut shiguredo_audio_toolbox::Encoder,
+                ) -> Vec<shiguredo_audio_toolbox::EncodedFrame> {
+                    let mut frames = Vec::new();
+                    while let Some(f) = encoder.next_frame() {
+                        frames.push(f);
+                    }
+                    frames
+                }
+
+                while let Ok(cmd) = cmd_rx.recv() {
+                    let result = match cmd {
+                        EncoderCommand::Encode(samples) => encoder
+                            .encode(&samples)
+                            .map(|()| collect_frames(&mut encoder))
+                            .map_err(|e| e.to_string()),
+                        EncoderCommand::Finish => encoder
+                            .finish()
+                            .map(|()| collect_frames(&mut encoder))
+                            .map_err(|e| e.to_string()),
+                    };
+                    if result_tx.send(result).is_err() {
+                        break;
+                    }
+                }
+            })
+            .map_err(|e| {
+                crate::Error::new(format!("failed to spawn audio toolbox encoder thread: {e}"))
             })?;
+
+        init_rx
+            .recv()
+            .map_err(|_| crate::Error::new("audio toolbox encoder thread has terminated"))?
+            .map_err(crate::Error::new)?;
+
         let sample_entry = Some(sample_entry(bitrate));
         Ok(Self {
-            inner,
+            cmd_tx,
+            result_rx,
             buffered_frames: VecDeque::new(),
             sample_entry,
             total_encoded_samples: 0,
@@ -40,7 +113,9 @@ impl AudioToolboxEncoder {
     }
 
     pub fn finish(&mut self) -> crate::Result<Option<AudioFrame>> {
-        self.inner.finish()?;
+        self.send_command(EncoderCommand::Finish)?;
+        let frames = self.recv_response()?;
+        self.buffered_frames.extend(frames);
         self.dequeue_encoded_frame()
     }
 
@@ -56,17 +131,26 @@ impl AudioToolboxEncoder {
         }
 
         let input = frame.interleaved_stereo_samples()?.collect::<Vec<_>>();
-        self.inner.encode(&input)?;
+        self.send_command(EncoderCommand::Encode(input))?;
+        let frames = self.recv_response()?;
+        self.buffered_frames.extend(frames);
         self.dequeue_encoded_frame()
     }
 
-    fn dequeue_encoded_frame(&mut self) -> crate::Result<Option<AudioFrame>> {
-        if self.buffered_frames.is_empty() {
-            while let Some(encoded) = self.inner.next_frame() {
-                self.buffered_frames.push_back(encoded);
-            }
-        }
+    fn send_command(&self, cmd: EncoderCommand) -> crate::Result<()> {
+        self.cmd_tx
+            .send(cmd)
+            .map_err(|_| crate::Error::new("audio toolbox encoder thread has terminated"))
+    }
 
+    fn recv_response(&self) -> crate::Result<Vec<shiguredo_audio_toolbox::EncodedFrame>> {
+        self.result_rx
+            .recv()
+            .map_err(|_| crate::Error::new("audio toolbox encoder thread has terminated"))?
+            .map_err(crate::Error::new)
+    }
+
+    fn dequeue_encoded_frame(&mut self) -> crate::Result<Option<AudioFrame>> {
         let Some(encoded) = self.buffered_frames.pop_front() else {
             return Ok(None);
         };
