@@ -245,7 +245,9 @@ pub fn is_source_startable(settings: &ObswsInputSettings) -> bool {
         ObswsInputSettings::RtmpInbound(s) => rtmp_inbound::is_source_startable(s),
         ObswsInputSettings::SrtInbound(s) => srt_inbound::is_source_startable(s),
         ObswsInputSettings::RtspSubscriber(s) => rtsp_subscriber::is_source_startable(s),
-        ObswsInputSettings::WebRtcSource(_) | ObswsInputSettings::SoraSource(_) => false,
+        // webrtc_source / sora_source は source processor を持たないが、
+        // track ID の予約（InputSourceState の登録）が必要なので true を返す
+        ObswsInputSettings::WebRtcSource(_) | ObswsInputSettings::SoraSource(_) => true,
     }
 }
 
