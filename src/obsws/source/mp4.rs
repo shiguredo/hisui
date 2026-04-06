@@ -4,6 +4,11 @@ use crate::obsws::source::{
 };
 use crate::{ProcessorId, TrackId};
 
+/// source processor を起動できる設定が揃っているかを返す
+pub(super) fn is_source_startable(settings: &ObswsMp4FileSourceSettings) -> bool {
+    settings.path.is_some()
+}
+
 pub(super) fn build_record_source_plan(
     settings: &ObswsMp4FileSourceSettings,
     output_kind: ObswsOutputKind,
@@ -11,8 +16,8 @@ pub(super) fn build_record_source_plan(
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(path) = settings.path.as_deref() else {
-        return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
-            "path",
+        return Err(BuildObswsRecordSourcePlanError::InvalidInput(
+            "inputSettings.path is required".to_owned(),
         ));
     };
 

@@ -123,6 +123,13 @@ fn convert_captured_frame_to_i16be(
     })
 }
 
+/// source processor を起動できる設定が揃っているかを返す
+pub(super) fn is_source_startable(
+    settings: &crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings,
+) -> bool {
+    settings.device_id.is_some()
+}
+
 pub(super) fn build_record_source_plan(
     settings: &crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings,
     output_kind: super::ObswsOutputKind,
@@ -209,18 +216,19 @@ mod tests {
     }
 
     #[test]
-    fn build_record_source_plan_without_device_id() {
-        let plan = build_record_source_plan(
-            &ObswsAudioCaptureDeviceSettings {
-                device_id: None,
-                sample_rate: None,
-                channels: None,
-            },
-            ObswsOutputKind::Program,
-            2,
-            "1",
-        )
-        .expect("audio_capture_device source plan without device_id must succeed");
+    fn build_record_source_plan_without_device_id_keeps_input_dormant() {
+        let settings = ObswsAudioCaptureDeviceSettings {
+            device_id: None,
+            sample_rate: None,
+            channels: None,
+        };
+        let plan = build_record_source_plan(&settings, ObswsOutputKind::Program, 2, "1")
+            .expect("audio_capture_device source plan without device_id must succeed");
+
+        assert!(
+            !is_source_startable(&settings),
+            "audio_capture_device without device_id must remain dormant"
+        );
 
         match &plan.requests[0] {
             ObswsSourceRequest::CreateAudioDeviceSource { source, .. } => {

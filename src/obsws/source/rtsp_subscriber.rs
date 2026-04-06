@@ -4,6 +4,11 @@ use crate::obsws::source::{
 };
 use crate::{ProcessorId, TrackId};
 
+/// source processor を起動できる設定が揃っているかを返す
+pub(super) fn is_source_startable(settings: &ObswsRtspSubscriberSettings) -> bool {
+    settings.input_url.is_some()
+}
+
 pub(super) fn build_record_source_plan(
     settings: &ObswsRtspSubscriberSettings,
     output_kind: ObswsOutputKind,
@@ -11,8 +16,8 @@ pub(super) fn build_record_source_plan(
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(input_url) = settings.input_url.as_deref() else {
-        return Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
-            "inputUrl",
+        return Err(BuildObswsRecordSourcePlanError::InvalidInput(
+            "inputSettings.inputUrl is required".to_owned(),
         ));
     };
 
@@ -87,18 +92,12 @@ mod tests {
     }
 
     #[test]
-    fn build_record_source_plan_requires_input_url() {
-        let result = build_record_source_plan(
-            &ObswsRtspSubscriberSettings { input_url: None },
-            ObswsOutputKind::Program,
-            1,
-            "0",
-        );
-        assert!(matches!(
-            result,
-            Err(BuildObswsRecordSourcePlanError::MissingRequiredField(
-                "inputUrl"
-            ))
-        ));
+    fn is_source_startable_requires_input_url() {
+        assert!(!is_source_startable(&ObswsRtspSubscriberSettings {
+            input_url: None,
+        }));
+        assert!(is_source_startable(&ObswsRtspSubscriberSettings {
+            input_url: Some("rtsp://127.0.0.1:554/stream".to_owned()),
+        }));
     }
 }

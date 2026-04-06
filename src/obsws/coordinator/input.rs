@@ -24,10 +24,11 @@ impl super::ObswsCoordinator {
         let response_text = execution.response_text;
         let mut events = Vec::new();
         if let Some(created) = execution.created {
-            // 入力ライフサイクルの source processor を起動する
-            if let Err(e) = self
-                .start_input_source_processor(&created.input_entry)
-                .await
+            // 起動条件を満たしている場合のみ source processor を起動する
+            if crate::obsws::source::is_source_startable(&created.input_entry.input.settings)
+                && let Err(e) = self
+                    .start_input_source_processor(&created.input_entry)
+                    .await
             {
                 tracing::warn!(
                     "failed to start source processor for input {}: {}",
@@ -175,7 +176,7 @@ impl super::ObswsCoordinator {
         self.build_result_from_response(response_text, events)
     }
 
-    pub(crate) fn handle_set_input_settings(
+    pub(crate) async fn handle_set_input_settings(
         &mut self,
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
@@ -222,6 +223,61 @@ impl super::ObswsCoordinator {
             // p2p_session にも通知する（chroma key 動的更新用）
             let _ = self.obsws_event_tx.send(event.clone());
             events.push(event);
+
+            // source lifecycle の再評価
+            let was_active = self
+                .input_source_processors
+                .contains_key(&updated_input.input_uuid);
+            let is_startable =
+                crate::obsws::source::is_source_startable(&updated_input.input.settings);
+
+            match (was_active, is_startable) {
+                (false, true) => {
+                    // 未起動 → 起動
+                    if let Err(e) = self.start_input_source_processor(&updated_input).await {
+                        tracing::warn!(
+                            "failed to start source processor for input {}: {}",
+                            updated_input.input_uuid,
+                            e.display()
+                        );
+                    }
+                }
+                (true, false) => {
+                    // 起動中 → 停止（未起動に戻る）
+                    if let Err(e) = self
+                        .stop_input_source_processor(&updated_input.input_uuid)
+                        .await
+                    {
+                        tracing::warn!(
+                            "failed to stop source processor for input {}: {}",
+                            updated_input.input_uuid,
+                            e.display()
+                        );
+                    }
+                }
+                (true, true) => {
+                    // 起動中のまま設定変更 → stop + start で再生成
+                    if let Err(e) = self
+                        .stop_input_source_processor(&updated_input.input_uuid)
+                        .await
+                    {
+                        tracing::warn!(
+                            "failed to stop source processor for input {}: {}",
+                            updated_input.input_uuid,
+                            e.display()
+                        );
+                    } else if let Err(e) = self.start_input_source_processor(&updated_input).await {
+                        tracing::warn!(
+                            "failed to restart source processor for input {}: {}",
+                            updated_input.input_uuid,
+                            e.display()
+                        );
+                    }
+                }
+                (false, false) => {
+                    // 未起動のまま → 何もしない
+                }
+            }
         }
         self.build_result_from_response(response_text, events)
     }
@@ -765,6 +821,9 @@ impl super::ObswsCoordinator {
         let Some(pipeline_handle) = &self.pipeline_handle else {
             return Ok(());
         };
+        if !crate::obsws::source::is_source_startable(&input_entry.input.settings) {
+            return Ok(());
+        }
         let mut source_plan = crate::obsws::source::build_record_source_plan(
             input_entry,
             crate::obsws::source::ObswsOutputKind::Program,
@@ -834,6 +893,9 @@ impl super::ObswsCoordinator {
             .cloned()
             .collect();
         for entry in entries {
+            if !crate::obsws::source::is_source_startable(&entry.input.settings) {
+                continue;
+            }
             if let Err(e) = self.start_input_source_processor(&entry).await {
                 tracing::warn!(
                     "failed to start source processor for initial input {}: {}",

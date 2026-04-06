@@ -480,6 +480,7 @@ impl ObswsCoordinator {
             }
             "SetInputSettings" => {
                 self.handle_set_input_settings(&request_id, request.request_data.as_ref())
+                    .await
             }
             "SetInputMute" => {
                 self.handle_set_input_mute(&request_id, request.request_data.as_ref())

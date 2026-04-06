@@ -62,7 +62,11 @@ pub fn build_composed_output_plan(
     frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsComposedOutputPlan, BuildObswsComposedOutputPlanError> {
     let mut source_plans = Vec::with_capacity(scene_inputs.len());
+    let mut active_scene_inputs = Vec::with_capacity(scene_inputs.len());
     for scene_input in scene_inputs.iter() {
+        if !source::is_source_startable(&scene_input.input.input.settings) {
+            continue;
+        }
         let source_plan = source::build_record_source_plan(
             &scene_input.input,
             output_kind,
@@ -72,6 +76,7 @@ pub fn build_composed_output_plan(
         )
         .map_err(BuildObswsComposedOutputPlanError::Source)?;
         source_plans.push(source_plan);
+        active_scene_inputs.push(scene_input);
     }
 
     // 常にオーディオミキサーを使用する。
@@ -96,10 +101,10 @@ pub fn build_composed_output_plan(
         output_kind.as_str()
     ));
 
-    // source_plans と scene_inputs は同じ順序・同じ長さ
+    // source_plans と active_scene_inputs は同じ順序・同じ長さ
     let video_mixer_input_tracks = source_plans
         .iter()
-        .zip(scene_inputs.iter())
+        .zip(active_scene_inputs.iter())
         .filter_map(|(plan, scene_input)| {
             let video_track_id = plan.source_video_track_id.as_ref()?;
             let transform = &scene_input.transform;
@@ -184,4 +189,67 @@ pub fn build_composed_output_plan(
         canvas_height,
         frame_rate,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::obsws::input_registry::{
+        ObswsInput, ObswsInputEntry, ObswsInputSettings, ObswsSceneItemTransform,
+    };
+
+    fn parse_owned_json(text: &str) -> nojson::RawJsonOwned {
+        nojson::RawJsonOwned::parse(text).expect("test json must be valid")
+    }
+
+    #[test]
+    fn build_composed_output_plan_skips_dormant_inputs() {
+        let dormant_input = ObswsSceneInputEntry {
+            input: ObswsInputEntry::new_for_test(
+                "input-1",
+                "dormant-image",
+                ObswsInput {
+                    settings: ObswsInputSettings::from_kind_and_settings(
+                        "image_source",
+                        parse_owned_json("{}").value(),
+                    )
+                    .expect("image_source settings must parse"),
+                    input_muted: false,
+                    input_volume_mul: crate::types::NonNegFiniteF64::ONE,
+                },
+            ),
+            scene_item_index: 0,
+            transform: ObswsSceneItemTransform::default(),
+        };
+        let active_input = ObswsSceneInputEntry {
+            input: ObswsInputEntry::new_for_test(
+                "input-2",
+                "color",
+                ObswsInput {
+                    settings: ObswsInputSettings::ColorSource(
+                        crate::obsws::input_registry::ObswsColorSourceSettings {
+                            color: Some("#FF0000".to_owned()),
+                        },
+                    ),
+                    input_muted: false,
+                    input_volume_mul: crate::types::NonNegFiniteF64::ONE,
+                },
+            ),
+            scene_item_index: 1,
+            transform: ObswsSceneItemTransform::default(),
+        };
+
+        let plan = build_composed_output_plan(
+            &[dormant_input, active_input],
+            ObswsOutputKind::Program,
+            0,
+            crate::types::EvenUsize::new(1280).expect("valid width"),
+            crate::types::EvenUsize::new(720).expect("valid height"),
+            crate::video::FrameRate::FPS_30,
+        )
+        .expect("output plan must build");
+
+        assert_eq!(plan.source_plans.len(), 1);
+        assert_eq!(plan.source_processor_ids.len(), 1);
+    }
 }
