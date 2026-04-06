@@ -190,3 +190,66 @@ pub fn build_composed_output_plan(
         frame_rate,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::obsws::input_registry::{
+        ObswsInput, ObswsInputEntry, ObswsInputSettings, ObswsSceneItemTransform,
+    };
+
+    fn parse_owned_json(text: &str) -> nojson::RawJsonOwned {
+        nojson::RawJsonOwned::parse(text).expect("test json must be valid")
+    }
+
+    #[test]
+    fn build_composed_output_plan_skips_dormant_inputs() {
+        let dormant_input = ObswsSceneInputEntry {
+            input: ObswsInputEntry::new_for_test(
+                "input-1",
+                "dormant-image",
+                ObswsInput {
+                    settings: ObswsInputSettings::from_kind_and_settings(
+                        "image_source",
+                        parse_owned_json("{}").value(),
+                    )
+                    .expect("image_source settings must parse"),
+                    input_muted: false,
+                    input_volume_mul: crate::types::NonNegFiniteF64::ONE,
+                },
+            ),
+            scene_item_index: 0,
+            transform: ObswsSceneItemTransform::default(),
+        };
+        let active_input = ObswsSceneInputEntry {
+            input: ObswsInputEntry::new_for_test(
+                "input-2",
+                "color",
+                ObswsInput {
+                    settings: ObswsInputSettings::ColorSource(
+                        crate::obsws::input_registry::ObswsColorSourceSettings {
+                            color: Some("#FF0000".to_owned()),
+                        },
+                    ),
+                    input_muted: false,
+                    input_volume_mul: crate::types::NonNegFiniteF64::ONE,
+                },
+            ),
+            scene_item_index: 1,
+            transform: ObswsSceneItemTransform::default(),
+        };
+
+        let plan = build_composed_output_plan(
+            &[dormant_input, active_input],
+            ObswsOutputKind::Program,
+            0,
+            crate::types::EvenUsize::new(1280).expect("valid width"),
+            crate::types::EvenUsize::new(720).expect("valid height"),
+            crate::video::FrameRate::FPS_30,
+        )
+        .expect("output plan must build");
+
+        assert_eq!(plan.source_plans.len(), 1);
+        assert_eq!(plan.source_processor_ids.len(), 1);
+    }
+}
