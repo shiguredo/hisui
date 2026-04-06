@@ -37,6 +37,7 @@ class ObswsServer:
         port: int,
         password: str | None = None,
         default_record_dir: Path | None = None,
+        ui: bool = False,
         ui_remote_url: str | None = None,
         https_cert_path: Path | None = None,
         https_key_path: Path | None = None,
@@ -48,6 +49,7 @@ class ObswsServer:
         self.port = port
         self.password = password
         self.default_record_dir = default_record_dir
+        self.ui = ui
         self.ui_remote_url = ui_remote_url
         self.https_cert_path = https_cert_path
         self.https_key_path = https_key_path
@@ -74,6 +76,8 @@ class ObswsServer:
         openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
             # use_env=True では対応する環境変数がない引数は未対応
+            if self.ui:
+                raise ValueError("ui is not supported with use_env=True")
             if self.ui_remote_url is not None:
                 raise ValueError("ui_remote_url is not supported with use_env=True")
             if self.https_cert_path is not None or self.https_key_path is not None:
@@ -101,6 +105,8 @@ class ObswsServer:
                 args.extend(["--password", self.password])
             if self.default_record_dir is not None:
                 args.extend(["--default-record-dir", str(self.default_record_dir)])
+            if self.ui:
+                args.append("--ui")
             if self.ui_remote_url is not None:
                 args.extend(["--ui-remote-url", self.ui_remote_url])
             if self.https_cert_path is not None and self.https_key_path is not None:

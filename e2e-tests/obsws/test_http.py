@@ -185,6 +185,7 @@ def test_obsws_proxy_root(binary_path: Path):
             binary_path,
             host=host,
             port=port,
+            ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:
@@ -204,6 +205,7 @@ def test_obsws_proxy_sub_path(binary_path: Path):
             binary_path,
             host=host,
             port=port,
+            ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:
@@ -225,6 +227,7 @@ def test_obsws_proxy_json(binary_path: Path):
             binary_path,
             host=host,
             port=port,
+            ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:
@@ -247,6 +250,7 @@ def test_obsws_proxy_ok_endpoint_not_proxied(binary_path: Path):
             binary_path,
             host=host,
             port=port,
+            ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:
@@ -265,6 +269,7 @@ def test_obsws_proxy_post_returns_405(binary_path: Path):
             binary_path,
             host=host,
             port=port,
+            ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:
@@ -285,6 +290,7 @@ def test_obsws_proxy_unknown_upstream_path(binary_path: Path):
             binary_path,
             host=host,
             port=port,
+            ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:
@@ -305,6 +311,7 @@ def test_obsws_proxy_client_disconnect_does_not_crash_server(binary_path: Path):
             binary_path,
             host=host,
             port=port,
+            ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:

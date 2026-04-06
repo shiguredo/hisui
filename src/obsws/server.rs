@@ -75,6 +75,7 @@ pub async fn run_server(
     password: Option<String>,
     default_record_dir: PathBuf,
     ui_remote_url: Option<String>,
+    open_ui_in_browser: bool,
     https_cert_path: Option<PathBuf>,
     https_key_path: Option<PathBuf>,
     pipeline_config: crate::MediaPipelineConfig,
@@ -120,6 +121,13 @@ pub async fn run_server(
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
     tracing::info!("obsws server listening on {scheme}://{addr}");
+
+    if upstream_config.is_some() {
+        tracing::info!("UI started at {scheme}://{addr}/");
+    }
+    if open_ui_in_browser {
+        open_browser(&format!("{scheme}://{addr}/"));
+    }
 
     // state file の読み込みと初期値への反映
     let (effective_record_dir, loaded_state, resolved_state_file_path) =
@@ -827,4 +835,21 @@ async fn proxy_to_upstream(
 
     // upstream がレスポンスなしで切断した場合
     Err("Upstream closed connection without sending a response".into())
+}
+
+fn open_browser(url: &str) {
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(url).spawn()
+    } else if cfg!(target_os = "linux") {
+        std::process::Command::new("xdg-open").arg(url).spawn()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .spawn()
+    } else {
+        return;
+    };
+    if let Err(e) = result {
+        tracing::warn!("failed to open browser: {e}");
+    }
 }

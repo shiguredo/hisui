@@ -40,11 +40,19 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .doc("obsws の録画先ディレクトリ初期値")
         .take(args)
         .present_and_then(|o| o.value().parse())?;
+    let ui: bool = noargs::flag("ui")
+        .doc("UI を有効にする")
+        .take(args)
+        .is_present();
     let ui_remote_url: Option<String> = noargs::opt("ui-remote-url")
         .ty("URL")
-        .doc("UI 用リモートサーバーの URL（GET リクエストをリバースプロキシする）")
+        .doc("UI 用リモートサーバーの URL（デフォルト: https://hisui-devtools.shiguredo.app/）")
         .take(args)
         .present_and_then(|o| Ok::<_, std::convert::Infallible>(o.value().to_string()))?;
+    let open: bool = noargs::flag("open")
+        .doc("--ui 指定時にブラウザで UI を開く")
+        .take(args)
+        .is_present();
     let https_cert_path: Option<PathBuf> = noargs::opt("https-cert-path")
         .ty("PATH")
         .doc("HTTPS 用の証明書ファイルパス（PEM 形式）")
@@ -100,6 +108,19 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         return Ok(());
     }
 
+    if !ui && ui_remote_url.is_some() {
+        return Err(noargs::Error::other(args, "--ui-remote-url requires --ui"));
+    }
+    if !ui && open {
+        return Err(noargs::Error::other(args, "--open requires --ui"));
+    }
+
+    let ui_remote_url: Option<String> = if ui {
+        Some(ui_remote_url.unwrap_or_else(|| "https://hisui-devtools.shiguredo.app/".to_string()))
+    } else {
+        None
+    };
+
     // 片方のみ指定はエラー
     match (&https_cert_path, &https_key_path) {
         (Some(_), None) => {
@@ -124,6 +145,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         password,
         resolve_default_record_dir(default_record_dir)?,
         ui_remote_url,
+        open,
         https_cert_path,
         https_key_path,
         openh264,
@@ -143,6 +165,7 @@ fn run_internal(
     password: Option<String>,
     default_record_dir: PathBuf,
     ui_remote_url: Option<String>,
+    open_ui_in_browser: bool,
     https_cert_path: Option<PathBuf>,
     https_key_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
@@ -195,6 +218,7 @@ fn run_internal(
                             password,
                             default_record_dir,
                             ui_remote_url,
+                            open_ui_in_browser,
                             https_cert_path,
                             https_key_path,
                             pipeline_config,
@@ -232,6 +256,7 @@ fn run_internal(
                 password,
                 default_record_dir,
                 ui_remote_url,
+                open_ui_in_browser,
                 https_cert_path,
                 https_key_path,
                 pipeline_config,
