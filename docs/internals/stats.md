@@ -236,7 +236,7 @@ compose の `--stats-file` は、 `Stats::entries()` をそのまま外へ出す
 
 ### bootstrap WebRTC stats
 
-bootstrap DataChannel の `GetWebRtcStats` は、 `Stats` 基盤とは別物です。
+bootstrap DataChannel の `HisuiGetWebRtcStats` は、 `Stats` 基盤とは別物です。
 WebRTC native stats を収集して JSON 化して返します。
 
 これは「統計値の公開」という意味では近いですが、 `src/stats.rs` を通らない別経路です。

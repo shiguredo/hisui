@@ -641,7 +641,7 @@ impl ObswsCoordinator {
 
     pub(crate) fn handle_list_sora_subscribers(&self, request_id: &str) -> CommandResult {
         let response_text = crate::obsws::response::build_request_response_success(
-            "ListSoraSubscribers",
+            "HisuiListSoraSubscribers",
             request_id,
             |f| {
                 f.member(
@@ -676,7 +676,7 @@ impl ObswsCoordinator {
         });
 
         let response_text = crate::obsws::response::build_request_response_success(
-            "ListSoraSourceTracks",
+            "HisuiListSoraSourceTracks",
             request_id,
             |f| {
                 f.member(
@@ -852,7 +852,7 @@ impl ObswsCoordinator {
                 match reply_rx.await {
                     Ok(Ok(publisher)) => {
                         tracing::debug!(
-                            "AttachSoraSourceTrack: publish_track succeeded, track_id={}, sending Attach command",
+                            "HisuiAttachSoraSourceTrack: publish_track succeeded, track_id={}, sending Attach command",
                             pipeline_track_id
                         );
                         let rt = &state.remote_tracks[&found_track_id];

@@ -6,7 +6,7 @@ use super::{BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan};
 ///
 /// webrtc_source は WebRTC remote track からフレームを受け取るため、
 /// 自律的な source processor は生成しない。video_track_id のみ確保して、
-/// 実際のフレーム publish は p2p_session 側の AttachWebRtcVideoTrack で行う。
+/// 実際のフレーム publish は p2p_session 側の HisuiAttachWebRtcVideoTrack で行う。
 pub fn build_record_source_plan(
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {

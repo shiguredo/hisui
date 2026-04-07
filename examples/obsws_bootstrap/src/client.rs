@@ -421,17 +421,17 @@ pub async fn run_client(
                         match result {
                             Ok(()) => {
                                 obsws_create_input_succeeded = true;
-                                // CreateInput 成功後に SubscribeProgramTracks を送信する
+                                // CreateInput 成功後に HisuiSubscribeProgramTracks を送信する
                                 if subscribe_program_tracks
                                     && !obsws_subscribe_program_sent
                                     && let Some(dc) = &retained.obsws_dc
                                     && dc.state() == DataChannelState::Open
                                 {
                                     let request = make_subscribe_program_tracks_request();
-                                    tracing::info!("sending SubscribeProgramTracks request");
+                                    tracing::info!("sending HisuiSubscribeProgramTracks request");
                                     if !dc.send(request.as_bytes(), false) {
                                         return Err(
-                                            "failed to send SubscribeProgramTracks request"
+                                            "failed to send HisuiSubscribeProgramTracks request"
                                                 .to_owned(),
                                         );
                                     }
@@ -449,11 +449,11 @@ pub async fn run_client(
                                 obsws_subscribe_program_succeeded = true;
                                 program_video_track_id = Some(track_ids.video_track_id);
                                 program_audio_track_id = Some(track_ids.audio_track_id);
-                                tracing::info!("SubscribeProgramTracks succeeded");
+                                tracing::info!("HisuiSubscribeProgramTracks succeeded");
                             }
                             Err(reason) => {
                                 return Err(format!(
-                                    "SubscribeProgramTracks request failed: {reason}"
+                                    "HisuiSubscribeProgramTracks request failed: {reason}"
                                 ));
                             }
                         }
@@ -638,8 +638,8 @@ pub async fn run_client(
         return Err("CreateInput request did not complete".to_owned());
     }
     if subscribe_program_tracks && !obsws_subscribe_program_succeeded {
-        tracing::warn!("SubscribeProgramTracks request did not complete before deadline");
-        return Err("SubscribeProgramTracks request did not complete".to_owned());
+        tracing::warn!("HisuiSubscribeProgramTracks request did not complete before deadline");
+        return Err("HisuiSubscribeProgramTracks request did not complete".to_owned());
     }
     let final_connection_state = connection_state
         .lock()
@@ -913,7 +913,7 @@ pub async fn run_send_video_client(
             }
         }
 
-        // 5. answer 受信後: ListWebRtcVideoTracks を送信
+        // 5. answer 受信後: HisuiListWebRtcVideoTracks を送信
         if client_offer_sent
             && !in_flight_offer
             && !list_tracks_sent
@@ -921,12 +921,12 @@ pub async fn run_send_video_client(
             && let Some(dc) = &retained.obsws_dc
         {
             let request = crate::obsws_message::make_list_webrtc_video_tracks_request();
-            tracing::info!("sending ListWebRtcVideoTracks request");
+            tracing::info!("sending HisuiListWebRtcVideoTracks request");
             dc.send(request.as_bytes(), false);
             list_tracks_sent = true;
         }
 
-        // 6. track_id が判明したら AttachWebRtcVideoTrack を送信
+        // 6. track_id が判明したら HisuiAttachWebRtcVideoTrack を送信
         if let Some(ref tid) = discovered_track_id
             && !attach_sent
             && obsws_dc_ready
@@ -937,22 +937,22 @@ pub async fn run_send_video_client(
                 tid,
             );
             tracing::info!(
-                "sending AttachWebRtcVideoTrack: input={webrtc_source_input_name}, track={tid}"
+                "sending HisuiAttachWebRtcVideoTrack: input={webrtc_source_input_name}, track={tid}"
             );
             dc.send(request.as_bytes(), false);
             attach_sent = true;
         }
 
-        // 7. attach 成功後に SubscribeProgramTracks を送信
+        // 7. attach 成功後に HisuiSubscribeProgramTracks を送信
         if attach_succeeded
             && !subscribe_program_sent
             && obsws_dc_ready
             && let Some(dc) = &retained.obsws_dc
         {
             let request = crate::obsws_message::make_subscribe_program_tracks_request();
-            tracing::info!("sending SubscribeProgramTracks request");
+            tracing::info!("sending HisuiSubscribeProgramTracks request");
             if !dc.send(request.as_bytes(), false) {
-                return Err("failed to send SubscribeProgramTracks request".to_owned());
+                return Err("failed to send HisuiSubscribeProgramTracks request".to_owned());
             }
             subscribe_program_sent = true;
         }
@@ -1125,13 +1125,16 @@ pub async fn run_send_video_client(
                             }
                         }
                     }
-                    // ListWebRtcVideoTracks レスポンス
+                    // HisuiListWebRtcVideoTracks レスポンス
                     if let Some(result) =
                         crate::obsws_message::parse_list_webrtc_video_tracks_response(text)
                     {
                         match result {
                             Ok(tracks) => {
-                                tracing::info!("ListWebRtcVideoTracks: {} tracks", tracks.len());
+                                tracing::info!(
+                                    "HisuiListWebRtcVideoTracks: {} tracks",
+                                    tracks.len()
+                                );
                                 for t in &tracks {
                                     tracing::info!(
                                         "  track_id={}, attached={:?}",
@@ -1146,35 +1149,39 @@ pub async fn run_send_video_client(
                                 }
                             }
                             Err(reason) => {
-                                tracing::warn!("ListWebRtcVideoTracks failed: {reason}");
+                                tracing::warn!("HisuiListWebRtcVideoTracks failed: {reason}");
                             }
                         }
                     }
-                    // AttachWebRtcVideoTrack レスポンス
+                    // HisuiAttachWebRtcVideoTrack レスポンス
                     if let Some(result) =
                         crate::obsws_message::parse_attach_webrtc_video_track_response(text)
                     {
                         match result {
                             Ok(()) => {
-                                tracing::info!("AttachWebRtcVideoTrack succeeded");
+                                tracing::info!("HisuiAttachWebRtcVideoTrack succeeded");
                                 attach_succeeded = true;
                             }
                             Err(reason) => {
-                                return Err(format!("AttachWebRtcVideoTrack failed: {reason}"));
+                                return Err(format!(
+                                    "HisuiAttachWebRtcVideoTrack failed: {reason}"
+                                ));
                             }
                         }
                     }
-                    // SubscribeProgramTracks レスポンス
+                    // HisuiSubscribeProgramTracks レスポンス
                     if let Some(result) = parse_subscribe_program_tracks_response(text) {
                         match result {
                             Ok(track_ids) => {
                                 subscribe_program_succeeded = true;
                                 program_video_track_id = Some(track_ids.video_track_id);
                                 program_audio_track_id = Some(track_ids.audio_track_id);
-                                tracing::info!("SubscribeProgramTracks succeeded");
+                                tracing::info!("HisuiSubscribeProgramTracks succeeded");
                             }
                             Err(reason) => {
-                                return Err(format!("SubscribeProgramTracks failed: {reason}"));
+                                return Err(format!(
+                                    "HisuiSubscribeProgramTracks failed: {reason}"
+                                ));
                             }
                         }
                     }

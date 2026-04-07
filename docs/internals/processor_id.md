@@ -38,7 +38,7 @@ ID はコロン `:` 区切りのセグメントで構成する。
 ### `sora_source` を `input:` に含めない理由
 
 通常の input（`rtsp_subscriber`、`color_source` 等）は自律的な source processor を持ち、自分でフレームを pipeline に publish する。
-一方 `sora_source` は source processor を持たず、track ID だけを確保する。実際のフレーム publish は `sora_subscriber` プロセッサ側の `AttachSoraSourceTrack` で行われる。
+一方 `sora_source` は source processor を持たず、track ID だけを確保する。実際のフレーム publish は `sora_subscriber` プロセッサ側の `HisuiAttachSoraSourceTrack` で行われる。
 このライフサイクルの違いから、`sora_source` は独立したカテゴリとして扱う。
 
 ## 具体例

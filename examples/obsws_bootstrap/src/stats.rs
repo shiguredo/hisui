@@ -54,26 +54,26 @@ pub async fn request_server_webrtc_stats(
 
     let request = make_get_webrtc_stats_request();
     if !dc.send(request.as_bytes(), false) {
-        return Err("failed to send GetWebRtcStats request".to_owned());
+        return Err("failed to send HisuiGetWebRtcStats request".to_owned());
     }
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
-            return Err("timed out waiting for GetWebRtcStats response".to_owned());
+            return Err("timed out waiting for HisuiGetWebRtcStats response".to_owned());
         }
 
         let event = tokio::time::timeout(remaining, event_rx.recv())
             .await
-            .map_err(|_| "timed out waiting for GetWebRtcStats response".to_owned())?
+            .map_err(|_| "timed out waiting for HisuiGetWebRtcStats response".to_owned())?
             .ok_or_else(|| {
-                "event channel closed while waiting for GetWebRtcStats response".to_owned()
+                "event channel closed while waiting for HisuiGetWebRtcStats response".to_owned()
             })?;
 
         if let ClientEvent::ObswsMessage { data } = event {
             let text = std::str::from_utf8(&data)
-                .map_err(|e| format!("GetWebRtcStats response was not UTF-8: {e}"))?;
+                .map_err(|e| format!("HisuiGetWebRtcStats response was not UTF-8: {e}"))?;
             if let Some(result) = parse_obsws_server_webrtc_stats_response(text) {
                 return result;
             }

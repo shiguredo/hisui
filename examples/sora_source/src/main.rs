@@ -140,7 +140,7 @@ fn make_start_sora_subscriber_request(
     let name = subscriber_name.to_owned();
     let url = signaling_url.to_owned();
     let ch = channel_id.to_owned();
-    make_request("StartSoraSubscriber", move |f| {
+    make_request("HisuiStartSoraSubscriber", move |f| {
         f.member("subscriberName", name.as_str())?;
         f.member("signalingUrls", [url.as_str()])?;
         f.member("channelId", ch.as_str())
@@ -149,7 +149,7 @@ fn make_start_sora_subscriber_request(
 
 fn make_stop_sora_subscriber_request(subscriber_name: &str) -> (String, String) {
     let name = subscriber_name.to_owned();
-    make_request("StopSoraSubscriber", move |f| {
+    make_request("HisuiStopSoraSubscriber", move |f| {
         f.member("subscriberName", name.as_str())
     })
 }
@@ -173,7 +173,7 @@ fn make_attach_sora_source_track_request(
     let iname = input_name.to_owned();
     let cid = connection_id.to_owned();
     let kind = track_kind.to_owned();
-    make_request("AttachSoraSourceTrack", move |f| {
+    make_request("HisuiAttachSoraSourceTrack", move |f| {
         f.member("inputName", iname.as_str())?;
         f.member("connectionId", cid.as_str())?;
         f.member("trackKind", kind.as_str())
@@ -485,7 +485,7 @@ async fn handle_event_message(
             let (req_id, msg) =
                 make_attach_sora_source_track_request(&input_name, &connection_id, "video");
             send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await?;
-            tracing::info!("AttachSoraSourceTrack 成功: {input_name} <- {connection_id}");
+            tracing::info!("HisuiAttachSoraSourceTrack 成功: {input_name} <- {connection_id}");
 
             state.video_tracks.push(TrackEntry {
                 track_id,
@@ -733,7 +733,9 @@ async fn run(
     let (req_id, msg) =
         make_start_sora_subscriber_request(subscriber_name, signaling_url, channel_id);
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await?;
-    tracing::info!("StartSoraSubscriber 成功: signaling={signaling_url}, channel={channel_id}");
+    tracing::info!(
+        "HisuiStartSoraSubscriber 成功: signaling={signaling_url}, channel={channel_id}"
+    );
 
     // イベント待受ループ
     let mut state = GridState::new();
@@ -807,7 +809,7 @@ async fn run(
     if let Err(e) =
         send_request_and_wait(&mut ws, &mut stream, &req_id, &msg, &mut event_queue).await
     {
-        tracing::warn!("StopSoraSubscriber 失敗: {e}");
+        tracing::warn!("HisuiStopSoraSubscriber 失敗: {e}");
     }
 
     // player 停止（--player 指定時）

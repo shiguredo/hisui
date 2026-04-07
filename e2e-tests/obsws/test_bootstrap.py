@@ -191,7 +191,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
 
 @pytest.mark.timeout(90)
 def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
-    """bootstrap で SubscribeProgramTracks を送信し、Program トラックを書き出せることを確認する"""
+    """bootstrap で HisuiSubscribeProgramTracks を送信し、Program トラックを書き出せることを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()

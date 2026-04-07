@@ -73,7 +73,7 @@ pub fn make_get_webrtc_stats_request() -> String {
         f.member(
             "d",
             nojson::object(|f| {
-                f.member("requestType", "GetWebRtcStats")?;
+                f.member("requestType", "HisuiGetWebRtcStats")?;
                 f.member("requestId", GET_WEBRTC_STATS_REQUEST_ID)
             }),
         )
@@ -87,7 +87,7 @@ pub fn make_subscribe_program_tracks_request() -> String {
         f.member(
             "d",
             nojson::object(|f| {
-                f.member("requestType", "SubscribeProgramTracks")?;
+                f.member("requestType", "HisuiSubscribeProgramTracks")?;
                 f.member("requestId", SUBSCRIBE_PROGRAM_TRACKS_REQUEST_ID)
             }),
         )
@@ -190,7 +190,7 @@ pub fn parse_subscribe_program_tracks_response(
             None
         };
     Some(Err(comment.unwrap_or_else(|| {
-        "SubscribeProgramTracks request failed".to_owned()
+        "HisuiSubscribeProgramTracks request failed".to_owned()
     })))
 }
 
@@ -227,7 +227,7 @@ pub fn parse_obsws_server_webrtc_stats_response(text: &str) -> Option<Result<Str
                 None
             };
         return Some(Err(
-            comment.unwrap_or_else(|| "GetWebRtcStats request failed".to_owned())
+            comment.unwrap_or_else(|| "HisuiGetWebRtcStats request failed".to_owned())
         ));
     }
 
@@ -318,7 +318,7 @@ pub fn make_list_webrtc_video_tracks_request() -> String {
         f.member(
             "d",
             nojson::object(|f| {
-                f.member("requestType", "ListWebRtcVideoTracks")?;
+                f.member("requestType", "HisuiListWebRtcVideoTracks")?;
                 f.member("requestId", LIST_WEBRTC_VIDEO_TRACKS_REQUEST_ID)
             }),
         )
@@ -366,7 +366,7 @@ pub fn parse_list_webrtc_video_tracks_response(
                 None
             };
         return Some(Err(comment.unwrap_or_else(|| {
-            "ListWebRtcVideoTracks request failed".to_owned()
+            "HisuiListWebRtcVideoTracks request failed".to_owned()
         })));
     }
 
@@ -399,7 +399,7 @@ pub fn make_attach_webrtc_video_track_request(input_name: &str, track_id: &str) 
         f.member(
             "d",
             nojson::object(|f| {
-                f.member("requestType", "AttachWebRtcVideoTrack")?;
+                f.member("requestType", "HisuiAttachWebRtcVideoTrack")?;
                 f.member("requestId", ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_ID)?;
                 f.member(
                     "requestData",
@@ -450,6 +450,6 @@ pub fn parse_attach_webrtc_video_track_response(text: &str) -> Option<Result<(),
             None
         };
     Some(Err(comment.unwrap_or_else(|| {
-        "AttachWebRtcVideoTrack request failed".to_owned()
+        "HisuiAttachWebRtcVideoTrack request failed".to_owned()
     })))
 }

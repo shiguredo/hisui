@@ -1023,11 +1023,11 @@ NOTE: 現在 Program / Preview Scene を削除した場合は残存 Scene へ自
 
 1. `C -> S` CreateInput（ `sceneName = "Scene"`, `inputName = "camera_user_a"`, `inputKind = "sora_source"` ）
 2. `S -> C` RequestResponse（ success ）
-3. `C -> S` StartSoraSubscriber（ `subscriberName = "sub1"`, `signalingUrls = ["wss://sora.example.com/signaling"]`, `channelId = "room1"` ）
+3. `C -> S` HisuiStartSoraSubscriber（ `subscriberName = "sub1"`, `signalingUrls = ["wss://sora.example.com/signaling"]`, `channelId = "room1"` ）
 4. `S -> C` RequestResponse（ success ）
 5. `S -> C` Event（ `eventType = "SoraSubscriberNotify"`, `notify = { "event_type": "connection.created", "connection_id": "conn1", "client_id": "user_a", ... }` ）
 6. `S -> C` Event（ `eventType = "SoraSourceTrackPublished"`, `subscriberName = "sub1"`, `connectionId = "conn1"`, `clientId = "user_a"`, `trackKind = "video"`, `trackId = "track1"` ）
-7. `C -> S` AttachSoraSourceTrack（ `inputName = "camera_user_a"`, `connectionId = "conn1"`, `trackKind = "video"` ）
+7. `C -> S` HisuiAttachSoraSourceTrack（ `inputName = "camera_user_a"`, `connectionId = "conn1"`, `trackKind = "video"` ）
 8. `S -> C` RequestResponse（ success ）
 
 **再接続フロー**: user_a が切断後に再接続した場合
@@ -1035,7 +1035,7 @@ NOTE: 現在 Program / Preview Scene を削除した場合は残存 Scene へ自
 9. `S -> C` Event（ `eventType = "SoraSourceTrackUnpublished"`, `connectionId = "conn1"`, `trackKind = "video"` ）
     - 自動 detach が発生（camera_user_a 入力は空になるが、シーン上の配置は保持される）
 10. `S -> C` Event（ `eventType = "SoraSourceTrackPublished"`, `connectionId = "conn2"`, `clientId = "user_a"`, `trackKind = "video"` ）
-11. `C -> S` AttachSoraSourceTrack（ `inputName = "camera_user_a"`, `connectionId = "conn2"`, `trackKind = "video"` ）
+11. `C -> S` HisuiAttachSoraSourceTrack（ `inputName = "camera_user_a"`, `connectionId = "conn2"`, `trackKind = "video"` ）
 12. `S -> C` RequestResponse（ success ）
 
 NOTE: クライアントは `clientId` で再接続ユーザーを識別し、同じ sora_source 入力に再 attach する

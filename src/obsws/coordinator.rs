@@ -555,7 +555,7 @@ impl ObswsCoordinator {
                     .await
             }
             // --- SoraSubscriber 管理 ---
-            "StartSoraSubscriber" => {
+            "HisuiStartSoraSubscriber" => {
                 self.handle_start_sora_subscriber(
                     &request_type,
                     &request_id,
@@ -563,7 +563,7 @@ impl ObswsCoordinator {
                 )
                 .await
             }
-            "StopSoraSubscriber" => {
+            "HisuiStopSoraSubscriber" => {
                 self.handle_stop_sora_subscriber(
                     &request_type,
                     &request_id,
@@ -571,11 +571,11 @@ impl ObswsCoordinator {
                 )
                 .await
             }
-            "ListSoraSubscribers" => self.handle_list_sora_subscribers(&request_id),
-            "ListSoraSourceTracks" => {
+            "HisuiListSoraSubscribers" => self.handle_list_sora_subscribers(&request_id),
+            "HisuiListSoraSourceTracks" => {
                 self.handle_list_sora_source_tracks(&request_id, request.request_data.as_ref())
             }
-            "AttachSoraSourceTrack" => {
+            "HisuiAttachSoraSourceTrack" => {
                 self.handle_attach_sora_source_track(
                     &request_type,
                     &request_id,
@@ -583,7 +583,7 @@ impl ObswsCoordinator {
                 )
                 .await
             }
-            "DetachSoraSourceTrack" => self.handle_detach_sora_source_track(
+            "HisuiDetachSoraSourceTrack" => self.handle_detach_sora_source_track(
                 &request_type,
                 &request_id,
                 request.request_data.as_ref(),

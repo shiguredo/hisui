@@ -202,7 +202,7 @@ bootstrap 時に `coordinator` から取得した snapshot を元に、各 input
 ### Program track
 
 Program track は初期状態では購読しません。
-`SubscribeProgramTracks` が来た時だけ、 `program_track_ids` を使って購読します。
+`HisuiSubscribeProgramTracks` が来た時だけ、 `program_track_ids` を使って購読します。
 
 この設計により、クライアントは以下を切り替えられます。
 
@@ -221,14 +221,14 @@ sequenceDiagram
     participant Session as Session
     participant Pipeline as media_pipeline
 
-    Client->>ObswsDc: SubscribeProgramTracks
+    Client->>ObswsDc: HisuiSubscribeProgramTracks
     ObswsDc->>Session: bootstrap 専用 Request として処理
     Session->>Pipeline: program video/audio track を subscribe
     Session->>Session: program_tracks_subscribed = true
     Session-->>ObswsDc: success response
 ```
 
-解除時はこの逆で、 `UnsubscribeProgramTracks` により購読を解除し、 `program_tracks_subscribed` を false に戻します。
+解除時はこの逆で、 `HisuiUnsubscribeProgramTracks` により購読を解除し、 `program_tracks_subscribed` を false に戻します。
 
 ## remote video track の attach / detach
 
@@ -272,7 +272,7 @@ bootstrap 接続では、クライアントから送られてきた remote video
 - 接続確立後は signaling DataChannel で再ネゴシエーションを受ける
 - `obsws` DataChannel が open になってから Request を送る
 - Program track は明示的に購読 Request を送った場合だけ受ける
-- `GetWebRtcStats` は `Stats` 基盤ではなく、その時点の PeerConnection native stats を返す
+- `HisuiGetWebRtcStats` は `Stats` 基盤ではなく、その時点の PeerConnection native stats を返す
 
 この振る舞いを前提にすると、 HTTP 1 回と 2 本の DataChannel だけで接続後の制御を完結できます。
 

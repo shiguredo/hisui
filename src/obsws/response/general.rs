@@ -89,12 +89,12 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "OffsetMediaInputCursor",
     "TriggerMediaInputAction",
     // SoraSubscriber / sora_source
-    "StartSoraSubscriber",
-    "StopSoraSubscriber",
-    "ListSoraSubscribers",
-    "ListSoraSourceTracks",
-    "AttachSoraSourceTrack",
-    "DetachSoraSourceTrack",
+    "HisuiStartSoraSubscriber",
+    "HisuiStopSoraSubscriber",
+    "HisuiListSoraSubscribers",
+    "HisuiListSoraSourceTracks",
+    "HisuiAttachSoraSourceTrack",
+    "HisuiDetachSoraSourceTrack",
 ];
 
 pub fn build_get_version_response(

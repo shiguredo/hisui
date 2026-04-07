@@ -11,12 +11,12 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::obsws::session::{ObswsSession, SessionAction};
 
-const GET_WEBRTC_STATS_REQUEST_TYPE: &str = "GetWebRtcStats";
-const SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE: &str = "SubscribeProgramTracks";
-const UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE: &str = "UnsubscribeProgramTracks";
-const LIST_WEBRTC_VIDEO_TRACKS_REQUEST_TYPE: &str = "ListWebRtcVideoTracks";
-const ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE: &str = "AttachWebRtcVideoTrack";
-const DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE: &str = "DetachWebRtcVideoTrack";
+const GET_WEBRTC_STATS_REQUEST_TYPE: &str = "HisuiGetWebRtcStats";
+const SUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE: &str = "HisuiSubscribeProgramTracks";
+const UNSUBSCRIBE_PROGRAM_TRACKS_REQUEST_TYPE: &str = "HisuiUnsubscribeProgramTracks";
+const LIST_WEBRTC_VIDEO_TRACKS_REQUEST_TYPE: &str = "HisuiListWebRtcVideoTracks";
+const ATTACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE: &str = "HisuiAttachWebRtcVideoTrack";
+const DETACH_WEBRTC_VIDEO_TRACK_REQUEST_TYPE: &str = "HisuiDetachWebRtcVideoTrack";
 
 /// bootstrap DataChannel 専用の Request 一覧（GetVersion の availableRequests に追加する）
 const BOOTSTRAP_DC_EXTRA_REQUESTS: &[&str] = &[
@@ -1050,7 +1050,7 @@ fn handle_bootstrap_get_version(
     crate::obsws::response::build_get_version_response(&request_id, BOOTSTRAP_DC_EXTRA_REQUESTS)
 }
 
-/// bootstrap DataChannel 経由の GetWebRtcStats
+/// bootstrap DataChannel 経由の HisuiGetWebRtcStats
 async fn handle_bootstrap_webrtc_stats(
     sess: &Session,
     request: &crate::obsws::message::RequestMessage,

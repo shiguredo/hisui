@@ -6,7 +6,7 @@ use super::{BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan};
 ///
 /// sora_source は Sora RecvOnly 接続のリモートトラックからフレームを受け取るため、
 /// 自律的な source processor は生成しない。video_track_id と audio_track_id を確保して、
-/// 実際のフレーム publish は coordinator 側の AttachSoraSourceTrack で行う。
+/// 実際のフレーム publish は coordinator 側の HisuiAttachSoraSourceTrack で行う。
 pub fn build_record_source_plan(
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
