@@ -772,8 +772,6 @@ impl ObswsCoordinator {
             .list_current_program_scene_input_entries();
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
-            crate::obsws::source::ObswsOutputKind::Program,
-            0,
             self.input_registry.canvas_width(),
             self.input_registry.canvas_height(),
             self.input_registry.frame_rate(),

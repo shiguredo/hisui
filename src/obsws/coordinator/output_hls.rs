@@ -85,20 +85,20 @@ impl ObswsCoordinator {
                 });
                 let scaler_processor_id = if needs_scaler {
                     Some(crate::ProcessorId::new(format!(
-                        "obsws:hls:{run_id}:{variant_label}_scaler"
+                        "output:hls:{variant_label}_scaler:{run_id}"
                     )))
                 } else {
                     None
                 };
                 let scaled_track_id = if needs_scaler {
                     Some(crate::TrackId::new(format!(
-                        "obsws:hls:{run_id}:{variant_label}_scaled_video"
+                        "output:hls:{variant_label}_scaled_video:{run_id}"
                     )))
                 } else {
                     None
                 };
                 let writer_processor_id = crate::ProcessorId::new(format!(
-                    "obsws:hls:{run_id}:{variant_label}_hls_writer"
+                    "output:hls:{variant_label}_hls_writer:{run_id}"
                 ));
                 let variant_path = if is_abr {
                     destination.variant_path(i)

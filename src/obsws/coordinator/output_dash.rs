@@ -86,20 +86,20 @@ impl ObswsCoordinator {
                 });
                 let scaler_processor_id = if needs_scaler {
                     Some(crate::ProcessorId::new(format!(
-                        "obsws:mpeg_dash:{run_id}:{variant_label}_scaler"
+                        "output:mpeg_dash:{variant_label}_scaler:{run_id}"
                     )))
                 } else {
                     None
                 };
                 let scaled_track_id = if needs_scaler {
                     Some(crate::TrackId::new(format!(
-                        "obsws:mpeg_dash:{run_id}:{variant_label}_scaled_video"
+                        "output:mpeg_dash:{variant_label}_scaled_video:{run_id}"
                     )))
                 } else {
                     None
                 };
                 let writer_processor_id = crate::ProcessorId::new(format!(
-                    "obsws:mpeg_dash:{run_id}:{variant_label}_dash_writer"
+                    "output:mpeg_dash:{variant_label}_dash_writer:{run_id}"
                 ));
                 let variant_path = if is_abr {
                     destination.variant_path(i)

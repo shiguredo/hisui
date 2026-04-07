@@ -83,8 +83,6 @@ pub(super) fn is_source_startable(
 
 pub(super) fn build_record_source_plan(
     settings: &crate::obsws::input_registry::ObswsColorSourceSettings,
-    output_kind: super::ObswsOutputKind,
-    run_id: u64,
     source_key: &str,
     frame_rate: FrameRate,
 ) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
@@ -94,14 +92,8 @@ pub(super) fn build_record_source_plan(
         .unwrap_or(DEFAULT_COLOR)
         .to_owned();
 
-    let source_processor_id = crate::ProcessorId::new(format!(
-        "obsws:{}:{run_id}:source:{source_key}:color_source",
-        output_kind.as_str()
-    ));
-    let source_video_track_id = crate::TrackId::new(format!(
-        "obsws:{}:{run_id}:source:{source_key}:raw_video",
-        output_kind.as_str()
-    ));
+    let source_processor_id = crate::ProcessorId::new(format!("input:color_source:{source_key}"));
+    let source_video_track_id = crate::TrackId::new(format!("input:raw_video:{source_key}"));
 
     let source = ColorSource {
         color,
@@ -191,14 +183,8 @@ mod tests {
     #[test]
     fn build_record_source_plan_uses_default_color_when_none() {
         let settings = crate::obsws::input_registry::ObswsColorSourceSettings { color: None };
-        let plan = build_record_source_plan(
-            &settings,
-            super::super::ObswsOutputKind::Program,
-            1,
-            "test",
-            FrameRate::FPS_30,
-        )
-        .expect("build_record_source_plan must succeed");
+        let plan = build_record_source_plan(&settings, "test", FrameRate::FPS_30)
+            .expect("build_record_source_plan must succeed");
         assert!(plan.source_video_track_id.is_some());
         assert!(plan.source_audio_track_id.is_none());
         assert_eq!(plan.requests.len(), 1);
@@ -209,14 +195,8 @@ mod tests {
         let settings = crate::obsws::input_registry::ObswsColorSourceSettings {
             color: Some("#FF0000".to_owned()),
         };
-        let plan = build_record_source_plan(
-            &settings,
-            super::super::ObswsOutputKind::Program,
-            2,
-            "red",
-            FrameRate::FPS_30,
-        )
-        .expect("build_record_source_plan must succeed");
+        let plan = build_record_source_plan(&settings, "red", FrameRate::FPS_30)
+            .expect("build_record_source_plan must succeed");
         assert!(plan.source_video_track_id.is_some());
         assert_eq!(plan.source_processor_ids.len(), 1);
     }

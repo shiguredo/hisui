@@ -66,7 +66,7 @@ impl ObswsCoordinator {
             video,
             audio,
             publisher_processor_id: crate::ProcessorId::new(format!(
-                "obsws:stream:{run_id}:rtmp_publisher"
+                "output:stream:rtmp_publisher:{run_id}"
             )),
         };
         if let Err(ActivateStreamError::AlreadyActive) =

@@ -1,6 +1,6 @@
 use crate::obsws::input_registry::ObswsSrtInboundSettings;
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
+    BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
 use crate::{ProcessorId, TrackId};
 
@@ -11,8 +11,6 @@ pub(super) fn is_source_startable(settings: &ObswsSrtInboundSettings) -> bool {
 
 pub(super) fn build_record_source_plan(
     settings: &ObswsSrtInboundSettings,
-    output_kind: ObswsOutputKind,
-    run_id: u64,
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(input_url) = settings.input_url.as_deref() else {
@@ -21,16 +19,9 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let kind = output_kind.as_str();
-    let source_processor_id = ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_key}:srt_inbound"
-    ));
-    let raw_video_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_key}:raw_video"
-    ));
-    let raw_audio_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_key}:raw_audio"
-    ));
+    let source_processor_id = ProcessorId::new(format!("input:srt_inbound:{source_key}"));
+    let raw_video_track_id = TrackId::new(format!("input:raw_video:{source_key}"));
+    let raw_audio_track_id = TrackId::new(format!("input:raw_audio:{source_key}"));
 
     let endpoint = crate::srt::inbound_endpoint::SrtInboundEndpoint {
         input_url: input_url.to_owned(),
@@ -65,27 +56,22 @@ mod tests {
                 stream_id: Some("test-stream".to_owned()),
                 passphrase: Some("secret123456".to_owned()),
             },
-            ObswsOutputKind::Program,
-            1,
             "0",
         )
         .expect("srt_inbound source plan must succeed");
 
         assert_eq!(plan.source_processor_ids.len(), 1);
-        assert_eq!(
-            plan.source_processor_ids[0].get(),
-            "obsws:program:1:source:0:srt_inbound"
-        );
+        assert_eq!(plan.source_processor_ids[0].get(), "input:srt_inbound:0");
 
         assert_eq!(plan.requests.len(), 1);
 
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:program:1:source:0:raw_video")
+            Some("input:raw_video:0")
         );
         assert_eq!(
             plan.source_audio_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:program:1:source:0:raw_audio")
+            Some("input:raw_audio:0")
         );
 
         // CreateSrtInboundEndpoint のパラメータを検証する
@@ -107,8 +93,6 @@ mod tests {
                 stream_id: None,
                 passphrase: None,
             },
-            ObswsOutputKind::Program,
-            2,
             "1",
         )
         .expect("srt_inbound source plan without optional params must succeed");

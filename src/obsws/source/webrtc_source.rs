@@ -1,6 +1,6 @@
 use crate::TrackId;
 
-use super::{BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan};
+use super::{BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan};
 
 /// webrtc_source 用のソースプランを構築する。
 ///
@@ -8,14 +8,9 @@ use super::{BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourceP
 /// 自律的な source processor は生成しない。video_track_id のみ確保して、
 /// 実際のフレーム publish は p2p_session 側の AttachWebRtcVideoTrack で行う。
 pub fn build_record_source_plan(
-    output_kind: ObswsOutputKind,
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
-    let video_track_id = TrackId::new(format!(
-        "webrtc_source:{}:{}:video",
-        output_kind.as_str(),
-        source_key
-    ));
+    let video_track_id = TrackId::new(format!("webrtc_source:video:{source_key}"));
 
     Ok(ObswsRecordSourcePlan {
         source_processor_ids: vec![],

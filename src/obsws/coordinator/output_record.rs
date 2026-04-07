@@ -53,7 +53,7 @@ impl ObswsCoordinator {
             video,
             audio,
             writer_processor_id: crate::ProcessorId::new(format!(
-                "obsws:record:{run_id}:mp4_writer"
+                "output:record:mp4_writer:{run_id}"
             )),
             output_path: output_path.clone(),
         };

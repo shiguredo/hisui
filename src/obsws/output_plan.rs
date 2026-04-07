@@ -1,5 +1,5 @@
 use crate::obsws::input_registry::ObswsSceneInputEntry;
-use crate::obsws::source::{self, ObswsOutputKind, ObswsRecordSourcePlan};
+use crate::obsws::source::{self, ObswsRecordSourcePlan};
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
@@ -55,8 +55,6 @@ fn round_to_even(value: f64) -> u32 {
 /// OBS と同様に、ソースの有無に関わらず常に映像（黒画面）と音声（無音）の両トラックを含める。
 pub fn build_composed_output_plan(
     scene_inputs: &[ObswsSceneInputEntry],
-    output_kind: ObswsOutputKind,
-    run_id: u64,
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
@@ -69,8 +67,6 @@ pub fn build_composed_output_plan(
         }
         let source_plan = source::build_record_source_plan(
             &scene_input.input,
-            output_kind,
-            run_id,
             &scene_input.input.input_uuid,
             frame_rate,
         )
@@ -81,25 +77,13 @@ pub fn build_composed_output_plan(
 
     // 常にオーディオミキサーを使用する。
     // 音声ソースがない場合でも無音を出力する。
-    let audio_track_id = TrackId::new(format!(
-        "obsws:{}:{run_id}:mixed_audio",
-        output_kind.as_str()
-    ));
-    let audio_mixer_processor_id = ProcessorId::new(format!(
-        "obsws:{}:{run_id}:audio_mixer",
-        output_kind.as_str()
-    ));
+    let audio_track_id = TrackId::new("program:mixed_audio");
+    let audio_mixer_processor_id = ProcessorId::new("program:audio_mixer");
 
     // 常に映像ミキサーを使用する。
     // 映像ソースがない場合でも黒画面を出力する。
-    let video_track_id = TrackId::new(format!(
-        "obsws:{}:{run_id}:mixed_video",
-        output_kind.as_str()
-    ));
-    let video_mixer_processor_id = ProcessorId::new(format!(
-        "obsws:{}:{run_id}:video_mixer",
-        output_kind.as_str()
-    ));
+    let video_track_id = TrackId::new("program:mixed_video");
+    let video_mixer_processor_id = ProcessorId::new("program:video_mixer");
 
     // source_plans と active_scene_inputs は同じ順序・同じ長さ
     let video_mixer_input_tracks = source_plans
@@ -241,8 +225,6 @@ mod tests {
 
         let plan = build_composed_output_plan(
             &[dormant_input, active_input],
-            ObswsOutputKind::Program,
-            0,
             crate::types::EvenUsize::new(1280).expect("valid width"),
             crate::types::EvenUsize::new(720).expect("valid height"),
             crate::video::FrameRate::FPS_30,

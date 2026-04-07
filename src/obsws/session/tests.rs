@@ -17,10 +17,10 @@ use std::time::Duration;
 fn test_program_output() -> crate::obsws::server::ProgramOutputState {
     crate::obsws::server::ProgramOutputState {
         scene_uuid: "scene-default".to_owned(),
-        video_track_id: crate::TrackId::new("obsws:program:0:mixed_video"),
-        audio_track_id: crate::TrackId::new("obsws:program:0:mixed_audio"),
-        video_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:video_mixer"),
-        audio_mixer_processor_id: crate::ProcessorId::new("obsws:program:0:audio_mixer"),
+        video_track_id: crate::TrackId::new("program:mixed_video"),
+        audio_track_id: crate::TrackId::new("program:mixed_audio"),
+        video_mixer_processor_id: crate::ProcessorId::new("program:video_mixer"),
+        audio_mixer_processor_id: crate::ProcessorId::new("program:audio_mixer"),
         source_processor_ids: Vec::new(),
     }
 }
@@ -113,8 +113,6 @@ async fn create_initialized_coordinator_handle_with_pipeline(
     let scene_inputs = registry.list_current_program_scene_input_entries();
     let output_plan = crate::obsws::output_plan::build_composed_output_plan(
         &scene_inputs,
-        crate::obsws::source::ObswsOutputKind::Program,
-        0,
         registry.canvas_width(),
         registry.canvas_height(),
         registry.frame_rate(),
@@ -2089,9 +2087,9 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
     assert!(result);
     assert_eq!(code, 100);
 
-    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:v1_scaler", true).await?;
-    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:v0_hls_writer", true).await?;
-    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:video_mixer", false).await?;
+    wait_for_processor_presence(&pipeline_handle, "output:hls:v1_scaler:0", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "output:hls:v0_hls_writer:0", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "output:hls:video_mixer:0", false).await?;
 
     let get_scene_item_id_action = session
         .handle_request(RequestMessage {
@@ -2124,7 +2122,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
     assert!(result);
     assert_eq!(code, 100);
 
-    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:v0_hls_writer", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "output:hls:v0_hls_writer:0", true).await?;
 
     let stop_action = session
         .handle_request(RequestMessage {
@@ -2141,7 +2139,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
     assert!(result);
     assert_eq!(code, 100);
 
-    wait_for_processor_presence(&pipeline_handle, "obsws:hls:0:v0_hls_writer", false).await?;
+    wait_for_processor_presence(&pipeline_handle, "output:hls:v0_hls_writer:0", false).await?;
 
     pipeline_task.abort();
 
@@ -2223,9 +2221,10 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
     assert!(result);
     assert_eq!(code, 100);
 
-    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v1_scaler", true).await?;
-    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v0_dash_writer", true).await?;
-    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:video_mixer", false).await?;
+    wait_for_processor_presence(&pipeline_handle, "output:mpeg_dash:v1_scaler:0", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "output:mpeg_dash:v0_dash_writer:0", true)
+        .await?;
+    wait_for_processor_presence(&pipeline_handle, "output:mpeg_dash:video_mixer:0", false).await?;
 
     // ABR 結合 MPD は SampleEntry から codec string が確定してから書き出される。
     // manifest.mpd の出現を待ち、codecs 属性が実際の SampleEntry と一致することを検証する。
@@ -2273,7 +2272,8 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
     assert!(result);
     assert_eq!(code, 100);
 
-    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v0_dash_writer", true).await?;
+    wait_for_processor_presence(&pipeline_handle, "output:mpeg_dash:v0_dash_writer:0", true)
+        .await?;
 
     let stop_action = session
         .handle_request(RequestMessage {
@@ -2290,7 +2290,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
     assert!(result);
     assert_eq!(code, 100);
 
-    wait_for_processor_presence(&pipeline_handle, "obsws:mpeg_dash:0:v0_dash_writer", false)
+    wait_for_processor_presence(&pipeline_handle, "output:mpeg_dash:v0_dash_writer:0", false)
         .await?;
 
     pipeline_task.abort();

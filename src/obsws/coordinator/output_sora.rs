@@ -105,7 +105,7 @@ impl ObswsCoordinator {
             }
         };
         let publisher_processor_id =
-            crate::ProcessorId::new(format!("obsws:sora_publisher:{run_id}:sora_publisher"));
+            crate::ProcessorId::new(format!("output:sora_publisher:publisher:{run_id}"));
         let run = ObswsSoraPublisherRun {
             publisher_processor_id: publisher_processor_id.clone(),
         };
@@ -530,7 +530,7 @@ impl ObswsCoordinator {
             );
         };
         let processor_id =
-            crate::ProcessorId::new(format!("obsws:sora_subscriber:{}", subscriber_name));
+            crate::ProcessorId::new(format!("output:sora_subscriber:{}", subscriber_name));
         let subscriber = crate::sora_source::SoraSubscriber {
             subscriber_name: subscriber_name.clone(),
             signaling_urls: state.settings.signaling_urls.clone(),

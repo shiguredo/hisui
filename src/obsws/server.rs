@@ -221,8 +221,6 @@ pub async fn run_server(
         let scene_inputs = input_registry.list_current_program_scene_input_entries();
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
-            crate::obsws::source::ObswsOutputKind::Program,
-            0,
             input_registry.canvas_width(),
             input_registry.canvas_height(),
             input_registry.frame_rate(),

@@ -53,7 +53,7 @@ impl ObswsCoordinator {
             video,
             audio,
             endpoint_processor_id: crate::ProcessorId::new(format!(
-                "obsws:rtmp_outbound:{run_id}:rtmp_outbound_endpoint"
+                "output:rtmp_outbound:endpoint:{run_id}"
             )),
         };
         if let Err(ActivateRtmpOutboundError::AlreadyActive) =

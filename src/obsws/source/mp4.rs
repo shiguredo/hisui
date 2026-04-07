@@ -1,6 +1,6 @@
 use crate::obsws::input_registry::ObswsMp4FileSourceSettings;
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
+    BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
 use crate::{ProcessorId, TrackId};
 
@@ -11,8 +11,6 @@ pub(super) fn is_source_startable(settings: &ObswsMp4FileSourceSettings) -> bool
 
 pub(super) fn build_record_source_plan(
     settings: &ObswsMp4FileSourceSettings,
-    output_kind: ObswsOutputKind,
-    run_id: u64,
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(path) = settings.path.as_deref() else {
@@ -21,24 +19,15 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let source_processor_id = ProcessorId::new(format!(
-        "obsws:{}:{run_id}:source:{source_key}:mp4_source",
-        output_kind.as_str()
-    ));
+    let source_processor_id = ProcessorId::new(format!("input:mp4_source:{source_key}"));
     let availability = crate::mp4::reader::probe_mp4_track_availability(path)
         .map_err(|e| BuildObswsRecordSourcePlanError::InvalidInput(e.display()))?;
-    let source_video_track_id = availability.has_video.then(|| {
-        TrackId::new(format!(
-            "obsws:{}:{run_id}:source:{source_key}:raw_video",
-            output_kind.as_str()
-        ))
-    });
-    let source_audio_track_id = availability.has_audio.then(|| {
-        TrackId::new(format!(
-            "obsws:{}:{run_id}:source:{source_key}:raw_audio",
-            output_kind.as_str()
-        ))
-    });
+    let source_video_track_id = availability
+        .has_video
+        .then(|| TrackId::new(format!("input:raw_video:{source_key}")));
+    let source_audio_track_id = availability
+        .has_audio
+        .then(|| TrackId::new(format!("input:raw_audio:{source_key}")));
 
     let source = super::file_mp4::Mp4FileSource {
         path: std::path::PathBuf::from(path),
@@ -70,14 +59,12 @@ mod tests {
                 path: Some("testdata/beep-aac-audio.mp4".to_owned()),
                 loop_playback: true,
             },
-            ObswsOutputKind::Program,
-            1,
             "0",
         )
         .expect("audio-only mp4 source plan must succeed");
         assert_eq!(
             plan.source_audio_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:program:1:source:0:raw_audio")
+            Some("input:raw_audio:0")
         );
         assert_eq!(plan.source_video_track_id, None);
 
@@ -99,15 +86,13 @@ mod tests {
                 path: Some("testdata/archive-red-320x320-h264.mp4".to_owned()),
                 loop_playback: false,
             },
-            ObswsOutputKind::Program,
-            2,
             "0",
         )
         .expect("video-only mp4 source plan must succeed");
         assert_eq!(plan.source_audio_track_id, None);
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:program:2:source:0:raw_video")
+            Some("input:raw_video:0")
         );
 
         assert_eq!(plan.requests.len(), 1);

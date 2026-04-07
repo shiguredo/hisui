@@ -290,7 +290,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
                 assert status == 200
                 if _has_positive_metric(
                     body,
-                    'hisui_total_audio_sample_count{processor_id="obsws:record:0:mp4_writer"',
+                    'hisui_total_audio_sample_count{processor_id="output:record:mp4_writer:0"',
                 ):
                     break
                 await asyncio.sleep(0.1)
@@ -824,7 +824,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     )
                     if status == 200 and _has_positive_metric(
                         body,
-                        'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"',
+                        'hisui_total_video_sample_count{processor_id="output:record:mp4_writer:0"',
                     ):
                         break
                     await asyncio.sleep(0.2)
@@ -940,7 +940,7 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                     )
                     if status == 200 and _has_positive_metric(
                         body,
-                        'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"',
+                        'hisui_total_video_sample_count{processor_id="output:record:mp4_writer:0"',
                     ):
                         break
                     await asyncio.sleep(0.2)
@@ -1061,7 +1061,7 @@ def test_obsws_srt_inbound_with_stream_id(
                     )
                     if status == 200 and _has_positive_metric(
                         body,
-                        'hisui_total_video_sample_count{processor_id="obsws:record:0:mp4_writer"',
+                        'hisui_total_video_sample_count{processor_id="output:record:mp4_writer:0"',
                     ):
                         break
                     await asyncio.sleep(0.2)

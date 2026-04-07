@@ -1,6 +1,6 @@
 use crate::obsws::input_registry::ObswsRtmpInboundSettings;
 use crate::obsws::source::{
-    BuildObswsRecordSourcePlanError, ObswsOutputKind, ObswsRecordSourcePlan, ObswsSourceRequest,
+    BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
 use crate::{ProcessorId, TrackId};
 
@@ -11,8 +11,6 @@ pub(super) fn is_source_startable(settings: &ObswsRtmpInboundSettings) -> bool {
 
 pub(super) fn build_record_source_plan(
     settings: &ObswsRtmpInboundSettings,
-    output_kind: ObswsOutputKind,
-    run_id: u64,
     source_key: &str,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(input_url) = settings.input_url.as_deref() else {
@@ -21,16 +19,9 @@ pub(super) fn build_record_source_plan(
         ));
     };
 
-    let kind = output_kind.as_str();
-    let source_processor_id = ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_key}:rtmp_inbound"
-    ));
-    let raw_video_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_key}:raw_video"
-    ));
-    let raw_audio_track_id = TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_key}:raw_audio"
-    ));
+    let source_processor_id = ProcessorId::new(format!("input:rtmp_inbound:{source_key}"));
+    let raw_video_track_id = TrackId::new(format!("input:raw_video:{source_key}"));
+    let raw_audio_track_id = TrackId::new(format!("input:raw_audio:{source_key}"));
 
     let endpoint = crate::rtmp::inbound_endpoint::RtmpInboundEndpoint {
         input_url: input_url.to_owned(),
@@ -62,27 +53,22 @@ mod tests {
                 input_url: Some("rtmp://127.0.0.1:1935".to_owned()),
                 stream_name: Some("live".to_owned()),
             },
-            ObswsOutputKind::Program,
-            1,
             "0",
         )
         .expect("rtmp_inbound source plan must succeed");
 
         assert_eq!(plan.source_processor_ids.len(), 1);
-        assert_eq!(
-            plan.source_processor_ids[0].get(),
-            "obsws:program:1:source:0:rtmp_inbound"
-        );
+        assert_eq!(plan.source_processor_ids[0].get(), "input:rtmp_inbound:0");
 
         assert_eq!(plan.requests.len(), 1);
 
         assert_eq!(
             plan.source_video_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:program:1:source:0:raw_video")
+            Some("input:raw_video:0")
         );
         assert_eq!(
             plan.source_audio_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:program:1:source:0:raw_audio")
+            Some("input:raw_audio:0")
         );
 
         // CreateRtmpInboundEndpoint のパラメータを検証する
@@ -102,8 +88,6 @@ mod tests {
                 input_url: Some("rtmp://127.0.0.1:1935".to_owned()),
                 stream_name: None,
             },
-            ObswsOutputKind::Program,
-            2,
             "1",
         )
         .expect("rtmp_inbound source plan without stream_name must succeed");

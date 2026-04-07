@@ -591,11 +591,11 @@ impl ObswsRecordTrackRun {
     ) -> Self {
         Self {
             encoder_processor_id: ProcessorId::new(format!(
-                "obsws:{output_kind}:{run_id}:{media_kind}_encoder"
+                "output:{output_kind}:{media_kind}_encoder:{run_id}"
             )),
             source_track_id: source_track_id.clone(),
             encoded_track_id: TrackId::new(format!(
-                "obsws:{output_kind}:{run_id}:encoded_{media_kind}"
+                "output:{output_kind}:encoded_{media_kind}:{run_id}"
             )),
         }
     }

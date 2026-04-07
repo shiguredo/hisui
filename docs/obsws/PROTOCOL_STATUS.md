@@ -495,8 +495,8 @@ WebRTC 接続の切り分けや観測用途を想定した、hisui 独自の Req
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `videoTrackId` | string | 成功時に必須 | Program の映像トラック ID（固定値: `obsws:program:0:mixed_video`） |
-| `audioTrackId` | string | 成功時に必須 | Program の音声トラック ID（固定値: `obsws:program:0:mixed_audio`） |
+| `videoTrackId` | string | 成功時に必須 | Program の映像トラック ID（固定値: `program:mixed_video`） |
+| `audioTrackId` | string | 成功時に必須 | Program の音声トラック ID（固定値: `program:mixed_audio`） |
 
 - NOTE: 既に購読中の場合は no-op で成功する（renegotiation は発生しない）
 - NOTE: raw input track の購読とは独立しており、同時に購読可能
@@ -517,8 +517,8 @@ WebRTC 接続の切り分けや観測用途を想定した、hisui 独自の Req
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `videoTrackId` | string | 成功時に必須 | Program の映像トラック ID（固定値: `obsws:program:0:mixed_video`） |
-| `audioTrackId` | string | 成功時に必須 | Program の音声トラック ID（固定値: `obsws:program:0:mixed_audio`） |
+| `videoTrackId` | string | 成功時に必須 | Program の映像トラック ID（固定値: `program:mixed_video`） |
+| `audioTrackId` | string | 成功時に必須 | Program の音声トラック ID（固定値: `program:mixed_audio`） |
 
 - NOTE: 未購読の場合は no-op で成功する（renegotiation は発生しない）
 - NOTE: 単発 Request（op=6）でのみ使用可能。RequestBatch（op=8）には対応していない

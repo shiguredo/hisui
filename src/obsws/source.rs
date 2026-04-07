@@ -13,20 +13,7 @@ mod srt_inbound;
 pub mod video_device;
 pub mod webrtc_source;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObswsOutputKind {
-    Program,
-}
-
-impl ObswsOutputKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Program => "program",
-        }
-    }
-}
-
-/// obsws ソースプランで使用する型付きリクエスト
+/// ソースプランで使用する型付きリクエスト
 pub enum ObswsSourceRequest {
     CreateMp4FileSource {
         source: self::file_mp4::Mp4FileSource,
@@ -253,50 +240,36 @@ pub fn is_source_startable(settings: &ObswsInputSettings) -> bool {
 
 pub fn build_record_source_plan(
     input: &ObswsInputEntry,
-    output_kind: ObswsOutputKind,
-    run_id: u64,
     source_key: &str,
     frame_rate: crate::video::FrameRate,
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     match &input.input.settings {
-        ObswsInputSettings::ImageSource(settings) => png_file::build_record_source_plan(
-            settings,
-            output_kind,
-            run_id,
-            source_key,
-            frame_rate,
-        ),
-        ObswsInputSettings::ColorSource(settings) => color_source::build_record_source_plan(
-            settings,
-            output_kind,
-            run_id,
-            source_key,
-            frame_rate,
-        ),
+        ObswsInputSettings::ImageSource(settings) => {
+            png_file::build_record_source_plan(settings, source_key, frame_rate)
+        }
+        ObswsInputSettings::ColorSource(settings) => {
+            color_source::build_record_source_plan(settings, source_key, frame_rate)
+        }
         ObswsInputSettings::Mp4FileSource(settings) => {
-            mp4::build_record_source_plan(settings, output_kind, run_id, source_key)
+            mp4::build_record_source_plan(settings, source_key)
         }
         ObswsInputSettings::VideoCaptureDevice(settings) => {
-            video_device::build_record_source_plan(settings, output_kind, run_id, source_key)
+            video_device::build_record_source_plan(settings, source_key)
         }
         ObswsInputSettings::AudioCaptureDevice(settings) => {
-            audio_device::build_record_source_plan(settings, output_kind, run_id, source_key)
+            audio_device::build_record_source_plan(settings, source_key)
         }
         ObswsInputSettings::RtmpInbound(settings) => {
-            rtmp_inbound::build_record_source_plan(settings, output_kind, run_id, source_key)
+            rtmp_inbound::build_record_source_plan(settings, source_key)
         }
         ObswsInputSettings::SrtInbound(settings) => {
-            srt_inbound::build_record_source_plan(settings, output_kind, run_id, source_key)
+            srt_inbound::build_record_source_plan(settings, source_key)
         }
         ObswsInputSettings::RtspSubscriber(settings) => {
-            rtsp_subscriber::build_record_source_plan(settings, output_kind, run_id, source_key)
+            rtsp_subscriber::build_record_source_plan(settings, source_key)
         }
-        ObswsInputSettings::WebRtcSource(_) => {
-            webrtc_source::build_record_source_plan(output_kind, source_key)
-        }
-        ObswsInputSettings::SoraSource(_) => {
-            sora_source::build_record_source_plan(output_kind, source_key)
-        }
+        ObswsInputSettings::WebRtcSource(_) => webrtc_source::build_record_source_plan(source_key),
+        ObswsInputSettings::SoraSource(_) => sora_source::build_record_source_plan(source_key),
     }
 }
 

@@ -826,8 +826,6 @@ impl super::ObswsCoordinator {
         }
         let mut source_plan = crate::obsws::source::build_record_source_plan(
             input_entry,
-            crate::obsws::source::ObswsOutputKind::Program,
-            0,
             &input_entry.input_uuid,
             self.input_registry.frame_rate(),
         )

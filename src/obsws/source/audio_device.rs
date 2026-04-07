@@ -132,17 +132,11 @@ pub(super) fn is_source_startable(
 
 pub(super) fn build_record_source_plan(
     settings: &crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings,
-    output_kind: super::ObswsOutputKind,
-    run_id: u64,
     source_key: &str,
 ) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
-    let kind = output_kind.as_str();
-    let source_processor_id = crate::ProcessorId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_key}:audio_device_source"
-    ));
-    let raw_audio_track_id = crate::TrackId::new(format!(
-        "obsws:{kind}:{run_id}:source:{source_key}:raw_audio"
-    ));
+    let source_processor_id =
+        crate::ProcessorId::new(format!("input:audio_device_source:{source_key}"));
+    let raw_audio_track_id = crate::TrackId::new(format!("input:raw_audio:{source_key}"));
 
     let source = AudioDeviceSource {
         output_audio_track_id: raw_audio_track_id.clone(),
@@ -166,7 +160,7 @@ pub(super) fn build_record_source_plan(
 mod tests {
     use super::*;
     use crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings;
-    use crate::obsws::source::{ObswsOutputKind, ObswsSourceRequest};
+    use crate::obsws::source::ObswsSourceRequest;
 
     #[test]
     fn build_record_source_plan_with_device_id() {
@@ -176,8 +170,6 @@ mod tests {
                 sample_rate: None,
                 channels: None,
             },
-            ObswsOutputKind::Program,
-            1,
             "0",
         )
         .expect("audio_capture_device source plan must succeed");
@@ -185,7 +177,7 @@ mod tests {
         assert_eq!(plan.source_processor_ids.len(), 1);
         assert_eq!(
             plan.source_processor_ids[0].get(),
-            "obsws:program:1:source:0:audio_device_source"
+            "input:audio_device_source:0"
         );
 
         assert_eq!(plan.requests.len(), 1);
@@ -193,7 +185,7 @@ mod tests {
         assert!(plan.source_video_track_id.is_none());
         assert_eq!(
             plan.source_audio_track_id.as_ref().map(|t| t.get()),
-            Some("obsws:program:1:source:0:raw_audio")
+            Some("input:raw_audio:0")
         );
 
         match &plan.requests[0] {
@@ -201,14 +193,11 @@ mod tests {
                 source,
                 processor_id,
             } => {
-                assert_eq!(
-                    source.output_audio_track_id.get(),
-                    "obsws:program:1:source:0:raw_audio"
-                );
+                assert_eq!(source.output_audio_track_id.get(), "input:raw_audio:0");
                 assert_eq!(source.device_id.as_deref(), Some("mic0"));
                 assert_eq!(
                     processor_id.as_ref().map(|p| p.get()),
-                    Some("obsws:program:1:source:0:audio_device_source")
+                    Some("input:audio_device_source:0")
                 );
             }
             _ => panic!("expected CreateAudioDeviceSource"),
@@ -222,7 +211,7 @@ mod tests {
             sample_rate: None,
             channels: None,
         };
-        let plan = build_record_source_plan(&settings, ObswsOutputKind::Program, 2, "1")
+        let plan = build_record_source_plan(&settings, "1")
             .expect("audio_capture_device source plan without device_id must succeed");
 
         assert!(
