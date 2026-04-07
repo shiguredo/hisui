@@ -22,7 +22,7 @@ use crate::obsws::protocol::{
 
 /// output インスタンスの状態
 pub(crate) struct OutputState {
-    #[expect(dead_code, reason = "Phase 2 以降で参照予定")]
+    #[expect(dead_code, reason = "Phase 6 の GetOutputList で使用予定")]
     pub(crate) output_kind: OutputKind,
     pub(crate) settings: OutputSettings,
     pub(crate) runtime: OutputRuntimeState,
@@ -35,7 +35,6 @@ pub(crate) struct OutputRuntimeState {
     pub(crate) started_at: Option<Instant>,
     pub(crate) run: Option<OutputRun>,
     /// HLS/DASH の ABR マスタープレイリスト等の非同期タスクハンドル
-    #[expect(dead_code, reason = "Phase 2 以降で参照予定")]
     pub(crate) background_task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -71,7 +70,7 @@ impl OutputKind {
     }
 
     /// OBS WebSocket の outputKind 文字列に変換する
-    #[expect(dead_code, reason = "Phase 2 以降で使用予定")]
+    #[expect(dead_code, reason = "Phase 6 の GetOutputList で使用予定")]
     pub(crate) fn as_kind_str(self) -> &'static str {
         match self {
             Self::Stream => "rtmp_output",
@@ -87,12 +86,8 @@ impl OutputKind {
 /// output の種別固有の設定
 pub(crate) enum OutputSettings {
     Stream(ObswsStreamServiceSettings),
-    Record {
-        record_directory: PathBuf,
-    },
-    #[expect(dead_code, reason = "Phase 2 以降で参照予定")]
+    Record { record_directory: PathBuf },
     Hls(ObswsHlsSettings),
-    #[expect(dead_code, reason = "Phase 2 以降で参照予定")]
     MpegDash(ObswsDashSettings),
     RtmpOutbound(ObswsRtmpOutboundSettings),
     Sora(ObswsSoraPublisherSettings),
@@ -102,9 +97,7 @@ pub(crate) enum OutputSettings {
 pub(crate) enum OutputRun {
     Stream(crate::obsws::input_registry::ObswsStreamRun),
     Record(crate::obsws::input_registry::ObswsRecordRun),
-    #[expect(dead_code, reason = "Phase 2 以降で使用予定")]
     Hls(crate::obsws::input_registry::ObswsHlsRun),
-    #[expect(dead_code, reason = "Phase 2 以降で使用予定")]
     MpegDash(crate::obsws::input_registry::ObswsDashRun),
     RtmpOutbound(crate::obsws::input_registry::ObswsRtmpOutboundRun),
     Sora(crate::obsws::input_registry::ObswsSoraPublisherRun),
@@ -135,6 +128,38 @@ pub(crate) fn create_default_outputs(
             settings: OutputSettings::Record {
                 record_directory: registry.record_directory().to_path_buf(),
             },
+            runtime: OutputRuntimeState::default(),
+        },
+    );
+    outputs.insert(
+        "rtmp_outbound".to_owned(),
+        OutputState {
+            output_kind: OutputKind::RtmpOutbound,
+            settings: OutputSettings::RtmpOutbound(registry.rtmp_outbound_settings().clone()),
+            runtime: OutputRuntimeState::default(),
+        },
+    );
+    outputs.insert(
+        "sora".to_owned(),
+        OutputState {
+            output_kind: OutputKind::Sora,
+            settings: OutputSettings::Sora(registry.sora_publisher_settings().clone()),
+            runtime: OutputRuntimeState::default(),
+        },
+    );
+    outputs.insert(
+        "hls".to_owned(),
+        OutputState {
+            output_kind: OutputKind::Hls,
+            settings: OutputSettings::Hls(registry.hls_settings().clone()),
+            runtime: OutputRuntimeState::default(),
+        },
+    );
+    outputs.insert(
+        "mpeg_dash".to_owned(),
+        OutputState {
+            output_kind: OutputKind::MpegDash,
+            settings: OutputSettings::MpegDash(registry.dash_settings().clone()),
             runtime: OutputRuntimeState::default(),
         },
     );

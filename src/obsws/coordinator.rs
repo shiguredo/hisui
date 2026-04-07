@@ -351,6 +351,12 @@ impl ObswsCoordinator {
             tracing::warn!("failed to rebuild program output: {}", e.display());
         }
 
+        // output 設定変更リクエストが成功した場合、input_registry の設定を outputs に同期する。
+        // Phase 6 で SetOutputSettings を coordinator 経由に移行するまでの暫定措置。
+        if request_succeeded {
+            self.sync_output_settings_from_registry(&request_type);
+        }
+
         // state file 保存: 対象リクエストが成功した場合に永続化する
         if request_succeeded
             && is_state_persisted_request(&request_type)
@@ -397,6 +403,9 @@ impl ObswsCoordinator {
                 .await
             {
                 tracing::warn!("failed to rebuild program output: {}", e.display());
+            }
+            if request_succeeded {
+                self.sync_output_settings_from_registry(&request_type);
             }
             if (halt_on_failure && !request_succeeded) || self.should_terminate {
                 break;
@@ -868,6 +877,59 @@ impl ObswsCoordinator {
                 request_status_comment: Some(status_comment.to_owned()),
                 response_data: None,
             },
+        }
+    }
+
+    /// output 設定変更リクエスト成功後に input_registry の設定を outputs BTreeMap に同期する。
+    /// Phase 6 で SetOutputSettings を coordinator 経由に移行するまでの暫定措置。
+    fn sync_output_settings_from_registry(&mut self, request_type: &str) {
+        use output_dynamic::OutputSettings;
+        match request_type {
+            "SetStreamServiceSettings" => {
+                if let Some(output) = self.outputs.get_mut("stream") {
+                    output.settings = OutputSettings::Stream(
+                        self.input_registry.stream_service_settings().clone(),
+                    );
+                }
+            }
+            "SetRecordDirectory" => {
+                if let Some(output) = self.outputs.get_mut("record") {
+                    output.settings = OutputSettings::Record {
+                        record_directory: self.input_registry.record_directory().to_path_buf(),
+                    };
+                }
+            }
+            "SetOutputSettings" => {
+                // SetOutputSettings は複数の output に対応するため、全種別を同期する
+                if let Some(output) = self.outputs.get_mut("stream") {
+                    output.settings = OutputSettings::Stream(
+                        self.input_registry.stream_service_settings().clone(),
+                    );
+                }
+                if let Some(output) = self.outputs.get_mut("record") {
+                    output.settings = OutputSettings::Record {
+                        record_directory: self.input_registry.record_directory().to_path_buf(),
+                    };
+                }
+                if let Some(output) = self.outputs.get_mut("rtmp_outbound") {
+                    output.settings = OutputSettings::RtmpOutbound(
+                        self.input_registry.rtmp_outbound_settings().clone(),
+                    );
+                }
+                if let Some(output) = self.outputs.get_mut("sora") {
+                    output.settings =
+                        OutputSettings::Sora(self.input_registry.sora_publisher_settings().clone());
+                }
+                if let Some(output) = self.outputs.get_mut("hls") {
+                    output.settings =
+                        OutputSettings::Hls(self.input_registry.hls_settings().clone());
+                }
+                if let Some(output) = self.outputs.get_mut("mpeg_dash") {
+                    output.settings =
+                        OutputSettings::MpegDash(self.input_registry.dash_settings().clone());
+                }
+            }
+            _ => {}
         }
     }
 

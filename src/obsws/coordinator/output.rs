@@ -322,11 +322,15 @@ impl ObswsCoordinator {
                 (outcome, Vec::new())
             }
             "hls" => {
-                let outcome = self.handle_start_hls("StartOutput", request_id).await;
+                let outcome = self
+                    .handle_start_hls("StartOutput", request_id, "hls")
+                    .await;
                 (outcome, Vec::new())
             }
             "mpeg_dash" => {
-                let outcome = self.handle_start_mpeg_dash("StartOutput", request_id).await;
+                let outcome = self
+                    .handle_start_mpeg_dash("StartOutput", request_id, "mpeg_dash")
+                    .await;
                 (outcome, Vec::new())
             }
             #[cfg(feature = "player")]
@@ -427,11 +431,13 @@ impl ObswsCoordinator {
                 (outcome, Vec::new())
             }
             "hls" => {
-                let outcome = self.handle_stop_hls("StopOutput", request_id).await;
+                let outcome = self.handle_stop_hls("StopOutput", request_id, "hls").await;
                 (outcome, Vec::new())
             }
             "mpeg_dash" => {
-                let outcome = self.handle_stop_mpeg_dash("StopOutput", request_id).await;
+                let outcome = self
+                    .handle_stop_mpeg_dash("StopOutput", request_id, "mpeg_dash")
+                    .await;
                 (outcome, Vec::new())
             }
             #[cfg(feature = "player")]
@@ -591,20 +597,26 @@ impl ObswsCoordinator {
                 (outcome, !was_active, Vec::new())
             }
             "hls" => {
-                let was_active = self.input_registry.is_hls_active();
+                let was_active = self.outputs.get("hls").is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
-                    self.handle_stop_hls("ToggleOutput", request_id).await
+                    self.handle_stop_hls("ToggleOutput", request_id, "hls")
+                        .await
                 } else {
-                    self.handle_start_hls("ToggleOutput", request_id).await
+                    self.handle_start_hls("ToggleOutput", request_id, "hls")
+                        .await
                 };
                 (outcome, !was_active, Vec::new())
             }
             "mpeg_dash" => {
-                let was_active = self.input_registry.is_dash_active();
+                let was_active = self
+                    .outputs
+                    .get("mpeg_dash")
+                    .is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
-                    self.handle_stop_mpeg_dash("ToggleOutput", request_id).await
+                    self.handle_stop_mpeg_dash("ToggleOutput", request_id, "mpeg_dash")
+                        .await
                 } else {
-                    self.handle_start_mpeg_dash("ToggleOutput", request_id)
+                    self.handle_start_mpeg_dash("ToggleOutput", request_id, "mpeg_dash")
                         .await
                 };
                 (outcome, !was_active, Vec::new())

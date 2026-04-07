@@ -9,18 +9,51 @@ use super::ObswsProgramOutputContext;
 use super::output::{
     OutputOperationOutcome, build_s3_client, terminate_and_wait, wait_or_terminate,
 };
+use super::output_dynamic::{OutputRun, OutputSettings};
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_start_mpeg_dash(
         &mut self,
         request_type: &str,
         request_id: &str,
+        output_name: &str,
     ) -> OutputOperationOutcome {
         use crate::obsws::input_registry::{
-            ActivateDashError, DashDestination, ObswsDashRun, ObswsDashVariantRun,
-            ObswsRecordTrackRun,
+            DashDestination, ObswsDashRun, ObswsDashVariantRun, ObswsRecordTrackRun,
         };
-        let dash_settings = self.input_registry.dash_settings().clone();
+
+        let Some(output) = self.outputs.get(output_name) else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ),
+            );
+        };
+        let OutputSettings::MpegDash(dash_settings) = &output.settings else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Output is not a MPEG-DASH output",
+                ),
+            );
+        };
+        let dash_settings = dash_settings.clone();
+
+        if output.runtime.active {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    "MPEG-DASH is already active",
+                ),
+            );
+        }
         let Some(ref destination) = dash_settings.destination else {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -41,19 +74,8 @@ impl ObswsCoordinator {
                 ),
             );
         }
-        let run_id = match self.input_registry.next_dash_run_id() {
-            Ok(run_id) => run_id,
-            Err(_) => {
-                return OutputOperationOutcome::failure(
-                    crate::obsws::response::build_request_response_error(
-                        request_type,
-                        request_id,
-                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                        "MPEG-DASH run ID overflow",
-                    ),
-                );
-            }
-        };
+        let run_id = self.next_output_run_id;
+        self.next_output_run_id = self.next_output_run_id.wrapping_add(1);
         let program_output = ObswsProgramOutputContext {
             video_track_id: self.program_output.video_track_id.clone(),
             audio_track_id: self.program_output.audio_track_id.clone(),
@@ -69,13 +91,13 @@ impl ObswsCoordinator {
             .map(|(i, variant)| {
                 let variant_label = format!("v{i}");
                 let video = ObswsRecordTrackRun::new(
-                    "mpeg_dash",
+                    output_name,
                     run_id,
                     &format!("{variant_label}_video"),
                     &program_output.video_track_id,
                 );
                 let audio = ObswsRecordTrackRun::new(
-                    "mpeg_dash",
+                    output_name,
                     run_id,
                     &format!("{variant_label}_audio"),
                     &program_output.audio_track_id,
@@ -86,20 +108,20 @@ impl ObswsCoordinator {
                 });
                 let scaler_processor_id = if needs_scaler {
                     Some(crate::ProcessorId::new(format!(
-                        "output:mpeg_dash:{variant_label}_scaler:{run_id}"
+                        "output:{output_name}:{variant_label}_scaler:{run_id}"
                     )))
                 } else {
                     None
                 };
                 let scaled_track_id = if needs_scaler {
                     Some(crate::TrackId::new(format!(
-                        "output:mpeg_dash:{variant_label}_scaled_video:{run_id}"
+                        "output:{output_name}:{variant_label}_scaled_video:{run_id}"
                     )))
                 } else {
                     None
                 };
                 let writer_processor_id = crate::ProcessorId::new(format!(
-                    "output:mpeg_dash:{variant_label}_dash_writer:{run_id}"
+                    "output:{output_name}:{variant_label}_dash_writer:{run_id}"
                 ));
                 let variant_path = if is_abr {
                     destination.variant_path(i)
@@ -123,23 +145,21 @@ impl ObswsCoordinator {
             destination: destination.clone(),
             variant_runs,
         };
-        if let Err(ActivateDashError::AlreadyActive) =
-            self.input_registry.activate_dash(run.clone())
-        {
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
-                    "MPEG-DASH is already active",
-                ),
-            );
+        // ランタイム状態を active にする
+        if let Some(output) = self.outputs.get_mut(output_name) {
+            output.runtime.active = true;
+            output.runtime.started_at = Some(std::time::Instant::now());
+            output.runtime.run = Some(OutputRun::MpegDash(run.clone()));
         }
         // filesystem の場合のみ出力ディレクトリを作成する
         if let DashDestination::Filesystem { directory } = destination
             && let Err(e) = std::fs::create_dir_all(directory)
         {
-            self.input_registry.deactivate_dash();
+            if let Some(output) = self.outputs.get_mut(output_name) {
+                output.runtime.active = false;
+                output.runtime.started_at = None;
+                output.runtime.run = None;
+            }
             let error_comment = format!("Failed to create MPEG-DASH output directory: {e}");
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -232,7 +252,11 @@ impl ObswsCoordinator {
             }
         }
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            self.input_registry.deactivate_dash();
+            if let Some(output) = self.outputs.get_mut(output_name) {
+                output.runtime.active = false;
+                output.runtime.started_at = None;
+                output.runtime.run = None;
+            }
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -244,10 +268,16 @@ impl ObswsCoordinator {
         };
         match start_dash_processors(pipeline_handle, &program_output, &run, &dash_settings).await {
             Ok(combined_mpd_task) => {
-                self.input_registry.dash_runtime.combined_mpd_task = combined_mpd_task;
+                if let Some(output) = self.outputs.get_mut(output_name) {
+                    output.runtime.background_task = combined_mpd_task;
+                }
             }
             Err(e) => {
-                self.input_registry.deactivate_dash();
+                if let Some(output) = self.outputs.get_mut(output_name) {
+                    output.runtime.active = false;
+                    output.runtime.started_at = None;
+                    output.runtime.run = None;
+                }
                 let _ = stop_processors_staged_dash(pipeline_handle, &run).await;
                 let error_comment = format!("Failed to start MPEG-DASH: {}", e.display());
                 return OutputOperationOutcome::failure(
@@ -270,19 +300,29 @@ impl ObswsCoordinator {
         &mut self,
         request_type: &str,
         request_id: &str,
+        output_name: &str,
     ) -> OutputOperationOutcome {
-        let run = match self.input_registry.deactivate_dash() {
-            Some(run) => run,
-            None => {
-                return OutputOperationOutcome::failure(
-                    crate::obsws::response::build_request_response_error(
-                        request_type,
-                        request_id,
-                        crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                        "MPEG-DASH is not active",
-                    ),
-                );
+        let run = self.outputs.get_mut(output_name).and_then(|o| {
+            if let Some(handle) = o.runtime.background_task.take() {
+                handle.abort();
             }
+            let run = o.runtime.run.take();
+            o.runtime.active = false;
+            o.runtime.started_at = None;
+            match run {
+                Some(OutputRun::MpegDash(r)) => Some(r),
+                _ => None,
+            }
+        });
+        let Some(run) = run else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "MPEG-DASH is not active",
+                ),
+            );
         };
         if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
             && let Err(e) = stop_processors_staged_dash(pipeline_handle, &run).await
