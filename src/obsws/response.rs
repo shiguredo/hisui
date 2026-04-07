@@ -174,14 +174,14 @@ struct SetSceneItemTransformFields {
     scene_item_transform: ObswsSceneItemTransformPatch,
 }
 
-struct SetStreamServiceSettingsFields {
-    stream_service_type: String,
-    server: String,
-    key: Option<String>,
+pub(crate) struct SetStreamServiceSettingsFields {
+    pub(crate) stream_service_type: String,
+    pub(crate) server: String,
+    pub(crate) key: Option<String>,
 }
 
-struct SetRecordDirectoryFields {
-    record_directory: String,
+pub(crate) struct SetRecordDirectoryFields {
+    pub(crate) record_directory: String,
 }
 
 struct GetOutputStatusFields {
@@ -858,7 +858,7 @@ fn is_valid_scene_item_alignment(alignment: i64) -> bool {
     matches!(alignment, 0 | 1 | 2 | 4 | 5 | 6 | 8 | 9 | 10)
 }
 
-fn parse_set_stream_service_settings_fields(
+pub(crate) fn parse_set_stream_service_settings_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetStreamServiceSettingsFields, nojson::JsonParseError> {
     let stream_service_type = required_non_empty_string_member(request_data, "streamServiceType")?;
@@ -875,7 +875,7 @@ fn parse_set_stream_service_settings_fields(
     })
 }
 
-fn parse_set_record_directory_fields(
+pub(crate) fn parse_set_record_directory_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetRecordDirectoryFields, nojson::JsonParseError> {
     let record_directory = required_non_empty_string_member(request_data, "recordDirectory")?;

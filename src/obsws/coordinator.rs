@@ -351,12 +351,6 @@ impl ObswsCoordinator {
             tracing::warn!("failed to rebuild program output: {}", e.display());
         }
 
-        // output 設定変更リクエストが成功した場合、input_registry の設定を outputs に同期する。
-        // Phase 6 で SetOutputSettings を coordinator 経由に移行するまでの暫定措置。
-        if request_succeeded {
-            self.sync_output_settings_from_registry(&request_type);
-        }
-
         // state file 保存: 対象リクエストが成功した場合に永続化する
         if request_succeeded
             && is_state_persisted_request(&request_type)
@@ -406,9 +400,6 @@ impl ObswsCoordinator {
                 .await
             {
                 tracing::warn!("failed to rebuild program output: {}", e.display());
-            }
-            if request_succeeded {
-                self.sync_output_settings_from_registry(&request_type);
             }
             if (halt_on_failure && !request_succeeded) || self.should_terminate {
                 break;
@@ -612,6 +603,52 @@ impl ObswsCoordinator {
                 request.request_data.as_ref(),
             ),
             // --- Output 読み取り ---
+            "GetStreamStatus" => {
+                let response =
+                    self.build_output_status_response("GetStreamStatus", &request_id, "stream");
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetRecordStatus" => {
+                let response = self.build_record_status_response(&request_id);
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetOutputStatus" => {
+                let response = self
+                    .build_get_output_status_response(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetStreamServiceSettings" => {
+                let response = self.handle_get_output_settings(
+                    "GetStreamServiceSettings",
+                    &request_id,
+                    "stream",
+                );
+                self.build_result_from_response(response, Vec::new())
+            }
+            "SetStreamServiceSettings" => {
+                let response = self
+                    .handle_set_stream_service_settings(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetRecordDirectory" => {
+                let response = self.handle_get_record_directory(&request_id);
+                self.build_result_from_response(response, Vec::new())
+            }
+            "SetRecordDirectory" => {
+                let response =
+                    self.handle_set_record_directory(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetOutputSettings" => {
+                let response = self
+                    .handle_get_output_settings_request(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "SetOutputSettings" => {
+                let response = self
+                    .handle_set_output_settings_request(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
             "GetOutputList" => {
                 let response = crate::obsws::response::build_get_output_list_response(
                     &request_id,
@@ -898,55 +935,88 @@ impl ObswsCoordinator {
 
     /// output 設定変更リクエスト成功後に input_registry の設定を outputs BTreeMap に同期する。
     /// Phase 6 で SetOutputSettings を coordinator 経由に移行するまでの暫定措置。
-    fn sync_output_settings_from_registry(&mut self, request_type: &str) {
-        use output_dynamic::OutputSettings;
-        match request_type {
-            "SetStreamServiceSettings" => {
-                if let Some(output) = self.outputs.get_mut("stream") {
-                    output.settings = OutputSettings::Stream(
-                        self.input_registry.stream_service_settings().clone(),
-                    );
-                }
-            }
-            "SetRecordDirectory" => {
-                if let Some(output) = self.outputs.get_mut("record") {
-                    output.settings = OutputSettings::Record {
-                        record_directory: self.input_registry.record_directory().to_path_buf(),
-                    };
-                }
-            }
-            "SetOutputSettings" => {
-                // SetOutputSettings は複数の output に対応するため、全種別を同期する
-                if let Some(output) = self.outputs.get_mut("stream") {
-                    output.settings = OutputSettings::Stream(
-                        self.input_registry.stream_service_settings().clone(),
-                    );
-                }
-                if let Some(output) = self.outputs.get_mut("record") {
-                    output.settings = OutputSettings::Record {
-                        record_directory: self.input_registry.record_directory().to_path_buf(),
-                    };
-                }
-                if let Some(output) = self.outputs.get_mut("rtmp_outbound") {
-                    output.settings = OutputSettings::RtmpOutbound(
-                        self.input_registry.rtmp_outbound_settings().clone(),
-                    );
-                }
-                if let Some(output) = self.outputs.get_mut("sora") {
-                    output.settings =
-                        OutputSettings::Sora(self.input_registry.sora_publisher_settings().clone());
-                }
-                if let Some(output) = self.outputs.get_mut("hls") {
-                    output.settings =
-                        OutputSettings::Hls(self.input_registry.hls_settings().clone());
-                }
-                if let Some(output) = self.outputs.get_mut("mpeg_dash") {
-                    output.settings =
-                        OutputSettings::MpegDash(self.input_registry.dash_settings().clone());
-                }
-            }
-            _ => {}
+    /// outputs BTreeMap から GetOutputStatus レスポンスを構築する。
+    fn build_output_status_response(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        output_name: &str,
+    ) -> nojson::RawJsonOwned {
+        let Some(state) = self.outputs.get(output_name) else {
+            return crate::obsws::response::build_request_response_error(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Output not found",
+            );
+        };
+        let (active, duration) = output_dynamic::output_active_and_uptime(state);
+        let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+        let output_timecode = crate::obsws::response::format_timecode(duration);
+        crate::obsws::response::build_request_response_success(request_type, request_id, |f| {
+            f.member("outputActive", active)?;
+            f.member("outputReconnecting", false)?;
+            f.member("outputTimecode", &output_timecode)?;
+            f.member("outputDuration", output_duration)?;
+            f.member("outputCongestion", 0.0)?;
+            f.member("outputBytes", 0)?;
+            f.member("outputSkippedFrames", 0)?;
+            f.member("outputTotalFrames", 0)
+        })
+    }
+
+    /// record 専用の GetRecordStatus レスポンスを構築する。
+    fn build_record_status_response(&self, request_id: &str) -> nojson::RawJsonOwned {
+        let Some(state) = self.outputs.get("record") else {
+            return crate::obsws::response::build_request_response_error(
+                "GetRecordStatus",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Output not found",
+            );
+        };
+        let (active, duration) = output_dynamic::output_active_and_uptime(state);
+        let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+        let output_timecode = crate::obsws::response::format_timecode(duration);
+        let output_path = output_dynamic::record_output_path(state).unwrap_or_default();
+        crate::obsws::response::build_request_response_success("GetRecordStatus", request_id, |f| {
+            f.member("outputActive", active)?;
+            f.member("outputTimecode", &output_timecode)?;
+            f.member("outputDuration", output_duration)?;
+            f.member("outputCongestion", 0.0)?;
+            f.member("outputBytes", 0)?;
+            f.member("outputSkippedFrames", 0)?;
+            f.member("outputTotalFrames", 0)?;
+            f.member("outputPath", &output_path)
+        })
+    }
+
+    /// GetOutputStatus リクエストを処理する。
+    fn build_get_output_status_response(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> nojson::RawJsonOwned {
+        let Some(output_name) = parse_required_non_empty_string_field(request_data, "outputName")
+        else {
+            return crate::obsws::response::build_request_response_error(
+                "GetOutputStatus",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required outputName field",
+            );
+        };
+        // player は outputs BTreeMap に含まれないため特別扱い
+        #[cfg(feature = "player")]
+        if output_name == "player" {
+            let active = self.input_registry.is_player_active();
+            return crate::obsws::response::build_request_response_success(
+                "GetOutputStatus",
+                request_id,
+                |f| f.member("outputActive", active),
+            );
         }
+        self.build_output_status_response("GetOutputStatus", request_id, &output_name)
     }
 
     fn build_parse_error_result(

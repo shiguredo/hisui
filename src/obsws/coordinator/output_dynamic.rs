@@ -172,6 +172,383 @@ pub(crate) fn create_default_outputs(
 }
 
 // -----------------------------------------------------------------------
+// output status レスポンス構築
+// -----------------------------------------------------------------------
+
+/// OutputState から GetOutputStatus / GetStreamStatus / GetRecordStatus 用の共通情報を取得する。
+pub(crate) fn output_active_and_uptime(state: &OutputState) -> (bool, std::time::Duration) {
+    let active = state.runtime.active;
+    let duration = if active {
+        state
+            .runtime
+            .started_at
+            .map(|t| t.elapsed())
+            .unwrap_or(std::time::Duration::ZERO)
+    } else {
+        std::time::Duration::ZERO
+    };
+    (active, duration)
+}
+
+/// OutputRun::Record から output_path を取得する。
+pub(crate) fn record_output_path(state: &OutputState) -> Option<String> {
+    state.runtime.run.as_ref().and_then(|r| match r {
+        OutputRun::Record(run) => Some(run.output_path.display().to_string()),
+        _ => None,
+    })
+}
+
+// -----------------------------------------------------------------------
+// GetOutputSettings / SetOutputSettings ハンドラ
+// -----------------------------------------------------------------------
+
+impl ObswsCoordinator {
+    /// GetOutputSettings: outputName で指定された output の設定を返す。
+    pub(crate) fn handle_get_output_settings(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        output_name: &str,
+    ) -> nojson::RawJsonOwned {
+        let Some(state) = self.outputs.get(output_name) else {
+            return crate::obsws::response::build_request_response_error(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Output not found",
+            );
+        };
+        let output_kind = state.output_kind.as_kind_str();
+        crate::obsws::response::build_request_response_success(request_type, request_id, |f| {
+            f.member("outputName", output_name)?;
+            f.member("outputKind", output_kind)?;
+            f.member("outputSettings", OutputSettingsJson(&state.settings))
+        })
+    }
+
+    /// GetOutputSettings リクエスト（outputName をリクエストデータからパース）
+    pub(crate) fn handle_get_output_settings_request(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> nojson::RawJsonOwned {
+        let Some(output_name) =
+            super::parse_required_non_empty_string_field(request_data, "outputName")
+        else {
+            return crate::obsws::response::build_request_response_error(
+                "GetOutputSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required outputName field",
+            );
+        };
+        // player の特別扱い
+        #[cfg(feature = "player")]
+        if output_name == "player" {
+            return crate::obsws::response::build_request_response_success(
+                "GetOutputSettings",
+                request_id,
+                |f| f.member("outputSettings", nojson::object(|_| Ok(()))),
+            );
+        }
+        self.handle_get_output_settings("GetOutputSettings", request_id, &output_name)
+    }
+
+    /// SetOutputSettings リクエスト
+    pub(crate) fn handle_set_output_settings_request(
+        &mut self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> nojson::RawJsonOwned {
+        let Some(request_data) = request_data else {
+            return crate::obsws::response::build_request_response_error(
+                "SetOutputSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_DATA,
+                "Missing required requestData field",
+            );
+        };
+        let Some(output_name) = parse_required_string(request_data, "outputName") else {
+            return crate::obsws::response::build_request_response_error(
+                "SetOutputSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required outputName field",
+            );
+        };
+        let output_settings_raw = request_data
+            .value()
+            .to_member("outputSettings")
+            .ok()
+            .and_then(|v| v.optional());
+        let Some(output_settings) = output_settings_raw else {
+            return crate::obsws::response::build_request_response_error(
+                "SetOutputSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required outputSettings field",
+            );
+        };
+        // player の特別扱い
+        #[cfg(feature = "player")]
+        if output_name == "player" {
+            return crate::obsws::response::build_request_response_success_no_data(
+                "SetOutputSettings",
+                request_id,
+            );
+        }
+        let Some(state) = self.outputs.get_mut(&output_name) else {
+            return crate::obsws::response::build_request_response_error(
+                "SetOutputSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Output not found",
+            );
+        };
+        // 種別に応じて settings を更新する
+        match &mut state.settings {
+            OutputSettings::Stream(settings) => {
+                if let Some(s) = output_settings
+                    .to_member("server")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| v.try_into().ok())
+                {
+                    settings.server = Some(s);
+                }
+                if let Ok(v) = output_settings.to_member("key") {
+                    settings.key = v.optional().and_then(|v| v.try_into().ok());
+                }
+                if let Some(s) = output_settings
+                    .to_member("streamServiceType")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                {
+                    settings.stream_service_type = s;
+                }
+                // input_registry にも反映（後方互換）
+                self.input_registry
+                    .set_stream_service_settings(settings.clone());
+            }
+            OutputSettings::Record { record_directory } => {
+                if let Some(dir) = output_settings
+                    .to_member("recordDirectory")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                {
+                    *record_directory = PathBuf::from(dir);
+                }
+                self.input_registry
+                    .set_record_directory(record_directory.clone());
+            }
+            OutputSettings::RtmpOutbound(settings) => {
+                if let Some(url) = output_settings
+                    .to_member("outputUrl")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                {
+                    settings.output_url = Some(url);
+                }
+                if let Some(name) = output_settings
+                    .to_member("streamName")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                {
+                    settings.stream_name = Some(name);
+                }
+                self.input_registry
+                    .set_rtmp_outbound_settings(settings.clone());
+            }
+            OutputSettings::Sora(settings) => {
+                if let Ok(v) = output_settings.to_member("soraSdkSettings")
+                    && let Some(sdk) = v.optional()
+                {
+                    if let Some(u) = sdk
+                        .to_member("signalingUrls")
+                        .ok()
+                        .and_then(|v| v.optional())
+                        .and_then(|v| <Vec<String>>::try_from(v).ok())
+                    {
+                        settings.signaling_urls = u;
+                    }
+                    if let Ok(ch) = sdk.to_member("channelId") {
+                        settings.channel_id = ch.optional().and_then(|v| v.try_into().ok());
+                    }
+                    if let Ok(ci) = sdk.to_member("clientId") {
+                        settings.client_id = ci.optional().and_then(|v| v.try_into().ok());
+                    }
+                    if let Ok(bi) = sdk.to_member("bundleId") {
+                        settings.bundle_id = bi.optional().and_then(|v| v.try_into().ok());
+                    }
+                    if let Ok(m) = sdk.to_member("metadata")
+                        && let Some(v) = m.optional()
+                        && v.kind().is_object()
+                    {
+                        settings.metadata = Some(v.extract().into_owned());
+                    }
+                }
+                self.input_registry
+                    .set_sora_publisher_settings(settings.clone());
+            }
+            OutputSettings::Hls(settings) => {
+                // HLS 設定の更新は既存の response/output.rs のパーサーが複雑なため、
+                // input_registry 経由のパーサーに委譲して結果を同期する
+                let result = crate::obsws::response::parse_and_apply_hls_settings(
+                    &output_settings,
+                    &mut self.input_registry,
+                );
+                if let Err(error) = result {
+                    return crate::obsws::response::build_request_response_error(
+                        "SetOutputSettings",
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        &error,
+                    );
+                }
+                *settings = self.input_registry.hls_settings().clone();
+            }
+            OutputSettings::MpegDash(settings) => {
+                let result = crate::obsws::response::parse_and_apply_dash_settings(
+                    &output_settings,
+                    &mut self.input_registry,
+                );
+                if let Err(error) = result {
+                    return crate::obsws::response::build_request_response_error(
+                        "SetOutputSettings",
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        &error,
+                    );
+                }
+                *settings = self.input_registry.dash_settings().clone();
+            }
+        }
+        crate::obsws::response::build_request_response_success_no_data(
+            "SetOutputSettings",
+            request_id,
+        )
+    }
+
+    /// SetStreamServiceSettings（stream 専用の設定変更）
+    pub(crate) fn handle_set_stream_service_settings(
+        &mut self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> nojson::RawJsonOwned {
+        let fields = match crate::obsws::response::parse_request_data_or_error_response(
+            "SetStreamServiceSettings",
+            request_id,
+            request_data,
+            crate::obsws::response::parse_set_stream_service_settings_fields,
+        ) {
+            Ok(fields) => fields,
+            Err(response) => return response,
+        };
+        let new_settings = ObswsStreamServiceSettings {
+            stream_service_type: fields.stream_service_type,
+            server: Some(fields.server),
+            key: fields.key,
+        };
+        // outputs BTreeMap を更新
+        if let Some(output) = self.outputs.get_mut("stream") {
+            output.settings = OutputSettings::Stream(new_settings.clone());
+        }
+        // input_registry にも反映（後方互換）
+        self.input_registry
+            .set_stream_service_settings(new_settings);
+        crate::obsws::response::build_request_response_success_no_data(
+            "SetStreamServiceSettings",
+            request_id,
+        )
+    }
+
+    /// GetRecordDirectory
+    pub(crate) fn handle_get_record_directory(&self, request_id: &str) -> nojson::RawJsonOwned {
+        let record_directory = self
+            .outputs
+            .get("record")
+            .and_then(|o| match &o.settings {
+                OutputSettings::Record { record_directory } => {
+                    Some(record_directory.display().to_string())
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        crate::obsws::response::build_request_response_success(
+            "GetRecordDirectory",
+            request_id,
+            |f| f.member("recordDirectory", &record_directory),
+        )
+    }
+
+    /// SetRecordDirectory
+    pub(crate) fn handle_set_record_directory(
+        &mut self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> nojson::RawJsonOwned {
+        let fields = match crate::obsws::response::parse_request_data_or_error_response(
+            "SetRecordDirectory",
+            request_id,
+            request_data,
+            crate::obsws::response::parse_set_record_directory_fields,
+        ) {
+            Ok(fields) => fields,
+            Err(response) => return response,
+        };
+        let record_directory =
+            match crate::obsws::response::resolve_record_directory_path(&fields.record_directory) {
+                Ok(path) => path,
+                Err(e) => {
+                    return crate::obsws::response::build_request_response_error(
+                        "SetRecordDirectory",
+                        request_id,
+                        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                        &e,
+                    );
+                }
+            };
+        if let Some(output) = self.outputs.get_mut("record") {
+            output.settings = OutputSettings::Record {
+                record_directory: record_directory.clone(),
+            };
+        }
+        self.input_registry.set_record_directory(record_directory);
+        crate::obsws::response::build_request_response_success_no_data(
+            "SetRecordDirectory",
+            request_id,
+        )
+    }
+}
+
+// -----------------------------------------------------------------------
+// OutputSettings の JSON シリアライズ
+// -----------------------------------------------------------------------
+
+/// OutputSettings を JSON として出力するためのラッパー
+struct OutputSettingsJson<'a>(&'a OutputSettings);
+
+impl nojson::DisplayJson for OutputSettingsJson<'_> {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self.0 {
+            OutputSettings::Stream(s) => s.fmt(f),
+            OutputSettings::Record { record_directory } => nojson::object(|f| {
+                f.member("recordDirectory", record_directory.display().to_string())
+            })
+            .fmt(f),
+            OutputSettings::Hls(s) => s.fmt(f),
+            OutputSettings::MpegDash(s) => s.fmt(f),
+            OutputSettings::RtmpOutbound(s) => s.fmt(f),
+            OutputSettings::Sora(s) => s.fmt(f),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
 // HisuiCreateOutput / HisuiRemoveOutput ハンドラ
 // -----------------------------------------------------------------------
 

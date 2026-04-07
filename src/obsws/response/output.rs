@@ -547,7 +547,7 @@ pub fn build_stop_record_response(request_id: &str, output_path: &str) -> nojson
     })
 }
 
-fn format_timecode(duration: std::time::Duration) -> String {
+pub(crate) fn format_timecode(duration: std::time::Duration) -> String {
     let total_millis = duration.as_millis();
     let millis = total_millis % 1_000;
     let total_secs = total_millis / 1_000;
@@ -751,7 +751,7 @@ fn parse_sora_publisher_settings(
     Ok(())
 }
 
-fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_record_directory_path(record_directory: &str) -> Result<PathBuf, String> {
     std::path::absolute(record_directory)
         .map_err(|e| format!("Failed to resolve absolute record directory path: {e}"))
 }
@@ -806,6 +806,15 @@ fn build_get_hls_status_as_output_response(
 
 /// HLS 出力の設定をパースして registry に保存する。
 /// 省略されたフィールドは既存値を維持する。
+/// HLS 設定をパースして input_registry に適用する。
+/// coordinator から呼び出し可能。
+pub(crate) fn parse_and_apply_hls_settings(
+    output_settings: &nojson::RawJsonValue<'_, '_>,
+    input_registry: &mut ObswsInputRegistry,
+) -> Result<(), String> {
+    parse_hls_settings(*output_settings, input_registry)
+}
+
 fn parse_hls_settings(
     output_settings: nojson::RawJsonValue<'_, '_>,
     input_registry: &mut ObswsInputRegistry,
@@ -1036,6 +1045,15 @@ fn build_get_dash_status_as_output_response(
 
 /// MPEG-DASH 出力の設定をパースして registry に保存する。
 /// 省略されたフィールドは既存値を維持する。
+/// DASH 設定をパースして input_registry に適用する。
+/// coordinator から呼び出し可能。
+pub(crate) fn parse_and_apply_dash_settings(
+    output_settings: &nojson::RawJsonValue<'_, '_>,
+    input_registry: &mut ObswsInputRegistry,
+) -> Result<(), String> {
+    parse_dash_settings(*output_settings, input_registry)
+}
+
 fn parse_dash_settings(
     output_settings: nojson::RawJsonValue<'_, '_>,
     input_registry: &mut ObswsInputRegistry,
