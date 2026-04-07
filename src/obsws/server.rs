@@ -158,7 +158,9 @@ pub async fn run_server(
     );
 
     // state file から読み込んだ設定を反映する
+    let mut state_file_outputs = None;
     if let Some(state) = loaded_state {
+        state_file_outputs = state.outputs;
         if let Some(stream) = &state.stream {
             input_registry.set_stream_service_settings(stream.to_stream_service_settings());
         }
@@ -267,6 +269,11 @@ pub async fn run_server(
             #[cfg(feature = "player")]
             player_media_tx,
         );
+    // state file に outputs セクションがある場合は復元する
+    if let Some(state_outputs) = state_file_outputs {
+        actor.outputs =
+            crate::obsws::coordinator::output_dynamic::restore_outputs_from_state(state_outputs);
+    }
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());
     #[cfg(feature = "player")]

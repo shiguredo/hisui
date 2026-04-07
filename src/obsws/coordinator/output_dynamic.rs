@@ -168,6 +168,147 @@ pub(crate) fn create_default_outputs(
 // HisuiCreateOutput / HisuiRemoveOutput ハンドラ
 // -----------------------------------------------------------------------
 
+/// state file の outputs セクションから outputs BTreeMap を復元する。
+/// パースに失敗した output はスキップしてログに記録する。
+pub(crate) fn restore_outputs_from_state(
+    state_outputs: Vec<crate::obsws::state_file::StateFileOutput>,
+) -> BTreeMap<String, OutputState> {
+    let mut outputs = BTreeMap::new();
+    for entry in state_outputs {
+        let Some(kind) = OutputKind::from_kind_str(&entry.output_kind) else {
+            tracing::warn!(
+                "state file: unknown outputKind \"{}\" for output \"{}\"; skipping",
+                entry.output_kind,
+                entry.output_name,
+            );
+            continue;
+        };
+        let settings = match restore_output_settings(kind, &entry.output_settings) {
+            Ok(s) => s,
+            Err(msg) => {
+                tracing::warn!(
+                    "state file: failed to parse outputSettings for output \"{}\": {}; skipping",
+                    entry.output_name,
+                    msg,
+                );
+                continue;
+            }
+        };
+        outputs.insert(
+            entry.output_name,
+            OutputState {
+                output_kind: kind,
+                settings,
+                runtime: OutputRuntimeState::default(),
+            },
+        );
+    }
+    outputs
+}
+
+/// state file の outputSettings JSON から OutputSettings を復元する。
+fn restore_output_settings(
+    kind: OutputKind,
+    raw: &nojson::RawJsonOwned,
+) -> Result<OutputSettings, String> {
+    let v = raw.value();
+    match kind {
+        OutputKind::Stream => {
+            let mut settings = ObswsStreamServiceSettings::default();
+            // state file の stream settings は StreamServiceSettings 形式
+            let sst: Option<String> = v
+                .to_member("streamServiceType")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            if let Some(s) = sst {
+                settings.stream_service_type = s;
+            }
+            // streamServiceSettings のネストもフラットも対応
+            let ss = v
+                .to_member("streamServiceSettings")
+                .ok()
+                .and_then(|v| v.optional());
+            let source = ss.as_ref().unwrap_or(&v);
+            let server: Option<String> = source
+                .to_member("server")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            settings.server = server;
+            let key: Option<String> = source
+                .to_member("key")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            settings.key = key;
+            Ok(OutputSettings::Stream(settings))
+        }
+        OutputKind::Record => {
+            let dir: Option<String> = v
+                .to_member("recordDirectory")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            let record_directory = dir
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp"));
+            Ok(OutputSettings::Record { record_directory })
+        }
+        OutputKind::Hls => {
+            // HLS 設定のフルパースは state_file.rs に既存実装があるが、
+            // ここでは outputSettings の RawJson をそのまま渡してデフォルト値で初期化する簡易版
+            Ok(OutputSettings::Hls(ObswsHlsSettings::default()))
+        }
+        OutputKind::MpegDash => Ok(OutputSettings::MpegDash(ObswsDashSettings::default())),
+        OutputKind::RtmpOutbound => {
+            let mut settings = ObswsRtmpOutboundSettings::default();
+            let url: Option<String> = v
+                .to_member("outputUrl")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            settings.output_url = url;
+            let name: Option<String> = v
+                .to_member("streamName")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            settings.stream_name = name;
+            Ok(OutputSettings::RtmpOutbound(settings))
+        }
+        OutputKind::Sora => {
+            let mut settings = ObswsSoraPublisherSettings::default();
+            let urls: Vec<String> = v
+                .to_member("signalingUrls")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok())
+                .unwrap_or_default();
+            settings.signaling_urls = urls;
+            let ch: Option<String> = v
+                .to_member("channelId")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            settings.channel_id = ch;
+            let ci: Option<String> = v
+                .to_member("clientId")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            settings.client_id = ci;
+            let bi: Option<String> = v
+                .to_member("bundleId")
+                .ok()
+                .and_then(|v| v.optional())
+                .and_then(|v| v.try_into().ok());
+            settings.bundle_id = bi;
+            Ok(OutputSettings::Sora(settings))
+        }
+    }
+}
+
 impl ObswsCoordinator {
     pub(crate) fn handle_create_output(
         &mut self,

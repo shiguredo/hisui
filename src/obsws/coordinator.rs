@@ -363,7 +363,10 @@ impl ObswsCoordinator {
             && let Some(path) = self.input_registry.state_file_path()
         {
             let path = path.to_path_buf();
-            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            let state = crate::obsws::state_file::build_state_from_registry(
+                &self.input_registry,
+                &self.outputs,
+            );
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -420,7 +423,10 @@ impl ObswsCoordinator {
             && let Some(path) = self.input_registry.state_file_path()
         {
             let path = path.to_path_buf();
-            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            let state = crate::obsws::state_file::build_state_from_registry(
+                &self.input_registry,
+                &self.outputs,
+            );
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
