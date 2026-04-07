@@ -2,6 +2,8 @@
 
 OBS WebSocket 仕様には存在しない、hisui が独自に追加したリクエスト一覧。
 
+hisui 固有リクエストは OBS WebSocket 標準の `requestType` と区別するため、すべて `Hisui` プレフィクスを付与する。
+
 ## WebRTC
 
 `obsdc` データチャネル経由でのみ利用可能。RequestBatch（op=8）には非対応。
