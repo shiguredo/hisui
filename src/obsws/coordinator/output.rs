@@ -41,7 +41,9 @@ impl OutputOperationOutcome {
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_start_stream_request(&mut self, request_id: &str) -> CommandResult {
-        let outcome = self.handle_start_stream("StartStream", request_id).await;
+        let outcome = self
+            .handle_start_stream("StartStream", request_id, "stream")
+            .await;
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
@@ -63,7 +65,9 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_stop_stream_request(&mut self, request_id: &str) -> CommandResult {
-        let outcome = self.handle_stop_stream("StopStream", request_id).await;
+        let outcome = self
+            .handle_stop_stream("StopStream", request_id, "stream")
+            .await;
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
@@ -85,11 +89,13 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_toggle_stream_request(&mut self, request_id: &str) -> CommandResult {
-        let was_active = self.input_registry.is_stream_active();
+        let was_active = self.outputs.get("stream").is_some_and(|o| o.runtime.active);
         let outcome = if was_active {
-            self.handle_stop_stream("ToggleStream", request_id).await
+            self.handle_stop_stream("ToggleStream", request_id, "stream")
+                .await
         } else {
-            self.handle_start_stream("ToggleStream", request_id).await
+            self.handle_start_stream("ToggleStream", request_id, "stream")
+                .await
         };
         let mut events = Vec::new();
         if outcome.success {
@@ -134,7 +140,9 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_start_record_request(&mut self, request_id: &str) -> CommandResult {
-        let outcome = self.handle_start_record("StartRecord", request_id).await;
+        let outcome = self
+            .handle_start_record("StartRecord", request_id, "record")
+            .await;
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
@@ -158,7 +166,9 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_stop_record_request(&mut self, request_id: &str) -> CommandResult {
-        let outcome = self.handle_stop_record("StopRecord", request_id).await;
+        let outcome = self
+            .handle_stop_record("StopRecord", request_id, "record")
+            .await;
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
@@ -182,11 +192,13 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_toggle_record_request(&mut self, request_id: &str) -> CommandResult {
-        let was_active = self.input_registry.is_record_active();
+        let was_active = self.outputs.get("record").is_some_and(|o| o.runtime.active);
         let outcome = if was_active {
-            self.handle_stop_record("ToggleRecord", request_id).await
+            self.handle_stop_record("ToggleRecord", request_id, "record")
+                .await
         } else {
-            self.handle_start_record("ToggleRecord", request_id).await
+            self.handle_start_record("ToggleRecord", request_id, "record")
+                .await
         };
         let mut events = Vec::new();
         if outcome.success {
@@ -250,7 +262,9 @@ impl ObswsCoordinator {
         };
         let (outcome, events) = match output_name.as_str() {
             "stream" => {
-                let outcome = self.handle_start_stream("StartOutput", request_id).await;
+                let outcome = self
+                    .handle_start_stream("StartOutput", request_id, "stream")
+                    .await;
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
@@ -271,7 +285,9 @@ impl ObswsCoordinator {
                 (outcome, events)
             }
             "record" => {
-                let outcome = self.handle_start_record("StartOutput", request_id).await;
+                let outcome = self
+                    .handle_start_record("StartOutput", request_id, "record")
+                    .await;
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
@@ -295,13 +311,13 @@ impl ObswsCoordinator {
             }
             "rtmp_outbound" => {
                 let outcome = self
-                    .handle_start_rtmp_outbound("StartOutput", request_id)
+                    .handle_start_rtmp_outbound("StartOutput", request_id, "rtmp_outbound")
                     .await;
                 (outcome, Vec::new())
             }
             "sora" => {
                 let outcome = self
-                    .handle_start_sora_publisher("StartOutput", request_id)
+                    .handle_start_sora_publisher("StartOutput", request_id, "sora")
                     .await;
                 (outcome, Vec::new())
             }
@@ -351,7 +367,9 @@ impl ObswsCoordinator {
         };
         let (outcome, events) = match output_name.as_str() {
             "stream" => {
-                let outcome = self.handle_stop_stream("StopOutput", request_id).await;
+                let outcome = self
+                    .handle_stop_stream("StopOutput", request_id, "stream")
+                    .await;
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
@@ -372,7 +390,9 @@ impl ObswsCoordinator {
                 (outcome, events)
             }
             "record" => {
-                let outcome = self.handle_stop_record("StopOutput", request_id).await;
+                let outcome = self
+                    .handle_stop_record("StopOutput", request_id, "record")
+                    .await;
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
@@ -396,13 +416,13 @@ impl ObswsCoordinator {
             }
             "rtmp_outbound" => {
                 let outcome = self
-                    .handle_stop_rtmp_outbound("StopOutput", request_id)
+                    .handle_stop_rtmp_outbound("StopOutput", request_id, "rtmp_outbound")
                     .await;
                 (outcome, Vec::new())
             }
             "sora" => {
                 let outcome = self
-                    .handle_stop_sora_publisher("StopOutput", request_id)
+                    .handle_stop_sora_publisher("StopOutput", request_id, "sora")
                     .await;
                 (outcome, Vec::new())
             }
@@ -452,11 +472,13 @@ impl ObswsCoordinator {
         };
         let (outcome, output_active_on_success, events) = match output_name.as_str() {
             "stream" => {
-                let was_active = self.input_registry.is_stream_active();
+                let was_active = self.outputs.get("stream").is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
-                    self.handle_stop_stream("ToggleOutput", request_id).await
+                    self.handle_stop_stream("ToggleOutput", request_id, "stream")
+                        .await
                 } else {
-                    self.handle_start_stream("ToggleOutput", request_id).await
+                    self.handle_start_stream("ToggleOutput", request_id, "stream")
+                        .await
                 };
                 let mut events = Vec::new();
                 if outcome.success {
@@ -495,11 +517,13 @@ impl ObswsCoordinator {
                 (outcome, !was_active, events)
             }
             "record" => {
-                let was_active = self.input_registry.is_record_active();
+                let was_active = self.outputs.get("record").is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
-                    self.handle_stop_record("ToggleOutput", request_id).await
+                    self.handle_stop_record("ToggleOutput", request_id, "record")
+                        .await
                 } else {
-                    self.handle_start_record("ToggleOutput", request_id).await
+                    self.handle_start_record("ToggleOutput", request_id, "record")
+                        .await
                 };
                 let mut events = Vec::new();
                 if outcome.success {
@@ -542,23 +566,26 @@ impl ObswsCoordinator {
                 (outcome, !was_active, events)
             }
             "rtmp_outbound" => {
-                let was_active = self.input_registry.is_rtmp_outbound_active();
+                let was_active = self
+                    .outputs
+                    .get("rtmp_outbound")
+                    .is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
-                    self.handle_stop_rtmp_outbound("ToggleOutput", request_id)
+                    self.handle_stop_rtmp_outbound("ToggleOutput", request_id, "rtmp_outbound")
                         .await
                 } else {
-                    self.handle_start_rtmp_outbound("ToggleOutput", request_id)
+                    self.handle_start_rtmp_outbound("ToggleOutput", request_id, "rtmp_outbound")
                         .await
                 };
                 (outcome, !was_active, Vec::new())
             }
             "sora" => {
-                let was_active = self.input_registry.is_sora_publisher_active();
+                let was_active = self.outputs.get("sora").is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
-                    self.handle_stop_sora_publisher("ToggleOutput", request_id)
+                    self.handle_stop_sora_publisher("ToggleOutput", request_id, "sora")
                         .await
                 } else {
-                    self.handle_start_sora_publisher("ToggleOutput", request_id)
+                    self.handle_start_sora_publisher("ToggleOutput", request_id, "sora")
                         .await
                 };
                 (outcome, !was_active, Vec::new())

@@ -95,6 +95,9 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "HisuiListSoraSourceTracks",
     "HisuiAttachSoraSourceTrack",
     "HisuiDetachSoraSourceTrack",
+    // Output 管理
+    "HisuiCreateOutput",
+    "HisuiRemoveOutput",
 ];
 
 pub fn build_get_version_response(

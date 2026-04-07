@@ -5,61 +5,44 @@ use std::time::Duration;
 
 use super::ObswsCoordinator;
 use super::output::{OutputOperationOutcome, terminate_and_wait, wait_or_terminate};
+use super::output_dynamic::{OutputRun, OutputSettings};
 
 impl ObswsCoordinator {
+    /// 指定された output_name の record output を開始する。
     pub(crate) async fn handle_start_record(
         &mut self,
         request_type: &str,
         request_id: &str,
+        output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::input_registry::{
-            ActivateRecordError, ObswsRecordRun, ObswsRecordTrackRun,
-        };
+        use crate::obsws::input_registry::{ObswsRecordRun, ObswsRecordTrackRun};
         use std::time::{SystemTime, UNIX_EPOCH};
-        let run_id = match self.input_registry.next_record_run_id() {
-            Ok(run_id) => run_id,
-            Err(_) => {
-                return OutputOperationOutcome::failure(
-                    crate::obsws::response::build_request_response_error(
-                        request_type,
-                        request_id,
-                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                        "Record run ID overflow",
-                    ),
-                );
-            }
+
+        // output の存在チェックと設定取得
+        let Some(output) = self.outputs.get(output_name) else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ),
+            );
         };
-        let video = ObswsRecordTrackRun::new(
-            "record",
-            run_id,
-            "video",
-            &self.program_output.video_track_id,
-        );
-        let audio = ObswsRecordTrackRun::new(
-            "record",
-            run_id,
-            "audio",
-            &self.program_output.audio_track_id,
-        );
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_millis();
-        let output_path = self
-            .input_registry
-            .record_directory()
-            .join(format!("obsws-record-{timestamp}.mp4"));
-        let run = ObswsRecordRun {
-            video,
-            audio,
-            writer_processor_id: crate::ProcessorId::new(format!(
-                "output:record:mp4_writer:{run_id}"
-            )),
-            output_path: output_path.clone(),
+        let OutputSettings::Record { record_directory } = &output.settings else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Output is not a record output",
+                ),
+            );
         };
-        if let Err(ActivateRecordError::AlreadyActive) =
-            self.input_registry.activate_record(run.clone())
-        {
+        let record_directory = record_directory.clone();
+
+        // 稼働中チェック
+        if output.runtime.active {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -69,10 +52,54 @@ impl ObswsCoordinator {
                 ),
             );
         }
+
+        // run_id の発行
+        let run_id = self.next_output_run_id;
+        self.next_output_run_id = self.next_output_run_id.wrapping_add(1);
+
+        let video = ObswsRecordTrackRun::new(
+            output_name,
+            run_id,
+            "video",
+            &self.program_output.video_track_id,
+        );
+        let audio = ObswsRecordTrackRun::new(
+            output_name,
+            run_id,
+            "audio",
+            &self.program_output.audio_track_id,
+        );
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis();
+        let output_path = record_directory.join(format!("obsws-record-{timestamp}.mp4"));
+        let run = ObswsRecordRun {
+            video,
+            audio,
+            writer_processor_id: crate::ProcessorId::new(format!(
+                "output:{output_name}:mp4_writer:{run_id}"
+            )),
+            output_path: output_path.clone(),
+        };
+
+        // ランタイム状態を active にする
+        if let Some(output) = self.outputs.get_mut(output_name) {
+            output.runtime.active = true;
+            output.runtime.started_at = Some(std::time::Instant::now());
+            output.runtime.run = Some(OutputRun::Record(run.clone()));
+        }
+
+        // 録画ディレクトリの作成
         if let Some(parent) = output_path.parent()
             && let Err(e) = std::fs::create_dir_all(parent)
         {
-            self.input_registry.deactivate_record();
+            // ロールバック
+            if let Some(output) = self.outputs.get_mut(output_name) {
+                output.runtime.active = false;
+                output.runtime.started_at = None;
+                output.runtime.run = None;
+            }
             let error_comment = format!("Failed to create record directory: {e}");
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -83,8 +110,14 @@ impl ObswsCoordinator {
                 ),
             );
         }
+
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            self.input_registry.deactivate_record();
+            // ロールバック
+            if let Some(output) = self.outputs.get_mut(output_name) {
+                output.runtime.active = false;
+                output.runtime.started_at = None;
+                output.runtime.run = None;
+            }
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -98,7 +131,12 @@ impl ObswsCoordinator {
         if let Err(e) =
             start_record_processors(pipeline_handle, &output_path, &run, frame_rate).await
         {
-            self.input_registry.deactivate_record();
+            // ロールバック
+            if let Some(output) = self.outputs.get_mut(output_name) {
+                output.runtime.active = false;
+                output.runtime.started_at = None;
+                output.runtime.run = None;
+            }
             let _ = stop_processors_staged_record(pipeline_handle, &run).await;
             let error_comment = format!("Failed to start record: {}", e.display());
             return OutputOperationOutcome::failure(
@@ -117,23 +155,31 @@ impl ObswsCoordinator {
         )
     }
 
+    /// 指定された output_name の record output を停止する。
     pub(crate) async fn handle_stop_record(
         &mut self,
         request_type: &str,
         request_id: &str,
+        output_name: &str,
     ) -> OutputOperationOutcome {
-        let run = match self.input_registry.record_run() {
-            Some(run) => run.clone(),
-            None => {
-                return OutputOperationOutcome::failure(
-                    crate::obsws::response::build_request_response_error(
-                        request_type,
-                        request_id,
-                        crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                        "Record is not active",
-                    ),
-                );
-            }
+        // output から run を取得
+        let run = self
+            .outputs
+            .get(output_name)
+            .and_then(|o| o.runtime.run.as_ref())
+            .and_then(|r| match r {
+                OutputRun::Record(run) => Some(run.clone()),
+                _ => None,
+            });
+        let Some(run) = run else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Record is not active",
+                ),
+            );
         };
         let output_path = run.output_path.display().to_string();
         if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
@@ -143,7 +189,12 @@ impl ObswsCoordinator {
             // MP4 ファイルの finalize を優先し、クライアントには成功を返す。
             tracing::warn!("failed to stop record processors: {}", e.display());
         }
-        self.input_registry.deactivate_record();
+        // ランタイム状態をリセット
+        if let Some(output) = self.outputs.get_mut(output_name) {
+            output.runtime.active = false;
+            output.runtime.started_at = None;
+            output.runtime.run = None;
+        }
         OutputOperationOutcome::success(
             crate::obsws::response::build_stop_record_response(request_id, &output_path),
             Some(output_path),

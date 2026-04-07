@@ -61,16 +61,50 @@ impl ObswsCoordinator {
     // --- Sora Publisher 操作 ---
     // `sora` は OBS の `stream` を拡張したものではなく、Program 出力の raw frame を
     // `sora-rust-sdk` に直接渡す専用 Output として扱う。
-    // 将来的に `stream` を多プロトコル化する余地はあるが、現時点では OBS 互換の
-    // 意味を保つため `stream` と `sora` を分離している。
 
+    /// 指定された output_name の sora publisher output を開始する。
     pub(crate) async fn handle_start_sora_publisher(
         &mut self,
         request_type: &str,
         request_id: &str,
+        output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::input_registry::{ActivateSoraPublisherError, ObswsSoraPublisherRun};
-        let sora_settings = self.input_registry.sora_publisher_settings().clone();
+        use super::output_dynamic::{OutputRun, OutputSettings};
+        use crate::obsws::input_registry::ObswsSoraPublisherRun;
+
+        let Some(output) = self.outputs.get(output_name) else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ),
+            );
+        };
+        let OutputSettings::Sora(sora_settings) = &output.settings else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    "Output is not a sora output",
+                ),
+            );
+        };
+        let sora_settings = sora_settings.clone();
+
+        if output.runtime.active {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                    "Sora publisher is already active",
+                ),
+            );
+        }
+
         if sora_settings.signaling_urls.is_empty() {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -91,38 +125,28 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        let run_id = match self.input_registry.next_sora_publisher_run_id() {
-            Ok(run_id) => run_id,
-            Err(_) => {
-                return OutputOperationOutcome::failure(
-                    crate::obsws::response::build_request_response_error(
-                        request_type,
-                        request_id,
-                        crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                        "Sora publisher run ID overflow",
-                    ),
-                );
-            }
-        };
+
+        let run_id = self.next_output_run_id;
+        self.next_output_run_id = self.next_output_run_id.wrapping_add(1);
+
         let publisher_processor_id =
-            crate::ProcessorId::new(format!("output:sora_publisher:publisher:{run_id}"));
+            crate::ProcessorId::new(format!("output:{output_name}:publisher:{run_id}"));
         let run = ObswsSoraPublisherRun {
             publisher_processor_id: publisher_processor_id.clone(),
         };
-        if let Err(ActivateSoraPublisherError::AlreadyActive) =
-            self.input_registry.activate_sora_publisher(run.clone())
-        {
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
-                    "Sora publisher is already active",
-                ),
-            );
+
+        if let Some(output) = self.outputs.get_mut(output_name) {
+            output.runtime.active = true;
+            output.runtime.started_at = Some(std::time::Instant::now());
+            output.runtime.run = Some(OutputRun::Sora(run.clone()));
         }
+
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
-            self.input_registry.deactivate_sora_publisher();
+            if let Some(output) = self.outputs.get_mut(output_name) {
+                output.runtime.active = false;
+                output.runtime.started_at = None;
+                output.runtime.run = None;
+            }
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -148,7 +172,11 @@ impl ObswsCoordinator {
         )
         .await
         {
-            self.input_registry.deactivate_sora_publisher();
+            if let Some(output) = self.outputs.get_mut(output_name) {
+                output.runtime.active = false;
+                output.runtime.started_at = None;
+                output.runtime.run = None;
+            }
             let error_comment = format!("Failed to start sora publisher: {}", e.display());
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -165,23 +193,32 @@ impl ObswsCoordinator {
         )
     }
 
+    /// 指定された output_name の sora publisher output を停止する。
     pub(crate) async fn handle_stop_sora_publisher(
         &mut self,
         request_type: &str,
         request_id: &str,
+        output_name: &str,
     ) -> OutputOperationOutcome {
-        let run = match self.input_registry.sora_publisher_run() {
-            Some(run) => run.clone(),
-            None => {
-                return OutputOperationOutcome::failure(
-                    crate::obsws::response::build_request_response_error(
-                        request_type,
-                        request_id,
-                        crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
-                        "Sora publisher is not active",
-                    ),
-                );
-            }
+        use super::output_dynamic::OutputRun;
+
+        let run = self
+            .outputs
+            .get(output_name)
+            .and_then(|o| o.runtime.run.as_ref())
+            .and_then(|r| match r {
+                OutputRun::Sora(run) => Some(run.clone()),
+                _ => None,
+            });
+        let Some(run) = run else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_NOT_RUNNING,
+                    "Sora publisher is not active",
+                ),
+            );
         };
         if let Some(pipeline_handle) = self.pipeline_handle.as_ref()
             && let Err(e) = terminate_and_wait(
@@ -192,7 +229,11 @@ impl ObswsCoordinator {
         {
             tracing::warn!("failed to stop sora publisher processor: {}", e.display());
         }
-        self.input_registry.deactivate_sora_publisher();
+        if let Some(output) = self.outputs.get_mut(output_name) {
+            output.runtime.active = false;
+            output.runtime.started_at = None;
+            output.runtime.run = None;
+        }
         OutputOperationOutcome::success(
             crate::obsws::response::build_stop_output_response(request_id),
             None,

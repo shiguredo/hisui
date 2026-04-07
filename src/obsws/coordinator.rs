@@ -17,6 +17,7 @@ pub use handle::ObswsCoordinatorHandle;
 mod input;
 mod output;
 mod output_dash;
+pub(crate) mod output_dynamic;
 mod output_hls;
 #[cfg(feature = "player")]
 mod output_player;
@@ -156,6 +157,10 @@ pub struct ObswsCoordinator {
     should_terminate: bool,
     /// 致命的エラー発生時にサーバーへ通知するための送信側
     shutdown_tx: tokio::sync::watch::Sender<bool>,
+    /// output の統一管理（outputName → 状態）
+    pub(crate) outputs: std::collections::BTreeMap<String, output_dynamic::OutputState>,
+    /// output の run_id カウンタ（全 output で共有）
+    pub(crate) next_output_run_id: u64,
     /// SoraSubscriber の状態管理（subscriberName → 状態）
     sora_subscribers: std::collections::BTreeMap<String, output_sora::SoraSubscriberState>,
     /// SoraSubscriber からのイベント受信チャネル
@@ -205,12 +210,15 @@ impl ObswsCoordinator {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
         };
+        let outputs = output_dynamic::create_default_outputs(&input_registry);
         let actor = Self {
             input_registry,
             program_output,
             pipeline_handle,
             command_rx,
             input_source_processors: std::collections::BTreeMap::new(),
+            outputs,
+            next_output_run_id: 0,
             obsws_event_tx: obsws_event_tx.clone(),
             bootstrap_event_tx: bootstrap_event_tx.clone(),
             should_terminate: false,
@@ -588,6 +596,14 @@ impl ObswsCoordinator {
                 &request_id,
                 request.request_data.as_ref(),
             ),
+            // --- Output 管理 ---
+            "HisuiCreateOutput" => {
+                self.handle_create_output(&request_type, &request_id, request.request_data.as_ref())
+            }
+            "HisuiRemoveOutput" => {
+                self.handle_remove_output(&request_type, &request_id, request.request_data.as_ref())
+                    .await
+            }
             // --- レジストリ状態変更なし ---
             "BroadcastCustomEvent" => {
                 self.handle_broadcast_custom_event(&request_id, request.request_data.as_ref())
@@ -904,6 +920,9 @@ fn is_state_persisted_request(request_type: &str) -> bool {
             | "SetSceneItemTransform"
             // transition override
             | "SetSceneSceneTransitionOverride"
+            // output 管理
+            | "HisuiCreateOutput"
+            | "HisuiRemoveOutput"
     )
 }
 
