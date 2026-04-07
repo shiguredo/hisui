@@ -22,7 +22,6 @@ use crate::obsws::protocol::{
 
 /// output インスタンスの状態
 pub(crate) struct OutputState {
-    #[expect(dead_code, reason = "Phase 6 の GetOutputList で使用予定")]
     pub(crate) output_kind: OutputKind,
     pub(crate) settings: OutputSettings,
     pub(crate) runtime: OutputRuntimeState,
@@ -70,7 +69,6 @@ impl OutputKind {
     }
 
     /// OBS WebSocket の outputKind 文字列に変換する
-    #[expect(dead_code, reason = "Phase 6 の GetOutputList で使用予定")]
     pub(crate) fn as_kind_str(self) -> &'static str {
         match self {
             Self::Stream => "rtmp_output",

@@ -605,6 +605,16 @@ impl ObswsCoordinator {
                 &request_id,
                 request.request_data.as_ref(),
             ),
+            // --- Output 読み取り ---
+            "GetOutputList" => {
+                let response = crate::obsws::response::build_get_output_list_response(
+                    &request_id,
+                    &self.outputs,
+                    #[cfg(feature = "player")]
+                    self.input_registry.is_player_active(),
+                );
+                self.build_result_from_response(response, Vec::new())
+            }
             // --- Output 管理 ---
             "HisuiCreateOutput" => {
                 self.handle_create_output(&request_type, &request_id, request.request_data.as_ref())

@@ -33,12 +33,6 @@ const OBSWS_PLAYER_OUTPUT_NAME: &str = "player";
 #[cfg(feature = "player")]
 const OBSWS_PLAYER_OUTPUT_KIND: &str = "player_output";
 
-#[derive(Debug, Clone, Copy)]
-struct ObswsOutputEntry {
-    output_name: &'static str,
-    output_kind: &'static str,
-}
-
 struct ParsedObswsS3Destination {
     bucket: String,
     prefix: String,
@@ -49,16 +43,6 @@ struct ParsedObswsS3Destination {
     secret_access_key: String,
     session_token: Option<String>,
     lifetime_days: Option<u32>,
-}
-
-impl nojson::DisplayJson for ObswsOutputEntry {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        nojson::object(|f| {
-            f.member("outputName", self.output_name)?;
-            f.member("outputKind", self.output_kind)
-        })
-        .fmt(f)
-    }
 }
 
 pub fn build_get_stream_service_settings_response(
@@ -132,41 +116,37 @@ pub fn build_get_stream_status_response(
     })
 }
 
-pub fn build_get_output_list_response(request_id: &str) -> nojson::RawJsonOwned {
-    #[cfg_attr(not(feature = "player"), expect(unused_mut))]
-    let mut outputs = vec![
-        ObswsOutputEntry {
-            output_name: OBSWS_STREAM_OUTPUT_NAME,
-            output_kind: OBSWS_STREAM_OUTPUT_KIND,
-        },
-        ObswsOutputEntry {
-            output_name: OBSWS_RECORD_OUTPUT_NAME,
-            output_kind: OBSWS_RECORD_OUTPUT_KIND,
-        },
-        ObswsOutputEntry {
-            output_name: OBSWS_RTMP_OUTBOUND_OUTPUT_NAME,
-            output_kind: OBSWS_RTMP_OUTBOUND_OUTPUT_KIND,
-        },
-        ObswsOutputEntry {
-            output_name: OBSWS_SORA_OUTPUT_NAME,
-            output_kind: OBSWS_SORA_OUTPUT_KIND,
-        },
-        ObswsOutputEntry {
-            output_name: OBSWS_HLS_OUTPUT_NAME,
-            output_kind: OBSWS_HLS_OUTPUT_KIND,
-        },
-        ObswsOutputEntry {
-            output_name: OBSWS_MPEG_DASH_OUTPUT_NAME,
-            output_kind: OBSWS_MPEG_DASH_OUTPUT_KIND,
-        },
-    ];
-    #[cfg(feature = "player")]
-    outputs.push(ObswsOutputEntry {
-        output_name: OBSWS_PLAYER_OUTPUT_NAME,
-        output_kind: OBSWS_PLAYER_OUTPUT_KIND,
-    });
+/// outputs BTreeMap から動的に output リストを構築する。
+pub(crate) fn build_get_output_list_response(
+    request_id: &str,
+    outputs: &std::collections::BTreeMap<
+        String,
+        crate::obsws::coordinator::output_dynamic::OutputState,
+    >,
+    #[cfg(feature = "player")] player_active: bool,
+) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetOutputList", request_id, |f| {
-        f.member("outputs", outputs.as_slice())
+        f.member(
+            "outputs",
+            nojson::array(|f| {
+                for (name, state) in outputs {
+                    f.element(nojson::object(|f| {
+                        f.member("outputName", name.as_str())?;
+                        f.member("outputKind", state.output_kind.as_kind_str())
+                    }))?;
+                }
+                #[cfg(feature = "player")]
+                {
+                    // player は outputs BTreeMap に含まれないため、別途追加する
+                    let _ = player_active;
+                    f.element(nojson::object(|f| {
+                        f.member("outputName", OBSWS_PLAYER_OUTPUT_NAME)?;
+                        f.member("outputKind", OBSWS_PLAYER_OUTPUT_KIND)
+                    }))?;
+                }
+                Ok(())
+            }),
+        )
     })
 }
 

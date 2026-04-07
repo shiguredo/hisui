@@ -384,7 +384,7 @@ pub fn handle_request_message_with_pipeline_handle(
             input_registry,
             pipeline_handle,
         ),
-        "GetOutputList" => crate::obsws::response::build_get_output_list_response(&request_id),
+        // GetOutputList は coordinator で処理する（outputs BTreeMap を参照するため）
         "GetOutputStatus" => crate::obsws::response::build_get_output_status_response(
             &request_id,
             request.request_data.as_ref(),
@@ -933,31 +933,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn handle_request_message_returns_get_output_list_response()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-output-list".to_owned()),
-            request_type: Some("GetOutputList".to_owned()),
-            request_data: None,
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-
-        let json = nojson::RawJson::parse(response.message.text())?;
-        let outputs = json
-            .value()
-            .to_path_member(&["d", "responseData", "outputs"])?
-            .required()?;
-        let output_names: Vec<String> = outputs
-            .to_array()?
-            .map(|output| output.to_member("outputName")?.required()?.try_into())
-            .collect::<Result<Vec<_>, _>>()?;
-        assert!(output_names.iter().any(|name| name == "stream"));
-        assert!(output_names.iter().any(|name| name == "record"));
-        Ok(())
-    }
+    // GetOutputList は coordinator 経由で処理されるため、message.rs レベルのテストは不要。
+    // session テスト側で検証する。
 
     #[test]
     fn handle_request_message_returns_get_output_status_response()
@@ -2261,29 +2238,7 @@ mod tests {
     // --- sora output テスト ---
 
     #[test]
-    fn get_output_list_includes_sora() -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-ol".to_owned()),
-            request_type: Some("GetOutputList".to_owned()),
-            request_data: None,
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-
-        let json = nojson::RawJson::parse(response.message.text())?;
-        let outputs = json
-            .value()
-            .to_path_member(&["d", "responseData", "outputs"])?
-            .required()?;
-        let output_names: Vec<String> = outputs
-            .to_array()?
-            .map(|output| output.to_member("outputName")?.required()?.try_into())
-            .collect::<Result<Vec<_>, _>>()?;
-        assert!(output_names.iter().any(|name| name == "sora"));
-        Ok(())
-    }
-
+    // get_output_list_includes_sora は coordinator 経由で処理されるため削除。
     #[test]
     fn set_and_get_sora_output_settings() -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
