@@ -2,8 +2,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
-    if !noargs::cmd("obsws")
-        .doc("OBS WebSocket 互換コマンド（実験的）")
+    if !noargs::cmd("server")
+        .doc("OBS WebSocket 互換サーバーコマンド")
         .take(args)
         .is_present()
     {
@@ -16,28 +16,28 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
 fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
     let host: IpAddr = noargs::opt("host")
         .ty("HOST")
-        .env("HISUI_OBSWS_HOST")
+        .env("HISUI_SERVER_HOST")
         .doc("OBS WebSocket のリッスンアドレス")
         .default("127.0.0.1")
         .take(args)
         .then(|o| o.value().parse())?;
     let port: u16 = noargs::opt("port")
         .ty("PORT")
-        .env("HISUI_OBSWS_PORT")
+        .env("HISUI_SERVER_PORT")
         .doc("OBS WebSocket のリッスンポート")
         .default("4455")
         .take(args)
         .then(|o| o.value().parse())?;
     let password: Option<String> = noargs::opt("password")
         .ty("PASSWORD")
-        .env("HISUI_OBSWS_PASSWORD")
+        .env("HISUI_SERVER_PASSWORD")
         .doc("OBS WebSocket の接続パスワード")
         .take(args)
         .present_and_then(|o| o.value().parse())?;
     let default_record_dir: Option<PathBuf> = noargs::opt("default-record-dir")
         .ty("PATH")
         .env("HISUI_DEFAULT_RECORD_DIR")
-        .doc("obsws の録画先ディレクトリ初期値")
+        .doc("server の録画先ディレクトリ初期値")
         .take(args)
         .present_and_then(|o| o.value().parse())?;
     let ui: bool = noargs::flag("ui")
@@ -78,29 +78,29 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .present_and_then(|o| o.value().parse())?;
     let canvas_width: crate::types::EvenUsize = noargs::opt("canvas-width")
         .ty("WIDTH")
-        .env("HISUI_OBSWS_CANVAS_WIDTH")
+        .env("HISUI_SERVER_CANVAS_WIDTH")
         .doc("映像ミキサーのキャンバス幅（偶数のみ）")
         .default("1920")
         .take(args)
         .then(|o| o.value().parse())?;
     let canvas_height: crate::types::EvenUsize = noargs::opt("canvas-height")
         .ty("HEIGHT")
-        .env("HISUI_OBSWS_CANVAS_HEIGHT")
+        .env("HISUI_SERVER_CANVAS_HEIGHT")
         .doc("映像ミキサーのキャンバス高さ（偶数のみ）")
         .default("1080")
         .take(args)
         .then(|o| o.value().parse())?;
     let frame_rate: crate::video::FrameRate = noargs::opt("frame-rate")
         .ty("FRAME_RATE")
-        .env("HISUI_OBSWS_FRAME_RATE")
+        .env("HISUI_SERVER_FRAME_RATE")
         .doc("映像のフレームレート")
         .default("30")
         .take(args)
         .then(|o| o.value().parse())?;
     let state_file: Option<PathBuf> = noargs::opt("state-file")
         .ty("PATH")
-        .env("HISUI_OBSWS_STATE_FILE")
-        .doc("obsws の設定永続化用 state file のパス")
+        .env("HISUI_SERVER_STATE_FILE")
+        .doc("server の設定永続化用 state file のパス")
         .take(args)
         .present_and_then(|o| o.value().parse())?;
 

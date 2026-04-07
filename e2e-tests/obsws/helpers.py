@@ -1,4 +1,4 @@
-"""obsws e2e テストの共有ヘルパー・定数・補助クラス"""
+"""server (OBS WebSocket 互換) e2e テストの共有ヘルパー・定数・補助クラス"""
 
 import asyncio
 import base64
@@ -27,7 +27,7 @@ OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED = 1 << 19
 
 
 class ObswsServer:
-    """obsws サブコマンドプロセスを管理するテスト補助クラス"""
+    """server サブコマンドプロセスを管理するテスト補助クラス"""
 
     def __init__(
         self,
@@ -67,11 +67,11 @@ class ObswsServer:
 
     def start(self):
         if self._process is not None:
-            raise RuntimeError("obsws server is already started")
+            raise RuntimeError("server is already started")
         if (self.https_cert_path is None) != (self.https_key_path is None):
             raise ValueError("https_cert_path and https_key_path must be provided together")
 
-        args = ["--verbose", "--experimental", "obsws"]
+        args = ["--verbose", "server"]
         env = os.environ.copy()
         openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
@@ -84,14 +84,14 @@ class ObswsServer:
                 raise ValueError(
                     "https_cert_path/https_key_path is not supported with use_env=True"
                 )
-            env["HISUI_OBSWS_HOST"] = self.host
-            env["HISUI_OBSWS_PORT"] = str(self.port)
+            env["HISUI_SERVER_HOST"] = self.host
+            env["HISUI_SERVER_PORT"] = str(self.port)
             if self.password is not None:
-                env["HISUI_OBSWS_PASSWORD"] = self.password
+                env["HISUI_SERVER_PASSWORD"] = self.password
             if self.default_record_dir is not None:
                 env["HISUI_DEFAULT_RECORD_DIR"] = str(self.default_record_dir)
             if self.state_file is not None:
-                env["HISUI_OBSWS_STATE_FILE"] = str(self.state_file)
+                env["HISUI_SERVER_STATE_FILE"] = str(self.state_file)
         else:
             args.extend(
                 [

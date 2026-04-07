@@ -83,9 +83,9 @@
   - @sile
 - [ADD] 依存ライブラリに shiguredo_webrtc 0.146.3 を追加する
   - @sile
-- [ADD] 実験的な `obsws` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
-  - `hisui obsws` で WebSocket サーバーを起動できる
-  - `hisui obsws --default-record-dir <PATH>` と `HISUI_DEFAULT_RECORD_DIR` で録画先ディレクトリの初期値を設定できる
+- [ADD] `server` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
+  - `hisui server` で WebSocket サーバーを起動できる
+  - `hisui server --default-record-dir <PATH>` と `HISUI_DEFAULT_RECORD_DIR` で録画先ディレクトリの初期値を設定できる
   - `--ui-remote-url` を指定した場合、ローカル endpoint 以外への GET リクエストを指定 URL にリバースプロキシする
   - `--https-cert-path` と `--https-key-path` を指定した場合、HTTPS で待ち受けできる
   - `obswebsocket.json` サブプロトコルでの接続を受け付ける

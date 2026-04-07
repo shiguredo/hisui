@@ -29,20 +29,13 @@ fn main() -> noargs::Result<()> {
         logger::init(tracing::level_filters::LevelFilter::WARN);
     };
 
-    // 実験的機能を有効にするかどうか
-    let experimental = noargs::flag("experimental")
-        .short('x')
-        .doc("実験的機能を有効にします")
-        .take(&mut args)
-        .is_present();
-
     // サブコマンドで分岐する
     let _ = hisui::subcommand_inspect::try_run(&mut args)?
         || hisui::subcommand_list_codecs::try_run(&mut args)?
         || hisui::sora::recording_subcommand_compose::try_run(&mut args)?
         || hisui::sora::recording_subcommand_vmaf::try_run(&mut args)?
         || hisui::sora::recording_subcommand_tune::try_run(&mut args)?
-        || (experimental && hisui::subcommand_obsws::try_run(&mut args)?);
+        || hisui::subcommand_obsws::try_run(&mut args)?;
 
     if let Some(help) = args.finish()? {
         print!("{help}");

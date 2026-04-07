@@ -114,10 +114,11 @@ Commands:
   compose     録画ファイルの合成を行います
   vmaf        VMAF を用いた映像エンコード品質の評価を行います
   tune        Optuna を用いた映像エンコードパラメーターの調整を行います
+  server      OBS WebSocket 互換サーバーコマンド
 
 Options:
   -h, --help         このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
       --version      バージョン番号を表示します
       --verbose      警告未満のログメッセージも出力します
-  -x, --experimental 実験的機能を有効にします
+
 ```

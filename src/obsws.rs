@@ -1,3 +1,5 @@
+// TODO: 現在このモジュールには OBS WebSocket プロトコルに関係ない処理も含まれているので、将来的に整理すること
+
 pub mod auth;
 pub mod coordinator;
 pub mod event;
