@@ -1,6 +1,13 @@
 //! output の統一管理。
 //! 全 output を名前付きインスタンスとして BTreeMap で管理し、
 //! HisuiCreateOutput / HisuiRemoveOutput で動的に追加・削除する。
+//!
+//! TODO: モジュール名・構成の整理
+//! - このモジュール名 `output_dynamic` は、全 output が動的管理に統一された現在では不適切。
+//!   リネーム候補: `output_registry`, `output_manager`, `output_instance` 等。
+//! - `input_registry` も実際には Input / Scene / SceneItem / Transition / グローバル設定を
+//!   管理しており「input 専用レジストリ」ではないため、命名の見直しが必要。
+//! - 両モジュールの責務と命名を合わせて検討すること。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
