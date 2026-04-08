@@ -150,7 +150,6 @@ pub async fn run_server(
         };
 
     let mut input_registry = ObswsInputRegistry::new(
-        effective_record_dir,
         canvas_width,
         canvas_height,
         frame_rate,
@@ -248,6 +247,7 @@ pub async fn run_server(
     let (mut actor, coordinator_handle, shutdown_rx) =
         crate::obsws::coordinator::ObswsCoordinator::new(
             input_registry,
+            effective_record_dir,
             program_output,
             Some(pipeline_handle.clone()),
             #[cfg(feature = "player")]

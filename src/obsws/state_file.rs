@@ -1349,21 +1349,6 @@ pub(crate) fn build_state_from_registry(
 ) -> ObswsStateFile {
     use crate::obsws::coordinator::output_dynamic::OutputSettings;
 
-    // 旧形式のフィールドも引き続き書き出す（後方互換のため）
-    let settings = registry.stream_service_settings();
-    let stream = Some(ObswsStateFileStream {
-        stream_service_type: settings.stream_service_type.clone(),
-        server: settings.server.clone(),
-        key: settings.key.clone(),
-    });
-    let record = Some(ObswsStateFileRecord {
-        record_directory: registry.record_directory().to_path_buf(),
-    });
-    let rtmp_outbound = Some(registry.rtmp_outbound_settings().clone());
-    let sora = Some(registry.sora_publisher_settings().clone());
-    let hls = Some(registry.hls_settings().clone());
-    let dash = Some(registry.dash_settings().clone());
-
     // outputs BTreeMap から outputs セクションを構築する
     let outputs = {
         let mut output_list = Vec::new();
@@ -1474,12 +1459,12 @@ pub(crate) fn build_state_from_registry(
     let next_scene_item_id = Some(registry.next_scene_item_id);
 
     ObswsStateFile {
-        stream,
-        record,
-        rtmp_outbound,
-        sora,
-        hls,
-        dash,
+        stream: None,
+        record: None,
+        rtmp_outbound: None,
+        sora: None,
+        hls: None,
+        dash: None,
         outputs,
         scenes,
         inputs,

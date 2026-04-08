@@ -188,6 +188,7 @@ impl ObswsCoordinator {
     /// サーバーの accept loop はこれを監視して graceful shutdown を行う。
     pub fn new(
         input_registry: ObswsInputRegistry,
+        record_directory: std::path::PathBuf,
         program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
         #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
@@ -210,7 +211,7 @@ impl ObswsCoordinator {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
         };
-        let outputs = output_dynamic::create_default_outputs(&input_registry);
+        let outputs = output_dynamic::create_default_outputs(record_directory);
         let actor = Self {
             input_registry,
             program_output,

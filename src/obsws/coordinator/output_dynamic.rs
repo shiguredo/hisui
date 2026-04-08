@@ -113,16 +113,14 @@ pub(crate) enum OutputRun {
 // -----------------------------------------------------------------------
 
 /// 起動時のデフォルト output を生成する。
-/// input_registry の既存設定を初期値として使用する。
-pub(crate) fn create_default_outputs(
-    registry: &crate::obsws::input_registry::ObswsInputRegistry,
-) -> BTreeMap<String, OutputState> {
+/// 各 output 設定はデフォルト値で初期化する。
+pub(crate) fn create_default_outputs(record_directory: PathBuf) -> BTreeMap<String, OutputState> {
     let mut outputs = BTreeMap::new();
     outputs.insert(
         "stream".to_owned(),
         OutputState {
             output_kind: OutputKind::Stream,
-            settings: OutputSettings::Stream(registry.stream_service_settings().clone()),
+            settings: OutputSettings::Stream(ObswsStreamServiceSettings::default()),
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -130,9 +128,7 @@ pub(crate) fn create_default_outputs(
         "record".to_owned(),
         OutputState {
             output_kind: OutputKind::Record,
-            settings: OutputSettings::Record {
-                record_directory: registry.record_directory().to_path_buf(),
-            },
+            settings: OutputSettings::Record { record_directory },
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -140,7 +136,7 @@ pub(crate) fn create_default_outputs(
         "rtmp_outbound".to_owned(),
         OutputState {
             output_kind: OutputKind::RtmpOutbound,
-            settings: OutputSettings::RtmpOutbound(registry.rtmp_outbound_settings().clone()),
+            settings: OutputSettings::RtmpOutbound(ObswsRtmpOutboundSettings::default()),
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -148,7 +144,7 @@ pub(crate) fn create_default_outputs(
         "sora".to_owned(),
         OutputState {
             output_kind: OutputKind::Sora,
-            settings: OutputSettings::Sora(registry.sora_publisher_settings().clone()),
+            settings: OutputSettings::Sora(ObswsSoraPublisherSettings::default()),
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -156,7 +152,7 @@ pub(crate) fn create_default_outputs(
         "hls".to_owned(),
         OutputState {
             output_kind: OutputKind::Hls,
-            settings: OutputSettings::Hls(registry.hls_settings().clone()),
+            settings: OutputSettings::Hls(ObswsHlsSettings::default()),
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -164,7 +160,7 @@ pub(crate) fn create_default_outputs(
         "mpeg_dash".to_owned(),
         OutputState {
             output_kind: OutputKind::MpegDash,
-            settings: OutputSettings::MpegDash(registry.dash_settings().clone()),
+            settings: OutputSettings::MpegDash(ObswsDashSettings::default()),
             runtime: OutputRuntimeState::default(),
         },
     );

@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::Instant;
 
 use nojson::DisplayJson as _;
 
@@ -818,55 +817,6 @@ impl nojson::DisplayJson for ObswsSceneItemIndexEntry {
 pub(crate) struct ObswsSceneState {
     pub(crate) scene_uuid: String,
     pub(crate) items: Vec<ObswsSceneItemState>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ObswsStreamRuntimeState {
-    pub(crate) active: bool,
-    pub(crate) started_at: Option<Instant>,
-    pub(crate) run: Option<ObswsStreamRun>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ObswsRtmpOutboundRuntimeState {
-    pub(crate) active: bool,
-    pub(crate) started_at: Option<Instant>,
-    pub(crate) run: Option<ObswsRtmpOutboundRun>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ObswsSoraPublisherRuntimeState {
-    pub(crate) active: bool,
-    pub(crate) started_at: Option<Instant>,
-    pub(crate) run: Option<ObswsSoraPublisherRun>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ObswsRecordRuntimeState {
-    pub(crate) active: bool,
-    pub(crate) started_at: Option<Instant>,
-    pub(crate) run: Option<ObswsRecordRun>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct ObswsHlsRuntimeState {
-    pub(crate) active: bool,
-    pub(crate) started_at: Option<Instant>,
-    pub(crate) run: Option<ObswsHlsRun>,
-    /// ABR マスタープレイリスト書き出しタスクの JoinHandle。
-    /// 出力停止時に abort() でキャンセルする。
-    pub(crate) master_playlist_task: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl Clone for ObswsHlsRuntimeState {
-    fn clone(&self) -> Self {
-        Self {
-            active: self.active,
-            started_at: self.started_at,
-            run: self.run.clone(),
-            master_playlist_task: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1939,30 +1889,6 @@ pub struct ObswsDashVariantRun {
     pub variant_path: String,
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct ObswsDashRuntimeState {
-    pub(crate) active: bool,
-    pub(crate) started_at: Option<Instant>,
-    pub(crate) run: Option<ObswsDashRun>,
-    /// ABR 結合 MPD 書き出しタスクの JoinHandle。
-    /// 出力停止時に abort() でキャンセルする。
-    pub(crate) combined_mpd_task: Option<tokio::task::JoinHandle<()>>,
-}
-
-impl Clone for ObswsDashRuntimeState {
-    fn clone(&self) -> Self {
-        Self {
-            active: self.active,
-            started_at: self.started_at,
-            run: self.run.clone(),
-            // JoinHandle は clone できないため、clone 時は None にする。
-            // ObswsInputRegistry の clone は coordinator の初期化時のみで、
-            // DASH 出力がアクティブな状態で clone されることはない。
-            combined_mpd_task: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsSoraPublisherSettings {
     // StartOutput 時に必須。登録時点では未指定も許容する。
@@ -2123,46 +2049,6 @@ pub(crate) struct InputIdOverflowError;
 /// scene item ID のオーバーフローを表す内部エラー型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SceneItemIdOverflowError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunIdOverflowError {
-    Stream,
-    Record,
-    RtmpOutbound,
-    SoraPublisher,
-    Hls,
-    MpegDash,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivateRtmpOutboundError {
-    AlreadyActive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivateSoraPublisherError {
-    AlreadyActive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivateStreamError {
-    AlreadyActive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivateRecordError {
-    AlreadyActive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivateHlsError {
-    AlreadyActive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivateDashError {
-    AlreadyActive,
-}
 
 /// SceneItem の検索時に発生するエラー。
 /// シーンが見つからない場合とシーンアイテムが見つからない場合を表す。

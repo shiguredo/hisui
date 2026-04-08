@@ -1,6 +1,6 @@
 use super::*;
 use crate::obsws::auth::build_authentication_response;
-use crate::obsws::input_registry::{ObswsInput, ObswsInputRegistry, ObswsStreamServiceSettings};
+use crate::obsws::input_registry::{ObswsInput, ObswsInputRegistry};
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
@@ -32,6 +32,7 @@ fn create_coordinator_handle(
     let program_output = test_program_output();
     let (actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
+        std::path::PathBuf::from("recordings-for-test"),
         program_output,
         None,
         #[cfg(feature = "player")]
@@ -56,6 +57,7 @@ fn create_coordinator_handle_with_player_channels(
     let program_output = test_program_output();
     let (actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
+        std::path::PathBuf::from("recordings-for-test"),
         program_output,
         pipeline_handle,
         player_command_tx,
@@ -92,9 +94,23 @@ fn create_coordinator_handle_with_pipeline(
     registry: ObswsInputRegistry,
     pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
+    create_coordinator_handle_with_pipeline_and_record_dir(
+        registry,
+        pipeline_handle,
+        std::path::PathBuf::from("recordings-for-test"),
+    )
+}
+
+/// パイプライン付きのランタイムハンドルを生成する（録画ディレクトリ指定）
+fn create_coordinator_handle_with_pipeline_and_record_dir(
+    registry: ObswsInputRegistry,
+    pipeline_handle: crate::MediaPipelineHandle,
+    record_directory: std::path::PathBuf,
+) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
     let (actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
+        record_directory,
         program_output,
         Some(pipeline_handle),
         #[cfg(feature = "player")]
@@ -109,6 +125,19 @@ fn create_coordinator_handle_with_pipeline(
 async fn create_initialized_coordinator_handle_with_pipeline(
     registry: ObswsInputRegistry,
     pipeline_handle: crate::MediaPipelineHandle,
+) -> crate::Result<crate::obsws::coordinator::ObswsCoordinatorHandle> {
+    create_initialized_coordinator_handle_with_pipeline_and_record_dir(
+        registry,
+        pipeline_handle,
+        std::path::PathBuf::from("recordings-for-test"),
+    )
+    .await
+}
+
+async fn create_initialized_coordinator_handle_with_pipeline_and_record_dir(
+    registry: ObswsInputRegistry,
+    pipeline_handle: crate::MediaPipelineHandle,
+    record_directory: std::path::PathBuf,
 ) -> crate::Result<crate::obsws::coordinator::ObswsCoordinatorHandle> {
     let scene_inputs = registry.list_current_program_scene_input_entries();
     let output_plan = crate::obsws::output_plan::build_composed_output_plan(
@@ -141,6 +170,7 @@ async fn create_initialized_coordinator_handle_with_pipeline(
 
     let (mut actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
         registry,
+        record_directory,
         program_output,
         Some(pipeline_handle),
         #[cfg(feature = "player")]
@@ -1565,7 +1595,6 @@ async fn stop_record_when_inactive_returns_error_response() {
 async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let mut registry = ObswsInputRegistry::new(
-        temp_dir.path().to_path_buf(),
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
@@ -1593,7 +1622,11 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let handle = create_coordinator_handle_with_pipeline(registry, pipeline_handle);
+    let handle = create_coordinator_handle_with_pipeline_and_record_dir(
+        registry,
+        pipeline_handle,
+        temp_dir.path().to_path_buf(),
+    );
     let mut session = ObswsSession::new(None, handle);
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
@@ -1644,7 +1677,6 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
 async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let mut registry = ObswsInputRegistry::new(
-        temp_dir.path().to_path_buf(),
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
@@ -1672,7 +1704,11 @@ async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() ->
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let handle = create_coordinator_handle_with_pipeline(registry, pipeline_handle);
+    let handle = create_coordinator_handle_with_pipeline_and_record_dir(
+        registry,
+        pipeline_handle,
+        temp_dir.path().to_path_buf(),
+    );
     let mut session = ObswsSession::new(None, handle);
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
@@ -1713,7 +1749,6 @@ async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() ->
 async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let mut registry = ObswsInputRegistry::new(
-        temp_dir.path().to_path_buf(),
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
@@ -1743,9 +1778,12 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let handle =
-        create_initialized_coordinator_handle_with_pipeline(registry, pipeline_handle.clone())
-            .await?;
+    let handle = create_initialized_coordinator_handle_with_pipeline_and_record_dir(
+        registry,
+        pipeline_handle.clone(),
+        temp_dir.path().to_path_buf(),
+    )
+    .await?;
     let mut session = ObswsSession::new(None, handle);
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
@@ -1790,7 +1828,6 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
 async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let registry = ObswsInputRegistry::new(
-        temp_dir.path().to_path_buf(),
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
@@ -1806,9 +1843,12 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
         .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
     assert!(started);
 
-    let handle =
-        create_initialized_coordinator_handle_with_pipeline(registry, pipeline_handle.clone())
-            .await?;
+    let handle = create_initialized_coordinator_handle_with_pipeline_and_record_dir(
+        registry,
+        pipeline_handle.clone(),
+        temp_dir.path().to_path_buf(),
+    )
+    .await?;
     let mut session = ObswsSession::new(None, handle);
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
@@ -1850,12 +1890,7 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
 
 #[tokio::test]
 async fn start_stream_with_no_inputs_succeeds() -> crate::Result<()> {
-    let mut registry = ObswsInputRegistry::new_for_test();
-    registry.set_stream_service_settings(ObswsStreamServiceSettings {
-        stream_service_type: "rtmp_custom".to_owned(),
-        server: Some("rtmp://127.0.0.1:1935/live".to_owned()),
-        key: Some("stream-no-inputs".to_owned()),
-    });
+    let registry = ObswsInputRegistry::new_for_test();
 
     let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
@@ -1873,6 +1908,23 @@ async fn start_stream_with_no_inputs_succeeds() -> crate::Result<()> {
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    // SetStreamServiceSettings で stream 設定を行う
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-stream-settings".to_owned()),
+            request_type: Some("SetStreamServiceSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"streamServiceType":"rtmp_custom","streamServiceSettings":{"server":"rtmp://127.0.0.1:1935/live","key":"stream-no-inputs"}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, _code) = parse_request_status(&text);
+    assert!(result);
 
     let start_action = session
         .handle_request(RequestMessage {
@@ -1948,11 +2000,6 @@ async fn start_record_with_multiple_video_inputs_builds_plan_successfully() {
 #[tokio::test]
 async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Result<()> {
     let mut registry = ObswsInputRegistry::new_for_test();
-    registry.set_stream_service_settings(ObswsStreamServiceSettings {
-        stream_service_type: "rtmp_custom".to_owned(),
-        server: Some("rtmp://127.0.0.1:1935/live".to_owned()),
-        key: Some("stream-main".to_owned()),
-    });
     for input_name in ["audio-file-1", "audio-file-2"] {
         let input = ObswsInput::from_kind_and_settings(
             "mp4_file_source",
@@ -1984,6 +2031,23 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    // SetStreamServiceSettings で stream 設定を行う
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-stream-settings".to_owned()),
+            request_type: Some("SetStreamServiceSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"streamServiceType":"rtmp_custom","streamServiceSettings":{"server":"rtmp://127.0.0.1:1935/live","key":"stream-main"}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, _code) = parse_request_status(&text);
+    assert!(result);
 
     let start_action = session
         .handle_request(RequestMessage {
@@ -2021,7 +2085,6 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
 async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let mut registry = ObswsInputRegistry::new(
-        temp_dir.path().to_path_buf(),
         crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
         crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
         crate::video::FrameRate::FPS_30,
@@ -2150,7 +2213,6 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
 async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let mut registry = ObswsInputRegistry::new(
-        temp_dir.path().to_path_buf(),
         crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
         crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
         crate::video::FrameRate::FPS_30,
@@ -2302,11 +2364,6 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
 async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
     // 複数映像入力は受理されるが、パイプラインがないため実行時エラーになる
     let mut registry = ObswsInputRegistry::new_for_test();
-    registry.set_stream_service_settings(ObswsStreamServiceSettings {
-        stream_service_type: "rtmp_custom".to_owned(),
-        server: Some("rtmp://127.0.0.1:1935/live".to_owned()),
-        key: Some("stream-main".to_owned()),
-    });
     for input_name in ["image-1", "image-2"] {
         let input = ObswsInput::from_kind_and_settings(
             "image_source",
@@ -2327,6 +2384,23 @@ async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
         .await
         .expect("identify must succeed");
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
+
+    // SetStreamServiceSettings で stream 設定を行う
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-stream-settings".to_owned()),
+            request_type: Some("SetStreamServiceSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"streamServiceType":"rtmp_custom","streamServiceSettings":{"server":"rtmp://127.0.0.1:1935/live","key":"stream-main"}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, _code) = parse_request_status(&text);
+    assert!(result);
 
     let action = session
         .handle_request(RequestMessage {
