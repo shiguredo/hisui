@@ -928,18 +928,7 @@ fn parse_output_settings(
         OutputKind::Stream => {
             let mut settings = ObswsStreamServiceSettings::default();
             if let Some(v) = &settings_value {
-                let server: Option<String> = v
-                    .to_member("server")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.server = server;
-                let key: Option<String> = v
-                    .to_member("key")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.key = key;
+                // streamServiceType はトップレベルから取得
                 let sst: Option<String> = v
                     .to_member("streamServiceType")
                     .ok()
@@ -948,6 +937,24 @@ fn parse_output_settings(
                 if let Some(s) = sst {
                     settings.stream_service_type = s;
                 }
+                // server / key は streamServiceSettings のネスト内またはトップレベルから取得
+                let ss = v
+                    .to_member("streamServiceSettings")
+                    .ok()
+                    .and_then(|v| v.optional());
+                let source = ss.as_ref().unwrap_or(v);
+                let server: Option<String> = source
+                    .to_member("server")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| v.try_into().ok());
+                settings.server = server;
+                let key: Option<String> = source
+                    .to_member("key")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| v.try_into().ok());
+                settings.key = key;
             }
             Ok(OutputSettings::Stream(settings))
         }
@@ -992,26 +999,32 @@ fn parse_output_settings(
         OutputKind::Sora => {
             let mut settings = ObswsSoraPublisherSettings::default();
             if let Some(v) = &settings_value {
-                let urls: Vec<String> = v
+                // soraSdkSettings のネスト内またはトップレベルから取得
+                let sdk = v
+                    .to_member("soraSdkSettings")
+                    .ok()
+                    .and_then(|v| v.optional());
+                let source = sdk.as_ref().unwrap_or(v);
+                let urls: Vec<String> = source
                     .to_member("signalingUrls")
                     .ok()
                     .and_then(|v| v.optional())
                     .and_then(|v| v.try_into().ok())
                     .unwrap_or_default();
                 settings.signaling_urls = urls;
-                let ch: Option<String> = v
+                let ch: Option<String> = source
                     .to_member("channelId")
                     .ok()
                     .and_then(|v| v.optional())
                     .and_then(|v| v.try_into().ok());
                 settings.channel_id = ch;
-                let ci: Option<String> = v
+                let ci: Option<String> = source
                     .to_member("clientId")
                     .ok()
                     .and_then(|v| v.optional())
                     .and_then(|v| v.try_into().ok());
                 settings.client_id = ci;
-                let bi: Option<String> = v
+                let bi: Option<String> = source
                     .to_member("bundleId")
                     .ok()
                     .and_then(|v| v.optional())
