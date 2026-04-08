@@ -2771,4 +2771,42 @@ mod tests {
             crate::json::parse_str(&json_text).expect("roundtrip parse must succeed");
         assert!(parsed.persistent_data.is_none());
     }
+
+    #[test]
+    fn restore_sora_output_preserves_metadata() {
+        use crate::obsws::coordinator::output_dynamic::{
+            OutputSettings, restore_outputs_from_state,
+        };
+
+        let state_outputs = vec![StateFileOutput {
+            output_name: "sora_with_meta".to_owned(),
+            output_kind: "sora_webrtc_output".to_owned(),
+            output_settings: nojson::RawJsonOwned::parse(
+                r#"{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"],"channelId":"ch","metadata":{"key":"value"}}}"#,
+            )
+            .expect("settings json must be valid"),
+        }];
+        let outputs = restore_outputs_from_state(state_outputs);
+        let state = outputs
+            .get("sora_with_meta")
+            .expect("sora output must exist");
+        let OutputSettings::Sora(settings) = &state.settings else {
+            panic!("expected Sora settings");
+        };
+        assert_eq!(settings.signaling_urls, vec!["wss://example.com/signaling"]);
+        assert_eq!(settings.channel_id.as_deref(), Some("ch"));
+        let metadata = settings
+            .metadata
+            .as_ref()
+            .expect("metadata must be present");
+        let key: String = metadata
+            .value()
+            .to_member("key")
+            .expect("key access must succeed")
+            .required()
+            .expect("key must be present")
+            .try_into()
+            .expect("key must be string");
+        assert_eq!(key, "value");
+    }
 }

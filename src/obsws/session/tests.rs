@@ -3230,3 +3230,143 @@ async fn hisui_create_output_mp4_without_record_directory_uses_default() {
     assert!(result);
     assert_eq!(code, 100);
 }
+
+#[tokio::test]
+async fn hisui_create_output_hls_reads_destination_and_variants() {
+    // HisuiCreateOutput で hls_output を destination + variants 指定で作成し、設定が反映されることを確認する
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let create_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-hls".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"my_hls","outputKind":"hls_output","outputSettings":{"destination":{"type":"filesystem","directory":"/tmp/hls-test"},"variants":[{"videoBitrate":2000000,"audioBitrate":128000}],"segmentDuration":4.0}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(create_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    // GetOutputSettings で設定が反映されていることを確認する
+    let get_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-get-hls-settings".to_owned()),
+            request_type: Some("GetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"my_hls"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(get_action);
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid JSON");
+    let settings = json
+        .value()
+        .to_path_member(&["d", "responseData", "outputSettings"])
+        .expect("outputSettings access must succeed")
+        .required()
+        .expect("outputSettings must be present");
+    // destination が反映されていることを確認
+    let dest_type: String = settings
+        .to_path_member(&["destination", "type"])
+        .expect("destination.type access must succeed")
+        .required()
+        .expect("destination.type must be present")
+        .try_into()
+        .expect("destination.type must be string");
+    assert_eq!(dest_type, "filesystem");
+    // segmentDuration が反映されていることを確認
+    let segment_duration: f64 = settings
+        .to_member("segmentDuration")
+        .expect("segmentDuration access must succeed")
+        .required()
+        .expect("segmentDuration must be present")
+        .try_into()
+        .expect("segmentDuration must be f64");
+    assert!((segment_duration - 4.0).abs() < f64::EPSILON);
+    // variants の中身が反映されていることを確認
+    let variants = settings
+        .to_member("variants")
+        .expect("variants access must succeed")
+        .required()
+        .expect("variants must be present");
+    let variants_arr: Vec<_> = variants
+        .to_array()
+        .expect("variants must be array")
+        .collect();
+    assert_eq!(variants_arr.len(), 1);
+    let video_bitrate: i64 = variants_arr[0]
+        .to_member("videoBitrate")
+        .expect("videoBitrate access must succeed")
+        .required()
+        .expect("videoBitrate must be present")
+        .try_into()
+        .expect("videoBitrate must be i64");
+    assert_eq!(video_bitrate, 2_000_000);
+}
+
+#[tokio::test]
+async fn hisui_create_output_sora_with_metadata_preserves_it() {
+    // HisuiCreateOutput で sora_webrtc_output を metadata 付きで作成し、
+    // restore_outputs_from_state で復元後も metadata が残ることを確認する
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let create_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-sora-meta".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"sora_meta","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"],"channelId":"ch","metadata":{"key":"value"}}}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(create_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    // GetOutputSettings で metadata が反映されていることを確認する
+    let get_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-get-sora-meta".to_owned()),
+            request_type: Some("GetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"sora_meta"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(get_action);
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid JSON");
+    let metadata_key: String = json
+        .value()
+        .to_path_member(&[
+            "d",
+            "responseData",
+            "outputSettings",
+            "soraSdkSettings",
+            "metadata",
+            "key",
+        ])
+        .expect("metadata.key access must succeed")
+        .required()
+        .expect("metadata.key must be present")
+        .try_into()
+        .expect("metadata.key must be string");
+    assert_eq!(metadata_key, "value");
+}

@@ -729,6 +729,13 @@ fn restore_output_settings(
                 .and_then(|v| v.optional())
                 .and_then(|v| v.try_into().ok());
             settings.bundle_id = bi;
+            // metadata の復元（object のみ）
+            if let Ok(m) = source.to_member("metadata")
+                && let Some(v) = m.optional()
+                && v.kind().is_object()
+            {
+                settings.metadata = Some(v.extract().into_owned());
+            }
             Ok(OutputSettings::Sora(settings))
         }
     }
@@ -970,13 +977,26 @@ fn parse_output_settings(
             Ok(OutputSettings::Record { record_directory })
         }
         OutputKind::Hls => {
-            // HLS 設定はデフォルト値で初期化し、SetOutputSettings で後から変更可能
-            let settings = ObswsHlsSettings::default();
-            Ok(OutputSettings::Hls(settings))
+            let existing = ObswsHlsSettings::default();
+            if let Some(v) = &settings_value {
+                match crate::obsws::response::parse_hls_settings_update(v, &existing) {
+                    Ok(s) => Ok(OutputSettings::Hls(s)),
+                    Err(e) => Err(e),
+                }
+            } else {
+                Ok(OutputSettings::Hls(existing))
+            }
         }
         OutputKind::MpegDash => {
-            let settings = ObswsDashSettings::default();
-            Ok(OutputSettings::MpegDash(settings))
+            let existing = ObswsDashSettings::default();
+            if let Some(v) = &settings_value {
+                match crate::obsws::response::parse_dash_settings_update(v, &existing) {
+                    Ok(s) => Ok(OutputSettings::MpegDash(s)),
+                    Err(e) => Err(e),
+                }
+            } else {
+                Ok(OutputSettings::MpegDash(existing))
+            }
         }
         OutputKind::RtmpOutbound => {
             let mut settings = ObswsRtmpOutboundSettings::default();
@@ -1030,6 +1050,13 @@ fn parse_output_settings(
                     .and_then(|v| v.optional())
                     .and_then(|v| v.try_into().ok());
                 settings.bundle_id = bi;
+                // metadata の読み込み（object のみ）
+                if let Ok(m) = source.to_member("metadata")
+                    && let Some(v) = m.optional()
+                    && v.kind().is_object()
+                {
+                    settings.metadata = Some(v.extract().into_owned());
+                }
             }
             Ok(OutputSettings::Sora(settings))
         }

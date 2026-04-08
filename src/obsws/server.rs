@@ -139,10 +139,26 @@ pub async fn run_server(
                 ))
             })?;
             let state = crate::obsws::state_file::load_state_file(&abs_path)?;
+            // outputs セクションの record エントリから recordDirectory を取得する。
+            // なければ旧形式の record セクション、それもなければ CLI の既定値にフォールバック。
             let record_dir = state
-                .record
+                .outputs
                 .as_ref()
-                .map(|r| r.record_directory.clone())
+                .and_then(|outputs| {
+                    outputs
+                        .iter()
+                        .find(|o| o.output_kind == "mp4_output")
+                        .and_then(|o| {
+                            o.output_settings
+                                .value()
+                                .to_member("recordDirectory")
+                                .ok()
+                                .and_then(|v| v.optional())
+                                .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                                .map(std::path::PathBuf::from)
+                        })
+                })
+                .or_else(|| state.record.as_ref().map(|r| r.record_directory.clone()))
                 .unwrap_or(default_record_dir);
             (record_dir, Some(state), Some(abs_path))
         } else {
