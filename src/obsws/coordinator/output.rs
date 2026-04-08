@@ -700,7 +700,7 @@ impl ObswsCoordinator {
     }
 
     /// 動的に作成された output を kind に応じて停止する。
-    pub(crate) async fn stop_dynamic_output(
+    async fn stop_dynamic_output(
         &mut self,
         request_type: &str,
         request_id: &str,

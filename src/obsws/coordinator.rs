@@ -161,6 +161,8 @@ pub struct ObswsCoordinator {
     pub(crate) outputs: std::collections::BTreeMap<String, output_dynamic::OutputState>,
     /// output の run_id カウンタ（全 output で共有）
     pub(crate) next_output_run_id: u64,
+    /// デフォルトの録画ディレクトリ（HisuiCreateOutput で mp4_output の既定値に使用）
+    pub(crate) default_record_directory: std::path::PathBuf,
     /// SoraSubscriber の状態管理（subscriberName → 状態）
     sora_subscribers: std::collections::BTreeMap<String, output_sora::SoraSubscriberState>,
     /// SoraSubscriber からのイベント受信チャネル
@@ -211,7 +213,7 @@ impl ObswsCoordinator {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
         };
-        let outputs = output_dynamic::create_default_outputs(record_directory);
+        let outputs = output_dynamic::create_default_outputs(record_directory.clone());
         let actor = Self {
             input_registry,
             program_output,
@@ -220,6 +222,7 @@ impl ObswsCoordinator {
             input_source_processors: std::collections::BTreeMap::new(),
             outputs,
             next_output_run_id: 0,
+            default_record_directory: record_directory,
             obsws_event_tx: obsws_event_tx.clone(),
             bootstrap_event_tx: bootstrap_event_tx.clone(),
             should_terminate: false,
@@ -670,7 +673,6 @@ impl ObswsCoordinator {
             }
             "HisuiRemoveOutput" => {
                 self.handle_remove_output(&request_type, &request_id, request.request_data.as_ref())
-                    .await
             }
             // --- レジストリ状態変更なし ---
             "BroadcastCustomEvent" => {
@@ -959,15 +961,29 @@ impl ObswsCoordinator {
         let (active, duration) = output_dynamic::output_active_and_uptime(state);
         let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
         let output_timecode = crate::obsws::response::format_timecode(duration);
+        let stats = crate::obsws::response::collect_output_runtime_stats_from_outputs(
+            &self.outputs,
+            self.pipeline_handle.as_ref(),
+        );
+        // stream の場合は実測値を返す
+        let (output_bytes, skipped_frames, total_frames) = if output_name == "stream" {
+            (
+                stats.stream_output_bytes,
+                stats.stream_skipped_frames,
+                stats.stream_total_frames,
+            )
+        } else {
+            (0, 0, 0)
+        };
         crate::obsws::response::build_request_response_success(request_type, request_id, |f| {
             f.member("outputActive", active)?;
             f.member("outputReconnecting", false)?;
             f.member("outputTimecode", &output_timecode)?;
             f.member("outputDuration", output_duration)?;
             f.member("outputCongestion", 0.0)?;
-            f.member("outputBytes", 0)?;
-            f.member("outputSkippedFrames", 0)?;
-            f.member("outputTotalFrames", 0)
+            f.member("outputBytes", output_bytes)?;
+            f.member("outputSkippedFrames", skipped_frames)?;
+            f.member("outputTotalFrames", total_frames)
         })
     }
 
@@ -985,14 +1001,26 @@ impl ObswsCoordinator {
         let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
         let output_timecode = crate::obsws::response::format_timecode(duration);
         let output_path = output_dynamic::record_output_path(state).unwrap_or_default();
+        let stats = crate::obsws::response::collect_output_runtime_stats_from_outputs(
+            &self.outputs,
+            self.pipeline_handle.as_ref(),
+        );
+        // record の outputBytes は録画ファイルサイズ
+        let output_bytes = if active {
+            std::fs::metadata(&output_path)
+                .map(|m| m.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
         crate::obsws::response::build_request_response_success("GetRecordStatus", request_id, |f| {
             f.member("outputActive", active)?;
             f.member("outputTimecode", &output_timecode)?;
             f.member("outputDuration", output_duration)?;
             f.member("outputCongestion", 0.0)?;
-            f.member("outputBytes", 0)?;
-            f.member("outputSkippedFrames", 0)?;
-            f.member("outputTotalFrames", 0)?;
+            f.member("outputBytes", output_bytes)?;
+            f.member("outputSkippedFrames", stats.record_skipped_frames)?;
+            f.member("outputTotalFrames", stats.record_total_frames)?;
             f.member("outputPath", &output_path)
         })
     }
@@ -1019,7 +1047,16 @@ impl ObswsCoordinator {
             return crate::obsws::response::build_request_response_success(
                 "GetOutputStatus",
                 request_id,
-                |f| f.member("outputActive", active),
+                |f| {
+                    f.member("outputActive", active)?;
+                    f.member("outputReconnecting", false)?;
+                    f.member("outputTimecode", "00:00:00.000")?;
+                    f.member("outputDuration", 0)?;
+                    f.member("outputCongestion", 0.0)?;
+                    f.member("outputBytes", 0)?;
+                    f.member("outputSkippedFrames", 0)?;
+                    f.member("outputTotalFrames", 0)
+                },
             );
         }
         self.build_output_status_response("GetOutputStatus", request_id, &output_name)

@@ -798,7 +798,11 @@ impl ObswsCoordinator {
         }
 
         // outputSettings のパース（種別に応じたデフォルト値で初期化）
-        let settings = match parse_output_settings(output_kind, request_data) {
+        let settings = match parse_output_settings(
+            output_kind,
+            request_data,
+            &self.default_record_directory,
+        ) {
             Ok(s) => s,
             Err(msg) => {
                 return self.build_error_result(
@@ -827,7 +831,7 @@ impl ObswsCoordinator {
         self.build_result_from_response(response, Vec::new())
     }
 
-    pub(crate) async fn handle_remove_output(
+    pub(crate) fn handle_remove_output(
         &mut self,
         request_type: &str,
         request_id: &str,
@@ -864,18 +868,18 @@ impl ObswsCoordinator {
             );
         }
 
-        // 稼働中なら先に停止する
+        // 稼働中の output は削除できない（先に StopOutput で停止する必要がある）
         let is_active = self
             .outputs
             .get(&output_name)
             .is_some_and(|o| o.runtime.active);
         if is_active {
-            let outcome = self
-                .stop_dynamic_output(request_type, request_id, &output_name)
-                .await;
-            if !outcome.success {
-                return self.build_result_from_response(outcome.response_text, Vec::new());
-            }
+            return self.build_error_result(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
+                "Output is currently running. Stop it before removing.",
+            );
         }
 
         self.outputs.remove(&output_name);
@@ -911,6 +915,7 @@ fn parse_required_string(request_data: &nojson::RawJsonOwned, field: &str) -> Op
 fn parse_output_settings(
     kind: OutputKind,
     request_data: &nojson::RawJsonOwned,
+    default_record_directory: &std::path::Path,
 ) -> Result<OutputSettings, String> {
     let json = request_data.value();
     // outputSettings フィールドの取得（オプション）
@@ -954,7 +959,7 @@ fn parse_output_settings(
                 .and_then(|v| v.try_into().ok());
             let record_directory = record_directory
                 .map(PathBuf::from)
-                .ok_or("outputSettings with recordDirectory is required for mp4_output")?;
+                .unwrap_or_else(|| default_record_directory.to_path_buf());
             Ok(OutputSettings::Record { record_directory })
         }
         OutputKind::Hls => {
