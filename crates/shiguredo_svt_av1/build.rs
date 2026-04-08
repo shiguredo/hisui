@@ -63,6 +63,9 @@ fn main() {
         .arg("release")
         .arg("--static")
         .arg("--disable-lto") // LTO が有効だと Ubuntu でリンクに失敗する
+        // build.sh のデフォルトは enable-native（-march=native）で、ビルド環境の CPU 専用バイナリになる。
+        // 実行環境の CPU が古いと Illegal instruction (SIGILL) になるため無効にする。
+        .arg("--disable-native")
         .status()
         .is_ok_and(|status| status.success());
     if !success {

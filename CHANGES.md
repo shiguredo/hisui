@@ -11,6 +11,11 @@
 
 ## develop
 
+- [FIX] shiguredo_svt_av1 のビルド時に `--disable-native` を指定するようにする
+  - SVT-AV1 の `build.sh` のデフォルトは `--enable-native` (`-march=native`) で、ビルド環境の CPU 専用バイナリが生成される
+  - そのため、ビルド環境より古い CPU を持つ実行環境では Illegal instruction (SIGILL) で落ちる問題があった
+  - @voluntas
+
 ## 2025.3.1
 
 **リリース日**: 2025-11-27
