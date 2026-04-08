@@ -1053,10 +1053,16 @@ pub use output::*;
 pub use scene::*;
 pub use scene_item::*;
 
-pub(crate) fn collect_output_runtime_stats(
-    input_registry: &ObswsInputRegistry,
+/// outputs BTreeMap から output 統計情報を収集する。
+pub(crate) fn collect_output_runtime_stats_from_outputs(
+    outputs: &std::collections::BTreeMap<
+        String,
+        crate::obsws::coordinator::output_dynamic::OutputState,
+    >,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> ObswsOutputRuntimeStats {
+    use crate::obsws::coordinator::output_dynamic::OutputRun;
+
     let Some(pipeline_handle) = pipeline_handle else {
         return ObswsOutputRuntimeStats::default();
     };
@@ -1064,8 +1070,20 @@ pub(crate) fn collect_output_runtime_stats(
         return ObswsOutputRuntimeStats::default();
     };
 
-    let stream_total_frames = input_registry
-        .stream_run()
+    let stream_run = outputs.get("stream").and_then(|o| {
+        o.runtime.run.as_ref().and_then(|r| match r {
+            OutputRun::Stream(run) => Some(run),
+            _ => None,
+        })
+    });
+    let record_run = outputs.get("record").and_then(|o| {
+        o.runtime.run.as_ref().and_then(|r| match r {
+            OutputRun::Record(run) => Some(run),
+            _ => None,
+        })
+    });
+
+    let stream_total_frames = stream_run
         .map(|run| {
             find_counter_metric(
                 &entries,
@@ -1074,12 +1092,10 @@ pub(crate) fn collect_output_runtime_stats(
             )
         })
         .unwrap_or(0);
-    let stream_output_bytes = input_registry
-        .stream_run()
+    let stream_output_bytes = stream_run
         .map(|run| find_counter_metric(&entries, &run.publisher_processor_id, "total_sent_bytes"))
         .unwrap_or(0);
-    let stream_skipped_frames = input_registry
-        .stream_run()
+    let stream_skipped_frames = stream_run
         .map(|run| {
             find_counter_metric(
                 &entries,
@@ -1088,8 +1104,7 @@ pub(crate) fn collect_output_runtime_stats(
             )
         })
         .unwrap_or(0);
-    let (record_total_frames, record_skipped_frames) = input_registry
-        .record_run()
+    let (record_total_frames, record_skipped_frames) = record_run
         .map(|run| {
             (
                 find_counter_metric(

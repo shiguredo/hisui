@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use crate::obsws::input_registry::ObswsInputRegistry;
-
 #[cfg(feature = "player")]
 const OBSWS_PLAYER_OUTPUT_NAME: &str = "player";
 #[cfg(feature = "player")]
@@ -119,19 +117,19 @@ pub(crate) fn resolve_record_directory_path(record_directory: &str) -> Result<Pa
 
 /// HLS 出力の設定をパースして registry に保存する。
 /// 省略されたフィールドは既存値を維持する。
-/// HLS 設定をパースして input_registry に適用する。
-/// coordinator から呼び出し可能。
-pub(crate) fn parse_and_apply_hls_settings(
+/// HLS 設定をパースして新しい ObswsHlsSettings を返す。
+/// 省略されたフィールドは existing の値を維持する。
+pub(crate) fn parse_hls_settings_update(
     output_settings: &nojson::RawJsonValue<'_, '_>,
-    input_registry: &mut ObswsInputRegistry,
-) -> Result<(), String> {
-    parse_hls_settings(*output_settings, input_registry)
+    existing: &crate::obsws::input_registry::ObswsHlsSettings,
+) -> Result<crate::obsws::input_registry::ObswsHlsSettings, String> {
+    parse_hls_settings_inner(*output_settings, existing)
 }
 
-fn parse_hls_settings(
+fn parse_hls_settings_inner(
     output_settings: nojson::RawJsonValue<'_, '_>,
-    input_registry: &mut ObswsInputRegistry,
-) -> Result<(), String> {
+    existing: &crate::obsws::input_registry::ObswsHlsSettings,
+) -> Result<crate::obsws::input_registry::ObswsHlsSettings, String> {
     // destination オブジェクトのパース
     let destination: Option<crate::obsws::input_registry::HlsDestination> =
         if let Some(dest_value) = output_settings
@@ -298,37 +296,35 @@ fn parse_hls_settings(
     }
     let segment_format = match segment_format_str {
         Some(ref s) => s.parse::<crate::obsws::input_registry::HlsSegmentFormat>()?,
-        None => input_registry.hls_settings().segment_format,
+        None => existing.segment_format,
     };
 
-    let existing = input_registry.hls_settings().clone();
-    input_registry.set_hls_settings(crate::obsws::input_registry::ObswsHlsSettings {
-        destination: destination.or(existing.destination),
+    Ok(crate::obsws::input_registry::ObswsHlsSettings {
+        destination: destination.or(existing.destination.clone()),
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
         segment_format,
-        variants: variants.unwrap_or(existing.variants),
-    });
-    Ok(())
+        variants: variants.unwrap_or_else(|| existing.variants.clone()),
+    })
 }
 
 // --- MPEG-DASH 出力 ---
 
 /// MPEG-DASH 出力の設定をパースして registry に保存する。
 /// 省略されたフィールドは既存値を維持する。
-/// DASH 設定をパースして input_registry に適用する。
-/// coordinator から呼び出し可能。
-pub(crate) fn parse_and_apply_dash_settings(
+/// DASH 設定をパースして新しい ObswsDashSettings を返す。
+/// 省略されたフィールドは existing の値を維持する。
+pub(crate) fn parse_dash_settings_update(
     output_settings: &nojson::RawJsonValue<'_, '_>,
-    input_registry: &mut ObswsInputRegistry,
-) -> Result<(), String> {
-    parse_dash_settings(*output_settings, input_registry)
+    existing: &crate::obsws::input_registry::ObswsDashSettings,
+) -> Result<crate::obsws::input_registry::ObswsDashSettings, String> {
+    parse_dash_settings_inner(*output_settings, existing)
 }
 
-fn parse_dash_settings(
+fn parse_dash_settings_inner(
     output_settings: nojson::RawJsonValue<'_, '_>,
-    input_registry: &mut ObswsInputRegistry,
-) -> Result<(), String> {
+    existing: &crate::obsws::input_registry::ObswsDashSettings,
+) -> Result<crate::obsws::input_registry::ObswsDashSettings, String> {
     // destination オブジェクトのパース
     let destination: Option<crate::obsws::input_registry::DashDestination> =
         if let Some(dest_value) = output_settings
@@ -516,16 +512,14 @@ fn parse_dash_settings(
         return Err("maxRetainedSegments must be at least 1".to_owned());
     }
 
-    let existing = input_registry.dash_settings().clone();
-    input_registry.set_dash_settings(crate::obsws::input_registry::ObswsDashSettings {
-        destination: destination.or(existing.destination),
+    Ok(crate::obsws::input_registry::ObswsDashSettings {
+        destination: destination.or(existing.destination.clone()),
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
-        variants: variants.unwrap_or(existing.variants),
+        variants: variants.unwrap_or_else(|| existing.variants.clone()),
         video_codec: video_codec.unwrap_or(existing.video_codec),
         audio_codec: audio_codec.unwrap_or(existing.audio_codec),
-    });
-    Ok(())
+    })
 }
 
 fn parse_obsws_s3_destination(

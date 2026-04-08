@@ -158,24 +158,10 @@ pub async fn run_server(
     );
 
     // state file から読み込んだ設定を反映する
+    // output 設定は outputs セクションから復元するため、旧形式の個別 setter は不要
     let mut state_file_outputs = None;
     if let Some(state) = loaded_state {
         state_file_outputs = state.outputs;
-        if let Some(stream) = &state.stream {
-            input_registry.set_stream_service_settings(stream.to_stream_service_settings());
-        }
-        if let Some(settings) = state.rtmp_outbound {
-            input_registry.set_rtmp_outbound_settings(settings);
-        }
-        if let Some(settings) = state.sora {
-            input_registry.set_sora_publisher_settings(settings);
-        }
-        if let Some(settings) = state.hls {
-            input_registry.set_hls_settings(settings);
-        }
-        if let Some(settings) = state.dash {
-            input_registry.set_dash_settings(settings);
-        }
         // persistent data の復元
         if let Some(data) = state.persistent_data {
             input_registry.restore_persistent_data(data);

@@ -144,9 +144,9 @@ pub fn handle_request_message(
 
 pub fn handle_request_message_with_pipeline_handle(
     request: RequestMessage,
-    session_stats: &ObswsSessionStats,
+    _session_stats: &ObswsSessionStats,
     input_registry: &mut ObswsInputRegistry,
-    pipeline_handle: Option<&crate::MediaPipelineHandle>,
+    _pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> RequestResponsePayload {
     let request_id = request.request_id.unwrap_or_default();
     let request_type = request.request_type.unwrap_or_default();
@@ -174,12 +174,7 @@ pub fn handle_request_message_with_pipeline_handle(
 
     let message = match request_type.as_str() {
         "GetVersion" => crate::obsws::response::build_get_version_response(&request_id, &[]),
-        "GetStats" => crate::obsws::response::build_get_stats_response(
-            &request_id,
-            session_stats,
-            input_registry,
-            pipeline_handle,
-        ),
+        // GetStats は coordinator で処理する（outputs BTreeMap を参照するため）
         "GetCanvasList" => crate::obsws::response::build_get_canvas_list_response(
             &request_id,
             input_registry.canvas_width(),
@@ -385,15 +380,13 @@ mod tests {
     use super::*;
     use crate::obsws::auth::{ObswsAuthentication, build_authentication_response};
     use crate::obsws::input_registry::{
-        ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings, ObswsRecordRun,
-        ObswsRecordTrackRun, ObswsStreamRun, ObswsVideoCaptureDeviceSettings,
+        ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings,
+        ObswsVideoCaptureDeviceSettings,
     };
     use crate::obsws::protocol::{
         OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
         REQUEST_STATUS_MISSING_REQUEST_DATA, REQUEST_STATUS_RESOURCE_NOT_FOUND,
     };
-    use crate::{ProcessorId, TrackId};
-
     fn input_registry() -> ObswsInputRegistry {
         let mut registry = ObswsInputRegistry::new_for_test();
         registry.insert_for_test(ObswsInputEntry::new_for_test(
@@ -414,17 +407,6 @@ mod tests {
 
     fn request_data(json: &str) -> nojson::RawJsonOwned {
         nojson::RawJsonOwned::parse(json).expect("requestData must be valid json")
-    }
-
-    fn set_processor_counter(
-        pipeline_handle: &crate::MediaPipelineHandle,
-        processor_id: &str,
-        metric_name: &'static str,
-        value: u64,
-    ) {
-        let mut stats = pipeline_handle.stats();
-        stats.set_default_label("processor_id", processor_id);
-        stats.counter(metric_name).add(value);
     }
 
     #[test]
@@ -972,135 +954,7 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn handle_request_message_returns_get_stats_response() -> Result<(), Box<dyn std::error::Error>>
-    {
-        let request = RequestMessage {
-            request_id: Some("req-stats".to_owned()),
-            request_type: Some("GetStats".to_owned()),
-            request_data: None,
-        };
-        let session_stats = ObswsSessionStats {
-            incoming_messages: 12,
-            outgoing_messages: 34,
-        };
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
-
-        let json = nojson::RawJson::parse(response.message.text())?;
-        let memory_usage: f64 = json
-            .value()
-            .to_path_member(&["d", "responseData", "memoryUsage"])?
-            .required()?
-            .try_into()?;
-        let available_disk_space: f64 = json
-            .value()
-            .to_path_member(&["d", "responseData", "availableDiskSpace"])?
-            .required()?
-            .try_into()?;
-        let outgoing_messages: u64 = json
-            .value()
-            .to_path_member(&["d", "responseData", "webSocketSessionOutgoingMessages"])?
-            .required()?
-            .try_into()?;
-        assert!(memory_usage >= 0.0);
-        assert!(available_disk_space >= 0.0);
-        assert_eq!(outgoing_messages, 35);
-        Ok(())
-    }
-
-    #[test]
-    fn handle_request_message_returns_get_stats_response_with_output_runtime_stats()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let request = RequestMessage {
-            request_id: Some("req-stats-runtime".to_owned()),
-            request_type: Some("GetStats".to_owned()),
-            request_data: None,
-        };
-        let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        input_registry
-            .activate_stream(ObswsStreamRun {
-                video: ObswsRecordTrackRun {
-                    encoder_processor_id: ProcessorId::new("encoder"),
-                    source_track_id: TrackId::new("source-track"),
-                    encoded_track_id: TrackId::new("encoded-track"),
-                },
-                audio: ObswsRecordTrackRun {
-                    encoder_processor_id: ProcessorId::new("audio-encoder"),
-                    source_track_id: TrackId::new("audio-source-track"),
-                    encoded_track_id: TrackId::new("audio-encoded-track"),
-                },
-                publisher_processor_id: ProcessorId::new("publisher"),
-            })
-            .expect("stream activation must succeed");
-        input_registry
-            .activate_record(ObswsRecordRun {
-                video: ObswsRecordTrackRun {
-                    encoder_processor_id: ProcessorId::new("encoder-record"),
-                    source_track_id: TrackId::new("record-source-track"),
-                    encoded_track_id: TrackId::new("record-encoded-track"),
-                },
-                audio: ObswsRecordTrackRun {
-                    encoder_processor_id: ProcessorId::new("audio-encoder-record"),
-                    source_track_id: TrackId::new("record-audio-source-track"),
-                    encoded_track_id: TrackId::new("record-audio-encoded-track"),
-                },
-                writer_processor_id: ProcessorId::new("writer"),
-                output_path: std::path::PathBuf::from("recordings-for-test/output.mp4"),
-            })
-            .expect("record activation must succeed");
-        let pipeline = crate::MediaPipeline::new().expect("pipeline creation must succeed");
-        let pipeline_handle = pipeline.handle();
-        set_processor_counter(
-            &pipeline_handle,
-            "encoder",
-            "total_output_video_frame_count",
-            11,
-        );
-        set_processor_counter(&pipeline_handle, "publisher", "total_sent_bytes", 1234);
-        set_processor_counter(
-            &pipeline_handle,
-            "publisher",
-            "total_waiting_keyframe_dropped_video_frame_count",
-            2,
-        );
-        set_processor_counter(&pipeline_handle, "writer", "total_video_sample_count", 7);
-        set_processor_counter(
-            &pipeline_handle,
-            "writer",
-            "total_keyframe_wait_dropped_video_frame_count",
-            3,
-        );
-
-        let response = handle_request_message_with_pipeline_handle(
-            request,
-            &session_stats,
-            &mut input_registry,
-            Some(&pipeline_handle),
-        );
-
-        let json = nojson::RawJson::parse(response.message.text())?;
-        let output_skipped_frames: u64 = json
-            .value()
-            .to_path_member(&["d", "responseData", "outputSkippedFrames"])?
-            .required()?
-            .try_into()?;
-        let output_total_frames: u64 = json
-            .value()
-            .to_path_member(&["d", "responseData", "outputTotalFrames"])?
-            .required()?
-            .try_into()?;
-        let active_fps: f64 = json
-            .value()
-            .to_path_member(&["d", "responseData", "activeFps"])?
-            .required()?
-            .try_into()?;
-        assert_eq!(output_skipped_frames, 5);
-        assert_eq!(output_total_frames, 18);
-        assert!(active_fps >= 0.0);
-        Ok(())
-    }
+    // GetStats は coordinator 経由で処理されるため削除。
 
     #[test]
     fn handle_request_message_returns_get_input_kind_list_response()

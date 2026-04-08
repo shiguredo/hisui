@@ -327,9 +327,6 @@ impl ObswsCoordinator {
                 {
                     settings.stream_service_type = s;
                 }
-                // input_registry にも反映（後方互換）
-                self.input_registry
-                    .set_stream_service_settings(settings.clone());
             }
             OutputSettings::Record { record_directory } => {
                 if let Some(dir) = output_settings
@@ -340,8 +337,6 @@ impl ObswsCoordinator {
                 {
                     *record_directory = PathBuf::from(dir);
                 }
-                self.input_registry
-                    .set_record_directory(record_directory.clone());
             }
             OutputSettings::RtmpOutbound(settings) => {
                 if let Some(url) = output_settings
@@ -360,8 +355,6 @@ impl ObswsCoordinator {
                 {
                     settings.stream_name = Some(name);
                 }
-                self.input_registry
-                    .set_rtmp_outbound_settings(settings.clone());
             }
             OutputSettings::Sora(settings) => {
                 if let Ok(v) = output_settings.to_member("soraSdkSettings")
@@ -391,40 +384,34 @@ impl ObswsCoordinator {
                         settings.metadata = Some(v.extract().into_owned());
                     }
                 }
-                self.input_registry
-                    .set_sora_publisher_settings(settings.clone());
             }
             OutputSettings::Hls(settings) => {
-                // HLS 設定の更新は既存の response/output.rs のパーサーが複雑なため、
-                // input_registry 経由のパーサーに委譲して結果を同期する
-                let result = crate::obsws::response::parse_and_apply_hls_settings(
-                    &output_settings,
-                    &mut self.input_registry,
-                );
-                if let Err(error) = result {
-                    return crate::obsws::response::build_request_response_error(
-                        "SetOutputSettings",
-                        request_id,
-                        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        &error,
-                    );
+                match crate::obsws::response::parse_hls_settings_update(&output_settings, settings)
+                {
+                    Ok(new_settings) => *settings = new_settings,
+                    Err(error) => {
+                        return crate::obsws::response::build_request_response_error(
+                            "SetOutputSettings",
+                            request_id,
+                            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                            &error,
+                        );
+                    }
                 }
-                *settings = self.input_registry.hls_settings().clone();
             }
             OutputSettings::MpegDash(settings) => {
-                let result = crate::obsws::response::parse_and_apply_dash_settings(
-                    &output_settings,
-                    &mut self.input_registry,
-                );
-                if let Err(error) = result {
-                    return crate::obsws::response::build_request_response_error(
-                        "SetOutputSettings",
-                        request_id,
-                        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        &error,
-                    );
+                match crate::obsws::response::parse_dash_settings_update(&output_settings, settings)
+                {
+                    Ok(new_settings) => *settings = new_settings,
+                    Err(error) => {
+                        return crate::obsws::response::build_request_response_error(
+                            "SetOutputSettings",
+                            request_id,
+                            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                            &error,
+                        );
+                    }
                 }
-                *settings = self.input_registry.dash_settings().clone();
             }
         }
         crate::obsws::response::build_request_response_success_no_data(
@@ -453,13 +440,9 @@ impl ObswsCoordinator {
             server: Some(fields.server),
             key: fields.key,
         };
-        // outputs BTreeMap を更新
         if let Some(output) = self.outputs.get_mut("stream") {
-            output.settings = OutputSettings::Stream(new_settings.clone());
+            output.settings = OutputSettings::Stream(new_settings);
         }
-        // input_registry にも反映（後方互換）
-        self.input_registry
-            .set_stream_service_settings(new_settings);
         crate::obsws::response::build_request_response_success_no_data(
             "SetStreamServiceSettings",
             request_id,
@@ -517,7 +500,6 @@ impl ObswsCoordinator {
                 record_directory: record_directory.clone(),
             };
         }
-        self.input_registry.set_record_directory(record_directory);
         crate::obsws::response::build_request_response_success_no_data(
             "SetRecordDirectory",
             request_id,

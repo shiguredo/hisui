@@ -603,6 +603,15 @@ impl ObswsCoordinator {
                 request.request_data.as_ref(),
             ),
             // --- Output 読み取り ---
+            "GetStats" => {
+                let response = crate::obsws::response::build_get_stats_response(
+                    &request_id,
+                    session_stats,
+                    &self.outputs,
+                    self.pipeline_handle.as_ref(),
+                );
+                self.build_result_from_response(response, Vec::new())
+            }
             "GetStreamStatus" => {
                 let response =
                     self.build_output_status_response("GetStreamStatus", &request_id, "stream");
