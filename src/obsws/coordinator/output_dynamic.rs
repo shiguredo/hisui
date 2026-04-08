@@ -823,20 +823,18 @@ impl ObswsCoordinator {
             );
         }
 
-        // 稼働中なら停止する
+        // 稼働中なら先に停止する
         let is_active = self
             .outputs
             .get(&output_name)
             .is_some_and(|o| o.runtime.active);
         if is_active {
-            // TODO: Phase 2 以降で各 output kind の停止処理を実装
-            // 現時点ではエラーを返す
-            return self.build_error_result(
-                request_type,
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
-                "Output is currently running. Stop it before removing.",
-            );
+            let outcome = self
+                .stop_dynamic_output(request_type, request_id, &output_name)
+                .await;
+            if !outcome.success {
+                return self.build_result_from_response(outcome.response_text, Vec::new());
+            }
         }
 
         self.outputs.remove(&output_name);

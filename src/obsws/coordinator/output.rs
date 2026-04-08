@@ -338,13 +338,12 @@ impl ObswsCoordinator {
                 let outcome = self.handle_start_player("StartOutput", request_id).await;
                 (outcome, Vec::new())
             }
-            _ => {
-                return self.build_error_result(
-                    "StartOutput",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Output not found",
-                );
+            other => {
+                // 動的に作成された output を kind に応じて起動する
+                let outcome = self
+                    .start_dynamic_output("StartOutput", request_id, other)
+                    .await;
+                (outcome, Vec::new())
             }
         };
         let response_text = if outcome.success {
@@ -445,13 +444,11 @@ impl ObswsCoordinator {
                 let outcome = self.handle_stop_player("StopOutput", request_id).await;
                 (outcome, Vec::new())
             }
-            _ => {
-                return self.build_error_result(
-                    "StopOutput",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Output not found",
-                );
+            other => {
+                let outcome = self
+                    .stop_dynamic_output("StopOutput", request_id, other)
+                    .await;
+                (outcome, Vec::new())
             }
         };
         let response_text = if outcome.success {
@@ -631,13 +628,16 @@ impl ObswsCoordinator {
                 };
                 (outcome, !was_active, Vec::new())
             }
-            _ => {
-                return self.build_error_result(
-                    "ToggleOutput",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Output not found",
-                );
+            other => {
+                let was_active = self.outputs.get(other).is_some_and(|o| o.runtime.active);
+                let outcome = if was_active {
+                    self.stop_dynamic_output("ToggleOutput", request_id, other)
+                        .await
+                } else {
+                    self.start_dynamic_output("ToggleOutput", request_id, other)
+                        .await
+                };
+                (outcome, !was_active, Vec::new())
             }
         };
         let response_text = if outcome.success {
@@ -649,6 +649,101 @@ impl ObswsCoordinator {
             outcome.response_text
         };
         self.build_result_from_response(response_text, events)
+    }
+
+    /// 動的に作成された output を kind に応じて起動する。
+    /// outputs BTreeMap から output_name を検索し、OutputKind に応じて適切な start ハンドラを呼ぶ。
+    async fn start_dynamic_output(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+        output_name: &str,
+    ) -> OutputOperationOutcome {
+        use super::output_dynamic::OutputKind;
+        let kind = self.outputs.get(output_name).map(|o| o.output_kind);
+        let Some(kind) = kind else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ),
+            );
+        };
+        match kind {
+            OutputKind::Stream => {
+                self.handle_start_stream(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Record => {
+                self.handle_start_record(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::RtmpOutbound => {
+                self.handle_start_rtmp_outbound(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Sora => {
+                self.handle_start_sora_publisher(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Hls => {
+                self.handle_start_hls(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::MpegDash => {
+                self.handle_start_mpeg_dash(request_type, request_id, output_name)
+                    .await
+            }
+        }
+    }
+
+    /// 動的に作成された output を kind に応じて停止する。
+    pub(crate) async fn stop_dynamic_output(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+        output_name: &str,
+    ) -> OutputOperationOutcome {
+        use super::output_dynamic::OutputKind;
+        let kind = self.outputs.get(output_name).map(|o| o.output_kind);
+        let Some(kind) = kind else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ),
+            );
+        };
+        match kind {
+            OutputKind::Stream => {
+                self.handle_stop_stream(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Record => {
+                self.handle_stop_record(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::RtmpOutbound => {
+                self.handle_stop_rtmp_outbound(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Sora => {
+                self.handle_stop_sora_publisher(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Hls => {
+                self.handle_stop_hls(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::MpegDash => {
+                self.handle_stop_mpeg_dash(request_type, request_id, output_name)
+                    .await
+            }
+        }
     }
 }
 
