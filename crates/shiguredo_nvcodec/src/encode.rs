@@ -372,7 +372,6 @@ impl Encoder {
             init_params.frameRateNum = config.fps_numerator;
             init_params.frameRateDen = config.fps_denominator;
             init_params.enablePTD = 1;
-            init_params.encodeConfig = &mut encode_config;
             init_params.maxEncodeWidth = config.max_encode_width.unwrap_or(config.width);
             init_params.maxEncodeHeight = config.max_encode_height.unwrap_or(config.height);
             init_params.tuningInfo = config.tuning_info.to_sys();
@@ -419,6 +418,11 @@ impl Encoder {
                     ));
                 }
             }
+
+            // 全ての encode_config への書き込みが終わってからポインタを設定する
+            // (先に設定すると Rust の borrow checker からは以降の書き込みが「読まれない」と見えて
+            //  unused_assignments lint に引っ掛かる)
+            init_params.encodeConfig = &mut encode_config;
 
             // エンコーダーを初期化
             let status = self
