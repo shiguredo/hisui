@@ -304,17 +304,7 @@ impl ObswsCoordinator {
         // 種別に応じて settings を更新する
         match &mut state.settings {
             OutputSettings::Stream(settings) => {
-                if let Some(s) = output_settings
-                    .to_member("server")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok())
-                {
-                    settings.server = Some(s);
-                }
-                if let Ok(v) = output_settings.to_member("key") {
-                    settings.key = v.optional().and_then(|v| v.try_into().ok());
-                }
+                // streamServiceType はトップレベルから取得
                 if let Some(s) = output_settings
                     .to_member("streamServiceType")
                     .ok()
@@ -322,6 +312,23 @@ impl ObswsCoordinator {
                     .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
                 {
                     settings.stream_service_type = s;
+                }
+                // server / key は streamServiceSettings のネスト内またはトップレベルから取得
+                let ss = output_settings
+                    .to_member("streamServiceSettings")
+                    .ok()
+                    .and_then(|v| v.optional());
+                let source = ss.as_ref().unwrap_or(&output_settings);
+                if let Some(s) = source
+                    .to_member("server")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| v.try_into().ok())
+                {
+                    settings.server = Some(s);
+                }
+                if let Ok(v) = source.to_member("key") {
+                    settings.key = v.optional().and_then(|v| v.try_into().ok());
                 }
             }
             OutputSettings::Record { record_directory } => {
@@ -442,6 +449,47 @@ impl ObswsCoordinator {
         crate::obsws::response::build_request_response_success_no_data(
             "SetStreamServiceSettings",
             request_id,
+        )
+    }
+
+    /// GetStreamServiceSettings（stream 専用の OBS 互換レスポンス形式）
+    pub(crate) fn handle_get_stream_service_settings(
+        &self,
+        request_id: &str,
+    ) -> nojson::RawJsonOwned {
+        let Some(state) = self.outputs.get("stream") else {
+            return crate::obsws::response::build_request_response_error(
+                "GetStreamServiceSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Output not found",
+            );
+        };
+        let OutputSettings::Stream(settings) = &state.settings else {
+            return crate::obsws::response::build_request_response_error(
+                "GetStreamServiceSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Output is not a stream output",
+            );
+        };
+        crate::obsws::response::build_request_response_success(
+            "GetStreamServiceSettings",
+            request_id,
+            |f| {
+                f.member("streamServiceType", &settings.stream_service_type)?;
+                f.member(
+                    "streamServiceSettings",
+                    nojson::object(|f| {
+                        f.member("bwtest", false)?;
+                        if let Some(server) = &settings.server {
+                            f.member("server", server)?;
+                        }
+                        f.member("key", settings.key.as_deref().unwrap_or(""))?;
+                        f.member("use_auth", false)
+                    }),
+                )
+            },
         )
     }
 
@@ -618,11 +666,20 @@ fn restore_output_settings(
             Ok(OutputSettings::Record { record_directory })
         }
         OutputKind::Hls => {
-            // HLS 設定のフルパースは state_file.rs に既存実装があるが、
-            // ここでは outputSettings の RawJson をそのまま渡してデフォルト値で初期化する簡易版
-            Ok(OutputSettings::Hls(ObswsHlsSettings::default()))
+            // HLS 設定を state file から復元する
+            let existing = ObswsHlsSettings::default();
+            match crate::obsws::response::parse_hls_settings_update(&v, &existing) {
+                Ok(settings) => Ok(OutputSettings::Hls(settings)),
+                Err(_) => Ok(OutputSettings::Hls(existing)),
+            }
         }
-        OutputKind::MpegDash => Ok(OutputSettings::MpegDash(ObswsDashSettings::default())),
+        OutputKind::MpegDash => {
+            let existing = ObswsDashSettings::default();
+            match crate::obsws::response::parse_dash_settings_update(&v, &existing) {
+                Ok(settings) => Ok(OutputSettings::MpegDash(settings)),
+                Err(_) => Ok(OutputSettings::MpegDash(existing)),
+            }
+        }
         OutputKind::RtmpOutbound => {
             let mut settings = ObswsRtmpOutboundSettings::default();
             let url: Option<String> = v
@@ -641,26 +698,32 @@ fn restore_output_settings(
         }
         OutputKind::Sora => {
             let mut settings = ObswsSoraPublisherSettings::default();
-            let urls: Vec<String> = v
+            // soraSdkSettings のネストもトップレベルも対応
+            let sdk = v
+                .to_member("soraSdkSettings")
+                .ok()
+                .and_then(|v| v.optional());
+            let source = sdk.as_ref().unwrap_or(&v);
+            let urls: Vec<String> = source
                 .to_member("signalingUrls")
                 .ok()
                 .and_then(|v| v.optional())
                 .and_then(|v| v.try_into().ok())
                 .unwrap_or_default();
             settings.signaling_urls = urls;
-            let ch: Option<String> = v
+            let ch: Option<String> = source
                 .to_member("channelId")
                 .ok()
                 .and_then(|v| v.optional())
                 .and_then(|v| v.try_into().ok());
             settings.channel_id = ch;
-            let ci: Option<String> = v
+            let ci: Option<String> = source
                 .to_member("clientId")
                 .ok()
                 .and_then(|v| v.optional())
                 .and_then(|v| v.try_into().ok());
             settings.client_id = ci;
-            let bi: Option<String> = v
+            let bi: Option<String> = source
                 .to_member("bundleId")
                 .ok()
                 .and_then(|v| v.optional())

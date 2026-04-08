@@ -334,16 +334,28 @@ def test_preexisting_state_file_is_loaded_on_startup(
         json.dumps(
             {
                 "version": 1,
-                "stream": {
-                    "streamServiceType": "rtmp_custom",
-                    "streamServiceSettings": {
-                        "server": "rtmp://preexisting-server/live",
-                        "key": "preexisting-key",
+                "outputs": [
+                    {
+                        "outputName": "stream",
+                        "outputKind": "rtmp_output",
+                        "outputSettings": {
+                            "streamServiceType": "rtmp_custom",
+                            "streamServiceSettings": {
+                                "server": "rtmp://preexisting-server/live",
+                                "key": "preexisting-key",
+                            },
+                        },
                     },
-                },
-                "record": {
-                    "recordDirectory": str(tmp_path / "preexisting-recordings"),
-                },
+                    {
+                        "outputName": "record",
+                        "outputKind": "mp4_output",
+                        "outputSettings": {
+                            "recordDirectory": str(
+                                tmp_path / "preexisting-recordings"
+                            ),
+                        },
+                    },
+                ],
             }
         )
     )

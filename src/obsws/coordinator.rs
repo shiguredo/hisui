@@ -628,11 +628,7 @@ impl ObswsCoordinator {
                 self.build_result_from_response(response, Vec::new())
             }
             "GetStreamServiceSettings" => {
-                let response = self.handle_get_output_settings(
-                    "GetStreamServiceSettings",
-                    &request_id,
-                    "stream",
-                );
+                let response = self.handle_get_stream_service_settings(&request_id);
                 self.build_result_from_response(response, Vec::new())
             }
             "SetStreamServiceSettings" => {
