@@ -3879,3 +3879,58 @@ async fn set_stream_service_settings_after_remove_returns_not_found() {
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
 }
+
+#[tokio::test]
+async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let create_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-sora-named-hls".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"hls","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"]}}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(create_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(result);
+    assert_eq!(code, 100);
+
+    // 名前ではなく output_kind で dispatch されるなら、
+    // HLS の destination エラーではなく Sora の channelId エラーになる。
+    let start_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-start-sora-named-hls".to_owned()),
+            request_type: Some("StartOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"hls"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(start_action);
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid JSON");
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+    let comment: String = json
+        .value()
+        .to_path_member(&["d", "requestStatus", "comment"])
+        .expect("comment access must succeed")
+        .required()
+        .expect("comment must be present")
+        .try_into()
+        .expect("comment must be string");
+    assert_eq!(
+        comment,
+        "Missing outputSettings.soraSdkSettings.channelId field"
+    );
+}

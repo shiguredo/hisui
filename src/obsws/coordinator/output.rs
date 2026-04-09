@@ -309,30 +309,6 @@ impl ObswsCoordinator {
                 }
                 (outcome, events)
             }
-            "rtmp_outbound" => {
-                let outcome = self
-                    .handle_start_rtmp_outbound("StartOutput", request_id, "rtmp_outbound")
-                    .await;
-                (outcome, Vec::new())
-            }
-            "sora" => {
-                let outcome = self
-                    .handle_start_sora_publisher("StartOutput", request_id, "sora")
-                    .await;
-                (outcome, Vec::new())
-            }
-            "hls" => {
-                let outcome = self
-                    .handle_start_hls("StartOutput", request_id, "hls")
-                    .await;
-                (outcome, Vec::new())
-            }
-            "mpeg_dash" => {
-                let outcome = self
-                    .handle_start_mpeg_dash("StartOutput", request_id, "mpeg_dash")
-                    .await;
-                (outcome, Vec::new())
-            }
             #[cfg(feature = "player")]
             "player" => {
                 let outcome = self.handle_start_player("StartOutput", request_id).await;
@@ -416,28 +392,6 @@ impl ObswsCoordinator {
                     });
                 }
                 (outcome, events)
-            }
-            "rtmp_outbound" => {
-                let outcome = self
-                    .handle_stop_rtmp_outbound("StopOutput", request_id, "rtmp_outbound")
-                    .await;
-                (outcome, Vec::new())
-            }
-            "sora" => {
-                let outcome = self
-                    .handle_stop_sora_publisher("StopOutput", request_id, "sora")
-                    .await;
-                (outcome, Vec::new())
-            }
-            "hls" => {
-                let outcome = self.handle_stop_hls("StopOutput", request_id, "hls").await;
-                (outcome, Vec::new())
-            }
-            "mpeg_dash" => {
-                let outcome = self
-                    .handle_stop_mpeg_dash("StopOutput", request_id, "mpeg_dash")
-                    .await;
-                (outcome, Vec::new())
             }
             #[cfg(feature = "player")]
             "player" => {
@@ -567,56 +521,6 @@ impl ObswsCoordinator {
                     }
                 }
                 (outcome, !was_active, events)
-            }
-            "rtmp_outbound" => {
-                let was_active = self
-                    .outputs
-                    .get("rtmp_outbound")
-                    .is_some_and(|o| o.runtime.active);
-                let outcome = if was_active {
-                    self.handle_stop_rtmp_outbound("ToggleOutput", request_id, "rtmp_outbound")
-                        .await
-                } else {
-                    self.handle_start_rtmp_outbound("ToggleOutput", request_id, "rtmp_outbound")
-                        .await
-                };
-                (outcome, !was_active, Vec::new())
-            }
-            "sora" => {
-                let was_active = self.outputs.get("sora").is_some_and(|o| o.runtime.active);
-                let outcome = if was_active {
-                    self.handle_stop_sora_publisher("ToggleOutput", request_id, "sora")
-                        .await
-                } else {
-                    self.handle_start_sora_publisher("ToggleOutput", request_id, "sora")
-                        .await
-                };
-                (outcome, !was_active, Vec::new())
-            }
-            "hls" => {
-                let was_active = self.outputs.get("hls").is_some_and(|o| o.runtime.active);
-                let outcome = if was_active {
-                    self.handle_stop_hls("ToggleOutput", request_id, "hls")
-                        .await
-                } else {
-                    self.handle_start_hls("ToggleOutput", request_id, "hls")
-                        .await
-                };
-                (outcome, !was_active, Vec::new())
-            }
-            "mpeg_dash" => {
-                let was_active = self
-                    .outputs
-                    .get("mpeg_dash")
-                    .is_some_and(|o| o.runtime.active);
-                let outcome = if was_active {
-                    self.handle_stop_mpeg_dash("ToggleOutput", request_id, "mpeg_dash")
-                        .await
-                } else {
-                    self.handle_start_mpeg_dash("ToggleOutput", request_id, "mpeg_dash")
-                        .await
-                };
-                (outcome, !was_active, Vec::new())
             }
             #[cfg(feature = "player")]
             "player" => {
