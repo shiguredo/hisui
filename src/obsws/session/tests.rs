@@ -3540,3 +3540,171 @@ async fn set_output_settings_null_clears_sora_channel_id() {
     let channel_id = sdk.to_member("channelId").ok().and_then(|v| v.optional());
     assert!(channel_id.is_none());
 }
+
+// --- SetRecordDirectory + HisuiCreateOutput の既定値連携テスト ---
+
+#[tokio::test]
+async fn set_record_directory_updates_default_for_future_mp4_outputs() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    // SetRecordDirectory で録画先を変更する
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-dir".to_owned()),
+            request_type: Some("SetRecordDirectory".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"recordDirectory":"/tmp/new-recordings"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, _) = parse_request_status(&text);
+    assert!(result);
+
+    // HisuiCreateOutput で mp4_output を省略作成する
+    let create_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-mp4-after-set".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"new_record","outputKind":"mp4_output"}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(create_action);
+    let (result, _) = parse_request_status(&text);
+    assert!(result);
+
+    // GetOutputSettings で新しい録画先が使われていることを確認する
+    let get_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-get-new-mp4".to_owned()),
+            request_type: Some("GetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"new_record"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(get_action);
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid JSON");
+    let dir: String = json
+        .value()
+        .to_path_member(&["d", "responseData", "outputSettings", "recordDirectory"])
+        .expect("recordDirectory access must succeed")
+        .required()
+        .expect("recordDirectory must be present")
+        .try_into()
+        .expect("recordDirectory must be string");
+    assert_eq!(dir, "/tmp/new-recordings");
+}
+
+// --- HisuiCreateOutput の型検証テスト ---
+
+#[tokio::test]
+async fn hisui_create_output_rejects_invalid_record_directory_type() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-bad-record".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"bad_record","outputKind":"mp4_output","outputSettings":{"recordDirectory":123}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
+async fn hisui_create_output_rejects_invalid_stream_service_type() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-bad-stream".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"bad_stream","outputKind":"rtmp_output","outputSettings":{"streamServiceType":123}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
+async fn hisui_create_output_rejects_invalid_sora_signaling_urls_type() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-bad-sora".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"bad_sora","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signalingUrls":"not-an-array"}}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
+async fn hisui_create_output_rejects_non_object_output_settings() {
+    // outputSettings が object でない場合は INVALID_REQUEST_FIELD を返す
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-bad-settings".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"bad_output","outputKind":"mp4_output","outputSettings":123}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}

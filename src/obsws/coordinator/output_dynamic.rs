@@ -624,6 +624,8 @@ impl ObswsCoordinator {
                 record_directory: record_directory.clone(),
             };
         }
+        // HisuiCreateOutput で mp4_output を省略作成した場合の既定値も更新する
+        self.default_record_directory = record_directory;
         crate::obsws::response::build_request_response_success_no_data(
             "SetRecordDirectory",
             request_id,
@@ -997,72 +999,97 @@ fn parse_required_string(request_data: &nojson::RawJsonOwned, field: &str) -> Op
     Some(value)
 }
 
+/// JSON メンバーから Option<String> を厳格に取得する。
+/// キー不在 → Ok(None)、null → Ok(None)、string → Ok(Some(s))、それ以外 → Err
+fn parse_optional_string_strict(
+    v: &nojson::RawJsonValue<'_, '_>,
+    field: &str,
+    error_msg: &str,
+) -> Result<Option<String>, String> {
+    let Ok(member) = v.to_member(field) else {
+        return Ok(None);
+    };
+    let Some(val) = member.optional() else {
+        return Ok(None);
+    };
+    if val.kind().is_null() {
+        return Ok(None);
+    }
+    match <String>::try_from(val) {
+        Ok(s) => Ok(Some(s)),
+        Err(_) => Err(error_msg.to_owned()),
+    }
+}
+
 /// outputKind に応じて outputSettings をパースする。
 /// outputSettings が省略された場合はデフォルト値を使用する。
+/// 指定された値の型が不正な場合はエラーを返す。
 fn parse_output_settings(
     kind: OutputKind,
     request_data: &nojson::RawJsonOwned,
     default_record_directory: &std::path::Path,
 ) -> Result<OutputSettings, String> {
     let json = request_data.value();
-    // outputSettings フィールドの取得（オプション）
     let settings_value = json
         .to_member("outputSettings")
         .ok()
         .and_then(|v| v.optional());
+    // outputSettings が存在する場合は object でなければエラー
+    if let Some(ref v) = settings_value
+        && !v.kind().is_object()
+        && !v.kind().is_null()
+    {
+        return Err("outputSettings must be an object".to_owned());
+    }
 
     match kind {
         OutputKind::Stream => {
             let mut settings = ObswsStreamServiceSettings::default();
             if let Some(v) = &settings_value {
-                // streamServiceType はトップレベルから取得
-                let sst: Option<String> = v
-                    .to_member("streamServiceType")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                if let Some(s) = sst {
+                if let Some(s) = parse_optional_string_strict(
+                    v,
+                    "streamServiceType",
+                    "streamServiceType must be a string",
+                )? {
                     settings.stream_service_type = s;
                 }
-                // server / key は streamServiceSettings のネスト内またはトップレベルから取得
                 let ss = v
                     .to_member("streamServiceSettings")
                     .ok()
                     .and_then(|v| v.optional());
                 let source = ss.as_ref().unwrap_or(v);
-                let server: Option<String> = source
-                    .to_member("server")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.server = server;
-                let key: Option<String> = source
-                    .to_member("key")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.key = key;
+                settings.server =
+                    parse_optional_string_strict(source, "server", "server must be a string")?;
+                settings.key = parse_optional_string_strict(source, "key", "key must be a string")?;
             }
             Ok(OutputSettings::Stream(settings))
         }
         OutputKind::Record => {
-            let record_directory: Option<String> = settings_value
-                .as_ref()
-                .and_then(|v| v.to_member("recordDirectory").ok())
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            let record_directory = record_directory
-                .map(PathBuf::from)
-                .unwrap_or_else(|| default_record_directory.to_path_buf());
-            Ok(OutputSettings::Record { record_directory })
+            if let Some(v) = &settings_value
+                && let Ok(member) = v.to_member("recordDirectory")
+                && let Some(val) = member.optional()
+            {
+                if val.kind().is_null() {
+                    return Err("recordDirectory cannot be null".to_owned());
+                }
+                match <String>::try_from(val) {
+                    Ok(dir) => {
+                        return Ok(OutputSettings::Record {
+                            record_directory: PathBuf::from(dir),
+                        });
+                    }
+                    Err(_) => return Err("recordDirectory must be a string".to_owned()),
+                }
+            }
+            Ok(OutputSettings::Record {
+                record_directory: default_record_directory.to_path_buf(),
+            })
         }
         OutputKind::Hls => {
             let existing = ObswsHlsSettings::default();
             if let Some(v) = &settings_value {
-                match crate::obsws::response::parse_hls_settings_update(v, &existing) {
-                    Ok(s) => Ok(OutputSettings::Hls(s)),
-                    Err(e) => Err(e),
-                }
+                crate::obsws::response::parse_hls_settings_update(v, &existing)
+                    .map(OutputSettings::Hls)
             } else {
                 Ok(OutputSettings::Hls(existing))
             }
@@ -1070,10 +1097,8 @@ fn parse_output_settings(
         OutputKind::MpegDash => {
             let existing = ObswsDashSettings::default();
             if let Some(v) = &settings_value {
-                match crate::obsws::response::parse_dash_settings_update(v, &existing) {
-                    Ok(s) => Ok(OutputSettings::MpegDash(s)),
-                    Err(e) => Err(e),
-                }
+                crate::obsws::response::parse_dash_settings_update(v, &existing)
+                    .map(OutputSettings::MpegDash)
             } else {
                 Ok(OutputSettings::MpegDash(existing))
             }
@@ -1081,61 +1106,48 @@ fn parse_output_settings(
         OutputKind::RtmpOutbound => {
             let mut settings = ObswsRtmpOutboundSettings::default();
             if let Some(v) = &settings_value {
-                let url: Option<String> = v
-                    .to_member("outputUrl")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.output_url = url;
-                let name: Option<String> = v
-                    .to_member("streamName")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.stream_name = name;
+                settings.output_url =
+                    parse_optional_string_strict(v, "outputUrl", "outputUrl must be a string")?;
+                settings.stream_name =
+                    parse_optional_string_strict(v, "streamName", "streamName must be a string")?;
             }
             Ok(OutputSettings::RtmpOutbound(settings))
         }
         OutputKind::Sora => {
             let mut settings = ObswsSoraPublisherSettings::default();
             if let Some(v) = &settings_value {
-                // soraSdkSettings のネスト内またはトップレベルから取得
                 let sdk = v
                     .to_member("soraSdkSettings")
                     .ok()
-                    .and_then(|v| v.optional());
+                    .and_then(|v| v.optional())
+                    .filter(|v| !v.kind().is_null());
                 let source = sdk.as_ref().unwrap_or(v);
-                let urls: Vec<String> = source
-                    .to_member("signalingUrls")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok())
-                    .unwrap_or_default();
-                settings.signaling_urls = urls;
-                let ch: Option<String> = source
-                    .to_member("channelId")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.channel_id = ch;
-                let ci: Option<String> = source
-                    .to_member("clientId")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.client_id = ci;
-                let bi: Option<String> = source
-                    .to_member("bundleId")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok());
-                settings.bundle_id = bi;
-                // metadata の読み込み（object のみ）
-                if let Ok(m) = source.to_member("metadata")
-                    && let Some(v) = m.optional()
-                    && v.kind().is_object()
+                // signalingUrls
+                if let Ok(member) = source.to_member("signalingUrls")
+                    && let Some(val) = member.optional()
+                    && !val.kind().is_null()
                 {
-                    settings.metadata = Some(v.extract().into_owned());
+                    settings.signaling_urls = <Vec<String>>::try_from(val)
+                        .map_err(|_| "signalingUrls must be an array of strings".to_owned())?;
+                }
+                settings.channel_id = parse_optional_string_strict(
+                    source,
+                    "channelId",
+                    "channelId must be a string",
+                )?;
+                settings.client_id =
+                    parse_optional_string_strict(source, "clientId", "clientId must be a string")?;
+                settings.bundle_id =
+                    parse_optional_string_strict(source, "bundleId", "bundleId must be a string")?;
+                // metadata（object のみ）
+                if let Ok(member) = source.to_member("metadata")
+                    && let Some(val) = member.optional()
+                    && !val.kind().is_null()
+                {
+                    if !val.kind().is_object() {
+                        return Err("metadata must be an object".to_owned());
+                    }
+                    settings.metadata = Some(val.extract().into_owned());
                 }
             }
             Ok(OutputSettings::Sora(settings))
