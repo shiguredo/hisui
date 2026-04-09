@@ -1350,6 +1350,7 @@ pub(crate) fn build_state_from_registry(
     use crate::obsws::coordinator::output_dynamic::OutputSettings;
 
     // outputs BTreeMap から outputs セクションを構築する
+    // ビルトイン output（Player 等）は永続設定を持たないためスキップする
     let outputs = {
         let mut output_list = Vec::new();
         for (name, state) in outputs_map {
@@ -1360,6 +1361,8 @@ pub(crate) fn build_state_from_registry(
                 OutputSettings::MpegDash(s) => crate::json::to_pretty_string(s),
                 OutputSettings::RtmpOutbound(s) => crate::json::to_pretty_string(s),
                 OutputSettings::Sora(s) => crate::json::to_pretty_string(s),
+                #[cfg(feature = "player")]
+                OutputSettings::Player => continue,
             };
             let raw =
                 nojson::RawJson::parse(&settings_json).expect("serialized JSON must be valid");

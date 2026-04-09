@@ -3,6 +3,7 @@
 
 use super::ObswsCoordinator;
 use super::output::OutputOperationOutcome;
+use super::output_dynamic::OutputRun;
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_start_player(
@@ -10,7 +11,7 @@ impl ObswsCoordinator {
         request_type: &str,
         request_id: &str,
     ) -> OutputOperationOutcome {
-        if self.input_registry.is_player_active() {
+        if self.outputs.get("player").is_some_and(|o| o.runtime.active) {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -40,16 +41,16 @@ impl ObswsCoordinator {
         let generation = self.player_generation;
         let (window_start_reply_tx, window_start_reply_rx) = tokio::sync::oneshot::channel();
 
-        if let Err(()) = self.input_registry.activate_player() {
-            return OutputOperationOutcome::failure(
-                crate::obsws::response::build_request_response_error(
-                    request_type,
-                    request_id,
-                    crate::obsws::protocol::REQUEST_STATUS_OUTPUT_RUNNING,
-                    "Player is already running",
-                ),
-            );
-        }
+        // active 状態に遷移する
+        let player_state = self
+            .outputs
+            .get_mut("player")
+            .expect("player output entry must exist");
+        player_state.runtime.active = true;
+        player_state.runtime.started_at = Some(std::time::Instant::now());
+        player_state.runtime.run = Some(OutputRun::Player {
+            subscriber_handle: None,
+        });
 
         // メインスレッドにウィンドウ作成を指示する
         if self
@@ -62,7 +63,7 @@ impl ObswsCoordinator {
             })
             .is_err()
         {
-            self.input_registry.deactivate_player();
+            self.deactivate_player();
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -76,7 +77,7 @@ impl ObswsCoordinator {
         match window_start_reply_rx.await {
             Ok(Ok(())) => {}
             Ok(Err(message)) => {
-                self.input_registry.deactivate_player();
+                self.deactivate_player();
                 return OutputOperationOutcome::failure(
                     crate::obsws::response::build_request_response_error(
                         request_type,
@@ -87,7 +88,7 @@ impl ObswsCoordinator {
                 );
             }
             Err(_) => {
-                self.input_registry.deactivate_player();
+                self.deactivate_player();
                 return OutputOperationOutcome::failure(
                     crate::obsws::response::build_request_response_error(
                         request_type,
@@ -116,11 +117,20 @@ impl ObswsCoordinator {
         });
         match subscriber_startup_reply_rx.await {
             Ok(Ok(())) => {
-                self.player_subscriber_handle = Some(handle);
+                // subscriber_handle を OutputRun::Player に保存する
+                if let Some(OutputRun::Player {
+                    subscriber_handle, ..
+                }) = self
+                    .outputs
+                    .get_mut("player")
+                    .and_then(|o| o.runtime.run.as_mut())
+                {
+                    *subscriber_handle = Some(handle);
+                }
             }
             Ok(Err(message)) => {
                 handle.abort();
-                self.input_registry.deactivate_player();
+                self.deactivate_player();
                 let _ = self
                     .player_command_tx
                     .send(crate::obsws::player::PlayerCommand::Stop);
@@ -135,7 +145,7 @@ impl ObswsCoordinator {
             }
             Err(_) => {
                 handle.abort();
-                self.input_registry.deactivate_player();
+                self.deactivate_player();
                 let _ = self
                     .player_command_tx
                     .send(crate::obsws::player::PlayerCommand::Stop);
@@ -161,7 +171,7 @@ impl ObswsCoordinator {
         request_type: &str,
         request_id: &str,
     ) -> OutputOperationOutcome {
-        if !self.input_registry.is_player_active() {
+        if !self.outputs.get("player").is_some_and(|o| o.runtime.active) {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -173,20 +183,41 @@ impl ObswsCoordinator {
         }
 
         // サブスクライバタスクを停止する
-        if let Some(handle) = self.player_subscriber_handle.take() {
-            handle.abort();
-        }
+        self.abort_player_subscriber();
 
         // メインスレッドにウィンドウ閉じを指示する
         let _ = self
             .player_command_tx
             .send(crate::obsws::player::PlayerCommand::Stop);
 
-        self.input_registry.deactivate_player();
+        self.deactivate_player();
 
         OutputOperationOutcome::success(
             crate::obsws::response::build_stop_output_response(request_id),
             None,
         )
+    }
+
+    /// player の稼働状態を非アクティブにリセットする。
+    pub(crate) fn deactivate_player(&mut self) {
+        if let Some(state) = self.outputs.get_mut("player") {
+            state.runtime.active = false;
+            state.runtime.started_at = None;
+            state.runtime.run = None;
+        }
+    }
+
+    /// player の subscriber タスクを abort する。
+    pub(crate) fn abort_player_subscriber(&mut self) {
+        if let Some(OutputRun::Player {
+            subscriber_handle, ..
+        }) = self
+            .outputs
+            .get_mut("player")
+            .and_then(|o| o.runtime.run.as_mut())
+            && let Some(handle) = subscriber_handle.take()
+        {
+            handle.abort();
+        }
     }
 }

@@ -309,11 +309,6 @@ impl ObswsCoordinator {
                 }
                 (outcome, events)
             }
-            #[cfg(feature = "player")]
-            "player" => {
-                let outcome = self.handle_start_player("StartOutput", request_id).await;
-                (outcome, Vec::new())
-            }
             other => {
                 // 動的に作成された output を kind に応じて起動する
                 let outcome = self
@@ -392,11 +387,6 @@ impl ObswsCoordinator {
                     });
                 }
                 (outcome, events)
-            }
-            #[cfg(feature = "player")]
-            "player" => {
-                let outcome = self.handle_stop_player("StopOutput", request_id).await;
-                (outcome, Vec::new())
             }
             other => {
                 let outcome = self
@@ -522,16 +512,6 @@ impl ObswsCoordinator {
                 }
                 (outcome, !was_active, events)
             }
-            #[cfg(feature = "player")]
-            "player" => {
-                let was_active = self.input_registry.is_player_active();
-                let outcome = if was_active {
-                    self.handle_stop_player("ToggleOutput", request_id).await
-                } else {
-                    self.handle_start_player("ToggleOutput", request_id).await
-                };
-                (outcome, !was_active, Vec::new())
-            }
             other => {
                 let was_active = self.outputs.get(other).is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
@@ -600,6 +580,8 @@ impl ObswsCoordinator {
                 self.handle_start_mpeg_dash(request_type, request_id, output_name)
                     .await
             }
+            #[cfg(feature = "player")]
+            OutputKind::Player => self.handle_start_player(request_type, request_id).await,
         }
     }
 
@@ -647,6 +629,8 @@ impl ObswsCoordinator {
                 self.handle_stop_mpeg_dash(request_type, request_id, output_name)
                     .await
             }
+            #[cfg(feature = "player")]
+            OutputKind::Player => self.handle_stop_player(request_type, request_id).await,
         }
     }
 }

@@ -175,10 +175,8 @@ pub struct ObswsCoordinator {
     #[cfg(feature = "player")]
     pub(crate) player_media_tx:
         std::sync::mpsc::SyncSender<crate::obsws::player::PlayerMediaMessage>,
-    /// player output のサブスクライバタスクハンドル
-    #[cfg(feature = "player")]
-    pub(crate) player_subscriber_handle: Option<tokio::task::JoinHandle<()>>,
     /// player セッションの世代 ID（古い Stopped イベントを無視するために使用）
+    /// OutputRun::Player ではなく coordinator で管理することで、Stop 後も単調増加を維持する
     #[cfg(feature = "player")]
     pub(crate) player_generation: u64,
 }
@@ -234,8 +232,6 @@ impl ObswsCoordinator {
             player_command_tx,
             #[cfg(feature = "player")]
             player_media_tx,
-            #[cfg(feature = "player")]
-            player_subscriber_handle: None,
             #[cfg(feature = "player")]
             player_generation: 0,
         };
@@ -331,10 +327,8 @@ impl ObswsCoordinator {
                 if generation != self.player_generation {
                     return;
                 }
-                if let Some(handle) = self.player_subscriber_handle.take() {
-                    handle.abort();
-                }
-                self.input_registry.deactivate_player();
+                self.abort_player_subscriber();
+                self.deactivate_player();
             }
         }
     }
@@ -662,8 +656,6 @@ impl ObswsCoordinator {
                 let response = crate::obsws::response::build_get_output_list_response(
                     &request_id,
                     &self.outputs,
-                    #[cfg(feature = "player")]
-                    self.input_registry.is_player_active(),
                 );
                 self.build_result_from_response(response, Vec::new())
             }
@@ -1090,25 +1082,6 @@ impl ObswsCoordinator {
                 "Missing required outputName field",
             );
         };
-        // player は outputs BTreeMap に含まれないため特別扱い
-        #[cfg(feature = "player")]
-        if output_name == "player" {
-            let active = self.input_registry.is_player_active();
-            return crate::obsws::response::build_request_response_success(
-                "GetOutputStatus",
-                request_id,
-                |f| {
-                    f.member("outputActive", active)?;
-                    f.member("outputReconnecting", false)?;
-                    f.member("outputTimecode", "00:00:00.000")?;
-                    f.member("outputDuration", 0)?;
-                    f.member("outputCongestion", 0.0)?;
-                    f.member("outputBytes", 0)?;
-                    f.member("outputSkippedFrames", 0)?;
-                    f.member("outputTotalFrames", 0)
-                },
-            );
-        }
         self.build_output_status_response("GetOutputStatus", request_id, &output_name)
     }
 

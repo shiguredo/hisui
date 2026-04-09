@@ -1,10 +1,5 @@
 use std::path::PathBuf;
 
-#[cfg(feature = "player")]
-const OBSWS_PLAYER_OUTPUT_NAME: &str = "player";
-#[cfg(feature = "player")]
-const OBSWS_PLAYER_OUTPUT_KIND: &str = "player_output";
-
 struct ParsedObswsS3Destination {
     bucket: String,
     prefix: String,
@@ -17,14 +12,13 @@ struct ParsedObswsS3Destination {
     lifetime_days: Option<u32>,
 }
 
-/// outputs BTreeMap から動的に output リストを構築する。
+/// outputs BTreeMap から output リストを構築する。
 pub(crate) fn build_get_output_list_response(
     request_id: &str,
     outputs: &std::collections::BTreeMap<
         String,
         crate::obsws::coordinator::output_dynamic::OutputState,
     >,
-    #[cfg(feature = "player")] player_active: bool,
 ) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetOutputList", request_id, |f| {
         f.member(
@@ -34,15 +28,6 @@ pub(crate) fn build_get_output_list_response(
                     f.element(nojson::object(|f| {
                         f.member("outputName", name.as_str())?;
                         f.member("outputKind", state.output_kind.as_kind_str())
-                    }))?;
-                }
-                #[cfg(feature = "player")]
-                {
-                    // player は outputs BTreeMap に含まれないため、別途追加する
-                    let _ = player_active;
-                    f.element(nojson::object(|f| {
-                        f.member("outputName", OBSWS_PLAYER_OUTPUT_NAME)?;
-                        f.member("outputKind", OBSWS_PLAYER_OUTPUT_KIND)
                     }))?;
                 }
                 Ok(())

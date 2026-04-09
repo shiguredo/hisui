@@ -56,10 +56,15 @@ pub(crate) enum OutputKind {
     RtmpOutbound,
     /// Sora WebRTC Publisher
     Sora,
+    /// SDL3 ウィンドウ表示（ビルトイン output）
+    #[cfg(feature = "player")]
+    Player,
 }
 
 impl OutputKind {
-    /// OBS WebSocket の outputKind 文字列からパースする
+    /// OBS WebSocket の outputKind 文字列からパースする。
+    /// ビルトイン output（Player 等）はここでは返さない。
+    /// ビルトイン output は create_default_outputs() でのみ作成される。
     pub(crate) fn from_kind_str(s: &str) -> Option<Self> {
         match s {
             "rtmp_output" => Some(Self::Stream),
@@ -81,6 +86,8 @@ impl OutputKind {
             Self::MpegDash => "mpeg_dash_output",
             Self::RtmpOutbound => "rtmp_outbound_output",
             Self::Sora => "sora_webrtc_output",
+            #[cfg(feature = "player")]
+            Self::Player => "player_output",
         }
     }
 }
@@ -93,6 +100,9 @@ pub(crate) enum OutputSettings {
     MpegDash(ObswsDashSettings),
     RtmpOutbound(super::output_rtmp::RtmpOutboundOutputSettings),
     Sora(super::output_sora::SoraOutputSettings),
+    /// Player は設定を持たない
+    #[cfg(feature = "player")]
+    Player,
 }
 
 /// output の稼働中の実行情報
@@ -103,6 +113,10 @@ pub(crate) enum OutputRun {
     MpegDash(crate::obsws::input_registry::ObswsDashRun),
     RtmpOutbound(crate::obsws::input_registry::ObswsRtmpOutboundRun),
     Sora(crate::obsws::input_registry::ObswsSoraPublisherRun),
+    #[cfg(feature = "player")]
+    Player {
+        subscriber_handle: Option<tokio::task::JoinHandle<()>>,
+    },
 }
 
 // -----------------------------------------------------------------------
@@ -110,7 +124,8 @@ pub(crate) enum OutputRun {
 // -----------------------------------------------------------------------
 
 /// 起動時のデフォルト output を生成する。
-/// OBS 互換として stream と record のみ自動作成する。
+/// OBS 互換として stream と record を自動作成する。
+/// player feature 有効時は player も自動作成する。
 /// hls / mpeg_dash / sora / rtmp_outbound は HisuiCreateOutput で明示的に作成する。
 pub(crate) fn create_default_outputs(record_directory: PathBuf) -> BTreeMap<String, OutputState> {
     let mut outputs = BTreeMap::new();
@@ -129,6 +144,15 @@ pub(crate) fn create_default_outputs(record_directory: PathBuf) -> BTreeMap<Stri
             settings: OutputSettings::Record(super::output_record::RecordOutputSettings {
                 record_directory,
             }),
+            runtime: OutputRuntimeState::default(),
+        },
+    );
+    #[cfg(feature = "player")]
+    outputs.insert(
+        "player".to_owned(),
+        OutputState {
+            output_kind: OutputKind::Player,
+            settings: OutputSettings::Player,
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -206,15 +230,6 @@ impl ObswsCoordinator {
                 "Missing required outputName field",
             );
         };
-        // player の特別扱い
-        #[cfg(feature = "player")]
-        if output_name == "player" {
-            return crate::obsws::response::build_request_response_success(
-                "GetOutputSettings",
-                request_id,
-                |f| f.member("outputSettings", nojson::object(|_| Ok(()))),
-            );
-        }
         self.handle_get_output_settings("GetOutputSettings", request_id, &output_name)
     }
 
@@ -264,14 +279,6 @@ impl ObswsCoordinator {
                 );
             }
         };
-        // player の特別扱い
-        #[cfg(feature = "player")]
-        if output_name == "player" {
-            return crate::obsws::response::build_request_response_success_no_data(
-                "SetOutputSettings",
-                request_id,
-            );
-        }
         let Some(state) = self.outputs.get_mut(&output_name) else {
             return crate::obsws::response::build_request_response_error(
                 "SetOutputSettings",
@@ -332,6 +339,9 @@ impl ObswsCoordinator {
                     }
                 }
             }
+            // Player は設定を持たないため何もしない
+            #[cfg(feature = "player")]
+            OutputSettings::Player => {}
         }
         // record の recordDirectory 更新時は default_record_directory も同期する
         if output_name == "record"
@@ -496,6 +506,11 @@ impl nojson::DisplayJson for OutputSettingsJson<'_> {
             OutputSettings::MpegDash(s) => s.fmt(f),
             OutputSettings::RtmpOutbound(s) => s.fmt(f),
             OutputSettings::Sora(s) => s.fmt(f),
+            #[cfg(feature = "player")]
+            OutputSettings::Player => {
+                // Player は設定を持たないため空オブジェクトを返す
+                Ok(())
+            }
         }
     }
 }
@@ -538,6 +553,16 @@ pub(crate) fn restore_outputs_from_state(
             },
         );
     }
+    // ビルトイン output を追加する（state file には保存されないため、常にここで挿入する）
+    #[cfg(feature = "player")]
+    outputs.insert(
+        "player".to_owned(),
+        OutputState {
+            output_kind: OutputKind::Player,
+            settings: OutputSettings::Player,
+            runtime: OutputRuntimeState::default(),
+        },
+    );
     Ok(outputs)
 }
 
@@ -581,6 +606,9 @@ fn restore_output_settings(
         OutputKind::Sora => Ok(OutputSettings::Sora(
             super::output_sora::SoraOutputSettings::parse_from_json(Some(&v))?,
         )),
+        // Player は from_kind_str で返されないため到達しない
+        #[cfg(feature = "player")]
+        OutputKind::Player => unreachable!(),
     }
 }
 
@@ -709,21 +737,28 @@ impl ObswsCoordinator {
         };
 
         // 存在チェック
-        if !self.outputs.contains_key(&output_name) {
+        let Some(state) = self.outputs.get(&output_name) else {
             return self.build_error_result(
                 request_type,
                 request_id,
                 REQUEST_STATUS_RESOURCE_NOT_FOUND,
                 &format!("Output not found: {output_name}"),
             );
+        };
+
+        // ビルトイン output は削除できない
+        #[cfg(feature = "player")]
+        if state.output_kind == OutputKind::Player {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "Cannot remove builtin output",
+            );
         }
 
         // 稼働中の output は削除できない（先に StopOutput で停止する必要がある）
-        let is_active = self
-            .outputs
-            .get(&output_name)
-            .is_some_and(|o| o.runtime.active);
-        if is_active {
+        if state.runtime.active {
             return self.build_error_result(
                 request_type,
                 request_id,
@@ -839,5 +874,8 @@ fn parse_output_settings(
         OutputKind::Sora => Ok(OutputSettings::Sora(
             super::output_sora::SoraOutputSettings::parse_from_json(settings_value.as_ref())?,
         )),
+        // Player は from_kind_str で返されないため到達しない
+        #[cfg(feature = "player")]
+        OutputKind::Player => unreachable!(),
     }
 }
