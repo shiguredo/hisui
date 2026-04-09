@@ -274,7 +274,7 @@ pub async fn run_server(
     // state file に outputs セクションがある場合は復元する
     if let Some(state_outputs) = state_file_outputs {
         actor.outputs =
-            crate::obsws::coordinator::output_dynamic::restore_outputs_from_state(state_outputs);
+            crate::obsws::coordinator::output_dynamic::restore_outputs_from_state(state_outputs)?;
     }
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());

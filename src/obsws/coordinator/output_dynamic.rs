@@ -505,29 +505,28 @@ impl nojson::DisplayJson for OutputSettingsJson<'_> {
 // -----------------------------------------------------------------------
 
 /// state file の outputs セクションから outputs BTreeMap を復元する。
-/// パースに失敗した output はスキップしてログに記録する。
+/// パースに失敗した場合は起動失敗とする。
 pub(crate) fn restore_outputs_from_state(
     state_outputs: Vec<crate::obsws::state_file::StateFileOutput>,
-) -> BTreeMap<String, OutputState> {
+) -> Result<BTreeMap<String, OutputState>, crate::Error> {
     let mut outputs = BTreeMap::new();
     for entry in state_outputs {
         let Some(kind) = OutputKind::from_kind_str(&entry.output_kind) else {
-            tracing::warn!(
-                "state file: unknown outputKind \"{}\" for output \"{}\"; skipping",
-                entry.output_kind,
-                entry.output_name,
-            );
-            continue;
+            return Err(crate::Error::new(format!(
+                "state file: unknown outputKind \"{}\" for output \"{}\"",
+                entry.output_kind, entry.output_name,
+            )));
         };
         let settings = match restore_output_settings(kind, &entry.output_settings) {
             Ok(s) => s,
             Err(msg) => {
-                tracing::warn!(
-                    "state file: failed to parse outputSettings for output \"{}\": {}; skipping",
-                    entry.output_name,
-                    msg,
-                );
-                continue;
+                // TODO: src/json.rs のような行・列付きコンテキスト表示を state file の
+                // outputSettings 復元エラーにも付与したいが、現状は String ベースの
+                // パーサが多く位置情報を十分に保持していないため後続タスクで対応する。
+                return Err(crate::Error::new(format!(
+                    "state file: failed to parse outputSettings for output \"{}\" (kind: \"{}\"): {}",
+                    entry.output_name, entry.output_kind, msg,
+                )));
             }
         };
         outputs.insert(
@@ -539,7 +538,7 @@ pub(crate) fn restore_outputs_from_state(
             },
         );
     }
-    outputs
+    Ok(outputs)
 }
 
 /// state file の outputSettings JSON から OutputSettings を復元する。

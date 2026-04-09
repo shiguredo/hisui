@@ -2782,7 +2782,7 @@ mod tests {
             )
             .expect("settings json must be valid"),
         }];
-        let outputs = restore_outputs_from_state(state_outputs);
+        let outputs = restore_outputs_from_state(state_outputs).expect("restore must succeed");
         let state = outputs
             .get("sora_with_meta")
             .expect("sora output must exist");
@@ -2882,5 +2882,25 @@ mod tests {
 
         // record がないので None → CLI 既定値にフォールバック
         assert!(record_dir.is_none());
+    }
+
+    #[test]
+    fn restore_outputs_from_state_fails_on_invalid_output_settings() {
+        use crate::obsws::coordinator::output_dynamic::restore_outputs_from_state;
+
+        let state_outputs = vec![StateFileOutput {
+            output_name: "broken_stream".to_owned(),
+            output_kind: "rtmp_output".to_owned(),
+            output_settings: nojson::RawJsonOwned::parse(
+                r#"{"streamServiceType":123,"streamServiceSettings":{"server":"rtmp://example.com/live"}}"#,
+            )
+            .expect("settings json must be valid"),
+        }];
+
+        let error = restore_outputs_from_state(state_outputs)
+            .expect_err("restore must fail for invalid state");
+        let message = error.display().to_string();
+        assert!(message.contains("broken_stream"));
+        assert!(message.contains("streamServiceType must be a string"));
     }
 }
