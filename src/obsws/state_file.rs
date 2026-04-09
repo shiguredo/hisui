@@ -2809,4 +2809,79 @@ mod tests {
             .expect("key must be string");
         assert_eq!(key, "value");
     }
+
+    #[test]
+    fn default_record_directory_uses_record_output_not_custom_mp4() {
+        // record と別名の mp4_output が異なる recordDirectory を持つ state file から
+        // 復元した場合、record 側の値が default_record_directory に使われるべき。
+        // server.rs の復元ロジックと同じ抽出ルールをテストする。
+        let state_outputs = [
+            // カスタム mp4_output（先に来る）
+            StateFileOutput {
+                output_name: "custom_record".to_owned(),
+                output_kind: "mp4_output".to_owned(),
+                output_settings: nojson::RawJsonOwned::parse(
+                    r#"{"recordDirectory":"/tmp/custom-recordings"}"#,
+                )
+                .expect("settings json must be valid"),
+            },
+            // 標準の record output
+            StateFileOutput {
+                output_name: "record".to_owned(),
+                output_kind: "mp4_output".to_owned(),
+                output_settings: nojson::RawJsonOwned::parse(
+                    r#"{"recordDirectory":"/tmp/standard-recordings"}"#,
+                )
+                .expect("settings json must be valid"),
+            },
+        ];
+
+        // server.rs と同じロジック: outputName == "record" && outputKind == "mp4_output" を優先
+        let record_dir = state_outputs
+            .iter()
+            .find(|o| o.output_name == "record" && o.output_kind == "mp4_output")
+            .and_then(|o| {
+                o.output_settings
+                    .value()
+                    .to_member("recordDirectory")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                    .map(std::path::PathBuf::from)
+            });
+
+        assert_eq!(
+            record_dir,
+            Some(std::path::PathBuf::from("/tmp/standard-recordings")),
+        );
+    }
+
+    #[test]
+    fn default_record_directory_falls_back_when_no_record_output() {
+        // record output がない場合、カスタム mp4_output からは逆算しない
+        let state_outputs = [StateFileOutput {
+            output_name: "custom_only".to_owned(),
+            output_kind: "mp4_output".to_owned(),
+            output_settings: nojson::RawJsonOwned::parse(
+                r#"{"recordDirectory":"/tmp/custom-only"}"#,
+            )
+            .expect("settings json must be valid"),
+        }];
+
+        let record_dir = state_outputs
+            .iter()
+            .find(|o| o.output_name == "record" && o.output_kind == "mp4_output")
+            .and_then(|o| {
+                o.output_settings
+                    .value()
+                    .to_member("recordDirectory")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                    .map(std::path::PathBuf::from)
+            });
+
+        // record がないので None → CLI 既定値にフォールバック
+        assert!(record_dir.is_none());
+    }
 }
