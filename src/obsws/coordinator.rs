@@ -961,20 +961,8 @@ impl ObswsCoordinator {
         let (active, duration) = output_dynamic::output_active_and_uptime(state);
         let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
         let output_timecode = crate::obsws::response::format_timecode(duration);
-        let stats = crate::obsws::response::collect_output_runtime_stats_from_outputs(
-            &self.outputs,
-            self.pipeline_handle.as_ref(),
-        );
-        // stream の場合は実測値を返す
-        let (output_bytes, skipped_frames, total_frames) = if output_name == "stream" {
-            (
-                stats.stream_output_bytes,
-                stats.stream_skipped_frames,
-                stats.stream_total_frames,
-            )
-        } else {
-            (0, 0, 0)
-        };
+        // output の種別に応じて pipeline から実測値を取得する
+        let (output_bytes, skipped_frames, total_frames) = self.collect_output_stats_for(state);
         crate::obsws::response::build_request_response_success(request_type, request_id, |f| {
             f.member("outputActive", active)?;
             f.member("outputReconnecting", false)?;
@@ -1001,28 +989,90 @@ impl ObswsCoordinator {
         let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
         let output_timecode = crate::obsws::response::format_timecode(duration);
         let output_path = output_dynamic::record_output_path(state).unwrap_or_default();
-        let stats = crate::obsws::response::collect_output_runtime_stats_from_outputs(
-            &self.outputs,
-            self.pipeline_handle.as_ref(),
-        );
-        // record の outputBytes は録画ファイルサイズ
-        let output_bytes = if active {
-            std::fs::metadata(&output_path)
-                .map(|m| m.len())
-                .unwrap_or(0)
-        } else {
-            0
-        };
+        let (output_bytes, skipped_frames, total_frames) = self.collect_output_stats_for(state);
         crate::obsws::response::build_request_response_success("GetRecordStatus", request_id, |f| {
             f.member("outputActive", active)?;
             f.member("outputTimecode", &output_timecode)?;
             f.member("outputDuration", output_duration)?;
             f.member("outputCongestion", 0.0)?;
             f.member("outputBytes", output_bytes)?;
-            f.member("outputSkippedFrames", stats.record_skipped_frames)?;
-            f.member("outputTotalFrames", stats.record_total_frames)?;
+            f.member("outputSkippedFrames", skipped_frames)?;
+            f.member("outputTotalFrames", total_frames)?;
             f.member("outputPath", &output_path)
         })
+    }
+
+    /// OutputState から (outputBytes, outputSkippedFrames, outputTotalFrames) を取得する。
+    /// pipeline の metrics から実測値を引く。対応する metrics がない output 種別では 0 を返す。
+    fn collect_output_stats_for(&self, state: &output_dynamic::OutputState) -> (u64, u64, u64) {
+        use output_dynamic::OutputRun;
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            return (0, 0, 0);
+        };
+        let Ok(entries) = pipeline_handle.stats().entries() else {
+            return (0, 0, 0);
+        };
+        let Some(run) = &state.runtime.run else {
+            return (0, 0, 0);
+        };
+        match run {
+            // stream / rtmp_outbound: エンコーダーとパブリッシャー/エンドポイントから取得
+            OutputRun::Stream(run) => {
+                let total_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.video.encoder_processor_id,
+                    "total_output_video_frame_count",
+                );
+                let output_bytes = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.publisher_processor_id,
+                    "total_sent_bytes",
+                );
+                let skipped_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.publisher_processor_id,
+                    "total_waiting_keyframe_dropped_video_frame_count",
+                );
+                (output_bytes, skipped_frames, total_frames)
+            }
+            OutputRun::RtmpOutbound(run) => {
+                let total_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.video.encoder_processor_id,
+                    "total_output_video_frame_count",
+                );
+                let output_bytes = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.endpoint_processor_id,
+                    "total_sent_bytes",
+                );
+                let skipped_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.endpoint_processor_id,
+                    "total_waiting_keyframe_dropped_video_frame_count",
+                );
+                (output_bytes, skipped_frames, total_frames)
+            }
+            // record: writer から取得
+            OutputRun::Record(run) => {
+                let total_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.writer_processor_id,
+                    "total_video_sample_count",
+                );
+                let skipped_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.writer_processor_id,
+                    "total_keyframe_wait_dropped_video_frame_count",
+                );
+                // record の outputBytes は録画ファイルサイズ
+                let output_bytes = run.output_path.metadata().map(|m| m.len()).unwrap_or(0);
+                (output_bytes, skipped_frames, total_frames)
+            }
+            // HLS / DASH / Sora: 対応する統計メトリクスが未整備のため 0 を返す
+            // TODO: OBS 互換として必要であれば、各 output に対応する metrics を追加する
+            _ => (0, 0, 0),
+        }
     }
 
     /// GetOutputStatus リクエストを処理する。

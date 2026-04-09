@@ -256,6 +256,15 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> nojson::RawJsonOwned {
+        // 不正な型のフィールドに対する共通エラーレスポンス
+        let invalid_field = |comment: &str| {
+            crate::obsws::response::build_request_response_error(
+                "SetOutputSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                comment,
+            )
+        };
         let Some(request_data) = request_data else {
             return crate::obsws::response::build_request_response_error(
                 "SetOutputSettings",
@@ -301,90 +310,161 @@ impl ObswsCoordinator {
                 "Output not found",
             );
         };
-        // 種別に応じて settings を更新する
+        // 種別に応じて settings を更新する。
+        // 各フィールドは「キーが存在し値が non-null」なら更新、「値が null」なら None にクリア、
+        // 「キーが存在しない」なら既存値を維持する。不正な型は INVALID_REQUEST_FIELD を返す。
         match &mut state.settings {
             OutputSettings::Stream(settings) => {
-                // streamServiceType はトップレベルから取得
-                if let Some(s) = output_settings
-                    .to_member("streamServiceType")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                if let Ok(v) = output_settings.to_member("streamServiceType")
+                    && let Some(v) = v.optional()
                 {
-                    settings.stream_service_type = s;
+                    if v.kind().is_null() {
+                        settings.stream_service_type =
+                            crate::obsws::input_registry::OBSWS_DEFAULT_STREAM_SERVICE_TYPE
+                                .to_owned();
+                    } else {
+                        match <String>::try_from(v) {
+                            Ok(s) => settings.stream_service_type = s,
+                            Err(_) => return invalid_field("streamServiceType must be a string"),
+                        }
+                    }
                 }
-                // server / key は streamServiceSettings のネスト内またはトップレベルから取得
                 let ss = output_settings
                     .to_member("streamServiceSettings")
                     .ok()
                     .and_then(|v| v.optional());
                 let source = ss.as_ref().unwrap_or(&output_settings);
-                if let Some(s) = source
-                    .to_member("server")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| v.try_into().ok())
+                if let Ok(v) = source.to_member("server")
+                    && let Some(v) = v.optional()
                 {
-                    settings.server = Some(s);
+                    if v.kind().is_null() {
+                        settings.server = None;
+                    } else {
+                        match <String>::try_from(v) {
+                            Ok(s) => settings.server = Some(s),
+                            Err(_) => return invalid_field("server must be a string"),
+                        }
+                    }
                 }
-                if let Ok(v) = source.to_member("key") {
-                    settings.key = v.optional().and_then(|v| v.try_into().ok());
+                if let Ok(v) = source.to_member("key")
+                    && let Some(v) = v.optional()
+                {
+                    if v.kind().is_null() {
+                        settings.key = None;
+                    } else {
+                        match <String>::try_from(v) {
+                            Ok(s) => settings.key = Some(s),
+                            Err(_) => return invalid_field("key must be a string"),
+                        }
+                    }
                 }
             }
             OutputSettings::Record { record_directory } => {
-                if let Some(dir) = output_settings
-                    .to_member("recordDirectory")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                if let Ok(v) = output_settings.to_member("recordDirectory")
+                    && let Some(v) = v.optional()
                 {
-                    *record_directory = PathBuf::from(dir);
+                    if v.kind().is_null() {
+                        return invalid_field("recordDirectory cannot be null");
+                    }
+                    match <String>::try_from(v) {
+                        Ok(dir) => *record_directory = PathBuf::from(dir),
+                        Err(_) => return invalid_field("recordDirectory must be a string"),
+                    }
                 }
             }
             OutputSettings::RtmpOutbound(settings) => {
-                if let Some(url) = output_settings
-                    .to_member("outputUrl")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                if let Ok(v) = output_settings.to_member("outputUrl")
+                    && let Some(v) = v.optional()
                 {
-                    settings.output_url = Some(url);
+                    if v.kind().is_null() {
+                        settings.output_url = None;
+                    } else {
+                        match <String>::try_from(v) {
+                            Ok(url) => settings.output_url = Some(url),
+                            Err(_) => return invalid_field("outputUrl must be a string"),
+                        }
+                    }
                 }
-                if let Some(name) = output_settings
-                    .to_member("streamName")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                if let Ok(v) = output_settings.to_member("streamName")
+                    && let Some(v) = v.optional()
                 {
-                    settings.stream_name = Some(name);
+                    if v.kind().is_null() {
+                        settings.stream_name = None;
+                    } else {
+                        match <String>::try_from(v) {
+                            Ok(name) => settings.stream_name = Some(name),
+                            Err(_) => return invalid_field("streamName must be a string"),
+                        }
+                    }
                 }
             }
             OutputSettings::Sora(settings) => {
                 if let Ok(v) = output_settings.to_member("soraSdkSettings")
                     && let Some(sdk) = v.optional()
+                    && !sdk.kind().is_null()
                 {
-                    if let Some(u) = sdk
-                        .to_member("signalingUrls")
-                        .ok()
-                        .and_then(|v| v.optional())
-                        .and_then(|v| <Vec<String>>::try_from(v).ok())
+                    if let Ok(v) = sdk.to_member("signalingUrls")
+                        && let Some(v) = v.optional()
                     {
-                        settings.signaling_urls = u;
+                        if v.kind().is_null() {
+                            settings.signaling_urls = Vec::new();
+                        } else {
+                            match <Vec<String>>::try_from(v) {
+                                Ok(urls) => settings.signaling_urls = urls,
+                                Err(_) => {
+                                    return invalid_field(
+                                        "signalingUrls must be an array of strings",
+                                    );
+                                }
+                            }
+                        }
                     }
-                    if let Ok(ch) = sdk.to_member("channelId") {
-                        settings.channel_id = ch.optional().and_then(|v| v.try_into().ok());
-                    }
-                    if let Ok(ci) = sdk.to_member("clientId") {
-                        settings.client_id = ci.optional().and_then(|v| v.try_into().ok());
-                    }
-                    if let Ok(bi) = sdk.to_member("bundleId") {
-                        settings.bundle_id = bi.optional().and_then(|v| v.try_into().ok());
-                    }
-                    if let Ok(m) = sdk.to_member("metadata")
-                        && let Some(v) = m.optional()
-                        && v.kind().is_object()
+                    if let Ok(v) = sdk.to_member("channelId")
+                        && let Some(v) = v.optional()
                     {
-                        settings.metadata = Some(v.extract().into_owned());
+                        if v.kind().is_null() {
+                            settings.channel_id = None;
+                        } else {
+                            match <String>::try_from(v) {
+                                Ok(ch) => settings.channel_id = Some(ch),
+                                Err(_) => return invalid_field("channelId must be a string"),
+                            }
+                        }
+                    }
+                    if let Ok(v) = sdk.to_member("clientId")
+                        && let Some(v) = v.optional()
+                    {
+                        if v.kind().is_null() {
+                            settings.client_id = None;
+                        } else {
+                            match <String>::try_from(v) {
+                                Ok(ci) => settings.client_id = Some(ci),
+                                Err(_) => return invalid_field("clientId must be a string"),
+                            }
+                        }
+                    }
+                    if let Ok(v) = sdk.to_member("bundleId")
+                        && let Some(v) = v.optional()
+                    {
+                        if v.kind().is_null() {
+                            settings.bundle_id = None;
+                        } else {
+                            match <String>::try_from(v) {
+                                Ok(bi) => settings.bundle_id = Some(bi),
+                                Err(_) => return invalid_field("bundleId must be a string"),
+                            }
+                        }
+                    }
+                    if let Ok(v) = sdk.to_member("metadata")
+                        && let Some(v) = v.optional()
+                    {
+                        if v.kind().is_null() {
+                            settings.metadata = None;
+                        } else if !v.kind().is_object() {
+                            return invalid_field("metadata must be an object");
+                        } else {
+                            settings.metadata = Some(v.extract().into_owned());
+                        }
                     }
                 }
             }

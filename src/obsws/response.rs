@@ -1085,7 +1085,7 @@ pub(crate) fn collect_output_runtime_stats_from_outputs(
 
     let stream_total_frames = stream_run
         .map(|run| {
-            find_counter_metric(
+            find_output_counter_metric(
                 &entries,
                 &run.video.encoder_processor_id,
                 "total_output_video_frame_count",
@@ -1093,11 +1093,13 @@ pub(crate) fn collect_output_runtime_stats_from_outputs(
         })
         .unwrap_or(0);
     let stream_output_bytes = stream_run
-        .map(|run| find_counter_metric(&entries, &run.publisher_processor_id, "total_sent_bytes"))
+        .map(|run| {
+            find_output_counter_metric(&entries, &run.publisher_processor_id, "total_sent_bytes")
+        })
         .unwrap_or(0);
     let stream_skipped_frames = stream_run
         .map(|run| {
-            find_counter_metric(
+            find_output_counter_metric(
                 &entries,
                 &run.publisher_processor_id,
                 "total_waiting_keyframe_dropped_video_frame_count",
@@ -1107,12 +1109,12 @@ pub(crate) fn collect_output_runtime_stats_from_outputs(
     let (record_total_frames, record_skipped_frames) = record_run
         .map(|run| {
             (
-                find_counter_metric(
+                find_output_counter_metric(
                     &entries,
                     &run.writer_processor_id,
                     "total_video_sample_count",
                 ),
-                find_counter_metric(
+                find_output_counter_metric(
                     &entries,
                     &run.writer_processor_id,
                     "total_keyframe_wait_dropped_video_frame_count",
@@ -1130,7 +1132,7 @@ pub(crate) fn collect_output_runtime_stats_from_outputs(
     }
 }
 
-fn find_counter_metric(
+pub(crate) fn find_output_counter_metric(
     entries: &[crate::stats::StatsEntry],
     processor_id: &crate::ProcessorId,
     metric_name: &'static str,

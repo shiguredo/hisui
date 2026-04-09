@@ -3370,3 +3370,173 @@ async fn hisui_create_output_sora_with_metadata_preserves_it() {
         .expect("metadata.key must be string");
     assert_eq!(metadata_key, "value");
 }
+
+// --- SetOutputSettings の入力検証テスト ---
+
+#[tokio::test]
+async fn set_output_settings_rejects_invalid_record_directory_type() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    // recordDirectory に数値を渡すと INVALID_REQUEST_FIELD を返す
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-bad-record".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"record","outputSettings":{"recordDirectory":123}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
+async fn set_output_settings_rejects_invalid_sora_metadata_type() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    // metadata に配列を渡すと INVALID_REQUEST_FIELD を返す
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-bad-meta".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"metadata":[]}}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
+async fn set_output_settings_rejects_invalid_signaling_urls_type() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    // signalingUrls に文字列を渡すと INVALID_REQUEST_FIELD を返す
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-bad-urls".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signalingUrls":"not-an-array"}}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
+async fn set_output_settings_rejects_invalid_stream_service_type() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-bad-sst".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"stream","outputSettings":{"streamServiceType":123}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
+
+#[tokio::test]
+async fn set_output_settings_null_clears_sora_channel_id() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    // まず channelId を設定する
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-sora-ch".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"channelId":"test-ch"}}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, _) = parse_request_status(&text);
+    assert!(result);
+
+    // channelId: null でクリアする
+    let clear_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-clear-sora-ch".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"channelId":null}}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(clear_action);
+    let (result, _) = parse_request_status(&text);
+    assert!(result);
+
+    // GetOutputSettings で channelId が消えていることを確認する
+    let get_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-get-sora-ch".to_owned()),
+            request_type: Some("GetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"sora"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(get_action);
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid JSON");
+    let sdk = json
+        .value()
+        .to_path_member(&["d", "responseData", "outputSettings", "soraSdkSettings"])
+        .expect("soraSdkSettings access must succeed")
+        .required()
+        .expect("soraSdkSettings must be present");
+    // channelId が null/未設定なので soraSdkSettings に含まれないはず
+    let channel_id = sdk.to_member("channelId").ok().and_then(|v| v.optional());
+    assert!(channel_id.is_none());
+}
