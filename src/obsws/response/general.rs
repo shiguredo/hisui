@@ -186,7 +186,7 @@ fn collect_runtime_stats(
     use crate::obsws::coordinator::output_dynamic::OutputSettings;
     // record output の record_directory からディスク容量を取得する
     let record_dir = outputs.get("record").and_then(|o| match &o.settings {
-        OutputSettings::Record { record_directory } => Some(record_directory.as_path()),
+        OutputSettings::Record(s) => Some(s.record_directory.as_path()),
         _ => None,
     });
     let disk_space = record_dir.map(available_disk_space_mb).unwrap_or(0.0);

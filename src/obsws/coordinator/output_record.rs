@@ -29,7 +29,7 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        let OutputSettings::Record { record_directory } = &output.settings else {
+        let OutputSettings::Record(record_settings) = &output.settings else {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
                     request_type,
@@ -39,7 +39,7 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        let record_directory = record_directory.clone();
+        let record_directory = record_settings.record_directory.clone();
 
         // 稼働中チェック
         if output.runtime.active {
@@ -199,6 +199,74 @@ impl ObswsCoordinator {
             crate::obsws::response::build_stop_record_response(request_id, &output_path),
             Some(output_path),
         )
+    }
+}
+
+// -----------------------------------------------------------------------
+// RecordOutputSettings: record output の種別固有設定
+// -----------------------------------------------------------------------
+
+/// Record output の設定。
+pub(crate) struct RecordOutputSettings {
+    pub(crate) record_directory: std::path::PathBuf,
+}
+
+impl nojson::DisplayJson for RecordOutputSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member(
+                "recordDirectory",
+                self.record_directory.display().to_string(),
+            )
+        })
+        .fmt(f)
+    }
+}
+
+impl RecordOutputSettings {
+    /// JSON から設定を更新する（SetOutputSettings 用）。
+    pub(crate) fn update_from_json(
+        &mut self,
+        output_settings: &nojson::RawJsonValue<'_, '_>,
+    ) -> Result<(), String> {
+        if let Ok(v) = output_settings.to_member("recordDirectory")
+            && let Some(v) = v.optional()
+        {
+            if v.kind().is_null() {
+                return Err("recordDirectory cannot be null".to_owned());
+            }
+            match <String>::try_from(v) {
+                Ok(dir) => self.record_directory = std::path::PathBuf::from(dir),
+                Err(_) => return Err("recordDirectory must be a string".to_owned()),
+            }
+        }
+        Ok(())
+    }
+
+    /// JSON から設定をパースする（HisuiCreateOutput / state file 復元用）。
+    pub(crate) fn parse_from_json(
+        settings_value: Option<&nojson::RawJsonValue<'_, '_>>,
+        default_record_directory: &std::path::Path,
+    ) -> Result<Self, String> {
+        if let Some(v) = settings_value
+            && let Ok(member) = v.to_member("recordDirectory")
+            && let Some(val) = member.optional()
+        {
+            if val.kind().is_null() {
+                return Err("recordDirectory cannot be null".to_owned());
+            }
+            match <String>::try_from(val) {
+                Ok(dir) => {
+                    return Ok(Self {
+                        record_directory: std::path::PathBuf::from(dir),
+                    });
+                }
+                Err(_) => return Err("recordDirectory must be a string".to_owned()),
+            }
+        }
+        Ok(Self {
+            record_directory: default_record_directory.to_path_buf(),
+        })
     }
 }
 

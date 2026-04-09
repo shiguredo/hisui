@@ -205,6 +205,152 @@ impl ObswsCoordinator {
     }
 }
 
+// -----------------------------------------------------------------------
+// StreamOutputSettings: stream output の種別固有設定
+// -----------------------------------------------------------------------
+
+/// Stream output の設定。
+/// `ObswsStreamServiceSettings` と同一フィールドを持ち、output_dynamic の enum から委譲される。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StreamOutputSettings {
+    pub(crate) stream_service_type: String,
+    pub(crate) server: Option<String>,
+    pub(crate) key: Option<String>,
+}
+
+impl Default for StreamOutputSettings {
+    fn default() -> Self {
+        Self {
+            stream_service_type: crate::obsws::input_registry::OBSWS_DEFAULT_STREAM_SERVICE_TYPE
+                .to_owned(),
+            server: None,
+            key: None,
+        }
+    }
+}
+
+impl From<crate::obsws::input_registry::ObswsStreamServiceSettings> for StreamOutputSettings {
+    fn from(s: crate::obsws::input_registry::ObswsStreamServiceSettings) -> Self {
+        Self {
+            stream_service_type: s.stream_service_type,
+            server: s.server,
+            key: s.key,
+        }
+    }
+}
+
+impl From<StreamOutputSettings> for crate::obsws::input_registry::ObswsStreamServiceSettings {
+    fn from(s: StreamOutputSettings) -> Self {
+        Self {
+            stream_service_type: s.stream_service_type,
+            server: s.server,
+            key: s.key,
+        }
+    }
+}
+
+impl nojson::DisplayJson for StreamOutputSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("streamServiceType", &self.stream_service_type)?;
+            f.member(
+                "streamServiceSettings",
+                nojson::object(|f| {
+                    if let Some(server) = &self.server {
+                        f.member("server", server)?;
+                    }
+                    if let Some(key) = &self.key {
+                        f.member("key", key)?;
+                    }
+                    Ok(())
+                }),
+            )
+        })
+        .fmt(f)
+    }
+}
+
+impl StreamOutputSettings {
+    /// JSON から設定を更新する（SetOutputSettings 用）。
+    /// 各フィールドは「キーが存在し値が non-null」なら更新、「値が null」なら既定値/None にクリア、
+    /// 「キーが存在しない」なら既存値を維持する。
+    pub(crate) fn update_from_json(
+        &mut self,
+        output_settings: &nojson::RawJsonValue<'_, '_>,
+    ) -> Result<(), String> {
+        if let Ok(v) = output_settings.to_member("streamServiceType")
+            && let Some(v) = v.optional()
+        {
+            if v.kind().is_null() {
+                self.stream_service_type =
+                    crate::obsws::input_registry::OBSWS_DEFAULT_STREAM_SERVICE_TYPE.to_owned();
+            } else {
+                match <String>::try_from(v) {
+                    Ok(s) => self.stream_service_type = s,
+                    Err(_) => return Err("streamServiceType must be a string".to_owned()),
+                }
+            }
+        }
+        let ss = output_settings
+            .to_member("streamServiceSettings")
+            .ok()
+            .and_then(|v| v.optional());
+        let source = ss.as_ref().unwrap_or(output_settings);
+        if let Ok(v) = source.to_member("server")
+            && let Some(v) = v.optional()
+        {
+            if v.kind().is_null() {
+                self.server = None;
+            } else {
+                match <String>::try_from(v) {
+                    Ok(s) => self.server = Some(s),
+                    Err(_) => return Err("server must be a string".to_owned()),
+                }
+            }
+        }
+        if let Ok(v) = source.to_member("key")
+            && let Some(v) = v.optional()
+        {
+            if v.kind().is_null() {
+                self.key = None;
+            } else {
+                match <String>::try_from(v) {
+                    Ok(s) => self.key = Some(s),
+                    Err(_) => return Err("key must be a string".to_owned()),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// JSON から設定をパースする（HisuiCreateOutput / state file 復元用）。
+    pub(crate) fn parse_from_json(
+        settings_value: Option<&nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<Self, String> {
+        use super::output_dynamic::parse_optional_string_strict;
+
+        let mut settings = Self::default();
+        if let Some(v) = settings_value {
+            if let Some(s) = parse_optional_string_strict(
+                v,
+                "streamServiceType",
+                "streamServiceType must be a string",
+            )? {
+                settings.stream_service_type = s;
+            }
+            let ss = v
+                .to_member("streamServiceSettings")
+                .ok()
+                .and_then(|v| v.optional());
+            let source = ss.as_ref().unwrap_or(v);
+            settings.server =
+                parse_optional_string_strict(source, "server", "server must be a string")?;
+            settings.key = parse_optional_string_strict(source, "key", "key must be a string")?;
+        }
+        Ok(settings)
+    }
+}
+
 /// ストリーム用プロセッサを起動する: エンコーダー → パブリッシャー
 /// program mixer の出力トラックを直接エンコーダーに入力するため、ミキサーとソースの起動は不要。
 async fn start_stream_processors(

@@ -57,6 +57,193 @@ pub(crate) struct SoraConnectionInfo {
     pub(crate) client_id: Option<String>,
 }
 
+// -----------------------------------------------------------------------
+// SoraOutputSettings: sora output の種別固有設定
+// -----------------------------------------------------------------------
+
+/// Sora publisher output の設定。
+/// `ObswsSoraPublisherSettings` と同一フィールドを持ち、output_dynamic の enum から委譲される。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct SoraOutputSettings {
+    pub(crate) signaling_urls: Vec<String>,
+    pub(crate) channel_id: Option<String>,
+    pub(crate) client_id: Option<String>,
+    pub(crate) bundle_id: Option<String>,
+    pub(crate) metadata: Option<nojson::RawJsonOwned>,
+}
+
+impl From<crate::obsws::input_registry::ObswsSoraPublisherSettings> for SoraOutputSettings {
+    fn from(s: crate::obsws::input_registry::ObswsSoraPublisherSettings) -> Self {
+        Self {
+            signaling_urls: s.signaling_urls,
+            channel_id: s.channel_id,
+            client_id: s.client_id,
+            bundle_id: s.bundle_id,
+            metadata: s.metadata,
+        }
+    }
+}
+
+impl From<SoraOutputSettings> for crate::obsws::input_registry::ObswsSoraPublisherSettings {
+    fn from(s: SoraOutputSettings) -> Self {
+        Self {
+            signaling_urls: s.signaling_urls,
+            channel_id: s.channel_id,
+            client_id: s.client_id,
+            bundle_id: s.bundle_id,
+            metadata: s.metadata,
+        }
+    }
+}
+
+impl nojson::DisplayJson for SoraOutputSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member(
+                "soraSdkSettings",
+                nojson::object(|f| {
+                    if !self.signaling_urls.is_empty() {
+                        f.member("signalingUrls", &self.signaling_urls)?;
+                    }
+                    if let Some(channel_id) = &self.channel_id {
+                        f.member("channelId", channel_id)?;
+                    }
+                    if let Some(client_id) = &self.client_id {
+                        f.member("clientId", client_id)?;
+                    }
+                    if let Some(bundle_id) = &self.bundle_id {
+                        f.member("bundleId", bundle_id)?;
+                    }
+                    if let Some(metadata) = &self.metadata {
+                        f.member("metadata", metadata)?;
+                    }
+                    Ok(())
+                }),
+            )
+        })
+        .fmt(f)
+    }
+}
+
+impl SoraOutputSettings {
+    /// JSON から設定を更新する（SetOutputSettings 用）。
+    /// soraSdkSettings オブジェクトの中の各フィールドを更新する。
+    pub(crate) fn update_from_json(
+        &mut self,
+        output_settings: &nojson::RawJsonValue<'_, '_>,
+    ) -> Result<(), String> {
+        if let Ok(v) = output_settings.to_member("soraSdkSettings")
+            && let Some(sdk) = v.optional()
+            && !sdk.kind().is_null()
+        {
+            if let Ok(v) = sdk.to_member("signalingUrls")
+                && let Some(v) = v.optional()
+            {
+                if v.kind().is_null() {
+                    self.signaling_urls = Vec::new();
+                } else {
+                    match <Vec<String>>::try_from(v) {
+                        Ok(urls) => self.signaling_urls = urls,
+                        Err(_) => {
+                            return Err("signalingUrls must be an array of strings".to_owned());
+                        }
+                    }
+                }
+            }
+            if let Ok(v) = sdk.to_member("channelId")
+                && let Some(v) = v.optional()
+            {
+                if v.kind().is_null() {
+                    self.channel_id = None;
+                } else {
+                    match <String>::try_from(v) {
+                        Ok(ch) => self.channel_id = Some(ch),
+                        Err(_) => return Err("channelId must be a string".to_owned()),
+                    }
+                }
+            }
+            if let Ok(v) = sdk.to_member("clientId")
+                && let Some(v) = v.optional()
+            {
+                if v.kind().is_null() {
+                    self.client_id = None;
+                } else {
+                    match <String>::try_from(v) {
+                        Ok(ci) => self.client_id = Some(ci),
+                        Err(_) => return Err("clientId must be a string".to_owned()),
+                    }
+                }
+            }
+            if let Ok(v) = sdk.to_member("bundleId")
+                && let Some(v) = v.optional()
+            {
+                if v.kind().is_null() {
+                    self.bundle_id = None;
+                } else {
+                    match <String>::try_from(v) {
+                        Ok(bi) => self.bundle_id = Some(bi),
+                        Err(_) => return Err("bundleId must be a string".to_owned()),
+                    }
+                }
+            }
+            if let Ok(v) = sdk.to_member("metadata")
+                && let Some(v) = v.optional()
+            {
+                if v.kind().is_null() {
+                    self.metadata = None;
+                } else if !v.kind().is_object() {
+                    return Err("metadata must be an object".to_owned());
+                } else {
+                    self.metadata = Some(v.extract().into_owned());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// JSON から設定をパースする（HisuiCreateOutput / state file 復元用）。
+    pub(crate) fn parse_from_json(
+        settings_value: Option<&nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<Self, String> {
+        use super::output_dynamic::parse_optional_string_strict;
+
+        let mut settings = Self::default();
+        if let Some(v) = settings_value {
+            let sdk = v
+                .to_member("soraSdkSettings")
+                .ok()
+                .and_then(|v| v.optional())
+                .filter(|v| !v.kind().is_null());
+            let source = sdk.as_ref().unwrap_or(v);
+            // signalingUrls
+            if let Ok(member) = source.to_member("signalingUrls")
+                && let Some(val) = member.optional()
+                && !val.kind().is_null()
+            {
+                settings.signaling_urls = <Vec<String>>::try_from(val)
+                    .map_err(|_| "signalingUrls must be an array of strings".to_owned())?;
+            }
+            settings.channel_id =
+                parse_optional_string_strict(source, "channelId", "channelId must be a string")?;
+            settings.client_id =
+                parse_optional_string_strict(source, "clientId", "clientId must be a string")?;
+            settings.bundle_id =
+                parse_optional_string_strict(source, "bundleId", "bundleId must be a string")?;
+            // metadata（object のみ）
+            if let Ok(member) = source.to_member("metadata")
+                && let Some(val) = member.optional()
+                && !val.kind().is_null()
+            {
+                if !val.kind().is_object() {
+                    return Err("metadata must be an object".to_owned());
+                }
+                settings.metadata = Some(val.extract().into_owned());
+            }
+        }
+        Ok(settings)
+    }
+}
+
 impl ObswsCoordinator {
     // --- Sora Publisher 操作 ---
     // `sora` は OBS の `stream` を拡張したものではなく、Program 出力の raw frame を

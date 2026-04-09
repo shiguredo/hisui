@@ -177,6 +177,102 @@ impl ObswsCoordinator {
     }
 }
 
+// -----------------------------------------------------------------------
+// RtmpOutboundOutputSettings: rtmp_outbound output の種別固有設定
+// -----------------------------------------------------------------------
+
+/// RTMP outbound output の設定。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct RtmpOutboundOutputSettings {
+    pub(crate) output_url: Option<String>,
+    pub(crate) stream_name: Option<String>,
+}
+
+impl From<crate::obsws::input_registry::ObswsRtmpOutboundSettings> for RtmpOutboundOutputSettings {
+    fn from(s: crate::obsws::input_registry::ObswsRtmpOutboundSettings) -> Self {
+        Self {
+            output_url: s.output_url,
+            stream_name: s.stream_name,
+        }
+    }
+}
+
+impl From<RtmpOutboundOutputSettings> for crate::obsws::input_registry::ObswsRtmpOutboundSettings {
+    fn from(s: RtmpOutboundOutputSettings) -> Self {
+        Self {
+            output_url: s.output_url,
+            stream_name: s.stream_name,
+        }
+    }
+}
+
+impl nojson::DisplayJson for RtmpOutboundOutputSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(output_url) = &self.output_url {
+                f.member("outputUrl", output_url)?;
+            }
+            if let Some(stream_name) = &self.stream_name {
+                f.member("streamName", stream_name)?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+impl RtmpOutboundOutputSettings {
+    /// JSON から設定を更新する（SetOutputSettings 用）。
+    /// 各フィールドは「キーが存在し値が non-null」なら更新、「値が null」なら None にクリア、
+    /// 「キーが存在しない」なら既存値を維持する。
+    pub(crate) fn update_from_json(
+        &mut self,
+        output_settings: &nojson::RawJsonValue<'_, '_>,
+    ) -> Result<(), String> {
+        if let Ok(v) = output_settings.to_member("outputUrl")
+            && let Some(v) = v.optional()
+        {
+            if v.kind().is_null() {
+                self.output_url = None;
+            } else {
+                match <String>::try_from(v) {
+                    Ok(url) => self.output_url = Some(url),
+                    Err(_) => return Err("outputUrl must be a string".to_owned()),
+                }
+            }
+        }
+        if let Ok(v) = output_settings.to_member("streamName")
+            && let Some(v) = v.optional()
+        {
+            if v.kind().is_null() {
+                self.stream_name = None;
+            } else {
+                match <String>::try_from(v) {
+                    Ok(name) => self.stream_name = Some(name),
+                    Err(_) => return Err("streamName must be a string".to_owned()),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// JSON から設定をパースする（HisuiCreateOutput / state file 復元用）。
+    pub(crate) fn parse_from_json(
+        settings_value: Option<&nojson::RawJsonValue<'_, '_>>,
+    ) -> Result<Self, String> {
+        use super::output_dynamic::parse_optional_string_strict;
+
+        let mut settings = Self::default();
+        if let Some(v) = settings_value {
+            settings.output_url =
+                parse_optional_string_strict(v, "outputUrl", "outputUrl must be a string")?;
+            settings.stream_name =
+                parse_optional_string_strict(v, "streamName", "streamName must be a string")?;
+        }
+        Ok(settings)
+    }
+}
+
 /// RTMP outbound 用プロセッサを起動する: エンコーダー → RTMP エンドポイント
 async fn start_rtmp_outbound_processors(
     pipeline_handle: &crate::MediaPipelineHandle,

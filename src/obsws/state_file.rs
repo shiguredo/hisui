@@ -1355,11 +1355,7 @@ pub(crate) fn build_state_from_registry(
         for (name, state) in outputs_map {
             let settings_json = match &state.settings {
                 OutputSettings::Stream(s) => crate::json::to_pretty_string(s),
-                OutputSettings::Record { record_directory } => {
-                    crate::json::to_pretty_string(&ObswsStateFileRecord {
-                        record_directory: record_directory.clone(),
-                    })
-                }
+                OutputSettings::Record(s) => crate::json::to_pretty_string(s),
                 OutputSettings::Hls(s) => crate::json::to_pretty_string(s),
                 OutputSettings::MpegDash(s) => crate::json::to_pretty_string(s),
                 OutputSettings::RtmpOutbound(s) => crate::json::to_pretty_string(s),
@@ -2790,12 +2786,15 @@ mod tests {
         let state = outputs
             .get("sora_with_meta")
             .expect("sora output must exist");
-        let OutputSettings::Sora(settings) = &state.settings else {
+        let OutputSettings::Sora(sora_settings) = &state.settings else {
             panic!("expected Sora settings");
         };
-        assert_eq!(settings.signaling_urls, vec!["wss://example.com/signaling"]);
-        assert_eq!(settings.channel_id.as_deref(), Some("ch"));
-        let metadata = settings
+        assert_eq!(
+            sora_settings.signaling_urls,
+            vec!["wss://example.com/signaling"]
+        );
+        assert_eq!(sora_settings.channel_id.as_deref(), Some("ch"));
+        let metadata = sora_settings
             .metadata
             .as_ref()
             .expect("metadata must be present");

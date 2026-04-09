@@ -14,10 +14,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::{CommandResult, ObswsCoordinator};
-use crate::obsws::input_registry::{
-    ObswsDashSettings, ObswsHlsSettings, ObswsRtmpOutboundSettings, ObswsSoraPublisherSettings,
-    ObswsStreamServiceSettings,
-};
+use crate::obsws::input_registry::{ObswsDashSettings, ObswsHlsSettings};
 use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
@@ -90,12 +87,12 @@ impl OutputKind {
 
 /// output の種別固有の設定
 pub(crate) enum OutputSettings {
-    Stream(ObswsStreamServiceSettings),
-    Record { record_directory: PathBuf },
+    Stream(super::output_stream::StreamOutputSettings),
+    Record(super::output_record::RecordOutputSettings),
     Hls(ObswsHlsSettings),
     MpegDash(ObswsDashSettings),
-    RtmpOutbound(ObswsRtmpOutboundSettings),
-    Sora(ObswsSoraPublisherSettings),
+    RtmpOutbound(super::output_rtmp::RtmpOutboundOutputSettings),
+    Sora(super::output_sora::SoraOutputSettings),
 }
 
 /// output の稼働中の実行情報
@@ -121,7 +118,7 @@ pub(crate) fn create_default_outputs(record_directory: PathBuf) -> BTreeMap<Stri
         "stream".to_owned(),
         OutputState {
             output_kind: OutputKind::Stream,
-            settings: OutputSettings::Stream(ObswsStreamServiceSettings::default()),
+            settings: OutputSettings::Stream(super::output_stream::StreamOutputSettings::default()),
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -129,7 +126,9 @@ pub(crate) fn create_default_outputs(record_directory: PathBuf) -> BTreeMap<Stri
         "record".to_owned(),
         OutputState {
             output_kind: OutputKind::Record,
-            settings: OutputSettings::Record { record_directory },
+            settings: OutputSettings::Record(super::output_record::RecordOutputSettings {
+                record_directory,
+            }),
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -285,158 +284,24 @@ impl ObswsCoordinator {
         // 各フィールドは「キーが存在し値が non-null」なら更新、「値が null」なら None にクリア、
         // 「キーが存在しない」なら既存値を維持する。不正な型は INVALID_REQUEST_FIELD を返す。
         match &mut state.settings {
-            OutputSettings::Stream(settings) => {
-                if let Ok(v) = output_settings.to_member("streamServiceType")
-                    && let Some(v) = v.optional()
-                {
-                    if v.kind().is_null() {
-                        settings.stream_service_type =
-                            crate::obsws::input_registry::OBSWS_DEFAULT_STREAM_SERVICE_TYPE
-                                .to_owned();
-                    } else {
-                        match <String>::try_from(v) {
-                            Ok(s) => settings.stream_service_type = s,
-                            Err(_) => return invalid_field("streamServiceType must be a string"),
-                        }
-                    }
-                }
-                let ss = output_settings
-                    .to_member("streamServiceSettings")
-                    .ok()
-                    .and_then(|v| v.optional());
-                let source = ss.as_ref().unwrap_or(&output_settings);
-                if let Ok(v) = source.to_member("server")
-                    && let Some(v) = v.optional()
-                {
-                    if v.kind().is_null() {
-                        settings.server = None;
-                    } else {
-                        match <String>::try_from(v) {
-                            Ok(s) => settings.server = Some(s),
-                            Err(_) => return invalid_field("server must be a string"),
-                        }
-                    }
-                }
-                if let Ok(v) = source.to_member("key")
-                    && let Some(v) = v.optional()
-                {
-                    if v.kind().is_null() {
-                        settings.key = None;
-                    } else {
-                        match <String>::try_from(v) {
-                            Ok(s) => settings.key = Some(s),
-                            Err(_) => return invalid_field("key must be a string"),
-                        }
-                    }
+            OutputSettings::Stream(s) => {
+                if let Err(e) = s.update_from_json(&output_settings) {
+                    return invalid_field(&e);
                 }
             }
-            OutputSettings::Record { record_directory } => {
-                if let Ok(v) = output_settings.to_member("recordDirectory")
-                    && let Some(v) = v.optional()
-                {
-                    if v.kind().is_null() {
-                        return invalid_field("recordDirectory cannot be null");
-                    }
-                    match <String>::try_from(v) {
-                        Ok(dir) => *record_directory = PathBuf::from(dir),
-                        Err(_) => return invalid_field("recordDirectory must be a string"),
-                    }
+            OutputSettings::Record(s) => {
+                if let Err(e) = s.update_from_json(&output_settings) {
+                    return invalid_field(&e);
                 }
             }
-            OutputSettings::RtmpOutbound(settings) => {
-                if let Ok(v) = output_settings.to_member("outputUrl")
-                    && let Some(v) = v.optional()
-                {
-                    if v.kind().is_null() {
-                        settings.output_url = None;
-                    } else {
-                        match <String>::try_from(v) {
-                            Ok(url) => settings.output_url = Some(url),
-                            Err(_) => return invalid_field("outputUrl must be a string"),
-                        }
-                    }
-                }
-                if let Ok(v) = output_settings.to_member("streamName")
-                    && let Some(v) = v.optional()
-                {
-                    if v.kind().is_null() {
-                        settings.stream_name = None;
-                    } else {
-                        match <String>::try_from(v) {
-                            Ok(name) => settings.stream_name = Some(name),
-                            Err(_) => return invalid_field("streamName must be a string"),
-                        }
-                    }
+            OutputSettings::RtmpOutbound(s) => {
+                if let Err(e) = s.update_from_json(&output_settings) {
+                    return invalid_field(&e);
                 }
             }
-            OutputSettings::Sora(settings) => {
-                if let Ok(v) = output_settings.to_member("soraSdkSettings")
-                    && let Some(sdk) = v.optional()
-                    && !sdk.kind().is_null()
-                {
-                    if let Ok(v) = sdk.to_member("signalingUrls")
-                        && let Some(v) = v.optional()
-                    {
-                        if v.kind().is_null() {
-                            settings.signaling_urls = Vec::new();
-                        } else {
-                            match <Vec<String>>::try_from(v) {
-                                Ok(urls) => settings.signaling_urls = urls,
-                                Err(_) => {
-                                    return invalid_field(
-                                        "signalingUrls must be an array of strings",
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    if let Ok(v) = sdk.to_member("channelId")
-                        && let Some(v) = v.optional()
-                    {
-                        if v.kind().is_null() {
-                            settings.channel_id = None;
-                        } else {
-                            match <String>::try_from(v) {
-                                Ok(ch) => settings.channel_id = Some(ch),
-                                Err(_) => return invalid_field("channelId must be a string"),
-                            }
-                        }
-                    }
-                    if let Ok(v) = sdk.to_member("clientId")
-                        && let Some(v) = v.optional()
-                    {
-                        if v.kind().is_null() {
-                            settings.client_id = None;
-                        } else {
-                            match <String>::try_from(v) {
-                                Ok(ci) => settings.client_id = Some(ci),
-                                Err(_) => return invalid_field("clientId must be a string"),
-                            }
-                        }
-                    }
-                    if let Ok(v) = sdk.to_member("bundleId")
-                        && let Some(v) = v.optional()
-                    {
-                        if v.kind().is_null() {
-                            settings.bundle_id = None;
-                        } else {
-                            match <String>::try_from(v) {
-                                Ok(bi) => settings.bundle_id = Some(bi),
-                                Err(_) => return invalid_field("bundleId must be a string"),
-                            }
-                        }
-                    }
-                    if let Ok(v) = sdk.to_member("metadata")
-                        && let Some(v) = v.optional()
-                    {
-                        if v.kind().is_null() {
-                            settings.metadata = None;
-                        } else if !v.kind().is_object() {
-                            return invalid_field("metadata must be an object");
-                        } else {
-                            settings.metadata = Some(v.extract().into_owned());
-                        }
-                    }
+            OutputSettings::Sora(s) => {
+                if let Err(e) = s.update_from_json(&output_settings) {
+                    return invalid_field(&e);
                 }
             }
             OutputSettings::Hls(settings) => {
@@ -471,9 +336,9 @@ impl ObswsCoordinator {
         // record の recordDirectory 更新時は default_record_directory も同期する
         if output_name == "record"
             && let Some(state) = self.outputs.get("record")
-            && let OutputSettings::Record { record_directory } = &state.settings
+            && let OutputSettings::Record(s) = &state.settings
         {
-            self.default_record_directory = record_directory.clone();
+            self.default_record_directory = s.record_directory.clone();
         }
         crate::obsws::response::build_request_response_success_no_data(
             "SetOutputSettings",
@@ -496,7 +361,7 @@ impl ObswsCoordinator {
             Ok(fields) => fields,
             Err(response) => return response,
         };
-        let new_settings = ObswsStreamServiceSettings {
+        let new_settings = super::output_stream::StreamOutputSettings {
             stream_service_type: fields.stream_service_type,
             server: Some(fields.server),
             key: fields.key,
@@ -563,9 +428,7 @@ impl ObswsCoordinator {
             .outputs
             .get("record")
             .and_then(|o| match &o.settings {
-                OutputSettings::Record { record_directory } => {
-                    Some(record_directory.display().to_string())
-                }
+                OutputSettings::Record(s) => Some(s.record_directory.display().to_string()),
                 _ => None,
             })
             .unwrap_or_default();
@@ -604,9 +467,9 @@ impl ObswsCoordinator {
                 }
             };
         if let Some(output) = self.outputs.get_mut("record") {
-            output.settings = OutputSettings::Record {
+            output.settings = OutputSettings::Record(super::output_record::RecordOutputSettings {
                 record_directory: record_directory.clone(),
-            };
+            });
         }
         // HisuiCreateOutput で mp4_output を省略作成した場合の既定値も更新する
         self.default_record_directory = record_directory;
@@ -628,10 +491,7 @@ impl nojson::DisplayJson for OutputSettingsJson<'_> {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         match self.0 {
             OutputSettings::Stream(s) => s.fmt(f),
-            OutputSettings::Record { record_directory } => nojson::object(|f| {
-                f.member("recordDirectory", record_directory.display().to_string())
-            })
-            .fmt(f),
+            OutputSettings::Record(s) => s.fmt(f),
             OutputSettings::Hls(s) => s.fmt(f),
             OutputSettings::MpegDash(s) => s.fmt(f),
             OutputSettings::RtmpOutbound(s) => s.fmt(f),
@@ -689,47 +549,17 @@ fn restore_output_settings(
 ) -> Result<OutputSettings, String> {
     let v = raw.value();
     match kind {
-        OutputKind::Stream => {
-            let mut settings = ObswsStreamServiceSettings::default();
-            // state file の stream settings は StreamServiceSettings 形式
-            let sst: Option<String> = v
-                .to_member("streamServiceType")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            if let Some(s) = sst {
-                settings.stream_service_type = s;
-            }
-            // streamServiceSettings のネストもフラットも対応
-            let ss = v
-                .to_member("streamServiceSettings")
-                .ok()
-                .and_then(|v| v.optional());
-            let source = ss.as_ref().unwrap_or(&v);
-            let server: Option<String> = source
-                .to_member("server")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            settings.server = server;
-            let key: Option<String> = source
-                .to_member("key")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            settings.key = key;
-            Ok(OutputSettings::Stream(settings))
-        }
+        OutputKind::Stream => Ok(OutputSettings::Stream(
+            super::output_stream::StreamOutputSettings::parse_from_json(Some(&v))?,
+        )),
         OutputKind::Record => {
-            let dir: Option<String> = v
-                .to_member("recordDirectory")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            let record_directory = dir
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/tmp"));
-            Ok(OutputSettings::Record { record_directory })
+            // state file 復元時のデフォルトは /tmp（state file にディレクトリ情報がない場合のフォールバック）
+            Ok(OutputSettings::Record(
+                super::output_record::RecordOutputSettings::parse_from_json(
+                    Some(&v),
+                    std::path::Path::new("/tmp"),
+                )?,
+            ))
         }
         OutputKind::Hls => {
             // HLS 設定を state file から復元する
@@ -746,64 +576,12 @@ fn restore_output_settings(
                 Err(_) => Ok(OutputSettings::MpegDash(existing)),
             }
         }
-        OutputKind::RtmpOutbound => {
-            let mut settings = ObswsRtmpOutboundSettings::default();
-            let url: Option<String> = v
-                .to_member("outputUrl")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            settings.output_url = url;
-            let name: Option<String> = v
-                .to_member("streamName")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            settings.stream_name = name;
-            Ok(OutputSettings::RtmpOutbound(settings))
-        }
-        OutputKind::Sora => {
-            let mut settings = ObswsSoraPublisherSettings::default();
-            // soraSdkSettings のネストもトップレベルも対応
-            let sdk = v
-                .to_member("soraSdkSettings")
-                .ok()
-                .and_then(|v| v.optional());
-            let source = sdk.as_ref().unwrap_or(&v);
-            let urls: Vec<String> = source
-                .to_member("signalingUrls")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok())
-                .unwrap_or_default();
-            settings.signaling_urls = urls;
-            let ch: Option<String> = source
-                .to_member("channelId")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            settings.channel_id = ch;
-            let ci: Option<String> = source
-                .to_member("clientId")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            settings.client_id = ci;
-            let bi: Option<String> = source
-                .to_member("bundleId")
-                .ok()
-                .and_then(|v| v.optional())
-                .and_then(|v| v.try_into().ok());
-            settings.bundle_id = bi;
-            // metadata の復元（object のみ）
-            if let Ok(m) = source.to_member("metadata")
-                && let Some(v) = m.optional()
-                && v.kind().is_object()
-            {
-                settings.metadata = Some(v.extract().into_owned());
-            }
-            Ok(OutputSettings::Sora(settings))
-        }
+        OutputKind::RtmpOutbound => Ok(OutputSettings::RtmpOutbound(
+            super::output_rtmp::RtmpOutboundOutputSettings::parse_from_json(Some(&v))?,
+        )),
+        OutputKind::Sora => Ok(OutputSettings::Sora(
+            super::output_sora::SoraOutputSettings::parse_from_json(Some(&v))?,
+        )),
     }
 }
 
@@ -985,7 +763,7 @@ fn parse_required_string(request_data: &nojson::RawJsonOwned, field: &str) -> Op
 
 /// JSON メンバーから Option<String> を厳格に取得する。
 /// キー不在 → Ok(None)、null → Ok(None)、string → Ok(Some(s))、それ以外 → Err
-fn parse_optional_string_strict(
+pub(super) fn parse_optional_string_strict(
     v: &nojson::RawJsonValue<'_, '_>,
     field: &str,
     error_msg: &str,
@@ -1027,48 +805,15 @@ fn parse_output_settings(
     }
 
     match kind {
-        OutputKind::Stream => {
-            let mut settings = ObswsStreamServiceSettings::default();
-            if let Some(v) = &settings_value {
-                if let Some(s) = parse_optional_string_strict(
-                    v,
-                    "streamServiceType",
-                    "streamServiceType must be a string",
-                )? {
-                    settings.stream_service_type = s;
-                }
-                let ss = v
-                    .to_member("streamServiceSettings")
-                    .ok()
-                    .and_then(|v| v.optional());
-                let source = ss.as_ref().unwrap_or(v);
-                settings.server =
-                    parse_optional_string_strict(source, "server", "server must be a string")?;
-                settings.key = parse_optional_string_strict(source, "key", "key must be a string")?;
-            }
-            Ok(OutputSettings::Stream(settings))
-        }
-        OutputKind::Record => {
-            if let Some(v) = &settings_value
-                && let Ok(member) = v.to_member("recordDirectory")
-                && let Some(val) = member.optional()
-            {
-                if val.kind().is_null() {
-                    return Err("recordDirectory cannot be null".to_owned());
-                }
-                match <String>::try_from(val) {
-                    Ok(dir) => {
-                        return Ok(OutputSettings::Record {
-                            record_directory: PathBuf::from(dir),
-                        });
-                    }
-                    Err(_) => return Err("recordDirectory must be a string".to_owned()),
-                }
-            }
-            Ok(OutputSettings::Record {
-                record_directory: default_record_directory.to_path_buf(),
-            })
-        }
+        OutputKind::Stream => Ok(OutputSettings::Stream(
+            super::output_stream::StreamOutputSettings::parse_from_json(settings_value.as_ref())?,
+        )),
+        OutputKind::Record => Ok(OutputSettings::Record(
+            super::output_record::RecordOutputSettings::parse_from_json(
+                settings_value.as_ref(),
+                default_record_directory,
+            )?,
+        )),
         OutputKind::Hls => {
             let existing = ObswsHlsSettings::default();
             if let Some(v) = &settings_value {
@@ -1087,54 +832,13 @@ fn parse_output_settings(
                 Ok(OutputSettings::MpegDash(existing))
             }
         }
-        OutputKind::RtmpOutbound => {
-            let mut settings = ObswsRtmpOutboundSettings::default();
-            if let Some(v) = &settings_value {
-                settings.output_url =
-                    parse_optional_string_strict(v, "outputUrl", "outputUrl must be a string")?;
-                settings.stream_name =
-                    parse_optional_string_strict(v, "streamName", "streamName must be a string")?;
-            }
-            Ok(OutputSettings::RtmpOutbound(settings))
-        }
-        OutputKind::Sora => {
-            let mut settings = ObswsSoraPublisherSettings::default();
-            if let Some(v) = &settings_value {
-                let sdk = v
-                    .to_member("soraSdkSettings")
-                    .ok()
-                    .and_then(|v| v.optional())
-                    .filter(|v| !v.kind().is_null());
-                let source = sdk.as_ref().unwrap_or(v);
-                // signalingUrls
-                if let Ok(member) = source.to_member("signalingUrls")
-                    && let Some(val) = member.optional()
-                    && !val.kind().is_null()
-                {
-                    settings.signaling_urls = <Vec<String>>::try_from(val)
-                        .map_err(|_| "signalingUrls must be an array of strings".to_owned())?;
-                }
-                settings.channel_id = parse_optional_string_strict(
-                    source,
-                    "channelId",
-                    "channelId must be a string",
-                )?;
-                settings.client_id =
-                    parse_optional_string_strict(source, "clientId", "clientId must be a string")?;
-                settings.bundle_id =
-                    parse_optional_string_strict(source, "bundleId", "bundleId must be a string")?;
-                // metadata（object のみ）
-                if let Ok(member) = source.to_member("metadata")
-                    && let Some(val) = member.optional()
-                    && !val.kind().is_null()
-                {
-                    if !val.kind().is_object() {
-                        return Err("metadata must be an object".to_owned());
-                    }
-                    settings.metadata = Some(val.extract().into_owned());
-                }
-            }
-            Ok(OutputSettings::Sora(settings))
-        }
+        OutputKind::RtmpOutbound => Ok(OutputSettings::RtmpOutbound(
+            super::output_rtmp::RtmpOutboundOutputSettings::parse_from_json(
+                settings_value.as_ref(),
+            )?,
+        )),
+        OutputKind::Sora => Ok(OutputSettings::Sora(
+            super::output_sora::SoraOutputSettings::parse_from_json(settings_value.as_ref())?,
+        )),
     }
 }
