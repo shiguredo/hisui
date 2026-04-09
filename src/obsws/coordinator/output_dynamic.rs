@@ -468,6 +468,13 @@ impl ObswsCoordinator {
                 }
             }
         }
+        // record の recordDirectory 更新時は default_record_directory も同期する
+        if output_name == "record"
+            && let Some(state) = self.outputs.get("record")
+            && let OutputSettings::Record { record_directory } = &state.settings
+        {
+            self.default_record_directory = record_directory.clone();
+        }
         crate::obsws::response::build_request_response_success_no_data(
             "SetOutputSettings",
             request_id,

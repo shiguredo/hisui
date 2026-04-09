@@ -3773,3 +3773,68 @@ async fn set_output_settings_rejects_non_object_output_settings() {
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
 }
+
+#[tokio::test]
+async fn set_output_settings_record_updates_default_record_directory() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    // SetOutputSettings で record の recordDirectory を変更
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-record-dir-via-settings".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"record","outputSettings":{"recordDirectory":"/tmp/updated-via-settings"}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, _) = parse_request_status(&text);
+    assert!(result);
+
+    // HisuiCreateOutput で mp4_output を省略作成
+    let create_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-create-mp4-after-settings".to_owned()),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"outputName":"new_record_via_settings","outputKind":"mp4_output"}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(create_action);
+    let (result, _) = parse_request_status(&text);
+    assert!(result);
+
+    // GetOutputSettings で更新後の値が使われていることを確認
+    let get_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-get-new-mp4-via-settings".to_owned()),
+            request_type: Some("GetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"new_record_via_settings"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(get_action);
+    let json = nojson::RawJson::parse(text.text()).expect("response must be valid JSON");
+    let dir: String = json
+        .value()
+        .to_path_member(&["d", "responseData", "outputSettings", "recordDirectory"])
+        .expect("recordDirectory access must succeed")
+        .required()
+        .expect("recordDirectory must be present")
+        .try_into()
+        .expect("recordDirectory must be string");
+    assert_eq!(dir, "/tmp/updated-via-settings");
+}
