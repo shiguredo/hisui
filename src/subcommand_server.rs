@@ -1,4 +1,5 @@
 use std::net::{IpAddr, SocketAddr};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
@@ -103,6 +104,12 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .doc("server の設定永続化用 state file のパス")
         .take(args)
         .present_and_then(|o| o.value().parse())?;
+    let worker_threads: Option<NonZeroUsize> = noargs::opt("worker-threads")
+        .ty("INTEGER")
+        .env("HISUI_SERVER_WORKER_THREADS")
+        .doc("サーバーのワーカースレッド数")
+        .take(args)
+        .present_and_then(|o| o.value().parse())?;
 
     if args.metadata().help_mode {
         return Ok(());
@@ -155,6 +162,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         canvas_height,
         frame_rate,
         state_file,
+        worker_threads,
     )
     .map_err(noargs::Error::from)
 }
@@ -174,6 +182,7 @@ fn run_internal(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file: Option<PathBuf>,
+    worker_threads: Option<NonZeroUsize>,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
@@ -189,10 +198,12 @@ fn run_internal(
         #[cfg(feature = "fdk-aac")]
         fdk_aac_lib,
     };
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(crate::Error::from)?;
+    let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
+    runtime_builder.enable_all();
+    if let Some(n) = worker_threads {
+        runtime_builder.worker_threads(n.get());
+    }
+    let runtime = runtime_builder.build().map_err(crate::Error::from)?;
 
     // SDL3 は macOS でメインスレッド必須のため、player feature 有効時は常にスレッドモデルを変更する:
     // メインスレッド → player 制御ループ（SDL）、バックグラウンドスレッド → tokio ランタイム
