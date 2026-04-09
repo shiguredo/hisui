@@ -113,7 +113,8 @@ pub(crate) enum OutputRun {
 // -----------------------------------------------------------------------
 
 /// 起動時のデフォルト output を生成する。
-/// 各 output 設定はデフォルト値で初期化する。
+/// OBS 互換として stream と record のみ自動作成する。
+/// hls / mpeg_dash / sora / rtmp_outbound は HisuiCreateOutput で明示的に作成する。
 pub(crate) fn create_default_outputs(record_directory: PathBuf) -> BTreeMap<String, OutputState> {
     let mut outputs = BTreeMap::new();
     outputs.insert(
@@ -129,38 +130,6 @@ pub(crate) fn create_default_outputs(record_directory: PathBuf) -> BTreeMap<Stri
         OutputState {
             output_kind: OutputKind::Record,
             settings: OutputSettings::Record { record_directory },
-            runtime: OutputRuntimeState::default(),
-        },
-    );
-    outputs.insert(
-        "rtmp_outbound".to_owned(),
-        OutputState {
-            output_kind: OutputKind::RtmpOutbound,
-            settings: OutputSettings::RtmpOutbound(ObswsRtmpOutboundSettings::default()),
-            runtime: OutputRuntimeState::default(),
-        },
-    );
-    outputs.insert(
-        "sora".to_owned(),
-        OutputState {
-            output_kind: OutputKind::Sora,
-            settings: OutputSettings::Sora(ObswsSoraPublisherSettings::default()),
-            runtime: OutputRuntimeState::default(),
-        },
-    );
-    outputs.insert(
-        "hls".to_owned(),
-        OutputState {
-            output_kind: OutputKind::Hls,
-            settings: OutputSettings::Hls(ObswsHlsSettings::default()),
-            runtime: OutputRuntimeState::default(),
-        },
-    );
-    outputs.insert(
-        "mpeg_dash".to_owned(),
-        OutputState {
-            output_kind: OutputKind::MpegDash,
-            settings: OutputSettings::MpegDash(ObswsDashSettings::default()),
             runtime: OutputRuntimeState::default(),
         },
     );

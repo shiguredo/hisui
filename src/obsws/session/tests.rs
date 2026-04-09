@@ -396,6 +396,25 @@ async fn identify_session(session: &mut ObswsSession) {
     assert!(matches!(identify_action, SessionAction::SendText { .. }));
 }
 
+/// HisuiCreateOutput で output を作成するヘルパー
+async fn create_output(session: &mut ObswsSession, output_name: &str, output_kind: &str) {
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some(format!("req-create-{output_name}")),
+            request_type: Some("HisuiCreateOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(format!(
+                    r#"{{"outputName":"{output_name}","outputKind":"{output_kind}"}}"#
+                ))
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, _) = parse_request_status(&text);
+    assert!(result, "HisuiCreateOutput for {output_name} must succeed");
+}
+
 async fn wait_for_processor_presence(
     pipeline_handle: &crate::MediaPipelineHandle,
     processor_id: &str,
@@ -2115,6 +2134,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
     let handle = create_coordinator_handle_with_pipeline(registry, pipeline_handle.clone());
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
+    create_output(&mut session, "hls", "hls_output").await;
 
     let hls_output_dir = temp_dir.path().join("hls-output");
     let set_action = session
@@ -2248,6 +2268,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
             .await?;
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
+    create_output(&mut session, "mpeg_dash", "mpeg_dash_output").await;
 
     let dash_output_dir = temp_dir.path().join("dash-output");
     let set_action = session
@@ -3405,6 +3426,7 @@ async fn set_output_settings_rejects_invalid_sora_metadata_type() {
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
+    create_output(&mut session, "sora", "sora_webrtc_output").await;
 
     // metadata に配列を渡すと INVALID_REQUEST_FIELD を返す
     let action = session
@@ -3431,6 +3453,7 @@ async fn set_output_settings_rejects_invalid_signaling_urls_type() {
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
+    create_output(&mut session, "sora", "sora_webrtc_output").await;
 
     // signalingUrls に文字列を渡すと INVALID_REQUEST_FIELD を返す
     let action = session
@@ -3482,6 +3505,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
+    create_output(&mut session, "sora", "sora_webrtc_output").await;
 
     // まず channelId を設定する
     let set_action = session

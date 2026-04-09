@@ -608,6 +608,22 @@ async def _send_obsws_request(
     return response
 
 
+async def _create_output(
+    ws: aiohttp.ClientWebSocketResponse,
+    output_name: str,
+    output_kind: str,
+):
+    """HisuiCreateOutput で output インスタンスを作成する"""
+    response = await _send_obsws_request(
+        ws,
+        "HisuiCreateOutput",
+        f"create-{output_name}",
+        {"outputName": output_name, "outputKind": output_kind},
+    )
+    assert response["d"]["requestStatus"]["result"] is True
+    return response
+
+
 async def _send_obsws_request_batch(
     ws: aiohttp.ClientWebSocketResponse,
     *,

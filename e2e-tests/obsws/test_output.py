@@ -13,6 +13,7 @@ from helpers import (
     ObswsServer,
     _collect_obsws_metrics_snapshot,
     _collect_obsws_metrics_snapshot_async,
+    _create_output,
     _format_obsws_diagnostics,
     _http_get,
     _identify_with_optional_password,
@@ -1437,6 +1438,9 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
 
+            # HLS output を作成
+            await _create_output(ws, "hls", "hls_output")
+
             # GetOutputList に hls が含まれることを確認
             output_list_response = await _send_obsws_request(
                 ws,
@@ -1597,6 +1601,9 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
 
+            # HLS output を作成
+            await _create_output(ws, "hls", "hls_output")
+
             # HLS 設定
             set_settings_response = await _send_obsws_request(
                 ws,
@@ -1684,6 +1691,9 @@ def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Pa
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
 
+            # HLS output を作成
+            await _create_output(ws, "hls", "hls_output")
+
             # destination を設定せずに StartOutput
             start_response = await _send_obsws_request(
                 ws,
@@ -1734,6 +1744,9 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
                 },
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
+
+            # HLS output を作成
+            await _create_output(ws, "hls", "hls_output")
 
             # fMP4 形式で HLS 設定を行う
             set_settings_response = await _send_obsws_request(
@@ -1877,6 +1890,9 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
             )
             assert create_input_response["d"]["requestStatus"]["result"] is True
 
+            # HLS output を作成
+            await _create_output(ws, "hls", "hls_output")
+
             # ABR 設定（2 バリアント）を行う
             set_settings_response = await _send_obsws_request(
                 ws,
@@ -2008,6 +2024,9 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
+
+            # HLS output を作成
+            await _create_output(ws, "hls", "hls_output")
 
             # 空の variants 配列はエラー
             resp = await _send_obsws_request(

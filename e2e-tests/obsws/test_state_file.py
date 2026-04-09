@@ -11,6 +11,7 @@ from hisui_server import reserve_ephemeral_port
 from helpers import (
     OBSWS_SUBPROTOCOL,
     ObswsServer,
+    _create_output,
     _identify_with_optional_password,
     _send_obsws_request,
 )
@@ -407,6 +408,7 @@ def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path
                     f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
+                await _create_output(ws, "rtmp_outbound", "rtmp_outbound_output")
                 response = await _send_obsws_request(
                     ws,
                     "SetOutputSettings",
@@ -467,6 +469,7 @@ def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
                     f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
+                await _create_output(ws, "sora", "sora_webrtc_output")
                 response = await _send_obsws_request(
                     ws,
                     "SetOutputSettings",
@@ -532,6 +535,7 @@ def test_hls_filesystem_persists_across_restart(binary_path: Path, tmp_path: Pat
                     f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
+                await _create_output(ws, "hls", "hls_output")
                 response = await _send_obsws_request(
                     ws,
                     "SetOutputSettings",
@@ -603,6 +607,7 @@ def test_mpeg_dash_filesystem_persists_across_restart(binary_path: Path, tmp_pat
                     f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
+                await _create_output(ws, "mpeg_dash", "mpeg_dash_output")
                 response = await _send_obsws_request(
                     ws,
                     "SetOutputSettings",
