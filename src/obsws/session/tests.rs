@@ -3838,3 +3838,44 @@ async fn set_output_settings_record_updates_default_record_directory() {
         .expect("recordDirectory must be string");
     assert_eq!(dir, "/tmp/updated-via-settings");
 }
+
+#[tokio::test]
+async fn set_stream_service_settings_after_remove_returns_not_found() {
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    // stream を削除する
+    let remove_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-remove-stream".to_owned()),
+            request_type: Some("HisuiRemoveOutput".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"stream"}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(remove_action);
+    let (result, _) = parse_request_status(&text);
+    assert!(result);
+
+    // 削除後の SetStreamServiceSettings は RESOURCE_NOT_FOUND を返す
+    let set_action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-stream-after-remove".to_owned()),
+            request_type: Some("SetStreamServiceSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(
+                    r#"{"streamServiceType":"rtmp_custom","streamServiceSettings":{"server":"rtmp://127.0.0.1/live"}}"#,
+                )
+                .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(set_action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_RESOURCE_NOT_FOUND);
+}

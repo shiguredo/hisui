@@ -501,9 +501,15 @@ impl ObswsCoordinator {
             server: Some(fields.server),
             key: fields.key,
         };
-        if let Some(output) = self.outputs.get_mut("stream") {
-            output.settings = OutputSettings::Stream(new_settings);
-        }
+        let Some(output) = self.outputs.get_mut("stream") else {
+            return crate::obsws::response::build_request_response_error(
+                "SetStreamServiceSettings",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Output not found",
+            );
+        };
+        output.settings = OutputSettings::Stream(new_settings);
         crate::obsws::response::build_request_response_success_no_data(
             "SetStreamServiceSettings",
             request_id,
