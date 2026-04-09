@@ -2897,8 +2897,10 @@ mod tests {
             .expect("settings json must be valid"),
         }];
 
-        let error = restore_outputs_from_state(state_outputs)
-            .expect_err("restore must fail for invalid state");
+        let error = match restore_outputs_from_state(state_outputs) {
+            Ok(_) => panic!("restore must fail for invalid state"),
+            Err(error) => error,
+        };
         let message = error.display().to_string();
         assert!(message.contains("broken_stream"));
         assert!(message.contains("streamServiceType must be a string"));
