@@ -95,6 +95,9 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     "HisuiListSoraSourceTracks",
     "HisuiAttachSoraSourceTrack",
     "HisuiDetachSoraSourceTrack",
+    // Output 管理
+    "HisuiCreateOutput",
+    "HisuiRemoveOutput",
 ];
 
 pub fn build_get_version_response(
@@ -127,16 +130,19 @@ pub fn build_get_version_response(
     })
 }
 
-pub fn build_get_stats_response(
+pub(crate) fn build_get_stats_response(
     request_id: &str,
     session_stats: &ObswsSessionStats,
-    input_registry: &ObswsInputRegistry,
+    outputs: &std::collections::BTreeMap<
+        String,
+        crate::obsws::coordinator::output_dynamic::OutputState,
+    >,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> nojson::RawJsonOwned {
     let outgoing_messages = session_stats.outgoing_messages.saturating_add(1);
-    let runtime_stats = collect_runtime_stats(input_registry);
-    let output_stats = super::collect_output_runtime_stats(input_registry, pipeline_handle);
-    let active_fps = calculate_active_fps(input_registry, &output_stats);
+    let runtime_stats = collect_runtime_stats(outputs);
+    let output_stats = super::collect_output_runtime_stats_from_outputs(outputs, pipeline_handle);
+    let active_fps = calculate_active_fps_from_outputs(outputs, &output_stats);
 
     super::build_request_response_success("GetStats", request_id, |f| {
         f.member("cpuUsage", 0.0)?;
@@ -171,28 +177,44 @@ struct ObswsRuntimeStats {
     available_disk_space_mb: f64,
 }
 
-fn collect_runtime_stats(input_registry: &ObswsInputRegistry) -> ObswsRuntimeStats {
+fn collect_runtime_stats(
+    outputs: &std::collections::BTreeMap<
+        String,
+        crate::obsws::coordinator::output_dynamic::OutputState,
+    >,
+) -> ObswsRuntimeStats {
+    use crate::obsws::coordinator::output_dynamic::OutputSettings;
+    // record output の record_directory からディスク容量を取得する
+    let record_dir = outputs.get("record").and_then(|o| match &o.settings {
+        OutputSettings::Record { record_directory } => Some(record_directory.as_path()),
+        _ => None,
+    });
+    let disk_space = record_dir.map(available_disk_space_mb).unwrap_or(0.0);
     ObswsRuntimeStats {
         memory_usage_mb: current_process_memory_usage_mb(),
-        available_disk_space_mb: available_disk_space_mb(input_registry.record_directory()),
+        available_disk_space_mb: disk_space,
     }
 }
 
-fn calculate_active_fps(
-    input_registry: &ObswsInputRegistry,
+fn calculate_active_fps_from_outputs(
+    outputs: &std::collections::BTreeMap<
+        String,
+        crate::obsws::coordinator::output_dynamic::OutputState,
+    >,
     output_stats: &super::ObswsOutputRuntimeStats,
 ) -> f64 {
-    if input_registry.is_stream_active() {
-        return frames_per_second(
-            output_stats.stream_total_frames,
-            input_registry.stream_uptime(),
-        );
+    use crate::obsws::coordinator::output_dynamic::output_active_and_uptime;
+    if let Some(stream) = outputs.get("stream") {
+        let (active, uptime) = output_active_and_uptime(stream);
+        if active {
+            return frames_per_second(output_stats.stream_total_frames, uptime);
+        }
     }
-    if input_registry.is_record_active() {
-        return frames_per_second(
-            output_stats.record_total_frames,
-            input_registry.record_uptime(),
-        );
+    if let Some(record) = outputs.get("record") {
+        let (active, uptime) = output_active_and_uptime(record);
+        if active {
+            return frames_per_second(output_stats.record_total_frames, uptime);
+        }
     }
     0.0
 }

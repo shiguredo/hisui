@@ -99,6 +99,29 @@ fn make_create_input_request(input_mp4_path: &str) -> (String, String) {
     (request_id, msg)
 }
 
+fn make_create_sora_output_request() -> (String, String) {
+    let request_id = next_request_id();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "HisuiCreateOutput")?;
+                f.member("requestId", request_id.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| {
+                        f.member("outputName", "sora")?;
+                        f.member("outputKind", "sora_webrtc_output")
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
 fn make_set_output_settings_request(signaling_url: &str, channel_id: &str) -> (String, String) {
     let request_id = next_request_id();
     let msg = nojson::object(|f| {
@@ -479,13 +502,19 @@ async fn run(
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("CreateInput 成功");
 
-    // 2. SetOutputSettings: Sora 設定
+    // 2. HisuiCreateOutput: Sora 出力インスタンスを作成
+    let (req_id, msg) = make_create_sora_output_request();
+    tracing::info!("HisuiCreateOutput: sora");
+    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+    tracing::info!("HisuiCreateOutput 成功");
+
+    // 3. SetOutputSettings: Sora 設定
     let (req_id, msg) = make_set_output_settings_request(signaling_url, channel_id);
     tracing::info!("SetOutputSettings 送信: signaling={signaling_url}, channel={channel_id}");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("SetOutputSettings 成功");
 
-    // 3. StartOutput: player 表示開始（オプション）
+    // 4. StartOutput: player 表示開始（オプション）
     if player {
         let (req_id, msg) = make_start_player_request();
         tracing::info!("StartOutput (player) 送信");
@@ -493,7 +522,7 @@ async fn run(
         tracing::info!("player 表示開始");
     }
 
-    // 4. StartOutput: Sora 配信開始
+    // 5. StartOutput: Sora 配信開始
     let (req_id, msg) = make_start_output_request();
     tracing::info!("StartOutput 送信");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;

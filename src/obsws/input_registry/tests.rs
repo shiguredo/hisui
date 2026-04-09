@@ -1,5 +1,4 @@
 use super::*;
-use crate::{ProcessorId, TrackId};
 
 fn parse_owned_json(text: &str) -> nojson::RawJsonOwned {
     nojson::RawJsonOwned::parse(text).expect("test json must be valid")
@@ -1333,62 +1332,7 @@ fn remove_scene_rejects_deleting_last_scene() {
     assert_eq!(error, RemoveSceneError::LastSceneNotRemovable);
 }
 
-#[test]
-fn stream_runtime_state_changes_on_activate_and_deactivate() {
-    let mut registry = ObswsInputRegistry::new_for_test();
-    assert!(!registry.is_stream_active());
-    assert_eq!(registry.stream_uptime(), Duration::ZERO);
-
-    registry
-        .activate_stream(ObswsStreamRun {
-            video: ObswsRecordTrackRun {
-                encoder_processor_id: ProcessorId::new("encoder"),
-                source_track_id: TrackId::new("source-track"),
-                encoded_track_id: TrackId::new("encoded-track"),
-            },
-            audio: ObswsRecordTrackRun {
-                encoder_processor_id: ProcessorId::new("audio-encoder"),
-                source_track_id: TrackId::new("audio-source-track"),
-                encoded_track_id: TrackId::new("audio-encoded-track"),
-            },
-            publisher_processor_id: ProcessorId::new("publisher"),
-        })
-        .expect("stream activation must succeed");
-    assert!(registry.is_stream_active());
-
-    registry.deactivate_stream();
-    assert!(!registry.is_stream_active());
-    assert_eq!(registry.stream_uptime(), Duration::ZERO);
-}
-
-#[test]
-fn record_runtime_state_changes_on_activate_and_deactivate() {
-    let mut registry = ObswsInputRegistry::new_for_test();
-    assert!(!registry.is_record_active());
-    assert_eq!(registry.record_uptime(), Duration::ZERO);
-
-    registry
-        .activate_record(ObswsRecordRun {
-            video: ObswsRecordTrackRun {
-                encoder_processor_id: ProcessorId::new("encoder"),
-                source_track_id: TrackId::new("source-track"),
-                encoded_track_id: TrackId::new("encoded-track"),
-            },
-            audio: ObswsRecordTrackRun {
-                encoder_processor_id: ProcessorId::new("audio-encoder"),
-                source_track_id: TrackId::new("audio-source-track"),
-                encoded_track_id: TrackId::new("audio-encoded-track"),
-            },
-            writer_processor_id: ProcessorId::new("writer"),
-            output_path: PathBuf::from("recordings-for-test/output.mp4"),
-        })
-        .expect("record activation must succeed");
-    assert!(registry.is_record_active());
-
-    registry.deactivate_record();
-    assert!(!registry.is_record_active());
-    assert_eq!(registry.record_uptime(), Duration::ZERO);
-}
+// stream / record runtime state テストは outputs BTreeMap に移行したため削除。
 
 #[test]
 fn srt_inbound_display_json_excludes_passphrase() {

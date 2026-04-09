@@ -41,7 +41,9 @@ impl OutputOperationOutcome {
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_start_stream_request(&mut self, request_id: &str) -> CommandResult {
-        let outcome = self.handle_start_stream("StartStream", request_id).await;
+        let outcome = self
+            .handle_start_stream("StartStream", request_id, "stream")
+            .await;
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
@@ -63,7 +65,9 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_stop_stream_request(&mut self, request_id: &str) -> CommandResult {
-        let outcome = self.handle_stop_stream("StopStream", request_id).await;
+        let outcome = self
+            .handle_stop_stream("StopStream", request_id, "stream")
+            .await;
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
@@ -85,11 +89,13 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_toggle_stream_request(&mut self, request_id: &str) -> CommandResult {
-        let was_active = self.input_registry.is_stream_active();
+        let was_active = self.outputs.get("stream").is_some_and(|o| o.runtime.active);
         let outcome = if was_active {
-            self.handle_stop_stream("ToggleStream", request_id).await
+            self.handle_stop_stream("ToggleStream", request_id, "stream")
+                .await
         } else {
-            self.handle_start_stream("ToggleStream", request_id).await
+            self.handle_start_stream("ToggleStream", request_id, "stream")
+                .await
         };
         let mut events = Vec::new();
         if outcome.success {
@@ -134,7 +140,9 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_start_record_request(&mut self, request_id: &str) -> CommandResult {
-        let outcome = self.handle_start_record("StartRecord", request_id).await;
+        let outcome = self
+            .handle_start_record("StartRecord", request_id, "record")
+            .await;
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
@@ -158,7 +166,9 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_stop_record_request(&mut self, request_id: &str) -> CommandResult {
-        let outcome = self.handle_stop_record("StopRecord", request_id).await;
+        let outcome = self
+            .handle_stop_record("StopRecord", request_id, "record")
+            .await;
         let mut events = Vec::new();
         if outcome.success {
             events.push(TaggedEvent {
@@ -182,11 +192,13 @@ impl ObswsCoordinator {
     }
 
     pub(crate) async fn handle_toggle_record_request(&mut self, request_id: &str) -> CommandResult {
-        let was_active = self.input_registry.is_record_active();
+        let was_active = self.outputs.get("record").is_some_and(|o| o.runtime.active);
         let outcome = if was_active {
-            self.handle_stop_record("ToggleRecord", request_id).await
+            self.handle_stop_record("ToggleRecord", request_id, "record")
+                .await
         } else {
-            self.handle_start_record("ToggleRecord", request_id).await
+            self.handle_start_record("ToggleRecord", request_id, "record")
+                .await
         };
         let mut events = Vec::new();
         if outcome.success {
@@ -250,7 +262,9 @@ impl ObswsCoordinator {
         };
         let (outcome, events) = match output_name.as_str() {
             "stream" => {
-                let outcome = self.handle_start_stream("StartOutput", request_id).await;
+                let outcome = self
+                    .handle_start_stream("StartOutput", request_id, "stream")
+                    .await;
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
@@ -271,7 +285,9 @@ impl ObswsCoordinator {
                 (outcome, events)
             }
             "record" => {
-                let outcome = self.handle_start_record("StartOutput", request_id).await;
+                let outcome = self
+                    .handle_start_record("StartOutput", request_id, "record")
+                    .await;
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
@@ -293,38 +309,17 @@ impl ObswsCoordinator {
                 }
                 (outcome, events)
             }
-            "rtmp_outbound" => {
-                let outcome = self
-                    .handle_start_rtmp_outbound("StartOutput", request_id)
-                    .await;
-                (outcome, Vec::new())
-            }
-            "sora" => {
-                let outcome = self
-                    .handle_start_sora_publisher("StartOutput", request_id)
-                    .await;
-                (outcome, Vec::new())
-            }
-            "hls" => {
-                let outcome = self.handle_start_hls("StartOutput", request_id).await;
-                (outcome, Vec::new())
-            }
-            "mpeg_dash" => {
-                let outcome = self.handle_start_mpeg_dash("StartOutput", request_id).await;
-                (outcome, Vec::new())
-            }
             #[cfg(feature = "player")]
             "player" => {
                 let outcome = self.handle_start_player("StartOutput", request_id).await;
                 (outcome, Vec::new())
             }
-            _ => {
-                return self.build_error_result(
-                    "StartOutput",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Output not found",
-                );
+            other => {
+                // 動的に作成された output を kind に応じて起動する
+                let outcome = self
+                    .start_dynamic_output("StartOutput", request_id, other)
+                    .await;
+                (outcome, Vec::new())
             }
         };
         let response_text = if outcome.success {
@@ -351,7 +346,9 @@ impl ObswsCoordinator {
         };
         let (outcome, events) = match output_name.as_str() {
             "stream" => {
-                let outcome = self.handle_stop_stream("StopOutput", request_id).await;
+                let outcome = self
+                    .handle_stop_stream("StopOutput", request_id, "stream")
+                    .await;
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
@@ -372,7 +369,9 @@ impl ObswsCoordinator {
                 (outcome, events)
             }
             "record" => {
-                let outcome = self.handle_stop_record("StopOutput", request_id).await;
+                let outcome = self
+                    .handle_stop_record("StopOutput", request_id, "record")
+                    .await;
                 let mut events = Vec::new();
                 if outcome.success {
                     events.push(TaggedEvent {
@@ -394,38 +393,16 @@ impl ObswsCoordinator {
                 }
                 (outcome, events)
             }
-            "rtmp_outbound" => {
-                let outcome = self
-                    .handle_stop_rtmp_outbound("StopOutput", request_id)
-                    .await;
-                (outcome, Vec::new())
-            }
-            "sora" => {
-                let outcome = self
-                    .handle_stop_sora_publisher("StopOutput", request_id)
-                    .await;
-                (outcome, Vec::new())
-            }
-            "hls" => {
-                let outcome = self.handle_stop_hls("StopOutput", request_id).await;
-                (outcome, Vec::new())
-            }
-            "mpeg_dash" => {
-                let outcome = self.handle_stop_mpeg_dash("StopOutput", request_id).await;
-                (outcome, Vec::new())
-            }
             #[cfg(feature = "player")]
             "player" => {
                 let outcome = self.handle_stop_player("StopOutput", request_id).await;
                 (outcome, Vec::new())
             }
-            _ => {
-                return self.build_error_result(
-                    "StopOutput",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Output not found",
-                );
+            other => {
+                let outcome = self
+                    .stop_dynamic_output("StopOutput", request_id, other)
+                    .await;
+                (outcome, Vec::new())
             }
         };
         let response_text = if outcome.success {
@@ -452,11 +429,13 @@ impl ObswsCoordinator {
         };
         let (outcome, output_active_on_success, events) = match output_name.as_str() {
             "stream" => {
-                let was_active = self.input_registry.is_stream_active();
+                let was_active = self.outputs.get("stream").is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
-                    self.handle_stop_stream("ToggleOutput", request_id).await
+                    self.handle_stop_stream("ToggleOutput", request_id, "stream")
+                        .await
                 } else {
-                    self.handle_start_stream("ToggleOutput", request_id).await
+                    self.handle_start_stream("ToggleOutput", request_id, "stream")
+                        .await
                 };
                 let mut events = Vec::new();
                 if outcome.success {
@@ -495,11 +474,13 @@ impl ObswsCoordinator {
                 (outcome, !was_active, events)
             }
             "record" => {
-                let was_active = self.input_registry.is_record_active();
+                let was_active = self.outputs.get("record").is_some_and(|o| o.runtime.active);
                 let outcome = if was_active {
-                    self.handle_stop_record("ToggleOutput", request_id).await
+                    self.handle_stop_record("ToggleOutput", request_id, "record")
+                        .await
                 } else {
-                    self.handle_start_record("ToggleOutput", request_id).await
+                    self.handle_start_record("ToggleOutput", request_id, "record")
+                        .await
                 };
                 let mut events = Vec::new();
                 if outcome.success {
@@ -541,47 +522,6 @@ impl ObswsCoordinator {
                 }
                 (outcome, !was_active, events)
             }
-            "rtmp_outbound" => {
-                let was_active = self.input_registry.is_rtmp_outbound_active();
-                let outcome = if was_active {
-                    self.handle_stop_rtmp_outbound("ToggleOutput", request_id)
-                        .await
-                } else {
-                    self.handle_start_rtmp_outbound("ToggleOutput", request_id)
-                        .await
-                };
-                (outcome, !was_active, Vec::new())
-            }
-            "sora" => {
-                let was_active = self.input_registry.is_sora_publisher_active();
-                let outcome = if was_active {
-                    self.handle_stop_sora_publisher("ToggleOutput", request_id)
-                        .await
-                } else {
-                    self.handle_start_sora_publisher("ToggleOutput", request_id)
-                        .await
-                };
-                (outcome, !was_active, Vec::new())
-            }
-            "hls" => {
-                let was_active = self.input_registry.is_hls_active();
-                let outcome = if was_active {
-                    self.handle_stop_hls("ToggleOutput", request_id).await
-                } else {
-                    self.handle_start_hls("ToggleOutput", request_id).await
-                };
-                (outcome, !was_active, Vec::new())
-            }
-            "mpeg_dash" => {
-                let was_active = self.input_registry.is_dash_active();
-                let outcome = if was_active {
-                    self.handle_stop_mpeg_dash("ToggleOutput", request_id).await
-                } else {
-                    self.handle_start_mpeg_dash("ToggleOutput", request_id)
-                        .await
-                };
-                (outcome, !was_active, Vec::new())
-            }
             #[cfg(feature = "player")]
             "player" => {
                 let was_active = self.input_registry.is_player_active();
@@ -592,13 +532,16 @@ impl ObswsCoordinator {
                 };
                 (outcome, !was_active, Vec::new())
             }
-            _ => {
-                return self.build_error_result(
-                    "ToggleOutput",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Output not found",
-                );
+            other => {
+                let was_active = self.outputs.get(other).is_some_and(|o| o.runtime.active);
+                let outcome = if was_active {
+                    self.stop_dynamic_output("ToggleOutput", request_id, other)
+                        .await
+                } else {
+                    self.start_dynamic_output("ToggleOutput", request_id, other)
+                        .await
+                };
+                (outcome, !was_active, Vec::new())
             }
         };
         let response_text = if outcome.success {
@@ -610,6 +553,101 @@ impl ObswsCoordinator {
             outcome.response_text
         };
         self.build_result_from_response(response_text, events)
+    }
+
+    /// 動的に作成された output を kind に応じて起動する。
+    /// outputs BTreeMap から output_name を検索し、OutputKind に応じて適切な start ハンドラを呼ぶ。
+    async fn start_dynamic_output(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+        output_name: &str,
+    ) -> OutputOperationOutcome {
+        use super::output_dynamic::OutputKind;
+        let kind = self.outputs.get(output_name).map(|o| o.output_kind);
+        let Some(kind) = kind else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ),
+            );
+        };
+        match kind {
+            OutputKind::Stream => {
+                self.handle_start_stream(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Record => {
+                self.handle_start_record(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::RtmpOutbound => {
+                self.handle_start_rtmp_outbound(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Sora => {
+                self.handle_start_sora_publisher(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Hls => {
+                self.handle_start_hls(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::MpegDash => {
+                self.handle_start_mpeg_dash(request_type, request_id, output_name)
+                    .await
+            }
+        }
+    }
+
+    /// 動的に作成された output を kind に応じて停止する。
+    async fn stop_dynamic_output(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+        output_name: &str,
+    ) -> OutputOperationOutcome {
+        use super::output_dynamic::OutputKind;
+        let kind = self.outputs.get(output_name).map(|o| o.output_kind);
+        let Some(kind) = kind else {
+            return OutputOperationOutcome::failure(
+                crate::obsws::response::build_request_response_error(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                    "Output not found",
+                ),
+            );
+        };
+        match kind {
+            OutputKind::Stream => {
+                self.handle_stop_stream(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Record => {
+                self.handle_stop_record(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::RtmpOutbound => {
+                self.handle_stop_rtmp_outbound(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Sora => {
+                self.handle_stop_sora_publisher(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::Hls => {
+                self.handle_stop_hls(request_type, request_id, output_name)
+                    .await
+            }
+            OutputKind::MpegDash => {
+                self.handle_stop_mpeg_dash(request_type, request_id, output_name)
+                    .await
+            }
+        }
     }
 }
 

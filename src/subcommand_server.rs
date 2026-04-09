@@ -152,7 +152,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         password,
         resolve_default_record_dir(default_record_dir)?,
         ui_remote_url,
-        !no_open,
+        ui && !no_open,
         https_cert_path,
         https_key_path,
         openh264,

@@ -12,6 +12,13 @@ use crate::obsws::input_registry::{
     ObswsStreamServiceSettings, ObswsWebRtcSourceSettings,
 };
 
+/// state file の output エントリ
+pub struct StateFileOutput {
+    pub output_name: String,
+    pub output_kind: String,
+    pub output_settings: nojson::RawJsonOwned,
+}
+
 /// state file のトップレベル構造
 pub struct ObswsStateFile {
     pub stream: Option<ObswsStateFileStream>,
@@ -20,6 +27,8 @@ pub struct ObswsStateFile {
     pub sora: Option<ObswsSoraPublisherSettings>,
     pub hls: Option<ObswsHlsSettings>,
     pub dash: Option<ObswsDashSettings>,
+    /// 動的 output リスト（新形式）
+    pub outputs: Option<Vec<StateFileOutput>>,
     pub scenes: Option<Vec<StateFileScene>>,
     pub inputs: Option<Vec<StateFileInput>>,
     pub current_program_scene: Option<String>,
@@ -101,6 +110,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFile 
         let hls = parse_optional_hls(value)?;
         let dash = parse_optional_dash(value)?;
 
+        // outputs セクション
+        let outputs = parse_optional_outputs(value)?;
+
         // scene / input セクション
         let scenes = parse_optional_scenes(value)?;
         let inputs = parse_optional_inputs(value)?;
@@ -122,6 +134,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ObswsStateFile 
             sora,
             hls,
             dash,
+            outputs,
             scenes,
             inputs,
             current_program_scene,
@@ -458,6 +471,32 @@ fn parse_optional_dash(
         video_codec,
         audio_codec,
     }))
+}
+
+fn parse_optional_outputs(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> Result<Option<Vec<StateFileOutput>>, nojson::JsonParseError> {
+    let member: Option<nojson::RawJsonOwned> = value.to_member("outputs")?.try_into()?;
+    let Some(ref section) = member else {
+        return Ok(None);
+    };
+    let arr = section.value().to_array()?;
+    let mut outputs = Vec::new();
+    for item in arr {
+        let output_name: String = item.to_member("outputName")?.required()?.try_into()?;
+        let output_kind: String = item.to_member("outputKind")?.required()?.try_into()?;
+        let output_settings: nojson::RawJsonOwned = item
+            .to_member("outputSettings")?
+            .required()?
+            .extract()
+            .into_owned();
+        outputs.push(StateFileOutput {
+            output_name,
+            output_kind,
+            output_settings,
+        });
+    }
+    Ok(Some(outputs))
 }
 
 fn parse_dash_variants(
@@ -1048,6 +1087,17 @@ impl nojson::DisplayJson for ObswsStateFile {
             if let Some(dash) = &self.dash {
                 f.member("mpegDash", DashSection(dash))?;
             }
+            if let Some(outputs) = &self.outputs {
+                f.member(
+                    "outputs",
+                    nojson::array(|f| {
+                        for output in outputs {
+                            f.element(output)?;
+                        }
+                        Ok(())
+                    }),
+                )?;
+            }
             if let Some(scenes) = &self.scenes {
                 f.member(
                     "scenes",
@@ -1137,6 +1187,17 @@ impl nojson::DisplayJson for ObswsStateFileRecord {
     }
 }
 
+impl nojson::DisplayJson for StateFileOutput {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("outputName", &self.output_name)?;
+            f.member("outputKind", &self.output_kind)?;
+            f.member("outputSettings", &self.output_settings)
+        })
+        .fmt(f)
+    }
+}
+
 impl nojson::DisplayJson for StateFileScene {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
@@ -1220,6 +1281,7 @@ pub fn load_state_file(path: &Path) -> crate::Result<ObswsStateFile> {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -1277,21 +1339,44 @@ pub fn save_state_file(path: &Path, state: &ObswsStateFile) -> crate::Result<()>
     Ok(())
 }
 
-/// ObswsInputRegistry の現在値から ObswsStateFile を構築する。
-pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFile {
-    let settings = registry.stream_service_settings();
-    let stream = Some(ObswsStateFileStream {
-        stream_service_type: settings.stream_service_type.clone(),
-        server: settings.server.clone(),
-        key: settings.key.clone(),
-    });
-    let record = Some(ObswsStateFileRecord {
-        record_directory: registry.record_directory().to_path_buf(),
-    });
-    let rtmp_outbound = Some(registry.rtmp_outbound_settings().clone());
-    let sora = Some(registry.sora_publisher_settings().clone());
-    let hls = Some(registry.hls_settings().clone());
-    let dash = Some(registry.dash_settings().clone());
+/// ObswsInputRegistry と outputs BTreeMap の現在値から ObswsStateFile を構築する。
+pub(crate) fn build_state_from_registry(
+    registry: &ObswsInputRegistry,
+    outputs_map: &std::collections::BTreeMap<
+        String,
+        crate::obsws::coordinator::output_dynamic::OutputState,
+    >,
+) -> ObswsStateFile {
+    use crate::obsws::coordinator::output_dynamic::OutputSettings;
+
+    // outputs BTreeMap から outputs セクションを構築する
+    let outputs = {
+        let mut output_list = Vec::new();
+        for (name, state) in outputs_map {
+            let settings_json = match &state.settings {
+                OutputSettings::Stream(s) => crate::json::to_pretty_string(s),
+                OutputSettings::Record { record_directory } => {
+                    crate::json::to_pretty_string(&ObswsStateFileRecord {
+                        record_directory: record_directory.clone(),
+                    })
+                }
+                OutputSettings::Hls(s) => crate::json::to_pretty_string(s),
+                OutputSettings::MpegDash(s) => crate::json::to_pretty_string(s),
+                OutputSettings::RtmpOutbound(s) => crate::json::to_pretty_string(s),
+                OutputSettings::Sora(s) => crate::json::to_pretty_string(s),
+            };
+            let raw =
+                nojson::RawJson::parse(&settings_json).expect("serialized JSON must be valid");
+            let output_settings = nojson::RawJsonOwned::try_from(raw.value())
+                .expect("RawJsonOwned conversion must succeed");
+            output_list.push(StateFileOutput {
+                output_name: name.clone(),
+                output_kind: state.output_kind.as_kind_str().to_owned(),
+                output_settings,
+            });
+        }
+        Some(output_list)
+    };
 
     // scenes を scene_order の順序で構築する
     let scenes = {
@@ -1374,12 +1459,13 @@ pub fn build_state_from_registry(registry: &ObswsInputRegistry) -> ObswsStateFil
     let next_scene_item_id = Some(registry.next_scene_item_id);
 
     ObswsStateFile {
-        stream,
-        record,
-        rtmp_outbound,
-        sora,
-        hls,
-        dash,
+        stream: None,
+        record: None,
+        rtmp_outbound: None,
+        sora: None,
+        hls: None,
+        dash: None,
+        outputs,
         scenes,
         inputs,
         current_program_scene,
@@ -1536,6 +1622,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -1599,6 +1686,7 @@ mod tests {
                 video_codec: crate::types::CodecName::H264,
                 audio_codec: crate::types::CodecName::Aac,
             }),
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -1658,6 +1746,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -1699,6 +1788,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -1761,6 +1851,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -1816,6 +1907,7 @@ mod tests {
             }),
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -1945,6 +2037,7 @@ mod tests {
                 }],
             }),
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -1990,6 +2083,7 @@ mod tests {
                 variants: vec![HlsVariant::default()],
             }),
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -2089,6 +2183,7 @@ mod tests {
                 video_codec: crate::types::CodecName::H264,
                 audio_codec: crate::types::CodecName::Aac,
             }),
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -2197,6 +2292,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: Some(vec![StateFileScene {
                 scene_name: "Scene1".to_owned(),
                 scene_uuid: "uuid-s1".to_owned(),
@@ -2312,6 +2408,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: Some(vec![StateFileInput {
                 input_uuid: "uuid-1".to_owned(),
@@ -2374,6 +2471,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: Some(vec![StateFileScene {
                 scene_name: "TransformTest".to_owned(),
                 scene_uuid: "uuid-tf".to_owned(),
@@ -2458,6 +2556,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: Some(vec![StateFileScene {
                 scene_name: "OverrideScene".to_owned(),
                 scene_uuid: "uuid-os".to_owned(),
@@ -2608,6 +2707,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -2652,6 +2752,7 @@ mod tests {
             sora: None,
             hls: None,
             dash: None,
+            outputs: None,
             scenes: None,
             inputs: None,
             current_program_scene: None,
@@ -2669,5 +2770,118 @@ mod tests {
         let parsed: ObswsStateFile =
             crate::json::parse_str(&json_text).expect("roundtrip parse must succeed");
         assert!(parsed.persistent_data.is_none());
+    }
+
+    #[test]
+    fn restore_sora_output_preserves_metadata() {
+        use crate::obsws::coordinator::output_dynamic::{
+            OutputSettings, restore_outputs_from_state,
+        };
+
+        let state_outputs = vec![StateFileOutput {
+            output_name: "sora_with_meta".to_owned(),
+            output_kind: "sora_webrtc_output".to_owned(),
+            output_settings: nojson::RawJsonOwned::parse(
+                r#"{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"],"channelId":"ch","metadata":{"key":"value"}}}"#,
+            )
+            .expect("settings json must be valid"),
+        }];
+        let outputs = restore_outputs_from_state(state_outputs);
+        let state = outputs
+            .get("sora_with_meta")
+            .expect("sora output must exist");
+        let OutputSettings::Sora(settings) = &state.settings else {
+            panic!("expected Sora settings");
+        };
+        assert_eq!(settings.signaling_urls, vec!["wss://example.com/signaling"]);
+        assert_eq!(settings.channel_id.as_deref(), Some("ch"));
+        let metadata = settings
+            .metadata
+            .as_ref()
+            .expect("metadata must be present");
+        let key: String = metadata
+            .value()
+            .to_member("key")
+            .expect("key access must succeed")
+            .required()
+            .expect("key must be present")
+            .try_into()
+            .expect("key must be string");
+        assert_eq!(key, "value");
+    }
+
+    #[test]
+    fn default_record_directory_uses_record_output_not_custom_mp4() {
+        // record と別名の mp4_output が異なる recordDirectory を持つ state file から
+        // 復元した場合、record 側の値が default_record_directory に使われるべき。
+        // server.rs の復元ロジックと同じ抽出ルールをテストする。
+        let state_outputs = [
+            // カスタム mp4_output（先に来る）
+            StateFileOutput {
+                output_name: "custom_record".to_owned(),
+                output_kind: "mp4_output".to_owned(),
+                output_settings: nojson::RawJsonOwned::parse(
+                    r#"{"recordDirectory":"/tmp/custom-recordings"}"#,
+                )
+                .expect("settings json must be valid"),
+            },
+            // 標準の record output
+            StateFileOutput {
+                output_name: "record".to_owned(),
+                output_kind: "mp4_output".to_owned(),
+                output_settings: nojson::RawJsonOwned::parse(
+                    r#"{"recordDirectory":"/tmp/standard-recordings"}"#,
+                )
+                .expect("settings json must be valid"),
+            },
+        ];
+
+        // server.rs と同じロジック: outputName == "record" && outputKind == "mp4_output" を優先
+        let record_dir = state_outputs
+            .iter()
+            .find(|o| o.output_name == "record" && o.output_kind == "mp4_output")
+            .and_then(|o| {
+                o.output_settings
+                    .value()
+                    .to_member("recordDirectory")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                    .map(std::path::PathBuf::from)
+            });
+
+        assert_eq!(
+            record_dir,
+            Some(std::path::PathBuf::from("/tmp/standard-recordings")),
+        );
+    }
+
+    #[test]
+    fn default_record_directory_falls_back_when_no_record_output() {
+        // record output がない場合、カスタム mp4_output からは逆算しない
+        let state_outputs = [StateFileOutput {
+            output_name: "custom_only".to_owned(),
+            output_kind: "mp4_output".to_owned(),
+            output_settings: nojson::RawJsonOwned::parse(
+                r#"{"recordDirectory":"/tmp/custom-only"}"#,
+            )
+            .expect("settings json must be valid"),
+        }];
+
+        let record_dir = state_outputs
+            .iter()
+            .find(|o| o.output_name == "record" && o.output_kind == "mp4_output")
+            .and_then(|o| {
+                o.output_settings
+                    .value()
+                    .to_member("recordDirectory")
+                    .ok()
+                    .and_then(|v| v.optional())
+                    .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                    .map(std::path::PathBuf::from)
+            });
+
+        // record がないので None → CLI 既定値にフォールバック
+        assert!(record_dir.is_none());
     }
 }

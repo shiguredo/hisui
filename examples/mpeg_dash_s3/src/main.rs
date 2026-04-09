@@ -98,6 +98,30 @@ fn make_create_input_request(input_mp4_path: &str) -> (String, String) {
     (request_id, msg)
 }
 
+/// MPEG-DASH 出力インスタンスを作成する
+fn make_create_mpeg_dash_output_request() -> (String, String) {
+    let request_id = next_request_id();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "HisuiCreateOutput")?;
+                f.member("requestId", request_id.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| {
+                        f.member("outputName", "mpeg_dash")?;
+                        f.member("outputKind", "mpeg_dash_output")
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
 /// MPEG-DASH 出力の S3 destination 設定を構築する
 fn make_set_output_settings_request(s3: &S3Params) -> (String, String) {
     let request_id = next_request_id();
@@ -552,7 +576,13 @@ async fn run(
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("CreateInput succeeded");
 
-    // 2. SetOutputSettings: MPEG-DASH S3 設定
+    // 2. HisuiCreateOutput: MPEG-DASH 出力インスタンスを作成
+    let (req_id, msg) = make_create_mpeg_dash_output_request();
+    tracing::info!("HisuiCreateOutput: mpeg_dash");
+    send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+    tracing::info!("HisuiCreateOutput succeeded");
+
+    // 3. SetOutputSettings: MPEG-DASH S3 設定
     let (req_id, msg) = make_set_output_settings_request(s3);
     tracing::info!(
         "SetOutputSettings: bucket={}, prefix={}, endpoint={}",
@@ -563,7 +593,7 @@ async fn run(
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("SetOutputSettings succeeded");
 
-    // 3. StartOutput: player 表示開始（オプション）
+    // 4. StartOutput: player 表示開始（オプション）
     if player {
         let (req_id, msg) = make_start_player_request();
         tracing::info!("StartOutput (player) requested");
@@ -571,7 +601,7 @@ async fn run(
         tracing::info!("player output started");
     }
 
-    // 4. StartOutput: MPEG-DASH 出力開始
+    // 5. StartOutput: MPEG-DASH 出力開始
     let (req_id, msg) = make_start_output_request();
     tracing::info!("StartOutput requested");
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;

@@ -139,10 +139,26 @@ pub async fn run_server(
                 ))
             })?;
             let state = crate::obsws::state_file::load_state_file(&abs_path)?;
+            // 標準の "record" output（outputName == "record"）から recordDirectory を取得する。
+            // カスタム mp4_output からは逆算しない（default_record_directory は標準録画先の既定値）。
+            // "record" がなければ CLI の既定値にフォールバック。
             let record_dir = state
-                .record
+                .outputs
                 .as_ref()
-                .map(|r| r.record_directory.clone())
+                .and_then(|outputs| {
+                    outputs
+                        .iter()
+                        .find(|o| o.output_name == "record" && o.output_kind == "mp4_output")
+                        .and_then(|o| {
+                            o.output_settings
+                                .value()
+                                .to_member("recordDirectory")
+                                .ok()
+                                .and_then(|v| v.optional())
+                                .and_then(|v| <Option<String>>::try_from(v).ok().flatten())
+                                .map(std::path::PathBuf::from)
+                        })
+                })
                 .unwrap_or(default_record_dir);
             (record_dir, Some(state), Some(abs_path))
         } else {
@@ -150,7 +166,6 @@ pub async fn run_server(
         };
 
     let mut input_registry = ObswsInputRegistry::new(
-        effective_record_dir,
         canvas_width,
         canvas_height,
         frame_rate,
@@ -158,22 +173,10 @@ pub async fn run_server(
     );
 
     // state file から読み込んだ設定を反映する
+    // output 設定は outputs セクションから復元するため、旧形式の個別 setter は不要
+    let mut state_file_outputs = None;
     if let Some(state) = loaded_state {
-        if let Some(stream) = &state.stream {
-            input_registry.set_stream_service_settings(stream.to_stream_service_settings());
-        }
-        if let Some(settings) = state.rtmp_outbound {
-            input_registry.set_rtmp_outbound_settings(settings);
-        }
-        if let Some(settings) = state.sora {
-            input_registry.set_sora_publisher_settings(settings);
-        }
-        if let Some(settings) = state.hls {
-            input_registry.set_hls_settings(settings);
-        }
-        if let Some(settings) = state.dash {
-            input_registry.set_dash_settings(settings);
-        }
+        state_file_outputs = state.outputs;
         // persistent data の復元
         if let Some(data) = state.persistent_data {
             input_registry.restore_persistent_data(data);
@@ -260,6 +263,7 @@ pub async fn run_server(
     let (mut actor, coordinator_handle, shutdown_rx) =
         crate::obsws::coordinator::ObswsCoordinator::new(
             input_registry,
+            effective_record_dir,
             program_output,
             Some(pipeline_handle.clone()),
             #[cfg(feature = "player")]
@@ -267,6 +271,11 @@ pub async fn run_server(
             #[cfg(feature = "player")]
             player_media_tx,
         );
+    // state file に outputs セクションがある場合は復元する
+    if let Some(state_outputs) = state_file_outputs {
+        actor.outputs =
+            crate::obsws::coordinator::output_dynamic::restore_outputs_from_state(state_outputs);
+    }
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());
     #[cfg(feature = "player")]

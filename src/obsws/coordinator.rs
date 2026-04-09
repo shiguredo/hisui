@@ -17,6 +17,7 @@ pub use handle::ObswsCoordinatorHandle;
 mod input;
 mod output;
 mod output_dash;
+pub(crate) mod output_dynamic;
 mod output_hls;
 #[cfg(feature = "player")]
 mod output_player;
@@ -156,6 +157,12 @@ pub struct ObswsCoordinator {
     should_terminate: bool,
     /// 致命的エラー発生時にサーバーへ通知するための送信側
     shutdown_tx: tokio::sync::watch::Sender<bool>,
+    /// output の統一管理（outputName → 状態）
+    pub(crate) outputs: std::collections::BTreeMap<String, output_dynamic::OutputState>,
+    /// output の run_id カウンタ（全 output で共有）
+    pub(crate) next_output_run_id: u64,
+    /// デフォルトの録画ディレクトリ（HisuiCreateOutput で mp4_output の既定値に使用）
+    pub(crate) default_record_directory: std::path::PathBuf,
     /// SoraSubscriber の状態管理（subscriberName → 状態）
     sora_subscribers: std::collections::BTreeMap<String, output_sora::SoraSubscriberState>,
     /// SoraSubscriber からのイベント受信チャネル
@@ -183,6 +190,7 @@ impl ObswsCoordinator {
     /// サーバーの accept loop はこれを監視して graceful shutdown を行う。
     pub fn new(
         input_registry: ObswsInputRegistry,
+        record_directory: std::path::PathBuf,
         program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
         #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
@@ -205,12 +213,16 @@ impl ObswsCoordinator {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
         };
+        let outputs = output_dynamic::create_default_outputs(record_directory.clone());
         let actor = Self {
             input_registry,
             program_output,
             pipeline_handle,
             command_rx,
             input_source_processors: std::collections::BTreeMap::new(),
+            outputs,
+            next_output_run_id: 0,
+            default_record_directory: record_directory,
             obsws_event_tx: obsws_event_tx.clone(),
             bootstrap_event_tx: bootstrap_event_tx.clone(),
             should_terminate: false,
@@ -349,7 +361,10 @@ impl ObswsCoordinator {
             && let Some(path) = self.input_registry.state_file_path()
         {
             let path = path.to_path_buf();
-            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            let state = crate::obsws::state_file::build_state_from_registry(
+                &self.input_registry,
+                &self.outputs,
+            );
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -403,7 +418,10 @@ impl ObswsCoordinator {
             && let Some(path) = self.input_registry.state_file_path()
         {
             let path = path.to_path_buf();
-            let state = crate::obsws::state_file::build_state_from_registry(&self.input_registry);
+            let state = crate::obsws::state_file::build_state_from_registry(
+                &self.input_registry,
+                &self.outputs,
+            );
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -588,6 +606,74 @@ impl ObswsCoordinator {
                 &request_id,
                 request.request_data.as_ref(),
             ),
+            // --- Output 読み取り ---
+            "GetStats" => {
+                let response = crate::obsws::response::build_get_stats_response(
+                    &request_id,
+                    session_stats,
+                    &self.outputs,
+                    self.pipeline_handle.as_ref(),
+                );
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetStreamStatus" => {
+                let response =
+                    self.build_output_status_response("GetStreamStatus", &request_id, "stream");
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetRecordStatus" => {
+                let response = self.build_record_status_response(&request_id);
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetOutputStatus" => {
+                let response = self
+                    .build_get_output_status_response(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetStreamServiceSettings" => {
+                let response = self.handle_get_stream_service_settings(&request_id);
+                self.build_result_from_response(response, Vec::new())
+            }
+            "SetStreamServiceSettings" => {
+                let response = self
+                    .handle_set_stream_service_settings(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetRecordDirectory" => {
+                let response = self.handle_get_record_directory(&request_id);
+                self.build_result_from_response(response, Vec::new())
+            }
+            "SetRecordDirectory" => {
+                let response =
+                    self.handle_set_record_directory(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetOutputSettings" => {
+                let response = self
+                    .handle_get_output_settings_request(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "SetOutputSettings" => {
+                let response = self
+                    .handle_set_output_settings_request(&request_id, request.request_data.as_ref());
+                self.build_result_from_response(response, Vec::new())
+            }
+            "GetOutputList" => {
+                let response = crate::obsws::response::build_get_output_list_response(
+                    &request_id,
+                    &self.outputs,
+                    #[cfg(feature = "player")]
+                    self.input_registry.is_player_active(),
+                );
+                self.build_result_from_response(response, Vec::new())
+            }
+            // --- Output 管理 ---
+            "HisuiCreateOutput" => {
+                self.handle_create_output(&request_type, &request_id, request.request_data.as_ref())
+            }
+            "HisuiRemoveOutput" => {
+                self.handle_remove_output(&request_type, &request_id, request.request_data.as_ref())
+            }
             // --- レジストリ状態変更なし ---
             "BroadcastCustomEvent" => {
                 self.handle_broadcast_custom_event(&request_id, request.request_data.as_ref())
@@ -855,6 +941,177 @@ impl ObswsCoordinator {
         }
     }
 
+    /// output 設定変更リクエスト成功後に input_registry の設定を outputs BTreeMap に同期する。
+    /// Phase 6 で SetOutputSettings を coordinator 経由に移行するまでの暫定措置。
+    /// outputs BTreeMap から GetOutputStatus レスポンスを構築する。
+    fn build_output_status_response(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        output_name: &str,
+    ) -> nojson::RawJsonOwned {
+        let Some(state) = self.outputs.get(output_name) else {
+            return crate::obsws::response::build_request_response_error(
+                request_type,
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Output not found",
+            );
+        };
+        let (active, duration) = output_dynamic::output_active_and_uptime(state);
+        let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+        let output_timecode = crate::obsws::response::format_timecode(duration);
+        // output の種別に応じて pipeline から実測値を取得する
+        let (output_bytes, skipped_frames, total_frames) = self.collect_output_stats_for(state);
+        crate::obsws::response::build_request_response_success(request_type, request_id, |f| {
+            f.member("outputActive", active)?;
+            f.member("outputReconnecting", false)?;
+            f.member("outputTimecode", &output_timecode)?;
+            f.member("outputDuration", output_duration)?;
+            f.member("outputCongestion", 0.0)?;
+            f.member("outputBytes", output_bytes)?;
+            f.member("outputSkippedFrames", skipped_frames)?;
+            f.member("outputTotalFrames", total_frames)
+        })
+    }
+
+    /// record 専用の GetRecordStatus レスポンスを構築する。
+    fn build_record_status_response(&self, request_id: &str) -> nojson::RawJsonOwned {
+        let Some(state) = self.outputs.get("record") else {
+            return crate::obsws::response::build_request_response_error(
+                "GetRecordStatus",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Output not found",
+            );
+        };
+        let (active, duration) = output_dynamic::output_active_and_uptime(state);
+        let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
+        let output_timecode = crate::obsws::response::format_timecode(duration);
+        let output_path = output_dynamic::record_output_path(state).unwrap_or_default();
+        let (output_bytes, skipped_frames, total_frames) = self.collect_output_stats_for(state);
+        crate::obsws::response::build_request_response_success("GetRecordStatus", request_id, |f| {
+            f.member("outputActive", active)?;
+            f.member("outputTimecode", &output_timecode)?;
+            f.member("outputDuration", output_duration)?;
+            f.member("outputCongestion", 0.0)?;
+            f.member("outputBytes", output_bytes)?;
+            f.member("outputSkippedFrames", skipped_frames)?;
+            f.member("outputTotalFrames", total_frames)?;
+            f.member("outputPath", &output_path)
+        })
+    }
+
+    /// OutputState から (outputBytes, outputSkippedFrames, outputTotalFrames) を取得する。
+    /// pipeline の metrics から実測値を引く。対応する metrics がない output 種別では 0 を返す。
+    fn collect_output_stats_for(&self, state: &output_dynamic::OutputState) -> (u64, u64, u64) {
+        use output_dynamic::OutputRun;
+        let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
+            return (0, 0, 0);
+        };
+        let Ok(entries) = pipeline_handle.stats().entries() else {
+            return (0, 0, 0);
+        };
+        let Some(run) = &state.runtime.run else {
+            return (0, 0, 0);
+        };
+        match run {
+            // stream / rtmp_outbound: エンコーダーとパブリッシャー/エンドポイントから取得
+            OutputRun::Stream(run) => {
+                let total_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.video.encoder_processor_id,
+                    "total_output_video_frame_count",
+                );
+                let output_bytes = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.publisher_processor_id,
+                    "total_sent_bytes",
+                );
+                let skipped_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.publisher_processor_id,
+                    "total_waiting_keyframe_dropped_video_frame_count",
+                );
+                (output_bytes, skipped_frames, total_frames)
+            }
+            OutputRun::RtmpOutbound(run) => {
+                let total_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.video.encoder_processor_id,
+                    "total_output_video_frame_count",
+                );
+                let output_bytes = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.endpoint_processor_id,
+                    "total_sent_bytes",
+                );
+                let skipped_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.endpoint_processor_id,
+                    "total_waiting_keyframe_dropped_video_frame_count",
+                );
+                (output_bytes, skipped_frames, total_frames)
+            }
+            // record: writer から取得
+            OutputRun::Record(run) => {
+                let total_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.writer_processor_id,
+                    "total_video_sample_count",
+                );
+                let skipped_frames = crate::obsws::response::find_output_counter_metric(
+                    &entries,
+                    &run.writer_processor_id,
+                    "total_keyframe_wait_dropped_video_frame_count",
+                );
+                // record の outputBytes は録画ファイルサイズ
+                let output_bytes = run.output_path.metadata().map(|m| m.len()).unwrap_or(0);
+                (output_bytes, skipped_frames, total_frames)
+            }
+            // HLS / DASH / Sora: 対応する統計メトリクスが未整備のため 0 を返す
+            // TODO: OBS 互換として必要であれば、各 output に対応する metrics を追加する
+            _ => (0, 0, 0),
+        }
+    }
+
+    /// GetOutputStatus リクエストを処理する。
+    fn build_get_output_status_response(
+        &self,
+        request_id: &str,
+        request_data: Option<&nojson::RawJsonOwned>,
+    ) -> nojson::RawJsonOwned {
+        let Some(output_name) = parse_required_non_empty_string_field(request_data, "outputName")
+        else {
+            return crate::obsws::response::build_request_response_error(
+                "GetOutputStatus",
+                request_id,
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                "Missing required outputName field",
+            );
+        };
+        // player は outputs BTreeMap に含まれないため特別扱い
+        #[cfg(feature = "player")]
+        if output_name == "player" {
+            let active = self.input_registry.is_player_active();
+            return crate::obsws::response::build_request_response_success(
+                "GetOutputStatus",
+                request_id,
+                |f| {
+                    f.member("outputActive", active)?;
+                    f.member("outputReconnecting", false)?;
+                    f.member("outputTimecode", "00:00:00.000")?;
+                    f.member("outputDuration", 0)?;
+                    f.member("outputCongestion", 0.0)?;
+                    f.member("outputBytes", 0)?;
+                    f.member("outputSkippedFrames", 0)?;
+                    f.member("outputTotalFrames", 0)
+                },
+            );
+        }
+        self.build_output_status_response("GetOutputStatus", request_id, &output_name)
+    }
+
     fn build_parse_error_result(
         &self,
         request_type: &str,
@@ -904,6 +1161,9 @@ fn is_state_persisted_request(request_type: &str) -> bool {
             | "SetSceneItemTransform"
             // transition override
             | "SetSceneSceneTransitionOverride"
+            // output 管理
+            | "HisuiCreateOutput"
+            | "HisuiRemoveOutput"
     )
 }
 

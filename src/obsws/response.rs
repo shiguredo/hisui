@@ -174,27 +174,14 @@ struct SetSceneItemTransformFields {
     scene_item_transform: ObswsSceneItemTransformPatch,
 }
 
-struct SetStreamServiceSettingsFields {
-    stream_service_type: String,
-    server: String,
-    key: Option<String>,
+pub(crate) struct SetStreamServiceSettingsFields {
+    pub(crate) stream_service_type: String,
+    pub(crate) server: String,
+    pub(crate) key: Option<String>,
 }
 
-struct SetRecordDirectoryFields {
-    record_directory: String,
-}
-
-struct GetOutputStatusFields {
-    output_name: String,
-}
-
-struct GetOutputSettingsFields {
-    output_name: String,
-}
-
-struct SetOutputSettingsFields {
-    output_name: String,
-    output_settings: nojson::RawJsonOwned,
+pub(crate) struct SetRecordDirectoryFields {
+    pub(crate) record_directory: String,
 }
 
 #[derive(Debug, Clone)]
@@ -858,7 +845,7 @@ fn is_valid_scene_item_alignment(alignment: i64) -> bool {
     matches!(alignment, 0 | 1 | 2 | 4 | 5 | 6 | 8 | 9 | 10)
 }
 
-fn parse_set_stream_service_settings_fields(
+pub(crate) fn parse_set_stream_service_settings_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetStreamServiceSettingsFields, nojson::JsonParseError> {
     let stream_service_type = required_non_empty_string_member(request_data, "streamServiceType")?;
@@ -875,39 +862,11 @@ fn parse_set_stream_service_settings_fields(
     })
 }
 
-fn parse_set_record_directory_fields(
+pub(crate) fn parse_set_record_directory_fields(
     request_data: nojson::RawJsonValue<'_, '_>,
 ) -> Result<SetRecordDirectoryFields, nojson::JsonParseError> {
     let record_directory = required_non_empty_string_member(request_data, "recordDirectory")?;
     Ok(SetRecordDirectoryFields { record_directory })
-}
-
-fn parse_get_output_status_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<GetOutputStatusFields, nojson::JsonParseError> {
-    let output_name = required_non_empty_string_member(request_data, "outputName")?;
-    Ok(GetOutputStatusFields { output_name })
-}
-
-fn parse_get_output_settings_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<GetOutputSettingsFields, nojson::JsonParseError> {
-    let output_name = required_non_empty_string_member(request_data, "outputName")?;
-    Ok(GetOutputSettingsFields { output_name })
-}
-
-fn parse_set_output_settings_fields(
-    request_data: nojson::RawJsonValue<'_, '_>,
-) -> Result<SetOutputSettingsFields, nojson::JsonParseError> {
-    let output_name = required_non_empty_string_member(request_data, "outputName")?;
-    let output_settings = request_data.to_member("outputSettings")?.required()?;
-    if output_settings.kind() != nojson::JsonValueKind::Object {
-        return Err(output_settings.invalid("object is required"));
-    }
-    Ok(SetOutputSettingsFields {
-        output_name,
-        output_settings: nojson::RawJsonOwned::try_from(output_settings)?,
-    })
 }
 
 fn required_non_empty_string_member(
@@ -1094,10 +1053,16 @@ pub use output::*;
 pub use scene::*;
 pub use scene_item::*;
 
-pub(crate) fn collect_output_runtime_stats(
-    input_registry: &ObswsInputRegistry,
+/// outputs BTreeMap から output 統計情報を収集する。
+pub(crate) fn collect_output_runtime_stats_from_outputs(
+    outputs: &std::collections::BTreeMap<
+        String,
+        crate::obsws::coordinator::output_dynamic::OutputState,
+    >,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> ObswsOutputRuntimeStats {
+    use crate::obsws::coordinator::output_dynamic::OutputRun;
+
     let Some(pipeline_handle) = pipeline_handle else {
         return ObswsOutputRuntimeStats::default();
     };
@@ -1105,40 +1070,51 @@ pub(crate) fn collect_output_runtime_stats(
         return ObswsOutputRuntimeStats::default();
     };
 
-    let stream_total_frames = input_registry
-        .stream_run()
+    let stream_run = outputs.get("stream").and_then(|o| {
+        o.runtime.run.as_ref().and_then(|r| match r {
+            OutputRun::Stream(run) => Some(run),
+            _ => None,
+        })
+    });
+    let record_run = outputs.get("record").and_then(|o| {
+        o.runtime.run.as_ref().and_then(|r| match r {
+            OutputRun::Record(run) => Some(run),
+            _ => None,
+        })
+    });
+
+    let stream_total_frames = stream_run
         .map(|run| {
-            find_counter_metric(
+            find_output_counter_metric(
                 &entries,
                 &run.video.encoder_processor_id,
                 "total_output_video_frame_count",
             )
         })
         .unwrap_or(0);
-    let stream_output_bytes = input_registry
-        .stream_run()
-        .map(|run| find_counter_metric(&entries, &run.publisher_processor_id, "total_sent_bytes"))
-        .unwrap_or(0);
-    let stream_skipped_frames = input_registry
-        .stream_run()
+    let stream_output_bytes = stream_run
         .map(|run| {
-            find_counter_metric(
+            find_output_counter_metric(&entries, &run.publisher_processor_id, "total_sent_bytes")
+        })
+        .unwrap_or(0);
+    let stream_skipped_frames = stream_run
+        .map(|run| {
+            find_output_counter_metric(
                 &entries,
                 &run.publisher_processor_id,
                 "total_waiting_keyframe_dropped_video_frame_count",
             )
         })
         .unwrap_or(0);
-    let (record_total_frames, record_skipped_frames) = input_registry
-        .record_run()
+    let (record_total_frames, record_skipped_frames) = record_run
         .map(|run| {
             (
-                find_counter_metric(
+                find_output_counter_metric(
                     &entries,
                     &run.writer_processor_id,
                     "total_video_sample_count",
                 ),
-                find_counter_metric(
+                find_output_counter_metric(
                     &entries,
                     &run.writer_processor_id,
                     "total_keyframe_wait_dropped_video_frame_count",
@@ -1156,7 +1132,7 @@ pub(crate) fn collect_output_runtime_stats(
     }
 }
 
-fn find_counter_metric(
+pub(crate) fn find_output_counter_metric(
     entries: &[crate::stats::StatsEntry],
     processor_id: &crate::ProcessorId,
     metric_name: &'static str,
