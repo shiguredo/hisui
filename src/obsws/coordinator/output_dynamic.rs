@@ -250,18 +250,20 @@ impl ObswsCoordinator {
                 "Missing required outputName field",
             );
         };
-        let output_settings_raw = request_data
-            .value()
-            .to_member("outputSettings")
-            .ok()
-            .and_then(|v| v.optional());
-        let Some(output_settings) = output_settings_raw else {
-            return crate::obsws::response::build_request_response_error(
-                "SetOutputSettings",
-                request_id,
-                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing required outputSettings field",
-            );
+        let output_settings = match request_data.value().to_member("outputSettings") {
+            Ok(v) => match v.optional() {
+                Some(v) if v.kind().is_object() => v,
+                Some(_) => return invalid_field("outputSettings must be an object"),
+                None => return invalid_field("outputSettings must be an object"),
+            },
+            Err(_) => {
+                return crate::obsws::response::build_request_response_error(
+                    "SetOutputSettings",
+                    request_id,
+                    crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                    "Missing required outputSettings field",
+                );
+            }
         };
         // player の特別扱い
         #[cfg(feature = "player")]

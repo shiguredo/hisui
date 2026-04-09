@@ -3732,3 +3732,44 @@ async fn hisui_create_output_rejects_non_object_output_settings() {
     assert!(!result);
     assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
 }
+
+#[tokio::test]
+async fn set_output_settings_rejects_non_object_output_settings() {
+    // SetOutputSettings で outputSettings が object でない場合は INVALID_REQUEST_FIELD を返す
+    let registry = ObswsInputRegistry::new_for_test();
+    let handle = create_coordinator_handle(registry);
+    let mut session = ObswsSession::new(None, handle);
+    identify_session(&mut session).await;
+
+    // outputSettings: 123
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-bad-settings-num".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"stream","outputSettings":123}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+
+    // outputSettings: null
+    let action = session
+        .handle_request(RequestMessage {
+            request_id: Some("req-set-bad-settings-null".to_owned()),
+            request_type: Some("SetOutputSettings".to_owned()),
+            request_data: Some(
+                nojson::RawJsonOwned::parse(r#"{"outputName":"record","outputSettings":null}"#)
+                    .expect("requestData must be valid json"),
+            ),
+        })
+        .await;
+    let text = unwrap_send_text(action);
+    let (result, code) = parse_request_status(&text);
+    assert!(!result);
+    assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+}
