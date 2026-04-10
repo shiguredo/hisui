@@ -5,11 +5,15 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::obsws::coordinator::output_registry::{
+    DEFAULT_DASH_MAX_RETAINED_SEGMENTS, DEFAULT_DASH_SEGMENT_DURATION_SECS,
+    DEFAULT_HLS_MAX_RETAINED_SEGMENTS, DEFAULT_HLS_SEGMENT_DURATION_SECS, DashDestination,
+    DashVariant, HlsDestination, HlsSegmentFormat, HlsVariant, ObswsDashSettings, ObswsHlsSettings,
+    ObswsRtmpOutboundSettings, ObswsSoraPublisherSettings, ObswsStreamServiceSettings,
+};
 use crate::obsws::state::{
-    DashDestination, DashVariant, HlsDestination, HlsSegmentFormat, HlsVariant, ObswsDashSettings,
-    ObswsHlsSettings, ObswsRtmpOutboundSettings, ObswsSceneItemBlendMode, ObswsSceneItemTransform,
-    ObswsSessionState, ObswsSoraPublisherSettings, ObswsSrtInboundSettings,
-    ObswsStreamServiceSettings, ObswsWebRtcSourceSettings,
+    ObswsSceneItemBlendMode, ObswsSceneItemTransform, ObswsSessionState, ObswsSrtInboundSettings,
+    ObswsWebRtcSourceSettings,
 };
 
 /// state file の output エントリ
@@ -281,8 +285,7 @@ fn parse_optional_hls(
     let destination = parse_optional_hls_destination(v)?;
 
     let segment_duration: Option<f64> = v.to_member("segmentDuration")?.try_into()?;
-    let segment_duration =
-        segment_duration.unwrap_or(crate::obsws::state::DEFAULT_HLS_SEGMENT_DURATION_SECS);
+    let segment_duration = segment_duration.unwrap_or(DEFAULT_HLS_SEGMENT_DURATION_SECS);
     // NaN / Infinity は JSON 仕様上パーサが弾くため、ここでは正値チェックのみ行う
     if segment_duration <= 0.0 {
         return Err(v
@@ -292,8 +295,7 @@ fn parse_optional_hls(
     }
 
     let max_retained_segments: Option<usize> = v.to_member("maxRetainedSegments")?.try_into()?;
-    let max_retained_segments =
-        max_retained_segments.unwrap_or(crate::obsws::state::DEFAULT_HLS_MAX_RETAINED_SEGMENTS);
+    let max_retained_segments = max_retained_segments.unwrap_or(DEFAULT_HLS_MAX_RETAINED_SEGMENTS);
     if max_retained_segments == 0 {
         return Err(v
             .to_member("maxRetainedSegments")?
@@ -417,8 +419,7 @@ fn parse_optional_dash(
     let destination = parse_optional_dash_destination(v)?;
 
     let segment_duration: Option<f64> = v.to_member("segmentDuration")?.try_into()?;
-    let segment_duration =
-        segment_duration.unwrap_or(crate::obsws::state::DEFAULT_DASH_SEGMENT_DURATION_SECS);
+    let segment_duration = segment_duration.unwrap_or(DEFAULT_DASH_SEGMENT_DURATION_SECS);
     // NaN / Infinity は JSON 仕様上パーサが弾くため、ここでは正値チェックのみ行う
     if segment_duration <= 0.0 {
         return Err(v
@@ -428,8 +429,7 @@ fn parse_optional_dash(
     }
 
     let max_retained_segments: Option<usize> = v.to_member("maxRetainedSegments")?.try_into()?;
-    let max_retained_segments =
-        max_retained_segments.unwrap_or(crate::obsws::state::DEFAULT_DASH_MAX_RETAINED_SEGMENTS);
+    let max_retained_segments = max_retained_segments.unwrap_or(DEFAULT_DASH_MAX_RETAINED_SEGMENTS);
     if max_retained_segments == 0 {
         return Err(v
             .to_member("maxRetainedSegments")?

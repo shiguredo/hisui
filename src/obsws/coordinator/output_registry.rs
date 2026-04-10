@@ -1,13 +1,6 @@
 //! output の統一管理。
 //! 全 output を名前付きインスタンスとして BTreeMap で管理し、
 //! HisuiCreateOutput / HisuiRemoveOutput で動的に追加・削除する。
-//!
-//! TODO: モジュール名・構成の整理
-//! - このモジュール名 `output_registry` は、全 output が動的管理に統一された現在では不適切。
-//!   リネーム候補: `output_registry`, `output_manager`, `output_instance` 等。
-//! - `state` も実際には Input / Scene / SceneItem / Transition / グローバル設定を
-//!   管理しており「input 専用レジストリ」ではないため、命名の見直しが必要。
-//! - 両モジュールの責務と命名を合わせて検討すること。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -18,11 +11,53 @@ use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
-use crate::obsws::state::{ObswsDashSettings, ObswsHlsSettings};
+use crate::{ProcessorId, TrackId};
+
+// output モジュールの Settings 型を re-export する
+pub(crate) use super::output_dash::{
+    DEFAULT_DASH_MAX_RETAINED_SEGMENTS, DEFAULT_DASH_SEGMENT_DURATION_SECS, DashDestination,
+    DashVariant, ObswsDashSettings,
+};
+pub(crate) use super::output_hls::{
+    DEFAULT_HLS_MAX_RETAINED_SEGMENTS, DEFAULT_HLS_SEGMENT_DURATION_SECS, HlsDestination,
+    HlsSegmentFormat, HlsVariant, ObswsHlsSettings,
+};
+pub(crate) use super::output_rtmp::ObswsRtmpOutboundSettings;
+pub(crate) use super::output_sora::ObswsSoraPublisherSettings;
+pub(crate) use super::output_stream::ObswsStreamServiceSettings;
 
 // -----------------------------------------------------------------------
 // 型定義
 // -----------------------------------------------------------------------
+
+/// output の共通トラック実行情報。
+/// Record / Stream / HLS / DASH / RTMP 各 output でエンコーダー + トラックの組として使われる。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsRecordTrackRun {
+    pub encoder_processor_id: ProcessorId,
+    pub source_track_id: TrackId,
+    pub encoded_track_id: TrackId,
+}
+
+impl ObswsRecordTrackRun {
+    /// output_kind ("stream" / "record") と media_kind ("video" / "audio") から構築する
+    pub fn new(
+        output_kind: &str,
+        run_id: u64,
+        media_kind: &str,
+        source_track_id: &TrackId,
+    ) -> Self {
+        Self {
+            encoder_processor_id: ProcessorId::new(format!(
+                "output:{output_kind}:{media_kind}_encoder:{run_id}"
+            )),
+            source_track_id: source_track_id.clone(),
+            encoded_track_id: TrackId::new(format!(
+                "output:{output_kind}:encoded_{media_kind}:{run_id}"
+            )),
+        }
+    }
+}
 
 /// output インスタンスの状態
 pub(crate) struct OutputState {
@@ -94,12 +129,12 @@ impl OutputKind {
 
 /// output の種別固有の設定
 pub(crate) enum OutputSettings {
-    Stream(super::output_stream::StreamOutputSettings),
+    Stream(ObswsStreamServiceSettings),
     Record(super::output_record::RecordOutputSettings),
     Hls(ObswsHlsSettings),
     MpegDash(ObswsDashSettings),
-    RtmpOutbound(super::output_rtmp::RtmpOutboundOutputSettings),
-    Sora(super::output_sora::SoraOutputSettings),
+    RtmpOutbound(ObswsRtmpOutboundSettings),
+    Sora(ObswsSoraPublisherSettings),
     /// Player は設定を持たない
     #[cfg(feature = "player")]
     Player,
@@ -107,12 +142,12 @@ pub(crate) enum OutputSettings {
 
 /// output の稼働中の実行情報
 pub(crate) enum OutputRun {
-    Stream(crate::obsws::state::ObswsStreamRun),
-    Record(crate::obsws::state::ObswsRecordRun),
-    Hls(crate::obsws::state::ObswsHlsRun),
-    MpegDash(crate::obsws::state::ObswsDashRun),
-    RtmpOutbound(crate::obsws::state::ObswsRtmpOutboundRun),
-    Sora(crate::obsws::state::ObswsSoraPublisherRun),
+    Stream(super::output_stream::ObswsStreamRun),
+    Record(super::output_record::ObswsRecordRun),
+    Hls(super::output_hls::ObswsHlsRun),
+    MpegDash(super::output_dash::ObswsDashRun),
+    RtmpOutbound(super::output_rtmp::ObswsRtmpOutboundRun),
+    Sora(super::output_sora::ObswsSoraPublisherRun),
     #[cfg(feature = "player")]
     Player {
         subscriber_handle: Option<tokio::task::JoinHandle<()>>,
@@ -133,7 +168,7 @@ pub(crate) fn create_default_outputs(record_directory: PathBuf) -> BTreeMap<Stri
         "stream".to_owned(),
         OutputState {
             output_kind: OutputKind::Stream,
-            settings: OutputSettings::Stream(super::output_stream::StreamOutputSettings::default()),
+            settings: OutputSettings::Stream(ObswsStreamServiceSettings::default()),
             runtime: OutputRuntimeState::default(),
         },
     );
@@ -312,8 +347,7 @@ impl ObswsCoordinator {
                 }
             }
             OutputSettings::Hls(settings) => {
-                match crate::obsws::response::parse_hls_settings_update(&output_settings, settings)
-                {
+                match super::output_hls::parse_hls_settings_update(&output_settings, settings) {
                     Ok(new_settings) => *settings = new_settings,
                     Err(error) => {
                         return crate::obsws::response::build_request_response_error(
@@ -326,8 +360,7 @@ impl ObswsCoordinator {
                 }
             }
             OutputSettings::MpegDash(settings) => {
-                match crate::obsws::response::parse_dash_settings_update(&output_settings, settings)
-                {
+                match super::output_dash::parse_dash_settings_update(&output_settings, settings) {
                     Ok(new_settings) => *settings = new_settings,
                     Err(error) => {
                         return crate::obsws::response::build_request_response_error(
@@ -371,7 +404,7 @@ impl ObswsCoordinator {
             Ok(fields) => fields,
             Err(response) => return response,
         };
-        let new_settings = super::output_stream::StreamOutputSettings {
+        let new_settings = ObswsStreamServiceSettings {
             stream_service_type: fields.stream_service_type,
             server: Some(fields.server),
             key: fields.key,
@@ -574,7 +607,7 @@ fn restore_output_settings(
     let v = raw.value();
     match kind {
         OutputKind::Stream => Ok(OutputSettings::Stream(
-            super::output_stream::StreamOutputSettings::parse_from_json(Some(&v))?,
+            ObswsStreamServiceSettings::parse_from_json(Some(&v))?,
         )),
         OutputKind::Record => {
             // state file 復元時のデフォルトは /tmp（state file にディレクトリ情報がない場合のフォールバック）
@@ -588,23 +621,23 @@ fn restore_output_settings(
         OutputKind::Hls => {
             // HLS 設定を state file から復元する
             let existing = ObswsHlsSettings::default();
-            match crate::obsws::response::parse_hls_settings_update(&v, &existing) {
+            match super::output_hls::parse_hls_settings_update(&v, &existing) {
                 Ok(settings) => Ok(OutputSettings::Hls(settings)),
                 Err(_) => Ok(OutputSettings::Hls(existing)),
             }
         }
         OutputKind::MpegDash => {
             let existing = ObswsDashSettings::default();
-            match crate::obsws::response::parse_dash_settings_update(&v, &existing) {
+            match super::output_dash::parse_dash_settings_update(&v, &existing) {
                 Ok(settings) => Ok(OutputSettings::MpegDash(settings)),
                 Err(_) => Ok(OutputSettings::MpegDash(existing)),
             }
         }
         OutputKind::RtmpOutbound => Ok(OutputSettings::RtmpOutbound(
-            super::output_rtmp::RtmpOutboundOutputSettings::parse_from_json(Some(&v))?,
+            ObswsRtmpOutboundSettings::parse_from_json(Some(&v))?,
         )),
         OutputKind::Sora => Ok(OutputSettings::Sora(
-            super::output_sora::SoraOutputSettings::parse_from_json(Some(&v))?,
+            ObswsSoraPublisherSettings::parse_from_json(Some(&v))?,
         )),
         // Player は from_kind_str で返されないため到達しない
         #[cfg(feature = "player")]
@@ -817,6 +850,130 @@ pub(super) fn parse_optional_string_strict(
     }
 }
 
+/// オブジェクトのメンバーから非空文字列を取得する。
+/// キー不在 → Ok(None)、null/空文字列 → Ok(None)、string → Ok(Some(s))、それ以外 → Err
+///
+/// HLS/DASH パーサ間で共有される。
+pub(super) fn optional_non_empty_string_member(
+    object: nojson::RawJsonValue<'_, '_>,
+    member_name: &str,
+) -> Result<Option<String>, nojson::JsonParseError> {
+    let value = object.to_member(member_name)?.optional();
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value: String = value.try_into()?;
+    if value.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(value))
+}
+
+/// OBS WebSocket 互換の S3 destination をパースした中間表現。
+/// HLS/DASH の両方のパーサで使用する。
+pub(super) struct ParsedObswsS3Destination {
+    pub(super) bucket: String,
+    pub(super) prefix: String,
+    pub(super) region: String,
+    pub(super) endpoint: Option<String>,
+    pub(super) use_path_style: bool,
+    pub(super) access_key_id: String,
+    pub(super) secret_access_key: String,
+    pub(super) session_token: Option<String>,
+    pub(super) lifetime_days: Option<u32>,
+}
+
+/// `destination` オブジェクトから S3 互換の出力先情報をパースする。
+/// HLS/DASH のパーサで共通に使用される。
+pub(super) fn parse_obsws_s3_destination(
+    dest_value: nojson::RawJsonValue<'_, '_>,
+) -> Result<ParsedObswsS3Destination, String> {
+    let bucket: String = dest_value
+        .to_member("bucket")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "destination.bucket is required for s3".to_owned())?
+        .try_into()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    let prefix: String = optional_non_empty_string_member(dest_value, "prefix")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    let region: String = dest_value
+        .to_member("region")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "destination.region is required for s3".to_owned())?
+        .try_into()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    let endpoint: Option<String> =
+        optional_non_empty_string_member(dest_value, "endpoint").map_err(|e| e.to_string())?;
+    let use_path_style: bool = dest_value
+        .to_member("usePathStyle")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?
+        .unwrap_or(false);
+
+    let creds_value = dest_value
+        .to_member("credentials")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "destination.credentials is required for s3".to_owned())?;
+    let access_key_id: String = creds_value
+        .to_member("accessKeyId")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "credentials.accessKeyId is required".to_owned())?
+        .try_into()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    let secret_access_key: String = creds_value
+        .to_member("secretAccessKey")
+        .map_err(|e| e.to_string())?
+        .required()
+        .map_err(|_| "credentials.secretAccessKey is required".to_owned())?
+        .try_into()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    let session_token: Option<String> =
+        optional_non_empty_string_member(creds_value, "sessionToken").map_err(|e| e.to_string())?;
+
+    let lifetime_days: Option<u32> = dest_value
+        .to_member("lifetimeDays")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    if bucket.is_empty() {
+        return Err("destination.bucket must not be empty".to_owned());
+    }
+    if region.is_empty() {
+        return Err("destination.region must not be empty".to_owned());
+    }
+    if let Some(days) = lifetime_days {
+        if days == 0 {
+            return Err("destination.lifetimeDays must be positive".to_owned());
+        }
+        if prefix.is_empty() {
+            return Err("destination.prefix is required when lifetimeDays is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
+        }
+    }
+
+    Ok(ParsedObswsS3Destination {
+        bucket,
+        prefix,
+        region,
+        endpoint,
+        use_path_style,
+        access_key_id,
+        secret_access_key,
+        session_token,
+        lifetime_days,
+    })
+}
+
 /// outputKind に応じて outputSettings をパースする。
 /// outputSettings が省略された場合はデフォルト値を使用する。
 /// 指定された値の型が不正な場合はエラーを返す。
@@ -840,7 +997,7 @@ fn parse_output_settings(
 
     match kind {
         OutputKind::Stream => Ok(OutputSettings::Stream(
-            super::output_stream::StreamOutputSettings::parse_from_json(settings_value.as_ref())?,
+            ObswsStreamServiceSettings::parse_from_json(settings_value.as_ref())?,
         )),
         OutputKind::Record => Ok(OutputSettings::Record(
             super::output_record::RecordOutputSettings::parse_from_json(
@@ -851,8 +1008,7 @@ fn parse_output_settings(
         OutputKind::Hls => {
             let existing = ObswsHlsSettings::default();
             if let Some(v) = &settings_value {
-                crate::obsws::response::parse_hls_settings_update(v, &existing)
-                    .map(OutputSettings::Hls)
+                super::output_hls::parse_hls_settings_update(v, &existing).map(OutputSettings::Hls)
             } else {
                 Ok(OutputSettings::Hls(existing))
             }
@@ -860,19 +1016,17 @@ fn parse_output_settings(
         OutputKind::MpegDash => {
             let existing = ObswsDashSettings::default();
             if let Some(v) = &settings_value {
-                crate::obsws::response::parse_dash_settings_update(v, &existing)
+                super::output_dash::parse_dash_settings_update(v, &existing)
                     .map(OutputSettings::MpegDash)
             } else {
                 Ok(OutputSettings::MpegDash(existing))
             }
         }
         OutputKind::RtmpOutbound => Ok(OutputSettings::RtmpOutbound(
-            super::output_rtmp::RtmpOutboundOutputSettings::parse_from_json(
-                settings_value.as_ref(),
-            )?,
+            ObswsRtmpOutboundSettings::parse_from_json(settings_value.as_ref())?,
         )),
         OutputKind::Sora => Ok(OutputSettings::Sora(
-            super::output_sora::SoraOutputSettings::parse_from_json(settings_value.as_ref())?,
+            ObswsSoraPublisherSettings::parse_from_json(settings_value.as_ref())?,
         )),
         // Player は from_kind_str で返されないため到達しない
         #[cfg(feature = "player")]

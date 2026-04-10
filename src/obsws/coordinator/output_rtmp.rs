@@ -3,7 +3,15 @@
 
 use super::ObswsCoordinator;
 use super::output::{OutputOperationOutcome, terminate_and_wait};
-use super::output_registry::{OutputRun, OutputSettings};
+use super::output_registry::{ObswsRecordTrackRun, OutputRun, OutputSettings};
+use crate::ProcessorId;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsRtmpOutboundRun {
+    pub video: ObswsRecordTrackRun,
+    pub audio: ObswsRecordTrackRun,
+    pub endpoint_processor_id: ProcessorId,
+}
 
 impl ObswsCoordinator {
     /// 指定された output_name の rtmp_outbound output を開始する。
@@ -13,8 +21,6 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::state::{ObswsRecordTrackRun, ObswsRtmpOutboundRun};
-
         let Some(output) = self.outputs.get(output_name) else {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -178,35 +184,18 @@ impl ObswsCoordinator {
 }
 
 // -----------------------------------------------------------------------
-// RtmpOutboundOutputSettings: rtmp_outbound output の種別固有設定
+// ObswsRtmpOutboundSettings: RTMP outbound の設定型
 // -----------------------------------------------------------------------
 
-/// RTMP outbound output の設定。
+/// RTMP outbound output の OBS WebSocket 互換設定。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct RtmpOutboundOutputSettings {
-    pub(crate) output_url: Option<String>,
-    pub(crate) stream_name: Option<String>,
+pub struct ObswsRtmpOutboundSettings {
+    // StartOutput 時に必須。登録時点では未指定も許容する。
+    pub output_url: Option<String>,
+    pub stream_name: Option<String>,
 }
 
-impl From<crate::obsws::state::ObswsRtmpOutboundSettings> for RtmpOutboundOutputSettings {
-    fn from(s: crate::obsws::state::ObswsRtmpOutboundSettings) -> Self {
-        Self {
-            output_url: s.output_url,
-            stream_name: s.stream_name,
-        }
-    }
-}
-
-impl From<RtmpOutboundOutputSettings> for crate::obsws::state::ObswsRtmpOutboundSettings {
-    fn from(s: RtmpOutboundOutputSettings) -> Self {
-        Self {
-            output_url: s.output_url,
-            stream_name: s.stream_name,
-        }
-    }
-}
-
-impl nojson::DisplayJson for RtmpOutboundOutputSettings {
+impl nojson::DisplayJson for ObswsRtmpOutboundSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if let Some(output_url) = &self.output_url {
@@ -221,7 +210,7 @@ impl nojson::DisplayJson for RtmpOutboundOutputSettings {
     }
 }
 
-impl RtmpOutboundOutputSettings {
+impl ObswsRtmpOutboundSettings {
     /// JSON から設定を更新する（SetOutputSettings 用）。
     /// 各フィールドは「キーが存在し値が non-null」なら更新、「値が null」なら None にクリア、
     /// 「キーが存在しない」なら既存値を維持する。
@@ -278,7 +267,7 @@ async fn start_rtmp_outbound_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     output_url: &str,
     stream_name: Option<&str>,
-    run: &crate::obsws::state::ObswsRtmpOutboundRun,
+    run: &ObswsRtmpOutboundRun,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
     // RTMP outbound は AAC エンコーディングを使用する（RTMP の制約）
@@ -309,7 +298,7 @@ async fn start_rtmp_outbound_processors(
 /// RTMP outbound 用プロセッサを段階的に停止する: エンコーダー → エンドポイント
 async fn stop_processors_staged_rtmp_outbound(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws::state::ObswsRtmpOutboundRun,
+    run: &ObswsRtmpOutboundRun,
 ) -> crate::Result<()> {
     terminate_and_wait(
         pipeline_handle,

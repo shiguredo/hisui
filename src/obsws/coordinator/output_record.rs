@@ -1,11 +1,21 @@
 //! Record (MP4 録画) の output エンジン。
 //! Program 出力を MP4 ファイルに録画するための processor 起動・停止を行う。
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use super::ObswsCoordinator;
 use super::output::{OutputOperationOutcome, terminate_and_wait, wait_or_terminate};
-use super::output_registry::{OutputRun, OutputSettings};
+use super::output_registry::{ObswsRecordTrackRun, OutputRun, OutputSettings};
+use crate::ProcessorId;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsRecordRun {
+    pub video: ObswsRecordTrackRun,
+    pub audio: ObswsRecordTrackRun,
+    pub writer_processor_id: ProcessorId,
+    pub output_path: PathBuf,
+}
 
 impl ObswsCoordinator {
     /// 指定された output_name の record output を開始する。
@@ -15,7 +25,6 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::state::{ObswsRecordRun, ObswsRecordTrackRun};
         use std::time::{SystemTime, UNIX_EPOCH};
 
         // output の存在チェックと設定取得
@@ -275,7 +284,7 @@ impl RecordOutputSettings {
 async fn start_record_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     output_path: &std::path::Path,
-    run: &crate::obsws::state::ObswsRecordRun,
+    run: &ObswsRecordRun,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
     // レコードは Opus エンコーディングを使用する
@@ -302,7 +311,7 @@ async fn start_record_processors(
 /// エンコーダーを terminate し、ライターは EOS 伝播で自然終了させる。
 async fn stop_processors_staged_record(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws::state::ObswsRecordRun,
+    run: &ObswsRecordRun,
 ) -> crate::Result<()> {
     // NOTE:
     // この経路は terminate_processor() ベースで encoder を停止するため、

@@ -6,11 +6,17 @@
 
 use super::output::{OutputOperationOutcome, terminate_and_wait};
 use super::{CommandResult, ObswsCoordinator};
+use crate::ProcessorId;
 use crate::obsws::event::TaggedEvent;
 use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_SORA_SOURCE, REQUEST_STATUS_MISSING_REQUEST_DATA,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsSoraPublisherRun {
+    pub publisher_processor_id: ProcessorId,
+}
 
 /// SoraSubscriber の状態
 pub(crate) struct SoraSubscriberState {
@@ -58,45 +64,21 @@ pub(crate) struct SoraConnectionInfo {
 }
 
 // -----------------------------------------------------------------------
-// SoraOutputSettings: sora output の種別固有設定
+// ObswsSoraPublisherSettings: Sora publisher の設定型
 // -----------------------------------------------------------------------
 
-/// Sora publisher output の設定。
-/// `ObswsSoraPublisherSettings` と同一フィールドを持ち、output_registry の enum から委譲される。
+/// Sora publisher output の OBS WebSocket 互換設定。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct SoraOutputSettings {
-    pub(crate) signaling_urls: Vec<String>,
-    pub(crate) channel_id: Option<String>,
-    pub(crate) client_id: Option<String>,
-    pub(crate) bundle_id: Option<String>,
-    pub(crate) metadata: Option<nojson::RawJsonOwned>,
+pub struct ObswsSoraPublisherSettings {
+    // StartOutput 時に必須。登録時点では未指定も許容する。
+    pub signaling_urls: Vec<String>,
+    pub channel_id: Option<String>,
+    pub client_id: Option<String>,
+    pub bundle_id: Option<String>,
+    pub metadata: Option<nojson::RawJsonOwned>,
 }
 
-impl From<crate::obsws::state::ObswsSoraPublisherSettings> for SoraOutputSettings {
-    fn from(s: crate::obsws::state::ObswsSoraPublisherSettings) -> Self {
-        Self {
-            signaling_urls: s.signaling_urls,
-            channel_id: s.channel_id,
-            client_id: s.client_id,
-            bundle_id: s.bundle_id,
-            metadata: s.metadata,
-        }
-    }
-}
-
-impl From<SoraOutputSettings> for crate::obsws::state::ObswsSoraPublisherSettings {
-    fn from(s: SoraOutputSettings) -> Self {
-        Self {
-            signaling_urls: s.signaling_urls,
-            channel_id: s.channel_id,
-            client_id: s.client_id,
-            bundle_id: s.bundle_id,
-            metadata: s.metadata,
-        }
-    }
-}
-
-impl nojson::DisplayJson for SoraOutputSettings {
+impl nojson::DisplayJson for ObswsSoraPublisherSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             f.member(
@@ -125,7 +107,7 @@ impl nojson::DisplayJson for SoraOutputSettings {
     }
 }
 
-impl SoraOutputSettings {
+impl ObswsSoraPublisherSettings {
     /// JSON から設定を更新する（SetOutputSettings 用）。
     /// soraSdkSettings オブジェクトの中の各フィールドを更新する。
     pub(crate) fn update_from_json(
@@ -257,7 +239,6 @@ impl ObswsCoordinator {
         output_name: &str,
     ) -> OutputOperationOutcome {
         use super::output_registry::{OutputRun, OutputSettings};
-        use crate::obsws::state::ObswsSoraPublisherRun;
 
         let Some(output) = self.outputs.get(output_name) else {
             return OutputOperationOutcome::failure(

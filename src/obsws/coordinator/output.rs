@@ -704,8 +704,8 @@ pub(crate) async fn live_processor_ids(
 /// 各 output エンジン（record / stream / rtmp_outbound）で共通のエンコーダー起動処理。
 pub(crate) async fn start_encoder_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    video: &crate::obsws::state::ObswsRecordTrackRun,
-    audio: &crate::obsws::state::ObswsRecordTrackRun,
+    video: &super::output_registry::ObswsRecordTrackRun,
+    audio: &super::output_registry::ObswsRecordTrackRun,
     audio_codec: crate::types::CodecName,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {

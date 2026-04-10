@@ -4,12 +4,506 @@
 
 use std::time::Duration;
 
+use nojson::DisplayJson as _;
+
 use super::ObswsCoordinator;
 use super::ObswsProgramOutputContext;
 use super::output::{
     OutputOperationOutcome, build_s3_client, terminate_and_wait, wait_or_terminate,
 };
-use super::output_registry::{OutputRun, OutputSettings};
+use super::output_registry::{ObswsRecordTrackRun, OutputRun, OutputSettings};
+use crate::{ProcessorId, TrackId};
+
+// -----------------------------------------------------------------------
+// DASH 設定型
+// -----------------------------------------------------------------------
+
+// MPEG-DASH 設定
+pub const DEFAULT_DASH_SEGMENT_DURATION_SECS: f64 = 2.0;
+pub const DEFAULT_DASH_MAX_RETAINED_SEGMENTS: usize = 6;
+pub const DEFAULT_DASH_VIDEO_BITRATE_BPS: usize = 2_000_000;
+pub const DEFAULT_DASH_AUDIO_BITRATE_BPS: usize = 128_000;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DashVariant {
+    /// ビデオビットレート (bps)
+    pub video_bitrate_bps: usize,
+    /// オーディオビットレート (bps)
+    pub audio_bitrate_bps: usize,
+    /// ビデオ幅（省略時はミキサーのキャンバスサイズを使用）
+    pub width: Option<crate::types::EvenUsize>,
+    /// ビデオ高さ（省略時はミキサーのキャンバスサイズを使用）
+    pub height: Option<crate::types::EvenUsize>,
+}
+
+impl Default for DashVariant {
+    fn default() -> Self {
+        Self {
+            video_bitrate_bps: DEFAULT_DASH_VIDEO_BITRATE_BPS,
+            audio_bitrate_bps: DEFAULT_DASH_AUDIO_BITRATE_BPS,
+            width: None,
+            height: None,
+        }
+    }
+}
+
+impl nojson::DisplayJson for DashVariant {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            f.member("videoBitrate", self.video_bitrate_bps)?;
+            f.member("audioBitrate", self.audio_bitrate_bps)?;
+            if let Some(width) = self.width {
+                f.member("width", width.get())?;
+            }
+            if let Some(height) = self.height {
+                f.member("height", height.get())?;
+            }
+            Ok(())
+        })
+        .fmt(f)
+    }
+}
+
+/// MPEG-DASH 出力先の設定
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DashDestination {
+    /// ローカルファイルシステムへの出力
+    Filesystem { directory: String },
+    /// S3 互換オブジェクトストレージへの出力
+    S3 {
+        bucket: String,
+        prefix: String,
+        region: String,
+        endpoint: Option<String>,
+        use_path_style: bool,
+        access_key_id: String,
+        secret_access_key: String,
+        session_token: Option<String>,
+        /// オブジェクトのライフタイム（日数）。
+        /// 指定時はバケットに lifecycle ルールを設定する（セーフティネット用途）。
+        /// 明示的な DeleteObject は常に実行する。
+        lifetime_days: Option<u32>,
+    },
+}
+
+impl nojson::DisplayJson for DashDestination {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            Self::Filesystem { directory } => nojson::object(|f| {
+                f.member("type", "filesystem")?;
+                f.member("directory", directory)
+            })
+            .fmt(f),
+            Self::S3 {
+                bucket,
+                prefix,
+                region,
+                endpoint,
+                use_path_style,
+                // 認証情報はレスポンスに含めない
+                access_key_id: _,
+                secret_access_key: _,
+                session_token: _,
+                lifetime_days,
+            } => nojson::object(|f| {
+                f.member("type", "s3")?;
+                f.member("bucket", bucket)?;
+                f.member("prefix", prefix)?;
+                f.member("region", region)?;
+                if let Some(endpoint) = endpoint {
+                    f.member("endpoint", endpoint)?;
+                }
+                f.member("usePathStyle", *use_path_style)?;
+                if let Some(days) = lifetime_days {
+                    f.member("lifetimeDays", *days)?;
+                }
+                Ok(())
+            })
+            .fmt(f),
+        }
+    }
+}
+
+impl DashDestination {
+    /// state file 用: 認証情報を含めて JSON オブジェクトとして出力する
+    pub fn fmt_with_credentials(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        match self {
+            Self::Filesystem { directory } => nojson::object(|f| {
+                f.member("type", "filesystem")?;
+                f.member("directory", directory)
+            })
+            .fmt(f),
+            Self::S3 {
+                bucket,
+                prefix,
+                region,
+                endpoint,
+                use_path_style,
+                access_key_id,
+                secret_access_key,
+                session_token,
+                lifetime_days,
+            } => nojson::object(|f| {
+                f.member("type", "s3")?;
+                f.member("bucket", bucket)?;
+                f.member("prefix", prefix)?;
+                f.member("region", region)?;
+                if let Some(endpoint) = endpoint {
+                    f.member("endpoint", endpoint)?;
+                }
+                f.member("usePathStyle", *use_path_style)?;
+                f.member(
+                    "credentials",
+                    nojson::object(|f| {
+                        f.member("accessKeyId", access_key_id)?;
+                        f.member("secretAccessKey", secret_access_key)?;
+                        if let Some(token) = session_token {
+                            f.member("sessionToken", token)?;
+                        }
+                        Ok(())
+                    }),
+                )?;
+                if let Some(days) = lifetime_days {
+                    f.member("lifetimeDays", *days)?;
+                }
+                Ok(())
+            })
+            .fmt(f),
+        }
+    }
+
+    /// GetOutputStatus 用の outputPath を生成する
+    pub fn output_path(&self) -> String {
+        match self {
+            Self::Filesystem { directory } => {
+                let path = std::path::PathBuf::from(directory).join("manifest.mpd");
+                path.display().to_string()
+            }
+            Self::S3 { bucket, prefix, .. } => {
+                if prefix.is_empty() {
+                    format!("s3://{bucket}/manifest.mpd")
+                } else {
+                    format!("s3://{bucket}/{prefix}/manifest.mpd")
+                }
+            }
+        }
+    }
+
+    /// バリアント用のサブパスを生成する
+    pub fn variant_path(&self, index: usize) -> String {
+        match self {
+            Self::Filesystem { directory } => std::path::PathBuf::from(directory)
+                .join(format!("variant_{index}"))
+                .display()
+                .to_string(),
+            Self::S3 { prefix, .. } => {
+                if prefix.is_empty() {
+                    format!("variant_{index}")
+                } else {
+                    format!("{prefix}/variant_{index}")
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObswsDashSettings {
+    // StartOutput 時に必須。登録時点では未指定も許容する。
+    pub destination: Option<DashDestination>,
+    /// セグメントの目標尺（秒）
+    pub segment_duration: f64,
+    /// マニフェストに保持するセグメント数
+    pub max_retained_segments: usize,
+    /// ABR バリアント定義。
+    /// 要素が 1 つの場合は non-ABR。
+    pub variants: Vec<DashVariant>,
+    /// ビデオコーデック。全バリアント共通。
+    pub video_codec: crate::types::CodecName,
+    /// オーディオコーデック。全バリアント共通。
+    pub audio_codec: crate::types::CodecName,
+}
+
+impl Default for ObswsDashSettings {
+    fn default() -> Self {
+        Self {
+            destination: None,
+            segment_duration: DEFAULT_DASH_SEGMENT_DURATION_SECS,
+            max_retained_segments: DEFAULT_DASH_MAX_RETAINED_SEGMENTS,
+            variants: vec![DashVariant::default()],
+            video_codec: crate::types::CodecName::H264,
+            audio_codec: crate::types::CodecName::Aac,
+        }
+    }
+}
+
+impl nojson::DisplayJson for ObswsDashSettings {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        nojson::object(|f| {
+            if let Some(destination) = &self.destination {
+                f.member("destination", destination)?;
+            }
+            f.member("segmentDuration", self.segment_duration)?;
+            f.member("maxRetainedSegments", self.max_retained_segments)?;
+            f.member(
+                "variants",
+                nojson::array(|f| {
+                    for variant in &self.variants {
+                        f.element(variant)?;
+                    }
+                    Ok(())
+                }),
+            )?;
+            f.member("videoCodec", self.video_codec)?;
+            f.member("audioCodec", self.audio_codec)
+        })
+        .fmt(f)
+    }
+}
+
+// -----------------------------------------------------------------------
+// Run 型
+// -----------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsDashRun {
+    pub destination: DashDestination,
+    /// バリアントごとの実行情報
+    pub variant_runs: Vec<ObswsDashVariantRun>,
+}
+
+impl ObswsDashRun {
+    /// ABR かどうかを返す
+    pub fn is_abr(&self) -> bool {
+        self.variant_runs.len() > 1
+    }
+}
+
+/// MPEG-DASH ABR バリアントごとの実行情報
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObswsDashVariantRun {
+    pub video: ObswsRecordTrackRun,
+    pub audio: ObswsRecordTrackRun,
+    /// 解像度変換が必要なバリアントのスケーラープロセッサ ID
+    pub scaler_processor_id: Option<ProcessorId>,
+    /// スケーラー出力トラック ID
+    pub scaled_track_id: Option<TrackId>,
+    pub writer_processor_id: ProcessorId,
+    /// バリアントの出力パス（filesystem: ディレクトリパス、S3: prefix）
+    pub variant_path: String,
+}
+
+// -----------------------------------------------------------------------
+// 設定パース
+// -----------------------------------------------------------------------
+
+/// DASH 設定をパースして新しい `ObswsDashSettings` を返す。
+/// 省略されたフィールドは existing の値を維持する。
+pub(crate) fn parse_dash_settings_update(
+    output_settings: &nojson::RawJsonValue<'_, '_>,
+    existing: &ObswsDashSettings,
+) -> Result<ObswsDashSettings, String> {
+    parse_dash_settings_inner(*output_settings, existing)
+}
+
+fn parse_dash_settings_inner(
+    output_settings: nojson::RawJsonValue<'_, '_>,
+    existing: &ObswsDashSettings,
+) -> Result<ObswsDashSettings, String> {
+    // destination オブジェクトのパース
+    let destination: Option<DashDestination> = if let Some(dest_value) = output_settings
+        .to_member("destination")
+        .map_err(|e| e.to_string())?
+        .optional()
+    {
+        let dest_type: String = dest_value
+            .to_member("type")
+            .map_err(|e| e.to_string())?
+            .required()
+            .map_err(|_| "destination.type is required".to_owned())?
+            .try_into()
+            .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+        match dest_type.as_str() {
+            "filesystem" => {
+                let directory: String = dest_value
+                    .to_member("directory")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.directory is required for filesystem".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                if directory.is_empty() {
+                    return Err("destination.directory must not be empty".to_owned());
+                }
+                Some(DashDestination::Filesystem { directory })
+            }
+            "s3" => {
+                let parsed = super::output_registry::parse_obsws_s3_destination(dest_value)?;
+                Some(DashDestination::S3 {
+                    bucket: parsed.bucket,
+                    prefix: parsed.prefix,
+                    region: parsed.region,
+                    endpoint: parsed.endpoint,
+                    use_path_style: parsed.use_path_style,
+                    access_key_id: parsed.access_key_id,
+                    secret_access_key: parsed.secret_access_key,
+                    session_token: parsed.session_token,
+                    lifetime_days: parsed.lifetime_days,
+                })
+            }
+            _ => {
+                return Err(format!(
+                    "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    let segment_duration: Option<f64> = output_settings
+        .to_member("segmentDuration")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    let max_retained_segments: Option<usize> = output_settings
+        .to_member("maxRetainedSegments")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| v.try_into())
+        .transpose()
+        .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+    // variants 配列のパース
+    let variants: Option<Vec<DashVariant>> = if let Some(variants_value) = output_settings
+        .to_member("variants")
+        .map_err(|e| e.to_string())?
+        .optional()
+    {
+        let mut variants = Vec::new();
+        for item in variants_value.to_array().map_err(|e| e.to_string())? {
+            let video_bitrate: usize = item
+                .to_member("videoBitrate")
+                .map_err(|e| e.to_string())?
+                .required()
+                .map_err(|_| "variants[].videoBitrate is required".to_owned())?
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let audio_bitrate: usize = item
+                .to_member("audioBitrate")
+                .map_err(|e| e.to_string())?
+                .required()
+                .map_err(|_| "variants[].audioBitrate is required".to_owned())?
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let width: Option<usize> = item
+                .to_member("width")
+                .map_err(|e| e.to_string())?
+                .optional()
+                .map(|v| v.try_into())
+                .transpose()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let height: Option<usize> = item
+                .to_member("height")
+                .map_err(|e| e.to_string())?
+                .optional()
+                .map(|v| v.try_into())
+                .transpose()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+
+            if video_bitrate == 0 {
+                return Err("variants[].videoBitrate must be positive".to_owned());
+            }
+            if audio_bitrate == 0 {
+                return Err("variants[].audioBitrate must be positive".to_owned());
+            }
+            let width = match width {
+                Some(0) => return Err("variants[].width must be positive".to_owned()),
+                Some(w) => {
+                    Some(crate::types::EvenUsize::new(w).ok_or("variants[].width must be even")?)
+                }
+                None => None,
+            };
+            let height = match height {
+                Some(0) => return Err("variants[].height must be positive".to_owned()),
+                Some(h) => {
+                    Some(crate::types::EvenUsize::new(h).ok_or("variants[].height must be even")?)
+                }
+                None => None,
+            };
+            // width と height は両方指定するか両方省略する必要がある
+            if width.is_some() != height.is_some() {
+                return Err(
+                    "variants[].width and variants[].height must both be specified or both omitted"
+                        .to_owned(),
+                );
+            }
+
+            variants.push(DashVariant {
+                video_bitrate_bps: video_bitrate,
+                audio_bitrate_bps: audio_bitrate,
+                width,
+                height,
+            });
+        }
+        if variants.is_empty() {
+            return Err("variants must not be empty".to_owned());
+        }
+        Some(variants)
+    } else {
+        None
+    };
+
+    // ビデオコーデックのパース
+    let video_codec: Option<crate::types::CodecName> = output_settings
+        .to_member("videoCodec")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| -> Result<crate::types::CodecName, String> {
+            let s: String = v
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            crate::types::CodecName::parse_video(&s)
+        })
+        .transpose()?;
+
+    // オーディオコーデックのパース
+    let audio_codec: Option<crate::types::CodecName> = output_settings
+        .to_member("audioCodec")
+        .map_err(|e| e.to_string())?
+        .optional()
+        .map(|v| -> Result<crate::types::CodecName, String> {
+            let s: String = v
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            crate::types::CodecName::parse_audio(&s)
+        })
+        .transpose()?;
+
+    if let Some(duration) = segment_duration
+        && duration <= 0.0
+    {
+        return Err("segmentDuration must be positive".to_owned());
+    }
+    if let Some(count) = max_retained_segments
+        && count == 0
+    {
+        return Err("maxRetainedSegments must be at least 1".to_owned());
+    }
+
+    Ok(ObswsDashSettings {
+        destination: destination.or(existing.destination.clone()),
+        segment_duration: segment_duration.unwrap_or(existing.segment_duration),
+        max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
+        variants: variants.unwrap_or_else(|| existing.variants.clone()),
+        video_codec: video_codec.unwrap_or(existing.video_codec),
+        audio_codec: audio_codec.unwrap_or(existing.audio_codec),
+    })
+}
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_start_mpeg_dash(
@@ -18,10 +512,6 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::state::{
-            DashDestination, ObswsDashRun, ObswsDashVariantRun, ObswsRecordTrackRun,
-        };
-
         let Some(output) = self.outputs.get(output_name) else {
             return OutputOperationOutcome::failure(
                 crate::obsws::response::build_request_response_error(
@@ -341,8 +831,8 @@ impl ObswsCoordinator {
 async fn start_dash_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     program_output: &ObswsProgramOutputContext,
-    run: &crate::obsws::state::ObswsDashRun,
-    dash_settings: &crate::obsws::state::ObswsDashSettings,
+    run: &ObswsDashRun,
+    dash_settings: &ObswsDashSettings,
 ) -> crate::Result<Option<tokio::task::JoinHandle<()>>> {
     // MPEG-DASH 用にキーフレーム間隔を設定する
     let fps = program_output.frame_rate.numerator.get() as f64
@@ -368,7 +858,7 @@ async fn start_dash_processors(
         .enumerate()
     {
         // filesystem かつ ABR の場合はバリアントのサブディレクトリを作成する
-        if is_abr && let crate::obsws::state::DashDestination::Filesystem { .. } = run.destination {
+        if is_abr && let DashDestination::Filesystem { .. } = run.destination {
             std::fs::create_dir_all(&variant_run.variant_path).map_err(|e| {
                 crate::Error::new(format!(
                     "failed to create variant directory {}: {e}",
@@ -428,12 +918,12 @@ async fn start_dash_processors(
 
         // DASH ライター
         let storage_config = match &run.destination {
-            crate::obsws::state::DashDestination::Filesystem { .. } => {
+            DashDestination::Filesystem { .. } => {
                 crate::dash::writer::DashStorageConfig::Filesystem {
                     output_directory: std::path::PathBuf::from(&variant_run.variant_path),
                 }
             }
-            crate::obsws::state::DashDestination::S3 {
+            DashDestination::S3 {
                 bucket,
                 region,
                 endpoint,
@@ -578,7 +1068,7 @@ async fn start_dash_processors(
 /// Program 出力は共有なので、variant 後段の processor のみを停止する。
 async fn stop_processors_staged_dash(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws::state::ObswsDashRun,
+    run: &ObswsDashRun,
 ) -> crate::Result<()> {
     // NOTE:
     // ライブ用途では StopOutput / ToggleOutput への応答遅延を避けることを優先し、
@@ -631,7 +1121,7 @@ async fn stop_processors_staged_dash(
             crate::dash::writer::delete_combined_mpd(root_storage_config).await;
         }
         // filesystem の場合はバリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
-        if let crate::obsws::state::DashDestination::Filesystem { .. } = &run.destination {
+        if let DashDestination::Filesystem { .. } = &run.destination {
             for vr in &run.variant_runs {
                 if let Err(e) = std::fs::remove_dir(&vr.variant_path)
                     && e.kind() != std::io::ErrorKind::NotFound
@@ -686,8 +1176,8 @@ async fn finish_dash_writer_rpc(
 /// 結合 MPD に書く media path を生成する。
 /// writer が実際に使う variant_path と同じ規則から相対パスを導出する。
 fn dash_variant_media_path(
-    destination: &crate::obsws::state::DashDestination,
-    variant_run: &crate::obsws::state::ObswsDashVariantRun,
+    destination: &DashDestination,
+    variant_run: &ObswsDashVariantRun,
 ) -> crate::Result<String> {
     let base_path = dash_variant_relative_path(destination, &variant_run.variant_path)?;
     Ok(format!("{base_path}/segment-$Number%06d$.m4s"))
@@ -696,8 +1186,8 @@ fn dash_variant_media_path(
 /// 結合 MPD に書く init segment path を生成する。
 /// writer が実際に使う variant_path と同じ規則から相対パスを導出する。
 fn dash_variant_init_path(
-    destination: &crate::obsws::state::DashDestination,
-    variant_run: &crate::obsws::state::ObswsDashVariantRun,
+    destination: &DashDestination,
+    variant_run: &ObswsDashVariantRun,
 ) -> crate::Result<String> {
     let base_path = dash_variant_relative_path(destination, &variant_run.variant_path)?;
     Ok(format!("{base_path}/init.mp4"))
@@ -705,11 +1195,11 @@ fn dash_variant_init_path(
 
 /// variant_path から結合 MPD 用の相対パス部分を取り出す。
 fn dash_variant_relative_path(
-    destination: &crate::obsws::state::DashDestination,
+    destination: &DashDestination,
     variant_path: &str,
 ) -> crate::Result<String> {
     match destination {
-        crate::obsws::state::DashDestination::Filesystem { directory } => {
+        DashDestination::Filesystem { directory } => {
             let root = std::path::Path::new(directory);
             let path = std::path::Path::new(variant_path);
             let relative = path.strip_prefix(root).map_err(|_| {
@@ -719,7 +1209,7 @@ fn dash_variant_relative_path(
             })?;
             Ok(relative.to_string_lossy().replace('\\', "/"))
         }
-        crate::obsws::state::DashDestination::S3 { prefix, .. } => {
+        DashDestination::S3 { prefix, .. } => {
             if prefix.is_empty() {
                 return Ok(variant_path.to_owned());
             }
@@ -736,15 +1226,15 @@ fn dash_variant_relative_path(
 /// DASH destination からルートディレクトリ/prefix 用の DashStorageConfig を構築する。
 /// 結合 MPD の書き出し・削除に使用する。
 fn build_dash_root_storage_config(
-    destination: &crate::obsws::state::DashDestination,
+    destination: &DashDestination,
 ) -> crate::Result<crate::dash::writer::DashStorageConfig> {
     match destination {
-        crate::obsws::state::DashDestination::Filesystem { directory } => {
+        DashDestination::Filesystem { directory } => {
             Ok(crate::dash::writer::DashStorageConfig::Filesystem {
                 output_directory: std::path::PathBuf::from(directory),
             })
         }
-        crate::obsws::state::DashDestination::S3 {
+        DashDestination::S3 {
             bucket,
             prefix,
             region,

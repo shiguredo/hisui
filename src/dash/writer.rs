@@ -1591,7 +1591,7 @@ mod tests {
 
     #[test]
     fn dash_destination_filesystem_output_path_returns_manifest_mpd() {
-        let dest = crate::obsws::state::DashDestination::Filesystem {
+        let dest = crate::obsws::coordinator::output_registry::DashDestination::Filesystem {
             directory: "/tmp/dash-output".to_owned(),
         };
         assert_eq!(dest.output_path(), "/tmp/dash-output/manifest.mpd");
@@ -1599,7 +1599,7 @@ mod tests {
 
     #[test]
     fn dash_destination_s3_output_path_returns_manifest_mpd() {
-        let dest = crate::obsws::state::DashDestination::S3 {
+        let dest = crate::obsws::coordinator::output_registry::DashDestination::S3 {
             bucket: "my-bucket".to_owned(),
             prefix: "live/stream1".to_owned(),
             region: "us-east-1".to_owned(),
@@ -1618,7 +1618,7 @@ mod tests {
 
     #[test]
     fn dash_destination_s3_empty_prefix_output_path() {
-        let dest = crate::obsws::state::DashDestination::S3 {
+        let dest = crate::obsws::coordinator::output_registry::DashDestination::S3 {
             bucket: "my-bucket".to_owned(),
             prefix: String::new(),
             region: "us-east-1".to_owned(),
