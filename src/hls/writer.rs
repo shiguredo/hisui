@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::codec_string::CodecResolutionState;
 
-use crate::obsws::input_registry::HlsSegmentFormat;
+use crate::obsws::state::HlsSegmentFormat;
 
 /// ファイル拡張子から content-type を返す
 fn content_type_for_filename(filename: &str) -> &'static str {

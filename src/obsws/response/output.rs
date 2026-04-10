@@ -17,7 +17,7 @@ pub(crate) fn build_get_output_list_response(
     request_id: &str,
     outputs: &std::collections::BTreeMap<
         String,
-        crate::obsws::coordinator::output_dynamic::OutputState,
+        crate::obsws::coordinator::output_registry::OutputState,
     >,
 ) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetOutputList", request_id, |f| {
@@ -106,67 +106,67 @@ pub(crate) fn resolve_record_directory_path(record_directory: &str) -> Result<Pa
 /// 省略されたフィールドは existing の値を維持する。
 pub(crate) fn parse_hls_settings_update(
     output_settings: &nojson::RawJsonValue<'_, '_>,
-    existing: &crate::obsws::input_registry::ObswsHlsSettings,
-) -> Result<crate::obsws::input_registry::ObswsHlsSettings, String> {
+    existing: &crate::obsws::state::ObswsHlsSettings,
+) -> Result<crate::obsws::state::ObswsHlsSettings, String> {
     parse_hls_settings_inner(*output_settings, existing)
 }
 
 fn parse_hls_settings_inner(
     output_settings: nojson::RawJsonValue<'_, '_>,
-    existing: &crate::obsws::input_registry::ObswsHlsSettings,
-) -> Result<crate::obsws::input_registry::ObswsHlsSettings, String> {
+    existing: &crate::obsws::state::ObswsHlsSettings,
+) -> Result<crate::obsws::state::ObswsHlsSettings, String> {
     // destination オブジェクトのパース
-    let destination: Option<crate::obsws::input_registry::HlsDestination> =
-        if let Some(dest_value) = output_settings
+    let destination: Option<crate::obsws::state::HlsDestination> = if let Some(dest_value) =
+        output_settings
             .to_member("destination")
             .map_err(|e| e.to_string())?
             .optional()
-        {
-            let dest_type: String = dest_value
-                .to_member("type")
-                .map_err(|e| e.to_string())?
-                .required()
-                .map_err(|_| "destination.type is required".to_owned())?
-                .try_into()
-                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    {
+        let dest_type: String = dest_value
+            .to_member("type")
+            .map_err(|e| e.to_string())?
+            .required()
+            .map_err(|_| "destination.type is required".to_owned())?
+            .try_into()
+            .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
-            match dest_type.as_str() {
-                "filesystem" => {
-                    let directory: String = dest_value
-                        .to_member("directory")
-                        .map_err(|e| e.to_string())?
-                        .required()
-                        .map_err(|_| "destination.directory is required for filesystem".to_owned())?
-                        .try_into()
-                        .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                    if directory.is_empty() {
-                        return Err("destination.directory must not be empty".to_owned());
-                    }
-                    Some(crate::obsws::input_registry::HlsDestination::Filesystem { directory })
+        match dest_type.as_str() {
+            "filesystem" => {
+                let directory: String = dest_value
+                    .to_member("directory")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.directory is required for filesystem".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                if directory.is_empty() {
+                    return Err("destination.directory must not be empty".to_owned());
                 }
-                "s3" => {
-                    let parsed = parse_obsws_s3_destination(dest_value)?;
-                    Some(crate::obsws::input_registry::HlsDestination::S3 {
-                        bucket: parsed.bucket,
-                        prefix: parsed.prefix,
-                        region: parsed.region,
-                        endpoint: parsed.endpoint,
-                        use_path_style: parsed.use_path_style,
-                        access_key_id: parsed.access_key_id,
-                        secret_access_key: parsed.secret_access_key,
-                        session_token: parsed.session_token,
-                        lifetime_days: parsed.lifetime_days,
-                    })
-                }
-                _ => {
-                    return Err(format!(
-                        "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
-                    ));
-                }
+                Some(crate::obsws::state::HlsDestination::Filesystem { directory })
             }
-        } else {
-            None
-        };
+            "s3" => {
+                let parsed = parse_obsws_s3_destination(dest_value)?;
+                Some(crate::obsws::state::HlsDestination::S3 {
+                    bucket: parsed.bucket,
+                    prefix: parsed.prefix,
+                    region: parsed.region,
+                    endpoint: parsed.endpoint,
+                    use_path_style: parsed.use_path_style,
+                    access_key_id: parsed.access_key_id,
+                    secret_access_key: parsed.secret_access_key,
+                    session_token: parsed.session_token,
+                    lifetime_days: parsed.lifetime_days,
+                })
+            }
+            _ => {
+                return Err(format!(
+                    "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
+                ));
+            }
+        }
+    } else {
+        None
+    };
 
     let segment_duration: Option<f64> = output_settings
         .to_member("segmentDuration")
@@ -189,85 +189,85 @@ fn parse_hls_settings_inner(
             .map_err(|e| e.to_string())?;
 
     // variants 配列のパース
-    let variants: Option<Vec<crate::obsws::input_registry::HlsVariant>> =
-        if let Some(variants_value) = output_settings
+    let variants: Option<Vec<crate::obsws::state::HlsVariant>> = if let Some(variants_value) =
+        output_settings
             .to_member("variants")
             .map_err(|e| e.to_string())?
             .optional()
-        {
-            let mut variants = Vec::new();
-            for item in variants_value.to_array().map_err(|e| e.to_string())? {
-                let video_bitrate: usize = item
-                    .to_member("videoBitrate")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "variants[].videoBitrate is required".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let audio_bitrate: usize = item
-                    .to_member("audioBitrate")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "variants[].audioBitrate is required".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let width: Option<usize> = item
-                    .to_member("width")
-                    .map_err(|e| e.to_string())?
-                    .optional()
-                    .map(|v| v.try_into())
-                    .transpose()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let height: Option<usize> = item
-                    .to_member("height")
-                    .map_err(|e| e.to_string())?
-                    .optional()
-                    .map(|v| v.try_into())
-                    .transpose()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    {
+        let mut variants = Vec::new();
+        for item in variants_value.to_array().map_err(|e| e.to_string())? {
+            let video_bitrate: usize = item
+                .to_member("videoBitrate")
+                .map_err(|e| e.to_string())?
+                .required()
+                .map_err(|_| "variants[].videoBitrate is required".to_owned())?
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let audio_bitrate: usize = item
+                .to_member("audioBitrate")
+                .map_err(|e| e.to_string())?
+                .required()
+                .map_err(|_| "variants[].audioBitrate is required".to_owned())?
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let width: Option<usize> = item
+                .to_member("width")
+                .map_err(|e| e.to_string())?
+                .optional()
+                .map(|v| v.try_into())
+                .transpose()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let height: Option<usize> = item
+                .to_member("height")
+                .map_err(|e| e.to_string())?
+                .optional()
+                .map(|v| v.try_into())
+                .transpose()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
-                if video_bitrate == 0 {
-                    return Err("variants[].videoBitrate must be positive".to_owned());
+            if video_bitrate == 0 {
+                return Err("variants[].videoBitrate must be positive".to_owned());
+            }
+            if audio_bitrate == 0 {
+                return Err("variants[].audioBitrate must be positive".to_owned());
+            }
+            let width = match width {
+                Some(0) => return Err("variants[].width must be positive".to_owned()),
+                Some(w) => {
+                    Some(crate::types::EvenUsize::new(w).ok_or("variants[].width must be even")?)
                 }
-                if audio_bitrate == 0 {
-                    return Err("variants[].audioBitrate must be positive".to_owned());
+                None => None,
+            };
+            let height = match height {
+                Some(0) => return Err("variants[].height must be positive".to_owned()),
+                Some(h) => {
+                    Some(crate::types::EvenUsize::new(h).ok_or("variants[].height must be even")?)
                 }
-                let width = match width {
-                    Some(0) => return Err("variants[].width must be positive".to_owned()),
-                    Some(w) => Some(
-                        crate::types::EvenUsize::new(w).ok_or("variants[].width must be even")?,
-                    ),
-                    None => None,
-                };
-                let height = match height {
-                    Some(0) => return Err("variants[].height must be positive".to_owned()),
-                    Some(h) => Some(
-                        crate::types::EvenUsize::new(h).ok_or("variants[].height must be even")?,
-                    ),
-                    None => None,
-                };
-                // width と height は両方指定するか両方省略する必要がある
-                if width.is_some() != height.is_some() {
-                    return Err(
+                None => None,
+            };
+            // width と height は両方指定するか両方省略する必要がある
+            if width.is_some() != height.is_some() {
+                return Err(
                     "variants[].width and variants[].height must both be specified or both omitted"
                         .to_owned(),
                 );
-                }
+            }
 
-                variants.push(crate::obsws::input_registry::HlsVariant {
-                    video_bitrate_bps: video_bitrate,
-                    audio_bitrate_bps: audio_bitrate,
-                    width,
-                    height,
-                });
-            }
-            if variants.is_empty() {
-                return Err("variants must not be empty".to_owned());
-            }
-            Some(variants)
-        } else {
-            None
-        };
+            variants.push(crate::obsws::state::HlsVariant {
+                video_bitrate_bps: video_bitrate,
+                audio_bitrate_bps: audio_bitrate,
+                width,
+                height,
+            });
+        }
+        if variants.is_empty() {
+            return Err("variants must not be empty".to_owned());
+        }
+        Some(variants)
+    } else {
+        None
+    };
 
     if let Some(duration) = segment_duration
         && duration <= 0.0
@@ -280,11 +280,11 @@ fn parse_hls_settings_inner(
         return Err("maxRetainedSegments must be at least 1".to_owned());
     }
     let segment_format = match segment_format_str {
-        Some(ref s) => s.parse::<crate::obsws::input_registry::HlsSegmentFormat>()?,
+        Some(ref s) => s.parse::<crate::obsws::state::HlsSegmentFormat>()?,
         None => existing.segment_format,
     };
 
-    Ok(crate::obsws::input_registry::ObswsHlsSettings {
+    Ok(crate::obsws::state::ObswsHlsSettings {
         destination: destination.or(existing.destination.clone()),
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),
@@ -301,67 +301,67 @@ fn parse_hls_settings_inner(
 /// 省略されたフィールドは existing の値を維持する。
 pub(crate) fn parse_dash_settings_update(
     output_settings: &nojson::RawJsonValue<'_, '_>,
-    existing: &crate::obsws::input_registry::ObswsDashSettings,
-) -> Result<crate::obsws::input_registry::ObswsDashSettings, String> {
+    existing: &crate::obsws::state::ObswsDashSettings,
+) -> Result<crate::obsws::state::ObswsDashSettings, String> {
     parse_dash_settings_inner(*output_settings, existing)
 }
 
 fn parse_dash_settings_inner(
     output_settings: nojson::RawJsonValue<'_, '_>,
-    existing: &crate::obsws::input_registry::ObswsDashSettings,
-) -> Result<crate::obsws::input_registry::ObswsDashSettings, String> {
+    existing: &crate::obsws::state::ObswsDashSettings,
+) -> Result<crate::obsws::state::ObswsDashSettings, String> {
     // destination オブジェクトのパース
-    let destination: Option<crate::obsws::input_registry::DashDestination> =
-        if let Some(dest_value) = output_settings
+    let destination: Option<crate::obsws::state::DashDestination> = if let Some(dest_value) =
+        output_settings
             .to_member("destination")
             .map_err(|e| e.to_string())?
             .optional()
-        {
-            let dest_type: String = dest_value
-                .to_member("type")
-                .map_err(|e| e.to_string())?
-                .required()
-                .map_err(|_| "destination.type is required".to_owned())?
-                .try_into()
-                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    {
+        let dest_type: String = dest_value
+            .to_member("type")
+            .map_err(|e| e.to_string())?
+            .required()
+            .map_err(|_| "destination.type is required".to_owned())?
+            .try_into()
+            .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
-            match dest_type.as_str() {
-                "filesystem" => {
-                    let directory: String = dest_value
-                        .to_member("directory")
-                        .map_err(|e| e.to_string())?
-                        .required()
-                        .map_err(|_| "destination.directory is required for filesystem".to_owned())?
-                        .try_into()
-                        .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                    if directory.is_empty() {
-                        return Err("destination.directory must not be empty".to_owned());
-                    }
-                    Some(crate::obsws::input_registry::DashDestination::Filesystem { directory })
+        match dest_type.as_str() {
+            "filesystem" => {
+                let directory: String = dest_value
+                    .to_member("directory")
+                    .map_err(|e| e.to_string())?
+                    .required()
+                    .map_err(|_| "destination.directory is required for filesystem".to_owned())?
+                    .try_into()
+                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+                if directory.is_empty() {
+                    return Err("destination.directory must not be empty".to_owned());
                 }
-                "s3" => {
-                    let parsed = parse_obsws_s3_destination(dest_value)?;
-                    Some(crate::obsws::input_registry::DashDestination::S3 {
-                        bucket: parsed.bucket,
-                        prefix: parsed.prefix,
-                        region: parsed.region,
-                        endpoint: parsed.endpoint,
-                        use_path_style: parsed.use_path_style,
-                        access_key_id: parsed.access_key_id,
-                        secret_access_key: parsed.secret_access_key,
-                        session_token: parsed.session_token,
-                        lifetime_days: parsed.lifetime_days,
-                    })
-                }
-                _ => {
-                    return Err(format!(
-                        "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
-                    ));
-                }
+                Some(crate::obsws::state::DashDestination::Filesystem { directory })
             }
-        } else {
-            None
-        };
+            "s3" => {
+                let parsed = parse_obsws_s3_destination(dest_value)?;
+                Some(crate::obsws::state::DashDestination::S3 {
+                    bucket: parsed.bucket,
+                    prefix: parsed.prefix,
+                    region: parsed.region,
+                    endpoint: parsed.endpoint,
+                    use_path_style: parsed.use_path_style,
+                    access_key_id: parsed.access_key_id,
+                    secret_access_key: parsed.secret_access_key,
+                    session_token: parsed.session_token,
+                    lifetime_days: parsed.lifetime_days,
+                })
+            }
+            _ => {
+                return Err(format!(
+                    "destination.type must be \"filesystem\" or \"s3\", got \"{dest_type}\""
+                ));
+            }
+        }
+    } else {
+        None
+    };
 
     let segment_duration: Option<f64> = output_settings
         .to_member("segmentDuration")
@@ -380,85 +380,85 @@ fn parse_dash_settings_inner(
         .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
     // variants 配列のパース
-    let variants: Option<Vec<crate::obsws::input_registry::DashVariant>> =
-        if let Some(variants_value) = output_settings
+    let variants: Option<Vec<crate::obsws::state::DashVariant>> = if let Some(variants_value) =
+        output_settings
             .to_member("variants")
             .map_err(|e| e.to_string())?
             .optional()
-        {
-            let mut variants = Vec::new();
-            for item in variants_value.to_array().map_err(|e| e.to_string())? {
-                let video_bitrate: usize = item
-                    .to_member("videoBitrate")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "variants[].videoBitrate is required".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let audio_bitrate: usize = item
-                    .to_member("audioBitrate")
-                    .map_err(|e| e.to_string())?
-                    .required()
-                    .map_err(|_| "variants[].audioBitrate is required".to_owned())?
-                    .try_into()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let width: Option<usize> = item
-                    .to_member("width")
-                    .map_err(|e| e.to_string())?
-                    .optional()
-                    .map(|v| v.try_into())
-                    .transpose()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
-                let height: Option<usize> = item
-                    .to_member("height")
-                    .map_err(|e| e.to_string())?
-                    .optional()
-                    .map(|v| v.try_into())
-                    .transpose()
-                    .map_err(|e: nojson::JsonParseError| e.to_string())?;
+    {
+        let mut variants = Vec::new();
+        for item in variants_value.to_array().map_err(|e| e.to_string())? {
+            let video_bitrate: usize = item
+                .to_member("videoBitrate")
+                .map_err(|e| e.to_string())?
+                .required()
+                .map_err(|_| "variants[].videoBitrate is required".to_owned())?
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let audio_bitrate: usize = item
+                .to_member("audioBitrate")
+                .map_err(|e| e.to_string())?
+                .required()
+                .map_err(|_| "variants[].audioBitrate is required".to_owned())?
+                .try_into()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let width: Option<usize> = item
+                .to_member("width")
+                .map_err(|e| e.to_string())?
+                .optional()
+                .map(|v| v.try_into())
+                .transpose()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
+            let height: Option<usize> = item
+                .to_member("height")
+                .map_err(|e| e.to_string())?
+                .optional()
+                .map(|v| v.try_into())
+                .transpose()
+                .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
-                if video_bitrate == 0 {
-                    return Err("variants[].videoBitrate must be positive".to_owned());
+            if video_bitrate == 0 {
+                return Err("variants[].videoBitrate must be positive".to_owned());
+            }
+            if audio_bitrate == 0 {
+                return Err("variants[].audioBitrate must be positive".to_owned());
+            }
+            let width = match width {
+                Some(0) => return Err("variants[].width must be positive".to_owned()),
+                Some(w) => {
+                    Some(crate::types::EvenUsize::new(w).ok_or("variants[].width must be even")?)
                 }
-                if audio_bitrate == 0 {
-                    return Err("variants[].audioBitrate must be positive".to_owned());
+                None => None,
+            };
+            let height = match height {
+                Some(0) => return Err("variants[].height must be positive".to_owned()),
+                Some(h) => {
+                    Some(crate::types::EvenUsize::new(h).ok_or("variants[].height must be even")?)
                 }
-                let width = match width {
-                    Some(0) => return Err("variants[].width must be positive".to_owned()),
-                    Some(w) => Some(
-                        crate::types::EvenUsize::new(w).ok_or("variants[].width must be even")?,
-                    ),
-                    None => None,
-                };
-                let height = match height {
-                    Some(0) => return Err("variants[].height must be positive".to_owned()),
-                    Some(h) => Some(
-                        crate::types::EvenUsize::new(h).ok_or("variants[].height must be even")?,
-                    ),
-                    None => None,
-                };
-                // width と height は両方指定するか両方省略する必要がある
-                if width.is_some() != height.is_some() {
-                    return Err(
+                None => None,
+            };
+            // width と height は両方指定するか両方省略する必要がある
+            if width.is_some() != height.is_some() {
+                return Err(
                     "variants[].width and variants[].height must both be specified or both omitted"
                         .to_owned(),
-                    );
-                }
+                );
+            }
 
-                variants.push(crate::obsws::input_registry::DashVariant {
-                    video_bitrate_bps: video_bitrate,
-                    audio_bitrate_bps: audio_bitrate,
-                    width,
-                    height,
-                });
-            }
-            if variants.is_empty() {
-                return Err("variants must not be empty".to_owned());
-            }
-            Some(variants)
-        } else {
-            None
-        };
+            variants.push(crate::obsws::state::DashVariant {
+                video_bitrate_bps: video_bitrate,
+                audio_bitrate_bps: audio_bitrate,
+                width,
+                height,
+            });
+        }
+        if variants.is_empty() {
+            return Err("variants must not be empty".to_owned());
+        }
+        Some(variants)
+    } else {
+        None
+    };
 
     // ビデオコーデックのパース
     let video_codec: Option<crate::types::CodecName> = output_settings
@@ -497,7 +497,7 @@ fn parse_dash_settings_inner(
         return Err("maxRetainedSegments must be at least 1".to_owned());
     }
 
-    Ok(crate::obsws::input_registry::ObswsDashSettings {
+    Ok(crate::obsws::state::ObswsDashSettings {
         destination: destination.or(existing.destination.clone()),
         segment_duration: segment_duration.unwrap_or(existing.segment_duration),
         max_retained_segments: max_retained_segments.unwrap_or(existing.max_retained_segments),

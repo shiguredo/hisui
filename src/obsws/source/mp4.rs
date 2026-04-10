@@ -1,7 +1,7 @@
-use crate::obsws::input_registry::ObswsMp4FileSourceSettings;
 use crate::obsws::source::{
     BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
+use crate::obsws::state::ObswsMp4FileSourceSettings;
 use crate::{ProcessorId, TrackId};
 
 /// source processor を起動できる設定が揃っているかを返す

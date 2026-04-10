@@ -2114,7 +2114,7 @@ pub struct SetSceneItemEnabledResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct ObswsInputRegistry {
+pub struct ObswsSessionState {
     pub(crate) inputs_by_uuid: BTreeMap<String, ObswsInputEntry>,
     pub(crate) uuids_by_name: BTreeMap<String, String>,
     pub(crate) scenes_by_name: BTreeMap<String, ObswsSceneState>,

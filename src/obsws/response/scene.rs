@@ -1,12 +1,12 @@
-use crate::obsws::input_registry::{
-    CreateSceneError, GetSceneSceneTransitionOverrideError, ObswsInputRegistry,
-    SetCurrentProgramSceneError, SetCurrentSceneTransitionDurationError,
-    SetCurrentSceneTransitionError, SetSceneNameError, SetSceneSceneTransitionOverrideError,
-};
 use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
     REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
     REQUEST_STATUS_RESOURCE_NOT_FOUND, REQUEST_STATUS_STUDIO_MODE_NOT_ACTIVE,
+};
+use crate::obsws::state::{
+    CreateSceneError, GetSceneSceneTransitionOverrideError, ObswsSessionState,
+    SetCurrentProgramSceneError, SetCurrentSceneTransitionDurationError,
+    SetCurrentSceneTransitionError, SetSceneNameError, SetSceneSceneTransitionOverrideError,
 };
 
 use super::{
@@ -65,9 +65,9 @@ fn transition_uuid(transition_name: &str) -> String {
 
 pub fn build_get_current_program_scene_response(
     request_id: &str,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
-    let current_program_scene = input_registry.current_program_scene();
+    let current_program_scene = state.current_program_scene();
     let scene_name = current_program_scene
         .as_ref()
         .map(|scene| scene.scene_name.as_str())
@@ -87,7 +87,7 @@ pub fn build_get_current_program_scene_response(
 pub fn build_set_current_program_scene_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentProgramScene",
@@ -101,7 +101,7 @@ pub fn build_set_current_program_scene_response(
     let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
         "SetCurrentProgramScene",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -109,7 +109,7 @@ pub fn build_set_current_program_scene_response(
         Err(response) => return response,
     };
     if let Err(SetCurrentProgramSceneError::SceneNotFound) =
-        input_registry.set_current_program_scene(&scene_name)
+        state.set_current_program_scene(&scene_name)
     {
         return super::build_request_response_error(
             "SetCurrentProgramScene",
@@ -141,21 +141,18 @@ pub fn build_set_current_preview_scene_response(request_id: &str) -> nojson::Raw
 
 pub fn build_get_transition_kind_list_response(
     request_id: &str,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetTransitionKindList", request_id, |f| {
-        f.member(
-            "transitionKinds",
-            input_registry.supported_transition_kinds(),
-        )
+        f.member("transitionKinds", state.supported_transition_kinds())
     })
 }
 
 pub fn build_get_scene_transition_list_response(
     request_id: &str,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
-    let transitions: Vec<ObswsSceneTransitionEntry> = input_registry
+    let transitions: Vec<ObswsSceneTransitionEntry> = state
         .transition_instances()
         .iter()
         .map(|name| ObswsSceneTransitionEntry {
@@ -166,7 +163,7 @@ pub fn build_get_scene_transition_list_response(
             transition_configurable: is_configurable_transition(name),
         })
         .collect();
-    let current_transition_name = input_registry.current_scene_transition_name();
+    let current_transition_name = state.current_scene_transition_name();
     let current_transition_uuid = transition_uuid(current_transition_name);
 
     super::build_request_response_success("GetSceneTransitionList", request_id, |f| {
@@ -179,11 +176,11 @@ pub fn build_get_scene_transition_list_response(
 
 pub fn build_get_current_scene_transition_response(
     request_id: &str,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
-    let current_transition_name = input_registry.current_scene_transition_name();
+    let current_transition_name = state.current_scene_transition_name();
     let current_transition_uuid = transition_uuid(current_transition_name);
-    let current_transition_duration_ms = input_registry.current_scene_transition_duration_ms();
+    let current_transition_duration_ms = state.current_scene_transition_duration_ms();
     let fixed = is_fixed_transition(current_transition_name);
     super::build_request_response_success("GetCurrentSceneTransition", request_id, |f| {
         f.member("transitionName", current_transition_name)?;
@@ -203,7 +200,7 @@ pub fn build_get_current_scene_transition_response(
 pub fn build_get_scene_scene_transition_override_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneSceneTransitionOverride",
@@ -217,14 +214,14 @@ pub fn build_get_scene_scene_transition_override_response(
     let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
         "GetSceneSceneTransitionOverride",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    let override_entry = match input_registry.get_scene_transition_override(&scene_name) {
+    let override_entry = match state.get_scene_transition_override(&scene_name) {
         Ok(override_entry) => override_entry,
         Err(GetSceneSceneTransitionOverrideError::SceneNotFound) => {
             return super::build_request_response_error(
@@ -245,7 +242,7 @@ pub fn build_get_scene_scene_transition_override_response(
 pub fn build_set_current_scene_transition_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentSceneTransition",
@@ -257,7 +254,7 @@ pub fn build_set_current_scene_transition_response(
         Err(response) => return response,
     };
     if let Err(SetCurrentSceneTransitionError::TransitionNotFound) =
-        input_registry.set_current_scene_transition(&fields.transition_name)
+        state.set_current_scene_transition(&fields.transition_name)
     {
         return super::build_request_response_error(
             "SetCurrentSceneTransition",
@@ -272,7 +269,7 @@ pub fn build_set_current_scene_transition_response(
 pub fn build_set_current_scene_transition_duration_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentSceneTransitionDuration",
@@ -284,7 +281,7 @@ pub fn build_set_current_scene_transition_duration_response(
         Err(response) => return response,
     };
     if let Err(SetCurrentSceneTransitionDurationError::InvalidTransitionDuration) =
-        input_registry.set_current_scene_transition_duration_ms(fields.transition_duration)
+        state.set_current_scene_transition_duration_ms(fields.transition_duration)
     {
         return super::build_request_response_error(
             "SetCurrentSceneTransitionDuration",
@@ -299,7 +296,7 @@ pub fn build_set_current_scene_transition_duration_response(
 pub fn build_set_current_scene_transition_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetCurrentSceneTransitionSettings",
@@ -311,7 +308,7 @@ pub fn build_set_current_scene_transition_settings_response(
         Err(response) => return response,
     };
     // ビルトイントランジションはカスタム設定をサポートしない
-    if !is_configurable_transition(input_registry.current_scene_transition_name()) {
+    if !is_configurable_transition(state.current_scene_transition_name()) {
         return super::build_request_response_error(
             "SetCurrentSceneTransitionSettings",
             request_id,
@@ -319,7 +316,7 @@ pub fn build_set_current_scene_transition_settings_response(
             "The current transition does not support custom settings.",
         );
     }
-    input_registry
+    state
         .set_current_scene_transition_settings(fields.transition_settings)
         .expect("BUG: parser must validate transitionSettings as object");
     super::build_request_response_success_no_data("SetCurrentSceneTransitionSettings", request_id)
@@ -328,7 +325,7 @@ pub fn build_set_current_scene_transition_settings_response(
 pub fn build_set_scene_scene_transition_override_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetSceneSceneTransitionOverride",
@@ -342,14 +339,14 @@ pub fn build_set_scene_scene_transition_override_response(
     let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
         "SetSceneSceneTransitionOverride",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    let override_entry = match input_registry.set_scene_transition_override(
+    let override_entry = match state.set_scene_transition_override(
         &scene_name,
         fields.transition_name.as_deref(),
         fields.transition_duration,
@@ -388,9 +385,9 @@ pub fn build_set_scene_scene_transition_override_response(
 
 pub fn build_get_current_scene_transition_cursor_response(
     request_id: &str,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
-    let transition_cursor = input_registry.current_tbar_position();
+    let transition_cursor = state.current_tbar_position();
     super::build_request_response_success("GetCurrentSceneTransitionCursor", request_id, |f| {
         f.member("transitionCursor", transition_cursor)
     })
@@ -409,7 +406,7 @@ pub fn build_set_tbar_position_response(request_id: &str) -> nojson::RawJsonOwne
 pub fn build_create_scene_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "CreateScene",
@@ -420,7 +417,7 @@ pub fn build_create_scene_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let created = match input_registry.create_scene(&fields.scene_name) {
+    let created = match state.create_scene(&fields.scene_name) {
         Ok(created) => created,
         Err(CreateSceneError::SceneNameAlreadyExists) => {
             return super::build_request_response_error(
@@ -448,7 +445,7 @@ pub fn build_create_scene_response(
 pub fn build_remove_scene_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "RemoveScene",
@@ -462,19 +459,19 @@ pub fn build_remove_scene_response(
     let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
         "RemoveScene",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    if let Err(error) = input_registry.remove_scene(&scene_name) {
+    if let Err(error) = state.remove_scene(&scene_name) {
         return match error {
-            crate::obsws::input_registry::RemoveSceneError::SceneNotFound => {
+            crate::obsws::state::RemoveSceneError::SceneNotFound => {
                 unreachable!("resolved scene name must exist in input registry")
             }
-            crate::obsws::input_registry::RemoveSceneError::LastSceneNotRemovable => {
+            crate::obsws::state::RemoveSceneError::LastSceneNotRemovable => {
                 super::build_request_response_error(
                     "RemoveScene",
                     request_id,
@@ -491,7 +488,7 @@ pub fn build_remove_scene_response(
 pub fn build_set_scene_name_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetSceneName",
@@ -505,14 +502,14 @@ pub fn build_set_scene_name_response(
     let (scene_name, _scene_uuid) = match super::resolve_scene_name_or_error(
         "SetSceneName",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    let renamed = match input_registry.set_scene_name(&scene_name, &fields.new_scene_name) {
+    let renamed = match state.set_scene_name(&scene_name, &fields.new_scene_name) {
         Ok(renamed) => renamed,
         Err(SetSceneNameError::SceneNotFound) => {
             unreachable!("resolved scene name must exist in input registry")

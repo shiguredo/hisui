@@ -1,5 +1,5 @@
-use crate::obsws::input_registry::ObswsSceneInputEntry;
 use crate::obsws::source::{self, ObswsRecordSourcePlan};
+use crate::obsws::state::ObswsSceneInputEntry;
 use crate::types::PositiveFiniteF64;
 use crate::{ProcessorId, TrackId};
 
@@ -178,7 +178,7 @@ pub fn build_composed_output_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::obsws::input_registry::{
+    use crate::obsws::state::{
         ObswsInput, ObswsInputEntry, ObswsInputSettings, ObswsSceneItemTransform,
     };
 
@@ -211,7 +211,7 @@ mod tests {
                 "color",
                 ObswsInput {
                     settings: ObswsInputSettings::ColorSource(
-                        crate::obsws::input_registry::ObswsColorSourceSettings {
+                        crate::obsws::state::ObswsColorSourceSettings {
                             color: Some("#FF0000".to_owned()),
                         },
                     ),

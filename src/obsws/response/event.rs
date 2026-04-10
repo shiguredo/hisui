@@ -1,12 +1,10 @@
-use crate::obsws::input_registry::{
-    ObswsInputSettings, ObswsSceneItemIndexEntry, ObswsSceneItemTransform,
-};
 use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_INPUTS, OBSWS_EVENT_SUB_MEDIA_INPUTS,
     OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
     OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_EVENT_SUB_SCENES, OBSWS_EVENT_SUB_SORA_SOURCE,
     OBSWS_OP_EVENT,
 };
+use crate::obsws::state::{ObswsInputSettings, ObswsSceneItemIndexEntry, ObswsSceneItemTransform};
 
 pub fn build_stream_state_changed_event(
     output_active: bool,

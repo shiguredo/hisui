@@ -1,10 +1,10 @@
-use crate::obsws::input_registry::{
-    CreateSceneItemError, DuplicateSceneItemError, GetSceneItemIdError, GetSceneItemListError,
-    ObswsInputRegistry, SceneItemLookupError, SetSceneItemIndexError,
-};
 use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
     REQUEST_STATUS_RESOURCE_NOT_FOUND,
+};
+use crate::obsws::state::{
+    CreateSceneItemError, DuplicateSceneItemError, GetSceneItemIdError, GetSceneItemListError,
+    ObswsSessionState, SceneItemLookupError, SetSceneItemIndexError,
 };
 
 use super::{
@@ -23,7 +23,7 @@ use super::{
 pub fn build_get_scene_item_id_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemId",
@@ -37,7 +37,7 @@ pub fn build_get_scene_item_id_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemId",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -45,7 +45,7 @@ pub fn build_get_scene_item_id_response(
         Err(response) => return response,
     };
 
-    let scene_item_id = match input_registry.get_scene_item_id(
+    let scene_item_id = match state.get_scene_item_id(
         &scene_name,
         fields.source_name.as_deref(),
         fields.source_uuid.as_deref(),
@@ -81,7 +81,7 @@ pub fn build_get_scene_item_id_response(
 pub fn build_get_scene_item_list_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemList",
@@ -95,14 +95,14 @@ pub fn build_get_scene_item_list_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemList",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    let scene_items = input_registry
+    let scene_items = state
         .list_scene_items(&scene_name)
         .unwrap_or_else(|error| match error {
             GetSceneItemListError::SceneNotFound => {
@@ -118,7 +118,7 @@ pub fn build_get_scene_item_list_response(
 pub fn execute_create_scene_item(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> CreateSceneItemExecution {
     let fields = match parse_request_data_or_error_response(
         "CreateSceneItem",
@@ -137,7 +137,7 @@ pub fn execute_create_scene_item(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "CreateSceneItem",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -149,7 +149,7 @@ pub fn execute_create_scene_item(
             };
         }
     };
-    let created = match input_registry.create_scene_item(
+    let created = match state.create_scene_item(
         &scene_name,
         fields.source_uuid.as_deref(),
         fields.source_name.as_deref(),
@@ -195,7 +195,7 @@ pub fn execute_create_scene_item(
 pub fn build_remove_scene_item_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "RemoveSceneItem",
@@ -209,14 +209,14 @@ pub fn build_remove_scene_item_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "RemoveSceneItem",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    if let Err(error) = input_registry.remove_scene_item(&scene_name, fields.scene_item_id) {
+    if let Err(error) = state.remove_scene_item(&scene_name, fields.scene_item_id) {
         return match error {
             SceneItemLookupError::SceneNotFound => {
                 unreachable!("resolved scene name must exist in input registry")
@@ -236,7 +236,7 @@ pub fn build_remove_scene_item_response(
 pub fn execute_duplicate_scene_item(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> DuplicateSceneItemExecution {
     let fields = match parse_request_data_or_error_response(
         "DuplicateSceneItem",
@@ -255,7 +255,7 @@ pub fn execute_duplicate_scene_item(
     let (from_scene_name, _from_scene_uuid) = match resolve_scene_name_or_error(
         "DuplicateSceneItem",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -270,7 +270,7 @@ pub fn execute_duplicate_scene_item(
     let (to_scene_name, _to_scene_uuid) = match resolve_scene_name_or_error(
         "DuplicateSceneItem",
         request_id,
-        input_registry,
+        state,
         fields.destination_scene_name.as_deref(),
         fields.destination_scene_uuid.as_deref(),
     ) {
@@ -282,41 +282,38 @@ pub fn execute_duplicate_scene_item(
             };
         }
     };
-    let duplicated = match input_registry.duplicate_scene_item(
-        &from_scene_name,
-        &to_scene_name,
-        fields.scene_item_id,
-    ) {
-        Ok(duplicated) => duplicated,
-        Err(DuplicateSceneItemError::SourceScene) => {
-            unreachable!("resolved source scene name must exist in input registry")
-        }
-        Err(DuplicateSceneItemError::DestinationScene) => {
-            unreachable!("resolved destination scene name must exist in input registry")
-        }
-        Err(DuplicateSceneItemError::SourceSceneItem) => {
-            return DuplicateSceneItemExecution {
-                response_text: super::build_request_response_error(
-                    "DuplicateSceneItem",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene item not found",
-                ),
-                duplicated: None,
-            };
-        }
-        Err(DuplicateSceneItemError::SceneItemIdOverflow) => {
-            return DuplicateSceneItemExecution {
-                response_text: super::build_request_response_error(
-                    "DuplicateSceneItem",
-                    request_id,
-                    REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    "Scene item ID overflow",
-                ),
-                duplicated: None,
-            };
-        }
-    };
+    let duplicated =
+        match state.duplicate_scene_item(&from_scene_name, &to_scene_name, fields.scene_item_id) {
+            Ok(duplicated) => duplicated,
+            Err(DuplicateSceneItemError::SourceScene) => {
+                unreachable!("resolved source scene name must exist in input registry")
+            }
+            Err(DuplicateSceneItemError::DestinationScene) => {
+                unreachable!("resolved destination scene name must exist in input registry")
+            }
+            Err(DuplicateSceneItemError::SourceSceneItem) => {
+                return DuplicateSceneItemExecution {
+                    response_text: super::build_request_response_error(
+                        "DuplicateSceneItem",
+                        request_id,
+                        REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                        "Scene item not found",
+                    ),
+                    duplicated: None,
+                };
+            }
+            Err(DuplicateSceneItemError::SceneItemIdOverflow) => {
+                return DuplicateSceneItemExecution {
+                    response_text: super::build_request_response_error(
+                        "DuplicateSceneItem",
+                        request_id,
+                        REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                        "Scene item ID overflow",
+                    ),
+                    duplicated: None,
+                };
+            }
+        };
 
     let response_text =
         super::build_request_response_success("DuplicateSceneItem", request_id, |f| {
@@ -331,7 +328,7 @@ pub fn execute_duplicate_scene_item(
 pub fn build_get_scene_item_source_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemSource",
@@ -345,7 +342,7 @@ pub fn build_get_scene_item_source_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemSource",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -353,7 +350,7 @@ pub fn build_get_scene_item_source_response(
         Err(response) => return response,
     };
     let (source_name, source_uuid) =
-        match input_registry.get_scene_item_source(&scene_name, fields.scene_item_id) {
+        match state.get_scene_item_source(&scene_name, fields.scene_item_id) {
             Ok(source) => source,
             Err(SceneItemLookupError::SceneItemNotFound) => {
                 return super::build_request_response_error(
@@ -377,7 +374,7 @@ pub fn build_get_scene_item_source_response(
 pub fn build_get_scene_item_index_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemIndex",
@@ -391,28 +388,27 @@ pub fn build_get_scene_item_index_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemIndex",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    let scene_item_index =
-        match input_registry.get_scene_item_index(&scene_name, fields.scene_item_id) {
-            Ok(scene_item_index) => scene_item_index,
-            Err(SceneItemLookupError::SceneItemNotFound) => {
-                return super::build_request_response_error(
-                    "GetSceneItemIndex",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene item not found",
-                );
-            }
-            Err(SceneItemLookupError::SceneNotFound) => {
-                unreachable!("resolved scene name must exist in input registry")
-            }
-        };
+    let scene_item_index = match state.get_scene_item_index(&scene_name, fields.scene_item_id) {
+        Ok(scene_item_index) => scene_item_index,
+        Err(SceneItemLookupError::SceneItemNotFound) => {
+            return super::build_request_response_error(
+                "GetSceneItemIndex",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene item not found",
+            );
+        }
+        Err(SceneItemLookupError::SceneNotFound) => {
+            unreachable!("resolved scene name must exist in input registry")
+        }
+    };
 
     super::build_request_response_success("GetSceneItemIndex", request_id, |f| {
         f.member("sceneItemIndex", scene_item_index)
@@ -422,7 +418,7 @@ pub fn build_get_scene_item_index_response(
 pub fn execute_set_scene_item_index(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> SetSceneItemIndexExecution {
     let fields = match parse_request_data_or_error_response(
         "SetSceneItemIndex",
@@ -441,7 +437,7 @@ pub fn execute_set_scene_item_index(
     let (scene_name, scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemIndex",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -453,7 +449,7 @@ pub fn execute_set_scene_item_index(
             };
         }
     };
-    let set_result = match input_registry.set_scene_item_index(
+    let set_result = match state.set_scene_item_index(
         &scene_name,
         fields.scene_item_id,
         fields.scene_item_index,
@@ -501,7 +497,7 @@ pub fn execute_set_scene_item_index(
 pub fn build_set_scene_item_enabled_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetSceneItemEnabled",
@@ -515,7 +511,7 @@ pub fn build_set_scene_item_enabled_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemEnabled",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -523,11 +519,9 @@ pub fn build_set_scene_item_enabled_response(
         Err(response) => return response,
     };
 
-    if let Err(error) = input_registry.set_scene_item_enabled(
-        &scene_name,
-        fields.scene_item_id,
-        fields.scene_item_enabled,
-    ) {
+    if let Err(error) =
+        state.set_scene_item_enabled(&scene_name, fields.scene_item_id, fields.scene_item_enabled)
+    {
         return match error {
             SceneItemLookupError::SceneNotFound => {
                 unreachable!("resolved scene name must exist in input registry")
@@ -547,7 +541,7 @@ pub fn build_set_scene_item_enabled_response(
 pub fn build_get_scene_item_enabled_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemEnabled",
@@ -561,7 +555,7 @@ pub fn build_get_scene_item_enabled_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemEnabled",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -569,21 +563,20 @@ pub fn build_get_scene_item_enabled_response(
         Err(response) => return response,
     };
 
-    let scene_item_enabled =
-        match input_registry.get_scene_item_enabled(&scene_name, fields.scene_item_id) {
-            Ok(scene_item_enabled) => scene_item_enabled,
-            Err(SceneItemLookupError::SceneNotFound) => {
-                unreachable!("resolved scene name must exist in input registry")
-            }
-            Err(SceneItemLookupError::SceneItemNotFound) => {
-                return super::build_request_response_error(
-                    "GetSceneItemEnabled",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene item not found",
-                );
-            }
-        };
+    let scene_item_enabled = match state.get_scene_item_enabled(&scene_name, fields.scene_item_id) {
+        Ok(scene_item_enabled) => scene_item_enabled,
+        Err(SceneItemLookupError::SceneNotFound) => {
+            unreachable!("resolved scene name must exist in input registry")
+        }
+        Err(SceneItemLookupError::SceneItemNotFound) => {
+            return super::build_request_response_error(
+                "GetSceneItemEnabled",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene item not found",
+            );
+        }
+    };
 
     super::build_request_response_success("GetSceneItemEnabled", request_id, |f| {
         f.member("sceneItemEnabled", scene_item_enabled)
@@ -597,7 +590,7 @@ pub fn build_set_scene_item_enabled_success_response(request_id: &str) -> nojson
 pub fn build_get_scene_item_locked_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemLocked",
@@ -611,28 +604,27 @@ pub fn build_get_scene_item_locked_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemLocked",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    let scene_item_locked =
-        match input_registry.get_scene_item_locked(&scene_name, fields.scene_item_id) {
-            Ok(scene_item_locked) => scene_item_locked,
-            Err(SceneItemLookupError::SceneNotFound) => {
-                unreachable!("resolved scene name must exist in input registry")
-            }
-            Err(SceneItemLookupError::SceneItemNotFound) => {
-                return super::build_request_response_error(
-                    "GetSceneItemLocked",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Scene item not found",
-                );
-            }
-        };
+    let scene_item_locked = match state.get_scene_item_locked(&scene_name, fields.scene_item_id) {
+        Ok(scene_item_locked) => scene_item_locked,
+        Err(SceneItemLookupError::SceneNotFound) => {
+            unreachable!("resolved scene name must exist in input registry")
+        }
+        Err(SceneItemLookupError::SceneItemNotFound) => {
+            return super::build_request_response_error(
+                "GetSceneItemLocked",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Scene item not found",
+            );
+        }
+    };
 
     super::build_request_response_success("GetSceneItemLocked", request_id, |f| {
         f.member("sceneItemLocked", scene_item_locked)
@@ -642,7 +634,7 @@ pub fn build_get_scene_item_locked_response(
 pub fn execute_set_scene_item_locked(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> SetSceneItemLockedExecution {
     let fields = match parse_request_data_or_error_response(
         "SetSceneItemLocked",
@@ -661,7 +653,7 @@ pub fn execute_set_scene_item_locked(
     let (scene_name, scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemLocked",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -673,7 +665,7 @@ pub fn execute_set_scene_item_locked(
             };
         }
     };
-    let set_result = match input_registry.set_scene_item_locked(
+    let set_result = match state.set_scene_item_locked(
         &scene_name,
         fields.scene_item_id,
         fields.scene_item_locked,
@@ -713,7 +705,7 @@ pub fn execute_set_scene_item_locked(
 pub fn build_get_scene_item_blend_mode_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemBlendMode",
@@ -727,7 +719,7 @@ pub fn build_get_scene_item_blend_mode_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemBlendMode",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -735,7 +727,7 @@ pub fn build_get_scene_item_blend_mode_response(
         Err(response) => return response,
     };
     let scene_item_blend_mode =
-        match input_registry.get_scene_item_blend_mode(&scene_name, fields.scene_item_id) {
+        match state.get_scene_item_blend_mode(&scene_name, fields.scene_item_id) {
             Ok(scene_item_blend_mode) => scene_item_blend_mode,
             Err(SceneItemLookupError::SceneNotFound) => {
                 unreachable!("resolved scene name must exist in input registry")
@@ -758,7 +750,7 @@ pub fn build_get_scene_item_blend_mode_response(
 pub fn build_set_scene_item_blend_mode_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetSceneItemBlendMode",
@@ -772,14 +764,14 @@ pub fn build_set_scene_item_blend_mode_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemBlendMode",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
         Ok(v) => v,
         Err(response) => return response,
     };
-    if let Err(error) = input_registry.set_scene_item_blend_mode(
+    if let Err(error) = state.set_scene_item_blend_mode(
         &scene_name,
         fields.scene_item_id,
         fields.scene_item_blend_mode,
@@ -802,7 +794,7 @@ pub fn build_set_scene_item_blend_mode_response(
 pub fn build_get_scene_item_transform_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetSceneItemTransform",
@@ -816,7 +808,7 @@ pub fn build_get_scene_item_transform_response(
     let (scene_name, _scene_uuid) = match resolve_scene_name_or_error(
         "GetSceneItemTransform",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -824,7 +816,7 @@ pub fn build_get_scene_item_transform_response(
         Err(response) => return response,
     };
     let scene_item_transform =
-        match input_registry.get_scene_item_transform(&scene_name, fields.scene_item_id) {
+        match state.get_scene_item_transform(&scene_name, fields.scene_item_id) {
             Ok(scene_item_transform) => scene_item_transform,
             Err(SceneItemLookupError::SceneNotFound) => {
                 unreachable!("resolved scene name must exist in input registry")
@@ -847,7 +839,7 @@ pub fn build_get_scene_item_transform_response(
 pub fn execute_set_scene_item_transform(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> SetSceneItemTransformExecution {
     let fields = match parse_request_data_or_error_response(
         "SetSceneItemTransform",
@@ -866,7 +858,7 @@ pub fn execute_set_scene_item_transform(
     let (scene_name, scene_uuid) = match resolve_scene_name_or_error(
         "SetSceneItemTransform",
         request_id,
-        input_registry,
+        state,
         fields.scene_name.as_deref(),
         fields.scene_uuid.as_deref(),
     ) {
@@ -878,7 +870,7 @@ pub fn execute_set_scene_item_transform(
             };
         }
     };
-    let set_result = match input_registry.set_scene_item_transform(
+    let set_result = match state.set_scene_item_transform(
         &scene_name,
         fields.scene_item_id,
         fields.scene_item_transform,

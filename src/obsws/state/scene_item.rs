@@ -1,6 +1,6 @@
 use super::*;
 
-impl ObswsInputRegistry {
+impl ObswsSessionState {
     pub fn get_scene_item_id(
         &self,
         scene_name: &str,

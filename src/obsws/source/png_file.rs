@@ -262,13 +262,13 @@ fn grayscale_like_to_i420a(
 
 /// source processor を起動できる設定が揃っているかを返す
 pub(super) fn is_source_startable(
-    settings: &crate::obsws::input_registry::ObswsImageSourceSettings,
+    settings: &crate::obsws::state::ObswsImageSourceSettings,
 ) -> bool {
     settings.file.is_some()
 }
 
 pub(super) fn build_record_source_plan(
-    settings: &crate::obsws::input_registry::ObswsImageSourceSettings,
+    settings: &crate::obsws::state::ObswsImageSourceSettings,
     source_key: &str,
     frame_rate: crate::video::FrameRate,
 ) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {

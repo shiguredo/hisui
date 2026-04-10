@@ -1,9 +1,9 @@
-use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::protocol::{
     OBSWS_OP_IDENTIFY, OBSWS_OP_REIDENTIFY, OBSWS_OP_REQUEST, OBSWS_OP_REQUEST_BATCH,
     OBSWS_RPC_VERSION, REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_TYPE,
     REQUEST_STATUS_UNKNOWN_REQUEST_TYPE,
 };
+use crate::obsws::state::ObswsSessionState;
 
 pub use crate::obsws::response::{build_hello_message, build_identified_message};
 
@@ -137,15 +137,15 @@ fn parse_request_message(
 pub fn handle_request_message(
     request: RequestMessage,
     session_stats: &ObswsSessionStats,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> RequestResponsePayload {
-    handle_request_message_with_pipeline_handle(request, session_stats, input_registry, None)
+    handle_request_message_with_pipeline_handle(request, session_stats, state, None)
 }
 
 pub fn handle_request_message_with_pipeline_handle(
     request: RequestMessage,
     _session_stats: &ObswsSessionStats,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
     _pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> RequestResponsePayload {
     let request_id = request.request_id.unwrap_or_default();
@@ -177,19 +177,14 @@ pub fn handle_request_message_with_pipeline_handle(
         // GetStats は coordinator で処理する（outputs BTreeMap を参照するため）
         "GetCanvasList" => crate::obsws::response::build_get_canvas_list_response(
             &request_id,
-            input_registry.canvas_width(),
-            input_registry.canvas_height(),
-            input_registry.frame_rate(),
+            state.canvas_width(),
+            state.canvas_height(),
+            state.frame_rate(),
         ),
         "GetGroupList" => crate::obsws::response::build_get_group_list_response(&request_id),
-        "GetSceneList" => {
-            crate::obsws::response::build_get_scene_list_response(&request_id, input_registry)
-        }
+        "GetSceneList" => crate::obsws::response::build_get_scene_list_response(&request_id, state),
         "GetCurrentProgramScene" => {
-            crate::obsws::response::build_get_current_program_scene_response(
-                &request_id,
-                input_registry,
-            )
+            crate::obsws::response::build_get_current_program_scene_response(&request_id, state)
         }
         "GetCurrentPreviewScene" => {
             crate::obsws::response::build_get_current_preview_scene_response(&request_id)
@@ -198,168 +193,161 @@ pub fn handle_request_message_with_pipeline_handle(
             crate::obsws::response::build_get_scene_scene_transition_override_response(
                 &request_id,
                 request.request_data.as_ref(),
-                input_registry,
+                state,
             )
         }
         "SetSceneSceneTransitionOverride" => {
             crate::obsws::response::build_set_scene_scene_transition_override_response(
                 &request_id,
                 request.request_data.as_ref(),
-                input_registry,
+                state,
             )
         }
-        "GetTransitionKindList" => crate::obsws::response::build_get_transition_kind_list_response(
-            &request_id,
-            input_registry,
-        ),
+        "GetTransitionKindList" => {
+            crate::obsws::response::build_get_transition_kind_list_response(&request_id, state)
+        }
         "GetSceneTransitionList" => {
-            crate::obsws::response::build_get_scene_transition_list_response(
-                &request_id,
-                input_registry,
-            )
+            crate::obsws::response::build_get_scene_transition_list_response(&request_id, state)
         }
         "GetCurrentSceneTransition" => {
-            crate::obsws::response::build_get_current_scene_transition_response(
-                &request_id,
-                input_registry,
-            )
+            crate::obsws::response::build_get_current_scene_transition_response(&request_id, state)
         }
         "SetCurrentSceneTransition" => {
             crate::obsws::response::build_set_current_scene_transition_response(
                 &request_id,
                 request.request_data.as_ref(),
-                input_registry,
+                state,
             )
         }
         "SetCurrentSceneTransitionDuration" => {
             crate::obsws::response::build_set_current_scene_transition_duration_response(
                 &request_id,
                 request.request_data.as_ref(),
-                input_registry,
+                state,
             )
         }
         "SetCurrentSceneTransitionSettings" => {
             crate::obsws::response::build_set_current_scene_transition_settings_response(
                 &request_id,
                 request.request_data.as_ref(),
-                input_registry,
+                state,
             )
         }
         "GetCurrentSceneTransitionCursor" => {
             crate::obsws::response::build_get_current_scene_transition_cursor_response(
                 &request_id,
-                input_registry,
+                state,
             )
         }
         "SetTBarPosition" => crate::obsws::response::build_set_tbar_position_response(&request_id),
         "SetSceneName" => crate::obsws::response::build_set_scene_name_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetSceneItemId" => crate::obsws::response::build_get_scene_item_id_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetSceneItemList" => crate::obsws::response::build_get_scene_item_list_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetSceneItemSource" => crate::obsws::response::build_get_scene_item_source_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetSceneItemEnabled" => crate::obsws::response::build_get_scene_item_enabled_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetSceneItemLocked" => crate::obsws::response::build_get_scene_item_locked_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetSceneItemIndex" => crate::obsws::response::build_get_scene_item_index_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetSceneItemBlendMode" => {
             crate::obsws::response::build_get_scene_item_blend_mode_response(
                 &request_id,
                 request.request_data.as_ref(),
-                input_registry,
+                state,
             )
         }
         "GetSceneItemTransform" => crate::obsws::response::build_get_scene_item_transform_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetInputList" => crate::obsws::response::build_get_input_list_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetInputKindList" => {
-            crate::obsws::response::build_get_input_kind_list_response(&request_id, input_registry)
+            crate::obsws::response::build_get_input_kind_list_response(&request_id, state)
         }
         "GetSourceActive" => crate::obsws::response::build_get_source_active_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetInputSettings" => crate::obsws::response::build_get_input_settings_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetInputMute" => crate::obsws::response::build_get_input_mute_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetInputVolume" => crate::obsws::response::build_get_input_volume_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "SetInputSettings" => crate::obsws::response::build_set_input_settings_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "SetInputName" => crate::obsws::response::build_set_input_name_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "GetInputDefaultSettings" => {
             crate::obsws::response::build_get_input_default_settings_response(
                 &request_id,
                 request.request_data.as_ref(),
-                input_registry,
+                state,
             )
         }
         "GetInputPropertiesListPropertyItems" => {
             crate::obsws::response::build_get_input_properties_list_property_items_response(
                 &request_id,
                 request.request_data.as_ref(),
-                input_registry,
+                state,
             )
         }
         "GetPersistentData" => crate::obsws::response::build_get_persistent_data_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         "SetPersistentData" => crate::obsws::response::build_set_persistent_data_response(
             &request_id,
             request.request_data.as_ref(),
-            input_registry,
+            state,
         ),
         // GetStreamServiceSettings / SetStreamServiceSettings / GetOutputSettings /
         // SetOutputSettings / GetRecordDirectory / SetRecordDirectory /
@@ -379,16 +367,16 @@ pub fn handle_request_message_with_pipeline_handle(
 mod tests {
     use super::*;
     use crate::obsws::auth::{ObswsAuthentication, build_authentication_response};
-    use crate::obsws::input_registry::{
-        ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings,
-        ObswsVideoCaptureDeviceSettings,
-    };
     use crate::obsws::protocol::{
         OBSWS_OP_HELLO, OBSWS_OP_REQUEST_RESPONSE, REQUEST_STATUS_INVALID_REQUEST_FIELD,
         REQUEST_STATUS_MISSING_REQUEST_DATA, REQUEST_STATUS_RESOURCE_NOT_FOUND,
     };
-    fn input_registry() -> ObswsInputRegistry {
-        let mut registry = ObswsInputRegistry::new_for_test();
+    use crate::obsws::state::{
+        ObswsInput, ObswsInputEntry, ObswsInputSettings, ObswsSessionState,
+        ObswsVideoCaptureDeviceSettings,
+    };
+    fn state() -> ObswsSessionState {
+        let mut registry = ObswsSessionState::new_for_test();
         registry.insert_for_test(ObswsInputEntry::new_for_test(
             "input-uuid-1",
             "input-name-1",
@@ -623,8 +611,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let op: i64 = json.value().to_member("op")?.required()?.try_into()?;
@@ -783,8 +771,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let mut groups = json
@@ -805,11 +793,11 @@ mod tests {
             request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        input_registry
+        let mut state = state();
+        state
             .create_scene_item("Scene", Some("input-uuid-1"), None, true)
             .expect("scene item creation must succeed");
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let video_active: bool = json
@@ -825,7 +813,7 @@ mod tests {
     fn handle_request_message_returns_scene_transition_override_responses()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let mut state = ObswsSessionState::new_for_test();
 
         let set_response = handle_request_message(
             RequestMessage {
@@ -836,7 +824,7 @@ mod tests {
                 )),
             },
             &session_stats,
-            &mut input_registry,
+            &mut state,
         );
         // OBS は SetSceneSceneTransitionOverride で responseData を返さない
         let set_json = nojson::RawJson::parse(set_response.message.text())?;
@@ -854,7 +842,7 @@ mod tests {
                 request_data: Some(request_data(r#"{"sceneName":"Scene"}"#)),
             },
             &session_stats,
-            &mut input_registry,
+            &mut state,
         );
         let get_json = nojson::RawJson::parse(get_response.message.text())?;
         let get_transition_name: Option<String> = get_json
@@ -886,8 +874,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = ObswsSessionState::new_for_test();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -898,9 +886,7 @@ mod tests {
         assert!(result);
         // OBS は SetSceneName で responseData を返さない
         assert_eq!(
-            input_registry
-                .current_program_scene()
-                .map(|scene| scene.scene_name),
+            state.current_program_scene().map(|scene| scene.scene_name),
             Some("Scene Renamed".to_owned())
         );
         Ok(())
@@ -915,8 +901,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -939,8 +925,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
@@ -965,8 +951,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
@@ -995,8 +981,8 @@ mod tests {
             request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let response_data = json
@@ -1026,8 +1012,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1037,7 +1023,7 @@ mod tests {
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         assert!(result);
 
-        let input = input_registry
+        let input = state
             .find_input(None, Some("input-name-1"))
             .expect("input must exist");
         match &input.input.settings {
@@ -1060,8 +1046,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1086,8 +1072,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1097,13 +1083,9 @@ mod tests {
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         assert!(result);
 
+        assert!(state.find_input(None, Some("input-name-1")).is_none());
         assert!(
-            input_registry
-                .find_input(None, Some("input-name-1"))
-                .is_none()
-        );
-        assert!(
-            input_registry
+            state
                 .find_input(None, Some("input-name-1-renamed"))
                 .is_some()
         );
@@ -1119,8 +1101,8 @@ mod tests {
             request_data: Some(request_data(r#"{"inputKind":"video_capture_device"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let default_input_settings = json
@@ -1142,8 +1124,8 @@ mod tests {
             request_data: Some(request_data(r#"{"inputKind":"mp4_file_source"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let default_input_settings = json
@@ -1171,16 +1153,16 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let mut state = ObswsSessionState::new_for_test();
         let input = ObswsInput::from_kind_and_settings(
             "video_capture_device",
             request_data(r#"{}"#).value(),
         )
         .expect("input settings must be valid");
-        input_registry
+        state
             .create_input("Scene", "camera-1", input, true)
             .expect("input creation must succeed");
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1209,16 +1191,16 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let mut state = ObswsSessionState::new_for_test();
         let input = ObswsInput::from_kind_and_settings(
             "video_capture_device",
             request_data(r#"{}"#).value(),
         )
         .expect("input settings must be valid");
-        input_registry
+        state
             .create_input("Scene", "camera-1", input, true)
             .expect("input creation must succeed");
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1241,19 +1223,19 @@ mod tests {
             request_data: Some(request_data(r#"{"sceneName":"Scene","sceneItemId":1}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let mut state = ObswsSessionState::new_for_test();
         let input = ObswsInput::from_kind_and_settings(
             "video_capture_device",
             request_data(r#"{}"#).value(),
         )
         .expect("input settings must be valid");
-        input_registry
+        state
             .create_input("Scene", "camera-1", input, true)
             .expect("input creation must succeed");
-        input_registry
+        state
             .set_scene_item_enabled("Scene", 1, false)
             .expect("set scene item enabled must succeed");
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1280,19 +1262,19 @@ mod tests {
             request_data: Some(request_data(r#"{"sceneName":"Scene","sceneItemId":1}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let mut state = ObswsSessionState::new_for_test();
         let input = ObswsInput::from_kind_and_settings(
             "video_capture_device",
             request_data(r#"{}"#).value(),
         )
         .expect("input settings must be valid");
-        input_registry
+        state
             .create_input("Scene", "camera-1", input, true)
             .expect("input creation must succeed");
-        input_registry
+        state
             .set_scene_item_locked("Scene", 1, true)
             .expect("set scene item locked must succeed");
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let scene_item_locked: bool = json
@@ -1313,23 +1295,23 @@ mod tests {
             request_data: Some(request_data(r#"{"sceneName":"Scene","sceneItemId":1}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let mut state = ObswsSessionState::new_for_test();
         let input = ObswsInput::from_kind_and_settings(
             "video_capture_device",
             request_data(r#"{}"#).value(),
         )
         .expect("input settings must be valid");
-        input_registry
+        state
             .create_input("Scene", "camera-1", input, true)
             .expect("input creation must succeed");
-        input_registry
+        state
             .set_scene_item_blend_mode(
                 "Scene",
                 1,
-                crate::obsws::input_registry::ObswsSceneItemBlendMode::Additive,
+                crate::obsws::state::ObswsSceneItemBlendMode::Additive,
             )
             .expect("set scene item blend mode must succeed");
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let scene_item_blend_mode: String = json
@@ -1350,26 +1332,26 @@ mod tests {
             request_data: Some(request_data(r#"{"sceneName":"Scene","sceneItemId":1}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let mut state = ObswsSessionState::new_for_test();
         let input = ObswsInput::from_kind_and_settings(
             "video_capture_device",
             request_data(r#"{}"#).value(),
         )
         .expect("input settings must be valid");
-        input_registry
+        state
             .create_input("Scene", "camera-1", input, true)
             .expect("input creation must succeed");
-        input_registry
+        state
             .set_scene_item_transform(
                 "Scene",
                 1,
-                crate::obsws::input_registry::ObswsSceneItemTransformPatch {
+                crate::obsws::state::ObswsSceneItemTransformPatch {
                     position_x: Some(123.0),
                     ..Default::default()
                 },
             )
             .expect("set scene item transform must succeed");
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let position_x: f64 = json
@@ -1392,8 +1374,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1427,8 +1409,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1462,8 +1444,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1496,8 +1478,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1522,8 +1504,8 @@ mod tests {
             )),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1546,8 +1528,8 @@ mod tests {
             request_data: Some(request_data(r#"{"inputName":"input-name-1"}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1570,8 +1552,8 @@ mod tests {
             request_data: None,
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1594,8 +1576,8 @@ mod tests {
             request_data: Some(request_data(r#"{"inputName":1}"#)),
         };
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = input_registry();
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let mut state = state();
+        let response = handle_request_message(request, &session_stats, &mut state);
 
         let json = nojson::RawJson::parse(response.message.text())?;
         let status = json
@@ -1645,8 +1627,8 @@ mod tests {
                 request_type: Some(request_type.to_owned()),
                 request_data: Some(request_data(r#"{"dummy":"value"}"#)),
             };
-            let mut input_registry = input_registry();
-            let response = handle_request_message(request, &session_stats, &mut input_registry);
+            let mut state = state();
+            let response = handle_request_message(request, &session_stats, &mut state);
             let json = nojson::RawJson::parse(response.message.text())?;
             let status = json
                 .value()
@@ -1666,7 +1648,7 @@ mod tests {
     fn set_sora_output_settings_rejects_non_object_metadata()
     -> Result<(), Box<dyn std::error::Error>> {
         let session_stats = ObswsSessionStats::default();
-        let mut input_registry = ObswsInputRegistry::new_for_test();
+        let mut state = ObswsSessionState::new_for_test();
 
         let request = RequestMessage {
             request_id: Some("req-bad-meta".to_owned()),
@@ -1675,7 +1657,7 @@ mod tests {
                 r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://a.example.com"],"channelId":"ch","metadata":"not-an-object"}}}"#,
             )),
         };
-        let response = handle_request_message(request, &session_stats, &mut input_registry);
+        let response = handle_request_message(request, &session_stats, &mut state);
         let json = nojson::RawJson::parse(response.message.text())?;
         let result: bool = json
             .value()

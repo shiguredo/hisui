@@ -98,7 +98,7 @@ impl ObswsCoordinatorHandle {
     pub async fn get_webrtc_source_settings(
         &self,
         input_name: &str,
-    ) -> crate::Result<Option<crate::obsws::input_registry::ObswsWebRtcSourceSettings>> {
+    ) -> crate::Result<Option<crate::obsws::state::ObswsWebRtcSourceSettings>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.command_tx
             .send(ObswsCoordinatorCommand::GetWebRtcSourceSettings {

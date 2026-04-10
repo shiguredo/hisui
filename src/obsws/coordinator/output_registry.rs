@@ -3,9 +3,9 @@
 //! HisuiCreateOutput / HisuiRemoveOutput で動的に追加・削除する。
 //!
 //! TODO: モジュール名・構成の整理
-//! - このモジュール名 `output_dynamic` は、全 output が動的管理に統一された現在では不適切。
+//! - このモジュール名 `output_registry` は、全 output が動的管理に統一された現在では不適切。
 //!   リネーム候補: `output_registry`, `output_manager`, `output_instance` 等。
-//! - `input_registry` も実際には Input / Scene / SceneItem / Transition / グローバル設定を
+//! - `state` も実際には Input / Scene / SceneItem / Transition / グローバル設定を
 //!   管理しており「input 専用レジストリ」ではないため、命名の見直しが必要。
 //! - 両モジュールの責務と命名を合わせて検討すること。
 
@@ -14,11 +14,11 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::{CommandResult, ObswsCoordinator};
-use crate::obsws::input_registry::{ObswsDashSettings, ObswsHlsSettings};
 use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
+use crate::obsws::state::{ObswsDashSettings, ObswsHlsSettings};
 
 // -----------------------------------------------------------------------
 // 型定義
@@ -107,12 +107,12 @@ pub(crate) enum OutputSettings {
 
 /// output の稼働中の実行情報
 pub(crate) enum OutputRun {
-    Stream(crate::obsws::input_registry::ObswsStreamRun),
-    Record(crate::obsws::input_registry::ObswsRecordRun),
-    Hls(crate::obsws::input_registry::ObswsHlsRun),
-    MpegDash(crate::obsws::input_registry::ObswsDashRun),
-    RtmpOutbound(crate::obsws::input_registry::ObswsRtmpOutboundRun),
-    Sora(crate::obsws::input_registry::ObswsSoraPublisherRun),
+    Stream(crate::obsws::state::ObswsStreamRun),
+    Record(crate::obsws::state::ObswsRecordRun),
+    Hls(crate::obsws::state::ObswsHlsRun),
+    MpegDash(crate::obsws::state::ObswsDashRun),
+    RtmpOutbound(crate::obsws::state::ObswsRtmpOutboundRun),
+    Sora(crate::obsws::state::ObswsSoraPublisherRun),
     #[cfg(feature = "player")]
     Player {
         subscriber_handle: Option<tokio::task::JoinHandle<()>>,

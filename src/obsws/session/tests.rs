@@ -1,6 +1,5 @@
 use super::*;
 use crate::obsws::auth::build_authentication_response;
-use crate::obsws::input_registry::{ObswsInput, ObswsInputRegistry};
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::{
     OBSWS_CLOSE_ALREADY_IDENTIFIED, OBSWS_CLOSE_AUTHENTICATION_FAILED, OBSWS_CLOSE_NOT_IDENTIFIED,
@@ -11,6 +10,7 @@ use crate::obsws::protocol::{
     REQUEST_STATUS_REQUEST_PROCESSING_FAILED, REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
     REQUEST_STATUS_RESOURCE_NOT_FOUND,
 };
+use crate::obsws::state::{ObswsInput, ObswsSessionState};
 use std::time::Duration;
 
 /// テスト用の ProgramOutputState を生成する
@@ -27,7 +27,7 @@ fn test_program_output() -> crate::obsws::server::ProgramOutputState {
 
 /// レジストリからランタイムハンドルを生成し、actor を spawn する
 fn create_coordinator_handle(
-    registry: ObswsInputRegistry,
+    registry: ObswsSessionState,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     let program_output = test_program_output();
     let (actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
@@ -46,7 +46,7 @@ fn create_coordinator_handle(
 
 #[cfg(feature = "player")]
 fn create_coordinator_handle_with_player_channels(
-    registry: ObswsInputRegistry,
+    registry: ObswsSessionState,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
     player_command_tx: std::sync::mpsc::SyncSender<crate::obsws::player::PlayerCommand>,
     player_media_tx: std::sync::mpsc::SyncSender<crate::obsws::player::PlayerMediaMessage>,
@@ -76,7 +76,7 @@ fn create_coordinator_handle_with_player_channels(
 
 /// デフォルトのテスト用ランタイムハンドルを生成する
 fn default_coordinator_handle() -> crate::obsws::coordinator::ObswsCoordinatorHandle {
-    create_coordinator_handle(ObswsInputRegistry::new_for_test())
+    create_coordinator_handle(ObswsSessionState::new_for_test())
 }
 
 #[cfg(feature = "player")]
@@ -91,7 +91,7 @@ fn test_player_media_tx() -> std::sync::mpsc::SyncSender<crate::obsws::player::P
 
 /// パイプライン付きのランタイムハンドルを生成する
 fn create_coordinator_handle_with_pipeline(
-    registry: ObswsInputRegistry,
+    registry: ObswsSessionState,
     pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
     create_coordinator_handle_with_pipeline_and_record_dir(
@@ -103,7 +103,7 @@ fn create_coordinator_handle_with_pipeline(
 
 /// パイプライン付きのランタイムハンドルを生成する（録画ディレクトリ指定）
 fn create_coordinator_handle_with_pipeline_and_record_dir(
-    registry: ObswsInputRegistry,
+    registry: ObswsSessionState,
     pipeline_handle: crate::MediaPipelineHandle,
     record_directory: std::path::PathBuf,
 ) -> crate::obsws::coordinator::ObswsCoordinatorHandle {
@@ -123,7 +123,7 @@ fn create_coordinator_handle_with_pipeline_and_record_dir(
 }
 
 async fn create_initialized_coordinator_handle_with_pipeline(
-    registry: ObswsInputRegistry,
+    registry: ObswsSessionState,
     pipeline_handle: crate::MediaPipelineHandle,
 ) -> crate::Result<crate::obsws::coordinator::ObswsCoordinatorHandle> {
     create_initialized_coordinator_handle_with_pipeline_and_record_dir(
@@ -135,7 +135,7 @@ async fn create_initialized_coordinator_handle_with_pipeline(
 }
 
 async fn create_initialized_coordinator_handle_with_pipeline_and_record_dir(
-    registry: ObswsInputRegistry,
+    registry: ObswsSessionState,
     pipeline_handle: crate::MediaPipelineHandle,
     record_directory: std::path::PathBuf,
 ) -> crate::Result<crate::obsws::coordinator::ObswsCoordinatorHandle> {
@@ -185,7 +185,7 @@ async fn create_initialized_coordinator_handle_with_pipeline_and_record_dir(
 
 #[tokio::test]
 async fn remove_current_scene_updates_program_output_state_without_pipeline() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry.create_scene("Scene B").expect("must create scene");
     registry
         .set_current_program_scene("Scene B")
@@ -233,7 +233,7 @@ async fn remove_current_scene_updates_program_output_state_without_pipeline() {
 
 #[tokio::test]
 async fn stale_scene_uuid_differs_from_current_program_scene_uuid() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry.create_scene("Scene B").expect("must create scene");
 
     let stale_scene_uuid = registry
@@ -1613,7 +1613,7 @@ async fn stop_record_when_inactive_returns_error_response() {
 #[tokio::test]
 async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let mut registry = ObswsInputRegistry::new(
+    let mut registry = ObswsSessionState::new(
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
@@ -1695,7 +1695,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
 #[tokio::test]
 async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let mut registry = ObswsInputRegistry::new(
+    let mut registry = ObswsSessionState::new(
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
@@ -1767,7 +1767,7 @@ async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() ->
 #[tokio::test]
 async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let mut registry = ObswsInputRegistry::new(
+    let mut registry = ObswsSessionState::new(
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
@@ -1846,7 +1846,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
 #[tokio::test]
 async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let registry = ObswsInputRegistry::new(
+    let registry = ObswsSessionState::new(
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
@@ -1909,7 +1909,7 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
 
 #[tokio::test]
 async fn start_stream_with_no_inputs_succeeds() -> crate::Result<()> {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
 
     let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
@@ -1980,7 +1980,7 @@ async fn start_stream_with_no_inputs_succeeds() -> crate::Result<()> {
 #[tokio::test]
 async fn start_record_with_multiple_video_inputs_builds_plan_successfully() {
     // 複数映像入力は受理されるが、パイプラインがないため実行時エラーになる
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     for input_name in ["image-1", "image-2"] {
         let input = ObswsInput::from_kind_and_settings(
             "image_source",
@@ -2018,7 +2018,7 @@ async fn start_record_with_multiple_video_inputs_builds_plan_successfully() {
 
 #[tokio::test]
 async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Result<()> {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     for input_name in ["audio-file-1", "audio-file-2"] {
         let input = ObswsInput::from_kind_and_settings(
             "mp4_file_source",
@@ -2103,7 +2103,7 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
 #[tokio::test]
 async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let mut registry = ObswsInputRegistry::new(
+    let mut registry = ObswsSessionState::new(
         crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
         crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
         crate::video::FrameRate::FPS_30,
@@ -2232,7 +2232,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
 #[tokio::test]
 async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<()> {
     let temp_dir = tempfile::tempdir()?;
-    let mut registry = ObswsInputRegistry::new(
+    let mut registry = ObswsSessionState::new(
         crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
         crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
         crate::video::FrameRate::FPS_30,
@@ -2384,7 +2384,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
 #[tokio::test]
 async fn start_stream_with_multiple_video_inputs_builds_plan_successfully() {
     // 複数映像入力は受理されるが、パイプラインがないため実行時エラーになる
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     for input_name in ["image-1", "image-2"] {
         let input = ObswsInput::from_kind_and_settings(
             "image_source",
@@ -2541,7 +2541,7 @@ async fn stop_output_when_record_is_inactive_returns_output_request_type_error()
 #[cfg(feature = "player")]
 #[tokio::test]
 async fn start_output_player_with_closed_control_channel_returns_processing_failed() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let pipeline = crate::MediaPipeline::new().expect("failed to create test media pipeline");
     let pipeline_handle = pipeline.handle();
     let (player_command_tx, player_command_rx) = std::sync::mpsc::sync_channel(1);
@@ -2582,7 +2582,7 @@ async fn start_output_player_with_closed_control_channel_returns_processing_fail
 #[cfg(feature = "player")]
 #[tokio::test]
 async fn player_lifecycle_stop_updates_output_status() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let pipeline = crate::MediaPipeline::new().expect("failed to create test media pipeline");
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
@@ -2667,7 +2667,7 @@ async fn player_lifecycle_stop_updates_output_status() {
 #[cfg(feature = "player")]
 #[tokio::test]
 async fn start_output_player_returns_processing_failed_when_subscriber_startup_fails() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let pipeline = crate::MediaPipeline::new().expect("failed to create test media pipeline");
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
@@ -2744,7 +2744,7 @@ async fn start_output_player_returns_processing_failed_when_subscriber_startup_f
 #[cfg(feature = "player")]
 #[tokio::test]
 async fn stale_player_stopped_event_does_not_deactivate_restarted_player() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let pipeline = crate::MediaPipeline::new().expect("failed to create test media pipeline");
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
@@ -3044,7 +3044,7 @@ async fn set_then_get_persistent_data_roundtrip() {
 #[tokio::test]
 async fn hisui_create_output_stream_reads_stream_service_settings() {
     // HisuiCreateOutput で rtmp_output を作成し、streamServiceSettings.server が読めることを確認する
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3100,7 +3100,7 @@ async fn hisui_create_output_stream_reads_stream_service_settings() {
 #[tokio::test]
 async fn hisui_create_output_sora_reads_sora_sdk_settings() {
     // HisuiCreateOutput で sora_webrtc_output を作成し、soraSdkSettings が読めることを確認する
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3166,7 +3166,7 @@ async fn hisui_create_output_sora_reads_sora_sdk_settings() {
 #[tokio::test]
 async fn hisui_remove_output_running_returns_error() {
     // 稼働中の output に対する HisuiRemoveOutput が OUTPUT_RUNNING を返すことを確認する
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3229,7 +3229,7 @@ async fn hisui_remove_output_running_returns_error() {
 #[tokio::test]
 async fn hisui_create_output_mp4_without_record_directory_uses_default() {
     // HisuiCreateOutput で mp4_output を outputSettings 省略で作成できることを確認する
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3255,7 +3255,7 @@ async fn hisui_create_output_mp4_without_record_directory_uses_default() {
 #[tokio::test]
 async fn hisui_create_output_hls_reads_destination_and_variants() {
     // HisuiCreateOutput で hls_output を destination + variants 指定で作成し、設定が反映されることを確認する
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3339,7 +3339,7 @@ async fn hisui_create_output_hls_reads_destination_and_variants() {
 async fn hisui_create_output_sora_with_metadata_preserves_it() {
     // HisuiCreateOutput で sora_webrtc_output を metadata 付きで作成し、
     // restore_outputs_from_state で復元後も metadata が残ることを確認する
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3396,7 +3396,7 @@ async fn hisui_create_output_sora_with_metadata_preserves_it() {
 
 #[tokio::test]
 async fn set_output_settings_rejects_invalid_record_directory_type() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3422,7 +3422,7 @@ async fn set_output_settings_rejects_invalid_record_directory_type() {
 
 #[tokio::test]
 async fn set_output_settings_rejects_invalid_sora_metadata_type() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3449,7 +3449,7 @@ async fn set_output_settings_rejects_invalid_sora_metadata_type() {
 
 #[tokio::test]
 async fn set_output_settings_rejects_invalid_signaling_urls_type() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3476,7 +3476,7 @@ async fn set_output_settings_rejects_invalid_signaling_urls_type() {
 
 #[tokio::test]
 async fn set_output_settings_rejects_invalid_stream_service_type() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3501,7 +3501,7 @@ async fn set_output_settings_rejects_invalid_stream_service_type() {
 
 #[tokio::test]
 async fn set_output_settings_null_clears_sora_channel_id() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3569,7 +3569,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
 
 #[tokio::test]
 async fn set_record_directory_updates_default_for_future_mp4_outputs() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3634,7 +3634,7 @@ async fn set_record_directory_updates_default_for_future_mp4_outputs() {
 
 #[tokio::test]
 async fn hisui_create_output_rejects_invalid_record_directory_type() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3659,7 +3659,7 @@ async fn hisui_create_output_rejects_invalid_record_directory_type() {
 
 #[tokio::test]
 async fn hisui_create_output_rejects_invalid_stream_service_type() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3684,7 +3684,7 @@ async fn hisui_create_output_rejects_invalid_stream_service_type() {
 
 #[tokio::test]
 async fn hisui_create_output_rejects_invalid_sora_signaling_urls_type() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3710,7 +3710,7 @@ async fn hisui_create_output_rejects_invalid_sora_signaling_urls_type() {
 #[tokio::test]
 async fn hisui_create_output_rejects_non_object_output_settings() {
     // outputSettings が object でない場合は INVALID_REQUEST_FIELD を返す
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3736,7 +3736,7 @@ async fn hisui_create_output_rejects_non_object_output_settings() {
 #[tokio::test]
 async fn set_output_settings_rejects_non_object_output_settings() {
     // SetOutputSettings で outputSettings が object でない場合は INVALID_REQUEST_FIELD を返す
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3776,7 +3776,7 @@ async fn set_output_settings_rejects_non_object_output_settings() {
 
 #[tokio::test]
 async fn set_output_settings_record_updates_default_record_directory() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3841,7 +3841,7 @@ async fn set_output_settings_record_updates_default_record_directory() {
 
 #[tokio::test]
 async fn set_stream_service_settings_after_remove_returns_not_found() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;
@@ -3882,7 +3882,7 @@ async fn set_stream_service_settings_after_remove_returns_not_found() {
 
 #[tokio::test]
 async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);
     identify_session(&mut session).await;

@@ -15,10 +15,10 @@ use tokio::net::TcpListener;
 
 use crate::endpoint_http_bootstrap::BootstrapEndpoint;
 use crate::obsws::auth::ObswsAuthentication;
-use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::message::ObswsSessionStats;
 use crate::obsws::protocol::OBSWS_SUBPROTOCOL;
 use crate::obsws::session::{ObswsSession, SessionAction};
+use crate::obsws::state::ObswsSessionState;
 use crate::tcp::{ServerTcpOrTlsStream, TcpOrTlsStream, create_server_tls_acceptor};
 
 type TlsAcceptor = Arc<tokio_rustls::TlsAcceptor>;
@@ -165,7 +165,7 @@ pub async fn run_server(
             (default_record_dir, None, None)
         };
 
-    let mut input_registry = ObswsInputRegistry::new(
+    let mut session_state = ObswsSessionState::new(
         canvas_width,
         canvas_height,
         frame_rate,
@@ -179,7 +179,7 @@ pub async fn run_server(
         state_file_outputs = state.outputs;
         // persistent data の復元
         if let Some(data) = state.persistent_data {
-            input_registry.restore_persistent_data(data);
+            session_state.restore_persistent_data(data);
         }
         // scene / input の復元
         match (state.scenes, state.inputs) {
@@ -189,7 +189,7 @@ pub async fn run_server(
                         "state file has scenes with items but no inputs section",
                     ));
                 }
-                input_registry.restore_scenes_and_inputs(
+                session_state.restore_scenes_and_inputs(
                     scenes,
                     inputs.unwrap_or_default(),
                     state.current_program_scene,
@@ -221,12 +221,12 @@ pub async fn run_server(
 
     // Program 出力を初期化する（常駐ミキサー）
     let program_output = {
-        let scene_inputs = input_registry.list_current_program_scene_input_entries();
+        let scene_inputs = session_state.list_current_program_scene_input_entries();
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
-            input_registry.canvas_width(),
-            input_registry.canvas_height(),
-            input_registry.frame_rate(),
+            session_state.canvas_width(),
+            session_state.canvas_height(),
+            session_state.frame_rate(),
         )
         .map_err(|e| {
             crate::Error::new(format!(
@@ -244,7 +244,7 @@ pub async fn run_server(
             output_plan.audio_track_id,
         );
 
-        let scene_uuid = input_registry
+        let scene_uuid = session_state
             .current_program_scene()
             .map(|s| s.scene_uuid)
             .unwrap_or_default();
@@ -262,7 +262,7 @@ pub async fn run_server(
     // source processor は入力ライフサイクルで管理するため、coordinator 経由で初期起動する
     let (mut actor, coordinator_handle, shutdown_rx) =
         crate::obsws::coordinator::ObswsCoordinator::new(
-            input_registry,
+            session_state,
             effective_record_dir,
             program_output,
             Some(pipeline_handle.clone()),
@@ -274,7 +274,7 @@ pub async fn run_server(
     // state file に outputs セクションがある場合は復元する
     if let Some(state_outputs) = state_file_outputs {
         actor.outputs =
-            crate::obsws::coordinator::output_dynamic::restore_outputs_from_state(state_outputs)?;
+            crate::obsws::coordinator::output_registry::restore_outputs_from_state(state_outputs)?;
     }
     actor.start_initial_input_source_processors().await?;
     tokio::task::spawn_local(actor.run());

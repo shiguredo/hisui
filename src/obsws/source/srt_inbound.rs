@@ -1,7 +1,7 @@
-use crate::obsws::input_registry::ObswsSrtInboundSettings;
 use crate::obsws::source::{
     BuildObswsRecordSourcePlanError, ObswsRecordSourcePlan, ObswsSourceRequest,
 };
+use crate::obsws::state::ObswsSrtInboundSettings;
 use crate::{ProcessorId, TrackId};
 
 /// source processor を起動できる設定が揃っているかを返す

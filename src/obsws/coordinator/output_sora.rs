@@ -14,7 +14,7 @@ use crate::obsws::protocol::{
 
 /// SoraSubscriber の状態
 pub(crate) struct SoraSubscriberState {
-    pub(crate) settings: crate::obsws::input_registry::ObswsSoraSubscriberSettings,
+    pub(crate) settings: crate::obsws::state::ObswsSoraSubscriberSettings,
     pub(crate) run: Option<SoraSubscriberRun>,
     /// 受信中のリモートトラック（trackId → トラック情報）
     pub(crate) remote_tracks: std::collections::HashMap<String, SoraSourceRemoteTrack>,
@@ -62,7 +62,7 @@ pub(crate) struct SoraConnectionInfo {
 // -----------------------------------------------------------------------
 
 /// Sora publisher output の設定。
-/// `ObswsSoraPublisherSettings` と同一フィールドを持ち、output_dynamic の enum から委譲される。
+/// `ObswsSoraPublisherSettings` と同一フィールドを持ち、output_registry の enum から委譲される。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct SoraOutputSettings {
     pub(crate) signaling_urls: Vec<String>,
@@ -72,8 +72,8 @@ pub(crate) struct SoraOutputSettings {
     pub(crate) metadata: Option<nojson::RawJsonOwned>,
 }
 
-impl From<crate::obsws::input_registry::ObswsSoraPublisherSettings> for SoraOutputSettings {
-    fn from(s: crate::obsws::input_registry::ObswsSoraPublisherSettings) -> Self {
+impl From<crate::obsws::state::ObswsSoraPublisherSettings> for SoraOutputSettings {
+    fn from(s: crate::obsws::state::ObswsSoraPublisherSettings) -> Self {
         Self {
             signaling_urls: s.signaling_urls,
             channel_id: s.channel_id,
@@ -84,7 +84,7 @@ impl From<crate::obsws::input_registry::ObswsSoraPublisherSettings> for SoraOutp
     }
 }
 
-impl From<SoraOutputSettings> for crate::obsws::input_registry::ObswsSoraPublisherSettings {
+impl From<SoraOutputSettings> for crate::obsws::state::ObswsSoraPublisherSettings {
     fn from(s: SoraOutputSettings) -> Self {
         Self {
             signaling_urls: s.signaling_urls,
@@ -205,7 +205,7 @@ impl SoraOutputSettings {
     pub(crate) fn parse_from_json(
         settings_value: Option<&nojson::RawJsonValue<'_, '_>>,
     ) -> Result<Self, String> {
-        use super::output_dynamic::parse_optional_string_strict;
+        use super::output_registry::parse_optional_string_strict;
 
         let mut settings = Self::default();
         if let Some(v) = settings_value {
@@ -256,8 +256,8 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use super::output_dynamic::{OutputRun, OutputSettings};
-        use crate::obsws::input_registry::ObswsSoraPublisherRun;
+        use super::output_registry::{OutputRun, OutputSettings};
+        use crate::obsws::state::ObswsSoraPublisherRun;
 
         let Some(output) = self.outputs.get(output_name) else {
             return OutputOperationOutcome::failure(
@@ -387,7 +387,7 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use super::output_dynamic::OutputRun;
+        use super::output_registry::OutputRun;
 
         let run = self
             .outputs
@@ -635,9 +635,9 @@ impl ObswsCoordinator {
     }
 
     pub(crate) fn clear_sora_source_track_id(&mut self, input_name: &str, track_kind: &str) {
-        if let Some(uuid) = self.input_registry.uuids_by_name.get(input_name)
-            && let Some(entry) = self.input_registry.inputs_by_uuid.get_mut(uuid)
-            && let crate::obsws::input_registry::ObswsInputSettings::SoraSource(ref mut s) =
+        if let Some(uuid) = self.state.uuids_by_name.get(input_name)
+            && let Some(entry) = self.state.inputs_by_uuid.get_mut(uuid)
+            && let crate::obsws::state::ObswsInputSettings::SoraSource(ref mut s) =
                 entry.input.settings
         {
             match track_kind {
@@ -728,7 +728,7 @@ impl ObswsCoordinator {
             .filter(|v| v.kind().is_object())
             .map(|v| v.extract().into_owned());
         // SoraSubscriberState を作成して挿入する
-        let settings = crate::obsws::input_registry::ObswsSoraSubscriberSettings {
+        let settings = crate::obsws::state::ObswsSoraSubscriberSettings {
             signaling_urls,
             channel_id: Some(channel_id.clone()),
             client_id,
@@ -1117,9 +1117,9 @@ impl ObswsCoordinator {
             .expect("BUG: track not found after lookup");
         rt.attached_input_name = Some(input_name.clone());
         rt.attached_pipeline_track_id = Some(pipeline_track_id.clone());
-        if let Some(uuid) = self.input_registry.uuids_by_name.get(&input_name)
-            && let Some(entry) = self.input_registry.inputs_by_uuid.get_mut(uuid)
-            && let crate::obsws::input_registry::ObswsInputSettings::SoraSource(ref mut s) =
+        if let Some(uuid) = self.state.uuids_by_name.get(&input_name)
+            && let Some(entry) = self.state.inputs_by_uuid.get_mut(uuid)
+            && let crate::obsws::state::ObswsInputSettings::SoraSource(ref mut s) =
                 entry.input.settings
         {
             match track_kind.as_str() {

@@ -16,11 +16,8 @@ impl super::ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
-        let execution = crate::obsws::response::execute_create_input(
-            request_id,
-            request_data,
-            &mut self.input_registry,
-        );
+        let execution =
+            crate::obsws::response::execute_create_input(request_id, request_data, &mut self.state);
         let response_text = execution.response_text;
         let mut events = Vec::new();
         if let Some(created) = execution.created {
@@ -111,23 +108,22 @@ impl super::ObswsCoordinator {
                 }
             };
         let removed_input = self
-            .input_registry
+            .state
             .find_input(input_uuid.as_deref(), input_name.as_deref())
             .cloned();
         // 削除前にシーンアイテムを収集する（イベント用）
-        let scene_items_to_remove = removed_input.as_ref().map(|input| {
-            self.input_registry
-                .find_scene_items_by_input_uuid(&input.input_uuid)
-        });
+        let scene_items_to_remove = removed_input
+            .as_ref()
+            .map(|input| self.state.find_scene_items_by_input_uuid(&input.input_uuid));
         let response_text = crate::obsws::response::build_remove_input_response(
             request_id,
             Some(request_data),
-            &mut self.input_registry,
+            &mut self.state,
         );
         let mut events = Vec::new();
         if let Some(removed_input) = removed_input {
             let removed_succeeded = self
-                .input_registry
+                .state
                 .find_input(Some(&removed_input.input_uuid), None)
                 .is_none();
             if removed_succeeded {
@@ -201,14 +197,14 @@ impl super::ObswsCoordinator {
         let execution = crate::obsws::response::execute_set_input_settings(
             request_id,
             Some(request_data),
-            &mut self.input_registry,
+            &mut self.state,
         );
         let response_text = execution.response_text;
         let mut events = Vec::new();
         if execution.request_succeeded
             && let Some((input_uuid, input_name)) = requested_input_lookup
             && let Some(updated_input) = self
-                .input_registry
+                .state
                 .find_input(input_uuid.as_deref(), input_name.as_deref())
                 .cloned()
         {
@@ -290,11 +286,11 @@ impl super::ObswsCoordinator {
         let execution = crate::obsws::response::build_set_input_mute_response(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         let mut events = Vec::new();
         if execution.request_succeeded
-            && let Some(entry) = self.input_registry.find_input(
+            && let Some(entry) = self.state.find_input(
                 execution.input_uuid.as_deref(),
                 execution.input_name.as_deref(),
             )
@@ -325,11 +321,11 @@ impl super::ObswsCoordinator {
         let execution = crate::obsws::response::build_toggle_input_mute_response(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         let mut events = Vec::new();
         if execution.request_succeeded
-            && let Some(entry) = self.input_registry.find_input(
+            && let Some(entry) = self.state.find_input(
                 execution.input_uuid.as_deref(),
                 execution.input_name.as_deref(),
             )
@@ -360,11 +356,11 @@ impl super::ObswsCoordinator {
         let execution = crate::obsws::response::build_set_input_volume_response(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         let mut events = Vec::new();
         if execution.request_succeeded
-            && let Some(entry) = self.input_registry.find_input(
+            && let Some(entry) = self.state.find_input(
                 execution.input_uuid.as_deref(),
                 execution.input_name.as_deref(),
             )
@@ -442,19 +438,19 @@ impl super::ObswsCoordinator {
         let old_input = requested_input_lookup
             .as_ref()
             .and_then(|(input_uuid, input_name)| {
-                self.input_registry
+                self.state
                     .find_input(input_uuid.as_deref(), input_name.as_deref())
                     .cloned()
             });
         let response_text = crate::obsws::response::build_set_input_name_response(
             request_id,
             Some(request_data),
-            &mut self.input_registry,
+            &mut self.state,
         );
         let mut events = Vec::new();
         if let Some(old_input) = old_input
             && let Some(updated_input) = self
-                .input_registry
+                .state
                 .find_input(Some(&old_input.input_uuid), None)
                 .cloned()
             && old_input.input_name != updated_input.input_name
@@ -502,7 +498,7 @@ impl super::ObswsCoordinator {
             };
 
         let Some(entry) = self
-            .input_registry
+            .state
             .find_input(input_uuid.as_deref(), input_name.as_deref())
         else {
             return self.build_error_result(
@@ -717,9 +713,9 @@ impl super::ObswsCoordinator {
         request_id: &str,
         input_uuid: &Option<String>,
         input_name: &Option<String>,
-    ) -> Result<crate::obsws::input_registry::ObswsInputEntry, Box<CommandResult>> {
+    ) -> Result<crate::obsws::state::ObswsInputEntry, Box<CommandResult>> {
         let Some(entry) = self
-            .input_registry
+            .state
             .find_input(input_uuid.as_deref(), input_name.as_deref())
         else {
             return Err(Box::new(self.build_error_result(
@@ -816,7 +812,7 @@ impl super::ObswsCoordinator {
     /// 入力ライフサイクルの source processor を起動する
     pub(crate) async fn start_input_source_processor(
         &mut self,
-        input_entry: &crate::obsws::input_registry::ObswsInputEntry,
+        input_entry: &crate::obsws::state::ObswsInputEntry,
     ) -> crate::Result<()> {
         let Some(pipeline_handle) = &self.pipeline_handle else {
             return Ok(());
@@ -827,7 +823,7 @@ impl super::ObswsCoordinator {
         let mut source_plan = crate::obsws::source::build_record_source_plan(
             input_entry,
             &input_entry.input_uuid,
-            self.input_registry.frame_rate(),
+            self.state.frame_rate(),
         )
         .map_err(|e| crate::Error::new(format!("failed to build source plan: {}", e.message())))?;
 
@@ -884,12 +880,7 @@ impl super::ObswsCoordinator {
 
     /// 初期入力に対して source processor を一括起動する
     pub async fn start_initial_input_source_processors(&mut self) -> crate::Result<()> {
-        let entries: Vec<_> = self
-            .input_registry
-            .inputs_by_uuid
-            .values()
-            .cloned()
-            .collect();
+        let entries: Vec<_> = self.state.inputs_by_uuid.values().cloned().collect();
         for entry in entries {
             if !crate::obsws::source::is_source_startable(&entry.input.settings) {
                 continue;
@@ -911,7 +902,7 @@ impl super::ObswsCoordinator {
             let Some(ref audio_track_id) = source_state.audio_track_id else {
                 continue;
             };
-            let Some(entry) = self.input_registry.find_input(Some(input_uuid), None) else {
+            let Some(entry) = self.state.find_input(Some(input_uuid), None) else {
                 continue;
             };
             // デフォルト値（unmuted, 1.0）の場合は通知を省略する

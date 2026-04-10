@@ -125,13 +125,13 @@ fn convert_captured_frame_to_i16be(
 
 /// source processor を起動できる設定が揃っているかを返す
 pub(super) fn is_source_startable(
-    settings: &crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings,
+    settings: &crate::obsws::state::ObswsAudioCaptureDeviceSettings,
 ) -> bool {
     settings.device_id.is_some()
 }
 
 pub(super) fn build_record_source_plan(
-    settings: &crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings,
+    settings: &crate::obsws::state::ObswsAudioCaptureDeviceSettings,
     source_key: &str,
 ) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
     let source_processor_id =
@@ -159,8 +159,8 @@ pub(super) fn build_record_source_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::obsws::input_registry::ObswsAudioCaptureDeviceSettings;
     use crate::obsws::source::ObswsSourceRequest;
+    use crate::obsws::state::ObswsAudioCaptureDeviceSettings;
 
     #[test]
     fn build_record_source_plan_with_device_id() {

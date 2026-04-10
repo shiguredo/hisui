@@ -1,5 +1,5 @@
 //! SceneItem CRUD ハンドラを定義するモジュール。
-//! input_registry 内のシーンに属するシーンアイテムを変更し、
+//! state 内のシーンに属するシーンアイテムを変更し、
 //! シーンアイテム関連の obsws イベントを発行する。
 
 use super::{CommandResult, ObswsCoordinator};
@@ -18,7 +18,7 @@ impl ObswsCoordinator {
         let execution = crate::obsws::response::execute_create_scene_item(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         let response_text = execution.response_text;
         let mut events = Vec::new();
@@ -72,13 +72,10 @@ impl ObswsCoordinator {
             }
         };
         let target_fields = self
-            .input_registry
+            .state
             .resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
             .map(|scene_name| {
-                let scene_uuid = self
-                    .input_registry
-                    .get_scene_uuid(&scene_name)
-                    .unwrap_or_default();
+                let scene_uuid = self.state.get_scene_uuid(&scene_name).unwrap_or_default();
                 (scene_name, scene_uuid, scene_item_id)
             });
         let removed_scene_item =
@@ -86,13 +83,13 @@ impl ObswsCoordinator {
                 .as_ref()
                 .and_then(|(scene_name, _, scene_item_id)| {
                     let (source_name, source_uuid) = self
-                        .input_registry
+                        .state
                         .get_scene_item_source(scene_name, *scene_item_id)
                         .ok()?;
                     Some((source_name, source_uuid))
                 });
         let scene_items_before = target_fields.as_ref().and_then(|(scene_name, _, _)| {
-            self.input_registry
+            self.state
                 .list_scene_items(scene_name)
                 .ok()
                 .map(|scene_items| {
@@ -105,7 +102,7 @@ impl ObswsCoordinator {
         let response_text = crate::obsws::response::build_remove_scene_item_response(
             request_id,
             Some(request_data),
-            &mut self.input_registry,
+            &mut self.state,
         );
         let mut events = Vec::new();
         if let Some((scene_name, scene_uuid, scene_item_id)) = target_fields
@@ -122,16 +119,14 @@ impl ObswsCoordinator {
                 subscription_flag: OBSWS_EVENT_SUB_SCENE_ITEMS,
             });
             let scene_items_after = self
-                .input_registry
+                .state
                 .list_scene_items(&scene_name)
                 .unwrap_or_default()
                 .iter()
-                .map(
-                    |si| crate::obsws::input_registry::ObswsSceneItemIndexEntry {
-                        scene_item_id: si.scene_item_id,
-                        scene_item_index: si.scene_item_index,
-                    },
-                )
+                .map(|si| crate::obsws::state::ObswsSceneItemIndexEntry {
+                    scene_item_id: si.scene_item_id,
+                    scene_item_index: si.scene_item_index,
+                })
                 .collect::<Vec<_>>();
             let scene_items_after_simple = scene_items_after
                 .iter()
@@ -169,7 +164,7 @@ impl ObswsCoordinator {
         let execution = crate::obsws::response::execute_duplicate_scene_item(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         let response_text = execution.response_text;
         let mut events = Vec::new();
@@ -220,16 +215,16 @@ impl ObswsCoordinator {
                 .as_ref()
                 .and_then(|(scene_name, scene_uuid, scene_item_id, _)| {
                     let resolved_name = self
-                        .input_registry
+                        .state
                         .resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())?;
-                    self.input_registry
+                    self.state
                         .get_scene_item_enabled(&resolved_name, *scene_item_id)
                         .ok()
                 });
         let response_text = crate::obsws::response::build_set_scene_item_enabled_response(
             request_id,
             Some(request_data),
-            &mut self.input_registry,
+            &mut self.state,
         );
         let mut events = Vec::new();
         if let Some((scene_name, scene_uuid, scene_item_id, scene_item_enabled)) = requested_fields
@@ -237,11 +232,11 @@ impl ObswsCoordinator {
             && prev != scene_item_enabled
         {
             let resolved_scene_name = self
-                .input_registry
+                .state
                 .resolve_scene_name(scene_name.as_deref(), scene_uuid.as_deref())
                 .unwrap_or_default();
             let resolved_scene_uuid = self
-                .input_registry
+                .state
                 .get_scene_uuid(&resolved_scene_name)
                 .unwrap_or_default();
             events.push(TaggedEvent {
@@ -265,7 +260,7 @@ impl ObswsCoordinator {
         let execution = crate::obsws::response::execute_set_scene_item_locked(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         let response_text = execution.response_text;
         let mut events = Vec::new();
@@ -293,7 +288,7 @@ impl ObswsCoordinator {
         let execution = crate::obsws::response::execute_set_scene_item_index(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         let response_text = execution.response_text;
         let mut events = Vec::new();
@@ -318,7 +313,7 @@ impl ObswsCoordinator {
         let response_text = crate::obsws::response::build_set_scene_item_blend_mode_response(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         self.build_result_from_response(response_text, Vec::new())
     }
@@ -331,7 +326,7 @@ impl ObswsCoordinator {
         let execution = crate::obsws::response::execute_set_scene_item_transform(
             request_id,
             request_data,
-            &mut self.input_registry,
+            &mut self.state,
         );
         let response_text = execution.response_text;
         let mut events = Vec::new();

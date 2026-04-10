@@ -5,10 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::obsws::input_registry::{
+use crate::obsws::state::{
     DashDestination, DashVariant, HlsDestination, HlsSegmentFormat, HlsVariant, ObswsDashSettings,
-    ObswsHlsSettings, ObswsInputRegistry, ObswsRtmpOutboundSettings, ObswsSceneItemBlendMode,
-    ObswsSceneItemTransform, ObswsSoraPublisherSettings, ObswsSrtInboundSettings,
+    ObswsHlsSettings, ObswsRtmpOutboundSettings, ObswsSceneItemBlendMode, ObswsSceneItemTransform,
+    ObswsSessionState, ObswsSoraPublisherSettings, ObswsSrtInboundSettings,
     ObswsStreamServiceSettings, ObswsWebRtcSourceSettings,
 };
 
@@ -282,7 +282,7 @@ fn parse_optional_hls(
 
     let segment_duration: Option<f64> = v.to_member("segmentDuration")?.try_into()?;
     let segment_duration =
-        segment_duration.unwrap_or(crate::obsws::input_registry::DEFAULT_HLS_SEGMENT_DURATION_SECS);
+        segment_duration.unwrap_or(crate::obsws::state::DEFAULT_HLS_SEGMENT_DURATION_SECS);
     // NaN / Infinity は JSON 仕様上パーサが弾くため、ここでは正値チェックのみ行う
     if segment_duration <= 0.0 {
         return Err(v
@@ -292,8 +292,8 @@ fn parse_optional_hls(
     }
 
     let max_retained_segments: Option<usize> = v.to_member("maxRetainedSegments")?.try_into()?;
-    let max_retained_segments = max_retained_segments
-        .unwrap_or(crate::obsws::input_registry::DEFAULT_HLS_MAX_RETAINED_SEGMENTS);
+    let max_retained_segments =
+        max_retained_segments.unwrap_or(crate::obsws::state::DEFAULT_HLS_MAX_RETAINED_SEGMENTS);
     if max_retained_segments == 0 {
         return Err(v
             .to_member("maxRetainedSegments")?
@@ -417,8 +417,8 @@ fn parse_optional_dash(
     let destination = parse_optional_dash_destination(v)?;
 
     let segment_duration: Option<f64> = v.to_member("segmentDuration")?.try_into()?;
-    let segment_duration = segment_duration
-        .unwrap_or(crate::obsws::input_registry::DEFAULT_DASH_SEGMENT_DURATION_SECS);
+    let segment_duration =
+        segment_duration.unwrap_or(crate::obsws::state::DEFAULT_DASH_SEGMENT_DURATION_SECS);
     // NaN / Infinity は JSON 仕様上パーサが弾くため、ここでは正値チェックのみ行う
     if segment_duration <= 0.0 {
         return Err(v
@@ -428,8 +428,8 @@ fn parse_optional_dash(
     }
 
     let max_retained_segments: Option<usize> = v.to_member("maxRetainedSegments")?.try_into()?;
-    let max_retained_segments = max_retained_segments
-        .unwrap_or(crate::obsws::input_registry::DEFAULT_DASH_MAX_RETAINED_SEGMENTS);
+    let max_retained_segments =
+        max_retained_segments.unwrap_or(crate::obsws::state::DEFAULT_DASH_MAX_RETAINED_SEGMENTS);
     if max_retained_segments == 0 {
         return Err(v
             .to_member("maxRetainedSegments")?
@@ -1339,15 +1339,15 @@ pub fn save_state_file(path: &Path, state: &ObswsStateFile) -> crate::Result<()>
     Ok(())
 }
 
-/// ObswsInputRegistry と outputs BTreeMap の現在値から ObswsStateFile を構築する。
+/// ObswsSessionState と outputs BTreeMap の現在値から ObswsStateFile を構築する。
 pub(crate) fn build_state_from_registry(
-    registry: &ObswsInputRegistry,
+    registry: &ObswsSessionState,
     outputs_map: &std::collections::BTreeMap<
         String,
-        crate::obsws::coordinator::output_dynamic::OutputState,
+        crate::obsws::coordinator::output_registry::OutputState,
     >,
 ) -> ObswsStateFile {
-    use crate::obsws::coordinator::output_dynamic::OutputSettings;
+    use crate::obsws::coordinator::output_registry::OutputSettings;
 
     // outputs BTreeMap から outputs セクションを構築する
     // ビルトイン output（Player 等）は永続設定を持たないためスキップする
@@ -1425,11 +1425,11 @@ pub(crate) fn build_state_from_registry(
         for (uuid, entry) in &registry.inputs_by_uuid {
             // input settings を適切な DisplayJson でシリアライズする
             let settings_json = match &entry.input.settings {
-                crate::obsws::input_registry::ObswsInputSettings::SrtInbound(srt) => {
+                crate::obsws::state::ObswsInputSettings::SrtInbound(srt) => {
                     // SRT inbound は passphrase を含めて出力する
                     crate::json::to_pretty_string(SrtInboundSettingsWithPassphrase(srt))
                 }
-                crate::obsws::input_registry::ObswsInputSettings::WebRtcSource(webrtc) => {
+                crate::obsws::state::ObswsInputSettings::WebRtcSource(webrtc) => {
                     // WebRTC source は track_id を除外する
                     crate::json::to_pretty_string(WebRtcSourceSettingsWithoutTrackId(webrtc))
                 }
@@ -2773,7 +2773,7 @@ mod tests {
 
     #[test]
     fn restore_sora_output_preserves_metadata() {
-        use crate::obsws::coordinator::output_dynamic::{
+        use crate::obsws::coordinator::output_registry::{
             OutputSettings, restore_outputs_from_state,
         };
 
@@ -2889,7 +2889,7 @@ mod tests {
 
     #[test]
     fn restore_outputs_from_state_fails_on_invalid_output_settings() {
-        use crate::obsws::coordinator::output_dynamic::restore_outputs_from_state;
+        use crate::obsws::coordinator::output_registry::restore_outputs_from_state;
 
         let state_outputs = vec![StateFileOutput {
             output_name: "broken_stream".to_owned(),

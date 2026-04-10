@@ -1,15 +1,15 @@
 use crate::obsws::auth::ObswsAuthentication;
-use crate::obsws::input_registry::{
-    ObswsInput, ObswsInputEntry, ObswsInputRegistry, ObswsInputSettings, ObswsSceneItemBlendMode,
-    ObswsSceneItemRef, ObswsSceneItemTransformPatch, ParseInputSettingsError,
-    SetSceneItemIndexResult, SetSceneItemLockedResult, SetSceneItemTransformResult,
-};
 use crate::obsws::protocol::{
     OBS_STUDIO_VERSION, OBSWS_OP_HELLO, OBSWS_OP_IDENTIFIED, OBSWS_OP_REQUEST_BATCH_RESPONSE,
     OBSWS_OP_REQUEST_RESPONSE, OBSWS_RPC_VERSION, OBSWS_VERSION,
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_DATA,
     REQUEST_STATUS_MISSING_REQUEST_FIELD, REQUEST_STATUS_RESOURCE_NOT_FOUND,
     REQUEST_STATUS_SUCCESS,
+};
+use crate::obsws::state::{
+    ObswsInput, ObswsInputEntry, ObswsInputSettings, ObswsSceneItemBlendMode, ObswsSceneItemRef,
+    ObswsSceneItemTransformPatch, ObswsSessionState, ParseInputSettingsError,
+    SetSceneItemIndexResult, SetSceneItemLockedResult, SetSceneItemTransformResult,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -959,11 +959,11 @@ where
 fn resolve_scene_name_or_error(
     request_type: &str,
     request_id: &str,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
     scene_name: Option<&str>,
     scene_uuid: Option<&str>,
 ) -> Result<(String, String), nojson::RawJsonOwned> {
-    let resolved_name = input_registry
+    let resolved_name = state
         .resolve_scene_name(scene_name, scene_uuid)
         .ok_or_else(|| {
             build_request_response_error(
@@ -973,16 +973,14 @@ fn resolve_scene_name_or_error(
                 "Scene not found",
             )
         })?;
-    let resolved_uuid = input_registry
-        .get_scene_uuid(&resolved_name)
-        .ok_or_else(|| {
-            build_request_response_error(
-                request_type,
-                request_id,
-                REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                "Internal error: resolved scene UUID not found",
-            )
-        })?;
+    let resolved_uuid = state.get_scene_uuid(&resolved_name).ok_or_else(|| {
+        build_request_response_error(
+            request_type,
+            request_id,
+            REQUEST_STATUS_RESOURCE_NOT_FOUND,
+            "Internal error: resolved scene UUID not found",
+        )
+    })?;
     Ok((resolved_name, resolved_uuid))
 }
 
@@ -1057,11 +1055,11 @@ pub use scene_item::*;
 pub(crate) fn collect_output_runtime_stats_from_outputs(
     outputs: &std::collections::BTreeMap<
         String,
-        crate::obsws::coordinator::output_dynamic::OutputState,
+        crate::obsws::coordinator::output_registry::OutputState,
     >,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> ObswsOutputRuntimeStats {
-    use crate::obsws::coordinator::output_dynamic::OutputRun;
+    use crate::obsws::coordinator::output_registry::OutputRun;
 
     let Some(pipeline_handle) = pipeline_handle else {
         return ObswsOutputRuntimeStats::default();

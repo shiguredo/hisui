@@ -3,7 +3,6 @@
 pub mod auth;
 pub mod coordinator;
 pub mod event;
-pub mod input_registry;
 pub mod message;
 mod output_plan;
 #[cfg(feature = "player")]
@@ -13,4 +12,5 @@ pub mod response;
 pub mod server;
 pub mod session;
 pub(crate) mod source;
+pub mod state;
 pub mod state_file;

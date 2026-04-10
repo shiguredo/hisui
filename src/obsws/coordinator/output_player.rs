@@ -3,7 +3,7 @@
 
 use super::ObswsCoordinator;
 use super::output::OutputOperationOutcome;
-use super::output_dynamic::OutputRun;
+use super::output_registry::OutputRun;
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_start_player(
@@ -22,8 +22,8 @@ impl ObswsCoordinator {
             );
         }
 
-        let canvas_width = self.input_registry.canvas_width().get() as i32;
-        let canvas_height = self.input_registry.canvas_height().get() as i32;
+        let canvas_width = self.state.canvas_width().get() as i32;
+        let canvas_height = self.state.canvas_height().get() as i32;
         let pipeline_handle = match self.pipeline_handle.as_ref() {
             Some(h) => h.clone(),
             None => {

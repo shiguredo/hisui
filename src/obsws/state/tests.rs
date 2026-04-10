@@ -18,7 +18,7 @@ fn empty_video_capture_device_input() -> ObswsInput {
 
 #[test]
 fn find_input_by_uuid_and_name() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry.insert_for_test(ObswsInputEntry::new_for_test(
         "input-uuid-1",
         "camera-1",
@@ -42,7 +42,7 @@ fn find_input_by_uuid_and_name() {
 
 #[test]
 fn supported_input_kinds_contains_expected_values() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     assert!(registry.supported_input_kinds().contains(&"image_source"));
     assert!(
         registry
@@ -198,7 +198,7 @@ fn parse_input_settings_ignores_unknown_fields() {
 
 #[test]
 fn set_input_settings_with_overlay_rejects_non_positive_fps() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "video_capture_device",
         parse_owned_json(r#"{"device_id":"camera-1","fps":30}"#).value(),
@@ -226,7 +226,7 @@ fn set_input_settings_with_overlay_rejects_non_positive_fps() {
 
 #[test]
 fn create_input_succeeds_with_supported_values() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let settings = parse_owned_json("{}");
     let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
         .expect("input settings must be valid");
@@ -241,7 +241,7 @@ fn create_input_succeeds_with_supported_values() {
 
 #[test]
 fn create_input_rejects_duplicate_name() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let first_settings = parse_owned_json("{}");
     let first_input =
         ObswsInput::from_kind_and_settings("video_capture_device", first_settings.value())
@@ -262,7 +262,7 @@ fn create_input_rejects_duplicate_name() {
 
 #[test]
 fn create_input_rejects_unsupported_scene_name() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let settings = parse_owned_json("{}");
     let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
         .expect("input settings must be valid");
@@ -274,7 +274,7 @@ fn create_input_rejects_unsupported_scene_name() {
 
 #[test]
 fn set_input_settings_with_overlay_updates_specified_fields_only() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "video_capture_device",
         parse_owned_json(r#"{"device_id":"camera-1"}"#).value(),
@@ -327,7 +327,7 @@ fn set_input_settings_with_overlay_updates_specified_fields_only() {
 
 #[test]
 fn set_input_settings_without_overlay_replaces_existing_settings() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "video_capture_device",
         parse_owned_json(r#"{"device_id":"camera-1"}"#).value(),
@@ -360,7 +360,7 @@ fn set_input_settings_without_overlay_replaces_existing_settings() {
 
 #[test]
 fn set_input_settings_returns_not_found_error_for_unknown_input() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let error = registry
         .set_input_settings(
             None,
@@ -374,7 +374,7 @@ fn set_input_settings_returns_not_found_error_for_unknown_input() {
 
 #[test]
 fn set_input_name_updates_name_lookup_and_entry() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -395,7 +395,7 @@ fn set_input_name_updates_name_lookup_and_entry() {
 
 #[test]
 fn set_input_name_returns_expected_errors() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input_1 =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -422,7 +422,7 @@ fn set_input_name_returns_expected_errors() {
 
 #[test]
 fn get_input_default_settings_returns_default_object_per_kind() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
 
     let image_default = registry
         .get_input_default_settings("image_source")
@@ -451,7 +451,7 @@ fn get_input_default_settings_returns_default_object_per_kind() {
 
 #[test]
 fn get_input_default_settings_rejects_unsupported_kind() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let error = registry
         .get_input_default_settings("unsupported_kind")
         .expect_err("unsupported input kind must be rejected");
@@ -460,7 +460,7 @@ fn get_input_default_settings_rejects_unsupported_kind() {
 
 #[test]
 fn get_scene_item_id_assigns_global_sequential_ids() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -491,7 +491,7 @@ fn get_scene_item_id_assigns_global_sequential_ids() {
 
 #[test]
 fn get_scene_item_id_rejects_non_zero_search_offset() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -507,7 +507,7 @@ fn get_scene_item_id_rejects_non_zero_search_offset() {
 
 #[test]
 fn get_scene_item_id_returns_not_found_errors() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -528,7 +528,7 @@ fn get_scene_item_id_returns_not_found_errors() {
 
 #[test]
 fn get_scene_item_id_resolves_source_by_uuid() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -551,7 +551,7 @@ fn get_scene_item_id_resolves_source_by_uuid() {
 
 #[test]
 fn set_scene_item_enabled_updates_scene_item_state() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -578,7 +578,7 @@ fn set_scene_item_enabled_updates_scene_item_state() {
 
 #[test]
 fn set_scene_item_enabled_returns_not_found_errors() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -599,7 +599,7 @@ fn set_scene_item_enabled_returns_not_found_errors() {
 
 #[test]
 fn get_scene_item_enabled_returns_current_state() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -627,7 +627,7 @@ fn get_scene_item_enabled_returns_current_state() {
 
 #[test]
 fn create_input_with_scene_item_disabled_creates_disabled_scene_item() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -646,7 +646,7 @@ fn create_input_with_scene_item_disabled_creates_disabled_scene_item() {
 
 #[test]
 fn get_scene_item_enabled_returns_not_found_errors() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -670,7 +670,7 @@ fn get_scene_item_enabled_returns_not_found_errors() {
 
 #[test]
 fn set_and_get_scene_item_locked_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -699,7 +699,7 @@ fn set_and_get_scene_item_locked_succeeds() {
 
 #[test]
 fn set_and_get_scene_item_blend_mode_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -732,7 +732,7 @@ fn set_and_get_scene_item_blend_mode_succeeds() {
 
 #[test]
 fn set_and_get_scene_item_transform_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input =
         ObswsInput::from_kind_and_settings("video_capture_device", parse_owned_json("{}").value())
             .expect("input settings must be valid");
@@ -769,7 +769,7 @@ fn set_and_get_scene_item_transform_succeeds() {
 
 #[test]
 fn create_scene_item_and_list_scene_items_succeed() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -795,7 +795,7 @@ fn create_scene_item_and_list_scene_items_succeed() {
 
 #[test]
 fn remove_scene_item_and_set_scene_item_index_succeed() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -847,7 +847,7 @@ fn remove_scene_item_and_set_scene_item_index_succeed() {
 
 #[test]
 fn duplicate_scene_item_to_another_scene_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -908,7 +908,7 @@ fn duplicate_scene_item_to_another_scene_succeeds() {
 
 #[test]
 fn remove_input_by_name_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let settings = parse_owned_json("{}");
     let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
         .expect("input settings must be valid");
@@ -927,7 +927,7 @@ fn remove_input_by_name_succeeds() {
 
 #[test]
 fn remove_input_by_uuid_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let settings = parse_owned_json("{}");
     let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())
         .expect("input settings must be valid");
@@ -946,14 +946,14 @@ fn remove_input_by_uuid_succeeds() {
 
 #[test]
 fn remove_input_returns_none_when_not_found() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let removed = registry.remove_input(None, Some("not-found"));
     assert!(removed.is_none());
 }
 
 #[test]
 fn scene_list_contains_default_scene() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let scenes = registry.list_scenes();
     assert_eq!(scenes.len(), 1);
     assert_eq!(scenes[0].scene_name, OBSWS_DEFAULT_SCENE_NAME);
@@ -967,7 +967,7 @@ fn scene_list_contains_default_scene() {
 
 #[test]
 fn get_scene_uuid_returns_expected_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let created = registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -978,7 +978,7 @@ fn get_scene_uuid_returns_expected_value() {
 
 #[test]
 fn create_scene_and_set_current_program_scene_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let created = registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -997,7 +997,7 @@ fn create_scene_and_set_current_program_scene_succeeds() {
 
 #[test]
 fn create_scene_and_set_current_preview_scene_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let created = registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -1016,7 +1016,7 @@ fn create_scene_and_set_current_preview_scene_succeeds() {
 
 #[test]
 fn set_scene_name_updates_scene_and_current_scene_names() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -1058,7 +1058,7 @@ fn set_scene_name_updates_scene_and_current_scene_names() {
 
 #[test]
 fn set_scene_name_rejects_duplicate_scene_name() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -1070,7 +1070,7 @@ fn set_scene_name_rejects_duplicate_scene_name() {
 
 #[test]
 fn is_source_active_returns_true_when_source_is_enabled_in_program_scene() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "video_capture_device",
         parse_owned_json(r#"{}"#).value(),
@@ -1087,7 +1087,7 @@ fn is_source_active_returns_true_when_source_is_enabled_in_program_scene() {
 
 #[test]
 fn scene_transition_override_round_trip_succeeds() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let override_entry = registry
         .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("fade_transition"), Some(500))
         .expect("transition override update must succeed");
@@ -1106,7 +1106,7 @@ fn scene_transition_override_round_trip_succeeds() {
 
 #[test]
 fn set_scene_name_moves_scene_transition_override_to_new_scene_name() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .set_scene_transition_override(OBSWS_DEFAULT_SCENE_NAME, Some("fade_transition"), Some(500))
         .expect("transition override update must succeed");
@@ -1127,7 +1127,7 @@ fn set_scene_name_moves_scene_transition_override_to_new_scene_name() {
 
 #[test]
 fn transition_runtime_defaults_to_cut_and_500ms() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     assert_eq!(registry.current_scene_transition_name(), "fade_transition");
     assert_eq!(registry.current_scene_transition_duration_ms(), 500);
     // デフォルトでは transitionSettings は None（OBS 互換で null を返す）
@@ -1149,7 +1149,7 @@ fn transition_runtime_defaults_to_cut_and_500ms() {
 
 #[test]
 fn set_current_scene_transition_updates_transition_name() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .set_current_scene_transition("fade_transition")
         .expect("setting transition to Fade must succeed");
@@ -1158,7 +1158,7 @@ fn set_current_scene_transition_updates_transition_name() {
 
 #[test]
 fn set_current_scene_transition_rejects_unknown_transition() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let error = registry
         .set_current_scene_transition("Swipe")
         .expect_err("unknown transition must be rejected");
@@ -1167,7 +1167,7 @@ fn set_current_scene_transition_rejects_unknown_transition() {
 
 #[test]
 fn set_current_scene_transition_duration_rejects_negative_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let error = registry
         .set_current_scene_transition_duration_ms(-1)
         .expect_err("negative transition duration must be rejected");
@@ -1179,7 +1179,7 @@ fn set_current_scene_transition_duration_rejects_negative_value() {
 
 #[test]
 fn set_current_scene_transition_duration_rejects_zero_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let error = registry
         .set_current_scene_transition_duration_ms(0)
         .expect_err("zero transition duration must be rejected");
@@ -1191,7 +1191,7 @@ fn set_current_scene_transition_duration_rejects_zero_value() {
 
 #[test]
 fn set_current_scene_transition_duration_rejects_too_large_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let error = registry
         .set_current_scene_transition_duration_ms(20_001)
         .expect_err("too large transition duration must be rejected");
@@ -1203,7 +1203,7 @@ fn set_current_scene_transition_duration_rejects_too_large_value() {
 
 #[test]
 fn set_current_scene_transition_duration_updates_runtime_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .set_current_scene_transition_duration_ms(500)
         .expect("transition duration update must succeed");
@@ -1212,7 +1212,7 @@ fn set_current_scene_transition_duration_updates_runtime_value() {
 
 #[test]
 fn set_current_scene_transition_settings_updates_runtime_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let transition_settings = nojson::RawJsonOwned::parse(r#"{"speed":2,"style":"smooth"}"#)
         .expect("transition settings must be valid json");
     registry
@@ -1231,7 +1231,7 @@ fn set_current_scene_transition_settings_updates_runtime_value() {
 
 #[test]
 fn set_current_scene_transition_settings_rejects_non_object_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let transition_settings =
         nojson::RawJsonOwned::parse(r#""invalid""#).expect("json must be valid");
     let error = registry
@@ -1245,7 +1245,7 @@ fn set_current_scene_transition_settings_rejects_non_object_value() {
 
 #[test]
 fn set_tbar_position_updates_runtime_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .set_tbar_position(0.25)
         .expect("tbar position update must succeed");
@@ -1254,7 +1254,7 @@ fn set_tbar_position_updates_runtime_value() {
 
 #[test]
 fn set_tbar_position_rejects_out_of_range_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let error = registry
         .set_tbar_position(1.5)
         .expect_err("out-of-range tbar position must be rejected");
@@ -1263,7 +1263,7 @@ fn set_tbar_position_rejects_out_of_range_value() {
 
 #[test]
 fn remove_scene_removes_non_current_scene() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -1283,7 +1283,7 @@ fn remove_scene_removes_non_current_scene() {
 
 #[test]
 fn remove_scene_switches_current_program_scene_when_current_is_removed() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -1304,7 +1304,7 @@ fn remove_scene_switches_current_program_scene_when_current_is_removed() {
 
 #[test]
 fn remove_scene_switches_current_preview_scene_when_current_is_removed() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -1325,7 +1325,7 @@ fn remove_scene_switches_current_preview_scene_when_current_is_removed() {
 
 #[test]
 fn remove_scene_rejects_deleting_last_scene() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let error = registry
         .remove_scene(OBSWS_DEFAULT_SCENE_NAME)
         .expect_err("last scene removal must fail");
@@ -1351,7 +1351,7 @@ fn srt_inbound_display_json_excludes_passphrase() {
 
 #[test]
 fn create_input_returns_error_when_uuid_suffix_range_is_exhausted() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry.next_input_id = OBSWS_MAX_INPUT_ID_FOR_UUID_SUFFIX + 1;
     let settings = parse_owned_json("{}");
     let input = ObswsInput::from_kind_and_settings("video_capture_device", settings.value())

@@ -76,13 +76,13 @@ impl ColorSource {
 
 /// source processor を起動できる設定が揃っているかを返す
 pub(super) fn is_source_startable(
-    _settings: &crate::obsws::input_registry::ObswsColorSourceSettings,
+    _settings: &crate::obsws::state::ObswsColorSourceSettings,
 ) -> bool {
     true
 }
 
 pub(super) fn build_record_source_plan(
-    settings: &crate::obsws::input_registry::ObswsColorSourceSettings,
+    settings: &crate::obsws::state::ObswsColorSourceSettings,
     source_key: &str,
     frame_rate: FrameRate,
 ) -> std::result::Result<super::ObswsRecordSourcePlan, super::BuildObswsRecordSourcePlanError> {
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn build_record_source_plan_uses_default_color_when_none() {
-        let settings = crate::obsws::input_registry::ObswsColorSourceSettings { color: None };
+        let settings = crate::obsws::state::ObswsColorSourceSettings { color: None };
         let plan = build_record_source_plan(&settings, "test", FrameRate::FPS_30)
             .expect("build_record_source_plan must succeed");
         assert!(plan.source_video_track_id.is_some());
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn build_record_source_plan_uses_specified_color() {
-        let settings = crate::obsws::input_registry::ObswsColorSourceSettings {
+        let settings = crate::obsws::state::ObswsColorSourceSettings {
             color: Some("#FF0000".to_owned()),
         };
         let plan = build_record_source_plan(&settings, "red", FrameRate::FPS_30)

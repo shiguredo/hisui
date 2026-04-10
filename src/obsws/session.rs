@@ -30,13 +30,13 @@ pub enum SessionAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ObswsSessionState {
+enum ObswsSessionPhase {
     AwaitingIdentify,
     Identified,
 }
 
 pub struct ObswsSession {
-    state: ObswsSessionState,
+    state: ObswsSessionPhase,
     negotiated_rpc_version: Option<u32>,
     event_subscriptions: u32,
     auth: Option<ObswsAuthentication>,
@@ -55,7 +55,7 @@ impl ObswsSession {
         coordinator_handle: ObswsCoordinatorHandle,
     ) -> Self {
         Self {
-            state: ObswsSessionState::AwaitingIdentify,
+            state: ObswsSessionPhase::AwaitingIdentify,
             negotiated_rpc_version: None,
             event_subscriptions: 0,
             auth,
@@ -67,7 +67,7 @@ impl ObswsSession {
     /// DataChannel 経由の接続用。認証なし・Identified 状態で初期化する。
     pub fn new_identified(coordinator_handle: ObswsCoordinatorHandle) -> Self {
         Self {
-            state: ObswsSessionState::Identified,
+            state: ObswsSessionPhase::Identified,
             negotiated_rpc_version: Some(1),
             event_subscriptions: OBSWS_EVENT_SUB_ALL,
             auth: None,
@@ -118,7 +118,7 @@ impl ObswsSession {
         &mut self,
         request: crate::obsws::message::RequestMessage,
     ) -> SessionAction {
-        if self.state != ObswsSessionState::Identified {
+        if self.state != ObswsSessionPhase::Identified {
             return SessionAction::Close {
                 code: OBSWS_CLOSE_NOT_IDENTIFIED,
                 reason: "identify is required",
@@ -176,7 +176,7 @@ impl ObswsSession {
     }
 
     async fn handle_request_batch(&mut self, request_batch: RequestBatchMessage) -> SessionAction {
-        if self.state != ObswsSessionState::Identified {
+        if self.state != ObswsSessionPhase::Identified {
             return SessionAction::Close {
                 code: OBSWS_CLOSE_NOT_IDENTIFIED,
                 reason: "identify is required",
@@ -341,7 +341,7 @@ impl ObswsSession {
         &mut self,
         identify: crate::obsws::message::IdentifyMessage,
     ) -> SessionAction {
-        if self.state != ObswsSessionState::AwaitingIdentify {
+        if self.state != ObswsSessionPhase::AwaitingIdentify {
             return SessionAction::Close {
                 code: OBSWS_CLOSE_ALREADY_IDENTIFIED,
                 reason: "already identified",
@@ -368,7 +368,7 @@ impl ObswsSession {
             };
         }
 
-        self.state = ObswsSessionState::Identified;
+        self.state = ObswsSessionPhase::Identified;
         self.negotiated_rpc_version = Some(rpc_version);
         self.event_subscriptions = identify.event_subscriptions.unwrap_or(OBSWS_EVENT_SUB_ALL);
 
@@ -382,7 +382,7 @@ impl ObswsSession {
         &mut self,
         reidentify: crate::obsws::message::ReidentifyMessage,
     ) -> SessionAction {
-        if self.state != ObswsSessionState::Identified {
+        if self.state != ObswsSessionPhase::Identified {
             return SessionAction::Close {
                 code: OBSWS_CLOSE_NOT_IDENTIFIED,
                 reason: "identify is required",

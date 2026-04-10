@@ -1,9 +1,9 @@
-use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::message::ObswsSessionStats;
 use crate::obsws::protocol::{
     OBSWS_RPC_VERSION, OBSWS_SUPPORTED_IMAGE_FORMATS, OBSWS_VERSION,
     REQUEST_STATUS_INVALID_REQUEST_FIELD,
 };
+use crate::obsws::state::ObswsSessionState;
 #[cfg(unix)]
 use std::ffi::CString;
 #[cfg(unix)]
@@ -135,7 +135,7 @@ pub(crate) fn build_get_stats_response(
     session_stats: &ObswsSessionStats,
     outputs: &std::collections::BTreeMap<
         String,
-        crate::obsws::coordinator::output_dynamic::OutputState,
+        crate::obsws::coordinator::output_registry::OutputState,
     >,
     pipeline_handle: Option<&crate::MediaPipelineHandle>,
 ) -> nojson::RawJsonOwned {
@@ -180,10 +180,10 @@ struct ObswsRuntimeStats {
 fn collect_runtime_stats(
     outputs: &std::collections::BTreeMap<
         String,
-        crate::obsws::coordinator::output_dynamic::OutputState,
+        crate::obsws::coordinator::output_registry::OutputState,
     >,
 ) -> ObswsRuntimeStats {
-    use crate::obsws::coordinator::output_dynamic::OutputSettings;
+    use crate::obsws::coordinator::output_registry::OutputSettings;
     // record output の record_directory からディスク容量を取得する
     let record_dir = outputs.get("record").and_then(|o| match &o.settings {
         OutputSettings::Record(s) => Some(s.record_directory.as_path()),
@@ -199,11 +199,11 @@ fn collect_runtime_stats(
 fn calculate_active_fps_from_outputs(
     outputs: &std::collections::BTreeMap<
         String,
-        crate::obsws::coordinator::output_dynamic::OutputState,
+        crate::obsws::coordinator::output_registry::OutputState,
     >,
     output_stats: &super::ObswsOutputRuntimeStats,
 ) -> f64 {
-    use crate::obsws::coordinator::output_dynamic::output_active_and_uptime;
+    use crate::obsws::coordinator::output_registry::output_active_and_uptime;
     if let Some(stream) = outputs.get("stream") {
         let (active, uptime) = output_active_and_uptime(stream);
         if active {
@@ -332,10 +332,10 @@ pub fn build_sleep_response(request_id: &str) -> nojson::RawJsonOwned {
 /// hisui は単一 canvas 前提のため、OBS の canvasUuid によるシーン絞り込みには対応しない。
 pub fn build_get_scene_list_response(
     request_id: &str,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
-    let scenes = input_registry.list_scenes();
-    let current_program_scene = input_registry.current_program_scene();
+    let scenes = state.list_scenes();
+    let current_program_scene = state.current_program_scene();
     let current_program_scene_name = current_program_scene
         .as_ref()
         .map(|scene| scene.scene_name.as_str())
@@ -356,7 +356,7 @@ pub fn build_get_scene_list_response(
 pub fn build_get_persistent_data_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetPersistentData",
@@ -371,7 +371,7 @@ pub fn build_get_persistent_data_response(
         return response;
     }
 
-    let slot_value = input_registry.get_persistent_data(&fields.slot_name);
+    let slot_value = state.get_persistent_data(&fields.slot_name);
     super::build_request_response_success("GetPersistentData", request_id, |f| match slot_value {
         Some(value) => f.member("slotValue", value),
         None => f.member("slotValue", Option::<&str>::None),
@@ -381,7 +381,7 @@ pub fn build_get_persistent_data_response(
 pub fn build_set_persistent_data_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let (fields, slot_value) = match parse_request_data_or_error_response(
         "SetPersistentData",
@@ -396,7 +396,7 @@ pub fn build_set_persistent_data_response(
         return response;
     }
 
-    input_registry.set_persistent_data(fields.slot_name, slot_value);
+    state.set_persistent_data(fields.slot_name, slot_value);
     super::build_request_response_success_no_data("SetPersistentData", request_id)
 }
 

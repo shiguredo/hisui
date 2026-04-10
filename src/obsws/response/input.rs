@@ -1,10 +1,10 @@
-use crate::obsws::input_registry::{
-    CreateInputError, ObswsInputRegistry, ParseInputSettingsError, SetInputNameError,
-    SetInputSettingsError,
-};
 use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_RESOURCE_NOT_FOUND,
+};
+use crate::obsws::state::{
+    CreateInputError, ObswsSessionState, ParseInputSettingsError, SetInputNameError,
+    SetInputSettingsError,
 };
 
 use super::{
@@ -17,9 +17,9 @@ use super::{
 pub fn build_get_input_list_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
-    let inputs = input_registry.list_inputs();
+    let inputs = state.list_inputs();
     // inputKind フィールドが指定されている場合、その kind でフィルタする
     let input_kind_filter: Option<String> = request_data.and_then(|data| {
         let value: Option<String> = data.value().to_member("inputKind").ok()?.try_into().ok()?;
@@ -41,17 +41,17 @@ pub fn build_get_input_list_response(
 /// OBS の unversioned パラメータには対応しない。
 pub fn build_get_input_kind_list_response(
     request_id: &str,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     super::build_request_response_success("GetInputKindList", request_id, |f| {
-        f.member("inputKinds", input_registry.supported_input_kinds())
+        f.member("inputKinds", state.supported_input_kinds())
     })
 }
 
 pub fn build_get_input_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "GetInputSettings",
@@ -63,8 +63,7 @@ pub fn build_get_input_settings_response(
         Err(response) => return response,
     };
 
-    let Some(input) = input_registry.find_input(input_uuid.as_deref(), input_name.as_deref())
-    else {
+    let Some(input) = state.find_input(input_uuid.as_deref(), input_name.as_deref()) else {
         return super::build_request_response_error(
             "GetInputSettings",
             request_id,
@@ -82,7 +81,7 @@ pub fn build_get_input_settings_response(
 pub fn build_get_source_active_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "GetSourceActive",
@@ -94,18 +93,17 @@ pub fn build_get_source_active_response(
         Err(response) => return response,
     };
 
-    let source_active =
-        match input_registry.is_source_active(input_uuid.as_deref(), input_name.as_deref()) {
-            Ok(source_active) => source_active,
-            Err(crate::obsws::input_registry::GetSourceActiveError::SourceNotFound) => {
-                return super::build_request_response_error(
-                    "GetSourceActive",
-                    request_id,
-                    REQUEST_STATUS_RESOURCE_NOT_FOUND,
-                    "Source not found",
-                );
-            }
-        };
+    let source_active = match state.is_source_active(input_uuid.as_deref(), input_name.as_deref()) {
+        Ok(source_active) => source_active,
+        Err(crate::obsws::state::GetSourceActiveError::SourceNotFound) => {
+            return super::build_request_response_error(
+                "GetSourceActive",
+                request_id,
+                REQUEST_STATUS_RESOURCE_NOT_FOUND,
+                "Source not found",
+            );
+        }
+    };
 
     super::build_request_response_success("GetSourceActive", request_id, |f| {
         f.member("videoActive", source_active)?;
@@ -117,15 +115,15 @@ pub fn build_get_source_active_response(
 pub fn build_set_input_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
-    execute_set_input_settings(request_id, request_data, input_registry).response_text
+    execute_set_input_settings(request_id, request_data, state).response_text
 }
 
 pub fn execute_set_input_settings(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> SetInputSettingsExecution {
     let fields = match parse_request_data_or_error_response(
         "SetInputSettings",
@@ -142,7 +140,7 @@ pub fn execute_set_input_settings(
         }
     };
 
-    if let Err(error) = input_registry.set_input_settings(
+    if let Err(error) = state.set_input_settings(
         fields.input_uuid.as_deref(),
         fields.input_name.as_deref(),
         fields.input_settings.value(),
@@ -181,7 +179,7 @@ pub fn execute_set_input_settings(
 pub fn build_set_input_name_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "SetInputName",
@@ -193,7 +191,7 @@ pub fn build_set_input_name_response(
         Err(response) => return response,
     };
 
-    if let Err(error) = input_registry.set_input_name(
+    if let Err(error) = state.set_input_name(
         fields.input_uuid.as_deref(),
         fields.input_name.as_deref(),
         &fields.new_input_name,
@@ -220,7 +218,7 @@ pub fn build_set_input_name_response(
 pub fn build_get_input_default_settings_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetInputDefaultSettings",
@@ -231,8 +229,7 @@ pub fn build_get_input_default_settings_response(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let default_input_settings = match input_registry.get_input_default_settings(&fields.input_kind)
-    {
+    let default_input_settings = match state.get_input_default_settings(&fields.input_kind) {
         Ok(settings) => settings,
         Err(ParseInputSettingsError::UnsupportedInputKind) => {
             return super::build_request_response_error(
@@ -255,15 +252,15 @@ pub fn build_get_input_default_settings_response(
 pub fn build_create_input_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
-    execute_create_input(request_id, request_data, input_registry).response_text
+    execute_create_input(request_id, request_data, state).response_text
 }
 
 pub fn execute_create_input(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> CreateInputExecution {
     let fields = match parse_request_data_or_error_response(
         "CreateInput",
@@ -281,7 +278,7 @@ pub fn execute_create_input(
     };
 
     let scene_name = fields.scene_name.clone();
-    let (created_entry, scene_item_id) = match input_registry.create_input(
+    let (created_entry, scene_item_id) = match state.create_input(
         &fields.scene_name,
         &fields.input_name,
         fields.input,
@@ -329,12 +326,8 @@ pub fn execute_create_input(
     });
 
     // SceneItemCreated イベント用の情報を構築する
-    let scene_uuid = input_registry
-        .get_scene_uuid(&scene_name)
-        .unwrap_or_default();
-    let scene_items = input_registry
-        .list_scene_items(&scene_name)
-        .unwrap_or_default();
+    let scene_uuid = state.get_scene_uuid(&scene_name).unwrap_or_default();
+    let scene_items = state.list_scene_items(&scene_name).unwrap_or_default();
     // 追加直後のアイテムを scene_item_id で検索する
     let created_scene_item = scene_items
         .iter()
@@ -346,14 +339,14 @@ pub fn execute_create_input(
         .map(|item| item.scene_item_transform.clone())
         .unwrap_or_default();
 
-    let default_settings = input_registry
+    let default_settings = state
         .get_input_default_settings(created_entry.input.kind_name())
         .unwrap_or_else(|_| created_entry.input.settings.clone());
 
-    let scene_item_ref = crate::obsws::input_registry::ObswsSceneItemRef {
+    let scene_item_ref = crate::obsws::state::ObswsSceneItemRef {
         scene_name: scene_name.clone(),
         scene_uuid,
-        scene_item: crate::obsws::input_registry::ObswsSceneItemEntry {
+        scene_item: crate::obsws::state::ObswsSceneItemEntry {
             scene_item_id,
             source_name: created_entry.input_name.clone(),
             source_uuid: created_entry.input_uuid.clone(),
@@ -361,7 +354,7 @@ pub fn execute_create_input(
             source_type: "OBS_SOURCE_TYPE_INPUT".to_owned(),
             scene_item_enabled: fields.scene_item_enabled,
             scene_item_locked: false,
-            scene_item_blend_mode: crate::obsws::input_registry::ObswsSceneItemBlendMode::default()
+            scene_item_blend_mode: crate::obsws::state::ObswsSceneItemBlendMode::default()
                 .as_str()
                 .to_owned(),
             scene_item_index,
@@ -383,7 +376,7 @@ pub fn execute_create_input(
 pub fn build_remove_input_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "RemoveInput",
@@ -394,8 +387,7 @@ pub fn build_remove_input_response(
         Ok(v) => v,
         Err(response) => return response,
     };
-    let Some(_removed) = input_registry.remove_input(input_uuid.as_deref(), input_name.as_deref())
-    else {
+    let Some(_removed) = state.remove_input(input_uuid.as_deref(), input_name.as_deref()) else {
         return super::build_request_response_error(
             "RemoveInput",
             request_id,
@@ -412,7 +404,7 @@ pub fn build_remove_input_response(
 pub fn build_get_input_mute_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "GetInputMute",
@@ -424,8 +416,7 @@ pub fn build_get_input_mute_response(
         Err(response) => return response,
     };
 
-    let Some(muted) = input_registry.get_input_mute(input_uuid.as_deref(), input_name.as_deref())
-    else {
+    let Some(muted) = state.get_input_mute(input_uuid.as_deref(), input_name.as_deref()) else {
         return super::build_request_response_error(
             "GetInputMute",
             request_id,
@@ -442,7 +433,7 @@ pub fn build_get_input_mute_response(
 pub fn build_set_input_mute_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> SetInputMuteExecution {
     let (input_uuid, input_name, input_muted) = match parse_request_data_or_error_response(
         "SetInputMute",
@@ -461,7 +452,7 @@ pub fn build_set_input_mute_response(
         }
     };
 
-    if input_registry
+    if state
         .set_input_mute(input_uuid.as_deref(), input_name.as_deref(), input_muted)
         .is_none()
     {
@@ -496,7 +487,7 @@ pub struct SetInputMuteExecution {
 pub fn build_toggle_input_mute_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> ToggleInputMuteExecution {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "ToggleInputMute",
@@ -515,8 +506,7 @@ pub fn build_toggle_input_mute_response(
         }
     };
 
-    let Some(new_muted) =
-        input_registry.toggle_input_mute(input_uuid.as_deref(), input_name.as_deref())
+    let Some(new_muted) = state.toggle_input_mute(input_uuid.as_deref(), input_name.as_deref())
     else {
         return ToggleInputMuteExecution {
             response_text: super::build_request_response_error(
@@ -551,7 +541,7 @@ pub struct ToggleInputMuteExecution {
 pub fn build_get_input_volume_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let (input_uuid, input_name) = match parse_request_data_or_error_response(
         "GetInputVolume",
@@ -564,7 +554,7 @@ pub fn build_get_input_volume_response(
     };
 
     let Some((volume_db, volume_mul)) =
-        input_registry.get_input_volume(input_uuid.as_deref(), input_name.as_deref())
+        state.get_input_volume(input_uuid.as_deref(), input_name.as_deref())
     else {
         return super::build_request_response_error(
             "GetInputVolume",
@@ -583,7 +573,7 @@ pub fn build_get_input_volume_response(
 pub fn build_set_input_volume_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &mut ObswsInputRegistry,
+    state: &mut ObswsSessionState,
 ) -> SetInputVolumeExecution {
     let fields = match parse_request_data_or_error_response(
         "SetInputVolume",
@@ -602,7 +592,7 @@ pub fn build_set_input_volume_response(
         }
     };
 
-    if input_registry
+    if state
         .set_input_volume(
             fields.input_uuid.as_deref(),
             fields.input_name.as_deref(),
@@ -702,7 +692,7 @@ fn parse_set_input_volume_fields(
 pub fn build_get_input_properties_list_property_items_response(
     request_id: &str,
     request_data: Option<&nojson::RawJsonOwned>,
-    input_registry: &ObswsInputRegistry,
+    state: &ObswsSessionState,
 ) -> nojson::RawJsonOwned {
     let fields = match parse_request_data_or_error_response(
         "GetInputPropertiesListPropertyItems",
@@ -714,8 +704,7 @@ pub fn build_get_input_properties_list_property_items_response(
         Err(response) => return response,
     };
 
-    let Some(input) =
-        input_registry.find_input(fields.input_uuid.as_deref(), fields.input_name.as_deref())
+    let Some(input) = state.find_input(fields.input_uuid.as_deref(), fields.input_name.as_deref())
     else {
         return super::build_request_response_error(
             "GetInputPropertiesListPropertyItems",
@@ -736,7 +725,7 @@ pub fn build_get_input_properties_list_property_items_response(
 
     // video_capture_device の device_id を取得する
     let input_device_id = match &input.input.settings {
-        crate::obsws::input_registry::ObswsInputSettings::VideoCaptureDevice(settings) => {
+        crate::obsws::state::ObswsInputSettings::VideoCaptureDevice(settings) => {
             settings.device_id.as_deref()
         }
         _ => None,

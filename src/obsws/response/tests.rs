@@ -1,12 +1,10 @@
 use super::*;
-use crate::obsws::input_registry::{
-    ObswsInputRegistry, ObswsInputSettings, ObswsSceneItemTransform,
-};
 use crate::obsws::protocol::{
     OBSWS_EVENT_SUB_GENERAL, OBSWS_EVENT_SUB_OUTPUTS, OBSWS_EVENT_SUB_SCENE_ITEMS, OBSWS_OP_EVENT,
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
     REQUEST_STATUS_RESOURCE_ALREADY_EXISTS, REQUEST_STATUS_SUCCESS,
 };
+use crate::obsws::state::{ObswsInputSettings, ObswsSceneItemTransform, ObswsSessionState};
 
 #[test]
 fn build_stream_state_changed_event_contains_expected_fields() {
@@ -178,7 +176,7 @@ fn build_get_and_set_current_preview_scene_response_succeeds() {
 
 #[test]
 fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     // cut_transition に切り替えてからカスタム設定を試みる
     registry
         .set_current_scene_transition("cut_transition")
@@ -211,7 +209,7 @@ fn build_set_current_scene_transition_settings_rejects_fixed_transition() {
 
 #[test]
 fn build_set_current_scene_transition_settings_rejects_fade_transition() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     // fade_transition はビルトイントランジションなのでカスタム設定をサポートしない
     let set_transition_settings_request_data =
         nojson::RawJsonOwned::parse(r#"{"transitionSettings":{"curve":"ease","power":2}}"#)
@@ -234,7 +232,7 @@ fn build_set_current_scene_transition_settings_rejects_fade_transition() {
 
 #[test]
 fn build_set_tbar_position_returns_506() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     // SetTBarPosition は Studio Mode 無効のため 506 を返す
     let set_tbar_position_response = build_set_tbar_position_response("req-set-tbar-position");
     let set_tbar_position_json = nojson::RawJson::parse(set_tbar_position_response.text())
@@ -313,7 +311,7 @@ fn build_input_events_contain_expected_fields() {
 #[test]
 fn build_input_settings_changed_event_contains_expected_fields() {
     let input_settings = ObswsInputSettings::VideoCaptureDevice(
-        crate::obsws::input_registry::ObswsVideoCaptureDeviceSettings {
+        crate::obsws::state::ObswsVideoCaptureDeviceSettings {
             device_id: Some("camera-1".to_owned()),
             pixel_format: None,
             fps: None,
@@ -473,7 +471,7 @@ fn build_scene_item_transform_changed_event_contains_expected_fields() {
 
 #[test]
 fn build_get_scene_item_id_response_succeeds_when_scene_item_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -508,7 +506,7 @@ fn build_get_scene_item_id_response_succeeds_when_scene_item_exists() {
 
 #[test]
 fn build_get_scene_item_id_response_succeeds_with_scene_uuid_and_source_uuid() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -551,7 +549,7 @@ fn build_get_scene_item_id_response_succeeds_with_scene_uuid_and_source_uuid() {
 
 #[test]
 fn build_set_current_program_scene_response_succeeds_with_scene_uuid() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -581,7 +579,7 @@ fn build_set_current_program_scene_response_succeeds_with_scene_uuid() {
 
 #[test]
 fn build_remove_scene_response_succeeds_with_scene_uuid() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -604,7 +602,7 @@ fn build_remove_scene_response_succeeds_with_scene_uuid() {
 
 #[test]
 fn build_set_scene_name_response_succeeds_with_scene_uuid() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -640,7 +638,7 @@ fn build_set_scene_name_response_succeeds_with_scene_uuid() {
 
 #[test]
 fn build_set_scene_item_enabled_response_succeeds_with_scene_uuid() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -679,7 +677,7 @@ fn build_set_scene_item_enabled_response_succeeds_with_scene_uuid() {
 
 #[test]
 fn build_get_scene_item_enabled_response_succeeds_with_scene_uuid() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -724,7 +722,7 @@ fn build_get_scene_item_enabled_response_succeeds_with_scene_uuid() {
 
 #[test]
 fn build_set_scene_item_enabled_response_succeeds_when_scene_item_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -761,7 +759,7 @@ fn build_set_scene_item_enabled_response_succeeds_when_scene_item_exists() {
 
 #[test]
 fn build_get_scene_item_enabled_response_succeeds_when_scene_item_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -806,7 +804,7 @@ fn build_get_scene_item_enabled_response_succeeds_when_scene_item_exists() {
 
 #[test]
 fn build_get_and_set_scene_item_locked_response_succeeds_when_scene_item_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -863,7 +861,7 @@ fn build_get_and_set_scene_item_locked_response_succeeds_when_scene_item_exists(
 
 #[test]
 fn build_get_and_set_scene_item_blend_mode_response_succeeds_when_scene_item_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -919,7 +917,7 @@ fn build_get_and_set_scene_item_blend_mode_response_succeeds_when_scene_item_exi
 
 #[test]
 fn build_get_and_set_scene_item_transform_response_succeeds_when_scene_item_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -976,7 +974,7 @@ fn build_get_and_set_scene_item_transform_response_succeeds_when_scene_item_exis
 
 #[test]
 fn execute_set_scene_item_transform_rejects_invalid_alignment_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -1019,7 +1017,7 @@ fn execute_set_scene_item_transform_rejects_invalid_alignment_value() {
 
 #[test]
 fn build_get_scene_item_list_response_succeeds_when_scene_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -1064,7 +1062,7 @@ fn build_get_scene_item_list_response_succeeds_when_scene_exists() {
 
 #[test]
 fn build_create_scene_item_response_succeeds_when_source_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -1101,7 +1099,7 @@ fn build_create_scene_item_response_succeeds_when_source_exists() {
 
 #[test]
 fn build_set_scene_item_index_response_rejects_invalid_index() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let input = ObswsInput::from_kind_and_settings(
         "image_source",
         nojson::RawJsonOwned::parse(r#"{"file":"/tmp/image.png"}"#)
@@ -1163,7 +1161,7 @@ fn build_scene_item_created_event_contains_expected_fields() {
 
 #[test]
 fn build_remove_scene_response_succeeds_when_scene_exists() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     registry
         .create_scene("Scene B")
         .expect("scene creation must succeed");
@@ -1242,7 +1240,7 @@ fn build_and_parse_request_batch_response_preserves_fields() {
 
 #[test]
 fn set_persistent_data_rejects_null_slot_value() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let request_data = nojson::RawJsonOwned::parse(
         r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_GLOBAL","slotName":"s","slotValue":null}"#,
     )
@@ -1266,7 +1264,7 @@ fn set_persistent_data_rejects_null_slot_value() {
 
 #[test]
 fn set_persistent_data_rejects_profile_realm() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
     let request_data = nojson::RawJsonOwned::parse(
         r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_PROFILE","slotName":"s","slotValue":1}"#,
     )
@@ -1290,7 +1288,7 @@ fn set_persistent_data_rejects_profile_realm() {
 
 #[test]
 fn get_persistent_data_rejects_profile_realm() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let request_data = nojson::RawJsonOwned::parse(
         r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_PROFILE","slotName":"s"}"#,
     )
@@ -1314,7 +1312,7 @@ fn get_persistent_data_rejects_profile_realm() {
 
 #[test]
 fn get_persistent_data_returns_null_for_nonexistent_slot() {
-    let registry = ObswsInputRegistry::new_for_test();
+    let registry = ObswsSessionState::new_for_test();
     let request_data = nojson::RawJsonOwned::parse(
         r#"{"realm":"OBS_WEBSOCKET_DATA_REALM_GLOBAL","slotName":"nonexistent"}"#,
     )
@@ -1338,7 +1336,7 @@ fn get_persistent_data_returns_null_for_nonexistent_slot() {
 
 #[test]
 fn set_then_get_persistent_data_roundtrip() {
-    let mut registry = ObswsInputRegistry::new_for_test();
+    let mut registry = ObswsSessionState::new_for_test();
 
     // Set
     let set_request_data = nojson::RawJsonOwned::parse(

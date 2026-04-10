@@ -3,7 +3,7 @@
 
 use super::ObswsCoordinator;
 use super::output::{OutputOperationOutcome, terminate_and_wait};
-use super::output_dynamic::{OutputRun, OutputSettings};
+use super::output_registry::{OutputRun, OutputSettings};
 
 impl ObswsCoordinator {
     /// 指定された output_name の rtmp_outbound output を開始する。
@@ -13,7 +13,7 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::input_registry::{ObswsRecordTrackRun, ObswsRtmpOutboundRun};
+        use crate::obsws::state::{ObswsRecordTrackRun, ObswsRtmpOutboundRun};
 
         let Some(output) = self.outputs.get(output_name) else {
             return OutputOperationOutcome::failure(
@@ -103,7 +103,7 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        let frame_rate = self.input_registry.frame_rate();
+        let frame_rate = self.state.frame_rate();
         if let Err(e) = start_rtmp_outbound_processors(
             pipeline_handle,
             &output_url,
@@ -188,8 +188,8 @@ pub(crate) struct RtmpOutboundOutputSettings {
     pub(crate) stream_name: Option<String>,
 }
 
-impl From<crate::obsws::input_registry::ObswsRtmpOutboundSettings> for RtmpOutboundOutputSettings {
-    fn from(s: crate::obsws::input_registry::ObswsRtmpOutboundSettings) -> Self {
+impl From<crate::obsws::state::ObswsRtmpOutboundSettings> for RtmpOutboundOutputSettings {
+    fn from(s: crate::obsws::state::ObswsRtmpOutboundSettings) -> Self {
         Self {
             output_url: s.output_url,
             stream_name: s.stream_name,
@@ -197,7 +197,7 @@ impl From<crate::obsws::input_registry::ObswsRtmpOutboundSettings> for RtmpOutbo
     }
 }
 
-impl From<RtmpOutboundOutputSettings> for crate::obsws::input_registry::ObswsRtmpOutboundSettings {
+impl From<RtmpOutboundOutputSettings> for crate::obsws::state::ObswsRtmpOutboundSettings {
     fn from(s: RtmpOutboundOutputSettings) -> Self {
         Self {
             output_url: s.output_url,
@@ -260,7 +260,7 @@ impl RtmpOutboundOutputSettings {
     pub(crate) fn parse_from_json(
         settings_value: Option<&nojson::RawJsonValue<'_, '_>>,
     ) -> Result<Self, String> {
-        use super::output_dynamic::parse_optional_string_strict;
+        use super::output_registry::parse_optional_string_strict;
 
         let mut settings = Self::default();
         if let Some(v) = settings_value {
@@ -278,7 +278,7 @@ async fn start_rtmp_outbound_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     output_url: &str,
     stream_name: Option<&str>,
-    run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
+    run: &crate::obsws::state::ObswsRtmpOutboundRun,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
     // RTMP outbound は AAC エンコーディングを使用する（RTMP の制約）
@@ -309,7 +309,7 @@ async fn start_rtmp_outbound_processors(
 /// RTMP outbound 用プロセッサを段階的に停止する: エンコーダー → エンドポイント
 async fn stop_processors_staged_rtmp_outbound(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws::input_registry::ObswsRtmpOutboundRun,
+    run: &crate::obsws::state::ObswsRtmpOutboundRun,
 ) -> crate::Result<()> {
     terminate_and_wait(
         pipeline_handle,

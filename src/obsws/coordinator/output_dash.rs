@@ -9,7 +9,7 @@ use super::ObswsProgramOutputContext;
 use super::output::{
     OutputOperationOutcome, build_s3_client, terminate_and_wait, wait_or_terminate,
 };
-use super::output_dynamic::{OutputRun, OutputSettings};
+use super::output_registry::{OutputRun, OutputSettings};
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_start_mpeg_dash(
@@ -18,7 +18,7 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::input_registry::{
+        use crate::obsws::state::{
             DashDestination, ObswsDashRun, ObswsDashVariantRun, ObswsRecordTrackRun,
         };
 
@@ -79,9 +79,9 @@ impl ObswsCoordinator {
         let program_output = ObswsProgramOutputContext {
             video_track_id: self.program_output.video_track_id.clone(),
             audio_track_id: self.program_output.audio_track_id.clone(),
-            canvas_width: self.input_registry.canvas_width(),
-            canvas_height: self.input_registry.canvas_height(),
-            frame_rate: self.input_registry.frame_rate(),
+            canvas_width: self.state.canvas_width(),
+            canvas_height: self.state.canvas_height(),
+            frame_rate: self.state.frame_rate(),
         };
         let is_abr = dash_settings.variants.len() > 1;
         let variant_runs: Vec<ObswsDashVariantRun> = dash_settings
@@ -341,8 +341,8 @@ impl ObswsCoordinator {
 async fn start_dash_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     program_output: &ObswsProgramOutputContext,
-    run: &crate::obsws::input_registry::ObswsDashRun,
-    dash_settings: &crate::obsws::input_registry::ObswsDashSettings,
+    run: &crate::obsws::state::ObswsDashRun,
+    dash_settings: &crate::obsws::state::ObswsDashSettings,
 ) -> crate::Result<Option<tokio::task::JoinHandle<()>>> {
     // MPEG-DASH 用にキーフレーム間隔を設定する
     let fps = program_output.frame_rate.numerator.get() as f64
@@ -368,10 +368,7 @@ async fn start_dash_processors(
         .enumerate()
     {
         // filesystem かつ ABR の場合はバリアントのサブディレクトリを作成する
-        if is_abr
-            && let crate::obsws::input_registry::DashDestination::Filesystem { .. } =
-                run.destination
-        {
+        if is_abr && let crate::obsws::state::DashDestination::Filesystem { .. } = run.destination {
             std::fs::create_dir_all(&variant_run.variant_path).map_err(|e| {
                 crate::Error::new(format!(
                     "failed to create variant directory {}: {e}",
@@ -431,12 +428,12 @@ async fn start_dash_processors(
 
         // DASH ライター
         let storage_config = match &run.destination {
-            crate::obsws::input_registry::DashDestination::Filesystem { .. } => {
+            crate::obsws::state::DashDestination::Filesystem { .. } => {
                 crate::dash::writer::DashStorageConfig::Filesystem {
                     output_directory: std::path::PathBuf::from(&variant_run.variant_path),
                 }
             }
-            crate::obsws::input_registry::DashDestination::S3 {
+            crate::obsws::state::DashDestination::S3 {
                 bucket,
                 region,
                 endpoint,
@@ -581,7 +578,7 @@ async fn start_dash_processors(
 /// Program 出力は共有なので、variant 後段の processor のみを停止する。
 async fn stop_processors_staged_dash(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws::input_registry::ObswsDashRun,
+    run: &crate::obsws::state::ObswsDashRun,
 ) -> crate::Result<()> {
     // NOTE:
     // ライブ用途では StopOutput / ToggleOutput への応答遅延を避けることを優先し、
@@ -634,7 +631,7 @@ async fn stop_processors_staged_dash(
             crate::dash::writer::delete_combined_mpd(root_storage_config).await;
         }
         // filesystem の場合はバリアントのサブディレクトリも削除する（ライターが中身を削除済みなので空のはず）
-        if let crate::obsws::input_registry::DashDestination::Filesystem { .. } = &run.destination {
+        if let crate::obsws::state::DashDestination::Filesystem { .. } = &run.destination {
             for vr in &run.variant_runs {
                 if let Err(e) = std::fs::remove_dir(&vr.variant_path)
                     && e.kind() != std::io::ErrorKind::NotFound
@@ -689,8 +686,8 @@ async fn finish_dash_writer_rpc(
 /// 結合 MPD に書く media path を生成する。
 /// writer が実際に使う variant_path と同じ規則から相対パスを導出する。
 fn dash_variant_media_path(
-    destination: &crate::obsws::input_registry::DashDestination,
-    variant_run: &crate::obsws::input_registry::ObswsDashVariantRun,
+    destination: &crate::obsws::state::DashDestination,
+    variant_run: &crate::obsws::state::ObswsDashVariantRun,
 ) -> crate::Result<String> {
     let base_path = dash_variant_relative_path(destination, &variant_run.variant_path)?;
     Ok(format!("{base_path}/segment-$Number%06d$.m4s"))
@@ -699,8 +696,8 @@ fn dash_variant_media_path(
 /// 結合 MPD に書く init segment path を生成する。
 /// writer が実際に使う variant_path と同じ規則から相対パスを導出する。
 fn dash_variant_init_path(
-    destination: &crate::obsws::input_registry::DashDestination,
-    variant_run: &crate::obsws::input_registry::ObswsDashVariantRun,
+    destination: &crate::obsws::state::DashDestination,
+    variant_run: &crate::obsws::state::ObswsDashVariantRun,
 ) -> crate::Result<String> {
     let base_path = dash_variant_relative_path(destination, &variant_run.variant_path)?;
     Ok(format!("{base_path}/init.mp4"))
@@ -708,11 +705,11 @@ fn dash_variant_init_path(
 
 /// variant_path から結合 MPD 用の相対パス部分を取り出す。
 fn dash_variant_relative_path(
-    destination: &crate::obsws::input_registry::DashDestination,
+    destination: &crate::obsws::state::DashDestination,
     variant_path: &str,
 ) -> crate::Result<String> {
     match destination {
-        crate::obsws::input_registry::DashDestination::Filesystem { directory } => {
+        crate::obsws::state::DashDestination::Filesystem { directory } => {
             let root = std::path::Path::new(directory);
             let path = std::path::Path::new(variant_path);
             let relative = path.strip_prefix(root).map_err(|_| {
@@ -722,7 +719,7 @@ fn dash_variant_relative_path(
             })?;
             Ok(relative.to_string_lossy().replace('\\', "/"))
         }
-        crate::obsws::input_registry::DashDestination::S3 { prefix, .. } => {
+        crate::obsws::state::DashDestination::S3 { prefix, .. } => {
             if prefix.is_empty() {
                 return Ok(variant_path.to_owned());
             }
@@ -739,15 +736,15 @@ fn dash_variant_relative_path(
 /// DASH destination からルートディレクトリ/prefix 用の DashStorageConfig を構築する。
 /// 結合 MPD の書き出し・削除に使用する。
 fn build_dash_root_storage_config(
-    destination: &crate::obsws::input_registry::DashDestination,
+    destination: &crate::obsws::state::DashDestination,
 ) -> crate::Result<crate::dash::writer::DashStorageConfig> {
     match destination {
-        crate::obsws::input_registry::DashDestination::Filesystem { directory } => {
+        crate::obsws::state::DashDestination::Filesystem { directory } => {
             Ok(crate::dash::writer::DashStorageConfig::Filesystem {
                 output_directory: std::path::PathBuf::from(directory),
             })
         }
-        crate::obsws::input_registry::DashDestination::S3 {
+        crate::obsws::state::DashDestination::S3 {
             bucket,
             prefix,
             region,

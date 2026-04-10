@@ -17,11 +17,11 @@ pub use handle::ObswsCoordinatorHandle;
 mod input;
 mod output;
 mod output_dash;
-pub(crate) mod output_dynamic;
 mod output_hls;
 #[cfg(feature = "player")]
 mod output_player;
 mod output_record;
+pub(crate) mod output_registry;
 mod output_rtmp;
 mod output_sora;
 mod output_stream;
@@ -29,9 +29,9 @@ mod scene;
 mod scene_item;
 
 use crate::obsws::event::TaggedEvent;
-use crate::obsws::input_registry::ObswsInputRegistry;
 use crate::obsws::message::ObswsSessionStats;
 use crate::obsws::protocol::{OBSWS_EVENT_SUB_GENERAL, REQUEST_STATUS_MISSING_REQUEST_DATA};
+use crate::obsws::state::ObswsSessionState;
 
 #[derive(Clone)]
 struct ObswsProgramOutputContext {
@@ -64,9 +64,8 @@ pub enum ObswsCoordinatorCommand {
     /// webrtc_source の settings を取得する
     GetWebRtcSourceSettings {
         input_name: String,
-        reply_tx: tokio::sync::oneshot::Sender<
-            Option<crate::obsws::input_registry::ObswsWebRtcSourceSettings>,
-        >,
+        reply_tx:
+            tokio::sync::oneshot::Sender<Option<crate::obsws::state::ObswsWebRtcSourceSettings>>,
     },
     /// webrtc_source の trackId を更新する（InputSettingsChanged イベントを発火する）
     UpdateWebRtcSourceTrackId {
@@ -143,7 +142,7 @@ pub struct InputSourceState {
 
 /// obsws の状態変更・副作用・Program 出力同期を調停する coordinator
 pub struct ObswsCoordinator {
-    input_registry: ObswsInputRegistry,
+    state: ObswsSessionState,
     program_output: crate::obsws::server::ProgramOutputState,
     pipeline_handle: Option<crate::MediaPipelineHandle>,
     command_rx: tokio::sync::mpsc::UnboundedReceiver<ObswsCoordinatorCommand>,
@@ -158,7 +157,7 @@ pub struct ObswsCoordinator {
     /// 致命的エラー発生時にサーバーへ通知するための送信側
     shutdown_tx: tokio::sync::watch::Sender<bool>,
     /// output の統一管理（outputName → 状態）
-    pub(crate) outputs: std::collections::BTreeMap<String, output_dynamic::OutputState>,
+    pub(crate) outputs: std::collections::BTreeMap<String, output_registry::OutputState>,
     /// output の run_id カウンタ（全 output で共有）
     pub(crate) next_output_run_id: u64,
     /// デフォルトの録画ディレクトリ（HisuiCreateOutput で mp4_output の既定値に使用）
@@ -187,7 +186,7 @@ impl ObswsCoordinator {
     /// 返り値の `watch::Receiver<bool>` は致命的エラー発生時に `true` を受信する。
     /// サーバーの accept loop はこれを監視して graceful shutdown を行う。
     pub fn new(
-        input_registry: ObswsInputRegistry,
+        state: ObswsSessionState,
         record_directory: std::path::PathBuf,
         program_output: crate::obsws::server::ProgramOutputState,
         pipeline_handle: Option<crate::MediaPipelineHandle>,
@@ -211,9 +210,9 @@ impl ObswsCoordinator {
             video_track_id: program_output.video_track_id.clone(),
             audio_track_id: program_output.audio_track_id.clone(),
         };
-        let outputs = output_dynamic::create_default_outputs(record_directory.clone());
+        let outputs = output_registry::create_default_outputs(record_directory.clone());
         let actor = Self {
-            input_registry,
+            state,
             program_output,
             pipeline_handle,
             command_rx,
@@ -352,13 +351,11 @@ impl ObswsCoordinator {
         // state file 保存: 対象リクエストが成功した場合に永続化する
         if request_succeeded
             && is_state_persisted_request(&request_type)
-            && let Some(path) = self.input_registry.state_file_path()
+            && let Some(path) = self.state.state_file_path()
         {
             let path = path.to_path_buf();
-            let state = crate::obsws::state_file::build_state_from_registry(
-                &self.input_registry,
-                &self.outputs,
-            );
+            let state =
+                crate::obsws::state_file::build_state_from_registry(&self.state, &self.outputs);
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -409,13 +406,11 @@ impl ObswsCoordinator {
         // ロールバックしないため、それまでの変更を保存する。
         if needs_save
             && !self.should_terminate
-            && let Some(path) = self.input_registry.state_file_path()
+            && let Some(path) = self.state.state_file_path()
         {
             let path = path.to_path_buf();
-            let state = crate::obsws::state_file::build_state_from_registry(
-                &self.input_registry,
-                &self.outputs,
-            );
+            let state =
+                crate::obsws::state_file::build_state_from_registry(&self.state, &self.outputs);
             if let Err(e) = crate::obsws::state_file::save_state_file(&path, &state) {
                 tracing::error!("failed to save state file: {}", e.display());
                 self.should_terminate = true;
@@ -675,7 +670,7 @@ impl ObswsCoordinator {
                 let response = crate::obsws::message::handle_request_message_with_pipeline_handle(
                     request,
                     session_stats,
-                    &mut self.input_registry,
+                    &mut self.state,
                     self.pipeline_handle.as_ref(),
                 );
                 self.build_result_from_response(response.message, Vec::new())
@@ -747,7 +742,7 @@ impl ObswsCoordinator {
             return Ok(());
         }
         let current_scene_uuid = self
-            .input_registry
+            .state
             .current_program_scene()
             .map(|scene| scene.scene_uuid)
             .unwrap_or_default();
@@ -767,7 +762,7 @@ impl ObswsCoordinator {
         self.input_source_processors
             .iter()
             .filter_map(|(input_uuid, state)| {
-                let entry = self.input_registry.find_input(Some(input_uuid), None)?;
+                let entry = self.state.find_input(Some(input_uuid), None)?;
                 Some(BootstrapInputSnapshot {
                     input_uuid: entry.input_uuid.clone(),
                     input_name: entry.input_name.clone(),
@@ -783,10 +778,10 @@ impl ObswsCoordinator {
     fn get_webrtc_source_settings(
         &self,
         input_name: &str,
-    ) -> Option<crate::obsws::input_registry::ObswsWebRtcSourceSettings> {
-        let entry = self.input_registry.find_input(None, Some(input_name))?;
+    ) -> Option<crate::obsws::state::ObswsWebRtcSourceSettings> {
+        let entry = self.state.find_input(None, Some(input_name))?;
         match &entry.input.settings {
-            crate::obsws::input_registry::ObswsInputSettings::WebRtcSource(settings) => {
+            crate::obsws::state::ObswsInputSettings::WebRtcSource(settings) => {
                 Some(settings.clone())
             }
             _ => None,
@@ -795,13 +790,13 @@ impl ObswsCoordinator {
 
     /// webrtc_source の trackId を更新し、InputSettingsChanged イベントを broadcast する
     fn update_webrtc_source_track_id(&mut self, input_name: &str, track_id: Option<String>) {
-        let Some(uuid) = self.input_registry.uuids_by_name.get(input_name).cloned() else {
+        let Some(uuid) = self.state.uuids_by_name.get(input_name).cloned() else {
             return;
         };
-        let Some(entry) = self.input_registry.inputs_by_uuid.get_mut(&uuid) else {
+        let Some(entry) = self.state.inputs_by_uuid.get_mut(&uuid) else {
             return;
         };
-        if let crate::obsws::input_registry::ObswsInputSettings::WebRtcSource(ref mut settings) =
+        if let crate::obsws::state::ObswsInputSettings::WebRtcSource(ref mut settings) =
             entry.input.settings
         {
             settings.track_id = track_id;
@@ -820,7 +815,7 @@ impl ObswsCoordinator {
 
     /// inputName から最新の input 情報を解決する（名前変更後も正しく解決する）
     fn resolve_input_by_name(&self, input_name: &str) -> Option<ResolvedInputInfo> {
-        let entry = self.input_registry.find_input(None, Some(input_name))?;
+        let entry = self.state.find_input(None, Some(input_name))?;
         let video_track_id = self
             .input_source_processors
             .get(&entry.input_uuid)
@@ -841,18 +836,16 @@ impl ObswsCoordinator {
             .ok_or_else(|| crate::Error::new("BUG: obsws pipeline handle is not initialized"))?;
 
         let current_scene_uuid = self
-            .input_registry
+            .state
             .current_program_scene()
             .map(|scene| scene.scene_uuid)
             .unwrap_or_default();
-        let scene_inputs = self
-            .input_registry
-            .list_current_program_scene_input_entries();
+        let scene_inputs = self.state.list_current_program_scene_input_entries();
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
-            self.input_registry.canvas_width(),
-            self.input_registry.canvas_height(),
-            self.input_registry.frame_rate(),
+            self.state.canvas_width(),
+            self.state.canvas_height(),
+            self.state.frame_rate(),
         )
         .map_err(|e| {
             crate::Error::new(format!(
@@ -933,7 +926,7 @@ impl ObswsCoordinator {
         }
     }
 
-    /// output 設定変更リクエスト成功後に input_registry の設定を outputs BTreeMap に同期する。
+    /// output 設定変更リクエスト成功後に state の設定を outputs BTreeMap に同期する。
     /// Phase 6 で SetOutputSettings を coordinator 経由に移行するまでの暫定措置。
     /// outputs BTreeMap から GetOutputStatus レスポンスを構築する。
     fn build_output_status_response(
@@ -950,7 +943,7 @@ impl ObswsCoordinator {
                 "Output not found",
             );
         };
-        let (active, duration) = output_dynamic::output_active_and_uptime(state);
+        let (active, duration) = output_registry::output_active_and_uptime(state);
         let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
         let output_timecode = crate::obsws::response::format_timecode(duration);
         // output の種別に応じて pipeline から実測値を取得する
@@ -977,10 +970,10 @@ impl ObswsCoordinator {
                 "Output not found",
             );
         };
-        let (active, duration) = output_dynamic::output_active_and_uptime(state);
+        let (active, duration) = output_registry::output_active_and_uptime(state);
         let output_duration = duration.as_millis().min(i64::MAX as u128) as i64;
         let output_timecode = crate::obsws::response::format_timecode(duration);
-        let output_path = output_dynamic::record_output_path(state).unwrap_or_default();
+        let output_path = output_registry::record_output_path(state).unwrap_or_default();
         let (output_bytes, skipped_frames, total_frames) = self.collect_output_stats_for(state);
         crate::obsws::response::build_request_response_success("GetRecordStatus", request_id, |f| {
             f.member("outputActive", active)?;
@@ -996,8 +989,8 @@ impl ObswsCoordinator {
 
     /// OutputState から (outputBytes, outputSkippedFrames, outputTotalFrames) を取得する。
     /// pipeline の metrics から実測値を引く。対応する metrics がない output 種別では 0 を返す。
-    fn collect_output_stats_for(&self, state: &output_dynamic::OutputState) -> (u64, u64, u64) {
-        use output_dynamic::OutputRun;
+    fn collect_output_stats_for(&self, state: &output_registry::OutputState) -> (u64, u64, u64) {
+        use output_registry::OutputRun;
         let Some(pipeline_handle) = self.pipeline_handle.as_ref() else {
             return (0, 0, 0);
         };

@@ -5,7 +5,7 @@ use crate::obsws::protocol::OBSWS_DEFAULT_SCENE_NAME;
 
 mod scene_item;
 #[cfg(test)]
-#[path = "input_registry/tests.rs"]
+#[path = "state/tests.rs"]
 mod tests;
 mod types;
 
@@ -53,7 +53,7 @@ fn transform_for_input(input: &ObswsInput) -> ObswsSceneItemTransform {
     ObswsSceneItemTransform::default()
 }
 
-impl ObswsInputRegistry {
+impl ObswsSessionState {
     pub fn new(
         canvas_width: crate::types::EvenUsize,
         canvas_height: crate::types::EvenUsize,
@@ -144,7 +144,7 @@ impl ObswsInputRegistry {
                             input.input_name,
                         ))
                     })?;
-            // NOTE: ここで復元した mute/volume は input_registry 上の状態に反映される。
+            // NOTE: ここで復元した mute/volume は state 上の状態に反映される。
             // audio mixer への反映は rebuild_program_output() 後の
             // sync_all_input_mute_volume() で行われる。
             obsws_input.input_muted = input.input_muted;

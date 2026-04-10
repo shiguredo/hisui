@@ -3,7 +3,7 @@
 
 use super::ObswsCoordinator;
 use super::output::{OutputOperationOutcome, terminate_and_wait};
-use super::output_dynamic::{OutputRun, OutputSettings};
+use super::output_registry::{OutputRun, OutputSettings};
 
 impl ObswsCoordinator {
     /// 指定された output_name の stream output を開始する。
@@ -14,7 +14,7 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::input_registry::{ObswsRecordTrackRun, ObswsStreamRun};
+        use crate::obsws::state::{ObswsRecordTrackRun, ObswsStreamRun};
 
         // output の存在チェックと設定取得
         let Some(output) = self.outputs.get(output_name) else {
@@ -120,7 +120,7 @@ impl ObswsCoordinator {
                 ),
             );
         };
-        let frame_rate = self.input_registry.frame_rate();
+        let frame_rate = self.state.frame_rate();
         if let Err(e) = start_stream_processors(
             pipeline_handle,
             &output_url,
@@ -210,7 +210,7 @@ impl ObswsCoordinator {
 // -----------------------------------------------------------------------
 
 /// Stream output の設定。
-/// `ObswsStreamServiceSettings` と同一フィールドを持ち、output_dynamic の enum から委譲される。
+/// `ObswsStreamServiceSettings` と同一フィールドを持ち、output_registry の enum から委譲される。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StreamOutputSettings {
     pub(crate) stream_service_type: String,
@@ -221,16 +221,15 @@ pub(crate) struct StreamOutputSettings {
 impl Default for StreamOutputSettings {
     fn default() -> Self {
         Self {
-            stream_service_type: crate::obsws::input_registry::OBSWS_DEFAULT_STREAM_SERVICE_TYPE
-                .to_owned(),
+            stream_service_type: crate::obsws::state::OBSWS_DEFAULT_STREAM_SERVICE_TYPE.to_owned(),
             server: None,
             key: None,
         }
     }
 }
 
-impl From<crate::obsws::input_registry::ObswsStreamServiceSettings> for StreamOutputSettings {
-    fn from(s: crate::obsws::input_registry::ObswsStreamServiceSettings) -> Self {
+impl From<crate::obsws::state::ObswsStreamServiceSettings> for StreamOutputSettings {
+    fn from(s: crate::obsws::state::ObswsStreamServiceSettings) -> Self {
         Self {
             stream_service_type: s.stream_service_type,
             server: s.server,
@@ -239,7 +238,7 @@ impl From<crate::obsws::input_registry::ObswsStreamServiceSettings> for StreamOu
     }
 }
 
-impl From<StreamOutputSettings> for crate::obsws::input_registry::ObswsStreamServiceSettings {
+impl From<StreamOutputSettings> for crate::obsws::state::ObswsStreamServiceSettings {
     fn from(s: StreamOutputSettings) -> Self {
         Self {
             stream_service_type: s.stream_service_type,
@@ -283,7 +282,7 @@ impl StreamOutputSettings {
         {
             if v.kind().is_null() {
                 self.stream_service_type =
-                    crate::obsws::input_registry::OBSWS_DEFAULT_STREAM_SERVICE_TYPE.to_owned();
+                    crate::obsws::state::OBSWS_DEFAULT_STREAM_SERVICE_TYPE.to_owned();
             } else {
                 match <String>::try_from(v) {
                     Ok(s) => self.stream_service_type = s,
@@ -327,7 +326,7 @@ impl StreamOutputSettings {
     pub(crate) fn parse_from_json(
         settings_value: Option<&nojson::RawJsonValue<'_, '_>>,
     ) -> Result<Self, String> {
-        use super::output_dynamic::parse_optional_string_strict;
+        use super::output_registry::parse_optional_string_strict;
 
         let mut settings = Self::default();
         if let Some(v) = settings_value {
@@ -357,7 +356,7 @@ async fn start_stream_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     output_url: &str,
     stream_key: Option<&str>,
-    run: &crate::obsws::input_registry::ObswsStreamRun,
+    run: &crate::obsws::state::ObswsStreamRun,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
     super::output::start_encoder_processors(
@@ -388,7 +387,7 @@ async fn start_stream_processors(
 /// ストリーム用プロセッサを段階的に停止する: エンコーダー → パブリッシャー
 async fn stop_processors_staged_stream(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws::input_registry::ObswsStreamRun,
+    run: &crate::obsws::state::ObswsStreamRun,
 ) -> crate::Result<()> {
     terminate_and_wait(
         pipeline_handle,

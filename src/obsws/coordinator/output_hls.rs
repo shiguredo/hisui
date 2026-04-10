@@ -9,7 +9,7 @@ use super::ObswsProgramOutputContext;
 use super::output::{
     OutputOperationOutcome, build_s3_client, terminate_and_wait, wait_or_terminate,
 };
-use super::output_dynamic::{OutputRun, OutputSettings};
+use super::output_registry::{OutputRun, OutputSettings};
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_start_hls(
@@ -18,7 +18,7 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use crate::obsws::input_registry::{
+        use crate::obsws::state::{
             HlsDestination, ObswsHlsRun, ObswsHlsVariantRun, ObswsRecordTrackRun,
         };
 
@@ -79,9 +79,9 @@ impl ObswsCoordinator {
         let program_output = ObswsProgramOutputContext {
             video_track_id: self.program_output.video_track_id.clone(),
             audio_track_id: self.program_output.audio_track_id.clone(),
-            canvas_width: self.input_registry.canvas_width(),
-            canvas_height: self.input_registry.canvas_height(),
-            frame_rate: self.input_registry.frame_rate(),
+            canvas_width: self.state.canvas_width(),
+            canvas_height: self.state.canvas_height(),
+            frame_rate: self.state.frame_rate(),
         };
         let is_abr = hls_settings.variants.len() > 1;
         let variant_runs: Vec<ObswsHlsVariantRun> = hls_settings
@@ -344,8 +344,8 @@ impl ObswsCoordinator {
 async fn start_hls_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     program_output: &ObswsProgramOutputContext,
-    run: &crate::obsws::input_registry::ObswsHlsRun,
-    hls_settings: &crate::obsws::input_registry::ObswsHlsSettings,
+    run: &crate::obsws::state::ObswsHlsRun,
+    hls_settings: &crate::obsws::state::ObswsHlsSettings,
 ) -> crate::Result<Option<tokio::task::JoinHandle<()>>> {
     // HLS 用にキーフレーム間隔を設定する。
     // segment_duration に合わせたフレーム数を計算し、エンコーダーに事前通知する。
@@ -372,9 +372,7 @@ async fn start_hls_processors(
         .enumerate()
     {
         // filesystem かつ ABR の場合はバリアントのサブディレクトリを作成する
-        if is_abr
-            && let crate::obsws::input_registry::HlsDestination::Filesystem { .. } = run.destination
-        {
+        if is_abr && let crate::obsws::state::HlsDestination::Filesystem { .. } = run.destination {
             std::fs::create_dir_all(&variant_run.variant_path).map_err(|e| {
                 crate::Error::new(format!(
                     "failed to create variant directory {}: {e}",
@@ -434,12 +432,12 @@ async fn start_hls_processors(
 
         // HLS ライター
         let storage_config = match &run.destination {
-            crate::obsws::input_registry::HlsDestination::Filesystem { .. } => {
+            crate::obsws::state::HlsDestination::Filesystem { .. } => {
                 crate::hls::writer::HlsStorageConfig::Filesystem {
                     output_directory: std::path::PathBuf::from(&variant_run.variant_path),
                 }
             }
-            crate::obsws::input_registry::HlsDestination::S3 {
+            crate::obsws::state::HlsDestination::S3 {
                 bucket,
                 region,
                 endpoint,
@@ -562,7 +560,7 @@ async fn start_hls_processors(
             let master_content =
                 crate::hls::writer::build_master_playlist_content(&master_variants, first);
             match &destination {
-                crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
+                crate::obsws::state::HlsDestination::Filesystem { directory } => {
                     if let Err(e) = crate::hls::writer::write_master_playlist(
                         &std::path::PathBuf::from(directory),
                         &master_variants,
@@ -571,7 +569,7 @@ async fn start_hls_processors(
                         tracing::error!(error = ?e, "failed to write HLS master playlist");
                     }
                 }
-                crate::obsws::input_registry::HlsDestination::S3 {
+                crate::obsws::state::HlsDestination::S3 {
                     bucket,
                     prefix,
                     region,
@@ -641,7 +639,7 @@ async fn start_hls_processors(
 /// Program 出力は共有なので、variant 後段の processor のみを停止する。
 async fn stop_processors_staged_hls(
     pipeline_handle: &crate::MediaPipelineHandle,
-    run: &crate::obsws::input_registry::ObswsHlsRun,
+    run: &crate::obsws::state::ObswsHlsRun,
 ) -> crate::Result<()> {
     // NOTE:
     // ライブ用途では StopOutput / ToggleOutput への応答遅延を避けることを優先し、
@@ -688,7 +686,7 @@ async fn stop_processors_staged_hls(
     // ABR の場合はマスタープレイリストとバリアントディレクトリを削除する
     if run.is_abr() {
         match &run.destination {
-            crate::obsws::input_registry::HlsDestination::Filesystem { directory } => {
+            crate::obsws::state::HlsDestination::Filesystem { directory } => {
                 let master_playlist_path =
                     std::path::PathBuf::from(directory).join("playlist.m3u8");
                 if let Err(e) = std::fs::remove_file(&master_playlist_path)
@@ -711,7 +709,7 @@ async fn stop_processors_staged_hls(
                     }
                 }
             }
-            crate::obsws::input_registry::HlsDestination::S3 {
+            crate::obsws::state::HlsDestination::S3 {
                 bucket,
                 prefix,
                 region,

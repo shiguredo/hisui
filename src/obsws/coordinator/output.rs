@@ -543,7 +543,7 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use super::output_dynamic::OutputKind;
+        use super::output_registry::OutputKind;
         let kind = self.outputs.get(output_name).map(|o| o.output_kind);
         let Some(kind) = kind else {
             return OutputOperationOutcome::failure(
@@ -592,7 +592,7 @@ impl ObswsCoordinator {
         request_id: &str,
         output_name: &str,
     ) -> OutputOperationOutcome {
-        use super::output_dynamic::OutputKind;
+        use super::output_registry::OutputKind;
         let kind = self.outputs.get(output_name).map(|o| o.output_kind);
         let Some(kind) = kind else {
             return OutputOperationOutcome::failure(
@@ -704,8 +704,8 @@ pub(crate) async fn live_processor_ids(
 /// 各 output エンジン（record / stream / rtmp_outbound）で共通のエンコーダー起動処理。
 pub(crate) async fn start_encoder_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
-    video: &crate::obsws::input_registry::ObswsRecordTrackRun,
-    audio: &crate::obsws::input_registry::ObswsRecordTrackRun,
+    video: &crate::obsws::state::ObswsRecordTrackRun,
+    audio: &crate::obsws::state::ObswsRecordTrackRun,
     audio_codec: crate::types::CodecName,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
