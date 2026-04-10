@@ -1,6 +1,23 @@
 //! output の統一管理。
 //! 全 output を名前付きインスタンスとして BTreeMap で管理し、
 //! HisuiCreateOutput / HisuiRemoveOutput で動的に追加・削除する。
+//!
+//! TODO: output 関連型の所属を再整理する
+//!
+//! 現状は output の Settings / Run / Destination / Variant 型の一部が
+//! coordinator 配下にあり、state_file / writer / response など
+//! coordinator 外のモジュールもそれらを参照している。
+//!
+//! そのため output_registry は output 集合の管理に加えて、
+//! 外部参照用の型の入口（re-export）も兼ねている。
+//!
+//! 将来的には以下の形へ整理する:
+//! - output 関連の Settings / Destination / Variant / 設定パースを
+//!   `obsws::output::*` のような coordinator 外の層へ移す
+//! - 必要なら Run 型も同じ層へ移し、coordinator は start / stop と
+//!   processor 制御に専念させる
+//! - それにより output_registry から re-export を取り除き、
+//!   registry 本来の責務に限定する
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
