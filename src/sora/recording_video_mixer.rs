@@ -425,7 +425,7 @@ impl VideoMixer {
             .input_track_ids
             .iter()
             .cloned()
-            .zip(input_track_ids.into_iter())
+            .zip(input_track_ids)
             .map(|(expected_track_id, subscribed_track_id)| {
                 (
                     expected_track_id,

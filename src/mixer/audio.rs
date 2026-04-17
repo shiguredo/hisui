@@ -710,14 +710,14 @@ impl AudioRealtimeMixerRunner<'_> {
             let vol = state.volume_mul.get();
             if (vol - 1.0).abs() < f64::EPSILON {
                 // 音量 1.0（0dB）の場合はそのまま加算
-                for (acc, sample) in accum.iter_mut().zip(samples.into_iter()) {
+                for (acc, sample) in accum.iter_mut().zip(samples) {
                     *acc = acc.saturating_add(i32::from(sample));
                 }
             } else {
                 // 音量を適用して加算。
                 // vol が極端に大きい場合は as i32 の saturating cast で飽和するが、
                 // 最終出力は i16 にクランプされるためクリッピングとして正常に扱う。
-                for (acc, sample) in accum.iter_mut().zip(samples.into_iter()) {
+                for (acc, sample) in accum.iter_mut().zip(samples) {
                     let scaled = (f64::from(sample) * vol) as i32;
                     *acc = acc.saturating_add(scaled);
                 }

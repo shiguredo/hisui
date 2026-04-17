@@ -169,11 +169,10 @@ fn render_bar(total: u64, position: u64, width: usize, use_color: bool) -> Strin
         return String::new();
     }
     let clamped = position.min(total);
-    let filled = if total == 0 {
-        width
-    } else {
-        (clamped.saturating_mul(width as u64) / total) as usize
-    };
+    let filled = clamped
+        .saturating_mul(width as u64)
+        .checked_div(total)
+        .map_or(width, |v| v as usize);
     let (filled_len, head_len, empty_len) = if filled >= width {
         (width, 0, 0)
     } else if filled == 0 {
