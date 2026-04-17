@@ -25,7 +25,7 @@ tracing-subscriber = { workspace = true }
 noargs = { workspace = true }
 nojson = { workspace = true }
 base64 = "=0.22.1"
-rustls = { version = "=0.23.37", default-features = false, features = [
+rustls = { version = "=0.23.38", default-features = false, features = [
     "std",
     "tls12",
     "aws-lc-rs",
@@ -39,7 +39,7 @@ shiguredo_rtmp = "=2026.1.0-canary.5"
 shiguredo_rtsp = "=2026.1.0-canary.0"
 shiguredo_srt = "=2026.1.0-canary.0"
 shiguredo_webrtc = { workspace = true }
-sora_sdk = "=2026.1.0-canary.5"
+sora_sdk = "=2026.1.0-canary.6"
 shiguredo_video_device = "=2026.1.0"
 shiguredo_audio_device = "=2026.1.0"
 mpeg2ts = "=0.6.0"
@@ -49,8 +49,8 @@ shiguredo_s3 = { version = "=2026.1.0-canary.2", default-features = false, featu
     "aws-lc-rs",
 ] }
 nopng = "=0.1.1"
-aws-lc-rs = "=1.16.2"
-libc = "=0.2.184"
+aws-lc-rs = "=1.16.3"
+libc = "=0.2.185"
 
 shiguredo_dav1d = "=2026.1.0"
 shiguredo_libvpx = { workspace = true }
@@ -80,7 +80,7 @@ tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["fmt", "std"] }
 noargs = "=0.4.2"
 nojson = "=0.3.10"
-tokio = { version = "=1.51.0", features = [
+tokio = { version = "=1.52.1", features = [
     "rt",
     "rt-multi-thread",
     "net",
@@ -89,7 +89,7 @@ tokio = { version = "=1.51.0", features = [
     "sync",
     "time",
 ] }
-shiguredo_webrtc = "=0.146.3"
+shiguredo_webrtc = "=0.147.1-canary.2"
 shiguredo_http11 = "=2026.1.1"
 shiguredo_libvpx = "=2026.1.0"
 shiguredo_opus = "=2026.1.0"
