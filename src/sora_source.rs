@@ -26,7 +26,7 @@ pub enum SoraSourceEvent {
         code: Option<u16>,
         reason: String,
     },
-    /// SoraClient タスク終了（正常・異常問わず）
+    /// SoraConnection タスク終了（正常・異常問わず）
     Disconnected { subscriber_name: String },
 }
 
@@ -56,9 +56,10 @@ impl SoraSubscriber {
         let subscriber_name = self.subscriber_name.clone();
         let event_tx = self.event_tx.clone();
 
-        // SoraClientContext を生成（RecvOnly なので外部 ADM は不要）
-        let context = sora_sdk::SoraClientContext::new()
-            .map_err(|e| crate::Error::new(format!("failed to create SoraClientContext: {e}")))?;
+        // SoraConnectionContext を生成（RecvOnly なので外部 ADM は不要）
+        let context = sora_sdk::SoraConnectionContext::new().map_err(|e| {
+            crate::Error::new(format!("failed to create SoraConnectionContext: {e}"))
+        })?;
 
         // コールバック用のクローン
         let on_track_name = subscriber_name.clone();
@@ -73,8 +74,8 @@ impl SoraSubscriber {
         let on_ws_close_name = subscriber_name.clone();
         let on_ws_close_tx = event_tx.clone();
 
-        // SoraClient を構築（RecvOnly）
-        let mut builder = sora_sdk::SoraClient::builder(
+        // SoraConnection を構築（RecvOnly）
+        let mut builder = sora_sdk::SoraConnection::builder(
             context,
             self.signaling_urls.clone(),
             self.channel_id.clone(),
@@ -130,17 +131,17 @@ impl SoraSubscriber {
             builder = builder.metadata(json_string);
         }
 
-        let (client, client_handle) = builder
+        let (connection, connection_handle) = builder
             .build()
-            .map_err(|e| crate::Error::new(format!("failed to build SoraClient: {e}")))?;
+            .map_err(|e| crate::Error::new(format!("failed to build SoraConnection: {e}")))?;
 
         tracing::info!("SoraSubscriber '{}': starting connection", subscriber_name);
 
         // Sora 接続を開始（バックグラウンドタスク）
         let disconnected_name = subscriber_name.clone();
         let disconnected_tx = event_tx.clone();
-        let mut client_task = tokio::spawn(async move {
-            if let Err(e) = client.run().await {
+        let mut connection_task = tokio::spawn(async move {
+            if let Err(e) = connection.run().await {
                 tracing::warn!(
                     "SoraSubscriber '{}' terminated with error: {e}",
                     disconnected_name
@@ -157,20 +158,21 @@ impl SoraSubscriber {
 
         handle.notify_ready();
 
-        // client_task の完了を待つ。
+        // connection_task の完了を待つ。
         // processor が TerminateProcessor で abort された場合はここで中断される。
-        let _ = (&mut client_task).await;
+        let _ = (&mut connection_task).await;
 
         // 切断（まだ接続中の場合）
-        if let Err(e) = client_handle.disconnect().await {
+        if let Err(e) = connection_handle.disconnect().await {
             tracing::warn!(
                 "failed to disconnect SoraSubscriber '{}': {e}",
                 subscriber_name
             );
         }
         // タスク終了を待ち、タイムアウト時は abort する
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut client_task).await;
-        client_task.abort();
+        let _ =
+            tokio::time::timeout(std::time::Duration::from_secs(5), &mut connection_task).await;
+        connection_task.abort();
 
         Ok(())
     }

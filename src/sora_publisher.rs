@@ -28,13 +28,14 @@ impl SoraPublisher {
         let external_adm =
             shiguredo_webrtc::AudioDeviceModule::new_with_handler(Box::new(adm_handler));
 
-        // SoraClientContext を外部 ADM 付きで生成
-        let context =
-            sora_sdk::SoraClientContext::new_with_config(sora_sdk::SoraClientContextConfig {
+        // SoraConnectionContext を外部 ADM 付きで生成
+        let context = sora_sdk::SoraConnectionContext::new_with_config(
+            sora_sdk::SoraConnectionContextConfig {
                 adm_config: sora_sdk::AdmConfig::UseExternal(external_adm),
                 ..Default::default()
-            })
-            .map_err(|e| crate::Error::new(format!("failed to create SoraClientContext: {e}")))?;
+            },
+        )
+        .map_err(|e| crate::Error::new(format!("failed to create SoraConnectionContext: {e}")))?;
 
         // video track を作成
         let mut video_source = shiguredo_webrtc::AdaptedVideoTrackSource::new();
@@ -51,8 +52,8 @@ impl SoraPublisher {
             .create_audio_track(&audio_source)
             .map_err(|e| crate::Error::new(format!("failed to create audio track: {e}")))?;
 
-        // SoraClient を構築
-        let mut builder = sora_sdk::SoraClient::builder(
+        // SoraConnection を構築
+        let mut builder = sora_sdk::SoraConnection::builder(
             context,
             self.signaling_urls.clone(),
             self.channel_id.clone(),
@@ -75,14 +76,14 @@ impl SoraPublisher {
             builder = builder.metadata(json_string);
         }
 
-        let (client, client_handle) = builder
+        let (connection, connection_handle) = builder
             .build()
-            .map_err(|e| crate::Error::new(format!("failed to build SoraClient: {e}")))?;
+            .map_err(|e| crate::Error::new(format!("failed to build SoraConnection: {e}")))?;
 
         // Sora 接続を開始（バックグラウンドタスク）
-        let mut client_task = tokio::spawn(async move {
-            if let Err(e) = client.run().await {
-                tracing::warn!("Sora client terminated with error: {e}");
+        let mut connection_task = tokio::spawn(async move {
+            if let Err(e) = connection.run().await {
+                tracing::warn!("Sora connection terminated with error: {e}");
             }
         });
 
@@ -160,12 +161,12 @@ impl SoraPublisher {
         }
 
         // 切断
-        if let Err(e) = client_handle.disconnect().await {
-            tracing::warn!("failed to disconnect Sora client: {e}");
+        if let Err(e) = connection_handle.disconnect().await {
+            tracing::warn!("failed to disconnect Sora connection: {e}");
         }
         // タスク終了を待ち、タイムアウト時は abort する
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut client_task).await;
-        client_task.abort();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut connection_task).await;
+        connection_task.abort();
 
         Ok(())
     }
