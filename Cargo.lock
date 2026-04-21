@@ -618,6 +618,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e5dc223a8d69eaeb19c31218a69a55112fe79965764430f092532aed848f1b8"
 
 [[package]]
+name = "noflate"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "774ddd9d0d682afb3d18239b1d8fc3e57902237bb83e0e439db9bad38c387df4"
+
+[[package]]
 name = "nojson"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1183,9 +1189,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_srt"
-version = "2026.1.0-canary.0"
+version = "2026.1.0-canary.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "214bc29942e7e1a10af9c728a5034c8ca1e2ce1272e9a34fe25a4f9604222248"
+checksum = "8e1fe078bda022a5409cae9a22c7c96403791eb5410a81841fd0766295c09d4d"
 dependencies = [
  "aws-lc-rs",
 ]
@@ -1232,9 +1238,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_webrtc"
-version = "0.147.1-canary.2"
+version = "0.147.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b271c88f73613f223f567f9810e6b8c8bc44abda3a86709b7c83a292e456827"
+checksum = "44122780996f7038ab344550f86d460da5495509e7fb3a55d90c00870fd51659"
 dependencies = [
  "bindgen",
  "nojson",
@@ -1306,12 +1312,12 @@ dependencies = [
 
 [[package]]
 name = "sora_sdk"
-version = "2026.1.0-canary.6"
+version = "2026.1.0-canary.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a8675e6f87682d733dc2085dfdf84b1f1f62942e0fc5c23d5db73aa883e5dea"
+checksum = "a1afa9e8d7aab33534630ef2789799af2b798c072c88a1bd0068c9a64b9e650b"
 dependencies = [
  "aws-lc-rs",
- "flate2",
+ "noflate",
  "nojson",
  "rand",
  "rustls",
