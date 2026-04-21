@@ -2,55 +2,79 @@
 name = "hisui"
 version = "2026.1.0-canary.1"
 edition = "2024"
-rust-version = "1.90"
-authors = ["Shiguredo Inc."]
-license = "Apache-2.0"
+rust-version = "1.95"
 description = "Recording Composition Tool Hisui"
+readme = "README.md"
 homepage = "https://github.com/shiguredo/hisui"
 repository = "https://github.com/shiguredo/hisui"
-readme = "README.md"
+license = "Apache-2.0"
 
-[features]
-default = ["player"]
-fdk-aac = ["shiguredo_fdk_aac"]
-nvcodec = ["shiguredo_nvcodec"]
-player = ["raw_player"]
+[workspace]
+members = [
+  "examples/camera_record",
+  "examples/hls_s3",
+  "examples/mpeg_dash_s3",
+  "examples/obsws_bootstrap",
+  "examples/sora_publish",
+  "examples/sora_source"
+]
+
+[workspace.dependencies]
+noargs = "=0.4.2"
+nojson = "=0.3.10"
+shiguredo_http11 = "=2026.1.1"
+shiguredo_libvpx = "=2026.1.0"
+shiguredo_mp4 = "=2026.3.0"
+shiguredo_opus = "=2026.1.0"
+shiguredo_webrtc = "=0.147.1-canary.2"
+shiguredo_websocket = "=2026.1.0"
+tokio = { version = "=1.52.1", features = [
+  "io-util",
+  "macros",
+  "net",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["fmt", "std"] }
 
 [dependencies]
 # NOTE: 通常の依存は突然挙動が変わることが内容に、バージョンは厳密一致で指定している
 # NOTE: examples と共有する依存は [workspace.dependencies] で定義している
 
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+aws-lc-rs = "=1.16.3"
+base64 = "=0.22.1"
+libc = "=0.2.185"
+mpeg2ts = "=0.6.0"
 noargs = { workspace = true }
 nojson = { workspace = true }
-base64 = "=0.22.1"
+nopng = "=0.1.1"
 rustls = { version = "=0.23.38", default-features = false, features = [
-    "std",
-    "tls12",
-    "aws-lc-rs",
+  "aws-lc-rs",
+  "std",
+  "tls12",
 ] }
 rustls-platform-verifier = "=0.6.2"
-tokio = { workspace = true }
-tokio-rustls = "=0.26.4"
-shiguredo_mp4 = { workspace = true }
+shiguredo_audio_device = "=2026.1.0"
 shiguredo_http11 = { workspace = true }
+shiguredo_m3u8 = "=2026.1.0-canary.0"
+shiguredo_mp4 = { workspace = true }
+shiguredo_mpd = "=2026.1.0-canary.0"
 shiguredo_rtmp = "=2026.1.0-canary.5"
 shiguredo_rtsp = "=2026.1.0-canary.0"
+shiguredo_s3 = { version = "=2026.1.0-canary.2", default-features = false, features = [
+  "aws-lc-rs",
+] }
 shiguredo_srt = "=2026.1.0-canary.0"
+shiguredo_video_device = "=2026.1.0"
 shiguredo_webrtc = { workspace = true }
 sora_sdk = "=2026.1.0-canary.6"
-shiguredo_video_device = "=2026.1.0"
-shiguredo_audio_device = "=2026.1.0"
-mpeg2ts = "=0.6.0"
-shiguredo_m3u8 = "=2026.1.0-canary.0"
-shiguredo_mpd = "=2026.1.0-canary.0"
-shiguredo_s3 = { version = "=2026.1.0-canary.2", default-features = false, features = [
-    "aws-lc-rs",
-] }
-nopng = "=0.1.1"
-aws-lc-rs = "=1.16.3"
-libc = "=0.2.185"
+tokio = { workspace = true }
+tokio-rustls = "=0.26.4"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 shiguredo_dav1d = "=2026.1.0"
 shiguredo_libvpx = { workspace = true }
@@ -65,33 +89,15 @@ shiguredo_fdk_aac = { version = "=2026.1.0-canary.1", optional = true }
 
 raw_player = { version = "=2026.1.0", optional = true }
 
+[dev-dependencies]
+tempfile = "3.18.0"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 shiguredo_audio_toolbox = "=2026.1.0"
 shiguredo_video_toolbox = "=2026.1.1"
 
-[dev-dependencies]
-tempfile = "3.18.0"
-
-[workspace]
-members = ["examples/obsws_bootstrap", "examples/sora_publish", "examples/sora_source", "examples/hls_s3", "examples/mpeg_dash_s3", "examples/camera_record"]
-
-[workspace.dependencies]
-tracing = "=0.1.44"
-tracing-subscriber = { version = "=0.3.23", features = ["fmt", "std"] }
-noargs = "=0.4.2"
-nojson = "=0.3.10"
-tokio = { version = "=1.52.1", features = [
-    "rt",
-    "rt-multi-thread",
-    "net",
-    "io-util",
-    "macros",
-    "sync",
-    "time",
-] }
-shiguredo_webrtc = "=0.147.1-canary.2"
-shiguredo_http11 = "=2026.1.1"
-shiguredo_libvpx = "=2026.1.0"
-shiguredo_opus = "=2026.1.0"
-shiguredo_mp4 = "=2026.3.0"
-shiguredo_websocket = "=2026.1.0"
+[features]
+default = ["player"]
+fdk-aac = ["shiguredo_fdk_aac"]
+nvcodec = ["shiguredo_nvcodec"]
+player = ["raw_player"]
