@@ -56,7 +56,7 @@ rustls = { version = "=0.23.38", default-features = false, features = [
   "std",
   "tls12",
 ] }
-rustls-platform-verifier = "=0.6.2"
+rustls-platform-verifier = "=0.7.0"
 shiguredo_audio_device = "=2026.1.0"
 shiguredo_http11 = { workspace = true }
 shiguredo_m3u8 = "=2026.1.0-canary.0"
