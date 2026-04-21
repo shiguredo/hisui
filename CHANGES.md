@@ -12,16 +12,16 @@
 ## develop
 
 - [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_dav1d crate のリポジトリが https://github.com/shiguredo/dav1d-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_dav1d crate のリポジトリが <https://github.com/shiguredo/dav1d-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
-  - このバージョンから shiguredo_fdk_aac crate のリポジトリが https://github.com/shiguredo/fdk-aac-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_fdk_aac crate のリポジトリが <https://github.com/shiguredo/fdk-aac-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_opus のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_opus crate のリポジトリが https://github.com/shiguredo/opus-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_opus crate のリポジトリが <https://github.com/shiguredo/opus-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_svt_av1 crate のリポジトリが https://github.com/shiguredo/svt-av1-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_svt_av1 crate のリポジトリが <https://github.com/shiguredo/svt-av1-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
   - @voluntas
@@ -55,7 +55,7 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.6 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.7 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
@@ -81,7 +81,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.147.1-canary.2 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.147.1 を追加する
   - @sile
 - [ADD] `server` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui server` で WebSocket サーバーを起動できる
@@ -131,22 +131,22 @@
   - 今までは H.265 では hev1 ボックスが使われている前提だったが、hvc1 ボックスにも対応する
   - @sile
 - [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0 にあげる
-  - shiguredo_openh264 crate のリポジトリは 2026.1.0 から https://github.com/shiguredo/openh264-rs に独立しており、hisui のワークスペースからは削除されている
+  - shiguredo_openh264 crate のリポジトリは 2026.1.0 から <https://github.com/shiguredo/openh264-rs> に独立しており、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_nvcodec crate のリポジトリが https://github.com/shiguredo/nvcodec-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_nvcodec crate のリポジトリが <https://github.com/shiguredo/nvcodec-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_libvpx のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_libvpx crate のリポジトリが https://github.com/shiguredo/libvpx-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_libvpx crate のリポジトリが <https://github.com/shiguredo/libvpx-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_libyuv のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_libyuv crate のリポジトリが https://github.com/shiguredo/libyuv-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_libyuv crate のリポジトリが <https://github.com/shiguredo/libyuv-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.1 にあげる
-  - このバージョンから shiguredo_video_toolbox crate のリポジトリが https://github.com/shiguredo/video-toolbox-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_video_toolbox crate のリポジトリが <https://github.com/shiguredo/video-toolbox-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_audio_toolbox crate のリポジトリが https://github.com/shiguredo/audio-toolbox-rs に独立したので、hisui のワークスペースからは削除されている
+  - このバージョンから shiguredo_audio_toolbox crate のリポジトリが <https://github.com/shiguredo/audio-toolbox-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.3.0 にあげる
   - @sile
