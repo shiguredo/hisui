@@ -2,6 +2,9 @@
 # See https://prek.j178.dev for more information.
 #:schema https://www.schemastore.org/prek.json
 
+# prek 独自の機能 (builtin repo, glob files, priority) を使うため最低バージョンを明示する
+minimum_prek_version = "0.3.9"
+
 [[repos]]
 repo = "builtin"
 hooks = [
@@ -9,6 +12,10 @@ hooks = [
   { id = "end-of-file-fixer" },
   { id = "check-toml" },
   { id = "check-yaml" },
+  { id = "check-merge-conflict" },
+  { id = "check-added-large-files" },
+  { id = "detect-private-key" },
+  { id = "mixed-line-ending" },
 ]
 
 [[repos]]
@@ -23,15 +30,15 @@ hooks = [
     pass_filenames = false,
     priority = 0,
   },
-  # {
-  #   id = "cargo-clippy",
-  #   name = "cargo clippy",
-  #   entry = "cargo clippy --all-targets --all-features -- -D warnings",
-  #   language = "system",
-  #   types = ["rust"],
-  #   pass_filenames = false,
-  #   priority = 10,
-  # },
+  {
+    id = "cargo-clippy",
+    name = "cargo clippy",
+    entry = "cargo clippy --all-targets -- -D warnings",
+    language = "system",
+    types = ["rust"],
+    pass_filenames = false,
+    priority = 10,
+  },
   {
     id = "ruff-e2e",
     name = "ruff (e2e-tests)",
