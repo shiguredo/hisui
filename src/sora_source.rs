@@ -170,8 +170,7 @@ impl SoraSubscriber {
             );
         }
         // タスク終了を待ち、タイムアウト時は abort する
-        let _ =
-            tokio::time::timeout(std::time::Duration::from_secs(5), &mut connection_task).await;
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut connection_task).await;
         connection_task.abort();
 
         Ok(())
