@@ -1,4 +1,4 @@
-use base64::Engine as _;
+use base64ct::{Base64, Encoding as _};
 
 use crate::obsws::protocol::AUTH_RANDOM_BYTE_LEN;
 
@@ -37,7 +37,7 @@ fn generate_random_base64(len: usize) -> crate::Result<String> {
     let mut bytes = vec![0_u8; len];
     aws_lc_rs::rand::fill(&mut bytes)
         .map_err(|_| crate::Error::new("failed to generate random bytes"))?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    Ok(Base64::encode_string(&bytes))
 }
 
 pub fn build_authentication_response(password: &str, salt: &str, challenge: &str) -> String {
@@ -45,10 +45,10 @@ pub fn build_authentication_response(password: &str, salt: &str, challenge: &str
         &aws_lc_rs::digest::SHA256,
         format!("{password}{salt}").as_bytes(),
     );
-    let secret = base64::engine::general_purpose::STANDARD.encode(secret_hash.as_ref());
+    let secret = Base64::encode_string(secret_hash.as_ref());
     let response_hash = aws_lc_rs::digest::digest(
         &aws_lc_rs::digest::SHA256,
         format!("{secret}{challenge}").as_bytes(),
     );
-    base64::engine::general_purpose::STANDARD.encode(response_hash.as_ref())
+    Base64::encode_string(response_hash.as_ref())
 }

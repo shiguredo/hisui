@@ -45,7 +45,7 @@ tracing-subscriber = { version = "=0.3.23", features = ["fmt", "std"] }
 # NOTE: examples と共有する依存は [workspace.dependencies] で定義している
 
 aws-lc-rs = "=1.16.3"
-base64 = "=0.22.1"
+base64ct = { version = "=1.8.3", features = ["alloc"] }
 libc = "=0.2.185"
 mpeg2ts = "=0.6.0"
 noargs = { workspace = true }

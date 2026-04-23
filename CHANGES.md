@@ -31,6 +31,9 @@
 - [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
   - `shiguredo_audio_device` が PulseAudio バックエンドを利用するために必要
   - @sile
+- [UPDATE] base64 crate を base64ct 1.8.3 に差し替える
+  - obsws 認証で利用する base64 エンコードを定数時間実装の base64ct に置き換える
+  - @voluntas
 - [ADD] obsws の Output に MPEG-DASH ライブ出力 (`outputName: "mpeg_dash"`) を追加する
   - 指定されたビデオ/オーディオコーデックの fragmented MP4 セグメントを生成し、MPD マニフェストで管理する
   - `SetOutputSettings` で `destination` / `segmentDuration` / `maxRetainedSegments` / `variants` / `videoCodec` / `audioCodec` を設定可能
