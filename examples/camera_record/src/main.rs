@@ -87,22 +87,33 @@ fn make_set_record_directory_request(record_directory: &str) -> (String, String)
     (request_id, msg)
 }
 
-fn make_create_camera_input_request() -> (String, String) {
+fn make_create_camera_input_request(input_name: &str, device_id: Option<&str>) -> (String, String) {
     let request_id = next_request_id();
+    let rid = request_id.clone();
+    let iname = input_name.to_owned();
+    let did = device_id.map(|s| s.to_owned());
     let msg = nojson::object(|f| {
         f.member("op", 6)?;
         f.member(
             "d",
             nojson::object(|f| {
                 f.member("requestType", "CreateInput")?;
-                f.member("requestId", request_id.as_str())?;
+                f.member("requestId", rid.as_str())?;
                 f.member(
                     "requestData",
                     nojson::object(|f| {
                         f.member("sceneName", "Scene")?;
-                        f.member("inputName", "camera")?;
+                        f.member("inputName", iname.as_str())?;
                         f.member("inputKind", "video_capture_device")?;
-                        f.member("inputSettings", nojson::object(|_| Ok(())))?;
+                        f.member(
+                            "inputSettings",
+                            nojson::object(|f| {
+                                if let Some(d) = did.as_deref() {
+                                    f.member("device_id", d)?;
+                                }
+                                Ok(())
+                            }),
+                        )?;
                         f.member("sceneItemEnabled", true)
                     }),
                 )
@@ -113,24 +124,76 @@ fn make_create_camera_input_request() -> (String, String) {
     (request_id, msg)
 }
 
-fn make_create_microphone_input_request() -> (String, String) {
+fn make_create_microphone_input_request(device_id: &str) -> (String, String) {
     let request_id = next_request_id();
+    let rid = request_id.clone();
+    let did = device_id.to_owned();
     let msg = nojson::object(|f| {
         f.member("op", 6)?;
         f.member(
             "d",
             nojson::object(|f| {
                 f.member("requestType", "CreateInput")?;
-                f.member("requestId", request_id.as_str())?;
+                f.member("requestId", rid.as_str())?;
                 f.member(
                     "requestData",
                     nojson::object(|f| {
                         f.member("sceneName", "Scene")?;
                         f.member("inputName", "microphone")?;
                         f.member("inputKind", "audio_capture_device")?;
-                        f.member("inputSettings", nojson::object(|_| Ok(())))?;
+                        f.member(
+                            "inputSettings",
+                            nojson::object(|f| f.member("device_id", did.as_str())),
+                        )?;
                         f.member("sceneItemEnabled", true)
                     }),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
+fn make_get_device_id_items_request(input_name: &str) -> (String, String) {
+    let request_id = next_request_id();
+    let rid = request_id.clone();
+    let iname = input_name.to_owned();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "GetInputPropertiesListPropertyItems")?;
+                f.member("requestId", rid.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| {
+                        f.member("inputName", iname.as_str())?;
+                        f.member("propertyName", "device_id")
+                    }),
+                )
+            }),
+        )
+    })
+    .to_string();
+    (request_id, msg)
+}
+
+fn make_remove_input_request(input_name: &str) -> (String, String) {
+    let request_id = next_request_id();
+    let rid = request_id.clone();
+    let iname = input_name.to_owned();
+    let msg = nojson::object(|f| {
+        f.member("op", 6)?;
+        f.member(
+            "d",
+            nojson::object(|f| {
+                f.member("requestType", "RemoveInput")?;
+                f.member("requestId", rid.as_str())?;
+                f.member(
+                    "requestData",
+                    nojson::object(|f| f.member("inputName", iname.as_str())),
                 )
             }),
         )
@@ -214,9 +277,9 @@ fn make_stop_player_request() -> (String, String) {
 // --- obsws レスポンスパース ---
 
 /// op=7 のレスポンスから requestId と成否を取得する。
-/// 成功時は Ok(())、失敗時は Err(comment)。
+/// 成功時は responseData の JSON 文字列、失敗時はエラーコメント。
 /// op=7 以外のメッセージは None を返す。
-fn parse_request_response(text: &str) -> Option<(String, Result<(), String>)> {
+fn parse_request_response(text: &str) -> Option<(String, Result<String, String>)> {
     let json = nojson::RawJson::parse(text).ok()?;
     let root = json.value();
     let op: i64 = root
@@ -239,7 +302,13 @@ fn parse_request_response(text: &str) -> Option<(String, Result<(), String>)> {
         .ok()?;
 
     if result {
-        Some((request_id, Ok(())))
+        let response_data = d
+            .to_member("responseData")
+            .ok()
+            .and_then(|v| v.optional())
+            .map(|v| v.extract().to_string())
+            .unwrap_or_default();
+        Some((request_id, Ok(response_data)))
     } else {
         let comment: Option<String> = request_status
             .to_member("comment")
@@ -251,6 +320,29 @@ fn parse_request_response(text: &str) -> Option<(String, Result<(), String>)> {
             Err(comment.unwrap_or_else(|| "unknown error".to_owned())),
         ))
     }
+}
+
+/// GetInputPropertiesListPropertyItems レスポンスから itemValue の配列を取り出す
+fn parse_property_item_values(response_data: &str) -> Vec<String> {
+    let Ok(json) = nojson::RawJson::parse(response_data) else {
+        return Vec::new();
+    };
+    let root = json.value();
+    let Ok(items_member) = root.to_member("propertyItems") else {
+        return Vec::new();
+    };
+    let Ok(items_value) = items_member.required() else {
+        return Vec::new();
+    };
+    let Ok(items) = items_value.to_array() else {
+        return Vec::new();
+    };
+    items
+        .filter_map(|item| {
+            let value = item.to_member("itemValue").ok()?.required().ok()?;
+            value.try_into().ok()
+        })
+        .collect()
 }
 
 // --- WebSocket 通信ヘルパー ---
@@ -311,13 +403,14 @@ async fn recv_text(
     }
 }
 
-/// obsws リクエストを送信し、対応するレスポンスを待つ
+/// obsws リクエストを送信し、対応するレスポンスを待つ。
+/// 成功時は responseData の JSON 文字列（空の場合もある）を返す。
 async fn send_request_and_wait(
     ws: &mut WebSocketClientConnection<SecureRandom>,
     stream: &mut TcpStream,
     request_id: &str,
     message: &str,
-) -> Result<(), String> {
+) -> Result<String, String> {
     ws.send_text(message)
         .map_err(|e| format!("failed to send request: {e}"))?;
     flush_ws_output(ws, stream).await?;
@@ -331,6 +424,29 @@ async fn send_request_and_wait(
         }
         // 対象外のメッセージは無視して続行
     }
+}
+
+/// カメラデバイスの device_id 一覧を取得する。
+/// 列挙用のダミー video_capture_device input を作成して照会し、終わったら削除する。
+async fn enumerate_camera_device_ids(
+    ws: &mut WebSocketClientConnection<SecureRandom>,
+    stream: &mut TcpStream,
+) -> Result<Vec<String>, String> {
+    let dummy_name = "__camera_record_enumerate__";
+
+    let (req_id, msg) = make_create_camera_input_request(dummy_name, None);
+    send_request_and_wait(ws, stream, &req_id, &msg).await?;
+
+    let (req_id, msg) = make_get_device_id_items_request(dummy_name);
+    let response_data = send_request_and_wait(ws, stream, &req_id, &msg).await?;
+    let device_ids = parse_property_item_values(&response_data);
+
+    let (req_id, msg) = make_remove_input_request(dummy_name);
+    if let Err(e) = send_request_and_wait(ws, stream, &req_id, &msg).await {
+        tracing::warn!("RemoveInput for enumerate dummy failed: {e}");
+    }
+
+    Ok(device_ids)
 }
 
 // --- main ---
@@ -366,6 +482,14 @@ fn main() -> noargs::Result<()> {
         .doc("カメラのみ使用する（マイクなし）")
         .take(&mut args)
         .is_present();
+    let camera_device_id: Option<String> = noargs::opt("camera-device-id")
+        .doc("カメラデバイス ID（省略時は接続中のカメラから自動選択）")
+        .take(&mut args)
+        .present_and_then(|o| o.value().parse())?;
+    let mic_device_id: Option<String> = noargs::opt("mic-device-id")
+        .doc("マイクデバイス ID（未指定かつ --camera-only なしで録画するとマイク作成が失敗する点に注意）")
+        .take(&mut args)
+        .present_and_then(|o| o.value().parse())?;
     let player = noargs::flag("player")
         .doc("player output を起動してウィンドウ表示する")
         .take(&mut args)
@@ -391,7 +515,15 @@ fn main() -> noargs::Result<()> {
         .build()
         .expect("failed to build tokio runtime");
 
-    let result = runtime.block_on(run(&host, port, &record_directory, camera_only, player));
+    let result = runtime.block_on(run(
+        &host,
+        port,
+        &record_directory,
+        camera_only,
+        camera_device_id.as_deref(),
+        mic_device_id.as_deref(),
+        player,
+    ));
 
     match result {
         Ok(()) => Ok(()),
@@ -407,6 +539,8 @@ async fn run(
     port: u16,
     record_directory: &str,
     camera_only: bool,
+    camera_device_id: Option<&str>,
+    mic_device_id: Option<&str>,
     player: bool,
 ) -> Result<(), String> {
     // TCP 接続
@@ -466,18 +600,42 @@ async fn run(
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("SetRecordDirectory 成功");
 
-    // 2. CreateInput: カメラ入力を追加
-    let (req_id, msg) = make_create_camera_input_request();
-    tracing::info!("CreateInput 送信: video_capture_device");
+    // 2. カメラ device_id を決定する。
+    //    hisui の video_capture_device は device_id 未指定だと source processor が起動せず
+    //    録画映像が黒になるため、必ず明示的に指定する。
+    let resolved_camera_device_id = if let Some(d) = camera_device_id {
+        Some(d.to_owned())
+    } else {
+        let device_ids = enumerate_camera_device_ids(&mut ws, &mut stream).await?;
+        tracing::info!("available camera device_ids: {} found", device_ids.len());
+        device_ids.into_iter().next()
+    };
+    let resolved_camera_device_id = resolved_camera_device_id
+        .ok_or_else(|| "no camera device found; specify --camera-device-id manually".to_owned())?;
+
+    // 3. CreateInput: カメラ入力を追加
+    let (req_id, msg) =
+        make_create_camera_input_request("camera", Some(resolved_camera_device_id.as_str()));
+    tracing::info!(
+        "CreateInput 送信: video_capture_device (device_id={resolved_camera_device_id})"
+    );
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("CreateInput 成功: camera");
 
-    // 3. CreateInput: マイク入力を追加（--camera-only でない場合）
+    // 4. CreateInput: マイク入力を追加（--camera-only でない、かつ --mic-device-id 指定時）
+    //    hisui の audio_capture_device も device_id 未指定では source processor が起動しないため、
+    //    CLI で明示指定されたときだけ作成する。
     if !camera_only {
-        let (req_id, msg) = make_create_microphone_input_request();
-        tracing::info!("CreateInput 送信: audio_capture_device");
-        send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
-        tracing::info!("CreateInput 成功: microphone");
+        if let Some(mic_id) = mic_device_id {
+            let (req_id, msg) = make_create_microphone_input_request(mic_id);
+            tracing::info!("CreateInput 送信: audio_capture_device (device_id={mic_id})");
+            send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
+            tracing::info!("CreateInput 成功: microphone");
+        } else {
+            tracing::warn!(
+                "--mic-device-id unset: microphone input skipped (use --camera-only to silence)"
+            );
+        }
     }
 
     // 4. StartOutput player: player ウィンドウ表示（--player 指定時）

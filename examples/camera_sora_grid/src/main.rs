@@ -164,6 +164,14 @@ fn make_create_sora_source_input_request(input_name: &str) -> (String, String) {
     })
 }
 
+fn make_get_device_id_items_request(input_name: &str) -> (String, String) {
+    let name = input_name.to_owned();
+    make_request("GetInputPropertiesListPropertyItems", move |f| {
+        f.member("inputName", name.as_str())?;
+        f.member("propertyName", "device_id")
+    })
+}
+
 fn make_attach_sora_source_track_request(
     input_name: &str,
     connection_id: &str,
@@ -355,6 +363,29 @@ fn parse_scene_item_id(response_data: &str) -> Option<i64> {
         .ok()
 }
 
+/// GetInputPropertiesListPropertyItems レスポンスから itemValue の配列を取り出す
+fn parse_property_item_values(response_data: &str) -> Vec<String> {
+    let Ok(json) = nojson::RawJson::parse(response_data) else {
+        return Vec::new();
+    };
+    let root = json.value();
+    let Ok(items_member) = root.to_member("propertyItems") else {
+        return Vec::new();
+    };
+    let Ok(items_value) = items_member.required() else {
+        return Vec::new();
+    };
+    let Ok(items) = items_value.to_array() else {
+        return Vec::new();
+    };
+    items
+        .filter_map(|item| {
+            let value = item.to_member("itemValue").ok()?.required().ok()?;
+            value.try_into().ok()
+        })
+        .collect()
+}
+
 // --- WebSocket 通信ヘルパー ---
 
 async fn flush_ws_output(
@@ -442,6 +473,33 @@ async fn send_request_and_wait(
         }
         event_queue.push(text);
     }
+}
+
+// --- カメラデバイス列挙 ---
+
+/// 利用可能なカメラデバイスの device_id 一覧を取得する。
+/// hisui 本体の GetInputPropertiesListPropertyItems は既存 input に対してしか動かないため、
+/// 列挙用のダミー input を一時的に作成して照会し、終わったら削除する。
+async fn enumerate_camera_device_ids(
+    ws: &mut WebSocketClientConnection<SecureRandom>,
+    stream: &mut TcpStream,
+    event_queue: &mut Vec<String>,
+) -> Result<Vec<String>, String> {
+    let dummy_name = "__camera_sora_grid_enumerate__";
+
+    let (req_id, msg) = make_create_camera_input_request(dummy_name, None);
+    send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await?;
+
+    let (req_id, msg) = make_get_device_id_items_request(dummy_name);
+    let response_data = send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await?;
+    let device_ids = parse_property_item_values(&response_data);
+
+    let (req_id, msg) = make_remove_input_request(dummy_name);
+    if let Err(e) = send_request_and_wait(ws, stream, &req_id, &msg, event_queue).await {
+        tracing::warn!("RemoveInput for enumerate dummy failed: {e}");
+    }
+
+    Ok(device_ids)
 }
 
 // --- グリッドレイアウト / イベント処理 ---
@@ -714,10 +772,38 @@ async fn run(
     let mut event_queue: Vec<String> = Vec::new();
     let mut state = GridState::new(max_sora_tracks);
 
+    // 利用可能なカメラデバイス ID を列挙する。
+    // hisui の video_capture_device は device_id 未指定だと source processor が起動せず
+    // 黒フレームしか出ないため、明示的に指定する必要がある。
+    let available_device_ids =
+        enumerate_camera_device_ids(&mut ws, &mut stream, &mut event_queue).await?;
+    tracing::info!(
+        "available camera device_ids: {} found",
+        available_device_ids.len()
+    );
+    if available_device_ids.is_empty()
+        && (camera_device_id_1.is_none() || camera_device_id_2.is_none())
+    {
+        return Err("no camera device found; specify --camera-device-id-1/2 manually".to_owned());
+    }
+
+    // CLI で明示された device_id を優先し、未指定は列挙結果のインデックスで埋める。
+    // 同じカメラを 2 つの入力で共有させたい場合は列挙結果の先頭を両方に使う。
+    let resolved_device_id_1: Option<String> = camera_device_id_1
+        .map(|s| s.to_owned())
+        .or_else(|| available_device_ids.first().cloned());
+    let resolved_device_id_2: Option<String> =
+        camera_device_id_2.map(|s| s.to_owned()).or_else(|| {
+            available_device_ids
+                .get(1)
+                .cloned()
+                .or_else(|| available_device_ids.first().cloned())
+        });
+
     // カメラ入力 2 台を作成する
     let cameras = [
-        ("camera_0", camera_device_id_1),
-        ("camera_1", camera_device_id_2),
+        ("camera_0", resolved_device_id_1.as_deref()),
+        ("camera_1", resolved_device_id_2.as_deref()),
     ];
     for (name, device_id) in cameras {
         let (req_id, msg) = make_create_camera_input_request(name, device_id);
