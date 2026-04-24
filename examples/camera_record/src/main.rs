@@ -447,15 +447,16 @@ async fn enumerate_camera_device_ids(
     send_request_and_wait(ws, stream, &req_id, &msg).await?;
 
     let (req_id, msg) = make_get_device_id_items_request(dummy_name);
-    let response_data = send_request_and_wait(ws, stream, &req_id, &msg).await?;
-    let device_ids = parse_property_item_values(&response_data);
+    let device_ids = send_request_and_wait(ws, stream, &req_id, &msg)
+        .await
+        .map(|response_data| parse_property_item_values(&response_data));
 
     let (req_id, msg) = make_remove_input_request(dummy_name);
     if let Err(e) = send_request_and_wait(ws, stream, &req_id, &msg).await {
         tracing::warn!("RemoveInput for enumerate dummy failed: {e}");
     }
 
-    Ok(device_ids)
+    device_ids
 }
 
 /// マイクデバイスの device_id 一覧を取得する。
@@ -470,15 +471,16 @@ async fn enumerate_microphone_device_ids(
     send_request_and_wait(ws, stream, &req_id, &msg).await?;
 
     let (req_id, msg) = make_get_device_id_items_request(dummy_name);
-    let response_data = send_request_and_wait(ws, stream, &req_id, &msg).await?;
-    let device_ids = parse_property_item_values(&response_data);
+    let device_ids = send_request_and_wait(ws, stream, &req_id, &msg)
+        .await
+        .map(|response_data| parse_property_item_values(&response_data));
 
     let (req_id, msg) = make_remove_input_request(dummy_name);
     if let Err(e) = send_request_and_wait(ws, stream, &req_id, &msg).await {
         tracing::warn!("RemoveInput for enumerate dummy failed: {e}");
     }
 
-    Ok(device_ids)
+    device_ids
 }
 
 // --- main ---
