@@ -714,35 +714,42 @@ pub fn build_get_input_properties_list_property_items_response(
         );
     };
 
-    if input.input.settings.kind_name() != "video_capture_device" {
-        return super::build_request_response_error(
-            "GetInputPropertiesListPropertyItems",
-            request_id,
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            "property enumeration is only supported for video_capture_device",
-        );
-    }
-
-    // video_capture_device の device_id を取得する
-    let input_device_id = match &input.input.settings {
+    // 入力 settings に応じて、video_capture_device / audio_capture_device の列挙関数に振り分ける。
+    // それ以外の入力種別では列挙をサポートしない。
+    let enumerate_result = match &input.input.settings {
         crate::obsws::state::ObswsInputSettings::VideoCaptureDevice(settings) => {
-            settings.device_id.as_deref()
+            enumerate_video_device_property_items(
+                &fields.property_name,
+                settings.device_id.as_deref(),
+            )
         }
-        _ => None,
+        crate::obsws::state::ObswsInputSettings::AudioCaptureDevice(settings) => {
+            enumerate_audio_device_property_items(
+                &fields.property_name,
+                settings.device_id.as_deref(),
+            )
+        }
+        _ => {
+            return super::build_request_response_error(
+                "GetInputPropertiesListPropertyItems",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                "property enumeration is only supported for video_capture_device and audio_capture_device",
+            );
+        }
     };
 
-    let property_items =
-        match enumerate_video_device_property_items(&fields.property_name, input_device_id) {
-            Ok(items) => items,
-            Err(error_message) => {
-                return super::build_request_response_error(
-                    "GetInputPropertiesListPropertyItems",
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &error_message,
-                );
-            }
-        };
+    let property_items = match enumerate_result {
+        Ok(items) => items,
+        Err(error_message) => {
+            return super::build_request_response_error(
+                "GetInputPropertiesListPropertyItems",
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &error_message,
+            );
+        }
+    };
 
     super::build_request_response_success("GetInputPropertiesListPropertyItems", request_id, |f| {
         f.member(
@@ -881,6 +888,78 @@ fn enumerate_video_device_property_items(
         }
         _ => Err(format!(
             "unsupported property name for video_capture_device: {property_name}"
+        )),
+    }
+}
+
+/// audio_capture_device の指定されたプロパティのアイテムを列挙する
+fn enumerate_audio_device_property_items(
+    property_name: &str,
+    device_id: Option<&str>,
+) -> Result<Vec<ObswsPropertyItem>, String> {
+    use std::collections::BTreeSet;
+
+    // AudioCapture と同じ入力用デバイス一覧を対象にする
+    let device_list = shiguredo_audio_device::AudioDeviceList::enumerate_input()
+        .map_err(|e| format!("failed to enumerate audio input devices: {e}"))?;
+
+    match property_name {
+        "device_id" => {
+            let mut items = Vec::new();
+            for device in device_list.devices() {
+                let name = device.name().unwrap_or_else(|_| "Unknown".to_owned());
+                let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                items.push(ObswsPropertyItem {
+                    item_name: name,
+                    item_value: unique_id,
+                    item_enabled: true,
+                });
+            }
+            Ok(items)
+        }
+        "sample_rate" => {
+            let mut values = BTreeSet::new();
+            for device in device_list.devices() {
+                // device_id が指定されている場合はそのデバイスだけフィルタする
+                if let Some(target_id) = device_id {
+                    let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                    if unique_id != target_id {
+                        continue;
+                    }
+                }
+                values.insert(device.sample_rate().to_string());
+            }
+            Ok(values
+                .into_iter()
+                .map(|value| ObswsPropertyItem {
+                    item_name: value.clone(),
+                    item_value: value,
+                    item_enabled: true,
+                })
+                .collect())
+        }
+        "channels" => {
+            let mut values = BTreeSet::new();
+            for device in device_list.devices() {
+                if let Some(target_id) = device_id {
+                    let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                    if unique_id != target_id {
+                        continue;
+                    }
+                }
+                values.insert(device.channels().to_string());
+            }
+            Ok(values
+                .into_iter()
+                .map(|value| ObswsPropertyItem {
+                    item_name: value.clone(),
+                    item_value: value,
+                    item_enabled: true,
+                })
+                .collect())
+        }
+        _ => Err(format!(
+            "unsupported property name for audio_capture_device: {property_name}"
         )),
     }
 }

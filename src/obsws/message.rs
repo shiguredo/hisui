@@ -393,6 +393,24 @@ mod tests {
         registry
     }
 
+    /// audio_capture_device 入力を含む fixture
+    fn state_with_audio_input() -> ObswsSessionState {
+        use crate::obsws::state::ObswsAudioCaptureDeviceSettings;
+        let mut registry = state();
+        registry.insert_for_test(ObswsInputEntry::new_for_test(
+            "input-uuid-audio",
+            "input-name-audio",
+            ObswsInput {
+                settings: ObswsInputSettings::AudioCaptureDevice(
+                    ObswsAudioCaptureDeviceSettings::default(),
+                ),
+                input_muted: false,
+                input_volume_mul: crate::types::NonNegFiniteF64::ONE,
+            },
+        ));
+        registry
+    }
+
     fn request_data(json: &str) -> nojson::RawJsonOwned {
         nojson::RawJsonOwned::parse(json).expect("requestData must be valid json")
     }
@@ -1466,6 +1484,162 @@ mod tests {
             let fps: i32 = value.parse()?;
             assert!(fps > 0);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_audio_device_id_property_items_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-audio-device-id".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-audio","propertyName":"device_id"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut state = state_with_audio_input();
+        let response = handle_request_message(request, &session_stats, &mut state);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        // PulseAudio デーモンが無いヘッドレス CI では shiguredo_audio_device::
+        // AudioDeviceList::enumerate_input() が Err を返すため、
+        // エラー応答となる可能性を許容する。実装の分岐と
+        // ハンドラ経路までは通ったことを code で確認して終了する。
+        if !result {
+            let code: i64 = status.to_member("code")?.required()?.try_into()?;
+            assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+            return Ok(());
+        }
+
+        let response_data = json
+            .value()
+            .to_path_member(&["d", "responseData"])?
+            .required()?;
+        let property_items = response_data.to_member("propertyItems")?.required()?;
+        assert_eq!(property_items.kind(), nojson::JsonValueKind::Array);
+        // 各項目が itemName / itemValue / itemEnabled を持つこと。
+        // デバイスが無い環境でも空配列が返ることを許容する。
+        for item in property_items.to_array()? {
+            let _: String = item.to_member("itemName")?.required()?.try_into()?;
+            let _: String = item.to_member("itemValue")?.required()?.try_into()?;
+            let _: bool = item.to_member("itemEnabled")?.required()?.try_into()?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_audio_sample_rate_property_items_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-audio-sample-rate".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-audio","propertyName":"sample_rate"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut state = state_with_audio_input();
+        let response = handle_request_message(request, &session_stats, &mut state);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        // ヘッドレス CI ではオーディオデバイス列挙が失敗しエラー応答となるため、
+        // その場合はコード値だけ確認して早期に return する。
+        if !result {
+            let code: i64 = status.to_member("code")?.required()?.try_into()?;
+            assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+            return Ok(());
+        }
+
+        let response_data = json
+            .value()
+            .to_path_member(&["d", "responseData"])?
+            .required()?;
+        let property_items = response_data.to_member("propertyItems")?.required()?;
+        assert_eq!(property_items.kind(), nojson::JsonValueKind::Array);
+        for item in property_items.to_array()? {
+            let value: String = item.to_member("itemValue")?.required()?.try_into()?;
+            let rate: i32 = value.parse()?;
+            assert!(rate > 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_audio_channels_property_items_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-audio-channels".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-audio","propertyName":"channels"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut state = state_with_audio_input();
+        let response = handle_request_message(request, &session_stats, &mut state);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        // ヘッドレス CI ではオーディオデバイス列挙が失敗しエラー応答となるため、
+        // その場合はコード値だけ確認して早期に return する。
+        if !result {
+            let code: i64 = status.to_member("code")?.required()?.try_into()?;
+            assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
+            return Ok(());
+        }
+
+        let response_data = json
+            .value()
+            .to_path_member(&["d", "responseData"])?
+            .required()?;
+        let property_items = response_data.to_member("propertyItems")?.required()?;
+        assert_eq!(property_items.kind(), nojson::JsonValueKind::Array);
+        for item in property_items.to_array()? {
+            let value: String = item.to_member("itemValue")?.required()?.try_into()?;
+            let channels: i32 = value.parse()?;
+            assert!(channels > 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn handle_request_message_returns_invalid_field_for_unsupported_audio_property_name()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = RequestMessage {
+            request_id: Some("req-get-props-audio-invalid-prop".to_owned()),
+            request_type: Some("GetInputPropertiesListPropertyItems".to_owned()),
+            request_data: Some(request_data(
+                r#"{"inputName":"input-name-audio","propertyName":"pixel_format"}"#,
+            )),
+        };
+        let session_stats = ObswsSessionStats::default();
+        let mut state = state_with_audio_input();
+        let response = handle_request_message(request, &session_stats, &mut state);
+
+        let json = nojson::RawJson::parse(response.message.text())?;
+        let status = json
+            .value()
+            .to_path_member(&["d", "requestStatus"])?
+            .required()?;
+        let result: bool = status.to_member("result")?.required()?.try_into()?;
+        let code: i64 = status.to_member("code")?.required()?.try_into()?;
+        assert!(!result);
+        assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
         Ok(())
     }
 

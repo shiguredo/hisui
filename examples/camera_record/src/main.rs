@@ -124,10 +124,14 @@ fn make_create_camera_input_request(input_name: &str, device_id: Option<&str>) -
     (request_id, msg)
 }
 
-fn make_create_microphone_input_request(device_id: &str) -> (String, String) {
+fn make_create_microphone_input_request(
+    input_name: &str,
+    device_id: Option<&str>,
+) -> (String, String) {
     let request_id = next_request_id();
     let rid = request_id.clone();
-    let did = device_id.to_owned();
+    let iname = input_name.to_owned();
+    let did = device_id.map(|s| s.to_owned());
     let msg = nojson::object(|f| {
         f.member("op", 6)?;
         f.member(
@@ -139,11 +143,16 @@ fn make_create_microphone_input_request(device_id: &str) -> (String, String) {
                     "requestData",
                     nojson::object(|f| {
                         f.member("sceneName", "Scene")?;
-                        f.member("inputName", "microphone")?;
+                        f.member("inputName", iname.as_str())?;
                         f.member("inputKind", "audio_capture_device")?;
                         f.member(
                             "inputSettings",
-                            nojson::object(|f| f.member("device_id", did.as_str())),
+                            nojson::object(|f| {
+                                if let Some(d) = did.as_deref() {
+                                    f.member("device_id", d)?;
+                                }
+                                Ok(())
+                            }),
                         )?;
                         f.member("sceneItemEnabled", true)
                     }),
@@ -432,21 +441,46 @@ async fn enumerate_camera_device_ids(
     ws: &mut WebSocketClientConnection<SecureRandom>,
     stream: &mut TcpStream,
 ) -> Result<Vec<String>, String> {
-    let dummy_name = "__camera_record_enumerate__";
+    let dummy_name = "__camera_record_enumerate_camera__";
 
     let (req_id, msg) = make_create_camera_input_request(dummy_name, None);
     send_request_and_wait(ws, stream, &req_id, &msg).await?;
 
     let (req_id, msg) = make_get_device_id_items_request(dummy_name);
-    let response_data = send_request_and_wait(ws, stream, &req_id, &msg).await?;
-    let device_ids = parse_property_item_values(&response_data);
+    let device_ids = send_request_and_wait(ws, stream, &req_id, &msg)
+        .await
+        .map(|response_data| parse_property_item_values(&response_data));
 
     let (req_id, msg) = make_remove_input_request(dummy_name);
     if let Err(e) = send_request_and_wait(ws, stream, &req_id, &msg).await {
         tracing::warn!("RemoveInput for enumerate dummy failed: {e}");
     }
 
-    Ok(device_ids)
+    device_ids
+}
+
+/// マイクデバイスの device_id 一覧を取得する。
+/// 列挙用のダミー audio_capture_device input を作成して照会し、終わったら削除する。
+async fn enumerate_microphone_device_ids(
+    ws: &mut WebSocketClientConnection<SecureRandom>,
+    stream: &mut TcpStream,
+) -> Result<Vec<String>, String> {
+    let dummy_name = "__camera_record_enumerate_mic__";
+
+    let (req_id, msg) = make_create_microphone_input_request(dummy_name, None);
+    send_request_and_wait(ws, stream, &req_id, &msg).await?;
+
+    let (req_id, msg) = make_get_device_id_items_request(dummy_name);
+    let device_ids = send_request_and_wait(ws, stream, &req_id, &msg)
+        .await
+        .map(|response_data| parse_property_item_values(&response_data));
+
+    let (req_id, msg) = make_remove_input_request(dummy_name);
+    if let Err(e) = send_request_and_wait(ws, stream, &req_id, &msg).await {
+        tracing::warn!("RemoveInput for enumerate dummy failed: {e}");
+    }
+
+    device_ids
 }
 
 // --- main ---
@@ -622,18 +656,33 @@ async fn run(
     send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
     tracing::info!("CreateInput 成功: camera");
 
-    // 4. CreateInput: マイク入力を追加（--camera-only でない、かつ --mic-device-id 指定時）
+    // 4. CreateInput: マイク入力を追加（--camera-only でない場合）
     //    hisui の audio_capture_device も device_id 未指定では source processor が起動しないため、
-    //    CLI で明示指定されたときだけ作成する。
+    //    CLI 指定がなければ GetInputPropertiesListPropertyItems で列挙して 1 件目を使う。
+    //    列挙処理そのものが失敗しても、録画自体はマイク無しで続行する。
     if !camera_only {
-        if let Some(mic_id) = mic_device_id {
-            let (req_id, msg) = make_create_microphone_input_request(mic_id);
+        let resolved_mic_device_id = if let Some(d) = mic_device_id {
+            Some(d.to_owned())
+        } else {
+            match enumerate_microphone_device_ids(&mut ws, &mut stream).await {
+                Ok(ids) => {
+                    tracing::info!("available microphone device_ids: {} found", ids.len());
+                    ids.into_iter().next()
+                }
+                Err(e) => {
+                    tracing::warn!("failed to enumerate microphone devices: {e}");
+                    None
+                }
+            }
+        };
+        if let Some(mic_id) = resolved_mic_device_id {
+            let (req_id, msg) = make_create_microphone_input_request("microphone", Some(&mic_id));
             tracing::info!("CreateInput 送信: audio_capture_device (device_id={mic_id})");
             send_request_and_wait(&mut ws, &mut stream, &req_id, &msg).await?;
             tracing::info!("CreateInput 成功: microphone");
         } else {
             tracing::warn!(
-                "--mic-device-id unset: microphone input skipped (use --camera-only to silence)"
+                "no microphone device found: recording without audio (use --camera-only to silence this warning)"
             );
         }
     }
