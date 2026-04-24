@@ -1,4 +1,6 @@
-use shiguredo_webrtc::{AudioTrackSink, RtpTransceiver, VideoSink, VideoSinkWants};
+use shiguredo_webrtc::{
+    AudioTrack, AudioTrackSink, RtpTransceiver, VideoSink, VideoSinkWants, VideoTrack,
+};
 
 /// SoraSubscriber processor から coordinator へ通知するイベント。
 ///
@@ -198,6 +200,60 @@ pub async fn create_processor(
 
 // --- フレーム転送関連 ---
 
+/// WebRTC トラックに登録された sink を RAII で管理する。
+///
+/// `VideoSink` / `AudioTrackSink` の `Drop` は C++ オブジェクトの `delete` を行うだけで、
+/// 登録先の `VideoTrack` / `AudioTrack` からの `remove_sink` は呼ばない実装になっているため、
+/// 単に sink を `drop` すると `VideoBroadcaster` や `AudioTrack` の内部 sink リストに
+/// 破棄済みポインタが残る。
+/// この状態で `IncomingVideoStreamQueue` 等が `OnFrame` を配送すると UAF でクラッシュする。
+/// 本型の `Drop` で必ず `remove_sink` を呼ぶことで、呼び忘れによる UAF を構造的に防ぐ。
+enum AttachedSink {
+    Video {
+        track: VideoTrack,
+        sink: Option<VideoSink>,
+    },
+    Audio {
+        track: AudioTrack,
+        sink: Option<AudioTrackSink>,
+    },
+}
+
+impl AttachedSink {
+    fn attach_video(mut track: VideoTrack, sink: VideoSink, wants: &VideoSinkWants) -> Self {
+        track.add_or_update_sink(&sink, wants);
+        Self::Video {
+            track,
+            sink: Some(sink),
+        }
+    }
+
+    fn attach_audio(mut track: AudioTrack, sink: AudioTrackSink) -> Self {
+        track.add_sink(&sink);
+        Self::Audio {
+            track,
+            sink: Some(sink),
+        }
+    }
+}
+
+impl Drop for AttachedSink {
+    fn drop(&mut self) {
+        match self {
+            Self::Video { track, sink } => {
+                if let Some(sink) = sink.take() {
+                    track.remove_sink(&sink);
+                }
+            }
+            Self::Audio { track, sink } => {
+                if let Some(sink) = sink.take() {
+                    track.remove_sink(&sink);
+                }
+            }
+        }
+    }
+}
+
 /// I420 フレームデータ（libwebrtc スレッドから非同期チャネル経由で転送する）
 struct RawI420Frame {
     y: Vec<u8>,
@@ -275,32 +331,14 @@ impl shiguredo_webrtc::AudioTrackSinkHandler for AudioFrameSinkHandler {
 /// このタスクに所有権を移して管理する。
 ///
 /// 注意: RtpTransceiver から取得した track / receiver は !Send の可能性があるため、
-/// .await をまたいで保持しないように、初期化時に cast してから command loop に入る。
+/// .await をまたいで保持しないように、使用時はブロックスコープで完結させる。
 pub async fn sora_track_holder_task(
     transceiver: RtpTransceiver,
     track_kind: String,
     mut command_rx: tokio::sync::mpsc::UnboundedReceiver<SoraTrackCommand>,
 ) {
-    // track_kind に応じて事前に cast する。
-    // receiver / track は !Send のため、.await をまたいで保持してはいけない。
-    // ブロックスコープで囲んで、.await 前に確実に drop する。
-    enum TrackVariant {
-        Video(shiguredo_webrtc::VideoTrack),
-        Audio(shiguredo_webrtc::AudioTrack),
-        Unsupported,
-    }
-    let mut variant = {
-        let receiver = transceiver.receiver();
-        let track = receiver.track();
-        match track_kind.as_str() {
-            "video" => TrackVariant::Video(track.cast_to_video_track()),
-            "audio" => TrackVariant::Audio(track.cast_to_audio_track()),
-            _ => TrackVariant::Unsupported,
-        }
-    };
-
-    let mut _video_sink: Option<VideoSink> = None;
-    let mut _audio_sink: Option<AudioTrackSink> = None;
+    // sink は RAII で管理し、drop されるときに必ず remove_sink が呼ばれるようにする。
+    let mut attached: Option<AttachedSink> = None;
     let mut forward_abort: Option<tokio::task::AbortHandle> = None;
 
     while let Some(cmd) = command_rx.recv().await {
@@ -310,42 +348,59 @@ pub async fn sora_track_holder_task(
                 if let Some(abort) = forward_abort.take() {
                     abort.abort();
                 }
-                _video_sink = None;
-                _audio_sink = None;
+                // 旧 sink は Drop 経由で remove_sink される。
+                drop(attached.take());
 
-                match &mut variant {
-                    TrackVariant::Video(video_track) => {
-                        let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<RawI420Frame>(2);
-                        let sink_handler = VideoFrameSinkHandler { frame_tx };
-                        let sink = VideoSink::new_with_handler(Box::new(sink_handler));
-                        let wants = VideoSinkWants::new();
-                        video_track.add_or_update_sink(&sink, &wants);
-                        _video_sink = Some(sink);
+                // !Send な receiver / track はこのブロックスコープで閉じ、.await を跨がない。
+                let new_state = {
+                    let receiver = transceiver.receiver();
+                    let track = receiver.track();
+                    match track_kind.as_str() {
+                        "video" => {
+                            let video_track = track.cast_to_video_track();
+                            let (frame_tx, frame_rx) =
+                                tokio::sync::mpsc::channel::<RawI420Frame>(2);
+                            let sink_handler = VideoFrameSinkHandler { frame_tx };
+                            let sink = VideoSink::new_with_handler(Box::new(sink_handler));
+                            let wants = VideoSinkWants::new();
+                            let attached_sink =
+                                AttachedSink::attach_video(video_track, sink, &wants);
 
-                        let task = tokio::spawn(video_forward_task(frame_rx, publisher));
-                        forward_abort = Some(task.abort_handle());
-                    }
-                    TrackVariant::Audio(audio_track) => {
-                        let (frame_tx, frame_rx) = tokio::sync::mpsc::channel::<RawAudioFrame>(4);
-                        let sink_handler = AudioFrameSinkHandler { frame_tx };
-                        let sink = AudioTrackSink::new_with_handler(Box::new(sink_handler));
-                        audio_track.add_sink(&sink);
-                        _audio_sink = Some(sink);
+                            let task = tokio::spawn(video_forward_task(frame_rx, publisher));
+                            Some((attached_sink, task.abort_handle()))
+                        }
+                        "audio" => {
+                            let audio_track = track.cast_to_audio_track();
+                            let (frame_tx, frame_rx) =
+                                tokio::sync::mpsc::channel::<RawAudioFrame>(4);
+                            let sink_handler = AudioFrameSinkHandler { frame_tx };
+                            let sink = AudioTrackSink::new_with_handler(Box::new(sink_handler));
+                            let attached_sink = AttachedSink::attach_audio(audio_track, sink);
 
-                        let task = tokio::spawn(audio_forward_task(frame_rx, publisher));
-                        forward_abort = Some(task.abort_handle());
+                            let task = tokio::spawn(audio_forward_task(frame_rx, publisher));
+                            Some((attached_sink, task.abort_handle()))
+                        }
+                        _ => {
+                            tracing::warn!(
+                                "unsupported track kind for sora_source: {}",
+                                track_kind
+                            );
+                            None
+                        }
                     }
-                    TrackVariant::Unsupported => {
-                        tracing::warn!("unsupported track kind for sora_source: {}", track_kind);
-                    }
+                };
+
+                if let Some((sink, abort)) = new_state {
+                    attached = Some(sink);
+                    forward_abort = Some(abort);
                 }
             }
             SoraTrackCommand::Detach => {
                 if let Some(abort) = forward_abort.take() {
                     abort.abort();
                 }
-                _video_sink = None;
-                _audio_sink = None;
+                // Drop 経由で remove_sink される。
+                drop(attached.take());
             }
         }
     }
@@ -353,7 +408,8 @@ pub async fn sora_track_holder_task(
     if let Some(abort) = forward_abort.take() {
         abort.abort();
     }
-    // transceiver はここで drop される
+    // attached はスコープ脱出で Drop され、remove_sink が呼ばれる。
+    // transceiver もここで drop される。
 }
 
 /// 映像フレーム転送タスク: mpsc channel → pipeline publish
