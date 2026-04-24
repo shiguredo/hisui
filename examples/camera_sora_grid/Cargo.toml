@@ -1,0 +1,13 @@
+[package]
+name = "camera_sora_grid"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+shiguredo_websocket = { workspace = true }
+nojson = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
+noargs = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

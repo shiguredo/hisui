@@ -112,6 +112,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "camera_sora_grid"
+version = "0.0.0"
+dependencies = [
+ "noargs",
+ "nojson",
+ "shiguredo_websocket",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
