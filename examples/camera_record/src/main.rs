@@ -657,14 +657,21 @@ async fn run(
     // 4. CreateInput: マイク入力を追加（--camera-only でない場合）
     //    hisui の audio_capture_device も device_id 未指定では source processor が起動しないため、
     //    CLI 指定がなければ GetInputPropertiesListPropertyItems で列挙して 1 件目を使う。
-    //    検出できなかった場合はマイク無しで録画を続行する。
+    //    列挙処理そのものが失敗しても、録画自体はマイク無しで続行する。
     if !camera_only {
         let resolved_mic_device_id = if let Some(d) = mic_device_id {
             Some(d.to_owned())
         } else {
-            let ids = enumerate_microphone_device_ids(&mut ws, &mut stream).await?;
-            tracing::info!("available microphone device_ids: {} found", ids.len());
-            ids.into_iter().next()
+            match enumerate_microphone_device_ids(&mut ws, &mut stream).await {
+                Ok(ids) => {
+                    tracing::info!("available microphone device_ids: {} found", ids.len());
+                    ids.into_iter().next()
+                }
+                Err(e) => {
+                    tracing::warn!("failed to enumerate microphone devices: {e}");
+                    None
+                }
+            }
         };
         if let Some(mic_id) = resolved_mic_device_id {
             let (req_id, msg) = make_create_microphone_input_request("microphone", Some(&mic_id));
