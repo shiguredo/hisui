@@ -560,9 +560,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.185"
+version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
+checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libloading"
@@ -892,9 +892,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.38"
+version = "0.23.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69f9466fb2c14ea04357e91413efb882e2a6d4a406e625449bc0a5d360d53a21"
+checksum = "7c2c118cb077cca2822033836dfb1b975355dfb784b5e8da48f7b6c5db74e60e"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -976,9 +976,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.12"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8279bb85272c9f10811ae6a6c547ff594d6a7f3c6c6b02ee9726d1d0dcfcdd06"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -1118,9 +1118,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_cmake"
-version = "4.3.0"
+version = "4.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5fb5a616371eb2329e68c9b2a2aa184dd700f056f8df460cfbd8fc88d3ae302"
+checksum = "b2c6a73b295ff44900705fa5fdede6f6d425017964ad1ed8368376bcc83d85fa"
 dependencies = [
  "cmake",
  "shiguredo_toml",
@@ -1226,9 +1226,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_rtmp"
-version = "2026.1.0-canary.5"
+version = "2026.1.0-canary.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4142bac693153ac233ed799c74043412cd01c6ecaaad62a2d3e94f2e00681e1"
+checksum = "44a3ddf3112e8cfd27e5fd69f8b34d58dc4b7d62291a314a43cb1212b88a68bb"
 
 [[package]]
 name = "shiguredo_rtsp"
@@ -1242,9 +1242,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_s3"
-version = "2026.1.0-canary.2"
+version = "2026.1.0-canary.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b00f1636680da9562f2ea84a77f4d8f31af4168b675f1bbe58a7026c9472e33"
+checksum = "2343e2f0f681e9cf170e1792204ef148fbe7a3a7add1a17b62fc2494fa687ff6"
 dependencies = [
  "aws-lc-rs",
  "base64",
@@ -1304,9 +1304,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_webrtc"
-version = "0.147.1"
+version = "0.147.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44122780996f7038ab344550f86d460da5495509e7fb3a55d90c00870fd51659"
+checksum = "2c4764b5f4a437c6d7223febf3a4d3884a9772732a277b6393c1acabed3541a7"
 dependencies = [
  "bindgen",
  "nojson",
@@ -1394,9 +1394,9 @@ dependencies = [
 
 [[package]]
 name = "sora_sdk"
-version = "2026.1.0-canary.7"
+version = "2026.1.0-canary.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1afa9e8d7aab33534630ef2789799af2b798c072c88a1bd0068c9a64b9e650b"
+checksum = "0bfc99adbc975c4898842036d2eb7078a93f2ae2d20377185ea0ad9e51a462d5"
 dependencies = [
  "aws-lc-rs",
  "noflate",

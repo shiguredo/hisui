@@ -25,7 +25,7 @@
   - @sile
 - [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
   - @voluntas
-- [UPDATE] `libc` 0.2.185 を direct dependency に追加する
+- [UPDATE] `libc` 0.2.186 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
   - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
@@ -43,7 +43,7 @@
   - S3 出力先にはオブジェクトライフタイム指定（`lifetimeDays`）を設定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.2 を追加する
+- [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.3 を追加する
   - @sile
 - [ADD] obsws の Output に HLS ライブ出力 (`outputName: "hls"`) を追加する
   - H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する
@@ -58,7 +58,7 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.7 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.8 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
@@ -84,7 +84,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.147.1 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.147.2 を追加する
   - @sile
 - [ADD] `server` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui server` で WebSocket サーバーを起動できる
@@ -123,7 +123,7 @@
   - @sile
 - [UPDATE] noargs crate のバージョンを 0.4.2 に上げる
   - @sile
-- [UPDATE] rustls crate のバージョンを 0.23.37 に上げる
+- [UPDATE] rustls crate のバージョンを 0.23.39 に上げる
   - @sile
 - [UPDATE] aws-lc-rs crate のバージョンを 1.16.2 に上げる
   - @sile
