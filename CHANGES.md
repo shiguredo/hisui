@@ -166,6 +166,17 @@
   - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
   - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
+- [ADD] candle (ML 推論フレームワーク) をオプション依存に追加する
+  - `candle` feature を有効にすることで candle-core, candle-nn, candle-transformers が利用可能になる
+  - ML 推論プロセッサ (`ml` モジュール) を追加し、MediaPipeline 上で映像フレームに対する ML 処理を実行できるようにする
+  - YOLOv8 物体検出モデル (`ml::yolo`) を追加し、safetensors 重みのロードと I420 フレームへの推論・描画が可能
+  - `ml` サブコマンドを追加し、カメラ入力 → ML 物体検知 → 画面表示のパイプラインを実行できる
+  - CPU / Metal / CUDA デバイスの自動検出に対応する
+  - @voluntas
+- [UPDATE] `ml` サブコマンドのデュアルカメラ合成を MediaPipeline の VideoRealtimeMixer で実装する
+  - カスタム合成関数 (`composite_i420_side_by_side`) を削除し、hisui 標準の合成機能を利用するように変更
+  - カメラキャプチャと ML 推論を MediaPipeline プロセッサとして統合し、モデルを `Arc` 共有で複数カメラに適用可能にする
+  - @voluntas
 - [CHANGE] ログ出力の時刻形式を UNIX タイムスタンプから ISO 8601 UTC 形式に変更する
   - ターミナル出力時は severity に応じて行全体を色付けする
   - `NO_COLOR` 環境変数が設定されている場合は色付けを無効にする
@@ -241,6 +252,9 @@
 - [CHANGE] shiguredo_svt_av1 の CMake 呼び出しを cmake crate に置き換える
   - @voluntas
 - [CHANGE] shiguredo_nvcodec crate を hisui のワークスペースから削除して外部リポジトリに移行する
+  - @voluntas
+- [UPDATE] ML 前処理の I420→RGB 変換とリサイズを libyuv (SIMD) を使うように高速化する
+  - これまでは CPU 上でピクセルごとの浮動小数点演算を行っていたため、特に debug ビルドで極端に遅かった
   - @voluntas
 
 ## 2025.3.2

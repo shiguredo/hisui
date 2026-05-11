@@ -35,7 +35,15 @@ fn main() -> noargs::Result<()> {
         || hisui::sora::recording_subcommand_compose::try_run(&mut args)?
         || hisui::sora::recording_subcommand_vmaf::try_run(&mut args)?
         || hisui::sora::recording_subcommand_tune::try_run(&mut args)?
-        || hisui::subcommand_server::try_run(&mut args)?;
+        || hisui::subcommand_server::try_run(&mut args)?
+        || {
+            #[cfg(all(feature = "candle", feature = "player"))]
+            {
+                hisui::subcommand_ml::try_run(&mut args)?
+            }
+            #[cfg(not(all(feature = "candle", feature = "player")))]
+            false
+        };
 
     if let Some(help) = args.finish()? {
         print!("{help}");

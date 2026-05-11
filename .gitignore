@@ -5,3 +5,4 @@
 
 # macos
 .DS_Store
+*.safetensors

@@ -14,6 +14,8 @@ pub mod logger;
 pub mod media;
 pub mod media_pipeline;
 pub mod mixer;
+#[cfg(feature = "candle")]
+pub mod ml;
 pub mod mp4;
 pub mod obsws;
 pub mod optuna;
@@ -30,6 +32,8 @@ pub(crate) mod sora_source;
 pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
+#[cfg(all(feature = "candle", feature = "player"))]
+pub mod subcommand_ml;
 pub mod subcommand_server;
 
 pub mod tcp;

@@ -273,6 +273,14 @@ impl From<shiguredo_nvcodec::Error> for Error {
     }
 }
 
+#[cfg(feature = "candle")]
+impl From<candle_core::Error> for Error {
+    #[track_caller]
+    fn from(e: candle_core::Error) -> Self {
+        Self::new(e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

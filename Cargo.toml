@@ -90,6 +90,11 @@ shiguredo_fdk_aac = { version = "=2026.1.0-canary.1", optional = true }
 
 raw_player = { version = "=2026.1.0", optional = true }
 
+# candle (ML 推論)
+candle-core = { version = "=0.10.2", optional = true }
+candle-nn = { version = "=0.10.2", optional = true }
+candle-transformers = { version = "=0.10.2", optional = true }
+
 [dev-dependencies]
 tempfile = "3.18.0"
 
@@ -99,6 +104,9 @@ shiguredo_video_toolbox = "=2026.1.1"
 
 [features]
 default = ["player"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
+candle-metal = ["candle", "candle-core/metal"]
+candle-cuda = ["candle", "candle-core/cuda"]
 fdk-aac = ["shiguredo_fdk_aac"]
 nvcodec = ["shiguredo_nvcodec"]
 player = ["raw_player"]
