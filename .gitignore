@@ -2,6 +2,7 @@
 
 # test
 /recordings
+/ml-models
 
 # macos
 .DS_Store

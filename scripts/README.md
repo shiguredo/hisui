@@ -86,6 +86,24 @@ GitHub Actions などの CI 環境で `maturin build` を実行するための�
 - `-canary.X` -> `-dev.X`
 - この変換により、Cargo と Python の両方で有効なバージョン形式を維持
 
+## download_ml_models.sh
+
+### 目的
+
+`hisui ml` / `hisui ml audio` 用のモデル重み（Whisper tiny、YOLOv8s）を Hugging Face から取得する。
+
+### 使い方
+
+```bash
+chmod +x ./scripts/download_ml_models.sh
+./scripts/download_ml_models.sh          # すべて
+./scripts/download_ml_models.sh whisper  # Whisper のみ
+./scripts/download_ml_models.sh vad      # Silero VAD のみ
+./scripts/download_ml_models.sh yolo     # YOLO のみ
+```
+
+既定の保存先は `./ml-models/`（`ML_MODELS_DIR` で変更可能）。詳細は [command_ml.md](../docs/command_ml.md) を参照。
+
 ## 注意事項
 
 - これらのスクリプトは macOS と Linux の両方で動作します

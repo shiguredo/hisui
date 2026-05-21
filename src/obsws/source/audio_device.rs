@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::{AudioFrame, Error, ProcessorHandle, Result, TrackId};
@@ -8,6 +11,8 @@ pub struct AudioDeviceSource {
     pub device_id: Option<String>,
     pub sample_rate: Option<i32>,
     pub channels: Option<i32>,
+    /// 指定時は false になったらキャプチャを終了する
+    pub running: Option<Arc<AtomicBool>>,
 }
 
 impl AudioDeviceSource {
@@ -41,7 +46,18 @@ impl AudioDeviceSource {
             .start()
             .map_err(|e| Error::new(format!("failed to start audio capture session: {e}")))?;
 
-        while let Some(captured_frame) = frame_rx.recv().await {
+        loop {
+            if self
+                .running
+                .as_ref()
+                .is_some_and(|running| !running.load(Ordering::Relaxed))
+            {
+                break;
+            }
+
+            let Some(captured_frame) = frame_rx.recv().await else {
+                break;
+            };
             let frame = convert_captured_frame_to_i16be(&captured_frame)?;
             if !output_audio_sender.send_audio(frame) {
                 break;
@@ -143,6 +159,7 @@ pub(super) fn build_record_source_plan(
         device_id: settings.device_id.clone(),
         sample_rate: settings.sample_rate,
         channels: settings.channels,
+        running: None,
     };
 
     Ok(super::ObswsRecordSourcePlan {

@@ -37,11 +37,11 @@ fn main() -> noargs::Result<()> {
         || hisui::sora::recording_subcommand_tune::try_run(&mut args)?
         || hisui::subcommand_server::try_run(&mut args)?
         || {
-            #[cfg(all(feature = "candle", feature = "player"))]
+            #[cfg(feature = "candle")]
             {
                 hisui::subcommand_ml::try_run(&mut args)?
             }
-            #[cfg(not(all(feature = "candle", feature = "player")))]
+            #[cfg(not(feature = "candle"))]
             false
         };
 

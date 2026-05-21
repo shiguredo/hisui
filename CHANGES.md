@@ -167,11 +167,18 @@
   - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
 - [ADD] candle (ML 推論フレームワーク) をオプション依存に追加する
-  - `candle` feature を有効にすることで candle-core, candle-nn, candle-transformers が利用可能になる
+  - `candle` feature を有効にすることで candle-core, candle-nn, candle-transformers, tokenizers が利用可能になる
   - ML 推論プロセッサ (`ml` モジュール) を追加し、MediaPipeline 上で映像フレームに対する ML 処理を実行できるようにする
   - YOLOv8 物体検出モデル (`ml::yolo`) を追加し、safetensors 重みのロードと I420 フレームへの推論・描画が可能
   - `ml` サブコマンドを追加し、カメラ入力 → ML 物体検知 → 画面表示のパイプラインを実行できる
   - CPU / Metal / CUDA デバイスの自動検出に対応する
+  - @voluntas
+- [ADD] `ml audio` サブコマンドを追加する
+  - マイク入力（48 kHz）を Whisper で文字起こしし、結果をログ出力する（PoC）
+  - `candle` feature のみでビルド可能（`player` 不要）
+  - Silero VAD（`candle-onnx`）と RMS フォールバックで無音チャンクを Whisper 前にスキップできる
+  - `--vad-trim` で発話区間のみを Whisper に渡せる
+  - `--language` / `--task` で Whisper の言語・タスクを指定できる
   - @voluntas
 - [UPDATE] `ml` サブコマンドのデュアルカメラ合成を MediaPipeline の VideoRealtimeMixer で実装する
   - カスタム合成関数 (`composite_i420_side_by_side`) を削除し、hisui 標準の合成機能を利用するように変更
@@ -214,6 +221,15 @@
 
 ### misc
 
+- [ADD] ML デモ用モデル取得スクリプト `scripts/download_ml_models.sh` を追加する
+  - Whisper tiny / Silero VAD / YOLOv8s 重みを `ml-models/` にダウンロードする
+  - @voluntas
+- [UPDATE] `candle` feature の ml audio 依存を整理する
+  - `config.json` パースに既存の nojson を利用し、serde_json を除去する
+  - mel フィルタ読み込みに `f32::from_le_bytes` を利用し、byteorder を除去する
+  - 48 kHz → 16 kHz リサンプルを自前 FIR 実装に置き換え、rubato を除去する
+  - Silero VAD 用に `candle-onnx` を `candle` feature に追加する
+  - @voluntas
 - [UPDATE] 映像コーデックエンジンの選択を各コーデック crate の `supported_codecs()` を使った実行時検出に統一する
   - @sile
 - [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる

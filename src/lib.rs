@@ -32,7 +32,7 @@ pub(crate) mod sora_source;
 pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
-#[cfg(all(feature = "candle", feature = "player"))]
+#[cfg(feature = "candle")]
 pub mod subcommand_ml;
 pub mod subcommand_server;
 

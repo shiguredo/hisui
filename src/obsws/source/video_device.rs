@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::{Error, ProcessorHandle, Result, TrackId, VideoFrame};
@@ -10,6 +13,8 @@ pub struct VideoDeviceSource {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub fps: Option<i32>,
+    /// 指定時は false になったらキャプチャを終了する（`ml` デモのウィンドウ閉鎖連動など）
+    pub running: Option<Arc<AtomicBool>>,
 }
 
 impl VideoDeviceSource {
@@ -46,7 +51,18 @@ impl VideoDeviceSource {
             .start()
             .map_err(|e| Error::new(format!("failed to start video capture session: {e}")))?;
 
-        while let Some(captured_frame) = frame_rx.recv().await {
+        loop {
+            if self
+                .running
+                .as_ref()
+                .is_some_and(|running| !running.load(Ordering::Relaxed))
+            {
+                break;
+            }
+
+            let Some(captured_frame) = frame_rx.recv().await else {
+                break;
+            };
             let frame = convert_captured_frame_to_i420(&captured_frame)?;
             // TODO: send_syn() でペース調整に対応する
             if !output_video_sender.send_video(frame) {
@@ -222,6 +238,7 @@ pub(super) fn build_record_source_plan(
         width: None,
         height: None,
         fps: settings.fps,
+        running: None,
     };
 
     Ok(super::ObswsRecordSourcePlan {

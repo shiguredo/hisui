@@ -5,23 +5,52 @@ use std::sync::atomic::Ordering;
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     let cmd = noargs::cmd("ml")
-        .doc("カメラ入力に ML 物体検知を適用して画面表示する")
+        .doc("ML 推論デモ (video: 物体検知 / audio: 音声転写)")
         .take(args);
 
     if !cmd.is_present() {
         return Ok(false);
     }
 
-    #[cfg(not(all(feature = "candle", feature = "player")))]
+    #[cfg(not(feature = "candle"))]
     {
         tracing::error!(
-            "ml subcommand requires both 'candle' and 'player' features. \
-             Rebuild with: cargo build --features candle"
+            "ml subcommand requires 'candle' feature. \
+             Rebuild with: cargo build --features candle,player"
         );
         std::process::exit(1);
     }
 
-    #[cfg(all(feature = "candle", feature = "player"))]
+    #[cfg(feature = "candle")]
+    {
+        let audio_cmd = noargs::cmd("audio")
+            .doc("マイク入力を Whisper で文字起こしする")
+            .take(args);
+        if audio_cmd.is_present() {
+            return try_run_audio(args);
+        }
+
+        #[cfg(not(feature = "player"))]
+        {
+            tracing::error!(
+                "ml video requires 'player' feature. \
+                 Use 'hisui ml audio' for speech-to-text, or rebuild with --features candle,player"
+            );
+            std::process::exit(1);
+        }
+
+        #[cfg(feature = "player")]
+        {
+            return try_run_video(args);
+        }
+    }
+
+    #[cfg(not(feature = "candle"))]
+    Ok(true)
+}
+
+#[cfg(all(feature = "candle", feature = "player"))]
+fn try_run_video(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     {
         let list_devices = noargs::flag("list-devices")
             .doc("利用可能なビデオデバイス一覧を表示する")
@@ -146,6 +175,359 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     Ok(true)
 }
 
+#[cfg(feature = "candle")]
+fn try_run_audio(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+    let list_devices = noargs::flag("list-audio-devices")
+        .doc("利用可能なオーディオ入力デバイス一覧を表示する")
+        .take(args)
+        .is_present();
+
+    if list_devices {
+        if args.metadata().help_mode {
+            return Ok(true);
+        }
+        print_audio_device_list();
+        return Ok(true);
+    }
+
+    let model_dir: PathBuf = noargs::opt("model-dir")
+        .ty("PATH")
+        .doc(
+            "Whisper モデルディレクトリ (config.json, tokenizer.json, model.safetensors)\n\
+             例: openai/whisper-tiny を huggingface-cli でダウンロードしたパス",
+        )
+        .take(args)
+        .then(|o| o.value().parse())?;
+
+    let device_id: Option<String> = noargs::opt("device-id")
+        .ty("ID")
+        .doc("オーディオ入力デバイス ID (省略時はデフォルト)")
+        .take(args)
+        .present_and_then(|a| a.value().parse())?;
+
+    let chunk_secs: u32 = noargs::opt("chunk-secs")
+        .ty("SEC")
+        .doc("転写チャンク長（秒）")
+        .default("10")
+        .take(args)
+        .then(|o| o.value().parse())?;
+
+    let vad = noargs::flag("vad")
+        .doc("VAD を有効化（Silero ONNX があれば Silero、なければ RMS）")
+        .take(args)
+        .is_present();
+
+    let vad_model: Option<PathBuf> = noargs::opt("vad-model")
+        .ty("PATH")
+        .doc("Silero VAD ONNX（例: ml-models/silero-vad/onnx/model.onnx）")
+        .take(args)
+        .present_and_then(|a| a.value().parse())?;
+
+    let vad_kind: String = noargs::opt("vad-kind")
+        .ty("KIND")
+        .doc("VAD 種別: auto / silero / energy / off")
+        .default("auto")
+        .take(args)
+        .then(|o| o.value().parse())?;
+
+    let vad_min_speech_ratio: f32 = noargs::opt("vad-min-speech-ratio")
+        .ty("RATIO")
+        .doc("RMS VAD: 発話フレーム比率の下限")
+        .default("0.05")
+        .take(args)
+        .then(|o| o.value().parse())?;
+
+    let vad_rms_threshold: f32 = noargs::opt("vad-rms-threshold")
+        .ty("AMP")
+        .doc("RMS VAD: フレーム RMS の下限")
+        .default("0.01")
+        .take(args)
+        .then(|o| o.value().parse())?;
+
+    let vad_probability: f32 = noargs::opt("vad-probability")
+        .ty("PROB")
+        .doc("Silero VAD: チャンク平均発話確率の下限")
+        .default("0.35")
+        .take(args)
+        .then(|o| o.value().parse())?;
+
+    let vad_trim = noargs::flag("vad-trim")
+        .doc("Silero VAD: 発話区間のみを Whisper に渡す")
+        .take(args)
+        .is_present();
+
+    let language: Option<String> = noargs::opt("language")
+        .ty("CODE")
+        .doc("Whisper 言語（例: en, ja）。省略時は多言語モデルで自動推定")
+        .take(args)
+        .present_and_then(|a| a.value().parse())?;
+
+    let task: String = noargs::opt("task")
+        .ty("NAME")
+        .doc("Whisper タスク: transcribe / translate")
+        .default("transcribe")
+        .take(args)
+        .then(|o| o.value().parse())?;
+
+    let device_str: String = noargs::opt("device")
+        .ty("NAME")
+        .doc("ML デバイス (auto / cpu / metal / cuda)")
+        .default("auto")
+        .take(args)
+        .then(|o| o.value().parse())?;
+
+    if args.metadata().help_mode {
+        return Ok(true);
+    }
+
+    let ml_device = match device_str.to_lowercase().as_str() {
+        "cpu" => Some(crate::ml::device::MlDevice::Cpu),
+        "metal" => Some(crate::ml::device::MlDevice::Metal(0)),
+        "cuda" => Some(crate::ml::device::MlDevice::Cuda(0)),
+        "auto" | _ => None,
+    };
+
+    run_audio(AudioRunConfig {
+        model_dir,
+        device_id,
+        chunk_secs,
+        vad,
+        vad_model,
+        vad_kind,
+        vad_min_speech_ratio,
+        vad_rms_threshold,
+        vad_probability,
+        vad_trim,
+        language,
+        task,
+        device: ml_device,
+    })
+    .map_err(|e| noargs::Error::Other {
+        metadata: None,
+        error: Box::new(format!("{e:?}")),
+    })?;
+
+    Ok(true)
+}
+
+#[cfg(feature = "candle")]
+struct AudioRunConfig {
+    model_dir: PathBuf,
+    device_id: Option<String>,
+    chunk_secs: u32,
+    vad: bool,
+    vad_model: Option<PathBuf>,
+    vad_kind: String,
+    vad_min_speech_ratio: f32,
+    vad_rms_threshold: f32,
+    vad_probability: f32,
+    vad_trim: bool,
+    language: Option<String>,
+    task: String,
+    device: Option<crate::ml::device::MlDevice>,
+}
+
+#[cfg(feature = "candle")]
+fn resolve_silero_vad_model(explicit: &Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(path) = explicit {
+        return Some(path.clone());
+    }
+    let models_root = std::env::var_os("ML_MODELS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("ml-models"));
+    let default = crate::ml::audio::silero_vad::default_model_path(&models_root);
+    default.is_file().then_some(default)
+}
+
+#[cfg(feature = "candle")]
+fn build_vad_gate(
+    config: &AudioRunConfig,
+    candle_device: &candle_core::Device,
+) -> crate::Result<crate::ml::audio::vad::VadGate> {
+    use crate::ml::audio::vad::VadGate;
+
+    let kind = config.vad_kind.to_lowercase();
+    if kind == "off" {
+        return Ok(VadGate::off());
+    }
+
+    let silero_path = resolve_silero_vad_model(&config.vad_model);
+    let use_silero = match kind.as_str() {
+        "silero" => true,
+        "energy" => false,
+        "auto" => silero_path.is_some(),
+        other => {
+            return Err(crate::Error::new(format!(
+                "unsupported vad-kind: {other} (use auto, silero, energy, or off)"
+            )));
+        }
+    };
+
+    if kind == "auto" && !config.vad && silero_path.is_none() {
+        return Ok(VadGate::off());
+    }
+
+    if use_silero {
+        let path = silero_path.ok_or_else(|| {
+            crate::Error::new(
+                "silero VAD requires --vad-model or ml-models/silero-vad/onnx/model.onnx \
+                 (run scripts/download_ml_models.sh vad)",
+            )
+        })?;
+        const FRAME_PROBABILITY: f32 = 0.5;
+        return VadGate::silero(
+            &path,
+            candle_device,
+            config.vad_probability,
+            FRAME_PROBABILITY,
+            config.vad_trim,
+        );
+    }
+
+    if config.vad || kind == "energy" {
+        return Ok(VadGate::energy(
+            config.vad_min_speech_ratio,
+            config.vad_rms_threshold,
+        ));
+    }
+
+    Err(crate::Error::new(
+        "VAD kind silero requires --vad-model or downloaded ml-models/silero-vad/onnx/model.onnx",
+    ))
+}
+
+#[cfg(feature = "candle")]
+fn run_audio(config: AudioRunConfig) -> crate::Result<()> {
+    use crate::ml::audio::decode::Task;
+    use crate::ml::audio::vad::VadGate;
+    use crate::ml::audio::{AudioMlProcessor, WhisperPipeline};
+
+    crate::ml::audio::whisper::validate_model_dir(&config.model_dir)?;
+
+    let ml_device = config.device.clone();
+    let candle_device = ml_device
+        .unwrap_or_else(crate::ml::device::MlDevice::auto)
+        .to_candle_device()
+        .map_err(|e| crate::Error::new(format!("failed to create ML device: {e}")))?;
+
+    let whisper_task = match config.task.to_lowercase().as_str() {
+        "transcribe" => Task::Transcribe,
+        "translate" => Task::Translate,
+        other => {
+            return Err(crate::Error::new(format!(
+                "unsupported whisper task: {other} (use transcribe or translate)"
+            )));
+        }
+    };
+
+    tracing::info!("Loading Whisper from {}", config.model_dir.display());
+    let whisper = WhisperPipeline::load(
+        &config.model_dir,
+        candle_device.clone(),
+        config.language.clone(),
+        whisper_task,
+    )?;
+    tracing::info!("Whisper model loaded");
+
+    let vad = build_vad_gate(&config, &candle_device)?;
+    match &vad {
+        VadGate::Off => tracing::info!("VAD disabled"),
+        VadGate::Energy { .. } => tracing::info!("VAD: energy (RMS)"),
+        VadGate::Silero { .. } => {
+            tracing::info!("VAD: silero (trim={})", config.vad_trim);
+        }
+    }
+
+    let running = Arc::new(AtomicBool::new(true));
+    let running_ctrlc = running.clone();
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .map_err(|e| crate::Error::new(format!("failed to create tokio runtime: {e}")))?;
+
+    rt.block_on(async move {
+        let pipeline = crate::MediaPipeline::new()
+            .map_err(|e| e.with_context("failed to create media pipeline"))?;
+        let handle = pipeline.handle();
+        let _pipeline_task = tokio::spawn(pipeline.run());
+
+        let raw_track_id = crate::TrackId::new("ml_audio_raw");
+        let audio_source = crate::obsws::source::audio_device::AudioDeviceSource {
+            output_audio_track_id: raw_track_id.clone(),
+            device_id: config.device_id,
+            sample_rate: None,
+            channels: None,
+            running: Some(running.clone()),
+        };
+        handle
+            .spawn_processor(
+                crate::ProcessorId::new("mlAudioDevice"),
+                crate::ProcessorMetadata::new("audio_device_source"),
+                move |h| audio_source.run(h),
+            )
+            .await?;
+
+        let ml_processor = AudioMlProcessor {
+            input_track_id: raw_track_id,
+            whisper,
+            chunk_secs: config.chunk_secs,
+            vad,
+            running: running.clone(),
+        };
+        handle
+            .spawn_processor(
+                crate::ProcessorId::new("mlAudioProcessor"),
+                crate::ProcessorMetadata::new("audio_ml_processor"),
+                move |h| ml_processor.run(h),
+            )
+            .await?;
+
+        handle.trigger_start().await?;
+        tracing::info!(
+            "audio ml pipeline started (chunk={}s, Ctrl+C to stop)",
+            config.chunk_secs
+        );
+
+        tokio::spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                tracing::info!("Ctrl+C received, stopping audio ml pipeline");
+                running_ctrlc.store(false, Ordering::Relaxed);
+            }
+        });
+
+        while running.load(Ordering::Relaxed) {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+
+        Ok::<(), crate::Error>(())
+    })?;
+
+    Ok(())
+}
+
+#[cfg(feature = "candle")]
+fn print_audio_device_list() {
+    match shiguredo_audio_device::AudioDeviceList::enumerate_input() {
+        Ok(list) => {
+            let devices = list.devices();
+            if devices.is_empty() {
+                println!("no audio input devices found");
+                return;
+            }
+            for d in devices {
+                let name = d.name().unwrap_or_else(|_| "Unknown".to_owned());
+                let id = d.unique_id().unwrap_or_else(|_| "unknown".to_owned());
+                println!("  {id}  {name}");
+            }
+        }
+        Err(e) => {
+            eprintln!("failed to enumerate audio devices: {e}");
+        }
+    }
+}
+
 #[cfg(all(feature = "candle", feature = "player"))]
 fn print_device_list() {
     match shiguredo_video_device::VideoDeviceList::enumerate() {
@@ -230,7 +612,13 @@ fn run(config: RunConfig) -> crate::Result<()> {
     let frame_ready_for_player = frame_ready.clone();
     let running_for_player = running.clone();
 
-    let dual = config.device_ids.len() >= 2;
+    // 省略時はデフォルトデバイス 1 台
+    let device_ids = if config.device_ids.is_empty() {
+        vec![String::new()]
+    } else {
+        config.device_ids
+    };
+    let dual = device_ids.len() >= 2;
     let capture_width = config.width;
     let capture_height = config.height;
 
@@ -249,32 +637,33 @@ fn run(config: RunConfig) -> crate::Result<()> {
 
         let mut ml_out_track_ids = Vec::new();
 
-        for (i, dev_id) in config.device_ids.iter().enumerate() {
-            let cam_track_id = crate::TrackId::new(format!("ml_raw_{i}"));
+        for (i, dev_id) in device_ids.iter().enumerate() {
+            let raw_track_id = crate::TrackId::new(format!("ml_raw_{i}"));
             let ml_out_track_id = crate::TrackId::new(format!("ml_out_{i}"));
 
-            let camera_source = CameraSource {
-                output_video_track_id: cam_track_id.clone(),
+            let video_device_source = crate::obsws::source::video_device::VideoDeviceSource {
+                output_video_track_id: raw_track_id.clone(),
                 device_id: if dev_id.is_empty() {
                     None
                 } else {
                     Some(dev_id.clone())
                 },
-                width: capture_width as i32,
-                height: capture_height as i32,
-                fps: config.fps as i32,
-                running: running.clone(),
+                pixel_format: None,
+                width: Some(capture_width as i32),
+                height: Some(capture_height as i32),
+                fps: Some(config.fps as i32),
+                running: Some(running.clone()),
             };
             handle
                 .spawn_processor(
-                    crate::ProcessorId::new(format!("mlCamera_{i}")),
-                    crate::ProcessorMetadata::new("camera_source"),
-                    move |h| camera_source.run(h),
+                    crate::ProcessorId::new(format!("mlVideoDevice_{i}")),
+                    crate::ProcessorMetadata::new("video_device_source"),
+                    move |h| video_device_source.run(h),
                 )
                 .await?;
 
             let ml_processor = crate::ml::MlProcessor {
-                input_track_id: cam_track_id,
+                input_track_id: raw_track_id,
                 output_track_id: ml_out_track_id.clone(),
                 model: model.clone(),
                 model_size: config.model_size,
@@ -359,7 +748,7 @@ fn run(config: RunConfig) -> crate::Result<()> {
             ml_out_track_ids
                 .into_iter()
                 .next()
-                .expect("camera tracks must not be empty")
+                .expect("video device tracks must not be empty")
         };
 
         let display_sink = DisplaySink {
@@ -405,162 +794,6 @@ fn run(config: RunConfig) -> crate::Result<()> {
 
     drop(rt);
     Ok(())
-}
-
-// ============================================================
-// カメラキャプチャプロセッサ
-// ============================================================
-
-#[cfg(all(feature = "candle", feature = "player"))]
-struct CameraSource {
-    output_video_track_id: crate::TrackId,
-    device_id: Option<String>,
-    width: i32,
-    height: i32,
-    fps: i32,
-    running: Arc<AtomicBool>,
-}
-
-#[cfg(all(feature = "candle", feature = "player"))]
-impl CameraSource {
-    async fn run(self, handle: crate::ProcessorHandle) -> crate::Result<()> {
-        let mut output_tx = handle
-            .publish_track(self.output_video_track_id.clone())
-            .await?;
-
-        handle.notify_ready();
-        handle.wait_subscribers_ready().await?;
-
-        let config = shiguredo_video_device::VideoCaptureConfig {
-            device_id: self.device_id.clone(),
-            width: self.width,
-            height: self.height,
-            fps: self.fps,
-            pixel_format: None,
-        };
-
-        let (frame_tx, mut frame_rx) =
-            tokio::sync::mpsc::unbounded_channel::<shiguredo_video_device::VideoFrameOwned>();
-        let mut capture = shiguredo_video_device::VideoCapture::new(config, move |f| {
-            let _ = frame_tx.send(f.to_owned());
-        })
-        .map_err(|e| crate::Error::new(format!("failed to create video capture session: {e}")))?;
-
-        capture
-            .start()
-            .map_err(|e| crate::Error::new(format!("failed to start video capture: {e}")))?;
-
-        while self.running.load(Ordering::Relaxed) {
-            let captured = match frame_rx.recv().await {
-                Some(f) => f,
-                None => break,
-            };
-
-            let video_frame = captured_to_video_frame(&captured)?;
-            if !output_tx.send_video(video_frame) {
-                break;
-            }
-        }
-
-        capture.stop();
-        output_tx.send_eos();
-        Ok(())
-    }
-}
-
-/// キャプチャされたフレームを I420 VideoFrame に変換する
-#[cfg(all(feature = "candle", feature = "player"))]
-fn captured_to_video_frame(
-    captured: &shiguredo_video_device::VideoFrameOwned,
-) -> crate::Result<crate::VideoFrame> {
-    let w = captured.width as usize;
-    let h = captured.height as usize;
-    if w == 0 || h == 0 {
-        return Err(crate::Error::new(format!(
-            "invalid frame size: {}x{}",
-            captured.width, captured.height
-        )));
-    }
-
-    let timestamp = std::time::Duration::from_micros(captured.timestamp_us as u64);
-    let y_size = w * h;
-    let uv_width = w.div_ceil(2);
-    let uv_height = h.div_ceil(2);
-    let uv_size = uv_width * uv_height;
-
-    // I420: data に Y+U+V が連続で格納
-    if captured.data.len() >= y_size + uv_size * 2 {
-        let mut data = Vec::with_capacity(y_size + uv_size * 2);
-        data.extend_from_slice(&captured.data[..y_size]);
-        data.extend_from_slice(&captured.data[y_size..y_size + uv_size]);
-        data.extend_from_slice(&captured.data[y_size + uv_size..y_size + uv_size * 2]);
-        return Ok(crate::VideoFrame {
-            data,
-            format: crate::video::VideoFormat::I420,
-            keyframe: false,
-            size: Some(crate::video::VideoFrameSize::new(w, h)?),
-            timestamp,
-            sample_entry: None,
-        });
-    }
-
-    // NV12: data = Y plane, uv_data = インターリーブ UV
-    if let Some(uv_plane) = captured.uv_data.as_deref() {
-        let raw_y_stride = usize::try_from(captured.stride).unwrap_or(0);
-        let raw_uv_stride = usize::try_from(captured.stride_uv).unwrap_or(0);
-        let y_stride = if raw_y_stride >= w && raw_y_stride * h <= captured.data.len() {
-            raw_y_stride
-        } else {
-            w
-        };
-        let uv_stride = if raw_uv_stride >= uv_width && raw_uv_stride * uv_height <= uv_plane.len()
-        {
-            raw_uv_stride
-        } else {
-            uv_width
-        };
-
-        let mut i420_data = vec![0u8; y_size + uv_size * 2];
-        let (y_dst, rest) = i420_data.split_at_mut(y_size);
-        let (u_dst, v_dst) = rest.split_at_mut(uv_size);
-
-        let src = shiguredo_libyuv::Nv12Image {
-            y: &captured.data,
-            y_stride,
-            uv: uv_plane,
-            uv_stride,
-        };
-        let mut dst = shiguredo_libyuv::I420ImageMut {
-            y: y_dst,
-            y_stride: w,
-            u: u_dst,
-            u_stride: uv_width,
-            v: v_dst,
-            v_stride: uv_width,
-        };
-        shiguredo_libyuv::nv12_to_i420(&src, &mut dst, shiguredo_libyuv::ImageSize::new(w, h))
-            .map_err(|e| crate::Error::new(format!("NV12 to I420 conversion failed: {e}")))?;
-
-        let mut data = Vec::with_capacity(y_size + uv_size * 2);
-        data.extend_from_slice(y_dst);
-        data.extend_from_slice(u_dst);
-        data.extend_from_slice(v_dst);
-
-        return Ok(crate::VideoFrame {
-            data,
-            format: crate::video::VideoFormat::I420,
-            keyframe: false,
-            size: Some(crate::video::VideoFrameSize::new(w, h)?),
-            timestamp,
-            sample_entry: None,
-        });
-    }
-
-    Err(crate::Error::new(format!(
-        "unexpected camera frame: {} bytes, uv_data={}",
-        captured.data.len(),
-        captured.uv_data.is_some()
-    )))
 }
 
 // ============================================================

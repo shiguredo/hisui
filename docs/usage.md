@@ -70,3 +70,4 @@ Hisui は `compose` 以外にもいろいろなコマンドを提供していま
 - [`tune`](command_tune.md) - 映像エンコードパラメーターの最適化を行うコマンド
 - [`vmaf`](command_vmaf.md) - 録画ファイルの品質評価（VMAF スコア計算）を行うコマンド
 - [`inspect`](command_inspect.md) - 録画ファイルの詳細情報を取得するコマンド
+- [`ml`](command_ml.md) - Candle による ML デモ（映像: YOLOv8 物体検出、音声: Whisper 転写。要 `candle` feature）
