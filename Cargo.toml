@@ -29,15 +29,18 @@ shiguredo_mp4 = "=2026.3.0"
 shiguredo_opus = "=2026.1.0"
 shiguredo_webrtc = "=0.147.2"
 shiguredo_websocket = "=2026.1.0"
-tokio = { version = "=1.52.1", features = [
-  "io-util",
-  "macros",
-  "net",
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "time",
-] }
+tokio = {
+  version = "=1.52.1",
+  features = [
+    "io-util",
+    "macros",
+    "net",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "time",
+  ]
+}
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["fmt", "std"] }
 
@@ -52,11 +55,15 @@ mpeg2ts = "=0.6.0"
 noargs = { workspace = true }
 nojson = { workspace = true }
 nopng = "=0.1.1"
-rustls = { version = "=0.23.39", default-features = false, features = [
-  "aws-lc-rs",
-  "std",
-  "tls12",
-] }
+rustls = {
+  version = "=0.23.39",
+  default-features = false,
+  features = [
+    "aws-lc-rs",
+    "std",
+    "tls12",
+  ]
+}
 rustls-platform-verifier = "=0.7.0"
 shiguredo_audio_device = "=2026.1.0"
 shiguredo_http11 = { workspace = true }
@@ -65,9 +72,13 @@ shiguredo_mp4 = { workspace = true }
 shiguredo_mpd = "=2026.1.0-canary.0"
 shiguredo_rtmp = "=2026.1.0-canary.6"
 shiguredo_rtsp = "=2026.1.0-canary.0"
-shiguredo_s3 = { version = "=2026.1.0-canary.3", default-features = false, features = [
-  "aws-lc-rs",
-] }
+shiguredo_s3 = {
+  version = "=2026.1.0-canary.3",
+  default-features = false,
+  features = [
+    "aws-lc-rs",
+  ]
+}
 shiguredo_srt = "=2026.1.0-canary.1"
 shiguredo_video_device = "=2026.1.0"
 shiguredo_webrtc = { workspace = true }
