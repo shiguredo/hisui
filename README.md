@@ -52,15 +52,14 @@ Media Pipeline Tool Hisui は以下の特徴を持つ予定です。
 - プラグイン不要で JSON-RPC 2.0 サーバーを実装するだけで機能を拡張できます
 - 重いエンコード・デコード・合成処理は Hisui が担当します
 
-### 対応予定機能
+### 対応機能
 
-- パイプライン機能
-- SRT 入出力機能
+- WebRTC 入出力機能
 - RTMP 入出力機能
+- SRT 入出力機能
 - RTSP 入出力機能
-- RTP 入出力機能
-- NDI 入出力
 - HLS 出力機能
+- MPEG-DASH 出力機能
 
 ## インストール
 
@@ -123,7 +122,6 @@ NVIDIA Video Codec を利用する場合は NVIDIA ドライバー 570.0 以降�
 - Ubuntu 22.04 arm64
 - macOS 26 arm64
 - macOS 15 arm64
-- macOS 14 arm64
 
 ### macOS の対応バージョン
 
