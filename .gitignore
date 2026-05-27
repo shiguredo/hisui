@@ -5,3 +5,6 @@
 
 # macos
 .DS_Store
+
+# model
+*.safetensors
