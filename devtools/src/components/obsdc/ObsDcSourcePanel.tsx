@@ -478,7 +478,9 @@ export function ObsDcSourcePanel({
                 <div
                   key={item.sceneItemId}
                   class={`flex items-center gap-2 border-b border-surface-200/50 px-3 py-2 ${
-                    isSelected ? "bg-accent-50 ring-1 ring-inset ring-accent-200" : "hover:bg-surface-100/60"
+                    isSelected
+                      ? "bg-accent-50 ring-1 ring-inset ring-accent-200"
+                      : "hover:bg-surface-100/60"
                   }`}
                 >
                   {/* 表示/非表示トグル */}

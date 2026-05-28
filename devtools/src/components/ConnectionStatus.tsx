@@ -48,7 +48,9 @@ export function ConnectionStatus({
         </div>
       )}
       {error !== null && (
-        <div class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error.message}</div>
+        <div class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {error.message}
+        </div>
       )}
     </div>
   );

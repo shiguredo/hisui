@@ -28,8 +28,8 @@ vp install
 cp .env.template .env
 ```
 
-| 変数 | 説明 |
-| --- | --- |
+| 変数                   | 説明                                                   |
+| ---------------------- | ------------------------------------------------------ |
 | `VITE_STUN_SERVER_URL` | STUN サーバーの URL (例: `stun:stun.example.com:3478`) |
 
 ## 使い方
@@ -53,7 +53,7 @@ hisui server の `--http-port` デフォルトは `4455` のため、Bootstrap U
 
 ## ページ
 
-| パス | 内容 |
-| --- | --- |
-| `/` (P2P) | Bootstrap 接続、映像表示、OBS WebSocket (DataChannel) 操作 |
-| `/debug` (Debug) | DataChannel 状態、Stats、OBS WebSocket リクエスト送信 |
+| パス             | 内容                                                       |
+| ---------------- | ---------------------------------------------------------- |
+| `/` (P2P)        | Bootstrap 接続、映像表示、OBS WebSocket (DataChannel) 操作 |
+| `/debug` (Debug) | DataChannel 状態、Stats、OBS WebSocket リクエスト送信      |

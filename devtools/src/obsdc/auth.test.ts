@@ -10,7 +10,7 @@ test("generateAuthenticationString は仕様通りの認証文字列を生成す
   const result = await generateAuthenticationString(password, salt, challenge);
 
   // 結果は Base64 文字列であること
-  assert.match(result, /^[A-Za-z0-9+/]+=*$/);
+  assert.match(result, /^[A-Za-z0-9+/]+=*$/u);
   // 長さは SHA-256 の Base64 エンコード (44 文字)
   assert.strictEqual(result.length, 44);
 });

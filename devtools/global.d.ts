@@ -3,6 +3,8 @@ declare module "*.css" {}
 
 // Vite の環境変数の型定義
 interface ImportMetaEnv {
+  readonly DEV: boolean;
+  readonly PROD: boolean;
   readonly VITE_STUN_SERVER_URL?: string;
 }
 

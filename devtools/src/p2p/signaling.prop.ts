@@ -67,6 +67,6 @@ test.prop([
 ])("parseServerMessage は不正な JSON で常にエラーを投げる", (invalidJson) => {
   assert.throws(
     () => parseServerMessage(invalidJson),
-    /failed to parse server message: invalid JSON/,
+    /failed to parse server message: invalid JSON/u,
   );
 });

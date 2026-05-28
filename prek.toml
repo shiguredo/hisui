@@ -6,6 +6,10 @@
 minimum_prek_version = "0.3.9"
 
 [[repos]]
+repo = "meta"
+hooks = [{ id = "check-hooks-apply" }]
+
+[[repos]]
 repo = "builtin"
 hooks = [
   { id = "trailing-whitespace" },
@@ -47,5 +51,35 @@ hooks = [
     files = { glob = "e2e-tests/**/*.py" },
     pass_filenames = false,
     priority = 0,
+  },
+  {
+    id = "vp-check-devtools",
+    name = "vp check (devtools)",
+    entry = "pnpm --dir devtools check",
+    language = "system",
+    files = { glob = "devtools/**" },
+    exclude = { glob = ["devtools/node_modules/**", "devtools/dist/**"] },
+    pass_filenames = false,
+    priority = 0,
+  },
+  {
+    id = "vp-build-devtools",
+    name = "vp build (devtools)",
+    entry = "pnpm --dir devtools build",
+    language = "system",
+    files = { glob = "devtools/**" },
+    exclude = { glob = ["devtools/node_modules/**", "devtools/dist/**"] },
+    pass_filenames = false,
+    priority = 10,
+  },
+  {
+    id = "vp-test-devtools",
+    name = "vp test (devtools)",
+    entry = "pnpm --dir devtools test",
+    language = "system",
+    files = { glob = "devtools/**" },
+    exclude = { glob = ["devtools/node_modules/**", "devtools/dist/**"] },
+    pass_filenames = false,
+    priority = 20,
   },
 ]

@@ -3,7 +3,7 @@ import preactPlugin from "@preact/preset-vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite-plus";
 
-const __dirname = import.meta.dirname;
+const rootDir = import.meta.dirname;
 
 export default defineConfig({
   plugins: [preactPlugin(), tailwindcss()],
@@ -12,7 +12,7 @@ export default defineConfig({
     target: "esnext",
     rolldownOptions: {
       input: {
-        index: path.resolve(__dirname, "./index.html"),
+        index: path.resolve(rootDir, "./index.html"),
       },
       output: {
         manualChunks(moduleId) {
@@ -30,7 +30,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(rootDir, "./src"),
     },
   },
   test: {
@@ -876,6 +876,7 @@ export default defineConfig({
       "sort-imports": "off",
       // 否定条件は可読性に問題ない場合が多い
       "no-negated-condition": "off",
+      "unicorn/no-negated-condition": "off",
       // 順次処理が必要な場合がある
       "no-await-in-loop": "off",
       // コールバック内の変数シャドウは一般的
@@ -915,6 +916,8 @@ export default defineConfig({
       "vitest/prefer-lowercase-title": "off",
       // テストは Chai API の assert を利用しており expect() を呼ばないため無効化
       "vitest/expect-expect": "off",
+      // Chai assert 利用のため expect.hasAssertions() は不要
+      "vitest/prefer-expect-assertions": "off",
       // jest ルールはプロジェクトで使用しない
       "jest/require-hook": "off",
       "jest/require-top-level-describe": "off",
@@ -936,6 +939,13 @@ export default defineConfig({
       "typescript/strict-void-return": "off",
     },
     overrides: [
+      {
+        // アプリケーションエントリポイントは Vitest の hook ルール対象外
+        files: ["src/main.tsx"],
+        rules: {
+          "vitest/require-hook": "off",
+        },
+      },
       {
         // テストファイルは型安全性を緩和
         files: ["**/*.test.ts", "**/*.prop.ts"],
