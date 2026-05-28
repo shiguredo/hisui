@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  /* 背景・境界 (ライト neutral) */
+  --color-surface-50: #f8fafc;
+  --color-surface-100: #f1f5f9;
+  --color-surface-200: #e2e8f0;
+  --color-surface-300: #cbd5e1;
+  --color-surface-400: #94a3b8;
+  --color-surface-500: #64748b;
+  --color-surface-600: #475569;
+  --color-surface-700: #334155;
+  --color-surface-800: #1e293b;
+  --color-surface-900: #0f172a;
+  --color-surface-950: #020617;
+
+  /* 操作色 (翡翠石・中間の明度) */
+  --color-accent-50: #edf8f4;
+  --color-accent-200: #a8dcc8;
+  --color-accent-400: #5aab92;
+  --color-accent-500: #4a9780;
+  --color-accent-600: #428771;
+  --color-accent-700: #36705d;
+
+  /* トップバー (磨かれた翡翠) */
+  --color-hisui-50: #f0faf6;
+  --color-hisui-100: #cce8dc;
+  --color-hisui-200: #9fd4be;
+  --color-hisui-500: #529a84;
+  --color-hisui-600: #488a76;
+  --color-hisui-700: #3d7967;
+  --color-hisui-800: #336858;
+}
+
+@layer components {
+  .field-control {
+    @apply rounded border border-surface-300 bg-white text-slate-900 placeholder:text-slate-400;
+    @apply transition-[border-color,box-shadow];
+    @apply focus:border-surface-400 focus:ring-2 focus:ring-surface-200 focus:outline-none;
+    @apply disabled:opacity-50;
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    margin: 0;
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      "Helvetica Neue",
+      Arial,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--color-surface-50);
+    color: var(--color-surface-900);
+  }
+}

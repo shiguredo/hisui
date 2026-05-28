@@ -36,7 +36,7 @@
 
 ```bash
 # レガシー Hisui
-hisui --layout /path/to/layout.json 
+hisui --layout /path/to/layout.json
 
 # 新 Hisui
 # => `hisui` の直後に `compose` を追加する

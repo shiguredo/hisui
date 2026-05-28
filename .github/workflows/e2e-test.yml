@@ -9,6 +9,9 @@ on:
     paths-ignore:
       - "**.md"
       - "python/**"
+      - "devtools/**"
+      - ".github/workflows/ci-devtools.yml"
+      - ".github/workflows/deploy-devtools.yml"
 
 jobs:
   e2e-test:
