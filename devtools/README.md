@@ -3,6 +3,8 @@
 [hisui](https://github.com/shiguredo/hisui) 向けの Web 開発ツール。
 HTTP Bootstrap と DataChannel シグナリングによる P2P WebRTC 接続、OBS WebSocket over DataChannel のデバッグ UI を提供する。
 
+公開版: https://hisui-devtools.shiguredo.app/
+
 ライセンスはリポジトリルートの [Apache License 2.0](../LICENSE) に従う。
 
 ## 必要条件
