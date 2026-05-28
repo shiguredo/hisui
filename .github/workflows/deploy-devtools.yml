@@ -40,7 +40,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_PAGES_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy devtools/dist --project-name=shiguredo-hisui-devtools
+          command: pages deploy devtools/dist --project-name=shiguredo-hisui-devtools --branch develop
 
   slack-notify:
     needs: build-and-deploy
