@@ -1,0 +1,59 @@
+name: ci-devtools
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "feature/*"
+    paths:
+      - "devtools/**"
+      - ".github/workflows/ci-devtools.yml"
+      - "!**.md"
+      - "!LICENSE"
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "devtools/**"
+      - ".github/workflows/ci-devtools.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: devtools
+    steps:
+      - uses: actions/checkout@v6
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24"
+          run-install: true
+          working-directory: devtools
+      - run: vp check
+      - run: vp build
+      - run: vp test run
+
+  slack_notify:
+    needs:
+      - ci
+    permissions:
+      actions: read
+    timeout-minutes: 5
+    runs-on: ubuntu-slim
+    if: always()
+    steps:
+      - name: Slack Notification
+        uses: shiguredo/github-actions/.github/actions/slack-notify@main
+        with:
+          status: ${{ job.status }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          slack_channel: hisui
+          notify_mode: failure_and_fixed
+        env:
+          GH_TOKEN: ${{ github.token }}

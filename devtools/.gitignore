@@ -1,0 +1,22 @@
+# 依存関係
+node_modules/
+.pnpm-store/
+
+# ビルド成果物
+dist/
+
+# TypeScript
+*.tsbuildinfo
+
+# 環境変数
+.env*
+!.env.template
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Vitest browser
+**/__screenshots__/

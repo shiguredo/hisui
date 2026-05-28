@@ -1,0 +1,46 @@
+{
+  "name": "hisui-devtools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Hisui DevTools",
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview",
+    "check": "vp check",
+    "check:fix": "vp check --fix",
+    "test": "vp test run",
+    "test:ct": "vp test run --config vitest.ct.config.ts",
+    "test:e2e": "playwright test --project=chromium",
+    "cleanup": "git clean -ffdx --exclude .env"
+  },
+  "dependencies": {
+    "@preact/signals": "2.9.1",
+    "preact": "10.29.2",
+    "preact-iso": "2.12.0"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "0.4.1",
+    "@playwright/test": "1.60.0",
+    "@preact/preset-vite": "2.10.5",
+    "@tailwindcss/vite": "4.3.0",
+    "@types/node": "25.9.1",
+    "@vitest/browser": "4.1.7",
+    "@vitest/browser-playwright": "4.1.7",
+    "dotenv": "17.4.2",
+    "fast-check": "4.8.0",
+    "jsdom": "29.1.1",
+    "tailwindcss": "4.3.0",
+    "typescript": "6.0.3",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.1.22",
+    "vite-plus": "0.1.22",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.22",
+    "vitest-browser-preact": "1.0.0"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.0.9"
+}

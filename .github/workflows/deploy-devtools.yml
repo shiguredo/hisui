@@ -1,0 +1,61 @@
+name: deploy-devtools
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "devtools/**"
+      - ".github/workflows/deploy-devtools.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-devtools
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: devtools
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24"
+          run-install: true
+          working-directory: devtools
+
+      - name: ビルドする
+        run: vp build
+
+      - name: Cloudflare Pages にデプロイする
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_PAGES_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: pages deploy devtools/dist --project-name=shiguredo-hisui-devtools
+
+  slack-notify:
+    needs: build-and-deploy
+    if: always()
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: shiguredo/github-actions/.github/actions/slack-notify@main
+        with:
+          status: ${{ job.status }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          slack_channel: hisui
+          notify_mode: failure_and_fixed
+        env:
+          GH_TOKEN: ${{ github.token }}
