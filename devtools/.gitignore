@@ -4,6 +4,7 @@ node_modules/
 
 # ビルド成果物
 dist/
+.vite/
 
 # TypeScript
 *.tsbuildinfo
