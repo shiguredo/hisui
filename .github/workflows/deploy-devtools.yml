@@ -3,7 +3,7 @@ name: deploy-devtools
 on:
   push:
     branches:
-      - main
+      - develop
     paths:
       - "devtools/**"
       - ".github/workflows/deploy-devtools.yml"
