@@ -35,7 +35,23 @@ AssertionError: inspect output missing required keys: missing_keys=['video_codec
 
 inspect 出力に `video_codec` と `video_sample_count` の両方が欠落しており、JSON 上は `path` と `format` の 2 フィールドしか含まれていない。
 
-### 失敗時のランタイムメトリクス (該当 run の `/metrics` ダンプより抜粋)
+### 失敗モード2 (2026-06-02 観測)
+
+同一テストだが、モード1 (inspect の必須キー欠落) より**前段**で失敗している。
+
+失敗箇所: `e2e-tests/obsws/test_output.py:949`
+
+失敗時のアサートメッセージ:
+
+```
+AssertionError: record did not write video samples in time for srt_inbound
+```
+
+該当箇所はテスト本体で、StartRecord 後に ffmpeg で SRT push を開始し、`/metrics` を 0.2 秒間隔で最大 30 回 (= 約 6 秒) ポーリングして `hisui_total_video_sample_count{processor_id="output:record:mp4_writer:0"}` が正値になるのを待つループ。この待機が時間内に成立せずタイムアウトしている。
+
+つまりモード1 が「書き込みは成立したが後から MP4 を読めない」のに対し、モード2 は「そもそも待機時間内に映像サンプルが 1 つも書き込まれなかった」という別症状。SRT inbound 経由の映像が CI 環境で約 6 秒以内に mp4_writer まで届かなかった (ffmpeg SRT push の確立遅延、SRT ハンドシェイク/接続待ち、ランナー負荷など) 可能性が高い。待機上限 (30 回 × 0.2 秒 = 6 秒) が CI 環境のばらつきに対して短い可能性も切り分け対象。
+
+### 失敗モード1 のランタイムメトリクス (2026-05-29 run の `/metrics` ダンプより抜粋)
 
 書き込み経路は **すべてのフェーズで映像フレームを処理している** ことが分かる:
 
@@ -63,9 +79,10 @@ hisui_total_recovery_moov_update_count{processor_id="output:record:mp4_writer:0"
 
 ### 観測済み失敗事例
 
-| 発生時刻 (UTC) | ジョブ | ブランチ | run / job |
-| --- | --- | --- | --- |
-| 2026-05-29T06:16Z | E2E Test → e2e-test | develop (HEAD `902385d2`) | <https://github.com/shiguredo/hisui/actions/runs/26621510837> |
+| 発生時刻 (UTC) | ジョブ | ブランチ | 失敗箇所 | 失敗モード | run / job |
+| --- | --- | --- | --- | --- | --- |
+| 2026-05-29T06:16Z | E2E Test → e2e-test | develop (HEAD `902385d2`) | `helpers.py:452` | モード1: inspect 出力に `video_codec` / `video_sample_count` が欠落 | <https://github.com/shiguredo/hisui/actions/runs/26621510837> |
+| 2026-06-02T06:03Z | E2E Test → e2e-test | develop (HEAD `f488f266`) | `test_output.py:949` | モード2: `hisui_total_video_sample_count` が時間内に正値にならず待機タイムアウト | <https://github.com/shiguredo/hisui/actions/runs/26801672139> |
 
 ### 仮説 (現時点では未確定)
 
@@ -81,6 +98,9 @@ hisui_total_recovery_moov_update_count{processor_id="output:record:mp4_writer:0"
 - **仮説 4: テストフローでの Stop タイミング**
   - `test_obsws_srt_inbound_start_record_and_inspect_output` 内で StopRecord → ファイル存在確認 → inspect の流れがあるが、StopRecord のレスポンスはあくまで API として受理した時点で返るのみで、mp4_writer が moov を書き終わって fsync まで完了したことを保証しない可能性。テスト側で finalize 完了を待つ仕組みが不足している可能性。
 
+- **仮説 5 (モード2): SRT push 確立遅延に対して待機上限が短い**
+  - モード2 はサンプル待機ループ (`test_output.py:937` 付近, 30 回 × 0.2 秒 = 約 6 秒) のタイムアウト。CI ランナー負荷や ffmpeg SRT push の接続確立 (SRT ハンドシェイク) が遅れると、6 秒以内に最初の映像サンプルが mp4_writer まで届かない可能性。失敗 run の `/metrics` が回収できれば `hisui_total_input_video_frame_count{processor_type="srt_inbound_endpoint"}` が 0 のままだったか (= そもそも SRT 入力が届いていない) を確認できる。
+
 ### 関連箇所 (調査着手用)
 
 - `e2e-tests/obsws/test_output.py::test_obsws_srt_inbound_start_record_and_inspect_output` — テスト本体。
@@ -88,6 +108,7 @@ hisui_total_recovery_moov_update_count{processor_id="output:record:mp4_writer:0"
 - `src/mp4/hybrid_writer.rs` — hybrid_mp4_writer の本体。moov の recovery 更新ロジックと finalize の境界がここにある。
 - `src/subcommand_inspect.rs` — inspect コマンドの実装。MP4 入力経路。
 - `src/mp4/reader.rs:1627` 前後 — `initialize_mp4_demuxer` (fMP4 非対応の明示コメントあり)。
+- `e2e-tests/obsws/test_output.py:937-951` — モード2 のサンプル待機ループ (待機上限 30 回 × 0.2 秒)。
 
 ## 設計方針
 
@@ -152,6 +173,8 @@ hybrid_mp4_writer が生成する MP4 構造が、`Mp4FileDemuxer` の前提と�
 ## 経過観察
 
 「観測済み失敗事例」テーブル参照。
+
+2026-06-02 時点: 観測 2 件 (モード1 / モード2 の別症状)。連続 CI 失敗ではなく (両 run の間は成功)、観測も 3 件未満のため Priority は Low のまま据え置き。ただし「同一テストが異なる箇所で 2 度フレーキー」となったため、切り分けの優先度は上げ、次回観測時 (= 3 件目) で Medium 格上げを検討する。
 
 本 issue の close 後も、同事象が観測されたら CLAUDE.md「issue が実は解決してなかった場合」手順に従って `issues/closed/` → `issues/` に `git mv` で戻し、観測事例を追記する。
 
