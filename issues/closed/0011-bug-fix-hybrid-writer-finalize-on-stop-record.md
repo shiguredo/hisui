@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-03
-- Completed:
+- Completed: 2026-06-03
 - Model: Opus 4.8
 - Branch: feature/fix-hybrid-writer-finalize-on-stop-record
 - Polished: 2026-06-03
@@ -133,4 +133,25 @@ A(2) と C はいずれも `wait_or_terminate` のタイムアウト強制終了
 
 ## 解決方法
 
-（実装時に追記）
+第 1 段階（真因特定）・第 2 段階（修正）とも本 issue 内で完了した。別 issue への切り出しは行わなかった。
+
+### 第 1 段階: 観測点の追加と真因の確定
+
+- `Mp4WriterStats` に finalize の開始・完了カウンタ（`total_finalize_started_count` / `total_finalize_completed_count`）を追加し、`finalize()` の先頭と末尾で計上するようにした（`src/mp4/writer.rs`、`src/mp4/hybrid_writer.rs`）。
+- `run()` を起動するクロージャで `run()` の Err を捕捉し warn ログを出すようにした（`src/mp4/hybrid_writer.rs`）。既存の `hisui_error` gauge は finalize の Err では立たないため。
+- `wait_or_terminate()` の強制終了経路（`src/obsws/coordinator/output.rs`）と `finish_mp4_writer_rpc()` の `terminate_processor` 経路（`src/obsws/coordinator/output_record.rs`）に warn ログを追加した。
+- obsws e2e テストの失敗時にサーバの stdout/stderr を出力するようにした（`e2e-tests/obsws/helpers.py`）。これまで失敗時にサーバログ（warn 含む）が捨てられ原因追跡が困難だった。
+- 一時ワークフローで CI 100 回実行し、`total_finalize_started_count = 1` / `completed_count = 0` と warn `Missing sample entry for first sample of Audio track` を観測。**候補 B（finalize 内 Err による `run()` 自己終了）を確定**し、候補 A・C を棄却した。
+
+これらの観測用要素のうち、finalize カウンタと warn ログは回帰検知・運用診断に有用なため恒久的に残し、一時ワークフローは検証完了後に削除した。
+
+### 第 2 段階: 修正
+
+音声トラック先頭サンプルの sample_entry 欠落が真因だったため、**writer の入口（`handle_audio_message` / `handle_video_message`）で受信フレームの sample_entry を即 `last_*_sample_entry` に取り込む**ようにした（`src/mp4/hybrid_writer.rs`）。sample_entry はストリーム中で最初の 1 フレームにしか載らない（例: `OpusEncoder` は `take()` で付与）ため、pending 化・キューイング・ドロップのタイミングに依存せず確実に保持する。これにより、フラグメント先頭サンプルが sample_entry を持たなくても `.or(last_*_sample_entry)` で解決し、finalize が成功する。
+
+- 回帰テスト `hybrid_writer_captures_audio_sample_entry_at_ingress` を追加（`src/mp4/hybrid_writer.rs`）。入口での取り込みが無いと `last_audio_sample_entry` が None のままになり落ちる。
+- `CHANGES.md` の `## develop` に `[FIX]` エントリを追記した。
+
+### 検証
+
+修正後、対象テスト `obsws/test_output.py::test_obsws_srt_inbound_start_record_and_inspect_output` を CI で 100 回（10 シャード × 10 回）実行し、**全成功（再発ゼロ）** を確認した。修正前は約 3% で失敗していた。
