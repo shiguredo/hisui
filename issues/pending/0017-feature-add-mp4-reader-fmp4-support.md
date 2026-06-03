@@ -41,3 +41,7 @@ issue 0001 で inspect コマンドの fMP4 読み込みに対応したが、OBS
 ## 解決方法
 
 - 依存ライブラリ (`shiguredo_mp4` の `Fmp4FileDemuxer`) の seek 対応後に詳細を詰める。
+
+## 補足
+
+- 録画合成の入力 fMP4 対応 (issue 0001 の段階 2a) は単独 issue としては設けない。対象は `src/sora/recording_mp4_reader.rs` の `Mp4VideoReader` / `Mp4AudioReader`。Sora は通常 fMP4 を出力せず需要が不明確なため。前方読みのみで実装コストは小さいので、需要が出たら本 issue の対応に合わせてついでに行う。
