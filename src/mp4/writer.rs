@@ -77,6 +77,10 @@ pub struct Mp4WriterStats {
     actual_moov_box_size: crate::stats::StatsGauge,
     total_flushed_fragment_count: crate::stats::StatsCounter,
     total_recovery_moov_update_count: crate::stats::StatsCounter,
+    // finalize の到達有無と完了有無を切り分けるためのカウンタ。
+    // started > completed なら finalize に到達したが完了しなかったこと（内部 Err や強制終了）を示す。
+    total_finalize_started_count: crate::stats::StatsCounter,
+    total_finalize_completed_count: crate::stats::StatsCounter,
     recoverable_media_duration: crate::stats::StatsDuration,
     current_unflushed_fragment_duration: crate::stats::StatsDuration,
     current_unflushed_video_sample_count: crate::stats::StatsGauge,
@@ -105,6 +109,8 @@ impl Mp4WriterStats {
         let actual_moov_box_size = stats.gauge("actual_moov_box_size");
         let total_flushed_fragment_count = stats.counter("total_flushed_fragment_count");
         let total_recovery_moov_update_count = stats.counter("total_recovery_moov_update_count");
+        let total_finalize_started_count = stats.counter("total_finalize_started_count");
+        let total_finalize_completed_count = stats.counter("total_finalize_completed_count");
         let recoverable_media_duration = stats.duration("recoverable_media_seconds");
         let current_unflushed_fragment_duration =
             stats.duration("current_unflushed_fragment_seconds");
@@ -139,6 +145,8 @@ impl Mp4WriterStats {
             actual_moov_box_size,
             total_flushed_fragment_count,
             total_recovery_moov_update_count,
+            total_finalize_started_count,
+            total_finalize_completed_count,
             recoverable_media_duration,
             current_unflushed_fragment_duration,
             current_unflushed_video_sample_count,
@@ -175,6 +183,14 @@ impl Mp4WriterStats {
 
     pub(crate) fn add_recovery_moov_update(&self) {
         self.total_recovery_moov_update_count.inc();
+    }
+
+    pub(crate) fn add_finalize_started(&self) {
+        self.total_finalize_started_count.inc();
+    }
+
+    pub(crate) fn add_finalize_completed(&self) {
+        self.total_finalize_completed_count.inc();
     }
 
     pub(crate) fn set_recoverable_media_duration(&self, duration: Duration) {
@@ -267,6 +283,14 @@ impl Mp4WriterStats {
 
     pub fn total_recovery_moov_update_count(&self) -> u64 {
         self.total_recovery_moov_update_count.get()
+    }
+
+    pub fn total_finalize_started_count(&self) -> u64 {
+        self.total_finalize_started_count.get()
+    }
+
+    pub fn total_finalize_completed_count(&self) -> u64 {
+        self.total_finalize_completed_count.get()
     }
 
     pub fn recoverable_media_duration(&self) -> Duration {

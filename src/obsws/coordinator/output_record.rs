@@ -378,6 +378,11 @@ async fn finish_mp4_writer_rpc(
                 tokio::time::sleep(RETRY_INTERVAL).await;
             }
             Err(_) => {
+                // Finish RPC の sender を取得できないまま強制終了する経路。
+                // writer は finalize を経ずに停止するため、録画が壊れうる。観測のため warn を出す。
+                tracing::warn!(
+                    "could not obtain mp4 writer RPC sender; force terminating without finalize: {processor_id}"
+                );
                 let _ = pipeline_handle
                     .terminate_processor(processor_id.clone())
                     .await;

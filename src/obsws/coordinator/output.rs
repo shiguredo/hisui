@@ -682,6 +682,12 @@ pub(crate) async fn wait_or_terminate(
     if live.is_empty() {
         return Ok(());
     }
+    // タイムアウトしても自然終了しなかったプロセッサを強制終了する。
+    // mp4 writer がこの経路に入ると finalize 未完了で録画が壊れうるため warn を出す。
+    tracing::warn!(
+        "force terminating processors that did not stop within timeout: {:?}",
+        live
+    );
     terminate_and_wait(pipeline_handle, &live).await
 }
 

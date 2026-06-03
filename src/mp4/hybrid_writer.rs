@@ -525,6 +525,10 @@ impl HybridMp4Writer {
 
     /// 録画を finalize して標準 MP4 に変換する
     fn finalize(&mut self) -> crate::Result<()> {
+        // finalize に到達したことを記録する。完了カウンタ (関数末尾) との差で
+        // 「到達したが完了しなかった」(内部 Err 等) を切り分けられるようにする。
+        self.core.stats.add_finalize_started();
+
         // 残りのフラグメントをフラッシュ
         self.flush_fragment()?;
 
@@ -583,6 +587,8 @@ impl HybridMp4Writer {
         }
 
         self.file.flush()?;
+
+        self.core.stats.add_finalize_completed();
 
         Ok(())
     }
@@ -1014,9 +1020,15 @@ pub async fn create_processor(
                     input_video_track_id.clone(),
                     h.stats(),
                 )?;
-                writer
+                let result = writer
                     .run(h, input_audio_track_id, input_video_track_id)
-                    .await
+                    .await;
+                // run() が Err 終了すると finalize に到達できず録画が壊れうる。
+                // finalize の Err は error フラグに反映されないため、ここで観測できるよう warn ログを出す。
+                if let Err(e) = &result {
+                    tracing::warn!("hybrid mp4 writer exited with error: {}", e.display());
+                }
+                result
             },
         )
         .await
