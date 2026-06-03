@@ -39,7 +39,26 @@ issues/0008 で対象テストを CI で 100 回繰り返し、約 3% でモー�
 - 録画が約 0.8 秒と短く、`HYBRID_FRAGMENT_MAX_DURATION = 2 秒`（`src/mp4/hybrid_writer.rs:38`）の時間フラッシュに届かない。録画開始時の 1 枚以外にキーフレームが無く GOP 区切りフラッシュも起きない（`src/mp4/hybrid_writer.rs:650`）。よって録画全体が単一の未 flush フラグメントに収まり、出力の成否が `finalize()` の実行有無だけに依存する。
 - 2 秒超の録画や複数キーフレームを含む録画では、最低 1 フラグメントが flush 済みになるため、仮に `finalize()` がスキップされても recovery moov + flush 済みフラグメントから映像が読める。短時間録画はこの救済が無く、`finalize()` 未実行が即「空トラック」に直結する。
 
-### 真因（finalize がスキップされる経路）は未確定
+### 真因（確定: 候補 B = finalize 内 Err）
+
+2026-06-03 の観測（追加した観測点入りで CI 100 回実行、`E2E Flaky Repro`）で真因を確定した。失敗時のメトリクスは `hisui_total_finalize_started_count = 1` / `hisui_total_finalize_completed_count = 0`（finalize に到達したが完了せず）で、サーバ stderr に次の warn が出ていた。
+
+```
+[WARN] hisui::mp4::hybrid_writer - hybrid mp4 writer exited with error: Missing sample entry for first sample of Audio track
+```
+
+よって **候補 B（`finalize()` 内の `flush_fragment()` で Err が発生し `run()` が Err 終了）が真因**。候補 A・C は棄却。
+
+具体的な発生機序:
+
+- `append_audio_to_fragment()`（`src/mp4/hybrid_writer.rs:253-266`）は、サンプルの `sample_entry` を `sample.sample_entry.clone().or_else(|| self.last_audio_sample_entry.clone())` で決める。
+- 音声トラックの**最初のサンプルが `sample_entry` 無しで到着**し、かつ過去に `sample_entry` 付きサンプルが無い（`last_audio_sample_entry` も None）場合、そのサンプルの `sample_entry` は None になる。
+- flush 時（`flush_fragment()` → muxer）に、トラックの先頭サンプルには `sample_entry`（コーデック設定）が必須のため、muxer が「Missing sample entry for first sample of Audio track」で Err を返す。
+- 短時間録画では flush 機会が finalize 時の 1 回だけなので、この先頭サンプルの sample_entry 欠落が即 finalize 失敗 → 空 moov に直結する。約 3% の発生率は、音声トラックの先頭サンプルが sample_entry 無しで到着する競合の頻度と整合する。
+
+下記は確定前の検討記録（経緯として残す）。`flush_pending_video_if_ready` 等により Finish/EOS 経路では finalize に到達することが分かり、候補 A は弱いと判断していた。
+
+#### 確定前の検討（参考）
 
 issues/0008 の結論は「Finish RPC が入力を即座に閉じると pending フレームが宙に浮き、finalize 条件に到達しないまま強制終了される」と記述しているが、**この機序はコード読解と整合しない**。
 
