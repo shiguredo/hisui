@@ -980,12 +980,8 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
         port=ws_port,
         default_record_dir=tmp_path,
         use_env=False,
-    ) as server:
+    ):
         output_path, metrics_snapshots = asyncio.run(_run())
-
-    # サーバ停止後の stdout/stderr には writer の finalize 失敗 warn 等が含まれるため、
-    # inspect 失敗時の切り分け用に診断へ含める (issues/0011 の真因特定)。
-    server_diagnostics = server.diagnostics()
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
@@ -995,8 +991,7 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
         required_keys=("video_codec", "video_sample_count"),
         diagnostics_text=_format_obsws_diagnostics(
             metrics_snapshots=metrics_snapshots,
-        )
-        + f"\nserver_diagnostics:\n{server_diagnostics}",
+        ),
     )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"

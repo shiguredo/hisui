@@ -150,6 +150,7 @@ class ObswsServer:
         self._stdout = stdout
         self._stderr = stderr
         self._process = None
+        self._emit_captured_output()
 
     def kill(self):
         """SIGKILL でプロセスを強制停止する"""
@@ -163,6 +164,13 @@ class ObswsServer:
         self._stdout = stdout
         self._stderr = stderr
         self._process = None
+        self._emit_captured_output()
+
+    def _emit_captured_output(self):
+        # サーバの stdout/stderr を print する。pytest は成功時の出力を隠し失敗時のみ表示するため、
+        # テスト失敗時に常にサーバログ (warn/error 含む) を原因切り分けに使えるようにする。
+        print(f"[obsws server stdout]\n{self._stdout}")
+        print(f"[obsws server stderr]\n{self._stderr}")
 
     def _wait_until_listening(self, timeout: float = 10.0):
         deadline = time.time() + timeout
