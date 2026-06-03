@@ -180,6 +180,10 @@ hybrid_mp4_writer が生成する MP4 構造が、`Mp4FileDemuxer` の前提と�
 
 本 issue の close 後も、同事象が観測されたら CLAUDE.md「issue が実は解決してなかった場合」手順に従って `issues/closed/` → `issues/` に `git mv` で戻し、観測事例を追記する。
 
+## pending にした理由 (2026-06-03)
+
+切り分けを進めるための観測強化 (inspect 失敗時の ffprobe 解析を診断出力へ含める) は実装・コミット済み (develop `12cce09d`)。一方で本 issue の完了条件である「仮説 1〜4 のどれが該当するか確定」と、その後の設計方針 B / C / D の選択は、CI 上での再発観測 (現状モード1・モード2 各 1 件のみ) と finalize/inspect の設計判断を要し、今すぐ進められない。次の CI 再発で ffprobe 出力が回収できるまで切り分けを待つ必要があるため pending とする。再発観測が得られ次第 issues/ に戻して切り分けを再開する。
+
 ## 解決方法
 
 (切り分け完了時に追記)
