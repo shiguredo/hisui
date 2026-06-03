@@ -723,7 +723,7 @@ impl ObswsCoordinator {
                         .put_bucket_lifecycle_configuration()
                         .bucket(bucket)
                         .rule(rule)
-                        .build_request();
+                        .build_request(std::time::SystemTime::now());
                     match request {
                         Ok(req) => match client.execute(&req).await {
                             Ok(response) if !response.is_success() => {
@@ -1107,7 +1107,7 @@ async fn start_hls_processors(
                         .key(&key)
                         .body(master_content.into_bytes())
                         .content_type("application/vnd.apple.mpegurl")
-                        .build_request()
+                        .build_request(std::time::SystemTime::now())
                     {
                         Ok(r) => r,
                         Err(e) => {
@@ -1241,7 +1241,7 @@ async fn stop_processors_staged_hls(
                         .delete_object()
                         .bucket(bucket)
                         .key(&key)
-                        .build_request()
+                        .build_request(std::time::SystemTime::now())
                     {
                         Ok(request) => match s3_client.execute(&request).await {
                             Ok(response) if !response.is_success() => {

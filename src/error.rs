@@ -66,7 +66,7 @@ impl From<Error> for noargs::Error {
     fn from(error: Error) -> Self {
         noargs::Error::Other {
             metadata: None,
-            error: Box::new(format!("{error:?}")),
+            error: format!("{error:?}"),
         }
     }
 }

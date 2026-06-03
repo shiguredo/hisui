@@ -136,7 +136,7 @@ impl HlsStorage {
                     .key(&key)
                     .body(data.to_vec())
                     .content_type(content_type)
-                    .build_request()?;
+                    .build_request(std::time::SystemTime::now())?;
                 match s3.client.execute(&request).await {
                     Ok(response) => {
                         s3.put_counts.record(response.status_code);
@@ -189,7 +189,7 @@ impl HlsStorage {
                     .key(&key)
                     .body(content.to_vec())
                     .content_type(content_type)
-                    .build_request()?;
+                    .build_request(std::time::SystemTime::now())?;
                 match s3.client.execute(&request).await {
                     Ok(response) => {
                         s3.put_counts.record(response.status_code);
@@ -229,7 +229,7 @@ impl HlsStorage {
                     .delete_object()
                     .bucket(&s3.bucket)
                     .key(&key)
-                    .build_request()
+                    .build_request(std::time::SystemTime::now())
                 {
                     Ok(request) => match s3.client.execute(&request).await {
                         Ok(response) => {

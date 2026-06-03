@@ -709,7 +709,7 @@ impl ObswsCoordinator {
                         .put_bucket_lifecycle_configuration()
                         .bucket(bucket)
                         .rule(rule)
-                        .build_request();
+                        .build_request(std::time::SystemTime::now());
                     match request {
                         Ok(req) => match client.execute(&req).await {
                             Ok(response) if !response.is_success() => {

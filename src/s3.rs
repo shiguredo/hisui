@@ -1,22 +1,22 @@
 use shiguredo_http11::ResponseDecoder;
-use shiguredo_s3::{S3Client, S3Config, S3Request, S3Response};
+use shiguredo_s3::{Client, Config, S3Request, S3Response};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::tcp::TcpOrTlsStream;
 
 /// Sans I/O な shiguredo_s3 と実際の HTTP 通信を橋渡しするクライアント
 pub struct S3HttpClient {
-    client: S3Client,
+    client: Client,
 }
 
 impl S3HttpClient {
-    pub fn new(config: S3Config) -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
-            client: S3Client::new(config),
+            client: Client::from_conf(config),
         }
     }
 
-    pub fn client(&self) -> &S3Client {
+    pub fn client(&self) -> &Client {
         &self.client
     }
 

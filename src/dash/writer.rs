@@ -129,7 +129,7 @@ impl DashStorage {
                     .key(&key)
                     .body(data.to_vec())
                     .content_type(content_type)
-                    .build_request()
+                    .build_request(std::time::SystemTime::now())
                     .map_err(|e| {
                         crate::Error::new(format!("failed to build S3 PutObject request: {e}"))
                     })?;
@@ -203,7 +203,7 @@ impl DashStorage {
                     .delete_object()
                     .bucket(&s3.bucket)
                     .key(&key)
-                    .build_request()
+                    .build_request(std::time::SystemTime::now())
                 {
                     Ok(r) => r,
                     Err(e) => {

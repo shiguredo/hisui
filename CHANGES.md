@@ -43,7 +43,7 @@
   - S3 出力先にはオブジェクトライフタイム指定（`lifetimeDays`）を設定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.3 を追加する
+- [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.4 を追加する
   - @sile
 - [ADD] obsws の Output に HLS ライブ出力 (`outputName: "hls"`) を追加する
   - H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する
@@ -58,11 +58,11 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.8 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.9 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
-- [ADD] 依存ライブラリに tokio 1.52.1 を追加する
+- [ADD] 依存ライブラリに tokio 1.52.3 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0 を追加する
   - @sile
@@ -121,11 +121,11 @@
   - @sile
 - [UPDATE] log crate のバージョンを 0.4.29 に上げる
   - @sile
-- [UPDATE] noargs crate のバージョンを 0.4.2 に上げる
+- [UPDATE] noargs crate のバージョンを 0.4.3 に上げる
   - @sile
-- [UPDATE] rustls crate のバージョンを 0.23.39 に上げる
+- [UPDATE] rustls crate のバージョンを 0.23.40 に上げる
   - @sile
-- [UPDATE] aws-lc-rs crate のバージョンを 1.16.2 に上げる
+- [UPDATE] aws-lc-rs crate のバージョンを 1.17.0 に上げる
   - @sile
 - [UPDATE] MP4 ファイルの読み書きに Mp4FileDemuxer および Mp4FileMuxer を使用する
   - 今までは shiguredo_mp4 の低レベル API を使っていたが、高レベル API に切り替える
@@ -207,7 +207,7 @@
   - @sile
 - [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
   - @sile
-- [UPDATE] nojson のバージョンを 0.3.10 にあげる
+- [UPDATE] nojson のバージョンを 0.3.12 にあげる
   - @sile
 - [UPDATE] shiguredo_video_device のバージョンを 2026.1.0 にあげる
   - @sile

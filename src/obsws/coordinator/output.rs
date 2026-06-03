@@ -740,16 +740,17 @@ pub(crate) fn build_s3_client(
     endpoint: Option<&str>,
     use_path_style: bool,
 ) -> crate::Result<crate::s3::S3HttpClient> {
-    let credential = match session_token {
-        Some(token) => {
-            shiguredo_s3::Credential::with_session_token(access_key_id, secret_access_key, token)
-        }
-        None => shiguredo_s3::Credential::new(access_key_id, secret_access_key),
-    };
-    let mut config_builder = shiguredo_s3::S3Config::builder()
+    let credential = shiguredo_s3::Credentials::new(
+        access_key_id,
+        secret_access_key,
+        session_token.map(|token| token.to_string()),
+        None,
+        "hisui",
+    );
+    let mut config_builder = shiguredo_s3::Config::builder()
         .region(region)
-        .credential(credential)
-        .use_path_style(use_path_style);
+        .credentials_provider(credential)
+        .force_path_style(use_path_style);
     if let Some(ep) = endpoint {
         config_builder = config_builder.endpoint(ep);
     }
