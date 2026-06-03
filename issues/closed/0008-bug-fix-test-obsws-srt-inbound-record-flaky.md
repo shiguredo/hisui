@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-05-29
-- Completed:
+- Completed: 2026-06-03
 - Model: Opus 4.7
 - Branch: feature/fix-test-obsws-srt-inbound-record-flaky
 - Polished: 2026-05-29
@@ -210,4 +210,4 @@ hybrid_mp4_writer が生成する MP4 構造が、`Mp4FileDemuxer` の前提と�
 ### 切り出した対応 issue
 
 - 設計方針 C（hybrid_mp4_writer の finalize を StopRecord 応答前に確実に完了させる）を別 issue として起票する。あわせて finalize 完了カウンタ・強制終了検知などの回帰検知用メトリクス追加もその issue のスコープに含める。
-- 別 issue 番号: （起票後に追記）
+- 別 issue 番号: issues/0011（短時間録画で hybrid_mp4_writer の finalize が走らず映像トラックが空になる）
