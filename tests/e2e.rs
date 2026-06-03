@@ -61,6 +61,104 @@ fn inspect_mp4_without_decode() -> noargs::Result<()> {
 }
 
 #[test]
+fn inspect_fragmented_mp4_video_only() -> noargs::Result<()> {
+    // 映像のみの fMP4 が通常 MP4 と整合的に inspect できること
+    let output = run_hisui_command(&[
+        "inspect",
+        "testdata/archive-red-320x320-h264-fragmented.mp4",
+    ])?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
+    let root = json.value();
+    assert_eq!(
+        root.to_member("format")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "mp4"
+    );
+    assert_eq!(
+        root.to_member("video_codec")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "H264"
+    );
+    let mut video_sample_count = 0;
+    for _ in root.to_member("video_samples")?.required()?.to_array()? {
+        video_sample_count += 1;
+    }
+    assert_eq!(
+        video_sample_count, 25,
+        "映像サンプル数が通常 MP4 と一致すること"
+    );
+    Ok(())
+}
+
+#[test]
+fn inspect_fragmented_mp4_audio_only() -> noargs::Result<()> {
+    // 音声のみの fMP4 が通常 MP4 と整合的に inspect できること
+    let output = run_hisui_command(&["inspect", "testdata/beep-aac-audio-fragmented.mp4"])?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
+    let root = json.value();
+    assert_eq!(
+        root.to_member("audio_codec")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "AAC"
+    );
+    let mut audio_sample_count = 0;
+    for _ in root.to_member("audio_samples")?.required()?.to_array()? {
+        audio_sample_count += 1;
+    }
+    assert_eq!(
+        audio_sample_count, 45,
+        "音声サンプル数が通常 MP4 と一致すること"
+    );
+    Ok(())
+}
+
+#[test]
+fn inspect_fragmented_mp4_audio_video() -> noargs::Result<()> {
+    // 映像+音声の fMP4 が両トラックとも inspect できること
+    let output = run_hisui_command(&["inspect", "testdata/red-320x320-h264-aac-fragmented.mp4"])?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
+    let root = json.value();
+    assert_eq!(
+        root.to_member("audio_codec")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "AAC"
+    );
+    assert_eq!(
+        root.to_member("video_codec")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "H264"
+    );
+    let mut audio_sample_count = 0;
+    for _ in root.to_member("audio_samples")?.required()?.to_array()? {
+        audio_sample_count += 1;
+    }
+    let mut video_sample_count = 0;
+    for _ in root.to_member("video_samples")?.required()?.to_array()? {
+        video_sample_count += 1;
+    }
+    assert_eq!(
+        audio_sample_count, 45,
+        "音声サンプル数が通常 MP4 と一致すること"
+    );
+    assert_eq!(
+        video_sample_count, 25,
+        "映像サンプル数が通常 MP4 と一致すること"
+    );
+    Ok(())
+}
+
+#[test]
 fn inspect_mp4_with_decode() -> noargs::Result<()> {
     let output = run_hisui_command(&[
         "inspect",

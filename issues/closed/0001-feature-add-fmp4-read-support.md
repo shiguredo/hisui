@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-05-29
-- Completed:
+- Completed: 2026-06-03
 - Model: Opus 4.7
 - Branch: feature/add-fmp4-read-support
 - Polished: 2026-06-03
@@ -122,7 +122,7 @@ inspect は前方読みしか使わないため、`Mp4FileReader` (再生制御�
 6. `src/subcommand_inspect.rs` の `ContainerFormat::Mp4` ブランチを `Mp4SampleReader` を使う形に置き換え、Mp4/Fmp4 のどちらもこの軽量 reader で処理する。`Mp4FileReader` への依存を除去する。
 7. `testdata/` に fMP4 サンプル (映像のみ・音声のみ・両方の最低 1 ファイル) を追加する。
    - 既存の対応する通常 MP4 と同内容で生成し、inspect 出力の整合を検証できるようにする。
-   - `Fmp4FileDemuxer` が非対応の `tfhd.base_data_offset` 絶対オフセット形式を避ける生成指定 (例: `ffmpeg -movflags +frag_keyframe+empty_moov+default_base_is_moof`) を用い、生成手順を `testdata/` の README か本 issue に記録する。
+   - `Fmp4FileDemuxer` が非対応の `tfhd.base_data_offset` 絶対オフセット形式を避ける生成指定 (例: `ffmpeg -movflags +frag_keyframe+empty_moov+default_base_moof`) を用い、生成手順を `testdata/` の README か本 issue に記録する。
    - 段階 1 は composition_time_offset 非対応のため、B フレームを含まないサンプル列になるよう生成する (例: `-bf 0` を指定する)。
 8. テストを追加する。
    - `detect_mp4_file_kind` の単体テスト (通常 MP4 / fMP4 / 不正バイナリ)。命名規則に従い `tests/test_<module>.rs` に置く。
@@ -145,3 +145,9 @@ inspect は前方読みしか使わないため、`Mp4FileReader` (再生制御�
 - `Fmp4FileDemuxer` は `tfhd.base_data_offset` がファイル絶対オフセットの形式に非対応。testdata はこの形式を避けて生成する。実ユーザーが該当ファイルを持ち込んだ場合はライブラリが返すエラーをそのまま inspect のエラーとして表示する。
 - inspect の JSON 出力は段階 1 では mp4 と fmp4 を区別しない (`"format": "mp4"`)。区別したい要望が出てきたら別途検討する。
 - fMP4 ファイルの `track.duration` は init segment 由来 (実値ではないことがある)。inspect の `audio_duration_us` / `video_duration_us` は既存実装どおりサンプル累積で算出するため影響しない見込みだが、最後のサンプルの duration が取れない既知の挙動は維持される。
+
+## 実装メモ
+
+- fMP4 (`Fmp4FileDemuxer`) は `next_sample()` が追加入力を要求する (`InputRequired`) ため、`src/mp4/demuxer.rs` の `Mp4Demuxer` enum に `File` を保持させ、`tracks()` / `next_sample()` が返す `InputRequired` をその都度ファイルから供給して内部解決する形にした。
+- 軽量 reader (`src/mp4/sample_reader.rs` の `Mp4SampleReader`) のトラック選択は、各種別で最初に現れたトラックを対象に固定する方式とした (inspect は単一トラック構成を前提)。
+- testdata は ffmpeg 7.1 の `-movflags +frag_keyframe+empty_moov+default_base_moof` で生成した。映像のみ・音声のみは通常 MP4 と inspect 出力が完全一致する。両方入りは ffmpeg が最初の映像サンプル duration を音声長に合わせて調整するため `video_duration_us` のみ差が出るが、サンプル数・コーデックは一致する。

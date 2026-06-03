@@ -7,7 +7,7 @@ use std::{
 use crate::{
     Error, Result,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
-    mp4::reader::{Mp4FileReader, Mp4FileReaderOptions},
+    mp4::sample_reader::{Mp4SampleReader, Mp4SampleReaderOptions},
     types::{CodecName, ContainerFormat},
     video::h264::H264AnnexBNalUnits,
     video::{VideoFormat, VideoFrame},
@@ -119,15 +119,13 @@ async fn setup_pipeline(
 
     match format {
         ContainerFormat::Mp4 => {
-            let reader = Mp4FileReader::new(
+            let reader = Mp4SampleReader::new(
                 input_file_path,
-                Mp4FileReaderOptions {
-                    realtime: false,
-                    loop_playback: false,
+                Mp4SampleReaderOptions {
                     audio_track_id: Some(crate::TrackId::new(AUDIO_ENCODED_TRACK_ID)),
                     video_track_id: Some(crate::TrackId::new(VIDEO_ENCODED_TRACK_ID)),
                 },
-            )?;
+            );
 
             pipeline_handle
                 .spawn_processor(
