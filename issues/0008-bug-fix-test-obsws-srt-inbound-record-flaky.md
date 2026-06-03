@@ -122,7 +122,9 @@ hisui_total_recovery_moov_update_count{processor_id="output:record:mp4_writer:0"
 2. 該当 MP4 (`obsws-record-1780035651665.mp4`) のローカル再現を試す:
    - `cargo run --release -- server` を起動し、E2E テストと同じ手順 (SRT inbound → StartRecord → SRT 入力流入 → StopRecord) をスクリプト化して 50 回繰り返し、再現可能か確認。
    - ローカルで再現できなければ workflow を `workflow_dispatch` で 20 回連続実行して CI 環境で再発を観測。
-3. 失敗時のアーティファクト (生成 MP4) を保全する仕組みを E2E テスト側に追加する (失敗時にだけ pytest fixture で保存)。これは本対応の範囲で実施してよい (テストコード追加のみ)。
+3. 失敗 MP4 を別経路で解析できる仕組みを E2E テスト側に追加する。
+   - 当初は失敗時に MP4 を CI アーティファクトとして保全する案だったが、保全は「後から人手で解析する手番」と「retention 期限切れで取り逃すリスク」が残るため、より直接的な方式に変更した。
+   - 実装 (2026-06-03): inspect の必須キー検査が失敗した時点で `ffprobe -v error -show_format -show_streams -of json <file>` を呼び、生 JSON を診断メッセージへそのまま含める (`e2e-tests/obsws/helpers.py` の `_probe_mp4_with_ffprobe` / `_inspect_mp4`)。これにより `moov.trak` に video stream があるかを CI ログ上で即判定でき、「ファイル自体に video trak が無い (writer 側)」のか「trak はあるが hisui inspect が読めない (inspect 側)」のかをモード1 で切り分けられる。metrics スナップショットは既に診断メッセージへ埋め込み済みのため追加対応は不要。
 4. 再現できた失敗 MP4 を:
    - `hisui inspect <file>` で再実行 → 同じく `video_codec` / `video_sample_count` が欠ける状態か確認。
    - `MP4Box -info` / `ffprobe` 等の外部ツールで構造を解析し、`moov.trak` に video entry があるかを別経路で確認。これにより「mp4 ファイル自体に video trak が無い」のか、「video trak はあるが hisui inspect で読めない」のかを切り分ける。

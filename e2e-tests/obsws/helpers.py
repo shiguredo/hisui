@@ -417,6 +417,39 @@ def _wait_process_exit(
     return stdout, stderr
 
 
+def _probe_mp4_with_ffprobe(path: Path) -> str:
+    """ffprobe で MP4 の構造を解析し、生 JSON 文字列を返す。
+
+    hisui inspect が video trak を読めない失敗の切り分け用。ffprobe の出力は
+    切り詰めず丸ごと返すことで、未知の壊れ方の情報も残す。ffprobe が無い、または
+    失敗した場合はその旨を文字列で返し、例外は送出しない（診断は best-effort）。
+    """
+    ffprobe_path = shutil.which("ffprobe")
+    if ffprobe_path is None:
+        return "ffprobe not available"
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_path,
+                "-v",
+                "error",
+                "-show_format",
+                "-show_streams",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10.0,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return f"ffprobe execution failed: {exc}"
+    if result.returncode != 0:
+        return f"ffprobe failed: returncode={result.returncode}, stderr={result.stderr.strip()}"
+    return result.stdout.strip()
+
+
 def _inspect_mp4(
     binary_path: Path,
     path: Path,
@@ -446,9 +479,13 @@ def _inspect_mp4(
             return output
         if time.time() >= deadline:
             missing_keys = [key for key in required_keys if key not in output]
-            diagnostics_suffix = ""
+            diagnostics_parts: list[str] = []
             if diagnostics_text:
-                diagnostics_suffix = f"\ndiagnostics:\n{diagnostics_text}"
+                diagnostics_parts.append(diagnostics_text)
+            # hisui inspect が読めない MP4 を ffprobe で別経路解析し、ファイル自体に
+            # video trak があるか（writer バグか inspect バグか）を切り分ける。
+            diagnostics_parts.append(f"ffprobe:\n{_probe_mp4_with_ffprobe(path)}")
+            diagnostics_suffix = "\ndiagnostics:\n" + "\n".join(diagnostics_parts)
             raise AssertionError(
                 "inspect output missing required keys: "
                 f"missing_keys={missing_keys}, output={output}{diagnostics_suffix}"
