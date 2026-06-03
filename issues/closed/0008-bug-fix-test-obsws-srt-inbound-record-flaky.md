@@ -198,14 +198,22 @@ hybrid_mp4_writer が生成する MP4 構造が、`Mp4FileDemuxer` の前提と�
 
 ### 結論
 
-仮説 3（hisui inspect 側のバグ）は棄却。ffprobe という外部ツールでも映像サンプルが読めないため、ファイル自体が「空 stbl の recovery (fMP4) moov だけ」の状態。**仮説 1 / 4（hybrid_mp4_writer の finalize と StopRecord/EOS 処理の競合）が確定**。
+仮説 3（hisui inspect 側のバグ）は棄却。ffprobe という外部ツールでも映像サンプルが読めないため、ファイル自体が「空 stbl の recovery (fMP4) moov だけ」の状態。実測事実として、**StopRecord 応答時点で `finalize()` が完了していない**（`hisui_actual_moov_box_size = 0`。この値は `finalize()` 内 `src/mp4/hybrid_writer.rs:534` で設定される）こと、全サンプルが未 flush のフラグメントに滞留したままであること（`total_flushed_fragment_count = 0`、`total_video_sample_count = 24`）は確定。よって**仮説 1 / 4（hybrid_mp4_writer の finalize 関連）の方向**で間違いない。
 
-根本メカニズム:
+ただし、なぜ finalize が完了しないのかという機序の詳細は本 issue では確定していない（下記の訂正を参照）。
 
-1. 録画が約 0.8 秒と短く、`HYBRID_FRAGMENT_MAX_DURATION = 2 秒`（`src/mp4/hybrid_writer.rs:38`）の時間フラッシュに届かない。キーフレームも開始時の 1 枚のみで GOP 区切りフラッシュも起きない（`src/mp4/hybrid_writer.rs:650`）。よって全サンプルが未フラッシュの単一フラグメントに滞留する。
-2. finalize は入力キューが空かつ pending 無しのときだけ走る（`src/mp4/hybrid_writer.rs:597-606`）。最後の 1 フレームは常に `pending_video_frame` として保持される設計（`src/mp4/hybrid_writer.rs:637-657`）。
-3. StopRecord の staged stop は writer に Finish RPC を送り、入力トラックを即座に閉じる（`Finish` ハンドラが `input_video_track_id = None`、`src/mp4/hybrid_writer.rs:905-911`）。終端 EOS / pending を読み切る前に入力を閉じる競合は `src/obsws/coordinator/output_record.rs:316-324` の NOTE に既知として明記されている。pending が宙に浮くと finalize 条件に到達せず、`wait_or_terminate` の 5 秒タイムアウトで強制終了 → finalize 未実行のまま、録画中の空 stbl recovery moov だけがファイルに残る。
-4. 2 秒超の録画や複数キーフレームがあれば最低 1 フラグメントが flush 済みになり救われるため、短時間 SRT inbound 録画テストでだけ顕在化していた。
+#### 短時間録画でだけ顕在化する理由（確定）
+
+- 録画が約 0.8 秒と短く、`HYBRID_FRAGMENT_MAX_DURATION = 2 秒`（`src/mp4/hybrid_writer.rs:38`）の時間フラッシュに届かない。キーフレームも開始時の 1 枚のみで GOP 区切りフラッシュも起きない（`src/mp4/hybrid_writer.rs:650`）。よって録画全体が未 flush の単一フラグメントに収まり、出力の成否が `finalize()` の実行有無だけに依存する。
+- 2 秒超の録画や複数キーフレームがあれば最低 1 フラグメントが flush 済みになり救われるため、短時間 SRT inbound 録画テストでだけ顕在化していた。
+
+#### 機序記述の訂正 (2026-06-03)
+
+当初この結論には「Finish RPC が入力を即座に閉じると pending フレームが宙に浮き、finalize 条件に到達せず強制終了で finalize 未実行になる」と記述していたが、issues/0011 の磨き上げ過程でのコード精査により**この機序は誤り**と判明したため訂正する。
+
+- `flush_pending_video_if_ready()` / `flush_pending_audio_if_ready()`（`src/mp4/hybrid_writer.rs:692-728`）が、入力トラックが None になった後に pending をフラグメントへ flush する。Finish RPC は `input_*_track_id` を None にするため、Finish 経路でも pending は救済され `finalize()` に到達するのがコードの素直な読みである。
+- さらに、Finish RPC が届かなくても、encoder terminate による購読チャネルの drop で writer は `Message::Eos` を受信し、`input_*_track_id = None` が設定されて finalize に到達する。
+- したがって「pending が宙に浮いて finalize 未到達」では `actual_moov_box_size = 0` を説明できない。真因（finalize が完了しない経路）は未確定であり、その特定と修正は issues/0011 で扱う（候補: 強制終了で finalize 未到達 / finalize 内の Err による自己終了 / finalize 完了前のタイムアウト）。
 
 ### 切り出した対応 issue
 
