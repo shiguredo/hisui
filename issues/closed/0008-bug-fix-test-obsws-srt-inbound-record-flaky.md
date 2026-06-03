@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-05-29
-- Completed:
+- Completed: 2026-06-03
 - Model: Opus 4.7
 - Branch: feature/fix-test-obsws-srt-inbound-record-flaky
 - Polished: 2026-05-29
@@ -182,8 +182,32 @@ hybrid_mp4_writer が生成する MP4 構造が、`Mp4FileDemuxer` の前提と�
 
 ## 解決方法
 
-(切り分け完了時に追記)
+フェーズ A（観測・切り分け）の作業として以下を実施した。
 
-### 結論 (切り分け完了時に追記)
+- inspect 失敗時に `ffprobe -show_format -show_streams -of json` で生成 MP4 を別経路解析し、生 JSON を診断出力へ含める仕組みを追加した（`e2e-tests/obsws/helpers.py` の `_probe_mp4_with_ffprobe` / `_inspect_mp4`）。これにより「ファイル自体に video trak が無い」のか「trak はあるが hisui inspect が読めない」のかを CI ログ上で切り分けられるようにした。
+- 対象テストだけを CI で多数回繰り返す一時ワークフロー `.github/workflows/e2e-flaky-repro.yml`（10 シャード × 10 回 = 100 回）を追加し、再現を観測した。
 
-仮説の判定結果と、対応として切り出した別 issue 番号を記録する。
+### 再現結果 (2026-06-03, run 26866409843)
+
+- 100 回中 3 回失敗（約 3%）。3 件すべてモード1（inspect が `video_codec` / `video_sample_count` を読めない）。今回モード2 は発生せず。
+- 失敗時の ffprobe 出力: 最終 MP4 に **video trak は存在する**（`codec_name: h264`, `avc1`, 1920x1080, `extradata_size: 30`）が、**サンプルがゼロ**（`duration: "0.000000"`, `nb_frames` 無し, `avg_frame_rate: "0/0"`）。`nb_streams: 1` で音声 trak すら無く、空の video trak だけ。
+- 対応するメトリクス（before / after stop_record とも）:
+  - `hisui_actual_moov_box_size = 0`（finalize は `src/mp4/hybrid_writer.rs:534` でこの値を設定するため、**StopRecord 応答時点で finalize が一度も走っていない**ことを示す）
+  - `hisui_total_flushed_fragment_count = 0`（フラグメントが一度も flush されていない）
+  - `hisui_total_video_sample_count = 24`（全サンプルがバッファ内にあり、ディスクのサンプルテーブルへ書かれていない）
+
+### 結論
+
+仮説 3（hisui inspect 側のバグ）は棄却。ffprobe という外部ツールでも映像サンプルが読めないため、ファイル自体が「空 stbl の recovery (fMP4) moov だけ」の状態。**仮説 1 / 4（hybrid_mp4_writer の finalize と StopRecord/EOS 処理の競合）が確定**。
+
+根本メカニズム:
+
+1. 録画が約 0.8 秒と短く、`HYBRID_FRAGMENT_MAX_DURATION = 2 秒`（`src/mp4/hybrid_writer.rs:38`）の時間フラッシュに届かない。キーフレームも開始時の 1 枚のみで GOP 区切りフラッシュも起きない（`src/mp4/hybrid_writer.rs:650`）。よって全サンプルが未フラッシュの単一フラグメントに滞留する。
+2. finalize は入力キューが空かつ pending 無しのときだけ走る（`src/mp4/hybrid_writer.rs:597-606`）。最後の 1 フレームは常に `pending_video_frame` として保持される設計（`src/mp4/hybrid_writer.rs:637-657`）。
+3. StopRecord の staged stop は writer に Finish RPC を送り、入力トラックを即座に閉じる（`Finish` ハンドラが `input_video_track_id = None`、`src/mp4/hybrid_writer.rs:905-911`）。終端 EOS / pending を読み切る前に入力を閉じる競合は `src/obsws/coordinator/output_record.rs:316-324` の NOTE に既知として明記されている。pending が宙に浮くと finalize 条件に到達せず、`wait_or_terminate` の 5 秒タイムアウトで強制終了 → finalize 未実行のまま、録画中の空 stbl recovery moov だけがファイルに残る。
+4. 2 秒超の録画や複数キーフレームがあれば最低 1 フラグメントが flush 済みになり救われるため、短時間 SRT inbound 録画テストでだけ顕在化していた。
+
+### 切り出した対応 issue
+
+- 設計方針 C（hybrid_mp4_writer の finalize を StopRecord 応答前に確実に完了させる）を別 issue として起票する。あわせて finalize 完了カウンタ・強制終了検知などの回帰検知用メトリクス追加もその issue のスコープに含める。
+- 別 issue 番号: issues/0011（短時間録画で hybrid_mp4_writer の finalize が走らず映像トラックが空になる）
