@@ -65,7 +65,7 @@ fMP4 を読みたい箇所は実際には 4 系統あり、前方読みで足り
 
 ### 段階 1: inspect コマンドの fMP4 対応 (本 issue の範囲)
 
-inspect は前方読みしか使わないため、`Mp4FileReader` (再生制御込みの大きな構造体) から inspect を切り離し、前方読み専用の軽量 reader に寄せる。demuxer の Mp4/Fmp4 差は薄い enum で吸収し、reader 本体は 1 本にする。これにより前方読みパスの二重化を避け、`Mp4FileReader` を OBSWS 専用に純化できる。
+inspect は前方読みしか使わないため、`Mp4FileReader` (再生制御込みの大きな構造体) から inspect を切り離し、前方読み専用の軽量 reader に寄せる。demuxer の Mp4/Fmp4 差は薄い enum で吸収し、reader 本体は 1 本にする。これにより前方読みパスの二重化を避け、`Mp4FileReader` を OBSWS 専用に純化できる。なお、composition_time_offset (B フレーム由来の CTS オフセット) を持つサンプルは、既存の前方読みパスと同様に段階 1 でも非対応とし、エラーで弾く挙動を踏襲する (B フレーム対応は将来の別 issue)。
 
 1. ファイル種別判定ヘルパー `detect_mp4_file_kind(path) -> Result<Mp4FileKind>` を `src/mp4/` 配下に追加する。
    - `Mp4FileKindDetector` を `required_input` 駆動で incremental に動かし、ファイル先頭のみ読む (`initialize_mp4_demuxer` と同じ `File::seek` + `read_exact` パターン)。
@@ -116,11 +116,14 @@ inspect は前方読みしか使わないため、`Mp4FileReader` (再生制御�
    - `select_audio_track` / `select_video_track` を `Mp4Demuxer` 対応に一般化。
    - 切り出し先は reader.rs に残して `pub(crate)` 公開するか、demuxer モジュール等の共通モジュールへ移すかは実装時に判断する。
 4. `src/mp4/` に前方読み専用 reader (仮 `Mp4SampleReader`) を追加する。`detect_mp4_file_kind` → `Mp4Demuxer` 構築 → `next_sample()` ループ → `AudioFrame` / `VideoFrame` を `TrackPublisher` へ送出 → EOS、という最小実装にする。
+   - メモリを圧迫しないよう、`Mp4FileReader::TrackSender` 相当の ack バックプレッシャー (`MAX_NOACKED_COUNT` ごとに `send_syn` の ack を待つ) を持たせる。一気に全サンプルを送出しないこと。
+   - composition_time_offset を持つサンプルは既存踏襲でエラーにする。
 5. `src/mp4/reader.rs` の `Mp4FileReader::new()` 冒頭に `detect_mp4_file_kind` を呼ぶ fail-fast を追加する (fMP4 で即エラー)。
 6. `src/subcommand_inspect.rs` の `ContainerFormat::Mp4` ブランチを `Mp4SampleReader` を使う形に置き換え、Mp4/Fmp4 のどちらもこの軽量 reader で処理する。`Mp4FileReader` への依存を除去する。
 7. `testdata/` に fMP4 サンプル (映像のみ・音声のみ・両方の最低 1 ファイル) を追加する。
    - 既存の対応する通常 MP4 と同内容で生成し、inspect 出力の整合を検証できるようにする。
    - `Fmp4FileDemuxer` が非対応の `tfhd.base_data_offset` 絶対オフセット形式を避ける生成指定 (例: `ffmpeg -movflags +frag_keyframe+empty_moov+default_base_is_moof`) を用い、生成手順を `testdata/` の README か本 issue に記録する。
+   - 段階 1 は composition_time_offset 非対応のため、B フレームを含まないサンプル列になるよう生成する (例: `-bf 0` を指定する)。
 8. テストを追加する。
    - `detect_mp4_file_kind` の単体テスト (通常 MP4 / fMP4 / 不正バイナリ)。命名規則に従い `tests/test_<module>.rs` に置く。
    - `Mp4FileReader::new()` に fMP4 を渡した場合の fail-fast エラーの単体テスト。
@@ -137,6 +140,7 @@ inspect は前方読みしか使わないため、`Mp4FileReader` (再生制御�
 
 ### リスク・留意事項
 
+- composition_time_offset (B フレーム由来の CTS オフセット) を持つサンプルは、既存の `Mp4FileReader` / `recording_mp4_reader` と同様に段階 1 でも非対応とし、エラーで弾く。配信用 fMP4 は B フレームを使うことが多く、外部ファイルではこの制約に当たりやすい。B フレームありの fMP4 まで inspect できるようにする対応は、前方読みパス全体に関わる横断的な課題のため、将来の別 issue として切り出す。
 - inspect を `Mp4SampleReader` へ移行する際、既存 MP4 経路の inspect 出力が変わらないことを担保する (inspect は前方読みのみ使用のため出力は不変の想定だが、テストで確認する)。
 - `Fmp4FileDemuxer` は `tfhd.base_data_offset` がファイル絶対オフセットの形式に非対応。testdata はこの形式を避けて生成する。実ユーザーが該当ファイルを持ち込んだ場合はライブラリが返すエラーをそのまま inspect のエラーとして表示する。
 - inspect の JSON 出力は段階 1 では mp4 と fmp4 を区別しない (`"format": "mp4"`)。区別したい要望が出てきたら別途検討する。
