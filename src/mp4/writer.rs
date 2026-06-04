@@ -81,6 +81,15 @@ pub struct Mp4WriterStats {
     // failure は finalize（標準 MP4 への変換）が内部 Err で失敗し、出力が fMP4 形式のまま残ることを示す。
     total_finalize_success_count: crate::stats::StatsCounter,
     total_finalize_failure_count: crate::stats::StatsCounter,
+    // sample_entry の受信数と「必要な時の欠落数」を音声/映像別に観測する (issues/0011)。
+    // received は ingress で sample_entry を載せて受信したフレーム数。
+    // missing はフラグメント先頭サンプルで sample_entry を解決できなかった数で、finalize 失敗の
+    // 直接原因になりうるため発生箇所で計上する。received が 0 なら上流が未送信、received>0 かつ
+    // missing>0 なら内部での取りこぼしを示す。
+    total_received_audio_sample_entry_count: crate::stats::StatsCounter,
+    total_received_video_sample_entry_count: crate::stats::StatsCounter,
+    total_missing_audio_sample_entry_count: crate::stats::StatsCounter,
+    total_missing_video_sample_entry_count: crate::stats::StatsCounter,
     recoverable_media_duration: crate::stats::StatsDuration,
     current_unflushed_fragment_duration: crate::stats::StatsDuration,
     current_unflushed_video_sample_count: crate::stats::StatsGauge,
@@ -111,6 +120,14 @@ impl Mp4WriterStats {
         let total_recovery_moov_update_count = stats.counter("total_recovery_moov_update_count");
         let total_finalize_success_count = stats.counter("total_finalize_success_count");
         let total_finalize_failure_count = stats.counter("total_finalize_failure_count");
+        let total_received_audio_sample_entry_count =
+            stats.counter("total_received_audio_sample_entry_count");
+        let total_received_video_sample_entry_count =
+            stats.counter("total_received_video_sample_entry_count");
+        let total_missing_audio_sample_entry_count =
+            stats.counter("total_missing_audio_sample_entry_count");
+        let total_missing_video_sample_entry_count =
+            stats.counter("total_missing_video_sample_entry_count");
         let recoverable_media_duration = stats.duration("recoverable_media_seconds");
         let current_unflushed_fragment_duration =
             stats.duration("current_unflushed_fragment_seconds");
@@ -147,6 +164,10 @@ impl Mp4WriterStats {
             total_recovery_moov_update_count,
             total_finalize_success_count,
             total_finalize_failure_count,
+            total_received_audio_sample_entry_count,
+            total_received_video_sample_entry_count,
+            total_missing_audio_sample_entry_count,
+            total_missing_video_sample_entry_count,
             recoverable_media_duration,
             current_unflushed_fragment_duration,
             current_unflushed_video_sample_count,
@@ -191,6 +212,22 @@ impl Mp4WriterStats {
 
     pub(crate) fn add_finalize_failure(&self) {
         self.total_finalize_failure_count.inc();
+    }
+
+    pub(crate) fn add_received_audio_sample_entry(&self) {
+        self.total_received_audio_sample_entry_count.inc();
+    }
+
+    pub(crate) fn add_received_video_sample_entry(&self) {
+        self.total_received_video_sample_entry_count.inc();
+    }
+
+    pub(crate) fn add_missing_audio_sample_entry(&self) {
+        self.total_missing_audio_sample_entry_count.inc();
+    }
+
+    pub(crate) fn add_missing_video_sample_entry(&self) {
+        self.total_missing_video_sample_entry_count.inc();
     }
 
     pub(crate) fn set_recoverable_media_duration(&self, duration: Duration) {
@@ -291,6 +328,22 @@ impl Mp4WriterStats {
 
     pub fn total_finalize_failure_count(&self) -> u64 {
         self.total_finalize_failure_count.get()
+    }
+
+    pub fn total_received_audio_sample_entry_count(&self) -> u64 {
+        self.total_received_audio_sample_entry_count.get()
+    }
+
+    pub fn total_received_video_sample_entry_count(&self) -> u64 {
+        self.total_received_video_sample_entry_count.get()
+    }
+
+    pub fn total_missing_audio_sample_entry_count(&self) -> u64 {
+        self.total_missing_audio_sample_entry_count.get()
+    }
+
+    pub fn total_missing_video_sample_entry_count(&self) -> u64 {
+        self.total_missing_video_sample_entry_count.get()
     }
 
     pub fn recoverable_media_duration(&self) -> Duration {

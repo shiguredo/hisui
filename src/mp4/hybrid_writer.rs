@@ -213,13 +213,20 @@ impl HybridMp4Writer {
             self.last_video_sample_entry.clone_from(&frame.sample_entry);
         }
 
+        // フラグメント先頭サンプルの sample_entry が None だと finalize 時に muxer が Err になる
+        // (issues/0011)。「必要な時に sample_entry が無かった」状態を発生箇所で直接観測する。
+        let sample_entry = frame
+            .sample_entry
+            .clone()
+            .or_else(|| self.last_video_sample_entry.clone());
+        if sample_entry.is_none() && self.fragment_video_samples.is_empty() {
+            self.core.stats.add_missing_video_sample_entry();
+        }
+
         self.fragment_video_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Video,
-                sample_entry: frame
-                    .sample_entry
-                    .clone()
-                    .or_else(|| self.last_video_sample_entry.clone()),
+                sample_entry,
                 keyframe: frame.keyframe,
                 timescale: TIMESCALE,
                 duration: duration.as_micros() as u32,
@@ -250,13 +257,20 @@ impl HybridMp4Writer {
                 .clone_from(&sample.sample_entry);
         }
 
+        // フラグメント先頭サンプルの sample_entry が None だと finalize 時に muxer が Err になる
+        // (issues/0011)。「必要な時に sample_entry が無かった」状態を発生箇所で直接観測する。
+        let sample_entry = sample
+            .sample_entry
+            .clone()
+            .or_else(|| self.last_audio_sample_entry.clone());
+        if sample_entry.is_none() && self.fragment_audio_samples.is_empty() {
+            self.core.stats.add_missing_audio_sample_entry();
+        }
+
         self.fragment_audio_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Audio,
-                sample_entry: sample
-                    .sample_entry
-                    .clone()
-                    .or_else(|| self.last_audio_sample_entry.clone()),
+                sample_entry,
                 keyframe: true,
                 timescale: TIMESCALE,
                 duration: duration.as_micros() as u32,
@@ -941,6 +955,7 @@ impl HybridMp4Writer {
                 // これが無いと、フラグメント先頭サンプルの sample_entry が None のまま flush され
                 // muxer が Err になりうる (issues/0011)。
                 if sample.sample_entry.is_some() {
+                    self.core.stats.add_received_audio_sample_entry();
                     self.last_audio_sample_entry
                         .clone_from(&sample.sample_entry);
                 }
@@ -973,6 +988,7 @@ impl HybridMp4Writer {
                 self.core.stats.add_received_video_data();
                 // 音声と同様に、sample_entry を受信時点で取り込んでおく (issues/0011 参照)。
                 if sample.sample_entry.is_some() {
+                    self.core.stats.add_received_video_sample_entry();
                     self.last_video_sample_entry
                         .clone_from(&sample.sample_entry);
                 }
@@ -1158,6 +1174,11 @@ mod tests {
             &mut None,
         )?;
         assert_eq!(writer.last_audio_sample_entry, Some(sample_entry.clone()));
+        // 入口で sample_entry を載せて受信したフレーム数が計上される。
+        assert_eq!(
+            writer.core.stats.total_received_audio_sample_entry_count(),
+            1
+        );
 
         // sample_entry を持たない音声サンプルを先頭に追加しても、入口で保持した値が使われる。
         writer.append_audio_to_fragment(&make_audio_frame(None), DEFAULT_SAMPLE_DURATION);
@@ -1180,6 +1201,37 @@ mod tests {
         writer.finalize()?;
         assert_eq!(writer.core.stats.total_finalize_success_count(), 1);
         assert_eq!(writer.core.stats.total_finalize_failure_count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_counts_missing_sample_entry_for_fragment_first_sample() -> crate::Result<()> {
+        // last_*_sample_entry が None の状態で sample_entry を持たない音声サンプルを
+        // フラグメント先頭に追加すると、「必要な時に sample_entry が無かった」として計上される。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        assert_eq!(
+            writer.core.stats.total_missing_audio_sample_entry_count(),
+            0
+        );
+
+        writer.append_audio_to_fragment(&make_audio_frame(None), DEFAULT_SAMPLE_DURATION);
+        assert_eq!(
+            writer.core.stats.total_missing_audio_sample_entry_count(),
+            1
+        );
+
+        // 2 つ目以降は先頭サンプルではないため計上されない。
+        writer.append_audio_to_fragment(&make_audio_frame(None), DEFAULT_SAMPLE_DURATION);
+        assert_eq!(
+            writer.core.stats.total_missing_audio_sample_entry_count(),
+            1
+        );
+
+        // 音声の計上が映像カウンタに混ざっていないことを確認する。
+        assert_eq!(
+            writer.core.stats.total_missing_video_sample_entry_count(),
+            0
+        );
         Ok(())
     }
 
