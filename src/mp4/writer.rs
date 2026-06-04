@@ -77,15 +77,19 @@ pub struct Mp4WriterStats {
     actual_moov_box_size: crate::stats::StatsGauge,
     total_flushed_fragment_count: crate::stats::StatsCounter,
     total_recovery_moov_update_count: crate::stats::StatsCounter,
-    // finalize の成否を切り分けるためのカウンタ。
-    // failure は finalize（標準 MP4 への変換）が内部 Err で失敗し、出力が fMP4 形式のまま残ることを示す。
+    // 以下の finalize / sample_entry 系カウンタは hybrid writer でのみ計上される
+    // （通常の Mp4Writer 経路では更新されず常に 0）。
+    //
+    // finalize の成否カウンタ。failure は finalize（標準 MP4 への変換）が内部 Err で失敗し、
+    // 出力が fMP4 形式のまま残ることを示す。
     total_finalize_success_count: crate::stats::StatsCounter,
     total_finalize_failure_count: crate::stats::StatsCounter,
-    // sample_entry の受信数と「必要な時の欠落数」を音声/映像別に観測する (issues/0011)。
-    // received は ingress で sample_entry を載せて受信したフレーム数。
-    // missing はフラグメント先頭サンプルで sample_entry を解決できなかった数で、finalize 失敗の
-    // 直接原因になりうるため発生箇所で計上する。received が 0 なら上流が未送信、received>0 かつ
-    // missing>0 なら内部での取りこぼしを示す。
+    // sample_entry の受信数と「フラグメント先頭で解決できなかった数」を音声/映像別に観測する (issues/0011)。
+    // received は ingress で sample_entry を載せて受信したフレーム数（pause 等で drop される前に数える）。
+    // received が 0 なら上流が一度も sample_entry を送っていないことを示す。
+    // missing はフラグメント先頭サンプルで sample_entry を解決できなかった数で、発生箇所（append）で計上する。
+    // writer のフラグメント単位と muxer 内部のチャンク単位は粒度が異なるため、missing>0 が即 finalize
+    // 失敗を意味するとは限らないが、sample_entry 取りこぼしの目安になる。
     total_received_audio_sample_entry_count: crate::stats::StatsCounter,
     total_received_video_sample_entry_count: crate::stats::StatsCounter,
     total_missing_audio_sample_entry_count: crate::stats::StatsCounter,

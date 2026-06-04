@@ -257,8 +257,7 @@ impl HybridMp4Writer {
                 .clone_from(&sample.sample_entry);
         }
 
-        // フラグメント先頭サンプルの sample_entry が None だと finalize 時に muxer が Err になる
-        // (issues/0011)。「必要な時に sample_entry が無かった」状態を発生箇所で直接観測する。
+        // 映像の append と同じく、フラグメント先頭の sample_entry 欠落を直接観測する (issues/0011)。
         let sample_entry = sample
             .sample_entry
             .clone()
@@ -420,6 +419,8 @@ impl HybridMp4Writer {
         let mut samples = Vec::new();
         let mut data_offset = 0;
 
+        // この経路は best-effort の recovery で、sample_entry を解決できない pending は単にスキップする
+        // （missing カウンタの計上は append_*_to_fragment 側でのみ行う）。
         if let Some(pending) = self.core.pending_video_frame.as_ref()
             && let Some(sample_entry) = pending
                 .sample_entry
