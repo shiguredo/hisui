@@ -528,6 +528,21 @@ pub struct StatsEntry {
     pub value: StatsValue,
 }
 
+/// 1 つの `StatsEntry` を JSON Lines 形式の 1 行（`name` / `labels` / `value` の object）に
+/// シリアライズする。プロセス終了時のメトリクスダンプ（`--dump-metrics-on-exit`）で使う。
+/// `name` には Prometheus 描画時の `hisui_` prefix は付けない。
+pub fn stats_entry_to_json_line(entry: &StatsEntry) -> String {
+    nojson::json(|f| {
+        f.object(|f| {
+            f.member("name", entry.metric_name)?;
+            f.member("labels", &entry.labels)?;
+            f.member("value", &entry.value)?;
+            Ok(())
+        })
+    })
+    .to_string()
+}
+
 #[derive(Debug, Clone)]
 struct PrometheusMetricFamily {
     name: String,
@@ -1018,6 +1033,47 @@ mod tests {
                 .iter()
                 .any(|e| e.metric_name == "state" && e.value.as_string() == Some("running".into())),
             "string entry is missing: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn stats_entry_to_json_line_serializes_all_metric_types() {
+        let mut stats = Stats::new();
+        stats.set_default_label("processor_id", "p0");
+        stats.counter("processed_total").add(10);
+        stats.gauge("queue_depth").set(-3);
+        stats.gauge_f64("latency_seconds").set(0.25);
+        stats.duration("uptime").set(Duration::from_millis(1250));
+        stats.flag("error").set(true);
+        stats.string("state").set("running");
+
+        let entries = stats.entries().expect("entries must succeed");
+
+        // 全エントリの 1 行が valid JSON としてパースできること
+        for entry in &entries {
+            let line = stats_entry_to_json_line(entry);
+            nojson::RawJsonOwned::parse(line.clone())
+                .unwrap_or_else(|_| panic!("各行は valid JSON であること: {line}"));
+        }
+
+        // counter は name / labels / value を含む期待どおりの形であること（prefix なし・数値）
+        let counter = entries
+            .iter()
+            .find(|e| e.metric_name == "processed_total")
+            .expect("counter エントリがあること");
+        assert_eq!(
+            stats_entry_to_json_line(counter),
+            r#"{"name":"processed_total","labels":{"processor_id":"p0"},"value":10}"#,
+        );
+
+        // string 型は value が文字列になること（value ラベル展開はしない）
+        let string_entry = entries
+            .iter()
+            .find(|e| e.metric_name == "state")
+            .expect("string エントリがあること");
+        assert_eq!(
+            stats_entry_to_json_line(string_entry),
+            r#"{"name":"state","labels":{"processor_id":"p0"},"value":"running"}"#,
         );
     }
 }

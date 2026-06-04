@@ -69,6 +69,73 @@ fn request_path(uri: &str) -> &str {
     uri.split_once('?').map_or(uri, |(path, _)| path)
 }
 
+/// SIGTERM / SIGINT を受けて graceful shutdown するためのシグナル受信。
+/// Unix 以外ではシグナルによる graceful shutdown は未対応（`recv` は永久に保留する）。
+struct ShutdownSignal {
+    #[cfg(unix)]
+    sigterm: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    sigint: tokio::signal::unix::Signal,
+}
+
+impl ShutdownSignal {
+    /// シグナルハンドラを登録する。起動直後に呼ぶことで、初期化中に届いたシグナルも
+    /// 取りこぼさない（ハンドラ登録後に受けたシグナルは最初の `recv` で返る）。
+    fn install() -> crate::Result<Self> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let sigterm = signal(SignalKind::terminate()).map_err(|e| {
+                crate::Error::new(format!("failed to install SIGTERM handler: {e}"))
+            })?;
+            let sigint = signal(SignalKind::interrupt())
+                .map_err(|e| crate::Error::new(format!("failed to install SIGINT handler: {e}")))?;
+            Ok(Self { sigterm, sigint })
+        }
+        #[cfg(not(unix))]
+        {
+            Ok(Self {})
+        }
+    }
+
+    /// SIGTERM か SIGINT を受信するまで待つ。
+    async fn recv(&mut self) {
+        #[cfg(unix)]
+        {
+            tokio::select! {
+                _ = self.sigterm.recv() => {}
+                _ = self.sigint.recv() => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            std::future::pending::<()>().await
+        }
+    }
+}
+
+/// 終了時に全メトリクス（`Stats` レジストリ全件）を JSON Lines で stdout へ出力する。
+/// 失敗してもプロセス終了は妨げない（警告ログを出して続行する）。
+fn dump_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
+    use std::io::Write as _;
+
+    let entries = match pipeline_handle.stats().entries() {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!("failed to collect metrics for exit dump: {}", e.display());
+            return;
+        }
+    };
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    for entry in &entries {
+        if let Err(e) = writeln!(out, "{}", crate::stats::stats_entry_to_json_line(entry)) {
+            tracing::warn!("failed to write metrics dump to stdout: {e}");
+            return;
+        }
+    }
+}
+
 #[expect(clippy::too_many_arguments)]
 pub async fn run_server(
     addr: SocketAddr,
@@ -83,6 +150,7 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
+    dump_metrics_on_exit: bool,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
         crate::obsws::player::PlayerCommand,
     >,
@@ -95,6 +163,10 @@ pub async fn run_server(
 ) -> crate::Result<()> {
     #[cfg(feature = "player")]
     let mut player_lifecycle_rx = player_lifecycle_rx;
+
+    // SIGTERM/SIGINT ハンドラは初期化中に届いたシグナルも取りこぼさないよう、
+    // bind 等の .await より前のここで登録する。
+    let shutdown_signal = ShutdownSignal::install()?;
 
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
@@ -302,6 +374,8 @@ pub async fn run_server(
         pipeline_handle,
         bootstrap_endpoint,
         shutdown_rx,
+        dump_metrics_on_exit,
+        shutdown_signal,
     )
     .await
 }
@@ -325,6 +399,8 @@ async fn run_accept_loop(
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    dump_metrics_on_exit: bool,
+    mut shutdown_signal: ShutdownSignal,
 ) -> crate::Result<()> {
     loop {
         let (stream, peer_addr) = tokio::select! {
@@ -336,6 +412,13 @@ async fn run_accept_loop(
                 return Err(crate::Error::new(
                     "obsws server terminated: state file write failed"
                 ));
+            }
+            _ = shutdown_signal.recv() => {
+                tracing::info!("obsws server shutting down on signal");
+                if dump_metrics_on_exit {
+                    dump_metrics_to_stdout(&pipeline_handle);
+                }
+                return Ok(());
             }
         };
         let tls_acceptor = tls_acceptor.clone();

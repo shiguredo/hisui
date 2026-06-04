@@ -28,7 +28,7 @@ Medium。テスト失敗や障害の原因調査の効率に直結する。ユ�
 
 ### 1. obsws server に SIGTERM/SIGINT graceful shutdown を追加する（本機能の前提）
 
-- `Cargo.toml` の workspace tokio（`:32-43`）の features に `signal` を追加し、用途コメントを付す。現状 `signal` は examples 6 件（`camera_record` / `hls_s3` / `camera_sora_grid` / `mpeg_dash_s3` / `sora_publish` / `sora_source`）が個別指定しているので、workspace へ集約して各 example の `features = ["signal"]` を外す。集約により `signal` 不要な `obsws_bootstrap` にも `signal` が付くが、軽量な feature なので許容する。
+- `Cargo.toml` の workspace tokio（`:32-43`）の features に `signal` を追加する。現状 `signal` は examples 6 件（`camera_record` / `hls_s3` / `camera_sora_grid` / `mpeg_dash_s3` / `sora_publish` / `sora_source`）が個別指定しているので、workspace へ集約して各 example の `features = ["signal"]` を外す。集約により `signal` 不要な `obsws_bootstrap` にも `signal` が付くが、軽量な feature なので許容する。
 - accept loop（`src/obsws/server.rs:329-340`）の `tokio::select!` に SIGTERM/SIGINT 分岐を足し、受信したら loop を抜けて `Ok(())` を返す（致命的エラーの `Err` 経路とは区別する）。SIGTERM を見るのは e2e の停止が SIGTERM のため（既存 examples の `tokio::signal::ctrl_c` は SIGINT のみ）。`tokio::signal::unix` は Windows 非対応なので `#[cfg(unix)]` でガードする（CI/e2e は Linux）。
 - 起動途中の取りこぼしを避けるため、`Signal` は `run_accept_loop` 内ではなく `run_server` の入口（`bind` 等の初期化 `.await` より前）で生成し、`run_accept_loop` へ渡す。これで `bind` 完了（e2e はここまでしか待たない）後・accept loop 到達前の窓で SIGTERM が来ても取りこぼさない。
 - 終了の連鎖（両経路で成立。`src/subcommand_server.rs`）: `run_server` が `Ok` → `block_on` 完了 → 非 player はそのままプロセス終了、player は runtime スレッド終了で `player_command_tx` の送信端（coordinator が保持（`src/obsws/coordinator.rs:173`）、実行中の output_player も clone を持つが、いずれも runtime 内）が全て drop → `run_player_control_loop` の `recv` が `Err` でループ脱出（`src/subcommand_server.rs:294-295`）→ `runtime_thread.join()`（`:254-256`）。処理中の `spawn_local` 接続・actor タスクは中断されてよい（runtime drop に委ねる）。
