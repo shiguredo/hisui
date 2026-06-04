@@ -261,8 +261,6 @@ struct VideoSampleInfo {
     height: Option<usize>,
 }
 
-impl VideoSampleInfo {}
-
 impl nojson::DisplayJson for VideoSampleInfo {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.set_indent_size(0);
