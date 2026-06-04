@@ -78,7 +78,7 @@ pub struct Mp4WriterStats {
     total_flushed_fragment_count: crate::stats::StatsCounter,
     total_recovery_moov_update_count: crate::stats::StatsCounter,
     // finalize の成否を切り分けるためのカウンタ。
-    // failure は finalize が内部 Err で失敗したこと（録画が壊れた可能性）を示す。
+    // failure は finalize（標準 MP4 への変換）が内部 Err で失敗し、出力が fMP4 形式のまま残ることを示す。
     total_finalize_success_count: crate::stats::StatsCounter,
     total_finalize_failure_count: crate::stats::StatsCounter,
     recoverable_media_duration: crate::stats::StatsDuration,

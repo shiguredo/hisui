@@ -525,8 +525,8 @@ impl HybridMp4Writer {
 
     /// 録画を finalize して標準 MP4 に変換する
     fn finalize(&mut self) -> crate::Result<()> {
-        // finalize の成否をカウンタに記録する。failure (内部 Err) は finalize 未完了で
-        // 録画が壊れた可能性を示すため、success と分けて観測できるようにする。
+        // finalize の成否をカウンタに記録する。failure (内部 Err) は標準 MP4 への変換が
+        // 未完了で、出力が fMP4 形式のまま残ることを示すため、success と分けて観測できるようにする。
         let result = self.finalize_inner();
         if result.is_ok() {
             self.core.stats.add_finalize_success();
