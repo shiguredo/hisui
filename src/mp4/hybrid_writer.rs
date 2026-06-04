@@ -542,7 +542,7 @@ impl HybridMp4Writer {
     fn finalize(&mut self) -> crate::Result<()> {
         // finalize の成否をカウンタに記録する。failure (内部 Err) は標準 MP4 への変換が
         // 未完了で、出力が fMP4 形式のまま残ることを示すため、success と分けて観測できるようにする。
-        let result = self.finalize_inner();
+        let result = self.convert_to_standard_mp4();
         if result.is_ok() {
             self.core.stats.add_finalize_success();
         } else {
@@ -551,8 +551,8 @@ impl HybridMp4Writer {
         result
     }
 
-    /// finalize の本体。成否カウンタの更新は呼び出し元の finalize() が行う。
-    fn finalize_inner(&mut self) -> crate::Result<()> {
+    /// 標準 MP4 への変換本体（残りのフラグメントの flush を含む）。成否カウンタの更新は呼び出し元の finalize() が行う。
+    fn convert_to_standard_mp4(&mut self) -> crate::Result<()> {
         // 残りのフラグメントをフラッシュ
         self.flush_fragment()?;
 
