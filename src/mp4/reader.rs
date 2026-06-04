@@ -5,8 +5,17 @@ use std::{
     time::Duration,
 };
 
-use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
+use shiguredo_mp4::{
+    TrackKind,
+    boxes::SampleEntry,
+    demux::{Mp4FileDemuxer, Mp4FileKind},
+};
 
+use super::demuxer::{
+    SampleContext, audio_format_from_entry, calculate_timestamps, is_supported_audio_entry,
+    is_supported_video_entry, read_sample_data_at, video_format_from_entry,
+};
+use super::file_kind::detect_mp4_file_kind;
 use crate::audio::{AudioFormat, Channels, SampleRate};
 use crate::video::{VideoFormat, VideoFrameSize};
 use crate::{Ack, AudioFrame, Error, ProcessorHandle, Result, TrackId, TrackPublisher, VideoFrame};
@@ -244,8 +253,17 @@ pub struct Mp4FileVideoDimensions {
 
 impl Mp4FileReader {
     pub fn new<P: AsRef<Path>>(path: P, options: Mp4FileReaderOptions) -> Result<Self> {
+        // Mp4FileReader は OBSWS のメディア再生 (seek / prev_sample) に依存するため、
+        // seek 未対応の fMP4 は受け付けない。inspect は fMP4 を Mp4SampleReader 経由で扱う。
+        let path = path.as_ref();
+        if detect_mp4_file_kind(path)? == Mp4FileKind::FragmentedMp4 {
+            return Err(Error::new(format!(
+                "Fmp4 is not supported by Mp4FileReader yet: {}",
+                path.display()
+            )));
+        }
         Ok(Self {
-            path: path.as_ref().to_path_buf(),
+            path: path.to_path_buf(),
             options,
             audio_sender: None,
             video_sender: None,
@@ -1415,46 +1433,15 @@ pub fn probe_mp4_video_dimensions<P: AsRef<Path>>(
     Ok(None)
 }
 
-#[derive(Debug, Clone)]
-struct SampleContext {
-    track_kind: TrackKind,
-    track_id: u32,
-    timescale: u32,
-    timestamp: u64,
-    duration: u64,
-    data_offset: u64,
-    data_size: usize,
-    keyframe: bool,
-    composition_time_offset: Option<i64>,
-    sample_entry: Option<SampleEntry>,
-}
-
-impl SampleContext {
-    fn from_sample(sample: &shiguredo_mp4::demux::Sample<'_>) -> Self {
-        Self {
-            track_kind: sample.track.kind,
-            track_id: sample.track.track_id,
-            timescale: sample.track.timescale.get(),
-            timestamp: sample.timestamp,
-            duration: sample.duration as u64,
-            data_offset: sample.data_offset,
-            data_size: sample.data_size,
-            keyframe: sample.keyframe,
-            composition_time_offset: sample.composition_time_offset,
-            sample_entry: sample.sample_entry.cloned(),
-        }
-    }
-}
-
 #[derive(Debug)]
-struct TrackSender {
+pub(crate) struct TrackSender {
     sender: TrackPublisher,
     ack: Option<Ack>,
     noacked_sent: u64,
 }
 
 impl TrackSender {
-    fn new(mut sender: TrackPublisher) -> Self {
+    pub(crate) fn new(mut sender: TrackPublisher) -> Self {
         let ack = Some(sender.send_syn());
         Self {
             sender,
@@ -1473,7 +1460,7 @@ impl TrackSender {
         }
     }
 
-    async fn send_audio(&mut self, data: AudioFrame) -> bool {
+    pub(crate) async fn send_audio(&mut self, data: AudioFrame) -> bool {
         self.prepare_send().await;
         let ok = self.sender.send_audio(data);
         if ok {
@@ -1482,7 +1469,7 @@ impl TrackSender {
         ok
     }
 
-    async fn send_video(&mut self, frame: VideoFrame) -> bool {
+    pub(crate) async fn send_video(&mut self, frame: VideoFrame) -> bool {
         self.prepare_send().await;
         let ok = self.sender.send_video(frame);
         if ok {
@@ -1491,7 +1478,7 @@ impl TrackSender {
         ok
     }
 
-    fn send_eos(&mut self) {
+    pub(crate) fn send_eos(&mut self) {
         let _ = self.sender.send_eos();
     }
 }
@@ -1568,57 +1555,24 @@ impl ReaderState {
     }
 
     fn update_audio_format(&mut self, sample_entry: &SampleEntry) -> Result<()> {
-        let (metadata, format) = match sample_entry {
-            SampleEntry::Opus(b) => (&b.audio, AudioFormat::Opus),
-            SampleEntry::Mp4a(b) => (&b.audio, AudioFormat::Aac),
-            entry => {
-                return Err(Error::new(format!("unsupported sample entry: {entry:?}")));
-            }
-        };
-
+        let (format, channels, sample_rate) = audio_format_from_entry(sample_entry)?;
         self.audio_format = format;
-        self.audio_channels = Channels::from_u16(metadata.channelcount)?;
-        self.audio_sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
-
+        self.audio_channels = channels;
+        self.audio_sample_rate = sample_rate;
         Ok(())
     }
 
     fn update_video_format(&mut self, sample_entry: &SampleEntry) -> Result<()> {
-        let (metadata, format) = match sample_entry {
-            SampleEntry::Avc1(b) => (&b.visual, VideoFormat::H264),
-            SampleEntry::Hev1(b) => (&b.visual, VideoFormat::H265),
-            SampleEntry::Hvc1(b) => (&b.visual, VideoFormat::H265),
-            SampleEntry::Vp08(b) => (&b.visual, VideoFormat::Vp8),
-            SampleEntry::Vp09(b) => (&b.visual, VideoFormat::Vp9),
-            SampleEntry::Av01(b) => (&b.visual, VideoFormat::Av1),
-            entry => {
-                return Err(Error::new(format!("unsupported sample entry: {entry:?}")));
-            }
-        };
-
+        let (format, width, height) = video_format_from_entry(sample_entry)?;
         self.video_format = format;
-        self.video_width = metadata.width as usize;
-        self.video_height = metadata.height as usize;
-
+        self.video_width = width;
+        self.video_height = height;
         Ok(())
     }
 
     fn read_sample_data(&mut self, data_offset: u64, data_size: usize) -> Result<Vec<u8>> {
-        let mut data = vec![0; data_size];
-        self.file
-            .seek(SeekFrom::Start(data_offset))
-            .map_err(|e| Error::new(format!("Seek error {}: {e}", self.path.display())))?;
-        self.file
-            .read_exact(&mut data)
-            .map_err(|e| Error::new(format!("Read error {}: {e}", self.path.display())))?;
-        Ok(data)
+        read_sample_data_at(&mut self.file, &self.path, data_offset, data_size)
     }
-}
-
-fn calculate_timestamps(timescale: u32, timestamp: u64, duration: u64) -> (Duration, Duration) {
-    let timestamp = Duration::from_secs(timestamp) / timescale;
-    let duration = Duration::from_secs(duration) / timescale;
-    (timestamp, duration)
 }
 
 /// MP4 ファイルからトラック情報を初期化する
@@ -1632,7 +1586,7 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
     // 念のために（壊れたファイルが渡された時のため）、バッファサイズの上限を 100 MB に設定しておく。
     // 正常なファイルの場合には、これは moov ボックスのサイズ上限となるが、
     // 典型的には、100 MB あれば、MP4 ファイル自体としては数百 GB 程度のものを扱えるため、実用上の問題はない想定。
-    const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
+    const MAX_READ_SIZE: usize = 100 * 1024 * 1024;
 
     while let Some(required) = demuxer.required_input() {
         let size = required.size.ok_or_else(|| {
@@ -1641,9 +1595,9 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
                 path.as_ref().display()
             ))
         })?;
-        if size > MAX_BUF_SIZE {
+        if size > MAX_READ_SIZE {
             return Err(Error::new(format!(
-                "MP4 file contains box larger than maximum allowed size ({size} > {MAX_BUF_SIZE}): {}",
+                "MP4 file contains box larger than maximum allowed size ({size} > {MAX_READ_SIZE}): {}",
                 path.as_ref().display()
             )));
         }
@@ -1669,13 +1623,7 @@ fn select_audio_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
         has_audio_track = true;
 
         if let Some(sample_entry) = sample.sample_entry {
-            let is_supported = match &sample_entry {
-                SampleEntry::Opus(_) => true,
-                SampleEntry::Mp4a(mp4a) => is_aac_codec(&mp4a.esds_box),
-                _ => false,
-            };
-
-            if is_supported {
+            if is_supported_audio_entry(sample_entry) {
                 return Ok(Some(sample.track.track_id));
             } else {
                 tracing::warn!(
@@ -1708,17 +1656,7 @@ fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
         has_video_track = true;
 
         if let Some(sample_entry) = sample.sample_entry {
-            let is_supported = matches!(
-                sample_entry,
-                SampleEntry::Avc1(_)
-                    | SampleEntry::Hev1(_)
-                    | SampleEntry::Hvc1(_)
-                    | SampleEntry::Vp08(_)
-                    | SampleEntry::Vp09(_)
-                    | SampleEntry::Av01(_)
-            );
-
-            if is_supported {
+            if is_supported_video_entry(sample_entry) {
                 return Ok(Some(sample.track.track_id));
             } else {
                 tracing::warn!(
@@ -1741,22 +1679,24 @@ fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
     }
 }
 
-/// AAC コーデックであることを確認する
-fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
-    // DecoderConfigDescriptor の object_type_indication が AAC を示しているかチェック
-    // AAC LC は 0x40 (64)
-    // AAC Main Profile は 0x41 (65)
-    // AAC SSR は 0x42 (66)
-    // AAC LTP は 0x43 (67)
-    matches!(
-        esds_box.es.dec_config_descr.object_type_indication,
-        0x40..=0x43
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_rejects_fragmented_mp4() {
+        // Mp4FileReader は fMP4 を受け付けず、再生前に明示エラーで失敗する
+        let result = Mp4FileReader::new(
+            "testdata/red-320x320-h264-aac-fragmented.mp4",
+            Mp4FileReaderOptions::default(),
+        );
+        let err = result.expect_err("fMP4 は Mp4FileReader::new で拒否されること");
+        let message = err.display();
+        assert!(
+            message.contains("Fmp4"),
+            "エラーメッセージに Fmp4 が含まれること: {message}"
+        );
+    }
 
     #[test]
     fn probe_mp4_track_availability_detects_audio_only_file() -> Result<()> {
