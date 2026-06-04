@@ -25,7 +25,7 @@ Medium。テスト失敗や障害の原因調査の効率に直結し、汎用�
 
 ### 1. hisui 側: 終了時メトリクスダンプ
 
-- フラグ（例: `--dump-metrics-on-exit`）または環境変数（例: `HISUI_DUMP_METRICS_ON_EXIT`）を追加する。名前・出力先（stdout / stderr）は要検討。
+- `--dump-metrics-on-exit`（`noargs::opt`、env: `HISUI_DUMP_METRICS_ON_EXIT`）を追加する。出力先（stdout / stderr、または destination を値で受けられるようにするか）と boolean / 値あり opt のどちらにするかは実装時に詰める。
 - 有効時、プロセスの graceful 終了時に全メトリクスを JSON Lines（1 行 1 メトリクス。各行に metric 名・labels・value）で出力する。
 - データ源は `/metrics?format=json` と同じく `Stats::entries()`（`src/stats.rs:151`）を再利用し、各 `StatsEntry`（`src/stats.rs:525`）を 1 行の JSON として nojson でシリアライズする。
 - 出力フックは obsws server のシャットダウン経路（`src/obsws/server.rs` / `src/obsws/coordinator.rs`）等に置く。
