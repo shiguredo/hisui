@@ -275,3 +275,38 @@ pub(crate) fn video_format_from_entry(
     };
     Ok((format, metadata.width as usize, metadata.height as usize))
 }
+
+/// AAC コーデックであることを確認する
+pub(crate) fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
+    // DecoderConfigDescriptor の object_type_indication が AAC を示しているかチェック
+    // AAC LC は 0x40 (64)
+    // AAC Main Profile は 0x41 (65)
+    // AAC SSR は 0x42 (66)
+    // AAC LTP は 0x43 (67)
+    matches!(
+        esds_box.es.dec_config_descr.object_type_indication,
+        0x40..=0x43
+    )
+}
+
+/// hisui が対応している音声コーデックのサンプルエントリーかどうかを判定する
+pub(crate) fn is_supported_audio_entry(sample_entry: &SampleEntry) -> bool {
+    match sample_entry {
+        SampleEntry::Opus(_) => true,
+        SampleEntry::Mp4a(mp4a) => is_aac_codec(&mp4a.esds_box),
+        _ => false,
+    }
+}
+
+/// hisui が対応している映像コーデックのサンプルエントリーかどうかを判定する
+pub(crate) fn is_supported_video_entry(sample_entry: &SampleEntry) -> bool {
+    matches!(
+        sample_entry,
+        SampleEntry::Avc1(_)
+            | SampleEntry::Hev1(_)
+            | SampleEntry::Hvc1(_)
+            | SampleEntry::Vp08(_)
+            | SampleEntry::Vp09(_)
+            | SampleEntry::Av01(_)
+    )
+}

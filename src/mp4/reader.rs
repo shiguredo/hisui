@@ -12,8 +12,8 @@ use shiguredo_mp4::{
 };
 
 use super::demuxer::{
-    SampleContext, audio_format_from_entry, calculate_timestamps, read_sample_data_at,
-    video_format_from_entry,
+    SampleContext, audio_format_from_entry, calculate_timestamps, is_supported_audio_entry,
+    is_supported_video_entry, read_sample_data_at, video_format_from_entry,
 };
 use super::file_kind::detect_mp4_file_kind;
 use crate::audio::{AudioFormat, Channels, SampleRate};
@@ -1623,13 +1623,7 @@ fn select_audio_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
         has_audio_track = true;
 
         if let Some(sample_entry) = sample.sample_entry {
-            let is_supported = match &sample_entry {
-                SampleEntry::Opus(_) => true,
-                SampleEntry::Mp4a(mp4a) => is_aac_codec(&mp4a.esds_box),
-                _ => false,
-            };
-
-            if is_supported {
+            if is_supported_audio_entry(sample_entry) {
                 return Ok(Some(sample.track.track_id));
             } else {
                 tracing::warn!(
@@ -1662,17 +1656,7 @@ fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
         has_video_track = true;
 
         if let Some(sample_entry) = sample.sample_entry {
-            let is_supported = matches!(
-                sample_entry,
-                SampleEntry::Avc1(_)
-                    | SampleEntry::Hev1(_)
-                    | SampleEntry::Hvc1(_)
-                    | SampleEntry::Vp08(_)
-                    | SampleEntry::Vp09(_)
-                    | SampleEntry::Av01(_)
-            );
-
-            if is_supported {
+            if is_supported_video_entry(sample_entry) {
                 return Ok(Some(sample.track.track_id));
             } else {
                 tracing::warn!(
@@ -1693,19 +1677,6 @@ fn select_video_track(mut demuxer: Mp4FileDemuxer) -> Result<Option<u32>> {
         // そもそも映像トラックがない場合には空扱いをする
         Ok(None)
     }
-}
-
-/// AAC コーデックであることを確認する
-fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
-    // DecoderConfigDescriptor の object_type_indication が AAC を示しているかチェック
-    // AAC LC は 0x40 (64)
-    // AAC Main Profile は 0x41 (65)
-    // AAC SSR は 0x42 (66)
-    // AAC LTP は 0x43 (67)
-    matches!(
-        esds_box.es.dec_config_descr.object_type_indication,
-        0x40..=0x43
-    )
 }
 
 #[cfg(test)]
