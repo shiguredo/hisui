@@ -20,7 +20,7 @@ use crate::{Error, Result};
 const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
 
 /// ファイル先頭 (ftyp + moov) を incremental に読み込んで MP4 / fMP4 を判定する
-pub fn detect_mp4_file_kind<P: AsRef<Path>>(path: P) -> Result<Mp4FileKind> {
+pub(crate) fn detect_mp4_file_kind<P: AsRef<Path>>(path: P) -> Result<Mp4FileKind> {
     let path = path.as_ref();
     let mut file = File::open(path)
         .map_err(|e| Error::new(format!("Cannot open file {}: {e}", path.display())))?;

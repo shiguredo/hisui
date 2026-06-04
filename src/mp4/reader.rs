@@ -20,7 +20,7 @@ use crate::audio::{AudioFormat, Channels, SampleRate};
 use crate::video::{VideoFormat, VideoFrameSize};
 use crate::{Ack, AudioFrame, Error, ProcessorHandle, Result, TrackId, TrackPublisher, VideoFrame};
 
-pub(crate) const MAX_NOACKED_COUNT: u64 = 100;
+const MAX_NOACKED_COUNT: u64 = 100;
 
 /// OBS 互換のメディア再生状態
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

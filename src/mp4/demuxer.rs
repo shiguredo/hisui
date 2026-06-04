@@ -32,16 +32,16 @@ use super::file_kind::{detect_mp4_file_kind, read_required_range};
 /// デマルチプレクサから取り出した 1 サンプル分の情報 (借用を含まない所有形)
 #[derive(Debug, Clone)]
 pub(crate) struct SampleContext {
-    pub track_kind: TrackKind,
-    pub track_id: u32,
-    pub timescale: u32,
-    pub timestamp: u64,
-    pub duration: u64,
-    pub data_offset: u64,
-    pub data_size: usize,
-    pub keyframe: bool,
-    pub composition_time_offset: Option<i64>,
-    pub sample_entry: Option<SampleEntry>,
+    pub(crate) track_kind: TrackKind,
+    pub(crate) track_id: u32,
+    pub(crate) timescale: u32,
+    pub(crate) timestamp: u64,
+    pub(crate) duration: u64,
+    pub(crate) data_offset: u64,
+    pub(crate) data_size: usize,
+    pub(crate) keyframe: bool,
+    pub(crate) composition_time_offset: Option<i64>,
+    pub(crate) sample_entry: Option<SampleEntry>,
 }
 
 impl SampleContext {
@@ -61,58 +61,36 @@ impl SampleContext {
     }
 }
 
-/// 前方読みデマルチプレクサの共通操作 (内部用)
+/// 通常 MP4 / fMP4 の前方読みデマルチプレクサを吸収する enum
 ///
-/// `Mp4FileDemuxer` と `Fmp4FileDemuxer` を同一インターフェースで扱うための trait。
-trait ForwardDemuxer {
-    fn handle_input(&mut self, input: Input);
-    fn tracks(&mut self) -> std::result::Result<&[TrackInfo], DemuxError>;
-    fn next_sample(&mut self) -> std::result::Result<Option<Sample<'_>>, DemuxError>;
-}
-
-impl ForwardDemuxer for Mp4FileDemuxer {
-    fn handle_input(&mut self, input: Input) {
-        Mp4FileDemuxer::handle_input(self, input);
-    }
-    fn tracks(&mut self) -> std::result::Result<&[TrackInfo], DemuxError> {
-        Mp4FileDemuxer::tracks(self)
-    }
-    fn next_sample(&mut self) -> std::result::Result<Option<Sample<'_>>, DemuxError> {
-        Mp4FileDemuxer::next_sample(self)
-    }
-}
-
-impl ForwardDemuxer for Fmp4FileDemuxer {
-    fn handle_input(&mut self, input: Input) {
-        Fmp4FileDemuxer::handle_input(self, input);
-    }
-    fn tracks(&mut self) -> std::result::Result<&[TrackInfo], DemuxError> {
-        Fmp4FileDemuxer::tracks(self)
-    }
-    fn next_sample(&mut self) -> std::result::Result<Option<Sample<'_>>, DemuxError> {
-        Fmp4FileDemuxer::next_sample(self)
-    }
-}
-
+/// 前方読みに必要な操作 (`handle_input` / `tracks` / `next_sample`) だけを
+/// 各バリアントへ match で委譲する。
 enum DemuxerKind {
     Mp4(Mp4FileDemuxer),
     Fmp4(Fmp4FileDemuxer),
 }
 
 impl DemuxerKind {
-    fn as_dyn(&mut self) -> &mut dyn ForwardDemuxer {
+    fn handle_input(&mut self, input: Input) {
         match self {
-            DemuxerKind::Mp4(d) => d,
-            DemuxerKind::Fmp4(d) => d,
+            DemuxerKind::Mp4(d) => d.handle_input(input),
+            DemuxerKind::Fmp4(d) => d.handle_input(input),
         }
     }
-}
 
-/// 前方読みステップの結果 (借用を含まない所有形)
-enum Step {
-    Sample(Box<SampleContext>),
-    Eof,
-    NeedInput(RequiredInput),
+    fn tracks(&mut self) -> std::result::Result<&[TrackInfo], DemuxError> {
+        match self {
+            DemuxerKind::Mp4(d) => d.tracks(),
+            DemuxerKind::Fmp4(d) => d.tracks(),
+        }
+    }
+
+    fn next_sample(&mut self) -> std::result::Result<Option<Sample<'_>>, DemuxError> {
+        match self {
+            DemuxerKind::Mp4(d) => d.next_sample(),
+            DemuxerKind::Fmp4(d) => d.next_sample(),
+        }
+    }
 }
 
 /// 通常 MP4 / fMP4 を前方読みするデマルチプレクサ
@@ -155,10 +133,7 @@ impl Mp4Demuxer {
     fn initialize(&mut self) -> Result<()> {
         loop {
             // tracks() の借用を即座に手放してから供給処理へ移る
-            let outcome: std::result::Result<(), DemuxError> = match self.inner.as_dyn().tracks() {
-                Ok(_) => Ok(()),
-                Err(e) => Err(e),
-            };
+            let outcome = self.inner.tracks().map(|_| ());
             match outcome {
                 Ok(()) => return Ok(()),
                 Err(DemuxError::InputRequired(required)) => self.supply(required)?,
@@ -175,31 +150,27 @@ impl Mp4Demuxer {
     /// 次のサンプルを返す。fMP4 の追加入力要求は内部で解決する。
     pub(crate) fn next_sample(&mut self) -> Result<Option<SampleContext>> {
         loop {
-            match self.step()? {
-                Step::Sample(ctx) => return Ok(Some(*ctx)),
-                Step::Eof => return Ok(None),
-                Step::NeedInput(required) => self.supply(required)?,
-            }
+            // next_sample() が返す借用は各 arm 内で完結させ、supply() の &mut self 借用と衝突させない
+            let required = match self.inner.next_sample() {
+                Ok(Some(sample)) => return Ok(Some(SampleContext::from_sample(&sample))),
+                Ok(None) => return Ok(None),
+                Err(DemuxError::InputRequired(required)) => required,
+                Err(e) => {
+                    return Err(Error::new(format!(
+                        "Demux error {}: {e}",
+                        self.path.display()
+                    )));
+                }
+            };
+            self.supply(required)?;
         }
-    }
-
-    /// デマルチプレクサを 1 ステップ進める。借用は関数内で完結させる。
-    fn step(&mut self) -> Result<Step> {
-        let outcome: std::result::Result<Step, DemuxError> = match self.inner.as_dyn().next_sample()
-        {
-            Ok(Some(sample)) => Ok(Step::Sample(Box::new(SampleContext::from_sample(&sample)))),
-            Ok(None) => Ok(Step::Eof),
-            Err(DemuxError::InputRequired(required)) => Ok(Step::NeedInput(required)),
-            Err(e) => Err(e),
-        };
-        outcome.map_err(|e| Error::new(format!("Demux error {}: {e}", self.path.display())))
     }
 
     /// `RequiredInput` が示す範囲をファイルから読み込んでデマルチプレクサに供給する
     fn supply(&mut self, required: RequiredInput) -> Result<()> {
         let position = required.position;
         let buf = read_required_range(&mut self.file, self.file_size, &self.path, required)?;
-        self.inner.as_dyn().handle_input(Input {
+        self.inner.handle_input(Input {
             position,
             data: &buf,
         });
