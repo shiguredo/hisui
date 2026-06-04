@@ -27,7 +27,7 @@ use crate::{
     video::VideoFormat,
 };
 
-use super::file_kind::{MAX_BUF_SIZE, detect_mp4_file_kind, read_required_range};
+use super::file_kind::{detect_mp4_file_kind, read_required_range};
 
 /// デマルチプレクサから取り出した 1 サンプル分の情報 (借用を含まない所有形)
 #[derive(Debug, Clone)]
@@ -198,6 +198,12 @@ pub(crate) fn calculate_timestamps(
     (timestamp, duration)
 }
 
+/// 壊れたファイル対策のサンプルデータサイズ上限 (100 MB)
+///
+/// 破損した stsz 等で極端に大きいサンプルサイズが指定されても、巨大なバッファを
+/// 確保しないための上限。
+const MAX_SAMPLE_DATA_SIZE: usize = 100 * 1024 * 1024;
+
 /// サンプルデータをファイルの指定位置から読み込む
 pub(crate) fn read_sample_data_at(
     file: &mut File,
@@ -206,10 +212,10 @@ pub(crate) fn read_sample_data_at(
     data_size: usize,
 ) -> Result<Vec<u8>> {
     // 破損ファイル対策: data_size は入力由来なので、巨大なバッファを確保する前に
-    // 絶対上限 (MAX_BUF_SIZE) とファイルサイズの両方で検証する。
-    if data_size > MAX_BUF_SIZE {
+    // 絶対上限 (MAX_SAMPLE_DATA_SIZE) とファイルサイズの両方で検証する。
+    if data_size > MAX_SAMPLE_DATA_SIZE {
         return Err(Error::new(format!(
-            "MP4 sample larger than maximum allowed size ({data_size} > {MAX_BUF_SIZE}): {}",
+            "MP4 sample larger than maximum allowed size ({data_size} > {MAX_SAMPLE_DATA_SIZE}): {}",
             path.display()
         )));
     }
@@ -318,7 +324,7 @@ mod tests {
     #[test]
     fn read_sample_data_rejects_size_beyond_file() {
         let mut file = File::open(TEST_MP4).expect("テスト用 MP4 を開けること");
-        // ファイルサイズより大きい (ただし MAX_BUF_SIZE 未満の) data_size は拒否する
+        // ファイルサイズより大きい (ただし MAX_SAMPLE_DATA_SIZE 未満の) data_size は拒否する
         let result = read_sample_data_at(&mut file, Path::new(TEST_MP4), 0, 1_000_000);
         assert!(
             result.is_err(),
@@ -327,9 +333,10 @@ mod tests {
     }
 
     #[test]
-    fn read_sample_data_rejects_size_over_max_buf_size() {
+    fn read_sample_data_rejects_size_over_limit() {
         let mut file = File::open(TEST_MP4).expect("テスト用 MP4 を開けること");
-        let result = read_sample_data_at(&mut file, Path::new(TEST_MP4), 0, MAX_BUF_SIZE + 1);
+        let result =
+            read_sample_data_at(&mut file, Path::new(TEST_MP4), 0, MAX_SAMPLE_DATA_SIZE + 1);
         assert!(result.is_err(), "絶対上限を超える読み込みは拒否されること");
     }
 }

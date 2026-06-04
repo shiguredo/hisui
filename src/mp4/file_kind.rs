@@ -13,11 +13,11 @@ use shiguredo_mp4::demux::{Input, Mp4FileKind, Mp4FileKindDetector, RequiredInpu
 
 use crate::{Error, Result};
 
-/// 壊れたファイル対策のバッファ上限 (100 MB)
+/// 壊れたファイル対策の読み込みサイズ上限 (100 MB)
 ///
-/// 正常なファイルでは ftyp / moov / 各セグメント / サンプルデータのサイズ上限として機能する。
+/// ftyp / moov / 各セグメントを required input として 1 回で読み込む際のサイズ上限。
 /// 典型的には 100 MB あれば数百 GB 規模の MP4 ファイルでも扱えるため、実用上の問題はない想定。
-pub(crate) const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
+const MAX_READ_SIZE: usize = 100 * 1024 * 1024;
 
 /// ファイル先頭 (ftyp + moov) を incremental に読み込んで MP4 / fMP4 を判定する
 pub(crate) fn detect_mp4_file_kind<P: AsRef<Path>>(path: P) -> Result<Mp4FileKind> {
@@ -70,9 +70,9 @@ pub(crate) fn read_required_range(
     let start = required.position;
     let end = match required.size {
         Some(size) => {
-            if size > MAX_BUF_SIZE {
+            if size > MAX_READ_SIZE {
                 return Err(Error::new(format!(
-                    "MP4 file contains box larger than maximum allowed size ({size} > {MAX_BUF_SIZE}): {}",
+                    "MP4 file contains box larger than maximum allowed size ({size} > {MAX_READ_SIZE}): {}",
                     path.display()
                 )));
             }
@@ -81,9 +81,9 @@ pub(crate) fn read_required_range(
         None => file_size,
     };
     let len = usize::try_from(end.saturating_sub(start)).unwrap_or(0);
-    if len > MAX_BUF_SIZE {
+    if len > MAX_READ_SIZE {
         return Err(Error::new(format!(
-            "MP4 file requires reading more than maximum allowed size ({len} > {MAX_BUF_SIZE}): {}",
+            "MP4 file requires reading more than maximum allowed size ({len} > {MAX_READ_SIZE}): {}",
             path.display()
         )));
     }
