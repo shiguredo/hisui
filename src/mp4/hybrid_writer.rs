@@ -209,10 +209,6 @@ impl HybridMp4Writer {
             self.core.stats.set_video_codec(name);
         }
 
-        if frame.sample_entry.is_some() {
-            self.last_video_sample_entry.clone_from(&frame.sample_entry);
-        }
-
         // フラグメント先頭サンプルの sample_entry が None だと finalize 時に muxer が Err になる
         // (issues/0011)。「必要な時に sample_entry が無かった」状態を発生箇所で直接観測する。
         let sample_entry = frame
@@ -250,11 +246,6 @@ impl HybridMp4Writer {
             && let Some(name) = sample.format.codec_name()
         {
             self.core.stats.set_audio_codec(name);
-        }
-
-        if sample.sample_entry.is_some() {
-            self.last_audio_sample_entry
-                .clone_from(&sample.sample_entry);
         }
 
         // 映像の append と同じく、フラグメント先頭の sample_entry 欠落を直接観測する (issues/0011)。
@@ -1140,10 +1131,15 @@ mod tests {
             Channels::STEREO,
         )?;
 
-        writer.append_audio_to_fragment(
-            &make_audio_frame(Some(sample_entry.clone())),
-            DEFAULT_SAMPLE_DURATION,
-        );
+        // 入口で sample_entry を取り込む（last_audio_sample_entry がフラグメント境界を越えて保持される）。
+        writer.handle_audio_message(
+            crate::Message::Media(crate::MediaFrame::Audio(Arc::new(make_audio_frame(Some(
+                sample_entry.clone(),
+            ))))),
+            &mut None,
+        )?;
+        // 1 つ目のフラグメントを flush した後、2 つ目の先頭 (sample_entry 無し) で last が使われることを確認する。
+        writer.append_audio_to_fragment(&make_audio_frame(None), DEFAULT_SAMPLE_DURATION);
         writer.flush_fragment()?;
         writer.append_audio_to_fragment(&make_audio_frame(None), DEFAULT_SAMPLE_DURATION);
 
@@ -1343,10 +1339,15 @@ mod tests {
             &[0x0A],
         );
 
-        writer.append_video_to_fragment(
-            &make_video_frame(Some(sample_entry.clone())),
-            DEFAULT_SAMPLE_DURATION,
-        );
+        // 入口で sample_entry を取り込む（last_video_sample_entry がフラグメント境界を越えて保持される）。
+        writer.handle_video_message(
+            crate::Message::Media(crate::MediaFrame::Video(Arc::new(make_video_frame(Some(
+                sample_entry.clone(),
+            ))))),
+            &mut None,
+        )?;
+        // 1 つ目のフラグメントを flush した後、2 つ目の先頭 (sample_entry 無し) で last が使われることを確認する。
+        writer.append_video_to_fragment(&make_video_frame(None), DEFAULT_SAMPLE_DURATION);
         writer.flush_fragment()?;
         writer.append_video_to_fragment(&make_video_frame(None), DEFAULT_SAMPLE_DURATION);
 
