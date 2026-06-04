@@ -934,10 +934,12 @@ impl HybridMp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 self.core.stats.add_received_audio_data();
-                // sample_entry はストリーム中で最初の 1 フレームにしか載らない (例: OpusEncoder)。
-                // pending 化やキューイング、ドロップのタイミングに依存せず確実に保持するため、
-                // writer の入口で受信した時点で取り込む。これが無いと、フラグメント先頭サンプルの
-                // sample_entry が None のまま flush され muxer が Err になりうる (issues/0011)。
+                // sample_entry は一部のフレームにしか載らない。音声は先頭フレームのみのことが多く
+                // (例: OpusEncoder)、映像は途中で解像度等のエンコード設定が変わると後続フレームにも
+                // 載りうる。どのタイミングで来ても取りこぼさないよう、pending 化・キューイング・
+                // ドロップに依存しない writer の入口で受信時点に取り込み、最新の sample_entry を保持する。
+                // これが無いと、フラグメント先頭サンプルの sample_entry が None のまま flush され
+                // muxer が Err になりうる (issues/0011)。
                 if sample.sample_entry.is_some() {
                     self.last_audio_sample_entry
                         .clone_from(&sample.sample_entry);
@@ -1043,10 +1045,14 @@ pub async fn create_processor(
                 let result = writer
                     .run(h, input_audio_track_id, input_video_track_id)
                     .await;
-                // run() が Err 終了すると finalize に到達できず録画が壊れうる。
+                // run() が Err 終了すると finalize（標準 MP4 への変換）に到達できず、ファイルは
+                // 録画中の fMP4 形式のまま残る（最後に flush 済みのフラグメントまでは読める）。
                 // finalize の Err は error フラグに反映されないため、ここで観測できるよう warn ログを出す。
                 if let Err(e) = &result {
-                    tracing::warn!("hybrid mp4 writer exited with error: {}", e.display());
+                    tracing::warn!(
+                        "failed to finalize mp4 file; the file may still be readable as fragmented mp4: {}",
+                        e.display()
+                    );
                 }
                 result
             },

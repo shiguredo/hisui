@@ -44,7 +44,7 @@ issues/0008 で対象テストを CI で 100 回繰り返し、約 3% でモー�
 2026-06-03 の観測（追加した観測点入りで CI 100 回実行、`E2E Flaky Repro`）で真因を確定した。失敗時のメトリクスは `hisui_total_finalize_failure_count = 1` / `hisui_total_finalize_success_count = 0`（finalize が内部 Err で失敗）で、サーバ stderr に次の warn が出ていた。
 
 ```
-[WARN] hisui::mp4::hybrid_writer - hybrid mp4 writer exited with error: Missing sample entry for first sample of Audio track
+[WARN] hisui::mp4::hybrid_writer - failed to finalize mp4 file; the file may still be readable as fragmented mp4: Missing sample entry for first sample of Audio track
 ```
 
 よって **候補 B（`finalize()` 内の `flush_fragment()` で Err が発生し `run()` が Err 終了）が真因**。候補 A・C は棄却。
@@ -147,7 +147,7 @@ A(2) と C はいずれも `wait_or_terminate` のタイムアウト強制終了
 
 ### 第 2 段階: 修正
 
-音声トラック先頭サンプルの sample_entry 欠落が真因だったため、**writer の入口（`handle_audio_message` / `handle_video_message`）で受信フレームの sample_entry を即 `last_*_sample_entry` に取り込む**ようにした（`src/mp4/hybrid_writer.rs`）。sample_entry はストリーム中で最初の 1 フレームにしか載らない（例: `OpusEncoder` は `take()` で付与）ため、pending 化・キューイング・ドロップのタイミングに依存せず確実に保持する。これにより、フラグメント先頭サンプルが sample_entry を持たなくても `.or(last_*_sample_entry)` で解決し、finalize が成功する。
+音声トラック先頭サンプルの sample_entry 欠落が真因だったため、**writer の入口（`handle_audio_message` / `handle_video_message`）で受信フレームの sample_entry を即 `last_*_sample_entry` に取り込む**ようにした（`src/mp4/hybrid_writer.rs`）。sample_entry は一部のフレームにしか載らない（音声は先頭フレームのみのことが多い。例: `OpusEncoder` は `take()` で先頭に付与。映像は解像度等のエンコード設定変更で後続フレームにも載りうる）ため、受信時点で最新を取り込み、pending 化・キューイング・ドロップのタイミングに依存せず確実に保持する。これにより、フラグメント先頭サンプルが sample_entry を持たなくても `.or(last_*_sample_entry)` で解決し、finalize が成功する。
 
 - 回帰テスト `hybrid_writer_captures_audio_sample_entry_at_ingress` を追加（`src/mp4/hybrid_writer.rs`）。入口での取り込みが無いと `last_audio_sample_entry` が None のままになり落ちる。
 - `CHANGES.md` の `## develop` に `[FIX]` エントリを追記した。
