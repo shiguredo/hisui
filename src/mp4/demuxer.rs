@@ -102,6 +102,10 @@ pub(crate) struct Mp4Demuxer {
     file_size: u64,
     path: PathBuf,
     inner: DemuxerKind,
+    /// 直近に供給した入力範囲の開始位置。
+    /// fMP4 でセグメント (moof + mdat) を処理中にエラーが起きた際、
+    /// その moof の位置を知るために使う。
+    last_supply_offset: Option<u64>,
 }
 
 impl Mp4Demuxer {
@@ -124,6 +128,7 @@ impl Mp4Demuxer {
             file_size,
             path: path.to_path_buf(),
             inner,
+            last_supply_offset: None,
         };
         this.initialize()?;
         Ok(this)
@@ -156,6 +161,20 @@ impl Mp4Demuxer {
                 Ok(None) => return Ok(None),
                 Err(DemuxError::InputRequired(required)) => required,
                 Err(e) => {
+                    // 書き込み途中でクラッシュした hybrid fMP4 では、フラグメントの moof + mdat が
+                    // 中途半端に書かれ、trun が宣言するサンプルデータが mdat に収まらないことがある。
+                    // これは hybrid mp4 では想定内のため、メディアフラグメント (moof + mdat) の処理中に
+                    // 失敗した場合はエラーにせず、そこで読み取りを終了 (ストリーム終端) として扱う。
+                    // moov / ftyp など初期化中の破損は引き続きエラーにする。
+                    if let Some(moof_offset) = self.last_supply_offset
+                        && self.is_media_fragment(moof_offset)?
+                    {
+                        tracing::warn!(
+                            "Stopping at broken media fragment at offset {moof_offset} in {}: {e}",
+                            self.path.display()
+                        );
+                        return Ok(None);
+                    }
                     return Err(Error::new(format!(
                         "Demux error {}: {e}",
                         self.path.display()
@@ -166,9 +185,66 @@ impl Mp4Demuxer {
         }
     }
 
+    /// 失敗したセグメント (`moof_offset`) が、メディアフラグメント (`moof` + `mdat`) かどうか判定する。
+    ///
+    /// `moof_offset` から始まるトップレベルボックスが `moof` であり、その直後に `mdat` が
+    /// 続く場合に真を返す。クラッシュで切り詰められたフラグメントを、初期化中 (moov / ftyp) の
+    /// 破損と区別して「メディアフラグメントの処理失敗」として扱うために使う。
+    fn is_media_fragment(&mut self, moof_offset: u64) -> Result<bool> {
+        let Some((moof_type, moof_size)) = self.read_box_header(moof_offset)? else {
+            return Ok(false);
+        };
+        if &moof_type != b"moof" || moof_size == 0 {
+            return Ok(false);
+        }
+        let Some(mdat_offset) = moof_offset.checked_add(moof_size) else {
+            return Ok(false);
+        };
+        let Some((mdat_type, _mdat_size)) = self.read_box_header(mdat_offset)? else {
+            return Ok(false);
+        };
+        Ok(&mdat_type == b"mdat")
+    }
+
+    /// 指定位置のボックスヘッダ (4 バイトの type と box サイズ) を読み取る。
+    /// `size == 1` の 64 bit サイズ、`size == 0` のファイル末尾までの両方に対応する。
+    /// ヘッダを読み取れない (ファイル末尾を超える等) 場合は `None` を返す。
+    fn read_box_header(&mut self, offset: u64) -> Result<Option<([u8; 4], u64)>> {
+        if offset.saturating_add(8) > self.file_size {
+            return Ok(None);
+        }
+        self.file
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| Error::new(format!("Seek error {}: {e}", self.path.display())))?;
+        let mut header = [0u8; 8];
+        self.file
+            .read_exact(&mut header)
+            .map_err(|e| Error::new(format!("Read error {}: {e}", self.path.display())))?;
+        let size32 = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
+        let box_type = [header[4], header[5], header[6], header[7]];
+        let size = match size32 {
+            // ファイル末尾までを表す
+            0 => 0,
+            // 直後の 8 バイトが 64 bit サイズ
+            1 => {
+                if offset.saturating_add(16) > self.file_size {
+                    return Ok(None);
+                }
+                let mut ext = [0u8; 8];
+                self.file
+                    .read_exact(&mut ext)
+                    .map_err(|e| Error::new(format!("Read error {}: {e}", self.path.display())))?;
+                u64::from_be_bytes(ext)
+            }
+            n => u64::from(n),
+        };
+        Ok(Some((box_type, size)))
+    }
+
     /// `RequiredInput` が示す範囲をファイルから読み込んでデマルチプレクサに供給する
     fn supply(&mut self, required: RequiredInput) -> Result<()> {
         let position = required.position;
+        self.last_supply_offset = Some(position);
         let buf = read_required_range(&mut self.file, self.file_size, &self.path, required)?;
         self.inner.handle_input(Input {
             position,
@@ -312,6 +388,113 @@ mod tests {
     use super::*;
 
     const TEST_MP4: &str = "testdata/red-320x320-h264-aac.mp4";
+    const TEST_FMP4: &str = "testdata/red-320x320-h264-aac-fragmented.mp4";
+
+    /// トップレベルボックスを走査して (type, offset, size) の一覧を返す
+    fn top_level_boxes(data: &[u8]) -> Vec<([u8; 4], usize, usize)> {
+        let mut boxes = Vec::new();
+        let mut off = 0;
+        while off + 8 <= data.len() {
+            let size = u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+                as usize;
+            let box_type = [data[off + 4], data[off + 5], data[off + 6], data[off + 7]];
+            boxes.push((box_type, off, size));
+            if size < 8 {
+                break;
+            }
+            off += size;
+        }
+        boxes
+    }
+
+    /// Mp4Demuxer でサンプル数を数える
+    fn count_samples(path: &Path) -> Result<usize> {
+        let mut demuxer = Mp4Demuxer::open(path)?;
+        let mut count = 0;
+        while demuxer.next_sample()?.is_some() {
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// 一時ファイルにデータを書き出す
+    fn write_temp(data: &[u8]) -> tempfile::NamedTempFile {
+        use std::io::Write;
+        let mut file = tempfile::Builder::new()
+            .suffix(".mp4")
+            .tempfile()
+            .expect("一時ファイルを作成できること");
+        file.write_all(data).expect("一時ファイルに書き込めること");
+        file.flush().expect("flush できること");
+        file
+    }
+
+    #[test]
+    fn tolerates_truncated_trailing_fragment() {
+        // 正常な fMP4 の末尾に「trun が宣言する以上に mdat が短い」壊れたフラグメントを追加し、
+        // クラッシュで切り詰められた hybrid fMP4 を模す。
+        // demuxer は壊れたフラグメントの手前までのサンプルを返し、エラーにせず終了すること。
+        let data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
+        let boxes = top_level_boxes(&data);
+        let (_, moof_off, moof_size) = boxes
+            .iter()
+            .find(|(t, _, _)| t == b"moof")
+            .copied()
+            .expect("moof があること");
+        let mdat_off = moof_off + moof_size;
+        let (mdat_type, _, mdat_size) = boxes
+            .iter()
+            .find(|(_, off, _)| *off == mdat_off)
+            .copied()
+            .expect("moof の直後に mdat があること");
+        assert_eq!(&mdat_type, b"mdat", "moof の直後は mdat であること");
+
+        // 最初のフラグメント (ftyp + moov + moof + mdat) のみの正常ファイル
+        let valid_only = &data[..mdat_off + mdat_size];
+        let valid_file = write_temp(valid_only);
+        let valid_count =
+            count_samples(valid_file.path()).expect("正常 fMP4 のサンプルを読めること");
+        assert!(valid_count > 0, "正常フラグメントからサンプルを読めること");
+
+        // moof をコピーし、わずか 16 バイトしか持たない mdat を続ける壊れたフラグメントを作る。
+        // default_base_is_moof のため moof の位置に依存せず、trun の宣言サイズが mdat を超える。
+        let mut truncated = valid_only.to_vec();
+        truncated.extend_from_slice(&data[moof_off..mdat_off]); // moof のコピー
+        truncated.extend_from_slice(&24u32.to_be_bytes()); // 小さい mdat (ヘッダ 8 + 本体 16)
+        truncated.extend_from_slice(b"mdat");
+        truncated.extend_from_slice(&[0u8; 16]);
+        let truncated_file = write_temp(&truncated);
+
+        let truncated_count = count_samples(truncated_file.path())
+            .expect("壊れたフラグメントでもエラーにならないこと");
+        assert_eq!(
+            truncated_count, valid_count,
+            "壊れた末尾フラグメントの手前までのサンプルを返すこと"
+        );
+    }
+
+    #[test]
+    fn is_media_fragment_distinguishes_moof_from_init() {
+        let data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
+        let boxes = top_level_boxes(&data);
+        let (_, moof_off, _) = boxes
+            .iter()
+            .find(|(t, _, _)| t == b"moof")
+            .copied()
+            .expect("moof があること");
+
+        let mut demuxer = Mp4Demuxer::open(TEST_FMP4).expect("fMP4 を開けること");
+        assert!(
+            demuxer
+                .is_media_fragment(moof_off as u64)
+                .expect("判定に成功すること"),
+            "moof の位置はメディアフラグメントと判定されること"
+        );
+        assert!(
+            !demuxer.is_media_fragment(0).expect("判定に成功すること"),
+            "先頭 (ftyp) はメディアフラグメントと判定されないこと"
+        );
+    }
 
     #[test]
     fn read_sample_data_reads_requested_range() {

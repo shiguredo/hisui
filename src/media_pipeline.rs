@@ -7,6 +7,10 @@ type SubscriberTx = tokio::sync::mpsc::UnboundedSender<Message>;
 struct ReturnSubscribersPayload {
     track_id: TrackId,
     subscribers: Vec<SubscriberTx>,
+    /// この publisher が Drop までに EOS を送信済みかどうか。
+    /// EOS 未送信のまま Drop した場合 (= 異常終了等) は、再 publish 待ち
+    /// (`marked_for_republish`) でない限り subscriber を閉じて EOS を伝える。
+    eos_sent: bool,
 }
 
 pub const PROCESSOR_TYPE_VIDEO_ENCODER: &str = "video_encoder";
@@ -45,6 +49,9 @@ pub struct MediaPipeline {
     tracks: std::collections::HashMap<TrackId, TrackState>,
     stats: crate::stats::Stats,
     config: std::sync::Arc<MediaPipelineConfig>,
+    /// いずれかの processor が異常終了したかどうか。
+    /// run() 終了後に呼び出し側 (inspect 等) が終了コードへ反映するために参照する。
+    error_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl MediaPipeline {
@@ -80,7 +87,14 @@ impl MediaPipeline {
             tracks: std::collections::HashMap::new(),
             stats: crate::stats::Stats::new(),
             config: std::sync::Arc::new(config),
+            error_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
+    }
+
+    /// いずれかの processor が異常終了したかどうかを参照するためのフラグを返す。
+    /// run() でパイプラインを消費する前に取得し、run() 完了後に参照する。
+    pub fn error_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.error_flag.clone()
     }
 
     /// このパイプラインを操作するためのハンドルを返す
@@ -92,6 +106,7 @@ impl MediaPipeline {
             local_processor_task_tx: self.local_processor_task_tx.clone().expect("infallible"),
             stats: self.stats.clone(),
             config: self.config.clone(),
+            error_flag: self.error_flag.clone(),
         }
     }
 
@@ -124,6 +139,13 @@ impl MediaPipeline {
             let Some(track) = self.tracks.get_mut(&payload.track_id) else {
                 continue;
             };
+            // EOS 未送信のまま Drop し、かつ再 publish 待ち (unpublish_track 由来) でもない場合は、
+            // publisher の異常終了とみなして subscriber を閉じる。payload (subscriber) を破棄すると
+            // 送信側が切断され、購読側の recv() は EOS を返してハングを防げる。
+            // EOS 送信済み (正常終了) や再 publish 待ちのトラックは従来通り subscriber を保持する。
+            if !payload.eos_sent && !track.marked_for_republish {
+                continue;
+            }
             let alive: Vec<_> = payload
                 .subscribers
                 .into_iter()
@@ -377,6 +399,8 @@ impl MediaPipeline {
         }
 
         track.publisher_processor_id = Some(processor_id.clone());
+        // 再 publish が行われたので、再 publish 待ちの状態を解除する
+        track.marked_for_republish = false;
         if let Some(state) = self.processors.get_mut(&processor_id)
             && !state.published_track_ids.contains(&track_id)
         {
@@ -396,6 +420,7 @@ impl MediaPipeline {
             return_tx: self.return_tx.clone(),
             processor_id,
             track_id,
+            eos_sent: false,
         })
     }
 
@@ -414,6 +439,8 @@ impl MediaPipeline {
         }
         track.publisher_processor_id = None;
         track.new_subscriber_tx = None;
+        // 同じ track_id の再 publish を待つ。publisher が EOS 未送信で Drop しても subscriber を保持する。
+        track.marked_for_republish = true;
 
         if let Some(state) = self.processors.get_mut(&processor_id) {
             state.published_track_ids.retain(|id| *id != track_id);
@@ -575,6 +602,7 @@ pub struct MediaPipelineHandle {
     local_processor_task_tx: tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>,
     stats: crate::stats::Stats,
     config: std::sync::Arc<MediaPipelineConfig>,
+    error_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl MediaPipelineHandle {
@@ -593,9 +621,11 @@ impl MediaPipelineHandle {
             .await?;
         let error_flag = handle.error_flag.clone();
         let spawned_processor_id = processor_id.clone();
+        let pipeline_error_flag = self.error_flag.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = f(handle).await {
                 error_flag.set(true);
+                pipeline_error_flag.store(true, std::sync::atomic::Ordering::SeqCst);
                 tracing::error!(
                     "failed to run processor {spawned_processor_id}: {}",
                     e.display()
@@ -623,10 +653,12 @@ impl MediaPipelineHandle {
             .register_processor(processor_id.clone(), metadata)
             .await?;
         let error_flag = handle.error_flag.clone();
+        let pipeline_error_flag = self.error_flag.clone();
         let task: LocalProcessorTask = Box::new(move || {
             tokio::task::spawn_local(async move {
                 if let Err(e) = f(handle).await {
                     error_flag.set(true);
+                    pipeline_error_flag.store(true, std::sync::atomic::Ordering::SeqCst);
                     tracing::error!("failed to run processor {processor_id}: {}", e.display());
                 }
             });
@@ -954,6 +986,9 @@ struct TrackState {
     /// publish 中に追加される subscriber を publisher に転送するためのチャネル。
     /// publish_track() で作成され、unpublish / deregister で None にリセットされる。
     new_subscriber_tx: Option<tokio::sync::mpsc::UnboundedSender<SubscriberTx>>,
+    /// unpublish_track() により、同じ track_id の再 publish を待っている状態かどうか。
+    /// この間に publisher が EOS 未送信で Drop しても、subscriber は閉じずに保持する。
+    marked_for_republish: bool,
 }
 
 #[derive(Clone)]
@@ -1163,6 +1198,8 @@ pub struct TrackPublisher {
     return_tx: std::sync::mpsc::Sender<ReturnSubscribersPayload>,
     processor_id: ProcessorId,
     track_id: TrackId,
+    /// EOS を送信済みかどうか。Drop 時に subscriber を閉じるか保持するかの判定に使う。
+    eos_sent: bool,
 }
 
 // TrackPublisher は subscribers の中身が Debug でないため手動実装
@@ -1191,6 +1228,7 @@ impl Drop for TrackPublisher {
         let _ = self.return_tx.send(ReturnSubscribersPayload {
             track_id: self.track_id.clone(),
             subscribers,
+            eos_sent: self.eos_sent,
         });
     }
 }
@@ -1247,6 +1285,7 @@ impl TrackPublisher {
     }
 
     pub fn send_eos(&mut self) -> bool {
+        self.eos_sent = true;
         self.send(Message::Eos)
     }
 
@@ -2222,6 +2261,70 @@ mod tests {
         )
         .await;
 
+        drop(handle);
+        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+            .await
+            .expect("pipeline task timed out")
+            .expect("pipeline task failed");
+    }
+
+    #[tokio::test]
+    async fn publisher_failure_without_eos_closes_subscribers() {
+        // publisher が EOS を送らずに異常終了した場合、購読側の recv() が EOS を返して
+        // ハングしないことを検証する。
+        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let handle = pipeline.handle();
+        let error_flag = pipeline.error_flag();
+        let pipeline_task = tokio::spawn(pipeline.run());
+
+        let receiver = handle
+            .register_processor(
+                ProcessorId::new("closing_receiver"),
+                metadata("test_receiver"),
+            )
+            .await
+            .expect("failed to register receiver");
+        let track_id = TrackId::new("failing-track");
+        let mut rx = receiver.subscribe_track(track_id.clone());
+        receiver.notify_ready();
+
+        assert!(
+            handle
+                .trigger_start()
+                .await
+                .expect("trigger_start must succeed")
+        );
+
+        // track を publish した直後に EOS を送らずエラーで終了する processor
+        let publish_track_id = track_id.clone();
+        handle
+            .spawn_processor(
+                ProcessorId::new("failing_publisher"),
+                metadata("test_publisher"),
+                move |handle| async move {
+                    let _publisher = handle.publish_track(publish_track_id).await?;
+                    handle.notify_ready();
+                    Err(crate::Error::new("publisher failed without sending eos"))
+                },
+            )
+            .await
+            .expect("spawn_processor must succeed");
+
+        // ハングせずに EOS を受信できること
+        let message = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("receiver hung waiting for eos");
+        assert!(
+            matches!(message, Message::Eos),
+            "subscriber must observe EOS when publisher fails without sending it"
+        );
+        assert!(
+            error_flag.load(std::sync::atomic::Ordering::SeqCst),
+            "pipeline error flag must be set on processor failure"
+        );
+
+        drop(rx);
+        drop(receiver);
         drop(handle);
         tokio::time::timeout(Duration::from_secs(5), pipeline_task)
             .await
