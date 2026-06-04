@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-05-29
-- Completed:
+- Completed: 2026-06-04
 - Model: Opus 4.7
 - Branch: feature/add-miri-tests
 - Polished: 2026-05-29
@@ -123,24 +123,67 @@ hisui の `unsafe` は、ほとんどが「外部 (主に C) ライブラリの 
 
 ## 解決方法
 
-### 検討手順
+検討の結論は **miri の一般的な導入は見送る（想定パターン A）**。pilot を実機で実施し、Q1〜Q6 を実測で確定した。
 
-1. nightly toolchain を rustup でインストールし、`rustup +nightly component add miri` でセットアップする。
-2. 純 Rust の小さな対象 (例: `src/types.rs` の `ContainerFormat::from_path`、`src/codec_string.rs`、`src/timestamp/` 系) に対する単体テストを 1〜2 本に絞って `cargo +nightly miri test --test <name>` を実行する。
-3. FFI を含むテストは `#[cfg(not(miri))]` で除外し、miri 実行時のコンパイルだけは通るようにする。
-4. 実行結果を踏まえ、以下を判断する:
-   - 検出された問題があれば、それを別 issue として登録する。
-   - 検出された問題が無くても、対象範囲を拡げて pilot を続けるか、見送るかを決める。
-5. 結論を本 issue に追記して close する。
+### 実施環境
 
-### 想定される結論パターン
+- 日付: 2026-06-04
+- toolchain: `rust-toolchain.toml` は stable のまま据え置き、`rustup run nightly` で override
+- nightly: rustc 1.98.0-nightly (57d06900f 2026-05-27)
+- miri: 0.1.0 (57d06900fd 2026-05-27)
+- セットアップ: `rustup component add --toolchain nightly miri rust-src`（ローカルのみ。`Cargo.toml` と `rust-toolchain.toml` は未変更）
 
-- **パターン A (導入見送り)**: 純 Rust 対象が薄く、検出される UB が無く、CI コスト・toolchain 二重化のコストに見合わない場合。本 issue で根拠を残して close。
-- **パターン B (限定導入)**: timestamp / types / 一部 mp4 関連の純 Rust テストだけ miri 対象にし、週次 CI ジョブで走らせる。導入 PR を別 issue で起こす。
-- **パターン C (依存 crate 側で対応すべきと判定)**: hisui で miri は走らせず、`shiguredo_mp4` などの依存 crate 側で miri テストを整備すべきと判定し、それを依存 crate 側の issue として起票する。
+### 実施した pilot と結果
 
-### 留意点
+前提として `cargo miri test` は `hisui` lib 全体（aws-lc-sys / sora_sdk / shiguredo_webrtc 等の C-FFI 依存を含む）をコンパイルする。**この全体コンパイルは miri ターゲットで成功した**（依存ビルドを除き約 37 秒）。FFI は呼び出し時のみ問題になるため、コンパイル自体は通る。
 
-- 検討段階なのでコード変更は最小限。`Cargo.toml` を触らず、`rustup` 経由でローカルにだけ miri を入れて pilot するのが望ましい。
-- 検討中に「ローカル pilot のためだけに `cfg(miri)` を src に撒く」のは過剰。pilot は `tests/` 配下に新規テストを 1〜2 本追加するだけで成立させる。
-- miri は実行速度が通常テストの 100〜1000 倍遅い。pilot 段階でも時間制約を意識し、ループ回数・入力サイズを小さくする。
+純 Rust モジュールの既存 unit test を厳密なモジュールパスで絞って実行した（いずれも新規テストの追加なし）。結果は次のとおり。
+
+| 対象フィルタ | 件数 | Stacked Borrows (既定) | Tree Borrows |
+| --- | --- | --- | --- |
+| `json::tests`（json 5 + sora stats json 2） | 7 | ok | ok |
+| `timestamp::mapper::tests` | 11 | ok | ok |
+| `timestamp::sample_aligner::tests` | 4 | ok | ok |
+| `codec_string::tests` | 15 | ok | ok |
+
+再現コマンド:
+
+```console
+rustup component add --toolchain nightly miri rust-src
+SDKROOT=$(xcrun --show-sdk-path) rustup run nightly cargo miri test --lib -- json::tests
+# Tree Borrows を使う場合は MIRIFLAGS を付与する
+MIRIFLAGS=-Zmiri-tree-borrows SDKROOT=$(xcrun --show-sdk-path) \
+  rustup run nightly cargo miri test --lib -- timestamp::mapper::tests
+```
+
+**UB は Stacked Borrows / Tree Borrows のいずれでも検出されなかった。**
+
+一方、フィルタを `json`（素朴な部分一致）にすると tokio ランタイムを張る `endpoint_http_metrics::tests::...json_format` まで巻き込み、miri が即 abort した。
+
+```text
+error: unsupported operation: can't call foreign function `kqueue` on OS `macos`
+  ... mio::sys::unix::selector::Selector::new
+  ... tokio::runtime::Builder::build
+```
+
+miri は最初の unsupported operation / UB でプロセス全体を abort する。tokio・FFI を踏むテストが 1 件でも混じると pure テストの結果も得られない。lib の unit test は約 564 件あり、上記で miri 実行できたのは 37 件（約 6.5%）にとどまる。
+
+### Q1〜Q6 の結論
+
+- **Q1（価値があるか）**: 限定的。hisui 本体の `unsafe` は 11 箇所すべてが FFI の薄いラッパー（`raw_player::quit` / `libc::getrusage` / `libc::statfs` / WebRTC バッファ操作）で、その先（C 側）を miri は解釈できない。miri が実際に動かせる純 Rust モジュール（json / timestamp / codec_string / sora stats json）には `unsafe` も生ポインタも無く、miri は「遅い再実行環境」にとどまる。
+- **Q2（対象範囲）**: 仮に絞るなら上記 4 モジュール。ただし価値は低い。唯一の例外は `src/webrtc/video.rs` の `copy_plane`（`ptr::copy_nonoverlapping` を使う自前の stride コピー）。これは FFI に依存しない生ポインタ操作なので、宛先を `Vec` で確保した隔離テストを書けば miri で検証する価値がある。
+- **Q3（CI）**: 仮に導入するなら別ジョブ・週次が妥当。ただし下記 Q4 の制約で素朴な実行は不可。
+- **Q4（ソース側対応）**: 致命的。`cargo miri test --lib` の素朴な一括実行はできない。部分一致フィルタですら tokio テストを巻き込んで abort する。pure テストだけを安全に回すには `#[cfg(not(miri))]` での FFI/tokio テスト除外、または miri 対象テストの専用モジュール隔離が必須で、約 564 件のテストへ網羅的に属性を付与・維持するコストが発生する。「最小コスト」では収まらない。
+- **Q5（nightly 管理）**: `rust-toolchain.toml` を stable のまま `rustup run nightly cargo miri` で override できることを実証した。toolchain 二重化は可能。
+- **Q6（Tree Borrows 等）**: pure 対象では `-Zmiri-tree-borrows` でも UB ゼロ。tokio を含めると即 abort するため `-Zmiri-many-seeds` 等のスケジューリング探索は対象外。
+
+### 最終結論
+
+- **一般的な miri テストスイートの導入は見送る（パターン A）**。理由は (1) miri 実行可能な純 Rust 部分に自前 `unsafe` が無く価値が「遅い PBT」止まり、(2) FFI/tokio テストの除外という非自明な構造変更が必須でコストに見合わない、(3) Stacked / Tree Borrows いずれでも UB ゼロ。
+- **依存 crate 側（shiguredo_mp4 等）の `unsafe` は依存 crate 側で miri を回すのが筋（パターン C）**。codec_string 経由でも UB は出ていない。
+- **唯一の残課題は `copy_plane`**。ただし当プロジェクトは stable + PBT(proptest) + fuzzing(cargo-fuzz) を方針としており、生ポインタ境界の検証は将来整備する fuzz target で賄う方が toolchain 二重化を避けられて筋が良い。miri 専用導入は行わない。
+
+### 留意点（実施記録）
+
+- pilot のための変更は「ローカルへの miri コンポーネント追加」のみ。`Cargo.toml` / `rust-toolchain.toml` / `src` / `tests` は未変更。
+- miri は通常テストより十分遅い（pure テスト 7〜15 件で 3〜6 秒）。FFI 依存込みの全体ビルドは別途必要。
