@@ -5,7 +5,23 @@
 - Completed:
 - Model: Opus 4.8
 - Branch: feature/fix-hybrid-writer-finalize-on-stop-record
-- Polished: 2026-06-03
+- Polished: 2026-06-04
+
+## 再 open（2026-06-04）
+
+一度 closed にしたが、修正が真因に届いておらず未解決のため open に戻す。
+
+- **再発の確認**: CI の e2e `obsws/test_output.py::test_obsws_srt_inbound_with_stream_id` で同症状が再発した。サーバ stderr に `Missing sample entry for first sample of Audio track`、メトリクスに `hisui_total_finalize_failure_count = 1` / `hisui_error = 1` を観測。
+- **真因の再診断**: 旧「候補 B（finalize 内 Err）」は**症状**であって根本原因ではない。根本原因は「**音声の sample_entry が録画 writer に確実に届く仕組みが無い**」こと。
+  - `OpusEncoder` は sample_entry を最初の出力フレームにしか載せない（`src/encoder/opus.rs` の `self.sample_entry.take()`）。
+  - 映像には録画開始時のキーフレーム要求（`request_upstream_video_keyframe`）があり、エンコーダがキーフレームに sample_entry を常に補完する（`src/encoder.rs:729-736`）ため確実に届く。**音声には同等の sample_entry 要求機構が無い**ため、writer が最初の entry 付きフレームを取りこぼすと entry が一度も届かず、finalize が失敗する。
+- **本ブランチで実施した内容（真因は未修正）**:
+  - 観測機構（finalize 成否カウンタ / sample_entry の received・missing カウンタ / warn ログ）を追加。真因再診断に寄与したため恒久的に残す。
+  - 入口（`handle_*_message`）での sample_entry 取り込み。pause 中等に entry 付きフレームが drop されても保持する hardening で、pause エッジには有効。ただし「そもそも届かない」本症状は塞げない。
+- **真の修正**: 音声にも sample_entry 要求機構を追加する（映像のキーフレーム要求の音声版）。別 issue で対応する。
+- なお当時の「100 回連続成功で修正確認」は、発生率約 3% に対し連続成功確率が約 5%（`0.97^100`）と偶然通過しうる弱い検証だった。
+
+以下は closed 化時点の記述であり、上記の再診断で訂正済み（特に「候補 B = 真因」「第 2 段階で修正完了」「再発ゼロ」は誤り）。
 
 ## 目的
 
@@ -39,7 +55,26 @@ issues/0008 で対象テストを CI で 100 回繰り返し、約 3% でモー�
 - 録画が約 0.8 秒と短く、`HYBRID_FRAGMENT_MAX_DURATION = 2 秒`（`src/mp4/hybrid_writer.rs:38`）の時間フラッシュに届かない。録画開始時の 1 枚以外にキーフレームが無く GOP 区切りフラッシュも起きない（`src/mp4/hybrid_writer.rs:650`）。よって録画全体が単一の未 flush フラグメントに収まり、出力の成否が `finalize()` の実行有無だけに依存する。
 - 2 秒超の録画や複数キーフレームを含む録画では、最低 1 フラグメントが flush 済みになるため、仮に `finalize()` がスキップされても recovery moov + flush 済みフラグメントから映像が読める。短時間録画はこの救済が無く、`finalize()` 未実行が即「空トラック」に直結する。
 
-### 真因（finalize がスキップされる経路）は未確定
+### 真因（確定: 候補 B = finalize 内 Err）
+
+2026-06-03 の観測（追加した観測点入りで CI 100 回実行、`E2E Flaky Repro`）で真因を確定した。失敗時のメトリクスは `hisui_total_finalize_failure_count = 1` / `hisui_total_finalize_success_count = 0`（finalize が内部 Err で失敗）で、サーバ stderr に次の warn が出ていた。
+
+```
+[WARN] hisui::mp4::hybrid_writer - failed to finalize mp4 file; the file may still be readable as fragmented mp4: Missing sample entry for first sample of Audio track
+```
+
+よって **候補 B（`finalize()` 内の `flush_fragment()` で Err が発生し `run()` が Err 終了）が真因**。候補 A・C は棄却。
+
+具体的な発生機序:
+
+- `append_audio_to_fragment()`（`src/mp4/hybrid_writer.rs:253-266`）は、サンプルの `sample_entry` を `sample.sample_entry.clone().or_else(|| self.last_audio_sample_entry.clone())` で決める。
+- 音声トラックの**最初のサンプルが `sample_entry` 無しで到着**し、かつ過去に `sample_entry` 付きサンプルが無い（`last_audio_sample_entry` も None）場合、そのサンプルの `sample_entry` は None になる。
+- flush 時（`flush_fragment()` → muxer）に、トラックの先頭サンプルには `sample_entry`（コーデック設定）が必須のため、muxer が「Missing sample entry for first sample of Audio track」で Err を返す。
+- 短時間録画では flush 機会が finalize 時の 1 回だけなので、この先頭サンプルの sample_entry 欠落が即 finalize 失敗 → 空 moov に直結する。約 3% の発生率は、音声トラックの先頭サンプルが sample_entry 無しで到着する競合の頻度と整合する。
+
+下記は確定前の検討記録（経緯として残す）。`flush_pending_video_if_ready` 等により Finish/EOS 経路では finalize に到達することが分かり、候補 A は弱いと判断していた。
+
+#### 確定前の検討（参考）
 
 issues/0008 の結論は「Finish RPC が入力を即座に閉じると pending フレームが宙に浮き、finalize 条件に到達しないまま強制終了される」と記述しているが、**この機序はコード読解と整合しない**。
 
@@ -114,4 +149,25 @@ A(2) と C はいずれも `wait_or_terminate` のタイムアウト強制終了
 
 ## 解決方法
 
-（実装時に追記）
+第 1 段階（真因特定）・第 2 段階（修正）とも本 issue 内で完了した。別 issue への切り出しは行わなかった。
+
+### 第 1 段階: 観測点の追加と真因の確定
+
+- `Mp4WriterStats` に finalize の成功・失敗カウンタ（`total_finalize_success_count` / `total_finalize_failure_count`）を追加し、`finalize()` の成否に応じて計上するようにした（`src/mp4/writer.rs`、`src/mp4/hybrid_writer.rs`）。
+- `run()` を起動するクロージャで `run()` の Err を捕捉し warn ログを出すようにした（`src/mp4/hybrid_writer.rs`）。`run()` の Err 自体は `spawn_processor` 側で `hisui_error` gauge と error ログに反映されるが、その error ログには「fMP4 として読める可能性がある」という finalize 固有の回復可能性の文脈が無いため、それを明示する warn を追加した。
+- `wait_or_terminate()` の強制終了経路（`src/obsws/coordinator/output.rs`）と `finish_mp4_writer_rpc()` の `terminate_processor` 経路（`src/obsws/coordinator/output_record.rs`）に warn ログを追加した。
+- obsws e2e テストの失敗時にサーバの stdout/stderr を出力するようにした（`e2e-tests/obsws/helpers.py`）。これまで失敗時にサーバログ（warn 含む）が捨てられ原因追跡が困難だった。
+- 一時ワークフローで CI 100 回実行し、`total_finalize_failure_count = 1` / `success_count = 0` と warn `Missing sample entry for first sample of Audio track` を観測。**候補 B（finalize 内 Err による `run()` 自己終了）を確定**し、候補 A・C を棄却した。
+
+これらの観測用要素のうち、finalize カウンタと warn ログは回帰検知・運用診断に有用なため恒久的に残し、一時ワークフローは検証完了後に削除した。
+
+### 第 2 段階: 修正
+
+音声トラック先頭サンプルの sample_entry 欠落が真因だったため、**writer の入口（`handle_audio_message` / `handle_video_message`）で受信フレームの sample_entry を即 `last_*_sample_entry` に取り込む**ようにした（`src/mp4/hybrid_writer.rs`）。sample_entry は一部のフレームにしか載らない（音声は先頭フレームのみのことが多い。例: `OpusEncoder` は `take()` で先頭に付与。映像は解像度等のエンコード設定変更で後続フレームにも載りうる）ため、受信時点で最新を取り込み、pending 化・キューイング・ドロップのタイミングに依存せず確実に保持する。これにより、フラグメント先頭サンプルが sample_entry を持たなくても `.or(last_*_sample_entry)` で解決し、finalize が成功する。
+
+- 回帰テスト `hybrid_writer_captures_audio_sample_entry_at_ingress` を追加（`src/mp4/hybrid_writer.rs`）。入口での取り込みが無いと `last_audio_sample_entry` が None のままになり落ちる。
+- `CHANGES.md` の `## develop` に `[FIX]` エントリを追記した。
+
+### 検証
+
+修正後、対象テスト `obsws/test_output.py::test_obsws_srt_inbound_start_record_and_inspect_output` を CI で 100 回（10 シャード × 10 回）実行し、**全成功（再発ゼロ）** を確認した。修正前は約 3% で失敗していた。

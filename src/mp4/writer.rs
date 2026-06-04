@@ -77,6 +77,23 @@ pub struct Mp4WriterStats {
     actual_moov_box_size: crate::stats::StatsGauge,
     total_flushed_fragment_count: crate::stats::StatsCounter,
     total_recovery_moov_update_count: crate::stats::StatsCounter,
+    // 以下の finalize / sample_entry 系カウンタは hybrid writer でのみ計上される
+    // （通常の Mp4Writer 経路では更新されず常に 0）。
+    //
+    // finalize の成否カウンタ。failure は finalize（標準 MP4 への変換）が内部 Err で失敗し、
+    // 出力が fMP4 形式のまま残ることを示す。
+    total_finalize_success_count: crate::stats::StatsCounter,
+    total_finalize_failure_count: crate::stats::StatsCounter,
+    // sample_entry の受信数と「フラグメント先頭で解決できなかった数」を音声/映像別に観測する (issues/0011)。
+    // received は ingress で sample_entry を載せて受信したフレーム数（pause 等で drop される前に数える）。
+    // received が 0 なら上流が一度も sample_entry を送っていないことを示す。
+    // missing はフラグメント先頭サンプルで sample_entry を解決できなかった数で、発生箇所（append）で計上する。
+    // writer のフラグメント単位と muxer 内部のチャンク単位は粒度が異なるため、missing>0 が即 finalize
+    // 失敗を意味するとは限らないが、sample_entry 取りこぼしの目安になる。
+    total_received_audio_sample_entry_count: crate::stats::StatsCounter,
+    total_received_video_sample_entry_count: crate::stats::StatsCounter,
+    total_missing_audio_sample_entry_count: crate::stats::StatsCounter,
+    total_missing_video_sample_entry_count: crate::stats::StatsCounter,
     recoverable_media_duration: crate::stats::StatsDuration,
     current_unflushed_fragment_duration: crate::stats::StatsDuration,
     current_unflushed_video_sample_count: crate::stats::StatsGauge,
@@ -105,6 +122,16 @@ impl Mp4WriterStats {
         let actual_moov_box_size = stats.gauge("actual_moov_box_size");
         let total_flushed_fragment_count = stats.counter("total_flushed_fragment_count");
         let total_recovery_moov_update_count = stats.counter("total_recovery_moov_update_count");
+        let total_finalize_success_count = stats.counter("total_finalize_success_count");
+        let total_finalize_failure_count = stats.counter("total_finalize_failure_count");
+        let total_received_audio_sample_entry_count =
+            stats.counter("total_received_audio_sample_entry_count");
+        let total_received_video_sample_entry_count =
+            stats.counter("total_received_video_sample_entry_count");
+        let total_missing_audio_sample_entry_count =
+            stats.counter("total_missing_audio_sample_entry_count");
+        let total_missing_video_sample_entry_count =
+            stats.counter("total_missing_video_sample_entry_count");
         let recoverable_media_duration = stats.duration("recoverable_media_seconds");
         let current_unflushed_fragment_duration =
             stats.duration("current_unflushed_fragment_seconds");
@@ -139,6 +166,12 @@ impl Mp4WriterStats {
             actual_moov_box_size,
             total_flushed_fragment_count,
             total_recovery_moov_update_count,
+            total_finalize_success_count,
+            total_finalize_failure_count,
+            total_received_audio_sample_entry_count,
+            total_received_video_sample_entry_count,
+            total_missing_audio_sample_entry_count,
+            total_missing_video_sample_entry_count,
             recoverable_media_duration,
             current_unflushed_fragment_duration,
             current_unflushed_video_sample_count,
@@ -175,6 +208,30 @@ impl Mp4WriterStats {
 
     pub(crate) fn add_recovery_moov_update(&self) {
         self.total_recovery_moov_update_count.inc();
+    }
+
+    pub(crate) fn add_finalize_success(&self) {
+        self.total_finalize_success_count.inc();
+    }
+
+    pub(crate) fn add_finalize_failure(&self) {
+        self.total_finalize_failure_count.inc();
+    }
+
+    pub(crate) fn add_received_audio_sample_entry(&self) {
+        self.total_received_audio_sample_entry_count.inc();
+    }
+
+    pub(crate) fn add_received_video_sample_entry(&self) {
+        self.total_received_video_sample_entry_count.inc();
+    }
+
+    pub(crate) fn add_missing_audio_sample_entry(&self) {
+        self.total_missing_audio_sample_entry_count.inc();
+    }
+
+    pub(crate) fn add_missing_video_sample_entry(&self) {
+        self.total_missing_video_sample_entry_count.inc();
     }
 
     pub(crate) fn set_recoverable_media_duration(&self, duration: Duration) {
@@ -267,6 +324,30 @@ impl Mp4WriterStats {
 
     pub fn total_recovery_moov_update_count(&self) -> u64 {
         self.total_recovery_moov_update_count.get()
+    }
+
+    pub fn total_finalize_success_count(&self) -> u64 {
+        self.total_finalize_success_count.get()
+    }
+
+    pub fn total_finalize_failure_count(&self) -> u64 {
+        self.total_finalize_failure_count.get()
+    }
+
+    pub fn total_received_audio_sample_entry_count(&self) -> u64 {
+        self.total_received_audio_sample_entry_count.get()
+    }
+
+    pub fn total_received_video_sample_entry_count(&self) -> u64 {
+        self.total_received_video_sample_entry_count.get()
+    }
+
+    pub fn total_missing_audio_sample_entry_count(&self) -> u64 {
+        self.total_missing_audio_sample_entry_count.get()
+    }
+
+    pub fn total_missing_video_sample_entry_count(&self) -> u64 {
+        self.total_missing_video_sample_entry_count.get()
     }
 
     pub fn recoverable_media_duration(&self) -> Duration {
