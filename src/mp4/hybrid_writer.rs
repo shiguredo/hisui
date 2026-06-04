@@ -1063,7 +1063,9 @@ pub async fn create_processor(
                     .await;
                 // run() が Err 終了すると finalize（標準 MP4 への変換）に到達できず、ファイルは
                 // 録画中の fMP4 形式のまま残る（最後に flush 済みのフラグメントまでは読める）。
-                // finalize の Err は error フラグに反映されないため、ここで観測できるよう warn ログを出す。
+                // run() の Err 自体は spawn_processor 側で error フラグと error ログに反映されるが、
+                // その error ログには「fMP4 として読める可能性がある」という finalize 固有の回復可能性の
+                // 文脈が無い。ここではその文脈を明示するため warn を追加で出す。
                 if let Err(e) = &result {
                     tracing::warn!(
                         "failed to finalize mp4 file; the file may still be readable as fragmented mp4: {}",
