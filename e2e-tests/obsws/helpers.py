@@ -43,6 +43,7 @@ class ObswsServer:
         https_key_path: Path | None = None,
         state_file: Path | None = None,
         use_env: bool = False,
+        dump_metrics_on_exit: bool = True,
     ):
         self.binary_path = binary_path
         self.host = host
@@ -55,6 +56,7 @@ class ObswsServer:
         self.https_key_path = https_key_path
         self.state_file = state_file
         self.use_env = use_env
+        self.dump_metrics_on_exit = dump_metrics_on_exit
         self._process: subprocess.Popen[str] | None = None
         self._stdout = ""
         self._stderr = ""
@@ -92,6 +94,9 @@ class ObswsServer:
                 env["HISUI_DEFAULT_RECORD_DIR"] = str(self.default_record_dir)
             if self.state_file is not None:
                 env["HISUI_SERVER_STATE_FILE"] = str(self.state_file)
+            # noargs::flag は値が空でなければ有効と解釈するため、無効時は変数自体を設定しない
+            if self.dump_metrics_on_exit:
+                env["HISUI_DUMP_METRICS_ON_EXIT"] = "1"
         else:
             args.extend(
                 [
@@ -122,6 +127,8 @@ class ObswsServer:
                 args.extend(["--state-file", str(self.state_file)])
             if openh264_path:
                 args.extend(["--openh264", openh264_path])
+            if self.dump_metrics_on_exit:
+                args.append("--dump-metrics-on-exit")
 
         cmd, cwd = build_hisui_command(self.binary_path, *args)
         self._process = subprocess.Popen(
@@ -141,12 +148,13 @@ class ObswsServer:
             return
         if process.poll() is None:
             process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=3.0)
-        stdout, stderr = process.communicate(timeout=1.0)
+        # 終了時メトリクスダンプで stdout pipe が詰まるとサーバが exit できないため、
+        # communicate() で stdout/stderr を並行 drain しながら終了を待つ。
+        try:
+            stdout, stderr = process.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=3.0)
         self._stdout = stdout
         self._stderr = stderr
         self._process = None
@@ -501,33 +509,6 @@ def _inspect_mp4(
 
         # StopRecord 直後は MP4 のメタ情報がまだ揃わないことがあるため、短時間だけ再試行する。
         time.sleep(interval_sec)
-
-
-def _format_obsws_diagnostics(
-    *,
-    inspect_output: dict[str, object] | None = None,
-    metrics_snapshots: dict[str, str] | None = None,
-) -> str:
-    parts: list[str] = []
-    if inspect_output is not None:
-        parts.append(f"inspect_output={inspect_output}")
-    if metrics_snapshots is not None:
-        for name, snapshot in metrics_snapshots.items():
-            parts.append(f"metrics_snapshot[{name}]:\n{snapshot}")
-    return "\n".join(parts)
-
-
-def _print_obsws_diagnostics(
-    *,
-    inspect_output: dict[str, object] | None = None,
-    metrics_snapshots: dict[str, str] | None = None,
-) -> None:
-    diagnostics_text = _format_obsws_diagnostics(
-        inspect_output=inspect_output,
-        metrics_snapshots=metrics_snapshots,
-    )
-    if diagnostics_text:
-        print(diagnostics_text)
 
 
 def _write_test_png(path: Path) -> None:

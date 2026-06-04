@@ -2,6 +2,7 @@
 
 import asyncio
 import concurrent.futures
+import json
 import re
 import time
 from pathlib import Path
@@ -12,9 +13,7 @@ from helpers import (
     OBSWS_SUBPROTOCOL,
     ObswsServer,
     _collect_obsws_metrics_snapshot,
-    _collect_obsws_metrics_snapshot_async,
     _create_output,
-    _format_obsws_diagnostics,
     _http_get,
     _identify_with_optional_password,
     _inspect_mp4,
@@ -312,14 +311,8 @@ def test_obsws_start_record_with_multiple_audio_inputs(
             assert output_path.exists()
             assert output_path.stat().st_size > 0
 
-            # StopRecord 後にメトリクスを取得（デバッグ用）
-            status, body, _ = await _http_get(
-                f"http://{server.host}:{server.port}/metrics"
-            )
-            metrics_snapshot = f"[/metrics] status={status}\n{body}"
-
             await ws.close()
-            return output_path, metrics_snapshot
+            return output_path
 
     with ObswsServer(
         binary_path,
@@ -328,7 +321,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
         default_record_dir=tmp_path,
         use_env=False,
     ) as server:
-        output_path, metrics_snapshot = asyncio.run(_run(server))
+        output_path = asyncio.run(_run(server))
 
     inspect_output = _inspect_mp4(
         binary_path,
@@ -336,7 +329,6 @@ def test_obsws_start_record_with_multiple_audio_inputs(
         required_keys=("video_codec", "video_sample_count"),
     )
     print(f"inspect_output={inspect_output}")
-    print(f"metrics_snapshot:\n{metrics_snapshot}")
     assert inspect_output["format"] == "mp4"
     assert inspect_output.get("audio_codec") == "OPUS", (
         f"audio_codec mismatch: inspect_output={inspect_output}"
@@ -816,7 +808,6 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                 None,
                 lambda: _start_ffmpeg_inbound_push(input_path, rtmp_push_url, "flv"),
             )
-            metrics_snapshots: dict[str, str] = {}
             try:
                 # mp4_writer に映像サンプルが書き込まれるまで待機する
                 for _ in range(30):
@@ -835,10 +826,6 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     )
 
                 await asyncio.sleep(0.5)
-                metrics_snapshots["before_stop_record"] = await _collect_obsws_metrics_snapshot_async(
-                    host,
-                    ws_port,
-                )
 
                 stop_record_response = await _send_obsws_request(
                     ws,
@@ -847,16 +834,12 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
                 output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
-                metrics_snapshots["after_stop_record"] = await _collect_obsws_metrics_snapshot_async(
-                    host,
-                    ws_port,
-                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
 
             await ws.close()
-            return output_path, metrics_snapshots
+            return output_path
 
     with ObswsServer(
         binary_path,
@@ -865,7 +848,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
         default_record_dir=tmp_path,
         use_env=False,
     ):
-        output_path, metrics_snapshots = asyncio.run(_run())
+        output_path = asyncio.run(_run())
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
@@ -873,9 +856,6 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
         binary_path,
         output_path,
         required_keys=("video_codec", "video_sample_count"),
-        diagnostics_text=_format_obsws_diagnostics(
-            metrics_snapshots=metrics_snapshots,
-        ),
     )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
@@ -932,7 +912,6 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                 None,
                 lambda: _start_ffmpeg_inbound_push(input_path, srt_url, "mpegts"),
             )
-            metrics_snapshots: dict[str, str] = {}
             try:
                 # mp4_writer に映像サンプルが書き込まれるまで待機する
                 for _ in range(30):
@@ -951,10 +930,6 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                     )
 
                 await asyncio.sleep(0.5)
-                metrics_snapshots["before_stop_record"] = await _collect_obsws_metrics_snapshot_async(
-                    host,
-                    ws_port,
-                )
 
                 stop_record_response = await _send_obsws_request(
                     ws,
@@ -963,16 +938,12 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
                 output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
-                metrics_snapshots["after_stop_record"] = await _collect_obsws_metrics_snapshot_async(
-                    host,
-                    ws_port,
-                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
 
             await ws.close()
-            return output_path, metrics_snapshots
+            return output_path
 
     with ObswsServer(
         binary_path,
@@ -981,7 +952,7 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
         default_record_dir=tmp_path,
         use_env=False,
     ):
-        output_path, metrics_snapshots = asyncio.run(_run())
+        output_path = asyncio.run(_run())
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
@@ -989,9 +960,6 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
         binary_path,
         output_path,
         required_keys=("video_codec", "video_sample_count"),
-        diagnostics_text=_format_obsws_diagnostics(
-            metrics_snapshots=metrics_snapshots,
-        ),
     )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
@@ -1053,7 +1021,6 @@ def test_obsws_srt_inbound_with_stream_id(
                 None,
                 lambda: _start_ffmpeg_inbound_push(input_path, srt_push_url, "mpegts"),
             )
-            metrics_snapshots: dict[str, str] = {}
             try:
                 # mp4_writer に映像サンプルが書き込まれるまで待機する
                 for _ in range(30):
@@ -1072,10 +1039,6 @@ def test_obsws_srt_inbound_with_stream_id(
                     )
 
                 await asyncio.sleep(0.5)
-                metrics_snapshots["before_stop_record"] = await _collect_obsws_metrics_snapshot_async(
-                    host,
-                    ws_port,
-                )
 
                 stop_record_response = await _send_obsws_request(
                     ws,
@@ -1084,16 +1047,12 @@ def test_obsws_srt_inbound_with_stream_id(
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
                 output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
-                metrics_snapshots["after_stop_record"] = await _collect_obsws_metrics_snapshot_async(
-                    host,
-                    ws_port,
-                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
 
             await ws.close()
-            return output_path, metrics_snapshots
+            return output_path
 
     with ObswsServer(
         binary_path,
@@ -1102,7 +1061,7 @@ def test_obsws_srt_inbound_with_stream_id(
         default_record_dir=tmp_path,
         use_env=False,
     ):
-        output_path, metrics_snapshots = asyncio.run(_run())
+        output_path = asyncio.run(_run())
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
@@ -1110,9 +1069,6 @@ def test_obsws_srt_inbound_with_stream_id(
         binary_path,
         output_path,
         required_keys=("video_codec", "video_sample_count"),
-        diagnostics_text=_format_obsws_diagnostics(
-            metrics_snapshots=metrics_snapshots,
-        ),
     )
     assert inspect_output["format"] == "mp4"
     assert inspect_output["video_codec"] == "H264"
@@ -2120,3 +2076,50 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
 
     with ObswsServer(binary_path, host=host, port=port, use_env=False):
         asyncio.run(_run_validation_flow())
+
+
+def _extract_metrics_dump_lines(stdout: str) -> list[dict]:
+    """サーバ stdout から終了時メトリクスダンプの JSON Lines を抽出してパースする"""
+    entries = []
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("{"):
+            entries.append(json.loads(stripped))
+    return entries
+
+
+def test_obsws_dump_metrics_on_exit_outputs_jsonl(binary_path: Path, tmp_path: Path):
+    """--dump-metrics-on-exit 有効時、SIGTERM 停止で全メトリクスが JSON Lines で stdout に出ることを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    # 起動直後に停止する。起動時点でミキサー等の processor がメトリクスを登録している。
+    server = ObswsServer(binary_path, host=host, port=port, default_record_dir=tmp_path)
+    with server:
+        pass
+
+    entries = _extract_metrics_dump_lines(server._stdout)
+    assert entries, f"終了時メトリクスダンプが stdout に出ていない: stdout={server._stdout!r}"
+    for entry in entries:
+        assert set(entry) == {"name", "labels", "value"}, f"ダンプ行の形式が不正: {entry}"
+
+
+def test_obsws_dump_metrics_on_exit_disabled(binary_path: Path, tmp_path: Path):
+    """--dump-metrics-on-exit 無効時はダンプが出力されないことを確認する"""
+    host = "127.0.0.1"
+    port, sock = reserve_ephemeral_port()
+    sock.close()
+
+    server = ObswsServer(
+        binary_path,
+        host=host,
+        port=port,
+        default_record_dir=tmp_path,
+        dump_metrics_on_exit=False,
+    )
+    with server:
+        pass
+
+    entries = _extract_metrics_dump_lines(server._stdout)
+    assert not entries, f"無効化したのにダンプが出ている: {entries}"
