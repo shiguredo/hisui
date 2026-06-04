@@ -1239,6 +1239,102 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_writer_counts_finalize_failure_on_missing_sample_entry() -> crate::Result<()> {
+        // 入口取り込みが無く last_audio_sample_entry が None のまま、sample_entry を持たない音声
+        // サンプルをフラグメント先頭に積むと、finalize 時に muxer が「先頭サンプルに sample_entry が
+        // 無い」で Err になる (issues/0011 の真因)。このとき failure カウンタが計上され Err が伝播する。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+
+        // 映像は sample_entry 付きで正常に積む。
+        let video_sample_entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+        writer.append_video_to_fragment(
+            &make_video_frame(Some(video_sample_entry)),
+            DEFAULT_SAMPLE_DURATION,
+        );
+
+        // 音声は sample_entry 無しで先頭に積む (last_audio_sample_entry も None なので解決できない)。
+        writer.append_audio_to_fragment(&make_audio_frame(None), DEFAULT_SAMPLE_DURATION);
+        assert_eq!(
+            writer.core.stats.total_missing_audio_sample_entry_count(),
+            1
+        );
+
+        let result = writer.finalize();
+        assert!(result.is_err());
+        assert_eq!(writer.core.stats.total_finalize_failure_count(), 1);
+        assert_eq!(writer.core.stats.total_finalize_success_count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_counts_missing_video_sample_entry_for_first_sample() -> crate::Result<()> {
+        // 音声版と対称 (issues/0011)。last_video_sample_entry が None の状態で sample_entry を
+        // 持たない映像フレームをフラグメント先頭に追加すると missing が計上され、2 つ目以降は計上されない。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        assert_eq!(
+            writer.core.stats.total_missing_video_sample_entry_count(),
+            0
+        );
+
+        writer.append_video_to_fragment(&make_video_frame(None), DEFAULT_SAMPLE_DURATION);
+        assert_eq!(
+            writer.core.stats.total_missing_video_sample_entry_count(),
+            1
+        );
+
+        // 2 つ目以降は先頭サンプルではないため計上されない。
+        writer.append_video_to_fragment(&make_video_frame(None), DEFAULT_SAMPLE_DURATION);
+        assert_eq!(
+            writer.core.stats.total_missing_video_sample_entry_count(),
+            1
+        );
+
+        // 映像の計上が音声カウンタに混ざらないことを確認する。
+        assert_eq!(
+            writer.core.stats.total_missing_audio_sample_entry_count(),
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_captures_video_sample_entry_at_ingress() -> crate::Result<()> {
+        // 音声版と対称 (issues/0011)。入口 (handle_video_message) で sample_entry 付き映像フレームを
+        // 受信すると last_video_sample_entry に保持され、received カウンタが計上される。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let sample_entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+
+        writer.handle_video_message(
+            crate::Message::Media(crate::MediaFrame::Video(Arc::new(make_video_frame(Some(
+                sample_entry.clone(),
+            ))))),
+            &mut None,
+        )?;
+        assert_eq!(writer.last_video_sample_entry, Some(sample_entry.clone()));
+        // 入口で sample_entry を載せて受信したフレーム数が計上される。
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            1
+        );
+
+        // sample_entry を持たない映像サンプルを先頭に追加しても、入口で保持した値が使われる。
+        writer.append_video_to_fragment(&make_video_frame(None), DEFAULT_SAMPLE_DURATION);
+        assert_eq!(
+            writer.fragment_video_samples[0].sample_entry,
+            Some(sample_entry)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn hybrid_writer_keeps_video_sample_entry_across_fragments() -> crate::Result<()> {
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         let sample_entry = crate::video::av1::av1_sample_entry(
