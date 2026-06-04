@@ -942,10 +942,10 @@ impl HybridMp4Writer {
                 self.core.stats.add_received_audio_data();
                 // sample_entry は一部のフレームにしか載らない。音声は先頭フレームのみのことが多く
                 // (例: OpusEncoder)、映像は途中で解像度等のエンコード設定が変わると後続フレームにも
-                // 載りうる。どのタイミングで来ても取りこぼさないよう、pending 化・キューイング・
-                // ドロップに依存しない writer の入口で受信時点に取り込み、最新の sample_entry を保持する。
-                // これが無いと、フラグメント先頭サンプルの sample_entry が None のまま flush され
-                // muxer が Err になりうる (issues/0011)。
+                // 載りうる。届いた sample_entry を pending 化・キューイング・ドロップで落とさないよう、
+                // writer の入口で受信時点に取り込んで保持する (pause エッジ向けの hardening)。
+                // ただし、entry 付きフレームが writer に一度も届かないケース (issues/0011 の真因) は
+                // これでは塞げず、上流に音声 sample_entry 要求機構を追加する必要がある。
                 if sample.sample_entry.is_some() {
                     self.core.stats.add_received_audio_sample_entry();
                     self.last_audio_sample_entry
@@ -1155,7 +1155,7 @@ mod tests {
     fn hybrid_writer_captures_audio_sample_entry_at_ingress() -> crate::Result<()> {
         // writer の入口 (handle_audio_message) で受信した sample_entry を保持し、
         // フラグメント先頭の音声サンプルが sample_entry を持たなくても finalize が
-        // 成功することを検証する (issues/0011 の回帰防止)。
+        // 成功することを検証する (入口取り込み hardening の回帰防止。issues/0011 の真因の修正ではない)。
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         let sample_entry = crate::audio::aac::create_mp4a_sample_entry(
             &[0x12, 0x10],
@@ -1238,7 +1238,7 @@ mod tests {
     fn hybrid_writer_counts_finalize_failure_on_missing_sample_entry() -> crate::Result<()> {
         // 入口取り込みが無く last_audio_sample_entry が None のまま、sample_entry を持たない音声
         // サンプルをフラグメント先頭に積むと、finalize 時に muxer が「先頭サンプルに sample_entry が
-        // 無い」で Err になる (issues/0011 の真因)。このとき failure カウンタが計上され Err が伝播する。
+        // 無い」で Err になる (issues/0011 で観測される finalize 失敗の症状)。failure カウンタが計上され Err が伝播する。
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
 
         // 映像は sample_entry 付きで正常に積む。

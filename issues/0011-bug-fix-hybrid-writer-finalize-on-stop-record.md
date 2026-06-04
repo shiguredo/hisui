@@ -2,10 +2,26 @@
 
 - Priority: Medium
 - Created: 2026-06-03
-- Completed: 2026-06-03
+- Completed:
 - Model: Opus 4.8
 - Branch: feature/fix-hybrid-writer-finalize-on-stop-record
-- Polished: 2026-06-03
+- Polished: 2026-06-04
+
+## 再 open（2026-06-04）
+
+一度 closed にしたが、修正が真因に届いておらず未解決のため open に戻す。
+
+- **再発の確認**: CI の e2e `obsws/test_output.py::test_obsws_srt_inbound_with_stream_id` で同症状が再発した。サーバ stderr に `Missing sample entry for first sample of Audio track`、メトリクスに `hisui_total_finalize_failure_count = 1` / `hisui_error = 1` を観測。
+- **真因の再診断**: 旧「候補 B（finalize 内 Err）」は**症状**であって根本原因ではない。根本原因は「**音声の sample_entry が録画 writer に確実に届く仕組みが無い**」こと。
+  - `OpusEncoder` は sample_entry を最初の出力フレームにしか載せない（`src/encoder/opus.rs` の `self.sample_entry.take()`）。
+  - 映像には録画開始時のキーフレーム要求（`request_upstream_video_keyframe`）があり、エンコーダがキーフレームに sample_entry を常に補完する（`src/encoder.rs:729-736`）ため確実に届く。**音声には同等の sample_entry 要求機構が無い**ため、writer が最初の entry 付きフレームを取りこぼすと entry が一度も届かず、finalize が失敗する。
+- **本ブランチで実施した内容（真因は未修正）**:
+  - 観測機構（finalize 成否カウンタ / sample_entry の received・missing カウンタ / warn ログ）を追加。真因再診断に寄与したため恒久的に残す。
+  - 入口（`handle_*_message`）での sample_entry 取り込み。pause 中等に entry 付きフレームが drop されても保持する hardening で、pause エッジには有効。ただし「そもそも届かない」本症状は塞げない。
+- **真の修正**: 音声にも sample_entry 要求機構を追加する（映像のキーフレーム要求の音声版）。別 issue で対応する。
+- なお当時の「100 回連続成功で修正確認」は、発生率約 3% に対し連続成功確率が約 5%（`0.97^100`）と偶然通過しうる弱い検証だった。
+
+以下は closed 化時点の記述であり、上記の再診断で訂正済み（特に「候補 B = 真因」「第 2 段階で修正完了」「再発ゼロ」は誤り）。
 
 ## 目的
 
