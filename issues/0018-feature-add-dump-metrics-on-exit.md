@@ -31,15 +31,16 @@ Medium。テスト失敗や障害の原因調査の効率に直結し、汎用�
 - 出力フックは obsws server のシャットダウン経路（`src/obsws/server.rs` / `src/obsws/coordinator.rs`）等に置く。
 - 制約: SIGKILL では出力できない（graceful 終了のみ）。server プロセスはシャットダウン時にまとめて出すため、録画ごとではなく最終状態のダンプになる（録画 processor 終了後もメトリクスはレジストリに残存することを issues/0011 の停止後スナップショットで確認済み）。
 
-### 2. e2e 側: スクレイプ・埋め込みの縮小
+### 2. e2e 側: フラグを既定で使い、スクレイプ・埋め込みを縮小する
 
-- 失敗診断は server 終了ダンプ（captured output。`e2e-tests/obsws/helpers.py` の `_emit_captured_output` で失敗時に print 済み）の最終メトリクスに委ねる。
-- `AssertionError` メッセージへの `/metrics` 全文埋め込み（`_format_obsws_diagnostics` の metrics_snapshot 部分）を廃止し、assert は簡潔な失敗理由のみにする。未使用の `_print_obsws_diagnostics` は整理（活用または削除）する。
-- 録画中の中間状態が必要なテストがあれば、その箇所だけ最小限のスクレイプを残す。
+- E2E サーバ起動（`ObswsServer.start`、`e2e-tests/obsws/helpers.py:68-126`）で `--dump-metrics-on-exit` を既定で付与し、全テストが graceful 停止時に終了ダンプを得られるようにする。
+- 失敗診断は server 終了ダンプ（captured output。`_emit_captured_output` で失敗時に print 済み）の最終メトリクスに委ねる。`AssertionError` への `/metrics` 全文埋め込み（`_format_obsws_diagnostics` の metrics_snapshot 部分）と、それ向けの `_collect_obsws_metrics_snapshot_async` でのスクレイプを廃止し、assert は簡潔な失敗理由のみにする。未使用の `_print_obsws_diagnostics` は整理（活用または削除）する。
+- 録画中のライブ待ち（`_has_positive_metric` で `/metrics` を見て映像サンプル書き込みを待つ等、`e2e-tests/obsws/test_output.py:288-292`）は終了前の状態が必要なので HTTP `/metrics` のまま残す。
 
 ## 完了条件
 
 - フラグ有効時、graceful 終了で全メトリクスが JSON Lines で出力されること（行ごとに 1 メトリクスで grep / parse できる）。
+- E2E サーバ（`ObswsServer`）が既定で `--dump-metrics-on-exit` を使い、全テストで終了ダンプが得られること。
 - obsws 録画系 e2e テストの失敗時に、最終メトリクス（finalize 成否 / sample_entry の received・missing 等）が切り詰められず確実に読めること。
 - `AssertionError` メッセージに `/metrics` 全文が埋め込まれないこと。
 
