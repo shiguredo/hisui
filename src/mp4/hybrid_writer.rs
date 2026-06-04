@@ -525,10 +525,19 @@ impl HybridMp4Writer {
 
     /// 録画を finalize して標準 MP4 に変換する
     fn finalize(&mut self) -> crate::Result<()> {
-        // finalize に到達したことを記録する。完了カウンタ (関数末尾) との差で
-        // 「到達したが完了しなかった」(内部 Err 等) を切り分けられるようにする。
-        self.core.stats.add_finalize_started();
+        // finalize の成否をカウンタに記録する。failure (内部 Err) は finalize 未完了で
+        // 録画が壊れた可能性を示すため、success と分けて観測できるようにする。
+        let result = self.finalize_inner();
+        if result.is_ok() {
+            self.core.stats.add_finalize_success();
+        } else {
+            self.core.stats.add_finalize_failure();
+        }
+        result
+    }
 
+    /// finalize の本体。成否カウンタの更新は呼び出し元の finalize() が行う。
+    fn finalize_inner(&mut self) -> crate::Result<()> {
         // 残りのフラグメントをフラッシュ
         self.flush_fragment()?;
 
@@ -587,8 +596,6 @@ impl HybridMp4Writer {
         }
 
         self.file.flush()?;
-
-        self.core.stats.add_finalize_completed();
 
         Ok(())
     }
@@ -1165,8 +1172,8 @@ mod tests {
         );
 
         writer.finalize()?;
-        assert_eq!(writer.core.stats.total_finalize_started_count(), 1);
-        assert_eq!(writer.core.stats.total_finalize_completed_count(), 1);
+        assert_eq!(writer.core.stats.total_finalize_success_count(), 1);
+        assert_eq!(writer.core.stats.total_finalize_failure_count(), 0);
         Ok(())
     }
 

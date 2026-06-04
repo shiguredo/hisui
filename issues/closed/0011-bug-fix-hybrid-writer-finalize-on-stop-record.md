@@ -41,7 +41,7 @@ issues/0008 で対象テストを CI で 100 回繰り返し、約 3% でモー�
 
 ### 真因（確定: 候補 B = finalize 内 Err）
 
-2026-06-03 の観測（追加した観測点入りで CI 100 回実行、`E2E Flaky Repro`）で真因を確定した。失敗時のメトリクスは `hisui_total_finalize_started_count = 1` / `hisui_total_finalize_completed_count = 0`（finalize に到達したが完了せず）で、サーバ stderr に次の warn が出ていた。
+2026-06-03 の観測（追加した観測点入りで CI 100 回実行、`E2E Flaky Repro`）で真因を確定した。失敗時のメトリクスは `hisui_total_finalize_failure_count = 1` / `hisui_total_finalize_success_count = 0`（finalize が内部 Err で失敗）で、サーバ stderr に次の warn が出ていた。
 
 ```
 [WARN] hisui::mp4::hybrid_writer - hybrid mp4 writer exited with error: Missing sample entry for first sample of Audio track
@@ -137,11 +137,11 @@ A(2) と C はいずれも `wait_or_terminate` のタイムアウト強制終了
 
 ### 第 1 段階: 観測点の追加と真因の確定
 
-- `Mp4WriterStats` に finalize の開始・完了カウンタ（`total_finalize_started_count` / `total_finalize_completed_count`）を追加し、`finalize()` の先頭と末尾で計上するようにした（`src/mp4/writer.rs`、`src/mp4/hybrid_writer.rs`）。
+- `Mp4WriterStats` に finalize の成功・失敗カウンタ（`total_finalize_success_count` / `total_finalize_failure_count`）を追加し、`finalize()` の成否に応じて計上するようにした（`src/mp4/writer.rs`、`src/mp4/hybrid_writer.rs`）。
 - `run()` を起動するクロージャで `run()` の Err を捕捉し warn ログを出すようにした（`src/mp4/hybrid_writer.rs`）。既存の `hisui_error` gauge は finalize の Err では立たないため。
 - `wait_or_terminate()` の強制終了経路（`src/obsws/coordinator/output.rs`）と `finish_mp4_writer_rpc()` の `terminate_processor` 経路（`src/obsws/coordinator/output_record.rs`）に warn ログを追加した。
 - obsws e2e テストの失敗時にサーバの stdout/stderr を出力するようにした（`e2e-tests/obsws/helpers.py`）。これまで失敗時にサーバログ（warn 含む）が捨てられ原因追跡が困難だった。
-- 一時ワークフローで CI 100 回実行し、`total_finalize_started_count = 1` / `completed_count = 0` と warn `Missing sample entry for first sample of Audio track` を観測。**候補 B（finalize 内 Err による `run()` 自己終了）を確定**し、候補 A・C を棄却した。
+- 一時ワークフローで CI 100 回実行し、`total_finalize_failure_count = 1` / `success_count = 0` と warn `Missing sample entry for first sample of Audio track` を観測。**候補 B（finalize 内 Err による `run()` 自己終了）を確定**し、候補 A・C を棄却した。
 
 これらの観測用要素のうち、finalize カウンタと warn ログは回帰検知・運用診断に有用なため恒久的に残し、一時ワークフローは検証完了後に削除した。
 
