@@ -15,9 +15,9 @@ use crate::{Error, Result};
 
 /// 壊れたファイル対策のバッファ上限 (100 MB)
 ///
-/// 正常なファイルでは ftyp / moov / 各セグメントのサイズ上限として機能する。
+/// 正常なファイルでは ftyp / moov / 各セグメント / サンプルデータのサイズ上限として機能する。
 /// 典型的には 100 MB あれば数百 GB 規模の MP4 ファイルでも扱えるため、実用上の問題はない想定。
-const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
+pub(crate) const MAX_BUF_SIZE: usize = 100 * 1024 * 1024;
 
 /// ファイル先頭 (ftyp + moov) を incremental に読み込んで MP4 / fMP4 を判定する
 pub(crate) fn detect_mp4_file_kind<P: AsRef<Path>>(path: P) -> Result<Mp4FileKind> {
