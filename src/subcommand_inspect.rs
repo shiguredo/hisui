@@ -142,7 +142,7 @@ async fn setup_pipeline(
     let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode);
 
     match format {
-        // fMP4 も通常 MP4 と同じ前方読み reader を使う
+        // fMP4 も通常 MP4 と同じ reader で扱える
         ContainerFormat::Mp4 | ContainerFormat::Fmp4 => {
             let reader = Mp4SampleReader::new(
                 input_file_path,
