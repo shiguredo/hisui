@@ -569,6 +569,30 @@ mod tests {
     }
 
     #[test]
+    fn errors_on_corrupted_moov() {
+        // 初期化中 (moov) の破損は、末尾フラグメントの切り詰めとは異なりエラーにする
+        // (壊れたファイルを正常終了として握り潰さない = 過剰許容にしない)。
+        let mut data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
+        let boxes = top_level_boxes(&data);
+        let (_, moov_off, moov_size) = boxes
+            .iter()
+            .find(|(t, _, _)| t == b"moov")
+            .copied()
+            .expect("moov があること");
+        // moov ペイロード (ヘッダ直後) を壊して decode を失敗させる
+        let corrupt_end = (moov_off + 8 + 64).min(moov_off + moov_size);
+        for byte in &mut data[moov_off + 8..corrupt_end] {
+            *byte = 0xff;
+        }
+        let file = write_temp(&data);
+
+        assert!(
+            count_samples(file.path()).is_err(),
+            "moov が壊れている場合はエラーになること (Ok(None) で握り潰さないこと)"
+        );
+    }
+
+    #[test]
     fn is_media_fragment_distinguishes_moof_from_init() {
         let data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
         let boxes = top_level_boxes(&data);
