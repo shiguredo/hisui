@@ -1,12 +1,15 @@
 use std::{
     collections::{HashSet, VecDeque},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::Duration,
 };
+
+use shiguredo_mp4::demux::Mp4FileKind;
 
 use crate::{
     Error, Result,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
+    mp4::file_kind::detect_mp4_file_kind,
     mp4::sample_reader::{Mp4SampleReader, Mp4SampleReaderOptions},
     types::{CodecName, ContainerFormat},
     video::h264::H264AnnexBNalUnits,
@@ -71,13 +74,27 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
     Ok(())
 }
 
+/// 入力ファイルのコンテナー形式を判定する
+///
+/// 拡張子で `Mp4` / `Webm` を判定したうえで、`Mp4` の場合のみファイル実体
+/// (ftyp / moov) を見て fragmented MP4 なら `Fmp4` に補正する。
+/// 破損ファイル等で判定に失敗した場合はエラーを伝播し、`Mp4` へはフォールバックしない
+/// (後段の reader 初期化でも同じ判定で失敗するため情報は失われない)。
+fn detect_container_format(path: &Path) -> Result<ContainerFormat> {
+    let format = ContainerFormat::from_path(path)?;
+    if format == ContainerFormat::Mp4 && detect_mp4_file_kind(path)? == Mp4FileKind::FragmentedMp4 {
+        return Ok(ContainerFormat::Fmp4);
+    }
+    Ok(format)
+}
+
 fn run_internal(
     input_file_path: PathBuf,
     decode: bool,
     openh264: Option<PathBuf>,
     #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
 ) -> Result<()> {
-    let format = ContainerFormat::from_path(&input_file_path)?;
+    let format = detect_container_format(&input_file_path)?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -125,7 +142,8 @@ async fn setup_pipeline(
     let output_printer = OutputPrinter::new(input_file_path.clone(), format, decode);
 
     match format {
-        ContainerFormat::Mp4 => {
+        // fMP4 も通常 MP4 と同じ前方読み reader を使う
+        ContainerFormat::Mp4 | ContainerFormat::Fmp4 => {
             let reader = Mp4SampleReader::new(
                 input_file_path,
                 Mp4SampleReaderOptions {
@@ -669,5 +687,53 @@ impl nojson::DisplayJson for OutputPrinter {
             }
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_regular_mp4_as_mp4() {
+        assert_eq!(
+            detect_container_format(Path::new("testdata/red-320x320-h264-aac.mp4"))
+                .expect("通常 MP4 の判定に成功すること"),
+            ContainerFormat::Mp4
+        );
+    }
+
+    #[test]
+    fn detect_fragmented_mp4_as_fmp4() {
+        assert_eq!(
+            detect_container_format(Path::new("testdata/red-320x320-h264-aac-fragmented.mp4"))
+                .expect("fMP4 の判定に成功すること"),
+            ContainerFormat::Fmp4
+        );
+    }
+
+    #[test]
+    fn detect_webm_as_webm() {
+        assert_eq!(
+            detect_container_format(Path::new("testdata/archive-black-silent.webm"))
+                .expect("WebM の判定に成功すること"),
+            ContainerFormat::Webm
+        );
+    }
+
+    #[test]
+    fn detect_propagates_error_for_corrupted_mp4() {
+        use std::io::Write;
+
+        // .mp4 拡張子だが中身が不正なファイルは detect_mp4_file_kind がエラーになり、
+        // それが伝播すること (Mp4 へフォールバックしないこと) を検証する
+        let mut file = tempfile::Builder::new()
+            .suffix(".mp4")
+            .tempfile()
+            .expect("一時ファイルを作成できること");
+        file.write_all(b"this is definitely not a valid mp4 file")
+            .expect("一時ファイルに書き込めること");
+        let result = detect_container_format(file.path());
+        assert!(result.is_err(), "破損 MP4 は判定エラーが伝播すること");
     }
 }

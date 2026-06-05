@@ -79,6 +79,11 @@ pub enum ContainerFormat {
     #[default]
     Webm,
     Mp4,
+    /// フラグメント化された MP4（fMP4）
+    ///
+    /// 拡張子では通常 MP4 と区別できないため `from_path` では生成されず、
+    /// inspect 層がファイル実体（ftyp / moov）を見て補正したときにのみ生成される。
+    Fmp4,
 }
 
 impl ContainerFormat {
@@ -107,6 +112,7 @@ impl nojson::DisplayJson for ContainerFormat {
         match self {
             ContainerFormat::Webm => f.string("webm"),
             ContainerFormat::Mp4 => f.string("mp4"),
+            ContainerFormat::Fmp4 => f.string("fmp4"),
         }
     }
 }

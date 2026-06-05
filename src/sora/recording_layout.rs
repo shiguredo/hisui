@@ -515,7 +515,8 @@ pub fn resolve_source_and_media_path_pairs(
         let mut media_path = path.clone();
         match archive.format {
             ContainerFormat::Webm => media_path.set_extension("webm"),
-            ContainerFormat::Mp4 => media_path.set_extension("mp4"),
+            // Sora 録画メタデータ経由では Fmp4 は生成されないが、網羅性維持のため Mp4 と同じ拡張子にする
+            ContainerFormat::Mp4 | ContainerFormat::Fmp4 => media_path.set_extension("mp4"),
         };
         resolved.push((archive.source_info(), media_path));
     }

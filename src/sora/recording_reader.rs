@@ -105,7 +105,9 @@ impl AudioReader {
             .pop()
             .ok_or_else(|| crate::Error::new("no input file for audio reader"))?;
         let inner = match format {
-            ContainerFormat::Mp4 => {
+            // Sora 録画メタデータ経由では Fmp4 は生成されない (TryFrom が受理しない) ため
+            // ここには到達しないが、網羅性維持のため Mp4 と同じ扱いにする
+            ContainerFormat::Mp4 | ContainerFormat::Fmp4 => {
                 let mut reader = Mp4AudioReader::new(first_input_file.clone())?;
                 reader.current_input_file = Some(first_input_file.clone());
                 AudioReaderInner::Mp4(Box::new(reader))
@@ -335,7 +337,9 @@ impl VideoReader {
             .pop()
             .ok_or_else(|| crate::Error::new("no input file for video reader"))?;
         let inner = match format {
-            ContainerFormat::Mp4 => {
+            // Sora 録画メタデータ経由では Fmp4 は生成されない (TryFrom が受理しない) ため
+            // ここには到達しないが、網羅性維持のため Mp4 と同じ扱いにする
+            ContainerFormat::Mp4 | ContainerFormat::Fmp4 => {
                 let mut reader = Mp4VideoReader::new(first_input_file.clone())?;
                 reader.current_input_file = Some(first_input_file.clone());
                 VideoReaderInner::Mp4(Box::new(reader))

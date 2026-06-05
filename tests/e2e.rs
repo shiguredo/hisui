@@ -75,7 +75,7 @@ fn inspect_fragmented_mp4_video_only() -> noargs::Result<()> {
         root.to_member("format")?
             .required()?
             .to_unquoted_string_str()?,
-        "mp4"
+        "fmp4"
     );
     assert_eq!(
         root.to_member("video_codec")?
@@ -103,6 +103,12 @@ fn inspect_fragmented_mp4_audio_only() -> noargs::Result<()> {
         .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
     let root = json.value();
     assert_eq!(
+        root.to_member("format")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "fmp4"
+    );
+    assert_eq!(
         root.to_member("audio_codec")?
             .required()?
             .to_unquoted_string_str()?,
@@ -127,6 +133,12 @@ fn inspect_fragmented_mp4_audio_video() -> noargs::Result<()> {
     let json = nojson::RawJson::parse(&stdout)
         .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
     let root = json.value();
+    assert_eq!(
+        root.to_member("format")?
+            .required()?
+            .to_unquoted_string_str()?,
+        "fmp4"
+    );
     assert_eq!(
         root.to_member("audio_codec")?
             .required()?

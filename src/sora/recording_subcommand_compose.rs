@@ -350,7 +350,8 @@ async fn setup_pipeline(
 
         let source_info = source_info.clone();
         let reader_processor_type = match source_info.format {
-            ContainerFormat::Mp4 => "mp4_audio_reader",
+            // Sora 録画メタデータ経由では Fmp4 は生成されないが、網羅性維持のため Mp4 と同じ扱いにする
+            ContainerFormat::Mp4 | ContainerFormat::Fmp4 => "mp4_audio_reader",
             ContainerFormat::Webm => "webm_audio_reader",
         };
         let (reader_processor_id, reader_metadata) = next_processor(reader_processor_type);
@@ -414,7 +415,8 @@ async fn setup_pipeline(
 
         let source_info = source_info.clone();
         let reader_processor_type = match source_info.format {
-            ContainerFormat::Mp4 => "mp4_video_reader",
+            // Sora 録画メタデータ経由では Fmp4 は生成されないが、網羅性維持のため Mp4 と同じ扱いにする
+            ContainerFormat::Mp4 | ContainerFormat::Fmp4 => "mp4_video_reader",
             ContainerFormat::Webm => "webm_video_reader",
         };
         let (reader_processor_id, reader_metadata) = next_processor(reader_processor_type);
