@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-04
-- Completed:
+- Completed: 2026-06-05
 - Model: Opus 4.8
 - Branch: feature/refactor-fmp4-reader-naming
 - Polished: 2026-06-05
@@ -47,10 +47,17 @@ Low。機能には影響しない可読性・一貫性の改善。変更対象�
 - `Mp4FileReader` に `Mp4SampleReader` との役割差を示す doc コメントが付くこと。
 - `Mp4FileReader::new` のエラー文言が `fMP4` 表記になり、テスト `new_rejects_fragmented_mp4`（`src/mp4/reader.rs:1696-1697` の `contains` とアサーションメッセージ）が追従すること。`cargo test -p hisui --lib new_rejects_fragmented_mp4` で確認できる（`testdata/red-320x320-h264-aac-fragmented.mp4` に依存）。
 - 識別子の `Fmp4`（型名・enum バリアント・ライブラリ型）に手を入れていないこと。
-- `CHANGES.md` の `### misc` に `[UPDATE]` として 1 行追記すること。エラー文言はユーザー可視だが、表記統一であって挙動・互換性に実質影響せず、doc 追加と合わせ機能に影響しないため `### misc` 扱いとする。記載例（既存の `[UPDATE]` 群の末尾に置き、次行に 2 文字インデントで担当者を添える）:
-  - `- [UPDATE] Mp4FileReader に doc コメントを追加し、エラー文言の fMP4 表記を統一する`
-  - `  - @ユーザー名`
 
 ## 関連
 
-- issues/0021（`src/mp4/demuxer.rs` の `Mp4Demuxer::open` を変更する）。本 issue は `src/mp4/reader.rs` と `CHANGES.md` のみ変更し、`demuxer.rs` は doc の手本として参照するだけなので、ファイル変更は重複しない。改名もしないため型名参照への波及も無い。
+- issues/0021（`src/mp4/demuxer.rs` の `Mp4Demuxer::open` を変更する）。本 issue は `src/mp4/reader.rs` のみ変更し、`demuxer.rs` は doc の手本として参照するだけなので、ファイル変更は重複しない。改名もしないため型名参照への波及も無い。
+
+## 解決方法 (2026-06-05)
+
+`feature/refactor-fmp4-reader-naming` で次を実装した。
+
+- `Mp4FileReader`（`src/mp4/reader.rs`）に doc コメントを追加し、再生制御つき reader であること・seek 依存で fMP4 非対応・前方読み専用は `Mp4SampleReader` を使うことを明示した。
+- `Mp4FileReader::new` のエラー文言を `"Fmp4 is not supported ..."` から `"fMP4 is not supported ..."` に統一した。
+- 連動するテスト `new_rejects_fragmented_mp4` の `contains` とアサーションメッセージを `fMP4` に追従させた。`cargo test -p hisui --lib new_rejects_fragmented_mp4` で通過を確認した。
+- 識別子（型名・enum バリアント・ライブラリ型）は変更していない。
+- `CHANGES.md` への記載は、doc 追加とエラー文言の表記統一のみで機能・互換性に影響しないため、方針判断により行わなかった。
