@@ -60,6 +60,7 @@ class ObswsServer:
         self._process: subprocess.Popen[str] | None = None
         self._stdout = ""
         self._stderr = ""
+        self._returncode: int | None = None
 
     def __enter__(self):
         return self.start()
@@ -156,6 +157,7 @@ class ObswsServer:
             stdout, stderr = process.communicate(timeout=3.0)
         self._stdout = stdout
         self._stderr = stderr
+        self._returncode = process.returncode
         self._process = None
         self._emit_captured_output()
 
@@ -170,6 +172,7 @@ class ObswsServer:
         stdout, stderr = process.communicate(timeout=1.0)
         self._stdout = stdout
         self._stderr = stderr
+        self._returncode = process.returncode
         self._process = None
         self._emit_captured_output()
 
@@ -207,6 +210,14 @@ class ObswsServer:
                 f"host={self.host}, port={self.port}"
             )
         return f"obsws stdout={self._stdout}, obsws stderr={self._stderr}"
+
+    @property
+    def stdout(self) -> str:
+        return self._stdout
+
+    @property
+    def returncode(self) -> int | None:
+        return self._returncode
 
 
 def _is_port_open(host: str, port: int) -> bool:

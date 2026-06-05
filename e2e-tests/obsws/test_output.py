@@ -2104,8 +2104,8 @@ def test_obsws_dump_metrics_on_exit_outputs_jsonl(binary_path: Path, tmp_path: P
     with server:
         pass
 
-    dump = _find_metrics_dump(server._stdout)
-    assert dump is not None, f"終了時メトリクスダンプが stdout に出ていない: stdout={server._stdout!r}"
+    dump = _find_metrics_dump(server.stdout)
+    assert dump is not None, f"終了時メトリクスダンプが stdout に出ていない: stdout={server.stdout!r}"
     # metrics は prom2json の family 配列で、hisui_ プレフィックス付きの family を含むこと
     families = dump["metrics"]
     assert isinstance(families, list) and families, f"metrics が空または配列でない: {dump}"
@@ -2133,6 +2133,9 @@ def test_obsws_dump_metrics_on_exit_disabled(binary_path: Path, tmp_path: Path):
     with server:
         pass
 
-    assert _find_metrics_dump(server._stdout) is None, (
-        f"無効化したのにダンプが出ている: {server._stdout!r}"
+    assert server.returncode == 0, (
+        f"SIGTERM でグレースフル終了していない: returncode={server.returncode}, {server.diagnostics()}"
+    )
+    assert _find_metrics_dump(server.stdout) is None, (
+        f"無効化したのにダンプが出ている: {server.stdout!r}"
     )
