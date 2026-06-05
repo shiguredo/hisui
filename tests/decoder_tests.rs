@@ -140,7 +140,9 @@ fn decode_video_frames_with_pipeline(
     runtime.block_on(async move {
         let pipeline = MediaPipeline::new()?;
         let pipeline_handle = pipeline.handle();
-        let mut pipeline_task = tokio::spawn(pipeline.run());
+        let mut pipeline_task = tokio::spawn(async move {
+            pipeline.run().await;
+        });
 
         let source_handle = register_processor(
             &pipeline_handle,
@@ -217,7 +219,9 @@ fn decode_audio_count_with_pipeline(input_samples: Vec<AudioFrame>) -> hisui::Re
     runtime.block_on(async move {
         let pipeline = MediaPipeline::new()?;
         let pipeline_handle = pipeline.handle();
-        let mut pipeline_task = tokio::spawn(pipeline.run());
+        let mut pipeline_task = tokio::spawn(async move {
+            pipeline.run().await;
+        });
 
         let source_handle = register_processor(
             &pipeline_handle,

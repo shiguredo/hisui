@@ -188,7 +188,9 @@ fn run_writer_with_pipeline(
     runtime.block_on(async move {
         let pipeline = MediaPipeline::new()?;
         let pipeline_handle = pipeline.handle();
-        let mut pipeline_task = tokio::spawn(pipeline.run());
+        let mut pipeline_task = tokio::spawn(async move {
+            pipeline.run().await;
+        });
 
         let has_audio = audio_samples.is_some();
         let has_video = video_frames.is_some();

@@ -50,8 +50,8 @@ pub struct MediaPipeline {
     stats: crate::stats::Stats,
     config: std::sync::Arc<MediaPipelineConfig>,
     /// いずれかの processor が異常終了したかどうか。
-    /// run() 終了後に呼び出し側 (inspect 等) が終了コードへ反映するために参照する。
-    error_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// run() の戻り値として呼び出し側 (inspect 等) に伝え、終了コードへ反映するために使う。
+    processor_failed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl MediaPipeline {
@@ -87,14 +87,8 @@ impl MediaPipeline {
             tracks: std::collections::HashMap::new(),
             stats: crate::stats::Stats::new(),
             config: std::sync::Arc::new(config),
-            error_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            processor_failed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
-    }
-
-    /// いずれかの processor が異常終了したかどうかを参照するためのフラグを返す。
-    /// run() でパイプラインを消費する前に取得し、run() 完了後に参照する。
-    pub fn error_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
-        self.error_flag.clone()
     }
 
     /// このパイプラインを操作するためのハンドルを返す
@@ -106,11 +100,12 @@ impl MediaPipeline {
             local_processor_task_tx: self.local_processor_task_tx.clone().expect("infallible"),
             stats: self.stats.clone(),
             config: self.config.clone(),
-            error_flag: self.error_flag.clone(),
+            processor_failed: self.processor_failed.clone(),
         }
     }
 
-    pub async fn run(mut self) {
+    /// パイプラインを駆動する。いずれかの processor が異常終了した場合は `true` を返す。
+    pub async fn run(mut self) -> bool {
         tracing::debug!("MediaPipeline started");
 
         self.command_tx = None; // 参照カウントから自分を外すために None にする
@@ -131,6 +126,8 @@ impl MediaPipeline {
         }
 
         tracing::debug!("MediaPipeline stopped");
+        self.processor_failed
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// TrackPublisher の Drop で返却された subscriber を pending_subscribers に戻す
@@ -602,7 +599,7 @@ pub struct MediaPipelineHandle {
     local_processor_task_tx: tokio::sync::mpsc::UnboundedSender<LocalProcessorTask>,
     stats: crate::stats::Stats,
     config: std::sync::Arc<MediaPipelineConfig>,
-    error_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    processor_failed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl MediaPipelineHandle {
@@ -621,11 +618,11 @@ impl MediaPipelineHandle {
             .await?;
         let error_flag = handle.error_flag.clone();
         let spawned_processor_id = processor_id.clone();
-        let pipeline_error_flag = self.error_flag.clone();
+        let processor_failed = self.processor_failed.clone();
         let join_handle = tokio::spawn(async move {
             if let Err(e) = f(handle).await {
                 error_flag.set(true);
-                pipeline_error_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                processor_failed.store(true, std::sync::atomic::Ordering::SeqCst);
                 tracing::error!(
                     "failed to run processor {spawned_processor_id}: {}",
                     e.display()
@@ -653,12 +650,12 @@ impl MediaPipelineHandle {
             .register_processor(processor_id.clone(), metadata)
             .await?;
         let error_flag = handle.error_flag.clone();
-        let pipeline_error_flag = self.error_flag.clone();
+        let processor_failed = self.processor_failed.clone();
         let task: LocalProcessorTask = Box::new(move || {
             tokio::task::spawn_local(async move {
                 if let Err(e) = f(handle).await {
                     error_flag.set(true);
-                    pipeline_error_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                    processor_failed.store(true, std::sync::atomic::Ordering::SeqCst);
                     tracing::error!("failed to run processor {processor_id}: {}", e.display());
                 }
             });
@@ -2277,7 +2274,6 @@ mod tests {
         // ハングしないことを検証する。
         let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
         let handle = pipeline.handle();
-        let error_flag = pipeline.error_flag();
         let pipeline_task = tokio::spawn(pipeline.run());
 
         let receiver = handle
@@ -2321,18 +2317,18 @@ mod tests {
             matches!(message, Message::Eos),
             "subscriber must observe EOS when publisher fails without sending it"
         );
-        assert!(
-            error_flag.load(std::sync::atomic::Ordering::SeqCst),
-            "pipeline error flag must be set on processor failure"
-        );
 
         drop(rx);
         drop(receiver);
         drop(handle);
-        tokio::time::timeout(Duration::from_secs(5), pipeline_task)
+        let processor_failed = tokio::time::timeout(Duration::from_secs(5), pipeline_task)
             .await
             .expect("pipeline task timed out")
             .expect("pipeline task failed");
+        assert!(
+            processor_failed,
+            "run() must report processor failure on abnormal termination"
+        );
     }
 
     async fn wait_until_metric_contains(handle: &MediaPipelineHandle, needle: &str) {

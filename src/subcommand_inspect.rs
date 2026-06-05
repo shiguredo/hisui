@@ -87,7 +87,6 @@ fn run_internal(
 
     let pipeline = crate::MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
-    let error_flag = pipeline.error_flag();
     runtime.spawn(async move {
         if let Err(e) = setup_pipeline(
             pipeline_handle,
@@ -104,10 +103,10 @@ fn run_internal(
         }
     });
 
-    runtime.block_on(pipeline.run());
+    let processor_failed = runtime.block_on(pipeline.run());
 
     // いずれかの processor が異常終了していた場合は、非ゼロ終了コードになるようエラーを返す
-    if error_flag.load(std::sync::atomic::Ordering::SeqCst) {
+    if processor_failed {
         return Err(Error::new(
             "inspect failed: one or more processors terminated abnormally",
         ));
