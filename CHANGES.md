@@ -38,7 +38,6 @@
   - 拡張子ではなくファイル先頭を読んで通常 MP4 / fragmented MP4 を判定する
   - inspect は fMP4 を `format: "fmp4"` として返す（通常 MP4 は `"mp4"`、WebM は `"webm"`）
   - @sile
-  - @tohta
 - [ADD] obsws の Output に MPEG-DASH ライブ出力 (`outputName: "mpeg_dash"`) を追加する
   - 指定されたビデオ/オーディオコーデックの fragmented MP4 セグメントを生成し、MPD マニフェストで管理する
   - `SetOutputSettings` で `destination` / `segmentDuration` / `maxRetainedSegments` / `variants` / `videoCodec` / `audioCodec` を設定可能
