@@ -161,16 +161,19 @@ impl Mp4Demuxer {
                 Ok(None) => return Ok(None),
                 Err(DemuxError::InputRequired(required)) => required,
                 Err(e) => {
-                    // 書き込み途中でクラッシュした hybrid fMP4 では、moof + mdat が中途半端に書かれて
-                    // その処理が失敗することがある (典型例: trun が宣言するサンプルデータが mdat に収まらない)。
-                    // これは hybrid mp4 では想定内のため、メディアフラグメント (moof + mdat) の処理中に
-                    // 失敗した場合は、その原因を問わずエラーにせず、そこで読み取りを終了 (ストリーム終端)
+                    // 書き込み途中でクラッシュした hybrid fMP4 では、末尾のフラグメントが中途半端に
+                    // 書かれてその処理が失敗することがある。これは hybrid mp4 では想定内のため、以下の
+                    // いずれかなら、その原因を問わずエラーにせず、そこで読み取りを終了 (ストリーム終端)
                     // として扱う。moov / ftyp など初期化中の破損は引き続きエラーにする。
-                    if let Some(moof_offset) = self.last_supply_offset
-                        && self.is_media_fragment(moof_offset)?
+                    //   - 構造は揃っているメディアフラグメント (moof + mdat) の処理失敗
+                    //     (典型例: trun が宣言するサンプルデータが mdat に収まらない)
+                    //   - ボックスが EOF で途切れている (ヘッダが読めない / 宣言サイズがファイル末尾を超える)
+                    if let Some(offset) = self.last_supply_offset
+                        && (self.is_media_fragment(offset)?
+                            || self.is_truncated_box_at_eof(offset)?)
                     {
                         tracing::warn!(
-                            "Stopping at broken media fragment at offset {moof_offset} in {}: {e}",
+                            "Stopping at broken trailing fragment at offset {offset} in {}: {e}",
                             self.path.display()
                         );
                         return Ok(None);
@@ -204,6 +207,22 @@ impl Mp4Demuxer {
             return Ok(false);
         };
         Ok(&mdat_type == b"mdat")
+    }
+
+    /// `offset` から始まるトップレベルボックスが、EOF で途切れているか判定する。
+    ///
+    /// 書き込み途中のクラッシュでフラグメント (moof / mdat) のヘッダや本体が末尾で切れた場合に真を返す。
+    /// ヘッダ (8 バイト) すら読めない場合、または宣言サイズがファイル末尾を超える場合を切り詰めとみなす。
+    /// `size == 0` (ファイル末尾までを表す正規のボックス) は切り詰めではないので偽を返す。
+    fn is_truncated_box_at_eof(&mut self, offset: u64) -> Result<bool> {
+        let Some((_box_type, size)) = self.read_box_header(offset)? else {
+            // ヘッダが読み切れない = 末尾で切り詰められている
+            return Ok(true);
+        };
+        if size == 0 {
+            return Ok(false);
+        }
+        Ok(offset.saturating_add(size) > self.file_size)
     }
 
     /// 指定位置のボックスヘッダ (4 バイトの type と box サイズ) を読み取る。
@@ -470,6 +489,82 @@ mod tests {
         assert_eq!(
             truncated_count, valid_count,
             "壊れた末尾フラグメントの手前までのサンプルを返すこと"
+        );
+    }
+
+    /// テスト用 fMP4 から「正常な単一フラグメント (ftyp+moov+moof+mdat)」と moof のコピー、
+    /// およびその正常フラグメントから読めるサンプル数を取り出す。
+    fn fragmented_fixture_parts() -> (Vec<u8>, Vec<u8>, usize) {
+        let data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
+        let boxes = top_level_boxes(&data);
+        let (_, moof_off, moof_size) = boxes
+            .iter()
+            .find(|(t, _, _)| t == b"moof")
+            .copied()
+            .expect("moof があること");
+        let mdat_off = moof_off + moof_size;
+        let (mdat_type, _, mdat_size) = boxes
+            .iter()
+            .find(|(_, off, _)| *off == mdat_off)
+            .copied()
+            .expect("moof の直後に mdat があること");
+        assert_eq!(&mdat_type, b"mdat", "moof の直後は mdat であること");
+
+        let valid_only = data[..mdat_off + mdat_size].to_vec();
+        let moof_bytes = data[moof_off..mdat_off].to_vec();
+        let valid_file = write_temp(&valid_only);
+        let valid_count =
+            count_samples(valid_file.path()).expect("正常 fMP4 のサンプルを読めること");
+        assert!(valid_count > 0, "正常フラグメントからサンプルを読めること");
+        (valid_only, moof_bytes, valid_count)
+    }
+
+    #[test]
+    fn tolerates_mdat_header_truncated_at_eof() {
+        // 完全な moof の直後で、mdat ボックスヘッダの途中までしか書かれずに EOF になったケース。
+        let (valid_only, moof_bytes, valid_count) = fragmented_fixture_parts();
+        let mut truncated = valid_only;
+        truncated.extend_from_slice(&moof_bytes); // 完全な moof
+        truncated.extend_from_slice(&[0x00, 0x00, 0x27, 0x00]); // mdat ヘッダの途中 (4 バイトのみ)
+        let file = write_temp(&truncated);
+
+        let count =
+            count_samples(file.path()).expect("ヘッダ途中の切り詰めでもエラーにならないこと");
+        assert_eq!(
+            count, valid_count,
+            "壊れたフラグメントの手前までのサンプルを返すこと"
+        );
+    }
+
+    #[test]
+    fn tolerates_moof_header_truncated_at_eof() {
+        // moof ボックスヘッダの途中までしか書かれずに EOF になったケース。
+        let (valid_only, _moof_bytes, valid_count) = fragmented_fixture_parts();
+        let mut truncated = valid_only;
+        truncated.extend_from_slice(&[0x00, 0x00, 0x02, 0xdc]); // moof ヘッダの途中 (4 バイトのみ)
+        let file = write_temp(&truncated);
+
+        let count =
+            count_samples(file.path()).expect("moof ヘッダ途中の切り詰めでもエラーにならないこと");
+        assert_eq!(
+            count, valid_count,
+            "壊れたフラグメントの手前までのサンプルを返すこと"
+        );
+    }
+
+    #[test]
+    fn tolerates_moof_body_truncated_at_eof() {
+        // moof ヘッダはサイズを宣言しているが、本体が途中で EOF になったケース。
+        let (valid_only, moof_bytes, valid_count) = fragmented_fixture_parts();
+        let mut truncated = valid_only;
+        truncated.extend_from_slice(&moof_bytes[..100]); // moof 本体の途中まで
+        let file = write_temp(&truncated);
+
+        let count =
+            count_samples(file.path()).expect("moof 本体途中の切り詰めでもエラーにならないこと");
+        assert_eq!(
+            count, valid_count,
+            "壊れたフラグメントの手前までのサンプルを返すこと"
         );
     }
 
