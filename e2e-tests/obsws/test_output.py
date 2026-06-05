@@ -2099,7 +2099,8 @@ def test_obsws_dump_metrics_on_exit_outputs_jsonl(binary_path: Path, tmp_path: P
     port, sock = reserve_ephemeral_port()
     sock.close()
 
-    # 起動直後に停止する。起動時点でミキサー等の processor がメトリクスを登録している。
+    # 起動直後に停止する。リッスン開始までにミキサー等の processor が stats を登録するため
+    # family は非空になる（明示的なバリアは無くスケジューラ依存だが、起動経路の .await で実際上満たされる）。
     server = ObswsServer(binary_path, host=host, port=port, default_record_dir=tmp_path)
     with server:
         pass

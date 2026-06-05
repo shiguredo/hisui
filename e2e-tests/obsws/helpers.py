@@ -43,6 +43,7 @@ class ObswsServer:
         https_key_path: Path | None = None,
         state_file: Path | None = None,
         use_env: bool = False,
+        # デフォルトで有効。失敗時の終了ダンプ（captured output）を診断に使えるようにするため。
         dump_metrics_on_exit: bool = True,
     ):
         self.binary_path = binary_path

@@ -79,8 +79,7 @@ struct ShutdownSignal {
 }
 
 impl ShutdownSignal {
-    /// シグナルハンドラを登録する。起動直後に呼ぶことで、初期化中に届いたシグナルも
-    /// 取りこぼさない（ハンドラ登録後に受けたシグナルは最初の `recv` で返る）。
+    /// シグナルハンドラを登録する。登録後に受けたシグナルは最初の `recv` で返る。
     fn install() -> crate::Result<Self> {
         #[cfg(unix)]
         {
@@ -134,7 +133,10 @@ fn dump_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
     });
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    if let Err(e) = writeln!(out, "{line}") {
+    // 出力先のパイプが途中閉じられた場合は警告しない（json.rs::pretty_print と同様）
+    if let Err(e) = writeln!(out, "{line}")
+        && e.kind() != std::io::ErrorKind::BrokenPipe
+    {
         tracing::warn!("failed to write metrics dump to stdout: {e}");
     }
 }
@@ -167,7 +169,7 @@ pub async fn run_server(
     #[cfg(feature = "player")]
     let mut player_lifecycle_rx = player_lifecycle_rx;
 
-    // SIGTERM/SIGINT ハンドラは初期化中に届いたシグナルも取りこぼさないよう、
+    // SIGTERM / SIGINT ハンドラは初期化中に届いたシグナルも取りこぼさないよう、
     // bind 等の .await より前のここで登録する。
     let shutdown_signal = ShutdownSignal::install()?;
 
