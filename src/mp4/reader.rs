@@ -208,6 +208,10 @@ pub struct Mp4FileReaderOptions {
     pub video_track_id: Option<TrackId>,
 }
 
+/// 再生制御 (seek / 一時停止 / ループ等) に対応した MP4 reader。
+///
+/// OBSWS のメディア再生で使う。seek に依存するため fMP4 は受け付けない。
+/// シーク不要で前方読みするだけの用途 (inspect 等) には `Mp4SampleReader` を使う。
 #[derive(Debug)]
 pub struct Mp4FileReader {
     path: PathBuf,
@@ -258,7 +262,7 @@ impl Mp4FileReader {
         let path = path.as_ref();
         if detect_mp4_file_kind(path)? == Mp4FileKind::FragmentedMp4 {
             return Err(Error::new(format!(
-                "Fmp4 is not supported by Mp4FileReader yet: {}",
+                "fMP4 is not supported by Mp4FileReader yet: {}",
                 path.display()
             )));
         }
@@ -1693,8 +1697,8 @@ mod tests {
         let err = result.expect_err("fMP4 は Mp4FileReader::new で拒否されること");
         let message = err.display();
         assert!(
-            message.contains("Fmp4"),
-            "エラーメッセージに Fmp4 が含まれること: {message}"
+            message.contains("fMP4"),
+            "エラーメッセージに fMP4 が含まれること: {message}"
         );
     }
 
