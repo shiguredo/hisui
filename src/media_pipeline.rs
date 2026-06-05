@@ -1256,6 +1256,10 @@ impl TrackPublisher {
 
     /// MediaPipeline が途中終了した場合は false が返される
     pub fn send(&mut self, message: Message) -> bool {
+        // EOS の送出は経路に依存せず一元的に記録する。Drop 時の subscriber 閉鎖判定に使う。
+        if matches!(message, Message::Eos) {
+            self.eos_sent = true;
+        }
         if !self.drain_new_subscribers() {
             return false;
         }
@@ -1285,7 +1289,6 @@ impl TrackPublisher {
     }
 
     pub fn send_eos(&mut self) -> bool {
-        self.eos_sent = true;
         self.send(Message::Eos)
     }
 
