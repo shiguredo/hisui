@@ -69,6 +69,60 @@ fn request_path(uri: &str) -> &str {
     uri.split_once('?').map_or(uri, |(path, _)| path)
 }
 
+/// SIGTERM / SIGINT を受けてグレースフルシャットダウンするためのシグナル受信。
+struct ShutdownSignal {
+    sigterm: tokio::signal::unix::Signal,
+    sigint: tokio::signal::unix::Signal,
+}
+
+impl ShutdownSignal {
+    /// シグナルハンドラを登録する。登録後に受けたシグナルは最初の `recv` で返る。
+    fn install() -> crate::Result<Self> {
+        use tokio::signal::unix::{SignalKind, signal};
+        let sigterm = signal(SignalKind::terminate())
+            .map_err(|e| crate::Error::new(format!("failed to install SIGTERM handler: {e}")))?;
+        let sigint = signal(SignalKind::interrupt())
+            .map_err(|e| crate::Error::new(format!("failed to install SIGINT handler: {e}")))?;
+        Ok(Self { sigterm, sigint })
+    }
+
+    /// SIGTERM か SIGINT を受信するまで待つ。
+    async fn recv(&mut self) {
+        tokio::select! {
+            _ = self.sigterm.recv() => {}
+            _ = self.sigint.recv() => {}
+        }
+    }
+}
+
+/// 終了時に全メトリクス（`Stats` レジストリ全件）を JSON Lines で stdout へ出力する。
+/// 失敗してもプロセス終了は妨げない（警告ログを出して続行する）。
+fn dump_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
+    use std::io::Write as _;
+
+    let families = match pipeline_handle.stats().to_prometheus_json_families() {
+        Ok(families) => families,
+        Err(e) => {
+            tracing::warn!("failed to collect metrics for exit dump: {}", e.display());
+            return;
+        }
+    };
+    // stdout の JSON Lines ストリームのエントリ種別を `type` で示す（メトリクスダンプは "metrics"）
+    let line = nojson::object(|f| {
+        f.member("type", "metrics")?;
+        f.member("metrics", &families)?;
+        Ok(())
+    });
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    // 出力先のパイプが途中閉じられた場合は警告しない（json.rs::pretty_print と同様）
+    if let Err(e) = writeln!(out, "{line}")
+        && e.kind() != std::io::ErrorKind::BrokenPipe
+    {
+        tracing::warn!("failed to write metrics dump to stdout: {e}");
+    }
+}
+
 #[expect(clippy::too_many_arguments)]
 pub async fn run_server(
     addr: SocketAddr,
@@ -83,6 +137,7 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
+    dump_metrics_on_exit: bool,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
         crate::obsws::player::PlayerCommand,
     >,
@@ -95,6 +150,10 @@ pub async fn run_server(
 ) -> crate::Result<()> {
     #[cfg(feature = "player")]
     let mut player_lifecycle_rx = player_lifecycle_rx;
+
+    // SIGTERM / SIGINT ハンドラは初期化中に届いたシグナルも取りこぼさないよう、
+    // bind 等の .await より前のここで登録する。
+    let shutdown_signal = ShutdownSignal::install()?;
 
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;
 
@@ -302,6 +361,8 @@ pub async fn run_server(
         pipeline_handle,
         bootstrap_endpoint,
         shutdown_rx,
+        dump_metrics_on_exit,
+        shutdown_signal,
     )
     .await
 }
@@ -325,6 +386,8 @@ async fn run_accept_loop(
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    dump_metrics_on_exit: bool,
+    mut shutdown_signal: ShutdownSignal,
 ) -> crate::Result<()> {
     loop {
         let (stream, peer_addr) = tokio::select! {
@@ -336,6 +399,13 @@ async fn run_accept_loop(
                 return Err(crate::Error::new(
                     "obsws server terminated: state file write failed"
                 ));
+            }
+            _ = shutdown_signal.recv() => {
+                tracing::info!("obsws server shutting down on signal");
+                if dump_metrics_on_exit {
+                    dump_metrics_to_stdout(&pipeline_handle);
+                }
+                return Ok(());
             }
         };
         let tls_acceptor = tls_acceptor.clone();

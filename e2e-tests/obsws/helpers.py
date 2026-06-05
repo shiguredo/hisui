@@ -43,6 +43,8 @@ class ObswsServer:
         https_key_path: Path | None = None,
         state_file: Path | None = None,
         use_env: bool = False,
+        # デフォルトで有効。失敗時の終了ダンプ（captured output）を診断に使えるようにするため。
+        dump_metrics_on_exit: bool = True,
     ):
         self.binary_path = binary_path
         self.host = host
@@ -55,9 +57,11 @@ class ObswsServer:
         self.https_key_path = https_key_path
         self.state_file = state_file
         self.use_env = use_env
+        self.dump_metrics_on_exit = dump_metrics_on_exit
         self._process: subprocess.Popen[str] | None = None
         self._stdout = ""
         self._stderr = ""
+        self._returncode: int | None = None
 
     def __enter__(self):
         return self.start()
@@ -92,6 +96,8 @@ class ObswsServer:
                 env["HISUI_DEFAULT_RECORD_DIR"] = str(self.default_record_dir)
             if self.state_file is not None:
                 env["HISUI_SERVER_STATE_FILE"] = str(self.state_file)
+            if self.dump_metrics_on_exit:
+                env["HISUI_DUMP_METRICS_ON_EXIT"] = "1"
         else:
             args.extend(
                 [
@@ -122,6 +128,8 @@ class ObswsServer:
                 args.extend(["--state-file", str(self.state_file)])
             if openh264_path:
                 args.extend(["--openh264", openh264_path])
+            if self.dump_metrics_on_exit:
+                args.append("--dump-metrics-on-exit")
 
         cmd, cwd = build_hisui_command(self.binary_path, *args)
         self._process = subprocess.Popen(
@@ -141,14 +149,16 @@ class ObswsServer:
             return
         if process.poll() is None:
             process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=3.0)
-        stdout, stderr = process.communicate(timeout=1.0)
+        # 終了時メトリクスダンプで stdout のパイプが詰まるとサーバが終了できないため、
+        # communicate() で stdout/stderr を並行して読み出しながら終了を待つ。
+        try:
+            stdout, stderr = process.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=3.0)
         self._stdout = stdout
         self._stderr = stderr
+        self._returncode = process.returncode
         self._process = None
         self._emit_captured_output()
 
@@ -163,6 +173,7 @@ class ObswsServer:
         stdout, stderr = process.communicate(timeout=1.0)
         self._stdout = stdout
         self._stderr = stderr
+        self._returncode = process.returncode
         self._process = None
         self._emit_captured_output()
 
@@ -200,6 +211,14 @@ class ObswsServer:
                 f"host={self.host}, port={self.port}"
             )
         return f"obsws stdout={self._stdout}, obsws stderr={self._stderr}"
+
+    @property
+    def stdout(self) -> str:
+        return self._stdout
+
+    @property
+    def returncode(self) -> int | None:
+        return self._returncode
 
 
 def _is_port_open(host: str, port: int) -> bool:
@@ -465,7 +484,6 @@ def _inspect_mp4(
     required_keys: tuple[str, ...] = (),
     timeout_sec: float = 3.0,
     interval_sec: float = 0.1,
-    diagnostics_text: str | None = None,
 ) -> dict[str, object]:
     deadline = time.time() + timeout_sec
     while True:
@@ -487,47 +505,17 @@ def _inspect_mp4(
             return output
         if time.time() >= deadline:
             missing_keys = [key for key in required_keys if key not in output]
-            diagnostics_parts: list[str] = []
-            if diagnostics_text:
-                diagnostics_parts.append(diagnostics_text)
             # hisui inspect が読めない MP4 を ffprobe で別経路解析し、ファイル自体に
             # video trak があるか（writer バグか inspect バグか）を切り分ける。
-            diagnostics_parts.append(f"ffprobe:\n{_probe_mp4_with_ffprobe(path)}")
-            diagnostics_suffix = "\ndiagnostics:\n" + "\n".join(diagnostics_parts)
+            ffprobe = _probe_mp4_with_ffprobe(path)
             raise AssertionError(
                 "inspect output missing required keys: "
-                f"missing_keys={missing_keys}, output={output}{diagnostics_suffix}"
+                f"missing_keys={missing_keys}, output={output}\n"
+                f"diagnostics:\nffprobe:\n{ffprobe}"
             )
 
         # StopRecord 直後は MP4 のメタ情報がまだ揃わないことがあるため、短時間だけ再試行する。
         time.sleep(interval_sec)
-
-
-def _format_obsws_diagnostics(
-    *,
-    inspect_output: dict[str, object] | None = None,
-    metrics_snapshots: dict[str, str] | None = None,
-) -> str:
-    parts: list[str] = []
-    if inspect_output is not None:
-        parts.append(f"inspect_output={inspect_output}")
-    if metrics_snapshots is not None:
-        for name, snapshot in metrics_snapshots.items():
-            parts.append(f"metrics_snapshot[{name}]:\n{snapshot}")
-    return "\n".join(parts)
-
-
-def _print_obsws_diagnostics(
-    *,
-    inspect_output: dict[str, object] | None = None,
-    metrics_snapshots: dict[str, str] | None = None,
-) -> None:
-    diagnostics_text = _format_obsws_diagnostics(
-        inspect_output=inspect_output,
-        metrics_snapshots=metrics_snapshots,
-    )
-    if diagnostics_text:
-        print(diagnostics_text)
 
 
 def _write_test_png(path: Path) -> None:
