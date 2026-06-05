@@ -13,7 +13,7 @@ use std::{
 };
 
 use shiguredo_mp4::{
-    TrackKind,
+    BoxHeader, Decode, TrackKind,
     boxes::SampleEntry,
     demux::{
         DemuxError, Fmp4FileDemuxer, Input, Mp4FileDemuxer, Mp4FileKind, RequiredInput, Sample,
@@ -194,70 +194,58 @@ impl Mp4Demuxer {
     /// 続く場合に真を返す。メディアフラグメントの処理失敗 (クラッシュによる切り詰め等) を、
     /// 初期化中 (moov / ftyp) の破損と区別して扱うために使う。
     fn is_media_fragment(&mut self, moof_offset: u64) -> Result<bool> {
-        let Some((moof_type, moof_size)) = self.read_box_header(moof_offset)? else {
+        let Some(moof) = self.read_box_header(moof_offset)? else {
             return Ok(false);
         };
-        if &moof_type != b"moof" || moof_size == 0 {
+        let moof_size = moof.box_size.get();
+        if moof.box_type.as_bytes() != b"moof" || moof_size == 0 {
             return Ok(false);
         }
         let Some(mdat_offset) = moof_offset.checked_add(moof_size) else {
             return Ok(false);
         };
-        let Some((mdat_type, _mdat_size)) = self.read_box_header(mdat_offset)? else {
+        let Some(mdat) = self.read_box_header(mdat_offset)? else {
             return Ok(false);
         };
-        Ok(&mdat_type == b"mdat")
+        Ok(mdat.box_type.as_bytes() == b"mdat")
     }
 
     /// `offset` から始まるトップレベルボックスが、EOF で途切れているか判定する。
     ///
     /// 書き込み途中のクラッシュでフラグメント (moof / mdat) のヘッダや本体が末尾で切れた場合に真を返す。
-    /// ヘッダ (8 バイト) すら読めない場合、または宣言サイズがファイル末尾を超える場合を切り詰めとみなす。
+    /// ヘッダを読み切れない場合、または宣言サイズがファイル末尾を超える場合を切り詰めとみなす。
     /// `size == 0` (ファイル末尾までを表す正規のボックス) は切り詰めではないので偽を返す。
     fn is_truncated_box_at_eof(&mut self, offset: u64) -> Result<bool> {
-        let Some((_box_type, size)) = self.read_box_header(offset)? else {
+        let Some(header) = self.read_box_header(offset)? else {
             // ヘッダが読み切れない = 末尾で切り詰められている
             return Ok(true);
         };
+        let size = header.box_size.get();
         if size == 0 {
             return Ok(false);
         }
         Ok(offset.saturating_add(size) > self.file_size)
     }
 
-    /// 指定位置のボックスヘッダ (4 バイトの type と box サイズ) を読み取る。
-    /// `size == 1` の 64 bit サイズ、`size == 0` のファイル末尾までの両方に対応する。
-    /// ヘッダを読み取れない (ファイル末尾を超える等) 場合は `None` を返す。
-    fn read_box_header(&mut self, offset: u64) -> Result<Option<([u8; 4], u64)>> {
-        if offset.saturating_add(8) > self.file_size {
+    /// 指定位置のボックスヘッダを読み取る。size のデコード (32 / 64 bit、ファイル末尾までの 0) は
+    /// `BoxHeader::decode` に委譲する。ヘッダを読み切れない (末尾で切り詰められている等) 場合は
+    /// `None` を返す。
+    fn read_box_header(&mut self, offset: u64) -> Result<Option<BoxHeader>> {
+        if offset >= self.file_size {
             return Ok(None);
         }
+        // ヘッダのデコードに必要な最大バイト数だけ読む (末尾に足りなければそこまで)
+        let end = offset
+            .saturating_add(BoxHeader::MAX_SIZE as u64)
+            .min(self.file_size);
+        let mut buf = vec![0; (end - offset) as usize];
         self.file
             .seek(SeekFrom::Start(offset))
             .map_err(|e| Error::new(format!("Seek error {}: {e}", self.path.display())))?;
-        let mut header = [0u8; 8];
         self.file
-            .read_exact(&mut header)
+            .read_exact(&mut buf)
             .map_err(|e| Error::new(format!("Read error {}: {e}", self.path.display())))?;
-        let size32 = u32::from_be_bytes([header[0], header[1], header[2], header[3]]);
-        let box_type = [header[4], header[5], header[6], header[7]];
-        let size = match size32 {
-            // ファイル末尾までを表す
-            0 => 0,
-            // 直後の 8 バイトが 64 bit サイズ
-            1 => {
-                if offset.saturating_add(16) > self.file_size {
-                    return Ok(None);
-                }
-                let mut ext = [0u8; 8];
-                self.file
-                    .read_exact(&mut ext)
-                    .map_err(|e| Error::new(format!("Read error {}: {e}", self.path.display())))?;
-                u64::from_be_bytes(ext)
-            }
-            n => u64::from(n),
-        };
-        Ok(Some((box_type, size)))
+        Ok(BoxHeader::decode(&buf).ok().map(|(header, _)| header))
     }
 
     /// `RequiredInput` が示す範囲をファイルから読み込んでデマルチプレクサに供給する
