@@ -1,42 +1,53 @@
 # 変更履歴
 
-- UPDATE
-  - 後方互換がある変更
-- ADD
-  - 後方互換がある追加
 - CHANGE
   - 後方互換のない変更
+- ADD
+  - 後方互換がある追加
+- UPDATE
+  - 後方互換がある変更
 - FIX
   - バグ修正
 
 ## develop
 
+- [CHANGE] ログ出力の時刻形式を UNIX タイムスタンプから ISO 8601 UTC 形式に変更する
+  - ターミナル出力時は severity に応じて行全体を色付けする
+  - `NO_COLOR` 環境変数が設定されている場合は色付けを無効にする
+  - @sile
+- [CHANGE] FDK-AAC を `fdk-aac` feature フラグによるビルド時有効化と、`--fdk-aac` オプションによる実行時の共有ライブラリ指定を併用する方式に変更する
+  - @sile
+- [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
+  - トップレベルの `worker_threads` が削除される
+  - `processors` から `progress_bar` が削除される
+  - `processors` の各要素から `total_processing_seconds` が削除される
+  - `video_mixer` では `output_video_resolution` が削除され、`output_video_width` / `output_video_height` が追加される
+  - `webm_audio_reader` / `webm_video_reader` では `input_files` が削除され、`current_input_file` / `total_sample_count` が追加される
+  - @sile
+- [CHANGE] orfail crate を依存から削除する
+  - これにより、エラー発生時に標準エラー出力に表示されるメッセージの細部のフォーマットに非互換な変更が入ることになる
+  - @sile
+- [CHANGE] Video Toolbox encode params から `use_parallelization` を削除する
+  - `shiguredo_video_toolbox` 2026.1.0-canary.0 では `use_parallelization` 設定が廃止されたため、Hisui 側でも受け付けない
+  - @sile
+- [CHANGE] indicatif の依存を削除して自前のプログレスバー実装に置き換える
+  - @sile
+- [CHANGE] 実験的な `pipeline` サブコマンドを削除する
+  - @sile
+- [CHANGE] コマンドライン引数に `--experimental(-x)` フラグを追加して `pipeline` サブコマンドはこのフラグ指定時にのみ有効になるようにする
+  - `pipeline` サブコマンドは元々実験的機能扱いであったが、実験的機能を扱うためのフラグを追加して、より明確にハンドリングするようにする
+  - @sile
+- [CHANGE] 出力 MP4 ファイルが H.265 ストリームを含む場合は hvc1 ボックスを使用する
+  - 今までは H.265 を表現するためには hev1 ボックスを使用していた
+  - Apple 系のプレイヤーは hvc1 ボックスしかサポートしておらず、hev1 ボックスでは再生ができなかった
+    - Apple 系プレイヤー以外は大抵 hev1 と hvc1 の両方をサポートしている
+  - そのため H.265 用には hvc1 ボックスを使用することにする
+  - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
+    - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
+  - @sile
 - [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになり、`--dump-metrics-on-exit` 指定時はプロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する
   - 環境変数 `HISUI_DUMP_METRICS_ON_EXIT` でも有効化できる
   - @sile
-- [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_dav1d crate のリポジトリが <https://github.com/shiguredo/dav1d-rs> に独立したので、hisui のワークスペースからは削除されている
-  - @sile
-- [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
-  - このバージョンから shiguredo_fdk_aac crate のリポジトリが <https://github.com/shiguredo/fdk-aac-rs> に独立したので、hisui のワークスペースからは削除されている
-  - @sile
-- [UPDATE] shiguredo_opus のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_opus crate のリポジトリが <https://github.com/shiguredo/opus-rs> に独立したので、hisui のワークスペースからは削除されている
-  - @sile
-- [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0 にあげる
-  - このバージョンから shiguredo_svt_av1 crate のリポジトリが <https://github.com/shiguredo/svt-av1-rs> に独立したので、hisui のワークスペースからは削除されている
-  - @sile
-- [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
-  - @voluntas
-- [UPDATE] `libc` 0.2.186 を direct dependency に追加する
-  - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
-  - @sile
-- [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
-  - `shiguredo_audio_device` が PulseAudio バックエンドを利用するために必要
-  - @sile
-- [UPDATE] base64 crate を base64ct 1.8.3 に差し替える
-  - obsws 認証で利用する base64 エンコードを定数時間実装の base64ct に置き換える
-  - @voluntas
 - [ADD] inspect コマンドが fMP4 ファイルの読み込みに対応する
   - 拡張子ではなくファイル先頭を読んで通常 MP4 / fragmented MP4 を判定する
   - @sile
@@ -117,6 +128,42 @@
   - @sile
 - [ADD] 依存ライブラリに nopng 0.1.1 を追加する
   - @sile
+- [ADD] FDK-AAC を使った AAC デコードに対応する
+  - @sile
+- [ADD] macOS で Audio Toolbox を使った AAC デコードに対応する
+  - @sile
+- [ADD] PyPI に `hiusi` を登録する GitHub Actions `pypi-publish.yml` を追加する
+  - バージョンが `-canary.X` は `.devX` 形式に変換される
+  - @voluntas
+- [ADD] 依存ライブラリに shiguredo_rtmp を追加する
+  - @sile
+- [ADD] VideoToolbox デコーダーで VP9 と AV1 のハードウェアデコードに対応する
+  - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
+  - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
+  - @sile
+- [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0 にあげる
+  - このバージョンから shiguredo_dav1d crate のリポジトリが <https://github.com/shiguredo/dav1d-rs> に独立したので、hisui のワークスペースからは削除されている
+  - @sile
+- [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
+  - このバージョンから shiguredo_fdk_aac crate のリポジトリが <https://github.com/shiguredo/fdk-aac-rs> に独立したので、hisui のワークスペースからは削除されている
+  - @sile
+- [UPDATE] shiguredo_opus のバージョンを 2026.1.0 にあげる
+  - このバージョンから shiguredo_opus crate のリポジトリが <https://github.com/shiguredo/opus-rs> に独立したので、hisui のワークスペースからは削除されている
+  - @sile
+- [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0 にあげる
+  - このバージョンから shiguredo_svt_av1 crate のリポジトリが <https://github.com/shiguredo/svt-av1-rs> に独立したので、hisui のワークスペースからは削除されている
+  - @sile
+- [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
+  - @voluntas
+- [UPDATE] `libc` 0.2.186 を direct dependency に追加する
+  - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
+  - @sile
+- [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
+  - `shiguredo_audio_device` が PulseAudio バックエンドを利用するために必要
+  - @sile
+- [UPDATE] base64 crate を base64ct 1.8.3 に差し替える
+  - obsws 認証で利用する base64 エンコードを定数時間実装の base64ct に置き換える
+  - @voluntas
 - [UPDATE] Linux 向けのビルド済みバイナリでは fdk-aac feature を有効にする
   - ただし実行時に有効にするためには --fdk-aac オプションないし HISUI_FDK_AAC_PATH 環境変数で、fdk-aac ライブラリのパスを指定する必要がある
   - @sile
@@ -159,64 +206,23 @@
   - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.3.0 にあげる
   - @sile
-- [ADD] FDK-AAC を使った AAC デコードに対応する
-  - @sile
-- [ADD] macOS で Audio Toolbox を使った AAC デコードに対応する
-  - @sile
-- [ADD] PyPI に `hiusi` を登録する GitHub Actions `pypi-publish.yml` を追加する
-  - バージョンが `-canary.X` は `.devX` 形式に変換される
-  - @voluntas
-- [ADD] 依存ライブラリに shiguredo_rtmp を追加する
-  - @sile
-- [ADD] VideoToolbox デコーダーで VP9 と AV1 のハードウェアデコードに対応する
-  - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
-  - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
-  - @sile
-- [CHANGE] ログ出力の時刻形式を UNIX タイムスタンプから ISO 8601 UTC 形式に変更する
-  - ターミナル出力時は severity に応じて行全体を色付けする
-  - `NO_COLOR` 環境変数が設定されている場合は色付けを無効にする
-  - @sile
-- [CHANGE] FDK-AAC を `fdk-aac` feature フラグによるビルド時有効化と、`--fdk-aac` オプションによる実行時の共有ライブラリ指定を併用する方式に変更する
-  - @sile
-- [CHANGE] compose サブコマンドで `--stats-file` を指定した場合に出力される統計 JSON の内容を調整する
-  - トップレベルの `worker_threads` が削除される
-  - `processors` から `progress_bar` が削除される
-  - `processors` の各要素から `total_processing_seconds` が削除される
-  - `video_mixer` では `output_video_resolution` が削除され、`output_video_width` / `output_video_height` が追加される
-  - `webm_audio_reader` / `webm_video_reader` では `input_files` が削除され、`current_input_file` / `total_sample_count` が追加される
-  - @sile
-- [CHANGE] orfail crate を依存から削除する
-  - これにより、エラー発生時に標準エラー出力に表示されるメッセージの細部のフォーマットに非互換な変更が入ることになる
-  - @sile
-- [CHANGE] Video Toolbox encode params から `use_parallelization` を削除する
-  - `shiguredo_video_toolbox` 2026.1.0-canary.0 では `use_parallelization` 設定が廃止されたため、Hisui 側でも受け付けない
-  - @sile
-- [CHANGE] indicatif の依存を削除して自前のプログレスバー実装に置き換える
-  - @sile
-- [CHANGE] 実験的な `pipeline` サブコマンドを削除する
-  - @sile
-- [CHANGE] コマンドライン引数に `--experimental(-x)` フラグを追加して `pipeline` サブコマンドはこのフラグ指定時にのみ有効になるようにする
-  - `pipeline` サブコマンドは元々実験的機能扱いであったが、実験的機能を扱うためのフラグを追加して、より明確にハンドリングするようにする
-  - @sile
-- [CHANGE] 出力 MP4 ファイルが H.265 ストリームを含む場合は hvc1 ボックスを使用する
-  - 今までは H.265 を表現するためには hev1 ボックスを使用していた
-  - Apple 系のプレイヤーは hvc1 ボックスしかサポートしておらず、hev1 ボックスでは再生ができなかった
-    - Apple 系プレイヤー以外は大抵 hev1 と hvc1 の両方をサポートしている
-  - そのため H.265 用には hvc1 ボックスを使用することにする
-  - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
-    - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
-  - @sile
 
 ### misc
 
-- [UPDATE] 映像コーデックエンジンの選択を各コーデック crate の `supported_codecs()` を使った実行時検出に統一する
+- [CHANGE] libvpx feature を削除して shiguredo_libvpx を常に有効にする
+  - shiguredo_libvpx のリポジトリを外出ししたことで、ビルドに時間が大幅に短縮されたので feature にする必要がなくなったため
   - @sile
-- [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
+- [CHANGE] Slack 通知を rtCamp/action-slack-notify から shiguredo/github-actions の slack-notify に置き換える
+  - @voluntas
+- [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
+  - 内部的な PoC 目的の機能だったが、不要となったので削除する
   - @sile
-- [UPDATE] nojson のバージョンを 0.3.12 にあげる
-  - @sile
-- [UPDATE] shiguredo_video_device のバージョンを 2026.1.0 にあげる
-  - @sile
+- [CHANGE] shiguredo_libyuv の CMake 呼び出しを cmake crate に置き換える
+  - @voluntas
+- [CHANGE] shiguredo_svt_av1 の CMake 呼び出しを cmake crate に置き換える
+  - @voluntas
+- [CHANGE] shiguredo_nvcodec crate を hisui のワークスペースから削除して外部リポジトリに移行する
+  - @voluntas
 - [ADD] 内部用に VideoDeviceSource 構造体を追加する
   - Video Device からの読み込みと I420 への変換を行い、映像トラックに出力する
   - @sile
@@ -234,20 +240,14 @@
   - @voluntas
 - [ADD] e2e テスト用の GitHub Actions で ffmpeg をインストールする
   - @sile
-- [CHANGE] libvpx feature を削除して shiguredo_libvpx を常に有効にする
-  - shiguredo_libvpx のリポジトリを外出ししたことで、ビルドに時間が大幅に短縮されたので feature にする必要がなくなったため
+- [UPDATE] 映像コーデックエンジンの選択を各コーデック crate の `supported_codecs()` を使った実行時検出に統一する
   - @sile
-- [CHANGE] Slack 通知を rtCamp/action-slack-notify から shiguredo/github-actions の slack-notify に置き換える
-  - @voluntas
-- [CHANGE] 実験的に機能として undocumented で実装していたプラグイン機能を削除する
-  - 内部的な PoC 目的の機能だったが、不要となったので削除する
+- [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる
   - @sile
-- [CHANGE] shiguredo_libyuv の CMake 呼び出しを cmake crate に置き換える
-  - @voluntas
-- [CHANGE] shiguredo_svt_av1 の CMake 呼び出しを cmake crate に置き換える
-  - @voluntas
-- [CHANGE] shiguredo_nvcodec crate を hisui のワークスペースから削除して外部リポジトリに移行する
-  - @voluntas
+- [UPDATE] nojson のバージョンを 0.3.12 にあげる
+  - @sile
+- [UPDATE] shiguredo_video_device のバージョンを 2026.1.0 にあげる
+  - @sile
 
 ## 2025.3.2
 
