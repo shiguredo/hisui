@@ -102,9 +102,9 @@ pub(crate) struct Mp4Demuxer {
     file_size: u64,
     path: PathBuf,
     inner: DemuxerKind,
-    /// 直近に供給した入力範囲の開始位置。
-    /// fMP4 でセグメント (moof + mdat) を処理中にエラーが起きた際、
-    /// その moof の位置を知るために使う。
+    /// 直近に supply() でデマルチプレクサへ供給した入力範囲の開始位置。
+    /// メディアフラグメント (moof + mdat) の処理中に失敗した場合、この位置が失敗フラグメントの
+    /// moof 先頭と一致するため、is_media_fragment() の判定対象として使う。
     last_supply_offset: Option<u64>,
 }
 
@@ -161,11 +161,11 @@ impl Mp4Demuxer {
                 Ok(None) => return Ok(None),
                 Err(DemuxError::InputRequired(required)) => required,
                 Err(e) => {
-                    // 書き込み途中でクラッシュした hybrid fMP4 では、フラグメントの moof + mdat が
-                    // 中途半端に書かれ、trun が宣言するサンプルデータが mdat に収まらないことがある。
+                    // 書き込み途中でクラッシュした hybrid fMP4 では、moof + mdat が中途半端に書かれて
+                    // その処理が失敗することがある (典型例: trun が宣言するサンプルデータが mdat に収まらない)。
                     // これは hybrid mp4 では想定内のため、メディアフラグメント (moof + mdat) の処理中に
-                    // 失敗した場合はエラーにせず、そこで読み取りを終了 (ストリーム終端) として扱う。
-                    // moov / ftyp など初期化中の破損は引き続きエラーにする。
+                    // 失敗した場合は、その原因を問わずエラーにせず、そこで読み取りを終了 (ストリーム終端)
+                    // として扱う。moov / ftyp など初期化中の破損は引き続きエラーにする。
                     if let Some(moof_offset) = self.last_supply_offset
                         && self.is_media_fragment(moof_offset)?
                     {
@@ -185,11 +185,11 @@ impl Mp4Demuxer {
         }
     }
 
-    /// 失敗したセグメント (`moof_offset`) が、メディアフラグメント (`moof` + `mdat`) かどうか判定する。
+    /// 失敗した位置 (`moof_offset`) が、メディアフラグメント (`moof` + `mdat`) の先頭か判定する。
     ///
     /// `moof_offset` から始まるトップレベルボックスが `moof` であり、その直後に `mdat` が
-    /// 続く場合に真を返す。クラッシュで切り詰められたフラグメントを、初期化中 (moov / ftyp) の
-    /// 破損と区別して「メディアフラグメントの処理失敗」として扱うために使う。
+    /// 続く場合に真を返す。メディアフラグメントの処理失敗 (クラッシュによる切り詰め等) を、
+    /// 初期化中 (moov / ftyp) の破損と区別して扱うために使う。
     fn is_media_fragment(&mut self, moof_offset: u64) -> Result<bool> {
         let Some((moof_type, moof_size)) = self.read_box_header(moof_offset)? else {
             return Ok(false);
