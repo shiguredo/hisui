@@ -94,7 +94,6 @@ class ObswsServer:
                 env["HISUI_DEFAULT_RECORD_DIR"] = str(self.default_record_dir)
             if self.state_file is not None:
                 env["HISUI_SERVER_STATE_FILE"] = str(self.state_file)
-            # noargs::flag は値が空でなければ有効と解釈するため、無効時は変数自体を設定しない
             if self.dump_metrics_on_exit:
                 env["HISUI_DUMP_METRICS_ON_EXIT"] = "1"
         else:
