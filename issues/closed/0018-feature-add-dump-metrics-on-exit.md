@@ -2,9 +2,9 @@
 
 - Priority: Medium
 - Created: 2026-06-04
-- Completed:
+- Completed: 2026-06-05
 - Model: Opus 4.8
-- Branch:
+- Branch: feature/add-dump-metrics-on-exit
 - Polished: 2026-06-04
 
 ## 目的
@@ -71,7 +71,33 @@ Medium。テスト失敗や障害の原因調査の効率に直結する。ユ�
 - メトリクスが空: 0 行で正常終了する。
 - stdout への書き込み失敗: 警告ログを出して終了を続行する（終了処理をブロックしない）。
 
+## 解決方法
+
+設計方針どおり SIGTERM / SIGINT グレースフルシャットダウンと `--dump-metrics-on-exit` を実装し、`/review-diff-code` のレビュー指摘を反映した。
+
+### 実装
+
+- obsws server に `ShutdownSignal`（SIGTERM / SIGINT）を新設。`run_server` 入口で登録し、`run_accept_loop` の `select!` にシグナル分岐を追加（受信で `Ok(())`、致命エラーの `Err` 分岐と区別）。
+- workspace tokio に `signal` feature を集約し、examples 6 件の個別指定を削除。
+- `--dump-metrics-on-exit`（env: `HISUI_DUMP_METRICS_ON_EXIT`）を `server` サブコマンドに追加し、player / 非 player 両経路で引き回し。
+- 終了時に `Stats::to_prometheus_json_families()`（`/metrics?format=json` と同一 prom2json）を `{"type":"metrics","metrics":...}` で包み stdout に 1 行出力。
+- e2e: `ObswsServer` が既定でフラグを使い、`stop()` を `communicate` ベースの並行 drain に変更。録画系の `/metrics` 全文埋め込みと未使用診断ヘルパを廃止し、診断は終了ダンプ（captured output）に委譲。
+
+### レビューで調整した点
+
+- `type` 付与は `Stats` でなく出力側の規約なので、`to_metrics_dump_json_line()` メソッドは設けず `dump_metrics_to_stdout`（server.rs）にインライン化（`to_prometheus_json_families()` を直接利用）。
+- `ShutdownSignal` の `#[cfg(not(unix))]` 分岐はコードベース唯一の非 unix ガードでデッドのため削除し、`tokio::signal::unix` を直接使う unix 前提に。
+- 終了ダンプの stdout 書き込みは BrokenPipe を黙殺（`json.rs::pretty_print` と一貫）。
+- e2e に公開アクセサ `stdout` / `returncode` を追加して private 直参照を解消。無効時テストは `returncode == 0`（SIGTERM グレースフル終了）も検証。
+- `_inspect_mp4` の死にコード化した `diagnostics_text` 引数を削除。
+- 完了条件のうち「専用の変換関数単体テスト追加」「e2e 改修の `### misc` 記載」は取り下げ。前者はラップのインライン化で対象関数が無くなり、prom2json 生成は既存 `to_prometheus_json_families` テスト群が、ダンプ形式は e2e 結合テストがカバー。後者は記載不要と判断。
+
+### 検証
+
+lib テスト 564 passed、clippy（player / 非 player）、ruff、ダンプ結合テスト 2 件、SIGTERM スモーク（returncode 0 ＋ ダンプ）すべて通過。
+
 ## 関連
 
 - issues/0011（調査元。reopen 済み）
 - issues/0017（音声 sample_entry 要求機構の修正。その flaky 検証時に本機能の診断が役立つ）
+- issues/0026（player 再生中の SDL シグナルハンドラ競合の調査。本 issue のレビューで分離）
