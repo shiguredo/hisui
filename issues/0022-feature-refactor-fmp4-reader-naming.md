@@ -1,35 +1,56 @@
-# fMP4 reader 周りの紛らわしい命名とエラー文言の表記を統一する
+# fMP4 reader の命名 doc を補い、エラー文言の fMP4 表記を統一する
 
 - Priority: Low
 - Created: 2026-06-04
 - Completed:
 - Model: Opus 4.8
-- Branch:
-- Polished:
+- Branch: feature/refactor-fmp4-reader-naming
+- Polished: 2026-06-05
 
 ## 目的
 
-自前型とライブラリ型で近接した紛らわしい命名があり、またエラー文言の fMP4 表記が不統一。可読性と一貫性を改善する。
+`Mp4FileReader` だけ doc コメントが無く、`Mp4SampleReader` との役割差が型名から読み取りにくい。また `Mp4FileReader::new` のエラー文言だけが `Fmp4` 表記で、コードベース全体の `fMP4` 表記から外れている。この 2 点を解消し、可読性と表記の一貫性を改善する。
 
 ## 優先度根拠
 
-Low。可読性・一貫性の改善で機能には影響しない。
+Low。機能には影響しない可読性・一貫性の改善。変更対象は doc コメントとエラー文言の表記のみで、挙動は変えない。
 
 ## 現状
 
-- 命名の近接衝突（`src/mp4/demuxer.rs`, `src/mp4/sample_reader.rs`）:
-  - 自前 `Mp4Demuxer` vs ライブラリ `Mp4FileDemuxer`
-  - 自前 `DemuxerKind` vs ライブラリ `Mp4FileKind`
-  - `Mp4SampleReader`（前方読み専用）vs `Mp4FileReader`（再生制御つき）
-  - いずれも役割差が名前から読み取りにくい。
-- エラー文言の表記揺れ: `src/mp4/reader.rs` の `Mp4FileReader::new` のエラー `"Fmp4 is not supported by Mp4FileReader yet"` の `Fmp4` が、コード / コメント / CHANGES の `fMP4` 表記と不統一。テスト `new_rejects_fragmented_mp4` が `contains("Fmp4")` で検証しているため、連動修正が必要。
+### エラー文言の表記揺れ
+
+- 散文表記として `Fmp4` を使っているのは `src/mp4/reader.rs:261` の `Mp4FileReader::new` のエラー `"Fmp4 is not supported by Mp4FileReader yet: {}"` 1 箇所のみ。
+- このエラーは OBSWS の MP4 ソース経路（`src/obsws/source/file_mp4.rs:32` の `Mp4FileReader::new(...)?`）でユーザーに表出する。
+- 連動して、テスト `new_rejects_fragmented_mp4`（`src/mp4/reader.rs:1687`）が `message.contains("Fmp4")`（`:1696`）とアサーションメッセージ（`:1697`「エラーメッセージに Fmp4 が含まれること」）で `Fmp4` を検証している。
+- 一方、他のエラー文字列リテラル（`src/hls/writer.rs:372,797,803` / `src/dash/writer.rs:340,658,664`）・コメント・`CHANGES.md` は一貫して `fMP4` 表記。識別子（型名・enum バリアント `DemuxerKind::Fmp4`・ライブラリ型 `Fmp4FileDemuxer` / `Fmp4SegmentMuxer`・`HlsSegmentFormat::Fmp4` 等）は Rust の命名規則上 `Fmp4` が正規であり、表記統一の対象外。
+
+### doc コメントの欠落
+
+- doc コメントが無いのは `src/mp4/reader.rs:212` の `Mp4FileReader` struct のみ（直前は `#[derive(Debug)]`）。
+- 役割差を示す説明自体は `src/mp4/reader.rs:256-257` のコメント（「OBSWS のメディア再生 (seek / prev_sample) に依存」「inspect は fMP4 を `Mp4SampleReader` 経由で扱う」）に既にある。
+- 近接して紛らわしい他の自前型は doc 整備済みで追加対応は不要:
+  - `Mp4Demuxer`（`src/mp4/demuxer.rs:96-99`）・`DemuxerKind`（`:64-67`）・`Mp4SampleReader`（`src/mp4/sample_reader.rs:1-5,26`）はいずれも doc / module doc で役割明示済み。
+- なお名前空間上の衝突（コンパイルエラー）は起きていない。型名が似ていて誤読しやすいだけ。
 
 ## 設計方針
 
-- 型名の役割が分かるよう改名するか、最低限 doc コメントで `Mp4FileReader` との違い等を明示する。
-- エラー文言を `fragmented MP4` または `fMP4` に統一し、対応するテストのアサーションも合わせる。
+- 改名はしない。`Mp4FileReader` / `Mp4SampleReader` は外部 API（`src/lib.rs:17` の `pub mod mp4` と `src/mp4.rs:4-5` の `pub mod reader` / `pub mod sample_reader` で crate 外へ到達する）であり、改名は後方互換を壊す（`feature/change-` 相当）。Priority Low に見合わないため doc 追記で対応する。
+- `Mp4FileReader`（`src/mp4/reader.rs:212`）に doc コメントを追加し、`Mp4SampleReader`（前方読み専用・inspect 用）との役割差を明示する。文面は `src/mp4/reader.rs:256-257` のコメントを要約して使う。
+- エラー文言を `fMP4` に統一する（エラー文字列リテラルの既存主流表記）。変更対象は次の 3 箇所:
+  - `src/mp4/reader.rs:261` のエラー文字列 `"Fmp4 ..."` を `"fMP4 ..."` にする。
+  - `src/mp4/reader.rs:1696` の `message.contains("Fmp4")` を `contains("fMP4")` にする。
+  - `src/mp4/reader.rs:1697` のアサーションメッセージ `"...に Fmp4 が含まれること"` を `"...に fMP4 が含まれること"` にする。
+- 識別子（型名・enum バリアント・ライブラリ型）は変更しない。
 
 ## 完了条件
 
-- 命名から役割が読み取れる、もしくは doc で明示されること。
-- fMP4 のエラー文言表記がコードベースで一貫し、テストも追従すること。
+- `Mp4FileReader` に `Mp4SampleReader` との役割差を示す doc コメントが付くこと。
+- `Mp4FileReader::new` のエラー文言が `fMP4` 表記になり、テスト `new_rejects_fragmented_mp4`（`src/mp4/reader.rs:1696-1697` の `contains` とアサーションメッセージ）が追従すること。`cargo test -p hisui --lib new_rejects_fragmented_mp4` で確認できる（`testdata/red-320x320-h264-aac-fragmented.mp4` に依存）。
+- 識別子の `Fmp4`（型名・enum バリアント・ライブラリ型）に手を入れていないこと。
+- `CHANGES.md` の `### misc` に `[UPDATE]` として 1 行追記すること。エラー文言はユーザー可視だが、表記統一であって挙動・互換性に実質影響せず、doc 追加と合わせ機能に影響しないため `### misc` 扱いとする。記載例（既存の `[UPDATE]` 群の末尾に置き、次行に 2 文字インデントで担当者を添える）:
+  - `- [UPDATE] Mp4FileReader に doc コメントを追加し、エラー文言の fMP4 表記を統一する`
+  - `  - @ユーザー名`
+
+## 関連
+
+- issues/0021（`src/mp4/demuxer.rs` の `Mp4Demuxer::open` を変更する）。本 issue は `src/mp4/reader.rs` と `CHANGES.md` のみ変更し、`demuxer.rs` は doc の手本として参照するだけなので、ファイル変更は重複しない。改名もしないため型名参照への波及も無い。
