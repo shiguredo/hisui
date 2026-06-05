@@ -119,13 +119,19 @@ impl ShutdownSignal {
 fn dump_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
     use std::io::Write as _;
 
-    let line = match pipeline_handle.stats().to_metrics_dump_json_line() {
-        Ok(line) => line,
+    let families = match pipeline_handle.stats().to_prometheus_json_families() {
+        Ok(families) => families,
         Err(e) => {
             tracing::warn!("failed to collect metrics for exit dump: {}", e.display());
             return;
         }
     };
+    // stdout の JSON Lines ストリームのエントリ種別を `type` で示す（メトリクスダンプは "metrics"）
+    let line = nojson::object(|f| {
+        f.member("type", "metrics")?;
+        f.member("metrics", &families)?;
+        Ok(())
+    });
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     if let Err(e) = writeln!(out, "{line}") {

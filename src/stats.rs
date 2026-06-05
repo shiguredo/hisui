@@ -148,16 +148,6 @@ impl Stats {
         to_prometheus_json_families_from_entries(self.entries()?)
     }
 
-    pub fn to_metrics_dump_json_line(&self) -> crate::Result<String> {
-        let families = self.to_prometheus_json_families()?;
-        Ok(nojson::object(|f| {
-            f.member("type", "metrics")?;
-            f.member("metrics", &families)?;
-            Ok(())
-        })
-        .to_string())
-    }
-
     pub fn entries(&self) -> crate::Result<Vec<StatsEntry>> {
         let entries = {
             let shared_entries = self
@@ -1028,31 +1018,6 @@ mod tests {
                 .iter()
                 .any(|e| e.metric_name == "state" && e.value.as_string() == Some("running".into())),
             "string entry is missing: {entries:?}"
-        );
-    }
-
-    #[test]
-    fn to_metrics_dump_json_line_wraps_prom2json_with_type() {
-        let mut stats = Stats::new();
-        stats.set_default_label("processor_id", "p0");
-        stats.counter("processed_total").add(10);
-        stats.string("state").set("running");
-
-        let line = stats
-            .to_metrics_dump_json_line()
-            .expect("to_metrics_dump_json_line must succeed");
-
-        // 1 行が妥当な JSON であること
-        nojson::RawJsonOwned::parse(line.clone())
-            .unwrap_or_else(|_| panic!("ダンプは妥当な JSON であること: {line}"));
-        // ルートに type:"metrics" を持ち、prom2json の family（hisui_ プレフィックス付き）を含むこと
-        assert!(
-            line.contains(r#""type":"metrics""#),
-            "type フィールドが無い: {line}"
-        );
-        assert!(
-            line.contains("hisui_processed_total"),
-            "prom2json の family が無い: {line}"
         );
     }
 }
