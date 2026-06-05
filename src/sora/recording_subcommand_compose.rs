@@ -352,8 +352,9 @@ async fn setup_pipeline(
         let reader_processor_type = match source_info.format {
             ContainerFormat::Mp4 => "mp4_audio_reader",
             ContainerFormat::Webm => "webm_audio_reader",
-            // Sora 録画メタデータの format は ContainerFormat::try_from ("webm"/"mp4" のみ受理) 経由でしか
-            // 構築されず Fmp4 は生成されない。ここに来るのは実装バグなのでエラーにする
+            // Sora 録画メタデータの format は ContainerFormat::parse_sora_recording_format
+            // ("webm"/"mp4" のみ受理) 経由でしか構築されず Fmp4 は生成されない。
+            // ここに来るのは実装バグなのでエラーにする
             ContainerFormat::Fmp4 => {
                 return Err(Error::new(
                     "unexpected fMP4 container format in Sora recording metadata",
@@ -423,8 +424,9 @@ async fn setup_pipeline(
         let reader_processor_type = match source_info.format {
             ContainerFormat::Mp4 => "mp4_video_reader",
             ContainerFormat::Webm => "webm_video_reader",
-            // Sora 録画メタデータの format は ContainerFormat::try_from ("webm"/"mp4" のみ受理) 経由でしか
-            // 構築されず Fmp4 は生成されない。ここに来るのは実装バグなのでエラーにする
+            // Sora 録画メタデータの format は ContainerFormat::parse_sora_recording_format
+            // ("webm"/"mp4" のみ受理) 経由でしか構築されず Fmp4 は生成されない。
+            // ここに来るのは実装バグなのでエラーにする
             ContainerFormat::Fmp4 => {
                 return Err(Error::new(
                     "unexpected fMP4 container format in Sora recording metadata",

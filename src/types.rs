@@ -105,6 +105,22 @@ impl ContainerFormat {
             )))
         }
     }
+
+    /// Sora 録画メタデータ (`*.json`) の `format` フィールドをパースする
+    ///
+    /// Sora の録画ファイルは通常 MP4 か WebM のみで fMP4 は出力されないため、
+    /// `"mp4"` / `"webm"` だけを受理し `Fmp4` は生成しない。
+    /// fMP4 かどうかの判別はファイル実体を見る必要があり、inspect 層の
+    /// content 判定（`detect_container_format`）が担う。
+    pub fn parse_sora_recording_format(
+        value: nojson::RawJsonValue<'_, '_>,
+    ) -> Result<Self, nojson::JsonParseError> {
+        match value.to_unquoted_string_str()?.as_ref() {
+            "webm" => Ok(Self::Webm),
+            "mp4" => Ok(Self::Mp4),
+            v => Err(value.invalid(format!("unknown container format: {v}"))),
+        }
+    }
 }
 
 impl nojson::DisplayJson for ContainerFormat {
@@ -113,18 +129,6 @@ impl nojson::DisplayJson for ContainerFormat {
             ContainerFormat::Webm => f.string("webm"),
             ContainerFormat::Mp4 => f.string("mp4"),
             ContainerFormat::Fmp4 => f.string("fmp4"),
-        }
-    }
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ContainerFormat {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(value: nojson::RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
-        match value.to_unquoted_string_str()?.as_ref() {
-            "webm" => Ok(Self::Webm),
-            "mp4" => Ok(Self::Mp4),
-            v => Err(value.invalid(format!("unknown container format: {v}"))),
         }
     }
 }
