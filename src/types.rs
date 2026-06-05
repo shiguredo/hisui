@@ -79,10 +79,11 @@ pub enum ContainerFormat {
     #[default]
     Webm,
     Mp4,
-    /// フラグメント化された MP4（fMP4）
+    /// fragmented MP4（fMP4）
     ///
-    /// 拡張子では通常 MP4 と区別できないため `from_path` では生成されず、
-    /// inspect 層がファイル実体（ftyp / moov）を見て補正したときにのみ生成される。
+    /// 通常 MP4 とは拡張子で区別できずファイル実体（ftyp / moov）を見る必要があるため、
+    /// 拡張子だけを見る `from_path` では生成されない。
+    /// inspect 層の `detect_container_format` がファイル実体を見て判定したときにのみ生成される。
     Fmp4,
 }
 
@@ -110,12 +111,10 @@ impl ContainerFormat {
     ///
     /// Sora の録画ファイルは通常 MP4 か WebM のみで fMP4 は出力されないため、
     /// `"mp4"` / `"webm"` だけを受理し `Fmp4` は生成しない。
-    /// fMP4 かどうかの判別はファイル実体を見る必要があり、inspect 層の
-    /// content 判定（`detect_container_format`）が担う。
     pub fn parse_sora_recording_format(
         value: nojson::RawJsonValue<'_, '_>,
     ) -> Result<Self, nojson::JsonParseError> {
-        match value.to_unquoted_string_str()?.as_ref() {
+        match value.as_string_str()? {
             "webm" => Ok(Self::Webm),
             "mp4" => Ok(Self::Mp4),
             v => Err(value.invalid(format!("unknown container format: {v}"))),
