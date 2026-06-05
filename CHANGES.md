@@ -11,7 +11,7 @@
 
 ## develop
 
-- [ADD] obsws server が SIGTERM / SIGINT で graceful shutdown するようになり、`--dump-metrics-on-exit` 指定時はプロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する
+- [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになり、`--dump-metrics-on-exit` 指定時はプロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する
   - 環境変数 `HISUI_DUMP_METRICS_ON_EXIT` でも有効化できる
   - @sile
 - [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0 にあげる
@@ -209,9 +209,6 @@
 
 ### misc
 
-- [UPDATE] obsws e2e の失敗診断をサーバ終了時のメトリクスダンプ（captured output）に委ねる
-  - 録画系テストで `/metrics` 全文を失敗メッセージに埋め込む処理を廃止し、終了ダンプから読めるようにする
-  - @sile
 - [UPDATE] 映像コーデックエンジンの選択を各コーデック crate の `supported_codecs()` を使った実行時検出に統一する
   - @sile
 - [UPDATE] tracing-subscriber のバージョンを 0.3.23 にあげる

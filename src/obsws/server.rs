@@ -69,8 +69,8 @@ fn request_path(uri: &str) -> &str {
     uri.split_once('?').map_or(uri, |(path, _)| path)
 }
 
-/// SIGTERM / SIGINT を受けて graceful shutdown するためのシグナル受信。
-/// Unix 以外ではシグナルによる graceful shutdown は未対応（`recv` は永久に保留する）。
+/// SIGTERM / SIGINT を受けてグレースフルシャットダウンするためのシグナル受信。
+/// Unix 以外ではシグナルによるグレースフルシャットダウンは未対応。
 struct ShutdownSignal {
     #[cfg(unix)]
     sigterm: tokio::signal::unix::Signal,

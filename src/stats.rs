@@ -150,12 +150,10 @@ impl Stats {
 
     pub fn to_metrics_dump_json_line(&self) -> crate::Result<String> {
         let families = self.to_prometheus_json_families()?;
-        Ok(nojson::json(|f| {
-            f.object(|f| {
-                f.member("type", "metrics")?;
-                f.member("metrics", &families)?;
-                Ok(())
-            })
+        Ok(nojson::object(|f| {
+            f.member("type", "metrics")?;
+            f.member("metrics", &families)?;
+            Ok(())
         })
         .to_string())
     }

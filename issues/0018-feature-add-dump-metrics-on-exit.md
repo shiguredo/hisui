@@ -1,4 +1,4 @@
-# obsws server に SIGTERM graceful shutdown と終了時メトリクス JSONL 出力フラグを追加し、失敗診断を改善する
+# obsws server に SIGTERM グレースフルシャットダウンと終了時メトリクス JSONL 出力フラグを追加し、失敗診断を改善する
 
 - Priority: Medium
 - Created: 2026-06-04
@@ -9,9 +9,9 @@
 
 ## 目的
 
-obsws server プロセスを SIGTERM で graceful に終了できるようにし、終了時に全メトリクスを JSON Lines で標準出力へ吐けるフラグを追加して、失敗診断を容易にする。動機は issues/0011 の調査で、obsws e2e が `/metrics` 全文を失敗メッセージに埋め込み CI ログで切り詰められ、目的のメトリクスが読めなかったこと。
+obsws server プロセスを SIGTERM でグレースフルに終了できるようにし、終了時に全メトリクスを JSON Lines で標準出力へ吐けるフラグを追加して、失敗診断を容易にする。動機は issues/0011 の調査で、obsws e2e が `/metrics` 全文を失敗メッセージに埋め込み CI ログで切り詰められ、目的のメトリクスが読めなかったこと。
 
-本 issue の主成果物は obsws server への SIGTERM/SIGINT graceful shutdown の新設であり、メトリクスダンプ機能はその上に乗る。フラグ追加が主目的のため category は `feature-add`。
+本 issue の主成果物は obsws server への SIGTERM/SIGINT グレースフルシャットダウンの新設であり、メトリクスダンプ機能はその上に乗る。フラグ追加が主目的のため category は `feature-add`。
 
 ## 優先度根拠
 
@@ -21,12 +21,12 @@ Medium。テスト失敗や障害の原因調査の効率に直結する。ユ�
 
 - hisui は HTTP で `/metrics`（Prometheus テキスト）と `/metrics?format=json`（prom2json 準拠 JSON。`src/endpoint_http_metrics.rs:98` が `Stats::entries()` ＋ tokio runtime メトリクスを合成）を公開するが、プロセス終了時に自分でメトリクスを吐く手段が無い。
 - obsws e2e は失敗時に `/metrics` 全文をスクレイプして失敗メッセージに埋め込む。`/metrics` は `BTreeMap` 由来でメトリクス名のアルファベット順のため、巨大なスナップショットが CI ログで後方から切り詰められ、後ろのメトリクス（`total_missing_*` / `total_received_*` 等）が読めない。
-- obsws server には graceful shutdown 経路もシグナルハンドラも存在しない。`src/` に `tokio::signal` は皆無で、`Cargo.toml` の tokio features に `signal` も無い。accept loop（`src/obsws/server.rs:329-340`）は無限ループで、抜けるのは accept エラー時か coordinator の致命的エラー（state file 書き込み失敗、`src/obsws/coordinator.rs:309-317`）時のみ（いずれも `Err`）。`run_server` に正常 `Ok(())` を返す経路は無い。e2e の停止は SIGTERM（`e2e-tests/obsws/helpers.py:143`）だが、ハンドラ無しで即時終了しクリーンアップは走らない。
+- obsws server にはグレースフルシャットダウン経路もシグナルハンドラも存在しない。`src/` に `tokio::signal` は皆無で、`Cargo.toml` の tokio features に `signal` も無い。accept loop（`src/obsws/server.rs:329-340`）は無限ループで、抜けるのは accept エラー時か coordinator の致命的エラー（state file 書き込み失敗、`src/obsws/coordinator.rs:309-317`）時のみ（いずれも `Err`）。`run_server` に正常 `Ok(())` を返す経路は無い。e2e の停止は SIGTERM（`e2e-tests/obsws/helpers.py:143`）だが、ハンドラ無しで即時終了しクリーンアップは走らない。
 - `run_server` の呼び出し元は 2 つある。player feature 有効時は別スレッドで `block_on`（`src/subcommand_server.rs:227`）し、メインスレッドは `run_player_control_loop` でブロックする。player 無効時は単一スレッドで `block_on`（`src/subcommand_server.rs:265`）。player は default（`Cargo.toml:112`）で、e2e/CI も player ビルド（CI は `--no-default-features` を付けない、`.github/workflows/e2e-test.yml:23`）。
 
 ## 設計方針
 
-### 1. obsws server に SIGTERM/SIGINT graceful shutdown を追加する（本機能の前提）
+### 1. obsws server に SIGTERM/SIGINT グレースフルシャットダウンを追加する（本機能の前提）
 
 - `Cargo.toml` の workspace tokio（`:32-43`）の features に `signal` を追加する。現状 `signal` は examples 6 件（`camera_record` / `hls_s3` / `camera_sora_grid` / `mpeg_dash_s3` / `sora_publish` / `sora_source`）が個別指定しているので、workspace へ集約して各 example の `features = ["signal"]` を外す。集約により `signal` 不要な `obsws_bootstrap` にも `signal` が付くが、軽量な feature なので許容する。
 - accept loop（`src/obsws/server.rs:329-340`）の `tokio::select!` に SIGTERM/SIGINT 分岐を足し、受信したら loop を抜けて `Ok(())` を返す（致命的エラーの `Err` 経路とは区別する）。SIGTERM を見るのは e2e の停止が SIGTERM のため（既存 examples の `tokio::signal::ctrl_c` は SIGINT のみ）。`tokio::signal::unix` は Windows 非対応なので `#[cfg(unix)]` でガードする（CI/e2e は Linux）。
@@ -37,7 +37,7 @@ Medium。テスト失敗や障害の原因調査の効率に直結する。ユ�
 ### 2. 終了時メトリクスダンプ（フラグ）
 
 - `--dump-metrics-on-exit`（`noargs::flag`、env: `HISUI_DUMP_METRICS_ON_EXIT`、boolean）を `server` サブコマンド（`src/subcommand_server.rs`）に追加し、`run_internal` → `run_server` → `run_accept_loop` へ `bool` 引数で引き回す。`run_server` の呼び出しは player（`:227`）と非 player（`:265`）の 2 箇所あり、両方に引数を追加する（`run_server` / `run_accept_loop` は既に `#[expect(clippy::too_many_arguments)]`）。
-- 有効時、設計方針 1 の signal 分岐で loop を抜ける直前（`run_accept_loop` 内。`pipeline_handle` は per-connection で clone するが本体は関数に残る）に、`pipeline_handle.stats()`（`MediaPipelineHandle::stats()`、`src/media_pipeline.rs:709`）で `Stats` を取得し、全メトリクスを **1 行の JSON** で **stdout** に出力する（tracing ログは stderr に出る（`src/logger.rs:124`）ため分離）。致命的エラー終了（`Err` 経路）でのダンプは対象外。
+- 有効時、設計方針 1 のシグナル分岐で loop を抜ける直前（`run_accept_loop` 内。`pipeline_handle` は per-connection で clone するが本体は関数に残る）に、`pipeline_handle.stats()`（`MediaPipelineHandle::stats()`、`src/media_pipeline.rs:709`）で `Stats` を取得し、全メトリクスを **1 行の JSON** で **stdout** に出力する（tracing ログは stderr に出る（`src/logger.rs:124`）ため分離）。致命的エラー終了（`Err` 経路）でのダンプは対象外。
 - 出力は stdout の JSON Lines ストリームの 1 エントリで、ルートに種別を示す `type` を持つ。将来 server 起動情報（issues/0002）等の別種エントリも同じ stdout に `type` 付きで出す想定（`type` 単一で識別する規約）。メトリクスダンプの `type` は `"metrics"`:
   - 例: `{"type":"metrics","metrics":[{"name":"hisui_current_canvas_height","help":"","type":"GAUGE","metrics":[{"labels":{"processor_id":"program:video_mixer","processor_type":"video_mixer"},"value":"1080"}]}, ...]}`
   - `metrics` の中身は既存 `Stats::to_prometheus_json_families()`（`/metrics?format=json` と同一の prom2json）。`hisui_` prefix 付き・family の配列・各 family に prometheus type（`COUNTER`/`GAUGE`）・value は文字列。
@@ -58,7 +58,7 @@ Medium。テスト失敗や障害の原因調査の効率に直結する。ユ�
 - E2E サーバが既定で `--dump-metrics-on-exit` を使い、SIGTERM で停止する録画系テストの失敗時に、最終メトリクス（finalize 成否 / sample_entry の received・missing 等）が切り詰められず確実に読めること（`server.kill()`（SIGKILL）で止めるテストは終了ダンプの対象外）。
 - 録画系の失敗メッセージへの `/metrics` 全文埋め込み（上記 grep で特定した箇所）が無くなり、未使用 `_print_obsws_diagnostics` が削除されていること。
 - 変換関数の単体テストが追加されていること（下記テスト戦略）。
-- `CHANGES.md` の `## develop` に `[ADD]` エントリを追記すること（フラグ追加と SIGTERM graceful 終了。現状の SIGTERM は OS 既定の即時終了で hisui が保証した挙動ではなく、graceful 経路の新設は後方互換を壊さないため `[ADD]`）。e2e 改修は `### misc` に記載する。
+- `CHANGES.md` の `## develop` に `[ADD]` エントリを追記すること（フラグ追加と SIGTERM グレースフル終了。現状の SIGTERM は OS 既定の即時終了で hisui が保証した挙動ではなく、グレースフル経路の新設は後方互換を壊さないため `[ADD]`）。e2e 改修は `### misc` に記載する。
 
 ## テスト戦略
 
