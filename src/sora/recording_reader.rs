@@ -105,12 +105,17 @@ impl AudioReader {
             .pop()
             .ok_or_else(|| crate::Error::new("no input file for audio reader"))?;
         let inner = match format {
-            // Sora 録画メタデータ経由では Fmp4 は生成されない (TryFrom が受理しない) ため
-            // ここには到達しないが、網羅性維持のため Mp4 と同じ扱いにする
-            ContainerFormat::Mp4 | ContainerFormat::Fmp4 => {
+            ContainerFormat::Mp4 => {
                 let mut reader = Mp4AudioReader::new(first_input_file.clone())?;
                 reader.current_input_file = Some(first_input_file.clone());
                 AudioReaderInner::Mp4(Box::new(reader))
+            }
+            // Sora 録画メタデータの format は ContainerFormat::try_from ("webm"/"mp4" のみ受理) 経由でしか
+            // 構築されず Fmp4 は生成されない。ここに来るのは実装バグなのでエラーにする
+            ContainerFormat::Fmp4 => {
+                return Err(crate::Error::new(
+                    "unexpected fMP4 container format in Sora recording metadata",
+                ));
             }
             ContainerFormat::Webm => {
                 let mut reader = WebmAudioReader::new(first_input_file.clone())?;
@@ -337,12 +342,17 @@ impl VideoReader {
             .pop()
             .ok_or_else(|| crate::Error::new("no input file for video reader"))?;
         let inner = match format {
-            // Sora 録画メタデータ経由では Fmp4 は生成されない (TryFrom が受理しない) ため
-            // ここには到達しないが、網羅性維持のため Mp4 と同じ扱いにする
-            ContainerFormat::Mp4 | ContainerFormat::Fmp4 => {
+            ContainerFormat::Mp4 => {
                 let mut reader = Mp4VideoReader::new(first_input_file.clone())?;
                 reader.current_input_file = Some(first_input_file.clone());
                 VideoReaderInner::Mp4(Box::new(reader))
+            }
+            // Sora 録画メタデータの format は ContainerFormat::try_from ("webm"/"mp4" のみ受理) 経由でしか
+            // 構築されず Fmp4 は生成されない。ここに来るのは実装バグなのでエラーにする
+            ContainerFormat::Fmp4 => {
+                return Err(crate::Error::new(
+                    "unexpected fMP4 container format in Sora recording metadata",
+                ));
             }
             ContainerFormat::Webm => {
                 let mut reader = WebmVideoReader::new(first_input_file.clone())?;

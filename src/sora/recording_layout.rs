@@ -515,8 +515,14 @@ pub fn resolve_source_and_media_path_pairs(
         let mut media_path = path.clone();
         match archive.format {
             ContainerFormat::Webm => media_path.set_extension("webm"),
-            // Sora 録画メタデータ経由では Fmp4 は生成されないが、網羅性維持のため Mp4 と同じ拡張子にする
-            ContainerFormat::Mp4 | ContainerFormat::Fmp4 => media_path.set_extension("mp4"),
+            ContainerFormat::Mp4 => media_path.set_extension("mp4"),
+            // Sora 録画メタデータの format は ContainerFormat::try_from ("webm"/"mp4" のみ受理) 経由でしか
+            // 構築されず Fmp4 は生成されない。ここに来るのは実装バグなのでエラーにする
+            ContainerFormat::Fmp4 => {
+                return Err(crate::Error::new(
+                    "unexpected fMP4 container format in Sora recording metadata",
+                ));
+            }
         };
         resolved.push((archive.source_info(), media_path));
     }

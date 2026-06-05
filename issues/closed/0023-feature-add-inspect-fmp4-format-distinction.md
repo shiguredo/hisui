@@ -93,7 +93,7 @@ Sora 系（`recording_*`）の match では `Fmp4` は到達しない（`TryFrom
 
 - `src/types.rs`: `ContainerFormat` に `Fmp4` を追加。`DisplayJson` に `Fmp4 => f.string("fmp4")` を追加。`from_path`（拡張子判定）と `TryFrom<RawJsonValue>`（`"webm"` / `"mp4"` のみ受理）は据え置き、Sora 録画メタデータ経路では `Fmp4` を生成しないようにした。
 - `src/subcommand_inspect.rs`: content 判定関数 `detect_container_format` を新設し、`run_internal` の `ContainerFormat::from_path` を置換。`Mp4` のとき `detect_mp4_file_kind` を見て `FragmentedMp4` なら `Fmp4` に補正する。判定エラーはそのまま伝播し `Mp4` へフォールバックしない。reader 選択 match は `Mp4 | Fmp4` で共通化。
-- 網羅性維持のため `src/sora/recording_reader.rs`・`src/sora/recording_layout.rs`・`src/sora/recording_subcommand_compose.rs` の `ContainerFormat` match に `Mp4 | Fmp4` arm を追加（これらの経路に `Fmp4` は到達しない）。
+- `src/sora/recording_reader.rs`・`src/sora/recording_layout.rs`・`src/sora/recording_subcommand_compose.rs` の `ContainerFormat` match に `Fmp4` arm を追加。これらの Sora 録画メタデータ経路は `ContainerFormat::try_from`（`"webm"`/`"mp4"` のみ受理）経由でしか `format` を構築せず `Fmp4` は生成されないため、`Mp4` と同じ扱いで握りつぶさず、到達した場合は実装バグとして明示的にエラー（`unexpected fMP4 container format in Sora recording metadata`）を返すようにした。
 - テスト: `tests/e2e.rs` の `inspect_fragmented_mp4_video_only` を `format == "fmp4"` に修正、`inspect_fragmented_mp4_audio_only` / `inspect_fragmented_mp4_audio_video` に `format == "fmp4"` の assert を追加。`detect_container_format` の単体テスト（通常 MP4 / fMP4 / WebM / 破損 MP4 のエラー伝播）を `src/subcommand_inspect.rs` に追加。
 - `CHANGES.md`: 既存の fMP4 対応 [ADD] エントリに sub-bullet を追記。
 
