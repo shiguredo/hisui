@@ -147,8 +147,8 @@ class ObswsServer:
             return
         if process.poll() is None:
             process.send_signal(signal.SIGTERM)
-        # 終了時メトリクスダンプで stdout pipe が詰まるとサーバが exit できないため、
-        # communicate() で stdout/stderr を並行 drain しながら終了を待つ。
+        # 終了時メトリクスダンプで stdout のパイプが詰まるとサーバが終了できないため、
+        # communicate() で stdout/stderr を並行して読み出しながら終了を待つ。
         try:
             stdout, stderr = process.communicate(timeout=5.0)
         except subprocess.TimeoutExpired:

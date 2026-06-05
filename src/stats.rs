@@ -1042,10 +1042,10 @@ mod tests {
             .to_metrics_dump_json_line()
             .expect("to_metrics_dump_json_line must succeed");
 
-        // 1 行が valid JSON であること
+        // 1 行が妥当な JSON であること
         nojson::RawJsonOwned::parse(line.clone())
-            .unwrap_or_else(|_| panic!("ダンプは valid JSON であること: {line}"));
-        // ルートに type:"metrics" を持ち、prom2json の family（hisui_ prefix 付き）を含むこと
+            .unwrap_or_else(|_| panic!("ダンプは妥当な JSON であること: {line}"));
+        // ルートに type:"metrics" を持ち、prom2json の family（hisui_ プレフィックス付き）を含むこと
         assert!(
             line.contains(r#""type":"metrics""#),
             "type フィールドが無い: {line}"

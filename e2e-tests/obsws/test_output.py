@@ -2106,14 +2106,14 @@ def test_obsws_dump_metrics_on_exit_outputs_jsonl(binary_path: Path, tmp_path: P
 
     dump = _find_metrics_dump(server._stdout)
     assert dump is not None, f"終了時メトリクスダンプが stdout に出ていない: stdout={server._stdout!r}"
-    # metrics は prom2json の family 配列で、hisui_ prefix 付きの family を含むこと
+    # metrics は prom2json の family 配列で、hisui_ プレフィックス付きの family を含むこと
     families = dump["metrics"]
     assert isinstance(families, list) and families, f"metrics が空または配列でない: {dump}"
     assert all("name" in f and "type" in f and "metrics" in f for f in families), (
         f"family の形式が不正: {families}"
     )
     assert any(f["name"].startswith("hisui_") for f in families), (
-        f"hisui_ prefix の family が無い: {families}"
+        f"hisui_ プレフィックスの family が無い: {families}"
     )
 
 
