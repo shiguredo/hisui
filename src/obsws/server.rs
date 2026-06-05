@@ -70,45 +70,27 @@ fn request_path(uri: &str) -> &str {
 }
 
 /// SIGTERM / SIGINT を受けてグレースフルシャットダウンするためのシグナル受信。
-/// Unix 以外ではシグナルによるグレースフルシャットダウンは未対応。
 struct ShutdownSignal {
-    #[cfg(unix)]
     sigterm: tokio::signal::unix::Signal,
-    #[cfg(unix)]
     sigint: tokio::signal::unix::Signal,
 }
 
 impl ShutdownSignal {
     /// シグナルハンドラを登録する。登録後に受けたシグナルは最初の `recv` で返る。
     fn install() -> crate::Result<Self> {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{SignalKind, signal};
-            let sigterm = signal(SignalKind::terminate()).map_err(|e| {
-                crate::Error::new(format!("failed to install SIGTERM handler: {e}"))
-            })?;
-            let sigint = signal(SignalKind::interrupt())
-                .map_err(|e| crate::Error::new(format!("failed to install SIGINT handler: {e}")))?;
-            Ok(Self { sigterm, sigint })
-        }
-        #[cfg(not(unix))]
-        {
-            Ok(Self {})
-        }
+        use tokio::signal::unix::{SignalKind, signal};
+        let sigterm = signal(SignalKind::terminate())
+            .map_err(|e| crate::Error::new(format!("failed to install SIGTERM handler: {e}")))?;
+        let sigint = signal(SignalKind::interrupt())
+            .map_err(|e| crate::Error::new(format!("failed to install SIGINT handler: {e}")))?;
+        Ok(Self { sigterm, sigint })
     }
 
     /// SIGTERM か SIGINT を受信するまで待つ。
     async fn recv(&mut self) {
-        #[cfg(unix)]
-        {
-            tokio::select! {
-                _ = self.sigterm.recv() => {}
-                _ = self.sigint.recv() => {}
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            std::future::pending::<()>().await
+        tokio::select! {
+            _ = self.sigterm.recv() => {}
+            _ = self.sigint.recv() => {}
         }
     }
 }
