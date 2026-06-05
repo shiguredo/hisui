@@ -119,8 +119,8 @@ impl ShutdownSignal {
 fn dump_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
     use std::io::Write as _;
 
-    let entries = match pipeline_handle.stats().entries() {
-        Ok(entries) => entries,
+    let line = match pipeline_handle.stats().to_metrics_dump_json_line() {
+        Ok(line) => line,
         Err(e) => {
             tracing::warn!("failed to collect metrics for exit dump: {}", e.display());
             return;
@@ -128,11 +128,8 @@ fn dump_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
     };
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    for entry in &entries {
-        if let Err(e) = writeln!(out, "{}", crate::stats::stats_entry_to_json_line(entry)) {
-            tracing::warn!("failed to write metrics dump to stdout: {e}");
-            return;
-        }
+    if let Err(e) = writeln!(out, "{line}") {
+        tracing::warn!("failed to write metrics dump to stdout: {e}");
     }
 }
 

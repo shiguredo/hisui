@@ -148,6 +148,18 @@ impl Stats {
         to_prometheus_json_families_from_entries(self.entries()?)
     }
 
+    pub fn to_metrics_dump_json_line(&self) -> crate::Result<String> {
+        let families = self.to_prometheus_json_families()?;
+        Ok(nojson::json(|f| {
+            f.object(|f| {
+                f.member("type", "metrics")?;
+                f.member("metrics", &families)?;
+                Ok(())
+            })
+        })
+        .to_string())
+    }
+
     pub fn entries(&self) -> crate::Result<Vec<StatsEntry>> {
         let entries = {
             let shared_entries = self
@@ -526,21 +538,6 @@ pub struct StatsEntry {
     pub metric_name: &'static str,
     pub labels: StatsLabels,
     pub value: StatsValue,
-}
-
-/// 1 つの `StatsEntry` を JSON Lines 形式の 1 行（`name` / `labels` / `value` の object）に
-/// シリアライズする。プロセス終了時のメトリクスダンプ（`--dump-metrics-on-exit`）で使う。
-/// `name` には Prometheus 描画時の `hisui_` prefix は付けない。
-pub fn stats_entry_to_json_line(entry: &StatsEntry) -> String {
-    nojson::json(|f| {
-        f.object(|f| {
-            f.member("name", entry.metric_name)?;
-            f.member("labels", &entry.labels)?;
-            f.member("value", &entry.value)?;
-            Ok(())
-        })
-    })
-    .to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -1037,43 +1034,27 @@ mod tests {
     }
 
     #[test]
-    fn stats_entry_to_json_line_serializes_all_metric_types() {
+    fn to_metrics_dump_json_line_wraps_prom2json_with_type() {
         let mut stats = Stats::new();
         stats.set_default_label("processor_id", "p0");
         stats.counter("processed_total").add(10);
-        stats.gauge("queue_depth").set(-3);
-        stats.gauge_f64("latency_seconds").set(0.25);
-        stats.duration("uptime").set(Duration::from_millis(1250));
-        stats.flag("error").set(true);
         stats.string("state").set("running");
 
-        let entries = stats.entries().expect("entries must succeed");
+        let line = stats
+            .to_metrics_dump_json_line()
+            .expect("to_metrics_dump_json_line must succeed");
 
-        // 全エントリの 1 行が valid JSON としてパースできること
-        for entry in &entries {
-            let line = stats_entry_to_json_line(entry);
-            nojson::RawJsonOwned::parse(line.clone())
-                .unwrap_or_else(|_| panic!("各行は valid JSON であること: {line}"));
-        }
-
-        // counter は name / labels / value を含む期待どおりの形であること（prefix なし・数値）
-        let counter = entries
-            .iter()
-            .find(|e| e.metric_name == "processed_total")
-            .expect("counter エントリがあること");
-        assert_eq!(
-            stats_entry_to_json_line(counter),
-            r#"{"name":"processed_total","labels":{"processor_id":"p0"},"value":10}"#,
+        // 1 行が valid JSON であること
+        nojson::RawJsonOwned::parse(line.clone())
+            .unwrap_or_else(|_| panic!("ダンプは valid JSON であること: {line}"));
+        // ルートに type:"metrics" を持ち、prom2json の family（hisui_ prefix 付き）を含むこと
+        assert!(
+            line.contains(r#""type":"metrics""#),
+            "type フィールドが無い: {line}"
         );
-
-        // string 型は value が文字列になること（value ラベル展開はしない）
-        let string_entry = entries
-            .iter()
-            .find(|e| e.metric_name == "state")
-            .expect("string エントリがあること");
-        assert_eq!(
-            stats_entry_to_json_line(string_entry),
-            r#"{"name":"state","labels":{"processor_id":"p0"},"value":"running"}"#,
+        assert!(
+            line.contains("hisui_processed_total"),
+            "prom2json の family が無い: {line}"
         );
     }
 }

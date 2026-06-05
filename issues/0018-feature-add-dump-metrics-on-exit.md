@@ -37,13 +37,11 @@ Medium。テスト失敗や障害の原因調査の効率に直結する。ユ�
 ### 2. 終了時メトリクスダンプ（フラグ）
 
 - `--dump-metrics-on-exit`（`noargs::flag`、env: `HISUI_DUMP_METRICS_ON_EXIT`、boolean）を `server` サブコマンド（`src/subcommand_server.rs`）に追加し、`run_internal` → `run_server` → `run_accept_loop` へ `bool` 引数で引き回す。`run_server` の呼び出しは player（`:227`）と非 player（`:265`）の 2 箇所あり、両方に引数を追加する（`run_server` / `run_accept_loop` は既に `#[expect(clippy::too_many_arguments)]`）。
-- 有効時、設計方針 1 の signal 分岐で loop を抜ける直前（`run_accept_loop` 内。`pipeline_handle` は per-connection で clone するが本体は関数に残る）に、`pipeline_handle.stats()`（`MediaPipelineHandle::stats()`、`src/media_pipeline.rs:709`）で `Stats` を取得し、`Stats::entries()`（`src/stats.rs:151`）で全メトリクスを取り、各 `StatsEntry`（`src/stats.rs:524-529`）を 1 行 1 メトリクスの JSON Lines で **stdout** に出力する（tracing ログは stderr に出る（`src/logger.rs:124`）ため分離）。致命的エラー終了（`Err` 経路）でのダンプは対象外。
-- `StatsEntry` には `DisplayJson` 実装が無いため、`src/stats.rs` に公開関数を追加し、`nojson` で `name` / `labels` / `value` の object を組む（`PrometheusMetricSample` の `DisplayJson`（`src/stats.rs:557`）が前例）。JSONL の 1 行スキーマ:
-  - 例: `{"name":"total_finalize_failure_count","labels":{"processor_id":"output:record:mp4_writer:0","processor_type":"hybrid_mp4_writer"},"value":1}`
-  - `name` は `hisui_` prefix 無しの `StatsEntry.metric_name`（prefix は Prometheus 描画時のみ付与、`src/stats.rs:120`）。
-  - `labels` は `StatsLabels` の既存 `DisplayJson`（`src/stats.rs:513-522`）。
-  - `value` は `StatsValue` の既存 `DisplayJson`（`src/stats.rs:321-335`: Counter→u64, Gauge→i64, GaugeF64→f64, Duration→秒 f64, Flag→bool, StringValue→文字列）。型混在を許容し、`/metrics?format=json` のような StringValue の value ラベル展開はしない。
-  - tokio runtime メトリクス（HTTP 経路のみ合成）は含めず、`Stats` レジストリ由来のみ（本 issue の「全メトリクス」はこの意味）。
+- 有効時、設計方針 1 の signal 分岐で loop を抜ける直前（`run_accept_loop` 内。`pipeline_handle` は per-connection で clone するが本体は関数に残る）に、`pipeline_handle.stats()`（`MediaPipelineHandle::stats()`、`src/media_pipeline.rs:709`）で `Stats` を取得し、全メトリクスを **1 行の JSON** で **stdout** に出力する（tracing ログは stderr に出る（`src/logger.rs:124`）ため分離）。致命的エラー終了（`Err` 経路）でのダンプは対象外。
+- 出力は stdout の JSON Lines ストリームの 1 エントリで、ルートに種別を示す `type` を持つ。将来 server 起動情報（issues/0002）等の別種エントリも同じ stdout に `type` 付きで出す想定（`type` 単一で識別する規約）。メトリクスダンプの `type` は `"metrics"`:
+  - 例: `{"type":"metrics","metrics":[{"name":"hisui_current_canvas_height","help":"","type":"GAUGE","metrics":[{"labels":{"processor_id":"program:video_mixer","processor_type":"video_mixer"},"value":"1080"}]}, ...]}`
+  - `metrics` の中身は既存 `Stats::to_prometheus_json_families()`（`/metrics?format=json` と同一の prom2json）。`hisui_` prefix 付き・family の配列・各 family に prometheus type（`COUNTER`/`GAUGE`）・value は文字列。
+  - 実装は `src/stats.rs` に `to_metrics_dump_json_line() -> crate::Result<String>` を追加し、`to_prometheus_json_families()` の結果を `{"type":"metrics","metrics":...}` で包むだけ。tokio runtime メトリクス（HTTP 経路のみ合成）は含めず、`Stats` レジストリ由来のみ（本 issue の「全メトリクス」はこの意味）。
 - 録画 processor 終了後も `Stats` レジストリにメトリクスが残る（`Stats` は `Arc<Mutex<BTreeMap>>`、`src/stats.rs:11-12`。issues/0011 の CI 失敗時、StopRecord 後の `/metrics` に mp4_writer のメトリクスが残っていた）。
 
 ### 3. e2e 側: フラグを既定で使い、診断を終了ダンプに委ねる
@@ -55,7 +53,7 @@ Medium。テスト失敗や障害の原因調査の効率に直結する。ユ�
 
 ## 完了条件
 
-- フラグ有効時、obsws server を SIGTERM で停止すると、全メトリクス（`Stats` レジストリ全件）が JSON Lines で stdout に出力され、1 行 1 メトリクスで grep / parse できること（形式は設計方針 2 の例）。`__init__` 引数を `False` にすると出力されないこと。
+- フラグ有効時、obsws server を SIGTERM で停止すると、全メトリクス（`Stats` レジストリ全件）が `{"type":"metrics","metrics":<prom2json>}` の 1 行 JSON で stdout に出力されること（形式は設計方針 2 の例）。`__init__` 引数を `False` にすると出力されないこと。
 - 非 player ビルドがコンパイルできること（CI の `cargo clippy --workspace --no-default-features`）。ダンプ挙動の検証は player ビルドの e2e で行う。
 - E2E サーバが既定で `--dump-metrics-on-exit` を使い、SIGTERM で停止する録画系テストの失敗時に、最終メトリクス（finalize 成否 / sample_entry の received・missing 等）が切り詰められず確実に読めること（`server.kill()`（SIGKILL）で止めるテストは終了ダンプの対象外）。
 - 録画系の失敗メッセージへの `/metrics` 全文埋め込み（上記 grep で特定した箇所）が無くなり、未使用 `_print_obsws_diagnostics` が削除されていること。
@@ -64,7 +62,7 @@ Medium。テスト失敗や障害の原因調査の効率に直結する。ユ�
 
 ## テスト戦略
 
-- hisui 側: 1 `StatsEntry` → 1 JSON 行の変換関数の単体テストを `src/stats.rs` の `#[cfg(test)] mod tests` に追加する（本リポジトリに PBT クレートは未整備のため単体テストで対応。各 `StatsValue` 型 Counter / Gauge / GaugeF64 / Duration / Flag / StringValue について、出力が valid JSON でパースでき name / labels / value が保持されることを検証）。
+- hisui 側: `Stats::to_metrics_dump_json_line()` の単体テストを `src/stats.rs` の `#[cfg(test)] mod tests` に追加する（本リポジトリに PBT クレートは未整備のため単体テストで対応。出力が valid JSON で、ルートに `type:"metrics"`・`metrics` に prom2json の family が入ることを検証）。
 - e2e 側: 録画系テストで「SIGTERM 停止後、captured stdout に JSONL が出ており目的メトリクスがパースできる」結合検証と、`dump_metrics_on_exit=False` でダンプが出ないことの確認を追加する。
 
 ## 想定エッジケース

@@ -2078,18 +2078,23 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
         asyncio.run(_run_validation_flow())
 
 
-def _extract_metrics_dump_lines(stdout: str) -> list[dict]:
-    """サーバ stdout から終了時メトリクスダンプの JSON Lines を抽出してパースする"""
-    entries = []
+def _find_metrics_dump(stdout: str) -> dict | None:
+    """サーバ stdout から終了時メトリクスダンプ（type=metrics の JSON Line）を探す"""
     for line in stdout.splitlines():
         stripped = line.strip()
-        if stripped.startswith("{"):
-            entries.append(json.loads(stripped))
-    return entries
+        if not stripped.startswith("{"):
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and obj.get("type") == "metrics":
+            return obj
+    return None
 
 
 def test_obsws_dump_metrics_on_exit_outputs_jsonl(binary_path: Path, tmp_path: Path):
-    """--dump-metrics-on-exit 有効時、SIGTERM 停止で全メトリクスが JSON Lines で stdout に出ることを確認する"""
+    """--dump-metrics-on-exit 有効時、SIGTERM 停止で type=metrics の JSON Line が stdout に出ることを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
@@ -2099,10 +2104,17 @@ def test_obsws_dump_metrics_on_exit_outputs_jsonl(binary_path: Path, tmp_path: P
     with server:
         pass
 
-    entries = _extract_metrics_dump_lines(server._stdout)
-    assert entries, f"終了時メトリクスダンプが stdout に出ていない: stdout={server._stdout!r}"
-    for entry in entries:
-        assert set(entry) == {"name", "labels", "value"}, f"ダンプ行の形式が不正: {entry}"
+    dump = _find_metrics_dump(server._stdout)
+    assert dump is not None, f"終了時メトリクスダンプが stdout に出ていない: stdout={server._stdout!r}"
+    # metrics は prom2json の family 配列で、hisui_ prefix 付きの family を含むこと
+    families = dump["metrics"]
+    assert isinstance(families, list) and families, f"metrics が空または配列でない: {dump}"
+    assert all("name" in f and "type" in f and "metrics" in f for f in families), (
+        f"family の形式が不正: {families}"
+    )
+    assert any(f["name"].startswith("hisui_") for f in families), (
+        f"hisui_ prefix の family が無い: {families}"
+    )
 
 
 def test_obsws_dump_metrics_on_exit_disabled(binary_path: Path, tmp_path: Path):
@@ -2121,5 +2133,6 @@ def test_obsws_dump_metrics_on_exit_disabled(binary_path: Path, tmp_path: Path):
     with server:
         pass
 
-    entries = _extract_metrics_dump_lines(server._stdout)
-    assert not entries, f"無効化したのにダンプが出ている: {entries}"
+    assert _find_metrics_dump(server._stdout) is None, (
+        f"無効化したのにダンプが出ている: {server._stdout!r}"
+    )
