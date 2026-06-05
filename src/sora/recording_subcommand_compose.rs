@@ -268,7 +268,10 @@ async fn run_compose_pipeline(
 ) -> Result<ComposeResult> {
     let pipeline = MediaPipeline::new()?;
     let pipeline_handle = pipeline.handle();
-    let pipeline_task = tokio::spawn(pipeline.run());
+    // 異常終了の検知は processor task / metric 側で行うため、run() の戻り値はここでは使わない
+    let pipeline_task = tokio::spawn(async move {
+        pipeline.run().await;
+    });
 
     let mut setup = match setup_pipeline(
         &pipeline_handle,

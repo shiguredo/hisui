@@ -103,7 +103,14 @@ fn run_internal(
         }
     });
 
-    runtime.block_on(pipeline.run());
+    let processor_failed = runtime.block_on(pipeline.run());
+
+    // いずれかの processor が異常終了していた場合は、非ゼロ終了コードになるようエラーを返す
+    if processor_failed {
+        return Err(Error::new(
+            "inspect failed: one or more processors terminated abnormally",
+        ));
+    }
     Ok(())
 }
 

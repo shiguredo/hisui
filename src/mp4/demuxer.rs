@@ -13,7 +13,7 @@ use std::{
 };
 
 use shiguredo_mp4::{
-    TrackKind,
+    BoxHeader, Decode, TrackKind,
     boxes::SampleEntry,
     demux::{
         DemuxError, Fmp4FileDemuxer, Input, Mp4FileDemuxer, Mp4FileKind, RequiredInput, Sample,
@@ -102,6 +102,10 @@ pub(crate) struct Mp4Demuxer {
     file_size: u64,
     path: PathBuf,
     inner: DemuxerKind,
+    /// 直近に supply() でデマルチプレクサへ供給した入力範囲の開始位置。
+    /// メディアフラグメント (moof + mdat) の処理中に失敗した場合、この位置が失敗フラグメントの
+    /// moof 先頭と一致するため、is_media_fragment() の判定対象として使う。
+    last_supply_offset: Option<u64>,
 }
 
 impl Mp4Demuxer {
@@ -124,6 +128,7 @@ impl Mp4Demuxer {
             file_size,
             path: path.to_path_buf(),
             inner,
+            last_supply_offset: None,
         };
         this.initialize()?;
         Ok(this)
@@ -156,6 +161,25 @@ impl Mp4Demuxer {
                 Ok(None) => return Ok(None),
                 Err(DemuxError::InputRequired(required)) => required,
                 Err(e) => {
+                    // fMP4 は moof + mdat のフラグメント単位で書かれるため、途中のフラグメントが
+                    // 壊れていても、その手前までは正しく読める (ベストエフォートで取り出せる) ことがある。
+                    // 例えば hybrid mp4 を書き込み途中でクラッシュした場合、末尾のフラグメントが
+                    // 中途半端に書かれて処理に失敗するが、その手前までの内容は有効である。
+                    // そこで、以下のいずれかなら原因を問わずエラーにせず、そこで読み取りを終了
+                    // (ストリーム終端) として扱う。moov / ftyp など初期化中の破損は引き続きエラーにする。
+                    //   - 構造は揃っているメディアフラグメント (moof + mdat) の処理失敗
+                    //     (典型例: trun が宣言するサンプルデータが mdat に収まらない)
+                    //   - ボックスが EOF で途切れている (ヘッダが読めない / 宣言サイズがファイル末尾を超える)
+                    if let Some(offset) = self.last_supply_offset
+                        && (self.is_media_fragment(offset)?
+                            || self.is_truncated_box_at_eof(offset)?)
+                    {
+                        tracing::warn!(
+                            "Stopping at broken trailing fragment at offset {offset} in {}: {e}",
+                            self.path.display()
+                        );
+                        return Ok(None);
+                    }
                     return Err(Error::new(format!(
                         "Demux error {}: {e}",
                         self.path.display()
@@ -166,9 +190,70 @@ impl Mp4Demuxer {
         }
     }
 
+    /// 失敗した位置 (`moof_offset`) が、メディアフラグメント (`moof` + `mdat`) の先頭か判定する。
+    ///
+    /// `moof_offset` から始まるトップレベルボックスが `moof` であり、その直後に `mdat` が
+    /// 続く場合に真を返す。メディアフラグメントの処理失敗 (クラッシュによる切り詰め等) を、
+    /// 初期化中 (moov / ftyp) の破損と区別して扱うために使う。
+    fn is_media_fragment(&mut self, moof_offset: u64) -> Result<bool> {
+        let Some(moof) = self.read_box_header(moof_offset)? else {
+            return Ok(false);
+        };
+        let moof_size = moof.box_size.get();
+        if moof.box_type.as_bytes() != b"moof" || moof_size == 0 {
+            return Ok(false);
+        }
+        let Some(mdat_offset) = moof_offset.checked_add(moof_size) else {
+            return Ok(false);
+        };
+        let Some(mdat) = self.read_box_header(mdat_offset)? else {
+            return Ok(false);
+        };
+        Ok(mdat.box_type.as_bytes() == b"mdat")
+    }
+
+    /// `offset` から始まるトップレベルボックスが、EOF で途切れているか判定する。
+    ///
+    /// 書き込み途中のクラッシュでフラグメント (moof / mdat) のヘッダや本体が末尾で切れた場合に真を返す。
+    /// ヘッダを読み切れない場合、または宣言サイズがファイル末尾を超える場合を切り詰めとみなす。
+    /// `size == 0` (ファイル末尾までを表す正規のボックス) は切り詰めではないので偽を返す。
+    fn is_truncated_box_at_eof(&mut self, offset: u64) -> Result<bool> {
+        let Some(header) = self.read_box_header(offset)? else {
+            // ヘッダが読み切れない = 末尾で切り詰められている
+            return Ok(true);
+        };
+        let size = header.box_size.get();
+        if size == 0 {
+            return Ok(false);
+        }
+        Ok(offset.saturating_add(size) > self.file_size)
+    }
+
+    /// 指定位置のボックスヘッダを読み取る。size のデコード (32 / 64 bit、ファイル末尾までの 0) は
+    /// `BoxHeader::decode` に委譲する。ヘッダを読み切れない (末尾で切り詰められている等) 場合は
+    /// `None` を返す。
+    fn read_box_header(&mut self, offset: u64) -> Result<Option<BoxHeader>> {
+        if offset >= self.file_size {
+            return Ok(None);
+        }
+        // ヘッダのデコードに必要な最大バイト数だけ読む (末尾に足りなければそこまで)
+        let end = offset
+            .saturating_add(BoxHeader::MAX_SIZE as u64)
+            .min(self.file_size);
+        let mut buf = vec![0; (end - offset) as usize];
+        self.file
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| Error::new(format!("Seek error {}: {e}", self.path.display())))?;
+        self.file
+            .read_exact(&mut buf)
+            .map_err(|e| Error::new(format!("Read error {}: {e}", self.path.display())))?;
+        Ok(BoxHeader::decode(&buf).ok().map(|(header, _)| header))
+    }
+
     /// `RequiredInput` が示す範囲をファイルから読み込んでデマルチプレクサに供給する
     fn supply(&mut self, required: RequiredInput) -> Result<()> {
         let position = required.position;
+        self.last_supply_offset = Some(position);
         let buf = read_required_range(&mut self.file, self.file_size, &self.path, required)?;
         self.inner.handle_input(Input {
             position,
@@ -312,6 +397,213 @@ mod tests {
     use super::*;
 
     const TEST_MP4: &str = "testdata/red-320x320-h264-aac.mp4";
+    const TEST_FMP4: &str = "testdata/red-320x320-h264-aac-fragmented.mp4";
+
+    /// トップレベルボックスを走査して (type, offset, size) の一覧を返す
+    fn top_level_boxes(data: &[u8]) -> Vec<([u8; 4], usize, usize)> {
+        let mut boxes = Vec::new();
+        let mut off = 0;
+        while off + 8 <= data.len() {
+            let size = u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+                as usize;
+            let box_type = [data[off + 4], data[off + 5], data[off + 6], data[off + 7]];
+            boxes.push((box_type, off, size));
+            if size < 8 {
+                break;
+            }
+            off += size;
+        }
+        boxes
+    }
+
+    /// Mp4Demuxer でサンプル数を数える
+    fn count_samples(path: &Path) -> Result<usize> {
+        let mut demuxer = Mp4Demuxer::open(path)?;
+        let mut count = 0;
+        while demuxer.next_sample()?.is_some() {
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// 一時ファイルにデータを書き出す
+    fn write_temp(data: &[u8]) -> tempfile::NamedTempFile {
+        use std::io::Write;
+        let mut file = tempfile::Builder::new()
+            .suffix(".mp4")
+            .tempfile()
+            .expect("一時ファイルを作成できること");
+        file.write_all(data).expect("一時ファイルに書き込めること");
+        file.flush().expect("flush できること");
+        file
+    }
+
+    #[test]
+    fn tolerates_truncated_trailing_fragment() {
+        // 正常な fMP4 の末尾に「trun が宣言する以上に mdat が短い」壊れたフラグメントを追加し、
+        // クラッシュで切り詰められた hybrid fMP4 を模す。
+        // demuxer は壊れたフラグメントの手前までのサンプルを返し、エラーにせず終了すること。
+        let data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
+        let boxes = top_level_boxes(&data);
+        let (_, moof_off, moof_size) = boxes
+            .iter()
+            .find(|(t, _, _)| t == b"moof")
+            .copied()
+            .expect("moof があること");
+        let mdat_off = moof_off + moof_size;
+        let (mdat_type, _, mdat_size) = boxes
+            .iter()
+            .find(|(_, off, _)| *off == mdat_off)
+            .copied()
+            .expect("moof の直後に mdat があること");
+        assert_eq!(&mdat_type, b"mdat", "moof の直後は mdat であること");
+
+        // 最初のフラグメント (ftyp + moov + moof + mdat) のみの正常ファイル
+        let valid_only = &data[..mdat_off + mdat_size];
+        let valid_file = write_temp(valid_only);
+        let valid_count =
+            count_samples(valid_file.path()).expect("正常 fMP4 のサンプルを読めること");
+        assert!(valid_count > 0, "正常フラグメントからサンプルを読めること");
+
+        // moof をコピーし、わずか 16 バイトしか持たない mdat を続ける壊れたフラグメントを作る。
+        // default_base_is_moof のため moof の位置に依存せず、trun の宣言サイズが mdat を超える。
+        let mut truncated = valid_only.to_vec();
+        truncated.extend_from_slice(&data[moof_off..mdat_off]); // moof のコピー
+        truncated.extend_from_slice(&24u32.to_be_bytes()); // 小さい mdat (ヘッダ 8 + 本体 16)
+        truncated.extend_from_slice(b"mdat");
+        truncated.extend_from_slice(&[0u8; 16]);
+        let truncated_file = write_temp(&truncated);
+
+        let truncated_count = count_samples(truncated_file.path())
+            .expect("壊れたフラグメントでもエラーにならないこと");
+        assert_eq!(
+            truncated_count, valid_count,
+            "壊れた末尾フラグメントの手前までのサンプルを返すこと"
+        );
+    }
+
+    /// テスト用 fMP4 から「正常な単一フラグメント (ftyp+moov+moof+mdat)」と moof のコピー、
+    /// およびその正常フラグメントから読めるサンプル数を取り出す。
+    fn fragmented_fixture_parts() -> (Vec<u8>, Vec<u8>, usize) {
+        let data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
+        let boxes = top_level_boxes(&data);
+        let (_, moof_off, moof_size) = boxes
+            .iter()
+            .find(|(t, _, _)| t == b"moof")
+            .copied()
+            .expect("moof があること");
+        let mdat_off = moof_off + moof_size;
+        let (mdat_type, _, mdat_size) = boxes
+            .iter()
+            .find(|(_, off, _)| *off == mdat_off)
+            .copied()
+            .expect("moof の直後に mdat があること");
+        assert_eq!(&mdat_type, b"mdat", "moof の直後は mdat であること");
+
+        let valid_only = data[..mdat_off + mdat_size].to_vec();
+        let moof_bytes = data[moof_off..mdat_off].to_vec();
+        let valid_file = write_temp(&valid_only);
+        let valid_count =
+            count_samples(valid_file.path()).expect("正常 fMP4 のサンプルを読めること");
+        assert!(valid_count > 0, "正常フラグメントからサンプルを読めること");
+        (valid_only, moof_bytes, valid_count)
+    }
+
+    #[test]
+    fn tolerates_mdat_header_truncated_at_eof() {
+        // 完全な moof の直後で、mdat ボックスヘッダの途中までしか書かれずに EOF になったケース。
+        let (valid_only, moof_bytes, valid_count) = fragmented_fixture_parts();
+        let mut truncated = valid_only;
+        truncated.extend_from_slice(&moof_bytes); // 完全な moof
+        truncated.extend_from_slice(&[0x00, 0x00, 0x27, 0x00]); // mdat ヘッダの途中 (4 バイトのみ)
+        let file = write_temp(&truncated);
+
+        let count =
+            count_samples(file.path()).expect("ヘッダ途中の切り詰めでもエラーにならないこと");
+        assert_eq!(
+            count, valid_count,
+            "壊れたフラグメントの手前までのサンプルを返すこと"
+        );
+    }
+
+    #[test]
+    fn tolerates_moof_header_truncated_at_eof() {
+        // moof ボックスヘッダの途中までしか書かれずに EOF になったケース。
+        let (valid_only, _moof_bytes, valid_count) = fragmented_fixture_parts();
+        let mut truncated = valid_only;
+        truncated.extend_from_slice(&[0x00, 0x00, 0x02, 0xdc]); // moof ヘッダの途中 (4 バイトのみ)
+        let file = write_temp(&truncated);
+
+        let count =
+            count_samples(file.path()).expect("moof ヘッダ途中の切り詰めでもエラーにならないこと");
+        assert_eq!(
+            count, valid_count,
+            "壊れたフラグメントの手前までのサンプルを返すこと"
+        );
+    }
+
+    #[test]
+    fn tolerates_moof_body_truncated_at_eof() {
+        // moof ヘッダはサイズを宣言しているが、本体が途中で EOF になったケース。
+        let (valid_only, moof_bytes, valid_count) = fragmented_fixture_parts();
+        let mut truncated = valid_only;
+        truncated.extend_from_slice(&moof_bytes[..100]); // moof 本体の途中まで
+        let file = write_temp(&truncated);
+
+        let count =
+            count_samples(file.path()).expect("moof 本体途中の切り詰めでもエラーにならないこと");
+        assert_eq!(
+            count, valid_count,
+            "壊れたフラグメントの手前までのサンプルを返すこと"
+        );
+    }
+
+    #[test]
+    fn errors_on_corrupted_moov() {
+        // 初期化中 (moov) の破損は、末尾フラグメントの切り詰めとは異なりエラーにする
+        // (壊れたファイルを正常終了として握り潰さない = 過剰許容にしない)。
+        let mut data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
+        let boxes = top_level_boxes(&data);
+        let (_, moov_off, moov_size) = boxes
+            .iter()
+            .find(|(t, _, _)| t == b"moov")
+            .copied()
+            .expect("moov があること");
+        // moov ペイロード (ヘッダ直後) を壊して decode を失敗させる
+        let corrupt_end = (moov_off + 8 + 64).min(moov_off + moov_size);
+        for byte in &mut data[moov_off + 8..corrupt_end] {
+            *byte = 0xff;
+        }
+        let file = write_temp(&data);
+
+        assert!(
+            count_samples(file.path()).is_err(),
+            "moov が壊れている場合はエラーになること (Ok(None) で握り潰さないこと)"
+        );
+    }
+
+    #[test]
+    fn is_media_fragment_distinguishes_moof_from_init() {
+        let data = std::fs::read(TEST_FMP4).expect("テスト用 fMP4 を読めること");
+        let boxes = top_level_boxes(&data);
+        let (_, moof_off, _) = boxes
+            .iter()
+            .find(|(t, _, _)| t == b"moof")
+            .copied()
+            .expect("moof があること");
+
+        let mut demuxer = Mp4Demuxer::open(TEST_FMP4).expect("fMP4 を開けること");
+        assert!(
+            demuxer
+                .is_media_fragment(moof_off as u64)
+                .expect("判定に成功すること"),
+            "moof の位置はメディアフラグメントと判定されること"
+        );
+        assert!(
+            !demuxer.is_media_fragment(0).expect("判定に成功すること"),
+            "先頭 (ftyp) はメディアフラグメントと判定されないこと"
+        );
+    }
 
     #[test]
     fn read_sample_data_reads_requested_range() {
