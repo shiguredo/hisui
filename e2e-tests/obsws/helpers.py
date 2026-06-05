@@ -472,7 +472,6 @@ def _inspect_mp4(
     required_keys: tuple[str, ...] = (),
     timeout_sec: float = 3.0,
     interval_sec: float = 0.1,
-    diagnostics_text: str | None = None,
 ) -> dict[str, object]:
     deadline = time.time() + timeout_sec
     while True:
@@ -494,16 +493,13 @@ def _inspect_mp4(
             return output
         if time.time() >= deadline:
             missing_keys = [key for key in required_keys if key not in output]
-            diagnostics_parts: list[str] = []
-            if diagnostics_text:
-                diagnostics_parts.append(diagnostics_text)
             # hisui inspect が読めない MP4 を ffprobe で別経路解析し、ファイル自体に
             # video trak があるか（writer バグか inspect バグか）を切り分ける。
-            diagnostics_parts.append(f"ffprobe:\n{_probe_mp4_with_ffprobe(path)}")
-            diagnostics_suffix = "\ndiagnostics:\n" + "\n".join(diagnostics_parts)
+            ffprobe = _probe_mp4_with_ffprobe(path)
             raise AssertionError(
                 "inspect output missing required keys: "
-                f"missing_keys={missing_keys}, output={output}{diagnostics_suffix}"
+                f"missing_keys={missing_keys}, output={output}\n"
+                f"diagnostics:\nffprobe:\n{ffprobe}"
             )
 
         # StopRecord 直後は MP4 のメタ情報がまだ揃わないことがあるため、短時間だけ再試行する。
