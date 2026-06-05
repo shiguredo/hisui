@@ -110,6 +110,11 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .doc("サーバーのワーカースレッド数")
         .take(args)
         .present_and_then(|o| o.value().parse())?;
+    let dump_metrics_on_exit: bool = noargs::flag("dump-metrics-on-exit")
+        .env("HISUI_DUMP_METRICS_ON_EXIT")
+        .doc("プロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する")
+        .take(args)
+        .is_present();
 
     if args.metadata().help_mode {
         return Ok(());
@@ -163,6 +168,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         frame_rate,
         state_file,
         worker_threads,
+        dump_metrics_on_exit,
     )
     .map_err(noargs::Error::from)
 }
@@ -183,6 +189,7 @@ fn run_internal(
     frame_rate: crate::video::FrameRate,
     state_file: Option<PathBuf>,
     worker_threads: Option<NonZeroUsize>,
+    dump_metrics_on_exit: bool,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
@@ -237,6 +244,7 @@ fn run_internal(
                             canvas_height,
                             frame_rate,
                             state_file,
+                            dump_metrics_on_exit,
                             #[cfg(feature = "player")]
                             command_tx,
                             #[cfg(feature = "player")]
@@ -275,6 +283,7 @@ fn run_internal(
                 canvas_height,
                 frame_rate,
                 state_file,
+                dump_metrics_on_exit,
             ))
             .await
     })

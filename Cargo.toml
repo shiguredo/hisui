@@ -37,6 +37,7 @@ tokio = {
     "net",
     "rt",
     "rt-multi-thread",
+    "signal",
     "sync",
     "time",
   ]
