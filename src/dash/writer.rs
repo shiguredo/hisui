@@ -584,8 +584,8 @@ impl DashWriter {
         self.current_payload.extend_from_slice(&frame.data);
         let sample_entry = frame
             .sample_entry
-            .clone()
-            .or_else(|| self.last_audio_sample_entry.clone())
+            .as_ref()
+            .or(self.last_audio_sample_entry.as_ref())
             .map(|e| e.get().clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Audio,

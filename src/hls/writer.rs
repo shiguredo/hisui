@@ -696,8 +696,8 @@ impl HlsWriter {
                 state.current_payload.extend_from_slice(&frame.data);
                 let sample_entry = frame
                     .sample_entry
-                    .clone()
-                    .or_else(|| state.last_audio_sample_entry.clone())
+                    .as_ref()
+                    .or(state.last_audio_sample_entry.as_ref())
                     .map(|e| e.get().clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Audio,
