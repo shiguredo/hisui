@@ -332,9 +332,9 @@ async fn setup_vmaf_pipeline(
         })
     {
         let (source_id, source_info) = source_info;
-        let reader_output_track_id = next_track_id(&mut next_track_number, "reader_output");
         let source_info = source_info.clone();
         let reader_processor_id = next_processor_id(&mut next_processor_number, "video_reader");
+        let reader_output_track_id = TrackId::new(reader_processor_id.get());
         let reader_processor_type = "video_reader";
         spawn_processor_task(
             pipeline_handle,
