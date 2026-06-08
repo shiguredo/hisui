@@ -7,7 +7,6 @@ use shiguredo_mp4::{
 
 use crate::{
     encoder::VideoEncoderOptions,
-    sample_entry::SharedSampleEntry,
     types::{CodecName, EvenUsize},
     video::h264::{H264_LEVEL_3_1, H264_PROFILE_BASELINE, NALU_HEADER_LENGTH},
     video::h265,
@@ -174,7 +173,7 @@ impl VideoToolboxEncoder {
                     height: self.height.get(),
                 }),
                 timestamp: input_frame.as_video_frame().timestamp,
-                sample_entry: sample_entry.map(SharedSampleEntry::new),
+                sample_entry,
             });
         }
         Ok(())

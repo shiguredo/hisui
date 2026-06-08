@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 
+use shiguredo_mp4::boxes::SampleEntry;
+
 use crate::{
     encoder::VideoEncoderOptions,
-    sample_entry::SharedSampleEntry,
     types::EvenUsize,
     video::av1,
     video::{RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
@@ -13,7 +14,7 @@ pub struct SvtAv1Encoder {
     inner: shiguredo_svt_av1::Encoder,
     input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    sample_entry: Option<SharedSampleEntry>,
+    sample_entry: Option<SampleEntry>,
     width: EvenUsize,
     height: EvenUsize,
     keyframe_request_pending: bool,
@@ -38,7 +39,7 @@ impl SvtAv1Encoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            sample_entry: Some(SharedSampleEntry::new(sample_entry)),
+            sample_entry: Some(sample_entry),
             width,
             height,
             keyframe_request_pending: false,

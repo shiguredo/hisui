@@ -552,7 +552,7 @@ impl HlsWriter {
                 CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
             )
             && let Some(codec_str) =
-                crate::codec_string::video_codec_string_from_sample_entry(entry.get())
+                crate::codec_string::video_codec_string_from_sample_entry(entry)
         {
             self.resolve_video_codec(codec_str);
         }
@@ -560,8 +560,10 @@ impl HlsWriter {
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
-                if let Some(entry) = &frame.sample_entry {
-                    state.last_video_sample_entry = Some(entry.get().clone());
+                if frame.sample_entry.is_some() {
+                    state
+                        .last_video_sample_entry
+                        .clone_from(&frame.sample_entry);
                 }
                 // length-prefixed NALU → Annex B 変換 + キーフレーム時の SPS/PPS 注入
                 let annexb_data = convert_length_prefixed_to_annexb(
@@ -582,8 +584,10 @@ impl HlsWriter {
             }
             FormatState::Fmp4(state) => {
                 // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
-                if let Some(entry) = &frame.sample_entry {
-                    state.last_video_sample_entry = Some(entry.get().clone());
+                if frame.sample_entry.is_some() {
+                    state
+                        .last_video_sample_entry
+                        .clone_from(&frame.sample_entry);
                 }
                 // 前のビデオサンプルの duration を確定させる
                 if let Some(prev_ts) = state.last_video_timestamp {
@@ -601,8 +605,7 @@ impl HlsWriter {
                 // フレームの sample_entry が None なら保持済みの値を使う
                 let sample_entry = frame
                     .sample_entry
-                    .as_ref()
-                    .map(|e| e.get().clone())
+                    .clone()
                     .or_else(|| state.last_video_sample_entry.clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Video,

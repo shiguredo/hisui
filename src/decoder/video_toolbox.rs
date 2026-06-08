@@ -273,7 +273,7 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
                     sps_list, pps_list, ..
                 },
                 ..
-            })) = frame.sample_entry.as_ref().map(|e| e.get())
+            })) = &frame.sample_entry
             else {
                 return Err(crate::Error::new(
                     "missing sample entry for H.264 first frame",
@@ -320,7 +320,7 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
         )));
     }
 
-    let hvcc = match frame.sample_entry.as_ref().map(|e| e.get()) {
+    let hvcc = match &frame.sample_entry {
         Some(SampleEntry::Hev1(b)) => &b.hvcc_box,
         Some(SampleEntry::Hvc1(b)) => &b.hvcc_box,
         _ => return Err(crate::Error::new("no H.265 sample entry")),

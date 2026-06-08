@@ -135,7 +135,7 @@ impl Mp4SampleReader {
                             height: video_height,
                         }),
                         timestamp,
-                        sample_entry: sample.sample_entry.map(SharedSampleEntry::new),
+                        sample_entry: sample.sample_entry,
                     };
                     if !sender.send_video(frame).await {
                         // パイプライン処理が中断された

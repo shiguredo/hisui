@@ -21,13 +21,14 @@ Low。issue 0017 で映像側も `SharedSampleEntry` 型に揃っており、key
 
 ## 現状
 
-- `VideoFrame.sample_entry`（`src/video.rs:50`）は issue 0017 完了後 `Option<SharedSampleEntry>` になる。
+- `VideoFrame.sample_entry`（`src/video.rs:50`）は issue 0017 完了後も生の `Option<SampleEntry>` のまま（0017 は差分最小化のため音声側 `AudioFrame.sample_entry` だけを `Option<SharedSampleEntry>` 化し、映像には手を入れていない）。共通型 `SharedSampleEntry`（`src/sample_entry.rs`）は 0017 で導入済みで、本 issue から利用できる。
 - 映像エンコーダは sample_entry を最初の出力フレームにしか載せない。録画 writer はそれを取りこぼさないよう、`push_encoded_frame_with_metrics`（`src/encoder.rs:724-739`）で keyframe のときだけ `last_video_sample_entry` から補完している。
   - 「録画開始時のキーフレーム要求」＋「keyframe には sample_entry を常に補完」で、録画 writer が subscribe した直後の keyframe に必ず entry が届くため、映像では音声のような finalize 失敗レースは顕在化していない。
-- ただし keyframe 以外の出力フレームには sample_entry が載らないため、フィールド型は `Option` のままにせざるを得ない。
+- keyframe 以外の出力フレームには sample_entry が載らないため、フィールド型は `Option` のままにせざるを得ない。音声と異なり `SharedSampleEntry` 化もされていないので、本 issue で全フレーム付与とあわせて映像のフィールド型も `Option<SharedSampleEntry>` に統一する。
 
 ## 設計方針
 
+- `VideoFrame.sample_entry`（`src/video.rs:50`）を `Option<SharedSampleEntry>` に変更し、音声と型を揃える。これに伴い映像エンコーダ（`svt_av1` / `libvpx` / `nvcodec` / `openh264` / `video_toolbox`）・映像デコーダ（`openh264` / `video_toolbox` / `nvcodec`）・各 reader/writer の映像経路・`src/encoder.rs` の `last_video_sample_entry` を `SharedSampleEntry` 経由に直す。feature gate された箇所（`nvcodec` 等）は `--features` 付きでビルド確認すること。
 - 映像エンコーダの sample_entry 付与を、音声 3 エンコーダと同様に「毎フレーム `Some(self.sample_entry.clone())`（Arc clone）を載せる」方式へ変更する。
 - これに伴い `push_encoded_frame_with_metrics`（`src/encoder.rs:724-739`）の「keyframe のときだけ補完する」分岐（issue 0017 が据え置いた映像の補完責務）を撤去し、補完責務をエンコーダ側へ一本化する。
 - writer 側の映像補完経路を整理する。補完を持つのは `hls` / `dash` / `mp4/hybrid` で、標準 `mp4`（`src/mp4/writer.rs`）は passthrough（補完なし）である点は音声側（issue 0017）と同じ。全フレーム付与後は映像専用の補完が不要になるため、各 writer の映像 `or_else` 補完を除去し、issue 0017 で `SharedSampleEntry` に用意した `changed_since` による変更検知へ寄せる（muxer 渡し経路へのフィルタ適用は音声と同じく optional で、muxer 側が dedup するため correctness 要件ではない）。
@@ -35,6 +36,7 @@ Low。issue 0017 で映像側も `SharedSampleEntry` 型に揃っており、key
 
 ## 完了条件
 
+- `VideoFrame.sample_entry` が `Option<SharedSampleEntry>` になり、音声と型が揃うこと。
 - 映像エンコーダが全出力フレームに sample_entry を載せること。
 - `push_encoded_frame_with_metrics` の keyframe 限定補完が撤去され、補完責務がエンコーダ側に一本化されること。
 - 各 writer の映像専用の `or_else` 補完経路が無くなること（標準 `mp4` は元々 passthrough のため対象外）。

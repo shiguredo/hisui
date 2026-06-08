@@ -1186,7 +1186,7 @@ impl Mp4FileReader {
                         height: state.video_height,
                     }),
                     timestamp: Duration::ZERO,
-                    sample_entry: context.sample_entry.map(SharedSampleEntry::new),
+                    sample_entry: context.sample_entry,
                 };
                 decoder.handle_input_sample(Some(crate::MediaFrame::Video(
                     std::sync::Arc::new(frame),
@@ -1221,7 +1221,7 @@ impl Mp4FileReader {
                 height: state.video_height,
             }),
             timestamp: output_timestamp,
-            sample_entry: context.sample_entry.map(SharedSampleEntry::new),
+            sample_entry: context.sample_entry,
         };
 
         if let Some(sender) = self.video_sender.as_mut() {

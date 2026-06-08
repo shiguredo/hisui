@@ -480,14 +480,14 @@ impl DashWriter {
 
         // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
         if let Some(ref entry) = frame.sample_entry {
-            self.last_video_sample_entry = Some(entry.get().clone());
+            self.last_video_sample_entry.clone_from(&frame.sample_entry);
 
             // SampleEntry から正確な codec string を確定する
             if !matches!(
                 self.codec_resolution,
                 CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
             ) && let Some(codec_str) =
-                crate::codec_string::video_codec_string_from_sample_entry(entry.get())
+                crate::codec_string::video_codec_string_from_sample_entry(entry)
             {
                 self.resolve_video_codec(codec_str);
             }
@@ -520,8 +520,7 @@ impl DashWriter {
         // フレームの sample_entry が None なら保持済みの値を使う
         let sample_entry = frame
             .sample_entry
-            .as_ref()
-            .map(|e| e.get().clone())
+            .clone()
             .or_else(|| self.last_video_sample_entry.clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Video,

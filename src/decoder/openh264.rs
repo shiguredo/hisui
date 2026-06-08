@@ -136,7 +136,7 @@ fn build_annexb_input(frame: &VideoFrame) -> crate::Result<Vec<u8>> {
             sps_list, pps_list, ..
         },
         ..
-    })) = frame.sample_entry.as_ref().map(|e| e.get())
+    })) = frame.sample_entry.as_ref()
     else {
         return Ok(payload_annexb);
     };
@@ -178,7 +178,7 @@ mod tests {
             keyframe: true,
             size: None,
             timestamp: std::time::Duration::ZERO,
-            sample_entry: Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+            sample_entry: Some(sample_entry),
         };
 
         let annexb = build_annexb_input(&frame)?;
@@ -215,7 +215,7 @@ mod tests {
             keyframe: true,
             size: None,
             timestamp: std::time::Duration::ZERO,
-            sample_entry: Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+            sample_entry: Some(sample_entry),
         };
 
         let annexb = build_annexb_input(&frame)?;
