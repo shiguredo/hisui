@@ -5,10 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    optuna::{JsonValue, OptunaStudy, SearchSpace, TrialValues},
-    sora::recording_subcommand_vmaf,
-};
+use crate::optuna::{JsonValue, OptunaStudy, SearchSpace, TrialValues};
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/tune-libvpx-vp9.jsonc");
 const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../../search-space-examples/full.jsonc");
@@ -145,9 +142,8 @@ fn run(raw_args: &mut noargs::RawArgs) -> noargs::Result<()> {
 }
 
 fn run_internal(args: Args) -> crate::Result<()> {
-    // 最初に optuna と vmaf コマンドが利用可能かどうかをチェックする
+    // 最初に optuna コマンドが利用可能かどうかをチェックする
     OptunaStudy::check_optuna_availability()?;
-    recording_subcommand_vmaf::check_vmaf_availability()?;
 
     // 必要なら tune_working_dir を作る
     if !args.tune_working_dir().exists() {
@@ -304,8 +300,6 @@ fn run_trial_evaluation(
         .arg(trial_dir.join("reference.yuv"))
         .arg("--distorted-yuv-file")
         .arg(trial_dir.join("distorted.yuv"))
-        .arg("--vmaf-output-file")
-        .arg(trial_dir.join("vmaf-output.json"))
         .arg(&args.root_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
