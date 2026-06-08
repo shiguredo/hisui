@@ -81,4 +81,5 @@ impl SharedSampleEntry {
 
 - issues/0011（reopen 済み。本 issue で真の修正を行う）
 - issues/0008（先行する flaky テストの issue。closed）
-- 別 issue（映像側の sample_entry を `SharedSampleEntry` で全フレーム付与・非 Option 化に統一するリファクタリング。本 issue 完了後に作成する）
+- issue 0027（映像側の sample_entry を `SharedSampleEntry` で全フレーム付与に統一するリファクタリング。本 issue 完了後に着手する）
+- issue 0028（音声・映像の sample_entry フィールドを非 Option 化するリファクタリング。0017・0027 完了後に着手する）
