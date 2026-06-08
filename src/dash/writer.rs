@@ -253,7 +253,7 @@ struct DashWriter {
     last_video_timestamp: Option<Duration>,
     /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
     last_audio_timestamp: Option<Duration>,
-    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持）
+    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持。型は issue 0027 で音声と統一予定）
     last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
     /// 最後に受信したオーディオの sample_entry（セグメント跨ぎで保持）
     last_audio_sample_entry: Option<SharedSampleEntry>,
@@ -546,7 +546,8 @@ impl DashWriter {
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
         // 最初の video keyframe より前に audio が流れ始めることがある。
-        // その場合でも、初回だけ付与される sample_entry は保持しておく。
+        // 入力経路によっては sample_entry が初回フレームにしか載らないため、
+        // 受け取った sample_entry を保持して後続フレームの補完に使う。
         if let Some(ref entry) = frame.sample_entry {
             self.last_audio_sample_entry = Some(entry.clone());
 

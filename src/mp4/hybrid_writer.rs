@@ -943,8 +943,9 @@ impl HybridMp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 self.core.stats.add_received_audio_data();
-                // 音声は全フレームに sample_entry が載る（issue 0017）。届いた entry を pending 化・
-                // キューイング・ドロップで落とさないよう writer の入口で受信時点に取り込んで保持する。
+                // 音声エンコーダ出力は全フレームに sample_entry が載る（issue 0017）。
+                // 入力経路によっては初回フレームのみのこともあるが、いずれにせよ届いた entry を
+                // pending 化・キューイング・ドロップで落とさないよう入口で取り込んで保持する。
                 // received カウンタは毎フレーム計上すると意味を失うため、前回から変化したとき
                 // （changed_since）だけ計上し「entry の確定・変化回数」を表すようにする。
                 if let Some(entry) = &sample.sample_entry {

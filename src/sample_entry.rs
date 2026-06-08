@@ -1,8 +1,10 @@
 //! 映像・音声で共有する sample entry の共通型。
 //!
 //! 各エンコーダが出力フレームに載せる sample entry を `Arc` で包むことで、
-//! 毎フレームの値コピーを Arc clone に抑えつつ、変化検知を `Arc::ptr_eq` で
-//! 短絡できるようにする。音声・映像のフレーム型（[`crate::audio::AudioFrame`] /
+//! フレーム間の受け渡しや writer での前回値保持を Arc clone で安価に行い、
+//! 変化検知を `Arc::ptr_eq` で短絡できるようにする。なお muxer へ渡す際は
+//! 生の `SampleEntry` を要求するため、その箇所では中身を取り出してコピーする。
+//! 音声・映像のフレーム型（[`crate::audio::AudioFrame`] /
 //! [`crate::video::VideoFrame`]）の `sample_entry` フィールドで共通利用する。
 
 use std::sync::Arc;
@@ -11,9 +13,10 @@ use shiguredo_mp4::boxes::SampleEntry;
 
 /// 映像・音声で共有する sample entry。
 ///
-/// `Arc` で包むことで毎フレームのコピーを Arc clone に抑え、変化検知を
-/// `Arc::ptr_eq` で短絡できる。`SampleEntry` 自体は `PartialEq` / `Eq` を
-/// 実装しているため、別 Arc 同士でも実体比較で変化を判定できる。
+/// `Arc` で包むことで、フレーム間の受け渡しや writer での前回値保持を
+/// Arc clone で安価に行い、変化検知を `Arc::ptr_eq` で短絡できる。
+/// `SampleEntry` 自体は `PartialEq` / `Eq` を実装しているため、
+/// 別 Arc 同士でも実体比較で変化を判定できる。
 #[derive(Debug, Clone)]
 pub struct SharedSampleEntry(Arc<SampleEntry>);
 
