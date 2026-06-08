@@ -310,7 +310,6 @@ async fn setup_vmaf_pipeline(
     reference_yuv_file_path: PathBuf,
 ) -> Result<VmafPipelineSetup> {
     let mut next_processor_number = 0usize;
-    let mut next_track_number = 0usize;
     let mut processor_tasks = Vec::new();
 
     let decoder_options = VideoDecoderOptions {
@@ -348,8 +347,8 @@ async fn setup_vmaf_pipeline(
         )
         .await?;
 
-        let decoder_output_track_id = next_track_id(&mut next_track_number, "decoder_output");
         let decoder_processor_id = next_processor_id(&mut next_processor_number, "video_decoder");
+        let decoder_output_track_id = TrackId::new(decoder_processor_id.get());
         let decoder_processor_type = "video_decoder";
         let decoder_options_for_decoder = decoder_options.clone();
         let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();
@@ -373,12 +372,12 @@ async fn setup_vmaf_pipeline(
         mixer_input_track_ids.push(decoder_output_track_id);
     }
 
-    let mixer_output_track_id = next_track_id(&mut next_track_number, "mixer_output");
+    let mixer_processor_id = next_processor_id(&mut next_processor_number, "video_mixer");
+    let mixer_output_track_id = TrackId::new(mixer_processor_id.get());
     let mixer_spec = VideoMixerSpec::from_layout(&layout)
         .with_input_track_source_ids(mixer_input_track_source_ids);
     let mixer_input_track_ids_for_new = mixer_input_track_ids.clone();
     let mixer_input_track_ids_for_run = mixer_input_track_ids;
-    let mixer_processor_id = next_processor_id(&mut next_processor_number, "video_mixer");
     let mixer_processor_type = "video_mixer";
     let mixer_output_track_id_for_new = mixer_output_track_id.clone();
     let mixer_output_track_id_for_mixer = mixer_output_track_id.clone();
@@ -403,13 +402,14 @@ async fn setup_vmaf_pipeline(
     )
     .await?;
 
-    let limiter_output_track_id = next_track_id(&mut next_track_number, "limiter_output");
+    let limiter_processor_id = next_processor_id(&mut next_processor_number, "frame_count_limiter");
+    let limiter_output_track_id = TrackId::new(limiter_processor_id.get());
     let limiter = FrameCountLimiter::new(frame_count);
     let mixer_output_track_id_for_limiter = mixer_output_track_id.clone();
     let limiter_output_track_id_for_limiter = limiter_output_track_id.clone();
     spawn_processor_task(
         pipeline_handle,
-        next_processor_id(&mut next_processor_number, "frame_count_limiter"),
+        limiter_processor_id,
         crate::ProcessorMetadata::new("frame_count_limiter"),
         move |handle| {
             limiter.run(
@@ -435,12 +435,12 @@ async fn setup_vmaf_pipeline(
     )
     .await?;
 
-    let encoder_output_track_id = next_track_id(&mut next_track_number, "encoder_output");
     let encoder_options = layout.video_encoder_options();
     let encoder_processor_id = next_processor_id(
         &mut next_processor_number,
         crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER,
     );
+    let encoder_output_track_id = TrackId::new(encoder_processor_id.get());
     let encoder_processor_type = crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER;
     let openh264_lib_for_encoder = openh264_lib;
     let limiter_output_track_id_for_encoder = limiter_output_track_id.clone();
@@ -464,9 +464,9 @@ async fn setup_vmaf_pipeline(
     )
     .await?;
 
-    let decoder_output_track_id = next_track_id(&mut next_track_number, "decoded_output");
     let decoded_decoder_processor_id =
         next_processor_id(&mut next_processor_number, "decoded_video_decoder");
+    let decoder_output_track_id = TrackId::new(decoded_decoder_processor_id.get());
     let decoded_decoder_processor_type = "decoded_video_decoder";
     let encoder_output_track_id_for_decoder = encoder_output_track_id.clone();
     let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();
@@ -652,12 +652,6 @@ fn next_processor_id(next_number: &mut usize, prefix: &str) -> ProcessorId {
     let number = *next_number;
     *next_number += 1;
     ProcessorId::new(format!("vmaf_{prefix}_{number}"))
-}
-
-fn next_track_id(next_number: &mut usize, prefix: &str) -> TrackId {
-    let number = *next_number;
-    *next_number += 1;
-    TrackId::new(format!("vmaf_{prefix}_{number}"))
 }
 
 // 参照・劣化の YUV ファイルを読み込んで vmaf-rs で VMAF スコアを評価する
