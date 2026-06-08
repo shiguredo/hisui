@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-02
+- Completed: 2026-06-08
 - Model: Opus 4.8
 - Branch: feature/change-replace-vmaf-with-vmaf-rs
 - Polished: 2026-06-08
@@ -165,7 +166,7 @@ vp9-webm の録画 (合成出力 320x240、30 フレーム) で生成した同�
 
 - 症状: `# Compose for VMAF` 出力直後に全 tokio ワーカーが park し、CPU 0% でハングする。develop ブランチ (本 issue の変更前) でも再現したため、vmaf-rs 置き換えとは無関係な既存バグと確認した
 - 原因: `setup_vmaf_pipeline` の reader→decoder のトラック配線ミス。`VideoReader::run` は自身の processor_id 名のトラックに publish するが、decoder には独立採番した別のトラック ID を subscribe させていたため、両者が繋がらずデータが流れていなかった (compose 側は reader の processor_id からトラック ID を導出しており正しい)
-- 修正: vmaf 側も `TrackId::new(reader_processor_id.get())` で reader の processor_id からトラック ID を導出するよう変更
+- 修正: vmaf 側も `TrackId::new(reader_processor_id.get())` で reader の processor_id からトラック ID を導出するよう変更。さらにレビューを受けて、パイプライン内の全トラック ID を compose と同じく生成元プロセッサの processor_id 由来に統一し、独立採番のヘルパー (`next_track_id` / `next_track_number`) を削除した
 - 未リリース部分のバグ修正のため CHANGES.md への `[FIX]` 追記は不要と判断した
 
 ## 動作確認結果
@@ -176,6 +177,22 @@ vp9-webm の録画 (合成出力 320x240、30 フレーム) で生成した同�
 - `hisui tune` (2 トライアル, 20 フレーム): vmaf サブプロセスが正常完了し、パレートフロントまで出力
 - これにより compose → YUV → vmaf-rs 評価の経路が end-to-end で動作することを確認した
 - 旧 `vmaf` CLI とのスコア同一性も確認済み (詳細は「結果の同一性確認」の確認結果を参照)
+
+## 解決方法
+
+- `Cargo.toml` に `shiguredo_vmaf = "=2026.1.0-canary.0"` を追加した
+- `src/yuv.rs` に I420 YUV ファイルをフレーム単位で読み込み Y/U/V プレーンに分割する `YuvReader` / `YuvFrame` を追加した
+- `src/sora/recording_subcommand_vmaf.rs` の VMAF 評価を vmaf-rs ベースに置き換えた (`Context` 構築 → `Model::load_builtin(V061)` → フレームごとに `Picture::from_i420` でペア登録 → flush → `score_pooled` を 4 種の `PoolingMethod` で算出)。`check_vmaf_availability()` / `parse_vmaf_output()` / 外部 `vmaf` コマンド実行と `--vmaf-output-file` / `Output::vmaf_output_file_path` を削除した
+- `src/sora/recording_subcommand_tune.rs` から `check_vmaf_availability()` 呼び出しと `--vmaf-output-file` 渡しを削除した
+- `CHANGES.md` に `[CHANGE]` エントリを追加し、`docs/` から外部 `vmaf` 依存前提の記述を整理した
+- 実機確認中に発見した compose パイプラインのトラック配線デッドロック (既存バグ) を修正した (上記「実装中に発見・修正した既存バグ」参照)
+- テスト: `tests/test_yuv.rs` で `YuvReader` のフレーム分割・空ファイル・端数バイト・フレーム数差を検証。`tests/e2e.rs` に `hisui vmaf` の e2e テストを追加し、compose → vmaf-rs 評価の全経路を実走で検証 (配線デッドロックの回帰も兼ねる)
+- 旧 `vmaf` CLI とのスコア同一性を確認済み (「結果の同一性確認」参照)
+
+### 対応を見送った項目 (レビュー指摘より)
+
+- `run_vmaf_evaluation` のフレーム数不一致・0 フレームのエラーパスの自動テスト化は見送った。該当ロジックは libvmaf 依存の関数内にあり切り出しコストに見合わず、e2e テストと手動確認で実経路は担保できているため
+- `YuvWriter` の単体テストと `read_frame` の EINTR 再試行は見送った。前者は e2e テストで実経路をカバー、後者は通常ファイル I/O では発生がまれでエラー時も安全に停止するため
 
 ## 関連
 
