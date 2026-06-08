@@ -11,7 +11,7 @@
 
 issue 0017 で音声側の sample_entry を「全出力フレームに載せる」方式へ変更し、共通型 `SharedSampleEntry` を導入した。一方で映像側は挙動を据え置き、keyframe にのみ sample_entry を補完する方式のまま `SharedSampleEntry` で型をラップしただけになっている。
 
-本 issue では映像側も音声と同じく「全出力フレームに sample_entry を載せる」方式へ統一し、映像・音声で sample_entry の付与ポリシーを一本化する。これにより issue 0017 で先送りした映像側の決定事項（決定 3: 補完責務）を確定させ、後続の非 Option 化（issue 0028）の前提を整える。
+本 issue では映像側も音声と同じく「全出力フレームに sample_entry を載せる」方式へ統一し、映像・音声で sample_entry の付与ポリシーを一本化する。これにより issue 0017 が据え置いた映像側の補完責務（0017 の決定 1 で別 issue に切り出すとした部分）を確定させ、後続の非 Option 化（issue 0028）の前提を整える。
 
 **前提**: 本 issue は issue 0017 の完了を前提とする。`SharedSampleEntry` の導入と音声側の全フレーム付与が済んでいることが必要。
 
@@ -29,17 +29,17 @@ Low。issue 0017 で映像側も `SharedSampleEntry` 型に揃っており、key
 ## 設計方針
 
 - 映像エンコーダの sample_entry 付与を、音声 3 エンコーダと同様に「毎フレーム `Some(self.sample_entry.clone())`（Arc clone）を載せる」方式へ変更する。
-- これに伴い `push_encoded_frame_with_metrics`（`src/encoder.rs:724-739`）の「keyframe のときだけ補完する」分岐（issue 0017 の決定 3 で先送りした補完責務）を撤去し、補完責務をエンコーダ側へ一本化する。
-- writer 側（`hls` / `dash` / `mp4` / `mp4/hybrid`）は、音声と同じく `changed_since` による変更検知で「変化時のみ muxer に渡す」フィルタに一本化する。映像専用の補完経路は不要になる。
+- これに伴い `push_encoded_frame_with_metrics`（`src/encoder.rs:724-739`）の「keyframe のときだけ補完する」分岐（issue 0017 が据え置いた映像の補完責務）を撤去し、補完責務をエンコーダ側へ一本化する。
+- writer 側の映像補完経路を整理する。補完を持つのは `hls` / `dash` / `mp4/hybrid` で、標準 `mp4`（`src/mp4/writer.rs`）は passthrough（補完なし）である点は音声側（issue 0017）と同じ。全フレーム付与後は映像専用の補完が不要になるため、各 writer の映像 `or_else` 補完を除去し、issue 0017 で `SharedSampleEntry` に用意した `changed_since` による変更検知へ寄せる（muxer 渡し経路へのフィルタ適用は音声と同じく optional で、muxer 側が dedup するため correctness 要件ではない）。
 - 全映像エンコーダ（VP8/VP9/AV1/H.264/H.265、ソフト・ハード各実装）が「最初の出力フレームで sample_entry を確定する」不変条件を満たすことを確認する。
 
 ## 完了条件
 
 - 映像エンコーダが全出力フレームに sample_entry を載せること。
 - `push_encoded_frame_with_metrics` の keyframe 限定補完が撤去され、補完責務がエンコーダ側に一本化されること。
-- 全 writer が映像 sample_entry を `changed_since` ベースの変更検知で処理し、映像専用の補完経路が無くなること。
+- 各 writer の映像専用の `or_else` 補完経路が無くなること（標準 `mp4` は元々 passthrough のため対象外）。
 - 全映像エンコーダで「最初の出力フレームで entry が確定する」不変条件が満たされることを確認すること。
-- 映像 sample_entry のラウンドトリップを PBT で検証する。
+- 映像エンコーダが全出力フレームに sample_entry を載せる不変条件を単体テストで検証する（本リポジトリには PBT 基盤（pbt クレート・proptest）が無いため、`tests/*_tests.rs` の統合テストと `#[cfg(test)]` 単体テストで行う。issue 0017 の「テスト」節と同じ方針）。
 - 録画機能（特に短時間録画・録画開始直後の映像トラック）にリグレッションが無いこと。
 
 ## 関連
