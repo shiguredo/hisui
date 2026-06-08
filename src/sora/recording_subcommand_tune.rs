@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::optuna::{JsonValue, OptunaStudy, SearchSpace, TrialValues};
+use crate::tune::{SearchSpace, Study, TrialValues, json_value::JsonValue};
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/tune-libvpx-vp9.jsonc");
 const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../../search-space-examples/full.jsonc");
@@ -50,14 +50,18 @@ impl Args {
             study_name: noargs::opt("study-name")
                 .ty("NAME")
                 .default("hisui-tune")
-                .doc("Optuna の study 名を指定します")
+                .doc("チューニングの study 名を指定します")
                 .take(raw_args)
                 .then(|a| a.value().parse())?,
             trial_count: noargs::opt("trial-count")
                 .short('n')
                 .ty("INTEGER")
                 .default("100")
-                .doc("実行する試行回数を指定します")
+                .doc(concat!(
+                    "目標とする合計試行回数を指定します\n",
+                    "（既存の履歴を含む合計がこの値に達するまで試行します。\n",
+                    "既存の履歴がこの値以上の場合は新規試行は行いません）"
+                ))
                 .take(raw_args)
                 .then(|a| a.value().parse())?,
             trial_timeout: noargs::opt("trial-timeout")
@@ -121,7 +125,7 @@ impl Args {
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("tune")
-        .doc("Optuna を用いた映像エンコードパラメーターの調整を行います")
+        .doc("NSGA-II を用いた映像エンコードパラメーターの調整を行います")
         .take(args)
         .is_present()
     {
@@ -142,9 +146,6 @@ fn run(raw_args: &mut noargs::RawArgs) -> noargs::Result<()> {
 }
 
 fn run_internal(args: Args) -> crate::Result<()> {
-    // 最初に optuna コマンドが利用可能かどうかをチェックする
-    OptunaStudy::check_optuna_availability()?;
-
     // 必要なら tune_working_dir を作る
     if !args.tune_working_dir().exists() {
         std::fs::create_dir_all(args.tune_working_dir()).map_err(|e| {
@@ -170,7 +171,7 @@ fn run_internal(args: Args) -> crate::Result<()> {
         crate::json::parse_str(DEFAULT_SEARCH_SPACE_JSON)?
     };
 
-    // 探索空間から不要なエントリを除外する（Optuna の探索を効率化するため）
+    // 探索空間から不要なエントリを除外する（探索を効率化するため）
     search_space
         .params
         .retain(|path, _| matches!(path.get(&layout_template), Some(JsonValue::Null)));
@@ -188,10 +189,9 @@ fn run_internal(args: Args) -> crate::Result<()> {
     }
 
     // 探索を始める前にいろいろと情報を表示する
-    let storage_url = format!(
-        "sqlite:///{}",
-        args.tune_working_dir().join("optuna.db").display()
-    );
+    let jsonl_path = args
+        .tune_working_dir()
+        .join(format!("{}.jsonl", args.study_name));
     eprintln!("====== INFO ======");
     eprintln!(
         "layout file to tune:\t {}",
@@ -206,9 +206,9 @@ fn run_internal(args: Args) -> crate::Result<()> {
             .map_or("DEFAULT".to_owned(), |p| p.display().to_string())
     );
     eprintln!("tune working dir:\t {}", args.tune_working_dir().display());
-    eprintln!("optuna storage:\t {storage_url}");
-    eprintln!("optuna study name:\t {}", args.study_name);
-    eprintln!("optuna trial count:\t {}", args.trial_count);
+    eprintln!("trials file:\t {}", jsonl_path.display());
+    eprintln!("study name:\t {}", args.study_name);
+    eprintln!("target total trials:\t {}", args.trial_count);
     eprintln!("tuning metrics:\t [Execution Time (minimize), VMAF Score Mean (maximize)]");
     eprintln!("tuning parameters ({}):", search_space.params.len());
     for (key, value) in &search_space.params {
@@ -216,21 +216,27 @@ fn run_internal(args: Args) -> crate::Result<()> {
     }
     eprintln!();
 
-    // optuna の study を作る
-    eprintln!("====== CREATE OPTUNA STUDY ======");
-    let mut optuna = OptunaStudy::new(args.study_name.clone(), storage_url);
-    optuna.create_study()?;
+    // スタディを開く（既存の履歴があれば続きから最適化する）
+    eprintln!("====== OPEN STUDY ======");
+    let mut study = Study::new(args.study_name.clone(), args.tune_working_dir())?;
+
+    // --trial-count は「合計到達ベース」。既存件数を差し引いた残り回数だけ新たに試行する。
+    let existing = study.trial_count();
+    let remaining = args.trial_count.saturating_sub(existing);
+    eprintln!("existing trials:\t {existing}");
+    eprintln!("remaining trials:\t {remaining}");
     eprintln!();
 
     let mut displayed_best_trials = false;
-    for i in 0..args.trial_count {
+    for i in 0..remaining {
         eprintln!(
-            "====== OPTUNA TRIAL ({}/{}) ======",
+            "====== TRIAL ({}/{}) (total target {}) ======",
             i + 1,
+            remaining,
             args.trial_count
         );
         eprintln!("=== SAMPLE PARAMETERS ===");
-        let ask_output = optuna.ask(&search_space)?;
+        let ask_output = study.ask(&search_space)?;
 
         let mut layout = layout_template.clone();
         ask_output.apply_params_to_layout(&mut layout)?;
@@ -238,21 +244,21 @@ fn run_internal(args: Args) -> crate::Result<()> {
 
         match run_trial_evaluation(&args, ask_output.number, &layout) {
             Ok(metrics) => {
-                optuna.tell(ask_output.number, &metrics)?;
+                study.tell(ask_output.number, &metrics)?;
             }
             Err(e) => {
                 eprintln!("failed to VMAF evaluation: {e:?}",);
-                optuna.tell_fail(ask_output.number)?;
+                study.tell_fail(ask_output.number)?;
             }
         }
         eprintln!();
 
-        displayed_best_trials = display_best_trials_if_updated(&args, &mut optuna, false)?;
+        displayed_best_trials = display_best_trials_if_updated(&args, &mut study, false)?;
     }
 
     if !displayed_best_trials {
         // 直前で表示していないなら、最後に結果を表示する
-        display_best_trials_if_updated(&args, &mut optuna, true)?;
+        display_best_trials_if_updated(&args, &mut study, true)?;
     }
 
     Ok(())
@@ -377,10 +383,10 @@ fn run_trial_evaluation(
 
 fn display_best_trials_if_updated(
     args: &Args,
-    optuna: &mut OptunaStudy,
+    study: &mut Study,
     force: bool,
 ) -> crate::Result<bool> {
-    let (updated, mut best_trials) = optuna.get_best_trials()?;
+    let (updated, mut best_trials) = study.get_best_trials()?;
     if !updated && !force {
         // 更新なし
         return Ok(false);

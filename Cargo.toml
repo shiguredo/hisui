@@ -17,7 +17,8 @@ members = [
   "examples/mpeg_dash_s3",
   "examples/obsws_bootstrap",
   "examples/sora_publish",
-  "examples/sora_source"
+  "examples/sora_source",
+  "pbt"
 ]
 
 [workspace.dependencies]

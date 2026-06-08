@@ -1,0 +1,413 @@
+use std::collections::BTreeMap;
+
+use crate::tune::json_value::{JsonNumber, JsonObjectMemberPath, JsonValue};
+use crate::tune::rng;
+use crate::tune::{ParameterDistribution, SearchSpace, TrialValues};
+
+// NSGA-II (Deb et al., 2002) の自前実装
+//
+// hisui が使うのは 2 目的 (合成時間 minimize / VMAF 平均 maximize) の多目的最適化のみ。
+// optuna の NSGAIISampler 既定挙動を参考にするが、完全一致は目的とせず、最適化品質が
+// 劣化しないことを比較で確認する方針 (issue 0010 参照)。
+
+/// 集団サイズ (optuna 既定に合わせる)
+pub const POPULATION_SIZE: usize = 50;
+
+/// 交叉確率 (optuna 既定に合わせる)
+const CROSSOVER_PROB: f64 = 0.9;
+
+/// SBX の分布指数
+const SBX_ETA: f64 = 20.0;
+
+/// polynomial mutation の分布指数
+const MUTATION_ETA: f64 = 20.0;
+
+/// NSGA-II が扱う 1 個体 (パラメータと、最小化方向に揃えた目的値)
+#[derive(Debug, Clone)]
+pub struct Individual {
+    pub params: BTreeMap<JsonObjectMemberPath, JsonValue>,
+    /// 最小化方向に揃えた 2 目的の値 (`[elapsed_seconds, -vmaf_mean]`)
+    pub objectives: [f64; 2],
+}
+
+impl Individual {
+    /// 評価値を最小化方向に揃えた個体を作る
+    ///
+    /// `vmaf_mean` は最大化目的なので符号を反転して、両目的を最小化として扱えるようにする。
+    pub fn new(params: BTreeMap<JsonObjectMemberPath, JsonValue>, values: &TrialValues) -> Self {
+        Self {
+            params,
+            objectives: [values.elapsed_seconds, -values.vmaf_mean],
+        }
+    }
+}
+
+/// 点 `a` が点 `b` を (パレート) 支配するかどうかを返す
+///
+/// 両目的とも最小化前提。`a` が全目的で `b` 以下、かつ少なくとも 1 目的で `b` 未満なら支配する。
+pub fn dominates(a: &[f64; 2], b: &[f64; 2]) -> bool {
+    let all_le = a[0] <= b[0] && a[1] <= b[1];
+    let any_lt = a[0] < b[0] || a[1] < b[1];
+    all_le && any_lt
+}
+
+/// 非劣ソートを行い、各点のフロント番号 (rank) を返す
+///
+/// rank 0 が最良フロント (どの点にも支配されない)。返り値は入力と同じ順序の rank 配列。
+pub fn non_dominated_sort(points: &[[f64; 2]]) -> Vec<usize> {
+    let n = points.len();
+    let mut rank = vec![0usize; n];
+
+    // 各点について「自分を支配する点の数」と「自分が支配する点の集合」を求める
+    let mut domination_count = vec![0usize; n];
+    let mut dominated_set: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut current_front: Vec<usize> = Vec::new();
+
+    for p in 0..n {
+        for q in 0..n {
+            if p == q {
+                continue;
+            }
+            if dominates(&points[p], &points[q]) {
+                dominated_set[p].push(q);
+            } else if dominates(&points[q], &points[p]) {
+                domination_count[p] += 1;
+            }
+        }
+        if domination_count[p] == 0 {
+            rank[p] = 0;
+            current_front.push(p);
+        }
+    }
+
+    // フロントを 1 つずつ剥がしていく
+    let mut front_index = 0;
+    while !current_front.is_empty() {
+        let mut next_front: Vec<usize> = Vec::new();
+        for &p in &current_front {
+            for &q in &dominated_set[p] {
+                domination_count[q] -= 1;
+                if domination_count[q] == 0 {
+                    rank[q] = front_index + 1;
+                    next_front.push(q);
+                }
+            }
+        }
+        front_index += 1;
+        current_front = next_front;
+    }
+
+    rank
+}
+
+/// 1 つのフロント内の各点の混雑度距離を返す
+///
+/// 各目的軸を min-max 正規化したうえで距離を計算する (2 目的のスケール差の影響を排除する)。
+/// 各目的軸での端点 (最小・最大) の距離は無限大とする。
+pub fn crowding_distance(front: &[[f64; 2]]) -> Vec<f64> {
+    let n = front.len();
+    let mut distance = vec![0.0f64; n];
+    if n == 0 {
+        return distance;
+    }
+    if n <= 2 {
+        // 端点しかないので全て無限大扱いにする
+        for d in distance.iter_mut() {
+            *d = f64::INFINITY;
+        }
+        return distance;
+    }
+
+    for m in [0usize, 1] {
+        // この目的軸の値でインデックスをソートする
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&i, &j| front[i][m].total_cmp(&front[j][m]));
+
+        // 端点は無限大
+        distance[order[0]] = f64::INFINITY;
+        distance[order[n - 1]] = f64::INFINITY;
+
+        let min = front[order[0]][m];
+        let max = front[order[n - 1]][m];
+        let range = max - min;
+        if range == 0.0 {
+            // この軸では差がないので寄与なし
+            continue;
+        }
+
+        for k in 1..n - 1 {
+            let prev = front[order[k - 1]][m];
+            let next = front[order[k + 1]][m];
+            distance[order[k]] += (next - prev) / range;
+        }
+    }
+
+    distance
+}
+
+/// 累積した成功個体から親世代 (上位 `POPULATION_SIZE` 個) を選抜する
+///
+/// 非劣ソートでフロントに分け、混雑度距離も加味して上位を選ぶ。
+/// これまでの全成功個体を母集団とすることで、優れた解が淘汰されず親集団に残る
+/// (大域最良が保持されるため elitism と同等の効果を持つ。issue 0010 参照)。
+fn select_parents(individuals: &[Individual]) -> Vec<Individual> {
+    if individuals.len() <= POPULATION_SIZE {
+        return individuals.to_vec();
+    }
+
+    let points: Vec<[f64; 2]> = individuals.iter().map(|i| i.objectives).collect();
+    let ranks = non_dominated_sort(&points);
+
+    // rank ごとにインデックスをまとめる
+    let max_rank = ranks.iter().copied().max().unwrap_or(0);
+    let mut fronts: Vec<Vec<usize>> = vec![Vec::new(); max_rank + 1];
+    for (idx, &r) in ranks.iter().enumerate() {
+        fronts[r].push(idx);
+    }
+
+    let mut selected: Vec<Individual> = Vec::new();
+    for front in fronts {
+        if selected.len() + front.len() <= POPULATION_SIZE {
+            // フロントごと丸ごと採用できる
+            for idx in front {
+                selected.push(individuals[idx].clone());
+            }
+        } else {
+            // 入りきらないフロントは混雑度距離が大きい順に詰める
+            let front_points: Vec<[f64; 2]> = front.iter().map(|&i| points[i]).collect();
+            let dist = crowding_distance(&front_points);
+            let mut ordered: Vec<(usize, f64)> = front.iter().copied().zip(dist).collect();
+            ordered.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let remaining = POPULATION_SIZE - selected.len();
+            for (idx, _) in ordered.into_iter().take(remaining) {
+                selected.push(individuals[idx].clone());
+            }
+            break;
+        }
+        if selected.len() == POPULATION_SIZE {
+            break;
+        }
+    }
+
+    selected
+}
+
+/// binary トーナメント選択で 1 個体のインデックスを選ぶ
+///
+/// rank が小さい方を優先し、同 rank なら混雑度距離が大きい方を優先する。
+fn tournament_select(ranks: &[usize], distances: &[f64]) -> crate::Result<usize> {
+    let n = ranks.len();
+    let a = rng::gen_index(n)?;
+    let b = rng::gen_index(n)?;
+    if ranks[a] < ranks[b] {
+        Ok(a)
+    } else if ranks[b] < ranks[a] {
+        Ok(b)
+    } else if distances[a] >= distances[b] {
+        Ok(a)
+    } else {
+        Ok(b)
+    }
+}
+
+/// 探索空間から各パラメータを一様ランダムにサンプリングする (初期集団用)
+pub fn sample_random(
+    search_space: &SearchSpace,
+) -> crate::Result<BTreeMap<JsonObjectMemberPath, JsonValue>> {
+    let mut params = BTreeMap::new();
+    for (path, dist) in &search_space.params {
+        params.insert(path.clone(), sample_one(dist)?);
+    }
+    Ok(params)
+}
+
+/// 1 つの分布から一様ランダムに値をサンプリングする
+fn sample_one(dist: &ParameterDistribution) -> crate::Result<JsonValue> {
+    match dist {
+        ParameterDistribution::Numeric { min, max } => match (min, max) {
+            // 両端が整数なら整数として扱う
+            (JsonNumber::Integer(lo), JsonNumber::Integer(hi)) => {
+                Ok(JsonValue::Integer(rng::gen_range_i64(*lo, *hi)?))
+            }
+            _ => {
+                let lo = to_f64(min);
+                let hi = to_f64(max);
+                Ok(JsonValue::Float(lo + rng::gen_unit_f64()? * (hi - lo)))
+            }
+        },
+        ParameterDistribution::Categorical(choices) => {
+            if choices.is_empty() {
+                return Err(crate::Error::new("categorical distribution has no choices"));
+            }
+            let idx = rng::gen_index(choices.len())?;
+            Ok(choices[idx].clone())
+        }
+    }
+}
+
+/// 累積した成功個体から、交叉 + 突然変異で子個体のパラメータを 1 つ生成する
+pub fn generate_child(
+    search_space: &SearchSpace,
+    individuals: &[Individual],
+) -> crate::Result<BTreeMap<JsonObjectMemberPath, JsonValue>> {
+    // 親世代を選抜し、その rank / 混雑度距離をトーナメント選択用に求める
+    let parents = select_parents(individuals);
+    let points: Vec<[f64; 2]> = parents.iter().map(|i| i.objectives).collect();
+    let ranks = non_dominated_sort(&points);
+
+    // 混雑度距離は rank (フロント) ごとに計算する
+    let mut distances = vec![0.0f64; parents.len()];
+    let max_rank = ranks.iter().copied().max().unwrap_or(0);
+    for r in 0..=max_rank {
+        let front_idx: Vec<usize> = (0..parents.len()).filter(|&i| ranks[i] == r).collect();
+        let front_points: Vec<[f64; 2]> = front_idx.iter().map(|&i| points[i]).collect();
+        let front_dist = crowding_distance(&front_points);
+        for (k, &i) in front_idx.iter().enumerate() {
+            distances[i] = front_dist[k];
+        }
+    }
+
+    // 2 親をトーナメント選択する
+    let p1 = &parents[tournament_select(&ranks, &distances)?];
+    let p2 = &parents[tournament_select(&ranks, &distances)?];
+
+    // 交叉
+    let mut child = if rng::gen_bool(CROSSOVER_PROB)? {
+        crossover(search_space, &p1.params, &p2.params)?
+    } else {
+        p1.params.clone()
+    };
+
+    // 突然変異 (各パラメータを確率 1 / パラメータ数 で変異させる)
+    let mutation_prob = if search_space.params.is_empty() {
+        0.0
+    } else {
+        1.0 / search_space.params.len() as f64
+    };
+    for (path, dist) in &search_space.params {
+        if rng::gen_bool(mutation_prob)?
+            && let Some(value) = child.get_mut(path)
+        {
+            *value = mutate_one(dist, value)?;
+        }
+    }
+
+    Ok(child)
+}
+
+/// 2 親のパラメータ集合を交叉して子のパラメータ集合を作る
+fn crossover(
+    search_space: &SearchSpace,
+    p1: &BTreeMap<JsonObjectMemberPath, JsonValue>,
+    p2: &BTreeMap<JsonObjectMemberPath, JsonValue>,
+) -> crate::Result<BTreeMap<JsonObjectMemberPath, JsonValue>> {
+    let mut child = BTreeMap::new();
+    for (path, dist) in &search_space.params {
+        // 親に対応する値がなければ (理論上は起きない) ランダムサンプリングで埋める
+        let (Some(v1), Some(v2)) = (p1.get(path), p2.get(path)) else {
+            child.insert(path.clone(), sample_one(dist)?);
+            continue;
+        };
+        let value = match dist {
+            ParameterDistribution::Numeric { min, max } => crossover_numeric(min, max, v1, v2)?,
+            // カテゴリカルは SBX を適用できないので uniform crossover (親のどちらかを選ぶ)
+            ParameterDistribution::Categorical(_) => {
+                if rng::gen_bool(0.5)? {
+                    v1.clone()
+                } else {
+                    v2.clone()
+                }
+            }
+        };
+        child.insert(path.clone(), value);
+    }
+    Ok(child)
+}
+
+/// 数値パラメータの SBX 交叉
+fn crossover_numeric(
+    min: &JsonNumber,
+    max: &JsonNumber,
+    v1: &JsonValue,
+    v2: &JsonValue,
+) -> crate::Result<JsonValue> {
+    let is_integer = matches!((min, max), (JsonNumber::Integer(_), JsonNumber::Integer(_)));
+    let lo = to_f64(min);
+    let hi = to_f64(max);
+    let x1 = json_value_to_f64(v1).unwrap_or(lo);
+    let x2 = json_value_to_f64(v2).unwrap_or(hi);
+
+    // SBX (Simulated Binary Crossover)。生成される 2 子のうち 1 つを採用する。
+    let u = rng::gen_unit_f64()?;
+    let beta = if u <= 0.5 {
+        (2.0 * u).powf(1.0 / (SBX_ETA + 1.0))
+    } else {
+        (1.0 / (2.0 * (1.0 - u))).powf(1.0 / (SBX_ETA + 1.0))
+    };
+    let c1 = 0.5 * ((1.0 + beta) * x1 + (1.0 - beta) * x2);
+    let c2 = 0.5 * ((1.0 - beta) * x1 + (1.0 + beta) * x2);
+    let child = if rng::gen_bool(0.5)? { c1 } else { c2 };
+
+    Ok(finalize_numeric(child, lo, hi, is_integer))
+}
+
+/// 数値パラメータの polynomial mutation
+fn mutate_one(dist: &ParameterDistribution, value: &JsonValue) -> crate::Result<JsonValue> {
+    match dist {
+        ParameterDistribution::Numeric { min, max } => {
+            let is_integer = matches!((min, max), (JsonNumber::Integer(_), JsonNumber::Integer(_)));
+            let lo = to_f64(min);
+            let hi = to_f64(max);
+            if hi <= lo {
+                // レンジが無いので変異しようがない
+                return Ok(finalize_numeric(lo, lo, hi, is_integer));
+            }
+            let x = json_value_to_f64(value).unwrap_or(lo).clamp(lo, hi);
+
+            let delta1 = (x - lo) / (hi - lo);
+            let delta2 = (hi - x) / (hi - lo);
+            let u = rng::gen_unit_f64()?;
+            let mut_pow = 1.0 / (MUTATION_ETA + 1.0);
+            let deltaq = if u < 0.5 {
+                let xy = 1.0 - delta1;
+                let val = 2.0 * u + (1.0 - 2.0 * u) * xy.powf(MUTATION_ETA + 1.0);
+                val.powf(mut_pow) - 1.0
+            } else {
+                let xy = 1.0 - delta2;
+                let val = 2.0 * (1.0 - u) + 2.0 * (u - 0.5) * xy.powf(MUTATION_ETA + 1.0);
+                1.0 - val.powf(mut_pow)
+            };
+            let mutated = x + deltaq * (hi - lo);
+            Ok(finalize_numeric(mutated, lo, hi, is_integer))
+        }
+        // カテゴリカルは選択肢集合から一様再サンプリングする
+        ParameterDistribution::Categorical(_) => sample_one(dist),
+    }
+}
+
+/// SBX / mutation の結果を範囲内にクランプし、整数なら丸める
+fn finalize_numeric(value: f64, lo: f64, hi: f64, is_integer: bool) -> JsonValue {
+    let clamped = value.clamp(lo, hi);
+    if is_integer {
+        JsonValue::Integer(clamped.round() as i64)
+    } else {
+        JsonValue::Float(clamped)
+    }
+}
+
+/// `JsonNumber` を `f64` に変換する
+fn to_f64(n: &JsonNumber) -> f64 {
+    match n {
+        JsonNumber::Integer(v) => *v as f64,
+        JsonNumber::Float(v) => *v,
+    }
+}
+
+/// `JsonValue` が数値なら `f64` として取り出す
+fn json_value_to_f64(v: &JsonValue) -> Option<f64> {
+    match v {
+        JsonValue::Integer(i) => Some(*i as f64),
+        JsonValue::Float(f) => Some(*f),
+        _ => None,
+    }
+}
