@@ -14,7 +14,6 @@ use crate::{
 #[derive(Debug)]
 pub struct FdkAacEncoder {
     inner: shiguredo_fdk_aac::Encoder,
-    // 全出力フレームに載せる sample entry。Arc 共有なので毎フレームの clone は安価。
     sample_entry: SharedSampleEntry,
     total_encoded_samples: u64,
 }

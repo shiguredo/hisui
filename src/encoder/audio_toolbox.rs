@@ -33,7 +33,6 @@ pub struct AudioToolboxEncoder {
     cmd_tx: std::sync::mpsc::Sender<EncoderCommand>,
     result_rx: std::sync::mpsc::Receiver<EncoderResponse>,
     buffered_frames: VecDeque<shiguredo_audio_toolbox::EncodedFrame>,
-    // 全出力フレームに載せる sample entry。Arc 共有なので毎フレームの clone は安価。
     sample_entry: SharedSampleEntry,
     total_encoded_samples: u64,
 }

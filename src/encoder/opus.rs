@@ -10,7 +10,6 @@ use crate::{
 #[derive(Debug)]
 pub struct OpusEncoder {
     inner: shiguredo_opus::Encoder,
-    // 全出力フレームに載せる sample entry。Arc 共有なので毎フレームの clone は安価。
     sample_entry: SharedSampleEntry,
 }
 
