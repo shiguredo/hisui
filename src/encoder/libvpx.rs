@@ -7,6 +7,7 @@ use shiguredo_mp4::{
 
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     types::CodecName,
     video::{self, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
@@ -26,7 +27,7 @@ const BT_709: u8 = 1; // 典型的な値。必要に応じて調整する
 pub struct LibvpxEncoder {
     inner: shiguredo_libvpx::Encoder,
     format: VideoFormat,
-    sample_entry: Option<SampleEntry>,
+    sample_entry: Option<SharedSampleEntry>,
     keyframe_request_pending: bool,
     input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
@@ -51,7 +52,7 @@ impl LibvpxEncoder {
         Ok(Self {
             inner,
             format: VideoFormat::Vp8,
-            sample_entry: Some(sample_entry),
+            sample_entry: Some(SharedSampleEntry::new(sample_entry)),
             keyframe_request_pending: false,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
@@ -76,7 +77,7 @@ impl LibvpxEncoder {
         Ok(Self {
             inner,
             format: VideoFormat::Vp9,
-            sample_entry: Some(sample_entry),
+            sample_entry: Some(SharedSampleEntry::new(sample_entry)),
             keyframe_request_pending: false,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),

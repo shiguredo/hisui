@@ -989,7 +989,7 @@ impl SrtTsDemuxer {
                     channels_value,
                 )?;
                 self.last_aac_config_key = Some(aac_config_key);
-                Some(entry)
+                Some(crate::sample_entry::SharedSampleEntry::new(entry))
             } else {
                 None
             };

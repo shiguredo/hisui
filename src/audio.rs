@@ -3,12 +3,9 @@ pub mod converter;
 
 use std::time::Duration;
 
-use shiguredo_mp4::{
-    FixedPointNumber,
-    boxes::{AudioSampleEntryFields, SampleEntry},
-};
+use shiguredo_mp4::{FixedPointNumber, boxes::AudioSampleEntryFields};
 
-use crate::types::CodecName;
+use crate::{sample_entry::SharedSampleEntry, types::CodecName};
 
 // エンコードパラメーターのデフォルト値
 pub const DEFAULT_BITRATE: usize = 65536;
@@ -87,7 +84,7 @@ pub struct AudioFrame {
     pub channels: Channels,
     pub sample_rate: SampleRate,
     pub timestamp: Duration,
-    pub sample_entry: Option<SampleEntry>,
+    pub sample_entry: Option<SharedSampleEntry>,
 }
 
 impl AudioFrame {

@@ -14,6 +14,7 @@ use super::demuxer::{
 };
 use super::reader::TrackSender;
 use crate::audio::{AudioFormat, Channels, SampleRate};
+use crate::sample_entry::SharedSampleEntry;
 use crate::video::{VideoFormat, VideoFrameSize};
 use crate::{AudioFrame, ProcessorHandle, Result, TrackId, VideoFrame};
 
@@ -105,7 +106,7 @@ impl Mp4SampleReader {
                         channels: audio_channels,
                         sample_rate: audio_sample_rate,
                         timestamp,
-                        sample_entry: sample.sample_entry,
+                        sample_entry: sample.sample_entry.map(SharedSampleEntry::new),
                     };
                     if !sender.send_audio(frame).await {
                         // パイプライン処理が中断された
@@ -134,7 +135,7 @@ impl Mp4SampleReader {
                             height: video_height,
                         }),
                         timestamp,
-                        sample_entry: sample.sample_entry,
+                        sample_entry: sample.sample_entry.map(SharedSampleEntry::new),
                     };
                     if !sender.send_video(frame).await {
                         // パイプライン処理が中断された

@@ -2,12 +2,16 @@ use std::num::NonZeroUsize;
 
 use shiguredo_mp4::boxes::{DopsBox, OpusBox, SampleEntry};
 
-use crate::audio::{self, AudioFormat, AudioFrame, Channels, SampleRate};
+use crate::{
+    audio::{self, AudioFormat, AudioFrame, Channels, SampleRate},
+    sample_entry::SharedSampleEntry,
+};
 
 #[derive(Debug)]
 pub struct OpusEncoder {
     inner: shiguredo_opus::Encoder,
-    sample_entry: Option<SampleEntry>,
+    // 全出力フレームに載せる sample entry。Arc 共有なので毎フレームの clone は安価。
+    sample_entry: SharedSampleEntry,
 }
 
 impl OpusEncoder {
@@ -21,13 +25,13 @@ impl OpusEncoder {
         };
         let inner = shiguredo_opus::Encoder::new(config)?;
 
-        // 最初の AudioFrame に載せるサンプルエントリーを作っておく
+        // 全出力フレームに載せるサンプルエントリーを作っておく
         let pre_skip = inner.get_lookahead()?;
         let sample_entry = sample_entry(pre_skip);
 
         Ok(Self {
             inner,
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
         })
     }
 
@@ -54,8 +58,10 @@ impl OpusEncoder {
             // 入力の値をそのまま引きつぐ
             timestamp: frame.timestamp,
 
-            // サンプルエントリーは途中で変わらないので、最初に一回だけ載せる
-            sample_entry: self.sample_entry.take(),
+            // 全出力フレームに sample entry を載せる。Arc 共有なので clone は安価。
+            // 「最初の 1 フレームだけ載せる」方式だと、writer が最初の entry 付き
+            // フレームを取りこぼした際に entry が一度も届かず finalize に失敗するため。
+            sample_entry: Some(self.sample_entry.clone()),
 
             // エンコード結果を反映する
             data: encoded.to_vec(),

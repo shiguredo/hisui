@@ -480,14 +480,14 @@ impl DashWriter {
 
         // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
         if let Some(ref entry) = frame.sample_entry {
-            self.last_video_sample_entry.clone_from(&frame.sample_entry);
+            self.last_video_sample_entry = Some(entry.get().clone());
 
             // SampleEntry から正確な codec string を確定する
             if !matches!(
                 self.codec_resolution,
                 CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
             ) && let Some(codec_str) =
-                crate::codec_string::video_codec_string_from_sample_entry(entry)
+                crate::codec_string::video_codec_string_from_sample_entry(entry.get())
             {
                 self.resolve_video_codec(codec_str);
             }
@@ -520,7 +520,8 @@ impl DashWriter {
         // フレームの sample_entry が None なら保持済みの値を使う
         let sample_entry = frame
             .sample_entry
-            .clone()
+            .as_ref()
+            .map(|e| e.get().clone())
             .or_else(|| self.last_video_sample_entry.clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Video,
@@ -547,14 +548,14 @@ impl DashWriter {
         // 最初の video keyframe より前に audio が流れ始めることがある。
         // その場合でも、初回だけ付与される sample_entry は保持しておく。
         if let Some(ref entry) = frame.sample_entry {
-            self.last_audio_sample_entry.clone_from(&frame.sample_entry);
+            self.last_audio_sample_entry = Some(entry.get().clone());
 
             // SampleEntry から正確な codec string を確定する
             if !matches!(
                 self.codec_resolution,
                 CodecResolutionState::AudioOnly(_) | CodecResolutionState::Resolved(_)
             ) && let Some(codec_str) =
-                crate::codec_string::audio_codec_string_from_sample_entry(entry)
+                crate::codec_string::audio_codec_string_from_sample_entry(entry.get())
             {
                 self.resolve_audio_codec(codec_str);
             }
@@ -583,7 +584,8 @@ impl DashWriter {
         self.current_payload.extend_from_slice(&frame.data);
         let sample_entry = frame
             .sample_entry
-            .clone()
+            .as_ref()
+            .map(|e| e.get().clone())
             .or_else(|| self.last_audio_sample_entry.clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Audio,

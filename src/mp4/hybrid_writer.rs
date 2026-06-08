@@ -11,7 +11,7 @@ use shiguredo_mp4::mux::{
 };
 use shiguredo_mp4::{BoxHeader, BoxSize, Decode, Encode};
 
-use crate::{TrackId, audio::AudioFrame, video::VideoFrame};
+use crate::{TrackId, audio::AudioFrame, sample_entry::SharedSampleEntry, video::VideoFrame};
 
 use super::writer::{
     DEFAULT_SAMPLE_DURATION, InputTrackKind, MAX_CHUNK_DURATION, MAX_INPUT_QUEUE_GAP,
@@ -75,9 +75,11 @@ pub struct HybridMp4Writer {
     fragment_start_timestamp: Option<Duration>,
     fragment_end_timestamp: Option<Duration>,
     fragment_accumulated_duration: Duration,
-    // エンコーダーは sample_entry を初回のみ付与することがあるため保持する
-    last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
-    last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    // フラグメント境界を越えて直前の sample_entry を保持する。
+    // 全フレーム付与（issue 0017）後も、フラグメント先頭の欠落補完と received カウンタの
+    // 変化検知（changed_since）のために前回 entry を覚えておく。
+    last_audio_sample_entry: Option<SharedSampleEntry>,
+    last_video_sample_entry: Option<SharedSampleEntry>,
     has_flushed_fragment: bool,
 
     // Mp4Writer と共有する入力キュー・一時停止管理・統計情報
@@ -222,7 +224,8 @@ impl HybridMp4Writer {
         self.fragment_video_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Video,
-                sample_entry,
+                // muxer は生の SampleEntry を要求するため Arc から取り出して渡す。
+                sample_entry: sample_entry.map(|e| e.get().clone()),
                 keyframe: frame.keyframe,
                 timescale: TIMESCALE,
                 duration: duration.as_micros() as u32,
@@ -260,7 +263,8 @@ impl HybridMp4Writer {
         self.fragment_audio_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Audio,
-                sample_entry,
+                // muxer は生の SampleEntry を要求するため Arc から取り出して渡す。
+                sample_entry: sample_entry.map(|e| e.get().clone()),
                 keyframe: true,
                 timescale: TIMESCALE,
                 duration: duration.as_micros() as u32,
@@ -420,7 +424,7 @@ impl HybridMp4Writer {
         {
             samples.push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Video,
-                sample_entry: Some(sample_entry),
+                sample_entry: Some(sample_entry.get().clone()),
                 keyframe: pending.keyframe,
                 timescale: TIMESCALE,
                 duration: DEFAULT_SAMPLE_DURATION.as_micros() as u32,
@@ -439,7 +443,7 @@ impl HybridMp4Writer {
         {
             samples.push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Audio,
-                sample_entry: Some(sample_entry),
+                sample_entry: Some(sample_entry.get().clone()),
                 keyframe: true,
                 timescale: TIMESCALE,
                 duration: DEFAULT_SAMPLE_DURATION.as_micros() as u32,
@@ -946,10 +950,14 @@ impl HybridMp4Writer {
                 // writer の入口で受信時点に取り込んで保持する (pause エッジ向けの hardening)。
                 // ただし、entry 付きフレームが writer に一度も届かないケース (issues/0011 の真因) は
                 // これでは塞げず、上流に音声 sample_entry 要求機構を追加する必要がある。
-                if sample.sample_entry.is_some() {
-                    self.core.stats.add_received_audio_sample_entry();
-                    self.last_audio_sample_entry
-                        .clone_from(&sample.sample_entry);
+                // 全フレーム付与（issue 0017）後は毎フレームに entry が載るため、
+                // received カウンタは「前回から変化したとき」だけ計上する
+                // （changed_since）。これで指標が「entry の確定・変化回数」を表す。
+                if let Some(entry) = &sample.sample_entry {
+                    if entry.changed_since(self.last_audio_sample_entry.as_ref()) {
+                        self.core.stats.add_received_audio_sample_entry();
+                    }
+                    self.last_audio_sample_entry = Some(entry.clone());
                 }
                 if self.core.input_audio_track_id.is_some() {
                     self.core.handle_input_sample(
@@ -979,10 +987,12 @@ impl HybridMp4Writer {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 self.core.stats.add_received_video_data();
                 // 音声と同様に、sample_entry を受信時点で取り込んでおく (issues/0011 参照)。
-                if sample.sample_entry.is_some() {
-                    self.core.stats.add_received_video_sample_entry();
-                    self.last_video_sample_entry
-                        .clone_from(&sample.sample_entry);
+                // 音声と同様に、received カウンタは前回から変化したときだけ計上する。
+                if let Some(entry) = &sample.sample_entry {
+                    if entry.changed_since(self.last_video_sample_entry.as_ref()) {
+                        self.core.stats.add_received_video_sample_entry();
+                    }
+                    self.last_video_sample_entry = Some(entry.clone());
                 }
                 if self.core.input_video_track_id.is_some() {
                     self.core.handle_input_sample(
@@ -1104,7 +1114,7 @@ mod tests {
             channels: Channels::STEREO,
             sample_rate: SampleRate::HZ_48000,
             timestamp: Duration::ZERO,
-            sample_entry,
+            sample_entry: sample_entry.map(SharedSampleEntry::new),
         }
     }
 
@@ -1118,7 +1128,7 @@ mod tests {
                 height: 16,
             }),
             timestamp: Duration::ZERO,
-            sample_entry,
+            sample_entry: sample_entry.map(SharedSampleEntry::new),
         }
     }
 
@@ -1172,7 +1182,10 @@ mod tests {
             ))))),
             &mut None,
         )?;
-        assert_eq!(writer.last_audio_sample_entry, Some(sample_entry.clone()));
+        assert_eq!(
+            writer.last_audio_sample_entry.as_ref().map(|e| e.get()),
+            Some(&sample_entry)
+        );
         // 入口で sample_entry を載せて受信したフレーム数が計上される。
         assert_eq!(
             writer.core.stats.total_received_audio_sample_entry_count(),
@@ -1314,7 +1327,10 @@ mod tests {
             ))))),
             &mut None,
         )?;
-        assert_eq!(writer.last_video_sample_entry, Some(sample_entry.clone()));
+        assert_eq!(
+            writer.last_video_sample_entry.as_ref().map(|e| e.get()),
+            Some(&sample_entry)
+        );
         // 入口で sample_entry を載せて受信したフレーム数が計上される。
         assert_eq!(
             writer.core.stats.total_received_video_sample_entry_count(),

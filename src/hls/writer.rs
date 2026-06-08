@@ -552,7 +552,7 @@ impl HlsWriter {
                 CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
             )
             && let Some(codec_str) =
-                crate::codec_string::video_codec_string_from_sample_entry(entry)
+                crate::codec_string::video_codec_string_from_sample_entry(entry.get())
         {
             self.resolve_video_codec(codec_str);
         }
@@ -560,10 +560,8 @@ impl HlsWriter {
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
-                if frame.sample_entry.is_some() {
-                    state
-                        .last_video_sample_entry
-                        .clone_from(&frame.sample_entry);
+                if let Some(entry) = &frame.sample_entry {
+                    state.last_video_sample_entry = Some(entry.get().clone());
                 }
                 // length-prefixed NALU → Annex B 変換 + キーフレーム時の SPS/PPS 注入
                 let annexb_data = convert_length_prefixed_to_annexb(
@@ -584,10 +582,8 @@ impl HlsWriter {
             }
             FormatState::Fmp4(state) => {
                 // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
-                if frame.sample_entry.is_some() {
-                    state
-                        .last_video_sample_entry
-                        .clone_from(&frame.sample_entry);
+                if let Some(entry) = &frame.sample_entry {
+                    state.last_video_sample_entry = Some(entry.get().clone());
                 }
                 // 前のビデオサンプルの duration を確定させる
                 if let Some(prev_ts) = state.last_video_timestamp {
@@ -605,7 +601,8 @@ impl HlsWriter {
                 // フレームの sample_entry が None なら保持済みの値を使う
                 let sample_entry = frame
                     .sample_entry
-                    .clone()
+                    .as_ref()
+                    .map(|e| e.get().clone())
                     .or_else(|| state.last_video_sample_entry.clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Video,
@@ -642,22 +639,18 @@ impl HlsWriter {
                 CodecResolutionState::AudioOnly(_) | CodecResolutionState::Resolved(_)
             )
             && let Some(codec_str) =
-                crate::codec_string::audio_codec_string_from_sample_entry(entry)
+                crate::codec_string::audio_codec_string_from_sample_entry(entry.get())
         {
             self.resolve_audio_codec(codec_str);
         }
 
-        if frame.sample_entry.is_some() {
+        if let Some(entry) = &frame.sample_entry {
             match &mut self.format_state {
                 FormatState::MpegTs(state) => {
-                    state
-                        .last_audio_sample_entry
-                        .clone_from(&frame.sample_entry);
+                    state.last_audio_sample_entry = Some(entry.get().clone());
                 }
                 FormatState::Fmp4(state) => {
-                    state
-                        .last_audio_sample_entry
-                        .clone_from(&frame.sample_entry);
+                    state.last_audio_sample_entry = Some(entry.get().clone());
                 }
             }
         }
@@ -696,7 +689,8 @@ impl HlsWriter {
                 state.current_payload.extend_from_slice(&frame.data);
                 let sample_entry = frame
                     .sample_entry
-                    .clone()
+                    .as_ref()
+                    .map(|e| e.get().clone())
                     .or_else(|| state.last_audio_sample_entry.clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Audio,

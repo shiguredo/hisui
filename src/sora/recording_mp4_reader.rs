@@ -10,6 +10,7 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 
 use crate::{
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
+    sample_entry::SharedSampleEntry,
     types::CodecName,
     video::{VideoFormat, VideoFrame, VideoFrameSize},
 };
@@ -147,7 +148,7 @@ impl Mp4VideoReader {
         });
 
         Ok(Some(VideoFrame {
-            sample_entry,
+            sample_entry: sample_entry.map(SharedSampleEntry::new),
             data,
             format: self.format,
             keyframe: sample.keyframe,
@@ -293,7 +294,7 @@ impl Mp4AudioReader {
         Ok(Some(AudioFrame {
             data,
             format: self.format,
-            sample_entry,
+            sample_entry: sample_entry.map(SharedSampleEntry::new),
             channels: self.channels,
             sample_rate: self.sample_rate,
             timestamp,
