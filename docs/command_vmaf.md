@@ -16,16 +16,6 @@
 このコマンドは、主に [`hisui tune`](command_tune.md) コマンドと組み合わせて、
 映像エンコードパラメーターの調整に利用することを想定しています。
 
-## 依存パッケージ
-
-このコマンドを利用するためには https://github.com/Netflix/vmaf が提供する `vmaf` コマンドがシステムにインストールされている必要があります。
-
-macOS の場合には以下のようにして、依存パッケージがインストールできます。
-
-```bash
-brew install libvmaf
-```
-
 ## 使用方法
 
 ```console
@@ -47,7 +37,6 @@ Options:
   -l, --layout-file <PATH>        合成に使用するレイアウトファイルを指定します [env: HISUI_LAYOUT_FILE_PATH] [default: HISUI_REPO/layout-examples/vmaf-default.jsonc]
       --reference-yuv-file <PATH> 参照映像のYUVファイルの出力先を指定します [default: ROOT_DIR/reference.yuv]
       --distorted-yuv-file <PATH> 歪み映像のYUVファイルの出力先を指定します [default: ROOT_DIR/distorted.yuv]
-      --vmaf-output-file <PATH>   vmaf コマンドの実行結果ファイルの出力先を指定します [default: ROOT_DIR/vmaf-output.jsonc]
       --openh264 <PATH>           OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
   -c, --max-cpu-cores <INTEGER>   合成処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
   -f, --frame-count <FRAMES>      変換するフレーム数を指定します [default: 1000]
@@ -62,16 +51,12 @@ $ hisui vmaf /path/to/archive/RECORDING_ID/
   [00:00:09] [########################################] 1000/1000 (0s)
 => done
 
-# Run vmaf command
-VMAF version 3.0.0
-675 frames ⠄⠀ 201.74 FPS
-vmaf_v0.6.1: 96.361266
+# Run VMAF evaluation
 => done
 
 {
   "reference_yuv_file_path": "/path/to/archive/RECORDING_ID/reference.yuv",
   "distorted_yuv_file_path": "/path/to/archive/RECORDING_ID/distorted.yuv",
-  "vmaf_output_file_path": "/path/to/archive/RECORDING_ID/vmaf-output.jsonc",
   "encode_engine": "libvpx",
   "width": 642,
   "height": 240,

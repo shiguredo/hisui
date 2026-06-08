@@ -42,47 +42,10 @@
 
 ## 依存パッケージ
 
-このコマンドを利用するためには、以下のパッケージがシステムにインストールされている必要があります。
+このコマンドはパラメーター最適化に外部の `optuna` コマンド（Python 製）を利用するため、別途インストールが必要です。
 
-- `optuna` - パラメーター最適化ツール
-- `vmaf` - 映像品質評価ツール（[`hisui vmaf`](command_vmaf.md) コマンドと共通）
-
-macOS の場合には以下のようにして、依存パッケージがインストールできます
+macOS / Ubuntu のいずれも、以下のようにして `optuna` をインストールできます
 （[uv](https://docs.astral.sh/uv/) はPython用のパッケージマネージャーです）：
-
-```bash
-brew install libvmaf
-uv tool install optuna
-```
-
-### Ubuntu で利用する場合
-
-Ubuntu では依存パッケージをビルドする必要があります。
-
-#### vmaf のビルド
-
-1. 必要なパッケージをインストール
-
-```bash
-sudo apt-get update
-sudo apt-get install ninja-build meson nasm
-```
-
-2. vmaf [ソースコード](https://github.com/Netflix/vmaf/releases) をダウンロード
-3. ソースコードの展開とビルド
-
-```bash
-# X.Y.Z はダウンロードした vmaf のバージョン
-tar -xzf vmaf-X.Y.Z.tar.gz
-cd vmaf-X.Y.Z/libvmaf
-meson build --buildtype release
-ninja -vC build
-sudo ninja -vC build install
-```
-
-#### optuna のインストール
-
-macOS と同様に uv を利用してインストールします。
 
 ```bash
 uv tool install optuna
@@ -189,10 +152,7 @@ $ "hisui" "vmaf" "--layout-file" "/path/to/trial-0/layout.jsonc" ...
   [00:00:00] [########################################] 10/10 (0s)
 => done
 
-# Run vmaf command
-VMAF version 3.0.0
-10 frames ⢋⠀ 0.00 FPS
-vmaf_v0.6.1: 90.988820
+# Run VMAF evaluation
 => done
 
 [I 2025-07-16 12:35:43,172] Told trial 0 with values [0.5039638, 90.98882] and state 1.

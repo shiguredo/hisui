@@ -11,6 +11,11 @@
 
 ## develop
 
+- [CHANGE] VMAF 評価を外部 `vmaf` コマンドから `shiguredo_vmaf` ライブラリ呼び出しに変更する
+  - 外部 `vmaf` バイナリの事前インストール (PATH 設定) が不要になる
+  - 代わりにビルド時に libvmaf の prebuilt バイナリのダウンロード (ネットワークアクセス) が発生する
+  - `hisui vmaf` の `--vmaf-output-file` オプションと、実行結果 JSON の `vmaf_output_file_path` フィールドを削除する
+  - @sile
 - [CHANGE] ログ出力の時刻形式を UNIX タイムスタンプから ISO 8601 UTC 形式に変更する
   - ターミナル出力時は severity に応じて行全体を色付けする
   - `NO_COLOR` 環境変数が設定されている場合は色付けを無効にする

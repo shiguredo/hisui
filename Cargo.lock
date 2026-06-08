@@ -471,6 +471,7 @@ dependencies = [
  "shiguredo_svt_av1",
  "shiguredo_video_device",
  "shiguredo_video_toolbox",
+ "shiguredo_vmaf",
  "shiguredo_webrtc",
  "shiguredo_websocket",
  "sora_sdk",
@@ -1351,6 +1352,17 @@ checksum = "200357d99d8d88d9bcee25fb8a8be6cb0663548e0614481f2e4e5b4148afdd0b"
 dependencies = [
  "bindgen",
  "log",
+]
+
+[[package]]
+name = "shiguredo_vmaf"
+version = "2026.1.0-canary.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f00a8e15fe7e5841806707121f34c0969afaa9ccd1a08f77d0156e47c0609037"
+dependencies = [
+ "bindgen",
+ "shiguredo_toml",
+ "tracing",
 ]
 
 [[package]]

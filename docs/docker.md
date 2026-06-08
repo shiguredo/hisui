@@ -124,5 +124,4 @@ Canary リリースは最新機能を含みますが、安定性は保証され�
 
 この Docker イメージには Hisui 本体のバイナリしか含まれていません。
 そのため、外部パッケージのインストールが別途必要となる以下のコマンドには未対応となります。
-- [`hisui tune`](./command_tune.md) コマンド
-- [`hisui vmaf`](./command_vmaf.md) コマンド
+- [`hisui tune`](./command_tune.md) コマンド（外部の `optuna` コマンドが必要）

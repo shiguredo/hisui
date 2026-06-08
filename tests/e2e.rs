@@ -872,6 +872,64 @@ fn compose_empty_source_summary_omits_media_specific_fields() -> noargs::Result<
     Ok(())
 }
 
+#[test]
+fn vmaf_stdout_summary_has_required_fields() -> noargs::Result<()> {
+    let reference_yuv = tempfile::NamedTempFile::new()?;
+    let distorted_yuv = tempfile::NamedTempFile::new()?;
+
+    let output = run_hisui_command(&[
+        "vmaf",
+        "--layout-file",
+        "testdata/e2e/simple_single_source_vp9/layout.jsonc",
+        "--frame-count",
+        "10",
+        "--reference-yuv-file",
+        &reference_yuv.path().display().to_string(),
+        "--distorted-yuv-file",
+        &distorted_yuv.path().display().to_string(),
+        "testdata/e2e/simple_single_source_vp9/",
+    ])?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json = nojson::RawJson::parse(&stdout)
+        .map_err(|e| format!("Failed to parse vmaf output JSON: {e}"))?;
+    let root = json.value();
+
+    let width = required_usize_member(root, "width")?;
+    let height = required_usize_member(root, "height")?;
+    let encoded_frame_count = required_usize_member(root, "encoded_frame_count")?;
+    assert!(width > 0, "width must be greater than 0");
+    assert!(height > 0, "height must be greater than 0");
+    assert_eq!(
+        encoded_frame_count, 10,
+        "encoded_frame_count must match --frame-count"
+    );
+
+    // VMAF スコアは 0..=100 の範囲に収まり、min <= harmonic_mean <= mean <= max の順序を満たす
+    let min = required_f64_member(root, "vmaf_min")?;
+    let max = required_f64_member(root, "vmaf_max")?;
+    let mean = required_f64_member(root, "vmaf_mean")?;
+    let harmonic_mean = required_f64_member(root, "vmaf_harmonic_mean")?;
+    for (name, score) in [
+        ("vmaf_min", min),
+        ("vmaf_max", max),
+        ("vmaf_mean", mean),
+        ("vmaf_harmonic_mean", harmonic_mean),
+    ] {
+        assert!(
+            (0.0..=100.0).contains(&score),
+            "{name} must be within 0..=100, but got {score}"
+        );
+    }
+    assert!(min <= max, "vmaf_min must be <= vmaf_max");
+    assert!(
+        min <= harmonic_mean && harmonic_mean <= mean && mean <= max,
+        "expected min <= harmonic_mean <= mean <= max, but got min={min} harmonic_mean={harmonic_mean} mean={mean} max={max}"
+    );
+
+    Ok(())
+}
+
 /// 単一のソースをそのまま変換する場合
 /// - 入力:
 ///   - 映像:

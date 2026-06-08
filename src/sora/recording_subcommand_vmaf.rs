@@ -3,11 +3,11 @@ use std::{
     future::Future,
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
 use shiguredo_openh264::Openh264Library;
+use shiguredo_vmaf::{BuiltinModel, Context, ContextConfig, Model, Picture, PoolingMethod};
 
 use crate::{
     Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, Result, TrackId,
@@ -18,7 +18,7 @@ use crate::{
     sora::recording_reader::VideoReader,
     sora::recording_video_mixer::{VideoMixer, VideoMixerSpec},
     video::FrameRate,
-    yuv::YuvWriter,
+    yuv::{YuvReader, YuvWriter},
 };
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/vmaf-default.jsonc");
@@ -28,7 +28,6 @@ struct Args {
     layout_file_path: Option<PathBuf>,
     reference_yuv_file_path: Option<PathBuf>,
     distorted_yuv_file_path: Option<PathBuf>,
-    vmaf_output_file_path: Option<PathBuf>,
     openh264: Option<PathBuf>,
     #[expect(dead_code)]
     max_cpu_cores: Option<NonZeroUsize>,
@@ -58,12 +57,6 @@ impl Args {
                 .ty("PATH")
                 .default("ROOT_DIR/distorted.yuv")
                 .doc("歪み映像のYUVファイルの出力先を指定します")
-                .take(raw_args)
-                .then(crate::arg_utils::parse_non_default_opt)?,
-            vmaf_output_file_path: noargs::opt("vmaf-output-file")
-                .ty("PATH")
-                .default("ROOT_DIR/vmaf-output.json")
-                .doc("vmaf コマンドの実行結果ファイルの出力先を指定します")
                 .take(raw_args)
                 .then(crate::arg_utils::parse_non_default_opt)?,
             openh264: noargs::opt("openh264")
@@ -134,9 +127,6 @@ fn run(raw_args: &mut noargs::RawArgs) -> noargs::Result<()> {
 }
 
 fn run_internal(args: Args) -> Result<()> {
-    // 最初に vmaf コマンドが利用可能かどうかをチェックする
-    check_vmaf_availability()?;
-
     // レイアウトを準備（音声処理は無効化）
     let mut layout = Layout::from_layout_json_file_or_default(
         args.root_dir.clone(),
@@ -195,28 +185,16 @@ fn run_internal(args: Args) -> Result<()> {
     // VMAF の下準備としての処理は全て完了した
     eprintln!("=> done\n");
 
-    // vmaf コマンドを実行
-    eprintln!("# Run vmaf command");
-    let vmaf_output_file_path = args
-        .vmaf_output_file_path
-        .unwrap_or_else(|| args.root_dir.join("vmaf-output.json"));
-    run_vmaf_evaluation(
-        &reference_yuv_file_path,
-        &distorted_yuv_file_path,
-        &vmaf_output_file_path,
-        &layout,
-    )?;
+    // VMAF 評価を実行
+    eprintln!("# Run VMAF evaluation");
+    let vmaf = run_vmaf_evaluation(&reference_yuv_file_path, &distorted_yuv_file_path, &layout)?;
     eprintln!("=> done\n");
-
-    // VMAF 結果を読み込んで解析
-    let vmaf = parse_vmaf_output(&vmaf_output_file_path)?;
 
     // 実行結果の要約を標準出力に出力する
     let output = Output {
         layout_file_path: args.layout_file_path,
         reference_yuv_file_path,
         distorted_yuv_file_path,
-        vmaf_output_file_path,
         encode_engine: compose_result.encode_engine,
         width: layout.resolution.width().get(),
         height: layout.resolution.height().get(),
@@ -332,7 +310,6 @@ async fn setup_vmaf_pipeline(
     reference_yuv_file_path: PathBuf,
 ) -> Result<VmafPipelineSetup> {
     let mut next_processor_number = 0usize;
-    let mut next_track_number = 0usize;
     let mut processor_tasks = Vec::new();
 
     let decoder_options = VideoDecoderOptions {
@@ -354,9 +331,9 @@ async fn setup_vmaf_pipeline(
         })
     {
         let (source_id, source_info) = source_info;
-        let reader_output_track_id = next_track_id(&mut next_track_number, "reader_output");
         let source_info = source_info.clone();
         let reader_processor_id = next_processor_id(&mut next_processor_number, "video_reader");
+        let reader_output_track_id = TrackId::new(reader_processor_id.get());
         let reader_processor_type = "video_reader";
         spawn_processor_task(
             pipeline_handle,
@@ -370,8 +347,8 @@ async fn setup_vmaf_pipeline(
         )
         .await?;
 
-        let decoder_output_track_id = next_track_id(&mut next_track_number, "decoder_output");
         let decoder_processor_id = next_processor_id(&mut next_processor_number, "video_decoder");
+        let decoder_output_track_id = TrackId::new(decoder_processor_id.get());
         let decoder_processor_type = "video_decoder";
         let decoder_options_for_decoder = decoder_options.clone();
         let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();
@@ -395,12 +372,12 @@ async fn setup_vmaf_pipeline(
         mixer_input_track_ids.push(decoder_output_track_id);
     }
 
-    let mixer_output_track_id = next_track_id(&mut next_track_number, "mixer_output");
+    let mixer_processor_id = next_processor_id(&mut next_processor_number, "video_mixer");
+    let mixer_output_track_id = TrackId::new(mixer_processor_id.get());
     let mixer_spec = VideoMixerSpec::from_layout(&layout)
         .with_input_track_source_ids(mixer_input_track_source_ids);
     let mixer_input_track_ids_for_new = mixer_input_track_ids.clone();
     let mixer_input_track_ids_for_run = mixer_input_track_ids;
-    let mixer_processor_id = next_processor_id(&mut next_processor_number, "video_mixer");
     let mixer_processor_type = "video_mixer";
     let mixer_output_track_id_for_new = mixer_output_track_id.clone();
     let mixer_output_track_id_for_mixer = mixer_output_track_id.clone();
@@ -425,13 +402,14 @@ async fn setup_vmaf_pipeline(
     )
     .await?;
 
-    let limiter_output_track_id = next_track_id(&mut next_track_number, "limiter_output");
+    let limiter_processor_id = next_processor_id(&mut next_processor_number, "frame_count_limiter");
+    let limiter_output_track_id = TrackId::new(limiter_processor_id.get());
     let limiter = FrameCountLimiter::new(frame_count);
     let mixer_output_track_id_for_limiter = mixer_output_track_id.clone();
     let limiter_output_track_id_for_limiter = limiter_output_track_id.clone();
     spawn_processor_task(
         pipeline_handle,
-        next_processor_id(&mut next_processor_number, "frame_count_limiter"),
+        limiter_processor_id,
         crate::ProcessorMetadata::new("frame_count_limiter"),
         move |handle| {
             limiter.run(
@@ -457,12 +435,12 @@ async fn setup_vmaf_pipeline(
     )
     .await?;
 
-    let encoder_output_track_id = next_track_id(&mut next_track_number, "encoder_output");
     let encoder_options = layout.video_encoder_options();
     let encoder_processor_id = next_processor_id(
         &mut next_processor_number,
         crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER,
     );
+    let encoder_output_track_id = TrackId::new(encoder_processor_id.get());
     let encoder_processor_type = crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER;
     let openh264_lib_for_encoder = openh264_lib;
     let limiter_output_track_id_for_encoder = limiter_output_track_id.clone();
@@ -486,9 +464,9 @@ async fn setup_vmaf_pipeline(
     )
     .await?;
 
-    let decoder_output_track_id = next_track_id(&mut next_track_number, "decoded_output");
     let decoded_decoder_processor_id =
         next_processor_id(&mut next_processor_number, "decoded_video_decoder");
+    let decoder_output_track_id = TrackId::new(decoded_decoder_processor_id.get());
     let decoded_decoder_processor_type = "decoded_video_decoder";
     let encoder_output_track_id_for_decoder = encoder_output_track_id.clone();
     let decoder_output_track_id_for_decoder = decoder_output_track_id.clone();
@@ -676,88 +654,95 @@ fn next_processor_id(next_number: &mut usize, prefix: &str) -> ProcessorId {
     ProcessorId::new(format!("vmaf_{prefix}_{number}"))
 }
 
-fn next_track_id(next_number: &mut usize, prefix: &str) -> TrackId {
-    let number = *next_number;
-    *next_number += 1;
-    TrackId::new(format!("vmaf_{prefix}_{number}"))
-}
-
-pub fn check_vmaf_availability() -> crate::Result<()> {
-    let output = Command::new("vmaf")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => Ok(()),
-        Ok(_) => Err(crate::Error::new("vmaf command failed to execute properly")),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(crate::Error::new(
-            "vmaf command not found. Please install vmaf and ensure it's in your PATH",
-        )),
-        Err(e) => Err(crate::Error::new(format!(
-            "failed to check vmaf availability: {e}"
-        ))),
-    }
-}
-
+// 参照・劣化の YUV ファイルを読み込んで vmaf-rs で VMAF スコアを評価する
+//
+// hisui は固定で 8-bit I420、libvmaf のデフォルトモデル相当 (V061) を使う。
 fn run_vmaf_evaluation(
     reference_yuv_file_path: &Path,
     distorted_yuv_file_path: &Path,
-    vmaf_output_file_path: &Path,
     layout: &Layout,
-) -> crate::Result<()> {
-    let output = Command::new("vmaf")
-        .args([
-            "--reference",
-            reference_yuv_file_path
-                .to_str()
-                .ok_or_else(|| crate::Error::new("invalid reference YUV file path"))?,
-            "--distorted",
-            distorted_yuv_file_path
-                .to_str()
-                .ok_or_else(|| crate::Error::new("invalid distorted YUV file path"))?,
-            "--width",
-            &layout.resolution.width().get().to_string(),
-            "--height",
-            &layout.resolution.height().get().to_string(),
-            "--output",
-            vmaf_output_file_path
-                .to_str()
-                .ok_or_else(|| crate::Error::new("invalid VMAF output file path"))?,
-            "--json",
-            // 以降のパラメータは hisui では固定
-            "--pixel_format",
-            "420",
-            "--bitdepth",
-            "8",
-        ])
-        .stderr(Stdio::inherit())
-        .output()?;
-    output.status.success().then_some(()).ok_or_else(|| {
-        crate::Error::new(format!(
-            "vmaf failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ))
-    })?;
-    Ok(())
-}
+) -> crate::Result<VmafScoreStats> {
+    let width = layout.resolution.width().get();
+    let height = layout.resolution.height().get();
+    let width_u32 =
+        u32::try_from(width).map_err(|_| crate::Error::new("video width is too large"))?;
+    let height_u32 =
+        u32::try_from(height).map_err(|_| crate::Error::new("video height is too large"))?;
 
-fn parse_vmaf_output(vmaf_output_file_path: &Path) -> crate::Result<VmafScoreStats> {
-    let vmaf_content = std::fs::read_to_string(vmaf_output_file_path)
-        .map_err(|e| crate::Error::new(format!("failed to read VMAF output file: {e}")))?;
-    let json = nojson::RawJson::parse(&vmaf_content)?;
-    let vmaf_data = json.value();
-    let pooled_metrics = vmaf_data.to_member("pooled_metrics")?.required()?;
-    let vmaf_metrics = pooled_metrics.to_member("vmaf")?.required()?;
+    let mut context = Context::new(ContextConfig::default())
+        .map_err(|e| crate::Error::new(format!("failed to create VMAF context: {e}")))?;
+    let model = Model::load_builtin(BuiltinModel::V061)
+        .map_err(|e| crate::Error::new(format!("failed to load VMAF model: {e}")))?;
+    context
+        .use_model(&model)
+        .map_err(|e| crate::Error::new(format!("failed to set VMAF model: {e}")))?;
+
+    let mut reference_reader = YuvReader::new(reference_yuv_file_path, width, height)?;
+    let mut distorted_reader = YuvReader::new(distorted_yuv_file_path, width, height)?;
+
+    let mut frame_count: u32 = 0;
+    loop {
+        let reference_frame = reference_reader.read_frame()?;
+        let distorted_frame = distorted_reader.read_frame()?;
+        match (reference_frame, distorted_frame) {
+            (Some(reference), Some(distorted)) => {
+                let reference_picture = Picture::from_i420(
+                    reference.y(),
+                    reference.u(),
+                    reference.v(),
+                    width_u32,
+                    height_u32,
+                )
+                .map_err(|e| {
+                    crate::Error::new(format!("failed to build reference picture: {e}"))
+                })?;
+                let distorted_picture = Picture::from_i420(
+                    distorted.y(),
+                    distorted.u(),
+                    distorted.v(),
+                    width_u32,
+                    height_u32,
+                )
+                .map_err(|e| {
+                    crate::Error::new(format!("failed to build distorted picture: {e}"))
+                })?;
+                context
+                    .read_pictures(
+                        Some(reference_picture),
+                        Some(distorted_picture),
+                        frame_count,
+                    )
+                    .map_err(|e| crate::Error::new(format!("failed to read pictures: {e}")))?;
+                frame_count += 1;
+            }
+            (None, None) => break,
+            _ => {
+                return Err(crate::Error::new(
+                    "reference and distorted YUV files have different frame counts",
+                ));
+            }
+        }
+    }
+    if frame_count == 0 {
+        return Err(crate::Error::new("no frames to evaluate for VMAF"));
+    }
+
+    // 全フレーム登録後に両方 None を渡して評価を確定させる (flush)。flush 時は index は参照されない
+    context
+        .read_pictures(None, None, 0)
+        .map_err(|e| crate::Error::new(format!("failed to flush VMAF pictures: {e}")))?;
+
+    let last_index = frame_count - 1;
+    let score_pooled = |method| {
+        context
+            .score_pooled(&model, method, 0, last_index)
+            .map_err(|e| crate::Error::new(format!("failed to compute pooled VMAF score: {e}")))
+    };
     Ok(VmafScoreStats {
-        min: vmaf_metrics.to_member("min")?.required()?.try_into()?,
-        max: vmaf_metrics.to_member("max")?.required()?.try_into()?,
-        mean: vmaf_metrics.to_member("mean")?.required()?.try_into()?,
-        harmonic_mean: vmaf_metrics
-            .to_member("harmonic_mean")?
-            .required()?
-            .try_into()?,
+        min: score_pooled(PoolingMethod::Min)?,
+        max: score_pooled(PoolingMethod::Max)?,
+        mean: score_pooled(PoolingMethod::Mean)?,
+        harmonic_mean: score_pooled(PoolingMethod::HarmonicMean)?,
     })
 }
 
@@ -766,7 +751,6 @@ struct Output {
     layout_file_path: Option<PathBuf>,
     reference_yuv_file_path: PathBuf,
     distorted_yuv_file_path: PathBuf,
-    vmaf_output_file_path: PathBuf,
     encode_engine: String,
     width: usize,
     height: usize,
@@ -784,7 +768,6 @@ impl nojson::DisplayJson for Output {
             }
             f.member("reference_yuv_file_path", &self.reference_yuv_file_path)?;
             f.member("distorted_yuv_file_path", &self.distorted_yuv_file_path)?;
-            f.member("vmaf_output_file_path", &self.vmaf_output_file_path)?;
             f.member("encode_engine", &self.encode_engine)?;
             f.member("width", self.width)?;
             f.member("height", self.height)?;
