@@ -80,8 +80,6 @@ impl FdkAacEncoder {
             channels: Channels::STEREO,
             sample_rate: SampleRate::HZ_48000,
 
-            // 全出力フレームに sample entry を載せる（Arc 共有で clone は安価）。
-            // writer の取りこぼしによる finalize 失敗を防ぐため最初の 1 フレームに限定しない。
             sample_entry: Some(self.sample_entry.clone()),
 
             // エンコード結果を反映する

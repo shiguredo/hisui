@@ -57,9 +57,6 @@ impl OpusEncoder {
             // 入力の値をそのまま引きつぐ
             timestamp: frame.timestamp,
 
-            // 全出力フレームに sample entry を載せる。Arc 共有なので clone は安価。
-            // 「最初の 1 フレームだけ載せる」方式だと、writer が最初の entry 付き
-            // フレームを取りこぼした際に entry が一度も届かず finalize に失敗するため。
             sample_entry: Some(self.sample_entry.clone()),
 
             // エンコード結果を反映する
