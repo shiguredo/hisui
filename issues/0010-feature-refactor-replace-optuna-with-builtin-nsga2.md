@@ -15,7 +15,7 @@
 - `optuna create-study` / `ask` / `tell` / `best-trials` という CLI 実行 → 標準出力の JSON パースという間接的な処理を、ライブラリ内呼び出しに置き換えられる
 - 外部プロセス起動・SQLite ファイル経由のやり取りを排除でき、挙動が hisui 内で完結する
 
-これは [[0009-feature-refactor-replace-vmaf-with-vmaf-rs]] と同じ「`hisui tune` / `hisui vmaf` が依存する外部 CLI バイナリ依存を排除する」という方向性の取り組みである。
+これは [[0009-feature-change-replace-vmaf-with-vmaf-rs]] と同じ「`hisui tune` / `hisui vmaf` が依存する外部 CLI バイナリ依存を排除する」という方向性の取り組みである。
 
 ## 優先度根拠
 
