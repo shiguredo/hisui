@@ -216,11 +216,6 @@
   - publish していたトラックが EOS 未送信のまま終了した場合に、購読側へ EOS を伝えて停止できるようにする
   - inspect は processor が異常終了した場合に非ゼロ終了コードで終了するようにする
   - @sile
-- [FIX] 短時間録画で StopRecord 後の出力 MP4 の映像トラックが空になることがある問題を修正する
-  - 原因は、音声エンコーダー (Opus / FDK-AAC / Audio Toolbox) が sample_entry を最初の出力フレームにしか載せておらず、録画 writer が起動レース等でその 1 フレームを取りこぼすと sample_entry が一度も届かず finalize に失敗していたこと
-  - 音声エンコーダーが全出力フレームに sample_entry を載せるようにして、いつ subscribe しても次フレームで必ず sample_entry が届くようにする
-  - 音声・映像で sample_entry を共有する共通型を導入し、フレームごとのコピーを抑える
-  - @sile
 
 ### misc
 

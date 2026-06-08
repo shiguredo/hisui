@@ -75,10 +75,10 @@ pub struct HybridMp4Writer {
     fragment_start_timestamp: Option<Duration>,
     fragment_end_timestamp: Option<Duration>,
     fragment_accumulated_duration: Duration,
-    // エンコーダーは sample_entry を初回のみ付与することがあるため保持する。
-    // 音声は全フレーム付与（issue 0017）に伴い、received カウンタの変化検知（changed_since）の
-    // ために共有型で保持する。映像は従来どおり生の SampleEntry のまま（型統一は別 issue）。
+    // フラグメント境界を越えて直前の sample_entry を保持する（先頭サンプルの欠落補完用）。
+    // 音声は received カウンタの変化検知（changed_since）のために共有型で保持する。
     last_audio_sample_entry: Option<SharedSampleEntry>,
+    // 映像は従来どおり生の SampleEntry のまま（型統一は issue 0027）。
     last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
     has_flushed_fragment: bool,
 

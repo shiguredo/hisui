@@ -69,14 +69,14 @@ mod tests {
     }
 
     #[test]
-    fn 初回は変化ありと判定する() {
+    fn changed_since_returns_true_for_none_prev() {
         let entry = SharedSampleEntry::new(make_sample_entry(&[0x01]));
         // prev が None のときは、まだ何も確定していないので true を返す。
         assert!(entry.changed_since(None));
     }
 
     #[test]
-    fn 同一_arc_は変化なしと判定する() {
+    fn changed_since_returns_false_for_same_arc() {
         let entry = SharedSampleEntry::new(make_sample_entry(&[0x01]));
         // clone は Arc を共有するので ptr_eq で短絡して false になる。
         let cloned = entry.clone();
@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn 別_arc_でも実体が同値なら変化なしと判定する() {
+    fn changed_since_returns_false_for_equal_value_in_different_arc() {
         let a = SharedSampleEntry::new(make_sample_entry(&[0x01]));
         // 同じ内容を別々に new するので Arc は別だが実体は等しい。
         let b = SharedSampleEntry::new(make_sample_entry(&[0x01]));
@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn 別_arc_で実体が異なれば変化ありと判定する() {
+    fn changed_since_returns_true_for_different_value() {
         let a = SharedSampleEntry::new(make_sample_entry(&[0x01]));
         // payload が異なるので実体比較で相違が出る。
         let b = SharedSampleEntry::new(make_sample_entry(&[0x02]));

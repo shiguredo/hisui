@@ -24,7 +24,7 @@ impl OpusEncoder {
         };
         let inner = shiguredo_opus::Encoder::new(config)?;
 
-        // 全出力フレームに載せるサンプルエントリーを作っておく
+        // 出力フレームに載せるサンプルエントリーを作っておく
         let pre_skip = inner.get_lookahead()?;
         let sample_entry = sample_entry(pre_skip);
 

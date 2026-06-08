@@ -27,7 +27,7 @@ fn make_silent_input_frame() -> AudioFrame {
 }
 
 #[test]
-fn opus_エンコーダーは全出力フレームに_sample_entry_を載せる() -> hisui::Result<()> {
+fn opus_encoder_sets_sample_entry_on_every_output_frame() -> hisui::Result<()> {
     let bitrate = NonZeroUsize::new(hisui::audio::DEFAULT_BITRATE).expect("bitrate is non-zero");
     let mut encoder = OpusEncoder::new(bitrate)?;
 
