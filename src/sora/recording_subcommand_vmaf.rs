@@ -727,7 +727,7 @@ fn run_vmaf_evaluation(
         return Err(crate::Error::new("no frames to evaluate for VMAF"));
     }
 
-    // 全フレーム登録後に両方 None を渡して評価を確定させる (flush)
+    // 全フレーム登録後に両方 None を渡して評価を確定させる (flush)。flush 時は index は参照されない
     context
         .read_pictures(None, None, 0)
         .map_err(|e| crate::Error::new(format!("failed to flush VMAF pictures: {e}")))?;

@@ -88,8 +88,8 @@ impl YuvFrame {
 
 impl YuvReader {
     pub fn new<P: AsRef<Path>>(path: P, width: usize, height: usize) -> Result<Self> {
-        // I420 の各プレーンサイズ。輝度は width * height、色差は水平・垂直ともに半分
-        // （奇数解像度に備えて切り上げる）
+        // I420 の各プレーンサイズ。輝度は width * height、色差は水平・垂直ともに半分。
+        // 本パイプラインでは解像度は常に偶数だが、念のため切り上げで計算する
         let y_size = width * height;
         let chroma_size = width.div_ceil(2) * height.div_ceil(2);
         let file = File::open(&path)
