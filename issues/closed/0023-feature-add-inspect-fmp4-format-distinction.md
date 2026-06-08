@@ -2,9 +2,9 @@
 
 - Priority: Low
 - Created: 2026-06-04
-- Completed:
+- Completed: 2026-06-05
 - Model: Opus 4.8
-- Branch:
+- Branch: feature/add-inspect-fmp4-format-distinction
 - Polished: 2026-06-04
 
 ## 目的
@@ -86,3 +86,15 @@ Sora 系（`recording_*`）の match では `Fmp4` は到達しない（`TryFrom
 - 上記テスト（Rust e2e の修正・追加、`detect_container_format` の単体テスト）が通り、Python e2e に回帰がないこと。
 - CHANGES.md に反映すること。
 - 安定版リリース前にマージすること（リリース後だと [CHANGE] になる）。
+
+## 解決方法
+
+設計方針どおり実装した。
+
+- `src/types.rs`: `ContainerFormat` に `Fmp4` を追加。`DisplayJson` に `Fmp4 => f.string("fmp4")` を追加。`from_path`（拡張子判定）は据え置き。`TryFrom<RawJsonValue>` は名前から「`webm` / `mp4` のみ受理」という意図が読み取れないため、専用メソッド `parse_sora_recording_format`（`"webm"` / `"mp4"` のみ受理し `Fmp4` を生成しない）に置き換えた。これにより Sora 録画メタデータ経路で `Fmp4` を生成しない契約をメソッド名とドキュメントコメントで明示した。
+- `src/subcommand_inspect.rs`: content 判定関数 `detect_container_format` を新設し、`run_internal` の `ContainerFormat::from_path` を置換。`Mp4` のとき `detect_mp4_file_kind` を見て `FragmentedMp4` なら `Fmp4` に補正する。判定エラーはそのまま伝播し `Mp4` へフォールバックしない。reader 選択 match は `Mp4 | Fmp4` で共通化。
+- `src/sora/recording_reader.rs`・`src/sora/recording_layout.rs`・`src/sora/recording_subcommand_compose.rs` の `ContainerFormat` match に `Fmp4` arm を追加。これらの Sora 録画メタデータ経路は `ContainerFormat::parse_sora_recording_format`（`"webm"`/`"mp4"` のみ受理）経由でしか `format` を構築せず `Fmp4` は生成されないため、`Mp4` と同じ扱いで握りつぶさず、到達した場合は実装バグとして明示的にエラー（`unexpected fMP4 container format in Sora recording metadata`）を返すようにした。
+- テスト: `tests/e2e.rs` の `inspect_fragmented_mp4_video_only` を `format == "fmp4"` に修正、`inspect_fragmented_mp4_audio_only` / `inspect_fragmented_mp4_audio_video` に `format == "fmp4"` の assert を追加。`detect_container_format` の単体テスト（通常 MP4 / fMP4 / WebM / 破損 MP4 のエラー伝播）を `src/subcommand_inspect.rs` に追加。
+- `CHANGES.md`: 既存の fMP4 対応 [ADD] エントリに sub-bullet を追記。
+
+全テスト（575 + e2e）と clippy がパスすることを確認した。

@@ -352,6 +352,13 @@ async fn setup_pipeline(
         let reader_processor_type = match source_info.format {
             ContainerFormat::Mp4 => "mp4_audio_reader",
             ContainerFormat::Webm => "webm_audio_reader",
+            // 録画メタデータの format フィールドのパース (parse_sora_recording_format) が
+            // webm/mp4 のみ受理するため Fmp4 はここに来ない想定。到達は入力起因ではなく実装バグ
+            ContainerFormat::Fmp4 => {
+                return Err(Error::new(
+                    "unexpected fMP4 container format in Sora recording metadata",
+                ));
+            }
         };
         let (reader_processor_id, reader_metadata) = next_processor(reader_processor_type);
         let reader_output_track_id = TrackId::new(reader_processor_id.get());
@@ -416,6 +423,13 @@ async fn setup_pipeline(
         let reader_processor_type = match source_info.format {
             ContainerFormat::Mp4 => "mp4_video_reader",
             ContainerFormat::Webm => "webm_video_reader",
+            // 録画メタデータの format フィールドのパース (parse_sora_recording_format) が
+            // webm/mp4 のみ受理するため Fmp4 はここに来ない想定。到達は入力起因ではなく実装バグ
+            ContainerFormat::Fmp4 => {
+                return Err(Error::new(
+                    "unexpected fMP4 container format in Sora recording metadata",
+                ));
+            }
         };
         let (reader_processor_id, reader_metadata) = next_processor(reader_processor_type);
         let reader_output_track_id = TrackId::new(reader_processor_id.get());

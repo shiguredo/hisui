@@ -100,7 +100,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ArchiveMetadata
         let connection_id = value.to_member("connection_id")?.required()?;
         let format = value
             .to_member("format")?
-            .map(ContainerFormat::try_from)?
+            .map(ContainerFormat::parse_sora_recording_format)?
             .unwrap_or(ContainerFormat::Webm); // MP4 録画に対応する前は format 項目自体がなかった
         let audio = value.to_member("audio")?.required()?;
         let video = value.to_member("video")?.required()?;
