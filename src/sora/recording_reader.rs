@@ -110,7 +110,8 @@ impl AudioReader {
                 reader.current_input_file = Some(first_input_file.clone());
                 AudioReaderInner::Mp4(Box::new(reader))
             }
-            // Sora 録画では Fmp4 は生成されない想定。到達は実装バグ
+            // 録画メタデータの format フィールドのパース (parse_sora_recording_format) が
+            // webm/mp4 のみ受理するため Fmp4 はここに来ない想定。到達は入力起因ではなく実装バグ
             ContainerFormat::Fmp4 => {
                 return Err(crate::Error::new(
                     "unexpected fMP4 container format in Sora recording metadata",
@@ -346,7 +347,8 @@ impl VideoReader {
                 reader.current_input_file = Some(first_input_file.clone());
                 VideoReaderInner::Mp4(Box::new(reader))
             }
-            // Sora 録画では Fmp4 は生成されない想定。到達は実装バグ
+            // 録画メタデータの format フィールドのパース (parse_sora_recording_format) が
+            // webm/mp4 のみ受理するため Fmp4 はここに来ない想定。到達は入力起因ではなく実装バグ
             ContainerFormat::Fmp4 => {
                 return Err(crate::Error::new(
                     "unexpected fMP4 container format in Sora recording metadata",

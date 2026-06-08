@@ -516,7 +516,8 @@ pub fn resolve_source_and_media_path_pairs(
         match archive.format {
             ContainerFormat::Webm => media_path.set_extension("webm"),
             ContainerFormat::Mp4 => media_path.set_extension("mp4"),
-            // Sora 録画では Fmp4 は生成されない想定。到達は実装バグ
+            // 録画メタデータの format フィールドのパース (parse_sora_recording_format) が
+            // webm/mp4 のみ受理するため Fmp4 はここに来ない想定。到達は入力起因ではなく実装バグ
             ContainerFormat::Fmp4 => {
                 return Err(crate::Error::new(
                     "unexpected fMP4 container format in Sora recording metadata",
