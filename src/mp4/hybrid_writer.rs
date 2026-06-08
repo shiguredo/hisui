@@ -1210,6 +1210,128 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_writer_received_audio_sample_entry_counts_only_changes() -> crate::Result<()> {
+        // received カウンタは「sample_entry が前回から変化したとき」(changed_since) だけ計上される。
+        // 全フレーム付与 (issue 0017) でも、同一 entry が続く限りカウンタが増えないことを検証する
+        // (毎フレーム計上すると指標が音声フレーム総数とほぼ同じになり意味を失うため)。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        let shared = SharedSampleEntry::new(entry.clone());
+
+        // 指定した sample_entry を載せた音声フレームを入口で受信させるヘルパ。
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            let frame = AudioFrame {
+                data: vec![0x11],
+                format: AudioFormat::Aac,
+                channels: Channels::STEREO,
+                sample_rate: SampleRate::HZ_48000,
+                timestamp: Duration::ZERO,
+                sample_entry,
+            };
+            writer.handle_audio_message(
+                crate::Message::Media(crate::MediaFrame::Audio(Arc::new(frame))),
+                &mut None,
+            )
+        };
+
+        // 1 回目: 初回 (changed_since(None) = true) なので計上される。
+        send(&mut writer, Some(shared.clone()))?;
+        assert_eq!(
+            writer.core.stats.total_received_audio_sample_entry_count(),
+            1
+        );
+
+        // 同一 Arc を再送: ptr_eq 短絡で変化なしと判定され、計上されない。
+        send(&mut writer, Some(shared.clone()))?;
+        assert_eq!(
+            writer.core.stats.total_received_audio_sample_entry_count(),
+            1
+        );
+
+        // 別 Arc だが実体同値: PartialEq fallback で変化なしと判定され、計上されない。
+        send(&mut writer, Some(SharedSampleEntry::new(entry.clone())))?;
+        assert_eq!(
+            writer.core.stats.total_received_audio_sample_entry_count(),
+            1
+        );
+
+        // 別 Arc で実体が異なる: 変化ありと判定され計上される。
+        let other = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x11, 0x88],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        send(&mut writer, Some(SharedSampleEntry::new(other)))?;
+        assert_eq!(
+            writer.core.stats.total_received_audio_sample_entry_count(),
+            2
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_finalizes_readable_audio_with_per_frame_sample_entry() -> crate::Result<()> {
+        // issue 0017 の修正後の挙動: 音声は全フレームに sample_entry が載るため、フラグメント先頭
+        // サンプルにも必ず entry があり、finalize 後の標準 MP4 から音声トラックを読み戻せることを
+        // 検証する (取りこぼしによる finalize 失敗・映像トラック空の回帰防止)。
+        let temp_dir = tempfile::tempdir()?;
+        let output_path = temp_dir.path().join("test.mp4");
+        let mut writer = HybridMp4Writer::new(
+            &output_path,
+            Some(TrackId::new("audio")),
+            Some(TrackId::new("video")),
+            crate::stats::Stats::new(),
+        )?;
+
+        let audio_sample_entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        let video_sample_entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+
+        // 全フレームに sample_entry を載せる (修正後のエンコーダ挙動)。
+        let audio_frame_count = 3;
+        for _ in 0..audio_frame_count {
+            writer.append_audio_to_fragment(
+                &make_audio_frame(Some(audio_sample_entry.clone())),
+                DEFAULT_SAMPLE_DURATION,
+            );
+        }
+        writer.append_video_to_fragment(
+            &make_video_frame(Some(video_sample_entry)),
+            DEFAULT_SAMPLE_DURATION,
+        );
+
+        writer.finalize()?;
+        assert_eq!(writer.core.stats.total_finalize_success_count(), 1);
+        // 先頭サンプルにも entry があったので missing は出ない。
+        assert_eq!(
+            writer.core.stats.total_missing_audio_sample_entry_count(),
+            0
+        );
+
+        // BufWriter を flush するために writer を drop してからファイルを読み戻す。
+        drop(writer);
+
+        // finalize 済みの標準 MP4 として音声トラックを読み戻し、書き込んだサンプル数と一致することを確認する。
+        let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
+        let read_samples = reader.collect::<crate::Result<Vec<_>>>()?;
+        assert_eq!(read_samples.len(), audio_frame_count);
+        Ok(())
+    }
+
+    #[test]
     fn hybrid_writer_counts_missing_sample_entry_for_fragment_first_sample() -> crate::Result<()> {
         // last_*_sample_entry が None の状態で sample_entry を持たない音声サンプルを
         // フラグメント先頭に追加すると、「必要な時に sample_entry が無かった」として計上される。
