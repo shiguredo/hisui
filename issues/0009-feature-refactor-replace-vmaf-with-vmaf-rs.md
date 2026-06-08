@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-02
+- Polished: 2026-06-08
 - Model: Opus 4.8
 - Branch: feature/refactor-replace-vmaf-with-vmaf-rs
 
@@ -31,6 +32,30 @@ VMAF 評価は `hisui vmaf` サブコマンド (開発・チューニング用�
 - `parse_vmaf_output()` (743 行付近): 出力 JSON の `pooled_metrics.vmaf` から `min` / `max` / `mean` / `harmonic_mean` を取り出して `VmafScoreStats` に詰める
 
 つまり現状は「8-bit I420、固定パラメータでの 1 リファレンス vs 1 ディストーション評価」しか行っておらず、vmaf-rs が提供する範囲 (8-bit I420 のフルリファレンス VMAF) と用途が一致する。
+
+## 調査結果 (2026-06-08)
+
+vmaf-rs (crates.io 上のクレート名は `shiguredo_vmaf`) を調査した結果、hisui の用途を満たすことを確認した。
+
+1. **8-bit I420 フルリファレンス API**: あり
+   - `Picture::from_i420(y: &[u8], u: &[u8], v: &[u8], width: u32, height: u32) -> Result<Self, Error>`
+   - `Context::new()` でコンテキスト生成、`Model::load_builtin()` でビルトインモデル 5 種 (V061 既定 / BV063 / V061Neg / V4k061 / V4k061Neg) を読み込み、参照・劣化フレームのペアをインデックス付きで登録して評価する設計
+2. **プール済みメトリクス**: 4 種すべて取得可能
+   - `Context::score_pooled(&self, model: &Model, method: PoolingMethod, index_low: u32, index_high: u32) -> Result<f64, Error>`
+   - `PoolingMethod` は Min / Max / Mean / HarmonicMean をサポートし、hisui が利用する 4 メトリクスと完全に一致する
+   - フレーム単位スコアも `score_at_index()` で取得可能
+3. **libvmaf 本体の入手方法**:
+   - 既定: GitHub Releases から prebuilt バイナリを自動ダウンロード (通常の `cargo build` のみで可。ビルド時にネットワークアクセスが発生する点に注意)
+   - `source-build` フィーチャでソースビルドも可能 (要 Git、C/C++ コンパイラ、Meson + Ninja、NASM (x86_64 のみ)、xxd)
+4. **対応プラットフォーム**: Ubuntu 24.04 / 22.04 (x86_64・arm64)、macOS 15 / 26 (arm64) でテスト済み
+5. **公式 libvmaf とのスコア一致検証**: 公式 CLI とのスコア値直接比較テストは無い。`tests/test_lib.rs` は性質ベースの検証のみ:
+   - 同一フレーム比較スコア ≥ 95.0 (libvmaf v3.0.0 では 100 にならない場合がある旨の注記あり)
+   - ノイズ加算 (+32) フレームで < 90.0
+   - Mean プーリングはフレーム単位スコアの平均との差 ±0.1、HarmonicMean は ±1.0
+   - その他に fuzz / pbt / コーデックベンチあり
+   - ただし vmaf-rs は libvmaf 本体への FFI バインディングであり、評価エンジン自体は現状の `vmaf` CLI と同一。形式的には「同一性が担保されていない」に該当するため、置き換え時に一度だけ旧 CLI と新実装で 4 メトリクスを突き合わせて確認する
+6. **バージョン**: crates.io に公開済みだが、最新かつ唯一のバージョンは `2026.1.0-canary.0` (Apache-2.0、MSRV 1.88)
+   - 「マイナーバージョンまで指定」の規約に対し canary 版しか存在しないため、canary を許容するか安定版リリースを待つかの判断が必要
 
 ## 設計方針
 
