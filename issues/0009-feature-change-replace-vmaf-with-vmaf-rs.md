@@ -146,6 +146,24 @@ vmaf-rs 側に公式 CLI とのスコア値直接比較テストが無いため 
 - テスト戦略に沿ったテストが追加されている
 - CHANGES.md に `[CHANGE]` エントリが追加されている
 
+## 実装中に発見・修正した既存バグ
+
+実装後に `hisui vmaf` / `hisui tune` を実機で動作確認した際、compose 段で完全にデッドロックする既存バグを発見し、本ブランチで併せて修正した。
+
+- 症状: `# Compose for VMAF` 出力直後に全 tokio ワーカーが park し、CPU 0% でハングする。develop ブランチ (本 issue の変更前) でも再現したため、vmaf-rs 置き換えとは無関係な既存バグと確認した
+- 原因: `setup_vmaf_pipeline` の reader→decoder のトラック配線ミス。`VideoReader::run` は自身の processor_id 名のトラックに publish するが、decoder には独立採番した別のトラック ID を subscribe させていたため、両者が繋がらずデータが流れていなかった (compose 側は reader の processor_id からトラック ID を導出しており正しい)
+- 修正: vmaf 側も `TrackId::new(reader_processor_id.get())` で reader の processor_id からトラック ID を導出するよう変更
+- 未リリース部分のバグ修正のため CHANGES.md への `[FIX]` 追記は不要と判断した
+
+## 動作確認結果
+
+`hisui vmaf` 単体および `hisui tune` 経由 (vmaf-rs 実装) で実機動作を確認した。
+
+- `hisui vmaf` (vp9-webm, 30 フレーム): 正常完了し VMAF スコアを出力 (mean 94.17 等)
+- `hisui tune` (2 トライアル, 20 フレーム): vmaf サブプロセスが正常完了し、パレートフロントまで出力
+- これにより compose → YUV → vmaf-rs 評価の経路が end-to-end で動作することを確認した
+- ただし旧 `vmaf` CLI とのスコア同一性比較 (結果の同一性確認の手順) はまだ実施していない
+
 ## 関連
 
 - [[0010-feature-refactor-replace-optuna-with-builtin-nsga2]]: `hisui tune` の外部 `optuna` CLI 依存を排除する取り組み。本 issue と合わせて完了すると tune / vmaf サブコマンドの外部コマンド依存が無くなる
