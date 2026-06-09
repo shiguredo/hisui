@@ -30,12 +30,10 @@ pub struct Individual {
 
 impl Individual {
     /// 評価値を最小化方向に揃えた個体を作る
-    ///
-    /// `vmaf_mean` は最大化目的なので符号を反転して、両目的を最小化として扱えるようにする。
     pub fn new(params: BTreeMap<JsonObjectMemberPath, JsonValue>, values: &TrialValues) -> Self {
         Self {
             params,
-            objectives: [values.elapsed_seconds, -values.vmaf_mean],
+            objectives: values.to_objectives(),
         }
     }
 }

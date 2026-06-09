@@ -41,6 +41,16 @@ pub struct TrialValues {
     pub vmaf_mean: f64,
 }
 
+impl TrialValues {
+    /// NSGA-II 用に最小化方向へ揃えた 2 目的の値を返す
+    ///
+    /// 合成時間は最小化目的なのでそのまま、VMAF 平均は最大化目的なので符号を反転して、
+    /// 両目的を最小化として扱えるようにする。この方向の規約はここに一元化する。
+    fn to_objectives(&self) -> [f64; 2] {
+        [self.elapsed_seconds, -self.vmaf_mean]
+    }
+}
+
 /// 探索空間
 #[derive(Debug)]
 pub struct SearchSpace {
@@ -261,10 +271,7 @@ impl Tuner {
         }
 
         // 最小化方向に揃えた目的値で非劣ソートし、rank 0 (フロント) を取り出す
-        let points: Vec<[f64; 2]> = completed
-            .iter()
-            .map(|(_, v)| [v.elapsed_seconds, -v.vmaf_mean])
-            .collect();
+        let points: Vec<[f64; 2]> = completed.iter().map(|(_, v)| v.to_objectives()).collect();
         let ranks = nsga2::non_dominated_sort(&points);
 
         completed
