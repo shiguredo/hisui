@@ -5,8 +5,9 @@ pub mod h265;
 
 use std::{num::NonZeroUsize, str::FromStr, sync::Arc, time::Duration};
 
-use shiguredo_mp4::boxes::{SampleEntry, VisualSampleEntryFields};
+use shiguredo_mp4::boxes::VisualSampleEntryFields;
 
+use crate::sample_entry::SharedSampleEntry;
 use crate::types::{CodecName, EvenUsize};
 
 pub type I420Planes<'a> = (&'a [u8], &'a [u8], &'a [u8]);
@@ -47,7 +48,7 @@ pub struct VideoFrame {
     pub keyframe: bool,
     pub size: Option<VideoFrameSize>,
     pub timestamp: Duration,
-    pub sample_entry: Option<SampleEntry>,
+    pub sample_entry: Option<SharedSampleEntry>,
 }
 
 #[derive(Debug, Clone)]

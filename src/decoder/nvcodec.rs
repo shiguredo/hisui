@@ -97,7 +97,10 @@ impl NvcodecDecoder {
         if self.parameter_sets.is_none()
             && let Some(sample_entry) = &frame.sample_entry
         {
-            self.parameter_sets = Some(extract_parameter_sets_annexb(sample_entry, frame.format)?);
+            self.parameter_sets = Some(extract_parameter_sets_annexb(
+                sample_entry.get(),
+                frame.format,
+            )?);
         }
 
         let data = if matches!(

@@ -148,7 +148,7 @@ impl Mp4VideoReader {
         });
 
         Ok(Some(VideoFrame {
-            sample_entry,
+            sample_entry: sample_entry.map(SharedSampleEntry::new),
             data,
             format: self.format,
             keyframe: sample.keyframe,

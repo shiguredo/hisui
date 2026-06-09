@@ -4,6 +4,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     types::CodecName,
     video::av1,
     video::h264,
@@ -257,7 +258,7 @@ impl NvcodecEncoder {
                 keyframe,
                 size: input_frame.size,
                 timestamp: input_frame.timestamp,
-                sample_entry: self.sample_entry.take(),
+                sample_entry: self.sample_entry.take().map(SharedSampleEntry::new),
             });
         }
         Ok(())

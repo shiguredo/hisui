@@ -14,8 +14,9 @@ pub mod video_toolbox;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
-use shiguredo_mp4::boxes::SampleEntry;
 use shiguredo_openh264::Openh264Library;
+
+use crate::sample_entry::SharedSampleEntry;
 
 #[cfg(target_os = "macos")]
 use self::audio_toolbox::AudioToolboxEncoder;
@@ -433,7 +434,7 @@ pub struct VideoEncoder {
     encoded: VecDeque<VideoFrame>,
     eos: bool,
     keyframe_request_pending: bool,
-    last_video_sample_entry: Option<SampleEntry>,
+    last_video_sample_entry: Option<SharedSampleEntry>,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
     inner: Option<VideoEncoderInner>,
     options: VideoEncoderOptions,

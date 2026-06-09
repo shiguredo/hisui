@@ -4,6 +4,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     types::EvenUsize,
     video::av1,
     video::{RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
@@ -95,7 +96,7 @@ impl SvtAv1Encoder {
                     height: self.height.get(),
                 }),
                 timestamp: input_frame.as_video_frame().timestamp,
-                sample_entry: self.sample_entry.take(),
+                sample_entry: self.sample_entry.take().map(SharedSampleEntry::new),
             });
         }
         Ok(())

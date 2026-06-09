@@ -7,6 +7,7 @@ use shiguredo_mp4::{
 
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     types::CodecName,
     video::{self, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
@@ -124,7 +125,7 @@ impl LibvpxEncoder {
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
             self.output_queue.push_back(VideoFrame {
-                sample_entry: self.sample_entry.take(),
+                sample_entry: self.sample_entry.take().map(SharedSampleEntry::new),
                 data: frame.data().to_vec(),
                 format: self.format,
                 keyframe: frame.is_keyframe(),

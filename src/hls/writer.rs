@@ -321,7 +321,7 @@ struct MpegTsState {
     video_cc: ContinuityCounter,
     audio_cc: ContinuityCounter,
     /// 最後に受信したビデオの sample_entry（SPS/PPS 注入用。型は issue 0027 で音声と統一予定）
-    last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    last_video_sample_entry: Option<SharedSampleEntry>,
     /// 最後に受信したオーディオの sample_entry（ADTS ヘッダ生成用）
     last_audio_sample_entry: Option<SharedSampleEntry>,
 }
@@ -338,7 +338,7 @@ struct Fmp4State {
     /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
     last_audio_timestamp: Option<Duration>,
     /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持。型は issue 0027 で音声と統一予定）
-    last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    last_video_sample_entry: Option<SharedSampleEntry>,
     /// 最後に受信したオーディオの sample_entry（セグメント跨ぎで保持）
     last_audio_sample_entry: Option<SharedSampleEntry>,
 }
@@ -553,23 +553,21 @@ impl HlsWriter {
                 CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
             )
             && let Some(codec_str) =
-                crate::codec_string::video_codec_string_from_sample_entry(entry)
+                crate::codec_string::video_codec_string_from_sample_entry(entry.get())
         {
             self.resolve_video_codec(codec_str);
         }
 
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
-                // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
-                if frame.sample_entry.is_some() {
-                    state
-                        .last_video_sample_entry
-                        .clone_from(&frame.sample_entry);
+                // 入力経路によっては sample_entry が初回フレームにしか載らないため保持する。
+                if let Some(entry) = &frame.sample_entry {
+                    state.last_video_sample_entry = Some(entry.clone());
                 }
                 // length-prefixed NALU → Annex B 変換 + キーフレーム時の SPS/PPS 注入
                 let annexb_data = convert_length_prefixed_to_annexb(
                     &frame.data,
-                    &state.last_video_sample_entry,
+                    state.last_video_sample_entry.as_ref().map(|e| e.get()),
                     frame.keyframe,
                 )?;
                 let pts = duration_to_timestamp(frame.timestamp)?;
@@ -584,11 +582,9 @@ impl HlsWriter {
                 )?;
             }
             FormatState::Fmp4(state) => {
-                // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
-                if frame.sample_entry.is_some() {
-                    state
-                        .last_video_sample_entry
-                        .clone_from(&frame.sample_entry);
+                // 入力経路によっては sample_entry が初回フレームにしか載らないため保持する。
+                if let Some(entry) = &frame.sample_entry {
+                    state.last_video_sample_entry = Some(entry.clone());
                 }
                 // 前のビデオサンプルの duration を確定させる
                 if let Some(prev_ts) = state.last_video_timestamp {
@@ -606,8 +602,9 @@ impl HlsWriter {
                 // フレームの sample_entry が None なら保持済みの値を使う
                 let sample_entry = frame
                     .sample_entry
-                    .clone()
-                    .or_else(|| state.last_video_sample_entry.clone());
+                    .as_ref()
+                    .or(state.last_video_sample_entry.as_ref())
+                    .map(|e| e.get().clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Video,
                     sample_entry,
@@ -776,8 +773,11 @@ impl HlsWriter {
                 // ここで最後に観測した sample_entry から補完しておく。
                 fill_missing_sample_entries(
                     &mut state.current_samples,
-                    &state.last_video_sample_entry,
                     // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
+                    &state
+                        .last_video_sample_entry
+                        .as_ref()
+                        .map(|e| e.get().clone()),
                     &state
                         .last_audio_sample_entry
                         .as_ref()
@@ -1232,7 +1232,7 @@ fn duration_to_timestamp(d: Duration) -> crate::Result<Timestamp> {
 /// キーフレームの場合は sample_entry から SPS/PPS を抽出して先頭に注入する。
 fn convert_length_prefixed_to_annexb(
     data: &[u8],
-    sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
+    sample_entry: Option<&shiguredo_mp4::boxes::SampleEntry>,
     keyframe: bool,
 ) -> crate::Result<Vec<u8>> {
     let length_size = match sample_entry {

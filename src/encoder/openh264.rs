@@ -1,5 +1,6 @@
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     video::h264::{self, H264_NALU_TYPE_SEI, H264AnnexBNalUnits},
     video::{RawVideoFrame, VideoFormat, VideoFrame},
 };
@@ -89,7 +90,7 @@ impl Openh264Encoder {
             keyframe: is_keyframe,
             size: Some(frame.size()),
             timestamp: video_frame.timestamp,
-            sample_entry,
+            sample_entry: sample_entry.map(SharedSampleEntry::new),
         });
 
         Ok(())
