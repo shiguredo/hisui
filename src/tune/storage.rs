@@ -34,17 +34,7 @@ impl nojson::DisplayJson for TrialRecord {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
             f.member("trial_number", self.trial_number)?;
-            f.member(
-                "params",
-                nojson::json(|f| {
-                    f.object(|f| {
-                        for (path, value) in &self.params {
-                            f.member(path.to_string(), value)?;
-                        }
-                        Ok(())
-                    })
-                }),
-            )?;
+            f.member("params", &self.params)?;
             match &self.result {
                 TrialResult::Complete(values) => {
                     f.member("state", "complete")?;
