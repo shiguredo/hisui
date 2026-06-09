@@ -210,6 +210,23 @@ mod tests {
         assert_every_output_frame_has_sample_entry(Openh264Encoder::new(lib, &options())?)
     }
 
+    // 各出力フレームに載った sample_entry が、エンコーダが保持する最新値
+    // (last_sample_entry) と一致することを検証する。openh264 は SPS/PPS を含むフレームでだけ
+    // サンプルエントリーを作り直し、SPS/PPS を含まない P フレームには保持済みの最新値を載せる。
+    // is_some だけでは「何か載っている」ことしか確認できず、保持値の伝播を検証できないため、
+    // ここで実体の一致まで確認する。
+    fn assert_carries_latest_sample_entry(encoder: &Openh264Encoder, frame: &VideoFrame) {
+        assert!(
+            frame.sample_entry.is_some(),
+            "出力フレームに sample_entry が載っていない"
+        );
+        assert_eq!(
+            frame.sample_entry.as_ref().map(|e| e.get()),
+            encoder.last_sample_entry.as_ref().map(|e| e.get()),
+            "出力フレームの sample_entry がエンコーダ保持の最新値と一致しない"
+        );
+    }
+
     #[test]
     fn openh264_sets_sample_entry_after_keyframe_request() -> crate::Result<()> {
         // OPENH264_PATH が未設定の環境ではスキップする。
@@ -219,28 +236,21 @@ mod tests {
         };
         let mut encoder = Openh264Encoder::new(lib, &options())?;
 
-        // 数フレームエンコードして初期状態を確定させる。
+        // 数フレームエンコードして初期状態を確定させる。最初の出力フレームで sample_entry が確定する。
         for i in 0..3u64 {
             encoder.encode(raw_i420_frame(i * 33))?;
             while let Some(frame) = encoder.next_encoded_frame() {
-                assert!(
-                    frame.sample_entry.is_some(),
-                    "初期フレームに sample_entry が載っていない"
-                );
+                assert_carries_latest_sample_entry(&encoder, &frame);
             }
         }
 
-        // キーフレーム要求後のフレームにも sample_entry が載ることを確認する。
-        // openh264 はキーフレーム要求時に SPS/PPS を再送し last_sample_entry を更新するため、
-        // 更新されたサンプルエントリーが以降の全フレームに正しく伝播されることが重要。
+        // キーフレーム要求後は SPS/PPS を含むフレームで last_sample_entry が作り直され、
+        // 以降の全フレーム (SPS/PPS を含まない P フレームも含む) にその保持値が伝播することを確認する。
         encoder.request_keyframe();
         for i in 3..8u64 {
             encoder.encode(raw_i420_frame(i * 33))?;
             while let Some(frame) = encoder.next_encoded_frame() {
-                assert!(
-                    frame.sample_entry.is_some(),
-                    "keyframe 要求後のフレームに sample_entry が載っていない"
-                );
+                assert_carries_latest_sample_entry(&encoder, &frame);
             }
         }
 
