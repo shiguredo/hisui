@@ -944,10 +944,10 @@ impl HybridMp4Writer {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 self.core.stats.add_received_audio_data();
                 // 音声エンコーダ出力は全フレームに sample_entry が載る（issue 0017）。
-                // 入力経路によっては初回フレームのみのこともあるが、いずれにせよ届いた entry を
+                // 入力経路によっては初回フレームのみのこともあるが、いずれにせよ届いたサンプルエントリーを
                 // pending 化・キューイング・ドロップで落とさないよう入口で取り込んで保持する。
                 // received カウンタは毎フレーム計上すると意味を失うため、前回から変化したとき
-                // （changed_since）だけ計上し「entry の確定・変化回数」を表すようにする。
+                // （changed_since）だけ計上し「サンプルエントリーの確定・変化回数」を表すようにする。
                 if let Some(entry) = &sample.sample_entry {
                     if entry.changed_since(self.last_audio_sample_entry.as_ref()) {
                         self.core.stats.add_received_audio_sample_entry();
@@ -1220,7 +1220,7 @@ mod tests {
     #[test]
     fn hybrid_writer_received_audio_sample_entry_counts_only_changes() -> crate::Result<()> {
         // received カウンタは「sample_entry が前回から変化したとき」(changed_since) だけ計上される。
-        // 全フレーム付与 (issue 0017) でも、同一 entry が続く限りカウンタが増えないことを検証する
+        // 全フレーム付与 (issue 0017) でも、同一サンプルエントリーが続く限りカウンタが増えないことを検証する
         // (毎フレーム計上すると指標が音声フレーム総数とほぼ同じになり意味を失うため)。
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         let entry = crate::audio::aac::create_mp4a_sample_entry(
@@ -1286,7 +1286,7 @@ mod tests {
     #[test]
     fn hybrid_writer_received_video_sample_entry_counts_only_changes() -> crate::Result<()> {
         // received カウンタは「sample_entry が前回から変化したとき」(changed_since) だけ計上される。
-        // 全フレーム付与 (issue 0027) でも、同一 entry が続く限りカウンタが増えないことを検証する
+        // 全フレーム付与 (issue 0027) でも、同一サンプルエントリーが続く限りカウンタが増えないことを検証する
         // (毎フレーム計上すると指標が映像フレーム総数とほぼ同じになり意味を失うため)。
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         let entry = crate::video::av1::av1_sample_entry(
@@ -1363,7 +1363,7 @@ mod tests {
     #[test]
     fn hybrid_writer_finalizes_readable_audio_with_per_frame_sample_entry() -> crate::Result<()> {
         // issue 0017 の修正後の挙動: 音声は全フレームに sample_entry が載るため、フラグメント先頭
-        // サンプルにも必ず entry があり、finalize 後の標準 MP4 から音声トラックを読み戻せることを
+        // サンプルにも必ずサンプルエントリーがあり、finalize 後の標準 MP4 から音声トラックを読み戻せることを
         // 検証する (取りこぼしによる finalize 失敗・映像トラック空の回帰防止)。
         let temp_dir = tempfile::tempdir()?;
         let output_path = temp_dir.path().join("test.mp4");
@@ -1395,7 +1395,7 @@ mod tests {
 
         writer.finalize()?;
         assert_eq!(writer.core.stats.total_finalize_success_count(), 1);
-        // 先頭サンプルにも entry があったので missing は出ない。
+        // 先頭サンプルにもサンプルエントリーがあったので missing は出ない。
         assert_eq!(
             writer.core.stats.total_missing_audio_sample_entry_count(),
             0

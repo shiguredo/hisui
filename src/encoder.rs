@@ -724,7 +724,7 @@ impl VideoEncoder {
             self.total_output_video_keyframe_count_metric.inc();
         }
         // 映像エンコーダは全出力フレームに sample_entry を載せる（issue 0027）ため、
-        // encoder 側での keyframe 補完は不要になった。
+        // エンコーダ側でのキーフレーム補完は不要になった。
         self.encoded.push_back(encoded);
     }
 

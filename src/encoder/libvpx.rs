@@ -27,7 +27,7 @@ const BT_709: u8 = 1; // 典型的な値。必要に応じて調整する
 pub struct LibvpxEncoder {
     inner: shiguredo_libvpx::Encoder,
     format: VideoFormat,
-    // 全出力フレームに載せる sample entry。Arc 共有なので毎フレームの clone は安価。
+    // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
     sample_entry: SharedSampleEntry,
     keyframe_request_pending: bool,
     input_queue: VecDeque<RawVideoFrame>,

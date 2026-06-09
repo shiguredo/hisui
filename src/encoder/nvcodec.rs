@@ -15,7 +15,7 @@ pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    // 全出力フレームに載せる sample entry。Arc 共有なので毎フレームの clone は安価。
+    // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
     sample_entry: SharedSampleEntry,
     encoded_format: VideoFormat,
     av1_sequence_header: Vec<u8>,

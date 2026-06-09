@@ -10,8 +10,8 @@ pub struct Openh264Encoder {
     inner: shiguredo_openh264::Encoder,
     encoded: Option<VideoFrame>,
     force_idr_pending: bool,
-    // 最後に確定した sample entry。SPS/PPS を含むフレームで更新し、全出力フレームに載せる。
-    // openh264 は keyframe 要求等で SPS/PPS が mid-stream で変わりうるため、最新値に追従する。
+    // 最後に確定したサンプルエントリー。SPS/PPS を含むフレームで更新し、全出力フレームに載せる。
+    // openh264 はキーフレーム要求等で SPS/PPS がストリーム途中で変わりうるため、最新値に追従する。
     last_sample_entry: Option<SharedSampleEntry>,
 }
 
@@ -52,11 +52,11 @@ impl Openh264Encoder {
             return Ok(());
         };
 
-        // OpenH264 は keyframe 要求時などに SPS/PPS が更新され得るため、
-        // SPS/PPS を受け取ったフレームでは sample entry を作り直して保持を更新する。
-        // 以後は全出力フレームに保持済みの最新 entry を載せる（設計方針 2 / issue 0027）。
-        // これにより、下流コンポーネントが参照する codec 設定を最新化し、
-        // 古い parameter set 参照によるデコード失敗を避ける。
+        // OpenH264 はキーフレーム要求時などに SPS/PPS が更新され得るため、
+        // SPS/PPS を受け取ったフレームではサンプルエントリーを作り直して保持を更新する。
+        // 以後は全出力フレームに保持済みの最新サンプルエントリーを載せる（設計方針 2 / issue 0027）。
+        // これにより、下流コンポーネントが参照するコーデック設定を最新化し、
+        // 古いパラメータセット参照によるデコード失敗を避ける。
         if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let size = frame.size();
             let sample_entry = h264::h264_sample_entry_from_annexb(
@@ -230,9 +230,9 @@ mod tests {
             }
         }
 
-        // keyframe 要求後のフレームにも sample_entry が載ることを確認する。
-        // openh264 は keyframe 要求時に SPS/PPS を再送し last_sample_entry を更新するため、
-        // 更新された entry が以降の全フレームに正しく伝播されることが重要。
+        // キーフレーム要求後のフレームにも sample_entry が載ることを確認する。
+        // openh264 はキーフレーム要求時に SPS/PPS を再送し last_sample_entry を更新するため、
+        // 更新されたサンプルエントリーが以降の全フレームに正しく伝播されることが重要。
         encoder.request_keyframe();
         for i in 3..8u64 {
             encoder.encode(raw_i420_frame(i * 33))?;

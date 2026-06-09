@@ -19,7 +19,7 @@ pub struct VideoToolboxEncoder {
     inner: shiguredo_video_toolbox::Encoder,
     input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    // 最初の出力フレームの SPS/PPS から確定する sample entry。確定後は全フレームに載せる。
+    // 最初の出力フレームの SPS/PPS から確定するサンプルエントリー。確定後は全フレームに載せる。
     sample_entry: Option<SharedSampleEntry>,
     width: EvenUsize,
     height: EvenUsize,
@@ -142,8 +142,8 @@ impl VideoToolboxEncoder {
                 .input_queue
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
-            // 最初の出力フレームの SPS/PPS から sample entry を確定して保持し、
-            // 以後は全出力フレームに保持済みの entry を載せる。
+            // 最初の出力フレームの SPS/PPS からサンプルエントリーを確定して保持し、
+            // 以後は全出力フレームに保持済みのサンプルエントリーを載せる。
             if self.sample_entry.is_none() {
                 let sample_entry = if self.format == VideoFormat::H264 {
                     h264_sample_entry(
