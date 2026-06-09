@@ -15,7 +15,10 @@ use shiguredo_mp4::{
     descriptors::{DecoderConfigDescriptor, DecoderSpecificInfo, EsDescriptor},
 };
 
-use crate::audio::{self, AudioFormat, AudioFrame, Channels, SampleRate};
+use crate::{
+    audio::{self, AudioFormat, AudioFrame, Channels, SampleRate},
+    sample_entry::SharedSampleEntry,
+};
 
 enum EncoderCommand {
     Encode(Vec<i16>),
@@ -30,7 +33,7 @@ pub struct AudioToolboxEncoder {
     cmd_tx: std::sync::mpsc::Sender<EncoderCommand>,
     result_rx: std::sync::mpsc::Receiver<EncoderResponse>,
     buffered_frames: VecDeque<shiguredo_audio_toolbox::EncodedFrame>,
-    sample_entry: Option<SampleEntry>,
+    sample_entry: SharedSampleEntry,
     total_encoded_samples: u64,
 }
 
@@ -102,7 +105,7 @@ impl AudioToolboxEncoder {
             .map_err(|_| crate::Error::new("audio toolbox encoder thread has terminated"))?
             .map_err(crate::Error::new)?;
 
-        let sample_entry = Some(sample_entry(bitrate));
+        let sample_entry = SharedSampleEntry::new(sample_entry(bitrate));
         Ok(Self {
             cmd_tx,
             result_rx,
@@ -171,8 +174,7 @@ impl AudioToolboxEncoder {
             channels: Channels::STEREO,
             sample_rate: SampleRate::HZ_48000,
 
-            // サンプルエントリーは途中で変わらないので、最初に一回だけ載せる
-            sample_entry: self.sample_entry.take(),
+            sample_entry: Some(self.sample_entry.clone()),
 
             // エンコード結果を反映する
             data: encoded.data,

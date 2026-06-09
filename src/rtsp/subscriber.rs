@@ -15,6 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::{
     Error, ProcessorHandle, TrackId, TrackPublisher,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
+    sample_entry::SharedSampleEntry,
     timestamp::mapper::TimestampMapper,
     video::{VideoFormat, VideoFrame},
 };
@@ -677,7 +678,7 @@ impl RtspSessionRunner {
                     None
                 } else {
                     audio_receiver.sent_sample_entry = true;
-                    Some(audio_receiver.sample_entry.clone())
+                    Some(SharedSampleEntry::new(audio_receiver.sample_entry.clone()))
                 };
                 let audio_frame = AudioFrame {
                     data: access_unit.data,

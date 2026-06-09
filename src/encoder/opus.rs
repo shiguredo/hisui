@@ -2,12 +2,15 @@ use std::num::NonZeroUsize;
 
 use shiguredo_mp4::boxes::{DopsBox, OpusBox, SampleEntry};
 
-use crate::audio::{self, AudioFormat, AudioFrame, Channels, SampleRate};
+use crate::{
+    audio::{self, AudioFormat, AudioFrame, Channels, SampleRate},
+    sample_entry::SharedSampleEntry,
+};
 
 #[derive(Debug)]
 pub struct OpusEncoder {
     inner: shiguredo_opus::Encoder,
-    sample_entry: Option<SampleEntry>,
+    sample_entry: SharedSampleEntry,
 }
 
 impl OpusEncoder {
@@ -21,13 +24,13 @@ impl OpusEncoder {
         };
         let inner = shiguredo_opus::Encoder::new(config)?;
 
-        // 最初の AudioFrame に載せるサンプルエントリーを作っておく
+        // 出力フレームに載せるサンプルエントリーを作っておく
         let pre_skip = inner.get_lookahead()?;
         let sample_entry = sample_entry(pre_skip);
 
         Ok(Self {
             inner,
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
         })
     }
 
@@ -54,8 +57,7 @@ impl OpusEncoder {
             // 入力の値をそのまま引きつぐ
             timestamp: frame.timestamp,
 
-            // サンプルエントリーは途中で変わらないので、最初に一回だけ載せる
-            sample_entry: self.sample_entry.take(),
+            sample_entry: Some(self.sample_entry.clone()),
 
             // エンコード結果を反映する
             data: encoded.to_vec(),

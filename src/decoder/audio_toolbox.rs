@@ -71,7 +71,7 @@ impl AudioToolboxDecoder {
                 .sample_entry
                 .as_ref()
                 .ok_or_else(|| crate::Error::new("missing sample entry for AAC decoder"))?;
-            self.initialize(sample_entry)?;
+            self.initialize(sample_entry.get())?;
         }
 
         let sample_rate_for_tracking = self.sample_rate.unwrap_or(frame.sample_rate);

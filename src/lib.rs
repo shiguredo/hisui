@@ -23,6 +23,7 @@ pub mod srt;
 pub mod rtmp;
 pub mod rtsp;
 pub mod s3;
+pub mod sample_entry;
 pub mod sora;
 pub(crate) mod sora_publisher;
 pub(crate) mod sora_source;

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::codec_string::CodecResolutionState;
+use crate::sample_entry::SharedSampleEntry;
 
 /// ファイル拡張子から content-type を返す
 fn content_type_for_filename(filename: &str) -> &'static str {
@@ -252,10 +253,10 @@ struct DashWriter {
     last_video_timestamp: Option<Duration>,
     /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
     last_audio_timestamp: Option<Duration>,
-    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持）
+    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持。型は issue 0027 で音声と統一予定）
     last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
     /// 最後に受信したオーディオの sample_entry（セグメント跨ぎで保持）
-    last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    last_audio_sample_entry: Option<SharedSampleEntry>,
     /// 現在のセグメントの共通情報
     current_segment_info: Option<CurrentSegmentInfo>,
     /// MPD の availabilityStartTime（ライター起動時の UTC 時刻）
@@ -545,16 +546,17 @@ impl DashWriter {
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
         // 最初の video keyframe より前に audio が流れ始めることがある。
-        // その場合でも、初回だけ付与される sample_entry は保持しておく。
+        // 入力経路によっては sample_entry が初回フレームにしか載らないため、
+        // 受け取った sample_entry を保持して後続フレームの補完に使う。
         if let Some(ref entry) = frame.sample_entry {
-            self.last_audio_sample_entry.clone_from(&frame.sample_entry);
+            self.last_audio_sample_entry = Some(entry.clone());
 
             // SampleEntry から正確な codec string を確定する
             if !matches!(
                 self.codec_resolution,
                 CodecResolutionState::AudioOnly(_) | CodecResolutionState::Resolved(_)
             ) && let Some(codec_str) =
-                crate::codec_string::audio_codec_string_from_sample_entry(entry)
+                crate::codec_string::audio_codec_string_from_sample_entry(entry.get())
             {
                 self.resolve_audio_codec(codec_str);
             }
@@ -583,8 +585,9 @@ impl DashWriter {
         self.current_payload.extend_from_slice(&frame.data);
         let sample_entry = frame
             .sample_entry
-            .clone()
-            .or_else(|| self.last_audio_sample_entry.clone());
+            .as_ref()
+            .or(self.last_audio_sample_entry.as_ref())
+            .map(|e| e.get().clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Audio,
             sample_entry,
@@ -640,7 +643,11 @@ impl DashWriter {
         fill_missing_sample_entries(
             &mut self.current_samples,
             &self.last_video_sample_entry,
-            &self.last_audio_sample_entry,
+            // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
+            &self
+                .last_audio_sample_entry
+                .as_ref()
+                .map(|e| e.get().clone()),
         );
 
         // 末尾サンプルの duration を補完する

@@ -4,6 +4,7 @@ use hisui::{
     Error, MediaPipeline, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     mp4::writer::{Mp4Writer, Mp4WriterOptions},
+    sample_entry::SharedSampleEntry,
     sora::recording_layout::{AggregatedSourceInfo, AssignedSource, Layout, Resolution},
     sora::recording_layout_region::{Grid, Region},
     sora::recording_metadata::{SourceId, SourceInfo},
@@ -500,11 +501,11 @@ fn audio_data(source: &SourceInfo, i: usize, duration: Duration) -> AudioFrame {
         timestamp: source.start_timestamp + duration * i as u32,
         sample_entry: if i == 0 {
             // 中身はなんでもいい
-            Some(SampleEntry::Unknown(UnknownBox {
+            Some(SharedSampleEntry::new(SampleEntry::Unknown(UnknownBox {
                 box_type: BoxType::Normal(*b"dumy"),
                 box_size: BoxSize::U32(8),
                 payload: Vec::new(),
-            }))
+            })))
         } else {
             None
         },

@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-05
-- Completed:
+- Completed: 2026-06-09
 - Model: Opus 4.8
 - Branch:
 - Polished:
@@ -30,3 +30,20 @@ Low。懸念は player 再生中（SDL ウィンドウ表示中）のみで、�
 ## 完了条件
 
 - player 再生中の SIGTERM でグレースフルシャットダウンとメトリクスダンプが走ることが確認できる（または競合せず対策不要と確認できる）。
+
+## クローズ理由（2026-06-09・対策不要と確認し close）
+
+コード解析により「player 再生中でも SIGTERM / SIGINT で tokio のグレースフルシャットダウンとメトリクスダンプが走る（SDL と競合しない）」ことを確認したため、実装変更なしで close する。実機テストは不要と判断した。
+
+なお本 issue は SDL2 前提で記述しているが、raw_player が実際に使うのは SDL3 である（`raw_player-2026.1.0` の `[package.metadata.external-dependencies]` に `sdl3 = { url = "https://github.com/libsdl-org/SDL", tag = "release-3.4.2" }`）。以下の確認は SDL3 release-3.4.2 の実ソースに基づく。
+
+- SDL3 は既存ハンドラを上書きしない。`src/events/SDL_quit.c` の `SDL_EventSignal_Init()` は `SDL_HINT_NO_SIGNAL_HANDLERS` が偽のときのみ登録を試み、かつ既存ハンドラが `SIG_DFL` のときだけ `SDL_HandleSIG` を設定する（sigaction 経路は `if (action.sa_handler == SIG_DFL ...)`、signal 経路は非デフォルトの旧ハンドラを復元）。issue 本文が SDL2 の慣例として挙げた挙動は SDL3 でも維持されている。
+- tokio 1.52.3 は登録時に対象シグナルの `sa_handler` を `SIG_DFL` でなくする。`ShutdownSignal::install()`（`src/obsws/server.rs`）→ `tokio::signal::unix::signal()` → `signal_hook_registry::register`（1.4.8）が `libc::sigaction()` で signal-hook の汎用ハンドラを設置し、旧 action を `prev` に保存する。設置した瞬間に SIGTERM / SIGINT は `SIG_DFL` でなくなる。
+- 受信時は旧ハンドラもチェーン実行する。signal-hook のハンドラは登録済みアクション（tokio の `Signal` 起床を含む）をすべて実行したのち `prev.execute()` で旧ハンドラも呼ぶ。
+
+結論（登録順に依存しない）:
+
+- 実際の順序（tokio が `run_server` 入口で登録 → SDL は player の Start 時に `raw_player::init()` で初期化）では、SDL は `sa_handler != SIG_DFL` を見て登録をスキップする。tokio のハンドラが唯一の権威として残り、`run_accept_loop` の `shutdown_signal.recv()` が発火してグレースフルシャットダウンとメトリクスダンプが走る。
+- 仮に逆順（SDL が先）でも、tokio の `signal_hook_registry::register` が SDL のハンドラを `prev` に保存してチェーンするため、tokio の `Signal` は発火する。
+
+どちらの順序でも tokio のシグナルは発火するため、競合せず対策不要。`SDL_NO_SIGNAL_HANDLERS=1` 等の追加対策は入れない（CLAUDE.md「Premature Optimization is the Root of All Evil」）。
