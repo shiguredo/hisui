@@ -1091,13 +1091,19 @@ mod tests {
     fn make_hybrid_writer() -> crate::Result<(tempfile::TempDir, HybridMp4Writer)> {
         let temp_dir = tempfile::tempdir()?;
         let output_path = temp_dir.path().join("test.mp4");
-        let writer = HybridMp4Writer::new(
-            &output_path,
+        let writer = make_hybrid_writer_at(&output_path)?;
+        Ok((temp_dir, writer))
+    }
+
+    // 出力先パスを指定して writer を作る。読み戻し検証のように出力ファイルへ
+    // アクセスしたいテストから使う。
+    fn make_hybrid_writer_at(output_path: &Path) -> crate::Result<HybridMp4Writer> {
+        HybridMp4Writer::new(
+            output_path,
             Some(TrackId::new("audio")),
             Some(TrackId::new("video")),
             crate::stats::Stats::new(),
-        )?;
-        Ok((temp_dir, writer))
+        )
     }
 
     fn make_audio_frame(sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>) -> AudioFrame {
@@ -1227,7 +1233,7 @@ mod tests {
                     sample_entry: Option<SharedSampleEntry>|
          -> crate::Result<()> {
             let frame = AudioFrame {
-                data: vec![0x11],
+                data: vec![0x11, 0x22, 0x33],
                 format: AudioFormat::Aac,
                 channels: Channels::STEREO,
                 sample_rate: SampleRate::HZ_48000,
@@ -1247,14 +1253,14 @@ mod tests {
             1
         );
 
-        // 同一 Arc を再送: ptr_eq 短絡で変化なしと判定され、計上されない。
+        // 同一 Arc を再送しても計上されない（同一 Arc は ptr_eq で短絡される）。
         send(&mut writer, Some(shared.clone()))?;
         assert_eq!(
             writer.core.stats.total_received_audio_sample_entry_count(),
             1
         );
 
-        // 別 Arc だが実体同値: PartialEq fallback で変化なしと判定され、計上されない。
+        // 別 Arc・実体同値でも計上されない（ptr_eq では短絡されず実体比較で同値と判定される）。
         send(&mut writer, Some(SharedSampleEntry::new(entry.clone())))?;
         assert_eq!(
             writer.core.stats.total_received_audio_sample_entry_count(),
@@ -1282,12 +1288,7 @@ mod tests {
         // 検証する (取りこぼしによる finalize 失敗・映像トラック空の回帰防止)。
         let temp_dir = tempfile::tempdir()?;
         let output_path = temp_dir.path().join("test.mp4");
-        let mut writer = HybridMp4Writer::new(
-            &output_path,
-            Some(TrackId::new("audio")),
-            Some(TrackId::new("video")),
-            crate::stats::Stats::new(),
-        )?;
+        let mut writer = make_hybrid_writer_at(&output_path)?;
 
         let audio_sample_entry = crate::audio::aac::create_mp4a_sample_entry(
             &[0x12, 0x10],
