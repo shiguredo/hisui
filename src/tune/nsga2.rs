@@ -7,13 +7,11 @@ use crate::tune::{ParameterDistribution, SearchSpace, TrialValues};
 // NSGA-II (Deb et al., 2002) の自前実装
 //
 // hisui が使うのは 2 目的 (合成時間 minimize / VMAF 平均 maximize) の多目的最適化のみ。
-// optuna の NSGAIISampler 既定挙動を参考にするが、完全一致は目的とせず、最適化品質が
-// 劣化しないことを比較で確認する方針 (issue 0010 参照)。
 
-/// 集団サイズ (optuna 既定に合わせる)
+/// 集団サイズ
 pub const POPULATION_SIZE: usize = 50;
 
-/// 交叉確率 (optuna 既定に合わせる)
+/// 交叉確率
 const CROSSOVER_PROB: f64 = 0.9;
 
 /// SBX の分布指数
@@ -230,8 +228,8 @@ fn sample_one(dist: &ParameterDistribution) -> crate::Result<JsonValue> {
                 Ok(JsonValue::Integer(rng::gen_range_i64(*lo, *hi)?))
             }
             _ => {
-                let lo = to_f64(min);
-                let hi = to_f64(max);
+                let lo = min.to_f64();
+                let hi = max.to_f64();
                 Ok(JsonValue::Float(lo + rng::gen_unit_f64()? * (hi - lo)))
             }
         },
@@ -332,8 +330,8 @@ fn crossover_numeric(
     v2: &JsonValue,
 ) -> crate::Result<JsonValue> {
     let is_integer = matches!((min, max), (JsonNumber::Integer(_), JsonNumber::Integer(_)));
-    let lo = to_f64(min);
-    let hi = to_f64(max);
+    let lo = min.to_f64();
+    let hi = max.to_f64();
     let x1 = json_value_to_f64(v1).unwrap_or(lo);
     let x2 = json_value_to_f64(v2).unwrap_or(hi);
 
@@ -356,8 +354,8 @@ fn mutate_one(dist: &ParameterDistribution, value: &JsonValue) -> crate::Result<
     match dist {
         ParameterDistribution::Numeric { min, max } => {
             let is_integer = matches!((min, max), (JsonNumber::Integer(_), JsonNumber::Integer(_)));
-            let lo = to_f64(min);
-            let hi = to_f64(max);
+            let lo = min.to_f64();
+            let hi = max.to_f64();
             if hi <= lo {
                 // レンジが無いので変異しようがない
                 return Ok(finalize_numeric(lo, lo, hi, is_integer));
@@ -392,14 +390,6 @@ fn finalize_numeric(value: f64, lo: f64, hi: f64, is_integer: bool) -> JsonValue
         JsonValue::Integer(clamped.round() as i64)
     } else {
         JsonValue::Float(clamped)
-    }
-}
-
-/// `JsonNumber` を `f64` に変換する
-fn to_f64(n: &JsonNumber) -> f64 {
-    match n {
-        JsonNumber::Integer(v) => *v as f64,
-        JsonNumber::Float(v) => *v,
     }
 }
 

@@ -12,6 +12,16 @@ pub enum JsonNumber {
     Float(f64),
 }
 
+impl JsonNumber {
+    /// `f64` に変換する
+    pub fn to_f64(self) -> f64 {
+        match self {
+            JsonNumber::Integer(v) => v as f64,
+            JsonNumber::Float(v) => v,
+        }
+    }
+}
+
 impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for JsonNumber {
     type Error = nojson::JsonParseError;
 
@@ -93,7 +103,6 @@ impl nojson::DisplayJson for JsonValue {
 /// `libvpx_vp9_encode_params` オブジェクトの `cpu_used` メンバーを指す。
 ///
 /// NOTE: パス区切りに `.` を使うため、メンバー名自体に `.` を含むレイアウトには対応しない。
-/// これは optuna ベース実装からの既存制約をそのまま踏襲している。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct JsonObjectMemberPath(Vec<String>);
 

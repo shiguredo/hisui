@@ -10,9 +10,9 @@ use self::json_value::{JsonNumber, JsonObjectMemberPath, JsonValue};
 use self::nsga2::Individual;
 use self::storage::{LockGuard, TrialRecord, TrialResult};
 
-// optuna 相当の 2 目的多目的最適化を自前の NSGA-II で行うモジュール。
+// 2 目的 (合成時間 minimize / VMAF 平均 maximize) の多目的最適化を NSGA-II で行うモジュール。
 //
-// optuna CLI (外部プロセス) への依存を排除し、最適化・履歴永続化を hisui 内で完結させる。
+// 最適化と試行履歴の永続化を hisui 内で完結させる。
 // アルゴリズムの詳細は nsga2 モジュール、履歴・ロックの永続化は storage モジュールを参照。
 
 /// トライアルの情報 (ask が返す、次に評価すべきパラメータセット)

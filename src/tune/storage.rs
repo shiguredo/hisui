@@ -10,8 +10,8 @@ use crate::tune::json_value::{JsonObjectMemberPath, JsonValue};
 
 // 試行履歴の永続化 (単一の JSON Lines ファイル) と、多重起動防止のロックファイル管理。
 //
-// optuna の SQLite ストレージは使わず、1 トライアル完了ごとに 1 行 1 JSON オブジェクトを
-// 追記する。分散・並列最適化は非対応で、一度に 1 プロセスのみが書き込む前提 (issue 0010)。
+// 1 トライアル完了ごとに 1 行 1 JSON オブジェクトを追記する。
+// 分散・並列最適化は非対応で、一度に 1 プロセスのみが書き込む前提 (issue 0010)。
 
 /// 試行 1 件の結果
 #[derive(Debug, Clone, PartialEq)]
