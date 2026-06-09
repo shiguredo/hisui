@@ -9,7 +9,7 @@
 
 ## 目的
 
-issue 0017 で音声側の sample_entry を「全出力フレームに載せる」方式へ変更し、共通型 `SharedSampleEntry` を導入した。一方で映像側は挙動を据え置き、keyframe にのみ sample_entry を補完する方式のまま `SharedSampleEntry` で型をラップしただけになっている。
+issue 0017 で音声側の sample_entry を「全出力フレームに載せる」方式へ変更し、共通型 `SharedSampleEntry` を導入した。一方で映像側には手を付けず、keyframe にのみ sample_entry を補完する方式のまま、フィールド型も生の `Option<SampleEntry>` のままになっている（0017 は差分最小化のため音声のみ `SharedSampleEntry` 化した）。
 
 本 issue では映像側も音声と同じく「全出力フレームに sample_entry を載せる」方式へ統一し、映像・音声で sample_entry の付与ポリシーを一本化する。これにより issue 0017 が据え置いた映像側の補完責務（0017 の決定 1 で別 issue に切り出すとした部分）を確定させ、後続の非 Option 化（issue 0028）の前提を整える。
 
@@ -17,7 +17,7 @@ issue 0017 で音声側の sample_entry を「全出力フレームに載せる�
 
 ## 優先度根拠
 
-Low。issue 0017 で映像側も `SharedSampleEntry` 型に揃っており、keyframe 補完によって muxer の契約（最初のサンプルに sample_entry 必須）は満たされているため、機能的なバグは無い。本 issue は付与ポリシーを音声と揃えて将来の非 Option 化（issue 0028）を可能にするための仕上げであり、時間があるときに対応する。
+Low。映像は keyframe 補完によって muxer の契約（最初のサンプルに sample_entry 必須）を満たしているため、機能的なバグは無い。本 issue はフィールド型を音声と揃え（`Option<SharedSampleEntry>` 化）、付与ポリシーも全フレーム付与へ統一して将来の非 Option 化（issue 0028）を可能にするための仕上げであり、時間があるときに対応する。
 
 ## 現状
 
