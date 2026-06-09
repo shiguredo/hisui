@@ -223,7 +223,9 @@ proptest! {
     }
 
     // generate_child の結果も探索空間の制約を満たす。
-    // 個体数を 1..120 で振り、select_parents の「全件採用」と「混雑度で詰める」両分岐を踏む。
+    // 個体数を 1..120 で振り、select_parents の早期 return (POPULATION_SIZE 以下) と
+    // 混雑度による切り詰め (超過時) の両経路を通す。多フロントの選抜ロジックそのものは
+    // src/tune/nsga2.rs の単体テストで検証する。
     #[test]
     fn generate_child_respects_space(space in search_space_strategy(), n in 1usize..120) {
         let individuals: Vec<Individual> = (0..n)

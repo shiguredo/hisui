@@ -207,8 +207,7 @@ fn select_parents(individuals: &[Individual]) -> Vec<Individual> {
 
 /// binary トーナメント選択で 1 個体のインデックスを選ぶ
 ///
-/// 比較は論文の crowded-comparison operator に従う:
-/// rank が小さい方を優先し、同 rank なら混雑度距離が大きい方を優先する。
+/// 異なる 2 個体を引き、crowded-comparison operator ([`crowded_compare`]) で優劣を決める。
 fn tournament_select(ranks: &[usize], distances: &[f64]) -> crate::Result<usize> {
     let n = ranks.len();
     let a = rng::gen_index(n)?;
@@ -224,15 +223,21 @@ fn tournament_select(ranks: &[usize], distances: &[f64]) -> crate::Result<usize>
         }
         b
     };
-    if ranks[a] < ranks[b] {
-        Ok(a)
-    } else if ranks[b] < ranks[a] {
-        Ok(b)
-    } else if distances[a] >= distances[b] {
-        Ok(a)
-    } else {
-        Ok(b)
+    // crowded-comparison で優劣を決める。完全同値 (rank も距離も同じ) のときは a を採る。
+    match crowded_compare(ranks[a], distances[a], ranks[b], distances[b]) {
+        std::cmp::Ordering::Greater => Ok(b),
+        _ => Ok(a),
     }
+}
+
+/// crowded-comparison operator (論文の ≻n) で 2 個体の優劣を比較する
+///
+/// rank が小さい方を優先し、同 rank なら混雑度距離が大きい方を優先する。a を基準とした
+/// 順序を返す (`Less` なら a 優先、`Greater` なら b 優先、`Equal` なら rank・距離とも同値)。
+/// rng を使わない純粋関数なので、選抜の優劣判定だけを切り出して単体テストで検証できる。
+fn crowded_compare(rank_a: usize, dist_a: f64, rank_b: usize, dist_b: f64) -> std::cmp::Ordering {
+    // rank は昇順 (小さいほど良い)、同 rank では距離の降順 (大きいほど良い)
+    rank_a.cmp(&rank_b).then(dist_b.total_cmp(&dist_a))
 }
 
 /// 探索空間から各パラメータを一様ランダムにサンプリングする (初期集団用)
@@ -441,5 +446,116 @@ fn json_value_to_f64(v: &JsonValue) -> Option<f64> {
         JsonValue::Integer(i) => Some(*i as f64),
         JsonValue::Float(f) => Some(*f),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering;
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    // 目的値だけを持つ個体を作る (params は選抜に影響しないので空にする)
+    fn individual(objective0: f64, objective1: f64) -> Individual {
+        Individual {
+            params: BTreeMap::new(),
+            objectives: [objective0, objective1],
+        }
+    }
+
+    // 親集団に「第 1 目的が指定の整数値」を持つ個体が含まれるかを返す。
+    // テストの目的値はすべて整数なので、float の == を避けて i64 に落として厳密比較する。
+    fn contains_objective0(parents: &[Individual], objective0: i64) -> bool {
+        parents.iter().any(|p| p.objectives[0] as i64 == objective0)
+    }
+
+    // crowded-comparison は rank が小さい方を、混雑度距離に関係なく優先する
+    #[test]
+    fn crowded_compare_prioritizes_smaller_rank() {
+        // a は rank 0 で距離 0、b は rank 1 で距離無限大。それでも rank の小さい a が勝つ
+        assert_eq!(crowded_compare(0, 0.0, 1, f64::INFINITY), Ordering::Less);
+        // 引数を入れ替えると rank 0 側 (b) が勝つ
+        assert_eq!(crowded_compare(1, f64::INFINITY, 0, 0.0), Ordering::Greater);
+    }
+
+    // 同 rank では混雑度距離が大きい方を優先し、rank も距離も同値なら Equal を返す
+    #[test]
+    fn crowded_compare_prioritizes_larger_distance_within_same_rank() {
+        assert_eq!(crowded_compare(2, 5.0, 2, 1.0), Ordering::Less);
+        assert_eq!(crowded_compare(2, 1.0, 2, 5.0), Ordering::Greater);
+        assert_eq!(crowded_compare(2, 1.0, 2, 1.0), Ordering::Equal);
+    }
+
+    // 個体数が POPULATION_SIZE 以下なら、全個体がそのまま親になる (早期 return 経路)
+    #[test]
+    fn select_parents_keeps_all_within_population_size() {
+        // 互いに非劣な個体を POPULATION_SIZE 個ちょうど作る
+        let individuals: Vec<Individual> = (0..POPULATION_SIZE)
+            .map(|i| individual(i as f64, (POPULATION_SIZE - i) as f64))
+            .collect();
+        let parents = select_parents(&individuals);
+        assert_eq!(
+            parents.len(),
+            POPULATION_SIZE,
+            "POPULATION_SIZE 以下なら全個体が親になること"
+        );
+    }
+
+    // 上位フロントを丸ごと採用する分岐を踏み、支配された劣個体が淘汰されることを確認する (elitism)
+    #[test]
+    fn select_parents_drops_dominated_individual() {
+        // 互いに非劣な rank 0 フロントを POPULATION_SIZE 個作る
+        let mut individuals: Vec<Individual> = (0..POPULATION_SIZE)
+            .map(|i| individual(i as f64, (POPULATION_SIZE - i) as f64))
+            .collect();
+        // どの rank 0 個体にも両目的で劣る (= 支配される) 個体を 1 つ加える
+        individuals.push(individual(1_000.0, 1_000.0));
+
+        let parents = select_parents(&individuals);
+
+        assert_eq!(
+            parents.len(),
+            POPULATION_SIZE,
+            "親は POPULATION_SIZE 個に絞られること"
+        );
+        assert!(
+            !contains_objective0(&parents, 1_000),
+            "支配された劣個体は親集団から淘汰されること"
+        );
+    }
+
+    // 上位フロントを全採用したうえで、入りきらない下位フロントを混雑度距離で詰める分岐を踏む。
+    // 大域最良 (rank 0) と下位フロントの端点 (混雑度距離が無限大) が残ることを確認する。
+    #[test]
+    fn select_parents_packs_overflow_front_by_crowding_distance() {
+        // rank 0 は [0,0] の 1 個だけ ([0,0] が以降の全個体を支配する)
+        let mut individuals = vec![individual(0.0, 0.0)];
+        // rank 1 は互いに非劣な直線上の点を POPULATION_SIZE より多く作る
+        let front1_len = POPULATION_SIZE + 5;
+        individuals
+            .extend((0..front1_len).map(|i| individual((i + 1) as f64, (front1_len - i) as f64)));
+
+        let parents = select_parents(&individuals);
+
+        assert_eq!(
+            parents.len(),
+            POPULATION_SIZE,
+            "親は POPULATION_SIZE 個に絞られること"
+        );
+        // rank 0 の大域最良は必ず残る (elitism)
+        assert!(
+            contains_objective0(&parents, 0),
+            "rank 0 の大域最良は必ず親に残ること"
+        );
+        // rank 1 フロントの両端点 (混雑度距離が無限大) も残る
+        assert!(
+            contains_objective0(&parents, 1),
+            "下位フロントの端点 (第 1 目的が最小) は残ること"
+        );
+        assert!(
+            contains_objective0(&parents, front1_len as i64),
+            "下位フロントの端点 (第 1 目的が最大) は残ること"
+        );
     }
 }
