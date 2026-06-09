@@ -239,7 +239,12 @@ impl Tuner {
         Ok((updated, best_trials))
     }
 
-    /// tell 待ちのパラメータを取り出す
+    /// tell 待ちのパラメータを取り出す (pending から remove する)
+    ///
+    /// この remove は後続の append (失敗しうる) より前に行われるため、append が失敗すると
+    /// pending を消費したままその試行が宙に浮く。ただし現在の呼び出し側は tell / tell_fail の
+    /// エラーを `?` で伝播してプロセスを終了するので、この状態は観測されない。tell エラーを
+    /// 捕捉して継続する呼び出し側を追加する場合は、remove を append 成功後に遅らせること。
     fn take_pending(
         &mut self,
         trial_number: usize,
