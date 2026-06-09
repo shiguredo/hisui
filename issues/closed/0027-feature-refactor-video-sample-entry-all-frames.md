@@ -2,9 +2,9 @@
 
 - Priority: Low
 - Created: 2026-06-08
-- Completed:
+- Completed: 2026-06-09
 - Model: Claude Opus 4.8
-- Branch:
+- Branch: feature/refactor-video-sample-entry-all-frames
 - Polished: 2026-06-09
 
 ## 目的
@@ -114,3 +114,21 @@ CLAUDE.md のテスト役割分担に従う。本リポジトリには現状 PBT
 
 - issue 0017（音声側の全フレーム付与と共通型 `SharedSampleEntry` 導入。本 issue の直接の前提・実装の手本。closed）
 - issue 0028（sample_entry フィールドの非 Option 化。生フレームが構造的に `None` を持つため実装せず close 済み。本 issue は非 Option 化を前提とせず、音声・映像の一貫性のみを目的とする）
+- issue 0030（エンコード済みフレームは常に sample_entry を持つ不変条件を全経路に適用する。本 issue の後続。リーダー経路の全フレーム付与と、本 issue で型追従のみ行った writer の保持・補完ロジックの削除を扱う）
+
+## 解決方法
+
+PR #263（ブランチ `feature/refactor-video-sample-entry-all-frames`）で実装した。
+
+- 設計方針 1（型統一）: `VideoFrame.sample_entry` を `Option<SampleEntry>` から `Option<SharedSampleEntry>` に変更。映像デコーダ 3 種・reader（`mp4/reader.rs` / `mp4/sample_reader.rs` / `sora/recording_mp4_reader.rs`）・writer・`rtmp/frame.rs` の映像経路を `.get()` / `SharedSampleEntry::new(...)` 経由に追従させた。
+- 設計方針 2（全フレーム付与）: 映像エンコーダ 5 種を「最初の出力フレーム以降、全出力フレームに `Some` を載せる」方式に変更した。
+  - `svt_av1` / `libvpx` / `nvcodec`: フィールドを `SharedSampleEntry`（非 Option）にし、出力時に `Some(self.sample_entry.clone())` で毎フレーム Arc clone する。
+  - `video_toolbox`: `is_first` フラグを `sample_entry: Option<SharedSampleEntry>` に置き換え、初回生成後は毎フレーム clone する。
+  - `openh264`: `last_sample_entry: Option<SharedSampleEntry>` を新設し、SPS/PPS を含むフレームで差し替えつつ全フレームに最新値を載せる（keyframe 要求等によるストリーム途中の SPS/PPS 更新に追従）。
+- 設計方針 3（補完撤去）: `encoder.rs` の keyframe 限定補完を撤去し `last_video_sample_entry` フィールドを削除した。「録画開始時のキーフレーム要求」機構は残した。
+- 設計方針 5（writer の型追従）: writer の `or_else` 補完・`fill_missing_sample_entries` は構造を保ったまま型だけ `SharedSampleEntry` 経由に追従させた（補完ロジック自体の除去は後続 issue 0030 で扱う）。
+- テスト: `libvpx`（VP8 / VP9）・`openh264` の全フレーム付与不変条件テストと、`hybrid_writer` の映像 `changed_since` カウンタテストを追加した。
+- CI 修正: `nvcodec` の不要になった `use shiguredo_mp4::boxes::SampleEntry;` を削除し `test-nvidia-video-codec`（`--deny warnings`）を通した。
+- コメント整備: `sample entry` / `keyframe` 等の英語表記を日本語に統一した。
+- CHANGES.md: 内部リファクタで利用者から見た挙動は不変のため、0017 の前例に倣い記載しない。
+- PR #263 の CI は全 green（`test-nvidia-video-codec` / `test-openh264` 等を含む）。

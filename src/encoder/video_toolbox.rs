@@ -7,6 +7,7 @@ use shiguredo_mp4::{
 
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     types::{CodecName, EvenUsize},
     video::h264::{H264_LEVEL_3_1, H264_PROFILE_BASELINE, NALU_HEADER_LENGTH},
     video::h265,
@@ -18,7 +19,8 @@ pub struct VideoToolboxEncoder {
     inner: shiguredo_video_toolbox::Encoder,
     input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    is_first: bool,
+    // 最初の出力フレームの SPS/PPS から確定するサンプルエントリー。確定後は全フレームに載せる。
+    sample_entry: Option<SharedSampleEntry>,
     width: EvenUsize,
     height: EvenUsize,
     format: VideoFormat,
@@ -48,7 +50,7 @@ impl VideoToolboxEncoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            is_first: true,
+            sample_entry: None,
             width,
             height,
             format: VideoFormat::H264,
@@ -78,7 +80,7 @@ impl VideoToolboxEncoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            is_first: true,
+            sample_entry: None,
             width,
             height,
             format: VideoFormat::H265,
@@ -140,8 +142,9 @@ impl VideoToolboxEncoder {
                 .input_queue
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
-            let sample_entry = if self.is_first {
-                self.is_first = false;
+            // 最初の出力フレームの SPS/PPS からサンプルエントリーを確定して保持し、
+            // 以後は全出力フレームに保持済みのサンプルエントリーを載せる。
+            if self.sample_entry.is_none() {
                 let sample_entry = if self.format == VideoFormat::H264 {
                     h264_sample_entry(
                         self.width,
@@ -159,10 +162,8 @@ impl VideoToolboxEncoder {
                         frame.pps_list.clone(),
                     )?
                 };
-                Some(sample_entry)
-            } else {
-                None
-            };
+                self.sample_entry = Some(SharedSampleEntry::new(sample_entry));
+            }
 
             self.output_queue.push_back(VideoFrame {
                 data: frame.data,
@@ -173,7 +174,7 @@ impl VideoToolboxEncoder {
                     height: self.height.get(),
                 }),
                 timestamp: input_frame.as_video_frame().timestamp,
-                sample_entry,
+                sample_entry: self.sample_entry.clone(),
             });
         }
         Ok(())

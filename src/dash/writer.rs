@@ -253,8 +253,8 @@ struct DashWriter {
     last_video_timestamp: Option<Duration>,
     /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
     last_audio_timestamp: Option<Duration>,
-    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持。型は issue 0027 で音声と統一予定）
-    last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持）
+    last_video_sample_entry: Option<SharedSampleEntry>,
     /// 最後に受信したオーディオの sample_entry（セグメント跨ぎで保持）
     last_audio_sample_entry: Option<SharedSampleEntry>,
     /// 現在のセグメントの共通情報
@@ -479,16 +479,17 @@ impl DashWriter {
             self.start_new_segment(frame.timestamp)?;
         }
 
-        // sample_entry が来たら保持する（エンコーダーは初回のみ付与する場合がある）
+        // 入力経路によっては sample_entry が初回フレームにしか載らないため、
+        // 受け取った sample_entry を保持して後続フレームの補完に使う。
         if let Some(ref entry) = frame.sample_entry {
-            self.last_video_sample_entry.clone_from(&frame.sample_entry);
+            self.last_video_sample_entry = Some(entry.clone());
 
             // SampleEntry から正確な codec string を確定する
             if !matches!(
                 self.codec_resolution,
                 CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
             ) && let Some(codec_str) =
-                crate::codec_string::video_codec_string_from_sample_entry(entry)
+                crate::codec_string::video_codec_string_from_sample_entry(entry.get())
             {
                 self.resolve_video_codec(codec_str);
             }
@@ -521,8 +522,9 @@ impl DashWriter {
         // フレームの sample_entry が None なら保持済みの値を使う
         let sample_entry = frame
             .sample_entry
-            .clone()
-            .or_else(|| self.last_video_sample_entry.clone());
+            .as_ref()
+            .or(self.last_video_sample_entry.as_ref())
+            .map(|e| e.get().clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Video,
             sample_entry,
@@ -637,13 +639,15 @@ impl DashWriter {
         }
 
         // muxer は各トラックの最初の sample に sample_entry があることを要求する。
-        // エンコーダーは sample_entry を最初のフレームにしか付けないため、
-        // セグメント開始直後のタイミング次第では current_samples 側で欠落し得る。
-        // ここで最後に観測した sample_entry から補完しておく。
+        // セグメント開始直後のフレームに sample_entry が欠落している場合に備えて、
+        // 最後に観測した sample_entry から補完しておく。
+        // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
         fill_missing_sample_entries(
             &mut self.current_samples,
-            &self.last_video_sample_entry,
-            // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
+            &self
+                .last_video_sample_entry
+                .as_ref()
+                .map(|e| e.get().clone()),
             &self
                 .last_audio_sample_entry
                 .as_ref()

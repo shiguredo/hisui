@@ -76,10 +76,9 @@ pub struct HybridMp4Writer {
     fragment_end_timestamp: Option<Duration>,
     fragment_accumulated_duration: Duration,
     // フラグメント境界を越えて直前の sample_entry を保持する（先頭サンプルの欠落補完用）。
-    // 音声は received カウンタの変化検知（changed_since）のために共有型で保持する。
+    // received カウンタの変化検知（changed_since）のために共有型で保持する。
     last_audio_sample_entry: Option<SharedSampleEntry>,
-    // 映像は従来どおり生の SampleEntry のまま（型統一は issue 0027）。
-    last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    last_video_sample_entry: Option<SharedSampleEntry>,
     has_flushed_fragment: bool,
 
     // Mp4Writer と共有する入力キュー・一時停止管理・統計情報
@@ -224,7 +223,8 @@ impl HybridMp4Writer {
         self.fragment_video_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Video,
-                sample_entry,
+                // muxer は生の SampleEntry を要求するため Arc から取り出して渡す。
+                sample_entry: sample_entry.map(|e| e.get().clone()),
                 keyframe: frame.keyframe,
                 timescale: TIMESCALE,
                 duration: duration.as_micros() as u32,
@@ -423,7 +423,7 @@ impl HybridMp4Writer {
         {
             samples.push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Video,
-                sample_entry: Some(sample_entry),
+                sample_entry: Some(sample_entry.get().clone()),
                 keyframe: pending.keyframe,
                 timescale: TIMESCALE,
                 duration: DEFAULT_SAMPLE_DURATION.as_micros() as u32,
@@ -944,10 +944,10 @@ impl HybridMp4Writer {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 self.core.stats.add_received_audio_data();
                 // 音声エンコーダ出力は全フレームに sample_entry が載る（issue 0017）。
-                // 入力経路によっては初回フレームのみのこともあるが、いずれにせよ届いた entry を
+                // 入力経路によっては初回フレームのみのこともあるが、いずれにせよ届いたサンプルエントリーを
                 // pending 化・キューイング・ドロップで落とさないよう入口で取り込んで保持する。
                 // received カウンタは毎フレーム計上すると意味を失うため、前回から変化したとき
-                // （changed_since）だけ計上し「entry の確定・変化回数」を表すようにする。
+                // （changed_since）だけ計上し「サンプルエントリーの確定・変化回数」を表すようにする。
                 if let Some(entry) = &sample.sample_entry {
                     if entry.changed_since(self.last_audio_sample_entry.as_ref()) {
                         self.core.stats.add_received_audio_sample_entry();
@@ -982,10 +982,12 @@ impl HybridMp4Writer {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 self.core.stats.add_received_video_data();
                 // 音声と同様に、sample_entry を受信時点で取り込んでおく (issues/0011 参照)。
-                if sample.sample_entry.is_some() {
-                    self.core.stats.add_received_video_sample_entry();
-                    self.last_video_sample_entry
-                        .clone_from(&sample.sample_entry);
+                // received カウンタは前回から変化したとき (changed_since) だけ計上する。
+                if let Some(entry) = &sample.sample_entry {
+                    if entry.changed_since(self.last_video_sample_entry.as_ref()) {
+                        self.core.stats.add_received_video_sample_entry();
+                    }
+                    self.last_video_sample_entry = Some(entry.clone());
                 }
                 if self.core.input_video_track_id.is_some() {
                     self.core.handle_input_sample(
@@ -1127,7 +1129,7 @@ mod tests {
                 height: 16,
             }),
             timestamp: Duration::ZERO,
-            sample_entry,
+            sample_entry: sample_entry.map(SharedSampleEntry::new),
         }
     }
 
@@ -1218,7 +1220,7 @@ mod tests {
     #[test]
     fn hybrid_writer_received_audio_sample_entry_counts_only_changes() -> crate::Result<()> {
         // received カウンタは「sample_entry が前回から変化したとき」(changed_since) だけ計上される。
-        // 全フレーム付与 (issue 0017) でも、同一 entry が続く限りカウンタが増えないことを検証する
+        // 全フレーム付与 (issue 0017) でも、同一サンプルエントリーが続く限りカウンタが増えないことを検証する
         // (毎フレーム計上すると指標が音声フレーム総数とほぼ同じになり意味を失うため)。
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         let entry = crate::audio::aac::create_mp4a_sample_entry(
@@ -1282,9 +1284,86 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_writer_received_video_sample_entry_counts_only_changes() -> crate::Result<()> {
+        // received カウンタは「sample_entry が前回から変化したとき」(changed_since) だけ計上される。
+        // 全フレーム付与 (issue 0027) でも、同一サンプルエントリーが続く限りカウンタが増えないことを検証する
+        // (毎フレーム計上すると指標が映像フレーム総数とほぼ同じになり意味を失うため)。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+        let shared = SharedSampleEntry::new(entry.clone());
+
+        // 指定した sample_entry を載せた映像フレームを入口で受信させるヘルパ。
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            writer.handle_video_message(
+                crate::Message::Media(crate::MediaFrame::Video(Arc::new(VideoFrame {
+                    data: vec![0x00, 0x00, 0x00, 0x01],
+                    format: VideoFormat::Av1,
+                    keyframe: true,
+                    size: Some(crate::video::VideoFrameSize {
+                        width: 16,
+                        height: 16,
+                    }),
+                    timestamp: std::time::Duration::ZERO,
+                    sample_entry,
+                }))),
+                &mut None,
+            )
+        };
+
+        // 1 回目: 初回 (changed_since(None) = true) なので計上される。
+        send(&mut writer, Some(shared.clone()))?;
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            1
+        );
+
+        // 同一 Arc を再送しても計上されない（同一 Arc は ptr_eq で短絡される）。
+        send(&mut writer, Some(shared.clone()))?;
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            1
+        );
+
+        // 別 Arc・実体同値でも計上されない（ptr_eq では短絡されず実体比較で同値と判定される）。
+        send(
+            &mut writer,
+            Some(SharedSampleEntry::new(crate::video::av1::av1_sample_entry(
+                EvenUsize::MIN_CELL_SIZE,
+                EvenUsize::MIN_CELL_SIZE,
+                &[0x0A],
+            ))),
+        )?;
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            1
+        );
+
+        // 別 Arc で実体が異なる: 変化ありと判定され計上される。
+        send(
+            &mut writer,
+            Some(SharedSampleEntry::new(crate::video::av1::av1_sample_entry(
+                EvenUsize::MIN_CELL_SIZE,
+                EvenUsize::MIN_CELL_SIZE,
+                &[0x0B],
+            ))),
+        )?;
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            2
+        );
+        Ok(())
+    }
+
+    #[test]
     fn hybrid_writer_finalizes_readable_audio_with_per_frame_sample_entry() -> crate::Result<()> {
         // issue 0017 の修正後の挙動: 音声は全フレームに sample_entry が載るため、フラグメント先頭
-        // サンプルにも必ず entry があり、finalize 後の標準 MP4 から音声トラックを読み戻せることを
+        // サンプルにも必ずサンプルエントリーがあり、finalize 後の標準 MP4 から音声トラックを読み戻せることを
         // 検証する (取りこぼしによる finalize 失敗・映像トラック空の回帰防止)。
         let temp_dir = tempfile::tempdir()?;
         let output_path = temp_dir.path().join("test.mp4");
@@ -1316,7 +1395,7 @@ mod tests {
 
         writer.finalize()?;
         assert_eq!(writer.core.stats.total_finalize_success_count(), 1);
-        // 先頭サンプルにも entry があったので missing は出ない。
+        // 先頭サンプルにもサンプルエントリーがあったので missing は出ない。
         assert_eq!(
             writer.core.stats.total_missing_audio_sample_entry_count(),
             0
@@ -1448,7 +1527,10 @@ mod tests {
             ))))),
             &mut None,
         )?;
-        assert_eq!(writer.last_video_sample_entry, Some(sample_entry.clone()));
+        assert_eq!(
+            writer.last_video_sample_entry.as_ref().map(|e| e.get()),
+            Some(&sample_entry)
+        );
         // 入口で sample_entry を載せて受信したフレーム数が計上される。
         assert_eq!(
             writer.core.stats.total_received_video_sample_entry_count(),

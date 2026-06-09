@@ -1,9 +1,8 @@
 use std::collections::VecDeque;
 
-use shiguredo_mp4::boxes::SampleEntry;
-
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     types::CodecName,
     video::av1,
     video::h264,
@@ -16,7 +15,8 @@ pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    sample_entry: Option<SampleEntry>,
+    // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
+    sample_entry: SharedSampleEntry,
     encoded_format: VideoFormat,
     av1_sequence_header: Vec<u8>,
     force_keyframe_next: bool,
@@ -53,7 +53,7 @@ impl NvcodecEncoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
             encoded_format: VideoFormat::H264,
             av1_sequence_header: Vec::new(),
             force_keyframe_next: false,
@@ -91,7 +91,7 @@ impl NvcodecEncoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
             encoded_format: VideoFormat::H265,
             av1_sequence_header: Vec::new(),
             force_keyframe_next: false,
@@ -145,7 +145,7 @@ impl NvcodecEncoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
             encoded_format: VideoFormat::Av1,
             av1_sequence_header: seq_params,
             force_keyframe_next: false,
@@ -257,7 +257,7 @@ impl NvcodecEncoder {
                 keyframe,
                 size: input_frame.size,
                 timestamp: input_frame.timestamp,
-                sample_entry: self.sample_entry.take(),
+                sample_entry: Some(self.sample_entry.clone()),
             });
         }
         Ok(())

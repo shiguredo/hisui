@@ -1,9 +1,8 @@
 use std::collections::VecDeque;
 
-use shiguredo_mp4::boxes::SampleEntry;
-
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     types::EvenUsize,
     video::av1,
     video::{RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
@@ -14,7 +13,8 @@ pub struct SvtAv1Encoder {
     inner: shiguredo_svt_av1::Encoder,
     input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    sample_entry: Option<SampleEntry>,
+    // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
+    sample_entry: SharedSampleEntry,
     width: EvenUsize,
     height: EvenUsize,
     keyframe_request_pending: bool,
@@ -39,7 +39,7 @@ impl SvtAv1Encoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
             width,
             height,
             keyframe_request_pending: false,
@@ -95,9 +95,94 @@ impl SvtAv1Encoder {
                     height: self.height.get(),
                 }),
                 timestamp: input_frame.as_video_frame().timestamp,
-                sample_entry: self.sample_entry.take(),
+                sample_entry: Some(self.sample_entry.clone()),
             });
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::types::CodecName;
+    use crate::video::FrameRate;
+
+    // SvtAv1Encoder::new は options.codec を参照しないため、固定値を使う。
+    fn options() -> VideoEncoderOptions {
+        VideoEncoderOptions {
+            codec: CodecName::Av1,
+            engines: None,
+            bitrate: 100_000,
+            width: EvenUsize::truncating_new(64),
+            height: EvenUsize::truncating_new(64),
+            frame_rate: FrameRate {
+                numerator: NonZeroUsize::MIN.saturating_add(29),
+                denumerator: NonZeroUsize::MIN,
+            },
+            encode_params: crate::encoder::default_video_encode_config_for_rpc(),
+        }
+    }
+
+    // 64x64 の I420 グレーフレームを作る。
+    fn raw_i420_frame(ts_ms: u64) -> RawVideoFrame {
+        let (width, height) = (64usize, 64usize);
+        let y_size = width * height;
+        let uv_size = (width / 2) * (height / 2);
+        let data: Vec<u8> = std::iter::repeat_n(16u8, y_size)
+            .chain(std::iter::repeat_n(128u8, uv_size * 2))
+            .collect();
+        let frame = VideoFrame {
+            data,
+            format: VideoFormat::I420,
+            keyframe: true,
+            size: Some(VideoFrameSize { width, height }),
+            timestamp: std::time::Duration::from_millis(ts_ms),
+            sample_entry: None,
+        };
+        RawVideoFrame::from_i420_video_frame(Arc::new(frame)).expect("有効な I420 フレーム")
+    }
+
+    // 全出力フレームに sample_entry が載る不変条件を検証する（issue 0027 の核心）。
+    // svt_av1 は sample_entry をコンストラクタで確定し全フレームに載せるため、
+    // 旧実装（self.sample_entry.take()）では 2 フレーム目以降が None になっていた。
+    // svt_av1 は libvpx と同じく feature gate されず常時利用可能なので単体テストで検証する。
+    #[test]
+    fn svt_av1_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
+        let mut encoder = SvtAv1Encoder::new(&options())?;
+        // 全フレームに載るのはコンストラクタで確定した同一の sample_entry なので、
+        // 実体まで一致することを確認する（is_some だけでは中身の退行を検出できない）。
+        let expected = encoder.sample_entry.get().clone();
+
+        let mut output_count = 0;
+        for i in 0..10 {
+            encoder.encode(raw_i420_frame(i * 33))?;
+            while let Some(frame) = encoder.next_encoded_frame() {
+                assert_eq!(
+                    frame.sample_entry.as_ref().map(|e| e.get()),
+                    Some(&expected),
+                    "出力フレームに確定済みの sample_entry が載っていない"
+                );
+                output_count += 1;
+            }
+        }
+        encoder.finish()?;
+        while let Some(frame) = encoder.next_encoded_frame() {
+            assert_eq!(
+                frame.sample_entry.as_ref().map(|e| e.get()),
+                Some(&expected),
+                "finish 後の出力フレームに確定済みの sample_entry が載っていない"
+            );
+            output_count += 1;
+        }
+        // 全フレーム付与を確認するには 2 フレーム以上の出力が必要。
+        assert!(
+            output_count >= 2,
+            "出力フレーム数が少なすぎる: {output_count}"
+        );
         Ok(())
     }
 }

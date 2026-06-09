@@ -7,6 +7,7 @@ use shiguredo_mp4::{
 
 use crate::{
     encoder::VideoEncoderOptions,
+    sample_entry::SharedSampleEntry,
     types::CodecName,
     video::{self, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
@@ -26,7 +27,8 @@ const BT_709: u8 = 1; // 典型的な値。必要に応じて調整する
 pub struct LibvpxEncoder {
     inner: shiguredo_libvpx::Encoder,
     format: VideoFormat,
-    sample_entry: Option<SampleEntry>,
+    // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
+    sample_entry: SharedSampleEntry,
     keyframe_request_pending: bool,
     input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
@@ -51,7 +53,7 @@ impl LibvpxEncoder {
         Ok(Self {
             inner,
             format: VideoFormat::Vp8,
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
             keyframe_request_pending: false,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
@@ -76,7 +78,7 @@ impl LibvpxEncoder {
         Ok(Self {
             inner,
             format: VideoFormat::Vp9,
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
             keyframe_request_pending: false,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
@@ -124,7 +126,7 @@ impl LibvpxEncoder {
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
             self.output_queue.push_back(VideoFrame {
-                sample_entry: self.sample_entry.take(),
+                sample_entry: Some(self.sample_entry.clone()),
                 data: frame.data().to_vec(),
                 format: self.format,
                 keyframe: frame.is_keyframe(),
@@ -189,4 +191,89 @@ fn vp9_sample_entry(width: usize, height: usize) -> SampleEntry {
         },
         unknown_boxes: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::types::EvenUsize;
+    use crate::video::FrameRate;
+
+    // new_vp8 / new_vp9 は options.codec を参照しないため、固定値を使う。
+    fn options() -> VideoEncoderOptions {
+        VideoEncoderOptions {
+            codec: CodecName::Vp8,
+            engines: None,
+            bitrate: 100_000,
+            width: EvenUsize::truncating_new(64),
+            height: EvenUsize::truncating_new(64),
+            frame_rate: FrameRate {
+                numerator: NonZeroUsize::MIN.saturating_add(29),
+                denumerator: NonZeroUsize::MIN,
+            },
+            encode_params: crate::encoder::default_video_encode_config_for_rpc(),
+        }
+    }
+
+    // 64x64 の I420 グレーフレームを作る。
+    fn raw_i420_frame(ts_ms: u64) -> RawVideoFrame {
+        let (width, height) = (64usize, 64usize);
+        let y_size = width * height;
+        let uv_size = (width / 2) * (height / 2);
+        let data: Vec<u8> = std::iter::repeat_n(16u8, y_size)
+            .chain(std::iter::repeat_n(128u8, uv_size * 2))
+            .collect();
+        let frame = VideoFrame {
+            data,
+            format: VideoFormat::I420,
+            keyframe: true,
+            size: Some(VideoFrameSize { width, height }),
+            timestamp: std::time::Duration::from_millis(ts_ms),
+            sample_entry: None,
+        };
+        RawVideoFrame::from_i420_video_frame(Arc::new(frame)).expect("有効な I420 フレーム")
+    }
+
+    // 全出力フレームに sample_entry が載る不変条件を検証する（issue 0027 の核心）。
+    // 旧実装（self.sample_entry.take()）では 2 フレーム目以降が None になっていた。
+    fn assert_every_output_frame_has_sample_entry(mut encoder: LibvpxEncoder) -> crate::Result<()> {
+        let mut output_count = 0;
+        for i in 0..10 {
+            encoder.encode(raw_i420_frame(i * 33))?;
+            while let Some(frame) = encoder.next_encoded_frame() {
+                assert!(
+                    frame.sample_entry.is_some(),
+                    "出力フレームに sample_entry が載っていない"
+                );
+                output_count += 1;
+            }
+        }
+        encoder.finish()?;
+        while let Some(frame) = encoder.next_encoded_frame() {
+            assert!(
+                frame.sample_entry.is_some(),
+                "finish 後の出力フレームに sample_entry が載っていない"
+            );
+            output_count += 1;
+        }
+        // 全フレーム付与を確認するには 2 フレーム以上の出力が必要。
+        assert!(
+            output_count >= 2,
+            "出力フレーム数が少なすぎる: {output_count}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn libvpx_vp8_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
+        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp8(&options())?)
+    }
+
+    #[test]
+    fn libvpx_vp9_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
+        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp9(&options())?)
+    }
 }
