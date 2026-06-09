@@ -198,6 +198,12 @@ impl Tuner {
 
     /// 探索結果 (成功) を伝える
     pub fn tell(&mut self, trial_number: usize, values: &TrialValues) -> crate::Result<()> {
+        // 目的値は有限前提 (NaN は NSGA-II の支配判定を壊し、その個体が rank 0 に居座る)。
+        // hisui の評価値は VMAF・合成時間とも常に有限なので、debug ビルドでのみ番兵として検査する。
+        debug_assert!(
+            values.elapsed_seconds.is_finite() && values.vmaf_mean.is_finite(),
+            "trial values must be finite"
+        );
         let params = self.take_pending(trial_number)?;
         let record = TrialRecord {
             trial_number,
