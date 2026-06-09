@@ -42,7 +42,7 @@ impl FdkAacDecoder {
             let sample_entry = frame.sample_entry.as_ref().ok_or_else(|| {
                 crate::Error::new("AAC sample entry is required to initialize FDK AAC decoder")
             })?;
-            let audio_specific_config = extract_audio_specific_config(sample_entry)?;
+            let audio_specific_config = extract_audio_specific_config(sample_entry.get())?;
             tracing::debug!(
                 "FDK AAC decoder initialized with config length: {}",
                 audio_specific_config.len()

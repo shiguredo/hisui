@@ -785,7 +785,7 @@ impl Mp4Writer {
         let data_offset = self.next_position;
         let sample = shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Audio,
-            sample_entry: data.sample_entry.clone(),
+            sample_entry: data.sample_entry.as_ref().map(|e| e.get().clone()),
             keyframe: true,
             timescale: TIMESCALE,
             duration: duration.as_micros() as u32,

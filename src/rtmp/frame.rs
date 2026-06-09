@@ -5,6 +5,7 @@ use shiguredo_mp4::boxes::SampleEntry;
 use crate::{
     Error,
     audio::{AudioFrame, Channels, SampleRate},
+    sample_entry::SharedSampleEntry,
     video::VideoFrame,
 };
 
@@ -38,7 +39,7 @@ impl RtmpOutgoingFrameHandler {
         // シーケンスヘッダーが必要な場合は生成
         let seq_frame = if self.audio_sequence_header_data.is_none() {
             if let Some(entry) = &frame.sample_entry {
-                let seq_header = create_audio_sequence_header(entry)?;
+                let seq_header = create_audio_sequence_header(entry.get())?;
                 let frame = shiguredo_rtmp::AudioFrame {
                     timestamp: shiguredo_rtmp::RtmpTimestamp::from_millis(0),
                     format: shiguredo_rtmp::AudioFormat::Aac,
@@ -238,7 +239,7 @@ impl RtmpIncomingFrameHandler {
             format: codec_info.format,
             sample_rate: codec_info.sample_rate,
             channels: codec_info.channels,
-            sample_entry: self.audio_sample_entry.clone(),
+            sample_entry: self.audio_sample_entry.clone().map(SharedSampleEntry::new),
             data: frame.data,
         }))
     }

@@ -2,9 +2,9 @@
 
 - Priority: High
 - Created: 2026-06-04
-- Completed:
+- Completed: 2026-06-09
 - Model: Opus 4.8
-- Branch:
+- Branch: feature/fix-audio-sample-entry-all-frames
 - Polished: 2026-06-08
 
 ## 目的
@@ -37,11 +37,11 @@ High。録画映像が再生不能になるデータ破損で、CI の e2e で�
 
 音声エンコーダが sample_entry を「最初の 1 フレームだけ」載せる構造がレースの本質。これを「全フレームに載せる」に変えて、いつ subscribe しても次フレームで必ず entry が届くようにし、レースのカテゴリ自体を消す。これがバグ修正の核心であり、これ単独で症状は解消する（上記 muxer 契約より）。
 
-あわせて、音声・映像で sample_entry の型を共通化する `SharedSampleEntry` を導入する。これは後続の issue 0027（映像の全フレーム付与）/ 0028（非 Option 化）と型を揃えるための土台であり、本 issue 単独のためだけの最適化ではない。
+あわせて、音声側の sample_entry の型として共通型 `SharedSampleEntry` を導入する。これは後続の issue 0027（映像の全フレーム付与）/ 0028（非 Option 化）でも使う土台であり、本 issue 単独のためだけの最適化ではない。
 
 ### 決定事項
 
-- 決定 1: 音声先行 + 型共通化。音声フレームを全フレーム付与に変えてバグを直す。共通型 `SharedSampleEntry` を導入し映像のフィールド型も揃えるが、映像の挙動（keyframe 補完）は据え置く。映像の全フレーム化・非 Option 化は別 issue（0027 / 0028）に切る（バグ修正の粒度を保つため）。
+- 決定 1: 音声先行 + 差分の最小化。音声フレームを全フレーム付与に変えてバグを直す。共通型 `SharedSampleEntry` を導入して `AudioFrame.sample_entry` の型を `Option<SharedSampleEntry>` にするが、`VideoFrame.sample_entry` は `Option<SampleEntry>`（生の型）のまま据え置く。映像のフィールド型統一・全フレーム化・非 Option 化はすべて別 issue（0027 / 0028）で行い、本 issue では映像側のコードに一切手を入れない（バグ修正の粒度を保ち、差分を最小化するため）。音声と映像でフレーム型が一時的に不揃いになるが、両者は独立したフィールドで writer の処理経路も別なので問題なく、0027 で揃う。
 - 決定 2: 変更検知 `changed_since` は `Arc::ptr_eq`（fast path）＋ `PartialEq`（別 Arc 時の実体比較 fallback）の二段とする。生成側の Arc 同一性保証に依存せず、writer が常に正確に判定できる。`shiguredo_mp4::boxes::SampleEntry` は `PartialEq` / `Eq` を実装済み（`boxes_sample_entry.rs` の derive で確認）。
 - 決定 3: `changed_since` メソッド自体は `SharedSampleEntry` に必ず実装する（後続の issue 0027 がこれを前提とするため）。一方、writer 側で「変化時のみ muxer に渡す」フィルタとして適用するかは optional とする。フィルタは correctness 要件ではなく、(a) muxer から見える entry の入力パターンを現状互換に保つ安全策、(b) muxer 側の毎フレーム `PartialEq` 比較を省く最適化、の二点が目的であり、muxer 契約（上記）よりフィルタが無くても出力は正しい。なお `received` カウンタの計上は、このフィルタ適用の有無とは独立に入口で行う（完了条件を参照）。
 - 決定 4: `SharedSampleEntry` を `Arc` で包むのは音声・映像で毎フレーム値コピーを避けるためだが、`SampleEntry` は小さい値型（enum）で値 clone のコストは実測上ほぼ誤差である（CLAUDE.md「性能差は誤差程度」「Premature Optimization is the Root of All Evil」）。よって Arc 化は性能最適化としてではなく、(a) 0027 / 0028 で全フレーム付与・非 Option 化したときに毎フレーム clone を Arc clone にして将来のコピー増を抑える布石、(b) `changed_since` の ptr_eq fast path を提供する設計、として位置づける。性能を理由に正当化しない。
@@ -71,22 +71,19 @@ impl SharedSampleEntry {
 ### 実装スコープ
 
 1. 新規 `SharedSampleEntry(Arc<SampleEntry>)`（`new` / `get` / `changed_since`）を追加する。
-2. `AudioFrame.sample_entry`（`src/audio.rs:90`）/ `VideoFrame.sample_entry`（`src/video.rs:50`）を `Option<SampleEntry>` から `Option<SharedSampleEntry>` に変更する。
-3. フィールド型変更に伴う波及を全消費箇所で吸収する。`frame.sample_entry` を読む側は `.as_ref().map(|e| e.get())` 等で `&SampleEntry` を取り出す。波及先はエンコーダ（生成側、`src/encoder/*.rs`）に加え、デコーダ（`src/decoder/{openh264,video_toolbox,fdk_aac,audio_toolbox,nvcodec}.rs`）、reader（`src/mp4/{reader,demuxer,sample_reader}.rs`、`src/sora/recording_mp4_reader.rs`）、`src/rtmp/frame.rs`、`src/rtsp/subscriber.rs`、`src/audio/converter.rs` など。洗い出しは `\.sample_entry` のフィールドアクセスだけでなく、writer が保持する `last_.*_sample_entry` というフィールド宣言・引数も grep すること（フィールド宣言は `\.sample_entry` に一致しないため取りこぼしやすい）。コンパイルを通すこと。
-4. 全エンコーダの sample_entry 生成箇所を `SharedSampleEntry::new(...)` でラップする。
-5. 音声 3 エンコーダ（`opus` / `fdk_aac` / `audio_toolbox`）の `self.sample_entry.take()` を廃止し、毎フレーム `Some(self.sample_entry.clone())`（Arc clone）を載せる。これがバグ修正の核心。
-6. 各 writer の対応（現状の補完経路が writer ごとに非対称なため、一律ではない）:
-   - `mp4/hybrid_writer.rs`: `last_audio_sample_entry` / `last_video_sample_entry`（`Option<SampleEntry>`）を `Option<SharedSampleEntry>` にする。`append_audio_to_fragment` 等の `or_else(|| self.last_*.clone())` 補完は、全フレーム付与後は届くので不要化できるが、フラグメント先頭での欠落に備え当面は残してもよい。入口取り込み（issues/0011 の hardening）はそのまま活きる。
-   - `dash/writer.rs`: 同上（`last_*_sample_entry` は `src/dash/writer.rs:256-258`）。セグメント書き出し経路から呼ばれる `fill_missing_sample_entries`（`src/dash/writer.rs:999`）への影響を確認する。
-   - `hls/writer.rs`: `last_audio_sample_entry` / `last_video_sample_entry` は 2 つの構造体に重複して宣言される（TS 用が `src/hls/writer.rs:323-325`、fMP4 セグメント跨ぎ保持用が `src/hls/writer.rs:340-342`）。両系統を `Option<SharedSampleEntry>` 化する。音声 sample_entry は muxer ではなく ADTS ヘッダ生成にも使い、`wrap_raw_aac_in_adts`（`src/hls/writer.rs:1299`）は `frame.sample_entry` ではなく保持済みの `last_audio_sample_entry` を引数に取るため、この関数のシグネチャ（`&Option<SampleEntry>` → `&Option<SharedSampleEntry>`）も直す。`fill_missing_sample_entries`（`src/hls/writer.rs:1164`）も同様。muxer 経路と ADTS 経路の両方を更新する。
-   - `mp4/writer.rs`（標準 Mp4Writer）: ここには `last_*_sample_entry` も `or_else` 補完も存在せず、`frame.sample_entry.clone()` を muxer にそのまま渡す（`src/mp4/writer.rs:788` 付近）。型変更に伴い `.get().clone()` 等へ直すだけでよい。全フレーム付与後は毎フレーム `Some` が muxer に渡るが、muxer 契約（前述）より正しく集約される。
-   - `changed_since` による「変化時のみ渡す」フィルタは決定 3 のとおり optional。導入する場合は hybrid / dash / mp4 の muxer 渡し経路に適用する。HLS の ADTS 経路はフィルタ対象外。
-7. 映像は挙動据え置き（型ラップのみ）。`last_video_sample_entry`（`src/encoder.rs:436`）の型を `Option<SharedSampleEntry>` にし、keyframe 補完（`src/encoder.rs:724-739`）の clone を Arc clone にする。挙動は変えない。
-8. テストの更新（後述の「テスト」を参照）。
+2. `AudioFrame.sample_entry`（`src/audio.rs:90`）のみを `Option<SampleEntry>` から `Option<SharedSampleEntry>` に変更する。`VideoFrame.sample_entry`（`src/video.rs:50`）は触らない（映像のフィールド型統一は issue 0027 で行う）。
+3. `AudioFrame.sample_entry` の型変更に伴う波及を、音声フレームを生成・消費・中継する箇所で吸収する。読む側は `.as_ref().map(|e| e.get())` 等で `&SampleEntry` を取り出し、生成側は `SharedSampleEntry::new(...)` でラップする。波及先は音声エンコーダ（`src/encoder/{opus,fdk_aac,audio_toolbox}.rs`）、音声デコーダ（`src/decoder/{fdk_aac,audio_toolbox}.rs`）、reader（`src/mp4/{reader,sample_reader}.rs`、`src/sora/recording_mp4_reader.rs`）、`src/rtmp/frame.rs`、`src/rtsp/subscriber.rs`、`src/srt/inbound_endpoint.rs` の音声経路。**feature gate された箇所（`fdk-aac` の `src/decoder/fdk_aac.rs` 等）はデフォルトの `cargo check` では検出されないため、`--features fdk-aac` でも必ずビルド確認すること**（CI の `test-fdk-aac` で検出される）。
+4. 音声 3 エンコーダ（`opus` / `fdk_aac` / `audio_toolbox`）の sample_entry 生成箇所を `SharedSampleEntry::new(...)` でラップし、`self.sample_entry.take()` を廃止して毎フレーム `Some(self.sample_entry.clone())`（Arc clone）を載せる。これがバグ修正の核心。
+5. 各 writer の音声経路のみを対応する（映像経路は触らない。補完経路が writer ごとに非対称なため一律ではない）:
+   - `mp4/hybrid_writer.rs`: `last_audio_sample_entry` を `Option<SharedSampleEntry>` にする（`last_video_sample_entry` は生の `Option<SampleEntry>` のまま）。`append_audio_to_fragment` の muxer 渡しでは `.get().clone()` で生の `SampleEntry` を取り出す。`or_else(|| self.last_audio_sample_entry.clone())` 補完は当面残す。
+   - `dash/writer.rs` / `hls/writer.rs`: `last_audio_sample_entry`（生の `SampleEntry`）はそのまま保持し、音声フレームの `frame.sample_entry`（`SharedSampleEntry`）を `.get()` 経由で読む。HLS は `wrap_raw_aac_in_adts` / `fill_missing_sample_entries` が保持済みの生 `last_audio_sample_entry` を使うため、これらのシグネチャは変更不要。
+   - `mp4/writer.rs`（標準 Mp4Writer）: 音声サンプルの muxer 渡し（`src/mp4/writer.rs:788` 付近）を `frame.sample_entry.as_ref().map(|e| e.get().clone())` に直す。
+   - `received_audio_sample_entry` カウンタは入口で `changed_since` が true のときだけ計上する（完了条件を参照）。
+6. テストの更新（後述の「テスト」を参照）。
 
 ### 非対象
 
-- 映像の全フレーム付与・非 Option 化（issue 0027 / 0028）。本 issue では映像の挙動を据え置き、型ラップのみ行う。
+- 映像側の sample_entry に関する一切（`VideoFrame.sample_entry` のフィールド型統一・全フレーム付与・非 Option 化、映像エンコーダ/デコーダ/writer の映像経路）。すべて issue 0027 / 0028 で行い、本 issue では映像コードに手を入れない。
 - mp4 writer 側でコーデック情報から sample_entry を合成する案（writer の責務外）。
 - PBT 基盤（proptest 依存・pbt クレート）の新設（後述。本 issue のスコープ外）。
 
@@ -94,7 +91,7 @@ impl SharedSampleEntry {
 
 CLAUDE.md のテスト役割分担に従う。ただし本リポジトリには現状 PBT 基盤が無い（`pbt/` クレート・`proptest` 依存・`prop_*.rs` がいずれも存在せず、テストは `tests/*_tests.rs` の統合テストと各モジュールの `#[cfg(test)] mod tests` のみ）。よって本 issue の検証は既存のテスト機構で行い、PBT 基盤の新設は本 issue のスコープ外とする（必要なら別 issue で扱う）。
 
-- 既存テストの更新（型変更で必ず壊れるため必須）: `src/mp4/hybrid_writer.rs` の `#[cfg(test)] mod tests` にある `make_audio_frame` / `make_video_frame` ヘルパは `Option<SampleEntry>` を直接フィールドへ代入しており、`Option<SharedSampleEntry>` 化でコンパイル不能になる。`last_*_sample_entry` と各 `assert_eq!`（`hybrid_writer_keeps_*_sample_entry_across_fragments` / `*_captures_*_sample_entry_at_ingress` / `*_counts_*` 系）も `SharedSampleEntry` 経由に直す。`tests/writer_mp4_tests.rs` / `tests/mixer_audio_tests.rs` / `tests/mixer_video_tests.rs` も `sample_entry` を参照しているため要更新。
+- 既存テストの更新（音声の型変更で壊れる箇所のみ）: `src/mp4/hybrid_writer.rs` の `#[cfg(test)] mod tests` の `make_audio_frame` ヘルパと音声側の `assert_eq!`（`last_audio_sample_entry` 比較は `.as_ref().map(|e| e.get())` 経由に直す）を更新する。`make_video_frame` と映像側の assert は据え置き。`tests/writer_mp4_tests.rs` の音声フレーム生成（`audio_data`）も `SharedSampleEntry::new(...)` でラップする。
 - 単体テスト（新規）: 音声エンコーダが「最初の出力フレームだけでなく 2 フレーム目以降にも sample_entry を載せる」不変条件を検証する。これがバグ修正の核心の回帰防止。現状 `src/encoder/*.rs` には `#[cfg(test)] mod tests` が無いため、CLAUDE.md の命名規約（`tests/test_<module>.rs`）に従い `tests/test_encoder_opus.rs` 等を新設する。Opus は常時利用可能なので最低限 Opus で検証する。FDK-AAC（`fdk-aac` feature）と AudioToolbox（プラットフォーム依存）は feature / ターゲット有効時のみ走るよう `#[cfg(...)]` でガードする（無効時に検証できない点は許容する）。
 - 単体テスト（新規）: `SharedSampleEntry::changed_since` の分岐（prev=None で true、同一 Arc で false、別 Arc・実体同値で false、別 Arc・実体相違で true）を検証する。
 - 統合 / e2e: 下記「完了条件」の CI 反復で finalize 失敗の非再発を確認する。
@@ -115,3 +112,16 @@ CLAUDE.md のテスト役割分担に従う。ただし本リポジトリには�
 - issues/0008（先行する flaky テストの issue。発生率 3% の出典。closed）
 - issue 0027（映像側の sample_entry を `SharedSampleEntry` で全フレーム付与に統一するリファクタリング。本 issue 完了後に着手する）
 - issue 0028（音声・映像の sample_entry フィールドを非 Option 化するリファクタリング。0017・0027 完了後に着手する）
+
+## 解決方法
+
+音声エンコーダが sample_entry を最初の出力フレームにしか載せない（`self.sample_entry.take()`）構造が、録画 writer の取りこぼし時に sample_entry が一度も届かず finalize に失敗する真因だった。これを「全出力フレームに載せる」方式へ変えてレースのカテゴリ自体を消した。
+
+- 共通型 `SharedSampleEntry(Arc<SampleEntry>)`（`new` / `get` / `changed_since`）を `src/sample_entry.rs` に新設した。`Arc` 共有でフレーム間の受け渡し・writer での前回値保持を安価にし、変化検知を `Arc::ptr_eq` で短絡する。
+- `AudioFrame.sample_entry` を `Option<SampleEntry>` から `Option<SharedSampleEntry>` に変更した。差分最小化のため `VideoFrame` には手を入れず、映像の型統一・全フレーム付与は issue 0027 に切り出した。
+- 音声 3 エンコーダ（`opus` / `fdk_aac` / `audio_toolbox`）の `self.sample_entry.take()` を廃止し、毎フレーム `Some(self.sample_entry.clone())`（Arc clone）を載せるようにした。これがバグ修正の核心。
+- 型変更の波及を音声デコーダ・各 reader・`rtmp` / `rtsp` / `srt` の音声経路で吸収した。各 writer（`hls` / `dash` / `mp4` / `mp4/hybrid`）は音声経路のみ更新し、muxer へ渡す箇所で `.get().clone()` により生の `SampleEntry` を取り出す。
+- hybrid writer の `received_audio_sample_entry` カウンタを「入口で `changed_since` が true（前回から変化）のときだけ計上」に変えた。全フレーム付与後も指標が「entry の確定・変化回数」を表すようにするため。
+- テスト: `SharedSampleEntry::changed_since` の単体テスト、Opus エンコーダが全出力フレームに sample_entry を載せる不変条件のテスト（`tests/test_encoder_opus.rs`）、received カウンタの結線検証と finalize 後の音声読み戻し検証を hybrid writer に追加した。
+
+なお完了条件にあった「100 回 CI 反復による再現検証」は実施せずにマージする判断とした（本修正はいずれにせよ入れるべきもので、万一再発した場合は別途対処する）。`CHANGES.md` への `[FIX]` エントリは未リリース部分の修正のため追記しない判断とした。

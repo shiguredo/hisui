@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::codec_string::CodecResolutionState;
+use crate::sample_entry::SharedSampleEntry;
 
 use crate::obsws::coordinator::output_registry::HlsSegmentFormat;
 
@@ -319,10 +320,10 @@ struct MpegTsState {
     pmt_cc: ContinuityCounter,
     video_cc: ContinuityCounter,
     audio_cc: ContinuityCounter,
-    /// 最後に受信したビデオの sample_entry（SPS/PPS 注入用）
+    /// 最後に受信したビデオの sample_entry（SPS/PPS 注入用。型は issue 0027 で音声と統一予定）
     last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
     /// 最後に受信したオーディオの sample_entry（ADTS ヘッダ生成用）
-    last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    last_audio_sample_entry: Option<SharedSampleEntry>,
 }
 
 /// fMP4 フォーマット固有の状態
@@ -336,10 +337,10 @@ struct Fmp4State {
     last_video_timestamp: Option<Duration>,
     /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
     last_audio_timestamp: Option<Duration>,
-    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持）
+    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持。型は issue 0027 で音声と統一予定）
     last_video_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
     /// 最後に受信したオーディオの sample_entry（セグメント跨ぎで保持）
-    last_audio_sample_entry: Option<shiguredo_mp4::boxes::SampleEntry>,
+    last_audio_sample_entry: Option<SharedSampleEntry>,
 }
 
 #[derive(Debug)]
@@ -632,7 +633,8 @@ impl HlsWriter {
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
         // 最初の video keyframe より前に audio が流れ始めることがある。
-        // その場合でも、初回だけ付与される sample_entry は保持しておかないと、
+        // 入力経路によっては sample_entry が初回フレームにしか載らないため、
+        // 受け取った sample_entry を保持しておかないと、
         // セグメント開始後の AAC フレーム群から codec 情報が失われる。
 
         // SampleEntry から正確な codec string を確定する
@@ -642,22 +644,18 @@ impl HlsWriter {
                 CodecResolutionState::AudioOnly(_) | CodecResolutionState::Resolved(_)
             )
             && let Some(codec_str) =
-                crate::codec_string::audio_codec_string_from_sample_entry(entry)
+                crate::codec_string::audio_codec_string_from_sample_entry(entry.get())
         {
             self.resolve_audio_codec(codec_str);
         }
 
-        if frame.sample_entry.is_some() {
+        if let Some(entry) = &frame.sample_entry {
             match &mut self.format_state {
                 FormatState::MpegTs(state) => {
-                    state
-                        .last_audio_sample_entry
-                        .clone_from(&frame.sample_entry);
+                    state.last_audio_sample_entry = Some(entry.clone());
                 }
                 FormatState::Fmp4(state) => {
-                    state
-                        .last_audio_sample_entry
-                        .clone_from(&frame.sample_entry);
+                    state.last_audio_sample_entry = Some(entry.clone());
                 }
             }
         }
@@ -669,7 +667,10 @@ impl HlsWriter {
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 // raw AAC → ADTS 変換
-                let adts_data = wrap_raw_aac_in_adts(&frame.data, &state.last_audio_sample_entry)?;
+                let adts_data = wrap_raw_aac_in_adts(
+                    &frame.data,
+                    state.last_audio_sample_entry.as_ref().map(|e| e.get()),
+                )?;
                 let pts = duration_to_timestamp(frame.timestamp)?;
                 write_pes_packets_mpegts(
                     state,
@@ -696,8 +697,9 @@ impl HlsWriter {
                 state.current_payload.extend_from_slice(&frame.data);
                 let sample_entry = frame
                     .sample_entry
-                    .clone()
-                    .or_else(|| state.last_audio_sample_entry.clone());
+                    .as_ref()
+                    .or(state.last_audio_sample_entry.as_ref())
+                    .map(|e| e.get().clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Audio,
                     sample_entry,
@@ -775,7 +777,11 @@ impl HlsWriter {
                 fill_missing_sample_entries(
                     &mut state.current_samples,
                     &state.last_video_sample_entry,
-                    &state.last_audio_sample_entry,
+                    // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
+                    &state
+                        .last_audio_sample_entry
+                        .as_ref()
+                        .map(|e| e.get().clone()),
                 );
 
                 // 末尾サンプルの duration を補完する。
@@ -1298,7 +1304,7 @@ fn convert_length_prefixed_to_annexb(
 /// SampleEntry から AudioSpecificConfig を取得し、ADTS ヘッダを構築する。
 fn wrap_raw_aac_in_adts(
     data: &[u8],
-    sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
+    sample_entry: Option<&shiguredo_mp4::boxes::SampleEntry>,
 ) -> crate::Result<Vec<u8>> {
     // SampleEntry から audio_object_type, sampling_frequency_index, channel_configuration を取得
     let (audio_object_type, sampling_frequency_index, channel_configuration) =
@@ -1333,7 +1339,7 @@ fn wrap_raw_aac_in_adts(
 
 /// SampleEntry から AAC の設定情報を抽出する
 fn extract_aac_config(
-    sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
+    sample_entry: Option<&shiguredo_mp4::boxes::SampleEntry>,
 ) -> crate::Result<(u8, u8, u8)> {
     let Some(shiguredo_mp4::boxes::SampleEntry::Mp4a(mp4a)) = sample_entry else {
         // SampleEntry が無い場合のフォールバック: AAC-LC, 48kHz, stereo

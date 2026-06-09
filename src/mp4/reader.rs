@@ -17,6 +17,7 @@ use super::demuxer::{
 };
 use super::file_kind::detect_mp4_file_kind;
 use crate::audio::{AudioFormat, Channels, SampleRate};
+use crate::sample_entry::SharedSampleEntry;
 use crate::video::{VideoFormat, VideoFrameSize};
 use crate::{Ack, AudioFrame, Error, ProcessorHandle, Result, TrackId, TrackPublisher, VideoFrame};
 
@@ -1092,7 +1093,7 @@ impl Mp4FileReader {
                     channels: state.audio_channels,
                     sample_rate: state.audio_sample_rate,
                     timestamp: Duration::ZERO,
-                    sample_entry: context.sample_entry,
+                    sample_entry: context.sample_entry.map(SharedSampleEntry::new),
                 };
                 decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
                     std::sync::Arc::new(frame),
@@ -1124,7 +1125,7 @@ impl Mp4FileReader {
             channels: state.audio_channels,
             sample_rate: state.audio_sample_rate,
             timestamp: output_timestamp,
-            sample_entry: context.sample_entry,
+            sample_entry: context.sample_entry.map(SharedSampleEntry::new),
         };
 
         if let Some(sender) = self.audio_sender.as_mut() {
