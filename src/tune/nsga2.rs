@@ -4,20 +4,25 @@ use crate::tune::json_value::{JsonNumber, JsonObjectMemberPath, JsonValue};
 use crate::tune::rng;
 use crate::tune::{ParameterDistribution, SearchSpace, TrialValues};
 
-// NSGA-II (Deb et al., 2002) の自前実装
+// NSGA-II (Deb et al., 2002 "A Fast and Elitist Multiobjective Genetic Algorithm: NSGA-II") の自前実装
 //
 // hisui が使うのは 2 目的 (合成時間 minimize / VMAF 平均 maximize) の多目的最適化のみ。
+// 非劣ソート・混雑度距離・混雑度比較・遺伝演算子は論文に従う。一方、論文の世代交代
+// (R_t = P_t ∪ Q_t から生存選択する) は採らず、累積した全成功個体を母集団とする方式に
+// 簡略化している (select_parents / generate_child 参照)。
 
-/// 集団サイズ
+// 以下のハイパーパラメータは論文の real-coded NSGA-II 実験で使われた値に合わせている。
+
+/// 集団サイズ (optuna 既定に合わせた値。論文の実験では 100 を使用)
 pub const POPULATION_SIZE: usize = 50;
 
-/// 交叉確率
+/// 交叉確率 (論文の p_c)
 const CROSSOVER_PROB: f64 = 0.9;
 
-/// SBX の分布指数
+/// SBX の分布指数 (論文の eta_c)
 const SBX_ETA: f64 = 20.0;
 
-/// polynomial mutation の分布指数
+/// polynomial mutation の分布指数 (論文の eta_m)
 const MUTATION_ETA: f64 = 20.0;
 
 /// NSGA-II が扱う 1 個体 (パラメータと、最小化方向に揃えた目的値)
@@ -49,12 +54,15 @@ pub fn dominates(a: &[f64; 2], b: &[f64; 2]) -> bool {
 
 /// 非劣ソートを行い、各点のフロント番号 (rank) を返す
 ///
-/// rank 0 が最良フロント (どの点にも支配されない)。返り値は入力と同じ順序の rank 配列。
+/// 論文の fast-non-dominated-sort に相当する。各点について「自分を支配する点の数」(論文の
+/// n_p) と「自分が支配する点の集合」(論文の S_p) を求め、n_p == 0 の点を最良フロントとして
+/// 順に剥がしていく。rank 0 が最良フロント (論文は第 1 フロントを rank 1 とするが 0 始まりにする)。
+/// 返り値は入力と同じ順序の rank 配列。
 pub fn non_dominated_sort(points: &[[f64; 2]]) -> Vec<usize> {
     let n = points.len();
     let mut rank = vec![0usize; n];
 
-    // 各点について「自分を支配する点の数」と「自分が支配する点の集合」を求める
+    // domination_count が論文の n_p、dominated_set が論文の S_p
     let mut domination_count = vec![0usize; n];
     let mut dominated_set: Vec<Vec<usize>> = vec![Vec::new(); n];
     let mut current_front: Vec<usize> = Vec::new();
@@ -98,8 +106,9 @@ pub fn non_dominated_sort(points: &[[f64; 2]]) -> Vec<usize> {
 
 /// 1 つのフロント内の各点の混雑度距離を返す
 ///
-/// 各目的軸を min-max 正規化したうえで距離を計算する (2 目的のスケール差の影響を排除する)。
-/// 各目的軸での端点 (最小・最大) の距離は無限大とする。
+/// 論文の crowding-distance-assignment に相当する。各目的軸をそのフロント内の min-max
+/// (論文の f_m^max / f_m^min) で正規化したうえで隣接点の距離を加算する (2 目的のスケール差の
+/// 影響を排除する)。各目的軸での端点 (最小・最大) の距離は無限大とする。
 pub fn crowding_distance(front: &[[f64; 2]]) -> Vec<f64> {
     let n = front.len();
     let mut distance = vec![0.0f64; n];
@@ -190,6 +199,7 @@ fn select_parents(individuals: &[Individual]) -> Vec<Individual> {
 
 /// binary トーナメント選択で 1 個体のインデックスを選ぶ
 ///
+/// 比較は論文の crowded-comparison operator に従う:
 /// rank が小さい方を優先し、同 rank なら混雑度距離が大きい方を優先する。
 fn tournament_select(ranks: &[usize], distances: &[f64]) -> crate::Result<usize> {
     let n = ranks.len();
@@ -285,7 +295,7 @@ pub fn generate_child(
         p1.params.clone()
     };
 
-    // 突然変異 (各パラメータを確率 1 / パラメータ数 で変異させる)
+    // 突然変異 (各パラメータを確率 1 / パラメータ数 で変異させる。論文の p_m = 1/n に相当)
     let mutation_prob = if search_space.params.is_empty() {
         0.0
     } else {
