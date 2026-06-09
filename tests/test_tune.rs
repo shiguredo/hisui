@@ -84,11 +84,11 @@ fn stale_lock_is_reclaimed() {
 }
 
 #[test]
-fn malformed_lines_are_skipped() {
+fn truncated_last_line_is_skipped() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
     let jsonl_path = dir.path().join("test.jsonl");
 
-    // 正常な 1 行 + 異常終了で途中まで書かれた壊れた行、というファイルを用意する
+    // 正常な 1 行 + 異常終了で途中まで書かれた最終行、というファイルを用意する
     let record = sample_record(
         0,
         TrialResult::Complete(TrialValues {
@@ -100,12 +100,48 @@ fn malformed_lines_are_skipped() {
         &jsonl_path,
         format!("{}\n{{ \"trial_number\": 1, \"par", nojson::Json(&record)),
     )
-    .expect("壊れた行を含むファイルを書ける");
+    .expect("途中切れの最終行を含むファイルを書ける");
 
-    // 壊れた行はスキップされ、正常な 1 件だけが読み込まれる
+    // 追記中の異常終了で途中切れになった最終行はスキップされ、正常な 1 件だけが読み込まれる
     let loaded = storage::load_trials(&jsonl_path).expect("読み込みは成功する");
-    assert_eq!(loaded.len(), 1, "壊れた行はスキップされること");
+    assert_eq!(loaded.len(), 1, "途中切れの最終行はスキップされること");
     assert_eq!(loaded[0], record);
+}
+
+#[test]
+fn malformed_middle_line_is_an_error() {
+    let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
+    let jsonl_path = dir.path().join("test.jsonl");
+
+    // 履歴ファイルは追記専用なので、中間行が壊れるのは正常系では起こらない (外部編集や FS 破損)。
+    // 正常な行・壊れた中間行・正常な最終行、という並びを用意する。
+    let record0 = sample_record(
+        0,
+        TrialResult::Complete(TrialValues {
+            elapsed_seconds: 1.0,
+            vmaf_mean: 90.0,
+        }),
+    );
+    let record2 = sample_record(
+        2,
+        TrialResult::Complete(TrialValues {
+            elapsed_seconds: 2.0,
+            vmaf_mean: 80.0,
+        }),
+    );
+    std::fs::write(
+        &jsonl_path,
+        format!(
+            "{}\n{{ \"trial_number\": 1, broken\n{}\n",
+            nojson::Json(&record0),
+            nojson::Json(&record2)
+        ),
+    )
+    .expect("中間行が壊れたファイルを書ける");
+
+    // 中間行の破損は「読めるところまで」で誤魔化さず、エラーになる
+    let result = storage::load_trials(&jsonl_path);
+    assert!(result.is_err(), "中間行が壊れている場合はエラーになること");
 }
 
 #[test]

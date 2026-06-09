@@ -88,8 +88,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for TrialRecord {
 /// JSON Lines ファイルを読み込み、保存済みの試行レコードを返す
 ///
 /// ファイルが存在しない場合は空の `Vec` を返す。
-/// 異常終了で最終行が途中で切れているケースに備え、パースに失敗した行は警告を出して
-/// スキップする (読めるところまで再開する)。
+/// 履歴ファイルは追記専用なので、途中で切れ得るのは最終行 (最後の追記中の異常終了) だけである。
+/// そのため最終の非空行の破損だけは警告を出してスキップし (読めるところまで再開する)、それ以外の
+/// 中間行の破損は外部編集や FS 破損などの異常とみなしてエラーにする (データ欠損を黙認しない)。
 pub fn load_trials(path: &Path) -> crate::Result<Vec<TrialRecord>> {
     let content = match std::fs::read_to_string(path) {
         Ok(content) => content,
@@ -102,6 +103,14 @@ pub fn load_trials(path: &Path) -> crate::Result<Vec<TrialRecord>> {
         }
     };
 
+    // 追記中の異常終了で途中切れになり得るのは最終の非空行だけ。この行の破損だけを許容する。
+    let last_nonempty_index = content
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(index, _)| index)
+        .last();
+
     let mut trials = Vec::new();
     for (line_index, line) in content.lines().enumerate() {
         if line.trim().is_empty() {
@@ -112,7 +121,17 @@ pub fn load_trials(path: &Path) -> crate::Result<Vec<TrialRecord>> {
         match line.parse::<nojson::Json<TrialRecord>>() {
             Ok(json) => trials.push(json.0),
             Err(e) => {
-                tracing::warn!("skip malformed trial line at line {}: {e}", line_index + 1);
+                if Some(line_index) == last_nonempty_index {
+                    // 最終行の途中切れ (追記中の異常終了) は正常系として読めるところまでで再開する
+                    tracing::warn!("skip truncated last trial line {}: {e}", line_index + 1);
+                } else {
+                    // 追記専用ファイルで中間行が壊れているのは異常 (外部編集・FS 破損など)
+                    return Err(crate::Error::new(format!(
+                        "malformed trial line at line {} (not the last line) in {}: {e}",
+                        line_index + 1,
+                        path.display()
+                    )));
+                }
             }
         }
     }
