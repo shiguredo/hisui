@@ -768,12 +768,11 @@ impl HlsWriter {
                 }
 
                 // muxer は各トラックの最初の sample に sample_entry があることを要求する。
-                // エンコーダーは sample_entry を最初のフレームにしか付けないため、
-                // セグメント開始直後のタイミング次第では current_samples 側で欠落し得る。
-                // ここで最後に観測した sample_entry から補完しておく。
+                // セグメント開始直後のフレームに sample_entry が欠落している場合に備えて、
+                // 最後に観測した sample_entry から補完しておく。
+                // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
                 fill_missing_sample_entries(
                     &mut state.current_samples,
-                    // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
                     &state
                         .last_video_sample_entry
                         .as_ref()
