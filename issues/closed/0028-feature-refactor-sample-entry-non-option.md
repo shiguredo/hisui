@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-08
-- Completed:
+- Completed: 2026-06-09
 - Model: Claude Opus 4.8
 - Branch:
 - Polished:
@@ -44,3 +44,14 @@ Low。機能的なバグ修正ではなく、型の最終形を整える仕上�
 
 - issue 0017（音声側の全フレーム付与と共通型導入。間接的な前提）
 - issue 0027（直接の前提。映像の全フレーム付与統一。本 issue は 0027 完了後に着手する）
+
+## クローズ理由（2026-06-09・実装せず close）
+
+本 issue の核心的前提「0017・0027 完了後は `AudioFrame.sample_entry` / `VideoFrame.sample_entry` が常に `Some` になり `None` が消える」は誤りだったため、実装せず close する。
+
+- `AudioFrame`（`src/audio.rs`）/ `VideoFrame`（`src/video.rs`）は、デコード → ミックス → エンコード → muxer のパイプライン全体で共有される単一型である（エンコーダのシグネチャは `fn encode(&mut self, frame: &AudioFrame) -> Result<AudioFrame>`。`src/encoder/opus.rs` 参照）。sample_entry はエンコーダ出力フレームでのみ意味を持つ。
+- 生データ・デコーダ出力・ミキサ出力など、sample_entry が意味を持たないフレームの構築サイトが 30 箇所超あり（`src/decoder/*.rs`、`src/mixer/*.rs`、`src/obsws/source/*.rs`、`src/webm/reader.rs`、`src/video.rs` の生データ構築など。コメント「生データにはサンプルエントリは存在しない」）、これらは 0017・0027 完了後も `None` のまま正しい。よって sample_entry フィールドが `None` になる状態は構造的に消えない。
+- フィールドを非 Option にするには「生フレーム型（sample_entry 無し）」と「エンコード済みフレーム型（非 Option）」をパイプライン全体で型分割する大改修が必要になる。得られる便益（writer の `Option` 分岐・`or_else` 補完の除去）に対して改修規模が著しく不釣り合いで、CLAUDE.md「Premature Optimization is the Root of All Evil」にも反する。
+- なお 0027 の磨き上げ時点で「生データ由来の `VideoFrame` は `None` のまま正しい」ことは把握しており、その事実が本 issue の前提を覆した。
+
+将来どうしても非 Option 化したくなった場合は、本 issue ではなく「`RawFrame` / `EncodedFrame` の型分割」を主目的とする別 issue として、優先度と波及範囲を見直したうえで起票し直すこと。
