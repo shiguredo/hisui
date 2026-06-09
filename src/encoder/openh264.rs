@@ -113,3 +113,137 @@ impl Openh264Encoder {
         self.force_idr_pending = true;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::types::{CodecName, EvenUsize};
+    use crate::video::{FrameRate, VideoFrameSize};
+
+    // openh264 ライブラリを環境変数 OPENH264_PATH からロードする。
+    // 未設定の場合は None を返す（テストスキップ）。
+    fn load_openh264_lib() -> Option<shiguredo_openh264::Openh264Library> {
+        let path = std::env::var("OPENH264_PATH").ok()?;
+        Some(
+            shiguredo_openh264::Openh264Library::load(path)
+                .expect("openh264 ライブラリのロードに失敗した"),
+        )
+    }
+
+    fn options() -> VideoEncoderOptions {
+        VideoEncoderOptions {
+            codec: CodecName::H264,
+            engines: None,
+            bitrate: 500_000,
+            width: EvenUsize::truncating_new(64),
+            height: EvenUsize::truncating_new(64),
+            frame_rate: FrameRate {
+                numerator: NonZeroUsize::MIN.saturating_add(29),
+                denumerator: NonZeroUsize::MIN,
+            },
+            encode_params: crate::encoder::default_video_encode_config_for_rpc(),
+        }
+    }
+
+    // 64x64 の I420 グレーフレームを作る。
+    fn raw_i420_frame(ts_ms: u64) -> RawVideoFrame {
+        let (width, height) = (64usize, 64usize);
+        let y_size = width * height;
+        let uv_size = (width / 2) * (height / 2);
+        let data: Vec<u8> = std::iter::repeat_n(16u8, y_size)
+            .chain(std::iter::repeat_n(128u8, uv_size * 2))
+            .collect();
+        let frame = VideoFrame {
+            data,
+            format: VideoFormat::I420,
+            keyframe: true,
+            size: Some(VideoFrameSize { width, height }),
+            timestamp: std::time::Duration::from_millis(ts_ms),
+            sample_entry: None,
+        };
+        RawVideoFrame::from_i420_video_frame(Arc::new(frame)).expect("有効な I420 フレームのはず")
+    }
+
+    // 全出力フレームに sample_entry が載る不変条件を検証する（issue 0027 の核心）。
+    // openh264 は最初の出力フレームに SPS/PPS が含まれ、以降は last_sample_entry を
+    // 全フレームに伝播させる。2 フレーム目以降でも Some になることを確認する。
+    fn assert_every_output_frame_has_sample_entry(
+        mut encoder: Openh264Encoder,
+    ) -> crate::Result<()> {
+        let mut output_count = 0;
+        for i in 0..10u64 {
+            encoder.encode(raw_i420_frame(i * 33))?;
+            while let Some(frame) = encoder.next_encoded_frame() {
+                assert!(
+                    frame.sample_entry.is_some(),
+                    "出力フレームに sample_entry が載っていない（フレーム番号: {output_count}）"
+                );
+                output_count += 1;
+            }
+        }
+        encoder.finish()?;
+        while let Some(frame) = encoder.next_encoded_frame() {
+            assert!(
+                frame.sample_entry.is_some(),
+                "finish 後の出力フレームに sample_entry が載っていない"
+            );
+            output_count += 1;
+        }
+        // 全フレーム付与を確認するには 2 フレーム以上の出力が必要。
+        assert!(
+            output_count >= 2,
+            "出力フレーム数が少なすぎる（確認には 2 フレーム以上必要）: {output_count}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn openh264_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
+        // OPENH264_PATH が未設定の環境ではスキップする。
+        let Some(lib) = load_openh264_lib() else {
+            eprintln!("OPENH264_PATH が未設定のためスキップ");
+            return Ok(());
+        };
+        assert_every_output_frame_has_sample_entry(Openh264Encoder::new(lib, &options())?)
+    }
+
+    #[test]
+    fn openh264_sets_sample_entry_after_keyframe_request() -> crate::Result<()> {
+        // OPENH264_PATH が未設定の環境ではスキップする。
+        let Some(lib) = load_openh264_lib() else {
+            eprintln!("OPENH264_PATH が未設定のためスキップ");
+            return Ok(());
+        };
+        let mut encoder = Openh264Encoder::new(lib, &options())?;
+
+        // 数フレームエンコードして初期状態を確定させる。
+        for i in 0..3u64 {
+            encoder.encode(raw_i420_frame(i * 33))?;
+            while let Some(frame) = encoder.next_encoded_frame() {
+                assert!(
+                    frame.sample_entry.is_some(),
+                    "初期フレームに sample_entry が載っていない"
+                );
+            }
+        }
+
+        // keyframe 要求後のフレームにも sample_entry が載ることを確認する。
+        // openh264 は keyframe 要求時に SPS/PPS を再送し last_sample_entry を更新するため、
+        // 更新された entry が以降の全フレームに正しく伝播されることが重要。
+        encoder.request_keyframe();
+        for i in 3..8u64 {
+            encoder.encode(raw_i420_frame(i * 33))?;
+            while let Some(frame) = encoder.next_encoded_frame() {
+                assert!(
+                    frame.sample_entry.is_some(),
+                    "keyframe 要求後のフレームに sample_entry が載っていない"
+                );
+            }
+        }
+
+        Ok(())
+    }
+}
