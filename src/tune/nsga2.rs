@@ -161,9 +161,11 @@ pub fn crowding_distance(front: &[[f64; 2]]) -> Vec<f64> {
 /// 累積した成功個体から親世代 (上位 `POPULATION_SIZE` 個) を選抜する
 ///
 /// 非劣ソートでフロントに分け、混雑度距離も加味して上位を選ぶ。
-/// これまでの全成功個体を母集団とすることで、見つかった大域最良が淘汰されず常に親候補に残る。
-/// これは累積アーカイブによる最良解の保持であり、論文の P_t ∪ Q_t 生存選択 (elitism) とは
-/// 機構が異なる (issue 0010 参照)。
+/// これまでの全成功個体をアーカイブとして母集団に使うので、見つかったパレート最適解は
+/// 結果 (best_trials) から失われない。集団を N 個に保つ論文の生存選択 (P_t ∪ Q_t, elitism)
+/// とはこの点で機構が異なる。フロントが POPULATION_SIZE を超える場合の混雑度距離による間引き
+/// は標準 NSGA-II と同じで、フロント内部の解は親から外れうる (各目的の端点は必ず残る)。
+/// issue 0010 参照。
 fn select_parents(individuals: &[Individual]) -> Vec<Individual> {
     if individuals.len() <= POPULATION_SIZE {
         return individuals.to_vec();
