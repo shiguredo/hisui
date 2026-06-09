@@ -567,4 +567,28 @@ mod tests {
             "下位フロントの端点 (第 1 目的が最大) は残ること"
         );
     }
+
+    // NumericRange::finalize は整数レンジでは範囲内にクランプして最近接へ丸め、Integer を返す
+    #[test]
+    fn numeric_range_finalize_rounds_and_clamps_integer() {
+        let range = NumericRange::new(&JsonNumber::Integer(0), &JsonNumber::Integer(10));
+        // 範囲内の小数は最近接整数へ丸める (round は 0.5 を 0 から遠い側へ丸める)
+        assert_eq!(range.finalize(3.4), JsonValue::Integer(3));
+        assert_eq!(range.finalize(3.6), JsonValue::Integer(4));
+        assert_eq!(range.finalize(2.5), JsonValue::Integer(3));
+        // 範囲外は端点へクランプしてから丸める
+        assert_eq!(range.finalize(-5.0), JsonValue::Integer(0));
+        assert_eq!(range.finalize(100.0), JsonValue::Integer(10));
+    }
+
+    // 浮動小数レンジでは丸めず、範囲内にクランプして Float を返す
+    #[test]
+    fn numeric_range_finalize_clamps_float_without_rounding() {
+        let range = NumericRange::new(&JsonNumber::Float(0.0), &JsonNumber::Float(1.0));
+        // 範囲内はそのまま返す
+        assert_eq!(range.finalize(0.25), JsonValue::Float(0.25));
+        // 範囲外は端点へクランプする
+        assert_eq!(range.finalize(-1.0), JsonValue::Float(0.0));
+        assert_eq!(range.finalize(2.0), JsonValue::Float(1.0));
+    }
 }

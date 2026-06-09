@@ -30,4 +30,18 @@ proptest! {
         let v = rng::gen_index(len).expect("乱数生成は成功する");
         prop_assert!(v < len, "len={len} に対し index={v} が範囲外");
     }
+
+    // gen_bool(0.0) は常に false。gen_unit_f64() は [0.0, 1.0) で 0.0 を下回らないため、
+    // 「乱数 < 0.0」が成立することはない。
+    #[test]
+    fn gen_bool_zero_is_always_false(_seed in any::<u64>()) {
+        prop_assert!(!rng::gen_bool(0.0).expect("乱数生成は成功する"), "gen_bool(0.0) は false のみ");
+    }
+
+    // gen_bool(1.0) は常に true。gen_unit_f64() は [0.0, 1.0) で必ず 1.0 を下回るため、
+    // 「乱数 < 1.0」が常に成立する。
+    #[test]
+    fn gen_bool_one_is_always_true(_seed in any::<u64>()) {
+        prop_assert!(rng::gen_bool(1.0).expect("乱数生成は成功する"), "gen_bool(1.0) は true のみ");
+    }
 }
