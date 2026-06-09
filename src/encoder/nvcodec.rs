@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
 
-use shiguredo_mp4::boxes::SampleEntry;
-
 use crate::{
     encoder::VideoEncoderOptions,
     sample_entry::SharedSampleEntry,
