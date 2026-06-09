@@ -1324,10 +1324,15 @@ mod tests {
         // BufWriter を flush するために writer を drop してからファイルを読み戻す。
         drop(writer);
 
-        // finalize 済みの標準 MP4 として音声トラックを読み戻し、書き込んだサンプル数と一致することを確認する。
+        // finalize 済みの標準 MP4 として音声トラックを読み戻し、サンプル数だけでなく
+        // 中身（コーデックと書き込んだデータ）も一致することを確認する。
         let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
         let read_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(read_samples.len(), audio_frame_count);
+        for sample in &read_samples {
+            assert_eq!(sample.format, AudioFormat::Aac);
+            assert_eq!(sample.data, vec![0x11, 0x22, 0x33]);
+        }
         Ok(())
     }
 
