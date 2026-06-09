@@ -61,7 +61,7 @@ Options:
   -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します [default: HISUI_REPO/layout-examples/tune-libvpx-vp9.jsonc]
   -s, --search-space-file <PATH> 探索空間定義ファイル（JSON）のパスを指定します [default: HISUI_REPO/search-space-examples/full.jsonc]
       --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: ROOT_DIR/hisui-tune/]
-      --study-name <NAME>        チューニングの study 名を指定します [default: hisui-tune]
+      --name <NAME>              探索履歴の保存に使う名前を指定します（名前ごとに履歴が分かれます） [default: hisui-tune]
   -n, --trial-count <INTEGER>    目標とする合計試行回数を指定します（既存の履歴を含む） [default: 100]
   -t, --trial-timeout <SECONDS>  各試行トライアルのタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）
       --openh264 <PATH>          OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
@@ -73,19 +73,20 @@ Options:
 
 ### 最適化の流れ
 
-最適化は、以下のような流れとなります:
+`hisui tune` は、内部の NSGA-II（多目的最適化アルゴリズム）を使って、以下の流れを繰り返します:
+
 1. ユーザーがパラメーターの探索空間を指定する
-   - `hisui tune` コマンドの `--layout-file` および `--search-space-file` の指定がこれに該当
-2. NSGA-II は、探索空間の中から次に探索するパラメーターセットをサンプリングする
-   - 集団サイズ（既定 50）に満たない初期段階では一様ランダムにサンプリングし、それ以降は過去の成功試行を母集団として交叉・突然変異で新しいパラメーターセットを生成する
-3. Hisui はサンプリングされたパラメーターセットを `hisui vmaf` コマンドを使って評価する
-   - 「パラメーターセットのサンプリングと評価」をまとめたものを「トライアル」と呼称
-4. Hisui は評価結果を探索履歴に反映する
-   - 探索履歴は作業ディレクトリ内の JSON Lines ファイル（`<study_name>.jsonl`）に 1 トライアル 1 行で追記される
+   - `--layout-file` および `--search-space-file` の指定がこれに該当
+2. 探索空間の中から、次に試すパラメーターセットを決める
+   - 過去の成功試行が集団サイズ（既定 50）に満たない初期段階では一様ランダムに選び、それ以降は過去の成功試行をもとに交叉・突然変異で新しいパラメーターセットを生成する
+3. そのパラメーターセットを `hisui vmaf` コマンドで評価する
+   - 「パラメーターセットの決定と評価」をまとめたものを「トライアル」と呼称
+4. 評価結果を探索履歴に記録し、次のトライアルの参考にする
+   - 探索履歴は作業ディレクトリ内の JSON Lines ファイル（`<name>.jsonl`）に 1 トライアル 1 行で追記される
 5. 2 に戻って、次のトライアルを開始する
    - これを `--trial-count` で指定した合計到達回数になるまで繰り返す
 
-なおこの一連の流れは `hisui tune` によってラップされているため、ユーザーが細かく意識する必要はありません。
+これらはすべて `hisui tune` が自動で行うため、利用者が中の動きを細かく意識する必要はありません。
 
 ### 最適化メトリクス
 
@@ -115,7 +116,7 @@ layout file to tune:    DEFAULT
 search space file:      DEFAULT
 tune working dir:       /path/to/archive/RECORDING_ID/hisui-tune/
 trials file:    /path/to/archive/RECORDING_ID/hisui-tune/hisui-tune.jsonl
-study name:     hisui-tune
+name:     hisui-tune
 target total trials:    100
 tuning metrics: [Execution Time (minimize), VMAF Score Mean (maximize)]
 tuning parameters (7):
@@ -127,7 +128,7 @@ tuning parameters (7):
   video_toolbox_h265_encode_params.real_time:    [true,false]
   video_toolbox_h265_encode_params.use_parallelization:  [true,false]
 
-====== OPEN STUDY ======
+====== OPEN HISTORY ======
 existing trials:         0
 remaining trials:        100
 
@@ -185,7 +186,7 @@ Trial #0
 もし、この `hisui compose` の実行結果が期待通りのものであれば、このトライアルのレイアウトファイルを、
 実際の運用で使うものとして採用することができます。
 
-なお、探索履歴は作業ディレクトリ内の JSON Lines ファイル（`<study_name>.jsonl`）に保存されるため、
+なお、探索履歴は作業ディレクトリ内の JSON Lines ファイル（`<name>.jsonl`）に保存されるため、
 必要に応じて自分で解析・可視化することもできます。
 
 ## 探索用のレイアウトファイル
@@ -340,8 +341,8 @@ Trial #0
 
 ### 以前の探索の続きから再開したい場合
 
-`ROOT_DIR` 引数や `--study-name` オプションの値を変えずに `hisui tune` コマンド
-を実行した場合は、作業ディレクトリ内の JSON Lines ファイル（`<study_name>.jsonl`）を読み込んで、自動で前回の続きから探索が再開されます。
+`ROOT_DIR` 引数や `--name` オプションの値を変えずに `hisui tune` コマンド
+を実行した場合は、作業ディレクトリ内の JSON Lines ファイル（`<name>.jsonl`）を読み込んで、自動で前回の続きから探索が再開されます。
 
 `--trial-count` は「合計到達回数」なので、もう少し探索したい場合は、より大きな値を指定して再実行してください
 （例えば前回 `--trial-count 100` で 100 件完了した後に `--trial-count 150` を指定すると、追加で 50 回試行します）。
@@ -352,10 +353,10 @@ Trial #0
 
 上述の通り、デフォルトでは `hisui tune` コマンドは前回の探索結果を引き継ぎます。
 ただし、探索空間などが変わった場合は引き継ぎではなく、一から探索を開始するのが望ましいです。
-その場合は、`--study-name` オプションで異なる名前を指定することで、新しい探索が開始できます。
+その場合は、`--name` オプションで異なる名前を指定することで、新しい探索が開始できます。
 
 また、`--tune-working-dir` オプションで指定した作業ディレクトリ以下にある
-探索履歴ファイル（`<study_name>.jsonl`）を削除することでも、探索履歴がクリアできます。
+探索履歴ファイル（`<name>.jsonl`）を削除することでも、探索履歴がクリアできます。
 
 ### トライアル回数をどうすべきか
 
@@ -365,7 +366,7 @@ Trial #0
 「最適なトライアル回数が何か」はケースバイケースなので、一概には言えませんが、
 デフォルトの 100 は多くの場合によく動作する値なので、そのまま使っても問題ありません
 （探索履歴は 1 トライアルごとにファイルへ保存されるので、途中で Ctrl+C で中断したとしても、探索を簡単に再開できます。
-ただし中断時にはロックファイル `<study_name>.lock` が残るため、再開前に手動で削除してください）。
+ただし中断時にはロックファイル `<name>.lock` が残るため、再開前に手動で削除してください）。
 
 探索をどこで終わりにするか、のひとつの目安としては「最適解の集合がしばらく更新されなくなったら」というものがあります。
 

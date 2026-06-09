@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::tune::{SearchSpace, Study, TrialValues, json_value::JsonValue};
+use crate::tune::{SearchSpace, TrialValues, Tuner, json_value::JsonValue};
 
 const DEFAULT_LAYOUT_JSON: &str = include_str!("../../layout-examples/tune-libvpx-vp9.jsonc");
 const DEFAULT_SEARCH_SPACE_JSON: &str = include_str!("../../search-space-examples/full.jsonc");
@@ -15,7 +15,7 @@ struct Args {
     layout_file_path: Option<PathBuf>,
     search_space_file_path: Option<PathBuf>,
     tune_working_dir: Option<PathBuf>,
-    study_name: String,
+    name: String,
     trial_count: usize,
     trial_timeout: Option<Duration>,
     openh264: Option<PathBuf>,
@@ -47,10 +47,10 @@ impl Args {
                 .doc("チューニング用に使われる作業ディレクトリを指定します")
                 .take(raw_args)
                 .then(crate::arg_utils::parse_non_default_opt)?,
-            study_name: noargs::opt("study-name")
+            name: noargs::opt("name")
                 .ty("NAME")
                 .default("hisui-tune")
-                .doc("チューニングの study 名を指定します")
+                .doc("探索履歴の保存に使う名前を指定します（名前ごとに履歴が分かれます）")
                 .take(raw_args)
                 .then(|a| a.value().parse())?,
             trial_count: noargs::opt("trial-count")
@@ -189,9 +189,7 @@ fn run_internal(args: Args) -> crate::Result<()> {
     }
 
     // 探索を始める前にいろいろと情報を表示する
-    let jsonl_path = args
-        .tune_working_dir()
-        .join(format!("{}.jsonl", args.study_name));
+    let jsonl_path = args.tune_working_dir().join(format!("{}.jsonl", args.name));
     eprintln!("====== INFO ======");
     eprintln!(
         "layout file to tune:\t {}",
@@ -207,7 +205,7 @@ fn run_internal(args: Args) -> crate::Result<()> {
     );
     eprintln!("tune working dir:\t {}", args.tune_working_dir().display());
     eprintln!("trials file:\t {}", jsonl_path.display());
-    eprintln!("study name:\t {}", args.study_name);
+    eprintln!("name:\t {}", args.name);
     eprintln!("target total trials:\t {}", args.trial_count);
     eprintln!("tuning metrics:\t [Execution Time (minimize), VMAF Score Mean (maximize)]");
     eprintln!("tuning parameters ({}):", search_space.params.len());
@@ -216,12 +214,12 @@ fn run_internal(args: Args) -> crate::Result<()> {
     }
     eprintln!();
 
-    // スタディを開く（既存の履歴があれば続きから最適化する）
-    eprintln!("====== OPEN STUDY ======");
-    let mut study = Study::new(args.study_name.clone(), args.tune_working_dir())?;
+    // チューナーを開く（既存の履歴があれば続きから最適化する）
+    eprintln!("====== OPEN HISTORY ======");
+    let mut tuner = Tuner::new(args.name.clone(), args.tune_working_dir())?;
 
     // --trial-count は「合計到達ベース」。既存件数を差し引いた残り回数だけ新たに試行する。
-    let existing = study.trial_count();
+    let existing = tuner.trial_count();
     let remaining = args.trial_count.saturating_sub(existing);
     eprintln!("existing trials:\t {existing}");
     eprintln!("remaining trials:\t {remaining}");
@@ -236,7 +234,7 @@ fn run_internal(args: Args) -> crate::Result<()> {
             args.trial_count
         );
         eprintln!("=== SAMPLE PARAMETERS ===");
-        let ask_output = study.ask(&search_space)?;
+        let ask_output = tuner.ask(&search_space)?;
 
         let mut layout = layout_template.clone();
         ask_output.apply_params_to_layout(&mut layout)?;
@@ -244,21 +242,21 @@ fn run_internal(args: Args) -> crate::Result<()> {
 
         match run_trial_evaluation(&args, ask_output.number, &layout) {
             Ok(metrics) => {
-                study.tell(ask_output.number, &metrics)?;
+                tuner.tell(ask_output.number, &metrics)?;
             }
             Err(e) => {
                 eprintln!("failed to VMAF evaluation: {e:?}",);
-                study.tell_fail(ask_output.number)?;
+                tuner.tell_fail(ask_output.number)?;
             }
         }
         eprintln!();
 
-        displayed_best_trials = display_best_trials_if_updated(&args, &mut study, false)?;
+        displayed_best_trials = display_best_trials_if_updated(&args, &mut tuner, false)?;
     }
 
     if !displayed_best_trials {
         // 直前で表示していないなら、最後に結果を表示する
-        display_best_trials_if_updated(&args, &mut study, true)?;
+        display_best_trials_if_updated(&args, &mut tuner, true)?;
     }
 
     Ok(())
@@ -266,7 +264,7 @@ fn run_internal(args: Args) -> crate::Result<()> {
 
 fn trial_dir(args: &Args, trial_number: usize) -> PathBuf {
     args.tune_working_dir()
-        .join(&args.study_name)
+        .join(&args.name)
         .join(format!("trial-{}", trial_number))
 }
 
@@ -383,10 +381,10 @@ fn run_trial_evaluation(
 
 fn display_best_trials_if_updated(
     args: &Args,
-    study: &mut Study,
+    tuner: &mut Tuner,
     force: bool,
 ) -> crate::Result<bool> {
-    let (updated, mut best_trials) = study.get_best_trials()?;
+    let (updated, mut best_trials) = tuner.get_best_trials()?;
     if !updated && !force {
         // 更新なし
         return Ok(false);

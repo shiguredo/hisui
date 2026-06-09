@@ -101,13 +101,12 @@ pub struct BestTrial {
     pub params: BTreeMap<JsonObjectMemberPath, JsonValue>,
 }
 
-/// NSGA-II による多目的最適化のスタディ
+/// NSGA-II による多目的最適化のチューナー
 ///
 /// `ask` (次のパラメータを問い合わせ) → 評価 → `tell` (結果を伝える) のループで使う。
 /// 試行履歴は JSON Lines ファイルに永続化され、既存ファイルがあれば続きから最適化する。
 #[derive(Debug)]
-pub struct Study {
-    study_name: String,
+pub struct Tuner {
     jsonl_path: PathBuf,
     // ロックは保持するだけで Drop 時に解放される
     _lock: LockGuard,
@@ -118,14 +117,16 @@ pub struct Study {
     last_best_trials: Vec<BestTrial>,
 }
 
-impl Study {
-    /// スタディを開く
+impl Tuner {
+    /// チューナーを開く
     ///
-    /// 作業ディレクトリ内のロックファイルを獲得し、既存の JSON Lines 履歴を読み込む。
+    /// `name` は探索履歴ファイルを区別するための名前で、作業ディレクトリ内の
+    /// `<name>.jsonl` (履歴) と `<name>.lock` (多重起動防止) に対応する。
+    /// ロックファイルを獲得し、既存の JSON Lines 履歴を読み込む。
     /// 履歴があれば trial 採番をその続きから行う。
-    pub fn new(study_name: String, working_dir: PathBuf) -> crate::Result<Self> {
-        let jsonl_path = working_dir.join(format!("{study_name}.jsonl"));
-        let lock_path = working_dir.join(format!("{study_name}.lock"));
+    pub fn new(name: String, working_dir: PathBuf) -> crate::Result<Self> {
+        let jsonl_path = working_dir.join(format!("{name}.jsonl"));
+        let lock_path = working_dir.join(format!("{name}.lock"));
         let lock = LockGuard::acquire(lock_path)?;
 
         let trials = storage::load_trials(&jsonl_path)?;
@@ -137,7 +138,6 @@ impl Study {
             .unwrap_or(0);
 
         Ok(Self {
-            study_name,
             jsonl_path,
             _lock: lock,
             trials,
@@ -145,11 +145,6 @@ impl Study {
             next_trial_number,
             last_best_trials: Vec::new(),
         })
-    }
-
-    /// スタディ名を返す
-    pub fn study_name(&self) -> &str {
-        &self.study_name
     }
 
     /// 永続化済みのトライアル件数 (成功・失敗の両方を含む) を返す

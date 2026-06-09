@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use hisui::tune::json_value::{JsonObjectMemberPath, JsonValue};
 use hisui::tune::storage::{self, TrialRecord, TrialResult};
-use hisui::tune::{SearchSpace, Study, TrialValues};
+use hisui::tune::{SearchSpace, TrialValues, Tuner};
 
 /// 2 つのパラメータを持つ単純な探索空間を作る
 fn build_test_search_space() -> SearchSpace {
@@ -23,21 +23,21 @@ fn lock_prevents_concurrent_start_and_releases_on_drop() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
     let path = dir.path().to_path_buf();
 
-    // 1 つ目のスタディがロックを保持している間は、同名スタディを開けない
-    let study1 = Study::new("study".to_owned(), path.clone()).expect("最初のスタディは開ける");
-    let study2 = Study::new("study".to_owned(), path.clone());
-    assert!(study2.is_err(), "ロック保持中は二重に開けないこと");
+    // 1 つ目のチューナーがロックを保持している間は、同名チューナーを開けない
+    let tuner1 = Tuner::new("test".to_owned(), path.clone()).expect("最初のチューナーは開ける");
+    let tuner2 = Tuner::new("test".to_owned(), path.clone());
+    assert!(tuner2.is_err(), "ロック保持中は二重に開けないこと");
 
     // ロックを解放すれば再度開ける
-    drop(study1);
-    let study3 = Study::new("study".to_owned(), path);
-    assert!(study3.is_ok(), "ロック解放後は再取得できること");
+    drop(tuner1);
+    let tuner3 = Tuner::new("test".to_owned(), path);
+    assert!(tuner3.is_ok(), "ロック解放後は再取得できること");
 }
 
 #[test]
 fn malformed_lines_are_skipped() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
-    let jsonl_path = dir.path().join("study.jsonl");
+    let jsonl_path = dir.path().join("test.jsonl");
 
     // 正常なレコードを 1 件書き込む
     let mut params = BTreeMap::new();
@@ -76,10 +76,10 @@ fn resume_continues_count_and_numbering() {
 
     // 1 回試行してから閉じる
     let first_number = {
-        let mut study = Study::new("study".to_owned(), path.clone()).expect("スタディを開ける");
-        assert_eq!(study.trial_count(), 0, "最初は履歴ゼロ");
-        let trial = study.ask(&search_space).expect("ask できる");
-        study
+        let mut tuner = Tuner::new("test".to_owned(), path.clone()).expect("チューナーを開ける");
+        assert_eq!(tuner.trial_count(), 0, "最初は履歴ゼロ");
+        let trial = tuner.ask(&search_space).expect("ask できる");
+        tuner
             .tell(
                 trial.number,
                 &TrialValues {
@@ -93,20 +93,20 @@ fn resume_continues_count_and_numbering() {
     assert_eq!(first_number, 0, "最初の trial 番号は 0");
 
     // 再開すると過去の履歴を引き継ぎ、採番は続きから始まる
-    let mut study = Study::new("study".to_owned(), path).expect("再開できる");
-    assert_eq!(study.trial_count(), 1, "再開時に既存の 1 件を引き継ぐこと");
-    let trial = study.ask(&search_space).expect("再開後も ask できる");
+    let mut tuner = Tuner::new("test".to_owned(), path).expect("再開できる");
+    assert_eq!(tuner.trial_count(), 1, "再開時に既存の 1 件を引き継ぐこと");
+    let trial = tuner.ask(&search_space).expect("再開後も ask できる");
     assert_eq!(trial.number, 1, "採番は既存の最大 + 1 から続くこと");
 }
 
 #[test]
 fn tell_for_unknown_trial_errors() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
-    let mut study =
-        Study::new("study".to_owned(), dir.path().to_path_buf()).expect("スタディを開ける");
+    let mut tuner =
+        Tuner::new("test".to_owned(), dir.path().to_path_buf()).expect("チューナーを開ける");
 
     // ask していない trial 番号への tell は失敗する
-    let result = study.tell(
+    let result = tuner.tell(
         999,
         &TrialValues {
             elapsed_seconds: 1.0,
@@ -120,16 +120,16 @@ fn tell_for_unknown_trial_errors() {
 fn failed_trials_counted_but_excluded_from_best() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
     let search_space = build_test_search_space();
-    let mut study =
-        Study::new("study".to_owned(), dir.path().to_path_buf()).expect("スタディを開ける");
+    let mut tuner =
+        Tuner::new("test".to_owned(), dir.path().to_path_buf()).expect("チューナーを開ける");
 
     // 1 件目は失敗させる
-    let trial0 = study.ask(&search_space).expect("ask できる");
-    study.tell_fail(trial0.number).expect("tell_fail できる");
+    let trial0 = tuner.ask(&search_space).expect("ask できる");
+    tuner.tell_fail(trial0.number).expect("tell_fail できる");
 
     // 2 件目は成功させる
-    let trial1 = study.ask(&search_space).expect("ask できる");
-    study
+    let trial1 = tuner.ask(&search_space).expect("ask できる");
+    tuner
         .tell(
             trial1.number,
             &TrialValues {
@@ -140,10 +140,10 @@ fn failed_trials_counted_but_excluded_from_best() {
         .expect("tell できる");
 
     // 失敗・成功の両方が件数 (採番ベース) には数えられる
-    assert_eq!(study.trial_count(), 2, "失敗も件数には数えること");
+    assert_eq!(tuner.trial_count(), 2, "失敗も件数には数えること");
 
     // ベストトライアルには成功した 1 件だけが含まれる
-    let (_, best) = study
+    let (_, best) = tuner
         .get_best_trials()
         .expect("ベストトライアルを取得できる");
     assert_eq!(best.len(), 1, "成功した試行だけがベストに入ること");
