@@ -4,4 +4,5 @@
 //! プロパティベースで検証する。
 
 mod nsga2_props;
+mod rng_props;
 mod storage_props;

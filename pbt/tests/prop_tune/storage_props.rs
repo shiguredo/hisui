@@ -10,14 +10,18 @@ use proptest::prelude::*;
 
 // params の値として使うスカラー値の戦略
 //
-// `JsonValue::Float` は「整数に見える値」(例: 3.0) が整数として書き出されると
-// 読み戻し時に `JsonValue::Integer` になりラウンドトリップが崩れるため、ここでは含めない。
-// 浮動小数のラウンドトリップは `TrialValues` 側 (f64 として読み戻す) で検証される。
+// 浮動小数は「整数に見える値」(例: 3.0) のみ除外する。これは整数として書き出されて
+// 読み戻し時に `JsonValue::Integer` になりラウンドトリップが崩れるため。小数部を持つ
+// 浮動小数 (3.5 等) はラウンドトリップするので含める (浮動小数の探索空間で生成される
+// `JsonValue::Float` の params が永続化・再読込される経路を担保する)。
 fn scalar_value() -> impl Strategy<Value = JsonValue> {
     prop_oneof![
         Just(JsonValue::Null),
         any::<bool>().prop_map(JsonValue::Boolean),
         (-100_000i64..100_000).prop_map(JsonValue::Integer),
+        // 小数部を必ず持つ浮動小数 (frac/1000 は 0 にならないので整数に丸まらない)
+        (-100_000i64..100_000, 1u32..1000)
+            .prop_map(|(int, frac)| JsonValue::Float(int as f64 + frac as f64 / 1000.0)),
         "[a-zA-Z0-9 _-]{0,8}".prop_map(JsonValue::String),
     ]
 }

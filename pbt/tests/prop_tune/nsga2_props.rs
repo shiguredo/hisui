@@ -1,4 +1,8 @@
-use hisui::tune::nsga2::{crowding_distance, dominates, non_dominated_sort};
+use hisui::tune::json_value::{JsonNumber, JsonObjectMemberPath, JsonValue};
+use hisui::tune::nsga2::{
+    Individual, crowding_distance, dominates, generate_child, non_dominated_sort, sample_random,
+};
+use hisui::tune::{ParameterDistribution, SearchSpace};
 use proptest::prelude::*;
 
 // NSGA-II のコア純粋関数 (非劣ソート・混雑度距離) の不変条件を検証する。
@@ -109,6 +113,134 @@ proptest! {
         let b = [b0, b1];
         if dominates(&a, &b) {
             prop_assert!(!dominates(&b, &a));
+        }
+    }
+
+    // a が b を、b が c を支配するなら、a は c を支配する (推移律)
+    #[test]
+    fn dominance_is_transitive(
+        a0 in -5.0f64..5.0, a1 in -5.0f64..5.0,
+        b0 in -5.0f64..5.0, b1 in -5.0f64..5.0,
+        c0 in -5.0f64..5.0, c1 in -5.0f64..5.0,
+    ) {
+        let (a, b, c) = ([a0, a1], [b0, b1], [c0, c1]);
+        if dominates(&a, &b) && dominates(&b, &c) {
+            prop_assert!(dominates(&a, &c));
+        }
+    }
+
+    // 非劣ソートの rank は 0 から始まり歯抜けがない
+    // (フロントを 1 つずつ剥がす実装の構造的な不変条件)
+    #[test]
+    fn ranks_are_contiguous(points in points_strategy()) {
+        let ranks = non_dominated_sort(&points);
+        if let Some(&max_rank) = ranks.iter().max() {
+            for r in 0..=max_rank {
+                prop_assert!(ranks.contains(&r), "rank {r} が歯抜けになっている");
+            }
+        }
+    }
+}
+
+// 探索空間 (SearchSpace) を生成する戦略。
+// 整数 Numeric・浮動小数 Numeric・カテゴリカルを混在させ、min <= max を保証する。
+fn distribution_strategy() -> impl Strategy<Value = ParameterDistribution> {
+    prop_oneof![
+        (-1000i64..1000, 0i64..1000).prop_map(|(lo, span)| ParameterDistribution::Numeric {
+            min: JsonNumber::Integer(lo),
+            max: JsonNumber::Integer(lo + span),
+        }),
+        (-1000.0f64..1000.0, 0.0f64..1000.0).prop_map(|(lo, span)| {
+            ParameterDistribution::Numeric {
+                min: JsonNumber::Float(lo),
+                max: JsonNumber::Float(lo + span),
+            }
+        }),
+        prop::collection::vec("[a-z]{1,4}".prop_map(JsonValue::String), 1..5)
+            .prop_map(ParameterDistribution::Categorical),
+    ]
+}
+
+fn search_space_strategy() -> impl Strategy<Value = SearchSpace> {
+    prop::collection::btree_map(
+        "[a-z][a-z0-9]{0,4}".prop_map(|s| {
+            s.parse::<JsonObjectMemberPath>()
+                .expect("JsonObjectMemberPath::from_str is infallible")
+        }),
+        distribution_strategy(),
+        1..6,
+    )
+    .prop_map(|params| SearchSpace { params })
+}
+
+// 値が分布の制約 (整数分布なら範囲内の整数、浮動小数分布なら範囲内の浮動小数、
+// カテゴリカルなら選択肢のいずれか) を満たすことを検証する。
+fn assert_value_in_distribution(
+    value: &JsonValue,
+    dist: &ParameterDistribution,
+) -> Result<(), TestCaseError> {
+    match dist {
+        ParameterDistribution::Numeric { min, max } => match (min, max) {
+            (JsonNumber::Integer(lo), JsonNumber::Integer(hi)) => match value {
+                JsonValue::Integer(v) => {
+                    prop_assert!(lo <= v && v <= hi, "整数 {v} が [{lo}, {hi}] の範囲外");
+                }
+                other => prop_assert!(false, "整数分布なのに整数以外: {other:?}"),
+            },
+            _ => {
+                let (lo, hi) = (min.to_f64(), max.to_f64());
+                match value {
+                    JsonValue::Float(v) => {
+                        prop_assert!(
+                            lo <= *v && *v <= hi,
+                            "浮動小数 {v} が [{lo}, {hi}] の範囲外"
+                        );
+                    }
+                    other => prop_assert!(false, "浮動小数分布なのに浮動小数以外: {other:?}"),
+                }
+            }
+        },
+        ParameterDistribution::Categorical(choices) => {
+            prop_assert!(
+                choices.contains(value),
+                "カテゴリ値 {value:?} が選択肢に含まれない"
+            );
+        }
+    }
+    Ok(())
+}
+
+proptest! {
+    // sample_random の結果は探索空間のキー集合と一致し、各値が分布制約を満たす
+    #[test]
+    fn sample_random_respects_space(space in search_space_strategy()) {
+        let params = sample_random(&space).expect("サンプリングは成功する");
+        prop_assert_eq!(params.len(), space.params.len());
+        for (path, dist) in &space.params {
+            let value = params.get(path).expect("各パラメータがサンプリングされる");
+            assert_value_in_distribution(value, dist)?;
+        }
+    }
+
+    // generate_child の結果も探索空間の制約を満たす。
+    // 個体数を 1..120 で振り、select_parents の「全件採用」と「混雑度で詰める」両分岐を踏む。
+    #[test]
+    fn generate_child_respects_space(space in search_space_strategy(), n in 1usize..120) {
+        let individuals: Vec<Individual> = (0..n)
+            .map(|i| {
+                let params = sample_random(&space).expect("サンプリングは成功する");
+                // 目的値は全個体が互いに非劣になるよう直線上に配置する
+                Individual {
+                    params,
+                    objectives: [i as f64, (n - i) as f64],
+                }
+            })
+            .collect();
+        let child = generate_child(&space, &individuals).expect("子個体生成は成功する");
+        prop_assert_eq!(child.len(), space.params.len());
+        for (path, dist) in &space.params {
+            let value = child.get(path).expect("各パラメータが生成される");
+            assert_value_in_distribution(value, dist)?;
         }
     }
 }
