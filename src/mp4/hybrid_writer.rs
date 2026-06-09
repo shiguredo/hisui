@@ -1284,6 +1284,83 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_writer_received_video_sample_entry_counts_only_changes() -> crate::Result<()> {
+        // received カウンタは「sample_entry が前回から変化したとき」(changed_since) だけ計上される。
+        // 全フレーム付与 (issue 0027) でも、同一 entry が続く限りカウンタが増えないことを検証する
+        // (毎フレーム計上すると指標が映像フレーム総数とほぼ同じになり意味を失うため)。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+        let shared = SharedSampleEntry::new(entry.clone());
+
+        // 指定した sample_entry を載せた映像フレームを入口で受信させるヘルパ。
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            writer.handle_video_message(
+                crate::Message::Media(crate::MediaFrame::Video(Arc::new(VideoFrame {
+                    data: vec![0x00, 0x00, 0x00, 0x01],
+                    format: VideoFormat::Av1,
+                    keyframe: true,
+                    size: Some(crate::video::VideoFrameSize {
+                        width: 16,
+                        height: 16,
+                    }),
+                    timestamp: std::time::Duration::ZERO,
+                    sample_entry,
+                }))),
+                &mut None,
+            )
+        };
+
+        // 1 回目: 初回 (changed_since(None) = true) なので計上される。
+        send(&mut writer, Some(shared.clone()))?;
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            1
+        );
+
+        // 同一 Arc を再送しても計上されない（同一 Arc は ptr_eq で短絡される）。
+        send(&mut writer, Some(shared.clone()))?;
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            1
+        );
+
+        // 別 Arc・実体同値でも計上されない（ptr_eq では短絡されず実体比較で同値と判定される）。
+        send(
+            &mut writer,
+            Some(SharedSampleEntry::new(crate::video::av1::av1_sample_entry(
+                EvenUsize::MIN_CELL_SIZE,
+                EvenUsize::MIN_CELL_SIZE,
+                &[0x0A],
+            ))),
+        )?;
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            1
+        );
+
+        // 別 Arc で実体が異なる: 変化ありと判定され計上される。
+        send(
+            &mut writer,
+            Some(SharedSampleEntry::new(crate::video::av1::av1_sample_entry(
+                EvenUsize::MIN_CELL_SIZE,
+                EvenUsize::MIN_CELL_SIZE,
+                &[0x0B],
+            ))),
+        )?;
+        assert_eq!(
+            writer.core.stats.total_received_video_sample_entry_count(),
+            2
+        );
+        Ok(())
+    }
+
+    #[test]
     fn hybrid_writer_finalizes_readable_audio_with_per_frame_sample_entry() -> crate::Result<()> {
         // issue 0017 の修正後の挙動: 音声は全フレームに sample_entry が載るため、フラグメント先頭
         // サンプルにも必ず entry があり、finalize 後の標準 MP4 から音声トラックを読み戻せることを
