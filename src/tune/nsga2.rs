@@ -11,10 +11,14 @@ use crate::tune::{ParameterDistribution, SearchSpace, TrialValues};
 // (R_t = P_t ∪ Q_t から生存選択する) は採らず、累積した全成功個体を母集団とする方式に
 // 簡略化している (select_parents / generate_child 参照)。
 
-// 以下のハイパーパラメータは論文の real-coded NSGA-II 実験で使われた値に合わせている。
+/// 集団サイズ
+///
+/// 誘導探索 (交叉・突然変異) は成功試行がこの数に達してから始まり、それまでは一様ランダム
+/// サンプリングになる。hisui では 1 試行が合成 + VMAF 評価で高コストなため、限られた試行数でも
+/// 誘導フェーズに早く入れるよう、論文の実験値 (100) より小さめにしている。
+pub const POPULATION_SIZE: usize = 20;
 
-/// 集団サイズ (optuna 既定に合わせた値。論文の実験では 100 を使用)
-pub const POPULATION_SIZE: usize = 50;
+// 以下の遺伝演算パラメータは論文の real-coded NSGA-II 実験で使われた値に合わせている。
 
 /// 交叉確率 (論文の p_c)
 const CROSSOVER_PROB: f64 = 0.9;

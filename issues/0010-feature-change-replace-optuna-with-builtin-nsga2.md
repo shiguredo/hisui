@@ -57,7 +57,7 @@ hisui の駆動は「1 trial ずつ `ask` → 評価 → `tell`」の逐次形�
 
 #### 1-2. ハイパーパラメータ (optuna 既定に準拠)
 
-- `population_size = 50` (optuna 既定)。今回は定数とし、CLI 引数での変更は提供しない (必要になった時点で検討する)
+- `population_size = 20` (定数。CLI 引数での変更は提供しない。必要になった時点で検討する)。optuna 既定 (50) や論文の実験値 (100) より小さめにしているのは、1 試行が高コストなため限られた試行数でも GA フェーズに早く入れるようにするため
 - 交叉確率 `crossover_prob = 0.9` (optuna 既定)
 - 突然変異確率 `mutation_prob = 1 / パラメータ数` (optuna 既定相当)。ここでの「パラメータ数」はレイアウトの null 箇所で絞り込んだ後の `search_space.params.len()` を指す
 - SBX の分布指数および polynomial mutation の分布指数は optuna 既定に合わせる
