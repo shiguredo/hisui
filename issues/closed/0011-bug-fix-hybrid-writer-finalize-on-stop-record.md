@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-03
-- Completed:
+- Completed: 2026-06-09
 - Model: Opus 4.8
 - Branch: feature/fix-hybrid-writer-finalize-on-stop-record
 - Polished: 2026-06-04
@@ -171,3 +171,11 @@ A(2) と C はいずれも `wait_or_terminate` のタイムアウト強制終了
 ### 検証
 
 修正後、対象テスト `obsws/test_output.py::test_obsws_srt_inbound_start_record_and_inspect_output` を CI で 100 回（10 シャード × 10 回）実行し、**全成功（再発ゼロ）** を確認した。修正前は約 3% で失敗していた。
+
+## 再 close（2026-06-09）
+
+上記「## 解決方法」は reopen 時の注記どおり真因に届いておらず誤りだった。真因（音声エンコーダが sample_entry を最初の出力フレームにしか載せず、録画 writer が取りこぼすと entry が一度も届かない）は issue 0017 で修正した。
+
+- issue 0017 で音声エンコーダ（Opus / FDK-AAC / Audio Toolbox）が全出力フレームに sample_entry を載せるようにし、いつ subscribe しても次フレームで必ず entry が届くようにしてレースのカテゴリ自体を消した。
+- 本 issue で導入した観測機構（finalize 成否カウンタ・received / missing カウンタ・warn ログ）と入口取り込みの hardening は、回帰検知・運用診断・pause エッジ対策として有効なため恒久的に残している。
+- 理屈上これで再発しない想定のため close する。なお issue 0017 では発生率約 3% に対する 100 回 CI 反復検証は実施せずにマージする判断とした（万一再発した場合は別途対処する）。

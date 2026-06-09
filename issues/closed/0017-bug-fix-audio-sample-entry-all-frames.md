@@ -2,9 +2,9 @@
 
 - Priority: High
 - Created: 2026-06-04
-- Completed:
+- Completed: 2026-06-09
 - Model: Opus 4.8
-- Branch:
+- Branch: feature/fix-audio-sample-entry-all-frames
 - Polished: 2026-06-08
 
 ## 目的
@@ -112,3 +112,16 @@ CLAUDE.md のテスト役割分担に従う。ただし本リポジトリには�
 - issues/0008（先行する flaky テストの issue。発生率 3% の出典。closed）
 - issue 0027（映像側の sample_entry を `SharedSampleEntry` で全フレーム付与に統一するリファクタリング。本 issue 完了後に着手する）
 - issue 0028（音声・映像の sample_entry フィールドを非 Option 化するリファクタリング。0017・0027 完了後に着手する）
+
+## 解決方法
+
+音声エンコーダが sample_entry を最初の出力フレームにしか載せない（`self.sample_entry.take()`）構造が、録画 writer の取りこぼし時に sample_entry が一度も届かず finalize に失敗する真因だった。これを「全出力フレームに載せる」方式へ変えてレースのカテゴリ自体を消した。
+
+- 共通型 `SharedSampleEntry(Arc<SampleEntry>)`（`new` / `get` / `changed_since`）を `src/sample_entry.rs` に新設した。`Arc` 共有でフレーム間の受け渡し・writer での前回値保持を安価にし、変化検知を `Arc::ptr_eq` で短絡する。
+- `AudioFrame.sample_entry` を `Option<SampleEntry>` から `Option<SharedSampleEntry>` に変更した。差分最小化のため `VideoFrame` には手を入れず、映像の型統一・全フレーム付与は issue 0027 に切り出した。
+- 音声 3 エンコーダ（`opus` / `fdk_aac` / `audio_toolbox`）の `self.sample_entry.take()` を廃止し、毎フレーム `Some(self.sample_entry.clone())`（Arc clone）を載せるようにした。これがバグ修正の核心。
+- 型変更の波及を音声デコーダ・各 reader・`rtmp` / `rtsp` / `srt` の音声経路で吸収した。各 writer（`hls` / `dash` / `mp4` / `mp4/hybrid`）は音声経路のみ更新し、muxer へ渡す箇所で `.get().clone()` により生の `SampleEntry` を取り出す。
+- hybrid writer の `received_audio_sample_entry` カウンタを「入口で `changed_since` が true（前回から変化）のときだけ計上」に変えた。全フレーム付与後も指標が「entry の確定・変化回数」を表すようにするため。
+- テスト: `SharedSampleEntry::changed_since` の単体テスト、Opus エンコーダが全出力フレームに sample_entry を載せる不変条件のテスト（`tests/test_encoder_opus.rs`）、received カウンタの結線検証と finalize 後の音声読み戻し検証を hybrid writer に追加した。
+
+なお完了条件にあった「100 回 CI 反復による再現検証」は実施せずにマージする判断とした（本修正はいずれにせよ入れるべきもので、万一再発した場合は別途対処する）。`CHANGES.md` への `[FIX]` エントリは未リリース部分の修正のため追記しない判断とした。
