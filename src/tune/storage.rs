@@ -149,35 +149,64 @@ pub fn append_trial(path: &Path, record: &TrialRecord) -> crate::Result<()> {
 
 /// 多重起動を防ぐためのロックファイル
 ///
-/// 生成時にロックファイルをアトミックに作成し、`Drop` 時に削除する (RAII)。
-/// 途中でエラーやパニックが起きても `Drop` で削除されるが、`std::process::exit` や
-/// シグナル (SIGINT / SIGTERM) では `Drop` が走らずロックが残る。残存時は手動削除が必要。
+/// 生成時にロックファイルをアトミックに作成して自プロセスの PID を書き込み、`Drop` 時に
+/// 削除する (RAII)。`std::process::exit` やシグナル (SIGINT / SIGTERM)・クラッシュでは
+/// `Drop` が走らずロックが残るが、その場合は次回起動時に「保持者プロセスが既に終了している」
+/// ことを検出して自動的に奪取するため、手動削除は不要。
 #[derive(Debug)]
 pub struct LockGuard {
     path: PathBuf,
 }
 
 impl LockGuard {
-    /// ロックファイルをアトミックに作成して獲得する
+    /// ロックを獲得する
     ///
-    /// すでに存在する場合はエラーを返す (存在確認 → 作成の TOCTOU を避けるため
-    /// `create_new` を使う)。
+    /// ロックファイルをアトミックに作成 (存在確認 → 作成の TOCTOU を避けるため `create_new`)
+    /// して PID を書き込む。すでに存在する場合は、その保持者プロセスが生きていれば多重起動と
+    /// みなしてエラーを返し、既に終了していれば中断で残った stale ロックとみなして奪取する。
     pub fn acquire(path: PathBuf) -> crate::Result<Self> {
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(_) => Ok(Self { path }),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                Err(crate::Error::new(format!(
-                    "lock file already exists: {}. \
-                     Another `hisui tune` process may be running. \
-                     If it has already finished, remove this file manually to resume \
-                     (the .jsonl history is preserved).",
-                    path.display()
-                )))
+        loop {
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut file) => {
+                    // 後続の stale 判定に使うため自プロセスの PID を書き込む
+                    writeln!(file, "{}", std::process::id()).map_err(|e| {
+                        crate::Error::new(format!(
+                            "failed to write PID to lock file {}: {e}",
+                            path.display()
+                        ))
+                    })?;
+                    return Ok(Self { path });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if lock_holder_is_alive(&path) {
+                        return Err(crate::Error::new(format!(
+                            "lock file already exists and its owner process is still running: {}. \
+                             Another `hisui tune` process may be using this history.",
+                            path.display()
+                        )));
+                    }
+                    // 保持者が既に終了している (Ctrl+C やクラッシュで残った) stale ロックなので奪取する
+                    tracing::warn!("reclaiming stale lock file {}", path.display());
+                    match std::fs::remove_file(&path) {
+                        Ok(()) => {}
+                        // 別プロセスが先に消していた場合はそのまま再試行する
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => {
+                            return Err(crate::Error::new(format!(
+                                "failed to remove stale lock file {}: {e}",
+                                path.display()
+                            )));
+                        }
+                    }
+                    // ループ先頭に戻って作成をやり直す
+                }
+                Err(e) => {
+                    return Err(crate::Error::new(format!(
+                        "failed to create lock file {}: {e}",
+                        path.display()
+                    )));
+                }
             }
-            Err(e) => Err(crate::Error::new(format!(
-                "failed to create lock file {}: {e}",
-                path.display()
-            ))),
         }
     }
 }
@@ -187,5 +216,32 @@ impl Drop for LockGuard {
         if let Err(e) = std::fs::remove_file(&self.path) {
             tracing::warn!("failed to remove lock file {}: {e}", self.path.display());
         }
+    }
+}
+
+/// ロックファイルに記録された PID のプロセスが生きているかどうかを返す
+///
+/// PID が読めない (空・破損・旧フォーマット) 場合は安全側に倒して「生きている」とみなす
+/// (誤って奪取しないため、その場合は従来どおりエラーになる)。
+fn lock_holder_is_alive(path: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return true;
+    };
+    let Ok(pid) = content.trim().parse::<i32>() else {
+        return true;
+    };
+    process_is_alive(pid)
+}
+
+/// 指定 PID のプロセスが存在するかどうかを返す
+fn process_is_alive(pid: i32) -> bool {
+    // kill(pid, 0) はシグナルを送らずに存在確認だけを行う。
+    // 戻り値 0 なら存在、エラーが ESRCH なら不在、EPERM (別ユーザー) ならプロセスは存在する。
+    // SAFETY: kill は引数を読むだけで、不正なメモリアクセスは起こさない。
+    let ret = unsafe { libc::kill(pid, 0) };
+    if ret == 0 {
+        true
+    } else {
+        std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
     }
 }

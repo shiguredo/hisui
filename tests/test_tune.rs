@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use hisui::tune::json_value::{JsonObjectMemberPath, JsonValue};
-use hisui::tune::storage::{self, TrialRecord, TrialResult};
+use hisui::tune::storage::{self, LockGuard, TrialRecord, TrialResult};
 use hisui::tune::{SearchSpace, Trial, TrialValues, Tuner};
 
 /// 2 つのパラメータを持つ単純な探索空間を作る
@@ -58,6 +58,29 @@ fn lock_prevents_concurrent_start_and_releases_on_drop() {
     drop(tuner1);
     let tuner3 = Tuner::new("test".to_owned(), path);
     assert!(tuner3.is_ok(), "ロック解放後は再取得できること");
+}
+
+#[test]
+fn stale_lock_is_reclaimed() {
+    let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
+    let lock_path = dir.path().join("test.lock");
+
+    // 既に終了した (reap 済みの) プロセスの PID を用意する
+    let mut child = std::process::Command::new("true")
+        .spawn()
+        .expect("子プロセスを起動できる");
+    let dead_pid = child.id();
+    child.wait().expect("子プロセスの終了を待てる");
+
+    // その死んだ PID を持つロックファイルを置く (中断で残った stale ロックを模擬)
+    std::fs::write(&lock_path, format!("{dead_pid}\n")).expect("ロックファイルを書ける");
+
+    // 保持者プロセスが既に終了しているので、acquire は stale ロックを自動回収して成功する
+    let guard = LockGuard::acquire(lock_path);
+    assert!(
+        guard.is_ok(),
+        "死んだプロセスの stale ロックは自動回収されること"
+    );
 }
 
 #[test]
