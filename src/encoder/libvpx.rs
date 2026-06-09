@@ -202,9 +202,10 @@ mod tests {
     use crate::types::EvenUsize;
     use crate::video::FrameRate;
 
-    fn options(codec: CodecName) -> VideoEncoderOptions {
+    // new_vp8 / new_vp9 は options.codec を参照しないため、固定値を使う。
+    fn options() -> VideoEncoderOptions {
         VideoEncoderOptions {
-            codec,
+            codec: CodecName::Vp8,
             engines: None,
             bitrate: 100_000,
             width: EvenUsize::truncating_new(64),
@@ -268,15 +269,11 @@ mod tests {
 
     #[test]
     fn libvpx_vp8_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp8(&options(
-            CodecName::Vp8,
-        ))?)
+        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp8(&options())?)
     }
 
     #[test]
     fn libvpx_vp9_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp9(&options(
-            CodecName::Vp9,
-        ))?)
+        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp9(&options())?)
     }
 }
