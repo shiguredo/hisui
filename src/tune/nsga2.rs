@@ -161,8 +161,9 @@ pub fn crowding_distance(front: &[[f64; 2]]) -> Vec<f64> {
 /// 累積した成功個体から親世代 (上位 `POPULATION_SIZE` 個) を選抜する
 ///
 /// 非劣ソートでフロントに分け、混雑度距離も加味して上位を選ぶ。
-/// これまでの全成功個体を母集団とすることで、優れた解が淘汰されず親集団に残る
-/// (大域最良が保持されるため elitism と同等の効果を持つ。issue 0010 参照)。
+/// これまでの全成功個体を母集団とすることで、見つかった大域最良が淘汰されず常に親候補に残る。
+/// これは累積アーカイブによる最良解の保持であり、論文の P_t ∪ Q_t 生存選択 (elitism) とは
+/// 機構が異なる (issue 0010 参照)。
 fn select_parents(individuals: &[Individual]) -> Vec<Individual> {
     if individuals.len() <= POPULATION_SIZE {
         return individuals.to_vec();
@@ -366,6 +367,12 @@ fn crossover_numeric(
     let x2 = json_value_to_f64(v2).unwrap_or(range.hi);
 
     // SBX (Simulated Binary Crossover)。生成される 2 子のうち 1 つを採用する。
+    //
+    // これは Deb & Agrawal (1995) の原型 SBX で、変数境界を考慮しない (unbounded)。
+    // NSGA-II 参照実装は親と境界の距離で beta を補正し範囲外の子を出にくくするが、
+    // ここでは簡略化のため補正せず、範囲外に出た子は finalize の clamp で境界へ丸める
+    // (端点に確率質量が偏るが、極小レンジを特別扱いしない方針。issue 0010 参照)。
+    // なお polynomial mutation (mutate_one) は境界考慮版を使っている。
     let u = rng::gen_unit_f64()?;
     let beta = if u <= 0.5 {
         (2.0 * u).powf(1.0 / (SBX_ETA + 1.0))
