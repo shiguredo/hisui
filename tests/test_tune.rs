@@ -19,6 +19,18 @@ fn build_test_search_space() -> SearchSpace {
 }
 
 #[test]
+fn numeric_range_rejects_min_greater_than_max() {
+    // min > max の数値範囲は探索空間のパース時点で拒否される
+    // (これを通すと後段のサンプリング・交叉でパニックする)
+    let json = r#"{ "a": { "min": 10, "max": 0 } }"#;
+    let result = hisui::json::parse_str::<SearchSpace>(json);
+    assert!(
+        result.is_err(),
+        "min > max の数値範囲はパースエラーになること"
+    );
+}
+
+#[test]
 fn lock_prevents_concurrent_start_and_releases_on_drop() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
     let path = dir.path().to_path_buf();

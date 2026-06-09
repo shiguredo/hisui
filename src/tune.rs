@@ -71,10 +71,22 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for ParameterDistri
         if value.kind().is_array() {
             Ok(Self::Categorical(value.try_into()?))
         } else if value.kind().is_object() {
-            Ok(Self::Numeric {
-                min: value.to_member("min")?.required()?.try_into()?,
-                max: value.to_member("max")?.required()?.try_into()?,
-            })
+            let min: JsonNumber = value.to_member("min")?.required()?.try_into()?;
+            let max: JsonNumber = value.to_member("max")?.required()?.try_into()?;
+            // 以降のサンプリング・交叉・突然変異は min <= max かつ有限であることを前提とする
+            // （f64::clamp や rng::gen_range_i64 は min > max でパニックするため、ここで弾く）。
+            // 整数同士は f64 への変換による精度落ちを避けて i64 のまま比較する。
+            let valid = match (min, max) {
+                (JsonNumber::Integer(lo), JsonNumber::Integer(hi)) => lo <= hi,
+                _ => {
+                    let (lo, hi) = (min.to_f64(), max.to_f64());
+                    lo.is_finite() && hi.is_finite() && lo <= hi
+                }
+            };
+            if !valid {
+                return Err(value.invalid("numeric range must be finite and satisfy min <= max"));
+            }
+            Ok(Self::Numeric { min, max })
         } else {
             Err(value.invalid("not JSON array or JSON object"))
         }
