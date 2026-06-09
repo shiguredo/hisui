@@ -125,7 +125,7 @@ impl Args {
 
 pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     if !noargs::cmd("tune")
-        .doc("NSGA-II を用いた映像エンコードパラメーターの調整を行います")
+        .doc("映像エンコードパラメーターの調整を行います")
         .take(args)
         .is_present()
     {
