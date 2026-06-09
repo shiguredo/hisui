@@ -320,7 +320,7 @@ struct MpegTsState {
     pmt_cc: ContinuityCounter,
     video_cc: ContinuityCounter,
     audio_cc: ContinuityCounter,
-    /// 最後に受信したビデオの sample_entry（SPS/PPS 注入用。型は issue 0027 で音声と統一予定）
+    /// 最後に受信したビデオの sample_entry（SPS/PPS 注入用）
     last_video_sample_entry: Option<SharedSampleEntry>,
     /// 最後に受信したオーディオの sample_entry（ADTS ヘッダ生成用）
     last_audio_sample_entry: Option<SharedSampleEntry>,
@@ -337,7 +337,7 @@ struct Fmp4State {
     last_video_timestamp: Option<Duration>,
     /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
     last_audio_timestamp: Option<Duration>,
-    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持。型は issue 0027 で音声と統一予定）
+    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持）
     last_video_sample_entry: Option<SharedSampleEntry>,
     /// 最後に受信したオーディオの sample_entry（セグメント跨ぎで保持）
     last_audio_sample_entry: Option<SharedSampleEntry>,
