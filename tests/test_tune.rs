@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use hisui::tune::json_value::{JsonObjectMemberPath, JsonValue};
 use hisui::tune::storage::{self, TrialRecord, TrialResult};
-use hisui::tune::{SearchSpace, TrialValues, Tuner};
+use hisui::tune::{SearchSpace, Trial, TrialValues, Tuner};
 
 /// 2 つのパラメータを持つ単純な探索空間を作る
 fn build_test_search_space() -> SearchSpace {
@@ -16,6 +16,20 @@ fn build_test_search_space() -> SearchSpace {
         "b": ["x", "y", "z"]
     }"#;
     hisui::json::parse_str(json).expect("探索空間 JSON はパースできる")
+}
+
+/// テスト用の試行レコードを 1 件作る (params は trial_number を値に持つ単一パラメータ)
+fn sample_record(trial_number: usize, result: TrialResult) -> TrialRecord {
+    let mut params = BTreeMap::new();
+    params.insert(
+        "a".parse::<JsonObjectMemberPath>().expect("パスは無謬"),
+        JsonValue::Integer(trial_number as i64),
+    );
+    TrialRecord {
+        trial_number,
+        params,
+        result,
+    }
 }
 
 #[test]
@@ -51,23 +65,14 @@ fn malformed_lines_are_skipped() {
     let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
     let jsonl_path = dir.path().join("test.jsonl");
 
-    // 正常なレコードを 1 件書き込む
-    let mut params = BTreeMap::new();
-    params.insert(
-        "a".parse::<JsonObjectMemberPath>().expect("パスは無謬"),
-        JsonValue::Integer(3),
-    );
-    let record = TrialRecord {
-        trial_number: 0,
-        params,
-        result: TrialResult::Complete(TrialValues {
+    // 正常な 1 行 + 異常終了で途中まで書かれた壊れた行、というファイルを用意する
+    let record = sample_record(
+        0,
+        TrialResult::Complete(TrialValues {
             elapsed_seconds: 1.5,
             vmaf_mean: 90.0,
         }),
-    };
-    storage::append_trial(&jsonl_path, &record).expect("正常レコードを追記できる");
-
-    // 異常終了で途中まで書かれた壊れた行を末尾に足す
+    );
     std::fs::write(
         &jsonl_path,
         format!("{}\n{{ \"trial_number\": 1, \"par", nojson::Json(&record)),
@@ -160,4 +165,68 @@ fn failed_trials_counted_but_excluded_from_best() {
         .expect("ベストトライアルを取得できる");
     assert_eq!(best.len(), 1, "成功した試行だけがベストに入ること");
     assert_eq!(best[0].number, trial1.number);
+}
+
+#[test]
+fn append_then_load_roundtrips() {
+    let dir = tempfile::tempdir().expect("一時ディレクトリを作成できる");
+    let jsonl_path = dir.path().join("test.jsonl");
+
+    // 成功・失敗を混ぜた複数レコードを順に追記する
+    let records = vec![
+        sample_record(
+            0,
+            TrialResult::Complete(TrialValues {
+                elapsed_seconds: 1.5,
+                vmaf_mean: 90.0,
+            }),
+        ),
+        sample_record(1, TrialResult::Fail),
+        sample_record(
+            2,
+            TrialResult::Complete(TrialValues {
+                elapsed_seconds: 2.0,
+                vmaf_mean: 88.0,
+            }),
+        ),
+    ];
+    for record in &records {
+        storage::append_trial(&jsonl_path, record).expect("追記できる");
+    }
+
+    // 追記したレコードが順序通りすべて読み戻せる
+    let loaded = storage::load_trials(&jsonl_path).expect("読み込みは成功する");
+    assert_eq!(loaded, records, "追記したレコードが順序通り読み戻せること");
+}
+
+#[test]
+fn apply_params_to_layout_fails_when_path_missing() {
+    // params のパスがレイアウトに存在しない場合はエラーになる
+    let mut params = BTreeMap::new();
+    params.insert(
+        "missing"
+            .parse::<JsonObjectMemberPath>()
+            .expect("パスは無謬"),
+        JsonValue::Integer(1),
+    );
+    let trial = Trial { number: 0, params };
+
+    // 当該パスを含まない空オブジェクトのレイアウトに適用する
+    let mut layout = JsonValue::Object(BTreeMap::new());
+    let result = trial.apply_params_to_layout(&mut layout);
+    assert!(
+        result.is_err(),
+        "レイアウトに無いパスへの適用は失敗すること"
+    );
+}
+
+#[test]
+fn search_space_rejects_non_array_non_object_distribution() {
+    // パラメータ定義が配列 (カテゴリカル) でもオブジェクト (数値範囲) でもない場合はエラー
+    let json = r#"{ "a": 42 }"#;
+    let result = hisui::json::parse_str::<SearchSpace>(json);
+    assert!(
+        result.is_err(),
+        "配列でもオブジェクトでもない定義はパースエラーになること"
+    );
 }
