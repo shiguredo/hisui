@@ -194,7 +194,18 @@ fn select_parents(individuals: &[Individual]) -> Vec<Individual> {
 fn tournament_select(ranks: &[usize], distances: &[f64]) -> crate::Result<usize> {
     let n = ranks.len();
     let a = rng::gen_index(n)?;
-    let b = rng::gen_index(n)?;
+    // 異なる 2 個体を競わせるため b は a と別のインデックスにする
+    // (集団が 1 個体しかない場合だけは a 自身を返す。今の呼び出し経路では到達しないが、
+    // rejection ループが無限に回らないようにするための防御)
+    let b = if n <= 1 {
+        a
+    } else {
+        let mut b = rng::gen_index(n)?;
+        while b == a {
+            b = rng::gen_index(n)?;
+        }
+        b
+    };
     if ranks[a] < ranks[b] {
         Ok(a)
     } else if ranks[b] < ranks[a] {
