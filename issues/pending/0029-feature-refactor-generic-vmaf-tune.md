@@ -6,6 +6,12 @@
 - Branch: feature/refactor-generic-vmaf-tune
 - Reporter: @sile
 
+## pending とした理由
+
+- 現時点で急いで対応する必要がなく、実際に汎用化が必要になったタイミングで着手する方針のため、一旦 `issues/pending/` で保留する。
+- 加えて本 issue は設計判断（汎用化の対象範囲が `vmaf` / `tune` のみか `compose` を含む共通基盤か、入力の指定方法、後方互換の扱い、コマンド体系・モジュール配置の最終形）を伴い、着手前にこれらを確定させる必要がある（後述の「未確定事項」参照）。AGENTS.md「外部依存の追加や設計判断が必要で保留中の issue は issues/pending/ に置く」にも合致する。
+- pending の issue は修正せずそのまま残す。
+
 ## 目的
 
 現状の `vmaf` / `tune` サブコマンドは Sora 録画ディレクトリ（`ROOT_DIR`）と
