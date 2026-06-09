@@ -107,16 +107,10 @@ pub fn load_trials(path: &Path) -> crate::Result<Vec<TrialRecord>> {
         if line.trim().is_empty() {
             continue;
         }
-        match nojson::RawJson::parse(line) {
-            Ok(json) => match TrialRecord::try_from(json.value()) {
-                Ok(record) => trials.push(record),
-                Err(e) => {
-                    tracing::warn!(
-                        "skip malformed trial record at line {}: {e}",
-                        line_index + 1
-                    );
-                }
-            },
+        // Json<T> の FromStr はパースと TryFrom を一括で行うため、
+        // JSON 構文エラーとデコードエラーの両方をこの 1 つの match で扱える
+        match line.parse::<nojson::Json<TrialRecord>>() {
+            Ok(json) => trials.push(json.0),
             Err(e) => {
                 tracing::warn!("skip malformed trial line at line {}: {e}", line_index + 1);
             }
