@@ -16,8 +16,6 @@ use std::num::NonZeroUsize;
 
 use shiguredo_openh264::Openh264Library;
 
-use crate::sample_entry::SharedSampleEntry;
-
 #[cfg(target_os = "macos")]
 use self::audio_toolbox::AudioToolboxEncoder;
 #[cfg(feature = "fdk-aac")]
@@ -434,7 +432,6 @@ pub struct VideoEncoder {
     encoded: VecDeque<VideoFrame>,
     eos: bool,
     keyframe_request_pending: bool,
-    last_video_sample_entry: Option<SharedSampleEntry>,
     // 最初のフレームを受信するまで、内部エンコーダは初期化されない
     inner: Option<VideoEncoderInner>,
     options: VideoEncoderOptions,
@@ -470,7 +467,6 @@ impl VideoEncoder {
             encoded: VecDeque::new(),
             eos: false,
             keyframe_request_pending: false,
-            last_video_sample_entry: None,
             inner: None,
             options: options.clone(),
             openh264_lib,
@@ -722,20 +718,13 @@ impl VideoEncoder {
         self.inner = Some(inner);
     }
 
-    fn push_encoded_frame_with_metrics(&mut self, mut encoded: VideoFrame) {
+    fn push_encoded_frame_with_metrics(&mut self, encoded: VideoFrame) {
         self.total_output_video_frame_count_metric.inc();
-        if let Some(sample_entry) = encoded.sample_entry.as_ref() {
-            self.last_video_sample_entry = Some(sample_entry.clone());
-        }
         if encoded.keyframe {
             self.total_output_video_keyframe_count_metric.inc();
-            // keyframe は単体でデコード可能であるべきなので、sample entry を常に補完する。
-            if encoded.sample_entry.is_none()
-                && let Some(sample_entry) = self.last_video_sample_entry.as_ref()
-            {
-                encoded.sample_entry = Some(sample_entry.clone());
-            }
         }
+        // 映像エンコーダは全出力フレームに sample_entry を載せる（issue 0027）ため、
+        // writer 側での keyframe 補完は不要になった。
         self.encoded.push_back(encoded);
     }
 

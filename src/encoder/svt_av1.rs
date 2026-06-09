@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
 
-use shiguredo_mp4::boxes::SampleEntry;
-
 use crate::{
     encoder::VideoEncoderOptions,
     sample_entry::SharedSampleEntry,
@@ -15,7 +13,8 @@ pub struct SvtAv1Encoder {
     inner: shiguredo_svt_av1::Encoder,
     input_queue: VecDeque<RawVideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    sample_entry: Option<SampleEntry>,
+    // 全出力フレームに載せる sample entry。Arc 共有なので毎フレームの clone は安価。
+    sample_entry: SharedSampleEntry,
     width: EvenUsize,
     height: EvenUsize,
     keyframe_request_pending: bool,
@@ -40,7 +39,7 @@ impl SvtAv1Encoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
-            sample_entry: Some(sample_entry),
+            sample_entry: SharedSampleEntry::new(sample_entry),
             width,
             height,
             keyframe_request_pending: false,
@@ -96,7 +95,7 @@ impl SvtAv1Encoder {
                     height: self.height.get(),
                 }),
                 timestamp: input_frame.as_video_frame().timestamp,
-                sample_entry: self.sample_entry.take().map(SharedSampleEntry::new),
+                sample_entry: Some(self.sample_entry.clone()),
             });
         }
         Ok(())

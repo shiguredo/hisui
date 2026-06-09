@@ -10,6 +10,9 @@ pub struct Openh264Encoder {
     inner: shiguredo_openh264::Encoder,
     encoded: Option<VideoFrame>,
     force_idr_pending: bool,
+    // 最後に確定した sample entry。SPS/PPS を含むフレームで更新し、全出力フレームに載せる。
+    // openh264 は keyframe 要求等で SPS/PPS が mid-stream で変わりうるため、最新値に追従する。
+    last_sample_entry: Option<SharedSampleEntry>,
 }
 
 impl Openh264Encoder {
@@ -32,6 +35,7 @@ impl Openh264Encoder {
             inner,
             encoded: None,
             force_idr_pending: false,
+            last_sample_entry: None,
         })
     }
 
@@ -49,19 +53,19 @@ impl Openh264Encoder {
         };
 
         // OpenH264 は keyframe 要求時などに SPS/PPS が更新され得るため、
-        // SPS/PPS を受け取ったフレームでは毎回 sample entry を更新する。
+        // SPS/PPS を受け取ったフレームでは sample entry を作り直して保持を更新する。
+        // 以後は全出力フレームに保持済みの最新 entry を載せる（設計方針 2 / issue 0027）。
         // これにより、下流コンポーネントが参照する codec 設定を最新化し、
         // 古い parameter set 参照によるデコード失敗を避ける。
-        let sample_entry = if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
+        if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let size = frame.size();
-            Some(h264::h264_sample_entry_from_annexb(
+            let sample_entry = h264::h264_sample_entry_from_annexb(
                 size.width,
                 size.height,
                 &h264::create_sequence_header_annexb(&encoded.sps_list, &encoded.pps_list),
-            )?)
-        } else {
-            None
-        };
+            )?;
+            self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry));
+        }
 
         // AnnexB から MP4 向けの形式に変換する
         let mut data = Vec::new();
@@ -90,7 +94,7 @@ impl Openh264Encoder {
             keyframe: is_keyframe,
             size: Some(frame.size()),
             timestamp: video_frame.timestamp,
-            sample_entry: sample_entry.map(SharedSampleEntry::new),
+            sample_entry: self.last_sample_entry.clone(),
         });
 
         Ok(())
