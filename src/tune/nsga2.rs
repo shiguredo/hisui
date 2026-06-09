@@ -307,7 +307,9 @@ fn crossover(
             continue;
         };
         let value = match dist {
-            ParameterDistribution::Numeric { min, max } => crossover_numeric(min, max, v1, v2)?,
+            ParameterDistribution::Numeric { min, max } => {
+                crossover_numeric(&NumericRange::new(min, max), v1, v2)?
+            }
             // カテゴリカルは SBX を適用できないので uniform crossover (親のどちらかを選ぶ)
             ParameterDistribution::Categorical(_) => {
                 if rng::gen_bool(0.5)? {
@@ -324,16 +326,12 @@ fn crossover(
 
 /// 数値パラメータの SBX 交叉
 fn crossover_numeric(
-    min: &JsonNumber,
-    max: &JsonNumber,
+    range: &NumericRange,
     v1: &JsonValue,
     v2: &JsonValue,
 ) -> crate::Result<JsonValue> {
-    let is_integer = matches!((min, max), (JsonNumber::Integer(_), JsonNumber::Integer(_)));
-    let lo = min.to_f64();
-    let hi = max.to_f64();
-    let x1 = json_value_to_f64(v1).unwrap_or(lo);
-    let x2 = json_value_to_f64(v2).unwrap_or(hi);
+    let x1 = json_value_to_f64(v1).unwrap_or(range.lo);
+    let x2 = json_value_to_f64(v2).unwrap_or(range.hi);
 
     // SBX (Simulated Binary Crossover)。生成される 2 子のうち 1 つを採用する。
     let u = rng::gen_unit_f64()?;
@@ -346,19 +344,18 @@ fn crossover_numeric(
     let c2 = 0.5 * ((1.0 - beta) * x1 + (1.0 + beta) * x2);
     let child = if rng::gen_bool(0.5)? { c1 } else { c2 };
 
-    Ok(finalize_numeric(child, lo, hi, is_integer))
+    Ok(range.finalize(child))
 }
 
 /// 数値パラメータの polynomial mutation
 fn mutate_one(dist: &ParameterDistribution, value: &JsonValue) -> crate::Result<JsonValue> {
     match dist {
         ParameterDistribution::Numeric { min, max } => {
-            let is_integer = matches!((min, max), (JsonNumber::Integer(_), JsonNumber::Integer(_)));
-            let lo = min.to_f64();
-            let hi = max.to_f64();
+            let range = NumericRange::new(min, max);
+            let (lo, hi) = (range.lo, range.hi);
             if hi <= lo {
                 // レンジが無いので変異しようがない
-                return Ok(finalize_numeric(lo, lo, hi, is_integer));
+                return Ok(range.finalize(lo));
             }
             let x = json_value_to_f64(value).unwrap_or(lo).clamp(lo, hi);
 
@@ -376,20 +373,38 @@ fn mutate_one(dist: &ParameterDistribution, value: &JsonValue) -> crate::Result<
                 1.0 - val.powf(mut_pow)
             };
             let mutated = x + deltaq * (hi - lo);
-            Ok(finalize_numeric(mutated, lo, hi, is_integer))
+            Ok(range.finalize(mutated))
         }
         // カテゴリカルは選択肢集合から一様再サンプリングする
         ParameterDistribution::Categorical(_) => sample_one(dist),
     }
 }
 
-/// SBX / mutation の結果を範囲内にクランプし、整数なら丸める
-fn finalize_numeric(value: f64, lo: f64, hi: f64, is_integer: bool) -> JsonValue {
-    let clamped = value.clamp(lo, hi);
-    if is_integer {
-        JsonValue::Integer(clamped.round() as i64)
-    } else {
-        JsonValue::Float(clamped)
+/// 数値分布の範囲。交叉・突然変異で共通して使う。
+struct NumericRange {
+    lo: f64,
+    hi: f64,
+    is_integer: bool,
+}
+
+impl NumericRange {
+    /// 探索空間の数値分布から範囲を作る
+    fn new(min: &JsonNumber, max: &JsonNumber) -> Self {
+        Self {
+            lo: min.to_f64(),
+            hi: max.to_f64(),
+            is_integer: matches!((min, max), (JsonNumber::Integer(_), JsonNumber::Integer(_))),
+        }
+    }
+
+    /// SBX / mutation の結果を範囲内にクランプし、整数なら丸めて `JsonValue` にする
+    fn finalize(&self, value: f64) -> JsonValue {
+        let clamped = value.clamp(self.lo, self.hi);
+        if self.is_integer {
+            JsonValue::Integer(clamped.round() as i64)
+        } else {
+            JsonValue::Float(clamped)
+        }
     }
 }
 
