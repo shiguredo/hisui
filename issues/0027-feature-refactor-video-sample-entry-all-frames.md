@@ -9,9 +9,14 @@
 
 ## 目的
 
-issue 0017 で音声側の sample_entry を「全出力フレームに載せる」方式へ変更し、共通型 `SharedSampleEntry` を導入した（差分最小化のため映像には手を付けなかった）。本 issue では映像側にも同じ変換を適用し、(1) 映像エンコーダが全出力フレームに sample_entry を載せ、(2) `VideoFrame.sample_entry` を `Option<SharedSampleEntry>` に揃える。これにより音声・映像で sample_entry の付与ポリシーと型を一本化し、後続の非 Option 化（issue 0028）の前提を整える。
+issue 0017 で音声側の sample_entry を「全出力フレームに載せる」方式へ変更し、共通型 `SharedSampleEntry` を導入した（差分最小化のため映像には手を付けなかった）。その結果、エンコード出力フレームの sample_entry の扱いが音声と映像で非対称になっている。
 
-本 issue の作業は「issue 0017 が音声に対して行った変更を映像に対して行う」ことが基本形であり、加えて映像エンコーダ固有の事情（後述）に対応する。
+- 音声: 全出力フレームに sample_entry を載せる。フィールド型は `Option<SharedSampleEntry>`。
+- 映像: 最初の出力フレーム（または SPS/PPS を含むフレーム）にだけ載せ、writer の keyframe 補完で取りこぼしを防ぐ。フィールド型は生の `Option<SampleEntry>`。
+
+この非対称は保守上分かりにくく、エンコードデータの sample_entry の扱いは音声・映像で揃っているべきである。本 issue では映像側にも 0017 と同じ変換を適用し、(1) 映像エンコーダが全出力フレームに sample_entry を載せ、(2) `VideoFrame.sample_entry` を `Option<SharedSampleEntry>` に揃えて、音声・映像で sample_entry の付与ポリシーと型を一貫させる。
+
+本 issue の作業は「issue 0017 が音声に対して行った変更を映像に対して行う」ことが基本形であり、加えて映像エンコーダ固有の事情（後述）に対応する。なお、これはバグ修正ではなく一貫性のためのリファクタである（映像には keyframe 補完があるため finalize 失敗バグは無い）。
 
 ## 優先度根拠
 
@@ -29,7 +34,7 @@ Low。映像は keyframe 補完によって muxer の契約（最初のサンプ
 
 `VideoFrame.sample_entry`（`src/video.rs:50`）を `Option<SampleEntry>` から `Option<SharedSampleEntry>` に変更する。生成側はラップ、読み出し側は `.as_ref().map(|e| e.get())` 等で `&SampleEntry` を取り出す。これは 0017 が `AudioFrame.sample_entry` に対して行ったのと同じ変換。
 
-「全フレーム付与」の対象はエンコーダ出力フレームに限る。生データ由来・デコーダ出力・リサイズ由来の `VideoFrame`（`src/video.rs:230/241/292/432/475/499/667/981` ほか。例: `// 生データにはサンプルエントリは存在しない`）は `None` のまま正しい。これらが `None` で残る事実は、`VideoFrame.sample_entry` を非 Option 化する issue 0028 の設計前提になるため申し送る（本 issue では非 Option 化しない）。
+「全フレーム付与」の対象はエンコーダ出力フレームに限る。生データ由来・デコーダ出力・リサイズ由来の `VideoFrame`（`src/video.rs:230/241/292/432/475/499/667/981` ほか。例: `// 生データにはサンプルエントリは存在しない`）は `None` のまま正しい。これらが構造的に `None` を持つため、`VideoFrame.sample_entry` は `Option` のままにする（フィールドの非 Option 化は、生フレーム型とエンコード済みフレーム型の分割を要し便益に見合わないため、issue 0028 として検討した結果 close 済み。本 issue では非 Option 化しない）。
 
 ### 2. 映像エンコーダの全フレーム付与（エンコーダごとに方式が異なる）
 
@@ -71,7 +76,7 @@ Low。映像は keyframe 補完によって muxer の契約（最初のサンプ
   - `hls/writer.rs`: `last_video_sample_entry` は 2 構造体（`:324` / `:341`）。clone_from・`or_else`（`:610`）・`fill_missing_sample_entries`（`:1170-1181`）・codec string 抽出。
   - `mp4/writer.rs`（標準 Mp4Writer）: passthrough（補完なし）。映像 sample_entry を muxer に渡す箇所を `.get().clone()` に直す。
 
-なお writer の `or_else` 補完そのもの（および `Option` 分岐）の **除去は本 issue では行わない**。0017 が音声でも or_else を残したのと揃え、補完ロジックは構造を保ったまま型だけ追従させる。`Option` 分岐・`or_else` 補完の除去は非 Option 化（issue 0028）の領分とする（0028 の「各 writer の `Option` 分岐・`or_else` 補完を除去」に含まれる）。
+なお writer の `or_else` 補完そのもの（および `Option` 分岐）の **除去は本 issue では行わない**。0017 が音声でも or_else を残したのと揃え、補完ロジックは構造を保ったまま型だけ追従させる（`VideoFrame.sample_entry` は `Option` のまま残るため、補完は引き続き必要）。
 
 ## 実装スコープ（変更対象ファイル）
 
@@ -103,4 +108,4 @@ CLAUDE.md のテスト役割分担に従う。本リポジトリには現状 PBT
 ## 関連
 
 - issue 0017（音声側の全フレーム付与と共通型 `SharedSampleEntry` 導入。本 issue の直接の前提・実装の手本。closed）
-- issue 0028（本 issue 完了後に着手する sample_entry フィールドの非 Option 化。`Option` 分岐・`or_else` 補完の除去と、映像の `None` サイトの扱いを担う。本 issue がその前提）
+- issue 0028（sample_entry フィールドの非 Option 化。生フレームが構造的に `None` を持つため実装せず close 済み。本 issue は非 Option 化を前提とせず、音声・映像の一貫性のみを目的とする）
