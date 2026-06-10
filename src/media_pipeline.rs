@@ -56,10 +56,21 @@ pub struct MediaPipeline {
 
 impl MediaPipeline {
     pub fn new() -> crate::Result<Self> {
-        Self::new_with_config(MediaPipelineConfig::default())
+        Self::new_with_config_and_stats(MediaPipelineConfig::default(), crate::stats::Stats::new())
     }
 
     pub fn new_with_config(config: MediaPipelineConfig) -> crate::Result<Self> {
+        Self::new_with_config_and_stats(config, crate::stats::Stats::new())
+    }
+
+    pub fn new_with_stats(stats: crate::stats::Stats) -> crate::Result<Self> {
+        Self::new_with_config_and_stats(MediaPipelineConfig::default(), stats)
+    }
+
+    pub fn new_with_config_and_stats(
+        config: MediaPipelineConfig,
+        stats: crate::stats::Stats,
+    ) -> crate::Result<Self> {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (return_tx, return_rx) = std::sync::mpsc::channel();
         let (local_processor_task_tx, local_processor_task_rx) =
@@ -85,7 +96,7 @@ impl MediaPipeline {
             pending_initial_processors: std::collections::HashSet::new(),
             initial_ready_waiters: Vec::new(),
             tracks: std::collections::HashMap::new(),
-            stats: crate::stats::Stats::new(),
+            stats,
             config: std::sync::Arc::new(config),
             processor_failed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
