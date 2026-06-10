@@ -2,9 +2,9 @@
 
 - Priority: Low
 - Created: 2026-06-04
-- Completed:
+- Completed: 2026-06-10
 - Model: Opus 4.8
-- Branch:
+- Branch: feature/refactor-inspect-fmp4-test-parity
 - Polished:
 
 ## 目的
@@ -49,3 +49,23 @@ Low。テストの実効性向上であり、製品機能には影響しない�
 
 - issues/closed/0023（inspect が通常 MP4 と fMP4 を区別して `format` に報告する。本テストの初出）
 - issues/closed/0024（inspect の fMP4 映像トラック読み出しハングを修正し、本テストの `#[ignore]` を解除）
+
+## 解決方法
+
+fMP4 inspect の e2e テスト 3 件を、対応する通常 MP4 を実際に inspect して比較対象フィールドを `assert_eq!` で突き合わせる形に書き換えた。`tests/e2e.rs` のみの変更で、プロダクションコード (`src/`) と inspect 出力仕様には触れていない。
+
+### 実装
+
+- `tests/e2e.rs` に共通ヘルパーを追加した。
+  - `inspect_stdout(path)`: 指定パスを `hisui inspect` して標準出力を返す。
+  - `assert_inspect_format_and_codec`: `format` / `audio_codec` / `video_codec` の前提値を確認する。
+  - `extract_inspect_comparable_samples`: inspect 出力 JSON を `nojson::RawJson` でパースし、`audio_samples` の `data_size`、`video_samples` の `data_size` / `keyframe` / `nalus(type, nri)` だけを `InspectComparableSamples` 構造体に抽出する。トラックの有無は `optional` で扱う。
+- `inspect_fragmented_mp4_video_only` / `inspect_fragmented_mp4_audio_only` / `inspect_fragmented_mp4_audio_video` を、対応する通常 MP4 (`archive-red-320x320-h264.mp4` / `beep-aac-audio.mp4` / `red-320x320-h264-aac.mp4`) を実際に inspect して `assert_eq!` で突き合わせる形に書き換えた。
+- `timestamp_us` / `duration_us` および集計値の `video_duration_us` / `audio_duration_us` は「音声+映像」ペアの映像トラックで testdata 生成差によりずれるため、比較対象から除外した。
+- 既存の絶対値検証（映像 25 / 音声 45）は、通常 MP4 と fMP4 が同時に同数で変化した場合の回帰検出アンカーとして残し、アサーションメッセージを「期待値どおりであること」に変更した。
+
+### 検証
+
+- `cargo test --test e2e inspect_fragmented` → 3 passed
+- `cargo clippy --tests --test e2e -- -D warnings` → 警告なし
+- pre-commit フックの cargo fmt / cargo clippy も通過
