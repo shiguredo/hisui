@@ -53,10 +53,10 @@
 ### 出力内容（初版）
 
 ```json
-{"event":"server_started","scheme":"http","address":"127.0.0.1:54321","host":"127.0.0.1","port":54321,"pid":12345,"ui_url":null}
+{"type":"startup_info","scheme":"http","address":"127.0.0.1:54321","host":"127.0.0.1","port":54321,"pid":12345,"ui_url":null}
 ```
 
-- `event`: 将来別種のイベントを追加する余地を残すため固定キー（初版は `"server_started"` のみ）。
+- `type`: stdout JSON Lines のエントリ種別を表す固定キー（初版は `"startup_info"` のみ）。既存の `--dump-metrics-on-exit` が `{"type":"metrics", ...}` を出力しており、本機能の出力もこの規約に揃える。将来別種のエントリを追加する余地を残すため固定キーで持つ。
 - `scheme`: `http` または `https` （`--https-cert-path` 指定時）。
 - `address`: `local_addr().to_string()`。IPv6 リテラルも `[::1]:54321` 形式で表現される。
 - `host` / `port`: パース済みの値。プログラム側で再分解しなくて済むよう冗長に持つ。
@@ -87,7 +87,7 @@
 ## 完了条件
 
 - `cargo test` がすべて成功すること。
-- `hisui server --port 0 --emit-startup-info` を実行すると、stdout に `{"event":"server_started", ...}` 形式の 1 行 JSON が即時に出力され、`address` / `port` フィールドにカーネルが割り当てた実ポート番号が含まれること。
+- `hisui server --port 0 --emit-startup-info` を実行すると、stdout に `{"type":"startup_info", ...}` 形式の 1 行 JSON が即時に出力され、`address` / `port` フィールドにカーネルが割り当てた実ポート番号が含まれること。
 - `--emit-startup-info` を付けない場合、stdout への出力は従来通り無い（後方互換）こと。
 - `--port 0` を指定したときのログ (`obsws server listening on ...`) も実ポートで表示されること。
 - `--ui` 指定時には `ui_url` フィールドに実 addr ベースの URL が入ること。
@@ -106,7 +106,7 @@
      ```rust
      let line = nojson::json_to_string(|f| {
          f.object(|f| {
-             f.member("event", "server_started")?;
+             f.member("type", "startup_info")?;
              f.member("scheme", scheme)?;
              f.member("address", actual_addr.to_string())?;
              f.member("host", actual_addr.ip().to_string())?;
@@ -137,5 +137,5 @@
 
 ### 将来の拡張余地
 
-- `event` フィールドを残しておくことで、起動以外のイベント（例えば `"state_file_loaded"` や `"shutdown_initiated"`）も同じ JSON LINE 経路で追加できる。
+- `type` フィールドを残しておくことで、起動情報以外のエントリ種別（例えば `"state_file_info"` や `"shutdown_info"`）も同じ JSON LINE 経路で追加できる。
 - フラグ駆動 (B) で開始し、運用上ノイズにならないと確認できたら (A) 「常に出力」へ切り替える選択肢も残る。その場合は CHANGES.md で `[CHANGE]` 扱いになる。
