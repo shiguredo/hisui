@@ -115,6 +115,11 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .doc("プロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する")
         .take(args)
         .is_present();
+    let emit_startup_info: bool = noargs::flag("emit-startup-info")
+        .env("HISUI_SERVER_EMIT_STARTUP_INFO")
+        .doc("起動直後にバインド情報を JSON Lines で標準出力へ出力する")
+        .take(args)
+        .is_present();
 
     if args.metadata().help_mode {
         return Ok(());
@@ -169,6 +174,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         state_file,
         worker_threads,
         dump_metrics_on_exit,
+        emit_startup_info,
     )
     .map_err(noargs::Error::from)
 }
@@ -190,6 +196,7 @@ fn run_internal(
     state_file: Option<PathBuf>,
     worker_threads: Option<NonZeroUsize>,
     dump_metrics_on_exit: bool,
+    emit_startup_info: bool,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
         .as_ref()
@@ -245,6 +252,7 @@ fn run_internal(
                             frame_rate,
                             state_file,
                             dump_metrics_on_exit,
+                            emit_startup_info,
                             #[cfg(feature = "player")]
                             command_tx,
                             #[cfg(feature = "player")]
@@ -284,6 +292,7 @@ fn run_internal(
                 frame_rate,
                 state_file,
                 dump_metrics_on_exit,
+                emit_startup_info,
             ))
             .await
     })

@@ -59,6 +59,11 @@
 - [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになり、`--dump-metrics-on-exit` 指定時はプロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する
   - 環境変数 `HISUI_DUMP_METRICS_ON_EXIT` でも有効化できる
   - @sile
+- [ADD] server サブコマンドに `--emit-startup-info` フラグを追加する
+  - bind 完了直後に実バインド情報 (`{"type":"startup_info", "server":{...}, "ui":..., "pid":...}` 形式) を JSON Lines で標準出力へ出力する
+  - `--port 0` でカーネルが割り当てた実ポートを呼び出し側 (E2E テストや起動スクリプト) が取得する用途を想定する
+  - 環境変数 `HISUI_SERVER_EMIT_STARTUP_INFO` でも有効化できる
+  - @tohta
 - [ADD] inspect コマンドが fMP4 ファイルの読み込みに対応する
   - 拡張子ではなくファイル先頭を読んで通常 MP4 / fragmented MP4 を判定する
   - inspect は fMP4 を `format: "fmp4"` として返す（通常 MP4 は `"mp4"`、WebM は `"webm"`）
@@ -269,6 +274,10 @@
   - @sile
 - [UPDATE] shiguredo_video_device のバージョンを 2026.1.0 にあげる
   - @sile
+- [FIX] server サブコマンドの起動ログと UI URL を bind 後の実アドレスで表示するように修正する
+  - 従来は `--port 0` 指定時にログの URL に `:0` がそのまま表示され、`--ui` 指定時のブラウザ起動 URL も同じ理由で壊れていた
+  - `listener.local_addr()` の結果で `obsws server listening on ...` / `UI started at ...` ログと `open_browser` の URL を統一する
+  - @tohta
 
 ## 2025.3.2
 

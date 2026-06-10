@@ -123,6 +123,62 @@ fn dump_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
     }
 }
 
+/// --emit-startup-info 指定時、bind 完了直後の情報を JSON Lines で stdout に書き出す。
+/// 1 行 1 JSON で、type フィールドでエントリ種別を示す規約は dump_metrics_to_stdout と同じ。
+/// 書き込み失敗時は呼び出し側 (E2E テスト等) が readline でハングするリスクを避けるため、
+/// エラーとして propagate して起動失敗扱いにする (BrokenPipe も同様)。
+fn emit_startup_info_line(
+    scheme: &str,
+    actual_addr: SocketAddr,
+    ui_remote_url: Option<&String>,
+) -> crate::Result<()> {
+    use std::io::Write as _;
+
+    // nojson::object のクロージャは Fn 制約で複数回呼ばれうるため、URL は事前に String 化して
+    // 参照で取り込む。format_args! を直接 f.member に渡すと Arguments<'_> の temporary scope が
+    // statement 末尾までしか伸びず Fn クロージャに閉じ込められないため使えない。
+    let server_url = format!("{scheme}://{actual_addr}");
+    // UI 有効判定は ui_remote_url.is_some() (= --ui 指定時)。open_ui_in_browser ではないので
+    // --ui --no-open でも ui フィールドはオブジェクトになる。
+    let ui_url: Option<String> = ui_remote_url.map(|_| format!("{scheme}://{actual_addr}/"));
+
+    let line = nojson::object(|f| {
+        f.member("type", "startup_info")?;
+        f.member(
+            "server",
+            nojson::object(|f| {
+                f.member("scheme", scheme)?;
+                f.member("url", &server_url)?;
+                f.member("host", actual_addr.ip())?;
+                f.member("port", actual_addr.port())?;
+                Ok(())
+            }),
+        )?;
+        f.member(
+            "ui",
+            ui_url.as_ref().map(|url| {
+                // url: &String を内側クロージャに move でコピーする。
+                // nojson::object の opaque 戻り値が Option::map の外に出るため、内側クロージャの
+                // borrow を Option::map クロージャ引数の lifetime に閉じ込めないようにする。
+                nojson::object(move |f| {
+                    f.member("url", url)?;
+                    Ok(())
+                })
+            }),
+        )?;
+        f.member("pid", std::process::id())?;
+        Ok(())
+    });
+
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    writeln!(out, "{line}")
+        .map_err(|e| crate::Error::new(format!("failed to write startup_info: {e}")))?;
+    out.flush()
+        .map_err(|e| crate::Error::new(format!("failed to flush startup_info: {e}")))?;
+    Ok(())
+}
+
 #[expect(clippy::too_many_arguments)]
 pub async fn run_server(
     addr: SocketAddr,
@@ -138,6 +194,7 @@ pub async fn run_server(
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
     dump_metrics_on_exit: bool,
+    emit_startup_info: bool,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
         crate::obsws::player::PlayerCommand,
     >,
@@ -179,13 +236,25 @@ pub async fn run_server(
     let listener = TcpListener::bind(addr)
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
-    tracing::info!("obsws server listening on {scheme}://{addr}");
+    // `--port 0` 指定時に呼び出し側が実ポートを参照できるよう、bind 後の実アドレスを取得する。
+    // 以降の listening / UI ログ・open_browser・startup_info 出力はすべてこの実アドレスを使う。
+    let actual_addr = listener
+        .local_addr()
+        .map_err(|e| crate::Error::new(format!("failed to get local addr: {e}")))?;
+    tracing::info!("obsws server listening on {scheme}://{actual_addr}");
 
     if upstream_config.is_some() {
-        tracing::info!("UI started at {scheme}://{addr}/");
+        tracing::info!("UI started at {scheme}://{actual_addr}/");
     }
     if open_ui_in_browser {
-        open_browser(&format!("{scheme}://{addr}/"));
+        open_browser(&format!("{scheme}://{actual_addr}/"));
+    }
+
+    // --emit-startup-info 指定時、bind 完了直後に startup_info を JSON Lines で stdout に書き出す。
+    // 呼び出し側 (E2E テスト等) が読み取って実ポートを取得する用途。
+    // 書き込み失敗時は明示的にエラー終了する（BrokenPipe も同様）。理由は issue 0002 を参照。
+    if emit_startup_info {
+        emit_startup_info_line(scheme, actual_addr, ui_remote_url.as_ref())?;
     }
 
     // state file の読み込みと初期値への反映
