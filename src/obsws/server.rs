@@ -134,7 +134,6 @@ fn emit_startup_info_to_stdout(
 ) -> crate::Result<()> {
     use std::io::Write as _;
 
-    // f.member の値引数は DisplayJson 制約で format_args! を渡せないため事前に String 化する。
     let server_url = format!("{scheme}://{actual_addr}");
     // UI 有効判定は ui_remote_url.is_some() (= --ui 指定時)。open_ui_in_browser ではないので
     // --ui --no-open でも ui フィールドは出力される。
