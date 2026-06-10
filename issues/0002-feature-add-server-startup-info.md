@@ -33,8 +33,8 @@
 - `src/obsws/server.rs:182`: bind 後に `tracing::info!("obsws server listening on {scheme}://{addr}")`。**`{addr}` は関数引数の値（`--port 0` のままだと `0`）であり、`listener.local_addr()` の結果ではない。**
 - `src/obsws/server.rs:184-186`: `upstream_config.is_some()` のとき `tracing::info!("UI started at {scheme}://{addr}/")`。UI 有効判定はこちらが正しい（`open_ui_in_browser` は別軸 = `--ui && !--no-open`）。
 - `src/obsws/server.rs:188`: `open_browser(&format!("{scheme}://{addr}/"))`。これも `addr` 引数の値で、`--port 0` だと壊れた URL になる。
-- `src/obsws/server.rs:100-124`: `dump_metrics_to_stdout`。本機能と同じく stdout に JSON Lines を出す既存実装。`nojson::object` + `f.member("type", "metrics")` で 1 行書き、`BrokenPipe` は黙殺・他失敗は `tracing::warn!` で続行する方針。
-- `src/logger.rs:124`: `with_writer(std::io::stderr)`。`tracing` の出力先は stderr 固定で、stdout は dump-metrics-on-exit 以外では未使用。
+- `src/obsws/server.rs:100-124`: `emit_exit_metrics_to_stdout`。本機能と同じく stdout に JSON Lines を出す既存実装。`nojson::object` + `f.member("type", "metrics")` で 1 行書き、`BrokenPipe` は黙殺・他失敗は `tracing::warn!` で続行する方針。
+- `src/logger.rs:124`: `with_writer(std::io::stderr)`。`tracing` の出力先は stderr 固定で、stdout は emit-exit-metrics 以外では未使用。
 
 ### 現状の問題点
 
@@ -69,7 +69,7 @@
 
 | キー | 型 | 値 | 備考 |
 | -- | -- | -- | -- |
-| `type` | string | `"startup_info"` 固定 | stdout JSON Lines のエントリ種別。既存 `--dump-metrics-on-exit` の `{"type":"metrics", ...}` と同じ規約。JSON 上は文字列のまま、将来 `state_file_info` 等を追加する場合は Rust 側で enum 化する余地を残す |
+| `type` | string | `"startup_info"` 固定 | stdout JSON Lines のエントリ種別。既存 `--emit-exit-metrics` の `{"type":"metrics", ...}` と同じ規約。JSON 上は文字列のまま、将来 `state_file_info` 等を追加する場合は Rust 側で enum 化する余地を残す |
 | `server` | object | bind 情報のサブオブジェクト | ルートに主語のない汎用キーを置かないために名前空間を分離 |
 | `server.scheme` | string | `"http"` or `"https"` | `--https-cert-path` 指定時に `"https"` |
 | `server.url` | string | `format!("{scheme}://{actual_addr}")` の結果 | IPv6 は `actual_addr.to_string()` が `[::]:54321` のブラケット表記になるため URL としてもそのまま正しい形になる。`server.host` がワイルドカード (`0.0.0.0` / `::`) の場合 URL もそのまま `http://0.0.0.0:54321` 等になるため、接続に使う側で `127.0.0.1` / `::1` 等への置換が必要 |
@@ -86,7 +86,7 @@
 | 案 | 内容 | 採否 |
 | -- | -- | -- |
 | (A) 常に出力する | 引数なしで stdout に必ず 1 行出す | 不採用。後方互換性を厳格に取るなら避ける |
-| (B) フラグで切り替える | `--emit-startup-info` フラグ（兼 env `HISUI_SERVER_EMIT_STARTUP_INFO`）でオン | **採用**。既存 `--dump-metrics-on-exit` がフラグ駆動なので規約も揃う |
+| (B) フラグで切り替える | `--emit-startup-info` フラグ（兼 env `HISUI_SERVER_EMIT_STARTUP_INFO`）でオン | **採用**。既存 `--emit-exit-metrics` がフラグ駆動なので規約も揃う |
 | (C) 出力先パスをフラグで指定する | `--startup-info-file <PATH>` で書き出す | 不採用。一時ファイル管理コストを hisui に負わせたくない |
 
 フラグ名は `--emit-startup-info`、env は `HISUI_SERVER_EMIT_STARTUP_INFO` とする。
@@ -99,9 +99,9 @@
 - `src/obsws/server.rs:185` の `UI started at {scheme}://{addr}/` を `actual_addr` ベースに差し替え。
 - `src/obsws/server.rs:188` の `open_browser(&format!("{scheme}://{addr}/"))` を `actual_addr` ベースに差し替え。
 
-### 書き出し失敗時の方針（既存 dump_metrics_to_stdout との方針差）
+### 書き出し失敗時の方針（既存 emit_exit_metrics_to_stdout との方針差）
 
-- 既存 `dump_metrics_to_stdout`（`src/obsws/server.rs:100-124`）は `BrokenPipe` を黙殺し、他失敗は `tracing::warn!` で続行する。これは「終了処理を妨げない」設計。
+- 既存 `emit_exit_metrics_to_stdout`（`src/obsws/server.rs:100-124`）は `BrokenPipe` を黙殺し、他失敗は `tracing::warn!` で続行する。これは「終了処理を妨げない」設計。
 - 本機能 `startup_info` は **書き出し失敗時に明示的にエラー終了する**。理由は次のとおり:
   - 起動直後に呼び出し側が stdout を `readline()` でブロックして待っている前提の機能で、書き出しに失敗するとブロックされた側がタイムアウトまでハングする。
   - 起動失敗としてプロセス終了させる方が呼び出し側に状況が伝わりやすい。`crate::Error::new(...)` で `?` 終了すると `noargs::Result<()>` 経由で exit code 1 で終了する。stderr への詳細出力は `main` 終端の表示パス次第のため、呼び出し側が確実に判定したい場合は exit code を見るのが堅い（特に `BrokenPipe` 時は親側 stderr 取得有無も保証できない）。
@@ -123,13 +123,13 @@
 
 ### 実装ステップ
 
-1. `src/subcommand_server.rs:113-117` 付近（`--dump-metrics-on-exit` の隣）に `--emit-startup-info` フラグを追加する。`noargs::flag("emit-startup-info").env("HISUI_SERVER_EMIT_STARTUP_INFO").doc("起動直後にバインド情報を JSON Lines で標準出力へ出力する")` の形。`run_internal`（`subcommand_server.rs:176`）に `emit_startup_info: bool` として渡し、`run_internal` から `run_server` に渡す。`run_internal` も既に `#[expect(clippy::too_many_arguments)]` 付きで引数追加でも抑制属性を増やす必要はない。
+1. `src/subcommand_server.rs:113-117` 付近（`--emit-exit-metrics` の隣）に `--emit-startup-info` フラグを追加する。`noargs::flag("emit-startup-info").env("HISUI_SERVER_EMIT_STARTUP_INFO").doc("起動直後にバインド情報を JSON Lines で標準出力へ出力する")` の形。`run_internal`（`subcommand_server.rs:176`）に `emit_startup_info: bool` として渡し、`run_internal` から `run_server` に渡す。`run_internal` も既に `#[expect(clippy::too_many_arguments)]` 付きで引数追加でも抑制属性を増やす必要はない。
 2. `src/subcommand_server.rs:234` と `:273` の **両方** の `run_server` 呼び出しに、`dump_metrics_on_exit` の隣（player 引数より前）として `emit_startup_info` を追加する。片方を忘れないこと。
 3. `src/obsws/server.rs::run_server` のシグネチャに `emit_startup_info: bool` を追加し、`#[expect(clippy::too_many_arguments)]` はそのまま維持する。
 4. `src/obsws/server.rs:179-188` 付近で:
    - `let actual_addr = listener.local_addr().map_err(|e| crate::Error::new(format!("failed to get local addr: {e}")))?;` を取得する。
    - 既存出力 3 箇所（L182 / L185 の `tracing::info!` ログと、L188 の `open_browser` 引数 URL）を `addr` から `actual_addr` ベースに差し替える。
-   - `emit_startup_info` が true の場合、以下を stdout に書き出す。既存 `dump_metrics_to_stdout`（L100-124）と同じ `nojson::object` パターンで書く。`format_args!` を `f.member` に渡すと `DisplayJson` 不適合でコンパイルできないので、URL は事前に `String` 化する。
+   - `emit_startup_info` が true の場合、以下を stdout に書き出す。既存 `emit_exit_metrics_to_stdout`（L100-124）と同じ `nojson::object` パターンで書く。`format_args!` を `f.member` に渡すと `DisplayJson` 不適合でコンパイルできないので、URL は事前に `String` 化する。
      ```rust
      use std::io::Write as _;
      let server_url = format!("{scheme}://{actual_addr}");
@@ -179,7 +179,7 @@
 
 - `nojson::object<F>` は `F: Fn(&mut JsonObjectFormatter) -> fmt::Result` で `Fn` 制約（`FnOnce` ではない）。複数回呼ばれうる前提で、クロージャは `Copy` 型（`scheme: &'static str`、`actual_addr: SocketAddr` はいずれも `Copy`）と、`String` への共有参照 (`&server_url`, `&ui_url`) を borrow キャプチャする。`src/obsws/state_file.rs::SoraSection::fmt` のネスト `nojson::object` 利用と同じパターン。
 - `format_args!()` を `f.member` の値として直接渡すと、`Arguments<'_>` の temporary scope が statement 末尾までしか伸びず `Fn` クロージャに `'_` lifetime を閉じ込められないため、URL は事前に `String` 化する。
-- stdout は `lock()` を取って 1 回の `writeln!` + `flush()` で書く。`dump_metrics_to_stdout` も同じパターンを使っているので、コードレビューで揺れないよう参照を残す。
-- `tests/` 配下に Rust の統合テストを置かない理由: `hisui server` は終了しないため、`#[tokio::test]` から起動するとシャットダウン制御が複雑になる。常駐サーバを子プロセスとして起動 → stdout を読む → terminate するというフローは `e2e-tests/` の pytest ベース基盤の方が自然。issue 0018（`--dump-metrics-on-exit`、closed）も同様の判断で単体テストを置かず e2e 寄せにしている。
+- stdout は `lock()` を取って 1 回の `writeln!` + `flush()` で書く。`emit_exit_metrics_to_stdout` も同じパターンを使っているので、コードレビューで揺れないよう参照を残す。
+- `tests/` 配下に Rust の統合テストを置かない理由: `hisui server` は終了しないため、`#[tokio::test]` から起動するとシャットダウン制御が複雑になる。常駐サーバを子プロセスとして起動 → stdout を読む → terminate するというフローは `e2e-tests/` の pytest ベース基盤の方が自然。issue 0018（`--emit-exit-metrics`、closed）も同様の判断で単体テストを置かず e2e 寄せにしている。
 - 依存追加: `nojson` / `noargs` / `tokio` / `tracing` は本対応で必要な機能をいずれも既存依存で賄えるため、`Cargo.toml` の変更は不要。
-- `use std::io::Write as _;` は `run_server` 関数内ローカルに置く（既存 `dump_metrics_to_stdout` (`src/obsws/server.rs:101`) と同じパターン）。モジュールトップに置く必要はない。
+- `use std::io::Write as _;` は `run_server` 関数内ローカルに置く（既存 `emit_exit_metrics_to_stdout` (`src/obsws/server.rs:101`) と同じパターン）。モジュールトップに置く必要はない。

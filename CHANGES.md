@@ -56,8 +56,8 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
-- [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになり、`--dump-metrics-on-exit` 指定時はプロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する
-  - 環境変数 `HISUI_DUMP_METRICS_ON_EXIT` でも有効化できる
+- [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになり、`--emit-exit-metrics` 指定時はプロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する
+  - 環境変数 `HISUI_SERVER_EMIT_EXIT_METRICS` でも有効化できる
   - @sile
 - [ADD] server サブコマンドに `--emit-startup-info` フラグを追加する
   - bind 完了直後に実バインド情報 (`{"type":"startup_info", "server":{...}, "ui":..., "pid":...}` 形式) を JSON Lines で標準出力へ出力する
