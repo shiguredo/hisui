@@ -56,7 +56,7 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
-- [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになり、`--dump-metrics-on-exit` 指定時はプロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する
+- [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになる。あわせて hisui 共通フラグとして `--dump-metrics-on-exit` を追加し、subcommand の終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
   - 環境変数 `HISUI_DUMP_METRICS_ON_EXIT` でも有効化できる
   - @sile
 - [ADD] inspect コマンドが fMP4 ファイルの読み込みに対応する
