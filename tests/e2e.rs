@@ -62,106 +62,236 @@ fn inspect_mp4_without_decode() -> noargs::Result<()> {
 
 #[test]
 fn inspect_fragmented_mp4_video_only() -> noargs::Result<()> {
-    // 映像のみの fMP4 が通常 MP4 と整合的に inspect できること
-    let output = run_hisui_command(&[
-        "inspect",
-        "testdata/archive-red-320x320-h264-fragmented.mp4",
-    ])?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json = nojson::RawJson::parse(&stdout)
-        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
-    let root = json.value();
+    // 映像のみの fMP4 が、対応する通常 MP4 と比較対象フィールドで一致すること
+    let plain_stdout = inspect_stdout("testdata/archive-red-320x320-h264.mp4")?;
+    let fmp4_stdout = inspect_stdout("testdata/archive-red-320x320-h264-fragmented.mp4")?;
+
+    // 前提となる format / codec が期待どおりであること
+    assert_inspect_format_and_codec(&plain_stdout, "mp4", None, Some("H264"))?;
+    assert_inspect_format_and_codec(&fmp4_stdout, "fmp4", None, Some("H264"))?;
+
+    // 比較対象フィールドだけを抽出する（timestamp_us / duration_us は通常 MP4 と
+    // testdata 生成差でずれ得るため除外する）
+    let plain = extract_inspect_comparable_samples(&plain_stdout)?;
+    let fmp4 = extract_inspect_comparable_samples(&fmp4_stdout)?;
+
+    // 映像サンプルの data_size / keyframe / nalus が通常 MP4 と一致すること
+    let plain_video = plain.video.expect("通常 MP4 の映像サンプルが存在すること");
+    let fmp4_video = fmp4.video.expect("fMP4 の映像サンプルが存在すること");
     assert_eq!(
-        root.to_member("format")?.required()?.as_string_str()?,
-        "fmp4"
+        fmp4_video, plain_video,
+        "映像サンプルの data_size / keyframe / nalus が通常 MP4 と一致すること"
     );
+
+    // 通常 MP4 と fMP4 が同時に同数で変化した場合の回帰検出アンカーとして残す
     assert_eq!(
-        root.to_member("video_codec")?
-            .required()?
-            .to_unquoted_string_str()?,
-        "H264"
+        fmp4_video.len(),
+        25,
+        "映像サンプル数が期待値どおりであること"
     );
-    let mut video_sample_count = 0;
-    for _ in root.to_member("video_samples")?.required()?.to_array()? {
-        video_sample_count += 1;
-    }
-    assert_eq!(
-        video_sample_count, 25,
-        "映像サンプル数が通常 MP4 と一致すること"
-    );
+
     Ok(())
 }
 
 #[test]
 fn inspect_fragmented_mp4_audio_only() -> noargs::Result<()> {
-    // 音声のみの fMP4 が通常 MP4 と整合的に inspect できること
-    let output = run_hisui_command(&["inspect", "testdata/beep-aac-audio-fragmented.mp4"])?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json = nojson::RawJson::parse(&stdout)
-        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
-    let root = json.value();
+    // 音声のみの fMP4 が、対応する通常 MP4 と比較対象フィールドで一致すること
+    let plain_stdout = inspect_stdout("testdata/beep-aac-audio.mp4")?;
+    let fmp4_stdout = inspect_stdout("testdata/beep-aac-audio-fragmented.mp4")?;
+
+    // 前提となる format / codec が期待どおりであること
+    assert_inspect_format_and_codec(&plain_stdout, "mp4", Some("AAC"), None)?;
+    assert_inspect_format_and_codec(&fmp4_stdout, "fmp4", Some("AAC"), None)?;
+
+    let plain = extract_inspect_comparable_samples(&plain_stdout)?;
+    let fmp4 = extract_inspect_comparable_samples(&fmp4_stdout)?;
+
+    // 音声サンプルの data_size が通常 MP4 と一致すること
+    let plain_audio = plain.audio.expect("通常 MP4 の音声サンプルが存在すること");
+    let fmp4_audio = fmp4.audio.expect("fMP4 の音声サンプルが存在すること");
     assert_eq!(
-        root.to_member("format")?.required()?.as_string_str()?,
-        "fmp4"
+        fmp4_audio, plain_audio,
+        "音声サンプルの data_size が通常 MP4 と一致すること"
     );
+
+    // 通常 MP4 と fMP4 が同時に同数で変化した場合の回帰検出アンカーとして残す
     assert_eq!(
-        root.to_member("audio_codec")?
-            .required()?
-            .to_unquoted_string_str()?,
-        "AAC"
+        fmp4_audio.len(),
+        45,
+        "音声サンプル数が期待値どおりであること"
     );
-    let mut audio_sample_count = 0;
-    for _ in root.to_member("audio_samples")?.required()?.to_array()? {
-        audio_sample_count += 1;
-    }
-    assert_eq!(
-        audio_sample_count, 45,
-        "音声サンプル数が通常 MP4 と一致すること"
-    );
+
     Ok(())
 }
 
 #[test]
 fn inspect_fragmented_mp4_audio_video() -> noargs::Result<()> {
-    // 映像+音声の fMP4 が両トラックとも inspect できること
-    let output = run_hisui_command(&["inspect", "testdata/red-320x320-h264-aac-fragmented.mp4"])?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json = nojson::RawJson::parse(&stdout)
+    // 映像+音声の fMP4 が、対応する通常 MP4 と比較対象フィールドで一致すること
+    let plain_stdout = inspect_stdout("testdata/red-320x320-h264-aac.mp4")?;
+    let fmp4_stdout = inspect_stdout("testdata/red-320x320-h264-aac-fragmented.mp4")?;
+
+    // 前提となる format / codec が期待どおりであること
+    assert_inspect_format_and_codec(&plain_stdout, "mp4", Some("AAC"), Some("H264"))?;
+    assert_inspect_format_and_codec(&fmp4_stdout, "fmp4", Some("AAC"), Some("H264"))?;
+
+    let plain = extract_inspect_comparable_samples(&plain_stdout)?;
+    let fmp4 = extract_inspect_comparable_samples(&fmp4_stdout)?;
+
+    let plain_audio = plain.audio.expect("通常 MP4 の音声サンプルが存在すること");
+    let fmp4_audio = fmp4.audio.expect("fMP4 の音声サンプルが存在すること");
+    let plain_video = plain.video.expect("通常 MP4 の映像サンプルが存在すること");
+    let fmp4_video = fmp4.video.expect("fMP4 の映像サンプルが存在すること");
+
+    // 音声サンプルの data_size が通常 MP4 と一致すること
+    assert_eq!(
+        fmp4_audio, plain_audio,
+        "音声サンプルの data_size が通常 MP4 と一致すること"
+    );
+    // 映像サンプルの data_size / keyframe / nalus が通常 MP4 と一致すること
+    // （timestamp_us / duration_us は testdata 生成差で「音声+映像」ペアの
+    //  映像トラックでずれるため比較対象から除外している）
+    assert_eq!(
+        fmp4_video, plain_video,
+        "映像サンプルの data_size / keyframe / nalus が通常 MP4 と一致すること"
+    );
+
+    // 通常 MP4 と fMP4 が同時に同数で変化した場合の回帰検出アンカーとして残す
+    assert_eq!(
+        fmp4_audio.len(),
+        45,
+        "音声サンプル数が期待値どおりであること"
+    );
+    assert_eq!(
+        fmp4_video.len(),
+        25,
+        "映像サンプル数が期待値どおりであること"
+    );
+
+    Ok(())
+}
+
+/// inspect を実行して標準出力を返す
+fn inspect_stdout(path: &str) -> noargs::Result<String> {
+    let output = run_hisui_command(&["inspect", path])?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// inspect 出力の `format` と `audio_codec` / `video_codec` が期待どおりか確認する。
+/// 各 codec は `None` を渡せばチェックをスキップする。
+fn assert_inspect_format_and_codec(
+    stdout: &str,
+    expected_format: &str,
+    expected_audio_codec: Option<&str>,
+    expected_video_codec: Option<&str>,
+) -> noargs::Result<()> {
+    let json = nojson::RawJson::parse(stdout)
         .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
     let root = json.value();
     assert_eq!(
         root.to_member("format")?.required()?.as_string_str()?,
-        "fmp4"
+        expected_format,
+        "format が期待値と一致すること"
     );
-    assert_eq!(
-        root.to_member("audio_codec")?
-            .required()?
-            .to_unquoted_string_str()?,
-        "AAC"
-    );
-    assert_eq!(
-        root.to_member("video_codec")?
-            .required()?
-            .to_unquoted_string_str()?,
-        "H264"
-    );
-    let mut audio_sample_count = 0;
-    for _ in root.to_member("audio_samples")?.required()?.to_array()? {
-        audio_sample_count += 1;
+    if let Some(expected) = expected_audio_codec {
+        assert_eq!(
+            root.to_member("audio_codec")?
+                .required()?
+                .to_unquoted_string_str()?,
+            expected,
+            "audio_codec が期待値と一致すること"
+        );
     }
-    let mut video_sample_count = 0;
-    for _ in root.to_member("video_samples")?.required()?.to_array()? {
-        video_sample_count += 1;
+    if let Some(expected) = expected_video_codec {
+        assert_eq!(
+            root.to_member("video_codec")?
+                .required()?
+                .to_unquoted_string_str()?,
+            expected,
+            "video_codec が期待値と一致すること"
+        );
     }
-    assert_eq!(
-        audio_sample_count, 45,
-        "音声サンプル数が通常 MP4 と一致すること"
-    );
-    assert_eq!(
-        video_sample_count, 25,
-        "映像サンプル数が通常 MP4 と一致すること"
-    );
     Ok(())
+}
+
+/// 通常 MP4 と fMP4 で実値が一致するはずの inspect 出力フィールドだけを抽出した
+/// 比較用構造体。
+///
+/// 含めるもの:
+///   - 音声サンプル列: `data_size`
+///   - 映像サンプル列: `data_size` / `keyframe` / `nalus`（`type` / `nri`）
+///
+/// 含めないもの:
+///   - `timestamp_us` / `duration_us`: 「音声+映像」ペアの映像トラックで
+///     testdata 生成差によりずれるため
+///   - 集計値の `video_duration_us` / `audio_duration_us`: 同上
+#[derive(Debug, PartialEq, Eq)]
+struct InspectComparableSamples {
+    audio: Option<Vec<InspectComparableAudioSample>>,
+    video: Option<Vec<InspectComparableVideoSample>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct InspectComparableAudioSample {
+    data_size: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct InspectComparableVideoSample {
+    data_size: u64,
+    keyframe: bool,
+    nalus: Vec<InspectComparableNalu>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct InspectComparableNalu {
+    nalu_type: u64,
+    nri: u64,
+}
+
+/// inspect の出力 JSON 文字列から `InspectComparableSamples` を抽出する。
+/// `audio_samples` / `video_samples` のキーが存在しない場合は当該フィールドを
+/// `None` とする（音声のみ・映像のみのテストケースで使うため）。
+fn extract_inspect_comparable_samples(stdout: &str) -> noargs::Result<InspectComparableSamples> {
+    let json = nojson::RawJson::parse(stdout)
+        .map_err(|e| format!("inspect 出力の JSON パースに失敗: {e}"))?;
+    let root = json.value();
+
+    // 音声トラックが存在する場合のみ抽出する
+    let audio = if let Some(audio_samples) = root.to_member("audio_samples")?.optional() {
+        let mut out = Vec::new();
+        for sample in audio_samples.to_array()? {
+            out.push(InspectComparableAudioSample {
+                data_size: sample.to_member("data_size")?.required()?.try_into()?,
+            });
+        }
+        Some(out)
+    } else {
+        None
+    };
+
+    // 映像トラックが存在する場合のみ抽出する
+    let video = if let Some(video_samples) = root.to_member("video_samples")?.optional() {
+        let mut out = Vec::new();
+        for sample in video_samples.to_array()? {
+            let mut nalus = Vec::new();
+            for nalu in sample.to_member("nalus")?.required()?.to_array()? {
+                nalus.push(InspectComparableNalu {
+                    nalu_type: nalu.to_member("type")?.required()?.try_into()?,
+                    nri: nalu.to_member("nri")?.required()?.try_into()?,
+                });
+            }
+            out.push(InspectComparableVideoSample {
+                data_size: sample.to_member("data_size")?.required()?.try_into()?,
+                keyframe: sample.to_member("keyframe")?.required()?.try_into()?,
+                nalus,
+            });
+        }
+        Some(out)
+    } else {
+        None
+    };
+
+    Ok(InspectComparableSamples { audio, video })
 }
 
 #[test]
