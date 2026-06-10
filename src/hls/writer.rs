@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::codec_string::CodecResolutionState;
-use crate::sample_entry::SharedSampleEntry;
 
 use crate::obsws::coordinator::output_registry::HlsSegmentFormat;
 
@@ -320,10 +319,6 @@ struct MpegTsState {
     pmt_cc: ContinuityCounter,
     video_cc: ContinuityCounter,
     audio_cc: ContinuityCounter,
-    /// 最後に受信したビデオの sample_entry（SPS/PPS 注入用）
-    last_video_sample_entry: Option<SharedSampleEntry>,
-    /// 最後に受信したオーディオの sample_entry（ADTS ヘッダ生成用）
-    last_audio_sample_entry: Option<SharedSampleEntry>,
 }
 
 /// fMP4 フォーマット固有の状態
@@ -337,10 +332,6 @@ struct Fmp4State {
     last_video_timestamp: Option<Duration>,
     /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
     last_audio_timestamp: Option<Duration>,
-    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持）
-    last_video_sample_entry: Option<SharedSampleEntry>,
-    /// 最後に受信したオーディオの sample_entry（セグメント跨ぎで保持）
-    last_audio_sample_entry: Option<SharedSampleEntry>,
 }
 
 #[derive(Debug)]
@@ -365,8 +356,6 @@ impl HlsWriter {
                 pmt_cc: ContinuityCounter::new(),
                 video_cc: ContinuityCounter::new(),
                 audio_cc: ContinuityCounter::new(),
-                last_video_sample_entry: None,
-                last_audio_sample_entry: None,
             })),
             HlsSegmentFormat::Fmp4 => {
                 let muxer = shiguredo_mp4::mux::Fmp4SegmentMuxer::new().map_err(|e| {
@@ -379,8 +368,6 @@ impl HlsWriter {
                     current_payload: Vec::new(),
                     last_video_timestamp: None,
                     last_audio_timestamp: None,
-                    last_video_sample_entry: None,
-                    last_audio_sample_entry: None,
                 }))
             }
         };
@@ -560,14 +547,11 @@ impl HlsWriter {
 
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
-                // 入力経路によっては sample_entry が初回フレームにしか載らないため保持する。
-                if let Some(entry) = &frame.sample_entry {
-                    state.last_video_sample_entry = Some(entry.clone());
-                }
                 // length-prefixed NALU → Annex B 変換 + キーフレーム時の SPS/PPS 注入
+                // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
                 let annexb_data = convert_length_prefixed_to_annexb(
                     &frame.data,
-                    state.last_video_sample_entry.as_ref().map(|e| e.get()),
+                    frame.sample_entry.as_ref().map(|e| e.get()),
                     frame.keyframe,
                 )?;
                 let pts = duration_to_timestamp(frame.timestamp)?;
@@ -582,10 +566,6 @@ impl HlsWriter {
                 )?;
             }
             FormatState::Fmp4(state) => {
-                // 入力経路によっては sample_entry が初回フレームにしか載らないため保持する。
-                if let Some(entry) = &frame.sample_entry {
-                    state.last_video_sample_entry = Some(entry.clone());
-                }
                 // 前のビデオサンプルの duration を確定させる
                 if let Some(prev_ts) = state.last_video_timestamp {
                     let duration = frame.timestamp.saturating_sub(prev_ts).as_micros() as u32;
@@ -599,12 +579,8 @@ impl HlsWriter {
                 }
                 let data_offset = state.current_payload.len() as u64;
                 state.current_payload.extend_from_slice(&frame.data);
-                // フレームの sample_entry が None なら保持済みの値を使う
-                let sample_entry = frame
-                    .sample_entry
-                    .as_ref()
-                    .or(state.last_video_sample_entry.as_ref())
-                    .map(|e| e.get().clone());
+                // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
+                let sample_entry = frame.sample_entry.as_ref().map(|e| e.get().clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Video,
                     sample_entry,
@@ -646,17 +622,6 @@ impl HlsWriter {
             self.resolve_audio_codec(codec_str);
         }
 
-        if let Some(entry) = &frame.sample_entry {
-            match &mut self.format_state {
-                FormatState::MpegTs(state) => {
-                    state.last_audio_sample_entry = Some(entry.clone());
-                }
-                FormatState::Fmp4(state) => {
-                    state.last_audio_sample_entry = Some(entry.clone());
-                }
-            }
-        }
-
         if self.current_segment_info.is_none() {
             return Ok(());
         }
@@ -664,9 +629,10 @@ impl HlsWriter {
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 // raw AAC → ADTS 変換
+                // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
                 let adts_data = wrap_raw_aac_in_adts(
                     &frame.data,
-                    state.last_audio_sample_entry.as_ref().map(|e| e.get()),
+                    frame.sample_entry.as_ref().map(|e| e.get()),
                 )?;
                 let pts = duration_to_timestamp(frame.timestamp)?;
                 write_pes_packets_mpegts(
@@ -692,11 +658,8 @@ impl HlsWriter {
                 }
                 let data_offset = state.current_payload.len() as u64;
                 state.current_payload.extend_from_slice(&frame.data);
-                let sample_entry = frame
-                    .sample_entry
-                    .as_ref()
-                    .or(state.last_audio_sample_entry.as_ref())
-                    .map(|e| e.get().clone());
+                // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
+                let sample_entry = frame.sample_entry.as_ref().map(|e| e.get().clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Audio,
                     sample_entry,
@@ -767,21 +730,8 @@ impl HlsWriter {
                     return Ok(());
                 }
 
-                // muxer は各トラックの最初の sample に sample_entry があることを要求する。
-                // セグメント開始直後のフレームに sample_entry が欠落している場合に備えて、
-                // 最後に観測した sample_entry から補完しておく。
-                // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
-                fill_missing_sample_entries(
-                    &mut state.current_samples,
-                    &state
-                        .last_video_sample_entry
-                        .as_ref()
-                        .map(|e| e.get().clone()),
-                    &state
-                        .last_audio_sample_entry
-                        .as_ref()
-                        .map(|e| e.get().clone()),
-                );
+                // issue 0030 で fill_missing_sample_entries 呼び出しを削除した。
+                // 不変条件下で各 sample が必ず sample_entry を持つため補完は不要。
 
                 // 末尾サンプルの duration を補完する。
                 // 各トラックの最後のサンプルは次フレーム未到着のため duration=0 のまま。
@@ -1166,26 +1116,6 @@ fn reorder_payload_by_track(
 }
 
 /// fMP4 muxer に渡す前に、欠落している sample_entry を最後に観測した値で補完する。
-fn fill_missing_sample_entries(
-    samples: &mut [shiguredo_mp4::mux::Sample],
-    last_video_sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
-    last_audio_sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
-) {
-    for sample in samples.iter_mut() {
-        if sample.sample_entry.is_some() {
-            continue;
-        }
-        match sample.track_kind {
-            shiguredo_mp4::TrackKind::Video => {
-                sample.sample_entry = last_video_sample_entry.clone();
-            }
-            shiguredo_mp4::TrackKind::Audio => {
-                sample.sample_entry = last_audio_sample_entry.clone();
-            }
-        }
-    }
-}
-
 fn fixup_last_sample_duration(samples: &mut [shiguredo_mp4::mux::Sample]) {
     // ビデオの末尾を補完
     fixup_last_sample_duration_for_track(samples, shiguredo_mp4::TrackKind::Video);
