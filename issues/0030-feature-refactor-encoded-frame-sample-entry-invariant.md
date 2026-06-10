@@ -17,9 +17,13 @@ issue 0017（音声）・0027（映像）でエンコーダ出力は全出力フ
 
 ## 優先度根拠
 
-Low。現状で機能的なバグは無い。HLS / DASH writer の consumer は obsws coordinator のみで、その上流は常にエンコーダ（全フレーム付与済み）であるため、writer の保持・補完ロジックは既に事実上デッドであり、リーダー経路の疎な付与が実害を生む経路は現時点で存在しない。本 issue は (1) 不変条件を全経路で真にして文書化し、(2) デッド化している防御ロジックを削除する、保守性のための仕上げである。時間があるときに対応する。
+Low。HLS / DASH writer の consumer は obsws coordinator のみで、その上流は常にエンコーダ（全フレーム付与済み）であるため、writer の保持・補完ロジックは事実上デッドであり、mp4 reader 経路の疎な付与が実害を生む経路は現時点で存在しない。
 
-便益はエンコード済みフレームの sample_entry 付与ポリシーが全経路で揃い、フレーム構造体のコメントで保証される一貫性のみで、機能的改善は無い。コストはリーダー 3 ファイル + ネットワーク入力の監査・改修、writer 2 ファイルの保持ロジック削除とテスト追従。
+ただし、`H264AnnexB` 形式のネットワーク入力（rtsp 映像・srt 映像）を直接 mp4 出力に繋ぐ構成（デバッグ用録画など）は、現状 sample_entry が `None` のまま writer に届くため mp4 fragment の先頭サンプルで壊れる。この経路は機能バグを含む。
+
+本 issue は (1) 不変条件を全経路で真にして文書化し、(2) デッド化している防御ロジックを削除し、(3) Annex-B 入力経路のバグを解消する、保守性と一貫性のための改修である。
+
+便益はエンコード済みフレームの sample_entry 付与ポリシーが全経路で揃いフレーム構造体のコメントで保証されること、および Annex-B 直接 mp4 出力が動作すること。コストはリーダー 3 ファイル + ネットワーク入力 4 経路の改修、writer 3 ファイルの保持ロジック削除とテスト追従。
 
 ## 現状
 
@@ -37,12 +41,13 @@ Low。現状で機能的なバグは無い。HLS / DASH writer の consumer は 
   - consumer は obsws coordinator のみ（`src/obsws/coordinator/output_hls.rs:975` / `output_dash.rs:960`）。上流は常に `encoder::create_video_processor*` / `create_audio_processor` → writer で、パススルー経路は無い
   - `src/dash/writer.rs`: `last_video_sample_entry` / `last_audio_sample_entry`（`:256-259`）、`.or()` フォールバック（`:528` / `:593`）、`fill_missing_sample_entries`（定義 `:1012`、呼び出し `:647`）
   - `src/hls/writer.rs`: `MpegTsState`（`:323-326`）と `Fmp4State`（`:340-343`）の `last_*_sample_entry`、`.or()` フォールバック（`:608` / `:700`）、`fill_missing_sample_entries`（定義 `:1171`、呼び出し `:776`）。MpegTs は映像で SPS/PPS 注入（`convert_length_prefixed_to_annexb`、`:570`）、音声で ADTS ヘッダ生成（`wrap_raw_aac_in_adts`、`:669`）に保持値を使う
-
-要監査（実装時に実コードで確認する。現時点で疎 / 全のいずれかは未確認なので推測で書かない）:
-
-- ネットワーク入力がエンコード済みフレームを構築する経路の sample_entry 付与:
-  - `src/rtmp/frame.rs`（内部に `video_sample_entry` フィールド `:168` を保持しているため、既に毎フレーム載せている可能性がある。要確認）
-  - `src/rtsp/subscriber.rs` / `src/srt/inbound_endpoint.rs` / `src/webrtc/p2p_session.rs`
+  - `src/mp4/hybrid_writer.rs`: `last_audio_sample_entry` / `last_video_sample_entry`（`:80-81`）、`.or_else()` フォールバック（`:218` / `:257`）— 同様に削除対象
+- ネットワーク入力経路の確認済み現状:
+  - `src/rtmp/frame.rs`: 映像（H264/AVCC）・音声（AAC）とも毎フレーム `Some` を付与。**対応不要**
+  - `src/rtsp/subscriber.rs`: 映像（H264AnnexB）は `sample_entry: None`。音声（AAC）は初回のみ（`sent_sample_entry` フラグで疎）
+  - `src/srt/inbound_endpoint.rs`: 映像（H264AnnexB）は `sample_entry: None`（コメント「Annex-B 入力では sample_entry は付与しない」）。音声（AAC）は config 変化時のみ（疎）
+  - `src/webrtc/p2p_session.rs`: 映像は I420 生フレーム。**対象外**
+  - Annex-B 映像（rtsp/srt）を直接 mp4 writer（`hybrid_writer.rs`）に繋ぐと、sample_entry が `None` のまま届くため mp4 fragment 先頭サンプルで壊れる
 
 ## 設計方針
 
@@ -52,14 +57,21 @@ Low。現状で機能的なバグは無い。HLS / DASH writer の consumer は 
 
 `Option` のままにする理由は維持する（生フレームが構造的に `None` を持つため。非 Option 化は issue 0028 で実装不可と判断済み）。コメントだけ先行させて実態が伴わない状態（broken window）を作らないため、設計方針 2 のリーダー対応と同一コミットで入れる。
 
-### 2. リーダー経路を全フレーム付与に変更
+### 2. リーダー経路・ネットワーク入力経路を全フレーム付与に変更
 
 リーダー内で直近の sample_entry を保持し、エンコード済みフレームを生成するたびに毎フレーム載せる（エンコーダ 3 種・writer が 0017 / 0027 で採った「保持して毎フレーム clone」と同方式。`SharedSampleEntry` は Arc なので clone は安価）。
 
 - `src/mp4/sample_reader.rs`（音声・映像）
 - `src/mp4/reader.rs`（4 箇所）
 - `src/sora/recording_mp4_reader.rs`（音声・映像）
-- 要監査のネットワーク入力（rtmp / rtsp / srt / webrtc）で疎な箇所があれば同様に対応する
+- `src/rtsp/subscriber.rs`: 音声を毎フレーム付与に変更（`sent_sample_entry` フラグ削除）。映像は下記 Annex-B 対応で解決
+- `src/srt/inbound_endpoint.rs`: 音声を毎フレーム付与に変更（config 変化時のみ → 保持して毎フレーム）。映像は下記 Annex-B 対応で解決
+
+**Annex-B 映像（rtsp / srt）の sample_entry 構築**:
+
+キーフレーム（SPS を含む IDR）到達時に `h264_sample_entry_from_annexb(0, 0, &frame.data)` を呼んで sample_entry を生成し保持する。その後は全フレームに保持値を clone して付与する。width / height は RTMP 実装（`src/rtmp/frame.rs`）と同様に 0 で構築する（SPS 内 Exp-Golomb パースによる解像度抽出は別 issue で対応）。
+
+「入力側でパース vs 出力側でパース」の判断: 入力側で完全な `SampleEntry` box を構築する。SPS パース処理はエンコードと比べて極めて軽量なため、責務の明確さを優先して入力側に一本化する。これは RTMP が既に採っている方式と一致する。
 
 ### 3. HLS / DASH writer の保持・補完ロジック削除
 
@@ -72,13 +84,15 @@ Low。現状で機能的なバグは無い。HLS / DASH writer の consumer は 
 
 削除後は writer の正しさが不変条件に依存する。不変条件違反のフレームが届いた場合は muxer がセグメント先頭サンプルでエラーになる。違反を早期検知するため `debug_assert!` か明示的なエラーを置くかは実装時に判断する。
 
+`src/mp4/hybrid_writer.rs` も同様の保持ロジックを持つため削除対象に含める。
+
 ## 完了条件
 
 - `VideoFrame` / `AudioFrame` の `sample_entry` に不変条件のコメントが入ること
 - リーダー経路（mp4 readers）がエンコード済みフレームに毎フレーム sample_entry を載せること。ネットワーク入力経路も監査し、疎な箇所が無いこと
 - HLS / DASH writer の `last_*_sample_entry`・`.or()` フォールバック・`fill_missing_sample_entries` が削除され、ビルド・テストが通ること
 - 録画・HLS / DASH 出力にリグレッションが無いこと
-- テスト: リーダーがエンコード済みフレームに毎フレーム sample_entry を載せることを単体 / 統合テストで検証する。writer のテストは保持ロジック前提のものを削除 / 更新する
+- テスト: リーダーがエンコード済みフレームに毎フレーム sample_entry を載せることを単体 / 統合テストで検証する。Annex-B 入力（rtsp/srt 映像）がキーフレームから sample_entry を構築し毎フレーム付与することを単体テストで検証する。writer のテストは保持ロジック前提のものを削除 / 更新する
 - CHANGES.md: 利用者から見た挙動は不変の内部リファクタ。記載要否は実装時に判断する（0017 / 0027 と同方針）
 
 ## 関連
