@@ -16,7 +16,6 @@ pub mod media_pipeline;
 pub mod mixer;
 pub mod mp4;
 pub mod obsws;
-pub mod optuna;
 pub mod progress;
 pub mod scaler;
 pub mod srt;
@@ -32,6 +31,7 @@ pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
 pub mod subcommand_server;
+pub mod tune;
 
 pub mod tcp;
 pub mod timestamp;

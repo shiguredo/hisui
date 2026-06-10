@@ -930,6 +930,88 @@ fn vmaf_stdout_summary_has_required_fields() -> noargs::Result<()> {
     Ok(())
 }
 
+/// tune コマンドが 1 試行を実行し、試行履歴を永続化することの最小確認。
+///
+/// tune は内部で vmaf サブコマンドを呼ぶ (current_exe() で自分自身を spawn する)。
+/// ここが通れば「tune -> vmaf -> 合成 -> エンコード -> VMAF 評価 -> 履歴永続化」の配線が
+/// 一通り生きていることになる (vmaf コマンドの変更などによるデグレ検知が目的)。
+#[test]
+fn tune_runs_one_trial_and_records_history() -> noargs::Result<()> {
+    let work_dir = tempfile::tempdir()?;
+
+    // 値が null のメンバーだけが探索対象になる。ここでは cpu_used 1 個だけを可変にした
+    // 最小レイアウトを使う。ソース glob はフィクスチャに合わせて "*.json"。
+    let layout_path = work_dir.path().join("tune-layout.jsonc");
+    std::fs::write(
+        &layout_path,
+        r#"{
+  "video_layout": {
+    "main": {
+      "cell_width": 320,
+      "cell_height": 240,
+      "max_columns": 3,
+      "video_sources": ["*.json"]
+    }
+  },
+  "video_codec": "VP9",
+  "video_encode_engines": ["libvpx"],
+  "video_decode_engines": ["libvpx"],
+  "libvpx_vp9_encode_params": { "cpu_used": null }
+}"#,
+    )?;
+
+    // cpu_used を速い側に限定して 1 試行を短時間で終わらせる。
+    let search_space_path = work_dir.path().join("search-space.jsonc");
+    std::fs::write(
+        &search_space_path,
+        r#"{ "libvpx_vp9_encode_params.cpu_used": { "min": 7, "max": 9 } }"#,
+    )?;
+
+    let tune_working_dir = work_dir.path().join("tune");
+    run_hisui_command(&[
+        "tune",
+        "--layout-file",
+        &layout_path.display().to_string(),
+        "--search-space-file",
+        &search_space_path.display().to_string(),
+        "--trial-count",
+        "1",
+        "--frame-count",
+        "5",
+        "--tune-working-dir",
+        &tune_working_dir.display().to_string(),
+        "testdata/e2e/simple_single_source_vp9/",
+    ])?;
+
+    // 試行履歴 (JSON Lines) に成功レコードが 1 件書かれていること。
+    let jsonl_path = tune_working_dir.join("hisui-tune.jsonl");
+    let content = std::fs::read_to_string(&jsonl_path)
+        .map_err(|e| format!("試行履歴 {} を読めること: {e}", jsonl_path.display()))?;
+    let lines: Vec<&str> = content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert_eq!(lines.len(), 1, "1 試行ぶんの履歴が書かれること");
+    assert!(
+        lines[0].contains(r#""state":"complete""#),
+        "成功 (complete) レコードであること: {}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("vmaf_mean"),
+        "vmaf_mean が記録されていること: {}",
+        lines[0]
+    );
+
+    // 多重起動防止のロックは正常終了で解放され、残らないこと。
+    assert!(
+        !tune_working_dir.join("hisui-tune.lock").exists(),
+        "ロックファイルが正常終了で残らないこと"
+    );
+
+    Ok(())
+}
+
 /// 単一のソースをそのまま変換する場合
 /// - 入力:
 ///   - 映像:

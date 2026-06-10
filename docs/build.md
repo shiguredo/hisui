@@ -113,7 +113,7 @@ Commands:
   list-codecs 利用可能なコーデック一覧を表示します
   compose     録画ファイルの合成を行います
   vmaf        VMAF を用いた映像エンコード品質の評価を行います
-  tune        Optuna を用いた映像エンコードパラメーターの調整を行います
+  tune        映像エンコードパラメーターの調整を行います
   server      OBS WebSocket 互換サーバーコマンド
 
 Options:

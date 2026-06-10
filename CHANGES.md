@@ -11,6 +11,12 @@
 
 ## develop
 
+- [CHANGE] `hisui tune` のパラメータ最適化エンジンを外部 `optuna` コマンドから自前の NSGA-II 実装に変更する
+  - Python + optuna の事前インストールが不要になる
+  - 試行履歴の保存形式を SQLite (`optuna.db`) から JSON Lines (`<name>.jsonl`) に変更する (既存の `optuna.db` は引き継げない)
+  - `--trial-count` の意味を「追加の試行回数」から「既存の履歴を含めた合計の到達回数」に変更する
+  - 多重起動防止のためにロックファイル (`<name>.lock`) を使用する (中断などで残った場合は次回起動時に自動回収する)
+  - @sile
 - [CHANGE] VMAF 評価を外部 `vmaf` コマンドから `shiguredo_vmaf` ライブラリ呼び出しに変更する
   - 外部 `vmaf` バイナリの事前インストール (PATH 設定) が不要になる
   - 代わりにビルド時に libvmaf の prebuilt バイナリのダウンロード (ネットワークアクセス) が発生する

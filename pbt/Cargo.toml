@@ -1,0 +1,15 @@
+[package]
+name = "pbt"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+# PBT 対象である hisui 本体を path 依存で参照する
+hisui = { path = ".." }
+# JSON Lines のラウンドトリップ検証用
+nojson = { workspace = true }
+# Property-Based Testing 本体
+proptest = "1.11"

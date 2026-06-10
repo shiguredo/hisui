@@ -251,6 +251,6 @@ Hisui レガシー機能は Hisui 2025.1.x でのみ利用できます。
 - AV1 のデコーダに [dav1d](https://code.videolan.org/videolan/dav1d/) を利用しています
 - Intel VPL に非対応です
 - NVIDIA Video Codec に対応しています
-- [Optuna](https://optuna.org/) を利用したエンコーダーパラメータの自動調整機能を利用できます
+- NSGA-II（多目的最適化）によるエンコーダーパラメータの自動調整機能を利用できます
 
 詳細は [migrate_hisui_legacy\.md](docs/migrate_hisui_legacy.md) をご覧ください。

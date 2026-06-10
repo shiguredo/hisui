@@ -2,7 +2,7 @@
 
 `hisui tune` コマンドは、映像のエンコードパラメーターの最適化を行うためのコマンドです。
 
-このコマンドは、[Optuna](https://optuna.org/) を使用して、指定されたレイアウトファイル内のエンコードパラメーターを自動的に調整し、**合成実行時間の最小化**と **映像品質（VMAF スコア）の最大化**という 2 つの目的を両立する最適なパラメーターセットを探索します。
+このコマンドは、NSGA-II という多目的最適化アルゴリズムを使用して、指定されたレイアウトファイル内のエンコードパラメーターを自動的に調整し、**合成実行時間の最小化**と **映像品質（VMAF スコア）の最大化**という 2 つの目的を両立する最適なパラメーターセットを探索します。
 
 ## 最適化（エンコードパラメーターの探索・調整） のモチベーション
 
@@ -40,17 +40,6 @@
 7. 必要に応じて、最終的なレイアウトファイルの内容を手で微調整します
    - もし対象のエンコードパラメーターについて詳しい人がいる場合には、手動調整を加えることで、さらなる改善が期待できます
 
-## 依存パッケージ
-
-このコマンドはパラメーター最適化に外部の `optuna` コマンド（Python 製）を利用するため、別途インストールが必要です。
-
-macOS / Ubuntu のいずれも、以下のようにして `optuna` をインストールできます
-（[uv](https://docs.astral.sh/uv/) はPython用のパッケージマネージャーです）：
-
-```bash
-uv tool install optuna
-```
-
 ## 使用方法
 
 ```console
@@ -72,31 +61,32 @@ Options:
   -l, --layout-file <PATH>       パラメータ調整に使用するレイアウトファイルを指定します [default: HISUI_REPO/layout-examples/tune-libvpx-vp9.jsonc]
   -s, --search-space-file <PATH> 探索空間定義ファイル（JSON）のパスを指定します [default: HISUI_REPO/search-space-examples/full.jsonc]
       --tune-working-dir <PATH>  チューニング用に使われる作業ディレクトリを指定します [default: ROOT_DIR/hisui-tune/]
-      --study-name <NAME>        Optuna の study 名を指定します [default: hisui-tune]
-  -n, --trial-count <INTEGER>    実行する試行回数を指定します [default: 100]
+      --name <NAME>              探索履歴の保存に使う名前を指定します（名前ごとに履歴が分かれます） [default: hisui-tune]
+  -n, --trial-count <INTEGER>    目標とする合計試行回数を指定します（既存の履歴を含む） [default: 100]
   -t, --trial-timeout <SECONDS>  各試行トライアルのタイムアウト時間（秒）を指定します（超過した場合は失敗扱い）
       --openh264 <PATH>          OpenH264 の共有ライブラリのパスを指定します [env: HISUI_OPENH264_PATH]
   -c, --max-cpu-cores <INTEGER>  調整処理を行うプロセスが使用するコア数の上限を指定します [env: HISUI_MAX_CPU_CORES]
   -f, --frame-count <FRAMES>     調整用にエンコードする映像フレームの数を指定します [default: 300]
 ```
 
-## Optuna による最適化の概要
+## 最適化の概要
 
 ### 最適化の流れ
 
-Optuna による最適化は、以下のような流れとなります:
-1. ユーザーがパラメーターの探索空間を指定する
-   - `hisui tune` コマンドの `--layout-file` および `--search-space-file` の指定がこれに該当
-2. Optuna は、探索空間の中から次に探索するパラメーターセットをサンプリングする
-3. Hisui はサンプリングされたパラメーターセットを `hisui vmaf` コマンドを使って評価する
-   - Optunaの用語では「パラメーターセットのサンプリングと評価」をまとめたものを「トライアル」と呼称
-4. Hisui は評価結果を Optuna にフィードバックする
-5. Optuna は次のトライアルでのサンプリングの参考にするために、フィードバック結果を探索履歴に反映する
-   - Optuna の探索履歴は SQLite のデータベースファイルに格納されている
-6. 2 に戻って、次のトライアルを開始する
-   - これを`--trial-count`で指定の回数に達するまで繰り返す
+`hisui tune` は、内部の NSGA-II（多目的最適化アルゴリズム）を使って、以下の流れを繰り返します:
 
-なおこの一連の流れは `hisui tune` によってラップされているため、ユーザーが細かく意識する必要はありません。
+1. ユーザーがパラメーターの探索空間を指定する
+   - `--layout-file` および `--search-space-file` の指定がこれに該当
+2. 探索空間の中から、次に試すパラメーターセットを決める
+   - 探索の序盤は広く探るために候補をランダムに選び、試行が貯まってくると、それまでに良かった試行をもとに有望そうな候補を生成していく
+3. そのパラメーターセットを `hisui vmaf` コマンドで評価する
+   - 「パラメーターセットの決定と評価」をまとめたものを「トライアル」と呼称
+4. 評価結果を探索履歴に記録し、次のトライアルの参考にする
+   - 探索履歴は作業ディレクトリ内の JSON Lines ファイル（`<name>.jsonl`）に 1 トライアル 1 行で追記される
+5. 2 に戻って、次のトライアルを開始する
+   - これを `--trial-count` で指定した合計到達回数になるまで繰り返す
+
+これらはすべて `hisui tune` が自動で行うため、利用者が中の動きを細かく意識する必要はありません。
 
 ### 最適化メトリクス
 
@@ -105,7 +95,7 @@ Optuna による最適化は、以下のような流れとなります:
 1. **実行時間（最小化）** - 映像エンコード処理にかかる時間を短縮
 2. **VMAF スコア平均値（最大化）** - 映像品質を向上
 
-これらは多目的最適化問題として扱われ、Optuna のパレートフロント探索によって、両方の目的を考慮した最適解の集合（パレート解）が見つけられます。
+これらは多目的最適化問題として扱われ、NSGA-II のパレートフロント探索によって、両方の目的を考慮した最適解の集合（パレート解）が見つけられます。
 
 多目的最適化の場合には単一の最適解は定まらないので、
 トレードオフを含んだ最適解の集合の中から最終的に使用する解（パラメーターセット）を選択するのは
@@ -125,9 +115,9 @@ $ hisui tune /path/to/archive/RECORDING_ID/
 layout file to tune:    DEFAULT
 search space file:      DEFAULT
 tune working dir:       /path/to/archive/RECORDING_ID/hisui-tune/
-optuna storage: sqlite:///path/to/archive/RECORDING_ID/hisui-tune/optuna.db
-optuna study name:      hisui-tune
-optuna trial count:     100
+trials file:    /path/to/archive/RECORDING_ID/hisui-tune/hisui-tune.jsonl
+name:     hisui-tune
+target total trials:    100
 tuning metrics: [Execution Time (minimize), VMAF Score Mean (maximize)]
 tuning parameters (7):
   video_toolbox_h265_encode_params.allow_open_gop:       [true,false]
@@ -138,12 +128,12 @@ tuning parameters (7):
   video_toolbox_h265_encode_params.real_time:    [true,false]
   video_toolbox_h265_encode_params.use_parallelization:  [true,false]
 
-====== CREATE OPTUNA STUDY ======
-[I 2025-07-16 12:35:41,907] A new study created in RDB with name: hisui-tune
+====== OPEN HISTORY ======
+existing trials:         0
+remaining trials:        100
 
-====== OPTUNA TRIAL (1/100) ======
+====== TRIAL (1/100) (total target 100) ======
 === SAMPLE PARAMETERS ===
-[I 2025-07-16 12:35:42,360] Asked trial 0 with parameters {'video_toolbox_h265_encode_params.allow_open_gop': False, 'video_toolbox_h265_encode_params.allow_temporal_compression': True, ...}.
 
 === EVALUATE PARAMETERS ===
 $ "hisui" "vmaf" "--layout-file" "/path/to/trial-0/layout.jsonc" ...
@@ -154,8 +144,6 @@ $ "hisui" "vmaf" "--layout-file" "/path/to/trial-0/layout.jsonc" ...
 
 # Run VMAF evaluation
 => done
-
-[I 2025-07-16 12:35:43,172] Told trial 0 with values [0.5039638, 90.98882] and state 1.
 
 ====== BEST TRIALS (sorted by execution time) ======
 Trial #0
@@ -178,8 +166,8 @@ Trial #0
 `hisui tune` コマンドの出力には、以下のような情報が含まれています。
 - `====== INFO ======`
   - 探索（最適化）の基本情報が表示されます
-- `====== OPTUNA TRIAL ({I}/{N}) ======`
-  - Optuna の各トライアルの情報が表示されます
+- `====== TRIAL ({I}/{N}) (total target {T}) ======`
+  - 各トライアルの情報が表示されます（`{I}` は今回の実行での連番、`{N}` は今回の残り回数、`{T}` は合計到達目標）
 - `====== BEST TRIALS (sorted by execution time) ======`
   - 探索によって見つかった最適解の集合が表示されます
   - 表示タイミングは以下の通りです
@@ -198,18 +186,14 @@ Trial #0
 もし、この `hisui compose` の実行結果が期待通りのものであれば、このトライアルのレイアウトファイルを、
 実際の運用で使うものとして採用することができます。
 
-なお `[I 2025-07-16 12:35:43,172] ...` という形式のログ出力は Optuna によるものです。
-
-また、`hisui tune` コマンドの探索結果についての出力は必要最低限のものとなっていますが、
-Optuna の可視化機能やダッシュボードを活用することで、より詳細な確認や分析が可能となります。
-- 可視化機能: [Optuna Documentation - Visualization](https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/005_visualization.html)
-- ダッシュボード: [Optuna Dashboard](https://github.com/optuna/optuna-dashboard)
+なお、探索履歴は作業ディレクトリ内の JSON Lines ファイル（`<name>.jsonl`）に保存されるため、
+必要に応じて自分で解析・可視化することもできます。
 
 ## 探索用のレイアウトファイル
 
 `hisui tune` コマンドで使用するレイアウトファイルは基本的には通常のものと同様です。
 ただし、JSON オブジェクトのメンバーの値が `null` の場合には、
-それが Optuna によって提案された値に置換された上で `hisui vmaf` コマンドに渡される点が異なります。
+それが NSGA-II によって提案された値に置換された上で `hisui vmaf` コマンドに渡される点が異なります。
 
 例えば以下は、デフォルトで使われる [tune-libvpx-vp9.jsonc](../layout-examples/tune-libvpx-vp9.jsonc) の内容を一部抜粋したものです。
 
@@ -236,7 +220,7 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 各トライアルで固定の値が使われます。
 
 一方、`libvpx_vp9_encode_params.min_quantizer` や `libvpx_vp9_encode_params.cq_level` には `null` が指定されているので、
-各トライアルで別々の、Optuna が提案した値が使われることになります。
+各トライアルで別々の、NSGA-II が提案した値が使われることになります。
 
 つまり、「探索したいパラメーターには `null` を指定する」という点が通常のレイアウトファイルとの差異となります。
 
@@ -357,19 +341,20 @@ Optuna の可視化機能やダッシュボードを活用することで、よ�
 
 ### 以前の探索の続きから再開したい場合
 
-`ROOT_DIR` 引数や `--study-name` オプションの値を変えずに `hisui tune` コマンド
-を実行した場合は、（Optuna の機能で）自動で前回の続きから探索が再開されます。
+`ROOT_DIR` 引数や `--name` オプションの値を変えずに `hisui tune` コマンド
+を実行した場合は、作業ディレクトリ内の JSON Lines ファイル（`<name>.jsonl`）を読み込んで、自動で前回の続きから探索が再開されます。
 
-これは「 `--trial-count` で指定した回数のトライアルは完了したけど、もう少し探索行いたい」といった場合に便利です。
+`--trial-count` は「合計到達回数」なので、もう少し探索したい場合は、より大きな値を指定して再実行してください
+（例えば前回 `--trial-count 100` で 100 件完了した後に `--trial-count 150` を指定すると、追加で 50 回試行します）。
 
 ### 探索空間やレイアウトファイルを変更して探索を行いたい場合
 
 上述の通り、デフォルトでは `hisui tune` コマンドは前回の探索結果を引き継ぎます。
 ただし、探索空間などが変わった場合は引き継ぎではなく、一から探索を開始するのが望ましいです。
-その場合は、`--study-name` オプションで異なる名前を指定することで、新しい探索が開始できます。
+その場合は、`--name` オプションで異なる名前を指定することで、新しい探索が開始できます。
 
 また、`--tune-working-dir` オプションで指定した作業ディレクトリ以下にある
-Optuna のストレージファイル（`optuna.db`）を削除することでも、探索履歴がクリアできます。
+探索履歴ファイル（`<name>.jsonl`）を削除することでも、探索履歴がクリアできます。
 
 ### トライアル回数をどうすべきか
 
@@ -378,13 +363,14 @@ Optuna のストレージファイル（`optuna.db`）を削除することで�
 
 「最適なトライアル回数が何か」はケースバイケースなので、一概には言えませんが、
 デフォルトの 100 は多くの場合によく動作する値なので、そのまま使っても問題ありません
-（内部で Optuna を使っているので、途中で Ctrl+C で中断したとしても、探索を簡単に再開できます）。
+（探索履歴は 1 トライアルごとにファイルへ保存されるので、途中で Ctrl+C で中断したとしても、探索を簡単に再開できます。
+中断時に残ったロックファイル `<name>.lock` は、次回起動時に自動で回収されるため手動削除は不要です）。
 
 探索をどこで終わりにするか、のひとつの目安としては「最適解の集合がしばらく更新されなくなったら」というものがあります。
 
 ### トライアルが失敗した場合にどうすべきか
 
-Optuna が提案したパラメーターセットの組み合わせによっては、
+探索によって提案されたパラメーターセットの組み合わせによっては、
 エンコーダーのバリデーションによってエラーになることがあります。
 
 このような組み合わせの発生を、事前に完全に防止するのは難しいので、

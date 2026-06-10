@@ -43,7 +43,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- --deny warnings
       - run: cargo check --workspace --no-default-features
       - run: cargo clippy --workspace --no-default-features -- --deny warnings
-      - run: cargo test
+      - run: cargo test --workspace
   test-nvidia-video-codec:
     runs-on:
       group: Self
@@ -80,7 +80,7 @@ jobs:
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
       - run: cargo check --workspace
       - run: cargo clippy --workspace -- --deny warnings
-      - run: cargo test
+      - run: cargo test --workspace
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
