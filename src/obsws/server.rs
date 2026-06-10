@@ -134,12 +134,10 @@ fn emit_startup_info_to_stdout(
 ) -> crate::Result<()> {
     use std::io::Write as _;
 
-    // nojson::object のクロージャは Fn 制約で複数回呼ばれうるため、URL は事前に String 化して
-    // 参照で取り込む。format_args! を直接 f.member に渡すと Arguments<'_> の temporary scope が
-    // statement 末尾までしか伸びず Fn クロージャに閉じ込められないため使えない。
+    // f.member の値引数は DisplayJson 制約で format_args! を渡せないため事前に String 化する。
     let server_url = format!("{scheme}://{actual_addr}");
     // UI 有効判定は ui_remote_url.is_some() (= --ui 指定時)。open_ui_in_browser ではないので
-    // --ui --no-open でも ui フィールドはオブジェクトになる。
+    // --ui --no-open でも ui フィールドは出力される。
     let ui_url: Option<String> = ui_remote_url.map(|_| format!("{scheme}://{actual_addr}/"));
 
     let line = nojson::object(|f| {
@@ -154,18 +152,16 @@ fn emit_startup_info_to_stdout(
                 Ok(())
             }),
         )?;
-        f.member(
-            "ui",
-            ui_url.as_ref().map(|url| {
-                // url: &String を内側クロージャに move でコピーする。
-                // nojson::object の opaque 戻り値が Option::map の外に出るため、内側クロージャの
-                // borrow を Option::map クロージャ引数の lifetime に閉じ込めないようにする。
-                nojson::object(move |f| {
+        // --ui 指定時のみ ui フィールドを出力する。未指定時はフィールドごと省略する。
+        if let Some(url) = &ui_url {
+            f.member(
+                "ui",
+                nojson::object(|f| {
                     f.member("url", url)?;
                     Ok(())
-                })
-            }),
-        )?;
+                }),
+            )?;
+        }
         f.member("pid", std::process::id())?;
         Ok(())
     });

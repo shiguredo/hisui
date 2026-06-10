@@ -60,8 +60,8 @@ def test_emit_startup_info_returns_actual_port(binary_path: Path):
         assert actual_port > 0, body
         # server.url は scheme + actual_addr を組み立てた完成形 URL になっている
         assert body["server"]["url"] == f"http://127.0.0.1:{actual_port}", body
-        # --ui 未指定なので ui は null になる
-        assert body["ui"] is None, body
+        # --ui 未指定時は ui フィールドごと省略される
+        assert "ui" not in body, body
         # pid は正の整数
         assert isinstance(body["pid"], int) and body["pid"] > 0, body
 

@@ -56,7 +56,7 @@
 例 (1): `--ui` なし
 
 ```json
-{"type":"startup_info","server":{"scheme":"http","url":"http://127.0.0.1:54321","host":"127.0.0.1","port":54321},"ui":null,"pid":12345}
+{"type":"startup_info","server":{"scheme":"http","url":"http://127.0.0.1:54321","host":"127.0.0.1","port":54321},"pid":12345}
 ```
 
 例 (2): `--ui` + `--https-cert-path` + IPv6 (`--host ::`)
@@ -75,7 +75,7 @@
 | `server.url` | string | `format!("{scheme}://{actual_addr}")` の結果 | IPv6 は `actual_addr.to_string()` が `[::]:54321` のブラケット表記になるため URL としてもそのまま正しい形になる。`server.host` がワイルドカード (`0.0.0.0` / `::`) の場合 URL もそのまま `http://0.0.0.0:54321` 等になるため、接続に使う側で `127.0.0.1` / `::1` 等への置換が必要 |
 | `server.host` | string | `actual_addr.ip()` を `nojson` 経由で出力 | `impl DisplayJson for IpAddr`（nojson 0.3.x）が JSON 文字列としてシリアライズする。IPv6 はブラケットなしの `::` 等。`--host 0.0.0.0` / `--host ::` ではワイルドカードがそのまま入る点に注意。IPv6 link-local + zone id 付き bind（`fe80::1%eth0` 等）は zone id を含む URL になり一般のクライアントで扱えないため、初版では非サポートとして扱う |
 | `server.port` | number (u16, > 0) | `actual_addr.port()` | `--port 0` 指定時のカーネル割り当て後の実ポート。Linux / macOS では `TcpListener::bind` 成功後の `local_addr()` は必ず割当済みポートを返すため 0 にならない。E2E テストの「ポートだけ取り出す」用途のため URL とは別に持つ |
-| `ui` | object \| null | UI 有効時のみオブジェクト | 判定は `ui_remote_url.is_some()`（= `--ui` 指定時に Some が入る）。`open_ui_in_browser` ではないので `--ui --no-open` でも `ui != null` になる |
+| `ui` | object（省略可） | UI 有効時のみオブジェクト。未指定時はフィールドごと省略する | 判定は `ui_remote_url.is_some()`（= `--ui` 指定時に Some が入る）。`open_ui_in_browser` ではないので `--ui --no-open` でも `ui` フィールドが出力される |
 | `ui.url` | string | `format!("{scheme}://{actual_addr}/")` の結果 | `server.url` に末尾スラッシュを付けたもの |
 | `pid` | number (u32) | `std::process::id()` の戻り値 | プロセス全体の情報のためルート直下。シェルラッパーやプロセスマネージャから hisui プロセスを後から特定する用途を想定（必須情報ではないが軽量に追加できる） |
 
@@ -113,7 +113,7 @@
 - `hisui server --port 0 --emit-startup-info` を実行すると、stdout に `{"type":"startup_info", ...}` 形式の 1 行 JSON が即時に出力され、`server.port` / `server.url` にカーネルが割り当てた実ポート番号が反映されていること。
 - `--emit-startup-info` を付けない場合、stdout への出力は従来通り無い（後方互換）こと。
 - `--port 0` を指定したときの既存ログ (`obsws server listening on ...`, `UI started at ...`) と `open_browser` の URL が実ポートで表示されていること（`[FIX]` 相当の付随修正）。
-- `--ui` 指定時には `ui` フィールドにオブジェクトが入り、`ui.url` に実 addr ベースの URL が入ること。`--ui --no-open` でも `ui != null` になること。`--ui` 未指定時は `ui` が `null` になること。
+- `--ui` 指定時には `ui` フィールドにオブジェクトが入り、`ui.url` に実 addr ベースの URL が入ること。`--ui --no-open` でも `ui` フィールドが出力されること。`--ui` 未指定時は `ui` フィールド自体が省略されること。
 - `e2e-tests/obsws/test_startup_info.py`（新規）が追加され、`subprocess.Popen` で `hisui server --port 0 --emit-startup-info` を起動し、`stdout.readline()` で 1 行読んで JSON パース、`server.port > 0` を assert、その後 `terminate()` + `wait()` で正常に終了することを検証していること。bind 直後で accept ループ未開始でも、kernel の listen backlog によって TCP 接続自体は成立するため、TCP 接続可能性 (`socket.create_connection`) のみで bind 完了を担保できる（HTTP 応答 ready の検証は不要）。**ここでの「1 例追加」が本 issue のスコープであり、35 箇所の `reserve_ephemeral_port()` の本格的な移行は issue 0035 で行う。**
 - CHANGES.md の `## develop` に以下 2 行を追記すること（`shiguredo-changelog` スキル参照）:
   - `[ADD] server サブコマンドに --emit-startup-info を追加する`
