@@ -52,20 +52,25 @@ Low。テストの実効性向上であり、製品機能には影響しない�
 
 ## 解決方法
 
-fMP4 inspect の e2e テスト 3 件を、対応する通常 MP4 を実際に inspect して比較対象フィールドを `assert_eq!` で突き合わせる形に書き換えた。`tests/e2e.rs` のみの変更で、プロダクションコード (`src/`) と inspect 出力仕様には触れていない。
+設計方針に従い `tests/e2e.rs` のみを変更した。
 
-### 実装
+### 追加ヘルパー
 
-- `tests/e2e.rs` に共通ヘルパーを追加した。
-  - `inspect_stdout(path)`: 指定パスを `hisui inspect` して標準出力を返す。
-  - `assert_inspect_format_and_codec`: `format` / `audio_codec` / `video_codec` の前提値を確認する。
-  - `extract_inspect_comparable_samples`: inspect 出力 JSON を `nojson::RawJson` でパースし、`audio_samples` の `data_size`、`video_samples` の `data_size` / `keyframe` / `nalus(type, nri)` だけを `InspectComparableSamples` 構造体に抽出する。トラックの有無は `optional` で扱う。
-- `inspect_fragmented_mp4_video_only` / `inspect_fragmented_mp4_audio_only` / `inspect_fragmented_mp4_audio_video` を、対応する通常 MP4 (`archive-red-320x320-h264.mp4` / `beep-aac-audio.mp4` / `red-320x320-h264-aac.mp4`) を実際に inspect して `assert_eq!` で突き合わせる形に書き換えた。
-- `timestamp_us` / `duration_us` および集計値の `video_duration_us` / `audio_duration_us` は「音声+映像」ペアの映像トラックで testdata 生成差によりずれるため、比較対象から除外した。
-- 既存の絶対値検証（映像 25 / 音声 45）は、通常 MP4 と fMP4 が同時に同数で変化した場合の回帰検出アンカーとして残し、アサーションメッセージを「期待値どおりであること」に変更した。
+- `inspect_stdout(path)`: 指定パスを `hisui inspect` し、`String::from_utf8` で stdout を厳密に検証する。
+- `assert_inspect_format_and_codec`: `format` / `audio_codec` / `video_codec` の前提値を確認する。codec 引数に `None` を渡した場合は「キー自体が出力されないこと」も assert し、音声のみ / 映像のみテストで想定外のトラック混入を検出できるようにした。
+- `extract_inspect_comparable_samples`: inspect 出力 JSON を `nojson::RawJson` でパースし、比較対象フィールドだけを `InspectComparableSamples` に抽出する。トラックの有無は `optional` で扱い、`required_u64_member` / `required_bool_member` 経由でキー名込みのエラーメッセージを返す。`nalus` が H.264 出力時のみ存在する点は構造体 doc に明示し、現状の H.264 testdata 限定の暗黙制約を可視化した。
+- `required_u64_member`: 既存の `required_*_member` パターンに合わせて新設。
+
+新規ヘルパー一式は既存の `required_*_member` / `optional_*_member` 群の直後に配置し、テスト関数群がヘルパーで分断されないようにした。
+
+### テスト書き換え
+
+- `inspect_fragmented_mp4_video_only` / `inspect_fragmented_mp4_audio_only` / `inspect_fragmented_mp4_audio_video` を、対応する通常 MP4 (`archive-red-320x320-h264.mp4` / `beep-aac-audio.mp4` / `red-320x320-h264-aac.mp4`) を inspect して `assert_eq!` で突き合わせる形にした。
+- `assert_eq!` メッセージは「fMP4 と通常 MP4 で一致すること」、絶対値検証は「サンプル数 25 (回帰検出アンカー)」のように意図を直接表現するメッセージに改めた。
+- `expect` メッセージは対象 testdata パスを含め、panic 時にどのファイルの inspect 結果に該当キーが無かったかを特定できるようにした。
 
 ### 検証
 
 - `cargo test --test e2e inspect_fragmented` → 3 passed
 - `cargo clippy --tests --test e2e -- -D warnings` → 警告なし
-- pre-commit フックの cargo fmt / cargo clippy も通過
+- `cargo fmt --all -- --check` → 差分なし
