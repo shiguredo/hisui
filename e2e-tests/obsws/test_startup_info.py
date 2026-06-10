@@ -38,12 +38,14 @@ def test_emit_startup_info_returns_actual_port(binary_path: Path):
         assert proc.stdout is not None
         ready, _, _ = select.select([proc.stdout], [], [], 10.0)
         if not ready:
+            # stderr が PIPE バッファを超えてブロックしないよう、wait ではなく
+            # communicate で stdout/stderr を読み切りつつプロセスを回収する。
             proc.terminate()
             try:
-                proc.wait(timeout=2.0)
+                _, stderr_output = proc.communicate(timeout=2.0)
             except subprocess.TimeoutExpired:
                 proc.kill()
-            stderr_output = proc.stderr.read() if proc.stderr else ""
+                _, stderr_output = proc.communicate()
             pytest.fail(
                 f"startup_info の出力が 10 秒以内に取得できなかった (stderr: {stderr_output!r})"
             )
@@ -70,10 +72,11 @@ def test_emit_startup_info_returns_actual_port(binary_path: Path):
         with socket.create_connection(("127.0.0.1", actual_port), timeout=2.0):
             pass
     finally:
-        # 子プロセス (hisui) は常駐するので必ず terminate して回収する
+        # 子プロセス (hisui) は常駐するので必ず terminate して回収する。
+        # stderr が PIPE バッファを超えてブロックしないよう communicate を使う。
         proc.terminate()
         try:
-            proc.wait(timeout=5.0)
+            proc.communicate(timeout=5.0)
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.wait()
+            proc.communicate()
