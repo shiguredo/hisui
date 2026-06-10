@@ -52,16 +52,27 @@
 
 ### 出力内容（初版）
 
+例 (1): `--ui` なし
+
 ```json
-{"type":"startup_info","scheme":"http","address":"127.0.0.1:54321","host":"127.0.0.1","port":54321,"pid":12345,"ui_url":null}
+{"type":"startup_info","server":{"scheme":"http","url":"http://127.0.0.1:54321","host":"127.0.0.1","port":54321},"ui":null,"pid":12345}
+```
+
+例 (2): `--ui` + `--https-cert-path` + IPv6 (`--host ::`)
+
+```json
+{"type":"startup_info","server":{"scheme":"https","url":"https://[::]:54321","host":"::","port":54321},"ui":{"url":"https://[::]:54321/"},"pid":12345}
 ```
 
 - `type`: stdout JSON Lines のエントリ種別を表す固定キー（初版は `"startup_info"` のみ）。既存の `--dump-metrics-on-exit` が `{"type":"metrics", ...}` を出力しており、本機能の出力もこの規約に揃える。将来別種のエントリを追加する余地を残すため固定キーで持つ。
-- `scheme`: `http` または `https` （`--https-cert-path` 指定時）。
-- `address`: `local_addr().to_string()`。IPv6 リテラルも `[::1]:54321` 形式で表現される。
-- `host` / `port`: パース済みの値。プログラム側で再分解しなくて済むよう冗長に持つ。
-- `pid`: 呼び出し側のプロセス制御用 (`std::process::id()`)。
-- `ui_url`: `--ui` 指定時のみ URL を入れる、それ以外は `null`。
+- `server`: OBS WebSocket リスナーの bind 情報を子オブジェクトでまとめる。ルートに `scheme` / `host` / `port` のような主語のない汎用キーを置くと、将来別主語のフィールドを足したくなった時に衝突するため、最初から名前空間を分離しておく。
+  - `server.scheme`: `http` または `https` （`--https-cert-path` 指定時）。
+  - `server.url`: `{scheme}://{actual_addr}` を組み立てた完成形 URL（例: `http://127.0.0.1:54321`、IPv6 は `http://[::]:54321`）。呼び出し側に IPv6 ブラケット規則を持たせないために JSON 側で組み立てて持つ。
+  - `server.host`: `actual_addr.ip().to_string()`。IPv6 の場合 `::` のような bracket なしの表記。
+  - `server.port`: `actual_addr.port()`。`--port 0` 指定時のカーネル割り当て後の実ポート。E2E テストでの「ポートだけ取り出して別用途で使う」需要に応えるため URL とは別に持つ。
+- `ui`: `--ui` 指定時のみオブジェクトが入る。未指定なら `null`。`ui != null` を見るだけで UI 有効判定ができる。
+  - `ui.url`: UI を開くための完成形 URL（例: `http://127.0.0.1:54321/`）。`server.url` に末尾スラッシュを付けたもの。
+- `pid`: 呼び出し側のプロセス制御用 (`std::process::id()`)。プロセス全体の情報なのでルート直下に置く。
 
 ### 常に出力するか / フラグ駆動か
 
@@ -87,10 +98,10 @@
 ## 完了条件
 
 - `cargo test` がすべて成功すること。
-- `hisui server --port 0 --emit-startup-info` を実行すると、stdout に `{"type":"startup_info", ...}` 形式の 1 行 JSON が即時に出力され、`address` / `port` フィールドにカーネルが割り当てた実ポート番号が含まれること。
+- `hisui server --port 0 --emit-startup-info` を実行すると、stdout に `{"type":"startup_info", ...}` 形式の 1 行 JSON が即時に出力され、`server.port` / `server.url` にカーネルが割り当てた実ポート番号が反映されていること。
 - `--emit-startup-info` を付けない場合、stdout への出力は従来通り無い（後方互換）こと。
 - `--port 0` を指定したときのログ (`obsws server listening on ...`) も実ポートで表示されること。
-- `--ui` 指定時には `ui_url` フィールドに実 addr ベースの URL が入ること。
+- `--ui` 指定時には `ui` フィールドにオブジェクトが入り、`ui.url` に実 addr ベースの URL が入ること。`--ui` 未指定時は `ui` が `null` になること。
 - CHANGES.md の `## develop` に `[ADD] server サブコマンドに --emit-startup-info を追加する` を追記すること。
 - E2E テスト（`e2e-tests/`）で本機能を活用する例を 1 つ追加し、ポート 0 起動 → 実ポート取得 → 接続 までを動作させる。
 
@@ -102,23 +113,32 @@
 2. `src/obsws/server.rs::run_server` 内で:
    - `TcpListener::bind(addr).await` 直後に `let actual_addr = listener.local_addr().map_err(...)?;` を取得する。
    - 既存のログメッセージを `actual_addr` ベースに差し替える。
-   - `emit_startup_info` が true の場合、以下を stdout に書き出す。
+   - `emit_startup_info` が true の場合、以下を stdout に書き出す。既存の `dump_metrics_to_stdout` (`src/obsws/server.rs:100-124`) と同じ `nojson::object` パターンで書く。
      ```rust
-     let line = nojson::json_to_string(|f| {
-         f.object(|f| {
-             f.member("type", "startup_info")?;
-             f.member("scheme", scheme)?;
-             f.member("address", actual_addr.to_string())?;
-             f.member("host", actual_addr.ip().to_string())?;
-             f.member("port", actual_addr.port())?;
-             f.member("pid", std::process::id())?;
-             f.member("ui_url", ui_url_value)?;
+     // `--ui` 指定時のみ ui オブジェクトが入る。未指定なら None を渡して JSON 上は null。
+     let ui_value = open_ui_in_browser.then(|| {
+         nojson::object(|f| {
+             f.member("url", format_args!("{scheme}://{actual_addr}/"))?;
              Ok(())
          })
      });
-     let mut stdout = std::io::stdout().lock();
-     writeln!(stdout, "{line}").map_err(...)?;
-     stdout.flush().map_err(...)?;
+     let line = nojson::object(|f| {
+         f.member("type", "startup_info")?;
+         f.member("server", nojson::object(|f| {
+             f.member("scheme", scheme)?;
+             f.member("url", format_args!("{scheme}://{actual_addr}"))?;
+             f.member("host", actual_addr.ip())?;
+             f.member("port", actual_addr.port())?;
+             Ok(())
+         }))?;
+         f.member("ui", &ui_value)?;
+         f.member("pid", std::process::id())?;
+         Ok(())
+     });
+     let stdout = std::io::stdout();
+     let mut out = stdout.lock();
+     writeln!(out, "{line}").map_err(...)?;
+     out.flush().map_err(...)?;
      ```
    - 書き出しに失敗した場合は明示的にエラー終了する（テスト側がパースに失敗するより、起動失敗の方が明快なため）。
 3. `--emit-startup-info` の help 文と、`docs/` 配下に該当する情報を追記する（ドキュメントは本 issue の範囲外として、別途必要なら追記）。
@@ -129,11 +149,11 @@
 
 ### 設計上の留意点
 
-- IPv6 アドレスに対応するため、`address` には `local_addr().to_string()` をそのまま入れる（`[::1]:54321` のように bracket 表記になる）。`host` / `port` フィールドは bracket なしの値を別途持つ。
+- IPv6 アドレスに対応するため、`server.url` は `format!("{scheme}://{actual_addr}")` で組み立てる（IPv6 では `actual_addr.to_string()` が `[::1]:54321` のように bracket 付きになり、URL としてもそのまま正しい形になる）。`server.host` / `server.port` は bracket なしの分解値を別途持ち、呼び出し側がポート単独取得などで使えるようにする。
 - JSON LINE 出力は **bind 成功と起動完了の中間** に出る。具体的には bind 後、`MediaPipeline::run()` を spawn する前。bind までで失敗したら出さない、bind 後の処理が失敗してもこの 1 行は既に出ている、というセマンティクスを README/docs に明文化する。
 - stdout は **lock を取って 1 回の `writeln!` で書く**。他の場所で stdout を使っていない想定だが、将来的に競合しないように lock は明示する。
 - TLS 経路 (`--https-cert-path` 指定時) でも `local_addr()` は取れるので分岐は不要。
-- `--ui` で UI を有効にした場合の `ui_url` は実 addr ベースで組み立てる。`open_ui_in_browser` の URL も既に差し替え対象だが、これは本対応で `actual_addr` ベースに揃える方が一貫する。
+- `--ui` で UI を有効にした場合の `ui.url` は実 addr ベースで組み立てる。`open_ui_in_browser` の URL も既に差し替え対象だが、これは本対応で `actual_addr` ベースに揃える方が一貫する。
 
 ### 将来の拡張余地
 
