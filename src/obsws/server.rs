@@ -130,7 +130,7 @@ fn emit_exit_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
 fn emit_startup_info_to_stdout(
     scheme: &str,
     actual_addr: SocketAddr,
-    ui_remote_url: Option<&String>,
+    ui_remote_url: Option<&str>,
 ) -> crate::Result<()> {
     use std::io::Write as _;
 
@@ -151,7 +151,6 @@ fn emit_startup_info_to_stdout(
                 Ok(())
             }),
         )?;
-        // --ui 指定時のみ ui フィールドを出力する。未指定時はフィールドごと省略する。
         if let Some(url) = &ui_url {
             f.member(
                 "ui",
@@ -245,11 +244,8 @@ pub async fn run_server(
         open_browser(&format!("{scheme}://{actual_addr}/"));
     }
 
-    // --emit-startup-info 指定時、bind 完了直後に startup_info を JSON Lines で stdout に書き出す。
-    // 呼び出し側 (E2E テスト等) が読み取って実ポートを取得する用途。
-    // 書き込み失敗時は明示的にエラー終了する（BrokenPipe も同様）。理由は issue 0002 を参照。
     if emit_startup_info {
-        emit_startup_info_to_stdout(scheme, actual_addr, ui_remote_url.as_ref())?;
+        emit_startup_info_to_stdout(scheme, actual_addr, ui_remote_url.as_deref())?;
     }
 
     // state file の読み込みと初期値への反映

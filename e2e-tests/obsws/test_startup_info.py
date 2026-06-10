@@ -1,4 +1,9 @@
-"""obsws server の --emit-startup-info が実バインド情報を JSON Lines で出力することを確認する e2e テスト"""
+"""obsws server の --emit-startup-info が実バインド情報を JSON Lines で出力することを確認する e2e テスト
+
+既存の ObswsServer ヘルパー (helpers.py) は固定ポート + _wait_until_listening 前提で、
+--port 0 + startup_info readline の検証には使えないため、本ファイルは独立の subprocess.Popen
+で書く。本格的なヘルパー化は issue 0035 で行う。
+"""
 
 import json
 import select
@@ -33,13 +38,10 @@ def test_emit_startup_info_returns_actual_port(binary_path: Path):
 
     try:
         # bind 失敗等で startup_info 行が出ないまま hisui が exit するケースに備え、
-        # readline には 10 秒のタイムアウトをかける。これが無いと CI で無限ハングする。
-        # 10 秒は cargo run のビルド待ちを含めた余裕を見た値。
+        # 10 秒のタイムアウトをかけて無限ハングを防ぐ。
         assert proc.stdout is not None
         ready, _, _ = select.select([proc.stdout], [], [], 10.0)
         if not ready:
-            # stderr が PIPE バッファを超えてブロックしないよう、wait ではなく
-            # communicate で stdout/stderr を読み切りつつプロセスを回収する。
             proc.terminate()
             try:
                 _, stderr_output = proc.communicate(timeout=2.0)
@@ -53,27 +55,18 @@ def test_emit_startup_info_returns_actual_port(binary_path: Path):
         line = proc.stdout.readline()
         body = json.loads(line)
 
-        # startup_info の各フィールドを検証する
         assert body["type"] == "startup_info", body
         assert body["server"]["scheme"] == "http", body
         assert body["server"]["host"] == "127.0.0.1", body
         actual_port = body["server"]["port"]
-        # --port 0 のカーネル割り当て結果なので 0 にはならない
         assert actual_port > 0, body
-        # server.url は scheme + actual_addr を組み立てた完成形 URL になっている
         assert body["server"]["url"] == f"http://127.0.0.1:{actual_port}", body
-        # --ui 未指定時は ui フィールドごと省略される
         assert "ui" not in body, body
-        # pid は正の整数
         assert isinstance(body["pid"], int) and body["pid"] > 0, body
 
-        # 取得した実ポートに対して TCP 接続が成立することを確認する。
-        # bind 直後で accept ループ未開始でも kernel の listen backlog により接続自体は成立する。
         with socket.create_connection(("127.0.0.1", actual_port), timeout=2.0):
             pass
     finally:
-        # 子プロセス (hisui) は常駐するので必ず terminate して回収する。
-        # stderr が PIPE バッファを超えてブロックしないよう communicate を使う。
         proc.terminate()
         try:
             proc.communicate(timeout=5.0)
@@ -120,7 +113,6 @@ def test_obsws_emit_startup_info_disabled_no_stdout_output(binary_path: Path):
 
 def test_obsws_emit_startup_info_with_ui_no_open(binary_path: Path):
     """--ui --no-open 指定時に ui フィールドが出力され ui.url が実 addr ベースで組まれることを確認する"""
-    # --no-open でブラウザ自動起動を切っても、UI 自体は有効なので ui フィールドは出力される
     cmd, cwd = build_hisui_command(
         binary_path,
         "server",
@@ -161,9 +153,7 @@ def test_obsws_emit_startup_info_with_ui_no_open(binary_path: Path):
         assert body["type"] == "startup_info", body
         actual_port = body["server"]["port"]
         assert actual_port > 0, body
-        # --ui --no-open でも ui フィールドが出力される
         assert "ui" in body, body
-        # ui.url は scheme + actual_addr + "/" を組み立てた完成形 URL
         assert body["ui"]["url"] == f"http://127.0.0.1:{actual_port}/", body
     finally:
         proc.terminate()
@@ -217,10 +207,7 @@ def test_obsws_emit_startup_info_wildcard_host(binary_path: Path):
         assert body["type"] == "startup_info", body
         actual_port = body["server"]["port"]
         assert actual_port > 0, body
-        # ワイルドカード host がそのまま server.host に入る
         assert body["server"]["host"] == "0.0.0.0", body
-        # server.url も actual_addr ベースで組み立てられる
-        # （ワイルドカード bind の場合は接続用 URL として機能しないが、host / port の整合性を確認する）
         assert body["server"]["url"] == f"http://0.0.0.0:{actual_port}", body
     finally:
         proc.terminate()

@@ -73,7 +73,7 @@
 | `server` | object | bind 情報のサブオブジェクト | ルートに主語のない汎用キーを置かないために名前空間を分離 |
 | `server.scheme` | string | `"http"` or `"https"` | `--https-cert-path` 指定時に `"https"` |
 | `server.url` | string | `format!("{scheme}://{actual_addr}")` の結果 | IPv6 は `actual_addr.to_string()` が `[::]:54321` のブラケット表記になるため URL としてもそのまま正しい形になる。`server.host` がワイルドカード (`0.0.0.0` / `::`) の場合 URL もそのまま `http://0.0.0.0:54321` 等になるため、接続に使う側で `127.0.0.1` / `::1` 等への置換が必要 |
-| `server.host` | string | `actual_addr.ip()` を `nojson` 経由で出力 | `impl DisplayJson for IpAddr`（nojson 0.3.x）が JSON 文字列としてシリアライズする。IPv6 はブラケットなしの `::` 等。`--host 0.0.0.0` / `--host ::` ではワイルドカードがそのまま入る点に注意。IPv6 link-local + zone id 付き bind（`fe80::1%eth0` 等）は zone id を含む URL になり一般のクライアントで扱えないため、初版では非サポートとして扱う |
+| `server.host` | string | `actual_addr.ip()` を `nojson` 経由で出力 | `impl DisplayJson for IpAddr`（nojson 0.3.x）が JSON 文字列としてシリアライズする。IPv6 はブラケットなしの `::` 等。`--host 0.0.0.0` / `--host ::` ではワイルドカードがそのまま入る点に注意。IPv6 link-local + zone id 付き bind（`fe80::1%eth0` 等）は zone id を含む URL になり一般のクライアントでは扱えない。これらは呼び出し側で接続用 IP に置換する責務とする（ワイルドカード bind も同様。hisui は bind した実 addr をそのまま返すだけで、接続可能 IP が複数になるケースを一意化することは原理的にできない） |
 | `server.port` | number (u16, > 0) | `actual_addr.port()` | `--port 0` 指定時のカーネル割り当て後の実ポート。Linux / macOS では `TcpListener::bind` 成功後の `local_addr()` は必ず割当済みポートを返すため 0 にならない。E2E テストの「ポートだけ取り出す」用途のため URL とは別に持つ |
 | `ui` | object（省略可） | UI 有効時のみオブジェクト。未指定時はフィールドごと省略する | 判定は `ui_remote_url.is_some()`（= `--ui` 指定時に Some が入る）。`open_ui_in_browser` ではないので `--ui --no-open` でも `ui` フィールドが出力される |
 | `ui.url` | string | `format!("{scheme}://{actual_addr}/")` の結果 | `server.url` に末尾スラッシュを付けたもの |
