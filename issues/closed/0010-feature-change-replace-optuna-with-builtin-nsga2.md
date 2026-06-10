@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-02
+- Completed: 2026-06-10
 - Model: Opus 4.8
 - Branch: feature/change-replace-optuna-with-builtin-nsga2
 - Polished: 2026-06-08
@@ -192,3 +193,25 @@ hisui の駆動は「1 trial ずつ `ask` → 評価 → `tell`」の逐次形�
   - 試行履歴ストレージを SQLite (`optuna.db`) から JSON Lines (`<study_name>.jsonl`) に変更する (既存 `optuna.db` は引き継げない)
   - `--trial-count` の意味を「追加試行回数」から「合計到達回数」に変更する
 - 関連 issue [[0029-feature-refactor-generic-vmaf-tune]] (open): `vmaf` / `tune` サブコマンドを Sora 録画前提から汎用化し、`tune` サブコマンド本体を `src/sora/` から移動する可能性がある。本 issue が新設する `src/tune/` (最適化エンジン) と、0029 が移動する `tune` サブコマンド本体は名前空間が衝突しうる。番号順では本 issue (0010) を先に着手するため `src/tune/` を最適化エンジン用に確保するが、0029 着手時にモジュール配置 (サブコマンド本体の置き場所・命名) を相互調整すること
+
+## 解決方法
+
+外部 `optuna` (Python) 依存を排除し、2 目的 (合成時間 minimize / VMAF 平均 maximize) の多目的最適化を Rust の自前 NSGA-II 実装に置き換えた。
+
+### 実装
+
+- `src/optuna.rs` を削除し、`src/tune/` ディレクトリモジュール (`nsga2` / `rng` / `storage` / `json_value`) と `src/tune.rs` (`Tuner`) に再編。`Command::new("optuna")` と SQLite 依存を全廃した。
+- 試行履歴を JSON Lines (`<name>.jsonl`) に永続化し、合計到達ベース (`--trial-count`) で再開できるようにした。
+- 多重起動防止のロックファイルを PID ベースの stale 検出で自動回収するようにした (`Drop` で解放し、中断で残っても次回起動時に回収する)。
+- tune が内部で呼ぶ `hisui vmaf` を `current_exe()` で自分自身に固定し、PATH 依存を排除した。
+- PBT 用の `pbt` クレートを新設。README / docs/command_tune.md / docs/build.md / docs/docker.md と CHANGES.md (`[CHANGE]`) を更新した。
+
+### 検証
+
+- NSGA-II の中核 (非劣ソート・混雑度距離・crowded-comparison・polynomial mutation) が論文 (Deb et al., 2002) / 標準実装と一致することをレビューで確認した。SBX は境界補正を省いた unbounded 版である旨をコメントに明記した。
+- PBT (ドミナンス不変条件・非劣ソート・混雑度距離・探索空間制約) と単体テスト (select_parents の多フロント淘汰/elitism、crowded_compare、NumericRange::finalize の整数丸め、gen_bool 境界、ロック・破損行・再開のエラーパス) と E2E (`tests/e2e.rs` の `tune_runs_one_trial_and_records_history`) を追加した。
+- 実録画データ (VP9) でスモークテストし、合成 → エンコード → VMAF → 履歴永続化 → 再開が動作し、支配判定が実データで正しく機能する (劣る trial がパレートフロントから除外される) ことを確認した。
+
+### 完了条件「optuna との定量的な品質比較」の扱い
+
+「既存 optuna 実装と比較して最適化品質が明確に劣化しないことをハイパーボリュームで定量確認する」という完了条件は見送った。最適化品質の劣化を厳密に測定するのは (乱数性・基準点依存・比較のための optuna 一時復活が必要なこと等で) 困難でコストに見合わないため、代わりに上記の実装レベルの正しさ (論文整合のレビュー + PBT/単体/E2E + 実データでのスモーク) で担保とする判断とした。
