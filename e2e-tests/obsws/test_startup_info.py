@@ -16,7 +16,7 @@ import pytest
 from hisui_server import build_hisui_command
 
 
-def test_emit_startup_info_returns_actual_port(binary_path: Path):
+def test_obsws_emit_startup_info_returns_actual_port(binary_path: Path):
     """--port 0 + --emit-startup-info でカーネル割り当て後の実ポートが stdout に 1 行 JSON で出ることを確認する"""
     cmd, cwd = build_hisui_command(
         binary_path,

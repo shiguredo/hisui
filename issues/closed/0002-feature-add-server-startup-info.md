@@ -40,7 +40,7 @@
 
 - ポート 0 を指定すると、ログには `obsws server listening on http://127.0.0.1:0` のように指定値がそのまま出る。
 - 呼び出し側が実ポートを知る手段が無く、`netstat` 相当のことを外から推測するか、ポートを固定する以外に方法がない。
-- `--port 0` 時のログ表示と `open_browser` の URL も同じ理由で壊れている（`[FIX]` 相当）が、これは本機能の前提として `listener.local_addr()` を取る過程で同時に修正できる。
+- `--port 0` 時のログ表示と `open_browser` の URL も同じ理由で壊れているが、これは本機能の前提として `listener.local_addr()` を取る過程で同時に修正できる。
 
 ## 設計方針
 
@@ -91,9 +91,9 @@
 
 フラグ名は `--emit-startup-info`、env は `HISUI_SERVER_EMIT_STARTUP_INFO` とする。
 
-### 既存ログの実 addr ベース化（[FIX] 相当）
+### 既存ログの実 addr ベース化
 
-本機能の前提として `listener.local_addr()` を取得するので、その値を使って既存の以下を同時に修正する。これは `--port 0` 指定時の表示バグの修正であり、CHANGES.md では `[FIX]` 行として別出しする。
+本機能の前提として `listener.local_addr()` を取得するので、その値を使って既存の以下を同時に修正する。`--port 0` 指定時の表示問題も合わせて解消する。`## develop` 内エントリの機能に対する中間状態整理なので CHANGES.md には独立 `[FIX]` エントリを立てない。
 
 - `src/obsws/server.rs:182` の `obsws server listening on {scheme}://{addr}` を `actual_addr` ベースに差し替え。
 - `src/obsws/server.rs:185` の `UI started at {scheme}://{addr}/` を `actual_addr` ベースに差し替え。
@@ -112,68 +112,78 @@
 - `cargo test` がすべて成功すること。
 - `hisui server --port 0 --emit-startup-info` を実行すると、stdout に `{"type":"startup_info", ...}` 形式の 1 行 JSON が即時に出力され、`server.port` / `server.url` にカーネルが割り当てた実ポート番号が反映されていること。
 - `--emit-startup-info` を付けない場合、stdout への出力は従来通り無い（後方互換）こと。
-- `--port 0` を指定したときの既存ログ (`obsws server listening on ...`, `UI started at ...`) と `open_browser` の URL が実ポートで表示されていること（`[FIX]` 相当の付随修正）。
 - `--ui` 指定時には `ui` フィールドにオブジェクトが入り、`ui.url` に実 addr ベースの URL が入ること。`--ui --no-open` でも `ui` フィールドが出力されること。`--ui` 未指定時は `ui` フィールド自体が省略されること。
-- `e2e-tests/obsws/test_startup_info.py`（新規）が追加され、`subprocess.Popen` で `hisui server --port 0 --emit-startup-info` を起動し、`stdout.readline()` で 1 行読んで JSON パース、`server.port > 0` を assert、その後 `terminate()` + `wait()` で正常に終了することを検証していること。bind 直後で accept ループ未開始でも、kernel の listen backlog によって TCP 接続自体は成立するため、TCP 接続可能性 (`socket.create_connection`) のみで bind 完了を担保できる（HTTP 応答 ready の検証は不要）。**ここでの「1 例追加」が本 issue のスコープであり、35 箇所の `reserve_ephemeral_port()` の本格的な移行は issue 0035 で行う。**
-- CHANGES.md の `## develop` に以下 2 行を追記すること（`shiguredo-changelog` スキル参照）:
+- `--port 0` を指定したときの既存ログ (`obsws server listening on ...`, `UI started at ...`) と `open_browser` の URL が実ポートで表示されていること。
+- `e2e-tests/obsws/test_startup_info.py`（新規）が追加され、`subprocess.Popen` で `hisui server --port 0 --emit-startup-info` を起動し、`stdout.readline()` で 1 行読んで JSON パース、`server.port > 0` を assert、その後 `terminate()` + `communicate()` で正常に終了することを検証していること。bind 直後で accept ループ未開始でも、kernel の listen backlog によって TCP 接続自体は成立するため、TCP 接続可能性 (`socket.create_connection`) のみで bind 完了を担保できる（HTTP 応答 ready の検証は不要）。**ここでの「1 例追加」が本 issue のスコープであり、35 箇所の `reserve_ephemeral_port()` の本格的な移行は issue 0035 で行う。**
+- CHANGES.md の `## develop` に以下 1 行を追記すること（`shiguredo-changelog` スキル参照）:
   - `[ADD] server サブコマンドに --emit-startup-info を追加する`
-  - `[FIX] server サブコマンドの起動ログ・UI URL を bind 後の実アドレスに揃える`
+  - 既存ログ/UI URL の実 addr ベース化は未リリース機能 (`## develop` 内エントリ) の中間状態整理なので、独立 `[FIX]` エントリを立てない。
 
 ## 解決方法
 
 ### 実装ステップ
 
 1. `src/subcommand_server.rs:113-117` 付近（`--emit-exit-metrics` の隣）に `--emit-startup-info` フラグを追加する。`noargs::flag("emit-startup-info").env("HISUI_SERVER_EMIT_STARTUP_INFO").doc("起動直後にバインド情報を JSON Lines で標準出力へ出力する")` の形。`run_internal`（`subcommand_server.rs:176`）に `emit_startup_info: bool` として渡し、`run_internal` から `run_server` に渡す。`run_internal` も既に `#[expect(clippy::too_many_arguments)]` 付きで引数追加でも抑制属性を増やす必要はない。
-2. `src/subcommand_server.rs:234` と `:273` の **両方** の `run_server` 呼び出しに、`dump_metrics_on_exit` の隣（player 引数より前）として `emit_startup_info` を追加する。片方を忘れないこと。
+2. `src/subcommand_server.rs:234` と `:273` の **両方** の `run_server` 呼び出しに、`emit_exit_metrics` の隣（player 引数より前）として `emit_startup_info` を追加する。片方を忘れないこと。
 3. `src/obsws/server.rs::run_server` のシグネチャに `emit_startup_info: bool` を追加し、`#[expect(clippy::too_many_arguments)]` はそのまま維持する。
 4. `src/obsws/server.rs:179-188` 付近で:
    - `let actual_addr = listener.local_addr().map_err(|e| crate::Error::new(format!("failed to get local addr: {e}")))?;` を取得する。
    - 既存出力 3 箇所（L182 / L185 の `tracing::info!` ログと、L188 の `open_browser` 引数 URL）を `addr` から `actual_addr` ベースに差し替える。
-   - `emit_startup_info` が true の場合、以下を stdout に書き出す。既存 `emit_exit_metrics_to_stdout`（L100-124）と同じ `nojson::object` パターンで書く。`format_args!` を `f.member` に渡すと `DisplayJson` 不適合でコンパイルできないので、URL は事前に `String` 化する。
+   - `emit_startup_info` が true の場合、`emit_startup_info_to_stdout(scheme, actual_addr, ui_remote_url.as_deref())?;` を呼ぶ。本関数は既存 `emit_exit_metrics_to_stdout` と同じ `nojson::object` パターンで 1 行 JSON を組み立て、stdout に書き出す。`format_args!` を `f.member` に渡すと `DisplayJson` 不適合でコンパイルできないので、URL は事前に `String` 化する。
+
      ```rust
-     use std::io::Write as _;
-     let server_url = format!("{scheme}://{actual_addr}");
-     // UI 有効判定は ui_remote_url.is_some()（= --ui 指定時）。open_ui_in_browser ではないので
-     // --ui --no-open でも ui フィールドはオブジェクトになる。
-     let ui_url: Option<String> = ui_remote_url
-         .as_ref()
-         .map(|_| format!("{scheme}://{actual_addr}/"));
-     let line = nojson::object(|f| {
-         f.member("type", "startup_info")?;
-         f.member("server", nojson::object(|f| {
-             f.member("scheme", scheme)?;
-             f.member("url", &server_url)?;
-             f.member("host", actual_addr.ip())?;
-             f.member("port", actual_addr.port())?;
+     fn emit_startup_info_to_stdout(
+         scheme: &str,
+         actual_addr: SocketAddr,
+         ui_remote_url: Option<&str>,
+     ) -> crate::Result<()> {
+         use std::io::Write as _;
+         let server_url = format!("{scheme}://{actual_addr}");
+         // UI 有効判定は --ui 指定の有無 (= ui_remote_url.is_some()) で行う。
+         // --no-open でブラウザ自動起動を切った場合も ui フィールドはオブジェクトとして出力する。
+         let ui_url: Option<String> = ui_remote_url.map(|_| format!("{scheme}://{actual_addr}/"));
+
+         let line = nojson::object(|f| {
+             f.member("type", "startup_info")?;
+             f.member("server", nojson::object(|f| {
+                 f.member("scheme", scheme)?;
+                 f.member("url", &server_url)?;
+                 f.member("host", actual_addr.ip())?;
+                 f.member("port", actual_addr.port())?;
+                 Ok(())
+             }))?;
+             if let Some(url) = &ui_url {
+                 f.member("ui", nojson::object(|f| {
+                     f.member("url", url)?;
+                     Ok(())
+                 }))?;
+             }
+             f.member("pid", std::process::id())?;
              Ok(())
-         }))?;
-         f.member("ui", ui_url.as_ref().map(|url| nojson::object(|f| {
-             f.member("url", url)?;
-             Ok(())
-         })))?;
-         f.member("pid", std::process::id())?;
+         });
+
+         let stdout = std::io::stdout();
+         let mut out = stdout.lock();
+         writeln!(out, "{line}")
+             .map_err(|e| crate::Error::new(format!("failed to write startup_info: {e}")))?;
+         out.flush()
+             .map_err(|e| crate::Error::new(format!("failed to flush startup_info: {e}")))?;
          Ok(())
-     });
-     let stdout = std::io::stdout();
-     let mut out = stdout.lock();
-     writeln!(out, "{line}")
-         .map_err(|e| crate::Error::new(format!("failed to write startup_info: {e}")))?;
-     out.flush()
-         .map_err(|e| crate::Error::new(format!("failed to flush startup_info: {e}")))?;
+     }
      ```
    - URL を事前に `String` 化する理由は「設計上の留意点」を参照（`format_args!` の `Arguments<'_>` が `Fn` クロージャに閉じ込められない）。
-   - `ui` フィールドは `Option<DisplayJson>` を `f.member` に渡せる nojson の仕様を利用する。`ui_url.as_ref().map(|url| nojson::object(...))` の形にすれば `--ui` 指定時のみオブジェクトが入り、未指定時は JSON 上 `null` になる。
+   - `ui` フィールドは `if let Some(url) = &ui_url` で条件付きに `f.member("ui", ...)` を呼ぶことで、未指定時はフィールド自体が JSON 出力に現れないようにする。
    - 書き出しまたは flush に失敗した場合は `crate::Error::new(...)` で `?` 終了する。`BrokenPipe` も同様に致命扱いとする（理由は「書き出し失敗時の方針」参照）。
 5. `src/subcommand_server.rs` の `--emit-startup-info` の help 文を簡潔に追加する（`docs/` 配下の更新は本 issue のスコープ外）。
 6. `e2e-tests/obsws/test_startup_info.py` を新規追加する。テスト本体:
    - `e2e-tests/hisui_server.py::build_hisui_command` を使って `hisui server --port 0 --emit-startup-info` のコマンドを組み立てる。戻り値は `(cmd, cwd)` の 2 タプルなので、`subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)` のように `cwd` を必ず渡して起動する。`stderr` は `PIPE` で受けて、テスト失敗時に `proc.stderr.read()` を assert メッセージに含めてデバッグ容易性を保つ。
-   - bind 失敗等で startup_info の行が出ないまま hisui が exit するケースに備え、`stdout.readline()` には `select.select([proc.stdout], [], [], 5.0)` で 5 秒のタイムアウトをかける。タイムアウト時は `proc.terminate()` + `proc.wait(timeout=2.0)` で確実に殺し、`stderr` 内容を含めて `pytest.fail` させる。これが無いと bind 失敗時に CI で無限ハングする。
+   - bind 失敗等で startup_info の行が出ないまま hisui が exit するケースに備え、`stdout.readline()` には `select.select([proc.stdout], [], [], 10.0)` で 10 秒のタイムアウトをかける。タイムアウト時は `proc.terminate()` + `proc.communicate(timeout=2.0)` で stdout/stderr を読み切りつつプロセスを回収し、`stderr` 内容を含めて `pytest.fail` させる。`wait` でなく `communicate` を使うのは、stderr が PIPE バッファを超えてブロックすることを避けるため。これが無いと bind 失敗時に CI で無限ハングする。
    - 取得した 1 行を `json.loads()` でパースし、`body["type"] == "startup_info"`, `body["server"]["port"] > 0`, `body["server"]["url"].startswith("http://")` を assert する。
    - 取得した `server.port` を使って `socket.create_connection(("127.0.0.1", port), timeout=2.0)` で TCP 接続可能なことを確認する。
-   - `terminate()` + `wait(timeout=5.0)` で正常終了させる。
-   - テスト関数名は `test_emit_startup_info_returns_actual_port` のような意図が読める命名にする（pytest の自動収集に依存）。
+   - `terminate()` + `communicate(timeout=5.0)` で stdout/stderr を読み切りつつ正常終了させる（パイプデッドロック回避）。
+   - テスト関数名は `test_obsws_emit_startup_info_returns_actual_port` のような `test_obsws_` プレフィックス + 意図が読める命名にする（既存 `e2e-tests/obsws/test_*.py` の慣習）。
    - 既存 `e2e-tests/obsws/test_*.py` で広く使われている `reserve_ephemeral_port()` の置き換え（35 箇所）は本 issue では行わず、issue 0035 で実施する。
-7. CHANGES.md の `## develop` に `[ADD]` と `[FIX]` の 2 行を追記する。詳細書式は `shiguredo-changelog` スキルを参照する。
+7. CHANGES.md の `## develop` に `[ADD]` 1 行を追記する。既存ログ/UI URL の実 addr ベース化は `## develop` 内の中間状態整理なので独立 `[FIX]` エントリを立てない。詳細書式は `shiguredo-changelog` スキルを参照する。
 
 ### 設計上の留意点
 

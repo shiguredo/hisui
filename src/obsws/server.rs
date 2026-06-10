@@ -125,8 +125,10 @@ fn emit_exit_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
 
 /// --emit-startup-info 指定時、bind 完了直後の情報を JSON Lines で stdout に書き出す。
 /// 1 行 1 JSON で、type フィールドでエントリ種別を示す規約は emit_exit_metrics_to_stdout と同じ。
-/// 書き込み失敗時は呼び出し側 (E2E テスト等) が readline でハングするリスクを避けるため、
-/// エラーとして propagate して起動失敗扱いにする (BrokenPipe も同様)。
+/// 書き込み失敗時の方針は emit_exit_metrics_to_stdout とは逆で、BrokenPipe 含めて起動失敗扱いにする:
+/// 終了時のメトリクス出力と違って起動後は hisui が稼働継続するため、書き込み失敗を黙殺すると
+/// 呼び出し側 (E2E テスト等) が startup_info を待ち続けてハングする。起動失敗で exit すれば
+/// 呼び出し側は stdout EOF で気付ける。
 fn emit_startup_info_to_stdout(
     scheme: &str,
     actual_addr: SocketAddr,
