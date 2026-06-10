@@ -105,7 +105,7 @@ impl Args {
     }
 }
 
-pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+pub fn try_run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<bool> {
     if !noargs::cmd("vmaf")
         .doc("VMAF を用いた映像エンコード品質の評価を行います")
         .take(args)
@@ -113,20 +113,20 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     {
         return Ok(false);
     }
-    run(args)?;
+    run(args, stats)?;
     Ok(true)
 }
 
-fn run(raw_args: &mut noargs::RawArgs) -> noargs::Result<()> {
+fn run(raw_args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<()> {
     let args = Args::parse(raw_args)?;
     if raw_args.metadata().help_mode {
         return Ok(());
     }
 
-    run_internal(args).map_err(noargs::Error::from)
+    run_internal(args, stats).map_err(noargs::Error::from)
 }
 
-fn run_internal(args: Args) -> Result<()> {
+fn run_internal(args: Args, stats: crate::stats::Stats) -> Result<()> {
     // レイアウトを準備（音声処理は無効化）
     let mut layout = Layout::from_layout_json_file_or_default(
         args.root_dir.clone(),
@@ -169,6 +169,7 @@ fn run_internal(args: Args) -> Result<()> {
             args.timeout,
             distorted_yuv_file_path.clone(),
             reference_yuv_file_path.clone(),
+            stats,
         ))
         .map_err(|e| e.with_context("failed to run VMAF compose pipeline"))?;
     if !compose_result.success {
@@ -236,6 +237,7 @@ struct SpawnedProcessorTask {
     task: tokio::task::JoinHandle<Result<()>>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn compose_for_vmaf(
     layout: Layout,
     openh264_lib: Option<Openh264Library>,
@@ -243,8 +245,9 @@ async fn compose_for_vmaf(
     timeout: Option<Duration>,
     distorted_yuv_file_path: PathBuf,
     reference_yuv_file_path: PathBuf,
+    stats: crate::stats::Stats,
 ) -> Result<ComposeForVmafResult> {
-    let pipeline = MediaPipeline::new()?;
+    let pipeline = MediaPipeline::new_with_stats(stats)?;
     let pipeline_handle = pipeline.handle();
     // 異常終了の検知は processor task / metric 側で行うため、run() の戻り値はここでは使わない
     let pipeline_task = tokio::spawn(async move {

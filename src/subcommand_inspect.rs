@@ -23,7 +23,7 @@ const VIDEO_ENCODED_TRACK_ID: &str = "video_encoded";
 const AUDIO_DECODED_TRACK_ID: &str = "audio_decoded";
 const VIDEO_DECODED_TRACK_ID: &str = "video_decoded";
 
-pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+pub fn try_run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<bool> {
     if !noargs::cmd("inspect")
         .doc("録画ファイルの情報を取得します")
         .take(args)
@@ -31,11 +31,11 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     {
         return Ok(false);
     }
-    run(args)?;
+    run(args, stats)?;
     Ok(true)
 }
 
-fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
+fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<()> {
     let decode: bool = noargs::flag("decode")
         .doc("指定された場合にはデコードまで行います")
         .take(args)
@@ -69,6 +69,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         openh264,
         #[cfg(feature = "fdk-aac")]
         fdk_aac,
+        stats,
     )
     .map_err(noargs::Error::from)?;
     Ok(())
@@ -93,6 +94,7 @@ fn run_internal(
     decode: bool,
     openh264: Option<PathBuf>,
     #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
+    stats: crate::stats::Stats,
 ) -> Result<()> {
     let format = detect_container_format(&input_file_path)?;
 
@@ -102,7 +104,7 @@ fn run_internal(
         .build()
         .map_err(|e| Error::new(e.to_string()))?;
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new_with_stats(stats)?;
     let pipeline_handle = pipeline.handle();
     runtime.spawn(async move {
         if let Err(e) = setup_pipeline(

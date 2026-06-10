@@ -95,34 +95,6 @@ impl ShutdownSignal {
     }
 }
 
-/// 終了時に全メトリクス（`Stats` レジストリ全件）を JSON Lines で stdout へ出力する。
-/// 失敗してもプロセス終了は妨げない（警告ログを出して続行する）。
-fn dump_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
-    use std::io::Write as _;
-
-    let families = match pipeline_handle.stats().to_prometheus_json_families() {
-        Ok(families) => families,
-        Err(e) => {
-            tracing::warn!("failed to collect metrics for exit dump: {}", e.display());
-            return;
-        }
-    };
-    // stdout の JSON Lines ストリームのエントリ種別を `type` で示す（メトリクスダンプは "metrics"）
-    let line = nojson::object(|f| {
-        f.member("type", "metrics")?;
-        f.member("metrics", &families)?;
-        Ok(())
-    });
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    // 出力先のパイプが途中閉じられた場合は警告しない（json.rs::pretty_print と同様）
-    if let Err(e) = writeln!(out, "{line}")
-        && e.kind() != std::io::ErrorKind::BrokenPipe
-    {
-        tracing::warn!("failed to write metrics dump to stdout: {e}");
-    }
-}
-
 #[expect(clippy::too_many_arguments)]
 pub async fn run_server(
     addr: SocketAddr,
@@ -137,7 +109,7 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
-    dump_metrics_on_exit: bool,
+    stats: crate::stats::Stats,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
         crate::obsws::player::PlayerCommand,
     >,
@@ -267,7 +239,7 @@ pub async fn run_server(
         }
     }
 
-    let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
+    let pipeline = crate::MediaPipeline::new_with_config_and_stats(pipeline_config, stats)?;
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -361,7 +333,6 @@ pub async fn run_server(
         pipeline_handle,
         bootstrap_endpoint,
         shutdown_rx,
-        dump_metrics_on_exit,
         shutdown_signal,
     )
     .await
@@ -386,7 +357,6 @@ async fn run_accept_loop(
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
-    dump_metrics_on_exit: bool,
     mut shutdown_signal: ShutdownSignal,
 ) -> crate::Result<()> {
     loop {
@@ -402,9 +372,6 @@ async fn run_accept_loop(
             }
             _ = shutdown_signal.recv() => {
                 tracing::info!("obsws server shutting down on signal");
-                if dump_metrics_on_exit {
-                    dump_metrics_to_stdout(&pipeline_handle);
-                }
                 return Ok(());
             }
         };

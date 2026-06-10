@@ -299,6 +299,11 @@ fn run_trial_evaluation(
     let hisui_exe = std::env::current_exe()
         .map_err(|e| crate::Error::new(format!("failed to resolve current executable: {e}")))?;
     let mut cmd = Command::new(&hisui_exe);
+    // 共通フラグ --dump-metrics-on-exit を子プロセスへ env 経由で継承させない。
+    // 子の hisui vmaf は結果 JSON のみを stdout に出すことを親が前提とする
+    // (tune 親はその stdout を nojson でパースする) ため、env 継承による
+    // メトリクスダンプ行の混入を防ぐ。
+    cmd.env_remove("HISUI_DUMP_METRICS_ON_EXIT");
     cmd.arg("vmaf")
         .arg("--layout-file")
         .arg(&layout_file_path)
