@@ -135,8 +135,8 @@ fn emit_startup_info_to_stdout(
     use std::io::Write as _;
 
     let server_url = format!("{scheme}://{actual_addr}");
-    // UI 有効判定は ui_remote_url.is_some() (= --ui 指定時)。open_ui_in_browser ではないので
-    // --ui --no-open でも ui フィールドは出力される。
+    // UI 有効判定は --ui 指定の有無 (= ui_remote_url.is_some()) で行う。
+    // --no-open でブラウザ自動起動を切った場合も ui フィールドはオブジェクトとして出力する。
     let ui_url: Option<String> = ui_remote_url.map(|_| format!("{scheme}://{actual_addr}/"));
 
     let line = nojson::object(|f| {
