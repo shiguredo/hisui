@@ -226,10 +226,16 @@ impl Mp4WriterStats {
         self.total_received_video_sample_entry_count.inc();
     }
 
+    // issue 0030 で `.or_else()` フォールバック削除に伴い呼び出し元が消えた。
+    // issue 0034 で `Mp4WriterStats` の missing 系一式と合わせて削除予定。
+    #[allow(dead_code)]
     pub(crate) fn add_missing_audio_sample_entry(&self) {
         self.total_missing_audio_sample_entry_count.inc();
     }
 
+    // issue 0030 で `.or_else()` フォールバック削除に伴い呼び出し元が消えた。
+    // issue 0034 で `Mp4WriterStats` の missing 系一式と合わせて削除予定。
+    #[allow(dead_code)]
     pub(crate) fn add_missing_video_sample_entry(&self) {
         self.total_missing_video_sample_entry_count.inc();
     }
