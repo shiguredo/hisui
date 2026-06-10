@@ -293,8 +293,12 @@ fn run_trial_evaluation(
         ))
     })?;
 
-    // hisui vmaf コマンドを実行
-    let mut cmd = Command::new("hisui");
+    // hisui vmaf コマンドを実行する。
+    // 自分自身の vmaf サブコマンドを呼ぶので、PATH 上の別の hisui を誤って拾わないよう
+    // current_exe() で実行中のバイナリを直接指定する。
+    let hisui_exe = std::env::current_exe()
+        .map_err(|e| crate::Error::new(format!("failed to resolve current executable: {e}")))?;
+    let mut cmd = Command::new(&hisui_exe);
     cmd.arg("vmaf")
         .arg("--layout-file")
         .arg(&layout_file_path)
