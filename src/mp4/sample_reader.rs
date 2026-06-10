@@ -76,6 +76,10 @@ impl Mp4SampleReader {
         let mut video_format = VideoFormat::Vp8;
         let mut video_width = 0usize;
         let mut video_height = 0usize;
+        // 直近のサンプルエントリーをトラック種別ごとに保持して全フレームに付与する
+        // （`VideoFrame.sample_entry` / `AudioFrame.sample_entry` の不変条件・issue 0030）
+        let mut last_audio_sample_entry: Option<SharedSampleEntry> = None;
+        let mut last_video_sample_entry: Option<SharedSampleEntry> = None;
 
         while let Some(sample) = demuxer.next_sample()? {
             // composition_time_offset (B フレーム由来の CTS オフセット) は未対応
@@ -96,6 +100,7 @@ impl Mp4SampleReader {
                     if let Some(entry) = &sample.sample_entry {
                         (audio_format, audio_channels, audio_sample_rate) =
                             audio_format_from_entry(entry)?;
+                        last_audio_sample_entry = Some(SharedSampleEntry::new(entry.clone()));
                     }
                     let data = demuxer.read_sample_data(sample.data_offset, sample.data_size)?;
                     let (timestamp, _duration) =
@@ -106,7 +111,7 @@ impl Mp4SampleReader {
                         channels: audio_channels,
                         sample_rate: audio_sample_rate,
                         timestamp,
-                        sample_entry: sample.sample_entry.map(SharedSampleEntry::new),
+                        sample_entry: last_audio_sample_entry.clone(),
                     };
                     if !sender.send_audio(frame).await {
                         // パイプライン処理が中断された
@@ -122,6 +127,7 @@ impl Mp4SampleReader {
                     }
                     if let Some(entry) = &sample.sample_entry {
                         (video_format, video_width, video_height) = video_format_from_entry(entry)?;
+                        last_video_sample_entry = Some(SharedSampleEntry::new(entry.clone()));
                     }
                     let data = demuxer.read_sample_data(sample.data_offset, sample.data_size)?;
                     let (timestamp, _duration) =
@@ -135,7 +141,7 @@ impl Mp4SampleReader {
                             height: video_height,
                         }),
                         timestamp,
-                        sample_entry: sample.sample_entry.map(SharedSampleEntry::new),
+                        sample_entry: last_video_sample_entry.clone(),
                     };
                     if !sender.send_video(frame).await {
                         // パイプライン処理が中断された

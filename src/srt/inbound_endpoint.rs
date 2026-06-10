@@ -726,6 +726,10 @@ struct SrtTsDemuxer {
     video_timestamp_mapper: crate::timestamp::mapper::TimestampMapper,
     audio_timestamp_mapper: crate::timestamp::mapper::TimestampMapper,
     last_aac_config_key: Option<AacConfigKey>,
+    /// `AudioFrame.sample_entry` の不変条件（issue 0030）に従い、
+    /// 直近の AAC sample entry を保持して全 AAC AU に clone して付与する。
+    /// `last_aac_config_key` が変化したときに新規生成して両フィールドを更新する。
+    last_aac_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
     received_video_keyframe: bool,
 }
 
@@ -750,6 +754,7 @@ impl SrtTsDemuxer {
                 Duration::ZERO,
             )?,
             last_aac_config_key: None,
+            last_aac_sample_entry: None,
             received_video_keyframe: false,
         })
     }
@@ -981,7 +986,8 @@ impl SrtTsDemuxer {
             let channels = header.channel_configuration;
             let channels_value = crate::audio::Channels::from_u8(channels)?;
             let aac_config_key = header.config_key();
-            let sample_entry = if self.last_aac_config_key != Some(aac_config_key) {
+            // config 変化時のみ新規生成して両フィールドを更新する（issue 0030）。
+            if self.last_aac_config_key != Some(aac_config_key) {
                 let audio_specific_config = header.audio_specific_config();
                 let entry = crate::audio::aac::create_mp4a_sample_entry(
                     &audio_specific_config,
@@ -989,10 +995,11 @@ impl SrtTsDemuxer {
                     channels_value,
                 )?;
                 self.last_aac_config_key = Some(aac_config_key);
-                Some(crate::sample_entry::SharedSampleEntry::new(entry))
-            } else {
-                None
-            };
+                self.last_aac_sample_entry =
+                    Some(crate::sample_entry::SharedSampleEntry::new(entry));
+            }
+            // `AudioFrame.sample_entry` の不変条件に従い全 AAC AU に保持値を clone して付与する。
+            let sample_entry = self.last_aac_sample_entry.clone();
             let pts_ticks = frame_index
                 .saturating_mul(1024)
                 .saturating_mul(90_000)

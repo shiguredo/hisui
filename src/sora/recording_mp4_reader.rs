@@ -28,6 +28,9 @@ pub struct Mp4VideoReader {
     format: VideoFormat,
     width: usize,
     height: usize,
+    /// 直近のサンプルエントリーを保持して全フレームに付与する
+    /// （`VideoFrame.sample_entry` の不変条件・issue 0030）
+    last_sample_entry: Option<SharedSampleEntry>,
 
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
@@ -53,6 +56,7 @@ impl Mp4VideoReader {
             format: VideoFormat::Vp8,
             width: 0,
             height: 0,
+            last_sample_entry: None,
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             resolutions: BTreeSet::new(),
@@ -118,6 +122,8 @@ impl Mp4VideoReader {
             self.format = format;
             self.width = metadata.width as usize;
             self.height = metadata.height as usize;
+            // 直近のサンプルエントリーを保持して全フレームに付与する（issue 0030）
+            self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry.clone()));
         }
 
         // サンプルデータを読み込む
@@ -148,7 +154,7 @@ impl Mp4VideoReader {
         });
 
         Ok(Some(VideoFrame {
-            sample_entry: sample_entry.map(SharedSampleEntry::new),
+            sample_entry: self.last_sample_entry.clone(),
             data,
             format: self.format,
             keyframe: sample.keyframe,
@@ -177,6 +183,9 @@ pub struct Mp4AudioReader {
     format: AudioFormat,
     channels: Channels,
     sample_rate: SampleRate,
+    /// 直近のサンプルエントリーを保持して全フレームに付与する
+    /// （`AudioFrame.sample_entry` の不変条件・issue 0030）
+    last_sample_entry: Option<SharedSampleEntry>,
 
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
@@ -207,6 +216,7 @@ impl Mp4AudioReader {
             format: AudioFormat::Opus,
             channels: Channels::STEREO,
             sample_rate: SampleRate::HZ_48000,
+            last_sample_entry: None,
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_sample_count: 0,
@@ -266,6 +276,8 @@ impl Mp4AudioReader {
             self.format = format;
             self.channels = Channels::from_u16(metadata.channelcount)?;
             self.sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
+            // 直近のサンプルエントリーを保持して全フレームに付与する（issue 0030）
+            self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry.clone()));
         }
 
         // サンプルデータを読み込む
@@ -294,7 +306,7 @@ impl Mp4AudioReader {
         Ok(Some(AudioFrame {
             data,
             format: self.format,
-            sample_entry: sample_entry.map(SharedSampleEntry::new),
+            sample_entry: self.last_sample_entry.clone(),
             channels: self.channels,
             sample_rate: self.sample_rate,
             timestamp,
@@ -401,4 +413,47 @@ fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
         esds_box.es.dec_config_descr.object_type_indication,
         0x40..=0x43
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // issue 0030 の不変条件「エンコード済み圧縮フォーマットの VideoFrame は常に sample_entry を持つ」を検証する。
+    // sora 録画形式の H.264 ファイルを Mp4VideoReader で読んだとき、
+    // 全ての映像フレーム（初回・後続を問わず）に sample_entry が載っていることを確認する。
+    #[test]
+    fn mp4_video_reader_emits_sample_entry_on_every_frame() -> crate::Result<()> {
+        let reader = Mp4VideoReader::new("testdata/archive-red-320x320-h264.mp4")?;
+        let mut frame_count = 0;
+        for frame in reader {
+            let frame = frame?;
+            assert!(
+                frame.sample_entry.is_some(),
+                "全ての映像フレームに sample_entry が載っていること (frame #{frame_count})"
+            );
+            frame_count += 1;
+        }
+        assert!(frame_count > 1, "複数フレームを読めていること");
+        Ok(())
+    }
+
+    // issue 0030 の不変条件「エンコード済み圧縮フォーマットの AudioFrame は常に sample_entry を持つ」を検証する。
+    // 通常 MP4 の AAC ファイルを Mp4AudioReader で読んだとき、
+    // 全ての音声フレームに sample_entry が載っていることを確認する。
+    #[test]
+    fn mp4_audio_reader_emits_sample_entry_on_every_frame() -> crate::Result<()> {
+        let reader = Mp4AudioReader::new("testdata/beep-aac-audio.mp4")?;
+        let mut frame_count = 0;
+        for frame in reader {
+            let frame = frame?;
+            assert!(
+                frame.sample_entry.is_some(),
+                "全ての音声フレームに sample_entry が載っていること (frame #{frame_count})"
+            );
+            frame_count += 1;
+        }
+        assert!(frame_count > 1, "複数フレームを読めていること");
+        Ok(())
+    }
 }

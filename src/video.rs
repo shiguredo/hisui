@@ -48,6 +48,13 @@ pub struct VideoFrame {
     pub keyframe: bool,
     pub size: Option<VideoFrameSize>,
     pub timestamp: Duration,
+    /// 不変条件: subscriber / reader / encoder が下流（writer や別 processor）に出力する
+    /// 圧縮フォーマット（H264 / H264AnnexB / H265 / Vp8 / Vp9 / Av1）の `VideoFrame` は常に `Some` を持つ。
+    /// 生フォーマット（I420 / I420A）と decoder 内部の中間表現として一時的に構築するフレーム、
+    /// および外部に流れないフレームは `None` を許容する。
+    ///
+    /// 現時点で未適用の経路: WebM リーダー（issue 0031）、rtsp / srt の Annex-B 映像（issue 0032 / 0033）。
+    /// これらの経路は不変条件成立後に該当 issue の完了条件でこのコメントから例外記述を削除する。
     pub sample_entry: Option<SharedSampleEntry>,
 }
 

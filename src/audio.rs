@@ -84,6 +84,13 @@ pub struct AudioFrame {
     pub channels: Channels,
     pub sample_rate: SampleRate,
     pub timestamp: Duration,
+    /// 不変条件: subscriber / reader / encoder が下流（writer や別 processor）に出力する
+    /// 圧縮フォーマット（Opus / Aac）の `AudioFrame` は常に `Some` を持つ。
+    /// 生フォーマット（I16Be）と decoder 内部の中間表現として一時的に構築するフレーム、
+    /// および外部に流れないフレームは `None` を許容する。
+    ///
+    /// 現時点で未適用の経路: WebM リーダー（issue 0031）。
+    /// これらの経路は不変条件成立後に該当 issue の完了条件でこのコメントから例外記述を削除する。
     pub sample_entry: Option<SharedSampleEntry>,
 }
 

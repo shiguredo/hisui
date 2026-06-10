@@ -1077,6 +1077,8 @@ impl Mp4FileReader {
 
         if let Some(entry) = &context.sample_entry {
             state.update_audio_format(entry)?;
+            // 直近のサンプルエントリーを保持して全フレームに付与する（issue 0030）
+            state.last_audio_sample_entry = Some(SharedSampleEntry::new(entry.clone()));
         }
 
         let data = state.read_sample_data(context.data_offset, context.data_size)?;
@@ -1093,7 +1095,7 @@ impl Mp4FileReader {
                     channels: state.audio_channels,
                     sample_rate: state.audio_sample_rate,
                     timestamp: Duration::ZERO,
-                    sample_entry: context.sample_entry.map(SharedSampleEntry::new),
+                    sample_entry: state.last_audio_sample_entry.clone(),
                 };
                 decoder.handle_input_sample(Some(crate::MediaFrame::Audio(
                     std::sync::Arc::new(frame),
@@ -1125,7 +1127,7 @@ impl Mp4FileReader {
             channels: state.audio_channels,
             sample_rate: state.audio_sample_rate,
             timestamp: output_timestamp,
-            sample_entry: context.sample_entry.map(SharedSampleEntry::new),
+            sample_entry: state.last_audio_sample_entry.clone(),
         };
 
         if let Some(sender) = self.audio_sender.as_mut() {
@@ -1167,6 +1169,8 @@ impl Mp4FileReader {
 
         if let Some(entry) = &context.sample_entry {
             state.update_video_format(entry)?;
+            // 直近のサンプルエントリーを保持して全フレームに付与する（issue 0030）
+            state.last_video_sample_entry = Some(SharedSampleEntry::new(entry.clone()));
         }
 
         let data = state.read_sample_data(context.data_offset, context.data_size)?;
@@ -1186,7 +1190,7 @@ impl Mp4FileReader {
                         height: state.video_height,
                     }),
                     timestamp: Duration::ZERO,
-                    sample_entry: context.sample_entry.map(SharedSampleEntry::new),
+                    sample_entry: state.last_video_sample_entry.clone(),
                 };
                 decoder.handle_input_sample(Some(crate::MediaFrame::Video(
                     std::sync::Arc::new(frame),
@@ -1221,7 +1225,7 @@ impl Mp4FileReader {
                 height: state.video_height,
             }),
             timestamp: output_timestamp,
-            sample_entry: context.sample_entry.map(SharedSampleEntry::new),
+            sample_entry: state.last_video_sample_entry.clone(),
         };
 
         if let Some(sender) = self.video_sender.as_mut() {
@@ -1503,6 +1507,10 @@ struct ReaderState {
     video_height: usize,
     /// トラックの最大 duration
     duration: Duration,
+    /// 直近のサンプルエントリーをトラック種別ごとに保持して全フレームに付与する
+    /// （`VideoFrame.sample_entry` / `AudioFrame.sample_entry` の不変条件・issue 0030）
+    last_audio_sample_entry: Option<SharedSampleEntry>,
+    last_video_sample_entry: Option<SharedSampleEntry>,
 }
 
 impl ReaderState {
@@ -1548,6 +1556,8 @@ impl ReaderState {
             video_width: 0,
             video_height: 0,
             duration,
+            last_audio_sample_entry: None,
+            last_video_sample_entry: None,
         })
     }
 
