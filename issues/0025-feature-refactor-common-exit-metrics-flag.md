@@ -4,7 +4,7 @@
 - Created: 2026-06-05
 - Completed:
 - Model: Opus 4.8
-- Branch:
+- Branch: feature/refactor-common-dump-metrics-flag
 - Polished: 2026-06-10
 
 ## 目的
@@ -130,7 +130,7 @@ doc 文では特定 subcommand を名指しせず、「プロセス終了時に�
    - `src/main.rs` で `--emit-exit-metrics` を parse、`Stats::new()` を生成、各 `try_run` に `stats.clone()` を渡し、末尾でメトリクス出力を呼び出す。
    - `src/subcommand_server.rs` と `src/obsws/server.rs` から `emit_exit_metrics` 受け渡しチェーン・SIGTERM 分岐内のメトリクス出力呼び出し・`obsws/server.rs` の `emit_exit_metrics_to_stdout` 自由関数を削除する。
    - `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後のメソッドチェーンに `cmd.env_remove("HISUI_EMIT_EXIT_METRICS")` を追加する。
-   - `e2e-tests/obsws/helpers.py` の CLI 経路でフラグ位置を `server` の前に移す。
+   - `e2e-tests/obsws/helpers.py` の CLI 経路で `--emit-exit-metrics` を渡す経路を維持する（noargs は引数順序非依存のため `server` の前後どちらでもよい）。
 4. `CHANGES.md` の 0018 関連エントリを共通フラグ前提に書き換える（ビルド独立、別コミットでもよい）。
 
 ## 完了条件
@@ -144,7 +144,7 @@ doc 文では特定 subcommand を名指しせず、「プロセス終了時に�
   - subcommand 未指定 / unknown subcommand（`hisui --emit-exit-metrics unknown-subcmd` 等）
 - list-codecs / tune では `{"type":"metrics","metrics":[]}` の空 1 行が出ること（仕様として許容）。
 - 既存の server e2e 2 件がフラグ位置変更後も通ること。
-- `e2e-tests/obsws/helpers.py` の CLI 経路で `--emit-exit-metrics` が `server` サブコマンドの前に置かれるよう改修されていること。env 経路は env 名 `HISUI_EMIT_EXIT_METRICS` 維持のため改修不要。
+- `e2e-tests/obsws/helpers.py` の CLI 経路で `--emit-exit-metrics` が渡されること（noargs は引数順序非依存のため `server` サブコマンドの前後どちらでもよい）。env 経路は env 名 `HISUI_EMIT_EXIT_METRICS` 維持のため改修不要。
 - server 固有の `emit_exit_metrics` 受け渡しチェーン・SIGTERM 分岐内のメトリクス出力呼び出し・`emit_exit_metrics_to_stdout` 自由関数が削除され、`src/metrics.rs` 経由で main 末尾からメトリクス出力が呼ばれていること。
 - `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後で `env_remove("HISUI_EMIT_EXIT_METRICS")` が呼ばれていること。
 - `CHANGES.md:59-61` の 0018 関連 `[ADD]` エントリを書き換えること（書き換え例は下記）。新規エントリは追加しない（shiguredo-changelog 規約「中間状態の修正は別エントリにしない」準拠）。`@sile` 行は維持する。
