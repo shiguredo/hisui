@@ -6,8 +6,6 @@ from pathlib import Path
 
 import aiohttp
 
-from hisui_server import reserve_ephemeral_port
-
 from helpers import (
     OBSWS_SUBPROTOCOL,
     ObswsServer,
@@ -94,17 +92,15 @@ def test_stream_settings_persist_across_restart(binary_path: Path, tmp_path: Pat
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     # 1 回目の起動: 設定を変更する
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 await _set_stream_service_settings(
@@ -118,16 +114,14 @@ def test_stream_settings_persist_across_restart(binary_path: Path, tmp_path: Pat
     assert state_file.exists(), "state file must be created after SetStreamServiceSettings"
 
     # 2 回目の起動: 値が復元されることを確認する
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 data = await _get_stream_service_settings(ws)
@@ -144,16 +138,14 @@ def test_record_directory_persists_across_restart(binary_path: Path, tmp_path: P
     state_file = tmp_path / "state.jsonc"
     record_dir = str(tmp_path / "my-recordings")
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 await _set_record_directory(ws, record_dir)
@@ -161,16 +153,14 @@ def test_record_directory_persists_across_restart(binary_path: Path, tmp_path: P
 
         asyncio.run(_set())
 
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 result = await _get_record_directory(ws)
@@ -185,16 +175,14 @@ def test_set_output_settings_stream_persists(binary_path: Path, tmp_path: Path):
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 await _set_output_settings_stream(
@@ -204,16 +192,14 @@ def test_set_output_settings_stream_persists(binary_path: Path, tmp_path: Path):
 
         asyncio.run(_set())
 
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 data = await _get_stream_service_settings(ws)
@@ -228,17 +214,15 @@ def test_no_state_file_means_no_persistence(binary_path: Path, tmp_path: Path):
     """state file 未指定では再起動後に値が復元されない"""
     host = "127.0.0.1"
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     # state_file を指定しない
-    with ObswsServer(binary_path, host=host, port=port):
+    with ObswsServer(binary_path, host=host) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 await _set_stream_service_settings(
@@ -248,16 +232,14 @@ def test_no_state_file_means_no_persistence(binary_path: Path, tmp_path: Path):
 
         asyncio.run(_set())
 
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2):
+    with ObswsServer(binary_path, host=host) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 data = await _get_stream_service_settings(ws)
@@ -353,16 +335,14 @@ def test_preexisting_state_file_is_loaded_on_startup(
         )
     )
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
 
@@ -388,16 +368,14 @@ def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 await _create_output(ws, "rtmp_outbound", "rtmp_outbound_output")
@@ -418,16 +396,14 @@ def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path
 
         asyncio.run(_set())
 
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 response = await _send_obsws_request(
@@ -449,16 +425,14 @@ def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 await _create_output(ws, "sora", "sora_webrtc_output")
@@ -482,16 +456,14 @@ def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
 
         asyncio.run(_set())
 
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 response = await _send_obsws_request(
@@ -515,16 +487,14 @@ def test_hls_filesystem_persists_across_restart(binary_path: Path, tmp_path: Pat
     state_file = tmp_path / "state.jsonc"
     hls_dir = str(tmp_path / "hls-output")
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 await _create_output(ws, "hls", "hls_output")
@@ -552,16 +522,14 @@ def test_hls_filesystem_persists_across_restart(binary_path: Path, tmp_path: Pat
 
         asyncio.run(_set())
 
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 response = await _send_obsws_request(
@@ -587,16 +555,14 @@ def test_mpeg_dash_filesystem_persists_across_restart(binary_path: Path, tmp_pat
     state_file = tmp_path / "state.jsonc"
     dash_dir = str(tmp_path / "dash-output")
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 await _create_output(ws, "mpeg_dash", "mpeg_dash_output")
@@ -625,16 +591,14 @@ def test_mpeg_dash_filesystem_persists_across_restart(binary_path: Path, tmp_pat
 
         asyncio.run(_set())
 
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 response = await _send_obsws_request(
@@ -660,18 +624,16 @@ def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     # 1 回目の起動: scene を作成し、sceneUuid を記録する
     created = {}
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 # scene を作成
@@ -698,16 +660,14 @@ def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
     assert created["sceneUuid"], "sceneUuid must be captured"
 
     # 2 回目の起動: sceneUuid が同一であることを確認する
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 response = await _send_obsws_request(ws, "GetSceneList", "get-scenes")
@@ -730,18 +690,16 @@ def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     # 1 回目の起動: input を作成し、UUID と sceneItemId を記録する
     created = {}
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 response = await _send_obsws_request(
@@ -766,16 +724,14 @@ def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
     assert created["inputUuid"], "inputUuid must be captured"
 
     # 2 回目の起動: UUID と sceneItemId が同一であることを確認する
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 # inputUuid の保持を確認
@@ -805,16 +761,14 @@ def test_scene_item_enabled_persists_across_restart(binary_path: Path, tmp_path:
     host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server.host}:{server.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 # input を作成
@@ -847,16 +801,14 @@ def test_scene_item_enabled_persists_across_restart(binary_path: Path, tmp_path:
 
         asyncio.run(_set())
 
-    port2, sock2 = reserve_ephemeral_port()
-    sock2.close()
 
-    with ObswsServer(binary_path, host=host, port=port2, state_file=state_file):
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 ws = await session.ws_connect(
-                    f"ws://{host}:{port2}/", protocols=[OBSWS_SUBPROTOCOL]
+                    f"ws://{server2.host}:{server2.port}/", protocols=[OBSWS_SUBPROTOCOL]
                 )
                 await _identify_with_optional_password(ws, password=None)
                 response = await _send_obsws_request(
