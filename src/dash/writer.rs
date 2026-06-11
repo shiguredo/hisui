@@ -473,7 +473,6 @@ impl DashWriter {
         }
 
         // SampleEntry から正確な codec string を確定する
-        // （issue 0030 で保持代入は削除済み。不変条件下で frame.sample_entry を直接参照する）
         if let Some(ref entry) = frame.sample_entry
             && !matches!(
                 self.codec_resolution,
@@ -509,7 +508,6 @@ impl DashWriter {
         }
         let data_offset = self.current_payload.len() as u64;
         self.current_payload.extend_from_slice(&frame.data);
-        // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
         let sample_entry = frame.sample_entry.as_ref().map(|e| e.get().clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Video,
@@ -534,7 +532,6 @@ impl DashWriter {
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
         // SampleEntry から正確な codec string を確定する
-        // （issue 0030 で保持代入は削除済み。不変条件下で frame.sample_entry を直接参照する）
         if let Some(ref entry) = frame.sample_entry
             && !matches!(
                 self.codec_resolution,
@@ -567,7 +564,6 @@ impl DashWriter {
         }
         let data_offset = self.current_payload.len() as u64;
         self.current_payload.extend_from_slice(&frame.data);
-        // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
         let sample_entry = frame.sample_entry.as_ref().map(|e| e.get().clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Audio,
@@ -616,9 +612,6 @@ impl DashWriter {
         if self.current_samples.is_empty() {
             return Ok(());
         }
-
-        // issue 0030 で fill_missing_sample_entries 呼び出しを削除した。
-        // 不変条件下で各 sample が必ず sample_entry を持つため補完は不要。
 
         // 末尾サンプルの duration を補完する
         fixup_last_sample_duration(&mut self.current_samples);

@@ -210,7 +210,6 @@ impl HybridMp4Writer {
             self.core.stats.set_video_codec(name);
         }
 
-        // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
         self.fragment_video_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Video,
@@ -241,7 +240,6 @@ impl HybridMp4Writer {
             self.core.stats.set_audio_codec(name);
         }
 
-        // 不変条件下で sample.sample_entry を直接参照する（issue 0030）
         self.fragment_audio_samples
             .push(shiguredo_mp4::mux::Sample {
                 track_kind: shiguredo_mp4::TrackKind::Audio,

@@ -548,7 +548,6 @@ impl HlsWriter {
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 // length-prefixed NALU → Annex B 変換 + キーフレーム時の SPS/PPS 注入
-                // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
                 let annexb_data = convert_length_prefixed_to_annexb(
                     &frame.data,
                     frame.sample_entry.as_ref().map(|e| e.get()),
@@ -579,7 +578,6 @@ impl HlsWriter {
                 }
                 let data_offset = state.current_payload.len() as u64;
                 state.current_payload.extend_from_slice(&frame.data);
-                // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
                 let sample_entry = frame.sample_entry.as_ref().map(|e| e.get().clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Video,
@@ -629,7 +627,6 @@ impl HlsWriter {
         match &mut self.format_state {
             FormatState::MpegTs(state) => {
                 // raw AAC → ADTS 変換
-                // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
                 let adts_data = wrap_raw_aac_in_adts(
                     &frame.data,
                     frame.sample_entry.as_ref().map(|e| e.get()),
@@ -658,7 +655,6 @@ impl HlsWriter {
                 }
                 let data_offset = state.current_payload.len() as u64;
                 state.current_payload.extend_from_slice(&frame.data);
-                // 不変条件下で frame.sample_entry を直接参照する（issue 0030）
                 let sample_entry = frame.sample_entry.as_ref().map(|e| e.get().clone());
                 state.current_samples.push(shiguredo_mp4::mux::Sample {
                     track_kind: shiguredo_mp4::TrackKind::Audio,
@@ -729,9 +725,6 @@ impl HlsWriter {
                 if state.current_samples.is_empty() {
                     return Ok(());
                 }
-
-                // issue 0030 で fill_missing_sample_entries 呼び出しを削除した。
-                // 不変条件下で各 sample が必ず sample_entry を持つため補完は不要。
 
                 // 末尾サンプルの duration を補完する。
                 // 各トラックの最後のサンプルは次フレーム未到着のため duration=0 のまま。
