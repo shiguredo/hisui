@@ -19,24 +19,24 @@ Low。server 固有版（0018）で当面の用途（server の flaky 診断）�
 
 本 issue は CLI 上のフラグ位置を `hisui server ... --emit-exit-metrics` から `hisui --emit-exit-metrics server ...` へ移すが、外部から観察可能な挙動（server で `--emit-exit-metrics` を ON にすると終了時に `type=metrics` の JSON Line が stdout に出る）は維持する。0018 は本 issue 着手時点で未リリース（`CHANGES.md:12` の `## develop` セクション内）であり、CLI 位置変更は develop ブランチ内の中間状態整理に当たる。リリース前の内部設計整理として `feature/refactor-` カテゴリで扱う。
 
-## 現状
+## 実装後の状態
 
-- `--emit-exit-metrics` の parse は `src/subcommand_server.rs:113` で server 固有。`run_server` → `run_accept_loop` の SIGTERM 分岐（`src/obsws/server.rs:405`）で `emit_exit_metrics_to_stdout(pipeline_handle)` を呼ぶ。
-- メトリクス出力本体 `src/obsws/server.rs:100-124` `emit_exit_metrics_to_stdout` は `pipeline_handle.stats().to_prometheus_json_families()` を `{"type":"metrics", "metrics": ...}` で包んで stdout に書く。JSON Lines のエントリ種別（`type`）の付与は出力側の責務で、`Stats` 側には持たせない（0018 のレビューで確定済み）。
-- `src/main.rs:22-30` に共通フラグの前例（`--verbose`）がある。
-- `Stats`（`src/stats.rs:11-30`）は `Clone` 可能で `clone()` 同士は `shared_entries` を共有する。`set_default_label` は `Arc<StatsLabels>` を差し替える実装で片側のみに作用する。`StatsKey` は entry 登録時の `default_labels` を値として保持するため（`src/stats.rs:194-197`）、subcommand 側 stats で `set_default_label` を呼んだ後に登録された entry の labels は、main 側 stats から `entries()` を取得しても正しく復元される。
-- `MediaPipeline::new()` は `MediaPipeline::new_with_config(MediaPipelineConfig::default())` への委譲、`new_with_config()` は内部で `Stats::new()` を作る（`src/media_pipeline.rs:58-92`）。
-- 実プロダクションパスでの `MediaPipeline::new()` / `new_with_config()` 呼び出しは以下の 4 箇所:
-  - `src/subcommand_inspect.rs:105`（`new()`）
-  - `src/sora/recording_subcommand_compose.rs:269`（`new()`）
-  - `src/sora/recording_subcommand_vmaf.rs:247`（`new()`）
-  - `src/obsws/server.rs:270`（`new_with_config()`）
-  - これ以外の `MediaPipeline::new()` 呼び出しは全て `#[cfg(test)]` 配下。
-- tune は内部で `current_exe` 経由で `vmaf` 子プロセスを起動する（`src/sora/recording_subcommand_tune.rs:301` の `Command` 構築、1 箇所のみ）。tune 親自身は stdout に何も書かない（出力は全て stderr）。tune 親は子の stdout を `nojson::RawJson::parse` で読む。
-- list-codecs は `MediaPipeline` を持たず、`src/subcommand_list_codecs.rs:148` の `println!` でコーデック一覧 JSON を 1 個 stdout に書く。
-- 既存 server e2e: `e2e-tests/obsws/test_output.py:2096-2132` の `test_obsws_emit_exit_metrics_outputs_jsonl` / `test_obsws_emit_exit_metrics_disabled`。両テストとも「stdout に `type=metrics` の JSON Line が含まれるか」を確認するのみ。
-- e2e helpers の `ObswsServer.start()`（`e2e-tests/obsws/helpers.py`）は CLI 経路（`--emit-exit-metrics` を `args` に append）と env 経路（`HISUI_EMIT_EXIT_METRICS=1` を env に設定）の 2 経路を持つ。
-- `CHANGES.md:59-61` に 0018 関連の `[ADD]` エントリ（3 行構造: 本文 + env 補足 + `@sile`）があり、未リリース。
+- `--emit-exit-metrics` の parse は `src/main.rs:32` で共通フラグとして受ける（subcommand 分岐前、`--verbose` の直後）。env `HISUI_EMIT_EXIT_METRICS` も受ける。
+- main 末尾（`src/main.rs:58-60`）で「フラグ ON かつ subcommand match かつ非 help_mode」の条件で `hisui::metrics::emit_exit_metrics_to_stdout(&stats)` を呼ぶ。
+- メトリクス出力本体 `src/metrics.rs:13` `emit_exit_metrics_to_stdout(stats: &Stats)` は `stats.to_prometheus_json_families()` を `{"type":"metrics", "metrics": ...}` で包んで stdout に書く。JSON Lines のエントリ種別（`type`）の付与は出力側の責務として `metrics` モジュールに置き、`Stats` モジュール（`src/stats.rs`）には出力規約を持ち込まない。
+- `Stats`（`src/stats.rs:11-` 以降）は `Clone` 可能で `clone()` 同士は `shared_entries` を共有する。`set_default_label` は `Arc<StatsLabels>` を差し替える実装で片側のみに作用する。`StatsKey` は entry 登録時の `default_labels` を値として保持するため、subcommand 側 stats で `set_default_label` を呼んだ後に登録された entry の labels は、main 側 stats から `entries()` を取得しても正しく復元される。
+- `MediaPipeline` には `new()` / `new_with_config(config)` / `new_with_stats(stats)` / `new_with_config_and_stats(config, stats)` の 4 API がある（`src/media_pipeline.rs:58-92` 付近）。内部は `new_with_config_and_stats` への委譲。
+- 実プロダクションパスでの呼び出しは以下の 4 箇所:
+  - `src/subcommand_inspect.rs:107`（`new_with_stats(stats)`）
+  - `src/sora/recording_subcommand_compose.rs:274`（`new_with_stats(stats)`）
+  - `src/sora/recording_subcommand_vmaf.rs:250`（`new_with_stats(stats)`）
+  - `src/obsws/server.rs:304`（`new_with_config_and_stats(pipeline_config, stats)`）
+  - これ以外の `MediaPipeline::new*` 呼び出しは全て `#[cfg(test)]` 配下。
+- tune は内部で `current_exe` 経由で `vmaf` 子プロセスを起動する（`src/sora/recording_subcommand_tune.rs:301` の `Command` 構築）。子に `HISUI_EMIT_EXIT_METRICS` を継承させないため、直後（`src/sora/recording_subcommand_tune.rs:306`）で `cmd.env_remove("HISUI_EMIT_EXIT_METRICS")` を呼ぶ。tune 親自身は stdout に何も書かない（出力は全て stderr）。tune 親は子の stdout を `nojson::RawJson::parse` で読む。
+- list-codecs は `MediaPipeline` を持たず、`src/subcommand_list_codecs.rs:148` の `println!` でコーデック一覧 JSON を 1 個 stdout に書く。`--emit-exit-metrics` 指定時は main 末尾で空 `{"type":"metrics","metrics":[]}` の 1 行が追加で出力される (`Stats` が空のため)。
+- server e2e: `e2e-tests/obsws/test_output.py:2096-2142` の `test_obsws_emit_exit_metrics_outputs_jsonl` / `test_obsws_emit_exit_metrics_disabled`。両テストとも「stdout に `type=metrics` の JSON Line が含まれるか」を `_find_exit_metrics` ヘルパー（`test_output.py:2081`）で確認する。
+- e2e helpers の `ObswsServer.start()`（`e2e-tests/obsws/helpers.py`）は CLI 経路（`--emit-exit-metrics` を server サブコマンド引数末尾に append）と env 経路（`HISUI_EMIT_EXIT_METRICS=1` を env に設定）の 2 経路を持つ。
+- `CHANGES.md` の `## develop` セクションに `--emit-exit-metrics` の `[ADD]` エントリ（本文 + env 補足 + `@sile`）が記載されており、未リリース。
 
 ## 設計方針
 
