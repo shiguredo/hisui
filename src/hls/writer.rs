@@ -533,7 +533,7 @@ impl HlsWriter {
             self.start_new_segment(frame.timestamp)?;
         }
 
-        // SampleEntry から正確な codec string を確定する
+        // SampleEntry から正確なコーデック文字列を確定する
         if let Some(ref entry) = frame.sample_entry
             && !matches!(
                 self.codec_resolution,
@@ -608,7 +608,7 @@ impl HlsWriter {
         // 受け取った sample_entry を保持しておかないと、
         // セグメント開始後の AAC フレーム群から codec 情報が失われる。
 
-        // SampleEntry から正確な codec string を確定する
+        // SampleEntry から正確なコーデック文字列を確定する
         if let Some(ref entry) = frame.sample_entry
             && !matches!(
                 self.codec_resolution,

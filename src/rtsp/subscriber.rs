@@ -313,7 +313,7 @@ struct AudioRtpReceiver {
     sample_rate: SampleRate,
     channels: Channels,
     /// `AudioFrame.sample_entry` の不変条件（issue 0030）に従い、
-    /// SDP 由来の sample entry を共有型で保持して全 AAC AU に clone して付与する。
+    /// SDP 由来のサンプルエントリーを共有型で保持して全 AAC AU に clone して付与する。
     sample_entry: SharedSampleEntry,
 }
 

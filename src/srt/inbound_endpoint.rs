@@ -727,7 +727,7 @@ struct SrtTsDemuxer {
     audio_timestamp_mapper: crate::timestamp::mapper::TimestampMapper,
     last_aac_config_key: Option<AacConfigKey>,
     /// `AudioFrame.sample_entry` の不変条件（issue 0030）に従い、
-    /// 直近の AAC sample entry を保持して全 AAC AU に clone して付与する。
+    /// 直近の AAC サンプルエントリーを保持して全 AAC AU に clone して付与する。
     /// `last_aac_config_key` が変化したときに新規生成して両フィールドを更新する。
     last_aac_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
     received_video_keyframe: bool,

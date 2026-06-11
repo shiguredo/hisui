@@ -394,9 +394,9 @@ impl HybridMp4Writer {
         let mut samples = Vec::new();
         let mut data_offset = 0;
 
-        // この経路は best-effort の recovery で、pending の sample_entry が未確定なら単にスキップする
+        // この経路はベストエフォートの recovery で、pending の sample_entry が未確定なら単にスキップする
         // （不変条件下では writer の上流が常に Some を保証するが、HybridMp4Writer の入力経路が
-        // 将来変わる可能性に備えて recovery moov 先行更新の best-effort 設計を保つ・issue 0030）
+        // 将来変わる可能性に備えて recovery moov 先行更新のベストエフォート設計を保つ・issue 0030）
         if let Some(pending) = self.core.pending_video_frame.as_ref()
             && let Some(ref sample_entry) = pending.sample_entry
         {
@@ -1291,7 +1291,7 @@ mod tests {
         // BufWriter を flush するために writer を drop してからファイルを読み戻す。
         drop(writer);
 
-        // finalize 済みの標準 MP4 として音声トラックを読み戻し、サンプル数・コーデック・データに加えて、
+        // ファイナライズ済みの標準 MP4 として音声トラックを読み戻し、サンプル数・コーデック・データに加えて、
         // 全フレームに sample_entry が載っていること（issue 0030 の不変条件）を検証する。
         let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
         let read_audio_samples = reader.collect::<crate::Result<Vec<_>>>()?;

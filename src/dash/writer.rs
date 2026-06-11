@@ -472,7 +472,7 @@ impl DashWriter {
             self.start_new_segment(frame.timestamp)?;
         }
 
-        // SampleEntry から正確な codec string を確定する
+        // SampleEntry から正確なコーデック文字列を確定する
         if let Some(ref entry) = frame.sample_entry
             && !matches!(
                 self.codec_resolution,
@@ -531,7 +531,7 @@ impl DashWriter {
     /// オーディオフレーム処理
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
-        // SampleEntry から正確な codec string を確定する
+        // SampleEntry から正確なコーデック文字列を確定する
         if let Some(ref entry) = frame.sample_entry
             && !matches!(
                 self.codec_resolution,
