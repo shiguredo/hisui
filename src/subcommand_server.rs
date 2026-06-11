@@ -2,7 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
-pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+pub fn try_run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<bool> {
     if !noargs::cmd("server")
         .doc("OBS WebSocket 互換サーバーコマンド")
         .take(args)
@@ -10,11 +10,11 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     {
         return Ok(false);
     }
-    run(args)?;
+    run(args, stats)?;
     Ok(true)
 }
 
-fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
+fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<()> {
     let host: IpAddr = noargs::opt("host")
         .ty("HOST")
         .env("HISUI_SERVER_HOST")
@@ -110,11 +110,6 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         .doc("サーバーのワーカースレッド数")
         .take(args)
         .present_and_then(|o| o.value().parse())?;
-    let emit_exit_metrics: bool = noargs::flag("emit-exit-metrics")
-        .env("HISUI_SERVER_EMIT_EXIT_METRICS")
-        .doc("プロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する")
-        .take(args)
-        .is_present();
     let emit_startup_info: bool = noargs::flag("emit-startup-info")
         .env("HISUI_SERVER_EMIT_STARTUP_INFO")
         .doc("起動直後にバインド情報を JSON Lines で標準出力へ出力する")
@@ -173,7 +168,7 @@ fn run(args: &mut noargs::RawArgs) -> noargs::Result<()> {
         frame_rate,
         state_file,
         worker_threads,
-        emit_exit_metrics,
+        stats,
         emit_startup_info,
     )
     .map_err(noargs::Error::from)
@@ -195,7 +190,7 @@ fn run_internal(
     frame_rate: crate::video::FrameRate,
     state_file: Option<PathBuf>,
     worker_threads: Option<NonZeroUsize>,
-    emit_exit_metrics: bool,
+    stats: crate::stats::Stats,
     emit_startup_info: bool,
 ) -> crate::Result<()> {
     let openh264_lib = openh264
@@ -251,7 +246,7 @@ fn run_internal(
                             canvas_height,
                             frame_rate,
                             state_file,
-                            emit_exit_metrics,
+                            stats,
                             emit_startup_info,
                             #[cfg(feature = "player")]
                             command_tx,
@@ -291,7 +286,7 @@ fn run_internal(
                 canvas_height,
                 frame_rate,
                 state_file,
-                emit_exit_metrics,
+                stats,
                 emit_startup_info,
             ))
             .await

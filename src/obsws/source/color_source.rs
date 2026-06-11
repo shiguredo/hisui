@@ -119,7 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn color_source_emits_i420_frames() -> crate::Result<()> {
-        let pipeline = MediaPipeline::new()?;
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         {

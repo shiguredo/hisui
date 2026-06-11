@@ -187,7 +187,7 @@ fn run_writer_with_pipeline(
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        let pipeline = MediaPipeline::new()?;
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
         let pipeline_handle = pipeline.handle();
         let mut pipeline_task = tokio::spawn(async move {
             pipeline.run().await;

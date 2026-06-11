@@ -106,7 +106,7 @@ impl Args {
     }
 }
 
-pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
+pub fn try_run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<bool> {
     if !noargs::cmd("compose")
         .doc("録画ファイルの合成を行います")
         .take(args)
@@ -114,20 +114,20 @@ pub fn try_run(args: &mut noargs::RawArgs) -> noargs::Result<bool> {
     {
         return Ok(false);
     }
-    run(args)?;
+    run(args, stats)?;
     Ok(true)
 }
 
-fn run(raw_args: &mut noargs::RawArgs) -> noargs::Result<()> {
+fn run(raw_args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<()> {
     let args = Args::parse(raw_args)?;
     if raw_args.metadata().help_mode {
         return Ok(());
     }
 
-    run_internal(args).map_err(noargs::Error::from)
+    run_internal(args, stats).map_err(noargs::Error::from)
 }
 
-fn run_internal(args: Args) -> crate::Result<()> {
+fn run_internal(args: Args, stats: crate::stats::Stats) -> crate::Result<()> {
     // レイアウトを準備
     let layout = Layout::from_layout_json_file_or_default(
         args.root_dir.clone(),
@@ -164,6 +164,7 @@ fn run_internal(args: Args) -> crate::Result<()> {
         args.worker_threads,
         output_file_path.clone(),
         args.stats_file_path.as_ref(),
+        stats,
     )?;
     let entries = result
         .stats
@@ -208,6 +209,7 @@ struct ComposePipelineSetup {
     processor_tasks: tokio::task::JoinSet<(ProcessorId, Result<()>)>,
 }
 
+#[cfg_attr(feature = "fdk-aac", expect(clippy::too_many_arguments))]
 fn run_compose(
     layout: Layout,
     openh264_lib: Option<Openh264Library>,
@@ -216,6 +218,7 @@ fn run_compose(
     worker_threads: NonZeroUsize,
     out_file_path: PathBuf,
     stats_file_path: Option<&PathBuf>,
+    stats: crate::stats::Stats,
 ) -> Result<ComposeResult> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads.get())
@@ -230,6 +233,7 @@ fn run_compose(
         fdk_aac_lib,
         show_progress_bar,
         out_file_path,
+        stats,
     ))?;
 
     if let Some(path) = stats_file_path {
@@ -265,8 +269,9 @@ async fn run_compose_pipeline(
     #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
     show_progress_bar: bool,
     out_file_path: PathBuf,
+    stats: crate::stats::Stats,
 ) -> Result<ComposeResult> {
-    let pipeline = MediaPipeline::new()?;
+    let pipeline = MediaPipeline::new(Default::default(), stats)?;
     let pipeline_handle = pipeline.handle();
     // 異常終了の検知は processor task / metric 側で行うため、run() の戻り値はここでは使わない
     let pipeline_task = tokio::spawn(async move {

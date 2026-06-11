@@ -95,37 +95,8 @@ impl ShutdownSignal {
     }
 }
 
-/// 終了時に全メトリクス（`Stats` レジストリ全件）を JSON Lines で stdout へ出力する。
-/// 失敗してもプロセス終了は妨げない（警告ログを出して続行する）。
-fn emit_exit_metrics_to_stdout(pipeline_handle: &crate::MediaPipelineHandle) {
-    use std::io::Write as _;
-
-    let families = match pipeline_handle.stats().to_prometheus_json_families() {
-        Ok(families) => families,
-        Err(e) => {
-            tracing::warn!("failed to collect metrics for exit dump: {}", e.display());
-            return;
-        }
-    };
-    // stdout の JSON Lines ストリームのエントリ種別を `type` で示す（メトリクスダンプは "metrics"）
-    let line = nojson::object(|f| {
-        f.member("type", "metrics")?;
-        f.member("metrics", &families)?;
-        Ok(())
-    });
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    // 出力先のパイプが途中閉じられた場合は警告しない（json.rs::pretty_print と同様）
-    if let Err(e) = writeln!(out, "{line}")
-        && e.kind() != std::io::ErrorKind::BrokenPipe
-    {
-        tracing::warn!("failed to write metrics dump to stdout: {e}");
-    }
-}
-
 /// --emit-startup-info 指定時、bind 完了直後の情報を JSON Lines で stdout に書き出す。
-/// 1 行 1 JSON で、type フィールドでエントリ種別を示す規約は emit_exit_metrics_to_stdout と同じ。
-/// 書き込み失敗時の方針は emit_exit_metrics_to_stdout とは逆で、BrokenPipe 含めて起動失敗扱いにする:
+/// 書き込み失敗時の方針は終了時メトリクス出力とは逆で、BrokenPipe 含めて起動失敗扱いにする:
 /// 終了時のメトリクス出力と違って起動後は hisui が稼働継続するため、書き込み失敗を黙殺すると
 /// 呼び出し側 (E2E テスト等) が startup_info を待ち続けてハングする。起動失敗で exit すれば
 /// 呼び出し側は stdout EOF で気付ける。
@@ -137,7 +108,6 @@ fn emit_startup_info_to_stdout(
     use std::io::Write as _;
 
     let server_url = format!("{scheme}://{actual_addr}");
-    // UI 有効判定は --ui 指定の有無 (= ui_remote_url.is_some()) で行う。
     // --no-open でブラウザ自動起動を切った場合も ui フィールドはオブジェクトとして出力する。
     let ui_url: Option<String> = ui_remote_url.map(|_| format!("{scheme}://{actual_addr}/"));
 
@@ -189,7 +159,7 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
-    emit_exit_metrics: bool,
+    stats: crate::stats::Stats,
     emit_startup_info: bool,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
         crate::obsws::player::PlayerCommand,
@@ -233,7 +203,6 @@ pub async fn run_server(
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
     // `--port 0` 指定時に呼び出し側が実ポートを参照できるよう、bind 後の実アドレスを取得する。
-    // 以降の listening / UI ログ・open_browser・startup_info 出力はすべてこの実アドレスを使う。
     let actual_addr = listener
         .local_addr()
         .map_err(|e| crate::Error::new(format!("failed to get local addr: {e}")))?;
@@ -329,7 +298,7 @@ pub async fn run_server(
         }
     }
 
-    let pipeline = crate::MediaPipeline::new_with_config(pipeline_config)?;
+    let pipeline = crate::MediaPipeline::new(pipeline_config, stats)?;
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -423,7 +392,6 @@ pub async fn run_server(
         pipeline_handle,
         bootstrap_endpoint,
         shutdown_rx,
-        emit_exit_metrics,
         shutdown_signal,
     )
     .await
@@ -448,7 +416,6 @@ async fn run_accept_loop(
     pipeline_handle: crate::MediaPipelineHandle,
     bootstrap_endpoint: Rc<BootstrapEndpoint>,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
-    emit_exit_metrics: bool,
     mut shutdown_signal: ShutdownSignal,
 ) -> crate::Result<()> {
     loop {
@@ -464,9 +431,6 @@ async fn run_accept_loop(
             }
             _ = shutdown_signal.recv() => {
                 tracing::info!("obsws server shutting down on signal");
-                if emit_exit_metrics {
-                    emit_exit_metrics_to_stdout(&pipeline_handle);
-                }
                 return Ok(());
             }
         };
