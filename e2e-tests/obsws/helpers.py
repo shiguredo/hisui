@@ -75,12 +75,7 @@ class ObswsServer:
         if (self.https_cert_path is None) != (self.https_key_path is None):
             raise ValueError("https_cert_path and https_key_path must be provided together")
 
-        # --emit-exit-metrics は main.rs の共通フラグへ昇格したため、
-        # サブコマンド (server) の前に置く必要がある。
-        args = ["--verbose"]
-        if not self.use_env and self.emit_exit_metrics:
-            args.append("--emit-exit-metrics")
-        args.append("server")
+        args = ["--verbose", "server"]
         env = os.environ.copy()
         openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
@@ -133,6 +128,8 @@ class ObswsServer:
                 args.extend(["--state-file", str(self.state_file)])
             if openh264_path:
                 args.extend(["--openh264", openh264_path])
+            if self.emit_exit_metrics:
+                args.append("--emit-exit-metrics")
 
         cmd, cwd = build_hisui_command(self.binary_path, *args)
         self._process = subprocess.Popen(
