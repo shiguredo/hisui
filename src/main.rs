@@ -39,9 +39,7 @@ fn main() -> noargs::Result<()> {
         .is_present();
 
     // メトリクスレジストリを main 側で 1 つ作り、`MediaPipeline` を持つ各 subcommand に
-    // clone を渡す。`Stats` は内部で `Arc<Mutex<...>>` を共有するため、main 側で保持した
-    // ものから末尾で `emit_exit_metrics_to_stdout(&stats)` を呼べば全 processor のメトリクスを
-    // 1 行 JSON で書き出せる。
+    // clone を渡す。
     let stats = hisui::stats::Stats::new();
 
     // サブコマンドで分岐する
@@ -52,9 +50,6 @@ fn main() -> noargs::Result<()> {
         || hisui::sora::recording_subcommand_tune::try_run(&mut args)?
         || hisui::subcommand_server::try_run(&mut args, stats.clone())?;
 
-    // フラグ ON かつ subcommand が実際に match し、ヘルプモードでない場合に限り
-    // 終了時メトリクスを出力する。`args.finish()` は self を消費するため、
-    // help_mode 判定と呼び出しは finish より前に置く。
     if emit_exit_metrics && matched && !args.metadata().help_mode {
         hisui::metrics::emit_exit_metrics_to_stdout(&stats);
     }

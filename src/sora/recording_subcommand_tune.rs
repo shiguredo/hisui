@@ -302,7 +302,7 @@ fn run_trial_evaluation(
     // 共通フラグ --emit-exit-metrics を子プロセスへ env 経由で継承させない。
     // 子の hisui vmaf は結果 JSON のみを stdout に出すことを親が前提とする
     // (tune 親はその stdout を nojson でパースする) ため、env 継承による
-    // メトリクスダンプ行の混入を防ぐ。
+    // 終了時メトリクス行の混入を防ぐ。
     cmd.env_remove("HISUI_EMIT_EXIT_METRICS");
     cmd.arg("vmaf")
         .arg("--layout-file")

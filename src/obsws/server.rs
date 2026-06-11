@@ -96,8 +96,7 @@ impl ShutdownSignal {
 }
 
 /// --emit-startup-info 指定時、bind 完了直後の情報を JSON Lines で stdout に書き出す。
-/// 1 行 1 JSON で、type フィールドでエントリ種別を示す規約は `metrics` のメトリクス出力と同じ。
-/// 書き込み失敗時の方針は終了時メトリクスダンプとは逆で、BrokenPipe 含めて起動失敗扱いにする:
+/// 書き込み失敗時の方針は終了時メトリクス出力とは逆で、BrokenPipe 含めて起動失敗扱いにする:
 /// 終了時のメトリクス出力と違って起動後は hisui が稼働継続するため、書き込み失敗を黙殺すると
 /// 呼び出し側 (E2E テスト等) が startup_info を待ち続けてハングする。起動失敗で exit すれば
 /// 呼び出し側は stdout EOF で気付ける。
@@ -109,7 +108,6 @@ fn emit_startup_info_to_stdout(
     use std::io::Write as _;
 
     let server_url = format!("{scheme}://{actual_addr}");
-    // UI 有効判定は --ui 指定の有無 (= ui_remote_url.is_some()) で行う。
     // --no-open でブラウザ自動起動を切った場合も ui フィールドはオブジェクトとして出力する。
     let ui_url: Option<String> = ui_remote_url.map(|_| format!("{scheme}://{actual_addr}/"));
 
@@ -205,7 +203,6 @@ pub async fn run_server(
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
     // `--port 0` 指定時に呼び出し側が実ポートを参照できるよう、bind 後の実アドレスを取得する。
-    // 以降の listening / UI ログ・open_browser・startup_info 出力はすべてこの実アドレスを使う。
     let actual_addr = listener
         .local_addr()
         .map_err(|e| crate::Error::new(format!("failed to get local addr: {e}")))?;

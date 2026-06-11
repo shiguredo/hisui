@@ -18,7 +18,6 @@ pub fn emit_exit_metrics_to_stdout(stats: &Stats) {
             return;
         }
     };
-    // stdout の JSON Lines ストリームのエントリ種別を `type` で示す（終了時メトリクスは "metrics"）
     let line = nojson::object(|f| {
         f.member("type", "metrics")?;
         f.member("metrics", &families)?;

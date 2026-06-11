@@ -43,7 +43,7 @@ class ObswsServer:
         https_key_path: Path | None = None,
         state_file: Path | None = None,
         use_env: bool = False,
-        # デフォルトで有効。失敗時の終了ダンプ（captured output）を診断に使えるようにするため。
+        # デフォルトで有効。失敗時の終了時メトリクス（captured output）を診断に使えるようにするため。
         emit_exit_metrics: bool = True,
     ):
         self.binary_path = binary_path
@@ -149,7 +149,7 @@ class ObswsServer:
             return
         if process.poll() is None:
             process.send_signal(signal.SIGTERM)
-        # 終了時メトリクスダンプで stdout のパイプが詰まるとサーバが終了できないため、
+        # 終了時メトリクス出力で stdout のパイプが詰まるとサーバが終了できないため、
         # communicate() で stdout/stderr を並行して読み出しながら終了を待つ。
         try:
             stdout, stderr = process.communicate(timeout=5.0)
