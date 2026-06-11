@@ -44,6 +44,7 @@ issue 0002 で追加される `hisui server --emit-startup-info` を活用し、
   - `__exit__` で `terminate()` + `wait()` までやり、テスト側のリーク責務を消す。
 - 35 箇所の hisui port 確保を新ヘルパーに置き換える。RTMP 等の非 hisui 用途は本 issue では残す（必要なら別関数に分離）。
 - hisui port 用途の利用が 0 になったら `reserve_ephemeral_port()` 自体を削除する（非 hisui 用途が残る場合は別名で分離してから旧名を消す）。
+- hisui を subprocess で起動するヘルパー（`build_hisui_command` および新ヘルパー）は親 env から `HISUI_EMIT_EXIT_METRICS` 等の hisui 共通 env を pop した状態で起動し、開発者がローカルで env を設定して e2e を回した際に subprocess の stdout に終了時メトリクス行が混入してテスト解析が壊れる事故を防ぐ（issue 0025 で共通フラグ昇格に伴い顕在化した課題）。
 
 ### 依存
 
@@ -53,7 +54,8 @@ issue 0002 で追加される `hisui server --emit-startup-info` を活用し、
 
 - `e2e-tests/hisui_server.py` から hisui port 用途の `reserve_ephemeral_port()` 呼び出しが消えていること。非 hisui 用途のみが残る場合は関数名で意図が読み取れること。
 - `e2e-tests/obsws/test_connection.py` / `test_http.py` / `test_output.py` の hisui port 確保がすべて新ヘルパー経由になっていること。
-- `e2e-tests/` を `uv run pytest` で実行し、全テストがパスすること。
+- hisui を subprocess で起動するヘルパーが親 env から `HISUI_EMIT_EXIT_METRICS` を pop した状態で起動していること。
+- `e2e-tests/` を `uv run pytest` で実行し、全テストがパスすること（ローカル env で `HISUI_EMIT_EXIT_METRICS=1` を設定した状態でもパスすること）。
 - CHANGES.md の `## develop` に追記すること（カテゴリは `shiguredo-changelog` スキル参照、`[CHANGE]` または `[REFACTOR]` 相当）。
 
 ## 解決方法

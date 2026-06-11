@@ -13,6 +13,7 @@ pub mod json;
 pub mod logger;
 pub mod media;
 pub mod media_pipeline;
+pub mod metrics;
 pub mod mixer;
 pub mod mp4;
 pub mod obsws;

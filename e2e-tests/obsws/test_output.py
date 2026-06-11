@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import json
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from helpers import (
     _wait_process_exit,
     _write_test_png,
 )
-from hisui_server import reserve_ephemeral_port
+from hisui_server import build_hisui_command, reserve_ephemeral_port
 
 RTMP_LISTEN_RECEIVER_STARTUP_WAIT_SEC = 2.0
 
@@ -2078,8 +2079,8 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
         asyncio.run(_run_validation_flow())
 
 
-def _find_metrics_dump(stdout: str) -> dict | None:
-    """サーバ stdout から終了時メトリクスダンプ（type=metrics の JSON Line）を探す"""
+def _find_exit_metrics(stdout: str) -> dict | None:
+    """サーバ stdout から終了時メトリクス（type=metrics の JSON Line）を探す"""
     for line in stdout.splitlines():
         stripped = line.strip()
         if not stripped.startswith("{"):
@@ -2105,11 +2106,11 @@ def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path
     with server:
         pass
 
-    dump = _find_metrics_dump(server.stdout)
-    assert dump is not None, f"終了時メトリクスダンプが stdout に出ていない: stdout={server.stdout!r}"
+    entry = _find_exit_metrics(server.stdout)
+    assert entry is not None, f"終了時メトリクスが stdout に出ていない: stdout={server.stdout!r}"
     # metrics は prom2json の family 配列で、hisui_ プレフィックス付きの family を含むこと
-    families = dump["metrics"]
-    assert isinstance(families, list) and families, f"metrics が空または配列でない: {dump}"
+    families = entry["metrics"]
+    assert isinstance(families, list) and families, f"metrics が空または配列でない: {entry}"
     assert all("name" in f and "type" in f and "metrics" in f for f in families), (
         f"family の形式が不正: {families}"
     )
@@ -2119,7 +2120,7 @@ def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path
 
 
 def test_obsws_emit_exit_metrics_disabled(binary_path: Path, tmp_path: Path):
-    """--emit-exit-metrics 無効時はダンプが出力されないことを確認する"""
+    """--emit-exit-metrics 無効時は終了時メトリクスが出力されないことを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
@@ -2137,6 +2138,19 @@ def test_obsws_emit_exit_metrics_disabled(binary_path: Path, tmp_path: Path):
     assert server.returncode == 0, (
         f"SIGTERM でグレースフル終了していない: returncode={server.returncode}, {server.diagnostics()}"
     )
-    assert _find_metrics_dump(server.stdout) is None, (
-        f"無効化したのにダンプが出ている: {server.stdout!r}"
+    assert _find_exit_metrics(server.stdout) is None, (
+        f"無効化したのに終了時メトリクスが出ている: {server.stdout!r}"
+    )
+
+
+def test_emit_exit_metrics_help_mode_outputs_no_metrics(binary_path: Path):
+    """--emit-exit-metrics と --help を同時に指定したとき、終了時メトリクスが出力されないことを確認する"""
+    cmd, cwd = build_hisui_command(binary_path, "--emit-exit-metrics", "--help")
+    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10.0)
+    assert result.returncode == 0, (
+        f"--help 指定時に終了コードが非ゼロ: returncode={result.returncode}, "
+        f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+    )
+    assert _find_exit_metrics(result.stdout) is None, (
+        f"ヘルプモードなのに終了時メトリクスが出ている: {result.stdout!r}"
     )
