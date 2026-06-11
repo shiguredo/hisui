@@ -53,10 +53,9 @@ fn main() -> noargs::Result<()> {
         || hisui::subcommand_server::try_run(&mut args, stats.clone())?;
 
     // フラグ ON かつ subcommand が実際に match し、ヘルプモードでない場合に限り
-    // 終了時 dump を出す。`args.finish()` は self を消費するため、help_mode 判定と
-    // dump 呼び出しは finish より前に置く。
-    let should_dump = emit_exit_metrics && matched && !args.metadata().help_mode;
-    if should_dump {
+    // 終了時メトリクスを出力する。`args.finish()` は self を消費するため、
+    // help_mode 判定と呼び出しは finish より前に置く。
+    if emit_exit_metrics && matched && !args.metadata().help_mode {
         hisui::metrics::emit_exit_metrics_to_stdout(&stats);
     }
 

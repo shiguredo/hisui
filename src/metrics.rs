@@ -1,8 +1,7 @@
-//! プロセス終了時に Stats レジストリの全メトリクスを JSON Lines で stdout へ出力する。
+//! メトリクス (`Stats` レジストリ) の外部出力を担うユーティリティ。
 //!
-//! `--emit-exit-metrics` を main.rs で共通フラグとして受け、subcommand 分岐の return 後に
-//! main から呼び出すユーティリティ。JSON Lines のエントリ種別 `type` の付与は出力側の責務として
-//! 本モジュールに置き、`Stats` モジュール (`src/stats.rs`) には出力規約を持ち込まない。
+//! `Stats` (`src/stats.rs`) はメトリクスの収集・保持だけを担い、
+//! 出力形式 (JSON Lines の `type` 規約等) は本モジュール側に集約する。
 
 use std::io::Write as _;
 
@@ -15,11 +14,11 @@ pub fn emit_exit_metrics_to_stdout(stats: &Stats) {
     let families = match stats.to_prometheus_json_families() {
         Ok(families) => families,
         Err(e) => {
-            tracing::warn!("failed to collect metrics for exit dump: {}", e.display());
+            tracing::warn!("failed to collect exit metrics: {}", e.display());
             return;
         }
     };
-    // stdout の JSON Lines ストリームのエントリ種別を `type` で示す（メトリクスダンプは "metrics"）
+    // stdout の JSON Lines ストリームのエントリ種別を `type` で示す（終了時メトリクスは "metrics"）
     let line = nojson::object(|f| {
         f.member("type", "metrics")?;
         f.member("metrics", &families)?;
@@ -31,6 +30,6 @@ pub fn emit_exit_metrics_to_stdout(stats: &Stats) {
     if let Err(e) = writeln!(out, "{line}")
         && e.kind() != std::io::ErrorKind::BrokenPipe
     {
-        tracing::warn!("failed to write metrics dump to stdout: {e}");
+        tracing::warn!("failed to write exit metrics to stdout: {e}");
     }
 }
