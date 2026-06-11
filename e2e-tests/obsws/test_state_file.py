@@ -277,16 +277,14 @@ def test_corrupted_state_file_causes_startup_failure(binary_path: Path, tmp_path
     state_file = tmp_path / "corrupted.jsonc"
     state_file.write_text("{ invalid json content !!!")
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
-
-    try:
-        with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
-            # ここに到達した場合はテスト失敗
-            assert False, "server must not start with corrupted state file"
-    except AssertionError as e:
-        # ObswsServer._wait_until_listening で起動前に終了を検知する
-        assert "exited before listening" in str(e)
+    # --emit-startup-info は bind 直後・state_file load より前に出るため
+    # _read_startup_info() 自体は成功し start() が return する。
+    # その直後 state_file load が失敗してプロセスが exit するので、
+    # wait_for_exit で短時間内の exit と returncode != 0 を検証する。
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+        returncode = server.wait_for_exit(timeout=5.0)
+        assert returncode is not None, "server should have exited due to corrupted state file"
+        assert returncode != 0, f"unexpected returncode {returncode}"
 
 
 def test_invalid_version_state_file_causes_startup_failure(
@@ -297,14 +295,10 @@ def test_invalid_version_state_file_causes_startup_failure(
     state_file = tmp_path / "bad-version.jsonc"
     state_file.write_text(json.dumps({"version": 99}))
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
-
-    try:
-        with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
-            assert False, "server must not start with invalid version state file"
-    except AssertionError as e:
-        assert "exited before listening" in str(e)
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+        returncode = server.wait_for_exit(timeout=5.0)
+        assert returncode is not None, "server should have exited due to invalid version state file"
+        assert returncode != 0, f"unexpected returncode {returncode}"
 
 
 def test_record_without_directory_causes_startup_failure(
@@ -315,14 +309,12 @@ def test_record_without_directory_causes_startup_failure(
     state_file = tmp_path / "no-record-dir.jsonc"
     state_file.write_text(json.dumps({"version": 1, "record": {}}))
 
-    port, sock = reserve_ephemeral_port()
-    sock.close()
-
-    try:
-        with ObswsServer(binary_path, host=host, port=port, state_file=state_file):
-            assert False, "server must not start with record section missing recordDirectory"
-    except AssertionError as e:
-        assert "exited before listening" in str(e)
+    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+        returncode = server.wait_for_exit(timeout=5.0)
+        assert returncode is not None, (
+            "server should have exited due to record section missing recordDirectory"
+        )
+        assert returncode != 0, f"unexpected returncode {returncode}"
 
 
 def test_preexisting_state_file_is_loaded_on_startup(

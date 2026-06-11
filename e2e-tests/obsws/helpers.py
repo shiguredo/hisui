@@ -5,9 +5,9 @@ import base64
 import hashlib
 import json
 import os
+import select
 import shutil
 import signal
-import socket
 import ssl
 import subprocess
 import time
@@ -34,7 +34,10 @@ class ObswsServer:
         binary_path: Path,
         *,
         host: str,
-        port: int,
+        # port 引数は issue 0035 で段階移行のため一時的に shim として残している。
+        # 渡された値は黙殺し、常に --port 0 で動的に取った port を self.port に反映する。
+        # 全呼び出し側の port=port 引数が削除された後、本引数も完全削除する。
+        port: int | None = None,
         password: str | None = None,
         default_record_dir: Path | None = None,
         ui: bool = False,
@@ -46,9 +49,11 @@ class ObswsServer:
         # デフォルトで有効。失敗時の終了時メトリクス（captured output）を診断に使えるようにするため。
         emit_exit_metrics: bool = True,
     ):
+        _ = port
         self.binary_path = binary_path
         self.host = host
-        self.port = port
+        # 実 port は _read_startup_info() で startup_info JSON から取得し上書きする。
+        self.port: int = 0
         self.password = password
         self.default_record_dir = default_record_dir
         self.ui = ui
@@ -77,6 +82,12 @@ class ObswsServer:
 
         args = ["--verbose", "server"]
         env = os.environ.copy()
+        # 親 env で立っている stdout 出力系フラグを pop して使い手の明示制御に揃える。
+        # 本ヘルパーは _read_startup_info() で stdout を JSON parse し、stop() の
+        # _emit_captured_output() で診断 print するため、親 env からの漏れは両方を汚す
+        # （issue 0035 参照）。
+        env.pop("HISUI_EMIT_EXIT_METRICS", None)
+        env.pop("HISUI_SERVER_EMIT_STARTUP_INFO", None)
         openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
             # use_env=True では対応する環境変数がない引数は未対応
@@ -89,7 +100,9 @@ class ObswsServer:
                     "https_cert_path/https_key_path is not supported with use_env=True"
                 )
             env["HISUI_SERVER_HOST"] = self.host
-            env["HISUI_SERVER_PORT"] = str(self.port)
+            # --port 0 同等。実 port は startup_info 経由で取得する。
+            env["HISUI_SERVER_PORT"] = "0"
+            env["HISUI_SERVER_EMIT_STARTUP_INFO"] = "1"
             if self.password is not None:
                 env["HISUI_SERVER_PASSWORD"] = self.password
             if self.default_record_dir is not None:
@@ -104,7 +117,7 @@ class ObswsServer:
                     "--host",
                     self.host,
                     "--port",
-                    str(self.port),
+                    "0",
                 ]
             )
             if self.password is not None:
@@ -128,6 +141,7 @@ class ObswsServer:
                 args.extend(["--state-file", str(self.state_file)])
             if openh264_path:
                 args.extend(["--openh264", openh264_path])
+            args.append("--emit-startup-info")
             if self.emit_exit_metrics:
                 args.append("--emit-exit-metrics")
 
@@ -140,7 +154,7 @@ class ObswsServer:
             stderr=subprocess.PIPE,
             text=True,
         )
-        self._wait_until_listening()
+        self._read_startup_info()
         return self
 
     def stop(self):
@@ -183,25 +197,92 @@ class ObswsServer:
         print(f"[obsws server stdout]\n{self._stdout}")
         print(f"[obsws server stderr]\n{self._stderr}")
 
-    def _wait_until_listening(self, timeout: float = 10.0):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            process = self._process
-            if process is not None and process.poll() is not None:
-                stdout, stderr = process.communicate(timeout=1.0)
-                self._stdout = stdout
-                self._stderr = stderr
+    def _read_startup_info(self):
+        # hisui の --emit-startup-info が stdout に 1 行で書く startup_info JSON を
+        # 読み取り、実 port を self.port に反映する。issue 0035 参照。
+        process = self._process
+        assert process is not None
+        assert process.stdout is not None
+
+        # cargo run のコールドスタートを考慮して default 60 秒。
+        # CI 環境などでの個別チューニングのため HISUI_E2E_STARTUP_TIMEOUT で override 可能。
+        # float() 失敗時は ValueError を素通しさせ silent な default 戻りを避ける。
+        timeout_override = os.environ.get("HISUI_E2E_STARTUP_TIMEOUT")
+        startup_timeout = float(timeout_override) if timeout_override is not None else 60.0
+
+        ready, _, _ = select.select([process.stdout], [], [], startup_timeout)
+        if not ready:
+            if process.poll() is not None:
+                self._cleanup_after_startup_failure()
                 raise AssertionError(
-                    "obsws process exited before listening: "
-                    f"returncode={process.returncode}, stdout={stdout}, stderr={stderr}"
+                    f"obsws server exited before startup_info: returncode={process.returncode}, "
+                    f"stdout={self._stdout}, stderr={self._stderr}"
                 )
-            if _is_port_open(self.host, self.port):
-                return
-            time.sleep(0.1)
-        raise AssertionError(
-            "obsws server did not start listening in time: "
-            f"{self.host}:{self.port}, stdout={self._stdout}, stderr={self._stderr}"
-        )
+            self._cleanup_after_startup_failure()
+            raise AssertionError(
+                f"obsws server startup_info timeout: timeout={startup_timeout}, "
+                f"stdout={self._stdout}, stderr={self._stderr}"
+            )
+
+        line = process.stdout.readline()
+        if not line:
+            self._cleanup_after_startup_failure()
+            raise AssertionError(
+                f"obsws server exited before startup_info: returncode={process.returncode}, "
+                f"stdout={self._stdout}, stderr={self._stderr}"
+            )
+
+        try:
+            body = json.loads(line)
+        except json.JSONDecodeError as e:
+            self._cleanup_after_startup_failure()
+            raise AssertionError(
+                f"obsws server startup_info invalid: json decode error: {e}, line={line!r}, "
+                f"stdout={self._stdout}, stderr={self._stderr}"
+            )
+
+        if not isinstance(body, dict) or body.get("type") != "startup_info":
+            self._cleanup_after_startup_failure()
+            raise AssertionError(
+                f"obsws server startup_info invalid: type mismatch: {body!r}, "
+                f"stdout={self._stdout}, stderr={self._stderr}"
+            )
+
+        server_info = body.get("server")
+        if not isinstance(server_info, dict) or "port" not in server_info:
+            self._cleanup_after_startup_failure()
+            raise AssertionError(
+                f"obsws server startup_info invalid: server.port not found: {body!r}, "
+                f"stdout={self._stdout}, stderr={self._stderr}"
+            )
+
+        self.port = int(server_info["port"])
+
+    def _cleanup_after_startup_failure(self):
+        # startup_info 取得失敗時のプロセス終了 + 診断 print 共通フロー。
+        process = self._process
+        if process is None:
+            return
+        if process.poll() is None:
+            process.terminate()
+        try:
+            stdout, stderr = process.communicate(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+        self._stdout = stdout
+        self._stderr = stderr
+        self._emit_captured_output()
+
+    def wait_for_exit(self, timeout: float = 5.0) -> int | None:
+        """プロセスが timeout 秒以内に exit したら returncode を返し、しなければ None を返す"""
+        process = self._process
+        if process is None:
+            return None
+        try:
+            return process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
 
     def diagnostics(self) -> str:
         process = self._process
@@ -219,14 +300,6 @@ class ObswsServer:
     @property
     def returncode(self) -> int | None:
         return self._returncode
-
-
-def _is_port_open(host: str, port: int) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=0.5):
-            return True
-    except OSError:
-        return False
 
 
 def _start_ffmpeg_rtmp_receive(
