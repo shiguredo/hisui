@@ -173,7 +173,8 @@ server サブコマンド固有のグレースフルシャットダウン記述�
 ## テスト戦略
 
 - 既存 server e2e（`test_obsws_emit_exit_metrics_outputs_jsonl` / `test_obsws_emit_exit_metrics_disabled`）がフラグ位置変更後も通ることで検証する。
-- 本 issue では新規テストを追加しない（`metrics::emit_exit_metrics_to_stdout` の単体テスト、batch 系でのメトリクス出力動作確認、tune の `env_remove` 結合テスト、いずれも）。`Stats::to_prometheus_json_families` 単体テスト群と server e2e で 0018 と同等のカバー範囲を維持する。BrokenPipe / I/O 警告ログ経路はテストしない。
+- ヘルプモード判定のリグレッション検知用に `test_emit_exit_metrics_help_mode_outputs_no_metrics` を 1 件追加する（`hisui --emit-exit-metrics --help` で stdout に `type=metrics` 行が出ないことを確認）。
+- それ以外の経路の自動カバーは追加しない（`metrics::emit_exit_metrics_to_stdout` の単体テスト、batch 系でのメトリクス出力動作確認、tune の `env_remove` 結合テスト、`?` 抜け / unknown サブコマンドでの非出力テスト、いずれも）。`Stats::to_prometheus_json_families` 単体テスト群と server e2e で 0018 と同等のカバー範囲を維持する。BrokenPipe / I/O 警告ログ経路はテストしない。
 
 ## 非対象
 
