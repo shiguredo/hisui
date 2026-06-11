@@ -35,14 +35,14 @@ Low。server 固有版（0018）で当面の用途（server の flaky 診断）�
 - tune は内部で `current_exe` 経由で `vmaf` 子プロセスを起動する（`src/sora/recording_subcommand_tune.rs:301` の `Command` 構築、1 箇所のみ）。tune 親自身は stdout に何も書かない（出力は全て stderr）。tune 親は子の stdout を `nojson::RawJson::parse` で読む。
 - list-codecs は `MediaPipeline` を持たず、`src/subcommand_list_codecs.rs:148` の `println!` でコーデック一覧 JSON を 1 個 stdout に書く。
 - 既存 server e2e: `e2e-tests/obsws/test_output.py:2096-2132` の `test_obsws_emit_exit_metrics_outputs_jsonl` / `test_obsws_emit_exit_metrics_disabled`。両テストとも「stdout に `type=metrics` の JSON Line が含まれるか」を確認するのみ。
-- e2e helpers の `ObswsServer.start()`（`e2e-tests/obsws/helpers.py`）は CLI 経路（`--emit-exit-metrics` を `args` に append）と env 経路（`HISUI_SERVER_EMIT_EXIT_METRICS=1` を env に設定）の 2 経路を持つ。
+- e2e helpers の `ObswsServer.start()`（`e2e-tests/obsws/helpers.py`）は CLI 経路（`--emit-exit-metrics` を `args` に append）と env 経路（`HISUI_EMIT_EXIT_METRICS=1` を env に設定）の 2 経路を持つ。
 - `CHANGES.md:59-61` に 0018 関連の `[ADD]` エントリ（3 行構造: 本文 + env 補足 + `@sile`）があり、未リリース。
 
 ## 設計方針
 
 ### 1. 共通フラグ parse の移設
 
-`--emit-exit-metrics`（env `HISUI_SERVER_EMIT_EXIT_METRICS` を維持）の parse を `src/main.rs` の `--verbose` 直後（subcommand 分岐前）へ移す。CLI 上の位置は `hisui --emit-exit-metrics server ...` を規約とする。env 経路は CLI 位置と独立に動く。
+`--emit-exit-metrics`（env `HISUI_EMIT_EXIT_METRICS` を維持）の parse を `src/main.rs` の `--verbose` 直後（subcommand 分岐前）へ移す。CLI 上の位置は `hisui --emit-exit-metrics server ...` を規約とする。env 経路は CLI 位置と独立に動く。
 
 ### 2. main 側で共有 `Stats` を作って渡す
 
@@ -114,8 +114,8 @@ e2e テストは「stdout に `type=metrics` 行が含まれるか」だけを�
 main 末尾でメトリクス出力する設計のため、`--emit-exit-metrics` を指定した上で server 以外を実行すると subcommand の stdout 出力とメトリクス出力の JSON Line が並ぶ:
 
 - compose / vmaf / inspect は結果 JSON を stdout に書くため、メトリクス出力行が後ろに並ぶ「単一 JSON + JSON Line」の混在出力になる。stdout を機械処理する用途では注意が必要。
-- list-codecs は `MediaPipeline` を持たず `Stats` が空のため、`{"type":"metrics","metrics":[]}` の空行が後続する。`HISUI_SERVER_EMIT_EXIT_METRICS=1` を env で常設した状態で `hisui list-codecs | jq` を実行するとパースが壊れる。これは「list-codecs / tune はメトリクス出力対象外」という暗黙の仕様（`MediaPipeline` を持たないため）の帰結として doc 注意でカバーする。
-- tune は子 `vmaf` の stdout を `nojson::RawJson::parse` で解析する。env 継承で子側にもメトリクス出力が出ると tune 親のパースが壊滅する。このため `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後のメソッドチェーンで `cmd.env_remove("HISUI_SERVER_EMIT_EXIT_METRICS")` を追加する。本対応は本 issue のスコープに含める。
+- list-codecs は `MediaPipeline` を持たず `Stats` が空のため、`{"type":"metrics","metrics":[]}` の空行が後続する。`HISUI_EMIT_EXIT_METRICS=1` を env で常設した状態で `hisui list-codecs | jq` を実行するとパースが壊れる。これは「list-codecs / tune はメトリクス出力対象外」という暗黙の仕様（`MediaPipeline` を持たないため）の帰結として doc 注意でカバーする。
+- tune は子 `vmaf` の stdout を `nojson::RawJson::parse` で解析する。env 継承で子側にもメトリクス出力が出ると tune 親のパースが壊滅する。このため `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後のメソッドチェーンで `cmd.env_remove("HISUI_EMIT_EXIT_METRICS")` を追加する。本対応は本 issue のスコープに含める。
 
 doc 文では特定 subcommand を名指しせず、「プロセス終了時に内部メトリクスを JSON Lines 形式で標準出力へ 1 行出力する。標準出力を機械処理する用途では他の subcommand 出力との混在に注意」相当の中立的記述とする。
 
@@ -129,13 +129,13 @@ doc 文では特定 subcommand を名指しせず、「プロセス終了時に�
    - 4 箇所の `MediaPipeline::new*` 呼び出しを新 API に置き換え、各 subcommand の `try_run` → 内部関数チェーンへ `stats` を引き回す。
    - `src/main.rs` で `--emit-exit-metrics` を parse、`Stats::new()` を生成、各 `try_run` に `stats.clone()` を渡し、末尾でメトリクス出力を呼び出す。
    - `src/subcommand_server.rs` と `src/obsws/server.rs` から `emit_exit_metrics` 受け渡しチェーン・SIGTERM 分岐内のメトリクス出力呼び出し・`obsws/server.rs` の `emit_exit_metrics_to_stdout` 自由関数を削除する。
-   - `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後のメソッドチェーンに `cmd.env_remove("HISUI_SERVER_EMIT_EXIT_METRICS")` を追加する。
+   - `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後のメソッドチェーンに `cmd.env_remove("HISUI_EMIT_EXIT_METRICS")` を追加する。
    - `e2e-tests/obsws/helpers.py` の CLI 経路でフラグ位置を `server` の前に移す。
 4. `CHANGES.md` の 0018 関連エントリを共通フラグ前提に書き換える（ビルド独立、別コミットでもよい）。
 
 ## 完了条件
 
-- `--emit-exit-metrics`（および env `HISUI_SERVER_EMIT_EXIT_METRICS`）が `src/main.rs` の共通フラグとして subcommand 分岐前に受け付けられること。
+- `--emit-exit-metrics`（および env `HISUI_EMIT_EXIT_METRICS`）が `src/main.rs` の共通フラグとして subcommand 分岐前に受け付けられること。
 - main で 1 度 `Stats::new()` を呼び、その `clone()` が `MediaPipeline` を持つ全 subcommand（server / compose / vmaf / inspect）の `try_run` 引数に渡されていること。
 - `--emit-exit-metrics` ON で server を SIGTERM 停止したとき、`{"type":"metrics", ...}` の 1 行が stdout に出ること。
 - 以下の経路でメトリクス出力が出ないこと:
@@ -144,9 +144,9 @@ doc 文では特定 subcommand を名指しせず、「プロセス終了時に�
   - subcommand 未指定 / unknown subcommand（`hisui --emit-exit-metrics unknown-subcmd` 等）
 - list-codecs / tune では `{"type":"metrics","metrics":[]}` の空 1 行が出ること（仕様として許容）。
 - 既存の server e2e 2 件がフラグ位置変更後も通ること。
-- `e2e-tests/obsws/helpers.py` の CLI 経路で `--emit-exit-metrics` が `server` サブコマンドの前に置かれるよう改修されていること。env 経路は env 名 `HISUI_SERVER_EMIT_EXIT_METRICS` 維持のため改修不要。
+- `e2e-tests/obsws/helpers.py` の CLI 経路で `--emit-exit-metrics` が `server` サブコマンドの前に置かれるよう改修されていること。env 経路は env 名 `HISUI_EMIT_EXIT_METRICS` 維持のため改修不要。
 - server 固有の `emit_exit_metrics` 受け渡しチェーン・SIGTERM 分岐内のメトリクス出力呼び出し・`emit_exit_metrics_to_stdout` 自由関数が削除され、`src/metrics.rs` 経由で main 末尾からメトリクス出力が呼ばれていること。
-- `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後で `env_remove("HISUI_SERVER_EMIT_EXIT_METRICS")` が呼ばれていること。
+- `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後で `env_remove("HISUI_EMIT_EXIT_METRICS")` が呼ばれていること。
 - `CHANGES.md:59-61` の 0018 関連 `[ADD]` エントリを書き換えること（書き換え例は下記）。新規エントリは追加しない（shiguredo-changelog 規約「中間状態の修正は別エントリにしない」準拠）。`@sile` 行は維持する。
 - フラグの doc 文に「プロセス終了時に内部メトリクスを JSON Lines 形式で標準出力へ 1 行出力する。標準出力を機械処理する用途では他の subcommand 出力との混在に注意」相当の記述を入れること。
 
@@ -156,17 +156,19 @@ doc 文では特定 subcommand を名指しせず、「プロセス終了時に�
 
 ```
 - [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになり、`--emit-exit-metrics` 指定時はプロセス終了時に全メトリクスを JSON Lines で標準出力へ出力する
-  - 環境変数 `HISUI_SERVER_EMIT_EXIT_METRICS` でも有効化できる
+  - 環境変数 `HISUI_EMIT_EXIT_METRICS` でも有効化できる
   - @sile
 ```
 
 書き換え後（案）:
 
 ```
-- [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになる。あわせて hisui 共通フラグとして `--emit-exit-metrics` を追加し、subcommand の終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
-  - 環境変数 `HISUI_SERVER_EMIT_EXIT_METRICS` でも有効化できる
+- [ADD] hisui 共通フラグとして `--emit-exit-metrics` を追加し、subcommand の終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
+  - 環境変数 `HISUI_EMIT_EXIT_METRICS` でも有効化できる
   - @sile
 ```
+
+server サブコマンド固有のグレースフルシャットダウン記述は server 自体が未リリース機能であり、CHANGES.md に記載する利得がないため削除する。
 
 ## テスト戦略
 

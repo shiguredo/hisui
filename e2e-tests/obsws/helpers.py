@@ -97,7 +97,7 @@ class ObswsServer:
             if self.state_file is not None:
                 env["HISUI_SERVER_STATE_FILE"] = str(self.state_file)
             if self.emit_exit_metrics:
-                env["HISUI_SERVER_EMIT_EXIT_METRICS"] = "1"
+                env["HISUI_EMIT_EXIT_METRICS"] = "1"
         else:
             args.extend(
                 [

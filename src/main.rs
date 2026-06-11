@@ -30,7 +30,7 @@ fn main() -> noargs::Result<()> {
     };
 
     let emit_exit_metrics: bool = noargs::flag("emit-exit-metrics")
-        .env("HISUI_SERVER_EMIT_EXIT_METRICS")
+        .env("HISUI_EMIT_EXIT_METRICS")
         .doc(concat!(
             "プロセス終了時に内部メトリクスを JSON Lines 形式で標準出力へ 1 行出力します\n",
             "標準出力を機械処理する用途では他のサブコマンド出力との混在に注意してください"

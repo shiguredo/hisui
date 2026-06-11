@@ -303,7 +303,7 @@ fn run_trial_evaluation(
     // 子の hisui vmaf は結果 JSON のみを stdout に出すことを親が前提とする
     // (tune 親はその stdout を nojson でパースする) ため、env 継承による
     // メトリクスダンプ行の混入を防ぐ。
-    cmd.env_remove("HISUI_SERVER_EMIT_EXIT_METRICS");
+    cmd.env_remove("HISUI_EMIT_EXIT_METRICS");
     cmd.arg("vmaf")
         .arg("--layout-file")
         .arg(&layout_file_path)
