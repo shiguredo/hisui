@@ -56,8 +56,13 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
-- [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになる。あわせて hisui 共通フラグとして `--dump-metrics-on-exit` を追加し、subcommand の終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
-  - 環境変数 `HISUI_DUMP_METRICS_ON_EXIT` でも有効化できる
+- [ADD] obsws server が SIGTERM / SIGINT でグレースフルシャットダウンするようになる。あわせて hisui 共通フラグとして `--emit-exit-metrics` を追加し、subcommand の終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
+  - 環境変数 `HISUI_SERVER_EMIT_EXIT_METRICS` でも有効化できる
+  - @sile
+- [ADD] server サブコマンドに `--emit-startup-info` フラグを追加する
+  - bind 完了直後に実バインド情報 (`{"type":"startup_info", "server":{...}, "ui":..., "pid":...}` 形式) を JSON Lines で標準出力へ出力する
+  - `--port 0` でカーネルが割り当てた実ポートを呼び出し側 (E2E テストや起動スクリプト) が取得する用途を想定する
+  - 環境変数 `HISUI_SERVER_EMIT_STARTUP_INFO` でも有効化できる
   - @sile
 - [ADD] inspect コマンドが fMP4 ファイルの読み込みに対応する
   - 拡張子ではなくファイル先頭を読んで通常 MP4 / fragmented MP4 を判定する

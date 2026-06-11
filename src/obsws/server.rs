@@ -95,6 +95,58 @@ impl ShutdownSignal {
     }
 }
 
+/// --emit-startup-info 指定時、bind 完了直後の情報を JSON Lines で stdout に書き出す。
+/// 1 行 1 JSON で、type フィールドでエントリ種別を示す規約は `metrics_dump` のメトリクス出力と同じ。
+/// 書き込み失敗時の方針は終了時メトリクスダンプとは逆で、BrokenPipe 含めて起動失敗扱いにする:
+/// 終了時のメトリクス出力と違って起動後は hisui が稼働継続するため、書き込み失敗を黙殺すると
+/// 呼び出し側 (E2E テスト等) が startup_info を待ち続けてハングする。起動失敗で exit すれば
+/// 呼び出し側は stdout EOF で気付ける。
+fn emit_startup_info_to_stdout(
+    scheme: &str,
+    actual_addr: SocketAddr,
+    ui_remote_url: Option<&str>,
+) -> crate::Result<()> {
+    use std::io::Write as _;
+
+    let server_url = format!("{scheme}://{actual_addr}");
+    // UI 有効判定は --ui 指定の有無 (= ui_remote_url.is_some()) で行う。
+    // --no-open でブラウザ自動起動を切った場合も ui フィールドはオブジェクトとして出力する。
+    let ui_url: Option<String> = ui_remote_url.map(|_| format!("{scheme}://{actual_addr}/"));
+
+    let line = nojson::object(|f| {
+        f.member("type", "startup_info")?;
+        f.member(
+            "server",
+            nojson::object(|f| {
+                f.member("scheme", scheme)?;
+                f.member("url", &server_url)?;
+                f.member("host", actual_addr.ip())?;
+                f.member("port", actual_addr.port())?;
+                Ok(())
+            }),
+        )?;
+        if let Some(url) = &ui_url {
+            f.member(
+                "ui",
+                nojson::object(|f| {
+                    f.member("url", url)?;
+                    Ok(())
+                }),
+            )?;
+        }
+        f.member("pid", std::process::id())?;
+        Ok(())
+    });
+
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    writeln!(out, "{line}")
+        .map_err(|e| crate::Error::new(format!("failed to write startup_info: {e}")))?;
+    out.flush()
+        .map_err(|e| crate::Error::new(format!("failed to flush startup_info: {e}")))?;
+    Ok(())
+}
+
 #[expect(clippy::too_many_arguments)]
 pub async fn run_server(
     addr: SocketAddr,
@@ -110,6 +162,7 @@ pub async fn run_server(
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
     stats: crate::stats::Stats,
+    emit_startup_info: bool,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
         crate::obsws::player::PlayerCommand,
     >,
@@ -151,13 +204,22 @@ pub async fn run_server(
     let listener = TcpListener::bind(addr)
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
-    tracing::info!("obsws server listening on {scheme}://{addr}");
+    // `--port 0` 指定時に呼び出し側が実ポートを参照できるよう、bind 後の実アドレスを取得する。
+    // 以降の listening / UI ログ・open_browser・startup_info 出力はすべてこの実アドレスを使う。
+    let actual_addr = listener
+        .local_addr()
+        .map_err(|e| crate::Error::new(format!("failed to get local addr: {e}")))?;
+    tracing::info!("obsws server listening on {scheme}://{actual_addr}");
 
     if upstream_config.is_some() {
-        tracing::info!("UI started at {scheme}://{addr}/");
+        tracing::info!("UI started at {scheme}://{actual_addr}/");
     }
     if open_ui_in_browser {
-        open_browser(&format!("{scheme}://{addr}/"));
+        open_browser(&format!("{scheme}://{actual_addr}/"));
+    }
+
+    if emit_startup_info {
+        emit_startup_info_to_stdout(scheme, actual_addr, ui_remote_url.as_deref())?;
     }
 
     // state file の読み込みと初期値への反映

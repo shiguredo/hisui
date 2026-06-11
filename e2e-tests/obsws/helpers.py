@@ -44,7 +44,7 @@ class ObswsServer:
         state_file: Path | None = None,
         use_env: bool = False,
         # デフォルトで有効。失敗時の終了ダンプ（captured output）を診断に使えるようにするため。
-        dump_metrics_on_exit: bool = True,
+        emit_exit_metrics: bool = True,
     ):
         self.binary_path = binary_path
         self.host = host
@@ -57,7 +57,7 @@ class ObswsServer:
         self.https_key_path = https_key_path
         self.state_file = state_file
         self.use_env = use_env
-        self.dump_metrics_on_exit = dump_metrics_on_exit
+        self.emit_exit_metrics = emit_exit_metrics
         self._process: subprocess.Popen[str] | None = None
         self._stdout = ""
         self._stderr = ""
@@ -75,11 +75,11 @@ class ObswsServer:
         if (self.https_cert_path is None) != (self.https_key_path is None):
             raise ValueError("https_cert_path and https_key_path must be provided together")
 
-        # --dump-metrics-on-exit は main.rs の共通フラグへ昇格したため、
+        # --emit-exit-metrics は main.rs の共通フラグへ昇格したため、
         # サブコマンド (server) の前に置く必要がある。
         args = ["--verbose"]
-        if not self.use_env and self.dump_metrics_on_exit:
-            args.append("--dump-metrics-on-exit")
+        if not self.use_env and self.emit_exit_metrics:
+            args.append("--emit-exit-metrics")
         args.append("server")
         env = os.environ.copy()
         openh264_path = env.get("HISUI_OPENH264_PATH")
@@ -101,8 +101,8 @@ class ObswsServer:
                 env["HISUI_DEFAULT_RECORD_DIR"] = str(self.default_record_dir)
             if self.state_file is not None:
                 env["HISUI_SERVER_STATE_FILE"] = str(self.state_file)
-            if self.dump_metrics_on_exit:
-                env["HISUI_DUMP_METRICS_ON_EXIT"] = "1"
+            if self.emit_exit_metrics:
+                env["HISUI_SERVER_EMIT_EXIT_METRICS"] = "1"
         else:
             args.extend(
                 [
