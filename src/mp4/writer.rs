@@ -227,13 +227,13 @@ impl Mp4WriterStats {
     }
 
     // 呼び出し元なし。issue 0034 で `Mp4WriterStats` の missing 系一式と合わせて削除予定。
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn add_missing_audio_sample_entry(&self) {
         self.total_missing_audio_sample_entry_count.inc();
     }
 
     // 呼び出し元なし。issue 0034 で `Mp4WriterStats` の missing 系一式と合わせて削除予定。
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn add_missing_video_sample_entry(&self) {
         self.total_missing_video_sample_entry_count.inc();
     }
