@@ -96,7 +96,7 @@ impl ShutdownSignal {
 }
 
 /// --emit-startup-info 指定時、bind 完了直後の情報を JSON Lines で stdout に書き出す。
-/// 1 行 1 JSON で、type フィールドでエントリ種別を示す規約は `metrics_dump` のメトリクス出力と同じ。
+/// 1 行 1 JSON で、type フィールドでエントリ種別を示す規約は `metrics` のメトリクス出力と同じ。
 /// 書き込み失敗時の方針は終了時メトリクスダンプとは逆で、BrokenPipe 含めて起動失敗扱いにする:
 /// 終了時のメトリクス出力と違って起動後は hisui が稼働継続するため、書き込み失敗を黙殺すると
 /// 呼び出し側 (E2E テスト等) が startup_info を待ち続けてハングする。起動失敗で exit すれば

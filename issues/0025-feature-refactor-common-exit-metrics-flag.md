@@ -89,12 +89,12 @@ Low。server 固有版（0018）で当面の用途（server の flaky 診断）�
 ### 6. dump 関数の配置
 
 - 現状の `src/obsws/server.rs:100-124` `emit_exit_metrics_to_stdout` は削除する。
-- `src/metrics_dump.rs` を新設して `pub fn emit_exit_metrics_to_stdout(stats: &Stats)` を置き、`src/lib.rs` から `pub mod metrics_dump;` として公開する。main からは `hisui::metrics_dump::emit_exit_metrics_to_stdout(&stats)` で呼ぶ。`Stats` モジュール（`src/stats.rs`）には JSON Lines の `type` 規約を持ち込まない（0018 のレビュー判断を踏襲）。lib crate 配下にするのは `src/main.rs` を薄く保つため。
+- `src/metrics.rs` を新設して `pub fn emit_exit_metrics_to_stdout(stats: &Stats)` を置き、`src/lib.rs` から `pub mod metrics;` として公開する。main からは `hisui::metrics::emit_exit_metrics_to_stdout(&stats)` で呼ぶ。`Stats` モジュール（`src/stats.rs`）には JSON Lines の `type` 規約を持ち込まない（0018 のレビュー判断を踏襲）。lib crate 配下にするのは `src/main.rs` を薄く保つため。
 - 関数の中身（`stats.to_prometheus_json_families()` → JSON Lines で stdout writeln、BrokenPipe 黙殺、その他 I/O エラーは警告ログ、`to_prometheus_json_families` の `Err` も警告ログを出して dump を諦め終了は続行）は 0018 で確立した既存仕様をそのまま移植する。
 
 ### 7. main 末尾での dump 呼び出し
 
-- main の subcommand 分岐の `||` チェーン戻り値を `matched: bool` で受け取り、以下を全て満たすときに `hisui::metrics_dump::emit_exit_metrics_to_stdout(&stats)` を呼ぶ:
+- main の subcommand 分岐の `||` チェーン戻り値を `matched: bool` で受け取り、以下を全て満たすときに `hisui::metrics::emit_exit_metrics_to_stdout(&stats)` を呼ぶ:
   - `--emit-exit-metrics` が ON
   - `matched == true`（いずれかの subcommand が `try_run` で `true` を返した。subcommand 未指定や unknown subcommand では dump しない）
   - `args.metadata().help_mode == false`（ヘルプ表示モードでは dump しない。subcommand 内 help_mode 早期 return で `try_run` が `Ok(true)` を返すケースを除外）
@@ -124,7 +124,7 @@ doc 文では特定 subcommand を名指しせず、「プロセス終了時に�
 中間状態でビルドが壊れないよう以下の順で進める。Step 1 は委譲化のみで挙動不変、Step 2 は dump 関数モジュール追加のみで使われない、Step 3 で全変更を同一コミットに集約する。
 
 1. `src/media_pipeline.rs` に `new_with_stats` / `new_with_config_and_stats` を `pub` で追加し、既存 `new()` / `new_with_config()` を委譲に書き換える（全テスト通る、挙動不変）。
-2. `src/metrics_dump.rs` を新設し `pub fn emit_exit_metrics_to_stdout(stats: &Stats)` を実装、`src/lib.rs` から公開する（既存経路はまだ無変更、ビルド通る）。
+2. `src/metrics.rs` を新設し `pub fn emit_exit_metrics_to_stdout(stats: &Stats)` を実装、`src/lib.rs` から公開する（既存経路はまだ無変更、ビルド通る）。
 3. 同一コミット内で以下を全て実施する:
    - 4 箇所の `MediaPipeline::new*` 呼び出しを新 API に置き換え、各 subcommand の `try_run` → 内部関数チェーンへ `stats` を引き回す。
    - `src/main.rs` で `--emit-exit-metrics` を parse、`Stats::new()` を生成、各 `try_run` に `stats.clone()` を渡し、末尾で dump を呼び出す。
@@ -145,7 +145,7 @@ doc 文では特定 subcommand を名指しせず、「プロセス終了時に�
 - list-codecs / tune では `{"type":"metrics","metrics":[]}` の空 1 行が出ること（仕様として許容）。
 - 既存の server e2e 2 件がフラグ位置変更後も通ること。
 - `e2e-tests/obsws/helpers.py` の CLI 経路で `--emit-exit-metrics` が `server` サブコマンドの前に置かれるよう改修されていること。env 経路は env 名 `HISUI_SERVER_EMIT_EXIT_METRICS` 維持のため改修不要。
-- server 固有の `emit_exit_metrics` 受け渡しチェーン・SIGTERM 分岐内 dump 呼び出し・`emit_exit_metrics_to_stdout` 自由関数が削除され、`src/metrics_dump.rs` 経由で main 末尾から dump が呼ばれていること。
+- server 固有の `emit_exit_metrics` 受け渡しチェーン・SIGTERM 分岐内 dump 呼び出し・`emit_exit_metrics_to_stdout` 自由関数が削除され、`src/metrics.rs` 経由で main 末尾から dump が呼ばれていること。
 - `src/sora/recording_subcommand_tune.rs` の `Command::new(&hisui_exe)` 直後で `env_remove("HISUI_SERVER_EMIT_EXIT_METRICS")` が呼ばれていること。
 - `CHANGES.md:59-61` の 0018 関連 `[ADD]` エントリを書き換えること（書き換え例は下記）。新規エントリは追加しない（shiguredo-changelog 規約「中間状態の修正は別エントリにしない」準拠）。`@sile` 行は維持する。
 - フラグの doc 文に「プロセス終了時に内部メトリクスを JSON Lines 形式で標準出力へ 1 行出力する。標準出力を機械処理する用途では他の subcommand 出力との混在に注意」相当の記述を入れること。
@@ -171,7 +171,7 @@ doc 文では特定 subcommand を名指しせず、「プロセス終了時に�
 ## テスト戦略
 
 - 既存 server e2e（`test_obsws_emit_exit_metrics_outputs_jsonl` / `test_obsws_emit_exit_metrics_disabled`）がフラグ位置変更後も通ることで検証する。
-- 本 issue では新規テストを追加しない（`metrics_dump::emit_exit_metrics_to_stdout` の単体テスト、batch 系での dump 動作確認、tune の `env_remove` 結合テスト、いずれも）。`Stats::to_prometheus_json_families` 単体テスト群と server e2e で 0018 と同等のカバー範囲を維持する。BrokenPipe / I/O 警告ログ経路はテストしない。
+- 本 issue では新規テストを追加しない（`metrics::emit_exit_metrics_to_stdout` の単体テスト、batch 系での dump 動作確認、tune の `env_remove` 結合テスト、いずれも）。`Stats::to_prometheus_json_families` 単体テスト群と server e2e で 0018 と同等のカバー範囲を維持する。BrokenPipe / I/O 警告ログ経路はテストしない。
 
 ## 非対象
 

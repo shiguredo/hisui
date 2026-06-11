@@ -57,7 +57,7 @@ fn main() -> noargs::Result<()> {
     // dump 呼び出しは finish より前に置く。
     let should_dump = emit_exit_metrics && matched && !args.metadata().help_mode;
     if should_dump {
-        hisui::metrics_dump::emit_exit_metrics_to_stdout(&stats);
+        hisui::metrics::emit_exit_metrics_to_stdout(&stats);
     }
 
     if let Some(help) = args.finish()? {

@@ -2078,8 +2078,8 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
         asyncio.run(_run_validation_flow())
 
 
-def _find_metrics_dump(stdout: str) -> dict | None:
-    """サーバ stdout から終了時メトリクスダンプ（type=metrics の JSON Line）を探す"""
+def _find_exit_metrics(stdout: str) -> dict | None:
+    """サーバ stdout から終了時メトリクス（type=metrics の JSON Line）を探す"""
     for line in stdout.splitlines():
         stripped = line.strip()
         if not stripped.startswith("{"):
@@ -2105,7 +2105,7 @@ def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path
     with server:
         pass
 
-    dump = _find_metrics_dump(server.stdout)
+    dump = _find_exit_metrics(server.stdout)
     assert dump is not None, f"終了時メトリクスダンプが stdout に出ていない: stdout={server.stdout!r}"
     # metrics は prom2json の family 配列で、hisui_ プレフィックス付きの family を含むこと
     families = dump["metrics"]
@@ -2137,6 +2137,6 @@ def test_obsws_emit_exit_metrics_disabled(binary_path: Path, tmp_path: Path):
     assert server.returncode == 0, (
         f"SIGTERM でグレースフル終了していない: returncode={server.returncode}, {server.diagnostics()}"
     )
-    assert _find_metrics_dump(server.stdout) is None, (
+    assert _find_exit_metrics(server.stdout) is None, (
         f"無効化したのにダンプが出ている: {server.stdout!r}"
     )
