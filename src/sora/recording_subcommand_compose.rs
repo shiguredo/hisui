@@ -209,7 +209,7 @@ struct ComposePipelineSetup {
     processor_tasks: tokio::task::JoinSet<(ProcessorId, Result<()>)>,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[cfg_attr(feature = "fdk-aac", expect(clippy::too_many_arguments))]
 fn run_compose(
     layout: Layout,
     openh264_lib: Option<Openh264Library>,

@@ -237,7 +237,6 @@ struct SpawnedProcessorTask {
     task: tokio::task::JoinHandle<Result<()>>,
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn compose_for_vmaf(
     layout: Layout,
     openh264_lib: Option<Openh264Library>,
