@@ -246,7 +246,7 @@ async fn compose_for_vmaf(
     reference_yuv_file_path: PathBuf,
     stats: crate::stats::Stats,
 ) -> Result<ComposeForVmafResult> {
-    let pipeline = MediaPipeline::new_with_stats(stats)?;
+    let pipeline = MediaPipeline::new(Default::default(), stats)?;
     let pipeline_handle = pipeline.handle();
     // 異常終了の検知は processor task / metric 側で行うため、run() の戻り値はここでは使わない
     let pipeline_task = tokio::spawn(async move {

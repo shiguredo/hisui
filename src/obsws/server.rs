@@ -298,7 +298,7 @@ pub async fn run_server(
         }
     }
 
-    let pipeline = crate::MediaPipeline::new_with_config_and_stats(pipeline_config, stats)?;
+    let pipeline = crate::MediaPipeline::new(pipeline_config, stats)?;
     let pipeline_handle = pipeline.handle();
     tokio::spawn(pipeline.run());
     let started = pipeline_handle

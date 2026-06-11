@@ -81,7 +81,7 @@ mod tests {
 
     #[tokio::test]
     async fn mp4_file_source_decode_smoke() -> Result<()> {
-        let pipeline = MediaPipeline::new()?;
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         {
@@ -148,11 +148,14 @@ mod tests {
             .enable_all()
             .build()?;
         runtime.block_on(async move {
-            let pipeline = MediaPipeline::new_with_config(crate::MediaPipelineConfig {
-                openh264_lib,
-                #[cfg(feature = "fdk-aac")]
-                fdk_aac_lib: None,
-            })?;
+            let pipeline = MediaPipeline::new(
+                crate::MediaPipelineConfig {
+                    openh264_lib,
+                    #[cfg(feature = "fdk-aac")]
+                    fdk_aac_lib: None,
+                },
+                Default::default(),
+            )?;
             let handle = pipeline.handle();
             let pipeline_task = tokio::spawn(pipeline.run());
             {

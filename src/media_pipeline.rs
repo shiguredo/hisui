@@ -55,22 +55,11 @@ pub struct MediaPipeline {
 }
 
 impl MediaPipeline {
-    pub fn new() -> crate::Result<Self> {
-        Self::new_with_config_and_stats(MediaPipelineConfig::default(), crate::stats::Stats::new())
-    }
-
-    pub fn new_with_config(config: MediaPipelineConfig) -> crate::Result<Self> {
-        Self::new_with_config_and_stats(config, crate::stats::Stats::new())
-    }
-
-    pub fn new_with_stats(stats: crate::stats::Stats) -> crate::Result<Self> {
-        Self::new_with_config_and_stats(MediaPipelineConfig::default(), stats)
-    }
-
-    pub fn new_with_config_and_stats(
-        config: MediaPipelineConfig,
-        stats: crate::stats::Stats,
-    ) -> crate::Result<Self> {
+    /// 指定設定と外部 `Stats` で `MediaPipeline` を作る。
+    /// 本番経路では main 側で生成した共有 `Stats` を渡し、メトリクス集約
+    /// (`--emit-exit-metrics` 等) に合流させる。`Default::default()` を渡せば
+    /// 独立した `Stats` レジストリで動かせる (テスト用途)。
+    pub fn new(config: MediaPipelineConfig, stats: crate::stats::Stats) -> crate::Result<Self> {
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (return_tx, return_rx) = std::sync::mpsc::channel();
         let (local_processor_task_tx, local_processor_task_rx) =
@@ -1435,7 +1424,8 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_local_processor_accepts_non_send_future() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         assert!(
@@ -1474,7 +1464,8 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_local_processor_rejects_duplicate_processor_id() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         assert!(
@@ -1518,7 +1509,8 @@ mod tests {
 
     #[tokio::test]
     async fn wait_subscribers_ready_waits_for_initial_processors() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -1571,7 +1563,8 @@ mod tests {
 
     #[tokio::test]
     async fn send_after_initial_ready_delivers_to_subscriber() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -1622,7 +1615,8 @@ mod tests {
 
     #[tokio::test]
     async fn unpublish_keeps_subscriber_alive_until_republish() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -1699,7 +1693,8 @@ mod tests {
 
     #[tokio::test]
     async fn send_syn_ack_waits_for_drop_after_initial_ready() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -1762,7 +1757,8 @@ mod tests {
 
     #[tokio::test]
     async fn trigger_start_is_idempotent() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         let processor = handle
@@ -1801,7 +1797,8 @@ mod tests {
 
     #[tokio::test]
     async fn wait_subscribers_ready_returns_error_after_pipeline_terminated() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         let processor = handle
@@ -1821,7 +1818,8 @@ mod tests {
 
     #[tokio::test]
     async fn register_and_get_rpc_sender_succeeds() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -1876,7 +1874,8 @@ mod tests {
 
     #[tokio::test]
     async fn get_rpc_sender_returns_sender_not_registered_before_registration() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -1919,7 +1918,8 @@ mod tests {
 
     #[tokio::test]
     async fn register_rpc_sender_rejects_duplicate_registration() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -1953,7 +1953,8 @@ mod tests {
 
     #[tokio::test]
     async fn get_rpc_sender_returns_type_mismatch_for_wrong_type() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -1990,7 +1991,8 @@ mod tests {
 
     #[tokio::test]
     async fn get_rpc_sender_returns_processor_not_found() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -2013,7 +2015,8 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_sender_is_removed_on_processor_drop() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -2054,7 +2057,8 @@ mod tests {
 
     #[tokio::test]
     async fn register_and_get_rpc_sender_return_error_after_pipeline_terminated() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         let processor = handle
@@ -2086,7 +2090,8 @@ mod tests {
 
     #[tokio::test]
     async fn find_upstream_video_encoder_returns_nearest_encoder() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -2140,7 +2145,8 @@ mod tests {
 
     #[tokio::test]
     async fn find_upstream_video_encoder_returns_none_for_best_effort_path() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -2182,7 +2188,8 @@ mod tests {
 
     #[tokio::test]
     async fn processor_handle_stats_has_processor_id_label() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 
@@ -2213,7 +2220,8 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_processor_sets_error_flag_on_failure() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         assert!(
@@ -2247,7 +2255,8 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_local_processor_sets_error_flag_on_failure() {
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
         assert!(
@@ -2283,7 +2292,8 @@ mod tests {
     async fn publisher_failure_without_eos_closes_subscribers() {
         // publisher が EOS を送らずに異常終了した場合、購読側の recv() が EOS を返して
         // ハングしないことを検証する。
-        let pipeline = MediaPipeline::new().expect("failed to create test media pipeline");
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create test media pipeline");
         let handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 

@@ -1632,7 +1632,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
         .create_input("Scene", "audio-file-1", input, true)
         .expect("input creation must succeed");
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -1714,7 +1714,7 @@ async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() ->
         .create_input("Scene", "audio-file-immediate-stop", input, true)
         .expect("input creation must succeed");
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -1788,7 +1788,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
             .expect("input creation must succeed");
     }
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -1853,7 +1853,7 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
         None,
     );
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -1911,7 +1911,7 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
 async fn start_stream_with_no_inputs_succeeds() -> crate::Result<()> {
     let registry = ObswsSessionState::new_for_test();
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -2034,7 +2034,7 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
             .expect("input creation must succeed");
     }
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -2122,7 +2122,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
         .create_input("Scene", "video-file", input, true)
         .expect("input creation must succeed");
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -2254,7 +2254,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
         .create_input("Scene", "video-file", input, true)
         .expect("input creation must succeed");
 
-    let pipeline = crate::MediaPipeline::new()?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let started = pipeline_handle
@@ -2542,7 +2542,8 @@ async fn stop_output_when_record_is_inactive_returns_output_request_type_error()
 #[tokio::test]
 async fn start_output_player_with_closed_control_channel_returns_processing_failed() {
     let registry = ObswsSessionState::new_for_test();
-    let pipeline = crate::MediaPipeline::new().expect("failed to create test media pipeline");
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+        .expect("failed to create test media pipeline");
     let pipeline_handle = pipeline.handle();
     let (player_command_tx, player_command_rx) = std::sync::mpsc::sync_channel(1);
     drop(player_command_rx);
@@ -2583,7 +2584,8 @@ async fn start_output_player_with_closed_control_channel_returns_processing_fail
 #[tokio::test]
 async fn player_lifecycle_stop_updates_output_status() {
     let registry = ObswsSessionState::new_for_test();
-    let pipeline = crate::MediaPipeline::new().expect("failed to create test media pipeline");
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+        .expect("failed to create test media pipeline");
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let (player_command_tx, player_command_rx) = std::sync::mpsc::sync_channel(4);
@@ -2668,7 +2670,8 @@ async fn player_lifecycle_stop_updates_output_status() {
 #[tokio::test]
 async fn start_output_player_returns_processing_failed_when_subscriber_startup_fails() {
     let registry = ObswsSessionState::new_for_test();
-    let pipeline = crate::MediaPipeline::new().expect("failed to create test media pipeline");
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+        .expect("failed to create test media pipeline");
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let _existing_processor = pipeline_handle
@@ -2745,7 +2748,8 @@ async fn start_output_player_returns_processing_failed_when_subscriber_startup_f
 #[tokio::test]
 async fn stale_player_stopped_event_does_not_deactivate_restarted_player() {
     let registry = ObswsSessionState::new_for_test();
-    let pipeline = crate::MediaPipeline::new().expect("failed to create test media pipeline");
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+        .expect("failed to create test media pipeline");
     let pipeline_handle = pipeline.handle();
     let pipeline_task = tokio::spawn(pipeline.run());
     let (player_command_tx, player_command_rx) = std::sync::mpsc::sync_channel(8);

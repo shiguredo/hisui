@@ -324,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn png_file_source_run_sends_i420a_frames() -> crate::Result<()> {
         let png_file = create_test_png_file(2, 2, nopng::PixelFormat::Rgba8, &[255; 16])?;
-        let pipeline = MediaPipeline::new()?;
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
         let pipeline_handle = pipeline.handle();
         let pipeline_task = tokio::spawn(pipeline.run());
 

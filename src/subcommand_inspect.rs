@@ -104,7 +104,7 @@ fn run_internal(
         .build()
         .map_err(|e| Error::new(e.to_string()))?;
 
-    let pipeline = crate::MediaPipeline::new_with_stats(stats)?;
+    let pipeline = crate::MediaPipeline::new(Default::default(), stats)?;
     let pipeline_handle = pipeline.handle();
     runtime.spawn(async move {
         if let Err(e) = setup_pipeline(

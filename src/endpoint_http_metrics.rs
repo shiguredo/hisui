@@ -156,7 +156,8 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_rejects_non_get() {
-        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create media pipeline");
         let handle = pipeline.handle();
         let request = Request::new("POST", "/metrics");
 
@@ -172,7 +173,8 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_returns_prometheus_text() {
-        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create media pipeline");
         let handle = pipeline.handle();
         let mut stats = handle.stats();
         stats.counter("requests_total").inc();
@@ -193,7 +195,8 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_returns_error_for_invalid_metric_name() {
-        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create media pipeline");
         let handle = pipeline.handle();
         let mut stats = handle.stats();
         stats.counter("bad-metric-name").inc();
@@ -207,7 +210,8 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_returns_prometheus_json() {
-        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create media pipeline");
         let handle = pipeline.handle();
         let mut stats = handle.stats();
         stats.counter("requests_total").inc();
@@ -229,7 +233,8 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_rejects_unsupported_format() {
-        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create media pipeline");
         let handle = pipeline.handle();
         let request = Request::new("GET", "/metrics?format=xml");
 
@@ -241,7 +246,8 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_accepts_percent_encoded_json_format() {
-        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create media pipeline");
         let handle = pipeline.handle();
         let request = Request::new("GET", "/metrics?format=%6a%73%6f%6e");
 
@@ -254,7 +260,8 @@ mod tests {
 
     #[tokio::test]
     async fn metrics_endpoint_rejects_invalid_percent_encoding() {
-        let pipeline = crate::MediaPipeline::new().expect("failed to create media pipeline");
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create media pipeline");
         let handle = pipeline.handle();
         let request = Request::new("GET", "/metrics?format=%ZZ");
 
