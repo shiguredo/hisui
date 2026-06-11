@@ -2093,8 +2093,8 @@ def _find_metrics_dump(stdout: str) -> dict | None:
     return None
 
 
-def test_obsws_dump_metrics_on_exit_outputs_jsonl(binary_path: Path, tmp_path: Path):
-    """--dump-metrics-on-exit 有効時、SIGTERM 停止で type=metrics の JSON Line が stdout に出ることを確認する"""
+def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path):
+    """--emit-exit-metrics 有効時、SIGTERM 停止で type=metrics の JSON Line が stdout に出ることを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
@@ -2118,8 +2118,8 @@ def test_obsws_dump_metrics_on_exit_outputs_jsonl(binary_path: Path, tmp_path: P
     )
 
 
-def test_obsws_dump_metrics_on_exit_disabled(binary_path: Path, tmp_path: Path):
-    """--dump-metrics-on-exit 無効時はダンプが出力されないことを確認する"""
+def test_obsws_emit_exit_metrics_disabled(binary_path: Path, tmp_path: Path):
+    """--emit-exit-metrics 無効時はダンプが出力されないことを確認する"""
     host = "127.0.0.1"
     port, sock = reserve_ephemeral_port()
     sock.close()
@@ -2129,7 +2129,7 @@ def test_obsws_dump_metrics_on_exit_disabled(binary_path: Path, tmp_path: Path):
         host=host,
         port=port,
         default_record_dir=tmp_path,
-        dump_metrics_on_exit=False,
+        emit_exit_metrics=False,
     )
     with server:
         pass
