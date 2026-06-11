@@ -34,10 +34,6 @@ class ObswsServer:
         binary_path: Path,
         *,
         host: str,
-        # port 引数は issue 0035 で段階移行のため一時的に shim として残している。
-        # 渡された値は黙殺し、常に --port 0 で動的に取った port を self.port に反映する。
-        # 全呼び出し側の port=port 引数が削除された後、本引数も完全削除する。
-        port: int | None = None,
         password: str | None = None,
         default_record_dir: Path | None = None,
         ui: bool = False,
@@ -49,7 +45,6 @@ class ObswsServer:
         # デフォルトで有効。失敗時の終了時メトリクス（captured output）を診断に使えるようにするため。
         emit_exit_metrics: bool = True,
     ):
-        _ = port
         self.binary_path = binary_path
         self.host = host
         # 実 port は _read_startup_info() で startup_info JSON から取得し上書きする。
