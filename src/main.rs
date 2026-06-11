@@ -38,7 +38,7 @@ fn main() -> noargs::Result<()> {
         .take(&mut args)
         .is_present();
 
-    // メトリクスレジストリを main 側で 1 つ作り、`MediaPipeline` を持つ各 subcommand に
+    // メトリクスレジストリを main 側で 1 つ作り、`MediaPipeline` を持つ各サブコマンドに
     // clone を渡す。
     let stats = hisui::stats::Stats::new();
 
