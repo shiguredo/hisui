@@ -62,6 +62,8 @@ class ObswsServer:
         self._stdout = ""
         self._stderr = ""
         self._returncode: int | None = None
+        # start() で _resolve_startup_timeout() の戻り値を格納する。
+        self._startup_timeout: float = 0.0
 
     def __enter__(self):
         return self.start()
@@ -75,12 +77,14 @@ class ObswsServer:
         if (self.https_cert_path is None) != (self.https_key_path is None):
             raise ValueError("https_cert_path and https_key_path must be provided together")
 
+        # Popen 起動後に値検証が失敗すると __enter__ 未完了で __exit__ も走らずプロセスが
+        # ゾンビ化するため、起動前に解決して self._startup_timeout に格納する。
+        self._startup_timeout = _resolve_startup_timeout()
+
         args = ["--verbose", "server"]
         env = os.environ.copy()
-        # 親 env で立っている stdout 出力系フラグを pop して使い手の明示制御に揃える。
-        # 本ヘルパーは _read_startup_info() で stdout を JSON parse し、stop() の
-        # _emit_captured_output() で診断 print するため、親 env からの漏れは両方を汚す
-        # （issue 0035 参照）。
+        # 親 env からの stdout 行混入で startup_info readline と終了時メトリクス診断 print
+        # が壊れるのを防ぐ。
         env.pop("HISUI_EMIT_EXIT_METRICS", None)
         env.pop("HISUI_SERVER_EMIT_STARTUP_INFO", None)
         openh264_path = env.get("HISUI_OPENH264_PATH")
@@ -179,7 +183,12 @@ class ObswsServer:
         if process.poll() is None:
             process.send_signal(signal.SIGKILL)
             process.wait(timeout=5.0)
-        stdout, stderr = process.communicate(timeout=1.0)
+        # PIPE のドレインに時間がかかるケースに備えて stop() と同じ timeout 帯で
+        # 待ち、それでも残ったら諦めて診断 print へ進む。
+        try:
+            stdout, stderr = process.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
         self._stdout = stdout
         self._stderr = stderr
         self._returncode = process.returncode
@@ -194,17 +203,12 @@ class ObswsServer:
 
     def _read_startup_info(self):
         # hisui の --emit-startup-info が stdout に 1 行で書く startup_info JSON を
-        # 読み取り、実 port を self.port に反映する。issue 0035 参照。
+        # 読み取り、実 port を self.port に反映する。
         process = self._process
         assert process is not None
         assert process.stdout is not None
 
-        # cargo run のコールドスタートを考慮して default 60 秒。
-        # CI 環境などでの個別チューニングのため HISUI_E2E_STARTUP_TIMEOUT で override 可能。
-        # float() 失敗時は ValueError を素通しさせ silent な default 戻りを避ける。
-        timeout_override = os.environ.get("HISUI_E2E_STARTUP_TIMEOUT")
-        startup_timeout = float(timeout_override) if timeout_override is not None else 60.0
-
+        startup_timeout = self._startup_timeout
         ready, _, _ = select.select([process.stdout], [], [], startup_timeout)
         if not ready:
             if process.poll() is not None:
@@ -270,14 +274,26 @@ class ObswsServer:
         self._emit_captured_output()
 
     def wait_for_exit(self, timeout: float = 5.0) -> int | None:
-        """プロセスが timeout 秒以内に exit したら returncode を返し、しなければ None を返す"""
+        """プロセスが timeout 秒以内に exit したら returncode を返し、しなければ None を返す。
+
+        内部で communicate() を呼んで stdout/stderr を回収するため、stdout PIPE 容量を
+        超える終了時メトリクス等で wait がデッドロックするのを防ぐ。回収後は
+        self._process を None に戻すので、context manager の __exit__ から走る stop()
+        は no-op になる。
+        """
         process = self._process
         if process is None:
-            return None
+            return self._returncode
         try:
-            return process.wait(timeout=timeout)
+            stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             return None
+        self._stdout = stdout
+        self._stderr = stderr
+        self._returncode = process.returncode
+        self._process = None
+        self._emit_captured_output()
+        return process.returncode
 
     def diagnostics(self) -> str:
         process = self._process
@@ -295,6 +311,19 @@ class ObswsServer:
     @property
     def returncode(self) -> int | None:
         return self._returncode
+
+
+def _resolve_startup_timeout() -> float:
+    """startup_info readline のタイムアウト秒数を返す。
+
+    cargo run のコールドスタートを考慮して default 60 秒。CI 環境などでの個別チューニング
+    のため HISUI_E2E_STARTUP_TIMEOUT で override 可能。float パース失敗時は ValueError を
+    そのまま raise して silent な default 戻りを避ける。
+    """
+    override = os.environ.get("HISUI_E2E_STARTUP_TIMEOUT")
+    if override is None:
+        return 60.0
+    return float(override)
 
 
 def _start_ffmpeg_rtmp_receive(

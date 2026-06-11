@@ -20,7 +20,6 @@ from hisui_server import reserve_ephemeral_port
 def test_obsws_request_batch_prepares_stream_flow(binary_path: Path, tmp_path: Path):
     """obsws が RequestBatch で配信準備 request を順次実行できることを確認する"""
     host = "127.0.0.1"
-    # rtmp_port は ffmpeg / 外部受信側用なので reserve_ephemeral_port を残す。
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
