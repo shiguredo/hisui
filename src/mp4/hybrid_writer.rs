@@ -1252,10 +1252,12 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_writer_finalizes_readable_audio_with_per_frame_sample_entry() -> crate::Result<()> {
-        // issue 0017 の修正後の挙動: 音声は全フレームに sample_entry が載るため、フラグメント先頭
-        // サンプルにも必ずサンプルエントリーがあり、finalize 後の標準 MP4 から音声トラックを読み戻せることを
-        // 検証する (取りこぼしによる finalize 失敗・映像トラック空の回帰防止)。
+    fn hybrid_writer_finalizes_readable_streams_with_per_frame_sample_entry() -> crate::Result<()> {
+        // issue 0017 / 0030 の修正後の挙動: 音声・映像とも全フレームに sample_entry が載るため、フラグメント
+        // 先頭サンプルにも必ずサンプルエントリーがあり、finalize 後の標準 MP4 から音声・映像両トラックを
+        // 読み戻せることを検証する (取りこぼしによる finalize 失敗・映像トラック空の回帰防止)。
+        // 加えて、読み戻したフレームの sample_entry が初回フレームと等価であることも確認し、
+        // reader が dummy SampleEntry を毎回新規生成しても素通りしないようにする。
         let temp_dir = tempfile::tempdir()?;
         let output_path = temp_dir.path().join("test.mp4");
         let mut writer = make_hybrid_writer_at(&output_path)?;
@@ -1291,28 +1293,45 @@ mod tests {
         drop(writer);
 
         // ファイナライズ済みの標準 MP4 として音声トラックを読み戻し、サンプル数・コーデック・データに加えて、
-        // 全フレームに sample_entry が載っていること（issue 0030 の不変条件）を検証する。
+        // 全フレームに sample_entry が載っていること（issue 0030 の不変条件）と、後続フレームの sample_entry が
+        // 初回と等価（changed_since=false）であることを検証する。
         let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
         let read_audio_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(read_audio_samples.len(), audio_frame_count);
-        for sample in &read_audio_samples {
+        let mut first_audio_entry: Option<&SharedSampleEntry> = None;
+        for (idx, sample) in read_audio_samples.iter().enumerate() {
             assert_eq!(sample.format, AudioFormat::Aac);
             assert_eq!(sample.data, vec![0x11, 0x22, 0x33]);
-            assert!(
-                sample.sample_entry.is_some(),
-                "読み戻した音声フレームに sample_entry が載っていること"
-            );
+            let entry = sample.sample_entry.as_ref().unwrap_or_else(|| {
+                panic!("読み戻した音声フレーム #{idx} に sample_entry が載っていないこと")
+            });
+            if let Some(first) = first_audio_entry {
+                assert!(
+                    !entry.changed_since(Some(first)),
+                    "後続の音声フレームが初回と等価な sample_entry を持つこと (frame #{idx})"
+                );
+            } else {
+                first_audio_entry = Some(entry);
+            }
         }
 
-        // 映像トラックも読み戻し、全フレームに sample_entry が載っていることを確認する。
+        // 映像トラックも読み戻し、全フレームに sample_entry が載っていること・初回と等価であることを確認する。
         let reader = crate::sora::recording_mp4_reader::Mp4VideoReader::new(&output_path)?;
         let read_video_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(read_video_samples.len(), 1);
-        for sample in &read_video_samples {
-            assert!(
-                sample.sample_entry.is_some(),
-                "読み戻した映像フレームに sample_entry が載っていること"
-            );
+        let mut first_video_entry: Option<&SharedSampleEntry> = None;
+        for (idx, sample) in read_video_samples.iter().enumerate() {
+            let entry = sample.sample_entry.as_ref().unwrap_or_else(|| {
+                panic!("読み戻した映像フレーム #{idx} に sample_entry が載っていないこと")
+            });
+            if let Some(first) = first_video_entry {
+                assert!(
+                    !entry.changed_since(Some(first)),
+                    "後続の映像フレームが初回と等価な sample_entry を持つこと (frame #{idx})"
+                );
+            } else {
+                first_video_entry = Some(entry);
+            }
         }
         Ok(())
     }
