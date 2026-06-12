@@ -166,10 +166,11 @@ codec_string 解決ブロック（映像 `:549-559`・音声 `:638-647`）は保
 ### テスト
 
 - 単体テスト（リーダー）:
-  - mp4 リーダー: 同一 sample_entry を持つ複数 sample を読んだ際に、全 `VideoFrame` / `AudioFrame` が `Some(SharedSampleEntry)` を持つことを検証
+  - sora 録画 MP4 リーダー（`Mp4VideoReader` / `Mp4AudioReader`）: 同一 sample_entry を持つ複数 sample を読んだ際に、全 `VideoFrame` / `AudioFrame` が `Some(SharedSampleEntry)` を持ち、後続フレームが初回と等価（`SharedSampleEntry::changed_since` が false）であることを検証
+  - `src/mp4/reader.rs` の `Mp4FileReader`（OBSWS 経路）と `src/mp4/sample_reader.rs` の `Mp4SampleReader`（inspect 経路）は `Mp4VideoReader` / `Mp4AudioReader` と同一の「直近 sample_entry を保持して全フレームに付与」パターンを採るため、本 issue では単体テスト追加せず既存 e2e で間接カバーとする
 - 単体テスト（ネットワーク入力）:
-  - rtsp 音声: 連続 AAC AU に対して全フレームが `Some` を持つこと
-  - srt 音声: `last_aac_config_key` 変化時も連続時も全フレームが `Some` を持つこと
+  - srt 音声: `SrtTsDemuxer::build_audio_samples` を直接呼び出し、`last_aac_config_key` 変化時も連続時も全 AU が `Some` を持つことを検証（config 連続シナリオと stereo / mono を切り替える config 変化シナリオの 2 ケース）
+  - rtsp 音声: `AudioRtpReceiver.sample_entry: SharedSampleEntry` への型変更と `Some(audio_receiver.sample_entry.clone())` の毎フレーム付与で「全 AU に Some が載る」ことが型システム・コードレベルで保証されるため、本 issue では単体テスト追加せず既存 e2e（`run_rtsp_session_*` 系）で間接カバーとする
 - writer テスト削除（`src/mp4/hybrid_writer.rs` の `#[cfg(test)] mod tests`）:
   - missing カウンタ関連（`add_missing_*_sample_entry` 呼び出し削除でテスト対象が消えるため）:
     - `hybrid_writer_counts_missing_sample_entry_for_fragment_first_sample`（`:1420`）
