@@ -101,7 +101,9 @@ def test_obsws_emit_startup_info_disabled_no_stdout_output(binary_path: Path):
         ready, _, _ = select.select([proc.stdout], [], [], 10.0)
         if ready:
             line = proc.stdout.readline()
-            pytest.fail(f"--emit-startup-info 未指定時に stdout に出力があった: {line!r}")
+            pytest.fail(
+                f"--emit-startup-info 未指定時に stdout に出力があった: {line!r}"
+            )
     finally:
         proc.terminate()
         try:

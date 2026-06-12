@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from helpers import ObswsServer, _collect_obsws_metrics_snapshot, _inspect_mp4
-from hisui_server import REPO_ROOT, reserve_ephemeral_port
+from hisui_server import REPO_ROOT
 
 BOOTSTRAP_TIMEOUT_SECONDS = 60.0
 
@@ -106,29 +106,25 @@ def _run_bootstrap_command(
 @pytest.mark.timeout(90)
 def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     """bootstrap で WebRTC 接続し、映像トラックが受信できることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
     input_mp4 = (
         Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
     )
     output_mp4 = tmp_path / "output.mp4"
 
-    server = ObswsServer(binary_path, host=host, port=port)
+    server = ObswsServer(binary_path)
     result = None
     try:
         with server:
             cmd, cwd = _build_bootstrap_command(
-                host, port, 10, str(input_mp4), str(output_mp4)
+                server.host, server.port, 10, str(input_mp4), str(output_mp4)
             )
             result = _run_bootstrap_command(cmd, cwd)
             # bootstrap 完了後にサーバーのメトリクスを取得する
             # （成功時は pytest が出力を抑制するため、常に表示して問題ない）
-            metrics = _collect_obsws_metrics_snapshot(host, port)
+            metrics = _collect_obsws_metrics_snapshot(server.host, server.port)
             print(f"\n--- hisui /metrics after bootstrap ---\n{metrics}")
             assert result.returncode == 0, (
-                "obsws_bootstrap failed: "
-                f"{_format_process_failure(result)}"
+                f"obsws_bootstrap failed: {_format_process_failure(result)}"
             )
             stats = json.loads(result.stdout)
             print(f"\n--- obsws_bootstrap stats ---\n{json.dumps(stats, indent=2)}")
@@ -144,9 +140,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
             assert stats["audio_frames_received"] >= 1, (
                 f"expected at least 1 audio frame, got {stats}"
             )
-            assert stats["video_width"] == 320, (
-                f"expected video_width=320, got {stats}"
-            )
+            assert stats["video_width"] == 320, f"expected video_width=320, got {stats}"
             assert stats["video_height"] == 320, (
                 f"expected video_height=320, got {stats}"
             )
@@ -164,9 +158,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     except Exception as e:
         bootstrap_details = ""
         if result is not None:
-            bootstrap_details = (
-                f" obsws_bootstrap {_format_process_failure(result)},"
-            )
+            bootstrap_details = f" obsws_bootstrap {_format_process_failure(result)},"
         raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e
 
     # MP4 ファイルの検証
@@ -192,32 +184,28 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
 @pytest.mark.timeout(90)
 def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
     """bootstrap で HisuiSubscribeProgramTracks を送信し、Program トラックを書き出せることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
     input_mp4 = (
         Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
     )
     output_mp4 = tmp_path / "output.mp4"
 
-    server = ObswsServer(binary_path, host=host, port=port)
+    server = ObswsServer(binary_path)
     result = None
     try:
         with server:
             cmd, cwd = _build_bootstrap_command(
-                host,
-                port,
+                server.host,
+                server.port,
                 10,
                 str(input_mp4),
                 str(output_mp4),
                 subscribe_program_tracks=True,
             )
             result = _run_bootstrap_command(cmd, cwd)
-            metrics = _collect_obsws_metrics_snapshot(host, port)
+            metrics = _collect_obsws_metrics_snapshot(server.host, server.port)
             print(f"\n--- hisui /metrics after bootstrap ---\n{metrics}")
             assert result.returncode == 0, (
-                "obsws_bootstrap failed: "
-                f"{_format_process_failure(result)}"
+                f"obsws_bootstrap failed: {_format_process_failure(result)}"
             )
             stats = json.loads(result.stdout)
             print(f"\n--- obsws_bootstrap stats ---\n{json.dumps(stats, indent=2)}")
@@ -263,9 +251,7 @@ def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
     except Exception as e:
         bootstrap_details = ""
         if result is not None:
-            bootstrap_details = (
-                f" obsws_bootstrap {_format_process_failure(result)},"
-            )
+            bootstrap_details = f" obsws_bootstrap {_format_process_failure(result)},"
         raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e
 
     assert output_mp4.exists(), "output MP4 file should exist"
@@ -286,36 +272,40 @@ def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
         f"expected at least 1 audio sample, got {inspect}"
     )
 
+
 @pytest.mark.timeout(90)
 def test_bootstrap_send_video(binary_path: Path, tmp_path: Path):
     """webrtc_source で映像を送信し、Program 出力に含まれることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
     input_mp4 = (
         Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
     )
     output_mp4 = tmp_path / "output.mp4"
 
-    server = ObswsServer(binary_path, host=host, port=port)
+    server = ObswsServer(binary_path)
     result = None
     try:
         with server:
             cmd, cwd = _build_bootstrap_command(
-                host,
-                port,
+                server.host,
+                server.port,
                 15,
                 str(input_mp4),
                 str(output_mp4),
                 subcommand="send-video",
-                extra_flags=["--send-width", "320", "--send-height", "320", "--send-fps", "30"],
+                extra_flags=[
+                    "--send-width",
+                    "320",
+                    "--send-height",
+                    "320",
+                    "--send-fps",
+                    "30",
+                ],
             )
             result = _run_bootstrap_command(cmd, cwd)
-            metrics = _collect_obsws_metrics_snapshot(host, port)
+            metrics = _collect_obsws_metrics_snapshot(server.host, server.port)
             print(f"\n--- hisui /metrics after send-video ---\n{metrics}")
             assert result.returncode == 0, (
-                "obsws_bootstrap send-video failed: "
-                f"{_format_process_failure(result)}"
+                f"obsws_bootstrap send-video failed: {_format_process_failure(result)}"
             )
             stats = json.loads(result.stdout)
             print(f"\n--- obsws_bootstrap stats ---\n{json.dumps(stats, indent=2)}")
@@ -337,9 +327,7 @@ def test_bootstrap_send_video(binary_path: Path, tmp_path: Path):
     except Exception as e:
         bootstrap_details = ""
         if result is not None:
-            bootstrap_details = (
-                f" obsws_bootstrap {_format_process_failure(result)},"
-            )
+            bootstrap_details = f" obsws_bootstrap {_format_process_failure(result)},"
         raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e
 
     assert output_mp4.exists(), "output MP4 file should exist"

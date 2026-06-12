@@ -5,13 +5,14 @@ import base64
 import hashlib
 import json
 import os
+import select
 import shutil
 import signal
-import socket
 import ssl
 import subprocess
 import time
 from pathlib import Path
+from typing import NoReturn
 
 import aiohttp
 import pytest
@@ -33,8 +34,7 @@ class ObswsServer:
         self,
         binary_path: Path,
         *,
-        host: str,
-        port: int,
+        host: str = "127.0.0.1",
         password: str | None = None,
         default_record_dir: Path | None = None,
         ui: bool = False,
@@ -48,7 +48,8 @@ class ObswsServer:
     ):
         self.binary_path = binary_path
         self.host = host
-        self.port = port
+        # 実 port は _read_startup_info() で startup_info JSON から取得し上書きする。
+        self.port: int = 0
         self.password = password
         self.default_record_dir = default_record_dir
         self.ui = ui
@@ -62,6 +63,8 @@ class ObswsServer:
         self._stdout = ""
         self._stderr = ""
         self._returncode: int | None = None
+        # start() で _resolve_startup_timeout() の戻り値を格納する。
+        self._startup_timeout: float = 0.0
 
     def __enter__(self):
         return self.start()
@@ -73,10 +76,20 @@ class ObswsServer:
         if self._process is not None:
             raise RuntimeError("server is already started")
         if (self.https_cert_path is None) != (self.https_key_path is None):
-            raise ValueError("https_cert_path and https_key_path must be provided together")
+            raise ValueError(
+                "https_cert_path and https_key_path must be provided together"
+            )
+
+        # Popen 起動後に値検証が失敗すると __enter__ 未完了で __exit__ も走らずプロセスが
+        # ゾンビ化するため、起動前に解決して self._startup_timeout に格納する。
+        self._startup_timeout = _resolve_startup_timeout()
 
         args = ["--verbose", "server"]
         env = os.environ.copy()
+        # 親 env からの stdout 行混入で startup_info readline と終了時メトリクス診断 print
+        # が壊れるのを防ぐ。
+        env.pop("HISUI_EMIT_EXIT_METRICS", None)
+        env.pop("HISUI_SERVER_EMIT_STARTUP_INFO", None)
         openh264_path = env.get("HISUI_OPENH264_PATH")
         if self.use_env:
             # use_env=True では対応する環境変数がない引数は未対応
@@ -89,7 +102,9 @@ class ObswsServer:
                     "https_cert_path/https_key_path is not supported with use_env=True"
                 )
             env["HISUI_SERVER_HOST"] = self.host
-            env["HISUI_SERVER_PORT"] = str(self.port)
+            # --port 0 同等。実 port は startup_info 経由で取得する。
+            env["HISUI_SERVER_PORT"] = "0"
+            env["HISUI_SERVER_EMIT_STARTUP_INFO"] = "1"
             if self.password is not None:
                 env["HISUI_SERVER_PASSWORD"] = self.password
             if self.default_record_dir is not None:
@@ -104,7 +119,7 @@ class ObswsServer:
                     "--host",
                     self.host,
                     "--port",
-                    str(self.port),
+                    "0",
                 ]
             )
             if self.password is not None:
@@ -128,6 +143,7 @@ class ObswsServer:
                 args.extend(["--state-file", str(self.state_file)])
             if openh264_path:
                 args.extend(["--openh264", openh264_path])
+            args.append("--emit-startup-info")
             if self.emit_exit_metrics:
                 args.append("--emit-exit-metrics")
 
@@ -140,37 +156,49 @@ class ObswsServer:
             stderr=subprocess.PIPE,
             text=True,
         )
-        self._wait_until_listening()
+        self._read_startup_info()
         return self
 
     def stop(self):
-        process = self._process
-        if process is None:
-            return
-        if process.poll() is None:
-            process.send_signal(signal.SIGTERM)
         # 終了時メトリクス出力で stdout のパイプが詰まるとサーバが終了できないため、
         # communicate() で stdout/stderr を並行して読み出しながら終了を待つ。
-        try:
-            stdout, stderr = process.communicate(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate(timeout=3.0)
-        self._stdout = stdout
-        self._stderr = stderr
-        self._returncode = process.returncode
-        self._process = None
-        self._emit_captured_output()
+        self._terminate_and_collect(
+            sig=signal.SIGTERM, primary_timeout=5.0, fallback_timeout=3.0
+        )
 
     def kill(self):
         """SIGKILL でプロセスを強制停止する"""
+        self._terminate_and_collect(sig=signal.SIGKILL, primary_timeout=5.0)
+
+    def _terminate_and_collect(
+        self,
+        *,
+        sig: signal.Signals,
+        primary_timeout: float,
+        fallback_timeout: float | None = None,
+    ):
+        """シグナル送信と communicate による stdout/stderr 回収を 1 関数に集約する。
+
+        primary_timeout で待ち、超過した場合は fallback_timeout が指定されていれば
+        SIGKILL してから再度 communicate で待つ。それでも超過した場合、または
+        fallback_timeout=None の場合は空文字列で続行して診断 print へ進む。
+        """
         process = self._process
         if process is None:
             return
         if process.poll() is None:
-            process.send_signal(signal.SIGKILL)
-            process.wait(timeout=5.0)
-        stdout, stderr = process.communicate(timeout=1.0)
+            process.send_signal(sig)
+        try:
+            stdout, stderr = process.communicate(timeout=primary_timeout)
+        except subprocess.TimeoutExpired:
+            if fallback_timeout is not None:
+                process.kill()
+                try:
+                    stdout, stderr = process.communicate(timeout=fallback_timeout)
+                except subprocess.TimeoutExpired:
+                    stdout, stderr = "", ""
+            else:
+                stdout, stderr = "", ""
         self._stdout = stdout
         self._stderr = stderr
         self._returncode = process.returncode
@@ -183,25 +211,85 @@ class ObswsServer:
         print(f"[obsws server stdout]\n{self._stdout}")
         print(f"[obsws server stderr]\n{self._stderr}")
 
-    def _wait_until_listening(self, timeout: float = 10.0):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            process = self._process
-            if process is not None and process.poll() is not None:
-                stdout, stderr = process.communicate(timeout=1.0)
-                self._stdout = stdout
-                self._stderr = stderr
-                raise AssertionError(
-                    "obsws process exited before listening: "
-                    f"returncode={process.returncode}, stdout={stdout}, stderr={stderr}"
+    def _read_startup_info(self):
+        # hisui の --emit-startup-info が stdout に 1 行で書く startup_info JSON を
+        # 読み取り、実 port を self.port に反映する。
+        process = self._process
+        assert process is not None
+        assert process.stdout is not None
+
+        startup_timeout = self._startup_timeout
+        ready, _, _ = select.select([process.stdout], [], [], startup_timeout)
+        if not ready:
+            if process.poll() is not None:
+                self._fail_startup_info(
+                    f"obsws server exited before startup_info: returncode={process.returncode}"
                 )
-            if _is_port_open(self.host, self.port):
-                return
-            time.sleep(0.1)
-        raise AssertionError(
-            "obsws server did not start listening in time: "
-            f"{self.host}:{self.port}, stdout={self._stdout}, stderr={self._stderr}"
+            self._fail_startup_info(
+                f"obsws server startup_info timeout: timeout={startup_timeout}"
+            )
+
+        line = process.stdout.readline()
+        if not line:
+            self._fail_startup_info(
+                f"obsws server exited before startup_info: returncode={process.returncode}"
+            )
+
+        try:
+            body = json.loads(line)
+        except json.JSONDecodeError as e:
+            self._fail_startup_info(
+                f"obsws server startup_info invalid: json decode error: {e}, line={line!r}"
+            )
+
+        if not isinstance(body, dict) or body.get("type") != "startup_info":
+            self._fail_startup_info(
+                f"obsws server startup_info invalid: type mismatch: {body!r}"
+            )
+
+        server_info = body.get("server")
+        if not isinstance(server_info, dict):
+            self._fail_startup_info(
+                f"obsws server startup_info invalid: server not dict: {body!r}"
+            )
+
+        port_value = server_info.get("port")
+        # bool は int の subclass だが startup_info の port としては不正なので除外する。
+        if not isinstance(port_value, int) or isinstance(port_value, bool):
+            self._fail_startup_info(
+                f"obsws server startup_info invalid: server.port not int: {body!r}"
+            )
+
+        self.port = port_value
+
+    def _fail_startup_info(self, message: str) -> NoReturn:
+        """startup_info 取得失敗時のクリーンアップと AssertionError 送出を集約する。"""
+        self._terminate_and_collect(
+            sig=signal.SIGTERM, primary_timeout=2.0, fallback_timeout=2.0
         )
+        raise AssertionError(f"{message}, stdout={self._stdout}, stderr={self._stderr}")
+
+    def wait_for_exit(self, timeout: float = 5.0) -> int | None:
+        """プロセスが timeout 秒以内に exit したら returncode を返し、しなければ None を返す。
+
+        内部で communicate() を呼んで stdout/stderr を回収するため、stdout PIPE 容量を
+        超える終了時メトリクス等で wait がデッドロックするのを防ぐ。回収後は
+        self._process を None に戻すので、context manager の __exit__ から走る stop()
+        は no-op になる。
+        """
+        process = self._process
+        if process is None:
+            return self._returncode
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
+        self._stdout = stdout
+        self._stderr = stderr
+        self._returncode = process.returncode
+        self._process = None
+        self._emit_captured_output()
+        return process.returncode
 
     def diagnostics(self) -> str:
         process = self._process
@@ -221,12 +309,17 @@ class ObswsServer:
         return self._returncode
 
 
-def _is_port_open(host: str, port: int) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=0.5):
-            return True
-    except OSError:
-        return False
+def _resolve_startup_timeout() -> float:
+    """startup_info readline のタイムアウト秒数を返す。
+
+    cargo run のコールドスタートを考慮して default 60 秒。CI 環境などでの個別チューニング
+    のため HISUI_E2E_STARTUP_TIMEOUT で override 可能。float パース失敗時は ValueError を
+    そのまま raise して silent な default 戻りを避ける。
+    """
+    override = os.environ.get("HISUI_E2E_STARTUP_TIMEOUT")
+    if override is None:
+        return 60.0
+    return float(override)
 
 
 def _start_ffmpeg_rtmp_receive(
@@ -413,7 +506,9 @@ def _start_ffmpeg_inbound_push(
     ]
     deadline = time.time() + startup_timeout
     while time.time() < deadline:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
         # プロセスが即座に終了していないか確認する
         time.sleep(0.3)
         if process.poll() is None:
@@ -601,7 +696,9 @@ async def _identify_with_optional_password(
     identify_data: dict[str, object] = {"rpcVersion": 1}
     # OBS WebSocket プロトコルでは eventSubscriptions 省略時のデフォルトが All のため、
     # イベントを購読しないテストでは明示的に 0 を送信する。
-    identify_data["eventSubscriptions"] = event_subscriptions if event_subscriptions is not None else 0
+    identify_data["eventSubscriptions"] = (
+        event_subscriptions if event_subscriptions is not None else 0
+    )
     if password is not None:
         authentication = hello_data["authentication"]
         identify_data["authentication"] = _build_obsws_authentication(
@@ -688,7 +785,9 @@ async def _expect_stream_state_changed_event(
     # hisui は中間状態イベント (STARTING/STOPPING) を最終状態イベント (STARTED/STOPPED) の
     # 前に送信するため、中間状態を消費してから最終状態を検証する。
     intermediate_state = (
-        "OBS_WEBSOCKET_OUTPUT_STARTING" if output_active else "OBS_WEBSOCKET_OUTPUT_STOPPING"
+        "OBS_WEBSOCKET_OUTPUT_STARTING"
+        if output_active
+        else "OBS_WEBSOCKET_OUTPUT_STOPPING"
     )
     intermediate_event = await _expect_obsws_event(
         ws,
@@ -704,7 +803,9 @@ async def _expect_stream_state_changed_event(
     )
     assert event["d"]["eventData"]["outputActive"] is output_active
     expected_output_state = (
-        "OBS_WEBSOCKET_OUTPUT_STARTED" if output_active else "OBS_WEBSOCKET_OUTPUT_STOPPED"
+        "OBS_WEBSOCKET_OUTPUT_STARTED"
+        if output_active
+        else "OBS_WEBSOCKET_OUTPUT_STOPPED"
     )
     assert event["d"]["eventData"]["outputState"] == expected_output_state
 

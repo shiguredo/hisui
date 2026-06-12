@@ -43,9 +43,6 @@ def _has_positive_metric(body: str, metric_prefix: str) -> bool:
 
 def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
     """obsws が ToggleStream で配信状態を切り替えられることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -56,7 +53,7 @@ def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -137,15 +134,12 @@ def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_toggle_stream_flow())
 
 
 def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
     """obsws が ToggleRecord で録画状態を切り替えられることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     image_path = tmp_path / "toggle-record-input.png"
     _write_test_png(image_path)
@@ -154,7 +148,7 @@ def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -221,7 +215,7 @@ def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_toggle_record_flow())
 
 
@@ -230,16 +224,13 @@ def test_obsws_start_record_with_multiple_audio_inputs(
     tmp_path: Path,
 ):
     """obsws が複数音声入力を合成して録画できることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
     input_path = Path(__file__).resolve().parents[2] / "testdata" / "beep-aac-audio.mp4"
 
-    async def _run(server: ObswsServer):
+    async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -276,12 +267,9 @@ def test_obsws_start_record_with_multiple_audio_inputs(
                     request_id="req-get-record-status-multi-audio",
                 )
                 record_status = record_status_response["d"]["responseData"]
-                if (
-                    record_status["outputActive"] is True
-                    and (
-                        record_status["outputBytes"] > 0
-                        or record_status["outputDuration"] > 0
-                    )
+                if record_status["outputActive"] is True and (
+                    record_status["outputBytes"] > 0
+                    or record_status["outputDuration"] > 0
                 ):
                     break
 
@@ -296,9 +284,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
                     break
                 await asyncio.sleep(0.1)
             else:
-                raise AssertionError(
-                    "record did not make observable progress in time"
-                )
+                raise AssertionError("record did not make observable progress in time")
 
             await asyncio.sleep(2.0)
 
@@ -317,12 +303,10 @@ def test_obsws_start_record_with_multiple_audio_inputs(
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         default_record_dir=tmp_path,
         use_env=False,
     ) as server:
-        output_path = asyncio.run(_run(server))
+        output_path = asyncio.run(_run())
 
     inspect_output = _inspect_mp4(
         binary_path,
@@ -342,9 +326,6 @@ def test_obsws_start_record_with_multiple_audio_inputs(
 
 def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Path):
     """obsws で image_source を作成し StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -360,7 +341,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -432,7 +413,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -486,13 +467,12 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
     tmp_path: Path,
 ):
     """obsws で mp4_file_source を作成し StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     output_path = tmp_path / "received-av.mp4"
 
     output_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
@@ -503,7 +483,7 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -572,7 +552,7 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -623,9 +603,6 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
     tmp_path: Path,
 ):
     """obsws で複数音声入力を合成して StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -640,7 +617,7 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -707,7 +684,7 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -759,13 +736,12 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
     tmp_path: Path,
 ):
     """obsws で rtmp_inbound を作成し StartRecord → ffmpeg RTMP push → StopRecord で録画できることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     rtmp_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
     stream_name = "inbound"
     rtmp_push_url = f"{rtmp_url}/{stream_name}"
@@ -774,7 +750,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
         timeout = aiohttp.ClientTimeout(total=30.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -813,7 +789,7 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                 # mp4_writer に映像サンプルが書き込まれるまで待機する
                 for _ in range(30):
                     status, body, _ = await _http_get(
-                        f"http://{host}:{ws_port}/metrics"
+                        f"http://{server.host}:{server.port}/metrics"
                     )
                     if status == 200 and _has_positive_metric(
                         body,
@@ -834,7 +810,9 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     request_id="req-stop-record-rtmp-inbound",
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
-                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+                output_path = Path(
+                    stop_record_response["d"]["responseData"]["outputPath"]
+                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
@@ -844,11 +822,9 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=ws_port,
         default_record_dir=tmp_path,
         use_env=False,
-    ):
+    ) as server:
         output_path = asyncio.run(_run())
 
     assert output_path.exists()
@@ -868,20 +844,19 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
     tmp_path: Path,
 ):
     """obsws で srt_inbound を作成し StartRecord → ffmpeg SRT push → StopRecord で録画できることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     srt_port, srt_sock = reserve_ephemeral_port()
     srt_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     srt_url = f"srt://127.0.0.1:{srt_port}"
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=30.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -917,7 +892,7 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                 # mp4_writer に映像サンプルが書き込まれるまで待機する
                 for _ in range(30):
                     status, body, _ = await _http_get(
-                        f"http://{host}:{ws_port}/metrics"
+                        f"http://{server.host}:{server.port}/metrics"
                     )
                     if status == 200 and _has_positive_metric(
                         body,
@@ -938,7 +913,9 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                     request_id="req-stop-record-srt-inbound",
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
-                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+                output_path = Path(
+                    stop_record_response["d"]["responseData"]["outputPath"]
+                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
@@ -948,11 +925,9 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=ws_port,
         default_record_dir=tmp_path,
         use_env=False,
-    ):
+    ) as server:
         output_path = asyncio.run(_run())
 
     assert output_path.exists()
@@ -972,13 +947,12 @@ def test_obsws_srt_inbound_with_stream_id(
     tmp_path: Path,
 ):
     """obsws で srt_inbound に streamId を指定して録画できることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     srt_port, srt_sock = reserve_ephemeral_port()
     srt_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     stream_id = "test-stream-id"
     srt_listen_url = f"srt://127.0.0.1:{srt_port}"
     srt_push_url = f"srt://127.0.0.1:{srt_port}?streamid={stream_id}"
@@ -987,7 +961,7 @@ def test_obsws_srt_inbound_with_stream_id(
         timeout = aiohttp.ClientTimeout(total=30.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1026,7 +1000,7 @@ def test_obsws_srt_inbound_with_stream_id(
                 # mp4_writer に映像サンプルが書き込まれるまで待機する
                 for _ in range(30):
                     status, body, _ = await _http_get(
-                        f"http://{host}:{ws_port}/metrics"
+                        f"http://{server.host}:{server.port}/metrics"
                     )
                     if status == 200 and _has_positive_metric(
                         body,
@@ -1047,7 +1021,9 @@ def test_obsws_srt_inbound_with_stream_id(
                     request_id="req-stop-record-srt-inbound-sid",
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
-                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+                output_path = Path(
+                    stop_record_response["d"]["responseData"]["outputPath"]
+                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
@@ -1057,11 +1033,9 @@ def test_obsws_srt_inbound_with_stream_id(
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=ws_port,
         default_record_dir=tmp_path,
         use_env=False,
-    ):
+    ) as server:
         output_path = asyncio.run(_run())
 
     assert output_path.exists()
@@ -1081,15 +1055,14 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
     tmp_path: Path,
 ):
     """obsws で rtmp_inbound を作成し StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_inbound_port, rtmp_inbound_sock = reserve_ephemeral_port()
     rtmp_inbound_sock.close()
     rtmp_outbound_port, rtmp_outbound_sock = reserve_ephemeral_port()
     rtmp_outbound_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     output_path = tmp_path / "received-rtmp-inbound-stream.mp4"
     rtmp_inbound_url = f"rtmp://127.0.0.1:{rtmp_inbound_port}/live"
     rtmp_inbound_stream_name = "inbound"
@@ -1102,7 +1075,7 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
         timeout = aiohttp.ClientTimeout(total=30.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1179,7 +1152,7 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -1225,15 +1198,14 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
     tmp_path: Path,
 ):
     """obsws で srt_inbound を作成し StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     srt_inbound_port, srt_inbound_sock = reserve_ephemeral_port()
     srt_inbound_sock.close()
     rtmp_outbound_port, rtmp_outbound_sock = reserve_ephemeral_port()
     rtmp_outbound_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     output_path = tmp_path / "received-srt-inbound-stream.mp4"
     srt_inbound_url = f"srt://127.0.0.1:{srt_inbound_port}"
     output_url = f"rtmp://127.0.0.1:{rtmp_outbound_port}/live"
@@ -1244,7 +1216,7 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
         timeout = aiohttp.ClientTimeout(total=30.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1318,7 +1290,7 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -1362,9 +1334,6 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
 def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
     """obsws が StartOutput/StopOutput で HLS 出力を開始・停止できることを確認する。
     停止後に生成ファイルが削除されることも確認する。"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     image_path = tmp_path / "hls-input.png"
     _write_test_png(image_path)
@@ -1375,7 +1344,7 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
         timeout = aiohttp.ClientTimeout(total=30.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1418,7 +1387,10 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
+                        "destination": {
+                            "type": "filesystem",
+                            "directory": str(hls_dir),
+                        },
                     },
                 },
             )
@@ -1511,23 +1483,22 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
                 raise AssertionError("HLS did not become inactive after StopOutput")
 
             # 停止後にファイルが削除されていることを確認
-            assert not playlist_path.exists(), "playlist.m3u8 must be deleted after stop"
+            assert not playlist_path.exists(), (
+                "playlist.m3u8 must be deleted after stop"
+            )
             ts_files_after = list(hls_dir.glob("segment-*.ts"))
-            assert (
-                len(ts_files_after) == 0
-            ), "all .ts segments must be deleted after stop"
+            assert len(ts_files_after) == 0, (
+                "all .ts segments must be deleted after stop"
+            )
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_flow())
 
 
 def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
     """obsws が ToggleOutput で HLS 出力を on/off できることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     image_path = tmp_path / "hls-toggle-input.png"
     _write_test_png(image_path)
@@ -1538,7 +1509,7 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1568,7 +1539,9 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
                 request_id="req-set-hls-toggle-settings",
                 request_data={
                     "outputName": "hls",
-                    "outputSettings": {"destination": {"type": "filesystem", "directory": str(hls_dir)}},
+                    "outputSettings": {
+                        "destination": {"type": "filesystem", "directory": str(hls_dir)}
+                    },
                 },
             )
             assert set_settings_response["d"]["requestStatus"]["result"] is True
@@ -1581,9 +1554,7 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
                 request_data={"outputName": "hls"},
             )
             assert toggle_start_response["d"]["requestStatus"]["result"] is True
-            assert (
-                toggle_start_response["d"]["responseData"]["outputActive"] is True
-            )
+            assert toggle_start_response["d"]["responseData"]["outputActive"] is True
 
             # アクティブ確認
             for _ in range(20):
@@ -1605,21 +1576,16 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
                 request_data={"outputName": "hls"},
             )
             assert toggle_stop_response["d"]["requestStatus"]["result"] is True
-            assert (
-                toggle_stop_response["d"]["responseData"]["outputActive"] is False
-            )
+            assert toggle_stop_response["d"]["responseData"]["outputActive"] is False
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_toggle_flow())
 
 
 def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Path):
     """destination 未設定で HLS StartOutput がエラーになることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     image_path = tmp_path / "hls-nodir-input.png"
     _write_test_png(image_path)
@@ -1628,7 +1594,7 @@ def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Pa
         timeout = aiohttp.ClientTimeout(total=10.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1662,16 +1628,13 @@ def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Pa
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_nodir_flow())
 
 
 def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
     """obsws が fMP4 形式の HLS 出力を開始・停止できることを確認する。
     init.mp4 と .m4s セグメントが生成され、停止後に削除されることを確認する。"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     image_path = tmp_path / "hls-fmp4-input.png"
     _write_test_png(image_path)
@@ -1682,7 +1645,7 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
         timeout = aiohttp.ClientTimeout(total=30.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1713,7 +1676,10 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
+                        "destination": {
+                            "type": "filesystem",
+                            "directory": str(hls_dir),
+                        },
                         "segmentFormat": "fmp4",
                     },
                 },
@@ -1799,24 +1765,23 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
 
             # 停止後にファイルが削除されていることを確認
             assert not init_path.exists(), "init.mp4 must be deleted after stop"
-            assert not playlist_path.exists(), "playlist.m3u8 must be deleted after stop"
+            assert not playlist_path.exists(), (
+                "playlist.m3u8 must be deleted after stop"
+            )
             m4s_files_after = list(hls_dir.glob("segment-*.m4s"))
-            assert (
-                len(m4s_files_after) == 0
-            ), "all .m4s segments must be deleted after stop"
+            assert len(m4s_files_after) == 0, (
+                "all .m4s segments must be deleted after stop"
+            )
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_fmp4_flow())
 
 
 def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
     """ABR 設定での HLS 出力を開始・停止できることを確認する。
     マスタープレイリストとバリアントサブディレクトリが生成・削除されることを確認する。"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     image_path = tmp_path / "hls-abr-input.png"
     _write_test_png(image_path)
@@ -1827,7 +1792,7 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
         timeout = aiohttp.ClientTimeout(total=30.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1858,7 +1823,10 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
+                        "destination": {
+                            "type": "filesystem",
+                            "directory": str(hls_dir),
+                        },
                         "variants": [
                             {"videoBitrate": 2000000, "audioBitrate": 128000},
                             {"videoBitrate": 800000, "audioBitrate": 96000},
@@ -1908,8 +1876,7 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
             else:
                 files = list(hls_dir.rglob("*"))
                 raise AssertionError(
-                    f"ABR HLS files were not generated within timeout. "
-                    f"Files: {files}"
+                    f"ABR HLS files were not generated within timeout. Files: {files}"
                 )
 
             # マスタープレイリストに EXT-X-STREAM-INF が含まれることを確認
@@ -1963,21 +1930,18 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_abr_flow())
 
 
 def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
     """HLS variants のバリデーションエラーを確認する。"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     async def _run_validation_flow():
         timeout = aiohttp.ClientTimeout(total=10.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -2075,7 +2039,7 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_validation_flow())
 
 
@@ -2096,21 +2060,22 @@ def _find_exit_metrics(stdout: str) -> dict | None:
 
 def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path):
     """--emit-exit-metrics 有効時、SIGTERM 停止で type=metrics の JSON Line が stdout に出ることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     # 起動直後に停止する。リッスン開始までにミキサー等の processor が stats を登録するため
     # family は非空になる（明示的なバリアは無くスケジューラ依存だが、起動経路の .await で実際上満たされる）。
-    server = ObswsServer(binary_path, host=host, port=port, default_record_dir=tmp_path)
+    server = ObswsServer(binary_path, default_record_dir=tmp_path)
     with server:
         pass
 
     entry = _find_exit_metrics(server.stdout)
-    assert entry is not None, f"終了時メトリクスが stdout に出ていない: stdout={server.stdout!r}"
+    assert entry is not None, (
+        f"終了時メトリクスが stdout に出ていない: stdout={server.stdout!r}"
+    )
     # metrics は prom2json の family 配列で、hisui_ プレフィックス付きの family を含むこと
     families = entry["metrics"]
-    assert isinstance(families, list) and families, f"metrics が空または配列でない: {entry}"
+    assert isinstance(families, list) and families, (
+        f"metrics が空または配列でない: {entry}"
+    )
     assert all("name" in f and "type" in f and "metrics" in f for f in families), (
         f"family の形式が不正: {families}"
     )
@@ -2121,14 +2086,9 @@ def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path
 
 def test_obsws_emit_exit_metrics_disabled(binary_path: Path, tmp_path: Path):
     """--emit-exit-metrics 無効時は終了時メトリクスが出力されないことを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     server = ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         default_record_dir=tmp_path,
         emit_exit_metrics=False,
     )
