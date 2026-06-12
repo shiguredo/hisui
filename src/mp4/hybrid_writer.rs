@@ -1337,6 +1337,116 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_writer_finalizes_readable_streams_across_fragments() -> crate::Result<()> {
+        // 不変条件下でフラグメント境界をまたぐシナリオの回帰防止。
+        // 複数フラグメントを生成 → finalize し、全フラグメントの全フレーム（先頭・後続を問わず）
+        // に sample_entry が載っていること、かつ初回 sample_entry と等価であることを検証する。
+        // 各フラグメントの先頭サンプルへの sample_entry 付与は muxer の必須要件なので、
+        // フラグメント境界をまたぐ経路は特に回帰しやすい。
+        let temp_dir = tempfile::tempdir()?;
+        let output_path = temp_dir.path().join("test.mp4");
+        let mut writer = make_hybrid_writer_at(&output_path)?;
+
+        let audio_sample_entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        let video_sample_entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+
+        // フラグメント 1: 音声 2 + 映像 1
+        for _ in 0..2 {
+            writer.append_audio_to_fragment(
+                &make_audio_frame(Some(audio_sample_entry.clone())),
+                DEFAULT_SAMPLE_DURATION,
+            );
+        }
+        writer.append_video_to_fragment(
+            &make_video_frame(Some(video_sample_entry.clone())),
+            DEFAULT_SAMPLE_DURATION,
+        );
+        writer.flush_fragment()?;
+
+        // フラグメント 2: 音声 2 + 映像 1
+        for _ in 0..2 {
+            writer.append_audio_to_fragment(
+                &make_audio_frame(Some(audio_sample_entry.clone())),
+                DEFAULT_SAMPLE_DURATION,
+            );
+        }
+        writer.append_video_to_fragment(
+            &make_video_frame(Some(video_sample_entry.clone())),
+            DEFAULT_SAMPLE_DURATION,
+        );
+        writer.flush_fragment()?;
+
+        // フラグメント 3: 音声 1 + 映像 1 (flush せず finalize で書き出す)
+        writer.append_audio_to_fragment(
+            &make_audio_frame(Some(audio_sample_entry)),
+            DEFAULT_SAMPLE_DURATION,
+        );
+        writer.append_video_to_fragment(
+            &make_video_frame(Some(video_sample_entry)),
+            DEFAULT_SAMPLE_DURATION,
+        );
+
+        writer.finalize()?;
+        assert_eq!(writer.core.stats.total_finalize_success_count(), 1);
+        drop(writer);
+
+        // 全 5 音声フレームに sample_entry が載り、初回と等価であることを検証する。
+        let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
+        let read_audio_samples = reader.collect::<crate::Result<Vec<_>>>()?;
+        assert_eq!(
+            read_audio_samples.len(),
+            5,
+            "5 音声サンプルが読み戻せること"
+        );
+        let mut first_audio_entry: Option<&SharedSampleEntry> = None;
+        for (idx, sample) in read_audio_samples.iter().enumerate() {
+            let entry = sample.sample_entry.as_ref().unwrap_or_else(|| {
+                panic!("読み戻した音声フレーム #{idx} に sample_entry が載っていること")
+            });
+            if let Some(first) = first_audio_entry {
+                assert!(
+                    !entry.changed_since(Some(first)),
+                    "フラグメント境界をまたいでも音声フレーム #{idx} が初回と等価な sample_entry を持つこと"
+                );
+            } else {
+                first_audio_entry = Some(entry);
+            }
+        }
+
+        // 全 3 映像フレームに sample_entry が載り、初回と等価であることを検証する。
+        let reader = crate::sora::recording_mp4_reader::Mp4VideoReader::new(&output_path)?;
+        let read_video_samples = reader.collect::<crate::Result<Vec<_>>>()?;
+        assert_eq!(
+            read_video_samples.len(),
+            3,
+            "3 映像サンプルが読み戻せること"
+        );
+        let mut first_video_entry: Option<&SharedSampleEntry> = None;
+        for (idx, sample) in read_video_samples.iter().enumerate() {
+            let entry = sample.sample_entry.as_ref().unwrap_or_else(|| {
+                panic!("読み戻した映像フレーム #{idx} に sample_entry が載っていること")
+            });
+            if let Some(first) = first_video_entry {
+                assert!(
+                    !entry.changed_since(Some(first)),
+                    "フラグメント境界をまたいでも映像フレーム #{idx} が初回と等価な sample_entry を持つこと"
+                );
+            } else {
+                first_video_entry = Some(entry);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn hybrid_writer_consumes_audio_queue_before_waiting_for_video() -> crate::Result<()> {
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         writer
