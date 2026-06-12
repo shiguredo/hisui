@@ -28,7 +28,7 @@ struct DashWriterStats {
 }
 
 pub enum DashWriterRpcMessage {
-    /// 入力を明示的に閉じ、finalize / cleanup に進ませる。
+    /// 入力を明示的に閉じ、ファイナライズ / クリーンアップに進ませる。
     /// 上流の残フレームをすべて受け切ることまでは保証しない。
     Finish {
         reply_tx: tokio::sync::oneshot::Sender<()>,
@@ -263,7 +263,7 @@ struct DashWriter {
     /// SampleEntry を受信するたびに状態が遷移し、video / audio 両方が揃った時点で
     /// Resolved に到達する。Resolved になるまで MPD は書き出さない。
     codec_resolution: CodecResolutionState,
-    /// ABR 結合 MPD 用の codec string 通知 channel。
+    /// ABR 結合 MPD 用のコーデック文字列通知 channel。
     /// 送信は 1 回のみ。送信後および non-ABR 時は None。
     codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
     stats: DashWriterStats,
@@ -428,7 +428,7 @@ impl DashWriter {
                     };
                     match rpc_message {
                         DashWriterRpcMessage::Finish { reply_tx } => {
-                            // 入力購読を閉じてループ脱出後の finalize / cleanup を実行する。
+                            // 入力購読を閉じてループ脱出後のファイナライズ / クリーンアップを実行する。
                             // 上流の残フレーム排出は別途保証していない。
                             audio_rx = None;
                             video_rx = None;
@@ -439,7 +439,7 @@ impl DashWriter {
             }
         }
 
-        // EOS 受信後: 現在のセグメントを finalize してから cleanup
+        // EOS 受信後: 現在のセグメントをファイナライズしてからクリーンアップ
         if let Err(e) = self.finalize_current_segment().await {
             tracing::warn!("DASH finalize error on EOS: {}", e.display());
         }
@@ -695,7 +695,7 @@ impl DashWriter {
         Ok(())
     }
 
-    /// ビデオの codec string が確定した際に状態を遷移させる。
+    /// ビデオのコーデック文字列が確定した際に状態を遷移させる。
     fn resolve_video_codec(&mut self, video: String) {
         if let Some(cs) = self.codec_resolution.resolve_video(video)
             && let Some(sender) = self.codec_string_sender.take()
@@ -704,7 +704,7 @@ impl DashWriter {
         }
     }
 
-    /// オーディオの codec string が確定した際に状態を遷移させる。
+    /// オーディオのコーデック文字列が確定した際に状態を遷移させる。
     fn resolve_audio_codec(&mut self, audio: String) {
         if let Some(cs) = self.codec_resolution.resolve_audio(audio)
             && let Some(sender) = self.codec_string_sender.take()
@@ -718,7 +718,7 @@ impl DashWriter {
         if self.retained_segments.is_empty() {
             return Ok(());
         }
-        // codec string が SampleEntry から確定するまで MPD は書き出さない
+        // コーデック文字列が SampleEntry から確定するまで MPD は書き出さない
         let CodecResolutionState::Resolved(codecs) = &self.codec_resolution else {
             return Ok(());
         };
@@ -1015,7 +1015,7 @@ pub struct DashWriterConfig {
     pub max_retained_segments: usize,
     /// ABR 時は結合 MPD を coordinator が書き出すため、ライター側では MPD を書かない
     pub skip_mpd: bool,
-    /// ABR 結合 MPD 用の codec string 通知 channel。
+    /// ABR 結合 MPD 用のコーデック文字列通知 channel。
     /// ABR 時のみ coordinator が受信側を持ち、全 variant の codec 確定後に結合 MPD を書き出す。
     /// non-ABR では DashWriter 自身が MPD を書くため不要（None を渡すこと）。
     pub codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
@@ -1094,7 +1094,7 @@ pub struct CombinedMpdVariant {
 // これには各バリアントライターからセグメント情報を集約する仕組みが必要になる。
 //
 // NOTE: ABR 結合 MPD の codecs は、各 variant の DashWriter が SampleEntry から確定した
-// codec string を oneshot channel 経由で coordinator に通知し、全 variant の値が一致する
+// コーデック文字列を oneshot channel 経由で coordinator に通知し、全 variant の値が一致する
 // ことを検証してから書き出す設計になっている。
 pub fn build_combined_mpd_content(
     variants: &[CombinedMpdVariant],
@@ -1360,7 +1360,7 @@ mod tests {
         assert_eq!(period.adaptation_sets.len(), 1);
 
         let adaptation_set = &period.adaptation_sets[0];
-        // AdaptationSet.codecs が指定した codec string を反映していること
+        // AdaptationSet.codecs が指定したコーデック文字列を反映していること
         assert_eq!(
             adaptation_set.codecs.as_deref(),
             Some("avc1.42e01f,mp4a.40.2")
@@ -1460,7 +1460,7 @@ mod tests {
         assert_eq!(mpd.minimum_update_period, Some(3.0));
     }
 
-    /// H.265 + AAC の codec string が結合 MPD の AdaptationSet.codecs にそのまま反映されること
+    /// H.265 + AAC のコーデック文字列が結合 MPD の AdaptationSet.codecs にそのまま反映されること
     #[test]
     fn combined_mpd_codecs_reflects_given_codec_string_h265_aac() {
         let variants = vec![CombinedMpdVariant {
@@ -1470,7 +1470,7 @@ mod tests {
             media_path: "variant_0/segment-$Number%06d$.m4s".to_owned(),
             init_path: "variant_0/init.mp4".to_owned(),
         }];
-        // 実際の Hvc1 SampleEntry から生成される codec string を模擬する
+        // 実際の Hvc1 SampleEntry から生成されるコーデック文字列を模擬する
         let codecs = crate::codec_string::CodecString {
             video: "hvc1.1.6.L123.B0".to_owned(),
             audio: "mp4a.40.2".to_owned(),
@@ -1486,7 +1486,7 @@ mod tests {
         );
     }
 
-    /// AV1 + Opus の codec string が結合 MPD の AdaptationSet.codecs にそのまま反映されること
+    /// AV1 + Opus のコーデック文字列が結合 MPD の AdaptationSet.codecs にそのまま反映されること
     #[test]
     fn combined_mpd_codecs_reflects_given_codec_string_av1_opus() {
         let variants = vec![CombinedMpdVariant {
@@ -1511,7 +1511,7 @@ mod tests {
         );
     }
 
-    /// VP9 + Opus の codec string が結合 MPD の AdaptationSet.codecs にそのまま反映されること
+    /// VP9 + Opus のコーデック文字列が結合 MPD の AdaptationSet.codecs にそのまま反映されること
     #[test]
     fn combined_mpd_codecs_reflects_given_codec_string_vp9_opus() {
         let variants = vec![CombinedMpdVariant {

@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-11
-- Completed:
+- Completed: 2026-06-12
 - Model: Opus 4.7
 - Branch: feature/refactor-japanize-comment-terms
 - Polished: 2026-06-12
@@ -146,3 +146,21 @@ CI 化 (`rg` ベースの自動チェック) は本 issue のスコープ外。�
 ## 関連
 
 - `0030 feature/refactor-encoded-frame-sample-entry-invariant` (closed): 本 issue 着手の発端となった作業。同ブランチのマージで `src/metrics.rs` / `src/obsws/server.rs` / `src/sora/recording_subcommand_tune.rs` 等の `bind` `exit` `return` `metrics 行` `best-effort` の一部が副次的に日本語化済み。本 issue の現状件数はそのマージ後の実測値。
+
+## 解決方法 (2026-06-12)
+
+`feature/refactor-japanize-comment-terms` で次を実装した。19 ファイル +95/-95 行、コメント文字列の置換のみ。コード実体・シグネチャ・文字列リテラルは無変更。
+
+- `codec string` (40 件) → `コーデック文字列` に統一した。`src/codec_string.rs`、`src/dash/writer.rs`、`src/hls/writer.rs`、`src/obsws/coordinator/output_dash.rs` 他で置換。
+- `sample entry` (6 件) → `サンプルエントリー` に統一した。`src/sample_entry.rs`、`src/video/h265.rs` で置換。
+- `best-effort` / `best effort` (3 件) → `ベストエフォート` に統一した。`src/hls/writer.rs`、`src/encoder.rs`、`src/media_pipeline.rs` で置換。
+- `bind` (1 件) → `バインド` に置換した。`src/obsws/server.rs:178` のみ残存。
+- `return` (3 件) を確定訳語で個別置換した。
+  - `src/obsws/message.rs:1557, 1599`: `早期に return する` → `早期に関数を抜ける`
+  - `src/tune/nsga2.rs:499`: `(早期 return 経路)` → `(早期復帰経路)`
+- `finalize` (38 件) → `ファイナライズ` で機械置換した。並列 `cleanup` (11 件) も同時に `クリーンアップ` に揃えた。
+- `サンプルエントリ` (長音なし 4 件) → `サンプルエントリー` (長音あり) に統一した。`src/video.rs:299, 439`、`src/decoder/nvcodec.rs:96, 228` で置換。
+- 識別子参照の 5 箇所 (`src/mp4/hybrid_writer.rs:524` の `finalize()`、`src/tune/nsga2.rs:571` の `NumericRange::finalize`、`src/tune/nsga2.rs:375` の `finalize の clamp`、`src/mp4/writer.rs:80` の `finalize / sample_entry 系カウンタ`、`src/subcommand_server.rs:219` の `return が必要`) は判定ルール 1〜9 に従い識別子扱いとして対象外にした。
+- 完了条件の `rg` 検証コマンドはすべて達成 (機械置換可能な対象表現はゼロ件、識別子残存は先回り除外箇所のみ)。
+- `cargo fmt --check` / `cargo clippy --all-targets` / `cargo test` (596 件) / `cargo doc --no-deps` (警告 3 件、ベースライン同一) すべてパスを確認した。
+- `CHANGES.md` への記載は、コメント変更のみで機能・互換性に影響しないため、方針判断により行わなかった (先例 closed 0022 と同じ判断)。

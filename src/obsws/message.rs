@@ -1554,7 +1554,7 @@ mod tests {
             .required()?;
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         // ヘッドレス CI ではオーディオデバイス列挙が失敗しエラー応答となるため、
-        // その場合はコード値だけ確認して早期に return する。
+        // その場合はコード値だけ確認して早期に関数を抜ける。
         if !result {
             let code: i64 = status.to_member("code")?.required()?.try_into()?;
             assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);
@@ -1596,7 +1596,7 @@ mod tests {
             .required()?;
         let result: bool = status.to_member("result")?.required()?.try_into()?;
         // ヘッドレス CI ではオーディオデバイス列挙が失敗しエラー応答となるため、
-        // その場合はコード値だけ確認して早期に return する。
+        // その場合はコード値だけ確認して早期に関数を抜ける。
         if !result {
             let code: i64 = status.to_member("code")?.required()?.try_into()?;
             assert_eq!(code, REQUEST_STATUS_INVALID_REQUEST_FIELD);

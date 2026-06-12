@@ -57,7 +57,7 @@ pub enum Mp4WriterRpcMessage {
     Resume {
         reply_tx: tokio::sync::oneshot::Sender<crate::Result<()>>,
     },
-    /// writer を finalize して正常終了する
+    /// writer をファイナライズして正常終了する
     Finish {
         reply_tx: tokio::sync::oneshot::Sender<()>,
     },
@@ -80,7 +80,7 @@ pub struct Mp4WriterStats {
     // 以下の finalize / sample_entry 系カウンタは hybrid writer でのみ計上される
     // （通常の Mp4Writer 経路では更新されず常に 0）。
     //
-    // finalize の成否カウンタ。failure は finalize（標準 MP4 への変換）が内部 Err で失敗し、
+    // ファイナライズの成否カウンタ。failure はファイナライズ（標準 MP4 への変換）が内部 Err で失敗し、
     // 出力が fMP4 形式のまま残ることを示す。
     total_finalize_success_count: crate::stats::StatsCounter,
     total_finalize_failure_count: crate::stats::StatsCounter,
@@ -930,7 +930,7 @@ impl Mp4Writer {
         }
         let mut rpc_rx_enabled = true;
 
-        // 入力トラックが 0 本でも finalize まで到達する。
+        // 入力トラックが 0 本でもファイナライズまで到達する。
         let mut output = self.poll_output()?;
         loop {
             match output {
@@ -1034,7 +1034,7 @@ impl Mp4Writer {
             Mp4WriterRpcMessage::Finish { reply_tx } => {
                 let _ = reply_tx.send(());
                 *rpc_rx_enabled = false;
-                // 入力トラックを閉じて finalize に遷移させる
+                // 入力トラックを閉じてファイナライズに遷移させる
                 self.core.input_video_track_id = None;
                 self.core.input_audio_track_id = None;
                 return Ok(true);

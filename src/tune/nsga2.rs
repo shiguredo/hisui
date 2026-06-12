@@ -496,7 +496,7 @@ mod tests {
         assert_eq!(crowded_compare(2, 1.0, 2, 1.0), Ordering::Equal);
     }
 
-    // 個体数が POPULATION_SIZE 以下なら、全個体がそのまま親になる (早期 return 経路)
+    // 個体数が POPULATION_SIZE 以下なら、全個体がそのまま親になる (早期復帰経路)
     #[test]
     fn select_parents_keeps_all_within_population_size() {
         // 互いに非劣な個体を POPULATION_SIZE 個ちょうど作る

@@ -863,7 +863,7 @@ async fn start_hls_processors(
 
     let is_abr = run.is_abr();
 
-    // ABR の場合、各 variant writer が SampleEntry から codec string を確定したら
+    // ABR の場合、各 variant writer が SampleEntry からコーデック文字列を確定したら
     // oneshot channel 経由で通知を受け取り、全 variant の値がそろってからマスタープレイリストを書き出す。
     let mut codec_string_receivers = Vec::new();
 
@@ -963,7 +963,7 @@ async fn start_hls_processors(
                 }
             }
         };
-        // ABR の場合は codec string 通知用の channel を作成する
+        // ABR の場合はコーデック文字列通知用の channel を作成する
         let codec_string_sender = if is_abr {
             let (tx, rx) = tokio::sync::oneshot::channel();
             codec_string_receivers.push(rx);
@@ -996,8 +996,8 @@ async fn start_hls_processors(
         );
     }
 
-    // ABR の場合は各 variant writer が SampleEntry から codec string を確定するのを待ち、
-    // 全 variant の codec string が一致することを検証してからマスタープレイリストを書き出す。
+    // ABR の場合は各 variant writer が SampleEntry からコーデック文字列を確定するのを待ち、
+    // 全 variant のコーデック文字列が一致することを検証してからマスタープレイリストを書き出す。
     if is_abr {
         let master_variants: Vec<crate::hls::writer::MasterPlaylistVariant> = hls_settings
             .variants
@@ -1024,7 +1024,7 @@ async fn start_hls_processors(
         let destination = run.destination.clone();
 
         let handle = tokio::spawn(async move {
-            // 全 variant の codec string を収集する
+            // 全 variant のコーデック文字列を収集する
             let mut codec_strings = Vec::with_capacity(codec_string_receivers.len());
             for (i, rx) in codec_string_receivers.into_iter().enumerate() {
                 match rx.await {
@@ -1039,7 +1039,7 @@ async fn start_hls_processors(
                 }
             }
 
-            // 全 variant の codec string が一致することを検証する
+            // 全 variant のコーデック文字列が一致することを検証する
             let Some(first) = codec_strings.first() else {
                 return;
             };
@@ -1144,7 +1144,7 @@ async fn stop_processors_staged_hls(
 ) -> crate::Result<()> {
     // NOTE:
     // ライブ用途では StopOutput / ToggleOutput への応答遅延を避けることを優先し、
-    // ここでは writer に finalize / cleanup を先行させる。
+    // ここでは writer にファイナライズ / クリーンアップを先行させる。
     // この経路は上流 encoder / scaler の完全 drain を保証しないため、
     // 停止直前の数フレームが最終セグメントに含まれない可能性がある。
     //
@@ -1272,7 +1272,7 @@ async fn stop_processors_staged_hls(
     Ok(())
 }
 
-/// HLS writer に Finish RPC を送り、finalize / cleanup を促す。
+/// HLS writer に Finish RPC を送り、ファイナライズ / クリーンアップを促す。
 /// これは writer 側の入力購読を閉じるためのもので、上流の完全 drain は保証しない。
 /// 失敗時は terminate にフォールバックする。
 async fn finish_hls_writer_rpc(

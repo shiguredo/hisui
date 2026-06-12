@@ -296,7 +296,7 @@ impl VideoFrame {
         }
 
         Self {
-            sample_entry: None, // 生データにはサンプルエントリは存在しない
+            sample_entry: None, // 生データにはサンプルエントリーは存在しない
             data,
             format: VideoFormat::I420,
             keyframe: true, // 生データは全てキーフレーム扱い
@@ -436,7 +436,7 @@ impl VideoFrame {
         }
 
         Ok(Self {
-            sample_entry: None, // 生データにはサンプルエントリは存在しない
+            sample_entry: None, // 生データにはサンプルエントリーは存在しない
             data,
             format: VideoFormat::I420,
             keyframe: true, // 生データは全てキーフレーム扱い

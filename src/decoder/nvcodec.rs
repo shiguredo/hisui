@@ -93,7 +93,7 @@ impl NvcodecDecoder {
             )));
         }
 
-        // サンプルエントリからパラメータセットを抽出してキャッシュ
+        // サンプルエントリーからパラメータセットを抽出してキャッシュ
         if self.parameter_sets.is_none()
             && let Some(sample_entry) = &frame.sample_entry
         {
@@ -225,7 +225,7 @@ impl NvcodecDecoder {
     }
 }
 
-/// サンプルエントリからパラメータセットを Annex.B 形式で抽出
+/// サンプルエントリーからパラメータセットを Annex.B 形式で抽出
 fn extract_parameter_sets_annexb(
     sample_entry: &shiguredo_mp4::boxes::SampleEntry,
     format: VideoFormat,

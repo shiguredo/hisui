@@ -195,7 +195,7 @@ impl ObswsCoordinator {
             && let Err(e) = stop_processors_staged_record(pipeline_handle, &run).await
         {
             // プロセッサ停止に失敗してもレコード状態は解除する。
-            // MP4 ファイルの finalize を優先し、クライアントには成功を返す。
+            // MP4 ファイルのファイナライズを優先し、クライアントには成功を返す。
             tracing::warn!("failed to stop record processors: {}", e.display());
         }
         // ランタイム状態をリセット
@@ -320,13 +320,13 @@ async fn stop_processors_staged_record(
     // 停止直前の数サンプル / 数フレームが最終 MP4 に含まれない可能性がある。
     // また、encoder 停止完了直後でも writer 側の購読チャネルには終端付近の
     // データや Eos が未処理で残りうるが、現状はその時点で Finish RPC を送って
-    // finalize を促すため、それらを読み切る前に末尾の一部を捨てるレースもある。
+    // ファイナライズを促すため、それらを読み切る前に末尾の一部を捨てるレースもある。
     // 現時点では StopRecord の応答性と実装単純性を優先し、この挙動を許容する。
     //
     // NOTE:
     // writer に Finish を送るのと同時に encoder へ非同期 finish RPC を送る方式は採用しない。
     // writer 側の Finish は入力トラックを即座に閉じるため、
-    // encoder の drain 完了前に writer が finalize へ進み、かえって末尾欠損を固定化しうる。
+    // encoder の drain 完了前に writer がファイナライズへ進み、かえって末尾欠損を固定化しうる。
     // 1. エンコーダーを停止して writer へ EOS を流す
     terminate_and_wait(
         pipeline_handle,
@@ -337,7 +337,7 @@ async fn stop_processors_staged_record(
     )
     .await?;
 
-    // 2. 上流が止まった時点で writer に finalize を促す
+    // 2. 上流が止まった時点で writer にファイナライズを促す
     finish_mp4_writer_rpc(pipeline_handle, &run.writer_processor_id).await;
 
     // 3. writer の自然終了を待ち、タイムアウト時は強制停止
@@ -351,7 +351,7 @@ async fn stop_processors_staged_record(
     Ok(())
 }
 
-/// MP4 writer に Finish RPC を送り、finalize を促す。
+/// MP4 writer に Finish RPC を送り、ファイナライズを促す。
 async fn finish_mp4_writer_rpc(
     pipeline_handle: &crate::MediaPipelineHandle,
     processor_id: &crate::ProcessorId,
@@ -379,7 +379,7 @@ async fn finish_mp4_writer_rpc(
             }
             Err(_) => {
                 // Finish RPC の sender を取得できないまま強制終了する経路。
-                // writer が finalize を経ずに停止するため、標準 MP4 化されず出力は fMP4 形式のまま残る。観測のため warn を出す。
+                // writer がファイナライズを経ずに停止するため、標準 MP4 化されず出力は fMP4 形式のまま残る。観測のため warn を出す。
                 tracing::warn!(
                     "could not obtain mp4 writer RPC sender; force terminating without finalize: {processor_id}"
                 );

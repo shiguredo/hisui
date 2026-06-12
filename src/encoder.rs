@@ -373,7 +373,7 @@ pub enum VideoEncoderRpcMessage {
 
 /// 上流の video encoder にキーフレーム要求を送る。
 ///
-/// encoder が見つからない場合は debug ログを出して正常終了する（best effort）。
+/// encoder が見つからない場合は debug ログを出して正常終了する（ベストエフォート）。
 /// encoder は後から追加される可能性があり、その時点でキーフレームが届く。
 pub async fn request_upstream_video_keyframe(
     pipeline_handle: &crate::MediaPipelineHandle,
