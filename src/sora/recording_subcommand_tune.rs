@@ -304,7 +304,7 @@ fn run_trial_evaluation(
     // (tune 親はその stdout を nojson でパースする) ため、env 継承による
     // 終了時メトリクス行の混入を防ぐ。
     // NOTE: この env_remove を削除すると、親プロセスで HISUI_EMIT_EXIT_METRICS=1
-    // が設定された状態で tune を実行した際に子 vmaf の stdout 末尾に metrics 行が
+    // が設定された状態で tune を実行した際に子 vmaf の stdout 末尾にメトリクス行が
     // 混入し、tune 親の nojson パースがサイレントに壊滅する。削除厳禁。
     cmd.env_remove("HISUI_EMIT_EXIT_METRICS");
     cmd.arg("vmaf")

@@ -726,6 +726,10 @@ struct SrtTsDemuxer {
     video_timestamp_mapper: crate::timestamp::mapper::TimestampMapper,
     audio_timestamp_mapper: crate::timestamp::mapper::TimestampMapper,
     last_aac_config_key: Option<AacConfigKey>,
+    /// `AudioFrame.sample_entry` の不変条件（issue 0030）に従い、
+    /// 直近の AAC サンプルエントリーを保持して全 AAC AU に clone して付与する。
+    /// `last_aac_config_key` が変化したときに新規生成して両フィールドを更新する。
+    last_aac_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
     received_video_keyframe: bool,
 }
 
@@ -750,6 +754,7 @@ impl SrtTsDemuxer {
                 Duration::ZERO,
             )?,
             last_aac_config_key: None,
+            last_aac_sample_entry: None,
             received_video_keyframe: false,
         })
     }
@@ -981,7 +986,13 @@ impl SrtTsDemuxer {
             let channels = header.channel_configuration;
             let channels_value = crate::audio::Channels::from_u8(channels)?;
             let aac_config_key = header.config_key();
-            let sample_entry = if self.last_aac_config_key != Some(aac_config_key) {
+            // `last_aac_config_key` と `last_aac_sample_entry` は同期更新される。
+            // どちらも初期値は None で、config 変化時のみ両方を同じ if 分岐で Some に更新する。
+            // 初回 AAC AU 受信時は `last_aac_config_key == None` のため必ず if に入り、
+            // 後段の `last_aac_sample_entry.clone()` が None を返すことはない。
+            // この同期によって `AudioFrame.sample_entry` の不変条件（全 AAC AU に Some を載せる）が
+            // SRT 入力経路でも成立する。
+            if self.last_aac_config_key != Some(aac_config_key) {
                 let audio_specific_config = header.audio_specific_config();
                 let entry = crate::audio::aac::create_mp4a_sample_entry(
                     &audio_specific_config,
@@ -989,10 +1000,12 @@ impl SrtTsDemuxer {
                     channels_value,
                 )?;
                 self.last_aac_config_key = Some(aac_config_key);
-                Some(crate::sample_entry::SharedSampleEntry::new(entry))
-            } else {
-                None
-            };
+                self.last_aac_sample_entry =
+                    Some(crate::sample_entry::SharedSampleEntry::new(entry));
+            }
+            // 不変条件に従い全 AAC AU に保持値を clone して付与する。
+            // Arc clone なので安価。
+            let sample_entry = self.last_aac_sample_entry.clone();
             let pts_ticks = frame_index
                 .saturating_mul(1024)
                 .saturating_mul(90_000)
@@ -1128,6 +1141,119 @@ mod tests {
         assert_eq!(header.channel_configuration, 2);
         assert_eq!(header.frame_length, 19);
         assert_eq!(header.audio_specific_config(), vec![0x12, 0x10]);
+    }
+
+    // SRT 入力経路の AAC AU 処理が AudioFrame.sample_entry の不変条件を満たすことを検証するヘルパー。
+    // `build_audio_samples` に渡す PendingPesPacket をテスト内で組み立てる。
+    fn make_aac_pending_pes(data: Vec<u8>, pts_ticks: u64) -> PendingPesPacket {
+        use mpeg2ts::es::StreamId;
+        use mpeg2ts::time::Timestamp;
+        PendingPesPacket {
+            header: PesHeader {
+                stream_id: StreamId::new(StreamId::AUDIO_MIN),
+                priority: false,
+                data_alignment_indicator: true,
+                copyright: false,
+                original_or_copy: false,
+                pts: Some(Timestamp::new(pts_ticks).expect("PTS が範囲内であること")),
+                dts: None,
+                escr: None,
+            },
+            data,
+            expected_data_len: None,
+        }
+    }
+
+    // ADTS ヘッダ (7 バイト) と 12 バイトのダミー payload から成る AAC AU。
+    // 既存テスト `parse_adts_header_extracts_aac_config` で動作確認済みのバイト列。
+    // 44.1kHz / stereo / AAC LC / frame_length=19。
+    const AAC_AU_STEREO_44_1KHZ: [u8; 19] = [
+        0xFF, 0xF1, 0x50, 0x80, 0x02, 0x7F, 0xFC, // ADTS header
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, // payload
+    ];
+
+    // 上記と同条件で channel_configuration のみ mono (=1) に変えた AAC AU。
+    // ADTS 4 バイト目の上位 2 bit（channel_configuration の下位 2 bit）を 10 → 01 に変更し、
+    // 3 バイト目の最終 bit（channel_configuration の MSB）は 0 のまま据え置く。
+    // この変更で `parse_adts_header` の `channel_configuration` が 2 → 1 に変わり、
+    // `config_key()` が異なる値を返すため `last_aac_sample_entry` の更新分岐に入る。
+    const AAC_AU_MONO_44_1KHZ: [u8; 19] = [
+        0xFF, 0xF1, 0x50, 0x40, 0x02, 0x7F, 0xFC, // ADTS header (mono)
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, // payload
+    ];
+
+    // AudioFrame.sample_entry の不変条件が SRT 入力経路の「config 連続」シナリオで成立することを検証する。
+    // 同一の ADTS 設定を持つ AU を 3 個含む PES を `build_audio_samples` に渡し、
+    // 全 AU の sample_entry が `Some` でありかつ初回 AU と等価（changed_since=false）であることを確認する。
+    // 等価性まで検証するのは、demuxer が dummy SampleEntry を毎回新規生成しても素通りしないようにするため。
+    #[test]
+    fn srt_aac_emits_sample_entry_on_every_au_with_constant_config() -> crate::Result<()> {
+        let mut demuxer = SrtTsDemuxer::new()?;
+        let mut pes_data = Vec::new();
+        for _ in 0..3 {
+            pes_data.extend_from_slice(&AAC_AU_STEREO_44_1KHZ);
+        }
+        let pending = make_aac_pending_pes(pes_data, 100_000);
+        let samples = demuxer.build_audio_samples(pending, Some(StreamType::AdtsAac))?;
+        assert_eq!(samples.len(), 3, "3 AU が分解されていること");
+
+        let mut first_entry: Option<crate::sample_entry::SharedSampleEntry> = None;
+        for (idx, sample) in samples.into_iter().enumerate() {
+            let TsSample::Audio(frame) = sample else {
+                panic!("AU #{idx} が音声サンプルとして取り出せること");
+            };
+            let entry = frame
+                .sample_entry
+                .unwrap_or_else(|| panic!("AU #{idx} に sample_entry が載っていること"));
+            if let Some(ref first) = first_entry {
+                assert!(
+                    !entry.changed_since(Some(first)),
+                    "config 連続時、AU #{idx} の sample_entry が初回と等価であること"
+                );
+            } else {
+                first_entry = Some(entry);
+            }
+        }
+        Ok(())
+    }
+
+    // SRT 入力経路の「config 変化」シナリオ。1 PES 内で channel_configuration を
+    // stereo → mono → stereo と変化させ、全 AU に sample_entry が載ること、
+    // config 変化を跨ぐ AU 間で sample_entry が変化することを確認する。
+    // `last_aac_config_key` と `last_aac_sample_entry` の同期更新が正しく機能していることを検証する。
+    #[test]
+    fn srt_aac_updates_sample_entry_on_config_change() -> crate::Result<()> {
+        let mut demuxer = SrtTsDemuxer::new()?;
+        let mut pes_data = Vec::new();
+        pes_data.extend_from_slice(&AAC_AU_STEREO_44_1KHZ);
+        pes_data.extend_from_slice(&AAC_AU_MONO_44_1KHZ);
+        pes_data.extend_from_slice(&AAC_AU_STEREO_44_1KHZ);
+        let pending = make_aac_pending_pes(pes_data, 100_000);
+        let samples = demuxer.build_audio_samples(pending, Some(StreamType::AdtsAac))?;
+        assert_eq!(samples.len(), 3, "3 AU が分解されていること");
+
+        let mut entries = Vec::new();
+        for (idx, sample) in samples.into_iter().enumerate() {
+            let TsSample::Audio(frame) = sample else {
+                panic!("AU #{idx} が音声サンプルとして取り出せること");
+            };
+            let entry = frame
+                .sample_entry
+                .unwrap_or_else(|| panic!("AU #{idx} に sample_entry が載っていること"));
+            entries.push(entry);
+        }
+
+        // stereo → mono への変化で sample_entry が更新される。
+        assert!(
+            entries[1].changed_since(Some(&entries[0])),
+            "stereo → mono で sample_entry が変化すること"
+        );
+        // mono → stereo への変化でも更新される。
+        assert!(
+            entries[2].changed_since(Some(&entries[1])),
+            "mono → stereo で sample_entry が変化すること"
+        );
+        Ok(())
     }
 
     #[test]

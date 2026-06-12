@@ -312,8 +312,9 @@ struct AudioRtpReceiver {
     depacketizer: AacRtpDepacketizer,
     sample_rate: SampleRate,
     channels: Channels,
-    sample_entry: SampleEntry,
-    sent_sample_entry: bool,
+    /// `AudioFrame.sample_entry` の不変条件（issue 0030）に従い、
+    /// SDP 由来のサンプルエントリーを共有型で保持して全 AAC AU に clone して付与する。
+    sample_entry: SharedSampleEntry,
 }
 
 #[derive(Debug, Default)]
@@ -495,8 +496,7 @@ impl RtspSessionRunner {
                 ),
                 sample_rate: audio.sample_rate,
                 channels: audio.channels,
-                sample_entry: audio.sample_entry,
-                sent_sample_entry: false,
+                sample_entry: SharedSampleEntry::new(audio.sample_entry),
             });
         }
 
@@ -674,19 +674,14 @@ impl RtspSessionRunner {
                 let timestamp = audio_receiver
                     .timestamp_mapper
                     .map(u64::from(access_unit.rtp_timestamp));
-                let sample_entry = if audio_receiver.sent_sample_entry {
-                    None
-                } else {
-                    audio_receiver.sent_sample_entry = true;
-                    Some(SharedSampleEntry::new(audio_receiver.sample_entry.clone()))
-                };
+                // `AudioFrame.sample_entry` の不変条件（issue 0030）に従い全フレームに付与する。
                 let audio_frame = AudioFrame {
                     data: access_unit.data,
                     format: AudioFormat::Aac,
                     channels: audio_receiver.channels,
                     sample_rate: audio_receiver.sample_rate,
                     timestamp,
-                    sample_entry,
+                    sample_entry: Some(audio_receiver.sample_entry.clone()),
                 };
                 stats.add_input_audio_data_count();
                 stats.set_last_input_audio_timestamp(timestamp);

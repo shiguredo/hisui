@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::codec_string::CodecResolutionState;
-use crate::sample_entry::SharedSampleEntry;
 
 /// ファイル拡張子から content-type を返す
 fn content_type_for_filename(filename: &str) -> &'static str {
@@ -253,10 +252,6 @@ struct DashWriter {
     last_video_timestamp: Option<Duration>,
     /// 前回のオーディオフレームのタイムスタンプ（duration 計算用）
     last_audio_timestamp: Option<Duration>,
-    /// 最後に受信したビデオの sample_entry（セグメント跨ぎで保持）
-    last_video_sample_entry: Option<SharedSampleEntry>,
-    /// 最後に受信したオーディオの sample_entry（セグメント跨ぎで保持）
-    last_audio_sample_entry: Option<SharedSampleEntry>,
     /// 現在のセグメントの共通情報
     current_segment_info: Option<CurrentSegmentInfo>,
     /// MPD の availabilityStartTime（ライター起動時の UTC 時刻）
@@ -352,8 +347,6 @@ impl DashWriter {
             current_payload: Vec::new(),
             last_video_timestamp: None,
             last_audio_timestamp: None,
-            last_video_sample_entry: None,
-            last_audio_sample_entry: None,
             current_segment_info: None,
             availability_start_time: format_utc_now(),
             skip_mpd,
@@ -479,20 +472,16 @@ impl DashWriter {
             self.start_new_segment(frame.timestamp)?;
         }
 
-        // 入力経路によっては sample_entry が初回フレームにしか載らないため、
-        // 受け取った sample_entry を保持して後続フレームの補完に使う。
-        if let Some(ref entry) = frame.sample_entry {
-            self.last_video_sample_entry = Some(entry.clone());
-
-            // SampleEntry から正確な codec string を確定する
-            if !matches!(
+        // SampleEntry から正確なコーデック文字列を確定する
+        if let Some(ref entry) = frame.sample_entry
+            && !matches!(
                 self.codec_resolution,
                 CodecResolutionState::VideoOnly(_) | CodecResolutionState::Resolved(_)
-            ) && let Some(codec_str) =
+            )
+            && let Some(codec_str) =
                 crate::codec_string::video_codec_string_from_sample_entry(entry.get())
-            {
-                self.resolve_video_codec(codec_str);
-            }
+        {
+            self.resolve_video_codec(codec_str);
         }
         // 前のビデオサンプルの duration を確定させる
         if let Some(prev_ts) = self.last_video_timestamp {
@@ -519,12 +508,7 @@ impl DashWriter {
         }
         let data_offset = self.current_payload.len() as u64;
         self.current_payload.extend_from_slice(&frame.data);
-        // フレームの sample_entry が None なら保持済みの値を使う
-        let sample_entry = frame
-            .sample_entry
-            .as_ref()
-            .or(self.last_video_sample_entry.as_ref())
-            .map(|e| e.get().clone());
+        let sample_entry = frame.sample_entry.as_ref().map(|e| e.get().clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Video,
             sample_entry,
@@ -547,21 +531,16 @@ impl DashWriter {
     /// オーディオフレーム処理
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
-        // 最初の video keyframe より前に audio が流れ始めることがある。
-        // 入力経路によっては sample_entry が初回フレームにしか載らないため、
-        // 受け取った sample_entry を保持して後続フレームの補完に使う。
-        if let Some(ref entry) = frame.sample_entry {
-            self.last_audio_sample_entry = Some(entry.clone());
-
-            // SampleEntry から正確な codec string を確定する
-            if !matches!(
+        // SampleEntry から正確なコーデック文字列を確定する
+        if let Some(ref entry) = frame.sample_entry
+            && !matches!(
                 self.codec_resolution,
                 CodecResolutionState::AudioOnly(_) | CodecResolutionState::Resolved(_)
-            ) && let Some(codec_str) =
+            )
+            && let Some(codec_str) =
                 crate::codec_string::audio_codec_string_from_sample_entry(entry.get())
-            {
-                self.resolve_audio_codec(codec_str);
-            }
+        {
+            self.resolve_audio_codec(codec_str);
         }
 
         if self.current_segment_info.is_none() {
@@ -585,11 +564,7 @@ impl DashWriter {
         }
         let data_offset = self.current_payload.len() as u64;
         self.current_payload.extend_from_slice(&frame.data);
-        let sample_entry = frame
-            .sample_entry
-            .as_ref()
-            .or(self.last_audio_sample_entry.as_ref())
-            .map(|e| e.get().clone());
+        let sample_entry = frame.sample_entry.as_ref().map(|e| e.get().clone());
         self.current_samples.push(shiguredo_mp4::mux::Sample {
             track_kind: shiguredo_mp4::TrackKind::Audio,
             sample_entry,
@@ -637,22 +612,6 @@ impl DashWriter {
         if self.current_samples.is_empty() {
             return Ok(());
         }
-
-        // muxer は各トラックの最初の sample に sample_entry があることを要求する。
-        // セグメント開始直後のフレームに sample_entry が欠落している場合に備えて、
-        // 最後に観測した sample_entry から補完しておく。
-        // フラッシュ時のみの呼び出しなので、ここでの生 SampleEntry 化のコストは許容する。
-        fill_missing_sample_entries(
-            &mut self.current_samples,
-            &self
-                .last_video_sample_entry
-                .as_ref()
-                .map(|e| e.get().clone()),
-            &self
-                .last_audio_sample_entry
-                .as_ref()
-                .map(|e| e.get().clone()),
-        );
 
         // 末尾サンプルの duration を補完する
         fixup_last_sample_duration(&mut self.current_samples);
@@ -1004,27 +963,6 @@ fn reorder_payload_by_track(
     }
 
     reordered
-}
-
-/// fMP4 muxer に渡す前に、欠落している sample_entry を最後に観測した値で補完する。
-fn fill_missing_sample_entries(
-    samples: &mut [shiguredo_mp4::mux::Sample],
-    last_video_sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
-    last_audio_sample_entry: &Option<shiguredo_mp4::boxes::SampleEntry>,
-) {
-    for sample in samples.iter_mut() {
-        if sample.sample_entry.is_some() {
-            continue;
-        }
-        match sample.track_kind {
-            shiguredo_mp4::TrackKind::Video => {
-                sample.sample_entry = last_video_sample_entry.clone();
-            }
-            shiguredo_mp4::TrackKind::Audio => {
-                sample.sample_entry = last_audio_sample_entry.clone();
-            }
-        }
-    }
 }
 
 fn fixup_last_sample_duration(samples: &mut [shiguredo_mp4::mux::Sample]) {

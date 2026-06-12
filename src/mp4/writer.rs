@@ -84,12 +84,13 @@ pub struct Mp4WriterStats {
     // 出力が fMP4 形式のまま残ることを示す。
     total_finalize_success_count: crate::stats::StatsCounter,
     total_finalize_failure_count: crate::stats::StatsCounter,
-    // sample_entry の受信数と「フラグメント先頭で解決できなかった数」を音声/映像別に観測する (issues/0011)。
+    // sample_entry 関連カウンタ（issues/0011）。
     // received は ingress で sample_entry を載せて受信したフレーム数（pause 等で drop される前に数える）。
     // received が 0 なら上流が一度も sample_entry を送っていないことを示す。
-    // missing はフラグメント先頭サンプルで sample_entry を解決できなかった数で、発生箇所（append）で計上する。
-    // writer のフラグメント単位と muxer 内部のチャンク単位は粒度が異なるため、missing>0 が即 finalize
-    // 失敗を意味するとは限らないが、sample_entry 取りこぼしの目安になる。
+    // missing はフラグメント先頭で sample_entry を解決できなかった数だったが、issue 0030 で
+    // リーダー / AAC 入力経路に不変条件「エンコード済みフレームは常に sample_entry を持つ」を適用し
+    // 計上経路（append 側の `.or_else()` フォールバック）を削除したため、本ブランチ以降は常に 0。
+    // 観測 API・Prometheus メトリクス自体は issue 0034 で破壊的廃止予定。
     total_received_audio_sample_entry_count: crate::stats::StatsCounter,
     total_received_video_sample_entry_count: crate::stats::StatsCounter,
     total_missing_audio_sample_entry_count: crate::stats::StatsCounter,
@@ -226,10 +227,14 @@ impl Mp4WriterStats {
         self.total_received_video_sample_entry_count.inc();
     }
 
+    // 呼び出し元なし。issue 0034 で `Mp4WriterStats` の missing 系一式と合わせて削除予定。
+    #[expect(dead_code)]
     pub(crate) fn add_missing_audio_sample_entry(&self) {
         self.total_missing_audio_sample_entry_count.inc();
     }
 
+    // 呼び出し元なし。issue 0034 で `Mp4WriterStats` の missing 系一式と合わせて削除予定。
+    #[expect(dead_code)]
     pub(crate) fn add_missing_video_sample_entry(&self) {
         self.total_missing_video_sample_entry_count.inc();
     }

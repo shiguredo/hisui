@@ -95,10 +95,10 @@ impl ShutdownSignal {
     }
 }
 
-/// --emit-startup-info 指定時、bind 完了直後の情報を JSON Lines で stdout に書き出す。
+/// --emit-startup-info 指定時、バインド完了直後の情報を JSON Lines で stdout に書き出す。
 /// 書き込み失敗時の方針は終了時メトリクス出力とは逆で、BrokenPipe 含めて起動失敗扱いにする:
 /// 終了時のメトリクス出力と違って起動後は hisui が稼働継続するため、書き込み失敗を黙殺すると
-/// 呼び出し側 (E2E テスト等) が startup_info を待ち続けてハングする。起動失敗で exit すれば
+/// 呼び出し側 (E2E テスト等) が startup_info を待ち続けてハングする。起動失敗で終了すれば
 /// 呼び出し側は stdout EOF で気付ける。
 fn emit_startup_info_to_stdout(
     scheme: &str,
@@ -202,7 +202,7 @@ pub async fn run_server(
     let listener = TcpListener::bind(addr)
         .await
         .map_err(|e| crate::Error::new(format!("failed to bind obsws listener: {e}")))?;
-    // `--port 0` 指定時に呼び出し側が実ポートを参照できるよう、bind 後の実アドレスを取得する。
+    // `--port 0` 指定時に呼び出し側が実ポートを参照できるよう、バインド後の実アドレスを取得する。
     let actual_addr = listener
         .local_addr()
         .map_err(|e| crate::Error::new(format!("failed to get local addr: {e}")))?;
