@@ -13,24 +13,18 @@ from helpers import (
     _send_obsws_request,
     _write_test_png,
 )
-from hisui_server import reserve_ephemeral_port
 
 
 def test_obsws_get_version_request(binary_path: Path):
     """obsws が GetVersion request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetVersion",
                 request_id="req-get-version",
             )
@@ -47,7 +41,9 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "SetInputSettings" in response_data["availableRequests"]
         assert "SetInputName" in response_data["availableRequests"]
         assert "GetInputDefaultSettings" in response_data["availableRequests"]
-        assert "GetInputPropertiesListPropertyItems" in response_data["availableRequests"]
+        assert (
+            "GetInputPropertiesListPropertyItems" in response_data["availableRequests"]
+        )
         assert "CreateInput" in response_data["availableRequests"]
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
@@ -87,19 +83,14 @@ def test_obsws_get_version_request(binary_path: Path):
 
 def test_obsws_get_stats_request(binary_path: Path):
     """obsws が GetStats request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetStats",
                 request_id="req-get-stats",
             )
@@ -114,19 +105,14 @@ def test_obsws_get_stats_request(binary_path: Path):
 
 def test_obsws_get_canvas_list_request(binary_path: Path):
     """obsws が GetCanvasList request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetCanvasList",
                 request_id="req-get-canvas-list",
             )
@@ -153,22 +139,17 @@ def test_obsws_get_canvas_list_request(binary_path: Path):
 
 def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path: Path):
     """obsws が GetRecordDirectory / SetRecordDirectory request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
     default_record_dir = tmp_path / "default-records"
     updated_record_dir = tmp_path / "updated-records"
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         default_record_dir=default_record_dir,
         use_env=False,
-    ):
+    ) as server:
         get_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetRecordDirectory",
                 request_id="req-get-record-dir-1",
             )
@@ -181,7 +162,7 @@ def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path:
 
         set_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetRecordDirectory",
                 request_id="req-set-record-dir-1",
                 request_data={"recordDirectory": str(updated_record_dir)},
@@ -192,7 +173,7 @@ def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path:
 
         get_response_after_update = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetRecordDirectory",
                 request_id="req-get-record-dir-2",
             )
@@ -206,19 +187,14 @@ def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path:
 
 def test_obsws_get_record_status_request(binary_path: Path):
     """obsws が GetRecordStatus request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetRecordStatus",
                 request_id="req-get-record-status",
             )
@@ -232,19 +208,14 @@ def test_obsws_get_record_status_request(binary_path: Path):
 
 def test_obsws_transition_requests(binary_path: Path):
     """obsws が Transition 関連 request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         kind_list_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetTransitionKindList",
                 request_id="req-get-transition-kind-list",
             )
@@ -256,7 +227,7 @@ def test_obsws_transition_requests(binary_path: Path):
 
         transition_list_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetSceneTransitionList",
                 request_id="req-get-scene-transition-list",
             )
@@ -270,7 +241,9 @@ def test_obsws_transition_requests(binary_path: Path):
             transition_list_response["d"]["responseData"]["currentSceneTransitionKind"]
             == "fade_transition"
         )
-        transition_entries = transition_list_response["d"]["responseData"]["transitions"]
+        transition_entries = transition_list_response["d"]["responseData"][
+            "transitions"
+        ]
         cut_transition = next(
             t for t in transition_entries if t["transitionName"] == "cut_transition"
         )
@@ -282,7 +255,7 @@ def test_obsws_transition_requests(binary_path: Path):
 
         set_transition_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetCurrentSceneTransition",
                 request_id="req-set-current-scene-transition",
                 request_data={"transitionName": "fade_transition"},
@@ -292,7 +265,7 @@ def test_obsws_transition_requests(binary_path: Path):
 
         set_transition_duration_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetCurrentSceneTransitionDuration",
                 request_id="req-set-current-scene-transition-duration",
                 request_data={"transitionDuration": 500},
@@ -302,7 +275,7 @@ def test_obsws_transition_requests(binary_path: Path):
 
         get_current_transition_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetCurrentSceneTransition",
                 request_id="req-get-current-scene-transition",
             )
@@ -316,19 +289,25 @@ def test_obsws_transition_requests(binary_path: Path):
             get_current_transition_response["d"]["responseData"]["transitionDuration"]
             == 500
         )
-        assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is False
+        assert (
+            get_current_transition_response["d"]["responseData"]["transitionFixed"]
+            is False
+        )
         # fade_transition は transitionSettings を初期状態では null で返す
-        assert get_current_transition_response["d"]["responseData"][
-            "transitionSettings"
-        ] is None
+        assert (
+            get_current_transition_response["d"]["responseData"]["transitionSettings"]
+            is None
+        )
 
         # ビルトイントランジションはカスタム設定をサポートしないので失敗する
         set_transition_settings_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetCurrentSceneTransitionSettings",
                 request_id="req-set-current-scene-transition-settings",
-                request_data={"transitionSettings": {"curve": "ease_in_out", "power": 2}},
+                request_data={
+                    "transitionSettings": {"curve": "ease_in_out", "power": 2}
+                },
             )
         )
         assert set_transition_settings_response["d"]["requestStatus"]["result"] is False
@@ -336,19 +315,20 @@ def test_obsws_transition_requests(binary_path: Path):
 
         get_transition_cursor_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetCurrentSceneTransitionCursor",
                 request_id="req-get-current-scene-transition-cursor",
             )
         )
         assert get_transition_cursor_response["d"]["requestStatus"]["result"] is True
         assert (
-            get_transition_cursor_response["d"]["responseData"]["transitionCursor"] == 0.0
+            get_transition_cursor_response["d"]["responseData"]["transitionCursor"]
+            == 0.0
         )
 
         set_tbar_position_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetTBarPosition",
                 request_id="req-set-tbar-position",
                 request_data={"position": 0.25},
@@ -359,12 +339,15 @@ def test_obsws_transition_requests(binary_path: Path):
 
         get_transition_cursor_after_tbar_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetCurrentSceneTransitionCursor",
                 request_id="req-get-current-scene-transition-cursor-after-tbar",
             )
         )
-        assert get_transition_cursor_after_tbar_response["d"]["requestStatus"]["result"] is True
+        assert (
+            get_transition_cursor_after_tbar_response["d"]["requestStatus"]["result"]
+            is True
+        )
         assert (
             get_transition_cursor_after_tbar_response["d"]["responseData"][
                 "transitionCursor"
@@ -374,7 +357,7 @@ def test_obsws_transition_requests(binary_path: Path):
 
         invalid_transition_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetCurrentSceneTransition",
                 request_id="req-set-current-scene-transition-invalid-name",
                 request_data={"transitionName": "Swipe"},
@@ -385,7 +368,7 @@ def test_obsws_transition_requests(binary_path: Path):
 
         invalid_duration_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetCurrentSceneTransitionDuration",
                 request_id="req-set-current-scene-transition-invalid-duration",
                 request_data={"transitionDuration": 0},
@@ -397,7 +380,7 @@ def test_obsws_transition_requests(binary_path: Path):
         # Studio Mode 無効のため、不正な position でも 506 を返す
         invalid_tbar_position_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetTBarPosition",
                 request_id="req-set-tbar-position-invalid",
                 request_data={"position": 1.5},
@@ -409,19 +392,14 @@ def test_obsws_transition_requests(binary_path: Path):
 
 def test_obsws_preview_scene_requests(binary_path: Path):
     """obsws が Preview Scene 関連 request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         get_preview_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetCurrentPreviewScene",
                 request_id="req-get-current-preview-scene-initial",
             )
@@ -431,7 +409,7 @@ def test_obsws_preview_scene_requests(binary_path: Path):
 
         set_preview_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetCurrentPreviewScene",
                 request_id="req-set-current-preview-scene",
                 request_data={"sceneName": "Scene"},
@@ -442,32 +420,36 @@ def test_obsws_preview_scene_requests(binary_path: Path):
 
         get_scene_list_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetSceneList",
                 request_id="req-get-scene-list-after-preview-set",
             )
         )
         assert get_scene_list_response["d"]["requestStatus"]["result"] is True
-        assert get_scene_list_response["d"]["responseData"]["currentProgramSceneName"] == "Scene"
-        assert get_scene_list_response["d"]["responseData"]["currentPreviewSceneName"] is None
-        assert get_scene_list_response["d"]["responseData"]["currentPreviewSceneUuid"] is None
+        assert (
+            get_scene_list_response["d"]["responseData"]["currentProgramSceneName"]
+            == "Scene"
+        )
+        assert (
+            get_scene_list_response["d"]["responseData"]["currentPreviewSceneName"]
+            is None
+        )
+        assert (
+            get_scene_list_response["d"]["responseData"]["currentPreviewSceneUuid"]
+            is None
+        )
 
 
 def test_obsws_get_input_list_request(binary_path: Path):
     """obsws が GetInputList request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputList",
                 request_id="req-get-input-list",
             )
@@ -481,19 +463,14 @@ def test_obsws_get_input_list_request(binary_path: Path):
 
 def test_obsws_get_input_kind_list_request(binary_path: Path):
     """obsws が GetInputKindList request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputKindList",
                 request_id="req-get-input-kind-list",
             )
@@ -508,19 +485,14 @@ def test_obsws_get_input_kind_list_request(binary_path: Path):
 
 def test_obsws_set_input_name_request(binary_path: Path):
     """obsws が SetInputName request に応答して入力名を変更できることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-for-set-name",
                 request_data={
@@ -535,7 +507,7 @@ def test_obsws_set_input_name_request(binary_path: Path):
 
         set_name_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputName",
                 request_id="req-set-input-name",
                 request_data={
@@ -550,7 +522,7 @@ def test_obsws_set_input_name_request(binary_path: Path):
 
         old_name_get_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputSettings",
                 request_id="req-get-input-settings-old-name",
                 request_data={"inputName": "obsws-set-name-input"},
@@ -561,7 +533,7 @@ def test_obsws_set_input_name_request(binary_path: Path):
 
         renamed_get_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputSettings",
                 request_id="req-get-input-settings-renamed",
                 request_data={"inputName": "obsws-set-name-input-renamed"},
@@ -575,19 +547,14 @@ def test_obsws_set_input_name_request(binary_path: Path):
 
 def test_obsws_get_input_default_settings_request(binary_path: Path):
     """obsws が GetInputDefaultSettings request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputDefaultSettings",
                 request_id="req-get-input-default-settings",
                 request_data={"inputKind": "video_capture_device"},
@@ -603,7 +570,7 @@ def test_obsws_get_input_default_settings_request(binary_path: Path):
 
         unsupported_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputDefaultSettings",
                 request_id="req-get-input-default-settings-unsupported",
                 request_data={"inputKind": "unsupported-kind"},
@@ -616,20 +583,15 @@ def test_obsws_get_input_default_settings_request(binary_path: Path):
 
 def test_obsws_get_input_properties_list_property_items_request(binary_path: Path):
     """obsws が GetInputPropertiesListPropertyItems request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         # テスト用 input を作成する
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-for-props-list",
                 request_data={
@@ -646,7 +608,7 @@ def test_obsws_get_input_properties_list_property_items_request(binary_path: Pat
         # 正常系: 空の propertyItems を返す
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputPropertiesListPropertyItems",
                 request_id="req-get-props-list",
                 request_data={
@@ -664,7 +626,7 @@ def test_obsws_get_input_properties_list_property_items_request(binary_path: Pat
         # 存在しない input でエラー
         not_found_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputPropertiesListPropertyItems",
                 request_id="req-get-props-list-not-found",
                 request_data={
@@ -680,7 +642,7 @@ def test_obsws_get_input_properties_list_property_items_request(binary_path: Pat
         # propertyName 欠落でエラー
         missing_prop_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputPropertiesListPropertyItems",
                 request_id="req-get-props-list-no-prop",
                 request_data={"inputName": "obsws-props-list-input"},
@@ -693,7 +655,7 @@ def test_obsws_get_input_properties_list_property_items_request(binary_path: Pat
         # requestData 空でエラー
         empty_data_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputPropertiesListPropertyItems",
                 request_id="req-get-props-list-empty",
                 request_data={},
@@ -705,19 +667,14 @@ def test_obsws_get_input_properties_list_property_items_request(binary_path: Pat
 
 def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
     """obsws が GetInputSettings で識別子欠落をエラー応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputSettings",
                 request_id="req-get-input-settings",
                 request_data={},
@@ -730,19 +687,14 @@ def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
 
 def test_obsws_set_input_settings_request(binary_path: Path):
     """obsws が SetInputSettings request に応答して入力設定を更新できることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-for-set-settings",
                 request_data={
@@ -759,7 +711,7 @@ def test_obsws_set_input_settings_request(binary_path: Path):
 
         set_overlay_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-overlay",
                 request_data={
@@ -774,7 +726,7 @@ def test_obsws_set_input_settings_request(binary_path: Path):
 
         get_overlay_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputSettings",
                 request_id="req-get-input-settings-after-overlay",
                 request_data={"inputUuid": input_uuid},
@@ -788,7 +740,7 @@ def test_obsws_set_input_settings_request(binary_path: Path):
 
         set_replace_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-replace",
                 request_data={
@@ -804,7 +756,7 @@ def test_obsws_set_input_settings_request(binary_path: Path):
 
         get_replace_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputSettings",
                 request_id="req-get-input-settings-after-replace",
                 request_data={"inputName": "obsws-set-settings-input"},
@@ -818,7 +770,7 @@ def test_obsws_set_input_settings_request(binary_path: Path):
 
         not_found_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-not-found",
                 request_data={
@@ -834,19 +786,14 @@ def test_obsws_set_input_settings_request(binary_path: Path):
 
 def test_obsws_set_input_settings_rejects_invalid_input_settings(binary_path: Path):
     """obsws が SetInputSettings で不正な inputSettings を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-invalid-set-settings",
                 request_data={
@@ -861,7 +808,7 @@ def test_obsws_set_input_settings_rejects_invalid_input_settings(binary_path: Pa
 
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-invalid",
                 request_data={
@@ -877,19 +824,14 @@ def test_obsws_set_input_settings_rejects_invalid_input_settings(binary_path: Pa
 
 def test_obsws_set_input_settings_rejects_missing_request_data(binary_path: Path):
     """obsws が SetInputSettings で requestData 欠落を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-missing-request-data",
             )
@@ -901,19 +843,14 @@ def test_obsws_set_input_settings_rejects_missing_request_data(binary_path: Path
 
 def test_obsws_set_input_settings_rejects_missing_lookup_fields(binary_path: Path):
     """obsws が SetInputSettings で識別子欠落を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-missing-lookup",
                 request_data={"inputSettings": {}},
@@ -926,19 +863,14 @@ def test_obsws_set_input_settings_rejects_missing_lookup_fields(binary_path: Pat
 
 def test_obsws_set_input_settings_rejects_missing_input_settings(binary_path: Path):
     """obsws が SetInputSettings で inputSettings 欠落を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-for-missing-input-settings",
                 request_data={
@@ -953,7 +885,7 @@ def test_obsws_set_input_settings_rejects_missing_input_settings(binary_path: Pa
 
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-missing-input-settings",
                 request_data={"inputName": "obsws-missing-input-settings-input"},
@@ -966,19 +898,14 @@ def test_obsws_set_input_settings_rejects_missing_input_settings(binary_path: Pa
 
 def test_obsws_set_input_settings_rejects_invalid_overlay_type(binary_path: Path):
     """obsws が SetInputSettings で overlay 型不正を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-for-invalid-overlay",
                 request_data={
@@ -993,7 +920,7 @@ def test_obsws_set_input_settings_rejects_invalid_overlay_type(binary_path: Path
 
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputSettings",
                 request_id="req-set-input-settings-invalid-overlay",
                 request_data={
@@ -1010,19 +937,14 @@ def test_obsws_set_input_settings_rejects_invalid_overlay_type(binary_path: Path
 
 def test_obsws_create_input_request(binary_path: Path):
     """obsws が CreateInput request に応答して入力を追加できることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input",
                 request_data={
@@ -1046,7 +968,7 @@ def test_obsws_create_input_request(binary_path: Path):
 
         list_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputList",
                 request_id="req-get-input-list-after-create",
             )
@@ -1062,7 +984,7 @@ def test_obsws_create_input_request(binary_path: Path):
 
         settings_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputSettings",
                 request_id="req-get-input-settings-after-create",
                 request_data={"inputUuid": input_uuid},
@@ -1084,19 +1006,14 @@ def test_obsws_create_input_request(binary_path: Path):
 
 def test_obsws_create_input_rejects_duplicate_name(binary_path: Path):
     """obsws が CreateInput で inputName 重複を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         first_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-first",
                 request_data={
@@ -1111,7 +1028,7 @@ def test_obsws_create_input_rejects_duplicate_name(binary_path: Path):
 
         second_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-second",
                 request_data={
@@ -1129,19 +1046,14 @@ def test_obsws_create_input_rejects_duplicate_name(binary_path: Path):
 
 def test_obsws_create_input_rejects_unsupported_scene_name(binary_path: Path):
     """obsws が CreateInput で未対応 sceneName を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-unsupported-scene",
                 request_data={
@@ -1159,19 +1071,14 @@ def test_obsws_create_input_rejects_unsupported_scene_name(binary_path: Path):
 
 def test_obsws_create_input_rejects_unsupported_input_kind(binary_path: Path):
     """obsws が CreateInput で未対応 inputKind を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-input-unsupported-kind",
                 request_data={
@@ -1189,19 +1096,14 @@ def test_obsws_create_input_rejects_unsupported_input_kind(binary_path: Path):
 
 def test_obsws_remove_input_request(binary_path: Path):
     """obsws が RemoveInput request に応答して入力を削除できることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create-for-remove",
                 request_data={
@@ -1216,7 +1118,7 @@ def test_obsws_remove_input_request(binary_path: Path):
 
         remove_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="RemoveInput",
                 request_id="req-remove-input",
                 request_data={"inputName": "to-be-removed"},
@@ -1228,7 +1130,7 @@ def test_obsws_remove_input_request(binary_path: Path):
 
         list_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputList",
                 request_id="req-get-input-list-after-remove",
             )
@@ -1241,19 +1143,14 @@ def test_obsws_remove_input_request(binary_path: Path):
 
 def test_obsws_remove_input_rejects_unknown_input(binary_path: Path):
     """obsws が RemoveInput で存在しない入力を拒否することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     with ObswsServer(
         binary_path,
-        host=host,
-        port=port,
         use_env=False,
-    ):
+    ) as server:
         response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="RemoveInput",
                 request_id="req-remove-input-not-found",
                 request_data={"inputName": "not-found"},
@@ -1266,15 +1163,12 @@ def test_obsws_remove_input_rejects_unknown_input(binary_path: Path):
 
 def test_obsws_get_scene_item_id_request(binary_path: Path):
     """obsws が GetSceneItemId request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1311,7 +1205,7 @@ def test_obsws_get_scene_item_id_request(binary_path: Path):
             assert scene_item_id > 0
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -1319,9 +1213,6 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が SetSceneItemEnabled で StartRecord の前提入力を切り替えられることを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
     image_path = tmp_path / "set-scene-item-enabled-input.png"
     _write_test_png(image_path)
 
@@ -1329,7 +1220,7 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1359,7 +1250,9 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
-            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+            scene_item_id = get_scene_item_id_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             disable_response = await _send_obsws_request(
                 ws,
@@ -1379,7 +1272,9 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
                 request_type="StartRecord",
                 request_id="req-start-record-disabled-input",
             )
-            assert start_record_disabled_response["d"]["requestStatus"]["result"] is True
+            assert (
+                start_record_disabled_response["d"]["requestStatus"]["result"] is True
+            )
 
             stop_record_disabled_response = await _send_obsws_request(
                 ws,
@@ -1416,21 +1311,18 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
             assert stop_record_response["d"]["responseData"]["outputPath"]
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_get_scene_item_enabled_request(binary_path: Path):
     """obsws が GetSceneItemEnabled request に応答することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1460,7 +1352,9 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
-            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+            scene_item_id = get_scene_item_id_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             get_enabled_response = await _send_obsws_request(
                 ws,
@@ -1496,24 +1390,23 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
                 },
             )
             assert get_disabled_response["d"]["requestStatus"]["result"] is True
-            assert get_disabled_response["d"]["responseData"]["sceneItemEnabled"] is False
+            assert (
+                get_disabled_response["d"]["responseData"]["sceneItemEnabled"] is False
+            )
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_scene_item_management_requests(binary_path: Path):
     """obsws の Scene Item 管理 request 一式が動作することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1544,7 +1437,9 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 },
             )
             assert create_scene_item_response["d"]["requestStatus"]["result"] is True
-            first_scene_item_id = create_scene_item_response["d"]["responseData"]["sceneItemId"]
+            first_scene_item_id = create_scene_item_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             create_second_scene_item_response = await _send_obsws_request(
                 ws,
@@ -1556,10 +1451,13 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                     "sceneItemEnabled": True,
                 },
             )
-            assert create_second_scene_item_response["d"]["requestStatus"]["result"] is True
-            second_scene_item_id = create_second_scene_item_response["d"]["responseData"][
-                "sceneItemId"
-            ]
+            assert (
+                create_second_scene_item_response["d"]["requestStatus"]["result"]
+                is True
+            )
+            second_scene_item_id = create_second_scene_item_response["d"][
+                "responseData"
+            ]["sceneItemId"]
 
             get_scene_item_list_response = await _send_obsws_request(
                 ws,
@@ -1568,7 +1466,9 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 request_data={"sceneName": "Scene"},
             )
             assert get_scene_item_list_response["d"]["requestStatus"]["result"] is True
-            scene_items = get_scene_item_list_response["d"]["responseData"]["sceneItems"]
+            scene_items = get_scene_item_list_response["d"]["responseData"][
+                "sceneItems"
+            ]
             scene_item_ids = [item["sceneItemId"] for item in scene_items]
             assert first_scene_item_id in scene_item_ids
             assert second_scene_item_id in scene_item_ids
@@ -1582,7 +1482,9 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                     "sceneItemId": first_scene_item_id,
                 },
             )
-            assert get_scene_item_source_response["d"]["requestStatus"]["result"] is True
+            assert (
+                get_scene_item_source_response["d"]["requestStatus"]["result"] is True
+            )
             assert (
                 get_scene_item_source_response["d"]["responseData"]["sourceUuid"]
                 == source_uuid
@@ -1602,9 +1504,14 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                     "sceneItemId": second_scene_item_id,
                 },
             )
-            assert get_second_scene_item_index_response["d"]["requestStatus"]["result"] is True
             assert (
-                get_second_scene_item_index_response["d"]["responseData"]["sceneItemIndex"]
+                get_second_scene_item_index_response["d"]["requestStatus"]["result"]
+                is True
+            )
+            assert (
+                get_second_scene_item_index_response["d"]["responseData"][
+                    "sceneItemIndex"
+                ]
                 == 0
             )
 
@@ -1674,27 +1581,24 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 },
             )
             assert duplicate_scene_item_response["d"]["requestStatus"]["result"] is True
-            duplicated_scene_item_id = duplicate_scene_item_response["d"]["responseData"][
-                "sceneItemId"
-            ]
+            duplicated_scene_item_id = duplicate_scene_item_response["d"][
+                "responseData"
+            ]["sceneItemId"]
             assert duplicated_scene_item_id != second_scene_item_id
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path):
     """obsws の Scene Item の lock / blend mode / transform request が動作することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -1724,7 +1628,9 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
-            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+            scene_item_id = get_scene_item_id_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             get_locked_response = await _send_obsws_request(
                 ws,
@@ -1760,7 +1666,10 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
                 },
             )
             assert get_locked_after_response["d"]["requestStatus"]["result"] is True
-            assert get_locked_after_response["d"]["responseData"]["sceneItemLocked"] is True
+            assert (
+                get_locked_after_response["d"]["responseData"]["sceneItemLocked"]
+                is True
+            )
 
             get_blend_mode_response = await _send_obsws_request(
                 ws,
@@ -1838,21 +1747,18 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
             assert scene_item_transform["boundsType"] == "OBS_BOUNDS_STRETCH"
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_input_mute_and_volume_requests(binary_path: Path):
     """obsws の入力ミュート・音量制御 API が正しく動作することを確認する"""
-    host = "127.0.0.1"
-    port, sock = reserve_ephemeral_port()
-    sock.close()
 
-    with ObswsServer(binary_path, host=host, port=port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         # まず入力を作成する
         create_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="CreateInput",
                 request_id="req-create",
                 request_data={
@@ -1869,7 +1775,7 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         # --- GetInputMute: 初期状態は false ---
         mute_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputMute",
                 request_id="req-get-mute",
                 request_data={"inputName": "mute-vol-test"},
@@ -1881,7 +1787,7 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         # --- SetInputMute: ミュート有効化 ---
         set_mute_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputMute",
                 request_id="req-set-mute",
                 request_data={"inputName": "mute-vol-test", "inputMuted": True},
@@ -1892,7 +1798,7 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         # --- GetInputMute: ミュート有効確認 ---
         mute_response2 = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputMute",
                 request_id="req-get-mute-2",
                 request_data={"inputName": "mute-vol-test"},
@@ -1903,7 +1809,7 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         # --- ToggleInputMute: トグルで false に戻る ---
         toggle_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="ToggleInputMute",
                 request_id="req-toggle-mute",
                 request_data={"inputName": "mute-vol-test"},
@@ -1915,7 +1821,7 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         # --- GetInputVolume: 初期状態は 0dB / 1.0 ---
         vol_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputVolume",
                 request_id="req-get-vol",
                 request_data={"inputName": "mute-vol-test"},
@@ -1929,7 +1835,7 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         # --- SetInputVolume: mul で設定 ---
         set_vol_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="SetInputVolume",
                 request_id="req-set-vol",
                 request_data={"inputName": "mute-vol-test", "inputVolumeMul": 0.5},
@@ -1940,7 +1846,7 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         # --- GetInputVolume: 0.5 mul ≈ -6.02 dB ---
         vol_response2 = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputVolume",
                 request_id="req-get-vol-2",
                 request_data={"inputName": "mute-vol-test"},
@@ -1954,7 +1860,7 @@ def test_obsws_input_mute_and_volume_requests(binary_path: Path):
         # （OBS 互換: GetInputList には inputMuted / inputVolumeMul は含めない）
         list_response = asyncio.run(
             _connect_identify_and_request(
-                f"ws://{host}:{port}/",
+                f"ws://{server.host}:{server.port}/",
                 request_type="GetInputList",
                 request_id="req-get-list",
             )

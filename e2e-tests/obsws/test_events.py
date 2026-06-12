@@ -35,9 +35,6 @@ def test_obsws_stream_events_are_sent_when_outputs_subscription_enabled(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が Outputs 購読時に StartStream / StopStream のイベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -50,7 +47,7 @@ def test_obsws_stream_events_are_sent_when_outputs_subscription_enabled(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -82,7 +79,7 @@ def test_obsws_stream_events_are_sent_when_outputs_subscription_enabled(
             await _expect_stream_state_changed_event(ws, output_active=False)
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -90,9 +87,6 @@ def test_obsws_stream_events_follow_reidentify_updates(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が Reidentify 後に更新した Outputs 購読設定でイベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -105,7 +99,7 @@ def test_obsws_stream_events_follow_reidentify_updates(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -143,7 +137,7 @@ def test_obsws_stream_events_follow_reidentify_updates(
             await _expect_stream_state_changed_event(ws, output_active=False)
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -151,9 +145,6 @@ def test_obsws_stream_events_are_not_sent_without_outputs_subscription(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が Outputs 非購読時は StartStream / StopStream のイベントを送らないことを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -166,7 +157,7 @@ def test_obsws_stream_events_are_not_sent_without_outputs_subscription(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -194,7 +185,7 @@ def test_obsws_stream_events_are_not_sent_without_outputs_subscription(
             await _assert_no_message_within(ws, timeout=0.5)
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -202,9 +193,6 @@ def test_obsws_toggle_stream_events_are_sent_when_outputs_subscription_enabled(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が Outputs 購読時に ToggleStream のイベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -217,7 +205,7 @@ def test_obsws_toggle_stream_events_are_sent_when_outputs_subscription_enabled(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -249,7 +237,7 @@ def test_obsws_toggle_stream_events_are_sent_when_outputs_subscription_enabled(
             await _expect_stream_state_changed_event(ws, output_active=False)
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -257,9 +245,6 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が Outputs 購読時に StartRecord / StopRecord のイベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     image_path = tmp_path / "record-event-input.png"
     _write_test_png(image_path)
@@ -268,7 +253,7 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -316,7 +301,7 @@ def test_obsws_record_events_are_sent_when_outputs_subscription_enabled(
             assert stop_event["d"]["eventData"]["outputPath"]
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -324,9 +309,6 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が Outputs 購読時に ToggleRecord のイベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     image_path = tmp_path / "toggle-record-event-input.png"
     _write_test_png(image_path)
@@ -335,7 +317,7 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -383,7 +365,7 @@ def test_obsws_toggle_record_events_are_sent_when_outputs_subscription_enabled(
             assert stop_event["d"]["eventData"]["outputPath"]
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -391,15 +373,12 @@ def test_obsws_scene_events_are_sent_when_scenes_subscription_enabled(
     binary_path: Path,
 ):
     """obsws が Scenes 購読時に Scene 関連イベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -466,7 +445,7 @@ def test_obsws_scene_events_are_sent_when_scenes_subscription_enabled(
             assert current_scene_event["d"]["eventData"]["sceneName"] == "Scene"
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -474,9 +453,6 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が Inputs 購読時に Input 関連イベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     image_path = tmp_path / "input-event-input.png"
     updated_image_path = tmp_path / "input-event-updated-input.png"
@@ -487,7 +463,7 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -534,9 +510,10 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 input_name="input-event-camera-renamed",
                 old_input_name="input-event-camera",
             )
-            assert input_name_changed_event["d"]["eventData"]["inputUuid"] == create_event["d"][
-                "eventData"
-            ]["inputUuid"]
+            assert (
+                input_name_changed_event["d"]["eventData"]["inputUuid"]
+                == create_event["d"]["eventData"]["inputUuid"]
+            )
 
             create_input_response_2 = await _send_obsws_request(
                 ws,
@@ -556,7 +533,9 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 event_type="InputCreated",
                 event_intent=OBSWS_EVENT_SUB_INPUTS,
             )
-            assert create_event_2["d"]["eventData"]["inputName"] == "input-event-camera-2"
+            assert (
+                create_event_2["d"]["eventData"]["inputName"] == "input-event-camera-2"
+            )
             assert "unversionedInputKind" in create_event_2["d"]["eventData"]
             assert "inputKindCaps" in create_event_2["d"]["eventData"]
             assert "inputSettings" in create_event_2["d"]["eventData"]
@@ -571,7 +550,9 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                     "newInputName": "input-event-camera-2",
                 },
             )
-            invalid_set_input_name_status = invalid_set_input_name_response["d"]["requestStatus"]
+            invalid_set_input_name_status = invalid_set_input_name_response["d"][
+                "requestStatus"
+            ]
             assert invalid_set_input_name_status["result"] is False
             assert invalid_set_input_name_status["code"] == 602
             await _assert_no_message_within(ws, timeout=0.5)
@@ -603,9 +584,9 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                     "inputSettings": {"file": 1},
                 },
             )
-            invalid_set_input_settings_status = invalid_set_input_settings_response["d"][
-                "requestStatus"
-            ]
+            invalid_set_input_settings_status = invalid_set_input_settings_response[
+                "d"
+            ]["requestStatus"]
             assert invalid_set_input_settings_status["result"] is False
             assert invalid_set_input_settings_status["code"] == 400
             await _assert_no_message_within(ws, timeout=0.5)
@@ -622,24 +603,24 @@ def test_obsws_input_events_are_sent_when_inputs_subscription_enabled(
                 event_type="InputRemoved",
                 event_intent=OBSWS_EVENT_SUB_INPUTS,
             )
-            assert remove_event["d"]["eventData"]["inputName"] == "input-event-camera-renamed"
+            assert (
+                remove_event["d"]["eventData"]["inputName"]
+                == "input-event-camera-renamed"
+            )
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_scene_events_follow_reidentify_updates(binary_path: Path):
     """obsws が Reidentify 後の Scenes 購読設定変更をイベント送信へ反映することを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(ws, None)
@@ -677,7 +658,7 @@ def test_obsws_scene_events_follow_reidentify_updates(binary_path: Path):
             assert set_scene_event["d"]["eventData"]["sceneName"] == "Scene C"
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -685,9 +666,6 @@ def test_obsws_scene_item_enabled_events_are_sent_when_scenes_subscription_enabl
     binary_path: Path, tmp_path: Path
 ):
     """obsws が SceneItems 購読時に SetSceneItemEnabled のイベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     image_path = tmp_path / "scene-item-event-input.png"
     _write_test_png(image_path)
@@ -696,7 +674,7 @@ def test_obsws_scene_item_enabled_events_are_sent_when_scenes_subscription_enabl
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -736,7 +714,9 @@ def test_obsws_scene_item_enabled_events_are_sent_when_scenes_subscription_enabl
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
-            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+            scene_item_id = get_scene_item_id_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             disable_response = await _send_obsws_request(
                 ws,
@@ -770,7 +750,7 @@ def test_obsws_scene_item_enabled_events_are_sent_when_scenes_subscription_enabl
             await _assert_no_message_within(ws, timeout=0.5)
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -778,15 +758,12 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
     binary_path: Path,
 ):
     """obsws が SceneItems 購読時に Scene Item 作成・削除・並び替えイベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -826,7 +803,9 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                     "sceneItemEnabled": True,
                 },
             )
-            assert create_scene_item_first_response["d"]["requestStatus"]["result"] is True
+            assert (
+                create_scene_item_first_response["d"]["requestStatus"]["result"] is True
+            )
             first_scene_item_id = create_scene_item_first_response["d"]["responseData"][
                 "sceneItemId"
             ]
@@ -835,7 +814,9 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 event_type="SceneItemCreated",
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
-            assert created_event_1["d"]["eventData"]["sceneItemId"] == first_scene_item_id
+            assert (
+                created_event_1["d"]["eventData"]["sceneItemId"] == first_scene_item_id
+            )
 
             create_scene_item_second_response = await _send_obsws_request(
                 ws,
@@ -847,16 +828,21 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                     "sceneItemEnabled": True,
                 },
             )
-            assert create_scene_item_second_response["d"]["requestStatus"]["result"] is True
-            second_scene_item_id = create_scene_item_second_response["d"]["responseData"][
-                "sceneItemId"
-            ]
+            assert (
+                create_scene_item_second_response["d"]["requestStatus"]["result"]
+                is True
+            )
+            second_scene_item_id = create_scene_item_second_response["d"][
+                "responseData"
+            ]["sceneItemId"]
             created_event_2 = await _expect_obsws_event(
                 ws,
                 event_type="SceneItemCreated",
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
-            assert created_event_2["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            assert (
+                created_event_2["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            )
 
             # insert(0) で追加されるため second が index=0、first が index=1
             # first を index=0 に移動して再インデックスイベントを確認する
@@ -877,7 +863,8 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
             reindexed_ids_1 = [
-                item["sceneItemId"] for item in reindexed_event_1["d"]["eventData"]["sceneItems"]
+                item["sceneItemId"]
+                for item in reindexed_event_1["d"]["eventData"]["sceneItems"]
             ]
             assert reindexed_ids_1[0] == first_scene_item_id
 
@@ -896,14 +883,17 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 event_type="SceneItemRemoved",
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
-            assert removed_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            assert (
+                removed_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            )
             reindexed_event_2 = await _expect_obsws_event(
                 ws,
                 event_type="SceneItemListReindexed",
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
             reindexed_ids_2 = [
-                item["sceneItemId"] for item in reindexed_event_2["d"]["eventData"]["sceneItems"]
+                item["sceneItemId"]
+                for item in reindexed_event_2["d"]["eventData"]["sceneItems"]
             ]
             assert second_scene_item_id not in reindexed_ids_2
 
@@ -918,18 +908,21 @@ def test_obsws_scene_item_events_are_sent_when_scenes_subscription_enabled(
                 },
             )
             assert duplicate_scene_item_response["d"]["requestStatus"]["result"] is True
-            duplicated_scene_item_id = duplicate_scene_item_response["d"]["responseData"][
-                "sceneItemId"
-            ]
+            duplicated_scene_item_id = duplicate_scene_item_response["d"][
+                "responseData"
+            ]["sceneItemId"]
             created_event_3 = await _expect_obsws_event(
                 ws,
                 event_type="SceneItemCreated",
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
-            assert created_event_3["d"]["eventData"]["sceneItemId"] == duplicated_scene_item_id
+            assert (
+                created_event_3["d"]["eventData"]["sceneItemId"]
+                == duplicated_scene_item_id
+            )
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -937,21 +930,19 @@ def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscri
     binary_path: Path,
 ):
     """obsws が SceneItems / SceneItemTransformChanged 購読時に Scene Item lock / transform イベントを送ることを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
                 ws,
                 None,
-                event_subscriptions=OBSWS_EVENT_SUB_SCENE_ITEMS | OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
+                event_subscriptions=OBSWS_EVENT_SUB_SCENE_ITEMS
+                | OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
             )
 
             create_input_response = await _send_obsws_request(
@@ -991,7 +982,9 @@ def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscri
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
-            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+            scene_item_id = get_scene_item_id_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             set_locked_response = await _send_obsws_request(
                 ws,
@@ -1065,7 +1058,7 @@ def test_obsws_scene_item_lock_and_transform_events_are_sent_when_scenes_subscri
             await _assert_no_message_within(ws, timeout=0.5)
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -1073,15 +1066,12 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
     binary_path: Path,
 ):
     """obsws が末尾 Scene Item 削除時に再インデックスイベントを送らないことを確認する"""
-    host = "127.0.0.1"
-    ws_port, ws_sock = reserve_ephemeral_port()
-    ws_sock.close()
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
-                f"ws://{host}:{ws_port}/",
+                f"ws://{server.host}:{server.port}/",
                 protocols=[OBSWS_SUBPROTOCOL],
             )
             await _identify_with_optional_password(
@@ -1105,7 +1095,9 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
             assert create_input_response["d"]["requestStatus"]["result"] is True
             source_uuid = create_input_response["d"]["responseData"]["inputUuid"]
             # CreateInput の sceneItemId は末尾確認に使用する
-            first_scene_item_id = create_input_response["d"]["responseData"]["sceneItemId"]
+            first_scene_item_id = create_input_response["d"]["responseData"][
+                "sceneItemId"
+            ]
             # CreateInput 時に SceneItemCreated イベントが送信されるので消費する
             await _expect_obsws_event(
                 ws,
@@ -1123,16 +1115,21 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
                     "sceneItemEnabled": True,
                 },
             )
-            assert create_scene_item_second_response["d"]["requestStatus"]["result"] is True
-            second_scene_item_id = create_scene_item_second_response["d"]["responseData"][
-                "sceneItemId"
-            ]
+            assert (
+                create_scene_item_second_response["d"]["requestStatus"]["result"]
+                is True
+            )
+            second_scene_item_id = create_scene_item_second_response["d"][
+                "responseData"
+            ]["sceneItemId"]
             created_event = await _expect_obsws_event(
                 ws,
                 event_type="SceneItemCreated",
                 event_intent=OBSWS_EVENT_SUB_SCENE_ITEMS,
             )
-            assert created_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            assert (
+                created_event["d"]["eventData"]["sceneItemId"] == second_scene_item_id
+            )
 
             # insert(0) で追加されるため、second が index=0、first が index=1（末尾）
             # 末尾のアイテムを削除して再インデックスイベントが送信されないことを確認する
@@ -1169,8 +1166,10 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
                     "unexpected SceneItemListReindexed after tail remove: "
                     f"{next_payload}"
                 )
-                raise AssertionError(f"unexpected text message after tail remove: {next_payload}")
+                raise AssertionError(
+                    f"unexpected text message after tail remove: {next_payload}"
+                )
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, port=ws_port, use_env=False):
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
