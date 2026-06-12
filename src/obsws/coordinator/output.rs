@@ -683,7 +683,7 @@ pub(crate) async fn wait_or_terminate(
         return Ok(());
     }
     // タイムアウトしても自然終了しなかったプロセッサを強制終了する。
-    // mp4 writer がこの経路に入ると finalize 未完了（標準 MP4 化されず fMP4 形式のまま）になるため warn を出す。
+    // mp4 writer がこの経路に入るとファイナライズ未完了（標準 MP4 化されず fMP4 形式のまま）になるため warn を出す。
     tracing::warn!(
         "force terminating processors that did not stop within timeout: {:?}",
         live

@@ -1144,7 +1144,7 @@ async fn stop_processors_staged_hls(
 ) -> crate::Result<()> {
     // NOTE:
     // ライブ用途では StopOutput / ToggleOutput への応答遅延を避けることを優先し、
-    // ここでは writer に finalize / cleanup を先行させる。
+    // ここでは writer にファイナライズ / クリーンアップを先行させる。
     // この経路は上流 encoder / scaler の完全 drain を保証しないため、
     // 停止直前の数フレームが最終セグメントに含まれない可能性がある。
     //
@@ -1272,7 +1272,7 @@ async fn stop_processors_staged_hls(
     Ok(())
 }
 
-/// HLS writer に Finish RPC を送り、finalize / cleanup を促す。
+/// HLS writer に Finish RPC を送り、ファイナライズ / クリーンアップを促す。
 /// これは writer 側の入力購読を閉じるためのもので、上流の完全 drain は保証しない。
 /// 失敗時は terminate にフォールバックする。
 async fn finish_hls_writer_rpc(

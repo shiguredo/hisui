@@ -1072,7 +1072,7 @@ async fn stop_processors_staged_dash(
 ) -> crate::Result<()> {
     // NOTE:
     // ライブ用途では StopOutput / ToggleOutput への応答遅延を避けることを優先し、
-    // ここでは writer に finalize / cleanup を先行させる。
+    // ここでは writer にファイナライズ / クリーンアップを先行させる。
     // この経路は上流 encoder / scaler の完全 drain を保証しないため、
     // 停止直前の数フレームが最終 segment や MPD に反映されない可能性がある。
     //
@@ -1081,7 +1081,7 @@ async fn stop_processors_staged_dash(
     // 上流から EOS 相当を伝播させる明示的な finish 経路が必要になる。
     // terminate_processor() は abort ベースで停止するだけなので、
     // encoder / scaler の残フレーム排出には使えない。
-    // 1. 各 writer に finalize / cleanup を要求し、停止を待つ。
+    // 1. 各 writer にファイナライズ / クリーンアップを要求し、停止を待つ。
     let writer_ids: Vec<crate::ProcessorId> = run
         .variant_runs
         .iter()
@@ -1138,7 +1138,7 @@ async fn stop_processors_staged_dash(
     Ok(())
 }
 
-/// DASH writer に Finish RPC を送り、finalize / cleanup を促す。
+/// DASH writer に Finish RPC を送り、ファイナライズ / クリーンアップを促す。
 /// これは writer 側の入力購読を閉じるためのもので、上流の完全 drain は保証しない。
 /// 失敗時は terminate にフォールバックする。
 async fn finish_dash_writer_rpc(

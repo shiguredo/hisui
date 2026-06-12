@@ -32,7 +32,7 @@ struct HlsWriterStats {
 }
 
 pub enum HlsWriterRpcMessage {
-    /// 入力を明示的に閉じ、finalize / cleanup に進ませる。
+    /// 入力を明示的に閉じ、ファイナライズ / クリーンアップに進ませる。
     /// 上流の残フレームをすべて受け切ることまでは保証しない。
     Finish {
         reply_tx: tokio::sync::oneshot::Sender<()>,
@@ -313,7 +313,7 @@ enum FormatState {
 
 /// MPEG-TS フォーマット固有の状態
 struct MpegTsState {
-    /// 現在のセグメントのライター（バッファに蓄積し、finalize 時に storage に書き出す）
+    /// 現在のセグメントのライター（バッファに蓄積し、ファイナライズ時に storage に書き出す）
     current_writer: Option<TsPacketWriter<Vec<u8>>>,
     pat_cc: ContinuityCounter,
     pmt_cc: ContinuityCounter,
@@ -489,7 +489,7 @@ impl HlsWriter {
                     };
                     match rpc_message {
                         HlsWriterRpcMessage::Finish { reply_tx } => {
-                            // 入力購読を閉じてループ脱出後の finalize / cleanup を実行する。
+                            // 入力購読を閉じてループ脱出後のファイナライズ / クリーンアップを実行する。
                             // 上流の残フレーム排出は別途保証していない。
                             audio_rx = None;
                             video_rx = None;
@@ -500,7 +500,7 @@ impl HlsWriter {
             }
         }
 
-        // EOS 受信後: 現在のセグメントを finalize してから cleanup
+        // EOS 受信後: 現在のセグメントをファイナライズしてからクリーンアップ
         if let Err(e) = self.finalize_current_segment().await {
             tracing::warn!("HLS finalize error on EOS: {}", e.display());
         }

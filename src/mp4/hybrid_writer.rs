@@ -30,7 +30,7 @@ const HYBRID_FREE_BOX_RESERVED_SIZE: usize = 512 * 1024;
 // ftyp ボックスの予約サイズ（バイト単位）
 //
 // 初期 ftyp は isom/iso2/mp41 の 3 ブランドで 28 バイトだが、
-// finalize 時にコーデック固有のブランド（avc1, hev1 等）が追加されうるため、
+// ファイナライズ時にコーデック固有のブランド（avc1, hev1 等）が追加されうるため、
 // 拡張用のスペースを確保しておく。
 const FTYP_RESERVED_SIZE: u64 = 64;
 
@@ -47,7 +47,7 @@ const HYBRID_FRAGMENT_MAX_DURATION: Duration = Duration::from_secs(2);
 ///
 /// ファイルレイアウト:
 /// - 録画中: `[ftyp][moov(fMP4用)][free][moof1][mdat1][moof2][mdat2]...`
-/// - finalize 後: `[ftyp][mdat(全データ)][moov(標準MP4)]`
+/// - ファイナライズ後: `[ftyp][mdat(全データ)][moov(標準MP4)]`
 #[derive(Debug)]
 pub struct HybridMp4Writer {
     file: BufWriter<File>,
@@ -56,7 +56,7 @@ pub struct HybridMp4Writer {
     fmp4_muxer: Fmp4SegmentMuxer,
     // 最初の実フラッシュ前に recovery 用 moov を先行更新するための専用 muxer
     initial_recovery_muxer: Option<Fmp4SegmentMuxer>,
-    // finalize 時の標準 MP4 moov 生成用
+    // ファイナライズ時の標準 MP4 moov 生成用
     mp4_muxer: Mp4FileMuxer,
 
     // ファイルレイアウト
@@ -98,7 +98,7 @@ impl HybridMp4Writer {
         let fmp4_muxer =
             Fmp4SegmentMuxer::with_options(SegmentMuxerOptions { creation_timestamp })?;
 
-        // finalize 時の標準 MP4 moov 生成用 muxer
+        // ファイナライズ時の標準 MP4 moov 生成用 muxer
         let mut mp4_muxer = Mp4FileMuxer::with_options(Mp4FileMuxerOptions {
             creation_timestamp,
             reserved_moov_box_size: 0,
@@ -113,7 +113,7 @@ impl HybridMp4Writer {
             .open(path)?;
 
         // ftyp ボックスを書き出す
-        // finalize 時にコーデック固有ブランドで更新するため、拡張用の free ボックスを後続に配置する
+        // ファイナライズ時にコーデック固有ブランドで更新するため、拡張用の free ボックスを後続に配置する
         let ftyp_box = FtypBox {
             major_brand: Brand::ISOM,
             minor_version: 0,
@@ -508,9 +508,9 @@ impl HybridMp4Writer {
         Ok(())
     }
 
-    /// 録画を finalize して標準 MP4 に変換する
+    /// 録画をファイナライズして標準 MP4 に変換する
     fn finalize(&mut self) -> crate::Result<()> {
-        // finalize の成否をカウンタに記録する。failure (内部 Err) は標準 MP4 への変換が
+        // ファイナライズの成否をカウンタに記録する。failure (内部 Err) は標準 MP4 への変換が
         // 未完了で、出力が fMP4 形式のまま残ることを示すため、success と分けて観測できるようにする。
         let result = self.convert_to_standard_mp4();
         if result.is_ok() {
@@ -526,7 +526,7 @@ impl HybridMp4Writer {
         // 残りのフラグメントをフラッシュ
         self.flush_fragment()?;
 
-        // mp4_muxer を finalize して標準 MP4 の moov と更新済み ftyp を取得する
+        // mp4_muxer をファイナライズして標準 MP4 の moov と更新済み ftyp を取得する
         let finalized = self.mp4_muxer.finalize()?;
         let actual_moov_size = finalized.moov_box_size() as u64;
         self.core.stats.set_actual_moov_box_size(actual_moov_size);
@@ -598,7 +598,7 @@ impl HybridMp4Writer {
                 {
                     return Ok(true);
                 }
-                // 全入力の処理が完了 → finalize
+                // 全入力の処理が完了 → ファイナライズ
                 self.finalize()?;
                 return Ok(false);
             }
@@ -1033,10 +1033,10 @@ pub async fn create_processor(
                 let result = writer
                     .run(h, input_audio_track_id, input_video_track_id)
                     .await;
-                // run() が Err 終了すると finalize（標準 MP4 への変換）に到達できず、ファイルは
+                // run() が Err 終了するとファイナライズ（標準 MP4 への変換）に到達できず、ファイルは
                 // 録画中の fMP4 形式のまま残る（最後に flush 済みのフラグメントまでは読める）。
                 // run() の Err 自体は spawn_processor 側で error フラグと error ログに反映されるが、
-                // その error ログには「fMP4 として読める可能性がある」という finalize 固有の回復可能性の
+                // その error ログには「fMP4 として読める可能性がある」というファイナライズ固有の回復可能性の
                 // 文脈が無い。ここではその文脈を明示するため warn を追加で出す。
                 if let Err(e) = &result {
                     tracing::warn!(
@@ -1254,8 +1254,8 @@ mod tests {
     #[test]
     fn hybrid_writer_finalizes_readable_streams_with_per_frame_sample_entry() -> crate::Result<()> {
         // issue 0017 / 0030 の修正後の挙動: 音声・映像とも全フレームに sample_entry が載るため、フラグメント
-        // 先頭サンプルにも必ずサンプルエントリーがあり、finalize 後の標準 MP4 から音声・映像両トラックを
-        // 読み戻せることを検証する (取りこぼしによる finalize 失敗・映像トラック空の回帰防止)。
+        // 先頭サンプルにも必ずサンプルエントリーがあり、ファイナライズ後の標準 MP4 から音声・映像両トラックを
+        // 読み戻せることを検証する (取りこぼしによるファイナライズ失敗・映像トラック空の回帰防止)。
         // 加えて、読み戻したフレームの sample_entry が初回フレームと等価であることも確認し、
         // reader が dummy SampleEntry を毎回新規生成しても素通りしないようにする。
         let temp_dir = tempfile::tempdir()?;
@@ -1339,7 +1339,7 @@ mod tests {
     #[test]
     fn hybrid_writer_finalizes_readable_streams_across_fragments() -> crate::Result<()> {
         // 不変条件下でフラグメント境界をまたぐシナリオの回帰防止。
-        // 複数フラグメントを生成 → finalize し、全フラグメントの全フレーム（先頭・後続を問わず）
+        // 複数フラグメントを生成 → ファイナライズし、全フラグメントの全フレーム（先頭・後続を問わず）
         // に sample_entry が載っていること、かつ初回 sample_entry と等価であることを検証する。
         // 各フラグメントの先頭サンプルへの sample_entry 付与は muxer の必須要件なので、
         // フラグメント境界をまたぐ経路は特に回帰しやすい。
@@ -1384,7 +1384,7 @@ mod tests {
         );
         writer.flush_fragment()?;
 
-        // フラグメント 3: 音声 1 + 映像 1 (flush せず finalize で書き出す)
+        // フラグメント 3: 音声 1 + 映像 1 (flush せずファイナライズで書き出す)
         writer.append_audio_to_fragment(
             &make_audio_frame(Some(audio_sample_entry)),
             DEFAULT_SAMPLE_DURATION,

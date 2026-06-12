@@ -28,7 +28,7 @@ struct DashWriterStats {
 }
 
 pub enum DashWriterRpcMessage {
-    /// 入力を明示的に閉じ、finalize / cleanup に進ませる。
+    /// 入力を明示的に閉じ、ファイナライズ / クリーンアップに進ませる。
     /// 上流の残フレームをすべて受け切ることまでは保証しない。
     Finish {
         reply_tx: tokio::sync::oneshot::Sender<()>,
@@ -428,7 +428,7 @@ impl DashWriter {
                     };
                     match rpc_message {
                         DashWriterRpcMessage::Finish { reply_tx } => {
-                            // 入力購読を閉じてループ脱出後の finalize / cleanup を実行する。
+                            // 入力購読を閉じてループ脱出後のファイナライズ / クリーンアップを実行する。
                             // 上流の残フレーム排出は別途保証していない。
                             audio_rx = None;
                             video_rx = None;
@@ -439,7 +439,7 @@ impl DashWriter {
             }
         }
 
-        // EOS 受信後: 現在のセグメントを finalize してから cleanup
+        // EOS 受信後: 現在のセグメントをファイナライズしてからクリーンアップ
         if let Err(e) = self.finalize_current_segment().await {
             tracing::warn!("DASH finalize error on EOS: {}", e.display());
         }
