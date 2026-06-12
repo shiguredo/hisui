@@ -171,18 +171,23 @@ codec_string 解決ブロック（映像 `:549-559`・音声 `:638-647`）は保
   - rtsp 音声: 連続 AAC AU に対して全フレームが `Some` を持つこと
   - srt 音声: `last_aac_config_key` 変化時も連続時も全フレームが `Some` を持つこと
 - writer テスト削除（`src/mp4/hybrid_writer.rs` の `#[cfg(test)] mod tests`）:
-  - `hybrid_writer_counts_missing_sample_entry_for_fragment_first_sample`（`:1420`）
-  - `hybrid_writer_counts_finalize_failure_on_missing_sample_entry`（`:1451`）
-  - `hybrid_writer_counts_missing_video_sample_entry_for_first_sample`（`:1483`）
-- writer テスト残置（`last_*_sample_entry` フィールドとカウンタ計上を 0030 で残すため、以下は変更不要）:
-  - `hybrid_writer_keeps_audio_sample_entry_across_fragments`（`:1137`）
-  - `hybrid_writer_keeps_video_sample_entry_across_fragments`（`:1550`）
-  - `hybrid_writer_captures_audio_sample_entry_at_ingress`（`:1166`）
-  - `hybrid_writer_captures_video_sample_entry_at_ingress`（`:1514`）
+  - missing カウンタ関連（`add_missing_*_sample_entry` 呼び出し削除でテスト対象が消えるため）:
+    - `hybrid_writer_counts_missing_sample_entry_for_fragment_first_sample`（`:1420`）
+    - `hybrid_writer_counts_finalize_failure_on_missing_sample_entry`（`:1451`）
+    - `hybrid_writer_counts_missing_video_sample_entry_for_first_sample`（`:1483`）
+  - `.or_else()` フォールバック関連（`append_*_to_fragment` 内のフォールバック削除でテスト対象が消えるため）:
+    - `hybrid_writer_keeps_audio_sample_entry_across_fragments`（`:1137`）
+    - `hybrid_writer_keeps_video_sample_entry_across_fragments`（`:1550`）
+    - `hybrid_writer_captures_audio_sample_entry_at_ingress`（`:1166`）
+    - `hybrid_writer_captures_video_sample_entry_at_ingress`（`:1514`）
+  - `captures_*_at_ingress` は `last_*_sample_entry` フィールド代入・received カウンタ計上・finalize 成功・フォールバック補完の 4 要素を 1 テストで検証していた。フォールバック補完以外の 3 要素は以下で間接的にカバーされる:
+    - フィールド代入と received カウンタ計上は `hybrid_writer_received_*_sample_entry_counts_only_changes` の `changed_since` 判定で検証される
+    - finalize 成功は writer テスト更新で扱う `hybrid_writer_finalizes_readable_streams_with_per_frame_sample_entry` で検証される
+- writer テスト残置（`last_*_sample_entry` フィールドと received カウンタ計上を 0030 で残すため、以下は変更不要）:
   - `hybrid_writer_received_audio_sample_entry_counts_only_changes`（`:1221`）
   - `hybrid_writer_received_video_sample_entry_counts_only_changes`（`:1287`）
 - writer テスト更新:
-  - `hybrid_writer_finalizes_readable_audio_with_per_frame_sample_entry`（`:1364`）は不変条件下の正常 finalize パスを守る回帰防止テストとして残す。`total_missing_audio_sample_entry_count` のアサート（`:1398-1402` 付近）と直前の解説コメントを削除（カウンタ呼び出しが消えるため）
+  - `hybrid_writer_finalizes_readable_audio_with_per_frame_sample_entry`（`:1364`）は不変条件下の正常 finalize パスを守る回帰防止テストとして残す。`total_missing_audio_sample_entry_count` のアサート（`:1398-1402` 付近）と直前の解説コメントを削除（カウンタ呼び出しが消えるため）。本 issue で映像トラックの読み戻しと初回フレームとの sample_entry 等価性検証（`SharedSampleEntry::changed_since`）を追加し、テスト名を `hybrid_writer_finalizes_readable_streams_with_per_frame_sample_entry` に改名する
 - 統合テスト: `HybridMp4Writer` で fMP4 セグメントを生成 → finalize → `Mp4AudioReader::new` / `Mp4VideoReader::new` で読み戻し、全フレームに `Some(SampleEntry)` が載っていることを assert する新規テストを追加する。既存 `tests/writer_mp4_tests.rs` は `Mp4Writer`（標準 MP4）専用なので、`HybridMp4Writer` 用テストファイルは新規追加か `src/mp4/hybrid_writer.rs` の `#[cfg(test)] mod tests` 内追加とする
 
 ### CHANGES.md
