@@ -11,5 +11,7 @@ publish = false
 hisui = { path = ".." }
 # JSON Lines のラウンドトリップ検証用
 nojson = { workspace = true }
+# sample_entry PBT で SampleEntry / UnknownBox を直接構築するため
+shiguredo_mp4 = { workspace = true }
 # Property-Based Testing 本体
 proptest = "1.11"

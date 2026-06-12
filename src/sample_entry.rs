@@ -34,6 +34,16 @@ impl SharedSampleEntry {
         &self.0
     }
 
+    /// 2 つの `SharedSampleEntry` が同一の `Arc` を共有しているかを判定する。
+    ///
+    /// fallback 補完値が直前の正常フレームの sample_entry を Arc 共有で保持できているかの
+    /// テスト用途を想定する。`changed_since` の `Arc::ptr_eq` 短絡経路が崩れた場合
+    /// （`get().clone()` で再 wrap する実装に書き換わるなど）に検知できるよう、Arc の同一性
+    /// だけを観測できる API として用意する。
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// 直前の entry から変化したかを判定する。
     ///
     /// - `prev` が `None`（初回）なら、まだ何も確定していないので変化ありとして `true` を返す。
@@ -64,7 +74,7 @@ impl SharedSampleEntry {
 /// `T` は `Patched` でのみ使用するが、enum シグネチャ上は呼び出し側で型を統一するため
 /// 全バリアントで `T` を持たせている（Pass / Skip 自体は値を持たない）。
 #[derive(Debug)]
-pub(crate) enum SampleEntryResolution<T> {
+pub enum SampleEntryResolution<T> {
     /// 通常パス。元のフレームをそのまま下流に渡す（既に `sample_entry` を持っているか、
     /// 圧縮対象外で違反検知の対象外）。
     Pass,
@@ -94,7 +104,7 @@ pub(crate) enum SampleEntryResolution<T> {
 ///
 /// 警告ログ（`tracing::warn!`）は呼び出し側の writer ごとに静的メッセージで出すため、
 /// この関数では出力しない。
-pub(crate) fn resolve_audio_sample_entry(
+pub fn resolve_audio_sample_entry(
     sample: &AudioFrame,
     fallback: &mut Option<SharedSampleEntry>,
 ) -> SampleEntryResolution<AudioFrame> {
@@ -125,7 +135,7 @@ pub(crate) fn resolve_audio_sample_entry(
 }
 
 /// 同 [`resolve_audio_sample_entry`] の映像用。挙動と戻り値の意味は同じ。
-pub(crate) fn resolve_video_sample_entry(
+pub fn resolve_video_sample_entry(
     frame: &VideoFrame,
     fallback: &mut Option<SharedSampleEntry>,
 ) -> SampleEntryResolution<VideoFrame> {
@@ -152,12 +162,16 @@ pub(crate) fn resolve_video_sample_entry(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use shiguredo_mp4::{
         BoxSize, BoxType,
         boxes::{SampleEntry, UnknownBox},
     };
 
     use super::*;
+    use crate::audio::{AudioFormat, Channels, SampleRate};
+    use crate::video::{VideoFormat, VideoFrameSize};
 
     // テスト用の SampleEntry を作る。payload の中身で実体の違いを作り分ける。
     fn make_sample_entry(payload: &[u8]) -> SampleEntry {
@@ -166,6 +180,39 @@ mod tests {
             box_size: BoxSize::U32(8 + payload.len() as u32),
             payload: payload.to_vec(),
         })
+    }
+
+    // 指定したフォーマットと sample_entry でテスト用の `AudioFrame` を作る。
+    fn make_audio_frame(
+        format: AudioFormat,
+        sample_entry: Option<SharedSampleEntry>,
+    ) -> AudioFrame {
+        AudioFrame {
+            data: vec![0x11, 0x22, 0x33],
+            format,
+            channels: Channels::STEREO,
+            sample_rate: SampleRate::HZ_48000,
+            timestamp: Duration::ZERO,
+            sample_entry,
+        }
+    }
+
+    // 指定したフォーマットと sample_entry でテスト用の `VideoFrame` を作る。
+    fn make_video_frame(
+        format: VideoFormat,
+        sample_entry: Option<SharedSampleEntry>,
+    ) -> VideoFrame {
+        VideoFrame {
+            data: vec![0x00, 0x00, 0x00, 0x01],
+            format,
+            keyframe: true,
+            size: Some(VideoFrameSize {
+                width: 16,
+                height: 16,
+            }),
+            timestamp: Duration::ZERO,
+            sample_entry,
+        }
     }
 
     #[test]
@@ -197,5 +244,152 @@ mod tests {
         // payload が異なるので実体比較で相違が出る。
         let b = SharedSampleEntry::new(make_sample_entry(&[0x02]));
         assert!(a.changed_since(Some(&b)));
+    }
+
+    #[test]
+    fn ptr_eq_returns_true_for_clone() {
+        // clone した SharedSampleEntry は同一の Arc を指す。
+        let a = SharedSampleEntry::new(make_sample_entry(&[0x01]));
+        let b = a.clone();
+        assert!(a.ptr_eq(&b));
+    }
+
+    #[test]
+    fn ptr_eq_returns_false_for_separately_constructed() {
+        // 同一内容でも別々に new した場合は別の Arc になり、ptr_eq は false。
+        let a = SharedSampleEntry::new(make_sample_entry(&[0x01]));
+        let b = SharedSampleEntry::new(make_sample_entry(&[0x01]));
+        assert!(!a.ptr_eq(&b));
+    }
+
+    #[test]
+    fn resolve_audio_passes_through_raw_format_without_touching_fallback() {
+        // 生フォーマット（codec_name == None）は不変条件の対象外。
+        // sample_entry の有無に関係なく Pass を返し、fallback も更新しない。
+        let sample = make_audio_frame(AudioFormat::I16Be, None);
+        let mut fallback: Option<SharedSampleEntry> = None;
+        let resolution = resolve_audio_sample_entry(&sample, &mut fallback);
+        assert!(matches!(resolution, SampleEntryResolution::Pass));
+        assert!(
+            fallback.is_none(),
+            "生フォーマットでは fallback を更新しないこと"
+        );
+    }
+
+    #[test]
+    fn resolve_audio_updates_fallback_with_shared_arc_on_normal_pass() {
+        // 通常パス（圧縮 + sample_entry == Some）: fallback が同一 Arc で更新される。
+        let entry = SharedSampleEntry::new(make_sample_entry(&[0x01]));
+        let sample = make_audio_frame(AudioFormat::Aac, Some(entry.clone()));
+        let mut fallback: Option<SharedSampleEntry> = None;
+        let resolution = resolve_audio_sample_entry(&sample, &mut fallback);
+        assert!(matches!(resolution, SampleEntryResolution::Pass));
+        let stored = fallback.expect("通常パスで fallback が Some になること");
+        assert!(
+            stored.ptr_eq(&entry),
+            "fallback は元の sample_entry と同一 Arc を共有していること"
+        );
+    }
+
+    #[test]
+    fn resolve_audio_returns_patched_with_shared_arc_when_fallback_available() {
+        // 違反パス（圧縮 + sample_entry == None）+ fallback Some: 補完済みフレームが返る。
+        // patched.sample_entry は fallback と同一 Arc を共有していること。
+        let fb_entry = SharedSampleEntry::new(make_sample_entry(&[0x02]));
+        let sample = make_audio_frame(AudioFormat::Aac, None);
+        let mut fallback = Some(fb_entry.clone());
+        let resolution = resolve_audio_sample_entry(&sample, &mut fallback);
+        let patched = match resolution {
+            SampleEntryResolution::Patched(p) => p,
+            other => panic!("Patched が返ること（実際: {other:?}）"),
+        };
+        let patched_entry = patched
+            .sample_entry
+            .as_ref()
+            .expect("補完済みフレームには sample_entry がある");
+        assert!(
+            patched_entry.ptr_eq(&fb_entry),
+            "patched の sample_entry が fallback と同一 Arc を共有していること"
+        );
+        // fallback 自体は補完で消費しても変化しない（次の正常フレームで更新されるまで保持）。
+        let after = fallback.expect("違反パスでも fallback は保持され続けること");
+        assert!(after.ptr_eq(&fb_entry));
+    }
+
+    #[test]
+    fn resolve_audio_returns_skip_when_fallback_unset() {
+        // 違反パス + fallback None: Skip を返し、fallback は None のまま。
+        let sample = make_audio_frame(AudioFormat::Aac, None);
+        let mut fallback: Option<SharedSampleEntry> = None;
+        let resolution = resolve_audio_sample_entry(&sample, &mut fallback);
+        assert!(matches!(resolution, SampleEntryResolution::Skip));
+        assert!(
+            fallback.is_none(),
+            "fallback 未確立のままなので Skip 後も None のまま"
+        );
+    }
+
+    #[test]
+    fn resolve_video_passes_through_raw_format_without_touching_fallback() {
+        // 生フォーマット（I420）は不変条件の対象外。Pass + fallback 未更新。
+        let frame = make_video_frame(VideoFormat::I420, None);
+        let mut fallback: Option<SharedSampleEntry> = None;
+        let resolution = resolve_video_sample_entry(&frame, &mut fallback);
+        assert!(matches!(resolution, SampleEntryResolution::Pass));
+        assert!(
+            fallback.is_none(),
+            "生フォーマットでは fallback を更新しないこと"
+        );
+    }
+
+    #[test]
+    fn resolve_video_updates_fallback_with_shared_arc_on_normal_pass() {
+        // 通常パス: fallback が同一 Arc で更新される。
+        let entry = SharedSampleEntry::new(make_sample_entry(&[0x0A]));
+        let frame = make_video_frame(VideoFormat::Av1, Some(entry.clone()));
+        let mut fallback: Option<SharedSampleEntry> = None;
+        let resolution = resolve_video_sample_entry(&frame, &mut fallback);
+        assert!(matches!(resolution, SampleEntryResolution::Pass));
+        let stored = fallback.expect("通常パスで fallback が Some になること");
+        assert!(
+            stored.ptr_eq(&entry),
+            "fallback は元の sample_entry と同一 Arc を共有していること"
+        );
+    }
+
+    #[test]
+    fn resolve_video_returns_patched_with_shared_arc_when_fallback_available() {
+        // 違反パス + fallback Some: 補完済みフレームが返り、Arc を共有する。
+        let fb_entry = SharedSampleEntry::new(make_sample_entry(&[0x0B]));
+        let frame = make_video_frame(VideoFormat::Av1, None);
+        let mut fallback = Some(fb_entry.clone());
+        let resolution = resolve_video_sample_entry(&frame, &mut fallback);
+        let patched = match resolution {
+            SampleEntryResolution::Patched(p) => p,
+            other => panic!("Patched が返ること（実際: {other:?}）"),
+        };
+        let patched_entry = patched
+            .sample_entry
+            .as_ref()
+            .expect("補完済みフレームには sample_entry がある");
+        assert!(
+            patched_entry.ptr_eq(&fb_entry),
+            "patched の sample_entry が fallback と同一 Arc を共有していること"
+        );
+        let after = fallback.expect("違反パスでも fallback は保持され続けること");
+        assert!(after.ptr_eq(&fb_entry));
+    }
+
+    #[test]
+    fn resolve_video_returns_skip_when_fallback_unset() {
+        // 違反パス + fallback None: Skip を返し、fallback は None のまま。
+        let frame = make_video_frame(VideoFormat::Av1, None);
+        let mut fallback: Option<SharedSampleEntry> = None;
+        let resolution = resolve_video_sample_entry(&frame, &mut fallback);
+        assert!(matches!(resolution, SampleEntryResolution::Skip));
+        assert!(
+            fallback.is_none(),
+            "fallback 未確立のままなので Skip 後も None のまま"
+        );
     }
 }

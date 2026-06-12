@@ -1205,9 +1205,24 @@ mod tests {
             .sample_entry
             .as_ref()
             .expect("補完されたフレームには sample_entry がある");
+        // 等価だけでなく同一 Arc を共有していることを確認する（changed_since の ptr_eq
+        // 短絡経路が壊れた場合、例えば fallback で生 SampleEntry を取り出して再 wrap する
+        // 実装に書き換わった場合に検知できるよう、Arc::ptr_eq ベースで assert する）。
         assert!(
-            !second_entry.changed_since(Some(first_entry)),
-            "補完された sample_entry が先頭と等価であること"
+            first_entry.ptr_eq(&shared_entry),
+            "先頭フレームの sample_entry が投入した shared_entry と同一 Arc を共有していること"
+        );
+        assert!(
+            second_entry.ptr_eq(&shared_entry),
+            "補完された sample_entry が投入した shared_entry と同一 Arc を共有していること"
+        );
+        let fallback = writer
+            .fallback_audio_sample_entry
+            .as_ref()
+            .expect("通常パスで fallback が確立される");
+        assert!(
+            fallback.ptr_eq(&shared_entry),
+            "fallback も同一 Arc を共有していること"
         );
         Ok(())
     }
@@ -1269,8 +1284,20 @@ mod tests {
             .as_ref()
             .expect("補完されたフレームには sample_entry がある");
         assert!(
-            !second_entry.changed_since(Some(first_entry)),
-            "補完された sample_entry が先頭と等価であること"
+            first_entry.ptr_eq(&shared_entry),
+            "先頭フレームの sample_entry が投入した shared_entry と同一 Arc を共有していること"
+        );
+        assert!(
+            second_entry.ptr_eq(&shared_entry),
+            "補完された sample_entry が投入した shared_entry と同一 Arc を共有していること"
+        );
+        let fallback = writer
+            .fallback_video_sample_entry
+            .as_ref()
+            .expect("通常パスで fallback が確立される");
+        assert!(
+            fallback.ptr_eq(&shared_entry),
+            "fallback も同一 Arc を共有していること"
         );
         Ok(())
     }
@@ -1317,15 +1344,27 @@ mod tests {
         );
 
         // 続く正常フレーム: fallback を確立してキューに積まれる。
-        send(&mut writer, Some(shared_entry))?;
+        send(&mut writer, Some(shared_entry.clone()))?;
+        let fallback = writer
+            .fallback_audio_sample_entry
+            .as_ref()
+            .expect("後続の正常フレームで fallback が確立すること");
         assert!(
-            writer.fallback_audio_sample_entry.is_some(),
-            "後続の正常フレームで fallback が確立すること"
+            fallback.ptr_eq(&shared_entry),
+            "fallback が投入した shared_entry と同一 Arc を共有していること"
         );
         assert_eq!(
             writer.core.input_audio_queue.len(),
             1,
             "後続の正常フレームのみがキューに積まれること"
+        );
+        let queued_entry = writer.core.input_audio_queue[0]
+            .sample_entry
+            .as_ref()
+            .expect("正常フレームには sample_entry がある");
+        assert!(
+            queued_entry.ptr_eq(&shared_entry),
+            "キュー内のフレームの sample_entry も同一 Arc を共有していること"
         );
         Ok(())
     }
@@ -1371,15 +1410,27 @@ mod tests {
             "先頭違反フレームは skip されてキューに積まれないこと"
         );
 
-        send(&mut writer, Some(shared_entry))?;
+        send(&mut writer, Some(shared_entry.clone()))?;
+        let fallback = writer
+            .fallback_video_sample_entry
+            .as_ref()
+            .expect("後続の正常フレームで fallback が確立すること");
         assert!(
-            writer.fallback_video_sample_entry.is_some(),
-            "後続の正常フレームで fallback が確立すること"
+            fallback.ptr_eq(&shared_entry),
+            "fallback が投入した shared_entry と同一 Arc を共有していること"
         );
         assert_eq!(
             writer.core.input_video_queue.len(),
             1,
             "後続の正常フレームのみがキューに積まれること"
+        );
+        let queued_entry = writer.core.input_video_queue[0]
+            .sample_entry
+            .as_ref()
+            .expect("正常フレームには sample_entry がある");
+        assert!(
+            queued_entry.ptr_eq(&shared_entry),
+            "キュー内のフレームの sample_entry も同一 Arc を共有していること"
         );
         Ok(())
     }
