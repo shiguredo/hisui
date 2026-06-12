@@ -12,6 +12,7 @@ import ssl
 import subprocess
 import time
 from pathlib import Path
+from typing import NoReturn
 
 import aiohttp
 import pytest
@@ -159,38 +160,45 @@ class ObswsServer:
         return self
 
     def stop(self):
-        process = self._process
-        if process is None:
-            return
-        if process.poll() is None:
-            process.send_signal(signal.SIGTERM)
         # 終了時メトリクス出力で stdout のパイプが詰まるとサーバが終了できないため、
         # communicate() で stdout/stderr を並行して読み出しながら終了を待つ。
-        try:
-            stdout, stderr = process.communicate(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate(timeout=3.0)
-        self._stdout = stdout
-        self._stderr = stderr
-        self._returncode = process.returncode
-        self._process = None
-        self._emit_captured_output()
+        self._terminate_and_collect(
+            sig=signal.SIGTERM, primary_timeout=5.0, fallback_timeout=3.0
+        )
 
     def kill(self):
         """SIGKILL でプロセスを強制停止する"""
+        self._terminate_and_collect(sig=signal.SIGKILL, primary_timeout=5.0)
+
+    def _terminate_and_collect(
+        self,
+        *,
+        sig: signal.Signals,
+        primary_timeout: float,
+        fallback_timeout: float | None = None,
+    ):
+        """シグナル送信と communicate による stdout/stderr 回収を 1 関数に集約する。
+
+        primary_timeout で待ち、超過した場合は fallback_timeout が指定されていれば
+        SIGKILL してから再度 communicate で待つ。それでも超過した場合、または
+        fallback_timeout=None の場合は空文字列で続行して診断 print へ進む。
+        """
         process = self._process
         if process is None:
             return
         if process.poll() is None:
-            process.send_signal(signal.SIGKILL)
-            process.wait(timeout=5.0)
-        # PIPE のドレインに時間がかかるケースに備えて stop() と同じ timeout 帯で
-        # 待ち、それでも残ったら諦めて診断 print へ進む。
+            process.send_signal(sig)
         try:
-            stdout, stderr = process.communicate(timeout=5.0)
+            stdout, stderr = process.communicate(timeout=primary_timeout)
         except subprocess.TimeoutExpired:
-            stdout, stderr = "", ""
+            if fallback_timeout is not None:
+                process.kill()
+                try:
+                    stdout, stderr = process.communicate(timeout=fallback_timeout)
+                except subprocess.TimeoutExpired:
+                    stdout, stderr = "", ""
+            else:
+                stdout, stderr = "", ""
         self._stdout = stdout
         self._stderr = stderr
         self._returncode = process.returncode
@@ -214,66 +222,52 @@ class ObswsServer:
         ready, _, _ = select.select([process.stdout], [], [], startup_timeout)
         if not ready:
             if process.poll() is not None:
-                self._cleanup_after_startup_failure()
-                raise AssertionError(
-                    f"obsws server exited before startup_info: returncode={process.returncode}, "
-                    f"stdout={self._stdout}, stderr={self._stderr}"
+                self._fail_startup_info(
+                    f"obsws server exited before startup_info: returncode={process.returncode}"
                 )
-            self._cleanup_after_startup_failure()
-            raise AssertionError(
-                f"obsws server startup_info timeout: timeout={startup_timeout}, "
-                f"stdout={self._stdout}, stderr={self._stderr}"
+            self._fail_startup_info(
+                f"obsws server startup_info timeout: timeout={startup_timeout}"
             )
 
         line = process.stdout.readline()
         if not line:
-            self._cleanup_after_startup_failure()
-            raise AssertionError(
-                f"obsws server exited before startup_info: returncode={process.returncode}, "
-                f"stdout={self._stdout}, stderr={self._stderr}"
+            self._fail_startup_info(
+                f"obsws server exited before startup_info: returncode={process.returncode}"
             )
 
         try:
             body = json.loads(line)
         except json.JSONDecodeError as e:
-            self._cleanup_after_startup_failure()
-            raise AssertionError(
-                f"obsws server startup_info invalid: json decode error: {e}, line={line!r}, "
-                f"stdout={self._stdout}, stderr={self._stderr}"
+            self._fail_startup_info(
+                f"obsws server startup_info invalid: json decode error: {e}, line={line!r}"
             )
 
         if not isinstance(body, dict) or body.get("type") != "startup_info":
-            self._cleanup_after_startup_failure()
-            raise AssertionError(
-                f"obsws server startup_info invalid: type mismatch: {body!r}, "
-                f"stdout={self._stdout}, stderr={self._stderr}"
+            self._fail_startup_info(
+                f"obsws server startup_info invalid: type mismatch: {body!r}"
             )
 
         server_info = body.get("server")
-        if not isinstance(server_info, dict) or "port" not in server_info:
-            self._cleanup_after_startup_failure()
-            raise AssertionError(
-                f"obsws server startup_info invalid: server.port not found: {body!r}, "
-                f"stdout={self._stdout}, stderr={self._stderr}"
+        if not isinstance(server_info, dict):
+            self._fail_startup_info(
+                f"obsws server startup_info invalid: server not dict: {body!r}"
             )
 
-        self.port = int(server_info["port"])
+        port_value = server_info.get("port")
+        # bool は int の subclass だが startup_info の port としては不正なので除外する。
+        if not isinstance(port_value, int) or isinstance(port_value, bool):
+            self._fail_startup_info(
+                f"obsws server startup_info invalid: server.port not int: {body!r}"
+            )
 
-    def _cleanup_after_startup_failure(self):
-        # startup_info 取得失敗時のプロセス終了 + 診断 print 共通フロー。
-        process = self._process
-        if process is None:
-            return
-        if process.poll() is None:
-            process.terminate()
-        try:
-            stdout, stderr = process.communicate(timeout=2.0)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            stdout, stderr = process.communicate()
-        self._stdout = stdout
-        self._stderr = stderr
-        self._emit_captured_output()
+        self.port = port_value
+
+    def _fail_startup_info(self, message: str) -> NoReturn:
+        """startup_info 取得失敗時のクリーンアップと AssertionError 送出を集約する。"""
+        self._terminate_and_collect(
+            sig=signal.SIGTERM, primary_timeout=2.0, fallback_timeout=2.0
+        )
+        raise AssertionError(f"{message}, stdout={self._stdout}, stderr={self._stderr}")
 
     def wait_for_exit(self, timeout: float = 5.0) -> int | None:
         """プロセスが timeout 秒以内に exit したら returncode を返し、しなければ None を返す。
