@@ -933,7 +933,7 @@ impl HybridMp4Writer {
                     crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
                     crate::sample_entry::SampleEntryResolution::Patched(patched) => {
                         tracing::warn!(
-                            format = ?sample.format,
+                            frame_format = ?sample.format,
                             timestamp_us = sample.timestamp.as_micros() as u64,
                             "hybrid_mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
                         );
@@ -941,7 +941,7 @@ impl HybridMp4Writer {
                     }
                     crate::sample_entry::SampleEntryResolution::Skip => {
                         tracing::warn!(
-                            format = ?sample.format,
+                            frame_format = ?sample.format,
                             timestamp_us = sample.timestamp.as_micros() as u64,
                             "hybrid_mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
                         );
@@ -987,7 +987,7 @@ impl HybridMp4Writer {
                     crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
                     crate::sample_entry::SampleEntryResolution::Patched(patched) => {
                         tracing::warn!(
-                            format = ?sample.format,
+                            frame_format = ?sample.format,
                             timestamp_us = sample.timestamp.as_micros() as u64,
                             "hybrid_mp4_writer video frame without sample_entry; encoded-frame invariant violated"
                         );
@@ -995,7 +995,7 @@ impl HybridMp4Writer {
                     }
                     crate::sample_entry::SampleEntryResolution::Skip => {
                         tracing::warn!(
-                            format = ?sample.format,
+                            frame_format = ?sample.format,
                             timestamp_us = sample.timestamp.as_micros() as u64,
                             "hybrid_mp4_writer video frame without sample_entry; encoded-frame invariant violated"
                         );

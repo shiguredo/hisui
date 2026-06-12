@@ -473,7 +473,7 @@ impl DashWriter {
             crate::sample_entry::SampleEntryResolution::Pass => frame,
             crate::sample_entry::SampleEntryResolution::Patched(v) => {
                 tracing::warn!(
-                    format = ?frame.format,
+                    frame_format = ?frame.format,
                     timestamp_us = frame.timestamp.as_micros() as u64,
                     "dash_writer video frame without sample_entry; encoded-frame invariant violated"
                 );
@@ -482,7 +482,7 @@ impl DashWriter {
             }
             crate::sample_entry::SampleEntryResolution::Skip => {
                 tracing::warn!(
-                    format = ?frame.format,
+                    frame_format = ?frame.format,
                     timestamp_us = frame.timestamp.as_micros() as u64,
                     "dash_writer video frame without sample_entry; encoded-frame invariant violated"
                 );
@@ -583,7 +583,7 @@ impl DashWriter {
             crate::sample_entry::SampleEntryResolution::Pass => frame,
             crate::sample_entry::SampleEntryResolution::Patched(v) => {
                 tracing::warn!(
-                    format = ?frame.format,
+                    frame_format = ?frame.format,
                     timestamp_us = frame.timestamp.as_micros() as u64,
                     "dash_writer audio frame without sample_entry; encoded-frame invariant violated"
                 );
@@ -592,7 +592,7 @@ impl DashWriter {
             }
             crate::sample_entry::SampleEntryResolution::Skip => {
                 tracing::warn!(
-                    format = ?frame.format,
+                    frame_format = ?frame.format,
                     timestamp_us = frame.timestamp.as_micros() as u64,
                     "dash_writer audio frame without sample_entry; encoded-frame invariant violated"
                 );
