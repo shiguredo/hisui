@@ -77,24 +77,13 @@ pub struct Mp4WriterStats {
     actual_moov_box_size: crate::stats::StatsGauge,
     total_flushed_fragment_count: crate::stats::StatsCounter,
     total_recovery_moov_update_count: crate::stats::StatsCounter,
-    // 以下の finalize / sample_entry 系カウンタは hybrid writer でのみ計上される
+    // 以下のファイナライズ系カウンタは hybrid writer でのみ計上される
     // （通常の Mp4Writer 経路では更新されず常に 0）。
     //
     // ファイナライズの成否カウンタ。failure はファイナライズ（標準 MP4 への変換）が内部 Err で失敗し、
     // 出力が fMP4 形式のまま残ることを示す。
     total_finalize_success_count: crate::stats::StatsCounter,
     total_finalize_failure_count: crate::stats::StatsCounter,
-    // sample_entry 関連カウンタ（issues/0011）。
-    // received は ingress で sample_entry を載せて受信したフレーム数（pause 等で drop される前に数える）。
-    // received が 0 なら上流が一度も sample_entry を送っていないことを示す。
-    // missing はフラグメント先頭で sample_entry を解決できなかった数だったが、issue 0030 で
-    // リーダー / AAC 入力経路に不変条件「エンコード済みフレームは常に sample_entry を持つ」を適用し
-    // 計上経路（append 側の `.or_else()` フォールバック）を削除したため、本ブランチ以降は常に 0。
-    // 観測 API・Prometheus メトリクス自体は issue 0034 で破壊的廃止予定。
-    total_received_audio_sample_entry_count: crate::stats::StatsCounter,
-    total_received_video_sample_entry_count: crate::stats::StatsCounter,
-    total_missing_audio_sample_entry_count: crate::stats::StatsCounter,
-    total_missing_video_sample_entry_count: crate::stats::StatsCounter,
     recoverable_media_duration: crate::stats::StatsDuration,
     current_unflushed_fragment_duration: crate::stats::StatsDuration,
     current_unflushed_video_sample_count: crate::stats::StatsGauge,
@@ -125,14 +114,6 @@ impl Mp4WriterStats {
         let total_recovery_moov_update_count = stats.counter("total_recovery_moov_update_count");
         let total_finalize_success_count = stats.counter("total_finalize_success_count");
         let total_finalize_failure_count = stats.counter("total_finalize_failure_count");
-        let total_received_audio_sample_entry_count =
-            stats.counter("total_received_audio_sample_entry_count");
-        let total_received_video_sample_entry_count =
-            stats.counter("total_received_video_sample_entry_count");
-        let total_missing_audio_sample_entry_count =
-            stats.counter("total_missing_audio_sample_entry_count");
-        let total_missing_video_sample_entry_count =
-            stats.counter("total_missing_video_sample_entry_count");
         let recoverable_media_duration = stats.duration("recoverable_media_seconds");
         let current_unflushed_fragment_duration =
             stats.duration("current_unflushed_fragment_seconds");
@@ -169,10 +150,6 @@ impl Mp4WriterStats {
             total_recovery_moov_update_count,
             total_finalize_success_count,
             total_finalize_failure_count,
-            total_received_audio_sample_entry_count,
-            total_received_video_sample_entry_count,
-            total_missing_audio_sample_entry_count,
-            total_missing_video_sample_entry_count,
             recoverable_media_duration,
             current_unflushed_fragment_duration,
             current_unflushed_video_sample_count,
@@ -217,26 +194,6 @@ impl Mp4WriterStats {
 
     pub(crate) fn add_finalize_failure(&self) {
         self.total_finalize_failure_count.inc();
-    }
-
-    pub(crate) fn add_received_audio_sample_entry(&self) {
-        self.total_received_audio_sample_entry_count.inc();
-    }
-
-    pub(crate) fn add_received_video_sample_entry(&self) {
-        self.total_received_video_sample_entry_count.inc();
-    }
-
-    // 呼び出し元なし。issue 0034 で `Mp4WriterStats` の missing 系一式と合わせて削除予定。
-    #[expect(dead_code)]
-    pub(crate) fn add_missing_audio_sample_entry(&self) {
-        self.total_missing_audio_sample_entry_count.inc();
-    }
-
-    // 呼び出し元なし。issue 0034 で `Mp4WriterStats` の missing 系一式と合わせて削除予定。
-    #[expect(dead_code)]
-    pub(crate) fn add_missing_video_sample_entry(&self) {
-        self.total_missing_video_sample_entry_count.inc();
     }
 
     pub(crate) fn set_recoverable_media_duration(&self, duration: Duration) {
@@ -337,22 +294,6 @@ impl Mp4WriterStats {
 
     pub fn total_finalize_failure_count(&self) -> u64 {
         self.total_finalize_failure_count.get()
-    }
-
-    pub fn total_received_audio_sample_entry_count(&self) -> u64 {
-        self.total_received_audio_sample_entry_count.get()
-    }
-
-    pub fn total_received_video_sample_entry_count(&self) -> u64 {
-        self.total_received_video_sample_entry_count.get()
-    }
-
-    pub fn total_missing_audio_sample_entry_count(&self) -> u64 {
-        self.total_missing_audio_sample_entry_count.get()
-    }
-
-    pub fn total_missing_video_sample_entry_count(&self) -> u64 {
-        self.total_missing_video_sample_entry_count.get()
     }
 
     pub fn recoverable_media_duration(&self) -> Duration {
@@ -590,6 +531,10 @@ pub struct Mp4Writer {
     muxer: Mp4FileMuxer,
     next_position: u64,
     core: WriterCore,
+    // エンコード済みフレームでの sample_entry 不変条件違反を救済するための補完値。
+    // 通常時（受信フレームに sample_entry がある場合）に更新し、違反時のみ消費する。
+    fallback_audio_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
+    fallback_video_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
 }
 
 impl Mp4Writer {
@@ -640,6 +585,8 @@ impl Mp4Writer {
             muxer,
             next_position,
             core: WriterCore::new(input_audio_track_id, input_video_track_id, stats),
+            fallback_audio_sample_entry: None,
+            fallback_video_sample_entry: None,
         })
     }
 
@@ -1051,7 +998,35 @@ impl Mp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 self.core.stats.add_received_audio_data();
-                if self.core.input_audio_track_id.is_some() {
+                // エンコード済みフレームに sample_entry が必ず載る不変条件を writer 入口で
+                // 監視する。違反時は警告ログを出してから補完値で差し替えるか、補完値が無ければ
+                // skip する。track 無効化中の受信フレームも違反観測の対象に含めるため、
+                // input_audio_track_id ガードより前に判定する。
+                let sample = match crate::sample_entry::try_resolve_audio_sample_entry(
+                    &sample,
+                    &mut self.fallback_audio_sample_entry,
+                ) {
+                    crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
+                    crate::sample_entry::SampleEntryResolution::Patched(patched) => {
+                        tracing::warn!(
+                            format = ?patched.format,
+                            timestamp_us = patched.timestamp.as_micros() as u64,
+                            "mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
+                        );
+                        Some(Arc::new(patched))
+                    }
+                    crate::sample_entry::SampleEntryResolution::Skip => {
+                        tracing::warn!(
+                            format = ?sample.format,
+                            timestamp_us = sample.timestamp.as_micros() as u64,
+                            "mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
+                        );
+                        None
+                    }
+                };
+                if let Some(sample) = sample
+                    && self.core.input_audio_track_id.is_some()
+                {
                     self.core.handle_input_sample(
                         InputTrackKind::Audio,
                         Some(crate::MediaFrame::Audio(sample)),
@@ -1078,7 +1053,32 @@ impl Mp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 self.core.stats.add_received_video_data();
-                if self.core.input_video_track_id.is_some() {
+                // 音声と同じく、エンコード済みフレーム不変条件を writer 入口で監視する。
+                let sample = match crate::sample_entry::try_resolve_video_sample_entry(
+                    &sample,
+                    &mut self.fallback_video_sample_entry,
+                ) {
+                    crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
+                    crate::sample_entry::SampleEntryResolution::Patched(patched) => {
+                        tracing::warn!(
+                            format = ?patched.format,
+                            timestamp_us = patched.timestamp.as_micros() as u64,
+                            "mp4_writer video frame without sample_entry; encoded-frame invariant violated"
+                        );
+                        Some(Arc::new(patched))
+                    }
+                    crate::sample_entry::SampleEntryResolution::Skip => {
+                        tracing::warn!(
+                            format = ?sample.format,
+                            timestamp_us = sample.timestamp.as_micros() as u64,
+                            "mp4_writer video frame without sample_entry; encoded-frame invariant violated"
+                        );
+                        None
+                    }
+                };
+                if let Some(sample) = sample
+                    && self.core.input_video_track_id.is_some()
+                {
                     self.core.handle_input_sample(
                         InputTrackKind::Video,
                         Some(crate::MediaFrame::Video(sample)),

@@ -75,10 +75,10 @@ pub struct HybridMp4Writer {
     fragment_start_timestamp: Option<Duration>,
     fragment_end_timestamp: Option<Duration>,
     fragment_accumulated_duration: Duration,
-    // received カウンタの `changed_since` 判定に使う前回値として保持する。
-    // issue 0034 で観測 API（received カウンタ）廃止と合わせて削除予定。
-    last_audio_sample_entry: Option<SharedSampleEntry>,
-    last_video_sample_entry: Option<SharedSampleEntry>,
+    // エンコード済みフレームでの sample_entry 不変条件違反を救済するための補完値。
+    // 通常時（受信フレームに sample_entry がある場合）に更新し、違反時のみ消費する。
+    fallback_audio_sample_entry: Option<SharedSampleEntry>,
+    fallback_video_sample_entry: Option<SharedSampleEntry>,
     has_flushed_fragment: bool,
 
     // Mp4Writer と共有する入力キュー・一時停止管理・統計情報
@@ -172,8 +172,8 @@ impl HybridMp4Writer {
             fragment_start_timestamp: None,
             fragment_end_timestamp: None,
             fragment_accumulated_duration: Duration::ZERO,
-            last_audio_sample_entry: None,
-            last_video_sample_entry: None,
+            fallback_audio_sample_entry: None,
+            fallback_video_sample_entry: None,
             has_flushed_fragment: false,
             core: WriterCore::new(input_audio_track_id, input_video_track_id, stats),
         })
@@ -396,7 +396,7 @@ impl HybridMp4Writer {
 
         // この経路はベストエフォートのリカバリで、pending の sample_entry が未確定なら単にスキップする
         // （不変条件下では writer の上流が常に Some を保証するが、HybridMp4Writer の入力経路が
-        // 将来変わる可能性に備えてリカバリ用 moov 先行更新のベストエフォート設計を保つ・issue 0030）
+        // 将来変わる可能性に備えてリカバリ用 moov 先行更新のベストエフォート設計を保つ）
         if let Some(pending) = self.core.pending_video_frame.as_ref()
             && let Some(ref sample_entry) = pending.sample_entry
         {
@@ -919,17 +919,34 @@ impl HybridMp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 self.core.stats.add_received_audio_data();
-                // received カウンタ（`changed_since` 判定）用に直近の sample_entry を保持する。
-                // 毎フレーム計上すると意味を失うため、前回から変化したとき（changed_since）だけ計上し
-                // 「サンプルエントリーの確定・変化回数」を表すようにする。
-                // issue 0034 で観測 API 廃止と合わせて保持・カウンタともに削除予定。
-                if let Some(entry) = &sample.sample_entry {
-                    if entry.changed_since(self.last_audio_sample_entry.as_ref()) {
-                        self.core.stats.add_received_audio_sample_entry();
+                // エンコード済みフレーム不変条件の違反検知と fallback 補完。
+                // track 無効化中の受信フレームも違反観測の対象に含めるため、
+                // input_audio_track_id ガードより前に判定する。
+                let sample = match crate::sample_entry::try_resolve_audio_sample_entry(
+                    &sample,
+                    &mut self.fallback_audio_sample_entry,
+                ) {
+                    crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
+                    crate::sample_entry::SampleEntryResolution::Patched(patched) => {
+                        tracing::warn!(
+                            format = ?patched.format,
+                            timestamp_us = patched.timestamp.as_micros() as u64,
+                            "hybrid_mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
+                        );
+                        Some(std::sync::Arc::new(patched))
                     }
-                    self.last_audio_sample_entry = Some(entry.clone());
-                }
-                if self.core.input_audio_track_id.is_some() {
+                    crate::sample_entry::SampleEntryResolution::Skip => {
+                        tracing::warn!(
+                            format = ?sample.format,
+                            timestamp_us = sample.timestamp.as_micros() as u64,
+                            "hybrid_mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
+                        );
+                        None
+                    }
+                };
+                if let Some(sample) = sample
+                    && self.core.input_audio_track_id.is_some()
+                {
                     self.core.handle_input_sample(
                         InputTrackKind::Audio,
                         Some(crate::MediaFrame::Audio(sample)),
@@ -956,15 +973,32 @@ impl HybridMp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 self.core.stats.add_received_video_data();
-                // 音声と同様、received カウンタの `changed_since` 判定用に直近の sample_entry を保持する。
-                // issue 0034 で観測 API 廃止と合わせて保持・カウンタともに削除予定。
-                if let Some(entry) = &sample.sample_entry {
-                    if entry.changed_since(self.last_video_sample_entry.as_ref()) {
-                        self.core.stats.add_received_video_sample_entry();
+                // 音声と同様、エンコード済みフレーム不変条件を writer 入口で監視する。
+                let sample = match crate::sample_entry::try_resolve_video_sample_entry(
+                    &sample,
+                    &mut self.fallback_video_sample_entry,
+                ) {
+                    crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
+                    crate::sample_entry::SampleEntryResolution::Patched(patched) => {
+                        tracing::warn!(
+                            format = ?patched.format,
+                            timestamp_us = patched.timestamp.as_micros() as u64,
+                            "hybrid_mp4_writer video frame without sample_entry; encoded-frame invariant violated"
+                        );
+                        Some(std::sync::Arc::new(patched))
                     }
-                    self.last_video_sample_entry = Some(entry.clone());
-                }
-                if self.core.input_video_track_id.is_some() {
+                    crate::sample_entry::SampleEntryResolution::Skip => {
+                        tracing::warn!(
+                            format = ?sample.format,
+                            timestamp_us = sample.timestamp.as_micros() as u64,
+                            "hybrid_mp4_writer video frame without sample_entry; encoded-frame invariant violated"
+                        );
+                        None
+                    }
+                };
+                if let Some(sample) = sample
+                    && self.core.input_video_track_id.is_some()
+                {
                     self.core.handle_input_sample(
                         InputTrackKind::Video,
                         Some(crate::MediaFrame::Video(sample)),
@@ -1109,19 +1143,18 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_writer_received_audio_sample_entry_counts_only_changes() -> crate::Result<()> {
-        // received カウンタは「sample_entry が前回から変化したとき」(changed_since) だけ計上される。
-        // 全フレーム付与 (issue 0017) でも、同一サンプルエントリーが続く限りカウンタが増えないことを検証する
-        // (毎フレーム計上すると指標が音声フレーム総数とほぼ同じになり意味を失うため)。
+    fn hybrid_writer_falls_back_on_missing_sample_entry_audio() -> crate::Result<()> {
+        // 不変条件違反フレーム（sample_entry: None）が writer 入口に届いた場合、直前に確立した
+        // fallback で補完したうえで下流（入力キュー）に流れることを検証する。
+        // 1 つ目は通常パスで fallback を確立、2 つ目は違反パスで補完。
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         let entry = crate::audio::aac::create_mp4a_sample_entry(
             &[0x12, 0x10],
             SampleRate::HZ_48000,
             Channels::STEREO,
         )?;
-        let shared = SharedSampleEntry::new(entry.clone());
+        let shared_entry = SharedSampleEntry::new(entry);
 
-        // 指定した sample_entry を載せた音声フレームを入口で受信させるヘルパ。
         let send = |writer: &mut HybridMp4Writer,
                     sample_entry: Option<SharedSampleEntry>|
          -> crate::Result<()> {
@@ -1139,55 +1172,53 @@ mod tests {
             )
         };
 
-        // 1 回目: 初回 (changed_since(None) = true) なので計上される。
-        send(&mut writer, Some(shared.clone()))?;
+        // 1 つ目: 通常パス。fallback が確立されることを確認する。
+        send(&mut writer, Some(shared_entry.clone()))?;
+        assert!(
+            writer.fallback_audio_sample_entry.is_some(),
+            "通常パスで fallback が更新されること"
+        );
         assert_eq!(
-            writer.core.stats.total_received_audio_sample_entry_count(),
-            1
+            writer.core.input_audio_queue.len(),
+            1,
+            "通常パスのフレームがキューに積まれること"
         );
 
-        // 同一 Arc を再送しても計上されない（同一 Arc は ptr_eq で短絡される）。
-        send(&mut writer, Some(shared.clone()))?;
+        // 2 つ目: 違反パス。fallback で補完されてキューに積まれることを確認する。
+        send(&mut writer, None)?;
         assert_eq!(
-            writer.core.stats.total_received_audio_sample_entry_count(),
-            1
+            writer.core.input_audio_queue.len(),
+            2,
+            "違反フレームも fallback 補完されてキューに積まれること"
         );
 
-        // 別 Arc・実体同値でも計上されない（ptr_eq では短絡されず実体比較で同値と判定される）。
-        send(&mut writer, Some(SharedSampleEntry::new(entry.clone())))?;
-        assert_eq!(
-            writer.core.stats.total_received_audio_sample_entry_count(),
-            1
-        );
-
-        // 別 Arc で実体が異なる: 変化ありと判定され計上される。
-        let other = crate::audio::aac::create_mp4a_sample_entry(
-            &[0x11, 0x88],
-            SampleRate::HZ_48000,
-            Channels::STEREO,
-        )?;
-        send(&mut writer, Some(SharedSampleEntry::new(other)))?;
-        assert_eq!(
-            writer.core.stats.total_received_audio_sample_entry_count(),
-            2
+        // キュー内の両フレームが同一の sample_entry を持つこと（補完値が直前の通常値と等価）。
+        let first_entry = writer.core.input_audio_queue[0]
+            .sample_entry
+            .as_ref()
+            .expect("先頭フレームには sample_entry がある");
+        let second_entry = writer.core.input_audio_queue[1]
+            .sample_entry
+            .as_ref()
+            .expect("補完されたフレームには sample_entry がある");
+        assert!(
+            !second_entry.changed_since(Some(first_entry)),
+            "補完された sample_entry が先頭と等価であること"
         );
         Ok(())
     }
 
     #[test]
-    fn hybrid_writer_received_video_sample_entry_counts_only_changes() -> crate::Result<()> {
-        // received カウンタは「sample_entry が前回から変化したとき」(changed_since) だけ計上される。
-        // 全フレーム付与 (issue 0027) でも、同一サンプルエントリーが続く限りカウンタが増えないことを検証する
-        // (毎フレーム計上すると指標が映像フレーム総数とほぼ同じになり意味を失うため)。
+    fn hybrid_writer_falls_back_on_missing_sample_entry_video() -> crate::Result<()> {
+        // 音声と同方針で映像の補完経路を検証する。
         let (_temp_dir, mut writer) = make_hybrid_writer()?;
         let entry = crate::video::av1::av1_sample_entry(
             EvenUsize::MIN_CELL_SIZE,
             EvenUsize::MIN_CELL_SIZE,
             &[0x0A],
         );
-        let shared = SharedSampleEntry::new(entry.clone());
+        let shared_entry = SharedSampleEntry::new(entry);
 
-        // 指定した sample_entry を載せた映像フレームを入口で受信させるヘルパ。
         let send = |writer: &mut HybridMp4Writer,
                     sample_entry: Option<SharedSampleEntry>|
          -> crate::Result<()> {
@@ -1200,62 +1231,160 @@ mod tests {
                         width: 16,
                         height: 16,
                     }),
-                    timestamp: std::time::Duration::ZERO,
+                    timestamp: Duration::ZERO,
                     sample_entry,
                 }))),
                 &mut None,
             )
         };
 
-        // 1 回目: 初回 (changed_since(None) = true) なので計上される。
-        send(&mut writer, Some(shared.clone()))?;
+        send(&mut writer, Some(shared_entry.clone()))?;
+        assert!(
+            writer.fallback_video_sample_entry.is_some(),
+            "通常パスで fallback が更新されること"
+        );
         assert_eq!(
-            writer.core.stats.total_received_video_sample_entry_count(),
-            1
+            writer.core.input_video_queue.len(),
+            1,
+            "通常パスのフレームがキューに積まれること"
         );
 
-        // 同一 Arc を再送しても計上されない（同一 Arc は ptr_eq で短絡される）。
-        send(&mut writer, Some(shared.clone()))?;
+        send(&mut writer, None)?;
         assert_eq!(
-            writer.core.stats.total_received_video_sample_entry_count(),
-            1
+            writer.core.input_video_queue.len(),
+            2,
+            "違反フレームも fallback 補完されてキューに積まれること"
         );
 
-        // 別 Arc・実体同値でも計上されない（ptr_eq では短絡されず実体比較で同値と判定される）。
-        send(
-            &mut writer,
-            Some(SharedSampleEntry::new(crate::video::av1::av1_sample_entry(
-                EvenUsize::MIN_CELL_SIZE,
-                EvenUsize::MIN_CELL_SIZE,
-                &[0x0A],
-            ))),
+        let first_entry = writer.core.input_video_queue[0]
+            .sample_entry
+            .as_ref()
+            .expect("先頭フレームには sample_entry がある");
+        let second_entry = writer.core.input_video_queue[1]
+            .sample_entry
+            .as_ref()
+            .expect("補完されたフレームには sample_entry がある");
+        assert!(
+            !second_entry.changed_since(Some(first_entry)),
+            "補完された sample_entry が先頭と等価であること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_skips_first_frame_when_missing_sample_entry_audio() -> crate::Result<()> {
+        // トラック先頭フレームから違反が発生した場合（fallback が未確立）、当該フレームは skip され
+        // キューには積まれないこと、続く正常フレームから処理が再開されることを検証する。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
         )?;
+        let shared_entry = SharedSampleEntry::new(entry);
+
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            let frame = AudioFrame {
+                data: vec![0x11, 0x22, 0x33],
+                format: AudioFormat::Aac,
+                channels: Channels::STEREO,
+                sample_rate: SampleRate::HZ_48000,
+                timestamp: Duration::ZERO,
+                sample_entry,
+            };
+            writer.handle_audio_message(
+                crate::Message::Media(crate::MediaFrame::Audio(Arc::new(frame))),
+                &mut None,
+            )
+        };
+
+        // 先頭が違反: skip されてキューに積まれず、fallback も None のまま。
+        send(&mut writer, None)?;
+        assert!(
+            writer.fallback_audio_sample_entry.is_none(),
+            "先頭違反では fallback は未確立のまま"
+        );
         assert_eq!(
-            writer.core.stats.total_received_video_sample_entry_count(),
-            1
+            writer.core.input_audio_queue.len(),
+            0,
+            "先頭違反フレームは skip されてキューに積まれないこと"
         );
 
-        // 別 Arc で実体が異なる: 変化ありと判定され計上される。
-        send(
-            &mut writer,
-            Some(SharedSampleEntry::new(crate::video::av1::av1_sample_entry(
-                EvenUsize::MIN_CELL_SIZE,
-                EvenUsize::MIN_CELL_SIZE,
-                &[0x0B],
-            ))),
-        )?;
+        // 続く正常フレーム: fallback を確立してキューに積まれる。
+        send(&mut writer, Some(shared_entry))?;
+        assert!(
+            writer.fallback_audio_sample_entry.is_some(),
+            "後続の正常フレームで fallback が確立すること"
+        );
         assert_eq!(
-            writer.core.stats.total_received_video_sample_entry_count(),
-            2
+            writer.core.input_audio_queue.len(),
+            1,
+            "後続の正常フレームのみがキューに積まれること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_skips_first_frame_when_missing_sample_entry_video() -> crate::Result<()> {
+        // 音声と同方針で映像の skip 経路を検証する。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+        let shared_entry = SharedSampleEntry::new(entry);
+
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            writer.handle_video_message(
+                crate::Message::Media(crate::MediaFrame::Video(Arc::new(VideoFrame {
+                    data: vec![0x00, 0x00, 0x00, 0x01],
+                    format: VideoFormat::Av1,
+                    keyframe: true,
+                    size: Some(crate::video::VideoFrameSize {
+                        width: 16,
+                        height: 16,
+                    }),
+                    timestamp: Duration::ZERO,
+                    sample_entry,
+                }))),
+                &mut None,
+            )
+        };
+
+        send(&mut writer, None)?;
+        assert!(
+            writer.fallback_video_sample_entry.is_none(),
+            "先頭違反では fallback は未確立のまま"
+        );
+        assert_eq!(
+            writer.core.input_video_queue.len(),
+            0,
+            "先頭違反フレームは skip されてキューに積まれないこと"
+        );
+
+        send(&mut writer, Some(shared_entry))?;
+        assert!(
+            writer.fallback_video_sample_entry.is_some(),
+            "後続の正常フレームで fallback が確立すること"
+        );
+        assert_eq!(
+            writer.core.input_video_queue.len(),
+            1,
+            "後続の正常フレームのみがキューに積まれること"
         );
         Ok(())
     }
 
     #[test]
     fn hybrid_writer_finalizes_readable_streams_with_per_frame_sample_entry() -> crate::Result<()> {
-        // issue 0017 / 0030 の修正後の挙動: 音声・映像とも全フレームに sample_entry が載るため、フラグメント
-        // 先頭サンプルにも必ずサンプルエントリーがあり、ファイナライズ後の標準 MP4 から音声・映像両トラックを
-        // 読み戻せることを検証する (取りこぼしによるファイナライズ失敗・映像トラック空の回帰防止)。
+        // エンコード済みフレームには常に sample_entry が載るため、フラグメント先頭サンプルにも
+        // 必ずサンプルエントリーがあり、ファイナライズ後の標準 MP4 から音声・映像両トラックを
+        // 読み戻せることを検証する（取りこぼしによるファイナライズ失敗・映像トラック空の回帰防止）。
         // 加えて、読み戻したフレームの sample_entry が初回フレームと等価であることも確認し、
         // reader が dummy SampleEntry を毎回新規生成しても素通りしないようにする。
         let temp_dir = tempfile::tempdir()?;
@@ -1293,8 +1422,8 @@ mod tests {
         drop(writer);
 
         // ファイナライズ済みの標準 MP4 として音声トラックを読み戻し、サンプル数・コーデック・データに加えて、
-        // 全フレームに sample_entry が載っていること（issue 0030 の不変条件）と、後続フレームの sample_entry が
-        // 初回と等価（changed_since=false）であることを検証する。
+        // 全フレームに sample_entry が載っていること（エンコード済みフレームは常に sample_entry を持つ不変条件）と、
+        // 後続フレームの sample_entry が初回と等価（changed_since=false）であることを検証する。
         let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
         let read_audio_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(read_audio_samples.len(), audio_frame_count);

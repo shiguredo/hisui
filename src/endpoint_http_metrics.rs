@@ -194,6 +194,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn metrics_endpoint_does_not_include_removed_sample_entry_counters() {
+        // Mp4WriterStats を明示的に初期化したうえで /metrics のレスポンスを取得し、
+        // 廃止済みの sample_entry カウンタが含まれないことを確認する。
+        // Mp4WriterStats::new を明示的に呼ぶことで、将来 Mp4WriterStats::new 内で
+        // 対象カウンタを再追加した場合の回帰を検知する。
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
+            .expect("failed to create media pipeline");
+        let handle = pipeline.handle();
+        let mut stats = handle.stats();
+        let _writer_stats = crate::mp4::writer::Mp4WriterStats::new(&mut stats, 0);
+        let request = Request::new("GET", "/metrics");
+
+        let response = handle_request(&request, &handle).await;
+        assert_eq!(response.status_code, 200);
+        let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
+        assert!(
+            !body.contains("hisui_total_received_audio_sample_entry_count"),
+            "廃止メトリクス hisui_total_received_audio_sample_entry_count が含まれないこと"
+        );
+        assert!(
+            !body.contains("hisui_total_received_video_sample_entry_count"),
+            "廃止メトリクス hisui_total_received_video_sample_entry_count が含まれないこと"
+        );
+        assert!(
+            !body.contains("hisui_total_missing_audio_sample_entry_count"),
+            "廃止メトリクス hisui_total_missing_audio_sample_entry_count が含まれないこと"
+        );
+        assert!(
+            !body.contains("hisui_total_missing_video_sample_entry_count"),
+            "廃止メトリクス hisui_total_missing_video_sample_entry_count が含まれないこと"
+        );
+    }
+
+    #[tokio::test]
     async fn metrics_endpoint_returns_error_for_invalid_metric_name() {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
             .expect("failed to create media pipeline");
