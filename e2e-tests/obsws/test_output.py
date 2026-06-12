@@ -270,12 +270,9 @@ def test_obsws_start_record_with_multiple_audio_inputs(
                     request_id="req-get-record-status-multi-audio",
                 )
                 record_status = record_status_response["d"]["responseData"]
-                if (
-                    record_status["outputActive"] is True
-                    and (
-                        record_status["outputBytes"] > 0
-                        or record_status["outputDuration"] > 0
-                    )
+                if record_status["outputActive"] is True and (
+                    record_status["outputBytes"] > 0
+                    or record_status["outputDuration"] > 0
                 ):
                     break
 
@@ -290,9 +287,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
                     break
                 await asyncio.sleep(0.1)
             else:
-                raise AssertionError(
-                    "record did not make observable progress in time"
-                )
+                raise AssertionError("record did not make observable progress in time")
 
             await asyncio.sleep(2.0)
 
@@ -481,7 +476,9 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     output_path = tmp_path / "received-av.mp4"
 
     output_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
@@ -750,7 +747,9 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     rtmp_url = f"rtmp://127.0.0.1:{rtmp_port}/live"
     stream_name = "inbound"
     rtmp_push_url = f"{rtmp_url}/{stream_name}"
@@ -819,7 +818,9 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     request_id="req-stop-record-rtmp-inbound",
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
-                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+                output_path = Path(
+                    stop_record_response["d"]["responseData"]["outputPath"]
+                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
@@ -856,7 +857,9 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
     srt_port, srt_sock = reserve_ephemeral_port()
     srt_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     srt_url = f"srt://127.0.0.1:{srt_port}"
 
     async def _run():
@@ -920,7 +923,9 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                     request_id="req-stop-record-srt-inbound",
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
-                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+                output_path = Path(
+                    stop_record_response["d"]["responseData"]["outputPath"]
+                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
@@ -957,7 +962,9 @@ def test_obsws_srt_inbound_with_stream_id(
     srt_port, srt_sock = reserve_ephemeral_port()
     srt_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     stream_id = "test-stream-id"
     srt_listen_url = f"srt://127.0.0.1:{srt_port}"
     srt_push_url = f"srt://127.0.0.1:{srt_port}?streamid={stream_id}"
@@ -1026,7 +1033,9 @@ def test_obsws_srt_inbound_with_stream_id(
                     request_id="req-stop-record-srt-inbound-sid",
                 )
                 assert stop_record_response["d"]["requestStatus"]["result"] is True
-                output_path = Path(stop_record_response["d"]["responseData"]["outputPath"])
+                output_path = Path(
+                    stop_record_response["d"]["responseData"]["outputPath"]
+                )
             finally:
                 ffmpeg_process.kill()
                 ffmpeg_process.communicate(timeout=5)
@@ -1065,7 +1074,9 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
     rtmp_outbound_port, rtmp_outbound_sock = reserve_ephemeral_port()
     rtmp_outbound_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     output_path = tmp_path / "received-rtmp-inbound-stream.mp4"
     rtmp_inbound_url = f"rtmp://127.0.0.1:{rtmp_inbound_port}/live"
     rtmp_inbound_stream_name = "inbound"
@@ -1207,7 +1218,9 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
     rtmp_outbound_port, rtmp_outbound_sock = reserve_ephemeral_port()
     rtmp_outbound_sock.close()
 
-    input_path = Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    input_path = (
+        Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
+    )
     output_path = tmp_path / "received-srt-inbound-stream.mp4"
     srt_inbound_url = f"srt://127.0.0.1:{srt_inbound_port}"
     output_url = f"rtmp://127.0.0.1:{rtmp_outbound_port}/live"
@@ -1390,7 +1403,10 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
+                        "destination": {
+                            "type": "filesystem",
+                            "directory": str(hls_dir),
+                        },
                     },
                 },
             )
@@ -1483,11 +1499,13 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
                 raise AssertionError("HLS did not become inactive after StopOutput")
 
             # 停止後にファイルが削除されていることを確認
-            assert not playlist_path.exists(), "playlist.m3u8 must be deleted after stop"
+            assert not playlist_path.exists(), (
+                "playlist.m3u8 must be deleted after stop"
+            )
             ts_files_after = list(hls_dir.glob("segment-*.ts"))
-            assert (
-                len(ts_files_after) == 0
-            ), "all .ts segments must be deleted after stop"
+            assert len(ts_files_after) == 0, (
+                "all .ts segments must be deleted after stop"
+            )
 
             await ws.close()
 
@@ -1538,7 +1556,9 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
                 request_id="req-set-hls-toggle-settings",
                 request_data={
                     "outputName": "hls",
-                    "outputSettings": {"destination": {"type": "filesystem", "directory": str(hls_dir)}},
+                    "outputSettings": {
+                        "destination": {"type": "filesystem", "directory": str(hls_dir)}
+                    },
                 },
             )
             assert set_settings_response["d"]["requestStatus"]["result"] is True
@@ -1551,9 +1571,7 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
                 request_data={"outputName": "hls"},
             )
             assert toggle_start_response["d"]["requestStatus"]["result"] is True
-            assert (
-                toggle_start_response["d"]["responseData"]["outputActive"] is True
-            )
+            assert toggle_start_response["d"]["responseData"]["outputActive"] is True
 
             # アクティブ確認
             for _ in range(20):
@@ -1575,9 +1593,7 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
                 request_data={"outputName": "hls"},
             )
             assert toggle_stop_response["d"]["requestStatus"]["result"] is True
-            assert (
-                toggle_stop_response["d"]["responseData"]["outputActive"] is False
-            )
+            assert toggle_stop_response["d"]["responseData"]["outputActive"] is False
 
             await ws.close()
 
@@ -1679,7 +1695,10 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
+                        "destination": {
+                            "type": "filesystem",
+                            "directory": str(hls_dir),
+                        },
                         "segmentFormat": "fmp4",
                     },
                 },
@@ -1765,11 +1784,13 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
 
             # 停止後にファイルが削除されていることを確認
             assert not init_path.exists(), "init.mp4 must be deleted after stop"
-            assert not playlist_path.exists(), "playlist.m3u8 must be deleted after stop"
+            assert not playlist_path.exists(), (
+                "playlist.m3u8 must be deleted after stop"
+            )
             m4s_files_after = list(hls_dir.glob("segment-*.m4s"))
-            assert (
-                len(m4s_files_after) == 0
-            ), "all .m4s segments must be deleted after stop"
+            assert len(m4s_files_after) == 0, (
+                "all .m4s segments must be deleted after stop"
+            )
 
             await ws.close()
 
@@ -1822,7 +1843,10 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "destination": {"type": "filesystem", "directory": str(hls_dir)},
+                        "destination": {
+                            "type": "filesystem",
+                            "directory": str(hls_dir),
+                        },
                         "variants": [
                             {"videoBitrate": 2000000, "audioBitrate": 128000},
                             {"videoBitrate": 800000, "audioBitrate": 96000},
@@ -1872,8 +1896,7 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
             else:
                 files = list(hls_dir.rglob("*"))
                 raise AssertionError(
-                    f"ABR HLS files were not generated within timeout. "
-                    f"Files: {files}"
+                    f"ABR HLS files were not generated within timeout. Files: {files}"
                 )
 
             # マスタープレイリストに EXT-X-STREAM-INF が含まれることを確認
@@ -2067,10 +2090,14 @@ def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path
         pass
 
     entry = _find_exit_metrics(server.stdout)
-    assert entry is not None, f"終了時メトリクスが stdout に出ていない: stdout={server.stdout!r}"
+    assert entry is not None, (
+        f"終了時メトリクスが stdout に出ていない: stdout={server.stdout!r}"
+    )
     # metrics は prom2json の family 配列で、hisui_ プレフィックス付きの family を含むこと
     families = entry["metrics"]
-    assert isinstance(families, list) and families, f"metrics が空または配列でない: {entry}"
+    assert isinstance(families, list) and families, (
+        f"metrics が空または配列でない: {entry}"
+    )
     assert all("name" in f and "type" in f and "metrics" in f for f in families), (
         f"family の形式が不正: {families}"
     )

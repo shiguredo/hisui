@@ -30,7 +30,9 @@ def test_obsws_hello_and_identify_flow(binary_path: Path):
         host=host,
         use_env=False,
     ) as server:
-        asyncio.run(_connect_and_exchange_identify(f"ws://{server.host}:{server.port}/"))
+        asyncio.run(
+            _connect_and_exchange_identify(f"ws://{server.host}:{server.port}/")
+        )
 
 
 def test_obsws_accepts_websocket_connection_with_env_vars(binary_path: Path):
@@ -91,7 +93,11 @@ def test_obsws_rejects_authenticated_connection_with_invalid_auth(binary_path: P
         password="test-password",
         use_env=False,
     ) as server:
-        asyncio.run(_connect_and_send_invalid_password_auth(f"ws://{server.host}:{server.port}/"))
+        asyncio.run(
+            _connect_and_send_invalid_password_auth(
+                f"ws://{server.host}:{server.port}/"
+            )
+        )
 
 
 def test_obsws_rejects_authenticated_connection_without_auth(binary_path: Path):
@@ -104,7 +110,11 @@ def test_obsws_rejects_authenticated_connection_without_auth(binary_path: Path):
         password="test-password",
         use_env=False,
     ) as server:
-        asyncio.run(_connect_and_send_missing_password_auth(f"ws://{server.host}:{server.port}/"))
+        asyncio.run(
+            _connect_and_send_missing_password_auth(
+                f"ws://{server.host}:{server.port}/"
+            )
+        )
 
 
 def test_obsws_rejects_duplicate_identify(binary_path: Path):
@@ -112,7 +122,9 @@ def test_obsws_rejects_duplicate_identify(binary_path: Path):
     host = "127.0.0.1"
 
     with ObswsServer(binary_path, host=host, use_env=False) as server:
-        asyncio.run(_connect_and_send_duplicate_identify(f"ws://{server.host}:{server.port}/"))
+        asyncio.run(
+            _connect_and_send_duplicate_identify(f"ws://{server.host}:{server.port}/")
+        )
 
 
 def test_obsws_accepts_reidentify_after_identify(binary_path: Path):

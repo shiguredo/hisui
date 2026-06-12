@@ -125,8 +125,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
             metrics = _collect_obsws_metrics_snapshot(server.host, server.port)
             print(f"\n--- hisui /metrics after bootstrap ---\n{metrics}")
             assert result.returncode == 0, (
-                "obsws_bootstrap failed: "
-                f"{_format_process_failure(result)}"
+                f"obsws_bootstrap failed: {_format_process_failure(result)}"
             )
             stats = json.loads(result.stdout)
             print(f"\n--- obsws_bootstrap stats ---\n{json.dumps(stats, indent=2)}")
@@ -142,9 +141,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
             assert stats["audio_frames_received"] >= 1, (
                 f"expected at least 1 audio frame, got {stats}"
             )
-            assert stats["video_width"] == 320, (
-                f"expected video_width=320, got {stats}"
-            )
+            assert stats["video_width"] == 320, f"expected video_width=320, got {stats}"
             assert stats["video_height"] == 320, (
                 f"expected video_height=320, got {stats}"
             )
@@ -162,9 +159,7 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     except Exception as e:
         bootstrap_details = ""
         if result is not None:
-            bootstrap_details = (
-                f" obsws_bootstrap {_format_process_failure(result)},"
-            )
+            bootstrap_details = f" obsws_bootstrap {_format_process_failure(result)},"
         raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e
 
     # MP4 ファイルの検証
@@ -212,8 +207,7 @@ def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
             metrics = _collect_obsws_metrics_snapshot(server.host, server.port)
             print(f"\n--- hisui /metrics after bootstrap ---\n{metrics}")
             assert result.returncode == 0, (
-                "obsws_bootstrap failed: "
-                f"{_format_process_failure(result)}"
+                f"obsws_bootstrap failed: {_format_process_failure(result)}"
             )
             stats = json.loads(result.stdout)
             print(f"\n--- obsws_bootstrap stats ---\n{json.dumps(stats, indent=2)}")
@@ -259,9 +253,7 @@ def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
     except Exception as e:
         bootstrap_details = ""
         if result is not None:
-            bootstrap_details = (
-                f" obsws_bootstrap {_format_process_failure(result)},"
-            )
+            bootstrap_details = f" obsws_bootstrap {_format_process_failure(result)},"
         raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e
 
     assert output_mp4.exists(), "output MP4 file should exist"
@@ -281,6 +273,7 @@ def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
     assert inspect.get("audio_sample_count", 0) >= 1, (
         f"expected at least 1 audio sample, got {inspect}"
     )
+
 
 @pytest.mark.timeout(90)
 def test_bootstrap_send_video(binary_path: Path, tmp_path: Path):
@@ -302,14 +295,20 @@ def test_bootstrap_send_video(binary_path: Path, tmp_path: Path):
                 str(input_mp4),
                 str(output_mp4),
                 subcommand="send-video",
-                extra_flags=["--send-width", "320", "--send-height", "320", "--send-fps", "30"],
+                extra_flags=[
+                    "--send-width",
+                    "320",
+                    "--send-height",
+                    "320",
+                    "--send-fps",
+                    "30",
+                ],
             )
             result = _run_bootstrap_command(cmd, cwd)
             metrics = _collect_obsws_metrics_snapshot(server.host, server.port)
             print(f"\n--- hisui /metrics after send-video ---\n{metrics}")
             assert result.returncode == 0, (
-                "obsws_bootstrap send-video failed: "
-                f"{_format_process_failure(result)}"
+                f"obsws_bootstrap send-video failed: {_format_process_failure(result)}"
             )
             stats = json.loads(result.stdout)
             print(f"\n--- obsws_bootstrap stats ---\n{json.dumps(stats, indent=2)}")
@@ -331,9 +330,7 @@ def test_bootstrap_send_video(binary_path: Path, tmp_path: Path):
     except Exception as e:
         bootstrap_details = ""
         if result is not None:
-            bootstrap_details = (
-                f" obsws_bootstrap {_format_process_failure(result)},"
-            )
+            bootstrap_details = f" obsws_bootstrap {_format_process_failure(result)},"
         raise AssertionError(f"{e}.{bootstrap_details} {server.diagnostics()}") from e
 
     assert output_mp4.exists(), "output MP4 file should exist"

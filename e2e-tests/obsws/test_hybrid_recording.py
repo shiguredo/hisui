@@ -37,7 +37,11 @@ def _ffprobe_json(path: Path) -> dict:
         )
     except FileNotFoundError:
         pytest.skip("ffprobe not found")
-    return result.returncode, json.loads(result.stdout) if result.stdout.strip() else {}, result.stderr
+    return (
+        result.returncode,
+        json.loads(result.stdout) if result.stdout.strip() else {},
+        result.stderr,
+    )
 
 
 @pytest.mark.timeout(60)
@@ -89,7 +93,10 @@ def test_hybrid_mp4_sigkill_produces_readable_file(binary_path: Path, tmp_path: 
                     request_id="req-get-hybrid-kill-status",
                 )
                 status = status_response["d"]["responseData"]
-                if status["outputActive"] is True and status.get("outputDuration", 0) > 0:
+                if (
+                    status["outputActive"] is True
+                    and status.get("outputDuration", 0) > 0
+                ):
                     break
                 await asyncio.sleep(0.1)
 
@@ -113,7 +120,9 @@ def test_hybrid_mp4_sigkill_produces_readable_file(binary_path: Path, tmp_path: 
 
     # 録画ファイルを探す
     mp4_files = list(record_dir.glob("*.mp4"))
-    assert len(mp4_files) > 0, f"録画ファイルが見つからない: {list(record_dir.iterdir())}"
+    assert len(mp4_files) > 0, (
+        f"録画ファイルが見つからない: {list(record_dir.iterdir())}"
+    )
     output_path = mp4_files[0]
     assert output_path.stat().st_size > 0, "録画ファイルが空"
 
@@ -178,7 +187,10 @@ def test_hybrid_mp4_normal_finalize_produces_valid_mp4(
                     request_id="req-get-hybrid-normal-status",
                 )
                 status = status_response["d"]["responseData"]
-                if status["outputActive"] is True and status.get("outputDuration", 0) > 0:
+                if (
+                    status["outputActive"] is True
+                    and status.get("outputDuration", 0) > 0
+                ):
                     break
                 await asyncio.sleep(0.1)
 
@@ -214,9 +226,7 @@ def test_hybrid_mp4_normal_finalize_produces_valid_mp4(
     if stderr:
         print(f"ffprobe stderr={stderr[:1000]}")
 
-    assert returncode == 0, (
-        f"ffprobe がファイルを読めなかった: stderr={stderr}"
-    )
+    assert returncode == 0, f"ffprobe がファイルを読めなかった: stderr={stderr}"
     streams = probe_output.get("streams", [])
     assert len(streams) > 0, "ストリームが見つからない"
 

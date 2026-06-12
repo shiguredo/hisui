@@ -151,7 +151,8 @@ def test_obsws_request_batch_applies_set_input_settings(binary_path: Path):
                 assert results[2]["requestType"] == "GetInputSettings"
                 assert results[2]["requestStatus"]["result"] is True
                 assert (
-                    results[2]["responseData"]["inputSettings"]["device_id"] == "after-device"
+                    results[2]["responseData"]["inputSettings"]["device_id"]
+                    == "after-device"
                 )
                 await ws.close()
 
@@ -221,7 +222,9 @@ def test_obsws_request_batch_halt_on_failure_stops_after_set_input_settings_erro
                     request_id="req-get-input-settings-after-batch-halt",
                     request_data={"inputName": "batch-set-input-settings-halt-input"},
                 )
-                assert get_input_settings_response["d"]["requestStatus"]["result"] is True
+                assert (
+                    get_input_settings_response["d"]["requestStatus"]["result"] is True
+                )
                 assert (
                     get_input_settings_response["d"]["responseData"]["inputSettings"][
                         "device_id"
@@ -327,7 +330,9 @@ def test_obsws_request_batch_halt_on_failure_stops_subsequent_requests(
                     request_type="GetCurrentProgramScene",
                     request_id="req-current-scene-after-batch",
                 )
-                assert current_scene_after_response["d"]["requestStatus"]["result"] is True
+                assert (
+                    current_scene_after_response["d"]["requestStatus"]["result"] is True
+                )
                 assert (
                     current_scene_after_response["d"]["responseData"][
                         "currentProgramSceneName"

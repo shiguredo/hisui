@@ -91,8 +91,12 @@ def _create_self_signed_cert(tmp_path: Path) -> tuple[Path, Path]:
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1))
-        .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30))
+        .not_valid_before(
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
+        )
+        .not_valid_after(
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)
+        )
         .add_extension(
             x509.SubjectAlternativeName(
                 [
@@ -180,7 +184,9 @@ def test_obsws_proxy_root(binary_path: Path):
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:
-            status, body, _ = asyncio.run(_http_get(f"http://{server.host}:{server.port}/"))
+            status, body, _ = asyncio.run(
+                _http_get(f"http://{server.host}:{server.port}/")
+            )
             assert status == 200
             assert body == "Hello, World!"
 
@@ -236,7 +242,9 @@ def test_obsws_proxy_ok_endpoint_not_proxied(binary_path: Path):
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
         ) as server:
-            status, _, _ = asyncio.run(_http_get(f"http://{server.host}:{server.port}/.ok"))
+            status, _, _ = asyncio.run(
+                _http_get(f"http://{server.host}:{server.port}/.ok")
+            )
             assert status == 204
 
 
@@ -300,7 +308,9 @@ def test_obsws_proxy_client_disconnect_does_not_crash_server(binary_path: Path):
             rst_sock.close()
 
             time.sleep(1.2)
-            status, _, _ = asyncio.run(_http_get(f"http://{server.host}:{server.port}/.ok"))
+            status, _, _ = asyncio.run(
+                _http_get(f"http://{server.host}:{server.port}/.ok")
+            )
             assert status == 204
 
 

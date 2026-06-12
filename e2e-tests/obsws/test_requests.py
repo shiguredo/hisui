@@ -14,6 +14,7 @@ from helpers import (
     _write_test_png,
 )
 
+
 def test_obsws_get_version_request(binary_path: Path):
     """obsws が GetVersion request に応答することを確認する"""
     host = "127.0.0.1"
@@ -42,7 +43,9 @@ def test_obsws_get_version_request(binary_path: Path):
         assert "SetInputSettings" in response_data["availableRequests"]
         assert "SetInputName" in response_data["availableRequests"]
         assert "GetInputDefaultSettings" in response_data["availableRequests"]
-        assert "GetInputPropertiesListPropertyItems" in response_data["availableRequests"]
+        assert (
+            "GetInputPropertiesListPropertyItems" in response_data["availableRequests"]
+        )
         assert "CreateInput" in response_data["availableRequests"]
         assert "RemoveInput" in response_data["availableRequests"]
         assert "RemoveScene" in response_data["availableRequests"]
@@ -250,7 +253,9 @@ def test_obsws_transition_requests(binary_path: Path):
             transition_list_response["d"]["responseData"]["currentSceneTransitionKind"]
             == "fade_transition"
         )
-        transition_entries = transition_list_response["d"]["responseData"]["transitions"]
+        transition_entries = transition_list_response["d"]["responseData"][
+            "transitions"
+        ]
         cut_transition = next(
             t for t in transition_entries if t["transitionName"] == "cut_transition"
         )
@@ -296,11 +301,15 @@ def test_obsws_transition_requests(binary_path: Path):
             get_current_transition_response["d"]["responseData"]["transitionDuration"]
             == 500
         )
-        assert get_current_transition_response["d"]["responseData"]["transitionFixed"] is False
+        assert (
+            get_current_transition_response["d"]["responseData"]["transitionFixed"]
+            is False
+        )
         # fade_transition は transitionSettings を初期状態では null で返す
-        assert get_current_transition_response["d"]["responseData"][
-            "transitionSettings"
-        ] is None
+        assert (
+            get_current_transition_response["d"]["responseData"]["transitionSettings"]
+            is None
+        )
 
         # ビルトイントランジションはカスタム設定をサポートしないので失敗する
         set_transition_settings_response = asyncio.run(
@@ -308,7 +317,9 @@ def test_obsws_transition_requests(binary_path: Path):
                 f"ws://{server.host}:{server.port}/",
                 request_type="SetCurrentSceneTransitionSettings",
                 request_id="req-set-current-scene-transition-settings",
-                request_data={"transitionSettings": {"curve": "ease_in_out", "power": 2}},
+                request_data={
+                    "transitionSettings": {"curve": "ease_in_out", "power": 2}
+                },
             )
         )
         assert set_transition_settings_response["d"]["requestStatus"]["result"] is False
@@ -323,7 +334,8 @@ def test_obsws_transition_requests(binary_path: Path):
         )
         assert get_transition_cursor_response["d"]["requestStatus"]["result"] is True
         assert (
-            get_transition_cursor_response["d"]["responseData"]["transitionCursor"] == 0.0
+            get_transition_cursor_response["d"]["responseData"]["transitionCursor"]
+            == 0.0
         )
 
         set_tbar_position_response = asyncio.run(
@@ -344,7 +356,10 @@ def test_obsws_transition_requests(binary_path: Path):
                 request_id="req-get-current-scene-transition-cursor-after-tbar",
             )
         )
-        assert get_transition_cursor_after_tbar_response["d"]["requestStatus"]["result"] is True
+        assert (
+            get_transition_cursor_after_tbar_response["d"]["requestStatus"]["result"]
+            is True
+        )
         assert (
             get_transition_cursor_after_tbar_response["d"]["responseData"][
                 "transitionCursor"
@@ -425,9 +440,18 @@ def test_obsws_preview_scene_requests(binary_path: Path):
             )
         )
         assert get_scene_list_response["d"]["requestStatus"]["result"] is True
-        assert get_scene_list_response["d"]["responseData"]["currentProgramSceneName"] == "Scene"
-        assert get_scene_list_response["d"]["responseData"]["currentPreviewSceneName"] is None
-        assert get_scene_list_response["d"]["responseData"]["currentPreviewSceneUuid"] is None
+        assert (
+            get_scene_list_response["d"]["responseData"]["currentProgramSceneName"]
+            == "Scene"
+        )
+        assert (
+            get_scene_list_response["d"]["responseData"]["currentPreviewSceneName"]
+            is None
+        )
+        assert (
+            get_scene_list_response["d"]["responseData"]["currentPreviewSceneUuid"]
+            is None
+        )
 
 
 def test_obsws_get_input_list_request(binary_path: Path):
@@ -1278,7 +1302,9 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
-            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+            scene_item_id = get_scene_item_id_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             disable_response = await _send_obsws_request(
                 ws,
@@ -1298,7 +1324,9 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
                 request_type="StartRecord",
                 request_id="req-start-record-disabled-input",
             )
-            assert start_record_disabled_response["d"]["requestStatus"]["result"] is True
+            assert (
+                start_record_disabled_response["d"]["requestStatus"]["result"] is True
+            )
 
             stop_record_disabled_response = await _send_obsws_request(
                 ws,
@@ -1377,7 +1405,9 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
-            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+            scene_item_id = get_scene_item_id_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             get_enabled_response = await _send_obsws_request(
                 ws,
@@ -1413,7 +1443,9 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
                 },
             )
             assert get_disabled_response["d"]["requestStatus"]["result"] is True
-            assert get_disabled_response["d"]["responseData"]["sceneItemEnabled"] is False
+            assert (
+                get_disabled_response["d"]["responseData"]["sceneItemEnabled"] is False
+            )
             await ws.close()
 
     with ObswsServer(binary_path, host=host, use_env=False) as server:
@@ -1459,7 +1491,9 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 },
             )
             assert create_scene_item_response["d"]["requestStatus"]["result"] is True
-            first_scene_item_id = create_scene_item_response["d"]["responseData"]["sceneItemId"]
+            first_scene_item_id = create_scene_item_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             create_second_scene_item_response = await _send_obsws_request(
                 ws,
@@ -1471,10 +1505,13 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                     "sceneItemEnabled": True,
                 },
             )
-            assert create_second_scene_item_response["d"]["requestStatus"]["result"] is True
-            second_scene_item_id = create_second_scene_item_response["d"]["responseData"][
-                "sceneItemId"
-            ]
+            assert (
+                create_second_scene_item_response["d"]["requestStatus"]["result"]
+                is True
+            )
+            second_scene_item_id = create_second_scene_item_response["d"][
+                "responseData"
+            ]["sceneItemId"]
 
             get_scene_item_list_response = await _send_obsws_request(
                 ws,
@@ -1483,7 +1520,9 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 request_data={"sceneName": "Scene"},
             )
             assert get_scene_item_list_response["d"]["requestStatus"]["result"] is True
-            scene_items = get_scene_item_list_response["d"]["responseData"]["sceneItems"]
+            scene_items = get_scene_item_list_response["d"]["responseData"][
+                "sceneItems"
+            ]
             scene_item_ids = [item["sceneItemId"] for item in scene_items]
             assert first_scene_item_id in scene_item_ids
             assert second_scene_item_id in scene_item_ids
@@ -1497,7 +1536,9 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                     "sceneItemId": first_scene_item_id,
                 },
             )
-            assert get_scene_item_source_response["d"]["requestStatus"]["result"] is True
+            assert (
+                get_scene_item_source_response["d"]["requestStatus"]["result"] is True
+            )
             assert (
                 get_scene_item_source_response["d"]["responseData"]["sourceUuid"]
                 == source_uuid
@@ -1517,9 +1558,14 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                     "sceneItemId": second_scene_item_id,
                 },
             )
-            assert get_second_scene_item_index_response["d"]["requestStatus"]["result"] is True
             assert (
-                get_second_scene_item_index_response["d"]["responseData"]["sceneItemIndex"]
+                get_second_scene_item_index_response["d"]["requestStatus"]["result"]
+                is True
+            )
+            assert (
+                get_second_scene_item_index_response["d"]["responseData"][
+                    "sceneItemIndex"
+                ]
                 == 0
             )
 
@@ -1589,9 +1635,9 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
                 },
             )
             assert duplicate_scene_item_response["d"]["requestStatus"]["result"] is True
-            duplicated_scene_item_id = duplicate_scene_item_response["d"]["responseData"][
-                "sceneItemId"
-            ]
+            duplicated_scene_item_id = duplicate_scene_item_response["d"][
+                "responseData"
+            ]["sceneItemId"]
             assert duplicated_scene_item_id != second_scene_item_id
             await ws.close()
 
@@ -1637,7 +1683,9 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
                 },
             )
             assert get_scene_item_id_response["d"]["requestStatus"]["result"] is True
-            scene_item_id = get_scene_item_id_response["d"]["responseData"]["sceneItemId"]
+            scene_item_id = get_scene_item_id_response["d"]["responseData"][
+                "sceneItemId"
+            ]
 
             get_locked_response = await _send_obsws_request(
                 ws,
@@ -1673,7 +1721,10 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
                 },
             )
             assert get_locked_after_response["d"]["requestStatus"]["result"] is True
-            assert get_locked_after_response["d"]["responseData"]["sceneItemLocked"] is True
+            assert (
+                get_locked_after_response["d"]["responseData"]["sceneItemLocked"]
+                is True
+            )
 
             get_blend_mode_response = await _send_obsws_request(
                 ws,

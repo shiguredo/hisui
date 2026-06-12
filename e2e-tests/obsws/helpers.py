@@ -75,7 +75,9 @@ class ObswsServer:
         if self._process is not None:
             raise RuntimeError("server is already started")
         if (self.https_cert_path is None) != (self.https_key_path is None):
-            raise ValueError("https_cert_path and https_key_path must be provided together")
+            raise ValueError(
+                "https_cert_path and https_key_path must be provided together"
+            )
 
         # Popen 起動後に値検証が失敗すると __enter__ 未完了で __exit__ も走らずプロセスが
         # ゾンビ化するため、起動前に解決して self._startup_timeout に格納する。
@@ -510,7 +512,9 @@ def _start_ffmpeg_inbound_push(
     ]
     deadline = time.time() + startup_timeout
     while time.time() < deadline:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
         # プロセスが即座に終了していないか確認する
         time.sleep(0.3)
         if process.poll() is None:
@@ -698,7 +702,9 @@ async def _identify_with_optional_password(
     identify_data: dict[str, object] = {"rpcVersion": 1}
     # OBS WebSocket プロトコルでは eventSubscriptions 省略時のデフォルトが All のため、
     # イベントを購読しないテストでは明示的に 0 を送信する。
-    identify_data["eventSubscriptions"] = event_subscriptions if event_subscriptions is not None else 0
+    identify_data["eventSubscriptions"] = (
+        event_subscriptions if event_subscriptions is not None else 0
+    )
     if password is not None:
         authentication = hello_data["authentication"]
         identify_data["authentication"] = _build_obsws_authentication(
@@ -785,7 +791,9 @@ async def _expect_stream_state_changed_event(
     # hisui は中間状態イベント (STARTING/STOPPING) を最終状態イベント (STARTED/STOPPED) の
     # 前に送信するため、中間状態を消費してから最終状態を検証する。
     intermediate_state = (
-        "OBS_WEBSOCKET_OUTPUT_STARTING" if output_active else "OBS_WEBSOCKET_OUTPUT_STOPPING"
+        "OBS_WEBSOCKET_OUTPUT_STARTING"
+        if output_active
+        else "OBS_WEBSOCKET_OUTPUT_STOPPING"
     )
     intermediate_event = await _expect_obsws_event(
         ws,
@@ -801,7 +809,9 @@ async def _expect_stream_state_changed_event(
     )
     assert event["d"]["eventData"]["outputActive"] is output_active
     expected_output_state = (
-        "OBS_WEBSOCKET_OUTPUT_STARTED" if output_active else "OBS_WEBSOCKET_OUTPUT_STOPPED"
+        "OBS_WEBSOCKET_OUTPUT_STARTED"
+        if output_active
+        else "OBS_WEBSOCKET_OUTPUT_STOPPED"
     )
     assert event["d"]["eventData"]["outputState"] == expected_output_state
 
