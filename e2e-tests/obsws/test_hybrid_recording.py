@@ -47,7 +47,6 @@ def _ffprobe_json(path: Path) -> dict:
 @pytest.mark.timeout(60)
 def test_hybrid_mp4_sigkill_produces_readable_file(binary_path: Path, tmp_path: Path):
     """録画中に SIGKILL でプロセスを停止しても、出力ファイルが ffprobe で読めることを確認する"""
-    host = "127.0.0.1"
 
     image_path = tmp_path / "hybrid-kill-input.png"
     _write_test_png(image_path)
@@ -107,7 +106,6 @@ def test_hybrid_mp4_sigkill_produces_readable_file(binary_path: Path, tmp_path: 
 
     server = ObswsServer(
         binary_path,
-        host=host,
         default_record_dir=record_dir,
         use_env=False,
     )
@@ -144,12 +142,11 @@ def test_hybrid_mp4_normal_finalize_produces_valid_mp4(
     binary_path: Path, tmp_path: Path
 ):
     """正常終了時に hybrid MP4 が有効な標準 MP4 に変換されることを確認する"""
-    host = "127.0.0.1"
 
     image_path = tmp_path / "hybrid-normal-input.png"
     _write_test_png(image_path)
 
-    async def _run(server: ObswsServer):
+    async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -210,11 +207,10 @@ def test_hybrid_mp4_normal_finalize_produces_valid_mp4(
 
     with ObswsServer(
         binary_path,
-        host=host,
         default_record_dir=tmp_path,
         use_env=False,
     ) as server:
-        output_path = asyncio.run(_run(server))
+        output_path = asyncio.run(_run())
 
     assert output_path.exists(), f"録画ファイルが存在しない: {output_path}"
     assert output_path.stat().st_size > 0, "録画ファイルが空"

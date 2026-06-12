@@ -106,13 +106,12 @@ def _run_bootstrap_command(
 @pytest.mark.timeout(90)
 def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
     """bootstrap で WebRTC 接続し、映像トラックが受信できることを確認する"""
-    host = "127.0.0.1"
     input_mp4 = (
         Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
     )
     output_mp4 = tmp_path / "output.mp4"
 
-    server = ObswsServer(binary_path, host=host)
+    server = ObswsServer(binary_path)
     result = None
     try:
         with server:
@@ -185,13 +184,12 @@ def test_bootstrap_receives_video_track(binary_path: Path, tmp_path: Path):
 @pytest.mark.timeout(90)
 def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
     """bootstrap で HisuiSubscribeProgramTracks を送信し、Program トラックを書き出せることを確認する"""
-    host = "127.0.0.1"
     input_mp4 = (
         Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
     )
     output_mp4 = tmp_path / "output.mp4"
 
-    server = ObswsServer(binary_path, host=host)
+    server = ObswsServer(binary_path)
     result = None
     try:
         with server:
@@ -278,13 +276,12 @@ def test_bootstrap_subscribe_program_tracks(binary_path: Path, tmp_path: Path):
 @pytest.mark.timeout(90)
 def test_bootstrap_send_video(binary_path: Path, tmp_path: Path):
     """webrtc_source で映像を送信し、Program 出力に含まれることを確認する"""
-    host = "127.0.0.1"
     input_mp4 = (
         Path(__file__).resolve().parents[2] / "testdata" / "red-320x320-h264-aac.mp4"
     )
     output_mp4 = tmp_path / "output.mp4"
 
-    server = ObswsServer(binary_path, host=host)
+    server = ObswsServer(binary_path)
     result = None
     try:
         with server:

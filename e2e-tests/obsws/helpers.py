@@ -33,7 +33,7 @@ class ObswsServer:
         self,
         binary_path: Path,
         *,
-        host: str,
+        host: str = "127.0.0.1",
         password: str | None = None,
         default_record_dir: Path | None = None,
         ui: bool = False,

@@ -128,18 +128,16 @@ def _client_ssl_context(cert_path: Path) -> ssl.SSLContext:
 
 def test_obsws_http_ok_endpoint(binary_path: Path):
     """obsws が HTTP /.ok エンドポイントを公開することを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         status, _, _ = asyncio.run(_http_get(f"http://{server.host}:{server.port}/.ok"))
         assert status == 204
 
 
 def test_obsws_http_metrics_endpoint(binary_path: Path):
     """obsws が HTTP /metrics エンドポイントを公開することを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         status, body, headers = asyncio.run(
             _http_get(f"http://{server.host}:{server.port}/metrics")
         )
@@ -150,9 +148,8 @@ def test_obsws_http_metrics_endpoint(binary_path: Path):
 
 def test_obsws_http_metrics_json_endpoint(binary_path: Path):
     """obsws が HTTP /metrics?format=json を返すことを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         status, body, headers = asyncio.run(
             _http_get(f"http://{server.host}:{server.port}/metrics?format=json")
         )
@@ -163,9 +160,8 @@ def test_obsws_http_metrics_json_endpoint(binary_path: Path):
 
 def test_obsws_http_bootstrap_get_returns_405(binary_path: Path):
     """obsws が GET /bootstrap を拒否することを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         status, _, _ = asyncio.run(
             _http_request("GET", f"http://{server.host}:{server.port}/bootstrap")
         )
@@ -174,12 +170,10 @@ def test_obsws_http_bootstrap_get_returns_405(binary_path: Path):
 
 def test_obsws_proxy_root(binary_path: Path):
     """obsws が root への GET を upstream にリバースプロキシすることを確認する"""
-    host = "127.0.0.1"
 
     with _UpstreamServer() as upstream:
         with ObswsServer(
             binary_path,
-            host=host,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
@@ -193,12 +187,10 @@ def test_obsws_proxy_root(binary_path: Path):
 
 def test_obsws_proxy_sub_path(binary_path: Path):
     """obsws がサブパスへの GET を upstream にリバースプロキシすることを確認する"""
-    host = "127.0.0.1"
 
     with _UpstreamServer() as upstream:
         with ObswsServer(
             binary_path,
-            host=host,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
@@ -212,12 +204,10 @@ def test_obsws_proxy_sub_path(binary_path: Path):
 
 def test_obsws_proxy_json(binary_path: Path):
     """obsws が JSON レスポンスの Content-Type を維持することを確認する"""
-    host = "127.0.0.1"
 
     with _UpstreamServer() as upstream:
         with ObswsServer(
             binary_path,
-            host=host,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
@@ -232,12 +222,10 @@ def test_obsws_proxy_json(binary_path: Path):
 
 def test_obsws_proxy_ok_endpoint_not_proxied(binary_path: Path):
     """obsws が /.ok を upstream に流さずローカルで返すことを確認する"""
-    host = "127.0.0.1"
 
     with _UpstreamServer() as upstream:
         with ObswsServer(
             binary_path,
-            host=host,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
@@ -250,12 +238,10 @@ def test_obsws_proxy_ok_endpoint_not_proxied(binary_path: Path):
 
 def test_obsws_proxy_post_returns_405(binary_path: Path):
     """obsws が proxy 対象外の POST を 405 で返すことを確認する"""
-    host = "127.0.0.1"
 
     with _UpstreamServer() as upstream:
         with ObswsServer(
             binary_path,
-            host=host,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
@@ -268,12 +254,10 @@ def test_obsws_proxy_post_returns_405(binary_path: Path):
 
 def test_obsws_proxy_unknown_upstream_path(binary_path: Path):
     """obsws が upstream の 404 をそのまま返すことを確認する"""
-    host = "127.0.0.1"
 
     with _UpstreamServer() as upstream:
         with ObswsServer(
             binary_path,
-            host=host,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
@@ -286,12 +270,10 @@ def test_obsws_proxy_unknown_upstream_path(binary_path: Path):
 
 def test_obsws_proxy_client_disconnect_does_not_crash_server(binary_path: Path):
     """obsws が proxy 中の client disconnect 後も継続稼働することを確認する"""
-    host = "127.0.0.1"
 
     with _UpstreamServer() as upstream:
         with ObswsServer(
             binary_path,
-            host=host,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
@@ -316,13 +298,11 @@ def test_obsws_proxy_client_disconnect_does_not_crash_server(binary_path: Path):
 
 def test_obsws_https_ok_endpoint(binary_path: Path, tmp_path: Path):
     """obsws が HTTPS /.ok エンドポイントを公開することを確認する"""
-    host = "127.0.0.1"
     cert_path, key_path = _create_self_signed_cert(tmp_path)
     ssl_context = _client_ssl_context(cert_path)
 
     with ObswsServer(
         binary_path,
-        host=host,
         https_cert_path=cert_path,
         https_key_path=key_path,
         use_env=False,
@@ -339,13 +319,11 @@ def test_obsws_https_ok_endpoint(binary_path: Path, tmp_path: Path):
 
 def test_obsws_https_metrics_json_endpoint(binary_path: Path, tmp_path: Path):
     """obsws が HTTPS でも /metrics?format=json を返すことを確認する"""
-    host = "127.0.0.1"
     cert_path, key_path = _create_self_signed_cert(tmp_path)
     ssl_context = _client_ssl_context(cert_path)
 
     with ObswsServer(
         binary_path,
-        host=host,
         https_cert_path=cert_path,
         https_key_path=key_path,
         use_env=False,

@@ -43,7 +43,6 @@ def _has_positive_metric(body: str, metric_prefix: str) -> bool:
 
 def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
     """obsws が ToggleStream で配信状態を切り替えられることを確認する"""
-    host = "127.0.0.1"
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -135,13 +134,12 @@ def test_obsws_toggle_stream_request(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_toggle_stream_flow())
 
 
 def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
     """obsws が ToggleRecord で録画状態を切り替えられることを確認する"""
-    host = "127.0.0.1"
 
     image_path = tmp_path / "toggle-record-input.png"
     _write_test_png(image_path)
@@ -217,7 +215,7 @@ def test_obsws_toggle_record_request(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_toggle_record_flow())
 
 
@@ -226,10 +224,9 @@ def test_obsws_start_record_with_multiple_audio_inputs(
     tmp_path: Path,
 ):
     """obsws が複数音声入力を合成して録画できることを確認する"""
-    host = "127.0.0.1"
     input_path = Path(__file__).resolve().parents[2] / "testdata" / "beep-aac-audio.mp4"
 
-    async def _run(server: ObswsServer):
+    async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             ws = await session.ws_connect(
@@ -306,11 +303,10 @@ def test_obsws_start_record_with_multiple_audio_inputs(
 
     with ObswsServer(
         binary_path,
-        host=host,
         default_record_dir=tmp_path,
         use_env=False,
     ) as server:
-        output_path = asyncio.run(_run(server))
+        output_path = asyncio.run(_run())
 
     inspect_output = _inspect_mp4(
         binary_path,
@@ -330,7 +326,6 @@ def test_obsws_start_record_with_multiple_audio_inputs(
 
 def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Path):
     """obsws で image_source を作成し StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -418,7 +413,7 @@ def test_obsws_image_source_start_stream_to_rtmp(binary_path: Path, tmp_path: Pa
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -472,7 +467,6 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
     tmp_path: Path,
 ):
     """obsws で mp4_file_source を作成し StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -558,7 +552,7 @@ def test_obsws_mp4_file_source_start_stream_to_rtmp_listen_mode(
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -609,7 +603,6 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
     tmp_path: Path,
 ):
     """obsws で複数音声入力を合成して StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -691,7 +684,7 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -743,7 +736,6 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
     tmp_path: Path,
 ):
     """obsws で rtmp_inbound を作成し StartRecord → ffmpeg RTMP push → StopRecord で録画できることを確認する"""
-    host = "127.0.0.1"
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
@@ -830,7 +822,6 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
 
     with ObswsServer(
         binary_path,
-        host=host,
         default_record_dir=tmp_path,
         use_env=False,
     ) as server:
@@ -853,7 +844,6 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
     tmp_path: Path,
 ):
     """obsws で srt_inbound を作成し StartRecord → ffmpeg SRT push → StopRecord で録画できることを確認する"""
-    host = "127.0.0.1"
     srt_port, srt_sock = reserve_ephemeral_port()
     srt_sock.close()
 
@@ -935,7 +925,6 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
 
     with ObswsServer(
         binary_path,
-        host=host,
         default_record_dir=tmp_path,
         use_env=False,
     ) as server:
@@ -958,7 +947,6 @@ def test_obsws_srt_inbound_with_stream_id(
     tmp_path: Path,
 ):
     """obsws で srt_inbound に streamId を指定して録画できることを確認する"""
-    host = "127.0.0.1"
     srt_port, srt_sock = reserve_ephemeral_port()
     srt_sock.close()
 
@@ -1045,7 +1033,6 @@ def test_obsws_srt_inbound_with_stream_id(
 
     with ObswsServer(
         binary_path,
-        host=host,
         default_record_dir=tmp_path,
         use_env=False,
     ) as server:
@@ -1068,7 +1055,6 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
     tmp_path: Path,
 ):
     """obsws で rtmp_inbound を作成し StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
     rtmp_inbound_port, rtmp_inbound_sock = reserve_ephemeral_port()
     rtmp_inbound_sock.close()
     rtmp_outbound_port, rtmp_outbound_sock = reserve_ephemeral_port()
@@ -1166,7 +1152,7 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -1212,7 +1198,6 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
     tmp_path: Path,
 ):
     """obsws で srt_inbound を作成し StartStream で RTMP 配信できることを確認する"""
-    host = "127.0.0.1"
     srt_inbound_port, srt_inbound_sock = reserve_ephemeral_port()
     srt_inbound_sock.close()
     rtmp_outbound_port, rtmp_outbound_sock = reserve_ephemeral_port()
@@ -1305,7 +1290,7 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         def _run_start_stream_flow_sync() -> None:
             asyncio.run(_run_start_stream_flow())
@@ -1349,7 +1334,6 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
 def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
     """obsws が StartOutput/StopOutput で HLS 出力を開始・停止できることを確認する。
     停止後に生成ファイルが削除されることも確認する。"""
-    host = "127.0.0.1"
 
     image_path = tmp_path / "hls-input.png"
     _write_test_png(image_path)
@@ -1509,13 +1493,12 @@ def test_obsws_hls_start_stop_output(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_flow())
 
 
 def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
     """obsws が ToggleOutput で HLS 出力を on/off できることを確認する"""
-    host = "127.0.0.1"
 
     image_path = tmp_path / "hls-toggle-input.png"
     _write_test_png(image_path)
@@ -1597,13 +1580,12 @@ def test_obsws_hls_toggle_output(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_toggle_flow())
 
 
 def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Path):
     """destination 未設定で HLS StartOutput がエラーになることを確認する"""
-    host = "127.0.0.1"
 
     image_path = tmp_path / "hls-nodir-input.png"
     _write_test_png(image_path)
@@ -1646,14 +1628,13 @@ def test_obsws_hls_start_without_directory_fails(binary_path: Path, tmp_path: Pa
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_nodir_flow())
 
 
 def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
     """obsws が fMP4 形式の HLS 出力を開始・停止できることを確認する。
     init.mp4 と .m4s セグメントが生成され、停止後に削除されることを確認する。"""
-    host = "127.0.0.1"
 
     image_path = tmp_path / "hls-fmp4-input.png"
     _write_test_png(image_path)
@@ -1794,14 +1775,13 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_fmp4_flow())
 
 
 def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
     """ABR 設定での HLS 出力を開始・停止できることを確認する。
     マスタープレイリストとバリアントサブディレクトリが生成・削除されることを確認する。"""
-    host = "127.0.0.1"
 
     image_path = tmp_path / "hls-abr-input.png"
     _write_test_png(image_path)
@@ -1950,13 +1930,12 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_hls_abr_flow())
 
 
 def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
     """HLS variants のバリデーションエラーを確認する。"""
-    host = "127.0.0.1"
 
     async def _run_validation_flow():
         timeout = aiohttp.ClientTimeout(total=10.0)
@@ -2060,7 +2039,7 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
 
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run_validation_flow())
 
 
@@ -2081,11 +2060,10 @@ def _find_exit_metrics(stdout: str) -> dict | None:
 
 def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path):
     """--emit-exit-metrics 有効時、SIGTERM 停止で type=metrics の JSON Line が stdout に出ることを確認する"""
-    host = "127.0.0.1"
 
     # 起動直後に停止する。リッスン開始までにミキサー等の processor が stats を登録するため
     # family は非空になる（明示的なバリアは無くスケジューラ依存だが、起動経路の .await で実際上満たされる）。
-    server = ObswsServer(binary_path, host=host, default_record_dir=tmp_path)
+    server = ObswsServer(binary_path, default_record_dir=tmp_path)
     with server:
         pass
 
@@ -2108,11 +2086,9 @@ def test_obsws_emit_exit_metrics_outputs_jsonl(binary_path: Path, tmp_path: Path
 
 def test_obsws_emit_exit_metrics_disabled(binary_path: Path, tmp_path: Path):
     """--emit-exit-metrics 無効時は終了時メトリクスが出力されないことを確認する"""
-    host = "127.0.0.1"
 
     server = ObswsServer(
         binary_path,
-        host=host,
         default_record_dir=tmp_path,
         emit_exit_metrics=False,
     )

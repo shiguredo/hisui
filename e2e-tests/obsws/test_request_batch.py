@@ -19,14 +19,13 @@ from hisui_server import reserve_ephemeral_port
 
 def test_obsws_request_batch_prepares_stream_flow(binary_path: Path, tmp_path: Path):
     """obsws が RequestBatch で配信準備 request を順次実行できることを確認する"""
-    host = "127.0.0.1"
     rtmp_port, rtmp_sock = reserve_ephemeral_port()
     rtmp_sock.close()
 
     image_path = tmp_path / "batch-input.png"
     _write_test_png(image_path)
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         async def _run_batch_flow():
             timeout = aiohttp.ClientTimeout(total=20.0)
@@ -98,9 +97,8 @@ def test_obsws_request_batch_prepares_stream_flow(binary_path: Path, tmp_path: P
 
 def test_obsws_request_batch_applies_set_input_settings(binary_path: Path):
     """obsws が RequestBatch で SetInputSettings を順次適用できることを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         async def _run_batch_set_input_settings_flow():
             timeout = aiohttp.ClientTimeout(total=20.0)
@@ -163,9 +161,8 @@ def test_obsws_request_batch_halt_on_failure_stops_after_set_input_settings_erro
     binary_path: Path,
 ):
     """obsws が RequestBatch の SetInputSettings エラーで後続 request を停止することを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         async def _run_batch_set_input_settings_halt_flow():
             timeout = aiohttp.ClientTimeout(total=20.0)
@@ -238,9 +235,8 @@ def test_obsws_request_batch_halt_on_failure_stops_after_set_input_settings_erro
 
 def test_obsws_request_batch_rejects_unsupported_execution_type(binary_path: Path):
     """obsws が未対応 executionType の RequestBatch を拒否することを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         async def _run_invalid_batch_flow():
             timeout = aiohttp.ClientTimeout(total=20.0)
@@ -275,9 +271,8 @@ def test_obsws_request_batch_halt_on_failure_stops_subsequent_requests(
     binary_path: Path,
 ):
     """obsws が RequestBatch の haltOnFailure で後続 request を停止することを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
 
         async def _run_halt_on_failure_flow():
             timeout = aiohttp.ClientTimeout(total=20.0)

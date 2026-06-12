@@ -17,11 +17,9 @@ from helpers import (
 
 def test_obsws_get_version_request(binary_path: Path):
     """obsws が GetVersion request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -85,11 +83,9 @@ def test_obsws_get_version_request(binary_path: Path):
 
 def test_obsws_get_stats_request(binary_path: Path):
     """obsws が GetStats request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -109,11 +105,9 @@ def test_obsws_get_stats_request(binary_path: Path):
 
 def test_obsws_get_canvas_list_request(binary_path: Path):
     """obsws が GetCanvasList request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -145,13 +139,11 @@ def test_obsws_get_canvas_list_request(binary_path: Path):
 
 def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path: Path):
     """obsws が GetRecordDirectory / SetRecordDirectory request に応答することを確認する"""
-    host = "127.0.0.1"
     default_record_dir = tmp_path / "default-records"
     updated_record_dir = tmp_path / "updated-records"
 
     with ObswsServer(
         binary_path,
-        host=host,
         default_record_dir=default_record_dir,
         use_env=False,
     ) as server:
@@ -195,11 +187,9 @@ def test_obsws_get_and_set_record_directory_request(binary_path: Path, tmp_path:
 
 def test_obsws_get_record_status_request(binary_path: Path):
     """obsws が GetRecordStatus request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -218,11 +208,9 @@ def test_obsws_get_record_status_request(binary_path: Path):
 
 def test_obsws_transition_requests(binary_path: Path):
     """obsws が Transition 関連 request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         kind_list_response = asyncio.run(
@@ -404,11 +392,9 @@ def test_obsws_transition_requests(binary_path: Path):
 
 def test_obsws_preview_scene_requests(binary_path: Path):
     """obsws が Preview Scene 関連 request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         get_preview_response = asyncio.run(
@@ -456,11 +442,9 @@ def test_obsws_preview_scene_requests(binary_path: Path):
 
 def test_obsws_get_input_list_request(binary_path: Path):
     """obsws が GetInputList request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -479,11 +463,9 @@ def test_obsws_get_input_list_request(binary_path: Path):
 
 def test_obsws_get_input_kind_list_request(binary_path: Path):
     """obsws が GetInputKindList request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -503,11 +485,9 @@ def test_obsws_get_input_kind_list_request(binary_path: Path):
 
 def test_obsws_set_input_name_request(binary_path: Path):
     """obsws が SetInputName request に応答して入力名を変更できることを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         create_response = asyncio.run(
@@ -567,11 +547,9 @@ def test_obsws_set_input_name_request(binary_path: Path):
 
 def test_obsws_get_input_default_settings_request(binary_path: Path):
     """obsws が GetInputDefaultSettings request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -605,11 +583,9 @@ def test_obsws_get_input_default_settings_request(binary_path: Path):
 
 def test_obsws_get_input_properties_list_property_items_request(binary_path: Path):
     """obsws が GetInputPropertiesListPropertyItems request に応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         # テスト用 input を作成する
@@ -691,11 +667,9 @@ def test_obsws_get_input_properties_list_property_items_request(binary_path: Pat
 
 def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
     """obsws が GetInputSettings で識別子欠落をエラー応答することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -713,11 +687,9 @@ def test_obsws_get_input_settings_without_lookup_fields(binary_path: Path):
 
 def test_obsws_set_input_settings_request(binary_path: Path):
     """obsws が SetInputSettings request に応答して入力設定を更新できることを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         create_response = asyncio.run(
@@ -814,11 +786,9 @@ def test_obsws_set_input_settings_request(binary_path: Path):
 
 def test_obsws_set_input_settings_rejects_invalid_input_settings(binary_path: Path):
     """obsws が SetInputSettings で不正な inputSettings を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         create_response = asyncio.run(
@@ -854,11 +824,9 @@ def test_obsws_set_input_settings_rejects_invalid_input_settings(binary_path: Pa
 
 def test_obsws_set_input_settings_rejects_missing_request_data(binary_path: Path):
     """obsws が SetInputSettings で requestData 欠落を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -875,11 +843,9 @@ def test_obsws_set_input_settings_rejects_missing_request_data(binary_path: Path
 
 def test_obsws_set_input_settings_rejects_missing_lookup_fields(binary_path: Path):
     """obsws が SetInputSettings で識別子欠落を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -897,11 +863,9 @@ def test_obsws_set_input_settings_rejects_missing_lookup_fields(binary_path: Pat
 
 def test_obsws_set_input_settings_rejects_missing_input_settings(binary_path: Path):
     """obsws が SetInputSettings で inputSettings 欠落を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         create_response = asyncio.run(
@@ -934,11 +898,9 @@ def test_obsws_set_input_settings_rejects_missing_input_settings(binary_path: Pa
 
 def test_obsws_set_input_settings_rejects_invalid_overlay_type(binary_path: Path):
     """obsws が SetInputSettings で overlay 型不正を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         create_response = asyncio.run(
@@ -975,11 +937,9 @@ def test_obsws_set_input_settings_rejects_invalid_overlay_type(binary_path: Path
 
 def test_obsws_create_input_request(binary_path: Path):
     """obsws が CreateInput request に応答して入力を追加できることを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         create_response = asyncio.run(
@@ -1046,11 +1006,9 @@ def test_obsws_create_input_request(binary_path: Path):
 
 def test_obsws_create_input_rejects_duplicate_name(binary_path: Path):
     """obsws が CreateInput で inputName 重複を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         first_response = asyncio.run(
@@ -1088,11 +1046,9 @@ def test_obsws_create_input_rejects_duplicate_name(binary_path: Path):
 
 def test_obsws_create_input_rejects_unsupported_scene_name(binary_path: Path):
     """obsws が CreateInput で未対応 sceneName を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -1115,11 +1071,9 @@ def test_obsws_create_input_rejects_unsupported_scene_name(binary_path: Path):
 
 def test_obsws_create_input_rejects_unsupported_input_kind(binary_path: Path):
     """obsws が CreateInput で未対応 inputKind を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -1142,11 +1096,9 @@ def test_obsws_create_input_rejects_unsupported_input_kind(binary_path: Path):
 
 def test_obsws_remove_input_request(binary_path: Path):
     """obsws が RemoveInput request に応答して入力を削除できることを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         create_response = asyncio.run(
@@ -1191,11 +1143,9 @@ def test_obsws_remove_input_request(binary_path: Path):
 
 def test_obsws_remove_input_rejects_unknown_input(binary_path: Path):
     """obsws が RemoveInput で存在しない入力を拒否することを確認する"""
-    host = "127.0.0.1"
 
     with ObswsServer(
         binary_path,
-        host=host,
         use_env=False,
     ) as server:
         response = asyncio.run(
@@ -1213,7 +1163,6 @@ def test_obsws_remove_input_rejects_unknown_input(binary_path: Path):
 
 def test_obsws_get_scene_item_id_request(binary_path: Path):
     """obsws が GetSceneItemId request に応答することを確認する"""
-    host = "127.0.0.1"
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
@@ -1256,7 +1205,7 @@ def test_obsws_get_scene_item_id_request(binary_path: Path):
             assert scene_item_id > 0
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
@@ -1264,7 +1213,6 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
     binary_path: Path, tmp_path: Path
 ):
     """obsws が SetSceneItemEnabled で StartRecord の前提入力を切り替えられることを確認する"""
-    host = "127.0.0.1"
     image_path = tmp_path / "set-scene-item-enabled-input.png"
     _write_test_png(image_path)
 
@@ -1363,13 +1311,12 @@ def test_obsws_set_scene_item_enabled_controls_start_record_precondition(
             assert stop_record_response["d"]["responseData"]["outputPath"]
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_get_scene_item_enabled_request(binary_path: Path):
     """obsws が GetSceneItemEnabled request に応答することを確認する"""
-    host = "127.0.0.1"
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
@@ -1448,13 +1395,12 @@ def test_obsws_get_scene_item_enabled_request(binary_path: Path):
             )
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_scene_item_management_requests(binary_path: Path):
     """obsws の Scene Item 管理 request 一式が動作することを確認する"""
-    host = "127.0.0.1"
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
@@ -1641,13 +1587,12 @@ def test_obsws_scene_item_management_requests(binary_path: Path):
             assert duplicated_scene_item_id != second_scene_item_id
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path):
     """obsws の Scene Item の lock / blend mode / transform request が動作することを確認する"""
-    host = "127.0.0.1"
 
     async def _run():
         timeout = aiohttp.ClientTimeout(total=20.0)
@@ -1802,15 +1747,14 @@ def test_obsws_scene_item_locked_blend_mode_transform_requests(binary_path: Path
             assert scene_item_transform["boundsType"] == "OBS_BOUNDS_STRETCH"
             await ws.close()
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         asyncio.run(_run())
 
 
 def test_obsws_input_mute_and_volume_requests(binary_path: Path):
     """obsws の入力ミュート・音量制御 API が正しく動作することを確認する"""
-    host = "127.0.0.1"
 
-    with ObswsServer(binary_path, host=host, use_env=False) as server:
+    with ObswsServer(binary_path, use_env=False) as server:
         # まず入力を作成する
         create_response = asyncio.run(
             _connect_identify_and_request(

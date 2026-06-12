@@ -89,11 +89,10 @@ async def _set_output_settings_stream(
 
 def test_stream_settings_persist_across_restart(binary_path: Path, tmp_path: Path):
     """SetStreamServiceSettings で設定した値が再起動後も復元される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
     # 1 回目の起動: 設定を変更する
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -116,7 +115,7 @@ def test_stream_settings_persist_across_restart(binary_path: Path, tmp_path: Pat
 
     # 2 回目の起動: 値が復元されることを確認する
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -138,11 +137,10 @@ def test_stream_settings_persist_across_restart(binary_path: Path, tmp_path: Pat
 
 def test_record_directory_persists_across_restart(binary_path: Path, tmp_path: Path):
     """SetRecordDirectory で設定した値が再起動後も復元される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
     record_dir = str(tmp_path / "my-recordings")
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -156,7 +154,7 @@ def test_record_directory_persists_across_restart(binary_path: Path, tmp_path: P
 
         asyncio.run(_set())
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -175,10 +173,9 @@ def test_record_directory_persists_across_restart(binary_path: Path, tmp_path: P
 
 def test_set_output_settings_stream_persists(binary_path: Path, tmp_path: Path):
     """SetOutputSettings 経由で stream を変更した値が再起動後も復元される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -194,7 +191,7 @@ def test_set_output_settings_stream_persists(binary_path: Path, tmp_path: Path):
 
         asyncio.run(_set())
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -216,10 +213,9 @@ def test_set_output_settings_stream_persists(binary_path: Path, tmp_path: Path):
 
 def test_no_state_file_means_no_persistence(binary_path: Path, tmp_path: Path):
     """state file 未指定では再起動後に値が復元されない"""
-    host = "127.0.0.1"
 
     # state_file を指定しない
-    with ObswsServer(binary_path, host=host) as server:
+    with ObswsServer(binary_path) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -235,7 +231,7 @@ def test_no_state_file_means_no_persistence(binary_path: Path, tmp_path: Path):
 
         asyncio.run(_set())
 
-    with ObswsServer(binary_path, host=host) as server2:
+    with ObswsServer(binary_path) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -258,7 +254,6 @@ def test_no_state_file_means_no_persistence(binary_path: Path, tmp_path: Path):
 
 def test_corrupted_state_file_causes_startup_failure(binary_path: Path, tmp_path: Path):
     """壊れた state file を指定すると起動に失敗する"""
-    host = "127.0.0.1"
     state_file = tmp_path / "corrupted.jsonc"
     state_file.write_text("{ invalid json content !!!")
 
@@ -266,7 +261,7 @@ def test_corrupted_state_file_causes_startup_failure(binary_path: Path, tmp_path
     # _read_startup_info() 自体は成功し start() が return する。
     # その直後 state_file load が失敗してプロセスが exit するので、
     # wait_for_exit で短時間内の exit と returncode != 0 を検証する。
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
         returncode = server.wait_for_exit(timeout=5.0)
         assert returncode is not None, (
             "server should have exited due to corrupted state file"
@@ -278,11 +273,10 @@ def test_invalid_version_state_file_causes_startup_failure(
     binary_path: Path, tmp_path: Path
 ):
     """version が 1 以外の state file を指定すると起動に失敗する"""
-    host = "127.0.0.1"
     state_file = tmp_path / "bad-version.jsonc"
     state_file.write_text(json.dumps({"version": 99}))
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
         returncode = server.wait_for_exit(timeout=5.0)
         assert returncode is not None, (
             "server should have exited due to invalid version state file"
@@ -294,11 +288,10 @@ def test_record_without_directory_causes_startup_failure(
     binary_path: Path, tmp_path: Path
 ):
     """record セクションに recordDirectory がない state file は起動に失敗する"""
-    host = "127.0.0.1"
     state_file = tmp_path / "no-record-dir.jsonc"
     state_file.write_text(json.dumps({"version": 1, "record": {}}))
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
         returncode = server.wait_for_exit(timeout=5.0)
         assert returncode is not None, (
             "server should have exited due to record section missing recordDirectory"
@@ -308,7 +301,6 @@ def test_record_without_directory_causes_startup_failure(
 
 def test_preexisting_state_file_is_loaded_on_startup(binary_path: Path, tmp_path: Path):
     """事前に作成された state file の値で起動時に初期化される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "preexisting.jsonc"
     state_file.write_text(
         json.dumps(
@@ -338,7 +330,7 @@ def test_preexisting_state_file_is_loaded_on_startup(binary_path: Path, tmp_path
         )
     )
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -367,10 +359,9 @@ def test_preexisting_state_file_is_loaded_on_startup(binary_path: Path, tmp_path
 
 def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path):
     """SetOutputSettings で rtmp_outbound を設定した値が再起動後も復元される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -397,7 +388,7 @@ def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path
 
         asyncio.run(_set())
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -423,10 +414,9 @@ def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path
 
 def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
     """SetOutputSettings で sora を設定した値が再起動後も復元される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -456,7 +446,7 @@ def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
 
         asyncio.run(_set())
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -483,11 +473,10 @@ def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
 
 def test_hls_filesystem_persists_across_restart(binary_path: Path, tmp_path: Path):
     """SetOutputSettings で hls filesystem を設定した値が再起動後も復元される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
     hls_dir = str(tmp_path / "hls-output")
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -521,7 +510,7 @@ def test_hls_filesystem_persists_across_restart(binary_path: Path, tmp_path: Pat
 
         asyncio.run(_set())
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -552,11 +541,10 @@ def test_mpeg_dash_filesystem_persists_across_restart(
     binary_path: Path, tmp_path: Path
 ):
     """SetOutputSettings で mpeg_dash filesystem を設定した値が再起動後も復元される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
     dash_dir = str(tmp_path / "dash-output")
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -591,7 +579,7 @@ def test_mpeg_dash_filesystem_persists_across_restart(
 
         asyncio.run(_set())
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -621,12 +609,11 @@ def test_mpeg_dash_filesystem_persists_across_restart(
 
 def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
     """CreateScene で作成した scene が再起動後も復元され、sceneUuid が保持される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
     # 1 回目の起動: scene を作成し、sceneUuid を記録する
     created = {}
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -660,7 +647,7 @@ def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
 
     # 2 回目の起動: sceneUuid が同一であることを確認する
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -687,12 +674,11 @@ def test_scene_persists_across_restart(binary_path: Path, tmp_path: Path):
 
 def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
     """CreateInput で作成した input が再起動後も復元され、UUID と sceneItemId が保持される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
     # 1 回目の起動: input を作成し、UUID と sceneItemId を記録する
     created = {}
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -724,7 +710,7 @@ def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
 
     # 2 回目の起動: UUID と sceneItemId が同一であることを確認する
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -758,10 +744,9 @@ def test_input_persists_across_restart(binary_path: Path, tmp_path: Path):
 
 def test_scene_item_enabled_persists_across_restart(binary_path: Path, tmp_path: Path):
     """SetSceneItemEnabled の変更が再起動後も復元される"""
-    host = "127.0.0.1"
     state_file = tmp_path / "state.jsonc"
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server:
+    with ObswsServer(binary_path, state_file=state_file) as server:
 
         async def _set():
             timeout = aiohttp.ClientTimeout(total=10.0)
@@ -800,7 +785,7 @@ def test_scene_item_enabled_persists_across_restart(binary_path: Path, tmp_path:
 
         asyncio.run(_set())
 
-    with ObswsServer(binary_path, host=host, state_file=state_file) as server2:
+    with ObswsServer(binary_path, state_file=state_file) as server2:
 
         async def _get():
             timeout = aiohttp.ClientTimeout(total=10.0)
