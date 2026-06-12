@@ -77,7 +77,7 @@ writer の保持・補完ロジックの現状:
 
 - `src/mp4/sample_reader.rs`（音声 :109・映像 :138）: `Mp4SampleReader::run` のローカル変数として 2 フィールド構成の保持（`last_audio_sample_entry: Option<SharedSampleEntry>` / `last_video_sample_entry: Option<SharedSampleEntry>`）を導入
 - `src/mp4/reader.rs`（音声 :1096 / :1128・映像 :1189 / :1224）: `ReaderState` に 2 フィールド構成の保持を追加。warm-up 経路（`suppress_publish`）と publish 経路の両方で保持値を `sample_entry` に載せる（warm-up 経路でも decoder が sample_entry を要求するため）
-- `src/sora/recording_mp4_reader.rs`（映像 :151・音声 :297）: `Mp4VideoReader` / `Mp4AudioReader` はそれぞれ単一トラック専用構造体のため、`Mp4VideoReader` に `last_video_sample_entry: Option<SharedSampleEntry>` の 1 フィールド、`Mp4AudioReader` に `last_audio_sample_entry: Option<SharedSampleEntry>` の 1 フィールドのみ追加
+- `src/sora/recording_mp4_reader.rs`（映像 :151・音声 :297）: `Mp4VideoReader` / `Mp4AudioReader` はそれぞれ単一トラック専用構造体のため、両者にそれぞれ `last_sample_entry: Option<SharedSampleEntry>` の 1 フィールドのみ追加（構造体名で映像/音声が既に表現されているため、フィールド名には冗長な修飾を付けない）
 
 保持の更新位置（mp4 リーダー 3 ファイル全てに適用）:
 
