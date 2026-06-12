@@ -16,7 +16,7 @@ pub const H265_NALU_TYPE_VPS: u8 = 32;
 pub const H265_NALU_TYPE_SPS: u8 = 33;
 pub const H265_NALU_TYPE_PPS: u8 = 34;
 
-/// H.265 sample entry を生成する
+/// H.265 サンプルエントリーを生成する
 pub fn h265_sample_entry(
     width: EvenUsize,
     height: EvenUsize,
@@ -79,7 +79,7 @@ fn hvcc_nalu_array(nalu_type: u8, nalus: NalUnitArray) -> HvccNalUintArray {
     }
 }
 
-/// Annex B 形式の H.265 データから VPS, SPS, PPS を抽出して sample entry を生成する
+/// Annex B 形式の H.265 データから VPS, SPS, PPS を抽出してサンプルエントリーを生成する
 pub fn h265_sample_entry_from_annexb(
     width: usize,
     height: usize,

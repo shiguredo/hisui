@@ -210,7 +210,7 @@ impl HlsStorage {
         }
     }
 
-    /// ファイルを削除する（best-effort、エラーは warning のみ）
+    /// ファイルを削除する（ベストエフォート、エラーは warning のみ）
     async fn delete_file(&self, filename: &str) {
         match self {
             Self::Filesystem(fs) => {
@@ -290,9 +290,9 @@ struct HlsWriter {
     format_state: FormatState,
     /// 現在のセグメントの共通情報
     current_segment_info: Option<CurrentSegmentInfo>,
-    /// マニフェストに記載する codec string の解決状態
+    /// マニフェストに記載するコーデック文字列の解決状態
     codec_resolution: CodecResolutionState,
-    /// ABR マスタープレイリスト用の codec string 通知 channel。
+    /// ABR マスタープレイリスト用のコーデック文字列通知 channel。
     /// 送信は 1 回のみ。送信後および non-ABR 時は None。
     codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
     stats: HlsWriterStats,
@@ -386,7 +386,7 @@ impl HlsWriter {
         })
     }
 
-    /// ビデオの codec string が確定した際に状態を遷移させる。
+    /// ビデオのコーデック文字列が確定した際に状態を遷移させる。
     fn resolve_video_codec(&mut self, video: String) {
         if let Some(cs) = self.codec_resolution.resolve_video(video)
             && let Some(sender) = self.codec_string_sender.take()
@@ -395,7 +395,7 @@ impl HlsWriter {
         }
     }
 
-    /// オーディオの codec string が確定した際に状態を遷移させる。
+    /// オーディオのコーデック文字列が確定した際に状態を遷移させる。
     fn resolve_audio_codec(&mut self, audio: String) {
         if let Some(cs) = self.codec_resolution.resolve_audio(audio)
             && let Some(sender) = self.codec_string_sender.take()
@@ -1309,7 +1309,7 @@ pub struct HlsWriterConfig {
     pub segment_duration: f64,
     pub max_retained_segments: usize,
     pub segment_format: HlsSegmentFormat,
-    /// ABR マスタープレイリスト用の codec string 通知 channel。
+    /// ABR マスタープレイリスト用のコーデック文字列通知 channel。
     /// ABR 時のみ coordinator が受信側を持ち、全 variant の codec 確定後にマスタープレイリストを書き出す。
     /// non-ABR では不要（None を渡すこと）。
     pub codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,

@@ -11,7 +11,7 @@ pub struct CodecString {
 }
 
 impl CodecString {
-    /// ビデオとオーディオの SampleEntry から正確な codec string を生成する。
+    /// ビデオとオーディオの SampleEntry から正確なコーデック文字列を生成する。
     ///
     /// エンコーダーが実際に出力した SampleEntry を情報源とするため、
     /// MPD や HLS マニフェストに記載する codecs 属性はこのメソッドで生成すべき。
@@ -28,7 +28,7 @@ impl CodecString {
         })
     }
 
-    /// [`CodecName`] のペアから代表的な codec string を生成する。
+    /// [`CodecName`] のペアから代表的なコーデック文字列を生成する。
     ///
     /// 実際のエンコーダー出力とはプロファイルやレベルが異なる可能性がある。
     /// マニフェストの本番用途では [`from_sample_entries`] を使うこと。
@@ -80,7 +80,7 @@ impl CodecString {
 /// SampleEntry からビデオコーデック文字列を生成する。
 ///
 /// エンコーダーが出力した実際の SampleEntry からプロファイル・レベル等を読み取り、
-/// MPD や HLS マニフェストに記載する正確な codec string を返す。
+/// MPD や HLS マニフェストに記載する正確なコーデック文字列を返す。
 /// 対応していない SampleEntry の場合は `None` を返す。
 pub fn video_codec_string_from_sample_entry(
     entry: &shiguredo_mp4::boxes::SampleEntry,
@@ -132,7 +132,7 @@ pub fn video_codec_string_from_sample_entry(
 /// SampleEntry からオーディオコーデック文字列を生成する。
 ///
 /// エンコーダーが出力した実際の SampleEntry から AudioSpecificConfig 等を読み取り、
-/// MPD や HLS マニフェストに記載する正確な codec string を返す。
+/// MPD や HLS マニフェストに記載する正確なコーデック文字列を返す。
 /// 対応していない SampleEntry の場合は `None` を返す。
 pub fn audio_codec_string_from_sample_entry(
     entry: &shiguredo_mp4::boxes::SampleEntry,
@@ -174,7 +174,7 @@ pub fn audio_codec_string_from_sample_entry(
     }
 }
 
-/// HEVC (H.265) の codec string を HvccBox から生成する。
+/// HEVC (H.265) のコーデック文字列を HvccBox から生成する。
 ///
 /// RFC 6381 Section 3.3 に基づく形式:
 /// `{prefix}.{profile}.{compat_flags_hex}.{tier}{level}.{constraints_hex}`
@@ -216,23 +216,23 @@ fn build_hevc_codec_string(prefix: &str, hvcc: &shiguredo_mp4::boxes::HvccBox) -
     format!("{prefix}.{profile_space}{profile_idc}.{compat_hex}.{tier}{level}.{constraint_hex}")
 }
 
-/// マニフェストに記載する codec string の解決状態。
+/// マニフェストに記載するコーデック文字列の解決状態。
 ///
 /// SampleEntry の到着順に `Pending` → `VideoOnly` / `AudioOnly` → `Resolved` と遷移する。
 /// DASH の MPD と HLS のマスタープレイリストの両方で共用する。
 pub enum CodecResolutionState {
     /// video / audio どちらの SampleEntry もまだ受信していない
     Pending,
-    /// video の codec string のみ確定済み
+    /// video のコーデック文字列のみ確定済み
     VideoOnly(String),
-    /// audio の codec string のみ確定済み
+    /// audio のコーデック文字列のみ確定済み
     AudioOnly(String),
     /// video / audio 両方確定済み
     Resolved(CodecString),
 }
 
 impl CodecResolutionState {
-    /// ビデオの codec string が確定した際に状態を遷移させる。
+    /// ビデオのコーデック文字列が確定した際に状態を遷移させる。
     /// Resolved に到達した場合は確定した CodecString を返す。
     pub fn resolve_video(&mut self, video: String) -> Option<CodecString> {
         let prev = std::mem::replace(self, Self::Pending);
@@ -253,7 +253,7 @@ impl CodecResolutionState {
         }
     }
 
-    /// オーディオの codec string が確定した際に状態を遷移させる。
+    /// オーディオのコーデック文字列が確定した際に状態を遷移させる。
     /// Resolved に到達した場合は確定した CodecString を返す。
     pub fn resolve_audio(&mut self, audio: String) -> Option<CodecString> {
         let prev = std::mem::replace(self, Self::Pending);

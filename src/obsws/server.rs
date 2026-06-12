@@ -175,7 +175,7 @@ pub async fn run_server(
     let mut player_lifecycle_rx = player_lifecycle_rx;
 
     // SIGTERM / SIGINT ハンドラは初期化中に届いたシグナルも取りこぼさないよう、
-    // bind 等の .await より前のここで登録する。
+    // バインド等の .await より前のここで登録する。
     let shutdown_signal = ShutdownSignal::install()?;
 
     let upstream_config = parse_upstream_config(ui_remote_url.as_deref())?;

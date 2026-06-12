@@ -2169,7 +2169,7 @@ mod tests {
             .expect("source publish must succeed");
         let _endpoint_rx = endpoint.subscribe_track(source_track);
 
-        // RTMP 再生開始時のキーフレーム要求は best effort のため、
+        // RTMP 再生開始時のキーフレーム要求はベストエフォートのため、
         // 上流に video encoder が存在しない構成では None を正常系として扱う。
         let found = handle
             .find_upstream_video_encoder(endpoint.processor_id())

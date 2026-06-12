@@ -2309,7 +2309,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
         .await?;
     wait_for_processor_presence(&pipeline_handle, "output:mpeg_dash:video_mixer:0", false).await?;
 
-    // ABR 結合 MPD は SampleEntry から codec string が確定してから書き出される。
+    // ABR 結合 MPD は SampleEntry からコーデック文字列が確定してから書き出される。
     // manifest.mpd の出現を待ち、codecs 属性が実際の SampleEntry と一致することを検証する。
     // VP9 + Opus は libvpx / opus が全環境で利用可能なため、エンコーダー不在で失敗しない。
     let manifest_path = dash_output_dir.join("manifest.mpd");
