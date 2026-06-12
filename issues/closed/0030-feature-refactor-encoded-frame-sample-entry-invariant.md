@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-09
-- Completed:
+- Completed: 2026-06-12
 - Model: Claude Opus 4.8
 - Branch: feature/refactor-encoded-frame-sample-entry-invariant
 - Polished: 2026-06-10
@@ -205,3 +205,46 @@ codec_string 解決ブロック（映像 `:549-559`・音声 `:638-647`）は保
 - issue 0032（RTSP の Annex-B 映像 sample_entry 構築。本 issue の後続。不変条件を RTSP Annex-B 経路にも拡張する）
 - issue 0033（SRT の Annex-B 映像 sample_entry 構築。本 issue の後続。不変条件を SRT Annex-B 経路にも拡張する）
 - issue 0034（hybrid_writer の `last_*_sample_entry` フィールド・`add_received_*_sample_entry` カウンタ呼び出し・`Mp4WriterStats` 公開 API / `/metrics` メトリクスの破壊的廃止と writer 不変条件違反検知ロギングの追加。本 issue の後続）
+
+## 解決方法
+
+### 不変条件の明文化
+
+- `AudioFrame.sample_entry` (`src/audio.rs`) と `VideoFrame.sample_entry` (`src/video.rs`) に不変条件コメントを追加した。圧縮フォーマット（Opus / Aac、H264 / H264AnnexB / H265 / Vp8 / Vp9 / Av1）の出力フレームは常に `Some` を持つこと、生フォーマット・decoder 内部の中間表現・外部に流れないフレームは `None` を許容することを明示した。本 issue 完了時点で未適用の経路（WebM リーダー、rtsp / srt の Annex-B 映像）は例外として明記し、後続 issue 0031 / 0032 / 0033 で順次解消する。
+
+### リーダー / 音声入力経路の全フレーム付与
+
+- `src/mp4/reader.rs` の `Mp4FileReader` の `ReaderState` に `last_audio_sample_entry` / `last_video_sample_entry` を追加し、warm-up（`suppress_publish`）経路と publish 経路の両方で全フレームに付与するように変更した。
+- `src/mp4/sample_reader.rs` の `Mp4SampleReader::run` でローカル変数として `last_audio_sample_entry` / `last_video_sample_entry` を保持し、全フレームに付与するように変更した。
+- `src/sora/recording_mp4_reader.rs` の `Mp4VideoReader` / `Mp4AudioReader` に `last_sample_entry` フィールドを追加し、全フレームに付与するように変更した（単一トラック構造体のため映像/音声を冠さない命名）。
+- `src/rtsp/subscriber.rs` の `AudioRtpReceiver.sample_entry` を `SampleEntry` から `SharedSampleEntry` に変更し、`sent_sample_entry` フラグを削除して全 AAC AU に `Some(audio_receiver.sample_entry.clone())` を付与する形に変更した。
+- `src/srt/inbound_endpoint.rs` の `SrtTsDemuxer` に `last_aac_sample_entry` を追加し、`last_aac_config_key` と同期更新（config 変化時に両方を Some に切り替え）することで全 AAC AU に `Some` を付与する形に変更した。
+
+### HLS / DASH writer・hybrid_writer の補完ロジック削除
+
+- `src/dash/writer.rs` / `src/hls/writer.rs` の `last_*_sample_entry` フィールド・`.or()` フォールバック・`fill_missing_sample_entries` を削除した。codec_string 解決ロジックは `frame.sample_entry` を直接参照する形にリファクタした。
+- `src/mp4/hybrid_writer.rs` の `append_*_to_fragment` の `.or_else()` フォールバックと `add_missing_*_sample_entry` カウンタ計上を削除した。`maybe_flush_initial_pending` の `.or_else()` も削除し、`pending.sample_entry` を直接参照する形に変更（ベストエフォート設計は維持）。
+- `last_*_sample_entry` フィールド・`handle_*_message` 内の保持取り込み・`add_received_*_sample_entry` カウンタ計上は残置（issue 0034 で観測 API 廃止と合わせて削除予定）。
+- `src/mp4/writer.rs` の `add_missing_audio_sample_entry` / `add_missing_video_sample_entry` は呼び出し元が消えるため `#[expect(dead_code)]` で抑制した（issue 0034 で削除予定）。
+
+### テスト
+
+- 単体テスト（リーダー）: `src/sora/recording_mp4_reader.rs` に `mp4_video_reader_emits_sample_entry_on_every_frame` / `mp4_audio_reader_emits_sample_entry_on_every_frame` を追加。後続フレームが初回と等価（`SharedSampleEntry::changed_since` が false）であることまで検証する。`Mp4FileReader` / `Mp4SampleReader` は同一パターンのため単体テスト追加は省略し、既存 e2e で間接カバーとする。
+- 単体テスト（ネットワーク入力）: `src/srt/inbound_endpoint.rs` に `srt_aac_emits_sample_entry_on_every_au_with_constant_config` / `srt_aac_updates_sample_entry_on_config_change` を追加し、`SrtTsDemuxer::build_audio_samples` を直接呼んで config 連続/変化の双方をカバーした。rtsp 音声は型システムとコードレビューレベルで保証されるため単体テスト追加せず、既存 e2e でカバーとする。
+- 統合テスト: `src/mp4/hybrid_writer.rs` の既存 `hybrid_writer_finalizes_readable_audio_with_per_frame_sample_entry` を `hybrid_writer_finalizes_readable_streams_with_per_frame_sample_entry` に改名し、映像トラックの読み戻しと等価性検証を追加した。さらに `hybrid_writer_finalizes_readable_streams_across_fragments` を追加し、`flush_fragment()` を挟む 3 フラグメントを生成して全フレーム（先頭・後続を問わず）に sample_entry が載ることを検証した。
+- 削除テスト: `add_missing_*_sample_entry` の呼び出しが消えたため `hybrid_writer_counts_missing_*` 系 3 件と、`.or_else()` フォールバックが消えたため `hybrid_writer_keeps_*` / `hybrid_writer_captures_*` 系 4 件を削除した。`captures_*_at_ingress` の検証要素のうちフォールバック以外の 3 要素（フィールド代入・received カウンタ計上・finalize 成功）は `hybrid_writer_received_*_counts_only_changes` と `hybrid_writer_finalizes_readable_streams_*` で間接的にカバーされる。
+
+### レビュー指摘の反映
+
+`/review-diff-code` で挙がった指摘を順次対応した。
+
+- 削除済み関数 `fill_missing_sample_entries` の docstring が `fixup_last_sample_duration` に誤って付着していた残骸を `src/dash/writer.rs` / `src/hls/writer.rs` から削除。
+- `src/hls/writer.rs` の `handle_audio_frame` 冒頭に残っていた「sample_entry を保持しておかないと codec 情報が失われる」旨の死んだ背景説明コメントを削除。
+- `src/mp4/hybrid_writer.rs` の `last_*_sample_entry` フィールドコメント・`handle_*_message` 内の入口取り込みコメント・`maybe_flush_initial_pending` の `recovery` 英単語残存箇所、および `src/mp4/writer.rs` の `Mp4WriterStats` フィールドコメントを実態（received カウンタの `changed_since` 判定専用、issue 0034 で削除予定）に合わせて書き換え。`recovery` を「リカバリ」/「リカバリ用 moov」に日本語化。
+- `src/sora/recording_mp4_reader.rs` の `next_sample` 内で発生していた `sample_entry` の二重 clone を `cloned()` の値を直接 move する形に変更。
+- `src/srt/inbound_endpoint.rs` の AAC AU 処理に `last_aac_config_key` と `last_aac_sample_entry` の同期更新不変条件を明示するコメントを追加。
+- `src/audio.rs` / `src/video.rs` の不変条件コメントから自己言及行（「不変条件成立後に該当 issue の完了条件でこのコメントから例外記述を削除する」）を削除。
+
+### CHANGES.md
+
+記載なし（内部リファクタ・公開 API 変化なし・利用者挙動変化なし）。0017 / 0027 と同方針。
