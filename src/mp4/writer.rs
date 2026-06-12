@@ -77,10 +77,9 @@ pub struct Mp4WriterStats {
     actual_moov_box_size: crate::stats::StatsGauge,
     total_flushed_fragment_count: crate::stats::StatsCounter,
     total_recovery_moov_update_count: crate::stats::StatsCounter,
-    // 以下のファイナライズ系カウンタは hybrid writer でのみ計上される
+    // 以下 2 カウンタ（ファイナライズの成否）は hybrid writer でのみ計上される
     // （通常の Mp4Writer 経路では更新されず常に 0）。
-    //
-    // ファイナライズの成否カウンタ。failure はファイナライズ（標準 MP4 への変換）が内部 Err で失敗し、
+    // failure はファイナライズ（標準 MP4 への変換）が内部 Err で失敗し、
     // 出力が fMP4 形式のまま残ることを示す。
     total_finalize_success_count: crate::stats::StatsCounter,
     total_finalize_failure_count: crate::stats::StatsCounter,
@@ -1002,15 +1001,17 @@ impl Mp4Writer {
                 // 監視する。違反時は警告ログを出してから補完値で差し替えるか、補完値が無ければ
                 // skip する。track 無効化中の受信フレームも違反観測の対象に含めるため、
                 // input_audio_track_id ガードより前に判定する。
-                let sample = match crate::sample_entry::try_resolve_audio_sample_entry(
+                // 違反検知前に `add_received_audio_data` は計上済みのため、skip パスでも
+                // 受信観測の連続性は保たれる。
+                let sample = match crate::sample_entry::resolve_audio_sample_entry(
                     &sample,
                     &mut self.fallback_audio_sample_entry,
                 ) {
                     crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
                     crate::sample_entry::SampleEntryResolution::Patched(patched) => {
                         tracing::warn!(
-                            format = ?patched.format,
-                            timestamp_us = patched.timestamp.as_micros() as u64,
+                            format = ?sample.format,
+                            timestamp_us = sample.timestamp.as_micros() as u64,
                             "mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
                         );
                         Some(Arc::new(patched))
@@ -1054,15 +1055,17 @@ impl Mp4Writer {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 self.core.stats.add_received_video_data();
                 // 音声と同じく、エンコード済みフレーム不変条件を writer 入口で監視する。
-                let sample = match crate::sample_entry::try_resolve_video_sample_entry(
+                // 違反検知前に `add_received_video_data` は計上済みのため、skip パスでも
+                // 受信観測の連続性は保たれる。
+                let sample = match crate::sample_entry::resolve_video_sample_entry(
                     &sample,
                     &mut self.fallback_video_sample_entry,
                 ) {
                     crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
                     crate::sample_entry::SampleEntryResolution::Patched(patched) => {
                         tracing::warn!(
-                            format = ?patched.format,
-                            timestamp_us = patched.timestamp.as_micros() as u64,
+                            format = ?sample.format,
+                            timestamp_us = sample.timestamp.as_micros() as u64,
                             "mp4_writer video frame without sample_entry; encoded-frame invariant violated"
                         );
                         Some(Arc::new(patched))

@@ -203,6 +203,9 @@ mod tests {
             .expect("failed to create media pipeline");
         let handle = pipeline.handle();
         let mut stats = handle.stats();
+        // `_writer_stats` の値そのものは使わないが、`Mp4WriterStats::new` が `stats` に対して
+        // 行う counter 登録を実行することが目的。登録された counter 名が `/metrics` のテキスト
+        // 出力に反映されるため、廃止された 4 メトリクスがここで誤って登録されると body に出現する。
         let _writer_stats = crate::mp4::writer::Mp4WriterStats::new(&mut stats, 0);
         let request = Request::new("GET", "/metrics");
 

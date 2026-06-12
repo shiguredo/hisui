@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::{BufWriter, Seek, SeekFrom, Write},
     path::Path,
+    sync::Arc,
     time::Duration,
 };
 
@@ -394,9 +395,10 @@ impl HybridMp4Writer {
         let mut samples = Vec::new();
         let mut data_offset = 0;
 
-        // この経路はベストエフォートのリカバリで、pending の sample_entry が未確定なら単にスキップする
-        // （不変条件下では writer の上流が常に Some を保証するが、HybridMp4Writer の入力経路が
-        // 将来変わる可能性に備えてリカバリ用 moov 先行更新のベストエフォート設計を保つ）
+        // この経路はベストエフォートのリカバリで、pending の sample_entry が未確定なら単にスキップする。
+        // 通常は writer 入口の fallback で sample_entry が補完済みのためここに来る pending は
+        // 常に Some だが、HybridMp4Writer の入力経路が将来変わる可能性に備えてリカバリ用 moov
+        // 先行更新のベストエフォート設計を保つ。
         if let Some(pending) = self.core.pending_video_frame.as_ref()
             && let Some(ref sample_entry) = pending.sample_entry
         {
@@ -922,18 +924,20 @@ impl HybridMp4Writer {
                 // エンコード済みフレーム不変条件の違反検知と fallback 補完。
                 // track 無効化中の受信フレームも違反観測の対象に含めるため、
                 // input_audio_track_id ガードより前に判定する。
-                let sample = match crate::sample_entry::try_resolve_audio_sample_entry(
+                // 違反検知前に `add_received_audio_data` は計上済みのため、skip パスでも
+                // 受信観測の連続性は保たれる。
+                let sample = match crate::sample_entry::resolve_audio_sample_entry(
                     &sample,
                     &mut self.fallback_audio_sample_entry,
                 ) {
                     crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
                     crate::sample_entry::SampleEntryResolution::Patched(patched) => {
                         tracing::warn!(
-                            format = ?patched.format,
-                            timestamp_us = patched.timestamp.as_micros() as u64,
+                            format = ?sample.format,
+                            timestamp_us = sample.timestamp.as_micros() as u64,
                             "hybrid_mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
                         );
-                        Some(std::sync::Arc::new(patched))
+                        Some(Arc::new(patched))
                     }
                     crate::sample_entry::SampleEntryResolution::Skip => {
                         tracing::warn!(
@@ -974,18 +978,20 @@ impl HybridMp4Writer {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 self.core.stats.add_received_video_data();
                 // 音声と同様、エンコード済みフレーム不変条件を writer 入口で監視する。
-                let sample = match crate::sample_entry::try_resolve_video_sample_entry(
+                // 違反検知前に `add_received_video_data` は計上済みのため、skip パスでも
+                // 受信観測の連続性は保たれる。
+                let sample = match crate::sample_entry::resolve_video_sample_entry(
                     &sample,
                     &mut self.fallback_video_sample_entry,
                 ) {
                     crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
                     crate::sample_entry::SampleEntryResolution::Patched(patched) => {
                         tracing::warn!(
-                            format = ?patched.format,
-                            timestamp_us = patched.timestamp.as_micros() as u64,
+                            format = ?sample.format,
+                            timestamp_us = sample.timestamp.as_micros() as u64,
                             "hybrid_mp4_writer video frame without sample_entry; encoded-frame invariant violated"
                         );
-                        Some(std::sync::Arc::new(patched))
+                        Some(Arc::new(patched))
                     }
                     crate::sample_entry::SampleEntryResolution::Skip => {
                         tracing::warn!(
@@ -1088,8 +1094,6 @@ pub async fn create_processor(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::mp4::writer::DEFAULT_SAMPLE_DURATION;
 

@@ -60,8 +60,11 @@ impl SharedSampleEntry {
 ///
 /// 圧縮フォーマット（codec_name が `Some`）のフレームに対して、`sample_entry` の有無と
 /// 補完値（fallback）の状態から writer 側の処理方針を表現する。
+///
+/// `T` は `Patched` でのみ使用するが、enum シグネチャ上は呼び出し側で型を統一するため
+/// 全バリアントで `T` を持たせている（Pass / Skip 自体は値を持たない）。
 #[derive(Debug)]
-pub enum SampleEntryResolution<T> {
+pub(crate) enum SampleEntryResolution<T> {
     /// 通常パス。元のフレームをそのまま下流に渡す（既に `sample_entry` を持っているか、
     /// 圧縮対象外で違反検知の対象外）。
     Pass,
@@ -76,15 +79,22 @@ pub enum SampleEntryResolution<T> {
 /// エンコード済みフレーム不変条件（圧縮フレームは常に `sample_entry: Some`）の検知と、
 /// fallback 補完値の更新・適用を一括で行う（音声用）。
 ///
-/// - 圧縮フォーマットでない（`codec_name() == None`）場合は `Pass` を返し、何もしない。
+/// - 圧縮フォーマットでない（`codec_name() == None`）場合は `Pass` を返し、`fallback` も
+///   更新しない（生フォーマットは不変条件の対象外で、補完値の連続性に含めない）。
 /// - 圧縮フォーマットで `sample_entry: Some` の場合は `fallback` を更新して `Pass` を返す。
 /// - 圧縮フォーマットで `sample_entry: None` の場合:
-///   - `fallback` が `Some` なら補完済みの新フレームを `Patched` で返す。
-///   - `fallback` が `None` なら `Skip` を返す。
+///   - `fallback` が `Some` なら補完済みの新フレームを `Patched` で返す（fallback 自体は
+///     直前の正常値を保持し続け、後続の正常フレームで更新されるまで変わらない）。
+///   - `fallback` が `None` なら `Skip` を返す（`fallback` は `None` のまま、後続の正常
+///     フレームで初めて `Some` になる）。
+///
+/// 違反パスでは `AudioFrame` 全体（`data: Vec<u8>` 含む）の deep copy が 1 回発生する。
+/// 呼び出し側の writer で `Arc::new(patched)` を作る場合や、`WriterCore::handle_input_sample`
+/// 経由でさらに deep copy する場合に重ねて発生するが、違反は基本起きない前提でコストは許容する。
 ///
 /// 警告ログ（`tracing::warn!`）は呼び出し側の writer ごとに静的メッセージで出すため、
 /// この関数では出力しない。
-pub fn try_resolve_audio_sample_entry(
+pub(crate) fn resolve_audio_sample_entry(
     sample: &AudioFrame,
     fallback: &mut Option<SharedSampleEntry>,
 ) -> SampleEntryResolution<AudioFrame> {
@@ -98,11 +108,13 @@ pub fn try_resolve_audio_sample_entry(
             *fallback = Some(entry.clone());
             SampleEntryResolution::Pass
         }
-        None => match fallback.clone() {
+        None => match fallback.as_ref() {
             Some(fb) => {
                 // 違反 + fallback あり: 補完済みフレームを生成して返す。
+                // fallback の Arc を共有することで下流の `changed_since` 判定が
+                // `Arc::ptr_eq` で短絡できる。
                 let patched = AudioFrame {
-                    sample_entry: Some(fb),
+                    sample_entry: Some(fb.clone()),
                     ..sample.clone()
                 };
                 SampleEntryResolution::Patched(patched)
@@ -112,8 +124,8 @@ pub fn try_resolve_audio_sample_entry(
     }
 }
 
-/// 同 [`try_resolve_audio_sample_entry`] の映像用。挙動と戻り値の意味は同じ。
-pub fn try_resolve_video_sample_entry(
+/// 同 [`resolve_audio_sample_entry`] の映像用。挙動と戻り値の意味は同じ。
+pub(crate) fn resolve_video_sample_entry(
     frame: &VideoFrame,
     fallback: &mut Option<SharedSampleEntry>,
 ) -> SampleEntryResolution<VideoFrame> {
@@ -125,10 +137,10 @@ pub fn try_resolve_video_sample_entry(
             *fallback = Some(entry.clone());
             SampleEntryResolution::Pass
         }
-        None => match fallback.clone() {
+        None => match fallback.as_ref() {
             Some(fb) => {
                 let patched = VideoFrame {
-                    sample_entry: Some(fb),
+                    sample_entry: Some(fb.clone()),
                     ..frame.clone()
                 };
                 SampleEntryResolution::Patched(patched)

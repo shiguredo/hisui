@@ -522,16 +522,21 @@ impl HlsWriter {
         // エンコード済みフレーム不変条件の違反検知と fallback 補完。
         // 早期 return（非キーフレーム時のセグメント未開始 skip）より前で判定し、
         // fallback の連続的な更新を保つ。
+        // 違反検知前に `total_input_video_frame_count` は計上済みのため、skip パスでも
+        // 受信観測の連続性は保たれる。
+        // `patched_holder` は Patched アームで生成したフレーム実体を本関数のスコープで
+        // 生かすための delayed-initialized ローカル。Pass は引数の参照、Patched は
+        // ローカルへの参照に統一して以後 `frame` を shadow する。
         let patched_holder;
-        let frame = match crate::sample_entry::try_resolve_video_sample_entry(
+        let frame = match crate::sample_entry::resolve_video_sample_entry(
             frame,
             &mut self.fallback_video_sample_entry,
         ) {
             crate::sample_entry::SampleEntryResolution::Pass => frame,
             crate::sample_entry::SampleEntryResolution::Patched(v) => {
                 tracing::warn!(
-                    format = ?v.format,
-                    timestamp_us = v.timestamp.as_micros() as u64,
+                    format = ?frame.format,
+                    timestamp_us = frame.timestamp.as_micros() as u64,
                     "hls_writer video frame without sample_entry; encoded-frame invariant violated"
                 );
                 patched_holder = v;
@@ -638,16 +643,21 @@ impl HlsWriter {
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
         // 映像と同様、エンコード済みフレーム不変条件を writer 入口で監視する。
+        // 違反検知前に `total_input_audio_frame_count` は計上済みのため、skip パスでも
+        // 受信観測の連続性は保たれる。
+        // `patched_holder` は Patched アームで生成したフレーム実体を本関数のスコープで
+        // 生かすための delayed-initialized ローカル。Pass は引数の参照、Patched は
+        // ローカルへの参照に統一して以後 `frame` を shadow する。
         let patched_holder;
-        let frame = match crate::sample_entry::try_resolve_audio_sample_entry(
+        let frame = match crate::sample_entry::resolve_audio_sample_entry(
             frame,
             &mut self.fallback_audio_sample_entry,
         ) {
             crate::sample_entry::SampleEntryResolution::Pass => frame,
             crate::sample_entry::SampleEntryResolution::Patched(v) => {
                 tracing::warn!(
-                    format = ?v.format,
-                    timestamp_us = v.timestamp.as_micros() as u64,
+                    format = ?frame.format,
+                    timestamp_us = frame.timestamp.as_micros() as u64,
                     "hls_writer audio frame without sample_entry; encoded-frame invariant violated"
                 );
                 patched_holder = v;
