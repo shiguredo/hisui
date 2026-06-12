@@ -42,7 +42,7 @@ jobs:
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
       - run: cargo build $HISUI_E2E_CARGO_RUN_ARGS
       - run: cargo build --release -p obsws_bootstrap
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - name: Run e2e tests
         env:
           HISUI_OPENH264_PATH: ${{ env.OPENH264_PATH }}
