@@ -1436,6 +1436,302 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_writer_resolves_sample_entry_even_when_audio_track_id_is_disabled()
+    -> crate::Result<()> {
+        // 設計意図: 違反検知と fallback 更新は `input_audio_track_id` ガードより前に
+        // 行うため、track 無効化中（input_audio_track_id == None）でも観測の連続性が
+        // 保たれる。一方で `WriterCore::handle_input_sample` 自体は track 有効時のみ
+        // 呼ばれるため、track 無効化中はキュー積みされない。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        let shared_entry = SharedSampleEntry::new(entry);
+
+        // 事前に audio track を無効化する。
+        writer.core.input_audio_track_id = None;
+
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            let frame = AudioFrame {
+                data: vec![0x11, 0x22, 0x33],
+                format: AudioFormat::Aac,
+                channels: Channels::STEREO,
+                sample_rate: SampleRate::HZ_48000,
+                timestamp: Duration::ZERO,
+                sample_entry,
+            };
+            writer.handle_audio_message(
+                crate::Message::Media(crate::MediaFrame::Audio(Arc::new(frame))),
+                &mut None,
+            )
+        };
+
+        // 通常パス: track 無効化中でも fallback は同一 Arc で更新される。
+        send(&mut writer, Some(shared_entry.clone()))?;
+        let fallback = writer
+            .fallback_audio_sample_entry
+            .as_ref()
+            .expect("track 無効化中でも通常パスで fallback が更新されること");
+        assert!(
+            fallback.ptr_eq(&shared_entry),
+            "fallback が投入した shared_entry と同一 Arc を共有していること"
+        );
+        assert_eq!(
+            writer.core.input_audio_queue.len(),
+            0,
+            "track 無効化中はキューに積まれないこと"
+        );
+
+        // 違反パス + fallback Some: track 無効化中でも違反観測は動くが、キュー積みは抑止される。
+        send(&mut writer, None)?;
+        assert_eq!(
+            writer.core.input_audio_queue.len(),
+            0,
+            "track 無効化中はキューに積まれないこと（違反パスでも同じ）"
+        );
+        let fallback = writer
+            .fallback_audio_sample_entry
+            .as_ref()
+            .expect("違反パスでも fallback は保持される");
+        assert!(
+            fallback.ptr_eq(&shared_entry),
+            "違反パスを通っても fallback は直前の正常値の Arc を保持し続けること"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_resolves_sample_entry_even_when_video_track_id_is_disabled()
+    -> crate::Result<()> {
+        // 音声と同方針で映像の track 無効化中シナリオを検証する。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+        let shared_entry = SharedSampleEntry::new(entry);
+
+        writer.core.input_video_track_id = None;
+
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            writer.handle_video_message(
+                crate::Message::Media(crate::MediaFrame::Video(Arc::new(VideoFrame {
+                    data: vec![0x00, 0x00, 0x00, 0x01],
+                    format: VideoFormat::Av1,
+                    keyframe: true,
+                    size: Some(crate::video::VideoFrameSize {
+                        width: 16,
+                        height: 16,
+                    }),
+                    timestamp: Duration::ZERO,
+                    sample_entry,
+                }))),
+                &mut None,
+            )
+        };
+
+        send(&mut writer, Some(shared_entry.clone()))?;
+        let fallback = writer
+            .fallback_video_sample_entry
+            .as_ref()
+            .expect("track 無効化中でも通常パスで fallback が更新されること");
+        assert!(fallback.ptr_eq(&shared_entry));
+        assert_eq!(
+            writer.core.input_video_queue.len(),
+            0,
+            "track 無効化中はキューに積まれないこと"
+        );
+
+        send(&mut writer, None)?;
+        assert_eq!(
+            writer.core.input_video_queue.len(),
+            0,
+            "track 無効化中はキューに積まれないこと（違反パスでも同じ）"
+        );
+        let fallback = writer
+            .fallback_video_sample_entry
+            .as_ref()
+            .expect("違反パスでも fallback は保持される");
+        assert!(fallback.ptr_eq(&shared_entry));
+
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_preserves_fallback_across_consecutive_violations_audio() -> crate::Result<()> {
+        // 「正常 1 → 違反 3 → 正常 1 → 違反 1」の混在シナリオ。
+        // 連続違反が起きても、直前の正常フレームの sample_entry が fallback として
+        // 保持され続け、すべての違反フレームを同一 Arc で補完できることを検証する
+        // （WebM の codec_private 初回提示パスなど、長期にわたって違反が続く経路を想定）。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry_a = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x10],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        let entry_b = crate::audio::aac::create_mp4a_sample_entry(
+            &[0x12, 0x20],
+            SampleRate::HZ_48000,
+            Channels::STEREO,
+        )?;
+        let shared_a = SharedSampleEntry::new(entry_a);
+        let shared_b = SharedSampleEntry::new(entry_b);
+
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            let frame = AudioFrame {
+                data: vec![0x11, 0x22, 0x33],
+                format: AudioFormat::Aac,
+                channels: Channels::STEREO,
+                sample_rate: SampleRate::HZ_48000,
+                timestamp: Duration::ZERO,
+                sample_entry,
+            };
+            writer.handle_audio_message(
+                crate::Message::Media(crate::MediaFrame::Audio(Arc::new(frame))),
+                &mut None,
+            )
+        };
+
+        // 正常 1 件: shared_a を fallback として確立する。
+        send(&mut writer, Some(shared_a.clone()))?;
+        // 連続違反 3 件: すべて shared_a で補完される。
+        for _ in 0..3 {
+            send(&mut writer, None)?;
+        }
+        // 正常 1 件: fallback を shared_b に切り替える。
+        send(&mut writer, Some(shared_b.clone()))?;
+        // 違反 1 件: shared_b で補完される。
+        send(&mut writer, None)?;
+
+        assert_eq!(
+            writer.core.input_audio_queue.len(),
+            6,
+            "6 件すべてがキューに積まれること（先頭 4 件が shared_a、後 2 件が shared_b）"
+        );
+        for (i, frame) in writer.core.input_audio_queue.iter().take(4).enumerate() {
+            let entry = frame
+                .sample_entry
+                .as_ref()
+                .expect("queue 内のフレームには必ず sample_entry がある");
+            assert!(
+                entry.ptr_eq(&shared_a),
+                "前半 4 件 (idx={i}) が shared_a と Arc 共有していること"
+            );
+        }
+        for (idx, frame) in writer
+            .core
+            .input_audio_queue
+            .iter()
+            .skip(4)
+            .take(2)
+            .enumerate()
+        {
+            let i = idx + 4;
+            let entry = frame.sample_entry.as_ref().expect("sample_entry あり");
+            assert!(
+                entry.ptr_eq(&shared_b),
+                "後半 2 件 (idx={i}) が shared_b と Arc 共有していること"
+            );
+        }
+        let fallback = writer
+            .fallback_audio_sample_entry
+            .as_ref()
+            .expect("最終的に fallback は shared_b を保持");
+        assert!(fallback.ptr_eq(&shared_b));
+
+        Ok(())
+    }
+
+    #[test]
+    fn hybrid_writer_preserves_fallback_across_consecutive_violations_video() -> crate::Result<()> {
+        // 音声と同方針で映像の連続違反シナリオを検証する。
+        let (_temp_dir, mut writer) = make_hybrid_writer()?;
+        let entry_a = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0A],
+        );
+        let entry_b = crate::video::av1::av1_sample_entry(
+            EvenUsize::MIN_CELL_SIZE,
+            EvenUsize::MIN_CELL_SIZE,
+            &[0x0B],
+        );
+        let shared_a = SharedSampleEntry::new(entry_a);
+        let shared_b = SharedSampleEntry::new(entry_b);
+
+        let send = |writer: &mut HybridMp4Writer,
+                    sample_entry: Option<SharedSampleEntry>|
+         -> crate::Result<()> {
+            writer.handle_video_message(
+                crate::Message::Media(crate::MediaFrame::Video(Arc::new(VideoFrame {
+                    data: vec![0x00, 0x00, 0x00, 0x01],
+                    format: VideoFormat::Av1,
+                    keyframe: true,
+                    size: Some(crate::video::VideoFrameSize {
+                        width: 16,
+                        height: 16,
+                    }),
+                    timestamp: Duration::ZERO,
+                    sample_entry,
+                }))),
+                &mut None,
+            )
+        };
+
+        send(&mut writer, Some(shared_a.clone()))?;
+        for _ in 0..3 {
+            send(&mut writer, None)?;
+        }
+        send(&mut writer, Some(shared_b.clone()))?;
+        send(&mut writer, None)?;
+
+        assert_eq!(
+            writer.core.input_video_queue.len(),
+            6,
+            "6 件すべてがキューに積まれること（先頭 4 件が shared_a、後 2 件が shared_b）"
+        );
+        for (i, frame) in writer.core.input_video_queue.iter().take(4).enumerate() {
+            let entry = frame.sample_entry.as_ref().expect("sample_entry あり");
+            assert!(
+                entry.ptr_eq(&shared_a),
+                "前半 4 件 (idx={i}) が shared_a と Arc 共有していること"
+            );
+        }
+        for (idx, frame) in writer
+            .core
+            .input_video_queue
+            .iter()
+            .skip(4)
+            .take(2)
+            .enumerate()
+        {
+            let i = idx + 4;
+            let entry = frame.sample_entry.as_ref().expect("sample_entry あり");
+            assert!(
+                entry.ptr_eq(&shared_b),
+                "後半 2 件 (idx={i}) が shared_b と Arc 共有していること"
+            );
+        }
+        let fallback = writer
+            .fallback_video_sample_entry
+            .as_ref()
+            .expect("最終的に fallback は shared_b を保持");
+        assert!(fallback.ptr_eq(&shared_b));
+
+        Ok(())
+    }
+
+    #[test]
     fn hybrid_writer_finalizes_readable_streams_with_per_frame_sample_entry() -> crate::Result<()> {
         // エンコード済みフレームには常に sample_entry が載るため、フラグメント先頭サンプルにも
         // 必ずサンプルエントリーがあり、ファイナライズ後の標準 MP4 から音声・映像両トラックを
