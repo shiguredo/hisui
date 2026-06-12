@@ -965,7 +965,6 @@ fn reorder_payload_by_track(
     reordered
 }
 
-/// fMP4 muxer に渡す前に、欠落している sample_entry を最後に観測した値で補完する。
 fn fixup_last_sample_duration(samples: &mut [shiguredo_mp4::mux::Sample]) {
     // ビデオの末尾を補完
     fixup_last_sample_duration_for_track(samples, shiguredo_mp4::TrackKind::Video);

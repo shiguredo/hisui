@@ -603,10 +603,6 @@ impl HlsWriter {
     /// オーディオフレーム処理
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
-        // 最初の video keyframe より前に audio が流れ始めることがある。
-        // 入力経路によっては sample_entry が初回フレームにしか載らないため、
-        // 受け取った sample_entry を保持しておかないと、
-        // セグメント開始後の AAC フレーム群から codec 情報が失われる。
 
         // SampleEntry から正確なコーデック文字列を確定する
         if let Some(ref entry) = frame.sample_entry
@@ -1108,7 +1104,6 @@ fn reorder_payload_by_track(
     reordered
 }
 
-/// fMP4 muxer に渡す前に、欠落している sample_entry を最後に観測した値で補完する。
 fn fixup_last_sample_duration(samples: &mut [shiguredo_mp4::mux::Sample]) {
     // ビデオの末尾を補完
     fixup_last_sample_duration_for_track(samples, shiguredo_mp4::TrackKind::Video);

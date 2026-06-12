@@ -75,8 +75,8 @@ pub struct HybridMp4Writer {
     fragment_start_timestamp: Option<Duration>,
     fragment_end_timestamp: Option<Duration>,
     fragment_accumulated_duration: Duration,
-    // フラグメント境界を越えて直前の sample_entry を保持する（先頭サンプルの欠落補完用）。
-    // received カウンタの変化検知（changed_since）のために共有型で保持する。
+    // received カウンタの `changed_since` 判定に使う前回値として保持する。
+    // issue 0034 で観測 API（received カウンタ）廃止と合わせて削除予定。
     last_audio_sample_entry: Option<SharedSampleEntry>,
     last_video_sample_entry: Option<SharedSampleEntry>,
     has_flushed_fragment: bool,
@@ -394,9 +394,9 @@ impl HybridMp4Writer {
         let mut samples = Vec::new();
         let mut data_offset = 0;
 
-        // この経路はベストエフォートの recovery で、pending の sample_entry が未確定なら単にスキップする
+        // この経路はベストエフォートのリカバリで、pending の sample_entry が未確定なら単にスキップする
         // （不変条件下では writer の上流が常に Some を保証するが、HybridMp4Writer の入力経路が
-        // 将来変わる可能性に備えて recovery moov 先行更新のベストエフォート設計を保つ・issue 0030）
+        // 将来変わる可能性に備えてリカバリ用 moov 先行更新のベストエフォート設計を保つ・issue 0030）
         if let Some(pending) = self.core.pending_video_frame.as_ref()
             && let Some(ref sample_entry) = pending.sample_entry
         {
@@ -919,11 +919,10 @@ impl HybridMp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 self.core.stats.add_received_audio_data();
-                // 音声エンコーダ出力は全フレームに sample_entry が載る（issue 0017）。
-                // 入力経路によっては初回フレームのみのこともあるが、いずれにせよ届いたサンプルエントリーを
-                // pending 化・キューイング・ドロップで落とさないよう入口で取り込んで保持する。
-                // received カウンタは毎フレーム計上すると意味を失うため、前回から変化したとき
-                // （changed_since）だけ計上し「サンプルエントリーの確定・変化回数」を表すようにする。
+                // received カウンタ（`changed_since` 判定）用に直近の sample_entry を保持する。
+                // 毎フレーム計上すると意味を失うため、前回から変化したとき（changed_since）だけ計上し
+                // 「サンプルエントリーの確定・変化回数」を表すようにする。
+                // issue 0034 で観測 API 廃止と合わせて保持・カウンタともに削除予定。
                 if let Some(entry) = &sample.sample_entry {
                     if entry.changed_since(self.last_audio_sample_entry.as_ref()) {
                         self.core.stats.add_received_audio_sample_entry();
@@ -957,8 +956,8 @@ impl HybridMp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 self.core.stats.add_received_video_data();
-                // 音声と同様に、sample_entry を受信時点で取り込んでおく (issues/0011 参照)。
-                // received カウンタは前回から変化したとき (changed_since) だけ計上する。
+                // 音声と同様、received カウンタの `changed_since` 判定用に直近の sample_entry を保持する。
+                // issue 0034 で観測 API 廃止と合わせて保持・カウンタともに削除予定。
                 if let Some(entry) = &sample.sample_entry {
                     if entry.changed_since(self.last_video_sample_entry.as_ref()) {
                         self.core.stats.add_received_video_sample_entry();
