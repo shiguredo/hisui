@@ -986,7 +986,12 @@ impl SrtTsDemuxer {
             let channels = header.channel_configuration;
             let channels_value = crate::audio::Channels::from_u8(channels)?;
             let aac_config_key = header.config_key();
-            // config 変化時のみ新規生成して両フィールドを更新する（issue 0030）。
+            // `last_aac_config_key` と `last_aac_sample_entry` は同期更新される。
+            // どちらも初期値は None で、config 変化時のみ両方を同じ if 分岐で Some に更新する。
+            // 初回 AAC AU 受信時は `last_aac_config_key == None` のため必ず if に入り、
+            // 後段の `last_aac_sample_entry.clone()` が None を返すことはない。
+            // この同期によって `AudioFrame.sample_entry` の不変条件（全 AAC AU に Some を載せる）が
+            // SRT 入力経路でも成立する。
             if self.last_aac_config_key != Some(aac_config_key) {
                 let audio_specific_config = header.audio_specific_config();
                 let entry = crate::audio::aac::create_mp4a_sample_entry(
@@ -998,7 +1003,8 @@ impl SrtTsDemuxer {
                 self.last_aac_sample_entry =
                     Some(crate::sample_entry::SharedSampleEntry::new(entry));
             }
-            // `AudioFrame.sample_entry` の不変条件に従い全 AAC AU に保持値を clone して付与する。
+            // 不変条件に従い全 AAC AU に保持値を clone して付与する。
+            // Arc clone なので安価。
             let sample_entry = self.last_aac_sample_entry.clone();
             let pts_ticks = frame_index
                 .saturating_mul(1024)

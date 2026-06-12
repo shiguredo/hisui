@@ -54,7 +54,6 @@ pub struct VideoFrame {
     /// および外部に流れないフレームは `None` を許容する。
     ///
     /// 現時点で未適用の経路: WebM リーダー（issue 0031）、rtsp / srt の Annex-B 映像（issue 0032 / 0033）。
-    /// これらの経路は不変条件成立後に該当 issue の完了条件でこのコメントから例外記述を削除する。
     pub sample_entry: Option<SharedSampleEntry>,
 }
 
