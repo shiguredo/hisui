@@ -9,7 +9,7 @@
 
 ## 目的
 
-CLAUDE.md の「コメントは全て日本語にすること」に従い、`src/` 配下の Rust コメント (`//` / `///` / `//!`) に残る英単語混在表記を、本 issue で確定する 8 表現に限定して日本語表記へ統一する。同時に、既に日本語化された箇所に残るカタカナ表記揺れ (`サンプルエントリ` と `サンプルエントリー` の長音差) も解消する。放置すると新規コメントで同じ揺れが繰り返されるため早期に止める。
+CLAUDE.md の「コメントは全て日本語にすること」に従い、`src/` 配下の Rust コメント (`//` / `///` / `//!`) に残る英単語混在表記を、本 issue で確定する 6 表現に限定して日本語表記へ統一する。同時に、既に日本語化された箇所に残るカタカナ表記揺れ (`サンプルエントリ` と `サンプルエントリー` の長音差) も解消する。放置すると新規コメントで同じ揺れが繰り返されるため早期に止める。
 
 文字列リテラル全般 (ログメッセージ、エラーメッセージ、`panic!` / `assert!` / `expect` の引数等) と、コード内の識別子 (型名・関数名・モジュール名・フィールド名・フラグ名・環境変数名) は本 issue の対象外。機能影響はゼロ・コメント文字列の表記統一のみ。
 
@@ -19,21 +19,21 @@ CLAUDE.md の「コメントは全て日本語にすること」に従い、`src
 
 | 対象表現 | コメント内出現数 | 主な出現ファイル |
 |---|---|---|
-| `codec string` | 44 | `src/codec_string.rs`、`src/dash/writer.rs`、`src/hls/writer.rs`、`src/obsws/coordinator/output_dash.rs`、`src/obsws/coordinator/output_hls.rs` ほか |
+| `codec string` | 40 | `src/codec_string.rs`、`src/dash/writer.rs`、`src/hls/writer.rs`、`src/obsws/coordinator/output_dash.rs`、`src/obsws/coordinator/output_hls.rs` ほか |
 | `sample entry` | 6 | `src/sample_entry.rs`、`src/video/h265.rs` |
-| `best-effort` / `best effort` | 5 | `src/hls/writer.rs`、`src/metrics.rs`、`src/encoder.rs`、`src/media_pipeline.rs`、`src/mp4/hybrid_writer.rs` |
-| `bind` (動詞・概念) | 3 | `src/obsws/server.rs` |
-| `exit` (動詞・概念) | 2 | `src/metrics.rs`、`src/obsws/server.rs` |
-| `return` (動詞・概念) | 4 | `src/metrics.rs`、`src/obsws/message.rs` (同一文 2 箇所)、`src/tune/nsga2.rs` |
-| `finalize` (動詞・状態・時点) | 45 | `src/mp4/writer.rs`、`src/mp4/hybrid_writer.rs`、`src/dash/writer.rs`、`src/hls/writer.rs`、`src/obsws/coordinator/output_dash.rs`、`src/obsws/coordinator/output_hls.rs`、`src/obsws/coordinator/output_record.rs` ほか |
-| `metrics 行` | 1 | `src/sora/recording_subcommand_tune.rs` |
+| `best-effort` / `best effort` | 3 | `src/hls/writer.rs:213`、`src/encoder.rs:376`、`src/media_pipeline.rs:2172` |
+| `bind` (動詞・概念) | 1 | `src/obsws/server.rs:178` |
+| `return` (動詞・概念) | 3 | `src/obsws/message.rs:1557, 1599`、`src/tune/nsga2.rs:499` |
+| `finalize` (動詞・状態・時点) | 38 | `src/mp4/writer.rs`、`src/mp4/hybrid_writer.rs`、`src/dash/writer.rs`、`src/hls/writer.rs`、`src/obsws/coordinator/output_dash.rs`、`src/obsws/coordinator/output_hls.rs`、`src/obsws/coordinator/output_record.rs` ほか |
 
-`finalize` の `/ cleanup` 並列 (11 件: `finalize / cleanup` 9 件 + `finalize してから cleanup` 2 件) では同時に `cleanup` も `クリーンアップ` に揃える。既存日本語前例: `クリーンアップ` がコメント 4 件 (`src/obsws/state_file.rs` ほか)。本 issue で `cleanup` を統一する対象は `finalize` と並列する 11 件に限定し、それ以外の `cleanup` 単独出現 (現状ゼロ件) を含めない。合計約 121 件。
+`finalize` の `/ cleanup` 並列 (11 件: `finalize / cleanup` 9 件 + `finalize してから cleanup` 2 件) では同時に `cleanup` も `クリーンアップ` に揃える。既存日本語前例: `クリーンアップ` がコメント 4 件 (`src/obsws/state_file.rs` ほか)。本 issue で `cleanup` を統一する対象は `finalize` と並列する 11 件に限定し、それ以外の `cleanup` 単独出現 (現状ゼロ件) を含めない。合計約 107 件・約 19 ファイルに手が入る規模。
 
 以下の grep ヒットは識別子参照のため対象外:
 
-- `src/mp4/hybrid_writer.rs:548` の `finalize()` (メソッド呼び出しの参照、ルール 6)
+- `src/mp4/hybrid_writer.rs:524` の `finalize()` (メソッド呼び出しの参照、ルール 6)
+- `src/tune/nsga2.rs:571` の `NumericRange::finalize` (`::` パス記法、ルール 3)
 - `src/tune/nsga2.rs:375` の `finalize の clamp` (同ファイル 388 行で `range.finalize(child)` を呼ぶ `NumericRange::finalize` メソッドの動作説明。ルール 8 単独適用なら概念表現になり得るが、ルール 9 で識別子側に倒す)
+- `src/mp4/writer.rs:80` の `finalize / sample_entry 系カウンタ` (`Stats` のメトリクスキー prefix を指す識別子参照。ルール 9 で識別子側に倒す)
 - `src/subcommand_server.rs:219` の `return が必要` (直下の `#[expect(clippy::needless_return)]` 属性が示すとおり Rust の `return` キーワード自体への言及。ルール 9 で識別子側に倒す)
 
 カタカナ表記揺れ:
@@ -49,7 +49,7 @@ CLAUDE.md の「コメントは全て日本語にすること」に従い、`src
 - 対象: `src/` 配下の Rust ファイル内のコメント (`//` / `///` / `//!`)。`#[cfg(test)] mod tests` 内も対象 (CLAUDE.md「テストはコメントを重視すること」を適用)。
 - 対象外: 文字列リテラル全般 (ログマクロ引数、`crate::Error::new("...")` / `format!("...")` のエラー文字列、`panic!` / `assert!` / `expect` 等の文字列リテラル)。CLAUDE.md「ログメッセージは全て英語にすること」と整合させるため触らない。
 - 対象外: コード内の識別子 (型名・関数名・メソッド名・フィールド名・変数名・モジュール名・パス・フラグ名・環境変数名)。
-- 既出 8 表現と `/ cleanup` 連動分、および 1 カタカナ揺れに限定する。他の英単語混在 (例: `flush`, `pending`, `channel`, `attach` 等) は本 issue の対象外。
+- 既出 6 表現と `/ cleanup` 連動分、および 1 カタカナ揺れに限定する。他の英単語混在 (例: `flush`, `pending`, `channel`, `attach` 等) は本 issue の対象外。
 
 ### 表記決定
 
@@ -58,27 +58,24 @@ CLAUDE.md の「コメントは全て日本語にすること」に従い、`src
 | `codec string` | `コーデック文字列` | `src/codec_string.rs` 他にコメント 6 件 |
 | `sample entry` | `サンプルエントリー` (長音あり) | `src/encoder/openh264.rs` 他にコメント 33 件 |
 | `best-effort` / `best effort` | `ベストエフォート` | `src/dash/writer.rs`、`src/mp4/demuxer.rs` にコメント 3 件 |
-| `bind` | `バインド` | (新規) |
-| `exit` する | `終了する` | `src/encoder.rs:376`、`src/media_pipeline.rs:96` ほか頻出 |
+| `bind` | `バインド` | `src/obsws/server.rs` 内で他箇所が既に `バインド` 化済み |
 | `return` する/し | `関数を抜ける` (動詞) / `早期復帰` (名詞句限定。下記の確定置換参照) | (新規) |
 | `finalize` (動詞・状態・時点) | `ファイナライズ` 系で機械置換 (下記補足参照) | (新規) |
 | `cleanup` (`finalize` 並列分のみ) | `クリーンアップ` | コメント 4 件 (`src/obsws/state_file.rs` 他) |
-| `metrics 行` | `メトリクス行` | `src/sora/recording_subcommand_tune.rs:305` (`終了時メトリクス行`) |
 | `サンプルエントリ` | `サンプルエントリー` | (多数派) |
 
 #### `return` の確定置換
 
-該当 4 件は全て文脈確定済み。判定ルールを経ずに以下の通り個別置換する。
+該当 3 件は全て文脈確定済み。判定ルールを経ずに以下の通り個別置換する。
 
 | 該当箇所 | before | after |
 |---|---|---|
-| `src/metrics.rs:12` | `警告ログのみで return し、終了処理は妨げない` | `警告ログのみで関数を抜け、終了処理は妨げない` |
 | `src/obsws/message.rs:1557, 1599` | `その場合はコード値だけ確認して早期に return する。` | `その場合はコード値だけ確認して早期に関数を抜ける。` |
 | `src/tune/nsga2.rs:499` | `全個体がそのまま親になる (早期 return 経路)` | `全個体がそのまま親になる (早期復帰経路)` |
 
 #### `finalize` の置換補足
 
-事前確認済みの 45 件 (47 件 grep ヒット - 識別子参照 2 件) はルール 8 で全て概念表現扱いと判定済みのため、個別判断不要で `ファイナライズ` に機械置換できる。意訳は不要。
+事前確認済みの 38 件 (42 件 grep ヒット - 識別子参照 4 件) はルール 8 で全て概念表現扱いと判定済みのため、個別判断不要で `ファイナライズ` に機械置換できる。意訳は不要。
 
 - 接尾辞・修飾語 (`時 / 後 / 中 / 済み / 未完了 / 完了前 / 失敗 / 成否 / 経由 / まで / 固有 / 直前` 等)、動詞活用 (`を促す` / `して(から)` / `を経ずに` / `を経由` / `を優先` / `に進む` / `へ遷移` 等)、全角括弧での補足 (`finalize（標準 MP4 への変換）`)、矢印遷移 (`→ finalize`) は全て `ファイナライズ` で機械置換できる。
 - `/ cleanup` と並列される箇所では `cleanup` も同時に `クリーンアップ` に揃える (`ファイナライズ / クリーンアップに進ませる` 等)。該当 11 件は `rg -n '^\s*(//|///|//!).*\bcleanup\b' --type rust src/` で確認できる。
@@ -101,24 +98,24 @@ CLAUDE.md の「コメントは全て日本語にすること」に従い、`src
    - 例: `bind 等の .await より前` → `バインド等の .await より前`
    - 例: `best-effort 出力` → `ベストエフォート出力`
    - 例: `（best effort）` → `（ベストエフォート）`
-9. **判断に迷う境界は識別子側 (保守側) に倒す**。誤って識別子参照を日本語化するより、概念表現が少し残る方が安全。`src/tune/nsga2.rs:375` (`finalize の clamp`) と `src/subcommand_server.rs:219` (`return が必要`) はルール 8 単独適用なら概念表現になり得るが、いずれも近接する識別子参照を意図しているためルール 9 で対象外とする (本 issue では現状セクションで先回り除外済み)。
+9. **判断に迷う境界は識別子側 (保守側) に倒す**。誤って識別子参照を日本語化するより、概念表現が少し残る方が安全。`src/tune/nsga2.rs:375` (`finalize の clamp`)、`src/mp4/writer.rs:80` (`finalize / sample_entry 系カウンタ`)、`src/subcommand_server.rs:219` (`return が必要`) はルール 8 単独適用なら概念表現になり得るが、いずれも近接する識別子参照を意図しているためルール 9 で対象外とする (本 issue では現状セクションで先回り除外済み)。
 
 `src/video/h265.rs:19, 82` のように関数 doc コメントで戻り値型 `SampleEntry` を意図する `sample entry` も、ルール 8 を適用して `サンプルエントリー` に統一する。
 
 ### 進め方
 
-`finalize` (45 件 + `cleanup` 連動 11 件) は単独 PR とし、他表現とは分ける (レビュー負荷の観点)。それ以外は 1 PR にまとめても、表現ごとに PR を分けてもよい。
+`finalize` (38 件 + `cleanup` 連動 11 件) は単独 PR とし、他表現とは分ける (レビュー負荷の観点)。それ以外は 1 PR にまとめても、表現ごとに PR を分けてもよい。
 
 ## 完了条件
 
-- 以下の `rg` 検証で対象表現が概念表現として残っていないこと。`bind` / `exit` / `return` / `finalize` は識別子としても出現するため、grep 結果を目視して残存箇所がルール 1〜7 の識別子扱い、または現状セクションで先回り除外した 3 箇所 (`src/mp4/hybrid_writer.rs:548`、`src/tune/nsga2.rs:375`、`src/subcommand_server.rs:219`) に限ることを確認する (ゼロ件には到達しない)。
+- 以下の `rg` 検証で対象表現が概念表現として残っていないこと。`bind` / `return` / `finalize` は識別子としても出現するため、grep 結果を目視して残存箇所がルール 1〜7 の識別子扱い、または現状セクションで先回り除外した箇所に限ることを確認する (ゼロ件には到達しない)。
 
   ```sh
   # 機械的に「ゼロ件」が達成可能なもの
-  rg -n '^\s*(//|///|//!).*(codec string|sample entry|best[- ]effort|metrics 行)' --type rust src/
+  rg -n '^\s*(//|///|//!).*(codec string|sample entry|best[- ]effort)' --type rust src/
 
   # 目視で識別子扱いのみが残ることを確認するもの
-  rg -n '^\s*(//|///|//!).*\b(bind|exit|return|finalize)\b' --type rust src/
+  rg -n '^\s*(//|///|//!).*\b(bind|return|finalize)\b' --type rust src/
   ```
 
 - `サンプルエントリ` (長音なし) と、`finalize` に並列する英語の `cleanup` の出現がゼロ件であること:
@@ -148,4 +145,4 @@ CI 化 (`rg` ベースの自動チェック) は本 issue のスコープ外。�
 
 ## 関連
 
-- `0030 feature/refactor-encoded-frame-sample-entry-invariant`: 対象ファイルが重なるため、本 issue 着手時点で develop の最新を取り込んでから作業すること。特に `src/sample_entry.rs`、`src/encoder/openh264.rs`、`src/mp4/hybrid_writer.rs` で重複の可能性がある。
+- `0030 feature/refactor-encoded-frame-sample-entry-invariant` (closed): 本 issue 着手の発端となった作業。同ブランチのマージで `src/metrics.rs` / `src/obsws/server.rs` / `src/sora/recording_subcommand_tune.rs` 等の `bind` `exit` `return` `metrics 行` `best-effort` の一部が副次的に日本語化済み。本 issue の現状件数はそのマージ後の実測値。
