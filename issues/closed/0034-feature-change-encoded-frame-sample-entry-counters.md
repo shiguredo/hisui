@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-10
-- Completed:
+- Completed: 2026-06-12
 - Model: Claude Opus 4.7
 - Branch: feature/change-encoded-frame-sample-entry-counters
 - Polished: 2026-06-12
@@ -223,3 +223,45 @@ CHANGES.md エントリ内に issue 番号への参照を書かない（shigured
 - issue 0017（音声エンコーダの全フレーム付与と共通型 `SharedSampleEntry` 導入。closed）
 - issue 0011（received / missing カウンタ系列の起源。closed）
 - issue 0031 / 0032 / 0033（不変条件未適用経路への適用拡張。本 issue の後続）
+
+## 解決方法
+
+### カウンタ・メソッド・関連フィールド・テストの削除
+
+- `src/mp4/writer.rs::Mp4WriterStats` から sample_entry 系 4 フィールド・`stats.counter("total_*_sample_entry_count")` 初期化・struct 初期化・`pub(crate) fn add_received_*_sample_entry` / `add_missing_*_sample_entry`・`pub fn total_*_sample_entry_count()` ゲッター 4 種を削除した。
+- `src/mp4/hybrid_writer.rs::HybridMp4Writer` から `last_audio_sample_entry` / `last_video_sample_entry` フィールド・初期化・`handle_*_message` 内の `changed_since` 判定と保持取り込み・`add_received_*_sample_entry()` 呼び出しを削除した。
+- 既存テスト `hybrid_writer_received_audio_sample_entry_counts_only_changes` / `hybrid_writer_received_video_sample_entry_counts_only_changes` を削除した。
+- 上記カウンタ初期化（`stats.counter("...")`）の削除に伴い、`/metrics` Prometheus メトリクス 4 種（`hisui_total_received_*_sample_entry_count` / `hisui_total_missing_*_sample_entry_count`）と `compose --stats-file` / `--emit-exit-metrics` 出力 JSON の同名 4 メンバーは自動的に消滅する。
+
+### 違反検知ロギングと fallback 補完値の追加
+
+- `src/sample_entry.rs` に共通ヘルパ `SampleEntryResolution<T>` enum と `resolve_audio_sample_entry` / `resolve_video_sample_entry` 関数を追加した。圧縮フレーム判定（`codec_name().is_some()`）→ 通常パスで fallback 更新（Arc 共有）→ 違反パスで補完済みフレーム生成 or skip の 3 分岐ロジックを集約。
+- `SharedSampleEntry::ptr_eq` を追加し、`changed_since` の Arc::ptr_eq 短絡経路が壊れていないかをテストで観測できるようにした。
+- 4 writer（`Mp4Writer` / `HybridMp4Writer` / `DashWriter` / `HlsWriter`）に `fallback_audio_sample_entry` / `fallback_video_sample_entry` フィールドを追加し、入口で `resolve_*_sample_entry` を呼ぶように改修した。違反時は `tracing::warn!`（key=value 形式、英語、writer 種別を `processor_type` 命名と一致する prefix で識別）を出してから補完値で差し替えるか skip する。違反検知は `input_*_track_id` ガード / `total_input_*_frame_count` 計上の後、早期 return の前に配置することで観測の連続性を保つ。
+- mp4 / hybrid_writer は `Arc<AudioFrame>` を `Arc::new(patched)` で詰め直し、dash / hls は `&AudioFrame` を `let patched_holder; ... &patched_holder` の shadow で借用ライフタイムを延ばす。
+- `HlsWriter` の fallback は `MpegTsState` / `Fmp4State` ではなく writer 直下に 1 ペアだけ持つ（両 state 共通で同じ値を使えるため）。
+
+### テスト
+
+- `src/sample_entry.rs` の `mod tests` に単体テスト 10 件（音声 / 映像 × 4 分岐 + `ptr_eq` の真偽 2 件）を追加。Arc 同一性を全 Pass / Patched パスで assert することで、fallback の `Arc::ptr_eq` 短絡経路が壊れた場合（例: `entry.get().clone()` で再 wrap する実装に書き換わる）を検知可能にした。
+- `pbt/tests/prop_sample_entry.rs` を新規作成し、`(codec_name 有無 × sample_entry 有無 × fallback 有無)` の 8 状態を `proptest` で性質ベースに検証する 8 件の PBT を追加。`pbt/Cargo.toml` に `shiguredo_mp4` dev-dependency を追加。
+- `src/mp4/hybrid_writer.rs` の `mod tests` に 8 件のテストを追加（`falls_back_*` 音声 / 映像、`skips_first_frame_*` 音声 / 映像、`resolves_sample_entry_even_when_*_track_id_is_disabled` 音声 / 映像、`preserves_fallback_across_consecutive_violations` 音声 / 映像）。track 無効化中の違反でも fallback 更新は走ること、連続違反でも fallback が直前の正常値を保持し続けることを検証する。
+- `src/endpoint_http_metrics.rs` の `mod tests` に `metrics_endpoint_does_not_include_removed_sample_entry_counters` を追加。`Mp4WriterStats::new` を明示的に呼んでも `/metrics` レスポンスに廃止 4 メトリクス名が含まれないことを確認する（将来再追加した場合の回帰検知）。
+
+### CHANGES.md
+
+`## develop` への [CHANGE] エントリ追加は行わなかった。本 issue で廃止する `Mp4WriterStats` の `pub fn` ゲッターおよび Prometheus メトリクスは最後のリリース以降に develop で追加されたもので、まだ正式リリースされていない。`shiguredo-changelog` の「派生元ブランチとの最終的な差分のみを記載すること」「開発ブランチ内の中間状態の修正は記載しないこと」に従い、未リリース機能の追加 → 削除は最終 diff として現れないため記載対象外と判断した。
+
+### スコープ外として後続に委ねた項目
+
+- **dash / hls writer の `resolve_*` 適用箇所への直接単体テスト**: writer インスタンステスト枠組み（`DashWriter` / `HlsWriter` を起動して `handle_*_frame` を直接呼ぶ仕組み）の構築が必要で本 issue の規模を超える。issue 0031 / 0032 / 0033 の実装で実違反経路が増えるタイミングで、各 PR の判断に応じて writer 側テストを併設する。
+- **`SampleEntryResolution<T>` 抽象化と 8 サイトの match + tracing::warn! 重複の集約**: マクロ or trait + generics で `resolve_*` 2 関数と writer 側 8 サイトをまとめて圧縮できる（推定 150 行削減）。本 issue では実装を済ませて挙動を安定させ、リファクタは別 issue で扱う方針。
+- **違反検知 warn のレートリミット**: 設計方針 2 で「違反は基本起きない前提のため全件出す」と決定済み。後続経路で実違反が観測されるようになった時点で、運用観測の別 issue として検討する。
+
+### レビュー指摘の反映
+
+`/review-diff-code` で挙がった指摘を順次対応した。
+
+- コメント拡充: `let patched_holder;` の delayed-init パターンの意図、`add_received_*_data` / `total_input_*_frame_count` が違反検知前に計上済みである旨、`maybe_flush_initial_pending` が writer 入口の fallback で補完済みの想定になる旨、`Mp4WriterStats` の「ファイナライズ系カウンタは hybrid writer のみ計上」コメントの範囲明示、生フォーマット Pass で fallback を更新しない設計、Arc 共有による `changed_since` 短絡、二重 deep copy の許容を `resolve_*` の docstring に明記。
+- 命名整理: `try_resolve_*_sample_entry` → `resolve_*_sample_entry`（`try_` プレフィックスは Result/Option 戻り値の Rust 慣用と齟齬があるため）。
+- 軽微改善: Patched パスのログ key を `?patched.format` → `?sample.format` / `?frame.format` に統一して Skip パスと揃える、`fallback.clone()` → `fallback.as_ref()` で Skip パスの Arc clone を省略、`std::sync::Arc::new(patched)` フルパス → `use std::sync::Arc;` 追加で短縮、tracing field 名 `format` → `frame_format` に変更して `std::format!` 連想による検索性劣化を回避。
