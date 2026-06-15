@@ -927,34 +927,23 @@ impl SrtTsDemuxer {
             }
         }
 
-        let timestamp = self.video_timestamp_mapper.map(dts.as_u64());
-
         if keyframe {
-            // width / height は 0 で構築する。SPS 内 Exp-Golomb による解像度抽出は将来の改善余地。
-            // SPS / PPS の有無判定は `h264_sample_entry_from_annexb` の Ok / Err に委ねる。
-            match crate::video::h264::h264_sample_entry_from_annexb(0, 0, &pending.data) {
-                Ok(entry) => {
-                    self.last_video_sample_entry =
-                        Some(crate::sample_entry::SharedSampleEntry::new(entry));
-                }
-                Err(_) => {
-                    // 確定前のみ warn を出す。確定後の Err は旧 entry を維持して通常パスで流す。
-                    if self.last_video_sample_entry.is_none() {
-                        tracing::warn!(
-                            frame_format = ?crate::video::VideoFormat::H264AnnexB,
-                            timestamp_us = timestamp.as_micros() as u64,
-                            reason = "missing_sps_pps",
-                            "srt_inbound_endpoint h264 frame without sample_entry; dropping until SPS-bearing IDR arrives"
-                        );
-                    }
-                }
-            }
+            // width / height は 0 で渡す。
+            // `h264_sample_entry_from_annexb` は引数をそのまま埋め込むだけで SPS パースはしないため、
+            // Annex-B から実値を取り出すには呼び出し側で SPS Exp-Golomb パースを実装する必要がある（将来の改善余地）。
+            // SPS / PPS 不在 IDR や破損 NAL は同関数が Err を返す。
+            // 正常な H.264 ストリームは IDR に SPS / PPS を inline するため、
+            // Err はエンコーダ側の異常とみなしてそのまま伝播し、接続を打ち切る。
+            let entry = crate::video::h264::h264_sample_entry_from_annexb(0, 0, &pending.data)?;
+            self.last_video_sample_entry = Some(crate::sample_entry::SharedSampleEntry::new(entry));
         }
 
-        // sample_entry が確定するまでは全フレーム（IDR / 非 IDR を問わず）を破棄する。
+        // 初回の SPS / PPS 含有 IDR が来るまでは P フレーム等を破棄する。
         if self.last_video_sample_entry.is_none() {
             return Ok(None);
         }
+
+        let timestamp = self.video_timestamp_mapper.map(dts.as_u64());
 
         Ok(Some(TsSample::Video(crate::VideoFrame {
             data: pending.data,
@@ -1423,83 +1412,40 @@ mod tests {
         Ok(())
     }
 
-    // 確定前に SPS / PPS 不在の IDR が来た場合の挙動を検証する。
-    // 当該 IDR は破棄され `last_video_sample_entry` は更新されない。
-    // 続けて SPS / PPS 含有 IDR を投入することで確定し、以後の P フレームに sample_entry が載る。
+    // SPS / PPS 不在の IDR が来た場合は Err を返して接続を打ち切る方針の回帰防止。
+    // 正常な H.264 ストリームは IDR に SPS / PPS を inline するため、不在はエンコーダ側の異常とみなす。
     #[test]
-    fn srt_h264_drops_idr_without_sps_pps_before_first_sample_entry() -> crate::Result<()> {
-        let mut demuxer = SrtTsDemuxer::new()?;
+    fn srt_h264_returns_err_on_idr_without_sps_pps() {
+        let mut demuxer = SrtTsDemuxer::new().expect("demuxer 生成に成功すること");
 
-        // SPS / PPS を含まない IDR のみの PES。確定前なので破棄される。
-        let pes1 = IDR.to_vec();
-        let samples1 = demuxer
-            .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
-        assert!(
-            samples1.is_none(),
-            "SPS / PPS 不在 IDR は確定前なので破棄されること"
-        );
-
-        // SPS + PPS + IDR で確定させる。
-        let pes2 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
-        let samples2 = demuxer
-            .build_video_sample(make_h264_pending_pes(pes2, 103_000), Some(StreamType::H264))?;
-        let sample2 = samples2.expect("SPS / PPS 含有 IDR で確定して流れること");
-        let TsSample::Video(frame2) = sample2 else {
-            panic!("映像サンプルとして取り出せること");
-        };
-        assert!(
-            frame2.sample_entry.is_some(),
-            "確定 IDR に sample_entry が載っていること"
-        );
-
-        // 後続の P フレームに sample_entry が載ることまで確認する。
-        let pes3 = P_FRAME.to_vec();
-        let samples3 = demuxer
-            .build_video_sample(make_h264_pending_pes(pes3, 106_000), Some(StreamType::H264))?;
-        let sample3 = samples3.expect("確定後の P フレームが流れること");
-        let TsSample::Video(frame3) = sample3 else {
-            panic!("映像サンプルとして取り出せること");
-        };
-        assert!(
-            frame3.sample_entry.is_some(),
-            "確定後の P フレームに sample_entry が載っていること"
-        );
-
-        Ok(())
+        let pes = IDR.to_vec();
+        let result =
+            demuxer.build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264));
+        assert!(result.is_err(), "SPS / PPS 不在 IDR は Err を返すこと");
     }
 
-    // 確定前に PPS 不在（SPS のみ含有）の IDR が来た場合の挙動を検証する。
-    // `h264_sample_entry_from_annexb` は `missing H.264 PPS` Err を返し、当該 PES は破棄される。
+    // PPS 不在（SPS のみ含有）の IDR は `h264_sample_entry_from_annexb` が `missing H.264 PPS` Err を返し、
+    // それが上位に伝播することを検証する。
     #[test]
-    fn srt_h264_drops_idr_with_only_sps_before_first_sample_entry() -> crate::Result<()> {
-        let mut demuxer = SrtTsDemuxer::new()?;
+    fn srt_h264_returns_err_on_idr_with_only_sps() {
+        let mut demuxer = SrtTsDemuxer::new().expect("demuxer 生成に成功すること");
 
         let pes = [&SPS_INITIAL[..], &IDR].concat();
-        let samples = demuxer
-            .build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264))?;
-        assert!(
-            samples.is_none(),
-            "PPS 不在 IDR は確定前なので破棄されること"
-        );
-
-        Ok(())
+        let result =
+            demuxer.build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264));
+        assert!(result.is_err(), "PPS 不在 IDR は Err を返すこと");
     }
 
-    // 確定前に SPS 不在（PPS のみ含有）の IDR が来た場合の挙動を検証する。
-    // `h264_sample_entry_from_annexb` は `missing H.264 SPS` Err を返し、当該 PES は破棄される。
+    // SPS 不在（PPS のみ含有）の IDR は `h264_sample_entry_from_annexb` が `missing H.264 SPS` Err を返し、
+    // それが上位に伝播することを検証する。
     #[test]
-    fn srt_h264_drops_idr_with_only_pps_before_first_sample_entry() -> crate::Result<()> {
-        let mut demuxer = SrtTsDemuxer::new()?;
+    fn srt_h264_returns_err_on_idr_with_only_pps() {
+        let mut demuxer = SrtTsDemuxer::new().expect("demuxer 生成に成功すること");
 
         let pes = [&PPS[..], &IDR].concat();
-        let samples = demuxer
-            .build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264))?;
-        assert!(
-            samples.is_none(),
-            "SPS 不在 IDR は確定前なので破棄されること"
-        );
-
-        Ok(())
+        let result =
+            demuxer.build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264));
+        assert!(result.is_err(), "SPS 不在 IDR は Err を返すこと");
     }
 
     // mid-stream で SPS / PPS が含有 IDR と一緒に更新された場合の挙動を検証する。
@@ -1535,64 +1481,6 @@ mod tests {
             entry2.changed_since(Some(&entry1)),
             "mid-stream SPS 変化で sample_entry が初期と異なる値に更新されていること"
         );
-
-        Ok(())
-    }
-
-    // 確定後に SPS / PPS 不在の IDR が来た場合の挙動を検証する。
-    // 確定後の不在 IDR では `last_video_sample_entry` を更新せず、当該フレームは旧 entry を `clone()` して下流に流す。
-    #[test]
-    fn srt_h264_preserves_last_sample_entry_when_subsequent_idr_lacks_sps_pps() -> crate::Result<()>
-    {
-        let mut demuxer = SrtTsDemuxer::new()?;
-
-        let pes1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
-        let samples1 = demuxer
-            .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
-        let sample1 = samples1.expect("SPS / PPS 含有 IDR で確定して流れること");
-        let TsSample::Video(frame1) = sample1 else {
-            panic!("映像サンプルとして取り出せること");
-        };
-        let entry1 = frame1
-            .sample_entry
-            .clone()
-            .expect("確定 IDR に sample_entry が載っていること");
-
-        // 確定後の SPS / PPS 不在 IDR は破棄せず旧 entry を載せて流す。
-        let pes2 = IDR.to_vec();
-        let samples2 = demuxer
-            .build_video_sample(make_h264_pending_pes(pes2, 103_000), Some(StreamType::H264))?;
-        let sample2 = samples2.expect("確定後の不在 IDR は旧 entry を載せて下流に流れること");
-        let TsSample::Video(frame2) = sample2 else {
-            panic!("映像サンプルとして取り出せること");
-        };
-        let entry2 = frame2
-            .sample_entry
-            .expect("確定後の不在 IDR にも sample_entry が載っていること");
-        assert!(
-            !entry2.changed_since(Some(&entry1)),
-            "確定後の不在 IDR では旧 entry がそのまま維持されること"
-        );
-
-        Ok(())
-    }
-
-    // 確定前に SPS / PPS 不在の IDR が連続して来た場合、いずれも破棄され `last_video_sample_entry` が `None` のまま維持されることを検証する。
-    // 複数回繰り返すことで、初回と後続で挙動差が出ないことを確認する。
-    #[test]
-    fn srt_h264_emits_no_frame_during_consecutive_sps_pps_missing_idrs() -> crate::Result<()> {
-        let mut demuxer = SrtTsDemuxer::new()?;
-
-        for (idx, pts) in [100_000_u64, 103_000, 106_000].iter().enumerate() {
-            let pes = IDR.to_vec();
-            let samples = demuxer
-                .build_video_sample(make_h264_pending_pes(pes, *pts), Some(StreamType::H264))?;
-            assert!(
-                samples.is_none(),
-                "{} 回目の SPS / PPS 不在 IDR は破棄されること",
-                idx + 1
-            );
-        }
 
         Ok(())
     }
