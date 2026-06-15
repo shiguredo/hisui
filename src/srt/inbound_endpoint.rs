@@ -917,13 +917,13 @@ impl SrtTsDemuxer {
             .ok_or_else(|| crate::Error::new("missing PTS in H264 PES"))?;
         let dts = pending.header.dts.unwrap_or(pts);
 
-        // PES 全 NAL を走査して IDR の有無を判定する。
-        // NAL パースエラーは早期検出のため `?` で伝播する。
+        // IDR の有無を判定する。
         let mut keyframe = false;
         for nalu in crate::video::h264::H264AnnexBNalUnits::new(&pending.data) {
             let nalu = nalu?;
             if nalu.ty == crate::video::h264::H264_NALU_TYPE_IDR {
                 keyframe = true;
+                break;
             }
         }
 
@@ -1402,7 +1402,7 @@ mod tests {
     }
 
     // IDR より後ろに SPS / PPS が並ぶ Annex-B ストリームでも sample_entry が確定することを検証する。
-    // `build_video_sample` の NAL 走査が IDR 検出後も break しない設計が、後置 SPS / PPS を取り逃さないことの回帰防止。
+    // `h264_sample_entry_from_annexb` が PES データ全体を走査して SPS / PPS を抽出することの回帰防止。
     #[test]
     fn srt_h264_emits_sample_entry_on_idr_with_trailing_sps_pps() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;

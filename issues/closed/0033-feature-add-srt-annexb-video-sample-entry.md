@@ -193,7 +193,7 @@ PBT は本 issue では追加しない。`SrtTsDemuxer::build_video_sample` の�
 
 ### build_video_sample の SPS / PPS 抽出フロー
 
-- `H264AnnexBNalUnits` での走査から IDR 検出時の `break` を取り除き、`has_idr: bool` のみを判定する形に整理した。SPS / PPS の有無判定は `h264_sample_entry_from_annexb` の Ok / Err に委ねる。
+- `H264AnnexBNalUnits` での走査は IDR 検出時に `break` で打ち切り、`has_idr: bool` のみを判定する形に整理した。SPS / PPS の有無判定や PES 全体の抽出は `h264_sample_entry_from_annexb` 側の独立した走査に委ねる。
 - IDR PES 全体を `h264_sample_entry_from_annexb(0, 0, &pending.data)` に渡し、`Ok(entry)` なら `last_video_sample_entry` を新値で上書き、`Err(_)` なら確定前のみ `tracing::warn!` を出す（確定後は旧 entry を維持して通常パスで流す）。
 - 確定前の全フレームはゲートで `Ok(None)` を返して破棄。`TsSample::Video` 構築箇所では `sample_entry: self.last_video_sample_entry.clone()` を載せる。
 
@@ -210,7 +210,7 @@ PBT は本 issue では追加しない。`SrtTsDemuxer::build_video_sample` の�
   - mid-stream 更新: SPS バイト列の差分で `last_video_sample_entry` が新値に上書きされて新 IDR 自身に載る挙動
   - 確定後の境界: SPS / PPS 不在 IDR で旧 entry が維持されて下流に流れる挙動
   - 連続違反耐性: SPS / PPS 不在 IDR を連続投入して `last_video_sample_entry` が `None` のまま維持される挙動
-  - IDR 後置 SPS / PPS: `[IDR, SPS, PPS]` 並びでも sample_entry が確定する挙動（`break` 削除の回帰防止）
+  - IDR 後置 SPS / PPS: `[IDR, SPS, PPS]` 並びでも sample_entry が確定する挙動（`h264_sample_entry_from_annexb` が PES データ全体を走査することの回帰防止）
   - 片側不在: SPS のみ / PPS のみを含む IDR がいずれも確定前なら破棄される挙動
 - テストヘルパとフィクスチャ:
   - `make_pending_pes(stream_id, data, pts_ticks)` を共通ヘルパとして導入し、`make_aac_pending_pes` / `make_h264_pending_pes` をその薄いラッパに整理した。
