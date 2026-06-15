@@ -53,7 +53,7 @@ pub struct VideoFrame {
     /// 生フォーマット（I420 / I420A）と decoder 内部の中間表現として一時的に構築するフレーム、
     /// および外部に流れないフレームは `None` を許容する。
     ///
-    /// 現時点で未適用の経路: WebM リーダー（issue 0031）、rtsp / srt の Annex-B 映像（issue 0032 / 0033）。
+    /// 現時点で未適用の経路: WebM リーダー、rtsp の Annex-B 映像。
     pub sample_entry: Option<SharedSampleEntry>,
 }
 

@@ -89,7 +89,7 @@ pub struct AudioFrame {
     /// 生フォーマット（I16Be）と decoder 内部の中間表現として一時的に構築するフレーム、
     /// および外部に流れないフレームは `None` を許容する。
     ///
-    /// 現時点で未適用の経路: WebM リーダー（issue 0031）。
+    /// 現時点で未適用の経路: WebM リーダー。
     pub sample_entry: Option<SharedSampleEntry>,
 }
 
