@@ -918,8 +918,7 @@ impl SrtTsDemuxer {
         let dts = pending.header.dts.unwrap_or(pts);
 
         // PES 全 NAL を走査して IDR の有無を判定する。
-        // IDR より後ろに SPS / PPS が並ぶエンコーダ実装にも対応するため、IDR 検出後も break しない。
-        // SPS / PPS の有無は `h264_sample_entry_from_annexb` の Ok / Err で代替判定する。
+        // NAL パースエラーは早期検出のため `?` で伝播する。
         let mut keyframe = false;
         for nalu in crate::video::h264::H264AnnexBNalUnits::new(&pending.data) {
             let nalu = nalu?;
@@ -928,21 +927,18 @@ impl SrtTsDemuxer {
             }
         }
 
-        // warn と TsSample::Video 構築の両方で同じ Duration を使うため、sample_entry 構築試行の前で確定させる
         let timestamp = self.video_timestamp_mapper.map(dts.as_u64());
 
         if keyframe {
-            // IDR PES 全体を `h264_sample_entry_from_annexb` に渡す。
-            // 同関数は内部で SPS / PPS を走査し、両方揃わなければ Err を返すため、
-            // 呼び出し側で SPS / PPS の有無を別途判定する必要は無い。
+            // width / height は 0 で構築する。SPS 内 Exp-Golomb による解像度抽出は将来の改善余地。
+            // SPS / PPS の有無判定は `h264_sample_entry_from_annexb` の Ok / Err に委ねる。
             match crate::video::h264::h264_sample_entry_from_annexb(0, 0, &pending.data) {
                 Ok(entry) => {
                     self.last_video_sample_entry =
                         Some(crate::sample_entry::SharedSampleEntry::new(entry));
                 }
                 Err(_) => {
-                    // SPS / PPS の片方または両方が不在。確定前のみ warn を出して、後続の SPS 含有 IDR を待つ。
-                    // 確定後の不在 IDR は旧 entry を維持してそのまま下流に流す（warn も出さない）。
+                    // 確定前のみ warn を出す。確定後の Err は旧 entry を維持して通常パスで流す。
                     if self.last_video_sample_entry.is_none() {
                         tracing::warn!(
                             frame_format = ?crate::video::VideoFormat::H264AnnexB,
@@ -1311,10 +1307,9 @@ mod tests {
         assert_eq!(dec_specific_info.payload, vec![0x12, 0x10]);
     }
 
-    // SRT 入力経路の H.264 Annex-B 映像処理が VideoFrame.sample_entry の不変条件を満たすことを検証するヘルパー。
     // `build_video_sample` に渡す PendingPesPacket をテスト内で組み立てる。
-    // AAC ヘルパは汎用 `StreamId::new` を採るが、映像側は `is_video()` 型検査で誤値混入を弾く `new_video` を使う。
-    // `dts` は None 固定で `build_video_sample` 側の `dts.unwrap_or(pts)` フォールバックに任せる。
+    // `StreamId::new_video` で `is_video()` 型検査により誤値混入を弾く。
+    // `dts` は None で `build_video_sample` 側の `dts.unwrap_or(pts)` フォールバックに任せる。
     fn make_h264_pending_pes(data: Vec<u8>, pts_ticks: u64) -> PendingPesPacket {
         use mpeg2ts::es::StreamId;
         use mpeg2ts::time::Timestamp;
@@ -1335,26 +1330,26 @@ mod tests {
         }
     }
 
-    // 最小限の SPS NAL ユニット。NAL header `0x67` で nal_unit_type=7（SPS）+ 任意 payload 4 バイト。
-    // `H264AnnexBNalUnits` は forbidden_zero_bit のみ検査するため、payload の具体値は任意でよく、
-    // payload 列に `0x00, 0x00, 0x01` シーケンスが現れないことだけ確認しておく（NAL の誤分割防止）。
+    // テスト用の最小限の NAL ユニット定数。先頭 4 バイトは start code prefix。
+    // 5 バイト目が NAL header で、上位 1 bit が forbidden_zero_bit、下位 5 bit が nal_unit_type。
+    // payload バイト列は任意だが、隣接 NAL の誤分割を避けるため `0x00, 0x00, 0x01` シーケンスを含めない。
+
+    // nal_unit_type=7（SPS）。
     const SPS_A: [u8; 9] = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xab];
 
     // SPS_A の payload 末尾 1 バイトのみ差し替えたバリアント。mid-stream で SPS が変化したシナリオの検証用。
-    // `h264_sample_entry_from_annexb` が組み立てる `Avc1Box` 内の sps_list バイト列に差分が出るため、
-    // `SharedSampleEntry::changed_since` が内容比較で true を返す。
     const SPS_B: [u8; 9] = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xac];
 
-    // 最小限の PPS NAL ユニット。NAL header `0x68` で nal_unit_type=8（PPS）+ 任意 payload 3 バイト。
+    // nal_unit_type=8（PPS）。
     const PPS: [u8; 8] = [0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x06, 0xe2];
 
-    // 最小限の IDR NAL ユニット。NAL header `0x65` で nal_unit_type=5（IDR）+ 任意 payload 3 バイト。
+    // nal_unit_type=5（IDR）。
     const IDR: [u8; 8] = [0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21];
 
-    // 最小限の P フレーム NAL ユニット。NAL header `0x41` で nal_unit_type=1（non-IDR coded slice）+ 任意 payload 3 バイト。
+    // nal_unit_type=1（non-IDR coded slice、P フレーム）。
     const P_FRAME: [u8; 8] = [0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x21, 0x6c];
 
-    // SPS + PPS + IDR を含む 1 PES の Annex-B バイト列を組み立てるヘルパー。
+    // 複数 NAL を連結して 1 PES 分の Annex-B バイト列を組み立てる。
     fn assemble_annexb(parts: &[&[u8]]) -> Vec<u8> {
         let mut data = Vec::new();
         for part in parts {
@@ -1366,7 +1361,6 @@ mod tests {
     // VideoFrame.sample_entry の不変条件が SRT 入力経路の「SPS / PPS 含有 IDR で確定 + 後続 P フレーム付与」シナリオで成立することを検証する。
     // SPS + PPS + IDR を含む PES と P フレームのみの PES を順に投入し、3 フレーム全てに `Some` が載り、
     // 後続フレームの sample_entry が初回と等価（`changed_since=false`）であることを確認する。
-    // 等価性まで検証するのは、demuxer が dummy SampleEntry を毎回新規生成しても素通りしないようにするため。
     #[test]
     fn srt_h264_emits_sample_entry_on_every_frame_after_sps_pps_idr() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
@@ -1500,8 +1494,7 @@ mod tests {
     }
 
     // 確定後に SPS / PPS 不在の IDR が来た場合の挙動を検証する。
-    // 設計方針 3 (3) の「確定後の Err パスでは旧 entry を維持」と設計方針 4 の `clone()` の組み合わせで、
-    // 当該 IDR は破棄されず旧 sample_entry を載せて下流に流れる。
+    // 確定後の不在 IDR では `last_video_sample_entry` を更新せず、当該フレームは旧 entry を `clone()` して下流に流す。
     #[test]
     fn srt_h264_preserves_last_sample_entry_when_subsequent_idr_lacks_sps_pps() -> crate::Result<()>
     {
@@ -1539,7 +1532,7 @@ mod tests {
     }
 
     // 確定前に SPS / PPS 不在の IDR が連続して来た場合、いずれも破棄され `last_video_sample_entry` が `None` のまま維持されることを検証する。
-    // 連続違反耐性のため複数回繰り返して非対称が無いことを確認する。
+    // 複数回繰り返すことで、初回と後続で挙動差が出ないことを確認する。
     #[test]
     fn srt_h264_emits_no_frame_during_consecutive_sps_pps_missing_idrs() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
