@@ -1168,14 +1168,17 @@ mod tests {
         assert_eq!(header.audio_specific_config(), vec![0x12, 0x10]);
     }
 
-    // SRT 入力経路の AAC AU 処理が AudioFrame.sample_entry の不変条件を満たすことを検証するヘルパー。
-    // `build_audio_samples` に渡す PendingPesPacket をテスト内で組み立てる。
-    fn make_aac_pending_pes(data: Vec<u8>, pts_ticks: u64) -> PendingPesPacket {
-        use mpeg2ts::es::StreamId;
+    // テスト内で PendingPesPacket を組み立てる共通ヘルパー。
+    // 各経路向けの薄いラッパー (make_aac_pending_pes / make_h264_pending_pes) はこれを呼ぶ。
+    fn make_pending_pes(
+        stream_id: mpeg2ts::es::StreamId,
+        data: Vec<u8>,
+        pts_ticks: u64,
+    ) -> PendingPesPacket {
         use mpeg2ts::time::Timestamp;
         PendingPesPacket {
             header: PesHeader {
-                stream_id: StreamId::new(StreamId::AUDIO_MIN),
+                stream_id,
                 priority: false,
                 data_alignment_indicator: true,
                 copyright: false,
@@ -1187,6 +1190,13 @@ mod tests {
             data,
             expected_data_len: None,
         }
+    }
+
+    // SRT 入力経路の AAC AU 処理が AudioFrame.sample_entry の不変条件を満たすことを検証するヘルパー。
+    // `build_audio_samples` に渡す PendingPesPacket をテスト内で組み立てる。
+    fn make_aac_pending_pes(data: Vec<u8>, pts_ticks: u64) -> PendingPesPacket {
+        use mpeg2ts::es::StreamId;
+        make_pending_pes(StreamId::new(StreamId::AUDIO_MIN), data, pts_ticks)
     }
 
     // ADTS ヘッダ (7 バイト) と 12 バイトのダミー payload から成る AAC AU。
@@ -1309,25 +1319,14 @@ mod tests {
 
     // `build_video_sample` に渡す PendingPesPacket をテスト内で組み立てる。
     // `StreamId::new_video` で `is_video()` 型検査により誤値混入を弾く。
-    // `dts` は None で `build_video_sample` 側の `dts.unwrap_or(pts)` フォールバックに任せる。
     fn make_h264_pending_pes(data: Vec<u8>, pts_ticks: u64) -> PendingPesPacket {
         use mpeg2ts::es::StreamId;
-        use mpeg2ts::time::Timestamp;
-        PendingPesPacket {
-            header: PesHeader {
-                stream_id: StreamId::new_video(StreamId::VIDEO_MIN)
-                    .expect("VIDEO_MIN が映像範囲の有効な値であること"),
-                priority: false,
-                data_alignment_indicator: true,
-                copyright: false,
-                original_or_copy: false,
-                pts: Some(Timestamp::new(pts_ticks).expect("PTS が範囲内であること")),
-                dts: None,
-                escr: None,
-            },
+        make_pending_pes(
+            StreamId::new_video(StreamId::VIDEO_MIN)
+                .expect("VIDEO_MIN が映像範囲の有効な値であること"),
             data,
-            expected_data_len: None,
-        }
+            pts_ticks,
+        )
     }
 
     // テスト用の最小限の NAL ユニット定数。先頭 4 バイトは start code prefix。
@@ -1335,10 +1334,10 @@ mod tests {
     // payload バイト列は任意だが、隣接 NAL の誤分割を避けるため `0x00, 0x00, 0x01` シーケンスを含めない。
 
     // nal_unit_type=7（SPS）。
-    const SPS_A: [u8; 9] = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xab];
+    const SPS_INITIAL: [u8; 9] = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xab];
 
-    // SPS_A の payload 末尾 1 バイトのみ差し替えたバリアント。mid-stream で SPS が変化したシナリオの検証用。
-    const SPS_B: [u8; 9] = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xac];
+    // SPS_INITIAL の payload 末尾 1 バイトのみ差し替えたバリアント。mid-stream で SPS が変化したシナリオの検証用。
+    const SPS_UPDATED: [u8; 9] = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xac];
 
     // nal_unit_type=8（PPS）。
     const PPS: [u8; 8] = [0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x06, 0xe2];
@@ -1349,15 +1348,6 @@ mod tests {
     // nal_unit_type=1（non-IDR coded slice、P フレーム）。
     const P_FRAME: [u8; 8] = [0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x21, 0x6c];
 
-    // 複数 NAL を連結して 1 PES 分の Annex-B バイト列を組み立てる。
-    fn assemble_annexb(parts: &[&[u8]]) -> Vec<u8> {
-        let mut data = Vec::new();
-        for part in parts {
-            data.extend_from_slice(part);
-        }
-        data
-    }
-
     // VideoFrame.sample_entry の不変条件が SRT 入力経路の「SPS / PPS 含有 IDR で確定 + 後続 P フレーム付与」シナリオで成立することを検証する。
     // SPS + PPS + IDR を含む PES と P フレームのみの PES を順に投入し、3 フレーム全てに `Some` が載り、
     // 後続フレームの sample_entry が初回と等価（`changed_since=false`）であることを確認する。
@@ -1365,7 +1355,7 @@ mod tests {
     fn srt_h264_emits_sample_entry_on_every_frame_after_sps_pps_idr() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        let pes1 = assemble_annexb(&[&SPS_A, &PPS, &IDR]);
+        let pes1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
         let samples1 = demuxer
             .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
         let sample1 =
@@ -1378,7 +1368,7 @@ mod tests {
             .clone()
             .expect("初回 IDR に sample_entry が載っていること");
 
-        let pes2 = assemble_annexb(&[&P_FRAME]);
+        let pes2 = P_FRAME.to_vec();
         let samples2 = demuxer
             .build_video_sample(make_h264_pending_pes(pes2, 103_000), Some(StreamType::H264))?;
         let sample2 = samples2.expect("確定後の P フレームが流れること");
@@ -1393,7 +1383,7 @@ mod tests {
             "確定後の P フレームの sample_entry が初回 IDR と等価であること"
         );
 
-        let pes3 = assemble_annexb(&[&P_FRAME]);
+        let pes3 = P_FRAME.to_vec();
         let samples3 = demuxer
             .build_video_sample(make_h264_pending_pes(pes3, 106_000), Some(StreamType::H264))?;
         let sample3 = samples3.expect("2 つ目の P フレームも流れること");
@@ -1418,7 +1408,7 @@ mod tests {
         let mut demuxer = SrtTsDemuxer::new()?;
 
         // IDR を先頭に置き、その後ろに SPS と PPS を並べる。
-        let pes = assemble_annexb(&[&IDR, &SPS_A, &PPS]);
+        let pes = [&IDR[..], &SPS_INITIAL, &PPS].concat();
         let samples = demuxer
             .build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264))?;
         let sample = samples.expect("IDR 後置 SPS / PPS でも sample_entry が確定して流れること");
@@ -1441,7 +1431,7 @@ mod tests {
         let mut demuxer = SrtTsDemuxer::new()?;
 
         // SPS / PPS を含まない IDR のみの PES。確定前なので破棄される。
-        let pes1 = assemble_annexb(&[&IDR]);
+        let pes1 = IDR.to_vec();
         let samples1 = demuxer
             .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
         assert!(
@@ -1450,7 +1440,7 @@ mod tests {
         );
 
         // SPS + PPS + IDR で確定させる。
-        let pes2 = assemble_annexb(&[&SPS_A, &PPS, &IDR]);
+        let pes2 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
         let samples2 = demuxer
             .build_video_sample(make_h264_pending_pes(pes2, 103_000), Some(StreamType::H264))?;
         let sample2 = samples2.expect("SPS / PPS 含有 IDR で確定して流れること");
@@ -1463,7 +1453,7 @@ mod tests {
         );
 
         // 後続の P フレームに sample_entry が載ることまで確認する。
-        let pes3 = assemble_annexb(&[&P_FRAME]);
+        let pes3 = P_FRAME.to_vec();
         let samples3 = demuxer
             .build_video_sample(make_h264_pending_pes(pes3, 106_000), Some(StreamType::H264))?;
         let sample3 = samples3.expect("確定後の P フレームが流れること");
@@ -1484,7 +1474,7 @@ mod tests {
     fn srt_h264_drops_idr_with_only_sps_before_first_sample_entry() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        let pes = assemble_annexb(&[&SPS_A, &IDR]);
+        let pes = [&SPS_INITIAL[..], &IDR].concat();
         let samples = demuxer
             .build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264))?;
         assert!(
@@ -1501,7 +1491,7 @@ mod tests {
     fn srt_h264_drops_idr_with_only_pps_before_first_sample_entry() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        let pes = assemble_annexb(&[&PPS, &IDR]);
+        let pes = [&PPS[..], &IDR].concat();
         let samples = demuxer
             .build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264))?;
         assert!(
@@ -1513,16 +1503,16 @@ mod tests {
     }
 
     // mid-stream で SPS / PPS が含有 IDR と一緒に更新された場合の挙動を検証する。
-    // 確定後に SPS_B + PPS + IDR を投入すると `last_video_sample_entry` が新値に上書きされ、
+    // 確定後に SPS_UPDATED + PPS + IDR を投入すると `last_video_sample_entry` が新値に上書きされ、
     // 新 IDR 自身に新 entry が載って下流に流れる。
     #[test]
     fn srt_h264_updates_sample_entry_on_mid_stream_sps_change() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        let pes1 = assemble_annexb(&[&SPS_A, &PPS, &IDR]);
+        let pes1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
         let samples1 = demuxer
             .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
-        let sample1 = samples1.expect("SPS_A 含有 IDR で初期確定して流れること");
+        let sample1 = samples1.expect("SPS_INITIAL 含有 IDR で初期確定して流れること");
         let TsSample::Video(frame1) = sample1 else {
             panic!("映像サンプルとして取り出せること");
         };
@@ -1531,10 +1521,10 @@ mod tests {
             .clone()
             .expect("初期確定 IDR に sample_entry が載っていること");
 
-        let pes2 = assemble_annexb(&[&SPS_B, &PPS, &IDR]);
+        let pes2 = [&SPS_UPDATED[..], &PPS, &IDR].concat();
         let samples2 = demuxer
             .build_video_sample(make_h264_pending_pes(pes2, 103_000), Some(StreamType::H264))?;
-        let sample2 = samples2.expect("SPS_B 含有 IDR で新値に更新されて流れること");
+        let sample2 = samples2.expect("SPS_UPDATED 含有 IDR で新値に更新されて流れること");
         let TsSample::Video(frame2) = sample2 else {
             panic!("映像サンプルとして取り出せること");
         };
@@ -1556,7 +1546,7 @@ mod tests {
     {
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        let pes1 = assemble_annexb(&[&SPS_A, &PPS, &IDR]);
+        let pes1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
         let samples1 = demuxer
             .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
         let sample1 = samples1.expect("SPS / PPS 含有 IDR で確定して流れること");
@@ -1569,7 +1559,7 @@ mod tests {
             .expect("確定 IDR に sample_entry が載っていること");
 
         // 確定後の SPS / PPS 不在 IDR は破棄せず旧 entry を載せて流す。
-        let pes2 = assemble_annexb(&[&IDR]);
+        let pes2 = IDR.to_vec();
         let samples2 = demuxer
             .build_video_sample(make_h264_pending_pes(pes2, 103_000), Some(StreamType::H264))?;
         let sample2 = samples2.expect("確定後の不在 IDR は旧 entry を載せて下流に流れること");
@@ -1594,7 +1584,7 @@ mod tests {
         let mut demuxer = SrtTsDemuxer::new()?;
 
         for (idx, pts) in [100_000_u64, 103_000, 106_000].iter().enumerate() {
-            let pes = assemble_annexb(&[&IDR]);
+            let pes = IDR.to_vec();
             let samples = demuxer
                 .build_video_sample(make_h264_pending_pes(pes, *pts), Some(StreamType::H264))?;
             assert!(
