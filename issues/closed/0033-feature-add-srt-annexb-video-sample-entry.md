@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-10
-- Completed:
+- Completed: 2026-06-15
 - Model: Claude Opus 4.7
 - Branch: feature/add-srt-annexb-video-sample-entry
 - Polished: 2026-06-15
@@ -183,3 +183,56 @@ PBT は本 issue では追加しない。`SrtTsDemuxer::build_video_sample` の�
 - issue 0017（音声側の `SharedSampleEntry` 共通型導入。間接的な前提。closed）
 - issue 0031（WebM リーダーへの sample_entry 構築追加。本 issue の兄弟）
 - issue 0032（RTSP の Annex-B 映像 sample_entry 構築。本 issue と並行・独立で進める。`src/video.rs` の不変条件コメント編集はマージ順序により互いに影響する）
+
+## 解決方法
+
+### SrtTsDemuxer への sample_entry 保持フィールド追加とゲート単一化
+
+- `SrtTsDemuxer` に `last_video_sample_entry: Option<SharedSampleEntry>` を追加し、コンストラクタで `None` 初期化した。
+- 既存の `received_video_keyframe` フィールド・初期化・参照を削除し、`last_video_sample_entry.is_some()` を唯一のゲートにした。AAC 側 `last_aac_sample_entry` の同期更新パターンと整合させた。
+
+### build_video_sample の SPS / PPS 抽出フロー
+
+- `H264AnnexBNalUnits` での走査から IDR 検出時の `break` を取り除き、`has_idr: bool` のみを判定する形に整理した。SPS / PPS の有無判定は `h264_sample_entry_from_annexb` の Ok / Err に委ねる。
+- IDR PES 全体を `h264_sample_entry_from_annexb(0, 0, &pending.data)` に渡し、`Ok(entry)` なら `last_video_sample_entry` を新値で上書き、`Err(_)` なら確定前のみ `tracing::warn!` を出す（確定後は旧 entry を維持して通常パスで流す）。
+- 確定前の全フレームはゲートで `Ok(None)` を返して破棄。`TsSample::Video` 構築箇所では `sample_entry: self.last_video_sample_entry.clone()` を載せる。
+
+### 不変条件 docstring の更新
+
+- `src/video.rs` の `VideoFrame.sample_entry` docstring から「srt の Annex-B 映像」相当の経路例外記述を削除した。
+- 既存負債清算として、`src/video.rs` / `src/audio.rs` の不変条件 docstring に残っていた `issue 0031` / `issue 0032` 等の issue 番号参照を削除し、経路名のみの記述に整理した。
+
+### テスト
+
+- 新規単体テストを `src/srt/inbound_endpoint.rs` の `mod tests` に追加した。
+  - 正常系: SPS + PPS + IDR 含有 PES と P フレーム PES を順に投入して全フレームに sample_entry が載ること（`changed_since=false` で等価性も検証）
+  - 異常系: 確定前の SPS / PPS 不在 IDR が破棄されて続く SPS / PPS 含有 IDR で確定する挙動
+  - mid-stream 更新: SPS バイト列の差分で `last_video_sample_entry` が新値に上書きされて新 IDR 自身に載る挙動
+  - 確定後の境界: SPS / PPS 不在 IDR で旧 entry が維持されて下流に流れる挙動
+  - 連続違反耐性: SPS / PPS 不在 IDR を連続投入して `last_video_sample_entry` が `None` のまま維持される挙動
+  - IDR 後置 SPS / PPS: `[IDR, SPS, PPS]` 並びでも sample_entry が確定する挙動（`break` 削除の回帰防止）
+  - 片側不在: SPS のみ / PPS のみを含む IDR がいずれも確定前なら破棄される挙動
+- テストヘルパとフィクスチャ:
+  - `make_pending_pes(stream_id, data, pts_ticks)` を共通ヘルパとして導入し、`make_aac_pending_pes` / `make_h264_pending_pes` をその薄いラッパに整理した。
+  - 映像用フィクスチャ定数 (`SPS_INITIAL` / `SPS_UPDATED` / `PPS` / `IDR` / `P_FRAME`) を `mod tests` 直下に置き、`H264AnnexBNalUnits` の検査仕様（forbidden_zero_bit のみ）を満たすバイト列とした。
+  - PES 連結はテスト側で `[..].concat()` / `.to_vec()` を直接使う形に整理し、`assemble_annexb` の薄いラッパは削除した。
+
+### レビュー指摘の反映
+
+`/review-diff-code` で挙がった指摘を順次対応した。
+
+- テストコメントから「設計方針 3 (3)」「設計方針 4」の節番号参照を削除し、動作仕様で説明する形に書き換えた。
+- `build_video_sample` の NAL 走査コメントを実態に合わせ、`h264_sample_entry_from_annexb` の内部仕様を呼び出し側で重複説明していた部分を簡素化した。
+- `tracing::warn!` の挿入位置で参照する `timestamp` 変数の計算を `h264_sample_entry_from_annexb` 呼び出しの前に確定させた。
+- 0034 の writer 入口違反検知ログとフォーマットを揃え、`frame_format` / `timestamp_us` キー基底に SRT 経路固有の `reason` キーを追加した。
+
+### スコープ外として後続に委ねた項目
+
+- **`build_video_sample` の責務分離**: 70 行強の関数を `refresh_h264_sample_entry` と `assemble_video_frame` に分離する案があったが、issue 0032 (RTSP Annex-B) 未着手の現時点では共通化の正解形が見えず、YAGNI 違反のリスクが高いため据え置いた。0032 着手時に重複が現実化したタイミングで抽出を検討する。
+- **`timestamp.as_micros() as u64` の `try_from` 化**: silent truncation の懸念があるが、リポジトリ内で同パターンが 22 箇所で慣用的に使われており、SRT 経路だけ修正すると整合性が崩れる。一括リファクタは別 issue で扱う。
+- **AAC と H.264 の確定キー保持パターン非対称**: AAC は `(config_key, sample_entry)` の差分検出、H.264 は無条件上書き。writer 入口 muxer 側で `SampleEntry::PartialEq` の重複判定が走るため重複登録は起きず、現状の設計判断を容認した。
+- **warn 出力検証テスト**: `tracing-test` 等の新規依存追加が必要なため別 issue で検討する。
+
+### CHANGES.md
+
+記載なし（内部リファクタ・公開 API 変化なし・利用者挙動変化なし）。0017 / 0027 / 0030 と同方針。obsws 配線では subscriber 出力は必ず `VideoDecoder` を経由するため、利用者から見える挙動は変わらない。
