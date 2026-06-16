@@ -470,7 +470,6 @@ impl ObswsCoordinator {
                 f.member(
                     "streamServiceSettings",
                     nojson::object(|f| {
-                        f.member("bwtest", false)?;
                         if let Some(server) = &settings.server {
                             f.member("server", server)?;
                         }
