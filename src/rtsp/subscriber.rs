@@ -36,7 +36,7 @@ pub struct RtspSubscriber {
 impl nojson::DisplayJson for RtspSubscriber {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("inputUrl", &self.input_url)?;
+            f.member("input_url", &self.input_url)?;
             if let Some(track_id) = &self.output_video_track_id {
                 f.member("outputVideoTrackId", track_id)?;
             }
@@ -54,11 +54,11 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtspSubscriber 
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
-        let input_url: String = value.to_member("inputUrl")?.required()?.try_into()?;
+        let input_url: String = value.to_member("input_url")?.required()?.try_into()?;
         // TryFrom では nojson のエラー位置情報を維持したまま invalid(...) を返すため、
         // ここでは URL の妥当性チェックだけ行う。
         if let Err(e) = validate_input_url(&input_url) {
-            return Err(value.to_member("inputUrl")?.required()?.invalid(e));
+            return Err(value.to_member("input_url")?.required()?.invalid(e));
         }
 
         let output_video_track_id: Option<TrackId> =
@@ -80,7 +80,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtspSubscriber 
 impl RtspSubscriber {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         let parsed_url = parse_rtsp_input_url(&self.input_url)
-            .map_err(|e| Error::new(format!("invalid inputUrl: {e}")))?;
+            .map_err(|e| Error::new(format!("invalid input_url: {e}")))?;
         let want_audio = self.output_audio_track_id.is_some();
         let want_video = self.output_video_track_id.is_some();
 
@@ -804,7 +804,7 @@ impl RtspSessionRunner {
                 RtspAuthorization::Digest(challenge) => {
                     let credentials = self.parsed_url.credentials.as_ref().ok_or_else(|| {
                         SessionError::Fatal(Error::new(
-                            "Digest auth requires credentials in inputUrl",
+                            "Digest auth requires credentials in input_url",
                         ))
                     })?;
                     let value = shiguredo_rtsp::auth::build_authorization(
@@ -1146,20 +1146,20 @@ fn parse_rtsp_input_url(input_url: &str) -> Result<ParsedRtspUrl, String> {
     let uri = Uri::parse(input_url).map_err(|e| format!("failed to parse URL: {e}"))?;
     let scheme = uri
         .scheme()
-        .ok_or_else(|| "inputUrl must contain URL scheme".to_owned())?;
+        .ok_or_else(|| "input_url must contain URL scheme".to_owned())?;
     let tls = match scheme {
         "rtsp" => false,
         "rtsps" => true,
-        _ => return Err("inputUrl scheme must be rtsp or rtsps".to_owned()),
+        _ => return Err("input_url scheme must be rtsp or rtsps".to_owned()),
     };
     let host = uri
         .host()
-        .ok_or_else(|| "inputUrl must contain host".to_owned())?
+        .ok_or_else(|| "input_url must contain host".to_owned())?
         .to_owned();
     let port = uri.port().unwrap_or(DEFAULT_RTSP_PORT);
     let authority = uri
         .authority()
-        .ok_or_else(|| "inputUrl must contain authority".to_owned())?;
+        .ok_or_else(|| "input_url must contain authority".to_owned())?;
     let (credentials, authority_without_userinfo) = parse_authority(authority)?;
 
     let mut path_and_query = uri.path().to_owned();
@@ -1188,7 +1188,7 @@ fn parse_authority(authority: &str) -> Result<(Option<RtspCredentials>, String),
         return Ok((None, authority.to_owned()));
     };
     if userinfo.is_empty() {
-        return Err("inputUrl must not contain empty username".to_owned());
+        return Err("input_url must not contain empty username".to_owned());
     }
 
     let (username, password) = match userinfo.split_once(':') {
@@ -1196,7 +1196,7 @@ fn parse_authority(authority: &str) -> Result<(Option<RtspCredentials>, String),
         None => (userinfo, ""),
     };
     if username.is_empty() {
-        return Err("inputUrl username must not be empty".to_owned());
+        return Err("input_url username must not be empty".to_owned());
     }
 
     Ok((
@@ -1501,7 +1501,7 @@ mod tests {
     #[test]
     fn parse_rtsp_input_url_rejects_scheme() {
         let err = parse_rtsp_input_url("http://example.com/live").expect_err("must reject");
-        assert_eq!(err, "inputUrl scheme must be rtsp or rtsps");
+        assert_eq!(err, "input_url scheme must be rtsp or rtsps");
     }
 
     #[test]

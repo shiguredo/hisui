@@ -200,7 +200,7 @@ impl ObswsInputSettings {
             }
             "audio_capture_device" => {
                 let device_id = parse_optional_string_setting(input_settings, "device_id")?;
-                let sample_rate = parse_optional_i32_setting(input_settings, "sampleRate")?;
+                let sample_rate = parse_optional_i32_setting(input_settings, "sample_rate")?;
                 let channels = parse_optional_i32_setting(input_settings, "channels")?;
                 Ok(Self::AudioCaptureDevice(ObswsAudioCaptureDeviceSettings {
                     device_id,
@@ -210,23 +210,23 @@ impl ObswsInputSettings {
             }
             "mp4_file_source" => {
                 let path = parse_optional_string_setting(input_settings, "path")?;
-                let loop_playback = parse_optional_bool_setting(input_settings, "loopPlayback")?;
+                let loop_playback = parse_optional_bool_setting(input_settings, "loop_playback")?;
                 Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings {
                     path,
                     loop_playback: loop_playback.unwrap_or(true),
                 }))
             }
             "rtmp_inbound" => {
-                let input_url = parse_optional_string_setting(input_settings, "inputUrl")?;
-                let stream_name = parse_optional_string_setting(input_settings, "streamName")?;
+                let input_url = parse_optional_string_setting(input_settings, "input_url")?;
+                let stream_name = parse_optional_string_setting(input_settings, "stream_name")?;
                 Ok(Self::RtmpInbound(ObswsRtmpInboundSettings {
                     input_url,
                     stream_name,
                 }))
             }
             "srt_inbound" => {
-                let input_url = parse_optional_string_setting(input_settings, "inputUrl")?;
-                let stream_id = parse_optional_string_setting(input_settings, "streamId")?;
+                let input_url = parse_optional_string_setting(input_settings, "input_url")?;
+                let stream_id = parse_optional_string_setting(input_settings, "stream_id")?;
                 let passphrase = parse_optional_string_setting(input_settings, "passphrase")?;
                 Ok(Self::SrtInbound(ObswsSrtInboundSettings {
                     input_url,
@@ -235,7 +235,7 @@ impl ObswsInputSettings {
                 }))
             }
             "rtsp_subscriber" => {
-                let input_url = parse_optional_string_setting(input_settings, "inputUrl")?;
+                let input_url = parse_optional_string_setting(input_settings, "input_url")?;
                 Ok(Self::RtspSubscriber(ObswsRtspSubscriberSettings {
                     input_url,
                 }))
@@ -243,9 +243,9 @@ impl ObswsInputSettings {
             "webrtc_source" => {
                 // trackId は Attach/Detach で制御するため、CreateInput 時は無視する
                 let background_key_color =
-                    parse_optional_string_setting(input_settings, "backgroundKeyColor")?;
+                    parse_optional_string_setting(input_settings, "background_key_color")?;
                 let background_key_tolerance =
-                    parse_optional_i32_setting(input_settings, "backgroundKeyTolerance")?;
+                    parse_optional_i32_setting(input_settings, "background_key_tolerance")?;
                 validate_background_key_tolerance(background_key_tolerance)?;
                 Ok(Self::WebRtcSource(ObswsWebRtcSourceSettings {
                     track_id: None,
@@ -340,8 +340,11 @@ impl ObswsInputSettings {
             Self::AudioCaptureDevice(existing) => {
                 let device_id =
                     parse_overlay_string_setting(input_settings, "device_id", &existing.device_id)?;
-                let sample_rate =
-                    parse_overlay_i32_setting(input_settings, "sampleRate", &existing.sample_rate)?;
+                let sample_rate = parse_overlay_i32_setting(
+                    input_settings,
+                    "sample_rate",
+                    &existing.sample_rate,
+                )?;
                 let channels =
                     parse_overlay_i32_setting(input_settings, "channels", &existing.channels)?;
                 Ok(Self::AudioCaptureDevice(ObswsAudioCaptureDeviceSettings {
@@ -354,7 +357,7 @@ impl ObswsInputSettings {
                 let path = parse_overlay_string_setting(input_settings, "path", &existing.path)?;
                 let loop_playback = parse_overlay_bool_setting(
                     input_settings,
-                    "loopPlayback",
+                    "loop_playback",
                     existing.loop_playback,
                 )?;
                 Ok(Self::Mp4FileSource(ObswsMp4FileSourceSettings {
@@ -364,10 +367,10 @@ impl ObswsInputSettings {
             }
             Self::RtmpInbound(existing) => {
                 let input_url =
-                    parse_overlay_string_setting(input_settings, "inputUrl", &existing.input_url)?;
+                    parse_overlay_string_setting(input_settings, "input_url", &existing.input_url)?;
                 let stream_name = parse_overlay_string_setting(
                     input_settings,
-                    "streamName",
+                    "stream_name",
                     &existing.stream_name,
                 )?;
                 Ok(Self::RtmpInbound(ObswsRtmpInboundSettings {
@@ -377,9 +380,9 @@ impl ObswsInputSettings {
             }
             Self::SrtInbound(existing) => {
                 let input_url =
-                    parse_overlay_string_setting(input_settings, "inputUrl", &existing.input_url)?;
+                    parse_overlay_string_setting(input_settings, "input_url", &existing.input_url)?;
                 let stream_id =
-                    parse_overlay_string_setting(input_settings, "streamId", &existing.stream_id)?;
+                    parse_overlay_string_setting(input_settings, "stream_id", &existing.stream_id)?;
                 let passphrase = parse_overlay_string_setting(
                     input_settings,
                     "passphrase",
@@ -393,7 +396,7 @@ impl ObswsInputSettings {
             }
             Self::RtspSubscriber(existing) => {
                 let input_url =
-                    parse_overlay_string_setting(input_settings, "inputUrl", &existing.input_url)?;
+                    parse_overlay_string_setting(input_settings, "input_url", &existing.input_url)?;
                 Ok(Self::RtspSubscriber(ObswsRtspSubscriberSettings {
                     input_url,
                 }))
@@ -402,12 +405,12 @@ impl ObswsInputSettings {
                 // trackId は Attach/Detach で制御するため overlay 対象外
                 let background_key_color = parse_overlay_string_setting(
                     input_settings,
-                    "backgroundKeyColor",
+                    "background_key_color",
                     &existing.background_key_color,
                 )?;
                 let background_key_tolerance = parse_overlay_i32_setting(
                     input_settings,
-                    "backgroundKeyTolerance",
+                    "background_key_tolerance",
                     &existing.background_key_tolerance,
                 )?;
                 validate_background_key_tolerance(background_key_tolerance)?;
@@ -1021,7 +1024,7 @@ impl nojson::DisplayJson for ObswsAudioCaptureDeviceSettings {
                 f.member("device_id", device_id)?;
             }
             if let Some(sample_rate) = self.sample_rate {
-                f.member("sampleRate", i64::from(sample_rate))?;
+                f.member("sample_rate", i64::from(sample_rate))?;
             }
             if let Some(channels) = self.channels {
                 f.member("channels", i64::from(channels))?;
@@ -1055,7 +1058,7 @@ impl nojson::DisplayJson for ObswsMp4FileSourceSettings {
             if let Some(path) = &self.path {
                 f.member("path", path)?;
             }
-            f.member("loopPlayback", self.loop_playback)
+            f.member("loop_playback", self.loop_playback)
         })
         .fmt(f)
     }
@@ -1072,10 +1075,10 @@ impl nojson::DisplayJson for ObswsRtmpInboundSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if let Some(input_url) = &self.input_url {
-                f.member("inputUrl", input_url)?;
+                f.member("input_url", input_url)?;
             }
             if let Some(stream_name) = &self.stream_name {
-                f.member("streamName", stream_name)?;
+                f.member("stream_name", stream_name)?;
             }
             Ok(())
         })
@@ -1095,10 +1098,10 @@ impl nojson::DisplayJson for ObswsSrtInboundSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if let Some(input_url) = &self.input_url {
-                f.member("inputUrl", input_url)?;
+                f.member("input_url", input_url)?;
             }
             if let Some(stream_id) = &self.stream_id {
-                f.member("streamId", stream_id)?;
+                f.member("stream_id", stream_id)?;
             }
             // passphrase はセキュリティ上の理由で GetInputSettings に含めない
             Ok(())
@@ -1117,7 +1120,7 @@ impl nojson::DisplayJson for ObswsRtspSubscriberSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if let Some(input_url) = &self.input_url {
-                f.member("inputUrl", input_url)?;
+                f.member("input_url", input_url)?;
             }
             Ok(())
         })
@@ -1139,14 +1142,14 @@ impl nojson::DisplayJson for ObswsWebRtcSourceSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if let Some(track_id) = &self.track_id {
-                f.member("trackId", track_id)?;
+                f.member("track_id", track_id)?;
             }
             if let Some(background_key_color) = &self.background_key_color {
-                f.member("backgroundKeyColor", background_key_color)?;
+                f.member("background_key_color", background_key_color)?;
             }
             if let Some(background_key_tolerance) = self.background_key_tolerance {
                 f.member(
-                    "backgroundKeyTolerance",
+                    "background_key_tolerance",
                     i64::from(background_key_tolerance),
                 )?;
             }
@@ -1167,10 +1170,10 @@ impl nojson::DisplayJson for ObswsSoraSourceInputSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if let Some(video_track_id) = &self.video_track_id {
-                f.member("videoTrackId", video_track_id)?;
+                f.member("video_track_id", video_track_id)?;
             }
             if let Some(audio_track_id) = &self.audio_track_id {
-                f.member("audioTrackId", audio_track_id)?;
+                f.member("audio_track_id", audio_track_id)?;
             }
             Ok(())
         })
@@ -1192,16 +1195,16 @@ impl nojson::DisplayJson for ObswsSoraSubscriberSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
             if !self.signaling_urls.is_empty() {
-                f.member("signalingUrls", &self.signaling_urls)?;
+                f.member("signaling_urls", &self.signaling_urls)?;
             }
             if let Some(channel_id) = &self.channel_id {
-                f.member("channelId", channel_id)?;
+                f.member("channel_id", channel_id)?;
             }
             if let Some(client_id) = &self.client_id {
-                f.member("clientId", client_id)?;
+                f.member("client_id", client_id)?;
             }
             if let Some(bundle_id) = &self.bundle_id {
-                f.member("bundleId", bundle_id)?;
+                f.member("bundle_id", bundle_id)?;
             }
             if let Some(metadata) = &self.metadata {
                 f.member("metadata", metadata)?;

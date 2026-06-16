@@ -50,8 +50,8 @@ impl Default for DashVariant {
 impl nojson::DisplayJson for DashVariant {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
-            f.member("videoBitrate", self.video_bitrate_bps)?;
-            f.member("audioBitrate", self.audio_bitrate_bps)?;
+            f.member("video_bitrate", self.video_bitrate_bps)?;
+            f.member("audio_bitrate", self.audio_bitrate_bps)?;
             if let Some(width) = self.width {
                 f.member("width", width.get())?;
             }
@@ -113,9 +113,9 @@ impl nojson::DisplayJson for DashDestination {
                 if let Some(endpoint) = endpoint {
                     f.member("endpoint", endpoint)?;
                 }
-                f.member("usePathStyle", *use_path_style)?;
+                f.member("use_path_style", *use_path_style)?;
                 if let Some(days) = lifetime_days {
-                    f.member("lifetimeDays", *days)?;
+                    f.member("lifetime_days", *days)?;
                 }
                 Ok(())
             })
@@ -151,20 +151,20 @@ impl DashDestination {
                 if let Some(endpoint) = endpoint {
                     f.member("endpoint", endpoint)?;
                 }
-                f.member("usePathStyle", *use_path_style)?;
+                f.member("use_path_style", *use_path_style)?;
                 f.member(
                     "credentials",
                     nojson::object(|f| {
-                        f.member("accessKeyId", access_key_id)?;
-                        f.member("secretAccessKey", secret_access_key)?;
+                        f.member("access_key_id", access_key_id)?;
+                        f.member("secret_access_key", secret_access_key)?;
                         if let Some(token) = session_token {
-                            f.member("sessionToken", token)?;
+                            f.member("session_token", token)?;
                         }
                         Ok(())
                     }),
                 )?;
                 if let Some(days) = lifetime_days {
-                    f.member("lifetimeDays", *days)?;
+                    f.member("lifetime_days", *days)?;
                 }
                 Ok(())
             })
@@ -243,8 +243,8 @@ impl nojson::DisplayJson for ObswsDashSettings {
             if let Some(destination) = &self.destination {
                 f.member("destination", destination)?;
             }
-            f.member("segmentDuration", self.segment_duration)?;
-            f.member("maxRetainedSegments", self.max_retained_segments)?;
+            f.member("segment_duration", self.segment_duration)?;
+            f.member("max_retained_segments", self.max_retained_segments)?;
             f.member(
                 "variants",
                 nojson::array(|f| {
@@ -254,8 +254,8 @@ impl nojson::DisplayJson for ObswsDashSettings {
                     Ok(())
                 }),
             )?;
-            f.member("videoCodec", self.video_codec)?;
-            f.member("audioCodec", self.audio_codec)
+            f.member("video_codec", self.video_codec)?;
+            f.member("audio_codec", self.audio_codec)
         })
         .fmt(f)
     }
@@ -363,7 +363,7 @@ fn parse_dash_settings_inner(
     };
 
     let segment_duration: Option<f64> = output_settings
-        .to_member("segmentDuration")
+        .to_member("segment_duration")
         .map_err(|e| e.to_string())?
         .optional()
         .map(|v| v.try_into())
@@ -371,7 +371,7 @@ fn parse_dash_settings_inner(
         .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
     let max_retained_segments: Option<usize> = output_settings
-        .to_member("maxRetainedSegments")
+        .to_member("max_retained_segments")
         .map_err(|e| e.to_string())?
         .optional()
         .map(|v| v.try_into())
@@ -387,14 +387,14 @@ fn parse_dash_settings_inner(
         let mut variants = Vec::new();
         for item in variants_value.to_array().map_err(|e| e.to_string())? {
             let video_bitrate: usize = item
-                .to_member("videoBitrate")
+                .to_member("video_bitrate")
                 .map_err(|e| e.to_string())?
                 .required()
                 .map_err(|_| "variants[].videoBitrate is required".to_owned())?
                 .try_into()
                 .map_err(|e: nojson::JsonParseError| e.to_string())?;
             let audio_bitrate: usize = item
-                .to_member("audioBitrate")
+                .to_member("audio_bitrate")
                 .map_err(|e| e.to_string())?
                 .required()
                 .map_err(|_| "variants[].audioBitrate is required".to_owned())?
@@ -460,7 +460,7 @@ fn parse_dash_settings_inner(
 
     // ビデオコーデックのパース
     let video_codec: Option<crate::types::CodecName> = output_settings
-        .to_member("videoCodec")
+        .to_member("video_codec")
         .map_err(|e| e.to_string())?
         .optional()
         .map(|v| -> Result<crate::types::CodecName, String> {
@@ -473,7 +473,7 @@ fn parse_dash_settings_inner(
 
     // オーディオコーデックのパース
     let audio_codec: Option<crate::types::CodecName> = output_settings
-        .to_member("audioCodec")
+        .to_member("audio_codec")
         .map_err(|e| e.to_string())?
         .optional()
         .map(|v| -> Result<crate::types::CodecName, String> {

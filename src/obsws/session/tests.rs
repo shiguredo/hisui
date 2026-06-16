@@ -1622,7 +1622,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
         nojson::RawJsonOwned::parse(
-            r#"{"path":"testdata/beep-aac-audio.mp4","loopPlayback":true}"#,
+            r#"{"path":"testdata/beep-aac-audio.mp4","loop_playback":true}"#,
         )
         .expect("requestData must be valid json")
         .value(),
@@ -1704,7 +1704,7 @@ async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() ->
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
         nojson::RawJsonOwned::parse(
-            r#"{"path":"testdata/beep-aac-audio.mp4","loopPlayback":true}"#,
+            r#"{"path":"testdata/beep-aac-audio.mp4","loop_playback":true}"#,
         )
         .expect("requestData must be valid json")
         .value(),
@@ -1777,7 +1777,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         let input = ObswsInput::from_kind_and_settings(
             "mp4_file_source",
             nojson::RawJsonOwned::parse(
-                r#"{"path":"testdata/beep-aac-audio.mp4","loopPlayback":true}"#,
+                r#"{"path":"testdata/beep-aac-audio.mp4","loop_playback":true}"#,
             )
             .expect("requestData must be valid json")
             .value(),
@@ -2023,7 +2023,7 @@ async fn start_stream_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         let input = ObswsInput::from_kind_and_settings(
             "mp4_file_source",
             nojson::RawJsonOwned::parse(
-                r#"{"path":"testdata/beep-aac-audio.mp4","loopPlayback":true}"#,
+                r#"{"path":"testdata/beep-aac-audio.mp4","loop_playback":true}"#,
             )
             .expect("requestData must be valid json")
             .value(),
@@ -2112,7 +2112,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
         nojson::RawJsonOwned::parse(
-            r#"{"path":"testdata/red-320x320-h264-aac.mp4","loopPlayback":true}"#,
+            r#"{"path":"testdata/red-320x320-h264-aac.mp4","loop_playback":true}"#,
         )
         .expect("requestData must be valid json")
         .value(),
@@ -2143,7 +2143,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
             request_type: Some("SetOutputSettings".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(format!(
-                    r#"{{"outputName":"hls","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"variants":[{{"videoBitrate":2000000,"audioBitrate":128000}},{{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}}]}}}}"#,
+                    r#"{{"outputName":"hls","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"variants":[{{"video_bitrate":2000000,"audio_bitrate":128000}},{{"video_bitrate":1000000,"audio_bitrate":64000,"width":1280,"height":720}}]}}}}"#,
                     hls_output_dir.display()
                 ))
                 .expect("requestData must be valid json"),
@@ -2244,7 +2244,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
         nojson::RawJsonOwned::parse(
-            r#"{"path":"testdata/red-320x320-h264-aac.mp4","loopPlayback":true}"#,
+            r#"{"path":"testdata/red-320x320-h264-aac.mp4","loop_playback":true}"#,
         )
         .expect("requestData must be valid json")
         .value(),
@@ -2277,7 +2277,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
             request_type: Some("SetOutputSettings".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(format!(
-                    r#"{{"outputName":"mpeg_dash","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"videoCodec":"VP9","audioCodec":"OPUS","variants":[{{"videoBitrate":2000000,"audioBitrate":128000}},{{"videoBitrate":1000000,"audioBitrate":64000,"width":1280,"height":720}}]}}}}"#,
+                    r#"{{"outputName":"mpeg_dash","outputSettings":{{"destination":{{"type":"filesystem","directory":"{}"}},"video_codec":"VP9","audio_codec":"OPUS","variants":[{{"video_bitrate":2000000,"audio_bitrate":128000}},{{"video_bitrate":1000000,"audio_bitrate":64000,"width":1280,"height":720}}]}}}}"#,
                     dash_output_dir.display()
                 ))
                 .expect("requestData must be valid json"),
@@ -3116,7 +3116,7 @@ async fn hisui_create_output_sora_reads_sora_sdk_settings() {
             request_type: Some("HisuiCreateOutput".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(
-                    r#"{"outputName":"my_sora","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"],"channelId":"test-ch"}}}"#,
+                    r#"{"outputName":"my_sora","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signaling_urls":["wss://example.com/signaling"],"channel_id":"test-ch"}}}"#,
                 )
                 .expect("requestData must be valid json"),
             ),
@@ -3147,7 +3147,7 @@ async fn hisui_create_output_sora_reads_sora_sdk_settings() {
         .required()
         .expect("outputSettings must be present");
     let urls = settings
-        .to_path_member(&["soraSdkSettings", "signalingUrls"])
+        .to_path_member(&["soraSdkSettings", "signaling_urls"])
         .expect("signalingUrls access must succeed")
         .required()
         .expect("signalingUrls must be present");
@@ -3158,7 +3158,7 @@ async fn hisui_create_output_sora_reads_sora_sdk_settings() {
         .collect();
     assert_eq!(url_list, vec!["wss://example.com/signaling"]);
     let channel_id: String = settings
-        .to_path_member(&["soraSdkSettings", "channelId"])
+        .to_path_member(&["soraSdkSettings", "channel_id"])
         .expect("channelId access must succeed")
         .required()
         .expect("channelId must be present")
@@ -3270,7 +3270,7 @@ async fn hisui_create_output_hls_reads_destination_and_variants() {
             request_type: Some("HisuiCreateOutput".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(
-                    r#"{"outputName":"my_hls","outputKind":"hls_output","outputSettings":{"destination":{"type":"filesystem","directory":"/tmp/hls-test"},"variants":[{"videoBitrate":2000000,"audioBitrate":128000}],"segmentDuration":4.0}}"#,
+                    r#"{"outputName":"my_hls","outputKind":"hls_output","outputSettings":{"destination":{"type":"filesystem","directory":"/tmp/hls-test"},"variants":[{"video_bitrate":2000000,"audio_bitrate":128000}],"segment_duration":4.0}}"#,
                 )
                 .expect("requestData must be valid json"),
             ),
@@ -3311,7 +3311,7 @@ async fn hisui_create_output_hls_reads_destination_and_variants() {
     assert_eq!(dest_type, "filesystem");
     // segmentDuration が反映されていることを確認
     let segment_duration: f64 = settings
-        .to_member("segmentDuration")
+        .to_member("segment_duration")
         .expect("segmentDuration access must succeed")
         .required()
         .expect("segmentDuration must be present")
@@ -3330,7 +3330,7 @@ async fn hisui_create_output_hls_reads_destination_and_variants() {
         .collect();
     assert_eq!(variants_arr.len(), 1);
     let video_bitrate: i64 = variants_arr[0]
-        .to_member("videoBitrate")
+        .to_member("video_bitrate")
         .expect("videoBitrate access must succeed")
         .required()
         .expect("videoBitrate must be present")
@@ -3354,7 +3354,7 @@ async fn hisui_create_output_sora_with_metadata_preserves_it() {
             request_type: Some("HisuiCreateOutput".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(
-                    r#"{"outputName":"sora_meta","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"],"channelId":"ch","metadata":{"key":"value"}}}}"#,
+                    r#"{"outputName":"sora_meta","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signaling_urls":["wss://example.com/signaling"],"channel_id":"ch","metadata":{"key":"value"}}}}"#,
                 )
                 .expect("requestData must be valid json"),
             ),
@@ -3466,7 +3466,7 @@ async fn set_output_settings_rejects_invalid_signaling_urls_type() {
             request_type: Some("SetOutputSettings".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(
-                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signalingUrls":"not-an-array"}}}"#,
+                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signaling_urls":"not-an-array"}}}"#,
                 )
                 .expect("requestData must be valid json"),
             ),
@@ -3518,7 +3518,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
             request_type: Some("SetOutputSettings".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(
-                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"channelId":"test-ch"}}}"#,
+                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"channel_id":"test-ch"}}}"#,
                 )
                 .expect("requestData must be valid json"),
             ),
@@ -3535,7 +3535,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
             request_type: Some("SetOutputSettings".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(
-                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"channelId":null}}}"#,
+                    r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"channel_id":null}}}"#,
                 )
                 .expect("requestData must be valid json"),
             ),
@@ -3565,7 +3565,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
         .required()
         .expect("soraSdkSettings must be present");
     // channelId が null/未設定なので soraSdkSettings に含まれないはず
-    let channel_id = sdk.to_member("channelId").ok().and_then(|v| v.optional());
+    let channel_id = sdk.to_member("channel_id").ok().and_then(|v| v.optional());
     assert!(channel_id.is_none());
 }
 
@@ -3699,7 +3699,7 @@ async fn hisui_create_output_rejects_invalid_sora_signaling_urls_type() {
             request_type: Some("HisuiCreateOutput".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(
-                    r#"{"outputName":"bad_sora","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signalingUrls":"not-an-array"}}}"#,
+                    r#"{"outputName":"bad_sora","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signaling_urls":"not-an-array"}}}"#,
                 )
                 .expect("requestData must be valid json"),
             ),
@@ -3897,7 +3897,7 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
             request_type: Some("HisuiCreateOutput".to_owned()),
             request_data: Some(
                 nojson::RawJsonOwned::parse(
-                    r#"{"outputName":"hls","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"]}}}"#,
+                    r#"{"outputName":"hls","outputKind":"sora_webrtc_output","outputSettings":{"soraSdkSettings":{"signaling_urls":["wss://example.com/signaling"]}}}"#,
                 )
                 .expect("requestData must be valid json"),
             ),

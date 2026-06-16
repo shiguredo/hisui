@@ -80,7 +80,7 @@ impl RtmpInboundEndpoint {
     /// Start the RTMP Inbound Endpoint
     pub async fn run(self, handle: crate::ProcessorHandle) -> crate::Result<()> {
         let url = parse_rtmp_url(&self.input_url, self.stream_name.as_deref())
-            .map_err(|e| crate::Error::new(format!("invalid inputUrl: {e}")))?;
+            .map_err(|e| crate::Error::new(format!("invalid input_url: {e}")))?;
         let addr = format!("{}:{}", url.host, url.port);
         tracing::debug!("Starting RTMP inbound endpoint on {addr}");
 
@@ -225,9 +225,9 @@ impl RtmpInboundEndpoint {
 impl nojson::DisplayJson for RtmpInboundEndpoint {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("inputUrl", &self.input_url)?;
+            f.member("input_url", &self.input_url)?;
             if let Some(stream_name) = &self.stream_name {
-                f.member("streamName", stream_name)?;
+                f.member("stream_name", stream_name)?;
             }
             if let Some(track_id) = &self.output_audio_track_id {
                 f.member("outputAudioTrackId", track_id)?;
@@ -246,8 +246,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundEndp
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
-        let input_url: String = value.to_member("inputUrl")?.required()?.try_into()?;
-        let stream_name: Option<String> = value.to_member("streamName")?.try_into()?;
+        let input_url: String = value.to_member("input_url")?.required()?.try_into()?;
+        let stream_name: Option<String> = value.to_member("stream_name")?.try_into()?;
         let output_audio_track_id: Option<crate::TrackId> =
             value.to_member("outputAudioTrackId")?.try_into()?;
         let output_video_track_id: Option<crate::TrackId> =
@@ -262,9 +262,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundEndp
                 let trimmed = stream_name.trim();
                 if trimmed.is_empty() {
                     return Err(value
-                        .to_member("streamName")?
+                        .to_member("stream_name")?
                         .required()?
-                        .invalid("streamName must not be empty"));
+                        .invalid("stream_name must not be empty"));
                 }
                 Some(trimmed.to_owned())
             }
@@ -272,7 +272,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundEndp
         };
 
         if let Err(e) = parse_rtmp_url(&input_url, stream_name.as_deref()) {
-            return Err(value.to_member("inputUrl")?.required()?.invalid(e));
+            return Err(value.to_member("input_url")?.required()?.invalid(e));
         }
 
         Ok(Self {

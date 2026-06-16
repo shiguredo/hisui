@@ -1152,7 +1152,7 @@ mod tests {
             .required()?;
         let path: Option<String> = default_input_settings.to_member("path")?.try_into()?;
         let loop_playback: bool = default_input_settings
-            .to_member("loopPlayback")?
+            .to_member("loop_playback")?
             .required()?
             .try_into()?;
         assert_eq!(path, None);
@@ -1828,7 +1828,7 @@ mod tests {
             request_id: Some("req-bad-meta".to_owned()),
             request_type: Some("SetOutputSettings".to_owned()),
             request_data: Some(request_data(
-                r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signalingUrls":["wss://a.example.com"],"channelId":"ch","metadata":"not-an-object"}}}"#,
+                r#"{"outputName":"sora","outputSettings":{"soraSdkSettings":{"signaling_urls":["wss://a.example.com"],"channel_id":"ch","metadata":"not-an-object"}}}"#,
             )),
         };
         let response = handle_request_message(request, &session_stats, &mut state);

@@ -1667,12 +1667,12 @@ fn handle_obsws_input_event(sess: &mut Session, event: &crate::obsws::event::Tag
                     return;
                 };
                 let background_key_color: Option<String> = input_settings
-                    .to_member("backgroundKeyColor")
+                    .to_member("background_key_color")
                     .ok()
                     .and_then(|v| v.optional())
                     .and_then(|v| v.try_into().ok());
                 let background_key_tolerance: Option<i32> = input_settings
-                    .to_member("backgroundKeyTolerance")
+                    .to_member("background_key_tolerance")
                     .ok()
                     .and_then(|v| v.optional())
                     .and_then(|v| v.try_into().ok());
