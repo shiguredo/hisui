@@ -94,7 +94,7 @@ impl std::str::FromStr for HlsSegmentFormat {
             "mpegts" => Ok(Self::MpegTs),
             "fmp4" => Ok(Self::Fmp4),
             _ => Err(format!(
-                "segmentFormat must be \"mpegts\" or \"fmp4\", got \"{s}\""
+                "segment_format must be \"mpegts\" or \"fmp4\", got \"{s}\""
             )),
         }
     }
@@ -426,14 +426,14 @@ fn parse_hls_settings_inner(
                 .to_member("video_bitrate")
                 .map_err(|e| e.to_string())?
                 .required()
-                .map_err(|_| "variants[].videoBitrate is required".to_owned())?
+                .map_err(|_| "variants[].video_bitrate is required".to_owned())?
                 .try_into()
                 .map_err(|e: nojson::JsonParseError| e.to_string())?;
             let audio_bitrate: usize = item
                 .to_member("audio_bitrate")
                 .map_err(|e| e.to_string())?
                 .required()
-                .map_err(|_| "variants[].audioBitrate is required".to_owned())?
+                .map_err(|_| "variants[].audio_bitrate is required".to_owned())?
                 .try_into()
                 .map_err(|e: nojson::JsonParseError| e.to_string())?;
             let width: Option<usize> = item
@@ -452,10 +452,10 @@ fn parse_hls_settings_inner(
                 .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
             if video_bitrate == 0 {
-                return Err("variants[].videoBitrate must be positive".to_owned());
+                return Err("variants[].video_bitrate must be positive".to_owned());
             }
             if audio_bitrate == 0 {
-                return Err("variants[].audioBitrate must be positive".to_owned());
+                return Err("variants[].audio_bitrate must be positive".to_owned());
             }
             let width = match width {
                 Some(0) => return Err("variants[].width must be positive".to_owned()),
@@ -497,12 +497,12 @@ fn parse_hls_settings_inner(
     if let Some(duration) = segment_duration
         && duration <= 0.0
     {
-        return Err("segmentDuration must be positive".to_owned());
+        return Err("segment_duration must be positive".to_owned());
     }
     if let Some(count) = max_retained_segments
         && count == 0
     {
-        return Err("maxRetainedSegments must be at least 1".to_owned());
+        return Err("max_retained_segments must be at least 1".to_owned());
     }
     let segment_format = match segment_format_str {
         Some(ref s) => s.parse::<HlsSegmentFormat>()?,
@@ -673,7 +673,7 @@ impl ObswsCoordinator {
                 ),
             );
         }
-        // S3 + lifetimeDays 指定時はバケットに lifecycle ルールを設定する
+        // S3 + lifetime_days 指定時はバケットに lifecycle ルールを設定する
         if let HlsDestination::S3 {
             bucket,
             prefix,

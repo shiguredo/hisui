@@ -197,7 +197,7 @@ impl ObswsSoraPublisherSettings {
                 .and_then(|v| v.optional())
                 .filter(|v| !v.kind().is_null());
             let source = sdk.as_ref().unwrap_or(v);
-            // signalingUrls
+            // signaling_urls
             if let Ok(member) = source.to_member("signaling_urls")
                 && let Some(val) = member.optional()
                 && !val.kind().is_null()
@@ -279,7 +279,7 @@ impl ObswsCoordinator {
                     request_type,
                     request_id,
                     crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Missing outputSettings.soraSdkSettings.signalingUrls field",
+                    "Missing outputSettings.soraSdkSettings.signaling_urls field",
                 ),
             );
         }
@@ -289,7 +289,7 @@ impl ObswsCoordinator {
                     request_type,
                     request_id,
                     crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Missing outputSettings.soraSdkSettings.channelId field",
+                    "Missing outputSettings.soraSdkSettings.channel_id field",
                 ),
             );
         };
@@ -689,7 +689,7 @@ impl ObswsCoordinator {
                 request_type,
                 request_id,
                 REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing channelId field",
+                "Missing channel_id field",
             );
         };
         let client_id: Option<String> = json

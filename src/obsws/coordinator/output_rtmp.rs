@@ -60,7 +60,7 @@ impl ObswsCoordinator {
                     request_type,
                     request_id,
                     crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Missing outputSettings.outputUrl field",
+                    "Missing outputSettings.output_url field",
                 ),
             );
         };
@@ -226,7 +226,7 @@ impl ObswsRtmpOutboundSettings {
             } else {
                 match <String>::try_from(v) {
                     Ok(url) => self.output_url = Some(url),
-                    Err(_) => return Err("outputUrl must be a string".to_owned()),
+                    Err(_) => return Err("output_url must be a string".to_owned()),
                 }
             }
         }
@@ -238,7 +238,7 @@ impl ObswsRtmpOutboundSettings {
             } else {
                 match <String>::try_from(v) {
                     Ok(name) => self.stream_name = Some(name),
-                    Err(_) => return Err("streamName must be a string".to_owned()),
+                    Err(_) => return Err("stream_name must be a string".to_owned()),
                 }
             }
         }
@@ -254,9 +254,9 @@ impl ObswsRtmpOutboundSettings {
         let mut settings = Self::default();
         if let Some(v) = settings_value {
             settings.output_url =
-                parse_optional_string_strict(v, "output_url", "outputUrl must be a string")?;
+                parse_optional_string_strict(v, "output_url", "output_url must be a string")?;
             settings.stream_name =
-                parse_optional_string_strict(v, "stream_name", "streamName must be a string")?;
+                parse_optional_string_strict(v, "stream_name", "stream_name must be a string")?;
         }
         Ok(settings)
     }

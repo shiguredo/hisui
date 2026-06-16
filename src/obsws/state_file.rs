@@ -291,7 +291,7 @@ fn parse_optional_hls(
         return Err(v
             .to_member("segment_duration")?
             .required()?
-            .invalid("segmentDuration must be positive"));
+            .invalid("segment_duration must be positive"));
     }
 
     let max_retained_segments: Option<usize> = v.to_member("max_retained_segments")?.try_into()?;
@@ -300,7 +300,7 @@ fn parse_optional_hls(
         return Err(v
             .to_member("max_retained_segments")?
             .required()?
-            .invalid("maxRetainedSegments must be at least 1"));
+            .invalid("max_retained_segments must be at least 1"));
     }
 
     let segment_format_str: Option<String> = v.to_member("segment_format")?.try_into()?;
@@ -342,13 +342,13 @@ fn parse_hls_variants(
             return Err(elem
                 .to_member("video_bitrate")?
                 .required()?
-                .invalid("videoBitrate must be positive"));
+                .invalid("video_bitrate must be positive"));
         }
         if audio_bitrate == 0 {
             return Err(elem
                 .to_member("audio_bitrate")?
                 .required()?
-                .invalid("audioBitrate must be positive"));
+                .invalid("audio_bitrate must be positive"));
         }
         let width: Option<usize> = elem.to_member("width")?.try_into()?;
         let height: Option<usize> = elem.to_member("height")?.try_into()?;
@@ -425,7 +425,7 @@ fn parse_optional_dash(
         return Err(v
             .to_member("segment_duration")?
             .required()?
-            .invalid("segmentDuration must be positive"));
+            .invalid("segment_duration must be positive"));
     }
 
     let max_retained_segments: Option<usize> = v.to_member("max_retained_segments")?.try_into()?;
@@ -434,7 +434,7 @@ fn parse_optional_dash(
         return Err(v
             .to_member("max_retained_segments")?
             .required()?
-            .invalid("maxRetainedSegments must be at least 1"));
+            .invalid("max_retained_segments must be at least 1"));
     }
 
     let variants = parse_dash_variants(v)?;
@@ -515,13 +515,13 @@ fn parse_dash_variants(
             return Err(elem
                 .to_member("video_bitrate")?
                 .required()?
-                .invalid("videoBitrate must be positive"));
+                .invalid("video_bitrate must be positive"));
         }
         if audio_bitrate == 0 {
             return Err(elem
                 .to_member("audio_bitrate")?
                 .required()?
-                .invalid("audioBitrate must be positive"));
+                .invalid("audio_bitrate must be positive"));
         }
         let width: Option<usize> = elem.to_member("width")?.try_into()?;
         let height: Option<usize> = elem.to_member("height")?.try_into()?;
@@ -871,14 +871,14 @@ fn parse_s3_fields(d: nojson::RawJsonValue<'_, '_>) -> Result<S3Fields, nojson::
         return Err(c
             .to_member("access_key_id")?
             .required()?
-            .invalid("accessKeyId must not be empty"));
+            .invalid("access_key_id must not be empty"));
     }
     let secret_access_key: String = c.to_member("secret_access_key")?.required()?.try_into()?;
     if secret_access_key.is_empty() {
         return Err(c
             .to_member("secret_access_key")?
             .required()?
-            .invalid("secretAccessKey must not be empty"));
+            .invalid("secret_access_key must not be empty"));
     }
     let session_token: Option<String> = c.to_member("session_token")?.try_into()?;
 
@@ -888,13 +888,13 @@ fn parse_s3_fields(d: nojson::RawJsonValue<'_, '_>) -> Result<S3Fields, nojson::
             return Err(d
                 .to_member("lifetime_days")?
                 .required()?
-                .invalid("lifetimeDays must be positive"));
+                .invalid("lifetime_days must be positive"));
         }
         if prefix.is_empty() {
             return Err(d
                 .to_member("lifetime_days")?
                 .required()?
-                .invalid("lifetimeDays requires a non-empty prefix"));
+                .invalid("lifetime_days requires a non-empty prefix"));
         }
     }
 

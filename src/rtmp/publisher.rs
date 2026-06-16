@@ -161,7 +161,7 @@ impl RtmpPublisher {
         handle.notify_ready();
 
         let url = parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
-            .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?;
+            .map_err(|e| Error::new(format!("invalid output_url: {e}")))?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(self.options.max_buffered_frame_count);
 
@@ -171,7 +171,7 @@ impl RtmpPublisher {
             recv_buf: vec![0u8; 4096],
             connection: shiguredo_rtmp::RtmpPublishClientConnection::new(
                 parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
-                    .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?,
+                    .map_err(|e| Error::new(format!("invalid output_url: {e}")))?,
             ),
             ready: false,
             frame_handler: crate::rtmp::frame::RtmpOutgoingFrameHandler::new(),

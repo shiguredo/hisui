@@ -166,7 +166,7 @@ impl RtmpOutboundEndpoint {
         handle.notify_ready();
 
         let url = parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
-            .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?;
+            .map_err(|e| Error::new(format!("invalid output_url: {e}")))?;
         let (tx, rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
 
         let server_options = self.options.clone();

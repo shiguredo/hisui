@@ -3148,22 +3148,22 @@ async fn hisui_create_output_sora_reads_sora_sdk_settings() {
         .expect("outputSettings must be present");
     let urls = settings
         .to_path_member(&["soraSdkSettings", "signaling_urls"])
-        .expect("signalingUrls access must succeed")
+        .expect("signaling_urls access must succeed")
         .required()
-        .expect("signalingUrls must be present");
+        .expect("signaling_urls must be present");
     let url_list: Vec<String> = urls
         .to_array()
-        .expect("signalingUrls must be array")
+        .expect("signaling_urls must be array")
         .map(|v| v.try_into().expect("url must be string"))
         .collect();
     assert_eq!(url_list, vec!["wss://example.com/signaling"]);
     let channel_id: String = settings
         .to_path_member(&["soraSdkSettings", "channel_id"])
-        .expect("channelId access must succeed")
+        .expect("channel_id access must succeed")
         .required()
-        .expect("channelId must be present")
+        .expect("channel_id must be present")
         .try_into()
-        .expect("channelId must be string");
+        .expect("channel_id must be string");
     assert_eq!(channel_id, "test-ch");
 }
 
@@ -3309,14 +3309,14 @@ async fn hisui_create_output_hls_reads_destination_and_variants() {
         .try_into()
         .expect("destination.type must be string");
     assert_eq!(dest_type, "filesystem");
-    // segmentDuration が反映されていることを確認
+    // segment_duration が反映されていることを確認
     let segment_duration: f64 = settings
         .to_member("segment_duration")
-        .expect("segmentDuration access must succeed")
+        .expect("segment_duration access must succeed")
         .required()
-        .expect("segmentDuration must be present")
+        .expect("segment_duration must be present")
         .try_into()
-        .expect("segmentDuration must be f64");
+        .expect("segment_duration must be f64");
     assert!((segment_duration - 4.0).abs() < f64::EPSILON);
     // variants の中身が反映されていることを確認
     let variants = settings
@@ -3331,11 +3331,11 @@ async fn hisui_create_output_hls_reads_destination_and_variants() {
     assert_eq!(variants_arr.len(), 1);
     let video_bitrate: i64 = variants_arr[0]
         .to_member("video_bitrate")
-        .expect("videoBitrate access must succeed")
+        .expect("video_bitrate access must succeed")
         .required()
-        .expect("videoBitrate must be present")
+        .expect("video_bitrate must be present")
         .try_into()
-        .expect("videoBitrate must be i64");
+        .expect("video_bitrate must be i64");
     assert_eq!(video_bitrate, 2_000_000);
 }
 
@@ -3459,7 +3459,7 @@ async fn set_output_settings_rejects_invalid_signaling_urls_type() {
     identify_session(&mut session).await;
     create_output(&mut session, "sora", "sora_webrtc_output").await;
 
-    // signalingUrls に文字列を渡すと INVALID_REQUEST_FIELD を返す
+    // signaling_urls に文字列を渡すと INVALID_REQUEST_FIELD を返す
     let action = session
         .handle_request(RequestMessage {
             request_id: Some("req-set-bad-urls".to_owned()),
@@ -3511,7 +3511,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
     identify_session(&mut session).await;
     create_output(&mut session, "sora", "sora_webrtc_output").await;
 
-    // まず channelId を設定する
+    // まず channel_id を設定する
     let set_action = session
         .handle_request(RequestMessage {
             request_id: Some("req-set-sora-ch".to_owned()),
@@ -3528,7 +3528,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
     let (result, _) = parse_request_status(&text);
     assert!(result);
 
-    // channelId: null でクリアする
+    // channel_id: null でクリアする
     let clear_action = session
         .handle_request(RequestMessage {
             request_id: Some("req-clear-sora-ch".to_owned()),
@@ -3545,7 +3545,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
     let (result, _) = parse_request_status(&text);
     assert!(result);
 
-    // GetOutputSettings で channelId が消えていることを確認する
+    // GetOutputSettings で channel_id が消えていることを確認する
     let get_action = session
         .handle_request(RequestMessage {
             request_id: Some("req-get-sora-ch".to_owned()),
@@ -3564,7 +3564,7 @@ async fn set_output_settings_null_clears_sora_channel_id() {
         .expect("soraSdkSettings access must succeed")
         .required()
         .expect("soraSdkSettings must be present");
-    // channelId が null/未設定なので soraSdkSettings に含まれないはず
+    // channel_id が null/未設定なので soraSdkSettings に含まれないはず
     let channel_id = sdk.to_member("channel_id").ok().and_then(|v| v.optional());
     assert!(channel_id.is_none());
 }
@@ -3909,7 +3909,7 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
     assert_eq!(code, 100);
 
     // 名前ではなく output_kind で dispatch されるなら、
-    // HLS の destination エラーではなく Sora の channelId エラーになる。
+    // HLS の destination エラーではなく Sora の channel_id エラーになる。
     let start_action = session
         .handle_request(RequestMessage {
             request_id: Some("req-start-sora-named-hls".to_owned()),
@@ -3935,6 +3935,6 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
         .expect("comment must be string");
     assert_eq!(
         comment,
-        "Missing outputSettings.soraSdkSettings.channelId field"
+        "Missing outputSettings.soraSdkSettings.channel_id field"
     );
 }

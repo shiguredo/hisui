@@ -872,7 +872,7 @@ fn validate_background_key_tolerance(value: Option<i32>) -> Result<(), ParseInpu
         && !(0..=255).contains(&v)
     {
         return Err(ParseInputSettingsError::InvalidInputSettings(format!(
-            "backgroundKeyTolerance must be 0-255, got {v}"
+            "background_key_tolerance must be 0-255, got {v}"
         )));
     }
     Ok(())
