@@ -143,6 +143,7 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)>;
 
 1. NAL ヘッダ 1 バイトをスキップする（先頭バイトの下位 5 ビットが SPS の NAL unit type (7) であることは呼び出し側で保証済み）。
 2. RBSP 抽出: `0x00 0x00 0x03` を `0x00 0x00` に置換して emulation prevention byte を除去する。
+   - SPS の先頭付近（`profile_idc` / `level_idc` 周辺）では `0x000003` 出現パターンが実質発生しないため、先頭部分だけパースする実装ならスキップしても動く。しかし本実装は `pic_width_in_mbs_minus1` まで読み進める都合上、`seq_scaling_matrix_present_flag == 1` 経由で scaling_list を消費するとビット位置が深くなり、`0x000003` 出現が無視できなくなる。安全のため最初から RBSP 抽出する。
 3. ビットリーダで以下を順番に **全フィールド消費** する（途中で位置がずれると `pic_width_in_mbs_minus1` 以降が壊れる）:
    - `profile_idc` (u(8))
    - `constraint_set0_flag` 〜 `constraint_set5_flag` + `reserved_zero_2bits` (u(8))
@@ -217,6 +218,19 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)>;
 
 - IDR 内 PES に複数の SPS NAL ユニットが含まれる場合、本 issue では **最初に出現した SPS** を解像度抽出対象とする。これは `h264_sample_entry_from_annexb` 内部の `sps_list` の先頭要素と一致するため、関数間で抽出対象が一貫する。
 - 複数 SPS が異なる解像度を持つケースは Hisui の入力前提（Sora / OBS 出力）では発生しない想定であり、本 issue では深追いしない（必要が出れば将来別 issue で扱う）。`h264_sample_entry_from_annexb` 側の `sps_list` には全件を保持し続けるため後方互換性は保たれる。
+
+### 設計判断ノート（簡略化案を採らない理由）
+
+H.264 SPS から解像度を抽出する処理には、世の中の参考実装に幅広く簡略化版が存在する。本実装で **採用しない** 簡略化と、その採用しない理由を明示する:
+
+- 簡略化案 (A): 解像度を `(pic_width_in_mbs_minus1 + 1) * 16` / `(pic_height_in_map_units_minus1 + 1) * 16` だけで算出し、`frame_mbs_only_flag` (interlaced) や `frame_cropping_flag` (crop) を無視する。
+  - **採用しない理由**: 外部入力（SRT inbound）の解像度を MP4 メタデータに正確に反映する目的に反する。crop は ffmpeg testsrc 等のテスト用ストリームでも発生し、interlaced は地デジ系の MPEG-TS で発生する。これらで誤った値が MP4 sample entry に埋まると下流プレイヤーが正しいピクセル数を取得できない。
+- 簡略化案 (B): `seq_scaling_matrix_present_flag == 1` のとき、scaling_list 全体を「`chroma_format_idc == 3` で 12 ビット、それ以外で 8 ビット」を flat に skip する。
+  - **採用しない理由**: 仕様非準拠。実際は 12 個（または 8 個）の `seq_scaling_list_present_flag` を 1 ビットずつ読み、立っているフラグごとに scaling_list サブルーチン（要素数ぶんの `delta_scale` se(v)）を走らせる必要がある。flat skip は `seq_scaling_list_present_flag` が 1 個でも立つと以降のビット位置がずれ、`pic_width_in_mbs_minus1` の読み取りが壊れる。
+- 簡略化案 (C): RBSP 抽出（emulation prevention byte 除去）を省略する。
+  - **採用しない理由**: SPS 先頭の `profile_idc` / `level_idc` 周辺だけパースするなら成立するが、本実装は scaling_list を経由して `pic_width_in_mbs_minus1` まで読むためビット位置が深くなり、`0x000003` 出現が無視できなくなる（内部処理 2 参照）。
+
+これらを採らないことで実装は重くなるが、外部入力経路での正確性を優先する。
 
 ## 完了条件
 
