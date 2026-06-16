@@ -36,14 +36,14 @@ OBS WebSocket Protocol v5 と OBS Studio 本体が公式に採用している階
 
 > このフィールドは settings ペイロード構造体・wrapper・variant・destination の `DisplayJson` 内に書くか?
 >
-> - Yes → `snake_case` (`scripts/obsws_field_naming_allowlist.toml` の `[[settings_struct]]` に該当構造体を追加)
-> - No → `camelCase` (Protocol 仕様で SCREAMING_SNAKE が指定されていれば SCREAMING_SNAKE。envelope 例外 allow-list に必要に応じて追記)
+> - Yes → `snake_case` (本ドキュメント 4 章 settings ペイロード allow-list に該当構造体が含まれていなければ追記する)
+> - No → `camelCase` (Protocol 仕様で SCREAMING_SNAKE が指定されていれば SCREAMING_SNAKE。本ドキュメント 3 章 envelope 例外 allow-list に必要に応じて追記する)
 
 外部プロトコル (Sora シグナリングなど) から受け取った JSON を透過する場合は、そのプロトコルの仕様準拠で受信側を書き、本規約の対象外とする。
 
 ## 3. envelope 例外 allow-list
 
-envelope レイヤで camelCase 維持の対象となる主なキー。網羅的な真実は `scripts/obsws_field_naming_allowlist.toml` の `[envelope_keys]` セクションを参照する。
+envelope レイヤで camelCase 維持の対象となる主なキー。新規 Event / Request を追加する際に envelope 引数が増える場合は本リストにも追記する。
 
 ### 3.1 Protocol envelope (固定キー)
 
@@ -72,7 +72,7 @@ settings ペイロードを内包する境界として hisui が出力するキ�
 
 ## 4. settings ペイロード allow-list
 
-settings ペイロードで snake_case 必須となる構造体一覧。網羅的な真実は `scripts/obsws_field_naming_allowlist.toml` の `[[settings_struct]]` を参照する。本章はその概要。
+settings ペイロードで snake_case 必須となる構造体一覧。新規 input kind / output kind を追加する際は本リストにも追記する。
 
 ### 4.1 input / source 系 (`src/obsws/state/types.rs`)
 

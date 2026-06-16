@@ -46,7 +46,7 @@ OBS WebSocket Protocol v5 のレスポンスは以下の形を取る。
 
 この階層構造は OBS Studio 本体・OBS WebSocket Protocol が公式に採用しているもので、hisui もこれを踏襲する。Protocol 仕様で SCREAMING_SNAKE が指定されているフィールド (`MAIN` / `ACTIVATE` / `MIX_AUDIO` / `SCENE_REF` / `EPHEMERAL`、`OBSWS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY` 等) もそのまま維持する。
 
-settings ペイロード内のキーと envelope 内のキーで **同名のもの** (`videoTrackId` / `audioTrackId` / `trackId` / `signalingUrls` / `channelId` / `clientId` / `bundleId` 等) が存在するが、実装的判定ルールは「コード上 settings 構造体 / wrapper / variant / destination の `DisplayJson` 内に書かれているか否か」で機械的に判別する。監査スクリプトの allow-list で対象構造体を列挙し、その allow-list に含まれる構造体内のキーを snake 規約の対象、それ以外を envelope (camel 維持) 対象とする (詳細は「設計方針 / 監査スクリプト」参照)。
+settings ペイロード内のキーと envelope 内のキーで **同名のもの** (`videoTrackId` / `audioTrackId` / `trackId` / `signalingUrls` / `channelId` / `clientId` / `bundleId` 等) が存在する。判定基準は「コード上 settings 構造体 / wrapper / variant / destination の `DisplayJson` 内に書かれているか否か」で、対象構造体一覧は `docs/obsws/json_naming.md` の章 4 settings ペイロード allow-list を真実とする。レビュー時に人間が同名キーの所在を allow-list と照合して判別する。
 
 ### envelope レイヤ (camelCase 維持、変更しない)
 
@@ -121,40 +121,8 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 新規 input kind / output kind / Event / Request を追加する際は以下の 1 問で判断する。
 
 > このフィールドは settings ペイロード構造体・wrapper・variant・destination の `DisplayJson` 内に書くか?
-> - Yes → snake_case (allow-list に該当構造体を追加)
-> - No → camelCase (Protocol 仕様で SCREAMING_SNAKE が指定されていれば SCREAMING_SNAKE)
-
-### 監査スクリプト
-
-新規追加時の判断ミスを防ぐため `scripts/audit_obsws_field_naming.sh` を追加する。
-
-- **実装言語**: bash。TOML パースには `yq` (`mikefarah/yq`) を前提とする (環境セットアップで `brew install yq` または equivalent を要求)。`scripts/maturin_*.sh` 同様 bash 統一とする。代替として依存を増やしたくない場合は Python (`uv run python scripts/audit_obsws_field_naming.py`) も検討可だが、本 issue 内では bash + yq で確定とし、実装で支障が出た時点で Python 化を別 issue として起票する。
-- **走査対象**: `src/obsws/` / `src/webrtc/p2p_session.rs` / `src/rtmp/` / `src/srt/` / `src/rtsp/` / `devtools/src/` / `e2e-tests/obsws/` / `testdata/`。
-- **allow-list の保管場所**: `scripts/obsws_field_naming_allowlist.toml`。Markdown のパースはスクリプトから困難なため、機械可読な TOML を使う。`docs/obsws/json_naming.md` の章 4 「settings ペイロード allow-list」は「真実は `scripts/obsws_field_naming_allowlist.toml`」と参照する形にする。
-- **allow-list TOML の最小スケルトン**:
-  ```toml
-  # settings 側構造体一覧 (これらの DisplayJson 内のキーは snake 必須)
-  [[settings_struct]]
-  name = "ObswsAudioCaptureDeviceSettings"
-  file = "src/obsws/state/types.rs"
-
-  [[settings_struct]]
-  name = "HlsVariant"
-  file = "src/obsws/coordinator/output_hls.rs"
-
-  # envelope 例外キー一覧 (これらは camel 必須)
-  [envelope_keys]
-  protocol_envelope = ["op", "d", "requestType", "requestId", "responseData", "eventType", "eventData", "eventIntent", "inputSettings", "outputSettings", "streamServiceSettings", "streamServiceType", "subscriberSettings", "soraSdkSettings"]
-  hisui_extension_event_data = ["subscriberName", "connectionId", "clientId", "trackKind", "trackId", "code", "reason", "notify"]
-  ```
-- **判定アルゴリズム**:
-  - settings 構造体 allow-list に含まれる構造体内 (`impl nojson::DisplayJson for <Name>` の `{}` ブロック内) の `f.member("...")` / `to_member("...")` / `parse_*_setting(*, "...")` の第 1 引数 (文字列キー) が camelCase なら違反。
-  - 構造体外で出る `f.member` / `to_member` の文字列キーが envelope 例外 allow-list に含まれていれば許可。
-  - 両 allow-list に該当しない grep 結果は「未分類」として警告のみ。エラーにはしない。
-- **出力**: 違反一覧 (パス + 行 + キー名 + 期待される命名)。出力言語は英語。
-- **終了コード**: 違反なしで 0、違反ありで 1、未分類のみで 0 (警告)。
-- **CI 統合**: 本 issue のスコープ外。詳細は本 issue の `## Future Work` 参照。
-- **`scripts/README.md` 追記**: 本スクリプトの目的・使い方・終了コード仕様を追記する。
+> - Yes → snake_case (`docs/obsws/json_naming.md` の章 4 settings ペイロード allow-list に該当構造体を追記する)
+> - No → camelCase (Protocol 仕様で SCREAMING_SNAKE が指定されていれば SCREAMING_SNAKE。`docs/obsws/json_naming.md` の章 3 envelope 例外 allow-list に必要に応じて追記する)
 
 ### 規約ドキュメント
 
@@ -163,7 +131,7 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 1. 規約 (3 階層 + 例外)
 2. 判定アルゴリズム (1 問)
 3. envelope 例外 allow-list (拡張 Event / Request の引数群、envelope 境界キー一覧)
-4. settings ペイロード allow-list (構造体名と所属ファイル一覧。真実は `scripts/obsws_field_naming_allowlist.toml`、本章はその概要)
+4. settings ペイロード allow-list (構造体名と所属ファイル一覧)
 5. OBS Studio キー定義対照表 (フェーズ A 調査結果)
 6. 引用 URL (OBS Studio 本体ソース、commit hash pinned で残す)
 7. 非対称キー (受信のみ / 送信のみ。例: `passphrase` は state file 永続化では出すが GetInputSettings レスポンスでは隠す。`trackId` は GetInputSettings レスポンスでは出すが state file 永続化では `WebRtcSourceSettingsWithoutTrackId` で除外する)
@@ -175,7 +143,7 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 - 規約に従い、`src/obsws/` / `src/webrtc/p2p_session.rs` / `src/rtmp/` / `src/srt/` / `src/rtsp/` 配下の settings ペイロード内のフィールドが snake_case に統一されていること。出力側 (`f.member`) と受信側 (`to_member` / `parse_optional_*_setting` / `parse_overlay_*_setting`) が一貫した命名で揃っていること。
 - envelope レイヤ (OBS WebSocket Protocol 標準キー、hisui 独自 Event / Request の eventData / requestData / responseData、envelope 境界キー) が camelCase のまま維持されていること。
 - 外部プロトコル由来のフィールド (Sora シグナリング受信) が変更されていないこと。
-- 機械チェック: 監査スクリプト `scripts/audit_obsws_field_naming.sh` を実装ステップ 3 で先行作成し、本リネーム (実装ステップ 4) 前に走らせて違反一覧を取得、リネーム後に走らせて違反 0 件・未分類 0 件を確認すること。手動 grep として以下を補助的に使う (envelope 用途で残る `signalingUrls` / `channelId` 等のヒットは監査スクリプトの allow-list で除外判別される。手動 grep の確認順序を守れば監査スクリプトが network 側の残存も自動検出する):
+- 機械チェック: リネーム前後で以下の手動 grep を実行し、リネーム後にヒット 0 件 (envelope 用途で残る `signalingUrls` / `channelId` / `clientId` / `bundleId` / `trackId` / `videoTrackId` / `audioTrackId` 等を除く) であることを確認すること。envelope 用途のヒットは `docs/obsws/json_naming.md` の章 3 envelope 例外 allow-list と章 4 settings ペイロード allow-list を照合して人間が判別する。
   ```
   rg 'sampleRate|loopPlayback|inputUrl|streamName|streamId|backgroundKeyColor|backgroundKeyTolerance|outputUrl|videoBitrate|audioBitrate|usePathStyle|lifetimeDays|accessKeyId|secretAccessKey|sessionToken|segmentDuration|maxRetainedSegments|segmentFormat|videoCodec|audioCodec' src/ e2e-tests/ devtools/src/ testdata/
   ```
@@ -189,12 +157,12 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
   - state file の envelope (`scenes` / `inputs` / `currentProgramScene` / `nextInputId` 等) は camel 維持。
   - state file 内部の wrapper 構造体 (`SrtInboundSettingsWithPassphrase` / `WebRtcSourceSettingsWithoutTrackId`) と HLS / DASH の S3 destination / variant 受信経路の中身を snake に倒す。
   - hisui は正式リリース前のため、フォールバック読み込みコードや移行ガイドは追加しない。既存の state file は破壊的変更扱いとする。
-- リネーム対象と削除対象を `CHANGES.md` の `## develop` に以下の 3 行 (`[CHANGE]`) で記載する。形式は既存 `## develop` エントリの慣例に従い、`[CHANGE]` 行直下に 2 スペースインデントで補足を続け、最終行に `- @sile` を 2 スペースインデントで置く。規約ドキュメント (`docs/obsws/json_naming.md`) と監査スクリプト (`scripts/audit_obsws_field_naming.sh` / `obsws_field_naming_allowlist.toml`) は内部開発者向けで、`## develop` の既存 `[ADD]` 慣例 (ユーザー視点の新規機能) に該当しないため CHANGES.md には載せない。
+- リネーム対象と削除対象を `CHANGES.md` の `## develop` に以下の 3 行 (`[CHANGE]`) で記載する。形式は既存 `## develop` エントリの慣例に従い、`[CHANGE]` 行直下に 2 スペースインデントで補足を続け、最終行に `- @sile` を 2 スペースインデントで置く。規約ドキュメント (`docs/obsws/json_naming.md`) は内部開発者向けで、`## develop` の既存 `[ADD]` 慣例 (ユーザー視点の新規機能) に該当しないため CHANGES.md には載せない。
   - `[CHANGE] obsws / obsdc の inputSettings / outputSettings / streamServiceSettings ペイロード内のフィールドを snake_case に統一する` (補足: 主要なリネーム前後を列挙、`- @sile`)
   - `[CHANGE] obsws の state file 永続化フォーマットを規約変更に追従させる` (補足: 既存 state file は読み込めなくなる、フォールバック移行コードは入れない、`- @sile`)
   - `[CHANGE] obsws GetStreamServiceSettings 応答から未使用の bwtest フィールドを削除する` (補足: OBS rtmp-services に該当キーが存在しないため、`- @sile`)
 - `bwtest` フィールドが `GetStreamServiceSettings` 応答 (`src/obsws/coordinator/output_registry.rs:473`) から削除されていること。`use_auth` のハードコード出力 (`:478`) は OBS rtmp-custom.c 互換のため維持されていること。
-- 規約ドキュメント `docs/obsws/json_naming.md` が新規作成され、`scripts/audit_obsws_field_naming.sh` および `scripts/obsws_field_naming_allowlist.toml` が追加され、ローカルから実行可能で、リネーム後に違反 0 件を返すこと。`scripts/README.md` にも追記されていること。
+- 規約ドキュメント `docs/obsws/json_naming.md` が新規作成され、章 3 envelope 例外 allow-list と章 4 settings ペイロード allow-list がリネーム後の構造体・キーと整合していること。
 - OBS Studio 本体クライアント (公式アプリ) を hisui server に接続し、**互換が成立する範囲のみ** で疎通確認する:
   - 互換成立範囲: `device_id` (audio_capture_device 4 plugin で確認、linux-v4l2 video_capture_device で確認)、stream service settings の `server` / `key` / `use_auth` (rtmp_custom サービスで確認)
   - 互換不成立範囲 (`pixel_format` / `sample_rate` / `channels` / `fps` / `loop_playback` 等の hisui 拡張キー、output 系全体、win-dshow / mac-avcapture 由来の `video_device_id` / `device` 等): 設計上 OBS Studio 本体が同名キーを使っていないため疎通テストは対象外。これらは devtools 経由 / 手書きクライアントで往復確認する。
@@ -206,42 +174,35 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 
 1. **issue ファイル名のリネーム**: `git mv issues/0003-feature-refactor-obsws-json-naming.md issues/0003-feature-change-obsws-json-naming.md`。実装ブランチ `feature/change-obsws-json-naming` への切り替えと同じコミットで実施。
 2. **規約ドキュメントの先行作成**: `docs/obsws/json_naming.md` を新規作成 (7 章構成)。
-3. **監査スクリプトと allow-list の先行作成**: `scripts/audit_obsws_field_naming.sh` (bash + yq) と `scripts/obsws_field_naming_allowlist.toml` を追加、`scripts/README.md` を更新する。リネーム前に走らせて現状の違反 (= リネーム対象) を列挙し、リネーム後に走らせて違反 0 件を確認する。
-4. **settings ペイロード内の snake_case リネーム (本対応の中核)**: 出力側 (`f.member`) と受信側 (`to_member` / `parse_optional_*_setting` / `parse_overlay_*_setting`) を同時に書き換える。対象は本 issue 末尾「リネーム対象の確定」を真とし、最終的な網羅性は `scripts/audit_obsws_field_naming.sh` の出力で担保する。
-5. **`bwtest` の削除**: `src/obsws/coordinator/output_registry.rs:473` の `f.member("bwtest", false)?;` を削除。`use_auth` のハードコード出力 (`:478`) は維持。
-6. **state file の snake 化**: `SrtInboundSettingsWithPassphrase` (`state_file.rs:1025`) / `WebRtcSourceSettingsWithoutTrackId` (`state_file.rs:1049`) の中身、`state_file.rs:864-895` 付近の HLS / DASH S3 destination receiver、`state_file.rs:339-351, :512-524` 付近の variant receiver の中身を snake 化。envelope (scenes / inputs / currentProgramScene 等) は触らない。`#[cfg(test)]` 内のアサーションも追従。
-7. **output_stream.rs の同期**: `ObswsStreamServiceSettings::fmt` (`output_stream.rs:240-258`) は `bwtest` / `use_auth` を概念として持たないため `bwtest` 削除対象外。`streamServiceSettings` 受信経路の中身 (server / key 等) は既に snake、追加作業なし。
-8. **hisui 内部サブシステムの同期**: `src/rtmp/inbound_endpoint.rs` (`:228, :249, :275`)、`src/srt/inbound_endpoint.rs` (`:361, :396, :420`)、`src/rtsp/subscriber.rs` (`:39, :57, :61`) の `f.member` / `to_member` キー `inputUrl` を `input_url` に追従させる。各ファイルのエラーメッセージ (`"inputUrl scheme must be rtsp or rtsps"` 等) も snake 表記に追従させる。
-9. **devtools 側の同期**: `devtools/src/components/obsdc/ObsDcSourcePanel.tsx` ほか `devtools/src/` 内の literal 文字列 (`settingsKey="..."` 等) を snake 化。TypeScript 側の型定義は実コード上存在しない (`inputSettings` は `Record<string, string>` として扱われている) ため型変更は不要。
-10. **テストの更新**: 完了条件で列挙したテストファイル全体を網羅して更新する。
-11. **CHANGES.md の更新**: `## develop` セクションに完了条件で示した 3 行 (`[CHANGE]`) を補足インデント付きで追加する。
-12. **OBS Studio 本体疎通テスト**: 互換成立範囲のみ公式 OBS Studio で確認し、結果を本 issue ファイル末尾の `## 結果` セクションに追記する。
+3. **settings ペイロード内の snake_case リネーム (本対応の中核)**: 出力側 (`f.member`) と受信側 (`to_member` / `parse_optional_*_setting` / `parse_overlay_*_setting`) を同時に書き換える。対象は本 issue 末尾「リネーム対象の確定」を真とし、最終的な網羅性は完了条件の手動 grep で担保する。
+4. **`bwtest` の削除**: `src/obsws/coordinator/output_registry.rs:473` の `f.member("bwtest", false)?;` を削除。`use_auth` のハードコード出力 (`:478`) は維持。
+5. **state file の snake 化**: `SrtInboundSettingsWithPassphrase` (`state_file.rs:1025`) / `WebRtcSourceSettingsWithoutTrackId` (`state_file.rs:1049`) の中身、`state_file.rs:864-895` 付近の HLS / DASH S3 destination receiver、`state_file.rs:339-351, :512-524` 付近の variant receiver の中身を snake 化。envelope (scenes / inputs / currentProgramScene 等) は触らない。`#[cfg(test)]` 内のアサーションも追従。
+6. **output_stream.rs の同期**: `ObswsStreamServiceSettings::fmt` (`output_stream.rs:240-258`) は `bwtest` / `use_auth` を概念として持たないため `bwtest` 削除対象外。`streamServiceSettings` 受信経路の中身 (server / key 等) は既に snake、追加作業なし。
+7. **hisui 内部サブシステムの同期**: `src/rtmp/inbound_endpoint.rs` (`:228, :249, :275`)、`src/srt/inbound_endpoint.rs` (`:361, :396, :420`)、`src/rtsp/subscriber.rs` (`:39, :57, :61`) の `f.member` / `to_member` キー `inputUrl` を `input_url` に追従させる。各ファイルのエラーメッセージ (`"inputUrl scheme must be rtsp or rtsps"` 等) も snake 表記に追従させる。
+8. **devtools 側の同期**: `devtools/src/components/obsdc/ObsDcSourcePanel.tsx` ほか `devtools/src/` 内の literal 文字列 (`settingsKey="..."` 等) を snake 化。TypeScript 側の型定義は実コード上存在しない (`inputSettings` は `Record<string, string>` として扱われている) ため型変更は不要。
+9. **テストの更新**: 完了条件で列挙したテストファイル全体を網羅して更新する。
+10. **CHANGES.md の更新**: `## develop` セクションに完了条件で示した 3 行 (`[CHANGE]`) を補足インデント付きで追加する。
+11. **OBS Studio 本体疎通テスト**: 互換成立範囲のみ公式 OBS Studio で確認し、結果を本 issue ファイル末尾の `## 結果` セクションに追記する。
 
 ### コミット分割
 
 shiguredo-git 規約 (`{SEQ} {TITLE}` 形式) に従う。リネーム差分は巨大化するが blame 汚染範囲を限定するため論理単位で分ける。
 
 1. `0003 obsws の issue ファイル名と命名規則ドキュメントを準備する` (issue ファイル `git mv` + `docs/obsws/json_naming.md` 新規作成)
-2. `0003 obsws フィールド命名規則の監査スクリプトと allow-list を追加する` (`scripts/audit_obsws_field_naming.sh` + `scripts/obsws_field_naming_allowlist.toml` + `scripts/README.md` 追記)
-3. `0003 obsws / obsdc の settings ペイロード内のフィールドを snake_case に統一する` (`src/obsws/` / `src/webrtc/p2p_session.rs` / `src/rtmp/` / `src/srt/` / `src/rtsp/` / 各種テスト)
-4. `0003 obsws の state file 永続化フォーマットを規約変更に追従させる` (`src/obsws/state_file.rs` の wrapper / receiver、テストデータ)
-5. `0003 devtools の obsdc 関連 settings を snake_case 規約に揃える`
-6. `0003 obsws GetStreamServiceSettings 応答から未使用の bwtest フィールドを削除する`
-7. `0003 CHANGES.md に obsws JSON 命名規則変更を記載する` (`[CHANGE]` 3 行)
+2. `0003 obsws / obsdc の settings ペイロード内のフィールドを snake_case に統一する` (`src/obsws/` / `src/webrtc/p2p_session.rs` / `src/rtmp/` / `src/srt/` / `src/rtsp/` / 各種テスト)
+3. `0003 obsws の state file 永続化フォーマットを規約変更に追従させる` (`src/obsws/state_file.rs` の wrapper / receiver、テストデータ)
+4. `0003 devtools の obsdc 関連 settings を snake_case 規約に揃える`
+5. `0003 obsws GetStreamServiceSettings 応答から未使用の bwtest フィールドを削除する`
+6. `0003 CHANGES.md に obsws JSON 命名規則変更を記載する` (`[CHANGE]` 3 行)
 
-差分が更に巨大化する場合はコミット 3 を input 系・output 系・state file・devtools に追加分割することを検討する。
+差分が更に巨大化する場合はコミット 2 を input 系・output 系・state file・devtools に追加分割することを検討する。
 
 ### 留意事項
 
 - hisui は正式リリース前のため、受信側 (`to_member` / `parse_optional_*_setting` 等) で旧名と新名の両方を試すフォールバックコードは入れない。state file の移行コードも入れない。
-- 監査スクリプトの出力メッセージは英語、コメントは日本語 (CLAUDE.md 規約)。
 - 章 7 「非対称キー」の対象候補 (`docs/obsws/json_naming.md` 執筆時の参考):
   - `passphrase`: state file 永続化 (`SrtInboundSettingsWithPassphrase`) では出力、GetInputSettings レスポンス (`ObswsSrtInboundSettings`) では隠す (`src/obsws/state/types.rs:1103` のコメント参照)
   - `trackId`: GetInputSettings レスポンス (`ObswsWebRtcSourceSettings.trackId` → `track_id`) では出力、state file 永続化 (`WebRtcSourceSettingsWithoutTrackId`) では除外
-
-## Future Work (本 issue close 後に起票)
-
-- 監査スクリプトを CI で常時実行する仕組みの追加 (`feature/add-obsws-field-naming-audit-ci`)。本 issue close 時に新規 issue として起票する。
 
 ## OBS Studio キー定義調査結果 (2026-06-15 追記、フェーズ A)
 
@@ -284,7 +245,7 @@ OBS Studio 側で plugin (OS) ごとにキー名が大きく分かれており�
 
 ### リネーム対象の確定 (本 issue 内の真実)
 
-settings ペイロード内で **実際に綴りが変わる (camel → snake) フィールド** を列挙する。それ以外は既に snake のため変化なし、または 1 単語のため綴り変化なし。詳細は `scripts/audit_obsws_field_naming.sh` の出力で網羅性を担保する。
+settings ペイロード内で **実際に綴りが変わる (camel → snake) フィールド** を列挙する。それ以外は既に snake のため変化なし、または 1 単語のため綴り変化なし。最終的な網羅性は完了条件の手動 grep で担保する。
 
 **input / source 系** (`src/obsws/state/types.rs`):
 
