@@ -71,21 +71,21 @@
   - @sile
 - [ADD] obsws の Output に MPEG-DASH ライブ出力 (`outputName: "mpeg_dash"`) を追加する
   - 指定されたビデオ/オーディオコーデックの fragmented MP4 セグメントを生成し、MPD マニフェストで管理する
-  - `SetOutputSettings` で `destination` / `segmentDuration` / `maxRetainedSegments` / `variants` / `videoCodec` / `audioCodec` を設定可能
-  - `videoCodec` で `"H264"` / `"H265"` / `"VP8"` / `"VP9"` / `"AV1"` を指定可能（デフォルト: `"H264"`）
-  - `audioCodec` で `"AAC"` / `"OPUS"` を指定可能（デフォルト: `"AAC"`）
+  - `SetOutputSettings` で `destination` / `segment_duration` / `max_retained_segments` / `variants` / `video_codec` / `audio_codec` を設定可能
+  - `video_codec` で `"H264"` / `"H265"` / `"VP8"` / `"VP9"` / `"AV1"` を指定可能（デフォルト: `"H264"`）
+  - `audio_codec` で `"AAC"` / `"OPUS"` を指定可能（デフォルト: `"AAC"`）
   - `destination.type` に `"filesystem"` または `"s3"` を指定して出力先を切り替える
-  - S3 出力先にはオブジェクトライフタイム指定（`lifetimeDays`）を設定可能
+  - S3 出力先にはオブジェクトライフタイム指定（`lifetime_days`）を設定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.4 を追加する
   - @sile
 - [ADD] obsws の Output に HLS ライブ出力 (`outputName: "hls"`) を追加する
   - H.264 + AAC の MPEG-TS または fragmented MP4 セグメントを生成し、M3U8 プレイリストで管理する
-  - `SetOutputSettings` で `destination` / `segmentDuration` / `maxRetainedSegments` / `segmentFormat` / `variants` を設定可能
+  - `SetOutputSettings` で `destination` / `segment_duration` / `max_retained_segments` / `segment_format` / `variants` を設定可能
   - `destination.type` に `"filesystem"` または `"s3"` を指定して出力先を切り替える
-  - S3 出力先にはオブジェクトライフタイム指定（`lifetimeDays`）を設定可能。指定時は HLS 開始時にバケットへ lifecycle ルールを自動設定する
-  - `segmentFormat` は `"mpegts"` (デフォルト) または `"fmp4"` を指定可能
+  - S3 出力先にはオブジェクトライフタイム指定（`lifetime_days`）を設定可能。指定時は HLS 開始時にバケットへ lifecycle ルールを自動設定する
+  - `segment_format` は `"mpegts"` (デフォルト) または `"fmp4"` を指定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile
 - [ADD] obsws Output に Sora WebRTC Publisher (`outputName: "sora"`) を追加する
