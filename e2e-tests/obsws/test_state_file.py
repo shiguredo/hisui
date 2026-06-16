@@ -378,8 +378,8 @@ def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path
                     {
                         "outputName": "rtmp_outbound",
                         "outputSettings": {
-                            "outputUrl": "rtmp://relay:1935/live",
-                            "streamName": "backup",
+                            "output_url": "rtmp://relay:1935/live",
+                            "stream_name": "backup",
                         },
                     },
                 )
@@ -405,8 +405,8 @@ def test_rtmp_outbound_persists_across_restart(binary_path: Path, tmp_path: Path
                     {"outputName": "rtmp_outbound"},
                 )
                 settings = response["d"]["responseData"]["outputSettings"]
-                assert settings["outputUrl"] == "rtmp://relay:1935/live"
-                assert settings["streamName"] == "backup"
+                assert settings["output_url"] == "rtmp://relay:1935/live"
+                assert settings["stream_name"] == "backup"
                 await ws.close()
 
         asyncio.run(_get())
@@ -434,8 +434,8 @@ def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
                         "outputName": "sora",
                         "outputSettings": {
                             "soraSdkSettings": {
-                                "signalingUrls": ["wss://example.com/signaling"],
-                                "channelId": "test-ch",
+                                "signaling_urls": ["wss://example.com/signaling"],
+                                "channel_id": "test-ch",
                                 "metadata": {"key": "value"},
                             }
                         },
@@ -464,8 +464,8 @@ def test_sora_persists_across_restart(binary_path: Path, tmp_path: Path):
                 )
                 settings = response["d"]["responseData"]["outputSettings"]
                 sora = settings["soraSdkSettings"]
-                assert sora["signalingUrls"] == ["wss://example.com/signaling"]
-                assert sora["channelId"] == "test-ch"
+                assert sora["signaling_urls"] == ["wss://example.com/signaling"]
+                assert sora["channel_id"] == "test-ch"
                 await ws.close()
 
         asyncio.run(_get())
@@ -497,10 +497,10 @@ def test_hls_filesystem_persists_across_restart(binary_path: Path, tmp_path: Pat
                                 "type": "filesystem",
                                 "directory": hls_dir,
                             },
-                            "segmentDuration": 3.0,
-                            "maxRetainedSegments": 10,
+                            "segment_duration": 3.0,
+                            "max_retained_segments": 10,
                             "variants": [
-                                {"videoBitrate": 1500000, "audioBitrate": 96000}
+                                {"video_bitrate": 1500000, "audio_bitrate": 96000}
                             ],
                         },
                     },
@@ -529,9 +529,9 @@ def test_hls_filesystem_persists_across_restart(binary_path: Path, tmp_path: Pat
                 settings = response["d"]["responseData"]["outputSettings"]
                 assert settings["destination"]["type"] == "filesystem"
                 assert settings["destination"]["directory"] == hls_dir
-                assert settings["segmentDuration"] == 3.0
-                assert settings["maxRetainedSegments"] == 10
-                assert settings["variants"][0]["videoBitrate"] == 1500000
+                assert settings["segment_duration"] == 3.0
+                assert settings["max_retained_segments"] == 10
+                assert settings["variants"][0]["video_bitrate"] == 1500000
                 await ws.close()
 
         asyncio.run(_get())
@@ -565,12 +565,12 @@ def test_mpeg_dash_filesystem_persists_across_restart(
                                 "type": "filesystem",
                                 "directory": dash_dir,
                             },
-                            "segmentDuration": 4.0,
+                            "segment_duration": 4.0,
                             "variants": [
-                                {"videoBitrate": 3000000, "audioBitrate": 192000}
+                                {"video_bitrate": 3000000, "audio_bitrate": 192000}
                             ],
-                            "videoCodec": "H265",
-                            "audioCodec": "OPUS",
+                            "video_codec": "H265",
+                            "audio_codec": "OPUS",
                         },
                     },
                 )
@@ -598,10 +598,10 @@ def test_mpeg_dash_filesystem_persists_across_restart(
                 settings = response["d"]["responseData"]["outputSettings"]
                 assert settings["destination"]["type"] == "filesystem"
                 assert settings["destination"]["directory"] == dash_dir
-                assert settings["segmentDuration"] == 4.0
-                assert settings["variants"][0]["videoBitrate"] == 3000000
-                assert settings["videoCodec"] == "H265"
-                assert settings["audioCodec"] == "OPUS"
+                assert settings["segment_duration"] == 4.0
+                assert settings["variants"][0]["video_bitrate"] == 3000000
+                assert settings["video_codec"] == "H265"
+                assert settings["audio_codec"] == "OPUS"
                 await ws.close()
 
         asyncio.run(_get())
