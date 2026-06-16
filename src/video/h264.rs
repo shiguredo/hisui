@@ -163,6 +163,335 @@ pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>])
     result
 }
 
+// High 系プロファイル群（ITU-T H.264 (2017/06) 仕様 7.3.2.1.1 の `if (profile_idc == ...)` 条件節）
+// ベースラインとなる SPS の追加フィールド群（chroma_format_idc 以下）を読み出す必要があるプロファイル
+const H264_HIGH_PROFILES: [u8; 13] = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
+
+/// SPS NAL ユニットのバイト列から width / height を抽出する
+///
+/// 入力 `sps` は `H264AnnexBNalUnits` が返す `H264NalUnit.data` をそのまま渡す形式で、
+/// 先頭 1 バイトに NAL ヘッダ（forbidden_zero_bit + nal_ref_idc + nal_unit_type = 7）を含む。
+/// 内部で先頭 1 バイトをスキップしたうえで RBSP 抽出（emulation prevention byte 除去）を行い、
+/// ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 に従って Exp-Golomb で解像度を抽出する。
+pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> {
+    let rbsp = rbsp_from_sps_nalu(sps)?;
+    let mut reader = H264BitReader::new(&rbsp);
+
+    // profile_idc, constraint_set*_flag + reserved_zero_2bits, level_idc
+    let profile_idc = reader.read_u(8)? as u8;
+    let _constraint_and_reserved = reader.read_u(8)?;
+    let _level_idc = reader.read_u(8)?;
+    let _seq_parameter_set_id = reader.read_ue()?;
+
+    // High 系プロファイルの追加フィールド群
+    let chroma_format_idc;
+    let separate_colour_plane_flag;
+    if H264_HIGH_PROFILES.contains(&profile_idc) {
+        chroma_format_idc = reader.read_ue()?;
+        if chroma_format_idc == 3 {
+            separate_colour_plane_flag = reader.read_u(1)?;
+        } else {
+            separate_colour_plane_flag = 0;
+        }
+        let _bit_depth_luma_minus8 = reader.read_ue()?;
+        let _bit_depth_chroma_minus8 = reader.read_ue()?;
+        let _qpprime_y_zero_transform_bypass_flag = reader.read_u(1)?;
+        let seq_scaling_matrix_present_flag = reader.read_u(1)?;
+        if seq_scaling_matrix_present_flag == 1 {
+            // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個の scaling_list を読み飛ばす
+            let scaling_list_count = if chroma_format_idc == 3 { 12 } else { 8 };
+            for i in 0..scaling_list_count {
+                let seq_scaling_list_present_flag = reader.read_u(1)?;
+                if seq_scaling_list_present_flag == 1 {
+                    // 先頭 6 個は 4x4 (size 16)、残りは 8x8 (size 64)
+                    let size = if i < 6 { 16 } else { 64 };
+                    reader.skip_scaling_list(size)?;
+                }
+            }
+        }
+    } else {
+        // Baseline / Main / Extended プロファイルでは chroma_format_idc は SPS に含まれないため
+        // 仕様 7.4.2.1.1 のデフォルトとして 4:2:0 (chroma_format_idc = 1) を用いる
+        chroma_format_idc = 1;
+        separate_colour_plane_flag = 0;
+    }
+
+    let _log2_max_frame_num_minus4 = reader.read_ue()?;
+    let pic_order_cnt_type = reader.read_ue()?;
+    match pic_order_cnt_type {
+        0 => {
+            let _log2_max_pic_order_cnt_lsb_minus4 = reader.read_ue()?;
+        }
+        1 => {
+            let _delta_pic_order_always_zero_flag = reader.read_u(1)?;
+            let _offset_for_non_ref_pic = reader.read_se()?;
+            let _offset_for_top_to_bottom_field = reader.read_se()?;
+            let num_ref_frames_in_pic_order_cnt_cycle = reader.read_ue()?;
+            for _ in 0..num_ref_frames_in_pic_order_cnt_cycle {
+                let _offset_for_ref_frame = reader.read_se()?;
+            }
+        }
+        _ => {
+            // pic_order_cnt_type == 2 では追加読み出しなし
+            // それ以外の値は仕様外だが、後続のフィールド読み出しはそのまま続行する
+        }
+    }
+
+    let _max_num_ref_frames = reader.read_ue()?;
+    let _gaps_in_frame_num_value_allowed_flag = reader.read_u(1)?;
+    let pic_width_in_mbs_minus1 = reader.read_ue()?;
+    let pic_height_in_map_units_minus1 = reader.read_ue()?;
+    let frame_mbs_only_flag = reader.read_u(1)?;
+    if frame_mbs_only_flag == 0 {
+        // mb_adaptive_frame_field_flag は本実装では使わないが仕様上は読み出す必要がある
+        // ただし pic_width / pic_height 算出には影響しないため省略する
+    }
+    let _direct_8x8_inference_flag = reader.read_u(1)?;
+    let frame_cropping_flag = reader.read_u(1)?;
+
+    // chroma_array_type の決定（仕様 7.4.2.1.1）
+    let chroma_array_type = if separate_colour_plane_flag == 1 {
+        0
+    } else {
+        chroma_format_idc
+    };
+
+    // CropUnitX / CropUnitY の決定（仕様 6.2 / 7.4.2.1.1）
+    let frame_mbs_factor = 2 - frame_mbs_only_flag as usize;
+    let (crop_unit_x, crop_unit_y) = match chroma_array_type {
+        0 => (1usize, frame_mbs_factor),
+        1 => (2, 2 * frame_mbs_factor),
+        2 => (2, frame_mbs_factor),
+        3 => (1, frame_mbs_factor),
+        _ => {
+            return Err(crate::Error::new(format!(
+                "invalid H.264 SPS: unexpected chroma_array_type {chroma_array_type}"
+            )));
+        }
+    };
+
+    // raw_width / raw_height の算出（usize に変換してから checked_* で組み立てる）
+    let raw_width = (pic_width_in_mbs_minus1 as usize)
+        .checked_add(1)
+        .and_then(|v| v.checked_mul(16))
+        .ok_or_else(|| {
+            crate::Error::new("invalid H.264 SPS: pic_width overflow during raw_width calculation")
+        })?;
+    let raw_height = (pic_height_in_map_units_minus1 as usize)
+        .checked_add(1)
+        .and_then(|v| v.checked_mul(16))
+        .and_then(|v| v.checked_mul(2 - frame_mbs_only_flag as usize))
+        .ok_or_else(|| {
+            crate::Error::new(
+                "invalid H.264 SPS: pic_height overflow during raw_height calculation",
+            )
+        })?;
+
+    let (width, height) = if frame_cropping_flag == 1 {
+        let frame_crop_left_offset = reader.read_ue()? as usize;
+        let frame_crop_right_offset = reader.read_ue()? as usize;
+        let frame_crop_top_offset = reader.read_ue()? as usize;
+        let frame_crop_bottom_offset = reader.read_ue()? as usize;
+
+        let crop_x = frame_crop_left_offset
+            .checked_add(frame_crop_right_offset)
+            .and_then(|v| v.checked_mul(crop_unit_x))
+            .ok_or_else(|| {
+                crate::Error::new("invalid H.264 SPS: crop_x overflow during width calculation")
+            })?;
+        let crop_y = frame_crop_top_offset
+            .checked_add(frame_crop_bottom_offset)
+            .and_then(|v| v.checked_mul(crop_unit_y))
+            .ok_or_else(|| {
+                crate::Error::new("invalid H.264 SPS: crop_y overflow during height calculation")
+            })?;
+
+        let width = raw_width.checked_sub(crop_x).ok_or_else(|| {
+            crate::Error::new("invalid H.264 SPS: crop_x exceeds raw_width (underflow)")
+        })?;
+        let height = raw_height.checked_sub(crop_y).ok_or_else(|| {
+            crate::Error::new("invalid H.264 SPS: crop_y exceeds raw_height (underflow)")
+        })?;
+        (width, height)
+    } else {
+        (raw_width, raw_height)
+    };
+
+    if width == 0 || height == 0 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: zero dimensions after cropping (width={width}, height={height})"
+        )));
+    }
+
+    Ok((width, height))
+}
+
+/// SPS NAL ユニットから RBSP を抽出する
+///
+/// 先頭の NAL ヘッダ 1 バイトをスキップし、payload 内の emulation prevention byte
+/// （`0x00 0x00 0x03` パターン）を除去した RBSP バイト列を返す。
+fn rbsp_from_sps_nalu(nalu: &[u8]) -> crate::Result<Vec<u8>> {
+    if nalu.is_empty() {
+        return Err(crate::Error::new("invalid H.264 SPS: empty NAL unit"));
+    }
+    debug_assert_eq!(
+        nalu[0] & 0x1F,
+        H264_NALU_TYPE_SPS,
+        "extract_dimensions_from_sps was called with non-SPS NAL unit"
+    );
+    let payload = &nalu[1..];
+    let mut rbsp = Vec::with_capacity(payload.len());
+    let mut i = 0;
+    while i < payload.len() {
+        // `0x00 0x00 0x03` パターンを検出したら `0x03` を除去する
+        if i + 2 < payload.len()
+            && payload[i] == 0x00
+            && payload[i + 1] == 0x00
+            && payload[i + 2] == 0x03
+        {
+            rbsp.push(0x00);
+            rbsp.push(0x00);
+            i += 3;
+        } else {
+            rbsp.push(payload[i]);
+            i += 1;
+        }
+    }
+    Ok(rbsp)
+}
+
+/// バイト列を 1 ビット単位で読み出すリーダー
+///
+/// 全 read メソッド（`read_u` / `read_ue` / `read_se`）はバッファ末尾を超える読み出しで Err を返す。
+/// パニックや無限ループは起こらないため、proptest のクラッシュフリー保証はこの構造で担保される。
+struct H264BitReader<'a> {
+    data: &'a [u8],
+    // バイト単位の現在位置
+    byte_pos: usize,
+    // 現バイト内のビット位置（0 = MSB, 7 = LSB）
+    bit_pos: u8,
+}
+
+impl<'a> H264BitReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self {
+            data,
+            byte_pos: 0,
+            bit_pos: 0,
+        }
+    }
+
+    /// n ビット符号なし整数を読み出す（仕様の u(n) に相当）
+    ///
+    /// n は最大 32 まで対応する。バッファ末尾を超える場合は Err を返す。
+    fn read_u(&mut self, n: usize) -> crate::Result<u32> {
+        if n > 32 {
+            return Err(crate::Error::new(format!(
+                "invalid H.264 SPS: read_u with n > 32 (n={n})"
+            )));
+        }
+        let mut value: u32 = 0;
+        for _ in 0..n {
+            value = (value << 1) | self.read_bit()? as u32;
+        }
+        Ok(value)
+    }
+
+    /// 1 ビットを読み出す（内部ヘルパー）
+    fn read_bit(&mut self) -> crate::Result<u8> {
+        if self.byte_pos >= self.data.len() {
+            return Err(crate::Error::new(
+                "invalid H.264 SPS: bit reader exhausted before requested read",
+            ));
+        }
+        let bit = (self.data[self.byte_pos] >> (7 - self.bit_pos)) & 1;
+        self.bit_pos += 1;
+        if self.bit_pos == 8 {
+            self.bit_pos = 0;
+            self.byte_pos += 1;
+        }
+        Ok(bit)
+    }
+
+    /// 符号なし Exp-Golomb 復号（仕様 9.1 の ue(v) に相当）
+    ///
+    /// 連続する 0 ビットの数を leading_zeros として数え、続く 1 ビットを読み、
+    /// その後 leading_zeros 個のビットを読んで `(1 << leading_zeros) - 1 + bits` を返す。
+    fn read_ue(&mut self) -> crate::Result<u32> {
+        let mut leading_zeros: u32 = 0;
+        loop {
+            let bit = self.read_bit()?;
+            if bit == 1 {
+                break;
+            }
+            leading_zeros += 1;
+            // leading_zeros が 32 を超えると u32 の範囲外になるため Err
+            if leading_zeros > 31 {
+                return Err(crate::Error::new(
+                    "invalid H.264 SPS: ue(v) leading_zeros exceeds 31 (overflow)",
+                ));
+            }
+        }
+        if leading_zeros == 0 {
+            return Ok(0);
+        }
+        let suffix = self.read_u(leading_zeros as usize)?;
+        // (1 << leading_zeros) - 1 + suffix が u32 にちょうど収まる範囲
+        // leading_zeros == 31 のとき、(1 << 31) - 1 + suffix は最大 (2^31 - 1) + (2^31 - 1) = 2^32 - 2
+        let prefix = (1u32 << leading_zeros).wrapping_sub(1);
+        prefix
+            .checked_add(suffix)
+            .ok_or_else(|| crate::Error::new("invalid H.264 SPS: ue(v) value overflow on combine"))
+    }
+
+    /// 符号付き Exp-Golomb 復号（仕様 9.1.1 の se(v) に相当）
+    ///
+    /// 内部で ue(v) を読み、code_num が偶数なら -code_num / 2、奇数なら (code_num + 1) / 2 を返す。
+    fn read_se(&mut self) -> crate::Result<i32> {
+        let code_num = self.read_ue()?;
+        if code_num % 2 == 1 {
+            let value = code_num.div_ceil(2);
+            i32::try_from(value)
+                .map_err(|_| crate::Error::new("invalid H.264 SPS: se(v) positive value overflow"))
+        } else {
+            let value = code_num / 2;
+            let negated = i64::from(value)
+                .checked_neg()
+                .ok_or_else(|| crate::Error::new("invalid H.264 SPS: se(v) negation overflow"))?;
+            i32::try_from(negated)
+                .map_err(|_| crate::Error::new("invalid H.264 SPS: se(v) negative value overflow"))
+        }
+    }
+
+    /// scaling_list() サブルーチンの読み飛ばし（仕様 7.3.2.1.1.1）
+    ///
+    /// 要素ごとに delta_scale (se(v)) を読む。next_scale が 0 になると以降は読まずに進める。
+    /// 実値は本実装では使わず、ビット位置を進めるだけ。
+    fn skip_scaling_list(&mut self, size: usize) -> crate::Result<()> {
+        let mut last_scale: i32 = 8;
+        let mut next_scale: i32 = 8;
+        for _ in 0..size {
+            if next_scale != 0 {
+                let delta_scale = self.read_se()?;
+                // 仕様 7.3.2.1.1.1: next_scale = (last_scale + delta_scale + 256) % 256
+                let sum = last_scale
+                    .checked_add(delta_scale)
+                    .and_then(|v| v.checked_add(256))
+                    .ok_or_else(|| {
+                        crate::Error::new(
+                            "invalid H.264 SPS: scaling_list next_scale overflow during update",
+                        )
+                    })?;
+                next_scale = sum.rem_euclid(256);
+            }
+            if next_scale != 0 {
+                last_scale = next_scale;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Annex.B 形式の H.264 を RTMP 用の AVC パケット形式（サイズ付き NALU）に変換
 pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec<u8>> {
     let mut result = Vec::new();
@@ -207,4 +536,170 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec
     }
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 以下の SPS バイト列は ffmpeg + libx264 で生成した実機 SPS を抽出したもの。
+    // 生成コマンドは `ffmpeg -f lavfi -i testsrc=size=WIDTHxHEIGHT:rate=30 -pix_fmt yuv420p
+    // -c:v libx264 -profile:v baseline -frames:v 1 -f h264 out.h264` で、
+    // 先頭の SPS NAL を 2 個目の start code 直前まで切り出した。
+
+    // Baseline プロファイル + 320x240
+    const SPS_320X240: [u8; 24] = [
+        0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00, 0x10,
+        0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80,
+    ];
+
+    // Baseline プロファイル + 640x480
+    const SPS_640X480: [u8; 24] = [
+        0x67, 0x42, 0xc0, 0x1e, 0xd9, 0x00, 0xa0, 0x3d, 0xb0, 0x11, 0x00, 0x00, 0x03, 0x00, 0x01,
+        0x00, 0x00, 0x03, 0x00, 0x3c, 0x0f, 0x16, 0x2e, 0x48,
+    ];
+
+    // Baseline プロファイル + 1280x720
+    const SPS_1280X720: [u8; 25] = [
+        0x67, 0x42, 0xc0, 0x1f, 0xd9, 0x00, 0x50, 0x05, 0xbb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00,
+        0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x83, 0x24, 0x80,
+    ];
+
+    // Baseline プロファイル + 1920x1080
+    const SPS_1920X1080: [u8; 26] = [
+        0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02, 0x27, 0xe5, 0xc0, 0x44, 0x00, 0x00, 0x03,
+        0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,
+    ];
+
+    #[test]
+    fn extract_dimensions_from_baseline_320x240() {
+        // 320x240 の SPS を渡したときに正しい解像度が抽出されること
+        let (width, height) = extract_dimensions_from_sps(&SPS_320X240).expect("SPS パース成功");
+        assert_eq!((width, height), (320, 240));
+    }
+
+    #[test]
+    fn extract_dimensions_from_baseline_640x480() {
+        // 640x480 の SPS を渡したときに正しい解像度が抽出されること
+        let (width, height) = extract_dimensions_from_sps(&SPS_640X480).expect("SPS パース成功");
+        assert_eq!((width, height), (640, 480));
+    }
+
+    #[test]
+    fn extract_dimensions_from_baseline_1280x720() {
+        // 1280x720 の SPS を渡したときに正しい解像度が抽出されること
+        let (width, height) = extract_dimensions_from_sps(&SPS_1280X720).expect("SPS パース成功");
+        assert_eq!((width, height), (1280, 720));
+    }
+
+    #[test]
+    fn extract_dimensions_from_baseline_1920x1080() {
+        // 1920x1080 の SPS を渡したときに正しい解像度が抽出されること
+        let (width, height) = extract_dimensions_from_sps(&SPS_1920X1080).expect("SPS パース成功");
+        assert_eq!((width, height), (1920, 1080));
+    }
+
+    #[test]
+    fn extract_dimensions_fails_on_truncated_sps() {
+        // SPS 末尾でビット切れになる入力では Err を返すこと
+        let truncated = &SPS_1920X1080[..5]; // NAL ヘッダ + 数バイトだけ残す
+        let result = extract_dimensions_from_sps(truncated);
+        assert!(
+            result.is_err(),
+            "短すぎる SPS は Err を返すはず: {result:?}"
+        );
+    }
+
+    #[test]
+    fn rbsp_from_sps_nalu_removes_emulation_prevention_bytes() {
+        // 0x00 0x00 0x03 の 3 バイトが 0x00 0x00 に縮約されることを直接検証する。
+        // 1920x1080 の SPS には emulation prevention byte が 2 箇所含まれる
+        let rbsp = rbsp_from_sps_nalu(&SPS_1920X1080).expect("RBSP 抽出成功");
+        // 入力（NAL ヘッダ 1 バイト + payload 25 バイト）から emulation prevention byte 2 個分が削れる
+        assert_eq!(rbsp.len(), SPS_1920X1080.len() - 1 - 2);
+        // RBSP には連続する 3 バイト `0x00 0x00 0x03` が残らない
+        for window in rbsp.windows(3) {
+            assert!(
+                !(window[0] == 0x00 && window[1] == 0x00 && window[2] == 0x03),
+                "RBSP に emulation prevention byte が残っている: {window:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rbsp_from_sps_nalu_rejects_empty_input() {
+        // 空入力では Err を返すこと
+        let result = rbsp_from_sps_nalu(&[]);
+        assert!(result.is_err(), "空 NAL は Err を返すはず: {result:?}");
+    }
+
+    #[test]
+    fn read_ue_decodes_specification_examples() {
+        // 仕様 9.1 表 9-1 の代表的な値を網羅的に検証する
+        // codeNum = 0 → "1"
+        // codeNum = 1 → "010"
+        // codeNum = 2 → "011"
+        // codeNum = 3 → "00100"
+        // codeNum = 4 → "00101"
+        // codeNum = 5 → "00110"
+        // codeNum = 6 → "00111"
+        let data = [
+            // "1 010 011 00100 00101 00110 00111" を 8 bit 単位に詰める
+            // MSB から bit 0..27 を順に並べると次の 4 バイトになる:
+            //   1010 0110 = 0xa6
+            //   0100 0010 = 0x42
+            //   1001 1000 = 0x98
+            //   1110 0000 = 0xe0（最後の 3 bit は "111"、残り 5 bit は 0 padding）
+            0xa6, 0x42, 0x98, 0xe0,
+        ];
+        let mut reader = H264BitReader::new(&data);
+        let expected = [0u32, 1, 2, 3, 4, 5, 6];
+        for &want in &expected {
+            let got = reader.read_ue().expect("ue(v) 読み出し成功");
+            assert_eq!(got, want, "ue(v) のデコード結果が期待値と一致すること");
+        }
+    }
+
+    #[test]
+    fn read_se_decodes_specification_examples() {
+        // 仕様 9.1.1 表 9-3 の代表的な値:
+        // ue codeNum 0 → se 0
+        // ue codeNum 1 → se 1
+        // ue codeNum 2 → se -1
+        // ue codeNum 3 → se 2
+        // ue codeNum 4 → se -2
+        // ue を順に並べたバイト列を使う
+        // ue: 1, 010, 011, 00100, 00101 = "1 010 011 00100 00101" を 8 bit 単位
+        // 1 0 1 0 0 1 1 0 = 0xa6
+        // 0 1 0 0 0 0 1 0 = 0x42
+        // 1 ... 0 埋め → 0x80
+        let data = [0xa6, 0x42, 0x80];
+        let mut reader = H264BitReader::new(&data);
+        let expected = [0i32, 1, -1, 2, -2];
+        for &want in &expected {
+            let got = reader.read_se().expect("se(v) 読み出し成功");
+            assert_eq!(got, want, "se(v) のデコード結果が期待値と一致すること");
+        }
+    }
+
+    #[test]
+    fn read_u_fails_on_exhausted_buffer() {
+        // バッファ末尾を超えた読み出しで Err を返すこと
+        let data = [0xff];
+        let mut reader = H264BitReader::new(&data);
+        // 8 bit 読めるが、9 bit 目で Err
+        assert!(reader.read_u(8).is_ok());
+        assert!(
+            reader.read_u(1).is_err(),
+            "exhausted buffer で Err を返すはず"
+        );
+    }
+
+    #[test]
+    fn read_u_rejects_too_large_n() {
+        // read_u(n) で n > 32 は Err を返すこと
+        let data = [0xff; 8];
+        let mut reader = H264BitReader::new(&data);
+        assert!(reader.read_u(33).is_err(), "n > 32 は Err を返すはず");
+    }
 }

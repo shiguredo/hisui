@@ -735,6 +735,9 @@ struct SrtTsDemuxer {
     /// SRT Annex-B 入力では IDR の inline NAL ユニットからのみ SPS / PPS を取得する設計のため、
     /// 確定までは `None` で、確定までの全フレームは下流に流さない。
     last_video_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
+    /// 直近の SPS から抽出した解像度を保持し、後続の Annex-B フレームの `VideoFrame.size` に反映する。
+    /// `last_video_sample_entry` と同期して IDR 検出時に更新される。
+    last_video_size: Option<crate::video::VideoFrameSize>,
 }
 
 impl SrtTsDemuxer {
@@ -760,6 +763,7 @@ impl SrtTsDemuxer {
             last_aac_config_key: None,
             last_aac_sample_entry: None,
             last_video_sample_entry: None,
+            last_video_size: None,
         })
     }
 
@@ -917,25 +921,35 @@ impl SrtTsDemuxer {
             .ok_or_else(|| crate::Error::new("missing PTS in H264 PES"))?;
         let dts = pending.header.dts.unwrap_or(pts);
 
-        // IDR の有無を判定する。
+        // IDR 判定と SPS NAL 収集を同じループで実施する。
+        // - IDR 検出時は break せず最後まで走査して SPS NAL も同時に収集する。
+        // - 複数 SPS が含まれる場合は最初に出現した SPS を採用する（仕様準拠の最初の SPS が解像度の根拠）。
+        // - PES 走査を二度行わずに済む。
         let mut keyframe = false;
+        let mut sps_nal: Option<Vec<u8>> = None;
         for nalu in crate::video::h264::H264AnnexBNalUnits::new(&pending.data) {
             let nalu = nalu?;
-            if nalu.ty == crate::video::h264::H264_NALU_TYPE_IDR {
-                keyframe = true;
-                break;
+            match nalu.ty {
+                crate::video::h264::H264_NALU_TYPE_IDR => keyframe = true,
+                crate::video::h264::H264_NALU_TYPE_SPS if sps_nal.is_none() => {
+                    sps_nal = Some(nalu.data.to_vec());
+                }
+                _ => {}
             }
         }
 
         if keyframe {
-            // width / height は 0 で渡す。
-            // `h264_sample_entry_from_annexb` は引数をそのまま埋め込むだけで SPS パースはしないため、
-            // Annex-B から実値を取り出すには呼び出し側で SPS Exp-Golomb パースを実装する必要がある（将来の改善余地）。
-            // SPS / PPS 不在 IDR や破損 NAL は同関数が Err を返す。
-            // 正常な H.264 ストリームは IDR に SPS / PPS を inline するため、
-            // Err はエンコーダ側の異常とみなしてそのまま伝播し、接続を打ち切る。
-            let entry = crate::video::h264::h264_sample_entry_from_annexb(0, 0, &pending.data)?;
+            // IDR 内 inline SPS から解像度を抽出し、sample_entry と VideoFrame.size の両方に反映する。
+            // SPS / PPS 不在 IDR や破損 NAL、SPS パース失敗は Err を返して接続を打ち切る (fail-fast)。
+            // 正常な H.264 ストリームは IDR に SPS / PPS を inline するため、Err はエンコーダ側の異常とみなす。
+            let sps_nal = sps_nal
+                .as_deref()
+                .ok_or_else(|| crate::Error::new("missing H.264 SPS in IDR PES"))?;
+            let (width, height) = crate::video::h264::extract_dimensions_from_sps(sps_nal)?;
+            let entry =
+                crate::video::h264::h264_sample_entry_from_annexb(width, height, &pending.data)?;
             self.last_video_sample_entry = Some(crate::sample_entry::SharedSampleEntry::new(entry));
+            self.last_video_size = Some(crate::video::VideoFrameSize::new(width, height)?);
         }
 
         // 初回の SPS / PPS 含有 IDR が来るまでは P フレーム等を破棄する。
@@ -949,7 +963,7 @@ impl SrtTsDemuxer {
             data: pending.data,
             format: crate::video::VideoFormat::H264AnnexB,
             keyframe,
-            size: None,
+            size: self.last_video_size,
             timestamp,
             sample_entry: self.last_video_sample_entry.clone(),
         })))
@@ -1318,15 +1332,27 @@ mod tests {
         )
     }
 
-    // テスト用の最小限の NAL ユニット定数。先頭 4 バイトは start code prefix。
+    // テスト用の NAL ユニット定数。先頭 4 バイトは start code prefix。
     // 5 バイト目が NAL header で、上位 1 bit が forbidden_zero_bit、下位 5 bit が nal_unit_type。
-    // payload バイト列は任意だが、隣接 NAL の誤分割を避けるため `0x00, 0x00, 0x01` シーケンスを含めない。
+    // payload バイト列は隣接 NAL の誤分割を避けるため `0x00, 0x00, 0x01` シーケンスを含めない。
+    //
+    // SPS は ffmpeg + libx264 で生成した実機 SPS を埋め込んでいる:
+    //   ffmpeg -f lavfi -i testsrc=size=WIDTHxHEIGHT:rate=30 -pix_fmt yuv420p \
+    //          -c:v libx264 -profile:v baseline -frames:v 1 -f h264 out.h264
+    // の出力から先頭の SPS NAL を切り出した（解像度抽出までビット位置が届く完全 SPS）。
 
-    // nal_unit_type=7（SPS）。
-    const SPS_INITIAL: [u8; 9] = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xab];
+    // nal_unit_type=7（SPS）。解像度 1920x1080 (Baseline)。`extract_dimensions_from_sps` が (1920, 1080) を返す。
+    const SPS_INITIAL: [u8; 30] = [
+        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02, 0x27, 0xe5, 0xc0,
+        0x44, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,
+    ];
 
-    // SPS_INITIAL の payload 末尾 1 バイトのみ差し替えたバリアント。mid-stream で SPS が変化したシナリオの検証用。
-    const SPS_UPDATED: [u8; 9] = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xac];
+    // SPS_INITIAL とは異なる解像度（1280x720、Baseline）の SPS。mid-stream で SPS が変化したシナリオの検証用。
+    // `extract_dimensions_from_sps` が (1280, 720) を返す。
+    const SPS_UPDATED: [u8; 29] = [
+        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1f, 0xd9, 0x00, 0x50, 0x05, 0xbb, 0x01, 0x10,
+        0x00, 0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x83, 0x24, 0x80,
+    ];
 
     // nal_unit_type=8（PPS）。
     const PPS: [u8; 8] = [0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x06, 0xe2];
@@ -1446,6 +1472,86 @@ mod tests {
         let result =
             demuxer.build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264));
         assert!(result.is_err(), "SPS 不在 IDR は Err を返すこと");
+    }
+
+    // build_video_sample が返す sample_entry の `Avc1Box.visual.width / .height` と、
+    // VideoFrame.size の両方が SPS 由来の実値（1920x1080 / 1280x720）になっていることを直接検証する。
+    // `extract_dimensions_from_sps` の出力が IDR ごとに正しく sample_entry と VideoFrame.size に流れることの回帰防止。
+    #[test]
+    fn srt_h264_sample_entry_and_size_reflect_sps_dimensions() -> crate::Result<()> {
+        use shiguredo_mp4::boxes::SampleEntry;
+
+        let mut demuxer = SrtTsDemuxer::new()?;
+
+        // 初期 IDR: SPS_INITIAL から 1920x1080 を抽出して埋め込む
+        let pes1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
+        let samples1 = demuxer
+            .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
+        let sample1 = samples1.expect("SPS_INITIAL 含有 IDR でフレームが流れること");
+        let TsSample::Video(frame1) = sample1 else {
+            panic!("映像サンプルとして取り出せること");
+        };
+        let entry1 = frame1
+            .sample_entry
+            .clone()
+            .expect("初期 IDR に sample_entry が載っていること");
+        let SampleEntry::Avc1(avc1) = entry1.get() else {
+            panic!("AVC1 サンプルエントリーであること");
+        };
+        assert_eq!(
+            (avc1.visual.width, avc1.visual.height),
+            (1920, 1080),
+            "Avc1Box.visual に SPS_INITIAL 由来の解像度 1920x1080 が埋め込まれていること"
+        );
+        assert_eq!(
+            frame1.size,
+            Some(crate::video::VideoFrameSize::new(1920, 1080)?),
+            "VideoFrame.size に SPS_INITIAL 由来の解像度 1920x1080 が反映されていること"
+        );
+
+        // 後続の P フレームも同じ解像度を引き継いで size に反映されること
+        let pes_p = P_FRAME.to_vec();
+        let samples_p = demuxer.build_video_sample(
+            make_h264_pending_pes(pes_p, 103_000),
+            Some(StreamType::H264),
+        )?;
+        let sample_p = samples_p.expect("P フレームが流れること");
+        let TsSample::Video(frame_p) = sample_p else {
+            panic!("映像サンプルとして取り出せること");
+        };
+        assert_eq!(
+            frame_p.size,
+            Some(crate::video::VideoFrameSize::new(1920, 1080)?),
+            "P フレームにも初期 IDR 由来の解像度 1920x1080 が引き継がれていること"
+        );
+
+        // mid-stream で SPS_UPDATED に切り替わると Avc1Box / VideoFrame.size の両方が更新されること
+        let pes2 = [&SPS_UPDATED[..], &PPS, &IDR].concat();
+        let samples2 = demuxer
+            .build_video_sample(make_h264_pending_pes(pes2, 106_000), Some(StreamType::H264))?;
+        let sample2 = samples2.expect("SPS_UPDATED 含有 IDR でフレームが流れること");
+        let TsSample::Video(frame2) = sample2 else {
+            panic!("映像サンプルとして取り出せること");
+        };
+        let entry2 = frame2
+            .sample_entry
+            .clone()
+            .expect("新 IDR に sample_entry が載っていること");
+        let SampleEntry::Avc1(avc1_2) = entry2.get() else {
+            panic!("AVC1 サンプルエントリーであること");
+        };
+        assert_eq!(
+            (avc1_2.visual.width, avc1_2.visual.height),
+            (1280, 720),
+            "Avc1Box.visual に SPS_UPDATED 由来の解像度 1280x720 が更新されていること"
+        );
+        assert_eq!(
+            frame2.size,
+            Some(crate::video::VideoFrameSize::new(1280, 720)?),
+            "VideoFrame.size にも SPS_UPDATED 由来の解像度 1280x720 が更新されていること"
+        );
+
+        Ok(())
     }
 
     // mid-stream で SPS / PPS が含有 IDR と一緒に更新された場合の挙動を検証する。
