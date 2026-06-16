@@ -247,9 +247,7 @@ struct VideoTrackConfig {
     control_url: String,
     payload_type: u8,
     clock_rate: u32,
-    // SDP `sprop-parameter-sets` から構築したサンプルエントリー。
-    // SDP に `sprop-parameter-sets` が含まれない場合や fmtp 自体が不在の場合は `None` で、
-    // depacketizer 出力の IDR 内 inline SPS / PPS から確定する経路に委ねる。
+    /// SDP `sprop-parameter-sets` から構築したサンプルエントリー（不在時は `None`）。
     sample_entry: Option<SampleEntry>,
 }
 
@@ -307,9 +305,7 @@ struct VideoRtpReceiver {
     payload_type: u8,
     timestamp_mapper: TimestampMapper,
     depacketizer: H264RtpDepacketizer,
-    // 最後に確定したサンプルエントリー。
-    // SDP `sprop-parameter-sets` で初期化されるか、IDR 内 inline SPS / PPS で確定する。
-    // `Some` 確定までの間に来たフレームは下流に流さない（ゲート）。
+    /// 最後に確定したサンプルエントリー。`None` の間はフレームを下流に流さない（ゲート）。
     last_sample_entry: Option<SharedSampleEntry>,
 }
 
@@ -455,8 +451,6 @@ impl RtspSessionRunner {
                 .and_then(|value| parse_interleaved_channel(value).ok())
                 .unwrap_or(rtp_channel);
 
-            // SDP 由来のサンプルエントリーがあれば `SharedSampleEntry` でラップして初期値に置く。
-            // 不在の場合は inline SPS / PPS 含有 IDR で確定するまで `None` のまま。
             let last_sample_entry = video.sample_entry.map(SharedSampleEntry::new);
 
             self.video_receiver = Some(VideoRtpReceiver {
@@ -645,13 +639,10 @@ impl RtspSessionRunner {
                     .timestamp_mapper
                     .map(u64::from(frame.rtp_timestamp));
 
-                // IDR + SPS + PPS の 3 条件が揃った frame があれば sample_entry を更新する。
-                // NAL 走査 Err および 3 条件揃った IDR でのパース失敗は fail-fast で接続を打ち切る。
                 apply_video_frame_sample_entry(video_receiver, &frame)
                     .map_err(SessionError::Fatal)?;
 
-                // sample_entry が未確定の間は frame を下流に流さない（破棄）。
-                // 破棄 frame は stats にもカウントしない（既存挙動と同じ意味論）。
+                // sample_entry 未確定の間は破棄する（stats にもカウントしない）。
                 let Some(sample_entry) = video_receiver.last_sample_entry.clone() else {
                     continue;
                 };
@@ -1039,13 +1030,13 @@ impl H264RtpDepacketizer {
     }
 }
 
-// depacketizer 出力 frame の NAL を走査し、IDR + SPS + PPS の 3 条件が揃った場合のみ
-// サンプルエントリーを構築して `receiver.last_sample_entry` を上書きする。
-//
-// 3 条件揃わない IDR（SDP `sprop-parameter-sets` で初期確定済みの一般的な RTSP カメラの
-// mid-stream IDR を想定）は更新試行をスキップし `Ok(())` を返す。
-// NAL 走査自身の Err（start code 不在 / 空 NAL / forbidden_zero_bit 設定）と、
-// 3 条件揃った IDR で `h264_sample_entry_from_annexb` がパース失敗した場合は `Err` を伝播する。
+/// depacketizer 出力 frame の NAL を走査し、IDR + SPS + PPS の 3 条件が揃った場合のみ
+/// サンプルエントリーを構築して `receiver.last_sample_entry` を上書きする。
+///
+/// 3 条件不揃いの IDR（SDP `sprop-parameter-sets` で初期確定済みの RTSP カメラが
+/// mid-stream で素の VCL NAL のみを送る場合を想定）は更新スキップで `Ok(())` を返す。
+/// NAL 走査自身の Err はそのまま `Err` で伝播し、呼び出し側で `SessionError::Fatal` に
+/// 変換されて RTSP 接続が打ち切られる。
 fn apply_video_frame_sample_entry(
     receiver: &mut VideoRtpReceiver,
     frame: &DepacketizedVideoFrame,
@@ -1329,9 +1320,6 @@ fn select_video_track(
         if let Some((encoding, clock_rate)) = find_rtpmap(&media.attributes, payload_type)
             && encoding.eq_ignore_ascii_case("H264")
         {
-            // SDP fmtp 行から `sprop-parameter-sets` を抽出してサンプルエントリーを構築する。
-            // RFC 6184 §8.2.1 で `sprop-parameter-sets` は MAY なので、不在は許容して
-            // inline SPS / PPS による代替経路（`apply_video_frame_sample_entry`）に委ねる。
             let sample_entry = extract_sample_entry_from_sprop(&media.attributes, payload_type)?;
             return Ok(Some(VideoTrackConfig {
                 control_url,
@@ -1345,12 +1333,14 @@ fn select_video_track(
     Ok(None)
 }
 
-// SDP fmtp 行から `sprop-parameter-sets` を抽出して、Annex-B 形式に組み立てて
-// `h264_sample_entry_from_annexb` でサンプルエントリーを構築する。
-//
-// 戻り値:
-// - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみの場合は `Ok(None)`
-// - Base64 デコード失敗または `h264_sample_entry_from_annexb` の Err は `crate::Error` として伝播
+/// SDP fmtp 行から `sprop-parameter-sets` (RFC 6184 §8.2.1) を抽出して、Annex-B 形式に
+/// 組み立てて `h264_sample_entry_from_annexb` でサンプルエントリーを構築する。
+///
+/// 戻り値:
+/// - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみの場合は `Ok(None)`
+///   （`sprop-parameter-sets` は MAY なので不在は許容し、IDR 内 inline SPS / PPS による
+///   代替経路 (`apply_video_frame_sample_entry`) に委ねる）
+/// - Base64 デコード失敗または `h264_sample_entry_from_annexb` の Err は `crate::Error` として伝播
 fn extract_sample_entry_from_sprop(
     attributes: &[SdpAttribute],
     payload_type: u8,
@@ -1366,7 +1356,6 @@ fn extract_sample_entry_from_sprop(
         return Ok(None);
     }
 
-    // `,` 区切りで複数の NAL ユニットを含みうる。trim 後に空の要素はスキップする。
     let mut annexb: Vec<u8> = Vec::new();
     for raw_entry in sprop_value.split(',') {
         let trimmed = raw_entry.trim();
@@ -1380,12 +1369,10 @@ fn extract_sample_entry_from_sprop(
     }
 
     if annexb.is_empty() {
-        // 空要素しか含まれていなかった場合は inline 経路に委ねる。
         return Ok(None);
     }
 
     // width / height は 0 で構築する。RTMP / openh264 / SRT 経路と同方針。
-    // SPS 内 Exp-Golomb 解像度抽出は別 issue。
     let entry = crate::video::h264::h264_sample_entry_from_annexb(0, 0, &annexb)?;
     Ok(Some(entry))
 }
@@ -2235,10 +2222,7 @@ mod tests {
     }
 
     // 映像 sample_entry テスト用の Annex-B バイト列フィクスチャ。
-    // payload 部分（先頭 4 バイトの start code を除いた NAL バイト列）に
-    // `0x00 0x00 0x01` シーケンスを含まず、NAL header の forbidden_zero_bit が立たないこと
-    // を満たす最小バイト列。0x67 = SPS、0x68 = PPS、0x65 = IDR、0x41 = 非 IDR の
-    // VCL NAL ユニットタイプ。0x85 は forbidden_zero_bit が立つ破損 NAL。
+    // NAL header: 0x67 = SPS、0x68 = PPS、0x65 = IDR、0x41 = 非 IDR、0x85 = forbidden_zero_bit セット。
     const SPS_INITIAL: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xab];
     const SPS_UPDATED: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xac];
     const PPS: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x06, 0xe2];
@@ -2260,9 +2244,7 @@ mod tests {
             .join(",")
     }
 
-    // テスト用の VideoRtpReceiver を構築する。
-    // `apply_video_frame_sample_entry` は `last_sample_entry` 以外のフィールドを読まないが、
-    // 構造体生成上は全フィールドの初期化が必要。
+    // テスト用の VideoRtpReceiver を最小値で構築する。
     fn build_test_video_receiver() -> VideoRtpReceiver {
         VideoRtpReceiver {
             rtp_channel: 0,
@@ -2275,7 +2257,6 @@ mod tests {
     }
 
     // テスト用の DepacketizedVideoFrame を構築する。
-    // `apply_video_frame_sample_entry` は `frame.keyframe` を読まないため固定値で良い。
     fn build_test_depacketized_frame(data: Vec<u8>) -> DepacketizedVideoFrame {
         DepacketizedVideoFrame {
             rtp_timestamp: 0,
@@ -2351,7 +2332,7 @@ mod tests {
 
     #[test]
     fn select_video_track_returns_none_when_fmtp_missing() {
-        // 既存 `build_test_sdp` は fmtp 行を含まない。fmtp 不在は Err にせず sample_entry: None を返す。
+        // fmtp 不在は Err にせず sample_entry: None を返す。
         let sdp = build_test_sdp(false, false);
         let cfg = parse_video_track(&sdp)
             .expect("fmtp 不在は Ok を返すこと")
@@ -2390,8 +2371,7 @@ mod tests {
 
     #[test]
     fn select_video_track_returns_none_when_sprop_has_only_empty_entries() {
-        // sprop-parameter-sets=,, でカンマのみの場合。trim 後の空要素はスキップされて
-        // 最終的に Annex-B が空のまま `h264_sample_entry_from_annexb` を呼ばない経路に流れる。
+        // 空要素のみの sprop（カンマ区切りで非空要素なし）は Err にせず None を返す。
         let sdp = build_test_sdp_with_fmtp("sprop-parameter-sets=,,");
         let cfg = parse_video_track(&sdp)
             .expect("空要素のみの sprop は Ok を返すこと")
@@ -2459,9 +2439,7 @@ mod tests {
     fn apply_video_frame_sample_entry_keeps_initial_sample_entry_for_mid_stream_idr_without_sps_pps()
      {
         // SDP `sprop-parameter-sets` 由来で確定済みの一般的 RTSP カメラの mid-stream IDR
-        // （SPS / PPS を inline しない）を模擬する。
-        // SPS / PPS 不在 IDR で `has_sps && has_pps` がショートサーキットして更新スキップ。
-        // 既存 `last_sample_entry` の Arc がそのまま維持される。
+        // （SPS / PPS を inline しない）を模擬する。更新スキップで Arc が維持される。
         let mut receiver = build_test_video_receiver();
         apply_video_frame_sample_entry(
             &mut receiver,
@@ -2538,8 +2516,7 @@ mod tests {
 
     #[test]
     fn apply_video_frame_sample_entry_returns_err_on_broken_nal() {
-        // forbidden_zero_bit が立った破損 NAL を含む frame は NAL 走査ループ内で
-        // Err が `?` で素通しされ、`apply_*` の戻り値として Err が返る。
+        // forbidden_zero_bit が立った破損 NAL を含む frame は Err を返す。
         let mut receiver = build_test_video_receiver();
         let err = apply_video_frame_sample_entry(
             &mut receiver,
