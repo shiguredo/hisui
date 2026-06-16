@@ -666,7 +666,7 @@ impl ObswsCoordinator {
         }
         let json = data.value();
         let signaling_urls: Vec<String> = json
-            .to_member("signaling_urls")
+            .to_member("signalingUrls")
             .ok()
             .and_then(|v| v.optional())
             .and_then(|v| v.try_into().ok())
@@ -676,11 +676,11 @@ impl ObswsCoordinator {
                 request_type,
                 request_id,
                 crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                "signaling_urls must not be empty",
+                "signalingUrls must not be empty",
             );
         }
         let channel_id: Option<String> = json
-            .to_member("channel_id")
+            .to_member("channelId")
             .ok()
             .and_then(|v| v.optional())
             .and_then(|v| v.try_into().ok());
@@ -689,16 +689,16 @@ impl ObswsCoordinator {
                 request_type,
                 request_id,
                 REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing channel_id field",
+                "Missing channelId field",
             );
         };
         let client_id: Option<String> = json
-            .to_member("client_id")
+            .to_member("clientId")
             .ok()
             .and_then(|v| v.optional())
             .and_then(|v| v.try_into().ok());
         let bundle_id: Option<String> = json
-            .to_member("bundle_id")
+            .to_member("bundleId")
             .ok()
             .and_then(|v| v.optional())
             .and_then(|v| v.try_into().ok());
