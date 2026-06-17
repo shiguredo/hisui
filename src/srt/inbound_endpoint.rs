@@ -737,7 +737,7 @@ struct SrtTsDemuxer {
     last_video_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
     /// 直近の SPS から抽出した解像度を保持し、後続の Annex-B フレームの `VideoFrame.size` に反映する。
     /// `last_video_sample_entry` と同期して IDR 検出時に更新される。
-    last_video_size: Option<crate::video::VideoFrameSize>,
+    last_video_frame_size: Option<crate::video::VideoFrameSize>,
 }
 
 impl SrtTsDemuxer {
@@ -763,7 +763,7 @@ impl SrtTsDemuxer {
             last_aac_config_key: None,
             last_aac_sample_entry: None,
             last_video_sample_entry: None,
-            last_video_size: None,
+            last_video_frame_size: None,
         })
     }
 
@@ -925,13 +925,13 @@ impl SrtTsDemuxer {
         // 複数 SPS は最初の SPS を採用する。仕様上は IDR slice header → PPS → SPS と辿るのが正確だが、
         // Hisui の入力前提 (publisher が PES に inline する SPS は同一内容) では最初の SPS で十分。
         let mut keyframe = false;
-        let mut sps_nal: Option<Vec<u8>> = None;
+        let mut sps_nal: Option<&[u8]> = None;
         for nalu in crate::video::h264::H264AnnexBNalUnits::new(&pending.data) {
             let nalu = nalu?;
             match nalu.ty {
                 crate::video::h264::H264_NALU_TYPE_IDR => keyframe = true,
                 crate::video::h264::H264_NALU_TYPE_SPS if sps_nal.is_none() => {
-                    sps_nal = Some(nalu.data.to_vec());
+                    sps_nal = Some(nalu.data);
                 }
                 _ => {}
             }
@@ -941,14 +941,18 @@ impl SrtTsDemuxer {
             // IDR 内 inline SPS から解像度を抽出し、sample_entry と VideoFrame.size の両方に反映する。
             // SPS / PPS 不在 IDR や破損 NAL、SPS パース失敗は Err を返して接続を打ち切る (fail-fast)。
             // 正常な H.264 ストリームは IDR に SPS / PPS を inline するため、Err はエンコーダ側の異常とみなす。
-            let sps_nal = sps_nal
-                .as_deref()
-                .ok_or_else(|| crate::Error::new("missing H.264 SPS in IDR PES"))?;
+            let sps_nal =
+                sps_nal.ok_or_else(|| crate::Error::new("missing H.264 SPS in IDR PES"))?;
             let (width, height) = crate::video::h264::extract_dimensions_from_sps(sps_nal)?;
             let entry =
                 crate::video::h264::h264_sample_entry_from_annexb(width, height, &pending.data)?;
             self.last_video_sample_entry = Some(crate::sample_entry::SharedSampleEntry::new(entry));
-            self.last_video_size = Some(crate::video::VideoFrameSize::new(width, height)?);
+            // extract_dimensions_from_sps が width == 0 / height == 0 を Err にしているため、
+            // ここでの VideoFrameSize::new は infallible。
+            self.last_video_frame_size = Some(
+                crate::video::VideoFrameSize::new(width, height)
+                    .expect("infallible: extract_dimensions_from_sps が 0 を Err 化済み"),
+            );
         }
 
         // 初回の SPS / PPS 含有 IDR が来るまでは P フレーム等を破棄する。
@@ -962,7 +966,7 @@ impl SrtTsDemuxer {
             data: pending.data,
             format: crate::video::VideoFormat::H264AnnexB,
             keyframe,
-            size: self.last_video_size,
+            size: self.last_video_frame_size,
             timestamp,
             sample_entry: self.last_video_sample_entry.clone(),
         })))
@@ -1335,10 +1339,8 @@ mod tests {
     // 5 バイト目が NAL header で、上位 1 bit が forbidden_zero_bit、下位 5 bit が nal_unit_type。
     // payload バイト列は隣接 NAL の誤分割を避けるため `0x00, 0x00, 0x01` シーケンスを含めない。
     //
-    // SPS は ffmpeg + libx264 で生成した実機 SPS を埋め込んでいる:
-    //   ffmpeg -f lavfi -i testsrc=size=WIDTHxHEIGHT:rate=30 -pix_fmt yuv420p \
-    //          -c:v libx264 -profile:v baseline -frames:v 1 -f h264 out.h264
-    // の出力から先頭の SPS NAL を切り出した（解像度抽出までビット位置が届く完全 SPS）。
+    // SPS バイト列は ffmpeg + libx264 で生成した実機 SPS（解像度抽出までビット位置が届く完全 SPS）。
+    // 生成手順は `src/video/h264.rs` の `mod tests` 冒頭コメントを参照。
 
     // nal_unit_type=7（SPS）。解像度 1920x1080 (Baseline)。`extract_dimensions_from_sps` が (1920, 1080) を返す。
     const SPS_INITIAL: [u8; 30] = [

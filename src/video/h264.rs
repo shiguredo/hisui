@@ -19,6 +19,10 @@ pub const H264_NALU_TYPE_SEI: u8 = 6;
 pub const H264_NALU_TYPE_SPS: u8 = 7;
 pub const H264_NALU_TYPE_PPS: u8 = 8;
 
+// High 系プロファイル群（ITU-T H.264 (2017/06) 仕様 7.3.2.1.1 の `if (profile_idc == ...)` 条件節）
+// 該当プロファイルでは SPS に chroma_format_idc 以下の追加フィールド群が含まれる
+const H264_HIGH_PROFILES: [u8; 13] = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
+
 /// Annex.B 形式の H.264 をパースして、含まれている NAL ユニットを走査するためのイテレーター
 #[derive(Debug)]
 pub struct H264AnnexBNalUnits<'a> {
@@ -163,10 +167,6 @@ pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>])
     result
 }
 
-// High 系プロファイル群（ITU-T H.264 (2017/06) 仕様 7.3.2.1.1 の `if (profile_idc == ...)` 条件節）
-// ベースラインとなる SPS の追加フィールド群（chroma_format_idc 以下）を読み出す必要があるプロファイル
-const H264_HIGH_PROFILES: [u8; 13] = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
-
 /// SPS NAL ユニットのバイト列から width / height を抽出する
 ///
 /// 入力 `sps` は `H264AnnexBNalUnits` が返す `H264NalUnit.data` をそのまま渡す形式で、
@@ -228,14 +228,18 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
             let _offset_for_non_ref_pic = reader.read_se()?;
             let _offset_for_top_to_bottom_field = reader.read_se()?;
             let num_ref_frames_in_pic_order_cnt_cycle = reader.read_ue()?;
+            // 仕様 7.4.2.1.1 で 0..=255 の範囲。それを超える値は仕様外で、巨大値での無駄な se(v) ループを防ぐ。
+            if num_ref_frames_in_pic_order_cnt_cycle > 255 {
+                return Err(crate::Error::new(format!(
+                    "invalid H.264 SPS: num_ref_frames_in_pic_order_cnt_cycle exceeds 255 ({num_ref_frames_in_pic_order_cnt_cycle})"
+                )));
+            }
             for _ in 0..num_ref_frames_in_pic_order_cnt_cycle {
                 let _offset_for_ref_frame = reader.read_se()?;
             }
         }
-        _ => {
-            // pic_order_cnt_type == 2 では追加読み出しなし
-            // それ以外の値は仕様外だが、後続のフィールド読み出しはそのまま続行する
-        }
+        // pic_order_cnt_type == 2 のときは追加読み出しなし
+        _ => {}
     }
 
     let _max_num_ref_frames = reader.read_ue()?;
@@ -432,7 +436,8 @@ impl<'a> H264BitReader<'a> {
                 break;
             }
             leading_zeros += 1;
-            // leading_zeros が 32 を超えると u32 の範囲外になるため Err
+            // 仕様 9.1 上 codeNum は最大 2^32 - 2 まで表現可能だが、`1u32 << 32` がシフト範囲外で
+            // panic / 未定義動作になるため 31 で制限する。Hisui で扱う SPS フィールド値はすべて 31 bit 以下。
             if leading_zeros > 31 {
                 return Err(crate::Error::new(
                     "invalid H.264 SPS: ue(v) leading_zeros exceeds 31 (overflow)",
@@ -554,54 +559,29 @@ mod tests {
     // -c:v libx264 -profile:v baseline -frames:v 1 -f h264 out.h264` で、
     // 先頭の SPS NAL を 2 個目の start code 直前まで切り出した。
 
-    // Baseline プロファイル + 320x240
+    // Baseline プロファイル + 320x240 (16 の倍数の解像度、crop なしの最小実機 SPS パターン)
     const SPS_320X240: [u8; 24] = [
         0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00, 0x10,
         0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80,
     ];
 
-    // Baseline プロファイル + 640x480
-    const SPS_640X480: [u8; 24] = [
-        0x67, 0x42, 0xc0, 0x1e, 0xd9, 0x00, 0xa0, 0x3d, 0xb0, 0x11, 0x00, 0x00, 0x03, 0x00, 0x01,
-        0x00, 0x00, 0x03, 0x00, 0x3c, 0x0f, 0x16, 0x2e, 0x48,
-    ];
-
-    // Baseline プロファイル + 1280x720
-    const SPS_1280X720: [u8; 25] = [
-        0x67, 0x42, 0xc0, 0x1f, 0xd9, 0x00, 0x50, 0x05, 0xbb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00,
-        0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x83, 0x24, 0x80,
-    ];
-
-    // Baseline プロファイル + 1920x1080
+    // Baseline プロファイル + 1920x1080 (16 倍数でない 1080 のため crop_bottom 経路を踏む実機 SPS)
     const SPS_1920X1080: [u8; 26] = [
         0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02, 0x27, 0xe5, 0xc0, 0x44, 0x00, 0x00, 0x03,
         0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,
     ];
 
     #[test]
-    fn extract_dimensions_from_baseline_320x240() {
-        // 320x240 の SPS を渡したときに正しい解像度が抽出されること
+    fn extract_dimensions_from_baseline_no_crop_320x240() {
+        // crop なし (16 倍数解像度) のときに raw_width / raw_height をそのまま返すこと
         let (width, height) = extract_dimensions_from_sps(&SPS_320X240).expect("SPS パース成功");
         assert_eq!((width, height), (320, 240));
     }
 
     #[test]
-    fn extract_dimensions_from_baseline_640x480() {
-        // 640x480 の SPS を渡したときに正しい解像度が抽出されること
-        let (width, height) = extract_dimensions_from_sps(&SPS_640X480).expect("SPS パース成功");
-        assert_eq!((width, height), (640, 480));
-    }
-
-    #[test]
-    fn extract_dimensions_from_baseline_1280x720() {
-        // 1280x720 の SPS を渡したときに正しい解像度が抽出されること
-        let (width, height) = extract_dimensions_from_sps(&SPS_1280X720).expect("SPS パース成功");
-        assert_eq!((width, height), (1280, 720));
-    }
-
-    #[test]
-    fn extract_dimensions_from_baseline_1920x1080() {
-        // 1920x1080 の SPS を渡したときに正しい解像度が抽出されること
+    fn extract_dimensions_from_baseline_with_crop_1920x1080() {
+        // libx264 が 1920x1080 を表現する際の実機パターン (raw 1920x1088 + crop_bottom=4) を
+        // 仕様準拠で正しく解釈して 1920x1080 を返すこと
         let (width, height) = extract_dimensions_from_sps(&SPS_1920X1080).expect("SPS パース成功");
         assert_eq!((width, height), (1920, 1080));
     }
