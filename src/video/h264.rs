@@ -171,6 +171,7 @@ const H264_HIGH_PROFILES: [u8; 13] = [100, 110, 122, 244, 44, 83, 86, 118, 128, 
 ///
 /// 入力 `sps` は `H264AnnexBNalUnits` が返す `H264NalUnit.data` をそのまま渡す形式で、
 /// 先頭 1 バイトに NAL ヘッダ（forbidden_zero_bit + nal_ref_idc + nal_unit_type = 7）を含む。
+/// 先頭バイトの下位 5 bit が SPS の NAL unit type (7) でない場合は Err を返す。
 /// 内部で先頭 1 バイトをスキップしたうえで RBSP 抽出（emulation prevention byte 除去）を行い、
 /// ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 に従って Exp-Golomb で解像度を抽出する。
 pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> {
@@ -336,11 +337,15 @@ fn rbsp_from_sps_nalu(nalu: &[u8]) -> crate::Result<Vec<u8>> {
     if nalu.is_empty() {
         return Err(crate::Error::new("invalid H.264 SPS: empty NAL unit"));
     }
-    debug_assert_eq!(
-        nalu[0] & 0x1F,
-        H264_NALU_TYPE_SPS,
-        "extract_dimensions_from_sps was called with non-SPS NAL unit"
-    );
+    // `extract_dimensions_from_sps` は pub で外部から呼ばれ得るため、release ビルドでも NAL タイプを検査する。
+    // ここで検出された場合のエラーメッセージは「NAL タイプの不一致」として、後段のビットリーダで失敗するよりも
+    // 早い段階で原因が分かるようにする。
+    let nal_unit_type = nalu[0] & 0x1F;
+    if nal_unit_type != H264_NALU_TYPE_SPS {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: expected nal_unit_type={H264_NALU_TYPE_SPS}, got {nal_unit_type}"
+        )));
+    }
     let payload = &nalu[1..];
     let mut rbsp = Vec::with_capacity(payload.len());
     let mut i = 0;
@@ -633,6 +638,19 @@ mod tests {
         // 空入力では Err を返すこと
         let result = rbsp_from_sps_nalu(&[]);
         assert!(result.is_err(), "空 NAL は Err を返すはず: {result:?}");
+    }
+
+    #[test]
+    fn extract_dimensions_from_sps_rejects_non_sps_nal() {
+        // SPS 以外の NAL（先頭バイトの下位 5 bit が 7 でないもの）を渡すと Err を返すこと。
+        // pub 関数として誤呼出時に release ビルドでも検出できることの回帰防止。
+        // 0x68 は PPS の NAL ヘッダ（nal_unit_type = 8）。
+        let pps_nal = [0x68, 0xce, 0x06, 0xe2];
+        let result = extract_dimensions_from_sps(&pps_nal);
+        assert!(
+            result.is_err(),
+            "SPS 以外の NAL は Err を返すはず: {result:?}"
+        );
     }
 
     #[test]
