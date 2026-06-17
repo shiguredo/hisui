@@ -330,6 +330,16 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
         )));
     }
 
+    // 戻り値は最終的に `sample_entry_visual_fields` で `width as u16 / height as u16` に渡される。
+    // u16 上限 (65535) を超えると silent truncation してラップした値や 0 が MP4 sample_entry に
+    // 埋め込まれるため、ここで上限を強制する。H.264 仕様 Level 6.2 の最大解像度 8192x4320 でも
+    // u16 に収まるため、実用範囲を狭めることはない。
+    if width > u16::MAX as usize || height > u16::MAX as usize {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: dimensions exceed u16::MAX (width={width}, height={height})"
+        )));
+    }
+
     Ok((width, height))
 }
 
@@ -1004,5 +1014,20 @@ mod tests {
             .with_pic_width_in_mbs_minus1(u32::MAX / 2)
             .build();
         let _ = extract_dimensions_from_sps(&sps);
+    }
+
+    #[test]
+    fn extract_dimensions_rejects_width_exceeding_u16_max() {
+        // pic_width_in_mbs_minus1=4095 で raw_width=65536 (= u16::MAX + 1) になり、
+        // `sample_entry_visual_fields` の `width as u16` で 0 にラップする入力。
+        // u16 上限を超える解像度は Err で弾くこと（外部入力で MP4 sample_entry に 0 が埋まらないため）。
+        let sps = SpsBuilder::raw(16, 16)
+            .with_pic_width_in_mbs_minus1(4095)
+            .build();
+        let result = extract_dimensions_from_sps(&sps);
+        assert!(
+            result.is_err(),
+            "u16::MAX を超える width は Err を返すはず: {result:?}"
+        );
     }
 }
