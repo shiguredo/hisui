@@ -921,10 +921,9 @@ impl SrtTsDemuxer {
             .ok_or_else(|| crate::Error::new("missing PTS in H264 PES"))?;
         let dts = pending.header.dts.unwrap_or(pts);
 
-        // IDR 判定と SPS NAL 収集を同じループで実施する。
-        // - IDR 検出時は break せず最後まで走査して SPS NAL も同時に収集する。
-        // - 複数 SPS が含まれる場合は最初に出現した SPS を採用する（仕様準拠の最初の SPS が解像度の根拠）。
-        // - PES 走査を二度行わずに済む。
+        // IDR 判定と SPS NAL 収集を同じループで実施する (IDR 検出時も break せず最後まで走査)。
+        // 複数 SPS は最初の SPS を採用する。仕様上は IDR slice header → PPS → SPS と辿るのが正確だが、
+        // Hisui の入力前提 (publisher が PES に inline する SPS は同一内容) では最初の SPS で十分。
         let mut keyframe = false;
         let mut sps_nal: Option<Vec<u8>> = None;
         for nalu in crate::video::h264::H264AnnexBNalUnits::new(&pending.data) {
