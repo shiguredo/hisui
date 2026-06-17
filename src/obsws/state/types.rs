@@ -1181,7 +1181,7 @@ impl nojson::DisplayJson for ObswsSoraSourceInputSettings {
     }
 }
 
-/// SoraSubscriber の接続設定。CreateSoraSubscriber で登録する。
+/// SoraSubscriber の接続設定。HisuiStartSoraSubscriber で登録する。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsSoraSubscriberSettings {
     pub signaling_urls: Vec<String>,

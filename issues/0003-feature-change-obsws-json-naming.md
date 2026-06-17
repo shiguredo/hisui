@@ -50,7 +50,7 @@ settings ペイロード内のキーと envelope 内のキーで **同名のも�
 
 - OBS Protocol 標準キー: `src/obsws/response/` 全般、`src/obsws/state/types.rs` の `ObswsInput*` / `ObswsScene*` / `ObswsSceneItemTransform` 等で `inputName` / `inputKind` / `inputUuid` / `sceneItemId` / `inputMuted` / `inputVolumeDb` / `inputVolumeMul` / `positionX` / `cropTop` / `boundsType` 等。
 - hisui 独自 Event の `eventData` (`src/obsws/response/event.rs:549-653`): `SoraSourceTrackPublished` / `SoraSourceTrackUnpublished` / `SoraSubscriberDisconnected` / `SoraSubscriberNotify`。主なフィールドは `subscriberName` / `connectionId` / `clientId` / `trackKind` / `trackId` / `code` / `reason` / `notify`。
-- hisui 独自 Request の `requestData` / `responseData`: `CreateSoraSubscriber` / `AttachSoraSubscriber` / `DetachSoraSubscriber` / `GetSoraSubscriberList` / `GetSoraSubscriberSettings` 等。
+- hisui 独自 Request の `requestData` / `responseData`: `HisuiStartSoraSubscriber` / `HisuiStopSoraSubscriber` / `HisuiListSoraSubscribers` / `HisuiListSoraSourceTracks` / `HisuiAttachSoraSourceTrack` / `HisuiDetachSoraSourceTrack`。
 - Sora subscriber list 応答 (`src/obsws/coordinator/output_sora.rs:861-907`): `subscriberName` / `active` / `settings` (子は settings ペイロード) / `connectionId` / `clientId` / `trackId` / `trackKind` / `attachedInputName`。
 - envelope 境界キー: `inputSettings` / `outputSettings` / `streamServiceSettings` / `streamServiceType` / `subscriberSettings` / `soraSdkSettings`。
 - `webrtc/p2p_session.rs` 経由の obsdc レスポンス: `SubscribeProgramTracks` 系の `videoTrackId` / `audioTrackId` / `trackId` (`src/webrtc/p2p_session.rs:1205-1206, 1740, 1832, 2011, 2206-2207`)。

@@ -66,7 +66,7 @@ settings ペイロードを内包する境界として hisui が出力するキ�
 
 ### 3.4 hisui 独自 Request の `requestData` / `responseData` 引数群
 
-- `CreateSoraSubscriber` / `AttachSoraSubscriber` / `DetachSoraSubscriber` / `GetSoraSubscriberList` / `GetSoraSubscriberSettings` 等
+- `HisuiStartSoraSubscriber` / `HisuiStopSoraSubscriber` / `HisuiListSoraSubscribers` / `HisuiListSoraSourceTracks` / `HisuiAttachSoraSourceTrack` / `HisuiDetachSoraSourceTrack`
 - Sora subscriber list 応答 (`src/obsws/coordinator/output_sora.rs:861-907`): `subscriberName` / `active` / `settings` (子は settings ペイロード) / `connectionId` / `clientId` / `trackId` / `trackKind` / `attachedInputName`
 - obsdc レスポンス (`src/webrtc/p2p_session.rs:1205-1206, 1740, 1832, 2011, 2206-2207`): `SubscribeProgramTracks` 系の `videoTrackId` / `audioTrackId` / `trackId`
 - `HisuiStartSoraSubscriber` の `requestData` 直下 (`src/obsws/coordinator/output_sora.rs:632-720` の `handle_start_sora_subscriber`): `subscriberName` / `signalingUrls` / `channelId` / `clientId` / `bundleId` / `metadata` は envelope 引数として camelCase。`ObswsSoraSubscriberSettings::fmt` (state file 永続化) は settings ペイロード規約で snake_case を使うが、これは別レイヤなので独立して扱う。
