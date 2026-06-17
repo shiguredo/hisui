@@ -1555,6 +1555,78 @@ mod tests {
         Ok(())
     }
 
+    // IDR の間に P フレームを複数挟んでも、`last_video_frame_size` が直前の IDR 由来の値を
+    // 保持し続けて全 P フレームの `VideoFrame.size` に反映されること、
+    // 次の IDR (mid-stream SPS 更新) で新値に切り替わって以降の P フレームに反映されることの回帰防止。
+    #[test]
+    fn srt_h264_video_frame_size_persists_across_p_frames_between_sps_changes() -> crate::Result<()>
+    {
+        let mut demuxer = SrtTsDemuxer::new()?;
+
+        // 初期 IDR (SPS_INITIAL = 1920x1080) を確定させる
+        let pes_idr1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
+        let TsSample::Video(_) = demuxer
+            .build_video_sample(
+                make_h264_pending_pes(pes_idr1, 100_000),
+                Some(StreamType::H264),
+            )?
+            .expect("初期 IDR でフレームが流れること")
+        else {
+            panic!("映像サンプルとして取り出せること");
+        };
+
+        // P フレームを 2 連続投入し、いずれも 1920x1080 を保持していること
+        for (i, ts) in [(1, 103_000), (2, 106_000)] {
+            let pes_p = P_FRAME.to_vec();
+            let TsSample::Video(frame_p) = demuxer
+                .build_video_sample(make_h264_pending_pes(pes_p, ts), Some(StreamType::H264))?
+                .expect("P フレームが流れること")
+            else {
+                panic!("映像サンプルとして取り出せること");
+            };
+            assert_eq!(
+                frame_p.size,
+                Some(crate::video::VideoFrameSize::new(1920, 1080)?),
+                "{i} 個目の P フレームは初期 IDR 由来の 1920x1080 を保持すること"
+            );
+        }
+
+        // mid-stream で SPS_UPDATED (1280x720) を含む IDR を投入し、`last_video_frame_size` が切り替わること
+        let pes_idr2 = [&SPS_UPDATED[..], &PPS, &IDR].concat();
+        let TsSample::Video(frame_idr2) = demuxer
+            .build_video_sample(
+                make_h264_pending_pes(pes_idr2, 109_000),
+                Some(StreamType::H264),
+            )?
+            .expect("更新 IDR でフレームが流れること")
+        else {
+            panic!("映像サンプルとして取り出せること");
+        };
+        assert_eq!(
+            frame_idr2.size,
+            Some(crate::video::VideoFrameSize::new(1280, 720)?),
+            "更新 IDR から VideoFrame.size が SPS_UPDATED 由来の 1280x720 に切り替わること"
+        );
+
+        // 更新後の P フレームも新値 (1280x720) を保持していること
+        for (i, ts) in [(1, 112_000), (2, 115_000)] {
+            let pes_p = P_FRAME.to_vec();
+            let TsSample::Video(frame_p) = demuxer
+                .build_video_sample(make_h264_pending_pes(pes_p, ts), Some(StreamType::H264))?
+                .expect("更新後の P フレームが流れること")
+            else {
+                panic!("映像サンプルとして取り出せること");
+            };
+            assert_eq!(
+                frame_p.size,
+                Some(crate::video::VideoFrameSize::new(1280, 720)?),
+                "更新後 {i} 個目の P フレームは更新 IDR 由来の 1280x720 を保持すること"
+            );
+        }
+
+        Ok(())
+    }
+
     // mid-stream で SPS / PPS が含有 IDR と一緒に更新された場合の挙動を検証する。
     // 確定後に SPS_UPDATED + PPS + IDR を投入すると `last_video_sample_entry` が新値に上書きされ、
     // 新 IDR 自身に新 entry が載って下流に流れる。

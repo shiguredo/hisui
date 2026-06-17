@@ -713,6 +713,43 @@ mod tests {
         assert!(reader.read_u(33).is_err(), "n > 32 は Err を返すはず");
     }
 
+    #[test]
+    fn read_ue_rejects_excessive_leading_zeros() {
+        // 0 ビットを 32 個以上連続させると `1u32 << 32` がシフト範囲外になるため Err を返すこと
+        // 32 個の連続 0 = 4 バイトすべて 0x00 にして、その後を埋める
+        let data = [0x00, 0x00, 0x00, 0x00, 0xff, 0xff];
+        let mut reader = H264BitReader::new(&data);
+        let result = reader.read_ue();
+        assert!(
+            result.is_err(),
+            "leading_zeros が 31 を超えると Err を返すはず: {result:?}"
+        );
+    }
+
+    #[test]
+    fn skip_scaling_list_rejects_next_scale_overflow() {
+        // scaling_list の next_scale 計算式 `last_scale + delta_scale + 256` で
+        // i32 オーバーフローが起きた場合に Err を返すこと。
+        //
+        // 仕様 9.1.1 で se(v) = i32::MAX を表現するには ue(v) で codeNum = 2 * i32::MAX - 1
+        // (= u32::MAX - 2 = 0xFFFFFFFD) を読ませる。
+        // codeNum = 0xFFFFFFFD の ue(v) バイト列:
+        //   leading_zeros = 31 (prefix = 2^31 - 1 = 0x7FFFFFFF)
+        //   suffix = codeNum - prefix = 0x7FFFFFFE (31 ビット)
+        // よって入力バイト列:
+        //   "0000_0000 0000_0000 0000_0000 0000_0001 1111_1111 1111_1111 1111_1111 1111_1100"
+        //   (31 個の 0 + "1" マーカー + suffix 31 ビット "1111_..._110" + padding 1 bit)
+        //   = [0x00, 0x00, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFC]
+        // これで delta_scale = i32::MAX となり、8.checked_add(i32::MAX) が None → Err。
+        let data = [0x00, 0x00, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFC];
+        let mut reader = H264BitReader::new(&data);
+        let result = reader.skip_scaling_list(1);
+        assert!(
+            result.is_err(),
+            "巨大な delta_scale で next_scale 計算が overflow したら Err: {result:?}"
+        );
+    }
+
     // ----------------------------------------------------------------
     // 仕様準拠の SPS バイト列ビルダー（テスト専用）
     //
