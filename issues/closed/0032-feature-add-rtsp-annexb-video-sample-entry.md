@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-10
-- Completed:
+- Completed: 2026-06-17
 - Model: Claude Opus 4.7
 - Branch: feature/add-rtsp-annexb-video-sample-entry
 - Polished: 2026-06-16
@@ -290,4 +290,64 @@ PBT は追加しない。状態空間は単体テスト 13 ケースで網羅可
 
 ## 解決方法
 
-実装着手後にここに記述する。
+### VideoTrackConfig への sample_entry フィールド追加と select_video_track の SDP fmtp パース拡張
+
+- `VideoTrackConfig` に `sample_entry: Option<SampleEntry>` を追加し、`select_video_track` から `extract_sample_entry_from_sprop` ヘルパを呼んで SDP fmtp 行の `sprop-parameter-sets` から SampleEntry を構築するようにした。
+- `extract_sample_entry_from_sprop` は `find_fmtp` / `parse_fmtp_parameters` を再利用しつつ `,` 区切りで sprop 値を分割、trim 後に空要素をスキップして各要素を `base64ct::Base64::decode_vec` でデコードし、`[0x00, 0x00, 0x00, 0x01]` の Annex-B start code prefix を挿入して連結する。
+- fmtp / sprop-parameter-sets 不在・値が空文字列・空要素のみは `Ok(None)` で許容し、inline SPS / PPS による代替経路 (`VideoRtpReceiver::apply_sample_entry`) に委ねる。
+- Base64 デコード失敗は `Error::new(format!("invalid sprop-parameter-sets base64: {e}"))` で `crate::Error` にラップして伝播し、`select_tracks` → `setup_session` の既存 `map_err(SessionError::Fatal)?` 経由で接続を打ち切る。
+
+### VideoRtpReceiver への sample_entry 保持フィールド追加とゲート単一化
+
+- `VideoRtpReceiver` に `last_sample_entry: Option<SharedSampleEntry>` を追加し、`setup_session` の VIDEO 分岐で `video.sample_entry.map(SharedSampleEntry::new)` で初期化した。
+- `handle_rtp_packet` の VIDEO 分岐 (`for frame in frames` ループ内) で `apply_sample_entry` を呼び、`let-else` ゲートで `last_sample_entry` が `None` の間は frame を破棄して下流に流さないようにした。stats は VideoFrame 構築後 / decoder 投入前の既存位置に置き、破棄 frame は stats に乗らない意味論を維持した。
+
+### VideoRtpReceiver::apply_sample_entry メソッドの導入
+
+- NAL 走査と 3 条件判定 + sample_entry 更新を `VideoRtpReceiver` の inherent メソッド `apply_sample_entry` として実装した。`H264RtpDepacketizer::push_packet` 等の既存パターンと同形に揃え、SRT 0033 `build_video_sample` と責務範囲も対応させた。
+- `has_idr && has_sps && has_pps` の 3 条件が揃った IDR でのみ `h264_sample_entry_from_annexb` を呼び、`receiver.last_sample_entry` を新 `SharedSampleEntry` で無条件上書きする。3 条件不揃いの IDR（SDP `sprop-parameter-sets` で初期確定済みの RTSP カメラが mid-stream で素の VCL NAL のみを送る場合）は更新スキップで `Ok(())` を返す。
+- NAL 走査自身の Err および 3 条件揃った IDR でのパース失敗は `crate::Error` として `?` で素通しし、呼び出し側で `SessionError::Fatal` に変換されて RTSP 接続が打ち切られる。
+
+### SPS / PPS 片方欠落 sprop のフォールバック切り替え
+
+- `extract_sample_entry_from_sprop` の `h264_sample_entry_from_annexb` 呼び出し前に `H264AnnexBNalUnits` で `has_sps` / `has_pps` を判定し、片方欠落の sprop は `Ok(None)` で inline 経路に委ねる構成にした。
+- 当初は `h264_sample_entry_from_annexb` の `missing H.264 SPS|PPS` Err をそのまま伝播して接続を打ち切る fail-fast 方針だったが、レビュー指摘を受けて挙動を見直した。fmtp / sprop-parameter-sets 全体不在を `Ok(None)` で許容している一方、SPS のみ / PPS のみの sprop で接続切断する非対称が issue の趣旨（不完全な補助メタデータは inline 経路に委ねる）と整合しないと判断し、3 条件揃った sprop でのみ SampleEntry を構築する形に切り替えた。
+
+### 不変条件 docstring の更新
+
+- `src/video.rs:51-57` の `VideoFrame.sample_entry` docstring から `rtsp の Annex-B 映像` 相当の記述を削除し、未適用経路を `WebM リーダー` のみに整理した。
+
+### テスト
+
+- 単体テストを `src/rtsp/subscriber.rs` の `mod tests` に追加し、`select_video_track` 系 8 件と `apply_sample_entry` 系 7 件の計 15 件を網羅した。
+  - `select_video_track`: 正常系・fmtp 不在・sprop 不在・空文字列・空要素のみ・不正 Base64・SPS のみ・PPS のみ
+  - `apply_sample_entry`: 3 条件揃いの正常系・SPS のみ / PPS のみ / 両方なしの mid-stream IDR（各 Arc 維持）・mid-stream SPS 更新・P フレームのみ・破損 NAL
+- テストフィクスチャ (`SPS_INITIAL` / `SPS_UPDATED` / `PPS` / `IDR` / `P_FRAME` / `BROKEN_NAL`) と SDP テキストヘルパ (`build_test_sdp_with_fmtp`)、`VideoRtpReceiver` / `DepacketizedVideoFrame` 構築ヘルパを `mod tests` 直下に置いた。SRT 0033 のフィクスチャ共有化はスコープ外として独立定義に留めた。
+- テストヘルパ `nal_payload` と `sprop_value_from` には `debug_assert!` / `assert!` を入れ、4 バイト未満の Annex-B や空配列の渡し込みを検出できるようにした。
+
+### レビュー指摘の反映
+
+`/review-diff-code` の指摘を順次対応した。
+
+- `// SPS 内 Exp-Golomb 解像度抽出は別 issue。` のような shiguredo-issues 規約違反のコメントを削除し、構造体フィールドのコメントを `///` doc コメントに整理して `VideoTrackConfig.sample_entry` / `VideoRtpReceiver.last_sample_entry` / `setup_session` / `handle_rtp_packet` / `extract_sample_entry_from_sprop` / `apply_sample_entry` 間で重複していた説明を集約した。
+- `apply_video_frame_sample_entry` 自由関数を `VideoRtpReceiver::apply_sample_entry` の inherent メソッドに移動して責務と所属を一致させ、SRT 0033 `build_video_sample` の inherent メソッド前例と揃えた。
+- mid-stream IDR の SPS のみ inline / PPS のみ inline の 2 サブケースを単体テストに追加し、`has_sps && has_pps` のショートサーキット誤リファクタを検出できるようにした。
+- SPS / PPS 片方欠落 sprop の fail-fast 方針を見直し、`extract_sample_entry_from_sprop` を `Ok(None)` で inline 経路に委ねるフォールバック方式に切り替えた。
+
+### スコープ外として後続に委ねた項目
+
+- **SPS 内 Exp-Golomb 解像度抽出**: `Avc1Box.visual.width/height` は 0 のまま。RTMP / openh264 / SRT 横断で別 issue で扱う。
+- **SDP `profile-level-id` / `packetization-mode` 等の他 fmtp パラメータ反映**: `Avc1Box.avcc_box` の `avc_profile_indication` / `avc_level_indication` は固定値のまま。別 issue。
+- **Re-DESCRIBE 対応**: 既存 `RtspSessionRunner` は PLAY 後に DESCRIBE を呼び返さない設計のため、本 issue でも介入しない。
+- **STAP-B / FU-B / MTAP16 / MTAP24 のサポート**: 既存 `H264RtpDepacketizer` がサポートしないパケット種別。
+- **`AudioRtpReceiver.sample_entry` docstring / `handle_rtp_packet` 内 AAC コメントの `issue 0030` 参照削除**: 既存負債清算として別 issue で扱う。
+- **sprop 由来と inline 由来の差分検出ログ**: SDP 由来確定後に異なる SPS / PPS が来た場合の警告ログ。
+- **テストフィクスチャ共有化**: SRT 0033 と同じ SPS / PPS / IDR / P_FRAME 定数の共有モジュール化は 0033 側の改変を伴うため別 refactor issue で扱う。
+- **永久破棄の検知・回復**: SDP `sprop-parameter-sets` 不在 + mid-stream IDR にも SPS / PPS が一度も inline されない publisher（業界実態では稀）に対するタイムアウトや警告ログは本 issue では設けない。
+- **Base64 padding 省略 publisher のサポート**: `Base64::decode_vec` の padding 厳格モードを使い、padding 省略は接続切断する。
+- **SDP 由来 `sample_entry: Some` 経路の統合テスト**: `setup_session` 内の `Option::map` 経由のラップ初期化を統合テストで再確認する余地があるが、`select_video_track` 単体テストで SampleEntry 構築は検証済みで、追加コストに見合う保証は小さいため見送った。
+- **`handle_rtp_packet` のゲート挙動と stats 順序の統合テスト**: `apply_sample_entry` 単体テストと `let-else continue` の Rust 典型パターンでカバー済みと判断し、本 issue ではスコープ外。
+
+### CHANGES.md
+
+記載なし（内部リファクタ・公開 API 変化なし・利用者挙動変化なし）。0017 / 0027 / 0030 / 0033 と同方針。
