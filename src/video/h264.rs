@@ -243,8 +243,10 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
     let pic_height_in_map_units_minus1 = reader.read_ue()?;
     let frame_mbs_only_flag = reader.read_u(1)?;
     if frame_mbs_only_flag == 0 {
-        // mb_adaptive_frame_field_flag は本実装では使わないが仕様上は読み出す必要がある
-        // ただし pic_width / pic_height 算出には影響しないため省略する
+        // 仕様 7.3.2.1.1: frame_mbs_only_flag == 0 のとき mb_adaptive_frame_field_flag (u(1)) を読む。
+        // 値自体は本実装では使わないが、ビット位置を進めないと後続の direct_8x8_inference_flag /
+        // frame_cropping_flag の読み出しが 1 bit ずれて誤動作する。
+        let _mb_adaptive_frame_field_flag = reader.read_u(1)?;
     }
     let _direct_8x8_inference_flag = reader.read_u(1)?;
     let frame_cropping_flag = reader.read_u(1)?;
