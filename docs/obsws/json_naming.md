@@ -69,6 +69,7 @@ settings ペイロードを内包する境界として hisui が出力するキ�
 - `CreateSoraSubscriber` / `AttachSoraSubscriber` / `DetachSoraSubscriber` / `GetSoraSubscriberList` / `GetSoraSubscriberSettings` 等
 - Sora subscriber list 応答 (`src/obsws/coordinator/output_sora.rs:861-907`): `subscriberName` / `active` / `settings` (子は settings ペイロード) / `connectionId` / `clientId` / `trackId` / `trackKind` / `attachedInputName`
 - obsdc レスポンス (`src/webrtc/p2p_session.rs:1205-1206, 1740, 1832, 2011, 2206-2207`): `SubscribeProgramTracks` 系の `videoTrackId` / `audioTrackId` / `trackId`
+- `HisuiStartSoraSubscriber` の `requestData` 直下 (`src/obsws/coordinator/output_sora.rs:632-720` の `handle_start_sora_subscriber`): `subscriberName` / `signalingUrls` / `channelId` / `clientId` / `bundleId` / `metadata` は envelope 引数として camelCase。`ObswsSoraSubscriberSettings::fmt` (state file 永続化) は settings ペイロード規約で snake_case を使うが、これは別レイヤなので独立して扱う。
 
 ## 4. settings ペイロード allow-list
 
@@ -93,7 +94,7 @@ settings ペイロードで snake_case 必須となる構造体一覧。新規 i
 
 ### 4.3 stream service settings 出力経路
 
-- `src/obsws/coordinator/output_registry.rs` の `handle_get_stream_service_settings`: `server` / `key` / `use_auth`。`bwtest` はかつて出力されていたが OBS rtmp-services に該当キーが存在しないため削除済み。
+- `src/obsws/coordinator/output_registry.rs` の `handle_get_stream_service_settings`: `server` / `key` / `use_auth` を出力する (`bwtest` 削除の経緯は章 5.3 参照)。
 
 ### 4.4 state file の wrapper / receiver (`src/obsws/state_file.rs`)
 
@@ -164,8 +165,6 @@ OBS Studio 本体の引用箇所。master が将来移動する可能性があ�
 - `plugins/linux-v4l2/v4l2-input.c#L670` (`device_id`), `#L577` (`pixelformat`), `#L581` (`framerate`)
 - `plugins/mac-capture/mac-audio.c#L724` (`device_id`)
 - `plugins/rtmp-services/rtmp-custom.c#L27` (`use_auth`)
-
-具体的な commit hash pinned URL の整備は、本ドキュメントを継続的に保守する際に随時更新する。`bwtest` 経緯のような外部キー有無の調査結果は、調査時点の commit hash で固定して記録する。
 
 ## 7. 非対称キー
 

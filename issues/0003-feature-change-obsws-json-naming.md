@@ -19,8 +19,6 @@ hisui の OBS WebSocket 互換サーバー (`src/obsws/` 配下) と、WebRTC Da
 
 hisui は正式リリース前のため、本対応は後方互換を維持しない破壊的変更として扱う。フォールバック読み込み・移行コードは入れない。
 
-issue ファイル名と Branch 名のミスマッチを解消するため、`git mv issues/0003-feature-refactor-obsws-json-naming.md issues/0003-feature-change-obsws-json-naming.md` を実装着手の最初のコミット (フェーズ B = 規約ドキュメント作成のコミット) と同じコミット内で行うこと。
-
 ## 優先度根拠
 
 - 命名規則のばらつきは外部 API のスペック揺れに直結し、UI 側 (devtools)・SDK 利用者・E2E テスト作者すべてに認知負荷を強いる。
@@ -157,10 +155,7 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
   - state file の envelope (`scenes` / `inputs` / `currentProgramScene` / `nextInputId` 等) は camel 維持。
   - state file 内部の wrapper 構造体 (`SrtInboundSettingsWithPassphrase` / `WebRtcSourceSettingsWithoutTrackId`) と HLS / DASH の S3 destination / variant 受信経路の中身を snake に倒す。
   - hisui は正式リリース前のため、フォールバック読み込みコードや移行ガイドは追加しない。既存の state file は破壊的変更扱いとする。
-- リネーム対象と削除対象を `CHANGES.md` の `## develop` に以下の 3 行 (`[CHANGE]`) で記載する。形式は既存 `## develop` エントリの慣例に従い、`[CHANGE]` 行直下に 2 スペースインデントで補足を続け、最終行に `- @sile` を 2 スペースインデントで置く。規約ドキュメント (`docs/obsws/json_naming.md`) は内部開発者向けで、`## develop` の既存 `[ADD]` 慣例 (ユーザー視点の新規機能) に該当しないため CHANGES.md には載せない。
-  - `[CHANGE] obsws / obsdc の inputSettings / outputSettings / streamServiceSettings ペイロード内のフィールドを snake_case に統一する` (補足: 主要なリネーム前後を列挙、`- @sile`)
-  - `[CHANGE] obsws の state file 永続化フォーマットを規約変更に追従させる` (補足: 既存 state file は読み込めなくなる、フォールバック移行コードは入れない、`- @sile`)
-  - `[CHANGE] obsws GetStreamServiceSettings 応答から未使用の bwtest フィールドを削除する` (補足: OBS rtmp-services に該当キーが存在しないため、`- @sile`)
+- 未リリース機能のため `CHANGES.md` の `## develop` セクションには新規 `[CHANGE]` エントリを追加しない。代わりに、既存 `[ADD]` エントリ内で本対応のリネーム対象キーを引用している箇所を snake_case 表記に追従させる (HLS / DASH エントリの `segmentDuration` / `maxRetainedSegments` / `videoCodec` / `audioCodec` / `lifetimeDays` / `segmentFormat` 等が該当)。規約ドキュメント (`docs/obsws/json_naming.md`) も内部開発者向けで CHANGES.md には載せない。
 - `bwtest` フィールドが `GetStreamServiceSettings` 応答 (`src/obsws/coordinator/output_registry.rs:473`) から削除されていること。`use_auth` のハードコード出力 (`:478`) は OBS rtmp-custom.c 互換のため維持されていること。
 - 規約ドキュメント `docs/obsws/json_naming.md` が新規作成され、章 3 envelope 例外 allow-list と章 4 settings ペイロード allow-list がリネーム後の構造体・キーと整合していること。
 - OBS Studio 本体クライアント (公式アプリ) を hisui server に接続し、**互換が成立する範囲のみ** で疎通確認する:
@@ -181,7 +176,7 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 7. **hisui 内部サブシステムの同期**: `src/rtmp/inbound_endpoint.rs` (`:228, :249, :275`)、`src/srt/inbound_endpoint.rs` (`:361, :396, :420`)、`src/rtsp/subscriber.rs` (`:39, :57, :61`) の `f.member` / `to_member` キー `inputUrl` を `input_url` に追従させる。各ファイルのエラーメッセージ (`"inputUrl scheme must be rtsp or rtsps"` 等) も snake 表記に追従させる。
 8. **devtools 側の同期**: `devtools/src/components/obsdc/ObsDcSourcePanel.tsx` ほか `devtools/src/` 内の literal 文字列 (`settingsKey="..."` 等) を snake 化。TypeScript 側の型定義は実コード上存在しない (`inputSettings` は `Record<string, string>` として扱われている) ため型変更は不要。
 9. **テストの更新**: 完了条件で列挙したテストファイル全体を網羅して更新する。
-10. **CHANGES.md の更新**: `## develop` セクションに完了条件で示した 3 行 (`[CHANGE]`) を補足インデント付きで追加する。
+10. **CHANGES.md の追従**: `## develop` セクションの既存 `[ADD]` エントリ内で snake 化対象のキー名を引用している箇所を snake_case に書き換える。未リリース機能のため新規 `[CHANGE]` エントリは追加しない。
 11. **OBS Studio 本体疎通テスト**: 互換成立範囲のみ公式 OBS Studio で確認し、結果を本 issue ファイル末尾の `## 結果` セクションに追記する。
 
 ### コミット分割
@@ -193,7 +188,7 @@ shiguredo-git 規約 (`{SEQ} {TITLE}` 形式) に従う。リネーム差分は�
 3. `0003 obsws の state file 永続化フォーマットを規約変更に追従させる` (`src/obsws/state_file.rs` の wrapper / receiver、テストデータ)
 4. `0003 devtools の obsdc 関連 settings を snake_case 規約に揃える`
 5. `0003 obsws GetStreamServiceSettings 応答から未使用の bwtest フィールドを削除する`
-6. `0003 CHANGES.md に obsws JSON 命名規則変更を記載する` (`[CHANGE]` 3 行)
+6. `0003 CHANGES.md 内の未リリース obsws エントリを snake_case 規約に追従させる`
 
 差分が更に巨大化する場合はコミット 2 を input 系・output 系・state file・devtools に追加分割することを検討する。
 
