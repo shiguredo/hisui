@@ -2663,6 +2663,9 @@ mod tests {
             crate::json::to_pretty_string(super::SrtInboundSettingsWithPassphrase(&srt));
         assert!(json_text.contains("passphrase"));
         assert!(json_text.contains("my-secret-pass"));
+        // snake_case 規約: input_url / stream_id を snake で出力する
+        assert!(json_text.contains("input_url"));
+        assert!(json_text.contains("stream_id"));
 
         // 通常の DisplayJson では passphrase が含まれないことを確認する
         let normal_text = crate::json::to_pretty_string(&srt);
