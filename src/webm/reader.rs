@@ -6,6 +6,11 @@ use std::{
 
 use crate::{
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
+    encoder::{
+        libvpx::{vp8_sample_entry, vp9_sample_entry},
+        opus::opus_sample_entry,
+    },
+    sample_entry::SharedSampleEntry,
     types::CodecName,
     video::{VideoFormat, VideoFrame},
 };
@@ -32,6 +37,10 @@ const ID_DOC_TYPE_VERSION: u32 = 0x4287;
 const ID_DOC_TYPE_READ_VERSION: u32 = 0x4285;
 const ID_TRACK_NUMBER: u32 = 0xD7;
 const ID_CODEC_ID: u32 = 0x86;
+const ID_CODEC_PRIVATE: u32 = 0x63A2;
+const ID_VIDEO: u32 = 0xE0;
+const ID_PIXEL_WIDTH: u32 = 0xB0;
+const ID_PIXEL_HEIGHT: u32 = 0xBA;
 
 // 各種バージョンや設定値 (Sora 前提なので固定で大丈夫なもの)
 const EBML_VERSION: u64 = 1;
@@ -265,9 +274,83 @@ fn check_info_element<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<(
     Ok(())
 }
 
+// OpusHead (RFC 7845 §5.1) から pre_skip を抽出する。
+// オフセット 0-7: マジック `OpusHead`、10-11: pre_skip (LE u16)。
+// ChannelMappingFamily = 0 (Sora 録画前提) では OpusHead は 19 バイト固定。
+fn parse_opus_head_pre_skip(data: &[u8]) -> crate::Result<u16> {
+    if data.len() < 19 {
+        return Err(crate::Error::new(format!(
+            "OpusHead CodecPrivate too short: {} bytes (expected at least 19)",
+            data.len()
+        )));
+    }
+    if &data[0..8] != b"OpusHead" {
+        return Err(crate::Error::new("OpusHead magic mismatch"));
+    }
+    Ok(u16::from_le_bytes([data[10], data[11]]))
+}
+
+// 音声 TRACK_ENTRY (A_OPUS) を走査して OpusHead pre_skip を取得する。
+// TRACKS 内の他の TRACK_ENTRY (映像など) は skip_all で読み捨てる。
+fn read_audio_track_pre_skip<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<u16> {
+    reader.skip_until(ID_TRACKS)?;
+    let mut tracks_reader = reader.read_master(ID_TRACKS)?;
+    let mut found: Option<u16> = None;
+    while !tracks_reader.is_eos() {
+        let mut entry = tracks_reader.read_master(ID_TRACK_ENTRY)?;
+        let track_number = entry.read_u64(ID_TRACK_NUMBER)?;
+        if track_number != TRACK_NUMBER_AUDIO || found.is_some() {
+            // 対象外トラック、または既に音声 TRACK_ENTRY を処理済み。
+            entry.skip_all()?;
+            continue;
+        }
+        // TRACK_ENTRY 内の残り子要素を peek_id ループで走査する。
+        // peek_id は内部キャッシュに ID を保持し、続く read_bytes の expect_id がその ID をそのまま消費する。
+        let mut codec_id_ok = false;
+        let mut pre_skip: Option<u16> = None;
+        while !entry.is_eos() {
+            let id = entry.peek_id()?;
+            match id {
+                ID_CODEC_ID => {
+                    let bytes = entry.read_bytes(ID_CODEC_ID)?;
+                    if bytes.as_slice() != b"A_OPUS" {
+                        return Err(crate::Error::new(format!(
+                            "unsupported audio codec ID: {bytes:?} (expected A_OPUS)"
+                        )));
+                    }
+                    codec_id_ok = true;
+                }
+                ID_CODEC_PRIVATE => {
+                    let bytes = entry.read_bytes(ID_CODEC_PRIVATE)?;
+                    pre_skip = Some(parse_opus_head_pre_skip(&bytes)?);
+                }
+                _ => {
+                    // それ以外の TRACK_ENTRY 子要素 (SamplingFrequency / Channels / OutputGain など) は使わないので読み捨てる。
+                    entry.read_id()?;
+                    entry.skip_element_data()?;
+                }
+            }
+        }
+        if !codec_id_ok {
+            return Err(crate::Error::new(
+                "audio TRACK_ENTRY missing CodecID element",
+            ));
+        }
+        let Some(pre_skip) = pre_skip else {
+            return Err(crate::Error::new(
+                "audio TRACK_ENTRY missing OpusHead (CodecPrivate)",
+            ));
+        };
+        found = Some(pre_skip);
+    }
+    found.ok_or_else(|| crate::Error::new("no audio TRACK_ENTRY (A_OPUS) found in WebM TRACKS"))
+}
+
 #[derive(Debug)]
 struct VideoTrackHeader {
     codec: VideoFormat,
+    width: usize,
+    height: usize,
 }
 
 impl VideoTrackHeader {
@@ -280,6 +363,8 @@ impl VideoTrackHeader {
                 tracing::warn!("no video track");
                 return Ok(Self {
                     codec: VideoFormat::I420,
+                    width: 0,
+                    height: 0,
                 });
             }
 
@@ -303,8 +388,56 @@ impl VideoTrackHeader {
                     )));
                 }
             };
-            reader.skip_all()?;
-            return Ok(Self { codec });
+
+            // CODEC_ID 取得後、TRACK_ENTRY 内の残り子要素を peek_id ループで走査して
+            // VIDEO master 内の PixelWidth / PixelHeight を取得する。
+            // VIDEO が無い・PixelWidth / PixelHeight が無い場合は 0 でフォールバック。
+            let mut width: usize = 0;
+            let mut height: usize = 0;
+            let mut video_seen = false;
+            while !reader.is_eos() {
+                let id = reader.peek_id()?;
+                if id == ID_VIDEO {
+                    video_seen = true;
+                    let mut video_reader = reader.read_master(ID_VIDEO)?;
+                    while !video_reader.is_eos() {
+                        let inner_id = video_reader.peek_id()?;
+                        match inner_id {
+                            ID_PIXEL_WIDTH => {
+                                width = video_reader.read_u64(ID_PIXEL_WIDTH)? as usize;
+                            }
+                            ID_PIXEL_HEIGHT => {
+                                height = video_reader.read_u64(ID_PIXEL_HEIGHT)? as usize;
+                            }
+                            _ => {
+                                // Video master 内の他の子要素 (FrameRate / DisplayWidth など) は使わないので読み捨てる。
+                                video_reader.read_id()?;
+                                video_reader.skip_element_data()?;
+                            }
+                        }
+                    }
+                } else {
+                    // TRACK_ENTRY 直下の他の子要素 (FlagLacing / Language など) は使わないので読み捨てる。
+                    reader.read_id()?;
+                    reader.skip_element_data()?;
+                }
+            }
+            if !video_seen {
+                tracing::warn!(
+                    "WebM video TRACK_ENTRY has no Video master element; falling back to width=0 height=0"
+                );
+            } else if width == 0 || height == 0 {
+                tracing::warn!(
+                    width,
+                    height,
+                    "WebM video TRACK_ENTRY missing PixelWidth or PixelHeight; falling back to 0"
+                );
+            }
+            return Ok(Self {
+                codec,
+                width,
+                height,
+            });
         }
     }
 }
@@ -313,6 +446,7 @@ impl VideoTrackHeader {
 pub struct WebmAudioReader {
     reader: ElementReader<std::io::Take<BufReader<std::fs::File>>>,
     cluster_timestamp: Duration,
+    sample_entry: Option<SharedSampleEntry>,
 
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
@@ -333,11 +467,16 @@ impl WebmAudioReader {
         let mut reader = reader.read_master_owned(ID_SEGMENT)?;
         reader.skip_until(ID_INFO)?;
         check_info_element(&mut reader)?;
+        // 音声 TRACK_ENTRY (A_OPUS) から OpusHead pre_skip を取得して sample_entry を構築する。
+        // ファイル切り替え時はリーダー再生成で sample_entry も自動的に再構築される (inherit_stats_from の対象外)。
+        let pre_skip = read_audio_track_pre_skip(&mut reader)?;
+        let sample_entry = SharedSampleEntry::new(opus_sample_entry(pre_skip));
         reader.skip_until(ID_CLUSTER)?;
 
         Ok(Self {
             reader,
             cluster_timestamp: Duration::ZERO,
+            sample_entry: Some(sample_entry),
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_cluster_count: 0,
@@ -395,8 +534,9 @@ impl WebmAudioReader {
             format: AudioFormat::Opus,
             timestamp,
 
-            // 以降のフィールドはデコーダーには参照されないのでダミー値を設定しておく
-            sample_entry: None,
+            // 全圧縮フレームに sample_entry を載せる不変条件 (issue 0030 / 0031) に従う。
+            // sample_entry は WebmAudioReader::new で OpusHead pre_skip から構築済み。
+            sample_entry: self.sample_entry.clone(),
             channels: Channels::STEREO,        // Hisui では常に固定値
             sample_rate: SampleRate::HZ_48000, // Hisui では常に固定値
         }))
@@ -447,6 +587,7 @@ pub struct WebmVideoReader {
     header: VideoTrackHeader,
     reader: ElementReader<std::io::Take<BufReader<std::fs::File>>>,
     cluster_timestamp: Duration,
+    sample_entry: Option<SharedSampleEntry>,
     pub current_input_file: Option<PathBuf>,
     pub codec: Option<CodecName>,
     pub total_cluster_count: u64,
@@ -466,12 +607,43 @@ impl WebmVideoReader {
         check_info_element(&mut reader)?;
 
         let header = VideoTrackHeader::read(&mut reader)?;
+        // 対応スコープ (VP8 / VP9) のみ sample_entry を構築する。
+        // AV1 / H264AnnexB は WebM コンテナで Sora が出力しない経路のため Err を返してサポート対象外とする。
+        // I420 (映像トラック不在時の警告フォールバック) は生フォーマットで不変条件の対象外のため None のまま保持する。
+        // ファイル切り替え時はリーダー再生成で sample_entry も自動的に再構築される (inherit_stats_from の対象外)。
+        let sample_entry = match header.codec {
+            VideoFormat::Vp8 => Some(SharedSampleEntry::new(vp8_sample_entry(
+                header.width,
+                header.height,
+            ))),
+            VideoFormat::Vp9 => Some(SharedSampleEntry::new(vp9_sample_entry(
+                header.width,
+                header.height,
+            ))),
+            VideoFormat::Av1 => {
+                return Err(crate::Error::new(
+                    "AV1 in WebM is not supported by WebmVideoReader (out of scope)",
+                ));
+            }
+            VideoFormat::H264AnnexB => {
+                return Err(crate::Error::new(
+                    "H264 (Annex-B) in WebM is not supported by WebmVideoReader (out of scope)",
+                ));
+            }
+            VideoFormat::I420 => None,
+            other => {
+                return Err(crate::Error::new(format!(
+                    "WebmVideoReader received unexpected video format from TRACKS: {other:?}"
+                )));
+            }
+        };
         reader.skip_until(ID_CLUSTER)?;
 
         Ok(Self {
             header,
             reader,
             cluster_timestamp: Duration::ZERO,
+            sample_entry,
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_cluster_count: 0,
@@ -570,7 +742,9 @@ impl WebmVideoReader {
             // WebM では payload を解析しないためサイズ情報は保持しない。
             // 利用側で必要な場合は後段で補完する。
             size: None,
-            sample_entry: None,
+            // 全圧縮フレームに sample_entry を載せる不変条件 (issue 0027 / 0031) に従う。
+            // sample_entry は WebmVideoReader::new で TRACKS の PixelWidth / PixelHeight から構築済み。
+            sample_entry: self.sample_entry.clone(),
         }))
     }
 }
@@ -580,5 +754,79 @@ impl Iterator for WebmVideoReader {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.read_video_frame().transpose()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opus_head_parser_returns_err_on_too_short_codec_private() {
+        // RFC 7845 §5.1 で定める ChannelMappingFamily=0 の OpusHead は最短 19 バイト。
+        // それ未満は不正として Err を返すこと。
+        let too_short = vec![0u8; 18];
+        let result = parse_opus_head_pre_skip(&too_short);
+        assert!(result.is_err(), "19 バイト未満は Err を返すこと");
+    }
+
+    #[test]
+    fn opus_head_parser_returns_err_on_magic_mismatch() {
+        // 先頭 8 バイトが b"OpusHead" でない場合は Err を返すこと。
+        let mut data = vec![0u8; 19];
+        data[0..8].copy_from_slice(b"NotOpusH");
+        let result = parse_opus_head_pre_skip(&data);
+        assert!(result.is_err(), "マジック不一致は Err を返すこと");
+    }
+
+    #[test]
+    fn opus_head_parser_extracts_pre_skip_in_little_endian() {
+        // 正常な OpusHead からは pre_skip をオフセット 10-11 から LE u16 で取り出せること。
+        let mut data = vec![0u8; 19];
+        data[0..8].copy_from_slice(b"OpusHead");
+        data[8] = 1; // Version
+        data[9] = 2; // OutputChannelCount
+        data[10] = 0x34; // pre_skip LE 下位バイト
+        data[11] = 0x12; // pre_skip LE 上位バイト
+        let pre_skip = parse_opus_head_pre_skip(&data).expect("正常な OpusHead は pre_skip を返す");
+        assert_eq!(
+            pre_skip, 0x1234,
+            "pre_skip が LE u16 として正しく抽出されること"
+        );
+    }
+
+    #[test]
+    fn webm_audio_reader_releases_new_arc_per_construction() {
+        // ファイル切り替えはリーダー再生成で新 Arc を確保する。同じ testdata を 2 回開いて
+        // それぞれの sample_entry が「実体としては等しいが Arc としては別物」であることを検証する。
+        let mut reader_a = WebmAudioReader::new("testdata/archive-black-silent.webm")
+            .expect("testdata を 1 回目で開ける");
+        let mut reader_b = WebmAudioReader::new("testdata/archive-black-silent.webm")
+            .expect("testdata を 2 回目で開ける");
+        let frame_a = reader_a
+            .next()
+            .expect("1 回目: フレームが存在")
+            .expect("1 回目: フレーム取得が成功");
+        let frame_b = reader_b
+            .next()
+            .expect("2 回目: フレームが存在")
+            .expect("2 回目: フレーム取得が成功");
+        let entry_a = frame_a
+            .sample_entry
+            .expect("1 回目: 圧縮フレームには sample_entry が載る");
+        let entry_b = frame_b
+            .sample_entry
+            .expect("2 回目: 圧縮フレームには sample_entry が載る");
+        // 別々にコンストラクタを呼んだので Arc は別物。
+        assert!(
+            !entry_a.ptr_eq(&entry_b),
+            "ファイルごとに新規 Arc を確保すること"
+        );
+        // ただし実体 (SampleEntry の中身) は等しいため、muxer 側で PartialEq により dedup される。
+        assert_eq!(
+            entry_a.get(),
+            entry_b.get(),
+            "実体は同値なので writer 側で dedup されること"
+        );
     }
 }
