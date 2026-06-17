@@ -722,4 +722,307 @@ mod tests {
         let mut reader = H264BitReader::new(&data);
         assert!(reader.read_u(33).is_err(), "n > 32 は Err を返すはず");
     }
+
+    // ----------------------------------------------------------------
+    // 仕様準拠の SPS バイト列ビルダー（テスト専用）
+    //
+    // 主要分岐 (High profile / scaling_matrix / pic_order_cnt_type=1 / interlaced / cropping) を
+    // 確実に踏ませるため、ITU-T H.264 7.3.2.1.1 に従って SPS を組み立てる。
+    // libx264 で生成できない経路や、各種 Err 経路 (crop アンダーフロー / 巨大値オーバーフロー)
+    // の単体テストにも使う。
+    // ----------------------------------------------------------------
+
+    /// ビット単位で値を書き出すライター（仕様 9.1 / 9.1.1 の逆操作）
+    struct SpsBitWriter {
+        bytes: Vec<u8>,
+        bit_count: usize,
+    }
+
+    impl SpsBitWriter {
+        fn new() -> Self {
+            Self {
+                bytes: Vec::new(),
+                bit_count: 0,
+            }
+        }
+
+        fn write_bit(&mut self, bit: u8) {
+            let byte_idx = self.bit_count / 8;
+            let bit_idx = self.bit_count % 8;
+            if byte_idx >= self.bytes.len() {
+                self.bytes.push(0);
+            }
+            self.bytes[byte_idx] |= (bit & 1) << (7 - bit_idx);
+            self.bit_count += 1;
+        }
+
+        /// n ビット符号なし整数を MSB ファーストで書き出す（u(n)）
+        fn write_u(&mut self, n: usize, value: u32) {
+            for i in (0..n).rev() {
+                let bit = ((value >> i) & 1) as u8;
+                self.write_bit(bit);
+            }
+        }
+
+        /// 符号なし Exp-Golomb 復号の逆操作（ue(v)、仕様 9.1）
+        fn write_ue(&mut self, value: u32) {
+            // codeNum = value
+            // value + 1 の bit 表現長を取り、(長さ - 1) 個の先行 0 + value+1 の bit 表現を書く
+            let v = value
+                .checked_add(1)
+                .expect("ue(v) のテスト入力が u32::MAX を越えた場合は意図的なオーバーフロー検証用");
+            let bits_needed = 32 - v.leading_zeros() as usize;
+            for _ in 0..(bits_needed - 1) {
+                self.write_bit(0);
+            }
+            self.write_u(bits_needed, v);
+        }
+
+        /// 符号付き Exp-Golomb 復号の逆操作（se(v)、仕様 9.1.1）
+        fn write_se(&mut self, value: i32) {
+            let code_num = if value <= 0 {
+                (-(i64::from(value))) as u64 * 2
+            } else {
+                (value as u64) * 2 - 1
+            };
+            self.write_ue(code_num as u32);
+        }
+
+        fn into_bytes(self) -> Vec<u8> {
+            self.bytes
+        }
+    }
+
+    /// テスト用の SPS バイト列ビルダー
+    ///
+    /// デフォルトは Baseline (profile_idc=66) + 1920x1080 + progressive + crop なしの最小 SPS。
+    /// `with_*` メソッドで各分岐を踏ませる。
+    struct SpsBuilder {
+        profile_idc: u8,
+        pic_width_in_mbs_minus1: u32,
+        pic_height_in_map_units_minus1: u32,
+        frame_mbs_only_flag: bool,
+        seq_scaling_matrix_present_flag: bool,
+        pic_order_cnt_type: u32,
+        frame_cropping_flag: bool,
+        crop_offsets: (u32, u32, u32, u32),
+    }
+
+    impl SpsBuilder {
+        /// raw 解像度 (pic_width_in_mbs_minus1 / pic_height_in_map_units_minus1 から決まる値) を
+        /// 直接指定するベースビルダー。
+        /// デフォルトは Baseline + progressive + crop なし + pic_order_cnt_type=2。
+        fn raw(raw_width: u32, raw_height: u32) -> Self {
+            assert!(
+                raw_width.is_multiple_of(16),
+                "raw_width は 16 の倍数で指定すること"
+            );
+            assert!(
+                raw_height.is_multiple_of(16),
+                "raw_height は 16 の倍数で指定すること"
+            );
+            Self {
+                profile_idc: 66, // Baseline
+                pic_width_in_mbs_minus1: raw_width / 16 - 1,
+                pic_height_in_map_units_minus1: raw_height / 16 - 1,
+                frame_mbs_only_flag: true,
+                seq_scaling_matrix_present_flag: false,
+                pic_order_cnt_type: 2,
+                frame_cropping_flag: false,
+                crop_offsets: (0, 0, 0, 0),
+            }
+        }
+
+        fn with_high_profile_and_scaling_matrix(mut self) -> Self {
+            self.profile_idc = 100; // High
+            self.seq_scaling_matrix_present_flag = true;
+            self
+        }
+
+        fn with_interlaced(mut self, raw_height_field: u32) -> Self {
+            // interlaced では pic_height_in_map_units_minus1 は field 単位（= 半分の高さ）
+            assert!(
+                raw_height_field.is_multiple_of(16),
+                "raw_height_field は 16 の倍数で指定すること"
+            );
+            self.frame_mbs_only_flag = false;
+            self.pic_height_in_map_units_minus1 = raw_height_field / 16 - 1;
+            self
+        }
+
+        fn with_pic_order_cnt_type_1(mut self) -> Self {
+            self.pic_order_cnt_type = 1;
+            self
+        }
+
+        fn with_cropping(mut self, left: u32, right: u32, top: u32, bottom: u32) -> Self {
+            self.frame_cropping_flag = true;
+            self.crop_offsets = (left, right, top, bottom);
+            self
+        }
+
+        fn with_pic_width_in_mbs_minus1(mut self, value: u32) -> Self {
+            self.pic_width_in_mbs_minus1 = value;
+            self
+        }
+
+        fn build(self) -> Vec<u8> {
+            let mut w = SpsBitWriter::new();
+
+            // NAL ヘッダ: forbidden_zero_bit=0, nal_ref_idc=3 (binary 011), nal_unit_type=7 (binary 00111)
+            // → 0x67
+            w.write_u(8, 0x67);
+
+            // profile_idc (u(8))
+            w.write_u(8, u32::from(self.profile_idc));
+            // constraint_set*_flag (6 bit) + reserved_zero_2bits (2 bit)
+            w.write_u(8, 0);
+            // level_idc (u(8)): 適当に Level 3.1
+            w.write_u(8, 31);
+            // seq_parameter_set_id
+            w.write_ue(0);
+
+            // High 系プロファイルの追加フィールド
+            let is_high = H264_HIGH_PROFILES.contains(&self.profile_idc);
+            if is_high {
+                w.write_ue(1); // chroma_format_idc = 1 (4:2:0)
+                // chroma_format_idc != 3 のため separate_colour_plane_flag は書かない
+                w.write_ue(0); // bit_depth_luma_minus8
+                w.write_ue(0); // bit_depth_chroma_minus8
+                w.write_u(1, 0); // qpprime_y_zero_transform_bypass_flag
+                w.write_u(
+                    1,
+                    if self.seq_scaling_matrix_present_flag {
+                        1
+                    } else {
+                        0
+                    },
+                );
+                if self.seq_scaling_matrix_present_flag {
+                    // 全 seq_scaling_list_present_flag を 0 にして scaling_list 本体を読まない経路で進める
+                    for _ in 0..8 {
+                        w.write_u(1, 0);
+                    }
+                }
+            }
+
+            // log2_max_frame_num_minus4
+            w.write_ue(0);
+            // pic_order_cnt_type
+            w.write_ue(self.pic_order_cnt_type);
+            match self.pic_order_cnt_type {
+                0 => {
+                    w.write_ue(0); // log2_max_pic_order_cnt_lsb_minus4
+                }
+                1 => {
+                    w.write_u(1, 0); // delta_pic_order_always_zero_flag
+                    w.write_se(0); // offset_for_non_ref_pic
+                    w.write_se(0); // offset_for_top_to_bottom_field
+                    w.write_ue(0); // num_ref_frames_in_pic_order_cnt_cycle (要素数 0)
+                }
+                _ => {}
+            }
+            w.write_ue(1); // max_num_ref_frames
+            w.write_u(1, 0); // gaps_in_frame_num_value_allowed_flag
+            w.write_ue(self.pic_width_in_mbs_minus1);
+            w.write_ue(self.pic_height_in_map_units_minus1);
+            w.write_u(1, if self.frame_mbs_only_flag { 1 } else { 0 });
+            if !self.frame_mbs_only_flag {
+                w.write_u(1, 0); // mb_adaptive_frame_field_flag
+            }
+            w.write_u(1, 0); // direct_8x8_inference_flag
+            w.write_u(1, if self.frame_cropping_flag { 1 } else { 0 });
+            if self.frame_cropping_flag {
+                w.write_ue(self.crop_offsets.0);
+                w.write_ue(self.crop_offsets.1);
+                w.write_ue(self.crop_offsets.2);
+                w.write_ue(self.crop_offsets.3);
+            }
+            // RBSP trailing bits は本実装では `pic_width_in_mbs_minus1` 以降まで読めれば不要なため省略する
+
+            w.into_bytes()
+        }
+    }
+
+    #[test]
+    fn extract_dimensions_handles_high_profile_with_scaling_matrix() {
+        // High profile かつ seq_scaling_matrix_present_flag=1（全 list_present_flag=0）で
+        // scaling_list 本体を読まずに pic_width / pic_height まで正しく到達できること
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_high_profile_and_scaling_matrix()
+            .build();
+        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
+        assert_eq!((width, height), (1920, 1088));
+    }
+
+    #[test]
+    fn extract_dimensions_handles_pic_order_cnt_type_1() {
+        // pic_order_cnt_type=1 の経路（delta_pic_order_always_zero_flag / offset_for_*）を踏んでも
+        // pic_width / pic_height まで正しく到達できること
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_pic_order_cnt_type_1()
+            .build();
+        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
+        assert_eq!((width, height), (1920, 1088));
+    }
+
+    #[test]
+    fn extract_dimensions_handles_interlaced_frame_mbs_only_flag_zero() {
+        // frame_mbs_only_flag=0 のとき mb_adaptive_frame_field_flag を読む経路を踏み、
+        // raw_height = (pic_height_in_map_units_minus1 + 1) * 16 * 2 と算出されること。
+        // field 単位の高さ 544 を渡すと frame 高さ 1088 が得られる。
+        let sps = SpsBuilder::raw(1920, 1088).with_interlaced(544).build();
+        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
+        assert_eq!((width, height), (1920, 1088));
+    }
+
+    #[test]
+    fn extract_dimensions_handles_frame_cropping_to_1080() {
+        // ffmpeg / libx264 が 1920x1080 を表現する際の典型パターン:
+        //   raw 1920x1088 + frame_cropping_flag=1 + crop_bottom=4
+        //   (CropUnitY=2, 2*(0+4)=8 を 1088 から削って 1080)
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_cropping(0, 0, 0, 4)
+            .build();
+        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
+        assert_eq!((width, height), (1920, 1080));
+    }
+
+    #[test]
+    fn extract_dimensions_rejects_crop_underflow() {
+        // crop 値が raw 解像度を超える場合は Err を返すこと（checked_sub アンダーフロー）。
+        // 1 MB ( = 16x16) の raw 解像度に対し、crop で横を 400 = 2*(100+100) 削ろうとする。
+        let sps = SpsBuilder::raw(16, 16)
+            .with_cropping(100, 100, 0, 0)
+            .build();
+        let result = extract_dimensions_from_sps(&sps);
+        assert!(
+            result.is_err(),
+            "crop アンダーフローは Err を返すはず: {result:?}"
+        );
+    }
+
+    #[test]
+    fn extract_dimensions_rejects_zero_dimensions_after_cropping() {
+        // crop 適用後に width / height が 0 になる場合は Err を返すこと。
+        // raw 1MB x 1MB (16x16) から crop で 16 横 削るとちょうど 0 になる。
+        // CropUnitX=2 のため crop_left=4, crop_right=4 で 2*(4+4)=16 削る。
+        let sps = SpsBuilder::raw(16, 32).with_cropping(4, 4, 0, 0).build();
+        let result = extract_dimensions_from_sps(&sps);
+        assert!(
+            result.is_err(),
+            "crop 後に width が 0 になる場合は Err を返すはず: {result:?}"
+        );
+    }
+
+    #[test]
+    fn extract_dimensions_does_not_panic_on_huge_pic_width() {
+        // pic_width_in_mbs_minus1 が巨大値の場合、checked_mul で Err になることがある。
+        // 32 bit 環境ではオーバーフローで Err、64 bit 環境では巨大値で Ok になることがあるため、
+        // ここではパニックしないこと（Ok か Err のどちらかが返ること）だけ確認する。
+        let sps = SpsBuilder::raw(16, 16)
+            .with_pic_width_in_mbs_minus1(u32::MAX / 2)
+            .build();
+        let _ = extract_dimensions_from_sps(&sps);
+    }
 }
