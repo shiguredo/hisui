@@ -309,6 +309,37 @@ struct VideoRtpReceiver {
     last_sample_entry: Option<SharedSampleEntry>,
 }
 
+impl VideoRtpReceiver {
+    /// depacketizer 出力 frame の NAL を走査し、IDR + SPS + PPS の 3 条件が揃った場合のみ
+    /// サンプルエントリーを構築して `self.last_sample_entry` を上書きする。
+    ///
+    /// 3 条件不揃いの IDR（SDP `sprop-parameter-sets` で初期確定済みの RTSP カメラが
+    /// mid-stream で素の VCL NAL のみを送る場合を想定）は更新スキップで `Ok(())` を返す。
+    /// NAL 走査自身の Err はそのまま `Err` で伝播し、呼び出し側で `SessionError::Fatal` に
+    /// 変換されて RTSP 接続が打ち切られる。
+    fn apply_sample_entry(&mut self, frame: &DepacketizedVideoFrame) -> crate::Result<()> {
+        let mut has_idr = false;
+        let mut has_sps = false;
+        let mut has_pps = false;
+        for nalu in crate::video::h264::H264AnnexBNalUnits::new(&frame.data) {
+            let nalu = nalu?;
+            match nalu.ty {
+                crate::video::h264::H264_NALU_TYPE_IDR => has_idr = true,
+                crate::video::h264::H264_NALU_TYPE_SPS => has_sps = true,
+                crate::video::h264::H264_NALU_TYPE_PPS => has_pps = true,
+                _ => {}
+            }
+        }
+
+        if has_idr && has_sps && has_pps {
+            let entry = crate::video::h264::h264_sample_entry_from_annexb(0, 0, &frame.data)?;
+            self.last_sample_entry = Some(SharedSampleEntry::new(entry));
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 struct AudioRtpReceiver {
     rtp_channel: u8,
@@ -639,7 +670,8 @@ impl RtspSessionRunner {
                     .timestamp_mapper
                     .map(u64::from(frame.rtp_timestamp));
 
-                apply_video_frame_sample_entry(video_receiver, &frame)
+                video_receiver
+                    .apply_sample_entry(&frame)
                     .map_err(SessionError::Fatal)?;
 
                 // sample_entry 未確定の間は破棄する（stats にもカウントしない）。
@@ -1030,38 +1062,6 @@ impl H264RtpDepacketizer {
     }
 }
 
-/// depacketizer 出力 frame の NAL を走査し、IDR + SPS + PPS の 3 条件が揃った場合のみ
-/// サンプルエントリーを構築して `receiver.last_sample_entry` を上書きする。
-///
-/// 3 条件不揃いの IDR（SDP `sprop-parameter-sets` で初期確定済みの RTSP カメラが
-/// mid-stream で素の VCL NAL のみを送る場合を想定）は更新スキップで `Ok(())` を返す。
-/// NAL 走査自身の Err はそのまま `Err` で伝播し、呼び出し側で `SessionError::Fatal` に
-/// 変換されて RTSP 接続が打ち切られる。
-fn apply_video_frame_sample_entry(
-    receiver: &mut VideoRtpReceiver,
-    frame: &DepacketizedVideoFrame,
-) -> crate::Result<()> {
-    let mut has_idr = false;
-    let mut has_sps = false;
-    let mut has_pps = false;
-    for nalu in crate::video::h264::H264AnnexBNalUnits::new(&frame.data) {
-        let nalu = nalu?;
-        match nalu.ty {
-            crate::video::h264::H264_NALU_TYPE_IDR => has_idr = true,
-            crate::video::h264::H264_NALU_TYPE_SPS => has_sps = true,
-            crate::video::h264::H264_NALU_TYPE_PPS => has_pps = true,
-            _ => {}
-        }
-    }
-
-    if has_idr && has_sps && has_pps {
-        let entry = crate::video::h264::h264_sample_entry_from_annexb(0, 0, &frame.data)?;
-        receiver.last_sample_entry = Some(SharedSampleEntry::new(entry));
-    }
-
-    Ok(())
-}
-
 #[derive(Debug, Clone)]
 struct AudioAccessUnit {
     rtp_timestamp: u32,
@@ -1339,7 +1339,7 @@ fn select_video_track(
 /// 戻り値:
 /// - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみの場合は `Ok(None)`
 ///   （`sprop-parameter-sets` は MAY なので不在は許容し、IDR 内 inline SPS / PPS による
-///   代替経路 (`apply_video_frame_sample_entry`) に委ねる）
+///   代替経路 (`VideoRtpReceiver::apply_sample_entry`) に委ねる）
 /// - Base64 デコード失敗または `h264_sample_entry_from_annexb` の Err は `crate::Error` として伝播
 fn extract_sample_entry_from_sprop(
     attributes: &[SdpAttribute],
@@ -2232,11 +2232,19 @@ mod tests {
 
     // Annex-B バイト列から start code prefix 4 バイトを除いた素の NAL バイト列を返す。
     fn nal_payload(annexb: &[u8]) -> &[u8] {
+        debug_assert!(
+            annexb.len() >= 4,
+            "annexb は最低 4 バイトの start code を持つこと"
+        );
         &annexb[4..]
     }
 
     // Annex-B バイト列の配列を Base64 化して `,` 区切りで連結した sprop-parameter-sets 値を作る。
     fn sprop_value_from(parts: &[&[u8]]) -> String {
+        assert!(
+            !parts.is_empty(),
+            "テストヘルパは少なくとも 1 つの NAL を要求する"
+        );
         parts
             .iter()
             .map(|nal| Base64::encode_string(nal_payload(nal)))
@@ -2422,12 +2430,13 @@ mod tests {
     }
 
     #[test]
-    fn apply_video_frame_sample_entry_emits_sample_entry_for_sps_pps_idr_frame() {
+    fn apply_sample_entry_emits_sample_entry_for_sps_pps_idr_frame() {
         // `last_sample_entry: None` 初期状態で SPS + PPS + IDR の 3 条件揃った frame を投入すると
         // sample_entry が確定して Some になる。
         let mut receiver = build_test_video_receiver();
         let frame = build_test_depacketized_frame(concat_sps_pps_idr(SPS_INITIAL));
-        apply_video_frame_sample_entry(&mut receiver, &frame)
+        receiver
+            .apply_sample_entry(&frame)
             .expect("3 条件揃った frame では Ok を返すこと");
         assert!(
             receiver.last_sample_entry.is_some(),
@@ -2436,22 +2445,22 @@ mod tests {
     }
 
     #[test]
-    fn apply_video_frame_sample_entry_keeps_initial_sample_entry_for_mid_stream_idr_without_sps_pps()
-     {
+    fn apply_sample_entry_keeps_initial_sample_entry_for_mid_stream_idr_without_sps_pps() {
         // SDP `sprop-parameter-sets` 由来で確定済みの一般的 RTSP カメラの mid-stream IDR
         // （SPS / PPS を inline しない）を模擬する。更新スキップで Arc が維持される。
         let mut receiver = build_test_video_receiver();
-        apply_video_frame_sample_entry(
-            &mut receiver,
-            &build_test_depacketized_frame(concat_sps_pps_idr(SPS_INITIAL)),
-        )
-        .expect("初期確定は Ok を返すこと");
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
+                SPS_INITIAL,
+            )))
+            .expect("初期確定は Ok を返すこと");
         let initial = receiver
             .last_sample_entry
             .clone()
             .expect("初期 sample_entry が確定していること");
 
-        apply_video_frame_sample_entry(&mut receiver, &build_test_depacketized_frame(IDR.to_vec()))
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(IDR.to_vec()))
             .expect("SPS / PPS 不在 IDR でも Ok を返すこと（fail-fast にしない）");
 
         let after = receiver
@@ -2465,24 +2474,80 @@ mod tests {
     }
 
     #[test]
-    fn apply_video_frame_sample_entry_updates_sample_entry_on_mid_stream_sps_change() {
-        // mid-stream で SPS の内容が変わった 3 条件揃いの IDR が来たら新値で上書きする。
+    fn apply_sample_entry_keeps_initial_sample_entry_for_mid_stream_idr_without_pps() {
+        // mid-stream IDR が SPS のみ inline して PPS を欠くケース。
+        // `has_sps && has_pps` が成立しないため 3 条件判定の更新分岐に入らず Arc 維持。
         let mut receiver = build_test_video_receiver();
-        apply_video_frame_sample_entry(
-            &mut receiver,
-            &build_test_depacketized_frame(concat_sps_pps_idr(SPS_INITIAL)),
-        )
-        .expect("初期確定は Ok を返すこと");
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
+                SPS_INITIAL,
+            )))
+            .expect("初期確定は Ok を返すこと");
         let initial = receiver
             .last_sample_entry
             .clone()
             .expect("初期 sample_entry が確定していること");
 
-        apply_video_frame_sample_entry(
-            &mut receiver,
-            &build_test_depacketized_frame(concat_sps_pps_idr(SPS_UPDATED)),
-        )
-        .expect("SPS 更新時も Ok を返すこと");
+        let mut sps_idr = SPS_INITIAL.to_vec();
+        sps_idr.extend_from_slice(IDR);
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(sps_idr))
+            .expect("PPS 不在 IDR でも Ok を返すこと（fail-fast にしない）");
+
+        let after = receiver
+            .last_sample_entry
+            .as_ref()
+            .expect("sample_entry が消えていないこと");
+        assert!(after.ptr_eq(&initial), "同一 Arc が維持されていること");
+    }
+
+    #[test]
+    fn apply_sample_entry_keeps_initial_sample_entry_for_mid_stream_idr_without_sps() {
+        // mid-stream IDR が PPS のみ inline して SPS を欠くケース。
+        // `has_sps && has_pps` が成立しないため 3 条件判定の更新分岐に入らず Arc 維持。
+        let mut receiver = build_test_video_receiver();
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
+                SPS_INITIAL,
+            )))
+            .expect("初期確定は Ok を返すこと");
+        let initial = receiver
+            .last_sample_entry
+            .clone()
+            .expect("初期 sample_entry が確定していること");
+
+        let mut pps_idr = PPS.to_vec();
+        pps_idr.extend_from_slice(IDR);
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(pps_idr))
+            .expect("SPS 不在 IDR でも Ok を返すこと（fail-fast にしない）");
+
+        let after = receiver
+            .last_sample_entry
+            .as_ref()
+            .expect("sample_entry が消えていないこと");
+        assert!(after.ptr_eq(&initial), "同一 Arc が維持されていること");
+    }
+
+    #[test]
+    fn apply_sample_entry_updates_sample_entry_on_mid_stream_sps_change() {
+        // mid-stream で SPS の内容が変わった 3 条件揃いの IDR が来たら新値で上書きする。
+        let mut receiver = build_test_video_receiver();
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
+                SPS_INITIAL,
+            )))
+            .expect("初期確定は Ok を返すこと");
+        let initial = receiver
+            .last_sample_entry
+            .clone()
+            .expect("初期 sample_entry が確定していること");
+
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
+                SPS_UPDATED,
+            )))
+            .expect("SPS 更新時も Ok を返すこと");
 
         let after = receiver
             .last_sample_entry
@@ -2499,15 +2564,13 @@ mod tests {
     }
 
     #[test]
-    fn apply_video_frame_sample_entry_skips_update_for_p_frame_only() {
+    fn apply_sample_entry_skips_update_for_p_frame_only() {
         // P フレームのみは `has_idr=false` で更新分岐に入らない。
         // `last_sample_entry: None` 初期状態のままで Ok を返す。
         let mut receiver = build_test_video_receiver();
-        apply_video_frame_sample_entry(
-            &mut receiver,
-            &build_test_depacketized_frame(P_FRAME.to_vec()),
-        )
-        .expect("P フレームのみでは Ok を返すこと");
+        receiver
+            .apply_sample_entry(&build_test_depacketized_frame(P_FRAME.to_vec()))
+            .expect("P フレームのみでは Ok を返すこと");
         assert!(
             receiver.last_sample_entry.is_none(),
             "last_sample_entry は None のまま変化しないこと"
@@ -2515,14 +2578,12 @@ mod tests {
     }
 
     #[test]
-    fn apply_video_frame_sample_entry_returns_err_on_broken_nal() {
+    fn apply_sample_entry_returns_err_on_broken_nal() {
         // forbidden_zero_bit が立った破損 NAL を含む frame は Err を返す。
         let mut receiver = build_test_video_receiver();
-        let err = apply_video_frame_sample_entry(
-            &mut receiver,
-            &build_test_depacketized_frame(BROKEN_NAL.to_vec()),
-        )
-        .expect_err("forbidden_zero_bit が立った NAL では Err を返すこと");
+        let err = receiver
+            .apply_sample_entry(&build_test_depacketized_frame(BROKEN_NAL.to_vec()))
+            .expect_err("forbidden_zero_bit が立った NAL では Err を返すこと");
         let display = format!("{err:?}");
         assert!(
             display.contains("forbidden_zero_bit"),
