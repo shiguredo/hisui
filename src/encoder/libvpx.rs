@@ -150,7 +150,7 @@ impl LibvpxEncoder {
     }
 }
 
-fn vp8_sample_entry(width: usize, height: usize) -> SampleEntry {
+pub(crate) fn vp8_sample_entry(width: usize, height: usize) -> SampleEntry {
     SampleEntry::Vp08(Vp08Box {
         visual: video::sample_entry_visual_fields(width, height),
         vpcc_box: VpccBox {
@@ -171,7 +171,7 @@ fn vp8_sample_entry(width: usize, height: usize) -> SampleEntry {
     })
 }
 
-fn vp9_sample_entry(width: usize, height: usize) -> SampleEntry {
+pub(crate) fn vp9_sample_entry(width: usize, height: usize) -> SampleEntry {
     SampleEntry::Vp09(Vp09Box {
         visual: video::sample_entry_visual_fields(width, height),
         vpcc_box: VpccBox {

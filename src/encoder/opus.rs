@@ -26,7 +26,7 @@ impl OpusEncoder {
 
         // 出力フレームに載せるサンプルエントリーを作っておく
         let pre_skip = inner.get_lookahead()?;
-        let sample_entry = sample_entry(pre_skip);
+        let sample_entry = opus_sample_entry(pre_skip);
 
         Ok(Self {
             inner,
@@ -65,7 +65,7 @@ impl OpusEncoder {
     }
 }
 
-fn sample_entry(pre_skip: u16) -> SampleEntry {
+pub(crate) fn opus_sample_entry(pre_skip: u16) -> SampleEntry {
     SampleEntry::Opus(OpusBox {
         audio: audio::sample_entry_audio_fields(),
         dops_box: DopsBox {
