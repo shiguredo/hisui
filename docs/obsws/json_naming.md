@@ -119,9 +119,13 @@ settings 側の文字列キーを読む主たる関数:
 
 ### 4.7 hisui 内部サブシステム連携
 
-obsws/obsdc から渡された settings を受け取る側。エラーメッセージや構造体の DisplayJson / 受信キーで `input_url` 系の表記を持つ。
+obsws / obsdc から渡された settings を受け取る側。これらのファイル内で扱うキーのうち、「obsws settings ペイロード由来のキー」(`input_url` / `output_url` / `stream_name` / `stream_id` / `passphrase` 等) は snake_case に従う。エラーメッセージ中の identifier 表記もこれに合わせる。
+
+一方、processor 構造体の `DisplayJson` / `TryFrom` 内にある「obsws settings に存在しない processor 独自キー」(例: `outputAudioTrackId` / `outputVideoTrackId` / `inputAudioTrackId` / `inputVideoTrackId` / `keyLength` / `tsbpdDelayMs` / `certPath` 等) は obsws JSON プロトコルの境界外であり、本規約の対象外。これらは現状の camelCase 表記を維持する。
 
 - `src/rtmp/inbound_endpoint.rs`
+- `src/rtmp/outbound_endpoint.rs`
+- `src/rtmp/publisher.rs`
 - `src/srt/inbound_endpoint.rs`
 - `src/rtsp/subscriber.rs`
 
