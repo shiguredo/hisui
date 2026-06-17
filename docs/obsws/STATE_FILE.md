@@ -82,7 +82,7 @@ state file は以下の secret を平文で保存する。ファイルの権限�
 |-----------|-----|------|------|
 | `signaling_urls` | String[] | 省略可 | シグナリング URL リスト |
 | `channel_id` | String | 省略可 | チャンネル ID |
-| `clientId` | String | 省略可 | クライアント ID |
+| `client_id` | String | 省略可 | クライアント ID |
 | `bundle_id` | String | 省略可 | バンドル ID |
 | `metadata` | Object | 省略可 | メタデータ（JSON object のみ） |
 
@@ -128,7 +128,7 @@ output 設定の詳細は `PROTOCOL_STATUS.md` の独自 Output セクション�
 | `inputMuted` | Boolean | 省略可 | ミュート状態。省略時は `false` |
 | `inputVolumeMul` | Number | 省略可 | 音量乗算係数（0.0 以上）。省略時は `1.0`（0dB） |
 
-NOTE: SRT inbound の `passphrase` は `GetInputSettings` では返されないが、state file には復元のため平文で保存される。WebRTC source の `trackId` は runtime 管理のため state file には含まれない。
+NOTE: SRT inbound の `passphrase` は `GetInputSettings` では返されないが、state file には復元のため平文で保存される。WebRTC source の `track_id` は runtime 管理のため state file には含まれない。
 
 ## 例
 

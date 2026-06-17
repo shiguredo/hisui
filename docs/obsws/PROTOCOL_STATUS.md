@@ -681,7 +681,7 @@ bootstrap セッションの上り video track を受けるための input kind�
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `trackId` | string \| null | - | attach 済みの WebRTC 映像 track ID。読み取り専用（`SetInputSettings` では変更不可） |
+| `track_id` | string \| null | - | attach 済みの WebRTC 映像 track ID。読み取り専用（`SetInputSettings` では変更不可） |
 | `background_key_color` | string \| null | - | 透過対象の背景色。`#RRGGBB` 形式 |
 | `background_key_tolerance` | number \| null | - | key color 許容差。0 以上 255 以下の整数 |
 
@@ -689,9 +689,9 @@ bootstrap セッションの上り video track を受けるための input kind�
 - NOTE: upstream 専用であり、browser 側への再配信対象には含めない
 - NOTE: `background_key_color` と `background_key_tolerance` の両方が設定されている場合に chroma key 透過が有効になる
 - NOTE: `background_key_color` / `background_key_tolerance` は `SetInputSettings` で変更でき、attach 中の出力にも反映される
-- NOTE: `trackId` は読み取り専用で、`HisuiAttachWebRtcVideoTrack` / `HisuiDetachWebRtcVideoTrack` / bootstrap セッション切断時に更新される
-- NOTE: `trackId` の変化は `InputSettingsChanged` イベントで購読できる
-- NOTE: bootstrap セッション切断時は input は残るが、`trackId` は null に戻る
+- NOTE: `track_id` は読み取り専用で、`HisuiAttachWebRtcVideoTrack` / `HisuiDetachWebRtcVideoTrack` / bootstrap セッション切断時に更新される
+- NOTE: `track_id` の変化は `InputSettingsChanged` イベントで購読できる
+- NOTE: bootstrap セッション切断時は input は残るが、`track_id` は null に戻る
 
 ### 独自 Output
 
@@ -732,7 +732,7 @@ outputSettings は `soraSdkSettings` オブジェクトを含む。
 |-----------|-----|------|------|
 | `soraSdkSettings.signaling_urls` | string[] | StartOutput 時に必須（1 件以上） | シグナリング URL 一覧 |
 | `soraSdkSettings.channel_id` | string | StartOutput 時に必須 | チャネル ID |
-| `soraSdkSettings.clientId` | string | - | クライアント ID |
+| `soraSdkSettings.client_id` | string | - | クライアント ID |
 | `soraSdkSettings.bundle_id` | string | - | バンドル ID |
 | `soraSdkSettings.metadata` | object | - | Sora に送信するメタデータ（JSON object のみ） |
 
@@ -760,7 +760,7 @@ Sora WebRTC Subscriber。sora-rust-sdk を使い、Sora チャネルに RecvOnly
 
 | リクエスト | 説明 | requestData |
 |---|---|---|
-| `HisuiStartSoraSubscriber` | subscriber を作成して RecvOnly 接続を開始 | `subscriberName`, `signaling_urls`, `channel_id`, `clientId`, `bundle_id`, `metadata` |
+| `HisuiStartSoraSubscriber` | subscriber を作成して RecvOnly 接続を開始 | `subscriberName`, `signalingUrls`, `channelId`, `clientId`, `bundleId`, `metadata` |
 | `HisuiStopSoraSubscriber` | 接続を停止して subscriber を削除 | `subscriberName` |
 | `HisuiListSoraSubscribers` | 全 subscriber の一覧・状態・設定を取得 | - |
 | `HisuiListSoraSourceTracks` | 受信中のリモートトラック一覧 | `subscriberName`（省略時は全 subscriber） |
@@ -799,8 +799,8 @@ Sora WebRTC Subscriber。sora-rust-sdk を使い、Sora チャネルに RecvOnly
 **エラー条件:**
 
 - 同名の subscriber が既に稼働中: `HisuiStartSoraSubscriber` が `OUTPUT_RUNNING` を返す
-- `signaling_urls` が空: `HisuiStartSoraSubscriber` が `INVALID_REQUEST_FIELD` を返す
-- `channel_id` が未設定: `HisuiStartSoraSubscriber` が `MISSING_REQUEST_FIELD` を返す
+- `signalingUrls` が空: `HisuiStartSoraSubscriber` が `INVALID_REQUEST_FIELD` を返す
+- `channelId` が未設定: `HisuiStartSoraSubscriber` が `MISSING_REQUEST_FIELD` を返す
 - 未登録の subscriber を停止: `HisuiStopSoraSubscriber` が `RESOURCE_NOT_FOUND` を返す
 - `sora_source` 以外の入力への attach: `HisuiAttachSoraSourceTrack` が失敗
 
