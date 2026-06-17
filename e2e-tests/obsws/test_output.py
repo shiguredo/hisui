@@ -946,7 +946,7 @@ def test_obsws_srt_inbound_with_stream_id(
     binary_path: Path,
     tmp_path: Path,
 ):
-    """obsws で srt_inbound に streamId を指定して録画できることを確認する"""
+    """obsws で srt_inbound に stream_id を指定して録画できることを確認する"""
     srt_port, srt_sock = reserve_ephemeral_port()
     srt_sock.close()
 
@@ -1686,7 +1686,7 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
             )
             assert set_settings_response["d"]["requestStatus"]["result"] is True
 
-            # 設定を取得して segmentFormat が fmp4 であることを確認
+            # 設定を取得して segment_format が fmp4 であることを確認
             get_settings_response = await _send_obsws_request(
                 ws,
                 request_type="GetOutputSettings",
@@ -1961,7 +1961,7 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
             )
             assert resp["d"]["requestStatus"]["result"] is False
 
-            # videoBitrate が 0 はエラー
+            # video_bitrate が 0 はエラー
             resp = await _send_obsws_request(
                 ws,
                 request_type="SetOutputSettings",

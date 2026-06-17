@@ -99,9 +99,9 @@ settings ペイロードで snake_case 必須となる構造体一覧。新規 i
 ### 4.4 state file の wrapper / receiver (`src/obsws/state_file.rs`)
 
 - `SrtInboundSettingsWithPassphrase`: `ObswsSrtInboundSettings` に `passphrase` を加えて永続化用に書き出す。
-- `WebRtcSourceSettingsWithoutTrackId`: `ObswsWebRtcSourceSettings` から `trackId` を除いて永続化用に書き出す。
-- HLS / DASH の S3 destination receiver (`state_file.rs:864-895` 付近): `usePathStyle` / `accessKeyId` / `secretAccessKey` / `sessionToken` / `lifetimeDays` を `to_member` で読む。
-- variant receiver (`state_file.rs:339-351, :512-524` 付近): `videoBitrate` / `audioBitrate` を `to_member` で読む。
+- `WebRtcSourceSettingsWithoutTrackId`: `ObswsWebRtcSourceSettings` から `track_id` を除いて永続化用に書き出す。
+- HLS / DASH の S3 destination receiver (`state_file.rs:864-895` 付近): `use_path_style` / `access_key_id` / `secret_access_key` / `session_token` / `lifetime_days` を `to_member` で読む。
+- variant receiver (`state_file.rs:339-351, :512-524` 付近): `video_bitrate` / `audio_bitrate` を `to_member` で読む。
 
 ### 4.5 受信経路 (`src/obsws/state/types.rs:181-410` 周辺)
 
@@ -115,11 +115,11 @@ settings 側の文字列キーを読む主たる関数:
 
 ### 4.6 obsdc 経由の settings 受信 (`src/webrtc/p2p_session.rs`)
 
-`InputSettingsChanged` イベント中の inputSettings ペイロードを `to_member("...")` で読む箇所がある (例: `:1670-1680` 付近の `backgroundKeyColor` 等)。settings 内側のため snake 規約。
+`InputSettingsChanged` イベント中の inputSettings ペイロードを `to_member("...")` で読む箇所がある (例: `:1670-1680` 付近の `background_key_color` 等)。settings 内側のため snake 規約。
 
 ### 4.7 hisui 内部サブシステム連携
 
-obsws/obsdc から渡された settings を受け取る側。エラーメッセージや構造体の DisplayJson / 受信キーで `inputUrl` 系の表記を持つ。
+obsws/obsdc から渡された settings を受け取る側。エラーメッセージや構造体の DisplayJson / 受信キーで `input_url` 系の表記を持つ。
 
 - `src/rtmp/inbound_endpoint.rs`
 - `src/srt/inbound_endpoint.rs`
