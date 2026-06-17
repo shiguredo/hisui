@@ -88,8 +88,6 @@ pub struct AudioFrame {
     /// 圧縮フォーマット（Opus / Aac）の `AudioFrame` は常に `Some` を持つ。
     /// 生フォーマット（I16Be）と decoder 内部の中間表現として一時的に構築するフレーム、
     /// および外部に流れないフレームは `None` を許容する。
-    ///
-    /// 現時点で未適用の経路: WebM リーダー。
     pub sample_entry: Option<SharedSampleEntry>,
 }
 
