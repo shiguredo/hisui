@@ -1337,10 +1337,11 @@ fn select_video_track(
 /// 組み立てて `h264_sample_entry_from_annexb` でサンプルエントリーを構築する。
 ///
 /// 戻り値:
-/// - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみの場合は `Ok(None)`
-///   （`sprop-parameter-sets` は MAY なので不在は許容し、IDR 内 inline SPS / PPS による
-///   代替経路 (`VideoRtpReceiver::apply_sample_entry`) に委ねる）
-/// - Base64 デコード失敗または `h264_sample_entry_from_annexb` の Err は `crate::Error` として伝播
+/// - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみ / SPS または PPS の
+///   片方が欠ける場合は `Ok(None)`（`sprop-parameter-sets` は MAY なので不完全な構成は許容し、
+///   IDR 内 inline SPS / PPS による代替経路 (`VideoRtpReceiver::apply_sample_entry`) に委ねる）
+/// - Base64 デコード失敗、NAL 走査自身の Err、`h264_sample_entry_from_annexb` の Err は
+///   `crate::Error` として伝播（壊れた SDP として接続を打ち切る）
 fn extract_sample_entry_from_sprop(
     attributes: &[SdpAttribute],
     payload_type: u8,
@@ -1369,6 +1370,22 @@ fn extract_sample_entry_from_sprop(
     }
 
     if annexb.is_empty() {
+        return Ok(None);
+    }
+
+    // sprop に SPS と PPS が両方含まれない場合は inline 経路に委ねる。
+    // fmtp 全体不在を Ok(None) で許容するのと同じ方針で、不完全な補助メタデータを fail-fast にしない。
+    let mut has_sps = false;
+    let mut has_pps = false;
+    for nalu in crate::video::h264::H264AnnexBNalUnits::new(&annexb) {
+        let nalu = nalu?;
+        match nalu.ty {
+            crate::video::h264::H264_NALU_TYPE_SPS => has_sps = true,
+            crate::video::h264::H264_NALU_TYPE_PPS => has_pps = true,
+            _ => {}
+        }
+    }
+    if !has_sps || !has_pps {
         return Ok(None);
     }
 
@@ -2403,29 +2420,30 @@ mod tests {
     }
 
     #[test]
-    fn select_video_track_returns_err_on_sprop_with_only_sps() {
-        // SPS のみ含む sprop-parameter-sets では `h264_sample_entry_from_annexb` が
-        // `missing H.264 PPS` を返してそのまま伝播する。
+    fn select_video_track_returns_none_when_sprop_has_only_sps() {
+        // SPS のみ含む sprop は不完全な補助メタデータとして許容し、inline 経路に委ねる。
         let sprop = sprop_value_from(&[SPS_INITIAL]);
         let sdp = build_test_sdp_with_fmtp(&format!("sprop-parameter-sets={sprop}"));
-        let err = parse_video_track(&sdp).expect_err("PPS 不在 sprop では Err を返すこと");
-        let display = format!("{err:?}");
+        let cfg = parse_video_track(&sdp)
+            .expect("PPS 不在 sprop は Err にせず Ok を返すこと")
+            .expect("VideoTrackConfig が返ること");
         assert!(
-            display.contains("missing H.264 PPS"),
-            "エラーメッセージに `missing H.264 PPS` が含まれること（実際: {display}）"
+            cfg.sample_entry.is_none(),
+            "PPS 不在 sprop では sample_entry が None になること"
         );
     }
 
     #[test]
-    fn select_video_track_returns_err_on_sprop_with_only_pps() {
-        // PPS のみ含む sprop-parameter-sets では `missing H.264 SPS` を伝播する。
+    fn select_video_track_returns_none_when_sprop_has_only_pps() {
+        // PPS のみ含む sprop は不完全な補助メタデータとして許容し、inline 経路に委ねる。
         let sprop = sprop_value_from(&[PPS]);
         let sdp = build_test_sdp_with_fmtp(&format!("sprop-parameter-sets={sprop}"));
-        let err = parse_video_track(&sdp).expect_err("SPS 不在 sprop では Err を返すこと");
-        let display = format!("{err:?}");
+        let cfg = parse_video_track(&sdp)
+            .expect("SPS 不在 sprop は Err にせず Ok を返すこと")
+            .expect("VideoTrackConfig が返ること");
         assert!(
-            display.contains("missing H.264 SPS"),
-            "エラーメッセージに `missing H.264 SPS` が含まれること（実際: {display}）"
+            cfg.sample_entry.is_none(),
+            "SPS 不在 sprop では sample_entry が None になること"
         );
     }
 
