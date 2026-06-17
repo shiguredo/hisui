@@ -241,7 +241,7 @@ impl ObswsInputSettings {
                 }))
             }
             "webrtc_source" => {
-                // trackId は Attach/Detach で制御するため、CreateInput 時は無視する
+                // track_id は HisuiAttach/HisuiDetachWebRtcVideoTrack で制御するため、CreateInput 時は無視する
                 let background_key_color =
                     parse_optional_string_setting(input_settings, "background_key_color")?;
                 let background_key_tolerance =
@@ -254,7 +254,7 @@ impl ObswsInputSettings {
                 }))
             }
             "sora_source" => {
-                // trackId は Attach/Detach で制御するため、CreateInput 時は無視する
+                // video_track_id / audio_track_id は HisuiAttach/HisuiDetachSoraSourceTrack で制御するため、CreateInput 時は無視する
                 Ok(Self::SoraSource(ObswsSoraSourceInputSettings::default()))
             }
             _ => Err(ParseInputSettingsError::UnsupportedInputKind),
@@ -402,7 +402,7 @@ impl ObswsInputSettings {
                 }))
             }
             Self::WebRtcSource(existing) => {
-                // trackId は Attach/Detach で制御するため overlay 対象外
+                // track_id は HisuiAttach/HisuiDetachWebRtcVideoTrack で制御するため overlay 対象外
                 let background_key_color = parse_overlay_string_setting(
                     input_settings,
                     "background_key_color",
@@ -421,7 +421,7 @@ impl ObswsInputSettings {
                 }))
             }
             Self::SoraSource(existing) => {
-                // trackId は Attach/Detach で制御するため overlay 対象外
+                // video_track_id / audio_track_id は HisuiAttach/HisuiDetachSoraSourceTrack で制御するため overlay 対象外
                 Ok(Self::SoraSource(existing.clone()))
             }
         }
@@ -1130,7 +1130,7 @@ impl nojson::DisplayJson for ObswsRtspSubscriberSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsWebRtcSourceSettings {
-    // trackId は Attach/Detach Request で制御する。SetInputSettings では変更不可。
+    // track_id は HisuiAttach/HisuiDetachWebRtcVideoTrack で制御する。SetInputSettings では変更不可。
     pub track_id: Option<String>,
     // 透過対象の背景色。#RRGGBB 形式。null は透過なし。
     pub background_key_color: Option<String>,
@@ -1161,7 +1161,7 @@ impl nojson::DisplayJson for ObswsWebRtcSourceSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ObswsSoraSourceInputSettings {
-    // video/audio の trackId は Attach/Detach で制御する。SetInputSettings では変更不可。
+    // video_track_id / audio_track_id は HisuiAttach/HisuiDetachSoraSourceTrack で制御する。SetInputSettings では変更不可。
     pub video_track_id: Option<String>,
     pub audio_track_id: Option<String>,
 }

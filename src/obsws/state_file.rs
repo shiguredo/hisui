@@ -242,7 +242,7 @@ fn parse_optional_sora(
     };
     let v = section.value();
 
-    // sora セクションは soraSdkSettings を直接含む構造
+    // sora セクションは soraSdkSettings ラッパーなしで signaling_urls 等を直接持つフラット構造
     let signaling_urls: Option<Vec<String>> = v.to_member("signaling_urls")?.try_into()?;
     let channel_id: Option<String> = v.to_member("channel_id")?.try_into()?;
     let client_id: Option<String> = v.to_member("client_id")?.try_into()?;
