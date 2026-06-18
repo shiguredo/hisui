@@ -602,7 +602,9 @@ pub struct WebmVideoReader {
 
 impl WebmVideoReader {
     pub fn new<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        let file = std::fs::File::open(&path)?;
+        let file = std::fs::File::open(&path).map_err(|e| {
+            crate::Error::new(format!("failed to open {}: {e}", path.as_ref().display()))
+        })?;
         let mut reader = ElementReader::new(BufReader::new(file));
         check_ebml_header_element(&mut reader)?;
 
