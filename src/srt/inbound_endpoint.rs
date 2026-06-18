@@ -28,7 +28,7 @@ pub struct SrtInboundEndpoint {
     pub passphrase: Option<String>,
     // SRT 暗号化の鍵長（passphrase 指定時のみ有効）。
     pub key_length: Option<KeyLength>,
-    // TSBPD 遅延。内部では Duration で保持し、SRT 接続オプションには endpoint_config で u16 ミリ秒に変換して渡す。
+    // TSBPD 遅延。
     pub tsbpd_delay_ms: Option<Duration>,
 }
 
