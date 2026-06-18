@@ -388,54 +388,7 @@ impl VideoTrackHeader {
                 }
             };
 
-            // VIDEO master の PixelWidth / PixelHeight を取得する。
-            // VIDEO が無い・PixelWidth / PixelHeight が無い場合は 0 でフォールバックする (warning ログを出す)。
-            let mut width: usize = 0;
-            let mut height: usize = 0;
-            let mut video_seen = false;
-            while !reader.is_eos() {
-                let id = reader.peek_id()?;
-                if id == ID_VIDEO {
-                    video_seen = true;
-                    let mut video_reader = reader.read_master(ID_VIDEO)?;
-                    while !video_reader.is_eos() {
-                        let inner_id = video_reader.peek_id()?;
-                        match inner_id {
-                            ID_PIXEL_WIDTH => {
-                                width = video_reader.read_u64(ID_PIXEL_WIDTH)? as usize;
-                            }
-                            ID_PIXEL_HEIGHT => {
-                                height = video_reader.read_u64(ID_PIXEL_HEIGHT)? as usize;
-                            }
-                            _ => {
-                                // Video master 内の他の子要素 (FrameRate / DisplayWidth など) は本 reader では使わない。
-                                video_reader.read_id()?;
-                                video_reader.skip_element_data()?;
-                            }
-                        }
-                    }
-                } else {
-                    // TRACK_ENTRY 直下の他の子要素 (FlagLacing / Language など) は本 reader では使わない。
-                    reader.read_id()?;
-                    reader.skip_element_data()?;
-                }
-            }
-            if !video_seen {
-                tracing::warn!(
-                    "WebM video TRACK_ENTRY has no Video master element; falling back to width=0 height=0"
-                );
-            } else if width == 0 || height == 0 {
-                tracing::warn!(
-                    width,
-                    height,
-                    "WebM video TRACK_ENTRY missing PixelWidth or PixelHeight; falling back to 0"
-                );
-            }
-            // width=0 / height=0 のフォールバック値はそのまま VP8 / VP9 の sample_entry に載って下流に流れる。
-            // Sora 録画前提では発生しない異常系のため Err にはしないが、もし sample_entry 経由で MP4 STSD に
-            // 直接書き出される経路が将来発生した場合は、ISO/IEC 14496-12 上の不正解像度として扱われる可能性がある。
-            // compose 経路 (src/sora/recording_reader.rs) では再エンコードで sample_entry が差し替わるため
-            // 実害は無い。
+            let (width, height) = read_pixel_dimensions(&mut reader)?;
             return Ok(Self {
                 codec,
                 width,
@@ -443,6 +396,62 @@ impl VideoTrackHeader {
             });
         }
     }
+}
+
+// TRACK_ENTRY 直下の残り子要素を peek_id ループで走査し、VIDEO master 内の PixelWidth /
+// PixelHeight を取得する。VIDEO が無い・PixelWidth / PixelHeight が無い場合は 0 で
+// フォールバックして警告ログを出す。
+//
+// width=0 / height=0 のフォールバック値はそのまま VP8 / VP9 の sample_entry に載って下流に
+// 流れる。Sora 録画前提では発生しない異常系のため Err にはしないが、もし sample_entry 経由で
+// MP4 STSD に直接書き出される経路が将来発生した場合は、ISO/IEC 14496-12 上の不正解像度として
+// 扱われる可能性がある。compose 経路 (src/sora/recording_reader.rs) では再エンコードで
+// sample_entry が差し替わるため実害は無い。
+fn read_pixel_dimensions<R: Read>(
+    reader: &mut ElementReader<std::io::Take<R>>,
+) -> crate::Result<(usize, usize)> {
+    let mut width: usize = 0;
+    let mut height: usize = 0;
+    let mut video_seen = false;
+    while !reader.is_eos() {
+        let id = reader.peek_id()?;
+        if id == ID_VIDEO {
+            video_seen = true;
+            let mut video_reader = reader.read_master(ID_VIDEO)?;
+            while !video_reader.is_eos() {
+                let inner_id = video_reader.peek_id()?;
+                match inner_id {
+                    ID_PIXEL_WIDTH => {
+                        width = video_reader.read_u64(ID_PIXEL_WIDTH)? as usize;
+                    }
+                    ID_PIXEL_HEIGHT => {
+                        height = video_reader.read_u64(ID_PIXEL_HEIGHT)? as usize;
+                    }
+                    _ => {
+                        // Video master 内の他の子要素 (FrameRate / DisplayWidth など) は本 reader では使わない。
+                        video_reader.read_id()?;
+                        video_reader.skip_element_data()?;
+                    }
+                }
+            }
+        } else {
+            // TRACK_ENTRY 直下の他の子要素 (FlagLacing / Language など) は本 reader では使わない。
+            reader.read_id()?;
+            reader.skip_element_data()?;
+        }
+    }
+    if !video_seen {
+        tracing::warn!(
+            "WebM video TRACK_ENTRY has no Video master element; falling back to width=0 height=0"
+        );
+    } else if width == 0 || height == 0 {
+        tracing::warn!(
+            width,
+            height,
+            "WebM video TRACK_ENTRY missing PixelWidth or PixelHeight; falling back to 0"
+        );
+    }
+    Ok((width, height))
 }
 
 #[derive(Debug)]
