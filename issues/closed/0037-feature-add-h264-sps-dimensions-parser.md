@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-16
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-06-18
 - Model: Opus 4.7
 - Branch: feature/add-h264-sps-dimensions-parser
 - Polished: 2026-06-16
