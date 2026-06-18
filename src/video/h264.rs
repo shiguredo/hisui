@@ -148,7 +148,7 @@ pub fn extract_video_dimensions(entry: &SampleEntry) -> crate::Result<(u32, u32)
 ///
 /// SPS (Sequence Parameter Set) と PPS (Picture Parameter Set) を
 /// Annex B 形式で連結してシーケンスヘッダを生成します。
-/// 各NALユニットの前には開始コード `0x00 0x00 0x00 0x01` が付与されます。
+/// 各 NAL ユニットの前には開始コード `0x00 0x00 0x00 0x01` が付与されます。
 pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>]) -> Vec<u8> {
     let mut result = Vec::new();
 
