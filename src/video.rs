@@ -2,6 +2,7 @@ pub mod av1;
 pub mod canvas;
 pub mod h264;
 pub mod h265;
+pub mod vpx;
 
 use std::{num::NonZeroUsize, str::FromStr, sync::Arc, time::Duration};
 

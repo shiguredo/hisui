@@ -5,14 +5,13 @@ use std::{
 };
 
 use crate::{
-    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
-    encoder::{
-        libvpx::{vp8_sample_entry, vp9_sample_entry},
-        opus::opus_sample_entry,
-    },
+    audio::{AudioFormat, AudioFrame, Channels, SampleRate, opus::opus_sample_entry},
     sample_entry::SharedSampleEntry,
     types::CodecName,
-    video::{VideoFormat, VideoFrame},
+    video::{
+        VideoFormat, VideoFrame,
+        vpx::{vp8_sample_entry, vp9_sample_entry},
+    },
 };
 
 // Hisui で参照する要素 ID
