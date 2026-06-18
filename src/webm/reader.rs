@@ -5,7 +5,10 @@ use std::{
 };
 
 use crate::{
-    audio::{AudioFormat, AudioFrame, Channels, SampleRate, opus::opus_sample_entry},
+    audio::{
+        AudioFormat, AudioFrame, Channels, SampleRate,
+        opus::{opus_sample_entry, parse_opus_head_pre_skip},
+    },
     sample_entry::SharedSampleEntry,
     types::CodecName,
     video::{
@@ -271,22 +274,6 @@ fn check_info_element<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<(
     reader.skip_all()?;
 
     Ok(())
-}
-
-// OpusHead (RFC 7845 §5.1) から pre_skip を抽出する。
-// オフセット 0-7: マジック `OpusHead`、10-11: pre_skip (LE u16)。
-// ChannelMappingFamily = 0 (Sora 録画前提) では OpusHead は 19 バイト固定。
-fn parse_opus_head_pre_skip(data: &[u8]) -> crate::Result<u16> {
-    if data.len() < 19 {
-        return Err(crate::Error::new(format!(
-            "OpusHead CodecPrivate too short: {} bytes (expected at least 19)",
-            data.len()
-        )));
-    }
-    if &data[0..8] != b"OpusHead" {
-        return Err(crate::Error::new("OpusHead magic mismatch"));
-    }
-    Ok(u16::from_le_bytes([data[10], data[11]]))
 }
 
 // 音声 TRACK_ENTRY (A_OPUS) を走査して OpusHead pre_skip を取得する。
@@ -765,40 +752,6 @@ impl Iterator for WebmVideoReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn opus_head_parser_returns_err_on_too_short_codec_private() {
-        // RFC 7845 §5.1 で定める ChannelMappingFamily=0 の OpusHead は最短 19 バイト。
-        // それ未満は不正として Err を返すこと。
-        let too_short = vec![0u8; 18];
-        let result = parse_opus_head_pre_skip(&too_short);
-        assert!(result.is_err(), "19 バイト未満は Err を返すこと");
-    }
-
-    #[test]
-    fn opus_head_parser_returns_err_on_magic_mismatch() {
-        // 先頭 8 バイトが b"OpusHead" でない場合は Err を返すこと。
-        let mut data = vec![0u8; 19];
-        data[0..8].copy_from_slice(b"NotOpusH");
-        let result = parse_opus_head_pre_skip(&data);
-        assert!(result.is_err(), "マジック不一致は Err を返すこと");
-    }
-
-    #[test]
-    fn opus_head_parser_extracts_pre_skip_in_little_endian() {
-        // 正常な OpusHead からは pre_skip をオフセット 10-11 から LE u16 で取り出せること。
-        let mut data = vec![0u8; 19];
-        data[0..8].copy_from_slice(b"OpusHead");
-        data[8] = 1; // Version
-        data[9] = 2; // OutputChannelCount
-        data[10] = 0x34; // pre_skip LE 下位バイト
-        data[11] = 0x12; // pre_skip LE 上位バイト
-        let pre_skip = parse_opus_head_pre_skip(&data).expect("正常な OpusHead は pre_skip を返す");
-        assert_eq!(
-            pre_skip, 0x1234,
-            "pre_skip が LE u16 として正しく抽出されること"
-        );
-    }
 
     #[test]
     fn webm_audio_reader_releases_new_arc_per_construction() {
