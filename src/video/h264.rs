@@ -183,40 +183,72 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
     reader.skip_u(8)?; // level_idc
     reader.skip_ue()?; // seq_parameter_set_id
 
-    // High 系プロファイルの追加フィールド群
-    let chroma_format_idc;
-    let separate_colour_plane_flag;
-    if H264_HIGH_PROFILES.contains(&profile_idc) {
-        chroma_format_idc = reader.read_ue()?;
-        if chroma_format_idc == 3 {
-            separate_colour_plane_flag = reader.read_u(1)?;
-        } else {
-            separate_colour_plane_flag = 0;
-        }
-        reader.skip_ue()?; // bit_depth_luma_minus8
-        reader.skip_ue()?; // bit_depth_chroma_minus8
-        reader.skip_u(1)?; // qpprime_y_zero_transform_bypass_flag
-        let seq_scaling_matrix_present_flag = reader.read_u(1)?;
-        if seq_scaling_matrix_present_flag == 1 {
-            // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個の scaling_list を読み飛ばす
-            let scaling_list_count = if chroma_format_idc == 3 { 12 } else { 8 };
-            for i in 0..scaling_list_count {
-                let seq_scaling_list_present_flag = reader.read_u(1)?;
-                if seq_scaling_list_present_flag == 1 {
-                    // 先頭 6 個は 4x4 (size 16)、残りは 8x8 (size 64)
-                    let size = if i < 6 { 16 } else { 64 };
-                    reader.skip_scaling_list(size)?;
-                }
-            }
-        }
-    } else {
-        // Baseline / Main / Extended プロファイルでは chroma_format_idc は SPS に含まれないため
-        // 仕様 7.4.2.1.1 のデフォルトとして 4:2:0 (chroma_format_idc = 1) を用いる
-        chroma_format_idc = 1;
-        separate_colour_plane_flag = 0;
+    let chroma_array_type = read_chroma_array_type(&mut reader, profile_idc)?;
+    reader.skip_ue()?; // log2_max_frame_num_minus4
+    skip_pic_order_cnt_type_extras(&mut reader)?;
+    let (width, height) = read_dimensions_with_cropping(&mut reader, chroma_array_type)?;
+
+    if width == 0 || height == 0 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: zero dimensions after cropping (width={width}, height={height})"
+        )));
     }
 
-    reader.skip_ue()?; // log2_max_frame_num_minus4
+    // 戻り値は最終的に `sample_entry_visual_fields` で `width as u16 / height as u16` に渡される。
+    // u16 上限 (65535) を超えると silent truncation してラップした値や 0 が MP4 sample_entry に
+    // 埋め込まれるため、ここで上限を強制する。H.264 仕様 Level 6.2 の最大解像度 8192x4320 でも
+    // u16 に収まるため、実用範囲を狭めることはない。
+    if width > u16::MAX as usize || height > u16::MAX as usize {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: dimensions exceed u16::MAX (width={width}, height={height})"
+        )));
+    }
+
+    Ok((width, height))
+}
+
+/// High 系プロファイルの追加フィールド群を読み、`chroma_array_type` を返す。
+///
+/// Baseline / Main / Extended プロファイルでは chroma_format_idc が SPS に含まれないため
+/// 仕様 7.4.2.1.1 のデフォルトとして 4:2:0 (`chroma_array_type = 1`) を返す。
+fn read_chroma_array_type(reader: &mut H264BitReader<'_>, profile_idc: u8) -> crate::Result<u32> {
+    if !H264_HIGH_PROFILES.contains(&profile_idc) {
+        return Ok(1);
+    }
+
+    let chroma_format_idc = reader.read_ue()?;
+    let separate_colour_plane_flag = if chroma_format_idc == 3 {
+        reader.read_u(1)?
+    } else {
+        0
+    };
+    reader.skip_ue()?; // bit_depth_luma_minus8
+    reader.skip_ue()?; // bit_depth_chroma_minus8
+    reader.skip_u(1)?; // qpprime_y_zero_transform_bypass_flag
+    let seq_scaling_matrix_present_flag = reader.read_u(1)?;
+    if seq_scaling_matrix_present_flag == 1 {
+        // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個の scaling_list を読み飛ばす
+        let scaling_list_count = if chroma_format_idc == 3 { 12 } else { 8 };
+        for i in 0..scaling_list_count {
+            let seq_scaling_list_present_flag = reader.read_u(1)?;
+            if seq_scaling_list_present_flag == 1 {
+                // 先頭 6 個は 4x4 (size 16)、残りは 8x8 (size 64)
+                let size = if i < 6 { 16 } else { 64 };
+                skip_scaling_list(reader, size)?;
+            }
+        }
+    }
+
+    // chroma_array_type の決定（仕様 7.4.2.1.1）
+    Ok(if separate_colour_plane_flag == 1 {
+        0
+    } else {
+        chroma_format_idc
+    })
+}
+
+/// pic_order_cnt_type に応じた追加フィールド群を読み飛ばす（仕様 7.3.2.1.1）
+fn skip_pic_order_cnt_type_extras(reader: &mut H264BitReader<'_>) -> crate::Result<()> {
     let pic_order_cnt_type = reader.read_ue()?;
     match pic_order_cnt_type {
         0 => {
@@ -240,7 +272,17 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
         // pic_order_cnt_type == 2 のときは追加読み出しなし
         _ => {}
     }
+    Ok(())
+}
 
+/// pic_width / pic_height / frame_mbs_only_flag / frame_cropping_flag を読み、
+/// cropping 適用後の (width, height) を返す（仕様 7.4.2.1.1）。
+///
+/// `chroma_array_type` は CropUnitX / CropUnitY の決定に使う。
+fn read_dimensions_with_cropping(
+    reader: &mut H264BitReader<'_>,
+    chroma_array_type: u32,
+) -> crate::Result<(usize, usize)> {
     reader.skip_ue()?; // max_num_ref_frames
     reader.skip_u(1)?; // gaps_in_frame_num_value_allowed_flag
     let pic_width_in_mbs_minus1 = reader.read_ue()?;
@@ -254,13 +296,6 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
     }
     reader.skip_u(1)?; // direct_8x8_inference_flag
     let frame_cropping_flag = reader.read_u(1)?;
-
-    // chroma_array_type の決定（仕様 7.4.2.1.1）
-    let chroma_array_type = if separate_colour_plane_flag == 1 {
-        0
-    } else {
-        chroma_format_idc
-    };
 
     // CropUnitX / CropUnitY の決定（仕様 6.2 / 7.4.2.1.1）
     let frame_mbs_factor = 2 - frame_mbs_only_flag as usize;
@@ -293,7 +328,7 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
             )
         })?;
 
-    let (width, height) = if frame_cropping_flag == 1 {
+    if frame_cropping_flag == 1 {
         let frame_crop_left_offset = reader.read_ue()? as usize;
         let frame_crop_right_offset = reader.read_ue()? as usize;
         let frame_crop_top_offset = reader.read_ue()? as usize;
@@ -318,28 +353,10 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
         let height = raw_height.checked_sub(crop_y).ok_or_else(|| {
             crate::Error::new("invalid H.264 SPS: crop_y exceeds raw_height (underflow)")
         })?;
-        (width, height)
+        Ok((width, height))
     } else {
-        (raw_width, raw_height)
-    };
-
-    if width == 0 || height == 0 {
-        return Err(crate::Error::new(format!(
-            "invalid H.264 SPS: zero dimensions after cropping (width={width}, height={height})"
-        )));
+        Ok((raw_width, raw_height))
     }
-
-    // 戻り値は最終的に `sample_entry_visual_fields` で `width as u16 / height as u16` に渡される。
-    // u16 上限 (65535) を超えると silent truncation してラップした値や 0 が MP4 sample_entry に
-    // 埋め込まれるため、ここで上限を強制する。H.264 仕様 Level 6.2 の最大解像度 8192x4320 でも
-    // u16 に収まるため、実用範囲を狭めることはない。
-    if width > u16::MAX as usize || height > u16::MAX as usize {
-        return Err(crate::Error::new(format!(
-            "invalid H.264 SPS: dimensions exceed u16::MAX (width={width}, height={height})"
-        )));
-    }
-
-    Ok((width, height))
 }
 
 /// SPS NAL ユニットから RBSP を抽出する
@@ -498,34 +515,36 @@ impl<'a> H264BitReader<'a> {
     fn skip_se(&mut self) -> crate::Result<()> {
         self.read_se().map(|_| ())
     }
+}
 
-    /// scaling_list() サブルーチンの読み飛ばし（仕様 7.3.2.1.1.1）
-    ///
-    /// 要素ごとに delta_scale (se(v)) を読む。next_scale が 0 になると以降は読まずに進める。
-    /// 実値は本実装では使わず、ビット位置を進めるだけ。
-    fn skip_scaling_list(&mut self, size: usize) -> crate::Result<()> {
-        let mut last_scale: i32 = 8;
-        let mut next_scale: i32 = 8;
-        for _ in 0..size {
-            if next_scale != 0 {
-                let delta_scale = self.read_se()?;
-                // 仕様 7.3.2.1.1.1: next_scale = (last_scale + delta_scale + 256) % 256
-                let sum = last_scale
-                    .checked_add(delta_scale)
-                    .and_then(|v| v.checked_add(256))
-                    .ok_or_else(|| {
-                        crate::Error::new(
-                            "invalid H.264 SPS: scaling_list next_scale overflow during update",
-                        )
-                    })?;
-                next_scale = sum.rem_euclid(256);
-            }
-            if next_scale != 0 {
-                last_scale = next_scale;
-            }
+/// scaling_list() サブルーチンの読み飛ばし（仕様 7.3.2.1.1.1）
+///
+/// 要素ごとに delta_scale (se(v)) を読む。next_scale が 0 になると以降は読まずに進める。
+/// 実値は本実装では使わず、ビット位置を進めるだけ。
+///
+/// H.264 仕様固有のロジックなので `H264BitReader` 本体（汎用ビットリーダ）からは分離する。
+fn skip_scaling_list(reader: &mut H264BitReader<'_>, size: usize) -> crate::Result<()> {
+    let mut last_scale: i32 = 8;
+    let mut next_scale: i32 = 8;
+    for _ in 0..size {
+        if next_scale != 0 {
+            let delta_scale = reader.read_se()?;
+            // 仕様 7.3.2.1.1.1: next_scale = (last_scale + delta_scale + 256) % 256
+            let sum = last_scale
+                .checked_add(delta_scale)
+                .and_then(|v| v.checked_add(256))
+                .ok_or_else(|| {
+                    crate::Error::new(
+                        "invalid H.264 SPS: scaling_list next_scale overflow during update",
+                    )
+                })?;
+            next_scale = sum.rem_euclid(256);
         }
-        Ok(())
+        if next_scale != 0 {
+            last_scale = next_scale;
+        }
     }
+    Ok(())
 }
 
 /// Annex.B 形式の H.264 を RTMP 用の AVC パケット形式（サイズ付き NALU）に変換
@@ -757,7 +776,7 @@ mod tests {
         // これで delta_scale = i32::MAX となり、8.checked_add(i32::MAX) が None → Err。
         let data = [0x00, 0x00, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFC];
         let mut reader = H264BitReader::new(&data);
-        let result = reader.skip_scaling_list(1);
+        let result = skip_scaling_list(&mut reader, 1);
         assert!(
             result.is_err(),
             "巨大な delta_scale で next_scale 計算が overflow したら Err: {result:?}"
