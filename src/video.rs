@@ -53,6 +53,8 @@ pub struct VideoFrame {
     /// 圧縮フォーマット（H264 / H264AnnexB / H265 / Vp8 / Vp9 / Av1）の `VideoFrame` は常に `Some` を持つ。
     /// 生フォーマット（I420 / I420A）と decoder 内部の中間表現として一時的に構築するフレーム、
     /// および外部に流れないフレームは `None` を許容する。
+    ///
+    /// 現時点で未適用の経路: WebM リーダーの AV1 / H264AnnexB 映像。
     pub sample_entry: Option<SharedSampleEntry>,
 }
 

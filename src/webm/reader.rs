@@ -284,7 +284,9 @@ struct AudioTrackHeader {
 impl AudioTrackHeader {
     // 音声 TRACK_ENTRY (A_OPUS) を走査して OpusHead pre_skip を取得する。
     // TRACKS 内の他の TRACK_ENTRY (映像など) は skip_all で読み捨てる。
-    fn read<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<Self> {
+    // 音声トラック不在の WebM (映像のみ録画など、Sora 録画でも普通にある) では Ok(None) を返し、
+    // WebmAudioReader::new 側で sample_entry: None として旧版互換の挙動を維持する。
+    fn read<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<Option<Self>> {
         reader.skip_until(ID_TRACKS)?;
         let mut tracks_reader = reader.read_master(ID_TRACKS)?;
         let mut found: Option<u16> = None;
@@ -334,10 +336,7 @@ impl AudioTrackHeader {
             };
             found = Some(pre_skip);
         }
-        let pre_skip = found.ok_or_else(|| {
-            crate::Error::new("no audio TRACK_ENTRY (A_OPUS) found in WebM TRACKS")
-        })?;
-        Ok(Self { pre_skip })
+        Ok(found.map(|pre_skip| Self { pre_skip }))
     }
 }
 
@@ -473,14 +472,16 @@ impl WebmAudioReader {
         check_info_element(&mut reader)?;
         // 音声 TRACK_ENTRY (A_OPUS) から OpusHead pre_skip を取得して sample_entry を構築する。
         // ファイル切り替え時はリーダー再生成で sample_entry も自動的に再構築される (inherit_stats_from の対象外)。
-        let header = AudioTrackHeader::read(&mut reader)?;
-        let sample_entry = SharedSampleEntry::new(opus_sample_entry(header.pre_skip));
+        // 音声トラック不在 (映像のみ録画など) では sample_entry: None になるが、read_simple_block で
+        // 圧縮 AudioFrame が生成される経路は track_number 不一致で発生しないため不変条件は保たれる。
+        let sample_entry = AudioTrackHeader::read(&mut reader)?
+            .map(|h| SharedSampleEntry::new(opus_sample_entry(h.pre_skip)));
         reader.skip_until(ID_CLUSTER)?;
 
         Ok(Self {
             reader,
             cluster_timestamp: Duration::ZERO,
-            sample_entry: Some(sample_entry),
+            sample_entry,
             current_input_file: Some(path.as_ref().to_path_buf()),
             codec: None,
             total_cluster_count: 0,
@@ -613,8 +614,11 @@ impl WebmVideoReader {
         check_info_element(&mut reader)?;
 
         let header = VideoTrackHeader::read(&mut reader)?;
-        // 対応スコープ (VP8 / VP9) のみ sample_entry を構築する。
-        // AV1 / H264AnnexB は Sora 録画で WebM コンテナに出力されないため Err を返す。
+        // VP8 / VP9 のみ sample_entry を構築する。AV1 / H264AnnexB は Sora 録画の WebM で普通に
+        // 出力されるが、それぞれ AV1CodecConfigurationRecord / AVCDecoderConfigurationRecord
+        // (avcC) のパーサ実装が必要で本 PR スコープ外。当面 sample_entry: None で開いて旧版
+        // 互換の挙動を維持し、compose 経路では再エンコードで sample_entry が確定する形に委ねる
+        // (writer 入口の resolve_*_sample_entry も二重防護で動く)。詳細は後続 issue で扱う。
         // I420 (映像トラック不在のフォールバック) は生フォーマットで不変条件の対象外のため None を保持する。
         let sample_entry = match header.codec {
             VideoFormat::Vp8 => Some(SharedSampleEntry::new(vp8_sample_entry(
@@ -625,16 +629,7 @@ impl WebmVideoReader {
                 header.width,
                 header.height,
             ))),
-            VideoFormat::Av1 => {
-                return Err(crate::Error::new(
-                    "AV1 in WebM is not supported by WebmVideoReader",
-                ));
-            }
-            VideoFormat::H264AnnexB => {
-                return Err(crate::Error::new(
-                    "H264 (Annex-B) in WebM is not supported by WebmVideoReader",
-                ));
-            }
+            VideoFormat::Av1 | VideoFormat::H264AnnexB => None,
             VideoFormat::I420 => None,
             // VideoTrackHeader::read が返す codec は Vp8 / Vp9 / Av1 / H264AnnexB / I420 の 5 値のみで、
             // 以下は構造的に到達不能な防御。VideoFormat の他バリアント (H264 / H265 / I420A) が将来
