@@ -132,7 +132,7 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 4. settings ペイロードの出現箇所 (snake_case を適用する API 経路リスト)
 5. OBS Studio キー定義対照表 (フェーズ A 調査結果)
 6. 引用 URL (OBS Studio 本体ソース、commit hash pinned で残す)
-7. 非対称キー (受信のみ / 送信のみ。例: `passphrase` は state file 永続化では出すが GetInputSettings レスポンスでは隠す。`trackId` は GetInputSettings レスポンスでは出すが state file 永続化では `WebRtcSourceSettingsWithoutTrackId` で除外する)
+7. 非対称キー (受信のみ / 送信のみ。例: `passphrase` は state file 永続化では出すが GetInputSettings レスポンスでは隠す。`track_id` は GetInputSettings レスポンスでは出すが state file 永続化では除外する)
 
 既存 `docs/obsws/PERSISTENT_DATA.md` / `STATE_FILE.md` 内に古い JSON サンプルがあればリネームに追従させ、相互参照リンクを `json_naming.md` 末尾に置く。
 
@@ -195,8 +195,8 @@ shiguredo-git 規約 (`{SEQ} {TITLE}` 形式) に従う。リネーム差分は�
 
 - hisui は正式リリース前のため、受信側 (`to_member` / `parse_optional_*_setting` 等) で旧名と新名の両方を試すフォールバックコードは入れない。state file の移行コードも入れない。
 - 章 7 「非対称キー」の対象候補 (`docs/obsws/json_naming.md` 執筆時の参考):
-  - `passphrase`: state file 永続化 (`SrtInboundSettingsWithPassphrase`) では出力、GetInputSettings レスポンス (`ObswsSrtInboundSettings`) では隠す (`src/obsws/state/types.rs:1103` のコメント参照)
-  - `trackId`: GetInputSettings レスポンス (`ObswsWebRtcSourceSettings.trackId` → `track_id`) では出力、state file 永続化 (`WebRtcSourceSettingsWithoutTrackId`) では除外
+  - `passphrase` (`srt_inbound`): state file 永続化では出力、GetInputSettings レスポンスでは隠す
+  - `track_id` (`webrtc_source`): GetInputSettings レスポンスでは出力、state file 永続化では除外
 
 ## OBS Studio キー定義調査結果 (2026-06-15 追記、フェーズ A)
 
