@@ -134,3 +134,17 @@ CI と同等のコマンドで通すこと:
 ## 関連
 
 - closed PR #207 (`feature/remove-json-rpc` / merge commit `d4170ed8`): 本 issue 対象の impl が呼び出し元を失った直接の契機 (`MediaPipelineHandle` から JSON-RPC 依存除去は `d8151946`)
+
+## 解決方法 (2026-06-18)
+
+`feature/refactor-remove-unused-processor-json-impls` で次を実装した。2 コミット、6 ファイル +2/-411 行。
+
+- `src/rtmp/inbound_endpoint.rs` / `src/rtmp/outbound_endpoint.rs` / `src/rtmp/publisher.rs` / `src/srt/inbound_endpoint.rs` / `src/rtsp/subscriber.rs` から `impl nojson::DisplayJson` と `impl TryFrom<nojson::RawJsonValue>` の各 impl ブロック (合計 10 ブロック) を削除した。
+- 連鎖 helper 4 個 (`parse_optional_non_empty_string` / `parse_optional_key_length` / `key_length_to_rpc_value` / `validate_input_url`) を削除した。`tsbpd_delay_duration_to_millis` は `endpoint_config` で使い続けるため残した。
+- `src/srt/inbound_endpoint.rs:31` の `tsbpd_delay_ms` フィールドコメントから旧 JSON-RPC 言及を除去し、周辺フィールドの密度に揃えて `// TSBPD 遅延。` に簡潔化した。
+- `docs/obsws/json_naming.md` 章 4 末尾の processor 独自 JSON フォーマットに関する段落 1 行を削除した。
+- 死活確認は impl 10 ブロックと helper 4 個を **すべて同時に** `#[cfg(any())]` で無効化したうえで CI 同等の `cargo check --workspace` / `cargo check --workspace --no-default-features` / `cargo clippy --workspace --all-targets -- --deny warnings` / `cargo clippy --workspace --no-default-features -- --deny warnings` / `cargo test --workspace` がすべてパスすることを確認した。helper 連鎖の `dead_code` 警告すら出ず呼び出し元不在を実証した。
+- 完了条件の grep 4 種 (`impl nojson::DisplayJson for ...` / `TryFrom<nojson::RawJsonValue` / `hisui 内部の processor` in docs / `JSON-?RPC|json-?rpc|createRtmp|createSrt|createRtsp` in 対象 5 ファイル) すべて 0 件達成。
+- `cargo fmt --all --check` / CI 同等の cargo コマンドすべてパス、`cargo doc --no-deps` 警告数 着手時 4 → 完了時 4 (差分 0)。
+- `CHANGES.md` には記載しなかった (shiguredo-changelog 規約「`.rst` / `.md` ファイルの変更は変更履歴に反映しない」と内部 dead code 整理のため、closed 0036 / 0022 と同じ先例に倣った)。
+- `/review-diff-code` で重要 1 件 (フィールドコメントの密度乖離) を検出し、コメント簡潔化コミットで解消した。残った重要・改善指摘 5 件はすべて本 issue のスコープ外で、別 issue 起票候補として実装者が記録済み (PROTOCOL_STATUS.md 旧 JSON-RPC 名残整理、5 構造体 validation 集約方針、`tsbpd_delay_duration_to_millis` のエラー文言、`endpoint_config()` テスト追加、obsws output coordinator テスト追加)。
