@@ -178,11 +178,10 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
     let rbsp = rbsp_from_sps_nalu(sps)?;
     let mut reader = H264BitReader::new(&rbsp);
 
-    // profile_idc, constraint_set*_flag + reserved_zero_2bits, level_idc
     let profile_idc = reader.read_u(8)? as u8;
-    let _constraint_and_reserved = reader.read_u(8)?;
-    let _level_idc = reader.read_u(8)?;
-    let _seq_parameter_set_id = reader.read_ue()?;
+    reader.skip_u(8)?; // constraint_set0..5_flag + reserved_zero_2bits
+    reader.skip_u(8)?; // level_idc
+    reader.skip_ue()?; // seq_parameter_set_id
 
     // High 系プロファイルの追加フィールド群
     let chroma_format_idc;
@@ -194,9 +193,9 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
         } else {
             separate_colour_plane_flag = 0;
         }
-        let _bit_depth_luma_minus8 = reader.read_ue()?;
-        let _bit_depth_chroma_minus8 = reader.read_ue()?;
-        let _qpprime_y_zero_transform_bypass_flag = reader.read_u(1)?;
+        reader.skip_ue()?; // bit_depth_luma_minus8
+        reader.skip_ue()?; // bit_depth_chroma_minus8
+        reader.skip_u(1)?; // qpprime_y_zero_transform_bypass_flag
         let seq_scaling_matrix_present_flag = reader.read_u(1)?;
         if seq_scaling_matrix_present_flag == 1 {
             // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個の scaling_list を読み飛ばす
@@ -217,16 +216,16 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
         separate_colour_plane_flag = 0;
     }
 
-    let _log2_max_frame_num_minus4 = reader.read_ue()?;
+    reader.skip_ue()?; // log2_max_frame_num_minus4
     let pic_order_cnt_type = reader.read_ue()?;
     match pic_order_cnt_type {
         0 => {
-            let _log2_max_pic_order_cnt_lsb_minus4 = reader.read_ue()?;
+            reader.skip_ue()?; // log2_max_pic_order_cnt_lsb_minus4
         }
         1 => {
-            let _delta_pic_order_always_zero_flag = reader.read_u(1)?;
-            let _offset_for_non_ref_pic = reader.read_se()?;
-            let _offset_for_top_to_bottom_field = reader.read_se()?;
+            reader.skip_u(1)?; // delta_pic_order_always_zero_flag
+            reader.skip_se()?; // offset_for_non_ref_pic
+            reader.skip_se()?; // offset_for_top_to_bottom_field
             let num_ref_frames_in_pic_order_cnt_cycle = reader.read_ue()?;
             // 仕様 7.4.2.1.1 で 0..=255 の範囲。それを超える値は仕様外で、巨大値での無駄な se(v) ループを防ぐ。
             if num_ref_frames_in_pic_order_cnt_cycle > 255 {
@@ -235,15 +234,15 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
                 )));
             }
             for _ in 0..num_ref_frames_in_pic_order_cnt_cycle {
-                let _offset_for_ref_frame = reader.read_se()?;
+                reader.skip_se()?; // offset_for_ref_frame[i]
             }
         }
         // pic_order_cnt_type == 2 のときは追加読み出しなし
         _ => {}
     }
 
-    let _max_num_ref_frames = reader.read_ue()?;
-    let _gaps_in_frame_num_value_allowed_flag = reader.read_u(1)?;
+    reader.skip_ue()?; // max_num_ref_frames
+    reader.skip_u(1)?; // gaps_in_frame_num_value_allowed_flag
     let pic_width_in_mbs_minus1 = reader.read_ue()?;
     let pic_height_in_map_units_minus1 = reader.read_ue()?;
     let frame_mbs_only_flag = reader.read_u(1)?;
@@ -251,9 +250,9 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
         // 仕様 7.3.2.1.1: frame_mbs_only_flag == 0 のとき mb_adaptive_frame_field_flag (u(1)) を読む。
         // 値自体は本実装では使わないが、ビット位置を進めないと後続の direct_8x8_inference_flag /
         // frame_cropping_flag の読み出しが 1 bit ずれて誤動作する。
-        let _mb_adaptive_frame_field_flag = reader.read_u(1)?;
+        reader.skip_u(1)?; // mb_adaptive_frame_field_flag
     }
-    let _direct_8x8_inference_flag = reader.read_u(1)?;
+    reader.skip_u(1)?; // direct_8x8_inference_flag
     let frame_cropping_flag = reader.read_u(1)?;
 
     // chroma_array_type の決定（仕様 7.4.2.1.1）
@@ -483,6 +482,21 @@ impl<'a> H264BitReader<'a> {
             i32::try_from(negated)
                 .map_err(|_| crate::Error::new("invalid H.264 SPS: se(v) negative value overflow"))
         }
+    }
+
+    /// n ビット符号なし整数を読み飛ばす（戻り値を捨てる `read_u` のラッパー）
+    fn skip_u(&mut self, n: usize) -> crate::Result<()> {
+        self.read_u(n).map(|_| ())
+    }
+
+    /// ue(v) を読み飛ばす（戻り値を捨てる `read_ue` のラッパー）
+    fn skip_ue(&mut self) -> crate::Result<()> {
+        self.read_ue().map(|_| ())
+    }
+
+    /// se(v) を読み飛ばす（戻り値を捨てる `read_se` のラッパー）
+    fn skip_se(&mut self) -> crate::Result<()> {
+        self.read_se().map(|_| ())
     }
 
     /// scaling_list() サブルーチンの読み飛ばし（仕様 7.3.2.1.1.1）
