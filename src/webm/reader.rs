@@ -353,8 +353,11 @@ impl VideoTrackHeader {
         let mut reader = reader.read_master(ID_TRACKS)?;
         loop {
             if reader.is_eos() {
-                // 映像トラックが存在しないパターン
-                // コーデックの値は、実際に参照されることはないので、あり得ない値を適当に設定しておく
+                // 映像トラックが存在しないパターン。Sora 録画は映像トラックを必ず含む前提のため、
+                // 実運用では発生しない経路。本来「生 YUV」を指す VideoFormat::I420 を「映像トラック
+                // 不在」のセンチネル値に流用しており、型の意味論としては不純だが Sora 録画前提では
+                // この値が WebmVideoReader::read_simple_block で参照されることはない (track_number
+                // 不一致でフレーム生成が起きないため)。型抽象の整理が必要になったら別 issue で扱う。
                 tracing::warn!(
                     "WebM TRACKS has no video TRACK_ENTRY; codec set to I420 as placeholder"
                 );
@@ -633,6 +636,10 @@ impl WebmVideoReader {
                 ));
             }
             VideoFormat::I420 => None,
+            // VideoTrackHeader::read が返す codec は Vp8 / Vp9 / Av1 / H264AnnexB / I420 の 5 値のみで、
+            // 以下は構造的に到達不能な防御。VideoFormat の他バリアント (H264 / H265 / I420A) が将来
+            // VideoTrackHeader::read のマッピングに追加されたとき silently ランタイムエラー化する余地
+            // があるため、型抽象の整理が必要になったら別 issue で扱う。
             other => {
                 return Err(crate::Error::new(format!(
                     "WebmVideoReader received unexpected video format from TRACKS: {other:?}"
