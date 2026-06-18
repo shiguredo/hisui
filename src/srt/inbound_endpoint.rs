@@ -28,7 +28,7 @@ pub struct SrtInboundEndpoint {
     pub passphrase: Option<String>,
     // SRT 暗号化の鍵長（passphrase 指定時のみ有効）。
     pub key_length: Option<KeyLength>,
-    // TSBPD 遅延。JSON-RPC ではミリ秒の u16 で受け取り、内部では Duration で保持する。
+    // TSBPD 遅延。内部では Duration で保持し、SRT 接続オプションには endpoint_config で u16 ミリ秒に変換して渡す。
     pub tsbpd_delay_ms: Option<Duration>,
 }
 
@@ -352,131 +352,6 @@ impl SrtInboundEndpoint {
             }
         }
         Ok(())
-    }
-}
-
-impl nojson::DisplayJson for SrtInboundEndpoint {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("input_url", &self.input_url)?;
-            if let Some(track_id) = &self.output_audio_track_id {
-                f.member("outputAudioTrackId", track_id)?;
-            }
-            if let Some(track_id) = &self.output_video_track_id {
-                f.member("outputVideoTrackId", track_id)?;
-            }
-            if let Some(stream_id) = &self.stream_id {
-                f.member("stream_id", stream_id)?;
-            }
-            if let Some(passphrase) = &self.passphrase {
-                f.member("passphrase", passphrase)?;
-            }
-            if let Some(key_length) = self.key_length {
-                f.member("keyLength", key_length_to_rpc_value(key_length))?;
-            }
-            if let Some(tsbpd_delay_ms) = self
-                .tsbpd_delay_ms
-                .map(tsbpd_delay_duration_to_millis)
-                .transpose()
-                .map_err(|_| std::fmt::Error)?
-            {
-                f.member("tsbpdDelayMs", tsbpd_delay_ms)?;
-            }
-            Ok(())
-        })
-    }
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for SrtInboundEndpoint {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(
-        value: nojson::RawJsonValue<'text, 'raw>,
-    ) -> std::result::Result<Self, Self::Error> {
-        let input_url: String = value.to_member("input_url")?.required()?.try_into()?;
-        let output_audio_track_id: Option<crate::TrackId> =
-            value.to_member("outputAudioTrackId")?.try_into()?;
-        let output_video_track_id: Option<crate::TrackId> =
-            value.to_member("outputVideoTrackId")?.try_into()?;
-
-        if output_audio_track_id.is_none() && output_video_track_id.is_none() {
-            return Err(value.invalid("outputAudioTrackId or outputVideoTrackId is required"));
-        }
-
-        let stream_id = parse_optional_non_empty_string(value, "stream_id")?;
-        let passphrase = parse_optional_non_empty_string(value, "passphrase")?;
-        let key_length = parse_optional_key_length(value)?;
-        let tsbpd_delay_ms_raw: Option<u16> = value.to_member("tsbpdDelayMs")?.try_into()?;
-        let tsbpd_delay_ms = tsbpd_delay_ms_raw.map(|ms| Duration::from_millis(ms as u64));
-
-        if passphrase.is_none() && key_length.is_some() {
-            return Err(value
-                .to_member("keyLength")?
-                .required()?
-                .invalid("keyLength requires passphrase"));
-        }
-
-        if let Err(e) = parse_srt_url(&input_url) {
-            return Err(value.to_member("input_url")?.required()?.invalid(e));
-        }
-
-        Ok(Self {
-            input_url,
-            output_audio_track_id,
-            output_video_track_id,
-            stream_id,
-            passphrase,
-            key_length,
-            tsbpd_delay_ms,
-        })
-    }
-}
-
-fn parse_optional_non_empty_string(
-    value: nojson::RawJsonValue<'_, '_>,
-    member: &str,
-) -> std::result::Result<Option<String>, nojson::JsonParseError> {
-    let raw: Option<String> = value.to_member(member)?.try_into()?;
-    match raw {
-        Some(s) => {
-            if s.is_empty() {
-                return Err(value
-                    .to_member(member)?
-                    .required()?
-                    .invalid(format!("{member} must not be empty")));
-            }
-            Ok(Some(s))
-        }
-        None => Ok(None),
-    }
-}
-
-fn parse_optional_key_length(
-    value: nojson::RawJsonValue<'_, '_>,
-) -> std::result::Result<Option<KeyLength>, nojson::JsonParseError> {
-    let raw: Option<u16> = value.to_member("keyLength")?.try_into()?;
-    let Some(raw) = raw else {
-        return Ok(None);
-    };
-
-    let key_length = match raw {
-        16 => KeyLength::Aes128,
-        32 => KeyLength::Aes256,
-        _ => {
-            return Err(value
-                .to_member("keyLength")?
-                .required()?
-                .invalid("keyLength must be one of 16 or 32"));
-        }
-    };
-
-    Ok(Some(key_length))
-}
-
-fn key_length_to_rpc_value(key_length: KeyLength) -> u16 {
-    match key_length {
-        KeyLength::Aes128 => 16,
-        KeyLength::Aes256 => 32,
     }
 }
 
