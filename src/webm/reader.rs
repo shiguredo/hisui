@@ -305,7 +305,6 @@ fn read_audio_track_pre_skip<R: Read>(reader: &mut ElementReader<R>) -> crate::R
             continue;
         }
         // TRACK_ENTRY 内の残り子要素を peek_id ループで走査する。
-        // peek_id は内部キャッシュに ID を保持し、続く read_bytes の expect_id がその ID をそのまま消費する。
         let mut codec_id_ok = false;
         let mut pre_skip: Option<u16> = None;
         while !entry.is_eos() {
@@ -325,7 +324,7 @@ fn read_audio_track_pre_skip<R: Read>(reader: &mut ElementReader<R>) -> crate::R
                     pre_skip = Some(parse_opus_head_pre_skip(&bytes)?);
                 }
                 _ => {
-                    // それ以外の TRACK_ENTRY 子要素 (SamplingFrequency / Channels / OutputGain など) は使わないので読み捨てる。
+                    // SamplingFrequency / Channels / OutputGain などは本 reader では使わない。
                     entry.read_id()?;
                     entry.skip_element_data()?;
                 }
@@ -360,7 +359,9 @@ impl VideoTrackHeader {
             if reader.is_eos() {
                 // 映像トラックが存在しないパターン
                 // コーデックの値は、実際に参照されることはないので、あり得ない値を適当に設定しておく
-                tracing::warn!("no video track");
+                tracing::warn!(
+                    "WebM TRACKS has no video TRACK_ENTRY; codec set to I420 as placeholder"
+                );
                 return Ok(Self {
                     codec: VideoFormat::I420,
                     width: 0,
@@ -389,9 +390,8 @@ impl VideoTrackHeader {
                 }
             };
 
-            // CODEC_ID 取得後、TRACK_ENTRY 内の残り子要素を peek_id ループで走査して
-            // VIDEO master 内の PixelWidth / PixelHeight を取得する。
-            // VIDEO が無い・PixelWidth / PixelHeight が無い場合は 0 でフォールバック。
+            // VIDEO master の PixelWidth / PixelHeight を取得する。
+            // VIDEO が無い・PixelWidth / PixelHeight が無い場合は 0 でフォールバックする (warning ログを出す)。
             let mut width: usize = 0;
             let mut height: usize = 0;
             let mut video_seen = false;
@@ -410,14 +410,14 @@ impl VideoTrackHeader {
                                 height = video_reader.read_u64(ID_PIXEL_HEIGHT)? as usize;
                             }
                             _ => {
-                                // Video master 内の他の子要素 (FrameRate / DisplayWidth など) は使わないので読み捨てる。
+                                // Video master 内の他の子要素 (FrameRate / DisplayWidth など) は本 reader では使わない。
                                 video_reader.read_id()?;
                                 video_reader.skip_element_data()?;
                             }
                         }
                     }
                 } else {
-                    // TRACK_ENTRY 直下の他の子要素 (FlagLacing / Language など) は使わないので読み捨てる。
+                    // TRACK_ENTRY 直下の他の子要素 (FlagLacing / Language など) は本 reader では使わない。
                     reader.read_id()?;
                     reader.skip_element_data()?;
                 }
@@ -534,8 +534,8 @@ impl WebmAudioReader {
             format: AudioFormat::Opus,
             timestamp,
 
-            // 全圧縮フレームに sample_entry を載せる不変条件 (issue 0030 / 0031) に従う。
             // sample_entry は WebmAudioReader::new で OpusHead pre_skip から構築済み。
+            // 不変条件 (圧縮 AudioFrame は常に Some) は src/audio.rs::AudioFrame の docstring を参照。
             sample_entry: self.sample_entry.clone(),
             channels: Channels::STEREO,        // Hisui では常に固定値
             sample_rate: SampleRate::HZ_48000, // Hisui では常に固定値
@@ -608,9 +608,8 @@ impl WebmVideoReader {
 
         let header = VideoTrackHeader::read(&mut reader)?;
         // 対応スコープ (VP8 / VP9) のみ sample_entry を構築する。
-        // AV1 / H264AnnexB は WebM コンテナで Sora が出力しない経路のため Err を返してサポート対象外とする。
-        // I420 (映像トラック不在時の警告フォールバック) は生フォーマットで不変条件の対象外のため None のまま保持する。
-        // ファイル切り替え時はリーダー再生成で sample_entry も自動的に再構築される (inherit_stats_from の対象外)。
+        // AV1 / H264AnnexB は Sora 録画で WebM コンテナに出力されないため Err を返す。
+        // I420 (映像トラック不在のフォールバック) は生フォーマットで不変条件の対象外のため None を保持する。
         let sample_entry = match header.codec {
             VideoFormat::Vp8 => Some(SharedSampleEntry::new(vp8_sample_entry(
                 header.width,
@@ -622,12 +621,12 @@ impl WebmVideoReader {
             ))),
             VideoFormat::Av1 => {
                 return Err(crate::Error::new(
-                    "AV1 in WebM is not supported by WebmVideoReader (out of scope)",
+                    "AV1 in WebM is not supported by WebmVideoReader",
                 ));
             }
             VideoFormat::H264AnnexB => {
                 return Err(crate::Error::new(
-                    "H264 (Annex-B) in WebM is not supported by WebmVideoReader (out of scope)",
+                    "H264 (Annex-B) in WebM is not supported by WebmVideoReader",
                 ));
             }
             VideoFormat::I420 => None,
@@ -742,8 +741,8 @@ impl WebmVideoReader {
             // WebM では payload を解析しないためサイズ情報は保持しない。
             // 利用側で必要な場合は後段で補完する。
             size: None,
-            // 全圧縮フレームに sample_entry を載せる不変条件 (issue 0027 / 0031) に従う。
             // sample_entry は WebmVideoReader::new で TRACKS の PixelWidth / PixelHeight から構築済み。
+            // 不変条件 (圧縮 VideoFrame は常に Some) は src/video.rs::VideoFrame の docstring を参照。
             sample_entry: self.sample_entry.clone(),
         }))
     }
@@ -822,7 +821,8 @@ mod tests {
             !entry_a.ptr_eq(&entry_b),
             "ファイルごとに新規 Arc を確保すること"
         );
-        // ただし実体 (SampleEntry の中身) は等しいため、muxer 側で PartialEq により dedup される。
+        // 実体 (SampleEntry の中身) は等しいため、writer 側の changed_since が Arc::ptr_eq 短絡を外れても
+        // PartialEq で同値判定され、サンプルエントリー差し替えは発生しない。
         assert_eq!(
             entry_a.get(),
             entry_b.get(),

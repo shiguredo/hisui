@@ -10,7 +10,7 @@ fn webm_audio_reader_test() -> hisui::Result<()> {
         let audio_data = audio_data?;
         last_timestamp = Some(audio_data.timestamp);
 
-        // 全圧縮フレームに sample_entry を載せる不変条件 (issue 0030 / 0031)。
+        // 不変条件 (圧縮 AudioFrame は常に Some) は src/audio.rs::AudioFrame の docstring を参照。
         let sample_entry = audio_data
             .sample_entry
             .expect("WebmAudioReader が返す Opus フレームには常に sample_entry が載る");
@@ -39,7 +39,7 @@ fn webm_video_reader_test() -> hisui::Result<()> {
         let video_frame = video_frame?;
         last_timestamp = Some(video_frame.timestamp);
 
-        // 全圧縮フレームに sample_entry を載せる不変条件 (issue 0027 / 0031)。
+        // 不変条件 (圧縮 VideoFrame は常に Some) は src/video.rs::VideoFrame の docstring を参照。
         let sample_entry = video_frame
             .sample_entry
             .expect("WebmVideoReader が返す VP8 フレームには常に sample_entry が載る");
