@@ -1,90 +1,136 @@
-# 削除済み pipeline サブコマンドの残骸として残った processor 構造体の DisplayJson / TryFrom 実装を削除する
+# JSON-RPC 削除で呼び出し元を失った processor 5 構造体の DisplayJson / TryFrom 実装を削除する
 
 - Priority: Low
 - Created: 2026-06-17
 - Completed:
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-remove-unused-processor-json-impls
-- Polished:
+- Polished: 2026-06-18
 
 ## 目的
 
-CHANGES.md `## develop` の `[CHANGE] 実験的な pipeline サブコマンドを削除する` で削除された pipeline サブコマンドは、processor のグラフを JSON 設定ファイル (recipe) で組み立てる機能だった。各 processor 構造体は recipe JSON でインスタンス化される必要があったため、`nojson::DisplayJson` と `TryFrom<nojson::RawJsonValue>` の実装を持っていた。
-
-pipeline サブコマンドが削除されたことで、これらの impl は呼び出し元を失っていると見られる。コードベースに死にコードとして残ったままだと:
-
-- `docs/obsws/json_naming.md` 章 4.7 が「obsws JSON 規約と無関係な camelCase キーが残る」状態を許容する文面を維持し続ける必要がある (本来そんなキーは存在しないのに)
-- 新規プロセッサ追加時に「DisplayJson / TryFrom を実装すべきか」の判断材料を曖昧にする
-
-死にコードであることを最終確認したうえで、impl ブロックと連鎖 helper を削除する。
-
-## 優先度根拠
-
-Low。
-
-- 機能影響なし: 削除済み pipeline サブコマンドが利用していたコード経路のみが対象で、現状の機能 (obsws / compose / inspect 等) には一切影響しない
-- 緊急度なし: 死にコードが残っていても直接の害は無い
-- ただしコードベース clean-up の延長として、obsws JSON 命名規約 (issue 0003 で整理) の保守性を高める副次的価値がある
+`RtmpInboundEndpoint` / `RtmpOutboundEndpoint` / `RtmpPublisher` / `SrtInboundEndpoint` / `RtspSubscriber` の 5 構造体には `nojson::DisplayJson` と `TryFrom<nojson::RawJsonValue>` の手書き実装が残っている。これらは元々 hisui server サブコマンドの JSON-RPC `createRtmpInboundEndpoint` / `createRtmpOutboundEndpoint` / `createRtmpPublisher` / `createSrtInboundEndpoint` / `createRtspSubscriber` メソッド経由で構造体を組み立てるための引数パーサとして追加されたものだが、その JSON-RPC 機能が `feature/remove-json-rpc` ブランチ (PR #207, merge commit `d4170ed8`) で全削除されたことにより呼び出し元を失っている。現在は obsws coordinator が `crate::rtmp::publisher::RtmpPublisher { ... }` の直接フィールド代入で構造体を組み立てており、JSON 経由のシリアライズ / デシリアライズ経路は実コード上に存在しない。死活確認のうえ impl ブロックと連鎖 helper を削除し、対応する docs 段落と JSON-RPC を前提とした内部コメントも整理する。
 
 ## 現状
 
 ### 対象 impl 群
 
-issue 0003 (obsws JSON 命名規約統一) のレビュー中に確認した範囲:
+実コードでの位置 (2026-06-18 時点で再確認):
 
-- `src/rtmp/inbound_endpoint.rs:225-285` — `RtmpInboundEndpoint::DisplayJson` / `TryFrom<RawJsonValue>`
-- `src/rtmp/outbound_endpoint.rs:66-130` — `RtmpOutboundEndpoint` 同等 impl
-- `src/rtmp/publisher.rs:64-130` — `RtmpPublisher` 同等 impl
-- `src/srt/inbound_endpoint.rs:358-432` — `SrtInboundEndpoint` 同等 impl
-- `src/rtsp/subscriber.rs:36-77` — `RtspSubscriber` 同等 impl
-
-これらの impl 内で扱われている camelCase キー (`outputAudioTrackId` / `outputVideoTrackId` / `inputAudioTrackId` / `inputVideoTrackId` / `keyLength` / `tsbpdDelayMs` / `certPath` / `keyPath` 等) は obsws / obsdc の JSON プロトコルには流れず、削除済み pipeline サブコマンドの recipe 形式専用だった。
+| ファイル | `impl DisplayJson` | `impl TryFrom<RawJsonValue>` |
+| --- | --- | --- |
+| `src/rtmp/inbound_endpoint.rs` | 225-241 | 243-286 |
+| `src/rtmp/outbound_endpoint.rs` | 66-90 | 92-149 |
+| `src/rtmp/publisher.rs` | 64-88 | 90-146 |
+| `src/srt/inbound_endpoint.rs` | 358-388 | 390-433 |
+| `src/rtsp/subscriber.rs` | 37-50 | 52-79 |
 
 ### 既に確認済みの調査結果
 
-issue 0003 ブランチで以下を確認:
+closed issue 0003 (`obsws JSON 命名規約` / merge commit `5378bd39`) のレビュー過程および本 issue polish 時の再 grep で確認済み:
 
-- `grep -rn 'try_into\(\)' src/` で対象 5 構造体を JSON から生成する呼び出し元はゼロ
-- `nojson::object(|f| ...)` 内で `f.value(&endpoint)` のように構造体を埋め込む箇所もゼロ
-- `tracing::debug!` 等のログでも構造体全体を Debug / JSON 表示する経路はなく、個別フィールド (`{addr}` 等) のみ
-- `src/obsws/state_file.rs` と obsws coordinator は構造体を直接フィールド代入で受け取っており、JSON 経由ではない
-- `src/obsws/source/rtmp_inbound.rs` / `srt_inbound.rs` / `rtsp_subscriber.rs` も `ObswsSourceRequest::CreateRtmpInboundEndpoint { endpoint, .. }` 等で構造体を直接渡している
-- examples / testdata / e2e-tests でも参照ゼロ
+- `grep -rn 'try_into()' src/ | grep -iE 'RtmpInboundEndpoint|RtmpOutboundEndpoint|RtmpPublisher|SrtInboundEndpoint|RtspSubscriber'` で対象 5 構造体への JSON 経由の生成呼び出しはゼロ
+- `nojson::object(|f| ...)` 内で `f.value(&endpoint)` 等で構造体を JSON に埋め込む箇所もゼロ。`tracing::debug!` 等で構造体全体を Debug / JSON 表示する経路もゼロ (個別フィールドのみ参照)
+- `src/obsws/state_file.rs`、obsws coordinator (`src/obsws/coordinator/output_rtmp.rs:282` / `output_stream.rs:359` / `source/srt_inbound.rs:26` 等)、`src/obsws/source.rs` の `ObswsSourceRequest` バリアントはすべて構造体を直接フィールド代入で受け取っており JSON 経由ではない
+- `tests/` / `pbt/` / `examples/` / `testdata/` / `e2e-tests/` / `devtools/` のいずれにも参照ゼロ
+- 5 構造体の impl ブロックに `#[cfg(test)]` / `#[cfg(feature = "...")]` 修飾はなく、間接利用経路はない
 
 ### 連鎖削除候補
 
-`src/srt/inbound_endpoint.rs` 内の `parse_optional_non_empty_string` / `parse_optional_key_length` / `key_length_to_rpc_value` / `tsbpd_delay_duration_to_millis` などの helper は、上記 `TryFrom` / `DisplayJson` 内でのみ使われている可能性が高い。impl 削除に追従して取り除く対象。
+impl 削除に追従して呼び出し元を失う helper:
 
-### 未確認事項
+- `src/srt/inbound_endpoint.rs:435-452` の `fn parse_optional_non_empty_string` — `TryFrom` (line 406, 407) でのみ使用
+- `src/srt/inbound_endpoint.rs:454-474` の `fn parse_optional_key_length` — `TryFrom` (line 408) でのみ使用
+- `src/srt/inbound_endpoint.rs:476-481` の `fn key_length_to_rpc_value` — `DisplayJson` (line 375) でのみ使用
+- `src/rtsp/subscriber.rs:1188-1192` の `fn validate_input_url` — `TryFrom` (line 61) でのみ使用 (`run` 経路は `parse_rtsp_input_url` を直接呼ぶため不要)
 
-本 issue 着手時に検証する:
+連鎖削除に **含めない** helper:
 
-- `#[cfg(feature = "...")]` / `#[cfg(test)]` 経由の間接利用がないか
-- `Debug for SrtInboundEndpoint` などの derive が `DisplayJson` に依存していないか
-- 一時的に impl ブロックを `#[cfg(any())]` で無効化してビルド・テストを通すことによる死活確認
-- docs / コメントから recipe 形式への参照が残っていないか
+- `src/srt/inbound_endpoint.rs:483-487` の `fn tsbpd_delay_duration_to_millis` — `DisplayJson` (line 379) だけでなく `SrtInboundEndpoint::endpoint_config` (line 303) でも `Duration → u16 ミリ秒` 変換に使われており impl 削除後も残す必要がある
+
+### コメント整合修正対象
+
+JSON-RPC 経路の存在を前提に書かれた内部コメントが残る。impl 削除と同 PR で整合させる:
+
+- `src/srt/inbound_endpoint.rs:31` の `tsbpd_delay_ms` フィールドコメント `// TSBPD 遅延。JSON-RPC ではミリ秒の u16 で受け取り、内部では Duration で保持する。` の前半 (`JSON-RPC ではミリ秒の u16 で受け取り、`) を削除し、`// TSBPD 遅延。内部では Duration で保持し、SRT 接続オプションには `endpoint_config` で u16 ミリ秒に変換して渡す。` 等に書き換える
+
+着手時に対象 5 ファイル全体を `grep -nE 'JSON-?RPC|json-?rpc|createRtmp|createSrt|createRtsp' src/rtmp/inbound_endpoint.rs src/rtmp/outbound_endpoint.rs src/rtmp/publisher.rs src/srt/inbound_endpoint.rs src/rtsp/subscriber.rs` で再点検し、追加で出てきたコメントも同じスコープで整合させる。
+
+### docs 編集対象
+
+`docs/obsws/json_naming.md:83` (章 4 末尾の独立段落):
+
+```
+hisui 内部の processor (RTMP / SRT / RTSP の Endpoint / Subscriber 等) が持つ独自 JSON フォーマット (obsws を経由しないキー) は obsws JSON プロトコルの境界外であり、本規約の対象外とする。
+```
+
+impl 削除後は「processor 独自 JSON フォーマット」自体が存在しなくなるため、この段落 1 行を **完全削除** する (代わりの段落は不要)。
 
 ## 設計方針
 
-1. **死活確認を最優先**: 対象 impl ブロックを `#[cfg(any())]` で一時的に無効化し、`cargo check --all-features --tests --benches` と `cargo clippy --all-targets --all-features -- -D warnings` を実行する。pub で隠れた呼び出し元が無いことを確認する
-2. 死活確認後、対象 impl ブロックを削除する
-3. 連鎖削除候補の helper も呼び出し元喪失で消えるので追従削除する
-4. `docs/obsws/json_naming.md` 章 4.7 を更新する: 「processor 独自キーは規約対象外」段落を削除し、「これらのファイルでは obsws settings 由来キーが snake_case で流れる」程度のシンプルな文面に戻す
+### 1. 死活確認 (commit しない作業ブランチ上のみ)
+
+対象 impl 10 ブロックと **連鎖削除候補 helper 4 個** (`parse_optional_non_empty_string` / `parse_optional_key_length` / `key_length_to_rpc_value` / `validate_input_url`) を **すべて同時に** `#[cfg(any())]` で一時的に無効化する。impl 10 ブロックを単独で無効化すると helper 4 個が呼び出し元喪失で `dead_code` 警告に化け、`cargo clippy --workspace --all-targets -- --deny warnings` の `--deny warnings` で deny されるため、死活確認のシグナルが取れなくなる。
+
+`tsbpd_delay_duration_to_millis` は `endpoint_config` (line 303) でも使われているため `#[cfg(any())]` の対象に **含めない** (含めると `endpoint_config` 側で型エラーになる)。
+
+適用位置: 対象 impl ブロックと helper 関数定義の **直前 1 行** に `#[cfg(any())]` を追加する。合計で `#[cfg(any())]` 属性を 14 箇所 (impl 10 ブロック直前 + helper 4 関数直前) に追加する。属性自身の追加行数は 14 行で、配下のブロック全体が無効化される。
+
+### 2. 検証
+
+CI と同等のコマンドで通すこと:
+
+- `cargo fmt --all --check`
+- `cargo check --workspace`
+- `cargo check --workspace --no-default-features`
+- `cargo clippy --workspace --all-targets -- --deny warnings`
+- `cargo clippy --workspace --no-default-features -- --deny warnings`
+- `cargo test --workspace`
+
+`--features nvcodec` / `--features fdk-aac` ジョブはローカル環境依存が大きいため CI 任せでよい。
+
+`#[cfg(any())]` 無効化下で **対象 impl / helper 由来以外** の型エラー・警告が一切出ないこと、特に `dead_code` 以外の警告が一切出ないことを確認する。出た場合は本 issue の前提 (呼び出し元不在) が崩れているので削除を中止し、後述の撤退条件に従う。
+
+### 3. 実削除と docs / コメント整合
+
+死活確認を通過したら、`#[cfg(any())]` 付与を巻き戻したうえで以下を 1 commit にまとめる:
+
+- impl 10 ブロックと helper 4 個を実削除
+- `src/srt/inbound_endpoint.rs:31` のコメント整合修正 (`### コメント整合修正対象` 参照)
+- 着手時 grep で追加検出されたコメントの整合修正
+- `docs/obsws/json_naming.md:83` の章 4 末尾段落 1 行を削除 (前後の空行も整える)
+
+### 4. PR 提出前検証
+
+設計方針 2 と同じコマンドを再度通す。加えて以下を確認:
+
+- `cargo doc --no-deps` の警告数が着手時ベースラインを超えないこと。ベースラインは着手時に develop ブランチで `cargo doc --no-deps 2>&1 | grep -E '^warning:' | wc -l` を測り、close 時に本 issue ファイル末尾へ追記する `## 解決方法` 節に「`cargo doc --no-deps` 警告: 着手時 N → 完了時 M」の形で記録する
+
+### 5. 撤退条件
+
+死活確認段階で `dead_code` 以外の警告 / エラーが出た場合 (JSON 経由で構造体を扱う未把握の経路が見つかった場合) は、作業ブランチを push せず `#[cfg(any())]` 付与状態のままローカルで保持し、本 issue ファイルの `### 既に確認済みの調査結果` セクションに「再調査が必要」として状況を追記して polish-issue で改稿する。
 
 ## 完了条件
 
 - 対象 5 ファイルから `impl nojson::DisplayJson` と `impl TryFrom<nojson::RawJsonValue>` の各 impl ブロックが削除されていること
-- 連鎖削除候補の helper (`parse_optional_non_empty_string` / `parse_optional_key_length` / `key_length_to_rpc_value` / `tsbpd_delay_duration_to_millis` 等) が呼び出し元と共に削除されていること
-- `cargo check --all-features --tests --benches` / `cargo test --all` / `cargo clippy --all-targets --all-features -- -D warnings` がすべて通ること
-- `docs/obsws/json_naming.md` 章 4.7 から「processor 独自キーは規約対象外」の記述が削除されていること
+- 連鎖削除候補 4 個 (`parse_optional_non_empty_string` / `parse_optional_key_length` / `key_length_to_rpc_value` / `validate_input_url`) が削除されていること。`tsbpd_delay_duration_to_millis` は `endpoint_config` で使い続けるため残ること
+- `src/srt/inbound_endpoint.rs:31` のコメントから `JSON-RPC ではミリ秒の u16 で受け取り、` の文言が削除されていること
+- `docs/obsws/json_naming.md` の章 4 末尾段落 (`hisui 内部の processor (...) は obsws JSON プロトコルの境界外であり、本規約の対象外とする。`) が削除されていること
+- 以下の grep が **すべて 0 件** (流派は GNU grep / BSD grep 共通の `-rnE` ERE で統一):
+  - `grep -rnE 'impl nojson::DisplayJson for (RtmpInboundEndpoint|RtmpOutboundEndpoint|RtmpPublisher|SrtInboundEndpoint|RtspSubscriber)' src/`
+  - `grep -rn 'TryFrom<nojson::RawJsonValue' src/rtmp/ src/srt/ src/rtsp/`
+  - `grep -rn 'hisui 内部の processor' docs/`
+  - `grep -rnE 'JSON-?RPC|json-?rpc' src/rtmp/ src/srt/ src/rtsp/`
+- `cargo fmt --all --check` / `cargo check --workspace` / `cargo check --workspace --no-default-features` / `cargo clippy --workspace --all-targets -- --deny warnings` / `cargo clippy --workspace --no-default-features -- --deny warnings` / `cargo test --workspace` が CI と同等のコマンドですべて通ること
+- `cargo doc --no-deps` の警告数が着手時ベースラインを超えないこと (記録方法は設計方針 4)
 
-### CHANGES.md
+## CHANGES.md について
 
-`## develop` に追記しない。削除済み pipeline サブコマンドの内部実装を整理するのみで、利用者から見える挙動・公開 API・依存関係は一切変化しないため。
+`CHANGES.md` には **追記しない**。
 
-## 解決方法
+- `docs/obsws/json_naming.md` の編集分は、shiguredo-changelog 規約「`.rst` / `.md` ファイルの変更は変更履歴に反映しないこと (コード変更と同時に行った場合も、ドキュメント変更分はエントリに含めない)」に従い、CHANGES.md に反映しない
+- impl / helper 削除分は、利用者から見える挙動・CLI / env / stdout・公開 API・依存関係はいずれも変化しない内部 dead code 整理のため、closed 0036 (`feature/refactor-japanize-comment-terms`) / closed 0022 (`feature/refactor-fmp4-reader-naming`) と同じ先例に倣う
 
-1. **死活確認**: 対象 impl 群 (`impl DisplayJson` / `impl TryFrom`) を `#[cfg(any())]` で一時的に無効化し、`cargo check --all-features --tests --benches` と `cargo clippy --all-targets --all-features -- -D warnings` を実行する。呼び出し元の不在を確認する
-2. impl ブロックを削除する。連鎖 helper も削除する
-3. `docs/obsws/json_naming.md` 章 4.7 を更新する
-4. 全テスト・clippy・fmt を通す
+## 関連
+
+- closed PR #207 (`feature/remove-json-rpc` / merge commit `d4170ed8`): 本 issue 対象の impl が呼び出し元を失った直接の契機 (`MediaPipelineHandle` から JSON-RPC 依存除去は `d8151946`)
