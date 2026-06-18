@@ -432,6 +432,11 @@ impl VideoTrackHeader {
                     "WebM video TRACK_ENTRY missing PixelWidth or PixelHeight; falling back to 0"
                 );
             }
+            // width=0 / height=0 のフォールバック値はそのまま VP8 / VP9 の sample_entry に載って下流に流れる。
+            // Sora 録画前提では発生しない異常系のため Err にはしないが、もし sample_entry 経由で MP4 STSD に
+            // 直接書き出される経路が将来発生した場合は、ISO/IEC 14496-12 上の不正解像度として扱われる可能性がある。
+            // compose 経路 (src/sora/recording_reader.rs) では再エンコードで sample_entry が差し替わるため
+            // 実害は無い。
             return Ok(Self {
                 codec,
                 width,
