@@ -222,69 +222,6 @@ impl RtmpInboundEndpoint {
     }
 }
 
-impl nojson::DisplayJson for RtmpInboundEndpoint {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("input_url", &self.input_url)?;
-            if let Some(stream_name) = &self.stream_name {
-                f.member("stream_name", stream_name)?;
-            }
-            if let Some(track_id) = &self.output_audio_track_id {
-                f.member("outputAudioTrackId", track_id)?;
-            }
-            if let Some(track_id) = &self.output_video_track_id {
-                f.member("outputVideoTrackId", track_id)?;
-            }
-            Ok(())
-        })
-    }
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpInboundEndpoint {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(
-        value: nojson::RawJsonValue<'text, 'raw>,
-    ) -> std::result::Result<Self, Self::Error> {
-        let input_url: String = value.to_member("input_url")?.required()?.try_into()?;
-        let stream_name: Option<String> = value.to_member("stream_name")?.try_into()?;
-        let output_audio_track_id: Option<crate::TrackId> =
-            value.to_member("outputAudioTrackId")?.try_into()?;
-        let output_video_track_id: Option<crate::TrackId> =
-            value.to_member("outputVideoTrackId")?.try_into()?;
-
-        if output_audio_track_id.is_none() && output_video_track_id.is_none() {
-            return Err(value.invalid("outputAudioTrackId or outputVideoTrackId is required"));
-        }
-
-        let stream_name = match stream_name {
-            Some(stream_name) => {
-                let trimmed = stream_name.trim();
-                if trimmed.is_empty() {
-                    return Err(value
-                        .to_member("stream_name")?
-                        .required()?
-                        .invalid("stream_name must not be empty"));
-                }
-                Some(trimmed.to_owned())
-            }
-            None => None,
-        };
-
-        if let Err(e) = parse_rtmp_url(&input_url, stream_name.as_deref()) {
-            return Err(value.to_member("input_url")?.required()?.invalid(e));
-        }
-
-        Ok(Self {
-            input_url,
-            stream_name,
-            output_audio_track_id,
-            output_video_track_id,
-            options: RtmpInboundEndpointOptions::default(),
-        })
-    }
-}
-
 fn parse_rtmp_url(
     input_url: &str,
     stream_name: Option<&str>,

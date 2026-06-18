@@ -34,50 +34,6 @@ pub struct RtspSubscriber {
     pub output_audio_track_id: Option<TrackId>,
 }
 
-impl nojson::DisplayJson for RtspSubscriber {
-    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.object(|f| {
-            f.member("input_url", &self.input_url)?;
-            if let Some(track_id) = &self.output_video_track_id {
-                f.member("outputVideoTrackId", track_id)?;
-            }
-            if let Some(track_id) = &self.output_audio_track_id {
-                f.member("outputAudioTrackId", track_id)?;
-            }
-            Ok(())
-        })
-    }
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtspSubscriber {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(
-        value: nojson::RawJsonValue<'text, 'raw>,
-    ) -> std::result::Result<Self, Self::Error> {
-        let input_url: String = value.to_member("input_url")?.required()?.try_into()?;
-        // TryFrom では nojson のエラー位置情報を維持したまま invalid(...) を返すため、
-        // ここでは URL の妥当性チェックだけ行う。
-        if let Err(e) = validate_input_url(&input_url) {
-            return Err(value.to_member("input_url")?.required()?.invalid(e));
-        }
-
-        let output_video_track_id: Option<TrackId> =
-            value.to_member("outputVideoTrackId")?.try_into()?;
-        let output_audio_track_id: Option<TrackId> =
-            value.to_member("outputAudioTrackId")?.try_into()?;
-        if output_video_track_id.is_none() && output_audio_track_id.is_none() {
-            return Err(value.invalid("outputAudioTrackId or outputVideoTrackId is required"));
-        }
-
-        Ok(Self {
-            input_url,
-            output_video_track_id,
-            output_audio_track_id,
-        })
-    }
-}
-
 impl RtspSubscriber {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         let parsed_url = parse_rtsp_input_url(&self.input_url)
@@ -1183,12 +1139,6 @@ impl<'a> BitReader<'a> {
         }
         Ok(value)
     }
-}
-
-fn validate_input_url(input_url: &str) -> Result<(), String> {
-    // 実行時の run では ParsedRtspUrl を接続に使うため再度 parse するが、
-    // パラメータ検証では nojson 向けに文字列エラーへ変換する用途に限定する。
-    parse_rtsp_input_url(input_url).map(|_| ())
 }
 
 fn parse_rtsp_input_url(input_url: &str) -> Result<ParsedRtspUrl, String> {

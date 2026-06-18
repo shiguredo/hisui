@@ -80,8 +80,6 @@ settings ペイロードは以下の API 経路の `inputSettings` / `outputSett
 - `InputSettingsChanged` イベントの `inputSettings` ペイロード (obsdc DataChannel 経由を含む)
 - state file の `inputs[].inputSettings`、`stream.streamServiceSettings`、`rtmpOutbound` / `sora` / `hls` / `mpegDash` セクションの中身
 
-hisui 内部の processor (RTMP / SRT / RTSP の Endpoint / Subscriber 等) が持つ独自 JSON フォーマット (obsws を経由しないキー) は obsws JSON プロトコルの境界外であり、本規約の対象外とする。
-
 ## 5. 非対称キー
 
 settings ペイロード内のキーで、出現箇所が API 経路によって異なるもの。命名規則自体は snake_case で揃うが、出現箇所のルールが規約だけからは読めないため明文化する。
