@@ -12,7 +12,7 @@ obsws の設定を再起動後も復元するための永続化ファイルで�
 
 state file は以下の secret を平文で保存する。ファイルの権限を適切に管理し、信頼されたローカルファイルとして扱うこと。
 
-- HLS / MPEG-DASH の S3 認証情報（`accessKeyId` / `secretAccessKey` / `sessionToken`）
+- HLS / MPEG-DASH の S3 認証情報（`access_key_id` / `secret_access_key` / `session_token`）
 - SRT inbound の `passphrase`
 
 ## 指定方法
@@ -73,17 +73,17 @@ state file は以下の secret を平文で保存する。ファイルの権限�
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `outputUrl` | String | 省略可 | RTMP リッスン URL |
-| `streamName` | String | 省略可 | ストリーム名 |
+| `output_url` | String | 省略可 | RTMP リッスン URL |
+| `stream_name` | String | 省略可 | ストリーム名 |
 
 #### `sora`
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `signalingUrls` | String[] | 省略可 | シグナリング URL リスト |
-| `channelId` | String | 省略可 | チャンネル ID |
-| `clientId` | String | 省略可 | クライアント ID |
-| `bundleId` | String | 省略可 | バンドル ID |
+| `signaling_urls` | String[] | 省略可 | シグナリング URL リスト |
+| `channel_id` | String | 省略可 | チャンネル ID |
+| `client_id` | String | 省略可 | クライアント ID |
+| `bundle_id` | String | 省略可 | バンドル ID |
 | `metadata` | Object | 省略可 | メタデータ（JSON object のみ） |
 
 #### `hls` / `mpegDash`
@@ -128,7 +128,7 @@ output 設定の詳細は `PROTOCOL_STATUS.md` の独自 Output セクション�
 | `inputMuted` | Boolean | 省略可 | ミュート状態。省略時は `false` |
 | `inputVolumeMul` | Number | 省略可 | 音量乗算係数（0.0 以上）。省略時は `1.0`（0dB） |
 
-NOTE: SRT inbound の `passphrase` は `GetInputSettings` では返されないが、state file には復元のため平文で保存される。WebRTC source の `trackId` は runtime 管理のため state file には含まれない。
+NOTE: SRT inbound の `passphrase` は `GetInputSettings` では返されないが、state file には復元のため平文で保存される。WebRTC source の `track_id` は runtime 管理のため state file には含まれない。
 
 ## 例
 

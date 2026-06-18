@@ -64,9 +64,9 @@ impl RtmpPublisherStats {
 impl nojson::DisplayJson for RtmpPublisher {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("outputUrl", &self.output_url)?;
+            f.member("output_url", &self.output_url)?;
             if let Some(stream_name) = &self.stream_name {
-                f.member("streamName", stream_name)?;
+                f.member("stream_name", stream_name)?;
             }
             if let Some(track_id) = &self.input_audio_track_id {
                 f.member("inputAudioTrackId", track_id)?;
@@ -93,8 +93,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpPublisher {
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
-        let output_url: String = value.to_member("outputUrl")?.required()?.try_into()?;
-        let stream_name: Option<String> = value.to_member("streamName")?.try_into()?;
+        let output_url: String = value.to_member("output_url")?.required()?.try_into()?;
+        let stream_name: Option<String> = value.to_member("stream_name")?.try_into()?;
         let input_audio_track_id: Option<TrackId> =
             value.to_member("inputAudioTrackId")?.try_into()?;
         let input_video_track_id: Option<TrackId> =
@@ -111,9 +111,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpPublisher {
                 let trimmed = stream_name.trim();
                 if trimmed.is_empty() {
                     return Err(value
-                        .to_member("streamName")?
+                        .to_member("stream_name")?
                         .required()?
-                        .invalid("streamName must not be empty"));
+                        .invalid("stream_name must not be empty"));
                 }
                 Some(trimmed.to_owned())
             }
@@ -130,7 +130,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpPublisher {
         }
 
         if let Err(e) = parse_rtmp_url(&output_url, stream_name.as_deref()) {
-            return Err(value.to_member("outputUrl")?.required()?.invalid(e));
+            return Err(value.to_member("output_url")?.required()?.invalid(e));
         }
 
         Ok(Self {
@@ -161,7 +161,7 @@ impl RtmpPublisher {
         handle.notify_ready();
 
         let url = parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
-            .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?;
+            .map_err(|e| Error::new(format!("invalid output_url: {e}")))?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(self.options.max_buffered_frame_count);
 
@@ -171,7 +171,7 @@ impl RtmpPublisher {
             recv_buf: vec![0u8; 4096],
             connection: shiguredo_rtmp::RtmpPublishClientConnection::new(
                 parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
-                    .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?,
+                    .map_err(|e| Error::new(format!("invalid output_url: {e}")))?,
             ),
             ready: false,
             frame_handler: crate::rtmp::frame::RtmpOutgoingFrameHandler::new(),

@@ -221,8 +221,8 @@ fn parse_optional_rtmp_outbound(
         return Ok(None);
     };
     let v = section.value();
-    let output_url: Option<String> = v.to_member("outputUrl")?.try_into()?;
-    let stream_name: Option<String> = v.to_member("streamName")?.try_into()?;
+    let output_url: Option<String> = v.to_member("output_url")?.try_into()?;
+    let stream_name: Option<String> = v.to_member("stream_name")?.try_into()?;
     Ok(Some(ObswsRtmpOutboundSettings {
         output_url,
         stream_name,
@@ -242,11 +242,11 @@ fn parse_optional_sora(
     };
     let v = section.value();
 
-    // sora セクションは soraSdkSettings を直接含む構造
-    let signaling_urls: Option<Vec<String>> = v.to_member("signalingUrls")?.try_into()?;
-    let channel_id: Option<String> = v.to_member("channelId")?.try_into()?;
-    let client_id: Option<String> = v.to_member("clientId")?.try_into()?;
-    let bundle_id: Option<String> = v.to_member("bundleId")?.try_into()?;
+    // sora セクションは soraSdkSettings ラッパーなしで signaling_urls 等を直接持つフラット構造
+    let signaling_urls: Option<Vec<String>> = v.to_member("signaling_urls")?.try_into()?;
+    let channel_id: Option<String> = v.to_member("channel_id")?.try_into()?;
+    let client_id: Option<String> = v.to_member("client_id")?.try_into()?;
+    let bundle_id: Option<String> = v.to_member("bundle_id")?.try_into()?;
 
     // metadata は object のみ受理する
     let metadata_member: Option<nojson::RawJsonOwned> = v.to_member("metadata")?.try_into()?;
@@ -284,29 +284,29 @@ fn parse_optional_hls(
 
     let destination = parse_optional_hls_destination(v)?;
 
-    let segment_duration: Option<f64> = v.to_member("segmentDuration")?.try_into()?;
+    let segment_duration: Option<f64> = v.to_member("segment_duration")?.try_into()?;
     let segment_duration = segment_duration.unwrap_or(DEFAULT_HLS_SEGMENT_DURATION_SECS);
     // NaN / Infinity は JSON 仕様上パーサが弾くため、ここでは正値チェックのみ行う
     if segment_duration <= 0.0 {
         return Err(v
-            .to_member("segmentDuration")?
+            .to_member("segment_duration")?
             .required()?
-            .invalid("segmentDuration must be positive"));
+            .invalid("segment_duration must be positive"));
     }
 
-    let max_retained_segments: Option<usize> = v.to_member("maxRetainedSegments")?.try_into()?;
+    let max_retained_segments: Option<usize> = v.to_member("max_retained_segments")?.try_into()?;
     let max_retained_segments = max_retained_segments.unwrap_or(DEFAULT_HLS_MAX_RETAINED_SEGMENTS);
     if max_retained_segments == 0 {
         return Err(v
-            .to_member("maxRetainedSegments")?
+            .to_member("max_retained_segments")?
             .required()?
-            .invalid("maxRetainedSegments must be at least 1"));
+            .invalid("max_retained_segments must be at least 1"));
     }
 
-    let segment_format_str: Option<String> = v.to_member("segmentFormat")?.try_into()?;
+    let segment_format_str: Option<String> = v.to_member("segment_format")?.try_into()?;
     let segment_format = match segment_format_str {
         Some(s) => s.parse::<HlsSegmentFormat>().map_err(|e| {
-            v.to_member("segmentFormat")
+            v.to_member("segment_format")
                 .expect("already accessed")
                 .required()
                 .expect("already accessed")
@@ -336,19 +336,19 @@ fn parse_hls_variants(
     let arr = variants_json.value().to_array()?;
     let mut variants = Vec::new();
     for elem in arr {
-        let video_bitrate: usize = elem.to_member("videoBitrate")?.required()?.try_into()?;
-        let audio_bitrate: usize = elem.to_member("audioBitrate")?.required()?.try_into()?;
+        let video_bitrate: usize = elem.to_member("video_bitrate")?.required()?.try_into()?;
+        let audio_bitrate: usize = elem.to_member("audio_bitrate")?.required()?.try_into()?;
         if video_bitrate == 0 {
             return Err(elem
-                .to_member("videoBitrate")?
+                .to_member("video_bitrate")?
                 .required()?
-                .invalid("videoBitrate must be positive"));
+                .invalid("video_bitrate must be positive"));
         }
         if audio_bitrate == 0 {
             return Err(elem
-                .to_member("audioBitrate")?
+                .to_member("audio_bitrate")?
                 .required()?
-                .invalid("audioBitrate must be positive"));
+                .invalid("audio_bitrate must be positive"));
         }
         let width: Option<usize> = elem.to_member("width")?.try_into()?;
         let height: Option<usize> = elem.to_member("height")?.try_into()?;
@@ -418,31 +418,31 @@ fn parse_optional_dash(
 
     let destination = parse_optional_dash_destination(v)?;
 
-    let segment_duration: Option<f64> = v.to_member("segmentDuration")?.try_into()?;
+    let segment_duration: Option<f64> = v.to_member("segment_duration")?.try_into()?;
     let segment_duration = segment_duration.unwrap_or(DEFAULT_DASH_SEGMENT_DURATION_SECS);
     // NaN / Infinity は JSON 仕様上パーサが弾くため、ここでは正値チェックのみ行う
     if segment_duration <= 0.0 {
         return Err(v
-            .to_member("segmentDuration")?
+            .to_member("segment_duration")?
             .required()?
-            .invalid("segmentDuration must be positive"));
+            .invalid("segment_duration must be positive"));
     }
 
-    let max_retained_segments: Option<usize> = v.to_member("maxRetainedSegments")?.try_into()?;
+    let max_retained_segments: Option<usize> = v.to_member("max_retained_segments")?.try_into()?;
     let max_retained_segments = max_retained_segments.unwrap_or(DEFAULT_DASH_MAX_RETAINED_SEGMENTS);
     if max_retained_segments == 0 {
         return Err(v
-            .to_member("maxRetainedSegments")?
+            .to_member("max_retained_segments")?
             .required()?
-            .invalid("maxRetainedSegments must be at least 1"));
+            .invalid("max_retained_segments must be at least 1"));
     }
 
     let variants = parse_dash_variants(v)?;
 
-    let video_codec_str: Option<String> = v.to_member("videoCodec")?.try_into()?;
+    let video_codec_str: Option<String> = v.to_member("video_codec")?.try_into()?;
     let video_codec = match video_codec_str {
         Some(s) => crate::types::CodecName::parse_video(&s).map_err(|e| {
-            v.to_member("videoCodec")
+            v.to_member("video_codec")
                 .expect("already accessed")
                 .required()
                 .expect("already accessed")
@@ -451,10 +451,10 @@ fn parse_optional_dash(
         None => crate::types::CodecName::H264,
     };
 
-    let audio_codec_str: Option<String> = v.to_member("audioCodec")?.try_into()?;
+    let audio_codec_str: Option<String> = v.to_member("audio_codec")?.try_into()?;
     let audio_codec = match audio_codec_str {
         Some(s) => crate::types::CodecName::parse_audio(&s).map_err(|e| {
-            v.to_member("audioCodec")
+            v.to_member("audio_codec")
                 .expect("already accessed")
                 .required()
                 .expect("already accessed")
@@ -509,19 +509,19 @@ fn parse_dash_variants(
     let arr = variants_json.value().to_array()?;
     let mut variants = Vec::new();
     for elem in arr {
-        let video_bitrate: usize = elem.to_member("videoBitrate")?.required()?.try_into()?;
-        let audio_bitrate: usize = elem.to_member("audioBitrate")?.required()?.try_into()?;
+        let video_bitrate: usize = elem.to_member("video_bitrate")?.required()?.try_into()?;
+        let audio_bitrate: usize = elem.to_member("audio_bitrate")?.required()?.try_into()?;
         if video_bitrate == 0 {
             return Err(elem
-                .to_member("videoBitrate")?
+                .to_member("video_bitrate")?
                 .required()?
-                .invalid("videoBitrate must be positive"));
+                .invalid("video_bitrate must be positive"));
         }
         if audio_bitrate == 0 {
             return Err(elem
-                .to_member("audioBitrate")?
+                .to_member("audio_bitrate")?
                 .required()?
-                .invalid("audioBitrate must be positive"));
+                .invalid("audio_bitrate must be positive"));
         }
         let width: Option<usize> = elem.to_member("width")?.try_into()?;
         let height: Option<usize> = elem.to_member("height")?.try_into()?;
@@ -861,40 +861,40 @@ fn parse_s3_fields(d: nojson::RawJsonValue<'_, '_>) -> Result<S3Fields, nojson::
             .invalid("region must not be empty"));
     }
     let endpoint: Option<String> = d.to_member("endpoint")?.try_into()?;
-    let use_path_style: Option<bool> = d.to_member("usePathStyle")?.try_into()?;
+    let use_path_style: Option<bool> = d.to_member("use_path_style")?.try_into()?;
 
     // credentials オブジェクトのパース
     let creds_member: nojson::RawJsonOwned = d.to_member("credentials")?.required()?.try_into()?;
     let c = creds_member.value();
-    let access_key_id: String = c.to_member("accessKeyId")?.required()?.try_into()?;
+    let access_key_id: String = c.to_member("access_key_id")?.required()?.try_into()?;
     if access_key_id.is_empty() {
         return Err(c
-            .to_member("accessKeyId")?
+            .to_member("access_key_id")?
             .required()?
-            .invalid("accessKeyId must not be empty"));
+            .invalid("access_key_id must not be empty"));
     }
-    let secret_access_key: String = c.to_member("secretAccessKey")?.required()?.try_into()?;
+    let secret_access_key: String = c.to_member("secret_access_key")?.required()?.try_into()?;
     if secret_access_key.is_empty() {
         return Err(c
-            .to_member("secretAccessKey")?
+            .to_member("secret_access_key")?
             .required()?
-            .invalid("secretAccessKey must not be empty"));
+            .invalid("secret_access_key must not be empty"));
     }
-    let session_token: Option<String> = c.to_member("sessionToken")?.try_into()?;
+    let session_token: Option<String> = c.to_member("session_token")?.try_into()?;
 
-    let lifetime_days: Option<u32> = d.to_member("lifetimeDays")?.try_into()?;
+    let lifetime_days: Option<u32> = d.to_member("lifetime_days")?.try_into()?;
     if let Some(days) = lifetime_days {
         if days == 0 {
             return Err(d
-                .to_member("lifetimeDays")?
+                .to_member("lifetime_days")?
                 .required()?
-                .invalid("lifetimeDays must be positive"));
+                .invalid("lifetime_days must be positive"));
         }
         if prefix.is_empty() {
             return Err(d
-                .to_member("lifetimeDays")?
+                .to_member("lifetime_days")?
                 .required()?
-                .invalid("lifetimeDays requires a non-empty prefix"));
+                .invalid("lifetime_days requires a non-empty prefix"));
         }
     }
 
@@ -942,16 +942,16 @@ impl nojson::DisplayJson for SoraSection<'_> {
         nojson::object(|f| {
             // 空配列は省略する。読み戻し時は unwrap_or_default() で空 Vec に復元されるため同義。
             if !sora.signaling_urls.is_empty() {
-                f.member("signalingUrls", &sora.signaling_urls)?;
+                f.member("signaling_urls", &sora.signaling_urls)?;
             }
             if let Some(channel_id) = &sora.channel_id {
-                f.member("channelId", channel_id)?;
+                f.member("channel_id", channel_id)?;
             }
             if let Some(client_id) = &sora.client_id {
-                f.member("clientId", client_id)?;
+                f.member("client_id", client_id)?;
             }
             if let Some(bundle_id) = &sora.bundle_id {
-                f.member("bundleId", bundle_id)?;
+                f.member("bundle_id", bundle_id)?;
             }
             if let Some(metadata) = &sora.metadata {
                 f.member("metadata", metadata)?;
@@ -972,9 +972,9 @@ impl nojson::DisplayJson for HlsSection<'_> {
             if let Some(destination) = &hls.destination {
                 f.member("destination", HlsDestinationWithCredentials(destination))?;
             }
-            f.member("segmentDuration", hls.segment_duration)?;
-            f.member("maxRetainedSegments", hls.max_retained_segments)?;
-            f.member("segmentFormat", hls.segment_format.as_str())?;
+            f.member("segment_duration", hls.segment_duration)?;
+            f.member("max_retained_segments", hls.max_retained_segments)?;
+            f.member("segment_format", hls.segment_format.as_str())?;
             f.member(
                 "variants",
                 nojson::array(|f| {
@@ -999,8 +999,8 @@ impl nojson::DisplayJson for DashSection<'_> {
             if let Some(destination) = &dash.destination {
                 f.member("destination", DashDestinationWithCredentials(destination))?;
             }
-            f.member("segmentDuration", dash.segment_duration)?;
-            f.member("maxRetainedSegments", dash.max_retained_segments)?;
+            f.member("segment_duration", dash.segment_duration)?;
+            f.member("max_retained_segments", dash.max_retained_segments)?;
             f.member(
                 "variants",
                 nojson::array(|f| {
@@ -1010,8 +1010,8 @@ impl nojson::DisplayJson for DashSection<'_> {
                     Ok(())
                 }),
             )?;
-            f.member("videoCodec", dash.video_codec)?;
-            f.member("audioCodec", dash.audio_codec)
+            f.member("video_codec", dash.video_codec)?;
+            f.member("audio_codec", dash.audio_codec)
         })
         .fmt(f)
     }
@@ -1027,10 +1027,10 @@ impl nojson::DisplayJson for SrtInboundSettingsWithPassphrase<'_> {
         let s = self.0;
         nojson::object(|f| {
             if let Some(input_url) = &s.input_url {
-                f.member("inputUrl", input_url)?;
+                f.member("input_url", input_url)?;
             }
             if let Some(stream_id) = &s.stream_id {
-                f.member("streamId", stream_id)?;
+                f.member("stream_id", stream_id)?;
             }
             if let Some(passphrase) = &s.passphrase {
                 f.member("passphrase", passphrase)?;
@@ -1051,11 +1051,11 @@ impl nojson::DisplayJson for WebRtcSourceSettingsWithoutTrackId<'_> {
         let s = self.0;
         nojson::object(|f| {
             if let Some(background_key_color) = &s.background_key_color {
-                f.member("backgroundKeyColor", background_key_color)?;
+                f.member("background_key_color", background_key_color)?;
             }
             if let Some(background_key_tolerance) = s.background_key_tolerance {
                 f.member(
-                    "backgroundKeyTolerance",
+                    "background_key_tolerance",
                     i64::from(background_key_tolerance),
                 )?;
             }
@@ -1828,8 +1828,8 @@ mod tests {
         let json = r#"{
             "version": 1,
             "rtmpOutbound": {
-                "outputUrl": "rtmp://relay:1935/live",
-                "streamName": "backup"
+                "output_url": "rtmp://relay:1935/live",
+                "stream_name": "backup"
             }
         }"#;
         let state: ObswsStateFile = crate::json::parse_str(json).expect("parse must succeed");
@@ -1875,8 +1875,8 @@ mod tests {
         let json = r#"{
             "version": 1,
             "sora": {
-                "signalingUrls": ["wss://example.com/signaling"],
-                "channelId": "test-ch",
+                "signaling_urls": ["wss://example.com/signaling"],
+                "channel_id": "test-ch",
                 "metadata": {"key": "value"}
             }
         }"#;
@@ -1949,11 +1949,11 @@ mod tests {
                     "type": "filesystem",
                     "directory": "/tmp/hls"
                 },
-                "segmentDuration": 3.0,
-                "maxRetainedSegments": 10,
-                "segmentFormat": "fmp4",
+                "segment_duration": 3.0,
+                "max_retained_segments": 10,
+                "segment_format": "fmp4",
                 "variants": [
-                    {"videoBitrate": 1000000, "audioBitrate": 64000}
+                    {"video_bitrate": 1000000, "audio_bitrate": 64000}
                 ]
             }
         }"#;
@@ -1980,16 +1980,16 @@ mod tests {
                     "bucket": "my-bucket",
                     "prefix": "hls-out",
                     "region": "us-east-1",
-                    "usePathStyle": false,
+                    "use_path_style": false,
                     "credentials": {
-                        "accessKeyId": "AKID",
-                        "secretAccessKey": "SECRET",
-                        "sessionToken": "TOKEN"
+                        "access_key_id": "AKID",
+                        "secret_access_key": "SECRET",
+                        "session_token": "TOKEN"
                     },
-                    "lifetimeDays": 7
+                    "lifetime_days": 7
                 },
                 "variants": [
-                    {"videoBitrate": 2000000, "audioBitrate": 128000}
+                    {"video_bitrate": 2000000, "audio_bitrate": 128000}
                 ]
             }
         }"#;
@@ -2134,13 +2134,13 @@ mod tests {
                     "type": "filesystem",
                     "directory": "/tmp/dash"
                 },
-                "segmentDuration": 4.0,
-                "maxRetainedSegments": 8,
+                "segment_duration": 4.0,
+                "max_retained_segments": 8,
                 "variants": [
-                    {"videoBitrate": 3000000, "audioBitrate": 192000}
+                    {"video_bitrate": 3000000, "audio_bitrate": 192000}
                 ],
-                "videoCodec": "H265",
-                "audioCodec": "OPUS"
+                "video_codec": "H265",
+                "audio_codec": "OPUS"
             }
         }"#;
         let state: ObswsStateFile = crate::json::parse_str(json).expect("parse must succeed");
@@ -2352,31 +2352,31 @@ mod tests {
                     "inputUuid": "uuid-4",
                     "inputName": "MP4",
                     "inputKind": "mp4_file_source",
-                    "inputSettings": {"path": "/tmp/video.mp4", "loopPlayback": true}
+                    "inputSettings": {"path": "/tmp/video.mp4", "loop_playback": true}
                 },
                 {
                     "inputUuid": "uuid-5",
                     "inputName": "RTMP",
                     "inputKind": "rtmp_inbound",
-                    "inputSettings": {"inputUrl": "rtmp://localhost/live", "streamName": "test"}
+                    "inputSettings": {"input_url": "rtmp://localhost/live", "stream_name": "test"}
                 },
                 {
                     "inputUuid": "uuid-6",
                     "inputName": "SRT",
                     "inputKind": "srt_inbound",
-                    "inputSettings": {"inputUrl": "srt://localhost:9000", "passphrase": "secret12"}
+                    "inputSettings": {"input_url": "srt://localhost:9000", "passphrase": "secret12"}
                 },
                 {
                     "inputUuid": "uuid-7",
                     "inputName": "RTSP",
                     "inputKind": "rtsp_subscriber",
-                    "inputSettings": {"inputUrl": "rtsp://localhost/stream"}
+                    "inputSettings": {"input_url": "rtsp://localhost/stream"}
                 },
                 {
                     "inputUuid": "uuid-8",
                     "inputName": "WebRTC",
                     "inputKind": "webrtc_source",
-                    "inputSettings": {"backgroundKeyColor": "#00FF00"}
+                    "inputSettings": {"background_key_color": "#00FF00"}
                 }
             ]
         }"##;
@@ -2395,7 +2395,7 @@ mod tests {
 
     #[test]
     fn roundtrip_inputs() {
-        let settings_json = r#"{"inputUrl": "rtmp://test/live"}"#;
+        let settings_json = r#"{"input_url": "rtmp://test/live"}"#;
         let raw = nojson::RawJson::parse(settings_json).expect("valid json");
         let input_settings =
             nojson::RawJsonOwned::try_from(raw.value()).expect("conversion must succeed");
@@ -2663,6 +2663,9 @@ mod tests {
             crate::json::to_pretty_string(super::SrtInboundSettingsWithPassphrase(&srt));
         assert!(json_text.contains("passphrase"));
         assert!(json_text.contains("my-secret-pass"));
+        // snake_case 規約: input_url / stream_id を snake で出力する
+        assert!(json_text.contains("input_url"));
+        assert!(json_text.contains("stream_id"));
 
         // 通常の DisplayJson では passphrase が含まれないことを確認する
         let normal_text = crate::json::to_pretty_string(&srt);
@@ -2679,9 +2682,9 @@ mod tests {
         };
         let json_text =
             crate::json::to_pretty_string(super::WebRtcSourceSettingsWithoutTrackId(&webrtc));
-        assert!(!json_text.contains("trackId"));
+        assert!(!json_text.contains("track_id"));
         assert!(!json_text.contains("runtime-track-id"));
-        assert!(json_text.contains("backgroundKeyColor"));
+        assert!(json_text.contains("background_key_color"));
         assert!(json_text.contains("#00FF00"));
     }
 
@@ -2781,7 +2784,7 @@ mod tests {
             output_name: "sora_with_meta".to_owned(),
             output_kind: "sora_webrtc_output".to_owned(),
             output_settings: nojson::RawJsonOwned::parse(
-                r#"{"soraSdkSettings":{"signalingUrls":["wss://example.com/signaling"],"channelId":"ch","metadata":{"key":"value"}}}"#,
+                r#"{"soraSdkSettings":{"signaling_urls":["wss://example.com/signaling"],"channel_id":"ch","metadata":{"key":"value"}}}"#,
             )
             .expect("settings json must be valid"),
         }];

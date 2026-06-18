@@ -66,9 +66,9 @@ impl RtmpOutboundEndpointStats {
 impl nojson::DisplayJson for RtmpOutboundEndpoint {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
-            f.member("outputUrl", &self.output_url)?;
+            f.member("output_url", &self.output_url)?;
             if let Some(stream_name) = &self.stream_name {
-                f.member("streamName", stream_name)?;
+                f.member("stream_name", stream_name)?;
             }
             if let Some(track_id) = &self.input_audio_track_id {
                 f.member("inputAudioTrackId", track_id)?;
@@ -95,8 +95,8 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpOutboundEnd
     fn try_from(
         value: nojson::RawJsonValue<'text, 'raw>,
     ) -> std::result::Result<Self, Self::Error> {
-        let output_url: String = value.to_member("outputUrl")?.required()?.try_into()?;
-        let stream_name: Option<String> = value.to_member("streamName")?.try_into()?;
+        let output_url: String = value.to_member("output_url")?.required()?.try_into()?;
+        let stream_name: Option<String> = value.to_member("stream_name")?.try_into()?;
         let input_audio_track_id: Option<TrackId> =
             value.to_member("inputAudioTrackId")?.try_into()?;
         let input_video_track_id: Option<TrackId> =
@@ -113,9 +113,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpOutboundEnd
                 let trimmed = stream_name.trim();
                 if trimmed.is_empty() {
                     return Err(value
-                        .to_member("streamName")?
+                        .to_member("stream_name")?
                         .required()?
-                        .invalid("streamName must not be empty"));
+                        .invalid("stream_name must not be empty"));
                 }
                 Some(trimmed.to_owned())
             }
@@ -128,7 +128,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for RtmpOutboundEnd
 
         let url = match parse_rtmp_url(&output_url, stream_name.as_deref()) {
             Ok(url) => url,
-            Err(e) => return Err(value.to_member("outputUrl")?.required()?.invalid(e)),
+            Err(e) => return Err(value.to_member("output_url")?.required()?.invalid(e)),
         };
 
         if url.tls && cert_path.is_none() {
@@ -166,7 +166,7 @@ impl RtmpOutboundEndpoint {
         handle.notify_ready();
 
         let url = parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
-            .map_err(|e| Error::new(format!("invalid outputUrl: {e}")))?;
+            .map_err(|e| Error::new(format!("invalid output_url: {e}")))?;
         let (tx, rx) = tokio::sync::mpsc::channel(FRAME_CHANNEL_SIZE);
 
         let server_options = self.options.clone();

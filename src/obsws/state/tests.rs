@@ -126,7 +126,7 @@ fn parse_video_capture_device_settings_reads_pixel_format_and_fps() {
 
 #[test]
 fn parse_mp4_file_source_settings_reads_path_and_loop_playback() {
-    let settings = parse_owned_json(r#"{"path":"/tmp/input.mp4","loopPlayback":true}"#);
+    let settings = parse_owned_json(r#"{"path":"/tmp/input.mp4","loop_playback":true}"#);
     let input = ObswsInput::from_kind_and_settings("mp4_file_source", settings.value())
         .expect("mp4_file_source settings must be accepted");
     assert_eq!(input.kind_name(), "mp4_file_source");
@@ -1342,8 +1342,8 @@ fn srt_inbound_display_json_excludes_passphrase() {
         passphrase: Some("secret-passphrase".to_owned()),
     };
     let json = nojson::json(|f| f.value(&settings)).to_string();
-    assert!(json.contains("inputUrl"));
-    assert!(json.contains("streamId"));
+    assert!(json.contains("input_url"));
+    assert!(json.contains("stream_id"));
     // passphrase は GetInputSettings で返却されないこと
     assert!(!json.contains("passphrase"));
     assert!(!json.contains("secret-passphrase"));

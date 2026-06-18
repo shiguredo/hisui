@@ -15,7 +15,7 @@ pub(super) fn build_record_source_plan(
 ) -> Result<ObswsRecordSourcePlan, BuildObswsRecordSourcePlanError> {
     let Some(input_url) = settings.input_url.as_deref() else {
         return Err(BuildObswsRecordSourcePlanError::InvalidInput(
-            "inputSettings.inputUrl is required".to_owned(),
+            "inputSettings.input_url is required".to_owned(),
         ));
     };
 

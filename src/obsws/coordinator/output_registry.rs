@@ -470,7 +470,6 @@ impl ObswsCoordinator {
                 f.member(
                     "streamServiceSettings",
                     nojson::object(|f| {
-                        f.member("bwtest", false)?;
                         if let Some(server) = &settings.server {
                             f.member("server", server)?;
                         }
@@ -925,7 +924,7 @@ pub(super) fn parse_obsws_s3_destination(
     let endpoint: Option<String> =
         optional_non_empty_string_member(dest_value, "endpoint").map_err(|e| e.to_string())?;
     let use_path_style: bool = dest_value
-        .to_member("usePathStyle")
+        .to_member("use_path_style")
         .map_err(|e| e.to_string())?
         .optional()
         .map(|v| v.try_into())
@@ -939,24 +938,25 @@ pub(super) fn parse_obsws_s3_destination(
         .required()
         .map_err(|_| "destination.credentials is required for s3".to_owned())?;
     let access_key_id: String = creds_value
-        .to_member("accessKeyId")
+        .to_member("access_key_id")
         .map_err(|e| e.to_string())?
         .required()
-        .map_err(|_| "credentials.accessKeyId is required".to_owned())?
+        .map_err(|_| "credentials.access_key_id is required".to_owned())?
         .try_into()
         .map_err(|e: nojson::JsonParseError| e.to_string())?;
     let secret_access_key: String = creds_value
-        .to_member("secretAccessKey")
+        .to_member("secret_access_key")
         .map_err(|e| e.to_string())?
         .required()
-        .map_err(|_| "credentials.secretAccessKey is required".to_owned())?
+        .map_err(|_| "credentials.secret_access_key is required".to_owned())?
         .try_into()
         .map_err(|e: nojson::JsonParseError| e.to_string())?;
     let session_token: Option<String> =
-        optional_non_empty_string_member(creds_value, "sessionToken").map_err(|e| e.to_string())?;
+        optional_non_empty_string_member(creds_value, "session_token")
+            .map_err(|e| e.to_string())?;
 
     let lifetime_days: Option<u32> = dest_value
-        .to_member("lifetimeDays")
+        .to_member("lifetime_days")
         .map_err(|e| e.to_string())?
         .optional()
         .map(|v| v.try_into())
@@ -971,10 +971,10 @@ pub(super) fn parse_obsws_s3_destination(
     }
     if let Some(days) = lifetime_days {
         if days == 0 {
-            return Err("destination.lifetimeDays must be positive".to_owned());
+            return Err("destination.lifetime_days must be positive".to_owned());
         }
         if prefix.is_empty() {
-            return Err("destination.prefix is required when lifetimeDays is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
+            return Err("destination.prefix is required when lifetime_days is set (empty prefix would apply lifecycle rules to the entire bucket)".to_owned());
         }
     }
 

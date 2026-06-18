@@ -85,16 +85,16 @@ impl nojson::DisplayJson for ObswsSoraPublisherSettings {
                 "soraSdkSettings",
                 nojson::object(|f| {
                     if !self.signaling_urls.is_empty() {
-                        f.member("signalingUrls", &self.signaling_urls)?;
+                        f.member("signaling_urls", &self.signaling_urls)?;
                     }
                     if let Some(channel_id) = &self.channel_id {
-                        f.member("channelId", channel_id)?;
+                        f.member("channel_id", channel_id)?;
                     }
                     if let Some(client_id) = &self.client_id {
-                        f.member("clientId", client_id)?;
+                        f.member("client_id", client_id)?;
                     }
                     if let Some(bundle_id) = &self.bundle_id {
-                        f.member("bundleId", bundle_id)?;
+                        f.member("bundle_id", bundle_id)?;
                     }
                     if let Some(metadata) = &self.metadata {
                         f.member("metadata", metadata)?;
@@ -118,7 +118,7 @@ impl ObswsSoraPublisherSettings {
             && let Some(sdk) = v.optional()
             && !sdk.kind().is_null()
         {
-            if let Ok(v) = sdk.to_member("signalingUrls")
+            if let Ok(v) = sdk.to_member("signaling_urls")
                 && let Some(v) = v.optional()
             {
                 if v.kind().is_null() {
@@ -127,12 +127,12 @@ impl ObswsSoraPublisherSettings {
                     match <Vec<String>>::try_from(v) {
                         Ok(urls) => self.signaling_urls = urls,
                         Err(_) => {
-                            return Err("signalingUrls must be an array of strings".to_owned());
+                            return Err("signaling_urls must be an array of strings".to_owned());
                         }
                     }
                 }
             }
-            if let Ok(v) = sdk.to_member("channelId")
+            if let Ok(v) = sdk.to_member("channel_id")
                 && let Some(v) = v.optional()
             {
                 if v.kind().is_null() {
@@ -140,11 +140,11 @@ impl ObswsSoraPublisherSettings {
                 } else {
                     match <String>::try_from(v) {
                         Ok(ch) => self.channel_id = Some(ch),
-                        Err(_) => return Err("channelId must be a string".to_owned()),
+                        Err(_) => return Err("channel_id must be a string".to_owned()),
                     }
                 }
             }
-            if let Ok(v) = sdk.to_member("clientId")
+            if let Ok(v) = sdk.to_member("client_id")
                 && let Some(v) = v.optional()
             {
                 if v.kind().is_null() {
@@ -152,11 +152,11 @@ impl ObswsSoraPublisherSettings {
                 } else {
                     match <String>::try_from(v) {
                         Ok(ci) => self.client_id = Some(ci),
-                        Err(_) => return Err("clientId must be a string".to_owned()),
+                        Err(_) => return Err("client_id must be a string".to_owned()),
                     }
                 }
             }
-            if let Ok(v) = sdk.to_member("bundleId")
+            if let Ok(v) = sdk.to_member("bundle_id")
                 && let Some(v) = v.optional()
             {
                 if v.kind().is_null() {
@@ -164,7 +164,7 @@ impl ObswsSoraPublisherSettings {
                 } else {
                     match <String>::try_from(v) {
                         Ok(bi) => self.bundle_id = Some(bi),
-                        Err(_) => return Err("bundleId must be a string".to_owned()),
+                        Err(_) => return Err("bundle_id must be a string".to_owned()),
                     }
                 }
             }
@@ -197,20 +197,20 @@ impl ObswsSoraPublisherSettings {
                 .and_then(|v| v.optional())
                 .filter(|v| !v.kind().is_null());
             let source = sdk.as_ref().unwrap_or(v);
-            // signalingUrls
-            if let Ok(member) = source.to_member("signalingUrls")
+            // signaling_urls
+            if let Ok(member) = source.to_member("signaling_urls")
                 && let Some(val) = member.optional()
                 && !val.kind().is_null()
             {
                 settings.signaling_urls = <Vec<String>>::try_from(val)
-                    .map_err(|_| "signalingUrls must be an array of strings".to_owned())?;
+                    .map_err(|_| "signaling_urls must be an array of strings".to_owned())?;
             }
             settings.channel_id =
-                parse_optional_string_strict(source, "channelId", "channelId must be a string")?;
+                parse_optional_string_strict(source, "channel_id", "channel_id must be a string")?;
             settings.client_id =
-                parse_optional_string_strict(source, "clientId", "clientId must be a string")?;
+                parse_optional_string_strict(source, "client_id", "client_id must be a string")?;
             settings.bundle_id =
-                parse_optional_string_strict(source, "bundleId", "bundleId must be a string")?;
+                parse_optional_string_strict(source, "bundle_id", "bundle_id must be a string")?;
             // metadata（object のみ）
             if let Ok(member) = source.to_member("metadata")
                 && let Some(val) = member.optional()
@@ -279,7 +279,7 @@ impl ObswsCoordinator {
                     request_type,
                     request_id,
                     crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Missing outputSettings.soraSdkSettings.signalingUrls field",
+                    "Missing outputSettings.soraSdkSettings.signaling_urls field",
                 ),
             );
         }
@@ -289,7 +289,7 @@ impl ObswsCoordinator {
                     request_type,
                     request_id,
                     crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    "Missing outputSettings.soraSdkSettings.channelId field",
+                    "Missing outputSettings.soraSdkSettings.channel_id field",
                 ),
             );
         };

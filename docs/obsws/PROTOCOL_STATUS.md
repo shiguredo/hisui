@@ -177,7 +177,7 @@ NOTE: `--state-file` 指定時、input の作成・削除・設定変更・名�
   - NOTE: `sceneItemEnabled` の値に応じて Scene Item を作成し、`sceneItemEnabled` に反映する
   - NOTE: 成功時は `responseData.inputUuid` を返し、`GetInputSettings` で参照できる
   - NOTE: input kind によっては設定不足でも登録のみ成功し、source は未起動のまま保持される
-  - NOTE: source の起動タイミングは input kind ごとに異なる。`image_source` は `file` 指定時、`mp4_file_source` は `path` 指定時、`video_capture_device` / `audio_capture_device` は `device_id` 指定時、`rtmp_inbound` / `srt_inbound` / `rtsp_subscriber` は `inputUrl` 指定時に起動する。`color_source` はデフォルトで成立するため常に起動する
+  - NOTE: source の起動タイミングは input kind ごとに異なる。`image_source` は `file` 指定時、`mp4_file_source` は `path` 指定時、`video_capture_device` / `audio_capture_device` は `device_id` 指定時、`rtmp_inbound` / `srt_inbound` / `rtsp_subscriber` は `input_url` 指定時に起動する。`color_source` はデフォルトで成立するため常に起動する
 - [x] `RemoveInput`: 入力を削除する
   - NOTE: `inputName` または `inputUuid` のいずれか指定で削除する
   - NOTE: 対象が存在しない場合は not found エラーを返す
@@ -638,10 +638,10 @@ RTMP インバウンドエンドポイント。指定した URL でリッスン�
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `inputUrl` | string | - | リッスン URL（例: `rtmp://127.0.0.1:1935`） |
-| `streamName` | string | - | RTMP ストリーム名 |
+| `input_url` | string | - | リッスン URL（例: `rtmp://127.0.0.1:1935`） |
+| `stream_name` | string | - | RTMP ストリーム名 |
 
-- NOTE: `inputUrl` が指定されたタイミングで source が起動する。未指定時は source 未起動のまま保持される
+- NOTE: `input_url` が指定されたタイミングで source が起動する。未指定時は source 未起動のまま保持される
 - NOTE: 映像・音声の両トラックを常に出力する。受信ストリームに含まれないトラックのデコーダーはアイドル状態になる
 
 #### `srt_inbound`
@@ -652,11 +652,11 @@ SRT インバウンドエンドポイント。指定した URL でリッスン�
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `inputUrl` | string | - | リッスン URL（例: `srt://127.0.0.1:9000`） |
-| `streamId` | string | - | SRT ストリーム ID（指定時は caller の streamid と照合する） |
+| `input_url` | string | - | リッスン URL（例: `srt://127.0.0.1:9000`） |
+| `stream_id` | string | - | SRT ストリーム ID（指定時は caller の streamid と照合する） |
 | `passphrase` | string | - | SRT 暗号化パスフレーズ |
 
-- NOTE: `inputUrl` が指定されたタイミングで source が起動する。未指定時は source 未起動のまま保持される
+- NOTE: `input_url` が指定されたタイミングで source が起動する。未指定時は source 未起動のまま保持される
 - NOTE: 映像・音声の両トラックを常に出力する。受信ストリームに含まれないトラックのデコーダーはアイドル状態になる
 
 #### `rtsp_subscriber`
@@ -667,9 +667,9 @@ RTSP サブスクライバー。指定した RTSP URL に接続し、映像・�
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `inputUrl` | string | - | RTSP URL（例: `rtsp://127.0.0.1:554/stream`） |
+| `input_url` | string | - | RTSP URL（例: `rtsp://127.0.0.1:554/stream`） |
 
-- NOTE: `inputUrl` が指定されたタイミングで source が起動する。未指定時は source 未起動のまま保持される
+- NOTE: `input_url` が指定されたタイミングで source が起動する。未指定時は source 未起動のまま保持される
 - NOTE: 映像・音声の両トラックを常に出力する。受信ストリームに含まれないトラックのデコーダーはアイドル状態になる
 
 #### `webrtc_source`
@@ -681,17 +681,17 @@ bootstrap セッションの上り video track を受けるための input kind�
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `trackId` | string \| null | - | attach 済みの WebRTC 映像 track ID。読み取り専用（`SetInputSettings` では変更不可） |
-| `backgroundKeyColor` | string \| null | - | 透過対象の背景色。`#RRGGBB` 形式 |
-| `backgroundKeyTolerance` | number \| null | - | key color 許容差。0 以上 255 以下の整数 |
+| `track_id` | string \| null | - | attach 済みの WebRTC 映像 track ID。読み取り専用（`SetInputSettings` では変更不可） |
+| `background_key_color` | string \| null | - | 透過対象の背景色。`#RRGGBB` 形式 |
+| `background_key_tolerance` | number \| null | - | key color 許容差。0 以上 255 以下の整数 |
 
 - NOTE: track 未接続でも input 自体は作成可能
 - NOTE: upstream 専用であり、browser 側への再配信対象には含めない
-- NOTE: `backgroundKeyColor` と `backgroundKeyTolerance` の両方が設定されている場合に chroma key 透過が有効になる
-- NOTE: `backgroundKeyColor` / `backgroundKeyTolerance` は `SetInputSettings` で変更でき、attach 中の出力にも反映される
-- NOTE: `trackId` は読み取り専用で、`HisuiAttachWebRtcVideoTrack` / `HisuiDetachWebRtcVideoTrack` / bootstrap セッション切断時に更新される
-- NOTE: `trackId` の変化は `InputSettingsChanged` イベントで購読できる
-- NOTE: bootstrap セッション切断時は input は残るが、`trackId` は null に戻る
+- NOTE: `background_key_color` と `background_key_tolerance` の両方が設定されている場合に chroma key 透過が有効になる
+- NOTE: `background_key_color` / `background_key_tolerance` は `SetInputSettings` で変更でき、attach 中の出力にも反映される
+- NOTE: `track_id` は読み取り専用で、`HisuiAttachWebRtcVideoTrack` / `HisuiDetachWebRtcVideoTrack` / bootstrap セッション切断時に更新される
+- NOTE: `track_id` の変化は `InputSettingsChanged` イベントで購読できる
+- NOTE: bootstrap セッション切断時は input は残るが、`track_id` は null に戻る
 
 ### 独自 Output
 
@@ -706,12 +706,12 @@ RTMP アウトバウンドエンドポイント。指定した URL でリッス�
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `outputUrl` | string | StartOutput 時に必須 | リッスン URL（例: `rtmp://127.0.0.1:1936/live`） |
-| `streamName` | string | - | RTMP ストリーム名 |
+| `output_url` | string | StartOutput 時に必須 | リッスン URL（例: `rtmp://127.0.0.1:1936/live`） |
+| `stream_name` | string | - | RTMP ストリーム名 |
 
 **フロー:**
 
-1. `SetOutputSettings` で `outputUrl` 等を設定
+1. `SetOutputSettings` で `output_url` 等を設定
 2. `StartOutput` で pipeline 生成 + リスナー開始
 3. `GetOutputStatus` で稼働状態確認
 4. `StopOutput` で pipeline 停止
@@ -730,10 +730,10 @@ outputSettings は `soraSdkSettings` オブジェクトを含む。
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `soraSdkSettings.signalingUrls` | string[] | StartOutput 時に必須（1 件以上） | シグナリング URL 一覧 |
-| `soraSdkSettings.channelId` | string | StartOutput 時に必須 | チャネル ID |
-| `soraSdkSettings.clientId` | string | - | クライアント ID |
-| `soraSdkSettings.bundleId` | string | - | バンドル ID |
+| `soraSdkSettings.signaling_urls` | string[] | StartOutput 時に必須（1 件以上） | シグナリング URL 一覧 |
+| `soraSdkSettings.channel_id` | string | StartOutput 時に必須 | チャネル ID |
+| `soraSdkSettings.client_id` | string | - | クライアント ID |
+| `soraSdkSettings.bundle_id` | string | - | バンドル ID |
 | `soraSdkSettings.metadata` | object | - | Sora に送信するメタデータ（JSON object のみ） |
 
 **フロー:**
@@ -745,7 +745,7 @@ outputSettings は `soraSdkSettings` オブジェクトを含む。
 
 **エラー条件:**
 
-- `signalingUrls` が空、または `channelId` が未設定の場合: `StartOutput` が失敗
+- `signaling_urls` が空、または `channel_id` が未設定の場合: `StartOutput` が失敗
 - `metadata` が JSON object 以外の場合: `SetOutputSettings` が失敗
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す
@@ -821,9 +821,9 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `destination` | object | StartOutput 時に必須 | 出力先の設定（下記参照） |
-| `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
-| `maxRetainedSegments` | number | - | プレイリストに保持するセグメント数。デフォルト: 6 |
-| `segmentFormat` | string | - | セグメントフォーマット。`"mpegts"` (デフォルト) または `"fmp4"` |
+| `segment_duration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
+| `max_retained_segments` | number | - | プレイリストに保持するセグメント数。デフォルト: 6 |
+| `segment_format` | string | - | セグメントフォーマット。`"mpegts"` (デフォルト) または `"fmp4"` |
 | `variants` | array | - | バリアント定義の配列。デフォルト: 1 要素（2Mbps video, 128kbps audio） |
 
 **`destination` (filesystem):**
@@ -842,13 +842,13 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 | `prefix` | string | - | オブジェクトキーの prefix。デフォルト: 空文字列 |
 | `region` | string | 必須 | AWS リージョン |
 | `endpoint` | string | - | カスタムエンドポイント URL（MinIO 等） |
-| `usePathStyle` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
+| `use_path_style` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
 | `credentials` | object | 必須 | 認証情報（下記参照） |
-| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数） |
+| `lifetime_days` | number | - | オブジェクトのライフタイム（日数） |
 
-> **`lifetimeDays` に関する注意:**
+> **`lifetime_days` に関する注意:**
 >
-> - `lifetimeDays` を指定すると、hisui は Output 開始時に対象バケットの lifecycle 設定を更新する
+> - `lifetime_days` を指定すると、hisui は Output 開始時に対象バケットの lifecycle 設定を更新する
 > - この更新は既存ルールとの競合を安全に解決しないため、他の lifecycle ルールへ影響する可能性がある
 > - 既存 lifecycle を運用している共有バケットでの利用は非推奨
 
@@ -856,16 +856,16 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `accessKeyId` | string | 必須 | アクセスキー ID |
-| `secretAccessKey` | string | 必須 | シークレットアクセスキー |
-| `sessionToken` | string | - | セッショントークン（一時認証情報用） |
+| `access_key_id` | string | 必須 | アクセスキー ID |
+| `secret_access_key` | string | 必須 | シークレットアクセスキー |
+| `session_token` | string | - | セッショントークン（一時認証情報用） |
 
 **`variants` の各要素:**
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `videoBitrate` | number | 必須 | ビデオビットレート (bps) |
-| `audioBitrate` | number | 必須 | オーディオビットレート (bps) |
+| `video_bitrate` | number | 必須 | ビデオビットレート (bps) |
+| `audio_bitrate` | number | 必須 | オーディオビットレート (bps) |
 | `width` | number | - | ビデオ幅（偶数）。省略時はキャンバスサイズを使用 |
 | `height` | number | - | ビデオ高さ（偶数）。省略時はキャンバスサイズを使用 |
 
@@ -908,11 +908,11 @@ HLS ライブ出力。H.264 + AAC の MPEG-TS または fragmented MP4 セグメ
 
 - `destination` が未設定の場合: `StartOutput` が失敗
 - `destination.type` が `"filesystem"` でも `"s3"` でもない場合: `SetOutputSettings` が失敗
-- `segmentDuration` が 0 以下の場合: `SetOutputSettings` が失敗
-- `maxRetainedSegments` が 0 の場合: `SetOutputSettings` が失敗
+- `segment_duration` が 0 以下の場合: `SetOutputSettings` が失敗
+- `max_retained_segments` が 0 の場合: `SetOutputSettings` が失敗
 - `variants` が空の場合: `SetOutputSettings` が失敗
-- `variants[].videoBitrate` が 0 の場合: `SetOutputSettings` が失敗
-- `variants[].audioBitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants[].video_bitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants[].audio_bitrate` が 0 の場合: `SetOutputSettings` が失敗
 - `variants[].width` / `height` が 0 または奇数の場合: `SetOutputSettings` が失敗
 - `variants[].width` / `height` の片方だけ指定された場合: `SetOutputSettings` が失敗
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
@@ -934,11 +934,11 @@ MPEG-DASH ライブ出力。指定されたビデオ/オーディオコーデッ
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `destination` | object | StartOutput 時に必須 | 出力先の設定（下記参照） |
-| `segmentDuration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
-| `maxRetainedSegments` | number | - | マニフェストに保持するセグメント数。デフォルト: 6 |
+| `segment_duration` | number | - | セグメントの目標尺（秒）。デフォルト: 2.0 |
+| `max_retained_segments` | number | - | マニフェストに保持するセグメント数。デフォルト: 6 |
 | `variants` | array | - | バリアント定義の配列。デフォルト: 1 要素（2Mbps video, 128kbps audio） |
-| `videoCodec` | string | - | ビデオコーデック（`"H264"` / `"H265"` / `"VP8"` / `"VP9"` / `"AV1"`）。デフォルト: `"H264"` |
-| `audioCodec` | string | - | オーディオコーデック（`"AAC"` / `"OPUS"`）。デフォルト: `"AAC"` |
+| `video_codec` | string | - | ビデオコーデック（`"H264"` / `"H265"` / `"VP8"` / `"VP9"` / `"AV1"`）。デフォルト: `"H264"` |
+| `audio_codec` | string | - | オーディオコーデック（`"AAC"` / `"OPUS"`）。デフォルト: `"AAC"` |
 
 **`destination` (filesystem):**
 
@@ -956,13 +956,13 @@ MPEG-DASH ライブ出力。指定されたビデオ/オーディオコーデッ
 | `prefix` | string | - | オブジェクトキーの prefix。デフォルト: 空文字列 |
 | `region` | string | 必須 | AWS リージョン |
 | `endpoint` | string | - | カスタムエンドポイント URL（MinIO 等） |
-| `usePathStyle` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
+| `use_path_style` | boolean | - | パススタイルの URL を使用する。デフォルト: `false` |
 | `credentials` | object | 必須 | 認証情報（下記参照） |
-| `lifetimeDays` | number | - | オブジェクトのライフタイム（日数） |
+| `lifetime_days` | number | - | オブジェクトのライフタイム（日数） |
 
-> **`lifetimeDays` に関する注意:**
+> **`lifetime_days` に関する注意:**
 >
-> - `lifetimeDays` を指定すると、hisui は Output 開始時に対象バケットの lifecycle 設定を更新する
+> - `lifetime_days` を指定すると、hisui は Output 開始時に対象バケットの lifecycle 設定を更新する
 > - この更新は既存ルールとの競合を安全に解決しないため、他の lifecycle ルールへ影響する可能性がある
 > - 既存 lifecycle を運用している共有バケットでの利用は非推奨
 
@@ -970,16 +970,16 @@ MPEG-DASH ライブ出力。指定されたビデオ/オーディオコーデッ
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `accessKeyId` | string | 必須 | アクセスキー ID |
-| `secretAccessKey` | string | 必須 | シークレットアクセスキー |
-| `sessionToken` | string | - | セッショントークン（一時認証情報用） |
+| `access_key_id` | string | 必須 | アクセスキー ID |
+| `secret_access_key` | string | 必須 | シークレットアクセスキー |
+| `session_token` | string | - | セッショントークン（一時認証情報用） |
 
 **`variants` の各要素:**
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `videoBitrate` | number | 必須 | ビデオビットレート (bps) |
-| `audioBitrate` | number | 必須 | オーディオビットレート (bps) |
+| `video_bitrate` | number | 必須 | ビデオビットレート (bps) |
+| `audio_bitrate` | number | 必須 | オーディオビットレート (bps) |
 | `width` | number | - | ビデオ幅（偶数）。省略時はキャンバスサイズを使用 |
 | `height` | number | - | ビデオ高さ（偶数）。省略時はキャンバスサイズを使用 |
 
@@ -1039,16 +1039,16 @@ MPEG-DASH ライブ出力。指定されたビデオ/オーディオコーデッ
 
 - `destination` が未設定の場合: `StartOutput` が失敗
 - `destination.type` が `"filesystem"` でも `"s3"` でもない場合: `SetOutputSettings` が失敗
-- `segmentDuration` が 0 以下の場合: `SetOutputSettings` が失敗
-- `maxRetainedSegments` が 0 の場合: `SetOutputSettings` が失敗
+- `segment_duration` が 0 以下の場合: `SetOutputSettings` が失敗
+- `max_retained_segments` が 0 の場合: `SetOutputSettings` が失敗
 - `variants` が空の場合: `SetOutputSettings` が失敗
-- `variants[].videoBitrate` が 0 の場合: `SetOutputSettings` が失敗
-- `variants[].audioBitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants[].video_bitrate` が 0 の場合: `SetOutputSettings` が失敗
+- `variants[].audio_bitrate` が 0 の場合: `SetOutputSettings` が失敗
 - `variants[].width` / `height` が 0 または奇数の場合: `SetOutputSettings` が失敗
 - `variants[].width` / `height` の片方だけ指定された場合: `SetOutputSettings` が失敗
-- `videoCodec` にオーディオコーデック名を指定した場合: `SetOutputSettings` が失敗
-- `audioCodec` にビデオコーデック名を指定した場合: `SetOutputSettings` が失敗
-- `videoCodec` / `audioCodec` に未知のコーデック名を指定した場合: `SetOutputSettings` が失敗
+- `video_codec` にオーディオコーデック名を指定した場合: `SetOutputSettings` が失敗
+- `audio_codec` にビデオコーデック名を指定した場合: `SetOutputSettings` が失敗
+- `video_codec` / `audio_codec` に未知のコーデック名を指定した場合: `SetOutputSettings` が失敗
 - 利用可能なエンコーダーが存在しないコーデックを指定した場合: `StartOutput` が失敗
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す

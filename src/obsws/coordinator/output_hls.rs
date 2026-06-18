@@ -53,8 +53,8 @@ impl Default for HlsVariant {
 impl nojson::DisplayJson for HlsVariant {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
-            f.member("videoBitrate", self.video_bitrate_bps)?;
-            f.member("audioBitrate", self.audio_bitrate_bps)?;
+            f.member("video_bitrate", self.video_bitrate_bps)?;
+            f.member("audio_bitrate", self.audio_bitrate_bps)?;
             if let Some(width) = self.width {
                 f.member("width", width.get())?;
             }
@@ -94,7 +94,7 @@ impl std::str::FromStr for HlsSegmentFormat {
             "mpegts" => Ok(Self::MpegTs),
             "fmp4" => Ok(Self::Fmp4),
             _ => Err(format!(
-                "segmentFormat must be \"mpegts\" or \"fmp4\", got \"{s}\""
+                "segment_format must be \"mpegts\" or \"fmp4\", got \"{s}\""
             )),
         }
     }
@@ -149,9 +149,9 @@ impl nojson::DisplayJson for HlsDestination {
                 if let Some(endpoint) = endpoint {
                     f.member("endpoint", endpoint)?;
                 }
-                f.member("usePathStyle", *use_path_style)?;
+                f.member("use_path_style", *use_path_style)?;
                 if let Some(days) = lifetime_days {
-                    f.member("lifetimeDays", *days)?;
+                    f.member("lifetime_days", *days)?;
                 }
                 Ok(())
             })
@@ -187,20 +187,20 @@ impl HlsDestination {
                 if let Some(endpoint) = endpoint {
                     f.member("endpoint", endpoint)?;
                 }
-                f.member("usePathStyle", *use_path_style)?;
+                f.member("use_path_style", *use_path_style)?;
                 f.member(
                     "credentials",
                     nojson::object(|f| {
-                        f.member("accessKeyId", access_key_id)?;
-                        f.member("secretAccessKey", secret_access_key)?;
+                        f.member("access_key_id", access_key_id)?;
+                        f.member("secret_access_key", secret_access_key)?;
                         if let Some(token) = session_token {
-                            f.member("sessionToken", token)?;
+                            f.member("session_token", token)?;
                         }
                         Ok(())
                     }),
                 )?;
                 if let Some(days) = lifetime_days {
-                    f.member("lifetimeDays", *days)?;
+                    f.member("lifetime_days", *days)?;
                 }
                 Ok(())
             })
@@ -276,9 +276,9 @@ impl nojson::DisplayJson for ObswsHlsSettings {
             if let Some(destination) = &self.destination {
                 f.member("destination", destination)?;
             }
-            f.member("segmentDuration", self.segment_duration)?;
-            f.member("maxRetainedSegments", self.max_retained_segments)?;
-            f.member("segmentFormat", self.segment_format.as_str())?;
+            f.member("segment_duration", self.segment_duration)?;
+            f.member("max_retained_segments", self.max_retained_segments)?;
+            f.member("segment_format", self.segment_format.as_str())?;
             f.member(
                 "variants",
                 nojson::array(|f| {
@@ -395,7 +395,7 @@ fn parse_hls_settings_inner(
     };
 
     let segment_duration: Option<f64> = output_settings
-        .to_member("segmentDuration")
+        .to_member("segment_duration")
         .map_err(|e| e.to_string())?
         .optional()
         .map(|v| v.try_into())
@@ -403,7 +403,7 @@ fn parse_hls_settings_inner(
         .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
     let max_retained_segments: Option<usize> = output_settings
-        .to_member("maxRetainedSegments")
+        .to_member("max_retained_segments")
         .map_err(|e| e.to_string())?
         .optional()
         .map(|v| v.try_into())
@@ -411,7 +411,7 @@ fn parse_hls_settings_inner(
         .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
     let segment_format_str: Option<String> =
-        super::output_registry::optional_non_empty_string_member(output_settings, "segmentFormat")
+        super::output_registry::optional_non_empty_string_member(output_settings, "segment_format")
             .map_err(|e| e.to_string())?;
 
     // variants 配列のパース
@@ -423,17 +423,17 @@ fn parse_hls_settings_inner(
         let mut variants = Vec::new();
         for item in variants_value.to_array().map_err(|e| e.to_string())? {
             let video_bitrate: usize = item
-                .to_member("videoBitrate")
+                .to_member("video_bitrate")
                 .map_err(|e| e.to_string())?
                 .required()
-                .map_err(|_| "variants[].videoBitrate is required".to_owned())?
+                .map_err(|_| "variants[].video_bitrate is required".to_owned())?
                 .try_into()
                 .map_err(|e: nojson::JsonParseError| e.to_string())?;
             let audio_bitrate: usize = item
-                .to_member("audioBitrate")
+                .to_member("audio_bitrate")
                 .map_err(|e| e.to_string())?
                 .required()
-                .map_err(|_| "variants[].audioBitrate is required".to_owned())?
+                .map_err(|_| "variants[].audio_bitrate is required".to_owned())?
                 .try_into()
                 .map_err(|e: nojson::JsonParseError| e.to_string())?;
             let width: Option<usize> = item
@@ -452,10 +452,10 @@ fn parse_hls_settings_inner(
                 .map_err(|e: nojson::JsonParseError| e.to_string())?;
 
             if video_bitrate == 0 {
-                return Err("variants[].videoBitrate must be positive".to_owned());
+                return Err("variants[].video_bitrate must be positive".to_owned());
             }
             if audio_bitrate == 0 {
-                return Err("variants[].audioBitrate must be positive".to_owned());
+                return Err("variants[].audio_bitrate must be positive".to_owned());
             }
             let width = match width {
                 Some(0) => return Err("variants[].width must be positive".to_owned()),
@@ -497,12 +497,12 @@ fn parse_hls_settings_inner(
     if let Some(duration) = segment_duration
         && duration <= 0.0
     {
-        return Err("segmentDuration must be positive".to_owned());
+        return Err("segment_duration must be positive".to_owned());
     }
     if let Some(count) = max_retained_segments
         && count == 0
     {
-        return Err("maxRetainedSegments must be at least 1".to_owned());
+        return Err("max_retained_segments must be at least 1".to_owned());
     }
     let segment_format = match segment_format_str {
         Some(ref s) => s.parse::<HlsSegmentFormat>()?,
@@ -673,7 +673,7 @@ impl ObswsCoordinator {
                 ),
             );
         }
-        // S3 + lifetimeDays 指定時はバケットに lifecycle ルールを設定する
+        // S3 + lifetime_days 指定時はバケットに lifecycle ルールを設定する
         if let HlsDestination::S3 {
             bucket,
             prefix,

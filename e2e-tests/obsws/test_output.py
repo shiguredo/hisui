@@ -246,7 +246,7 @@ def test_obsws_start_record_with_multiple_audio_inputs(
                         "inputKind": "mp4_file_source",
                         "inputSettings": {
                             "path": str(input_path),
-                            "loopPlayback": True,
+                            "loop_playback": True,
                         },
                         "sceneItemEnabled": True,
                     },
@@ -633,7 +633,7 @@ def test_obsws_multiple_audio_inputs_start_stream_to_rtmp_listen_mode(
                         "inputKind": "mp4_file_source",
                         "inputSettings": {
                             "path": str(input_path),
-                            "loopPlayback": True,
+                            "loop_playback": True,
                         },
                         "sceneItemEnabled": True,
                     },
@@ -764,8 +764,8 @@ def test_obsws_rtmp_inbound_start_record_and_inspect_output(
                     "inputName": "rtmp-inbound-input",
                     "inputKind": "rtmp_inbound",
                     "inputSettings": {
-                        "inputUrl": rtmp_url,
-                        "streamName": stream_name,
+                        "input_url": rtmp_url,
+                        "stream_name": stream_name,
                     },
                     "sceneItemEnabled": True,
                 },
@@ -869,7 +869,7 @@ def test_obsws_srt_inbound_start_record_and_inspect_output(
                     "sceneName": "Scene",
                     "inputName": "srt-inbound-input",
                     "inputKind": "srt_inbound",
-                    "inputSettings": {"inputUrl": srt_url},
+                    "inputSettings": {"input_url": srt_url},
                     "sceneItemEnabled": True,
                 },
             )
@@ -946,7 +946,7 @@ def test_obsws_srt_inbound_with_stream_id(
     binary_path: Path,
     tmp_path: Path,
 ):
-    """obsws で srt_inbound に streamId を指定して録画できることを確認する"""
+    """obsws で srt_inbound に stream_id を指定して録画できることを確認する"""
     srt_port, srt_sock = reserve_ephemeral_port()
     srt_sock.close()
 
@@ -975,8 +975,8 @@ def test_obsws_srt_inbound_with_stream_id(
                     "inputName": "srt-inbound-with-sid",
                     "inputKind": "srt_inbound",
                     "inputSettings": {
-                        "inputUrl": srt_listen_url,
-                        "streamId": stream_id,
+                        "input_url": srt_listen_url,
+                        "stream_id": stream_id,
                     },
                     "sceneItemEnabled": True,
                 },
@@ -1090,8 +1090,8 @@ def test_obsws_rtmp_inbound_start_stream_to_rtmp(
                     "inputName": "rtmp-inbound-stream-input",
                     "inputKind": "rtmp_inbound",
                     "inputSettings": {
-                        "inputUrl": rtmp_inbound_url,
-                        "streamName": rtmp_inbound_stream_name,
+                        "input_url": rtmp_inbound_url,
+                        "stream_name": rtmp_inbound_stream_name,
                     },
                     "sceneItemEnabled": True,
                 },
@@ -1230,7 +1230,7 @@ def test_obsws_srt_inbound_start_stream_to_rtmp(
                     "sceneName": "Scene",
                     "inputName": "srt-inbound-stream-input",
                     "inputKind": "srt_inbound",
-                    "inputSettings": {"inputUrl": srt_inbound_url},
+                    "inputSettings": {"input_url": srt_inbound_url},
                     "sceneItemEnabled": True,
                 },
             )
@@ -1680,13 +1680,13 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
                             "type": "filesystem",
                             "directory": str(hls_dir),
                         },
-                        "segmentFormat": "fmp4",
+                        "segment_format": "fmp4",
                     },
                 },
             )
             assert set_settings_response["d"]["requestStatus"]["result"] is True
 
-            # 設定を取得して segmentFormat が fmp4 であることを確認
+            # 設定を取得して segment_format が fmp4 であることを確認
             get_settings_response = await _send_obsws_request(
                 ws,
                 request_type="GetOutputSettings",
@@ -1695,7 +1695,7 @@ def test_obsws_hls_fmp4_start_stop_output(binary_path: Path, tmp_path: Path):
             )
             assert get_settings_response["d"]["requestStatus"]["result"] is True
             settings = get_settings_response["d"]["responseData"]["outputSettings"]
-            assert settings["segmentFormat"] == "fmp4"
+            assert settings["segment_format"] == "fmp4"
 
             # HLS 出力を開始
             start_response = await _send_obsws_request(
@@ -1828,8 +1828,8 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
                             "directory": str(hls_dir),
                         },
                         "variants": [
-                            {"videoBitrate": 2000000, "audioBitrate": 128000},
-                            {"videoBitrate": 800000, "audioBitrate": 96000},
+                            {"video_bitrate": 2000000, "audio_bitrate": 128000},
+                            {"video_bitrate": 800000, "audio_bitrate": 96000},
                         ],
                     },
                 },
@@ -1846,8 +1846,8 @@ def test_obsws_hls_abr_start_stop_output(binary_path: Path, tmp_path: Path):
             assert get_settings_response["d"]["requestStatus"]["result"] is True
             settings = get_settings_response["d"]["responseData"]["outputSettings"]
             assert len(settings["variants"]) == 2
-            assert settings["variants"][0]["videoBitrate"] == 2000000
-            assert settings["variants"][1]["videoBitrate"] == 800000
+            assert settings["variants"][0]["video_bitrate"] == 2000000
+            assert settings["variants"][1]["video_bitrate"] == 800000
 
             # HLS 出力を開始
             start_response = await _send_obsws_request(
@@ -1961,7 +1961,7 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
             )
             assert resp["d"]["requestStatus"]["result"] is False
 
-            # videoBitrate が 0 はエラー
+            # video_bitrate が 0 はエラー
             resp = await _send_obsws_request(
                 ws,
                 request_type="SetOutputSettings",
@@ -1969,7 +1969,7 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
                 request_data={
                     "outputName": "hls",
                     "outputSettings": {
-                        "variants": [{"videoBitrate": 0, "audioBitrate": 128000}],
+                        "variants": [{"video_bitrate": 0, "audio_bitrate": 128000}],
                     },
                 },
             )
@@ -1985,8 +1985,8 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
                     "outputSettings": {
                         "variants": [
                             {
-                                "videoBitrate": 2000000,
-                                "audioBitrate": 128000,
+                                "video_bitrate": 2000000,
+                                "audio_bitrate": 128000,
                                 "width": 1280,
                             }
                         ],
@@ -2005,8 +2005,8 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
                     "outputSettings": {
                         "variants": [
                             {
-                                "videoBitrate": 2000000,
-                                "audioBitrate": 128000,
+                                "video_bitrate": 2000000,
+                                "audio_bitrate": 128000,
                                 "width": 1281,
                                 "height": 720,
                             }
@@ -2026,8 +2026,8 @@ def test_obsws_hls_variants_validation(binary_path: Path, tmp_path: Path):
                     "outputSettings": {
                         "variants": [
                             {
-                                "videoBitrate": 2000000,
-                                "audioBitrate": 128000,
+                                "video_bitrate": 2000000,
+                                "audio_bitrate": 128000,
                                 "width": 1280,
                                 "height": 720,
                             }

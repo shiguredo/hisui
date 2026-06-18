@@ -695,14 +695,14 @@ export function ObsDcSourcePanel({
             <div class="flex flex-col gap-3">
               <InputSettingsField
                 label="Input URL"
-                settingsKey="inputUrl"
+                settingsKey="input_url"
                 placeholder="rtmp://..."
                 inputSettings={inputSettings}
                 setInputSettings={setInputSettings}
               />
               <InputSettingsField
                 label="Stream Name"
-                settingsKey="streamName"
+                settingsKey="stream_name"
                 placeholder="ストリーム名"
                 inputSettings={inputSettings}
                 setInputSettings={setInputSettings}
@@ -713,14 +713,14 @@ export function ObsDcSourcePanel({
             <div class="flex flex-col gap-3">
               <InputSettingsField
                 label="Input URL"
-                settingsKey="inputUrl"
+                settingsKey="input_url"
                 placeholder="srt://..."
                 inputSettings={inputSettings}
                 setInputSettings={setInputSettings}
               />
               <InputSettingsField
                 label="Stream ID"
-                settingsKey="streamId"
+                settingsKey="stream_id"
                 placeholder="ストリーム ID"
                 inputSettings={inputSettings}
                 setInputSettings={setInputSettings}
@@ -730,7 +730,7 @@ export function ObsDcSourcePanel({
           {newInputKind === "rtsp_subscriber" && (
             <InputSettingsField
               label="Input URL"
-              settingsKey="inputUrl"
+              settingsKey="input_url"
               placeholder="rtsp://..."
               inputSettings={inputSettings}
               setInputSettings={setInputSettings}
