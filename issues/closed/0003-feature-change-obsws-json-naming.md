@@ -124,15 +124,13 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 
 ### 規約ドキュメント
 
-`docs/obsws/json_naming.md` を新規作成する。章構成は 7 章:
+`docs/obsws/json_naming.md` を新規作成する。章構成は 5 章:
 
 1. 規約 (3 階層 + 例外)
 2. 判定アルゴリズム (1 問)
 3. envelope 例外 allow-list (拡張 Event / Request の引数群、envelope 境界キー一覧)
 4. settings ペイロードの出現箇所 (snake_case を適用する API 経路リスト)
-5. OBS Studio キー定義対照表 (フェーズ A 調査結果)
-6. 引用 URL (OBS Studio 本体ソース、commit hash pinned で残す)
-7. 非対称キー (受信のみ / 送信のみ。例: `passphrase` は state file 永続化では出すが GetInputSettings レスポンスでは隠す。`track_id` は GetInputSettings レスポンスでは出すが state file 永続化では除外する)
+5. 非対称キー (受信のみ / 送信のみ。例: `passphrase` は state file 永続化では出すが GetInputSettings レスポンスでは隠す。`track_id` は GetInputSettings レスポンスでは出すが state file 永続化では除外する)
 
 既存 `docs/obsws/PERSISTENT_DATA.md` / `STATE_FILE.md` 内に古い JSON サンプルがあればリネームに追従させ、相互参照リンクを `json_naming.md` 末尾に置く。
 
@@ -158,16 +156,14 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 - 未リリース機能のため `CHANGES.md` の `## develop` セクションには新規 `[CHANGE]` エントリを追加しない。代わりに、既存 `[ADD]` エントリ内で本対応のリネーム対象キーを引用している箇所を snake_case 表記に追従させる (HLS / DASH エントリの `segmentDuration` / `maxRetainedSegments` / `videoCodec` / `audioCodec` / `lifetimeDays` / `segmentFormat` 等が該当)。規約ドキュメント (`docs/obsws/json_naming.md`) も内部開発者向けで CHANGES.md には載せない。
 - `bwtest` フィールドが `GetStreamServiceSettings` 応答 (`src/obsws/coordinator/output_registry.rs:473`) から削除されていること。`use_auth` のハードコード出力 (`:478`) は OBS rtmp-custom.c 互換のため維持されていること。
 - 規約ドキュメント `docs/obsws/json_naming.md` が新規作成され、章 3 envelope 例外 allow-list と章 4 settings ペイロードの出現箇所がリネーム後のキー名と整合していること。
-- OBS Studio 互換性の確認は `docs/obsws/json_naming.md` 章 5 「OBS Studio キー定義対照表」で行う。OBS Studio 本体 (公式アプリ) は「外部 obs-websocket サーバーに接続するクライアント機能」を提供せず、obs-websocket Protocol は OBS Studio 本体が内蔵する obs-websocket plugin のサーバー側に外部クライアントが接続するモデルである。hisui の obsws もサーバー側であり、OBS Studio 本体と hisui を直接疎通させる経路は存在しない。よって本 issue ではライブ疎通テストではなく、OBS Studio 公式 plugin ソース (linux-v4l2 / mac-audio / pulse-input / win-wasapi / alsa-input / rtmp-custom 等) の `obs_data` キー名と hisui の settings ペイロードキー名の対照を docs に記録することを以て互換確認の代替とする。
-  - 互換成立範囲 (キー名一致): `device_id` (audio_capture_device 4 plugin / linux-v4l2 video_capture_device)、stream service settings の `server` / `key` / `use_auth` (rtmp_custom)
-  - 互換不成立範囲: `pixel_format` / `sample_rate` / `channels` / `fps` / `loop_playback` 等の hisui 拡張キー、output 系全体、win-dshow / mac-avcapture 由来の `video_device_id` / `device` 等。設計上 OBS Studio 本体が同名キーを使っていないため対象外。これらは devtools 経由 / 手書きクライアントで往復確認する。
+- OBS Studio クライアントとの互換確認は本 issue の範囲外。obsws JSON 命名規約の整理が本 issue の責務であり、OBS Studio 本体は「外部 obs-websocket サーバーに接続するクライアント機能」を提供しないため hisui との直接疎通経路も存在しない。特定 plugin との `obs_data` キー対照表や疎通確認は別途実施する。
 
 ## 解決方法
 
 ### 実装ステップ
 
 1. **issue ファイル名のリネーム**: `git mv issues/0003-feature-refactor-obsws-json-naming.md issues/0003-feature-change-obsws-json-naming.md`。実装ブランチ `feature/change-obsws-json-naming` への切り替えと同じコミットで実施。
-2. **規約ドキュメントの先行作成**: `docs/obsws/json_naming.md` を新規作成 (7 章構成)。
+2. **規約ドキュメントの先行作成**: `docs/obsws/json_naming.md` を新規作成 (5 章構成)。
 3. **settings ペイロード内の snake_case リネーム (本対応の中核)**: 出力側 (`f.member`) と受信側 (`to_member` / `parse_optional_*_setting` / `parse_overlay_*_setting`) を同時に書き換える。対象は本 issue 末尾「リネーム対象の確定」を真とし、最終的な網羅性は完了条件の手動 grep で担保する。
 4. **`bwtest` の削除**: `src/obsws/coordinator/output_registry.rs:473` の `f.member("bwtest", false)?;` を削除。`use_auth` のハードコード出力 (`:478`) は維持。
 5. **state file の snake 化**: `SrtInboundSettingsWithPassphrase` (`state_file.rs:1025`) / `WebRtcSourceSettingsWithoutTrackId` (`state_file.rs:1049`) の中身、`state_file.rs:864-895` 付近の HLS / DASH S3 destination receiver、`state_file.rs:339-351, :512-524` 付近の variant receiver の中身を snake 化。envelope (scenes / inputs / currentProgramScene 等) は触らない。`#[cfg(test)]` 内のアサーションも追従。
@@ -176,7 +172,6 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 8. **devtools 側の同期**: `devtools/src/components/obsdc/ObsDcSourcePanel.tsx` ほか `devtools/src/` 内の literal 文字列 (`settingsKey="..."` 等) を snake 化。TypeScript 側の型定義は実コード上存在しない (`inputSettings` は `Record<string, string>` として扱われている) ため型変更は不要。
 9. **テストの更新**: 完了条件で列挙したテストファイル全体を網羅して更新する。
 10. **CHANGES.md の追従**: `## develop` セクションの既存 `[ADD]` エントリ内で snake 化対象のキー名を引用している箇所を snake_case に書き換える。未リリース機能のため新規 `[CHANGE]` エントリは追加しない。
-11. **OBS Studio キー対照の docs 記録**: `docs/obsws/json_naming.md` 章 5 「OBS Studio キー定義対照表」に linux-v4l2 / mac-audio / pulse-input / win-wasapi / alsa-input / rtmp-custom 等の公式 plugin `obs_data` キー名と hisui の settings ペイロードキー名の対照を記録する。OBS Studio 本体は obs-websocket クライアント機能を持たず、hisui の obsws サーバーへ直接疎通させる経路が存在しないため、ライブ疎通テストは行わない。
 
 ### コミット分割
 
@@ -194,7 +189,7 @@ shiguredo-git 規約 (`{SEQ} {TITLE}` 形式) に従う。リネーム差分は�
 ### 留意事項
 
 - hisui は正式リリース前のため、受信側 (`to_member` / `parse_optional_*_setting` 等) で旧名と新名の両方を試すフォールバックコードは入れない。state file の移行コードも入れない。
-- 章 7 「非対称キー」の対象候補 (`docs/obsws/json_naming.md` 執筆時の参考):
+- 章 5 「非対称キー」の対象候補 (`docs/obsws/json_naming.md` 執筆時の参考):
   - `passphrase` (`srt_inbound`): state file 永続化では出力、GetInputSettings レスポンスでは隠す
   - `track_id` (`webrtc_source`): GetInputSettings レスポンスでは出力、state file 永続化では除外
 

@@ -75,58 +75,18 @@ settings ペイロードは以下の API 経路の `inputSettings` / `outputSett
 
 - `GetInputSettings` / `SetInputSettings` の `inputSettings`
 - `GetOutputSettings` / `SetOutputSettings` の `outputSettings` 内 (HLS / DASH / RTMP outbound / Sora publisher / Stream service の中身)
-- `GetStreamServiceSettings` の `streamServiceSettings` (OBS rtmp-custom.c 互換のため `use_auth: false` を常に含む)
+- `GetStreamServiceSettings` の `streamServiceSettings` (OBS Studio クライアント互換のため `use_auth: false` を常に含む)
 - `HisuiCreateOutput` / `HisuiStartSoraSubscriber` 等の `subscriberSettings` / `soraSdkSettings`
 - `InputSettingsChanged` イベントの `inputSettings` ペイロード (obsdc DataChannel 経由を含む)
 - state file の `inputs[].inputSettings`、`stream.streamServiceSettings`、`rtmpOutbound` / `sora` / `hls` / `mpegDash` セクションの中身
 
-hisui 内部の processor (`src/rtmp/` / `src/srt/` / `src/rtsp/` 配下の Endpoint / Subscriber 等) が持つ独自 JSON フォーマット (obsws を経由しないキー) は obsws JSON プロトコルの境界外であり、本規約の対象外とする。
+hisui 内部の processor (RTMP / SRT / RTSP の Endpoint / Subscriber 等) が持つ独自 JSON フォーマット (obsws を経由しないキー) は obsws JSON プロトコルの境界外であり、本規約の対象外とする。
 
-## 5. OBS Studio キー定義対照表
-
-OBS Studio リポジトリ ([https://github.com/obsproject/obs-studio](https://github.com/obsproject/obs-studio)) の plugin 実コードを直接確認した結果を以下に記す。output 系 (HLS / DASH / RTMP outbound / Sora publisher) は hisui 独自拡張で OBS Studio に対応 plugin が無いため、本表の対象外。
-
-### 5.1 video_capture_device 系
-
-OBS Studio 側で plugin (OS) ごとにキー名が大きく分かれており、hisui の 1 構造体で完全に対応するのは元から不可能。共通して言えるのは「全 plugin が snake_case 文化」という点のみ。
-
-| hisui 側キー | mac-avcapture | linux-v4l2 | win-dshow | OBS 互換 |
-| --- | --- | --- | --- | --- |
-| `device_id` | `device` / `device_name` | `device_id` | `video_device_id` / `audio_device_id` | linux-v4l2 のみ成立 |
-| `pixel_format` | `input_format` + `video_range` + `color_space` | `pixelformat` | `video_format` | 名称不一致で不成立 |
-| `fps` | `frame_rate` | `framerate` | `frame_interval` | 名称不一致で不成立 |
-
-### 5.2 audio_capture_device 系
-
-| hisui 側キー | OBS 側の有無 | OBS 互換 |
-| --- | --- | --- |
-| `device_id` | mac-audio.c / pulse-input.c / win-wasapi.cpp / alsa-input.c の 4 plugin 全てで `device_id` (snake_case) | 4 plugin で成立 |
-| `sample_rate` | OBS 側にキー存在せず (4 plugin で `sample_rate` / `samplerate` / `rate` 等の `obs_data_get_int` 呼び出し 0 件)。OBS Studio はサンプリングレートをグローバル設定で決める仕様 | hisui 独自、不成立 |
-| `channels` | 同上、OBS 側に存在しない | hisui 独自、不成立 |
-
-### 5.3 stream service settings
-
-| hisui 側キー | OBS rtmp-services 側 | OBS 互換 |
-| --- | --- | --- |
-| `server` | rtmp-common.c / rtmp-custom.c で snake_case | 成立 |
-| `key` | 同上 | 成立 |
-| `use_auth` | rtmp-custom.c のみ snake_case | カスタム RTMP のみ成立 |
-
-## 6. 引用 URL
-
-OBS Studio 本体の引用箇所。master が将来移動する可能性があるため、本ドキュメント執筆時に確認した master 最新 commit を基準とする。実装時に最新の commit hash で固定する。
-
-調査基準: `https://github.com/obsproject/obs-studio` master ブランチ (2026-06-15 時点)。
-
-- `plugins/linux-v4l2/v4l2-input.c#L670` (`device_id`), `#L577` (`pixelformat`), `#L581` (`framerate`)
-- `plugins/mac-capture/mac-audio.c#L724` (`device_id`)
-- `plugins/rtmp-services/rtmp-custom.c#L27` (`use_auth`)
-
-## 7. 非対称キー
+## 5. 非対称キー
 
 settings ペイロード内のキーで、出現箇所が API 経路によって異なるもの。命名規則自体は snake_case で揃うが、出現箇所のルールが規約だけからは読めないため明文化する。
 
-### 7.1 `passphrase`
+### 5.1 `passphrase`
 
 対象 input kind: `srt_inbound`
 
@@ -134,7 +94,7 @@ settings ペイロード内のキーで、出現箇所が API 経路によって
 - 送信: `GetInputSettings` レスポンスには含めない (セキュリティ理由)
 - 永続化: state file には平文で保存する (state file 自体を信頼ローカルファイルとして扱う前提)
 
-### 7.2 `track_id`
+### 5.2 `track_id`
 
 対象 input kind: `webrtc_source`
 
@@ -143,7 +103,7 @@ settings ペイロード内のキーで、出現箇所が API 経路によって
 - 送信: `GetInputSettings` レスポンスには現在値を含める
 - 永続化: state file には保存しない (runtime 管理)
 
-### 7.3 `video_track_id` / `audio_track_id`
+### 5.3 `video_track_id` / `audio_track_id`
 
 対象 input kind: `sora_source`
 
