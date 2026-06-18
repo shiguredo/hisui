@@ -788,4 +788,37 @@ mod tests {
             "実体は同値なので writer 側で dedup されること"
         );
     }
+
+    #[test]
+    fn webm_video_reader_releases_new_arc_per_construction() {
+        // 映像側でも同じ「ファイルごとに新規 Arc を確保 + 実体は同値」契約を検証する。
+        // 音声側と対称な保証で、sample_entry が intern キャッシュで共有される退行を検出する。
+        let mut reader_a = WebmVideoReader::new("testdata/archive-black-silent.webm")
+            .expect("testdata を 1 回目で開ける");
+        let mut reader_b = WebmVideoReader::new("testdata/archive-black-silent.webm")
+            .expect("testdata を 2 回目で開ける");
+        let frame_a = reader_a
+            .next()
+            .expect("1 回目: フレームが存在")
+            .expect("1 回目: フレーム取得が成功");
+        let frame_b = reader_b
+            .next()
+            .expect("2 回目: フレームが存在")
+            .expect("2 回目: フレーム取得が成功");
+        let entry_a = frame_a
+            .sample_entry
+            .expect("1 回目: 圧縮フレームには sample_entry が載る");
+        let entry_b = frame_b
+            .sample_entry
+            .expect("2 回目: 圧縮フレームには sample_entry が載る");
+        assert!(
+            !entry_a.ptr_eq(&entry_b),
+            "ファイルごとに新規 Arc を確保すること"
+        );
+        assert_eq!(
+            entry_a.get(),
+            entry_b.get(),
+            "実体は同値なので writer 側で dedup されること"
+        );
+    }
 }
