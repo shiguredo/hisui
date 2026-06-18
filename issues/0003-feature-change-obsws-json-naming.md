@@ -44,7 +44,7 @@ OBS WebSocket Protocol v5 のレスポンスは以下の形を取る。
 
 この階層構造は OBS Studio 本体・OBS WebSocket Protocol が公式に採用しているもので、hisui もこれを踏襲する。Protocol 仕様で SCREAMING_SNAKE が指定されているフィールド (`MAIN` / `ACTIVATE` / `MIX_AUDIO` / `SCENE_REF` / `EPHEMERAL`、`OBSWS_WEBSOCKET_MEDIA_INPUT_ACTION_PLAY` 等) もそのまま維持する。
 
-settings ペイロード内のキーと envelope 内のキーで **同名のもの** (`videoTrackId` / `audioTrackId` / `trackId` / `signalingUrls` / `channelId` / `clientId` / `bundleId` 等) が存在する。判定基準は「コード上 settings 構造体 / wrapper / variant / destination の `DisplayJson` 内に書かれているか否か」で、対象構造体一覧は `docs/obsws/json_naming.md` の章 4 settings ペイロード allow-list を真実とする。レビュー時に人間が同名キーの所在を allow-list と照合して判別する。
+settings ペイロード内のキーと envelope 内のキーで **同名のもの** (`videoTrackId` / `audioTrackId` / `trackId` / `signalingUrls` / `channelId` / `clientId` / `bundleId` 等) が存在する。判定基準は「envelope 境界キー (`inputSettings` / `outputSettings` / `streamServiceSettings` / `subscriberSettings` / `soraSdkSettings`) の中身として現れるか否か」で、対象 API 経路は `docs/obsws/json_naming.md` の章 4 settings ペイロードの出現箇所を真実とする。レビュー時に人間が同名キーの所在を出現箇所リストと照合して判別する。
 
 ### envelope レイヤ (camelCase 維持、変更しない)
 
@@ -118,8 +118,8 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 
 新規 input kind / output kind / Event / Request を追加する際は以下の 1 問で判断する。
 
-> このフィールドは settings ペイロード構造体・wrapper・variant・destination の `DisplayJson` 内に書くか?
-> - Yes → snake_case (`docs/obsws/json_naming.md` の章 4 settings ペイロード allow-list に該当構造体を追記する)
+> このフィールドは envelope 境界キー (`inputSettings` / `outputSettings` / `streamServiceSettings` / `subscriberSettings` / `soraSdkSettings`) の中身か?
+> - Yes → snake_case (新規 API 経路を追加する場合は `docs/obsws/json_naming.md` の章 4 settings ペイロードの出現箇所に追記する)
 > - No → camelCase (Protocol 仕様で SCREAMING_SNAKE が指定されていれば SCREAMING_SNAKE。`docs/obsws/json_naming.md` の章 3 envelope 例外 allow-list に必要に応じて追記する)
 
 ### 規約ドキュメント
@@ -129,7 +129,7 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 1. 規約 (3 階層 + 例外)
 2. 判定アルゴリズム (1 問)
 3. envelope 例外 allow-list (拡張 Event / Request の引数群、envelope 境界キー一覧)
-4. settings ペイロード allow-list (構造体名と所属ファイル一覧)
+4. settings ペイロードの出現箇所 (snake_case を適用する API 経路リスト)
 5. OBS Studio キー定義対照表 (フェーズ A 調査結果)
 6. 引用 URL (OBS Studio 本体ソース、commit hash pinned で残す)
 7. 非対称キー (受信のみ / 送信のみ。例: `passphrase` は state file 永続化では出すが GetInputSettings レスポンスでは隠す。`trackId` は GetInputSettings レスポンスでは出すが state file 永続化では `WebRtcSourceSettingsWithoutTrackId` で除外する)
@@ -141,7 +141,7 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
 - 規約に従い、`src/obsws/` / `src/webrtc/p2p_session.rs` / `src/rtmp/` / `src/srt/` / `src/rtsp/` 配下の settings ペイロード内のフィールドが snake_case に統一されていること。出力側 (`f.member`) と受信側 (`to_member` / `parse_optional_*_setting` / `parse_overlay_*_setting`) が一貫した命名で揃っていること。
 - envelope レイヤ (OBS WebSocket Protocol 標準キー、hisui 独自 Event / Request の eventData / requestData / responseData、envelope 境界キー) が camelCase のまま維持されていること。
 - 外部プロトコル由来のフィールド (Sora シグナリング受信) が変更されていないこと。
-- 機械チェック: リネーム前後で以下の手動 grep を実行し、リネーム後にヒット 0 件 (envelope 用途で残る `signalingUrls` / `channelId` / `clientId` / `bundleId` / `trackId` / `videoTrackId` / `audioTrackId` 等を除く) であることを確認すること。envelope 用途のヒットは `docs/obsws/json_naming.md` の章 3 envelope 例外 allow-list と章 4 settings ペイロード allow-list を照合して人間が判別する。
+- 機械チェック: リネーム前後で以下の手動 grep を実行し、リネーム後にヒット 0 件 (envelope 用途で残る `signalingUrls` / `channelId` / `clientId` / `bundleId` / `trackId` / `videoTrackId` / `audioTrackId` 等を除く) であることを確認すること。envelope 用途のヒットは `docs/obsws/json_naming.md` の章 3 envelope 例外 allow-list と章 4 settings ペイロードの出現箇所を照合して人間が判別する。
   ```
   rg 'sampleRate|loopPlayback|inputUrl|streamName|streamId|backgroundKeyColor|backgroundKeyTolerance|outputUrl|videoBitrate|audioBitrate|usePathStyle|lifetimeDays|accessKeyId|secretAccessKey|sessionToken|segmentDuration|maxRetainedSegments|segmentFormat|videoCodec|audioCodec' src/ e2e-tests/ devtools/src/ testdata/
   ```
@@ -157,7 +157,7 @@ OBS Studio 本体は source / output plugin の settings を `obs_data` で扱�
   - hisui は正式リリース前のため、フォールバック読み込みコードや移行ガイドは追加しない。既存の state file は破壊的変更扱いとする。
 - 未リリース機能のため `CHANGES.md` の `## develop` セクションには新規 `[CHANGE]` エントリを追加しない。代わりに、既存 `[ADD]` エントリ内で本対応のリネーム対象キーを引用している箇所を snake_case 表記に追従させる (HLS / DASH エントリの `segmentDuration` / `maxRetainedSegments` / `videoCodec` / `audioCodec` / `lifetimeDays` / `segmentFormat` 等が該当)。規約ドキュメント (`docs/obsws/json_naming.md`) も内部開発者向けで CHANGES.md には載せない。
 - `bwtest` フィールドが `GetStreamServiceSettings` 応答 (`src/obsws/coordinator/output_registry.rs:473`) から削除されていること。`use_auth` のハードコード出力 (`:478`) は OBS rtmp-custom.c 互換のため維持されていること。
-- 規約ドキュメント `docs/obsws/json_naming.md` が新規作成され、章 3 envelope 例外 allow-list と章 4 settings ペイロード allow-list がリネーム後の構造体・キーと整合していること。
+- 規約ドキュメント `docs/obsws/json_naming.md` が新規作成され、章 3 envelope 例外 allow-list と章 4 settings ペイロードの出現箇所がリネーム後のキー名と整合していること。
 - OBS Studio 互換性の確認は `docs/obsws/json_naming.md` 章 5 「OBS Studio キー定義対照表」で行う。OBS Studio 本体 (公式アプリ) は「外部 obs-websocket サーバーに接続するクライアント機能」を提供せず、obs-websocket Protocol は OBS Studio 本体が内蔵する obs-websocket plugin のサーバー側に外部クライアントが接続するモデルである。hisui の obsws もサーバー側であり、OBS Studio 本体と hisui を直接疎通させる経路は存在しない。よって本 issue ではライブ疎通テストではなく、OBS Studio 公式 plugin ソース (linux-v4l2 / mac-audio / pulse-input / win-wasapi / alsa-input / rtmp-custom 等) の `obs_data` キー名と hisui の settings ペイロードキー名の対照を docs に記録することを以て互換確認の代替とする。
   - 互換成立範囲 (キー名一致): `device_id` (audio_capture_device 4 plugin / linux-v4l2 video_capture_device)、stream service settings の `server` / `key` / `use_auth` (rtmp_custom)
   - 互換不成立範囲: `pixel_format` / `sample_rate` / `channels` / `fps` / `loop_playback` 等の hisui 拡張キー、output 系全体、win-dshow / mac-avcapture 由来の `video_device_id` / `device` 等。設計上 OBS Studio 本体が同名キーを使っていないため対象外。これらは devtools 経由 / 手書きクライアントで往復確認する。
