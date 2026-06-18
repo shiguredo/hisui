@@ -276,59 +276,69 @@ fn check_info_element<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<(
     Ok(())
 }
 
-// 音声 TRACK_ENTRY (A_OPUS) を走査して OpusHead pre_skip を取得する。
-// TRACKS 内の他の TRACK_ENTRY (映像など) は skip_all で読み捨てる。
-fn read_audio_track_pre_skip<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<u16> {
-    reader.skip_until(ID_TRACKS)?;
-    let mut tracks_reader = reader.read_master(ID_TRACKS)?;
-    let mut found: Option<u16> = None;
-    while !tracks_reader.is_eos() {
-        let mut entry = tracks_reader.read_master(ID_TRACK_ENTRY)?;
-        let track_number = entry.read_u64(ID_TRACK_NUMBER)?;
-        if track_number != TRACK_NUMBER_AUDIO || found.is_some() {
-            // 対象外トラック、または既に音声 TRACK_ENTRY を処理済み。
-            entry.skip_all()?;
-            continue;
-        }
-        // TRACK_ENTRY 内の残り子要素を peek_id ループで走査する。
-        let mut codec_id_ok = false;
-        let mut pre_skip: Option<u16> = None;
-        while !entry.is_eos() {
-            let id = entry.peek_id()?;
-            match id {
-                ID_CODEC_ID => {
-                    let bytes = entry.read_bytes(ID_CODEC_ID)?;
-                    if bytes.as_slice() != b"A_OPUS" {
-                        return Err(crate::Error::new(format!(
-                            "unsupported audio codec ID: {bytes:?} (expected A_OPUS)"
-                        )));
+#[derive(Debug)]
+struct AudioTrackHeader {
+    pre_skip: u16,
+}
+
+impl AudioTrackHeader {
+    // 音声 TRACK_ENTRY (A_OPUS) を走査して OpusHead pre_skip を取得する。
+    // TRACKS 内の他の TRACK_ENTRY (映像など) は skip_all で読み捨てる。
+    fn read<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<Self> {
+        reader.skip_until(ID_TRACKS)?;
+        let mut tracks_reader = reader.read_master(ID_TRACKS)?;
+        let mut found: Option<u16> = None;
+        while !tracks_reader.is_eos() {
+            let mut entry = tracks_reader.read_master(ID_TRACK_ENTRY)?;
+            let track_number = entry.read_u64(ID_TRACK_NUMBER)?;
+            if track_number != TRACK_NUMBER_AUDIO || found.is_some() {
+                // 対象外トラック、または既に音声 TRACK_ENTRY を処理済み。
+                entry.skip_all()?;
+                continue;
+            }
+            // TRACK_ENTRY 内の残り子要素を peek_id ループで走査する。
+            let mut codec_id_ok = false;
+            let mut pre_skip: Option<u16> = None;
+            while !entry.is_eos() {
+                let id = entry.peek_id()?;
+                match id {
+                    ID_CODEC_ID => {
+                        let bytes = entry.read_bytes(ID_CODEC_ID)?;
+                        if bytes.as_slice() != b"A_OPUS" {
+                            return Err(crate::Error::new(format!(
+                                "unsupported audio codec ID: {bytes:?} (expected A_OPUS)"
+                            )));
+                        }
+                        codec_id_ok = true;
                     }
-                    codec_id_ok = true;
-                }
-                ID_CODEC_PRIVATE => {
-                    let bytes = entry.read_bytes(ID_CODEC_PRIVATE)?;
-                    pre_skip = Some(parse_opus_head_pre_skip(&bytes)?);
-                }
-                _ => {
-                    // SamplingFrequency / Channels / OutputGain などは本 reader では使わない。
-                    entry.read_id()?;
-                    entry.skip_element_data()?;
+                    ID_CODEC_PRIVATE => {
+                        let bytes = entry.read_bytes(ID_CODEC_PRIVATE)?;
+                        pre_skip = Some(parse_opus_head_pre_skip(&bytes)?);
+                    }
+                    _ => {
+                        // SamplingFrequency / Channels / OutputGain などは本 reader では使わない。
+                        entry.read_id()?;
+                        entry.skip_element_data()?;
+                    }
                 }
             }
+            if !codec_id_ok {
+                return Err(crate::Error::new(
+                    "audio TRACK_ENTRY missing CodecID element",
+                ));
+            }
+            let Some(pre_skip) = pre_skip else {
+                return Err(crate::Error::new(
+                    "audio TRACK_ENTRY missing OpusHead (CodecPrivate)",
+                ));
+            };
+            found = Some(pre_skip);
         }
-        if !codec_id_ok {
-            return Err(crate::Error::new(
-                "audio TRACK_ENTRY missing CodecID element",
-            ));
-        }
-        let Some(pre_skip) = pre_skip else {
-            return Err(crate::Error::new(
-                "audio TRACK_ENTRY missing OpusHead (CodecPrivate)",
-            ));
-        };
-        found = Some(pre_skip);
+        let pre_skip = found.ok_or_else(|| {
+            crate::Error::new("no audio TRACK_ENTRY (A_OPUS) found in WebM TRACKS")
+        })?;
+        Ok(Self { pre_skip })
     }
-    found.ok_or_else(|| crate::Error::new("no audio TRACK_ENTRY (A_OPUS) found in WebM TRACKS"))
 }
 
 #[derive(Debug)]
@@ -460,8 +470,8 @@ impl WebmAudioReader {
         check_info_element(&mut reader)?;
         // 音声 TRACK_ENTRY (A_OPUS) から OpusHead pre_skip を取得して sample_entry を構築する。
         // ファイル切り替え時はリーダー再生成で sample_entry も自動的に再構築される (inherit_stats_from の対象外)。
-        let pre_skip = read_audio_track_pre_skip(&mut reader)?;
-        let sample_entry = SharedSampleEntry::new(opus_sample_entry(pre_skip));
+        let header = AudioTrackHeader::read(&mut reader)?;
+        let sample_entry = SharedSampleEntry::new(opus_sample_entry(header.pre_skip));
         reader.skip_until(ID_CLUSTER)?;
 
         Ok(Self {
