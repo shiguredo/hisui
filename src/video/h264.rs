@@ -1371,4 +1371,143 @@ mod tests {
         assert_eq!(params.width, 1920);
         assert_eq!(params.height, 1080);
     }
+
+    // ----------------------------------------------------------------
+    // h264_sample_entry_from_sps_pps_lists の単体テスト群
+    //
+    // SpsParams のフィールドが AvccBox の対応フィールドに正しくマップされること、
+    // 空 sps_list / pps_list で適切な Err を返すこと、
+    // 戻り値タプルの VideoFrameSize が cropping 適用後の値と一致することを直接検証する。
+    // ----------------------------------------------------------------
+
+    // PPS バイト列 (NAL ヘッダ 0x68 + 任意 payload)。テスト全体で共有する。
+    const PPS_NAL: &[u8] = &[0x68, 0xce, 0x06, 0xe2];
+
+    #[test]
+    fn h264_sample_entry_from_sps_pps_lists_returns_err_on_empty_sps_list() {
+        // sps_list が空のときは `missing H.264 SPS` Err を返す
+        let result = h264_sample_entry_from_sps_pps_lists(vec![], vec![PPS_NAL.to_vec()]);
+        let err = result.expect_err("sps_list 空は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("missing H.264 SPS"),
+            "エラーメッセージに `missing H.264 SPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h264_sample_entry_from_sps_pps_lists_returns_err_on_empty_pps_list() {
+        // pps_list が空のときは `missing H.264 PPS` Err を返す
+        let sps = SpsBuilder::raw(1920, 1088).build();
+        let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![]);
+        let err = result.expect_err("pps_list 空は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("missing H.264 PPS"),
+            "エラーメッセージに `missing H.264 PPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h264_sample_entry_from_sps_pps_lists_maps_baseline_sps_to_avcc() {
+        // Baseline SPS の profile_idc / constraint_set_flags / level_idc が AvccBox に
+        // 1:1 で反映され、chroma_format / bit_depth_* が None になることを直接検証する。
+        // constraint_set_flags = 0xc0 を指定して `profile_compatibility` が RBSP byte[1] と
+        // 一致することも併せて担保する。
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_constraint_set_flags(0xc0)
+            .build();
+        let (entry, _frame_size) =
+            h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()])
+                .expect("Baseline SPS のパース成功");
+        let SampleEntry::Avc1(avc1) = entry else {
+            panic!("Avc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        assert_eq!(avc1.avcc_box.avc_profile_indication, 66);
+        assert_eq!(avc1.avcc_box.profile_compatibility, 0xc0);
+        assert_eq!(avc1.avcc_box.avc_level_indication, 31);
+        assert!(avc1.avcc_box.chroma_format.is_none());
+        assert!(avc1.avcc_box.bit_depth_luma_minus8.is_none());
+        assert!(avc1.avcc_box.bit_depth_chroma_minus8.is_none());
+    }
+
+    #[test]
+    fn h264_sample_entry_from_sps_pps_lists_maps_high_sps_to_avcc() {
+        // High SPS の high_profile_params が AvccBox の chroma_format / bit_depth_* に
+        // 1:1 で反映されることを直接検証する。luma / chroma を異なる値に設定して
+        // フィールド取り違えのバグを検出可能にする。
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_profile_idc(100)
+            .with_chroma_format_idc(1)
+            .with_bit_depth_luma_minus8(2)
+            .with_bit_depth_chroma_minus8(4)
+            .build();
+        let (entry, _frame_size) =
+            h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()])
+                .expect("High SPS のパース成功");
+        let SampleEntry::Avc1(avc1) = entry else {
+            panic!("Avc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        assert_eq!(avc1.avcc_box.avc_profile_indication, 100);
+        assert_eq!(
+            avc1.avcc_box.chroma_format.expect("High では Some").get(),
+            1
+        );
+        assert_eq!(
+            avc1.avcc_box
+                .bit_depth_luma_minus8
+                .expect("High では Some")
+                .get(),
+            2
+        );
+        assert_eq!(
+            avc1.avcc_box
+                .bit_depth_chroma_minus8
+                .expect("High では Some")
+                .get(),
+            4
+        );
+    }
+
+    #[test]
+    fn h264_sample_entry_from_sps_pps_lists_preserves_all_sps_pps_in_avcc() {
+        // sps_list / pps_list に複数の NAL を渡したとき、`AvccBox.sps_list / pps_list` に
+        // 全 NAL がそのままの順序で move されることを直接検証する。
+        // 先頭 SPS のパラメータのみが avcC フィールドに反映される (Hisui の入力前提) ことの
+        // 確認も兼ねる。
+        let sps_a = SpsBuilder::raw(320, 240).build();
+        let sps_b = SpsBuilder::raw(1920, 1088).build();
+        let pps_a = PPS_NAL.to_vec();
+        let pps_b = vec![0x68, 0x01, 0x02, 0x03];
+        let (entry, _frame_size) = h264_sample_entry_from_sps_pps_lists(
+            vec![sps_a.clone(), sps_b.clone()],
+            vec![pps_a.clone(), pps_b.clone()],
+        )
+        .expect("複数 SPS / PPS でもパース成功");
+        let SampleEntry::Avc1(avc1) = entry else {
+            panic!("Avc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        assert_eq!(avc1.avcc_box.sps_list, vec![sps_a, sps_b]);
+        assert_eq!(avc1.avcc_box.pps_list, vec![pps_a, pps_b]);
+    }
+
+    #[test]
+    fn h264_sample_entry_from_sps_pps_lists_returns_frame_size_from_cropping() {
+        // 戻り値タプルの第 2 要素 `VideoFrameSize` が SPS の cropping 適用後解像度と一致し、
+        // `Avc1Box.visual.width / height` にも同じ値が反映されることを直接検証する。
+        // libx264 が 1920x1080 を表現する典型パターン (raw 1920x1088 + crop_bottom=4)。
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_cropping(0, 0, 0, 4)
+            .build();
+        let (entry, frame_size) =
+            h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()])
+                .expect("crop SPS のパース成功");
+        assert_eq!(frame_size.width, 1920);
+        assert_eq!(frame_size.height, 1080);
+        let SampleEntry::Avc1(avc1) = entry else {
+            panic!("Avc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        assert_eq!(avc1.visual.width, 1920);
+        assert_eq!(avc1.visual.height, 1080);
+    }
 }
