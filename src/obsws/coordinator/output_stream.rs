@@ -240,22 +240,46 @@ impl Default for ObswsStreamServiceSettings {
 impl nojson::DisplayJson for ObswsStreamServiceSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
-            f.member("streamServiceType", &self.stream_service_type)?;
-            f.member(
-                "streamServiceSettings",
-                nojson::object(|f| {
-                    if let Some(server) = &self.server {
-                        f.member("server", server)?;
-                    }
-                    if let Some(key) = &self.key {
-                        f.member("key", key)?;
-                    }
-                    Ok(())
-                }),
+            fmt_stream_service_envelope(
+                f,
+                &self.stream_service_type,
+                self.server.as_deref(),
+                self.key.as_deref(),
+                false,
             )
         })
         .fmt(f)
     }
+}
+
+/// `streamServiceType` + `streamServiceSettings { server, key }` の envelope を JSON に書き出す。
+///
+/// 引数 `f` は `nojson::object(|f| { ... })` クロージャ内の `JsonObjectFormatter` を受け取る。
+/// `obs_compat: true` の場合、`docs/obsws/json_naming.md` 章 4 の OBS rtmp-custom.c 互換要件に従い
+/// `key` を常時出力 (None 時 `""`) し `use_auth: false` をハードコード出力する。
+pub(crate) fn fmt_stream_service_envelope(
+    f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
+    stream_service_type: &str,
+    server: Option<&str>,
+    key: Option<&str>,
+    obs_compat: bool,
+) -> std::fmt::Result {
+    f.member("streamServiceType", stream_service_type)?;
+    f.member(
+        "streamServiceSettings",
+        nojson::object(|f| {
+            if let Some(server) = server {
+                f.member("server", server)?;
+            }
+            if obs_compat {
+                f.member("key", key.unwrap_or(""))?;
+                f.member("use_auth", false)?;
+            } else if let Some(key) = key {
+                f.member("key", key)?;
+            }
+            Ok(())
+        }),
+    )
 }
 
 impl ObswsStreamServiceSettings {
