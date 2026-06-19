@@ -57,6 +57,8 @@ line 293 のエラーは `SrtInboundEndpoint::endpoint_config()` (line 290-307) 
 
 本 issue の動機は「dead path 解消」ではなく **camelCase → snake_case の内部命名衛生** (closed 0041 のフィールドコメント整合と同じ哲学)。利用者影響ゼロの根拠は dead path ではなく `tracing::error!` ログのみで露出するエラー伝播経路の方に依存する (dead path が将来解消されても伝播経路は変わらない)。
 
+将来 dead path を解消する PR (`ObswsSrtInboundSettings` に `key_length` / `tsbpd_delay_ms` を追加して obsws coordinator から渡せるよう拡張する変更) では、両 validation 経路が初めて活性化するため、`endpoint_config()` 単体テスト (closed 0041 line 150 で「後追い起票候補」として記録された未起票項目) を併せて追加して回帰検知力を担保すること。
+
 ### スコープ外
 
 - `endpoint_config()` 内の validation 責務分担 (どこで弾くか、何を弾くか、構造体側 / coordinator 側 / 型レベルへの集約) は open issue 0046 のスコープ。本 issue はエラー文言の literal だけを書き換え、validation のロジック (条件式・引数・発火箇所) は変更しない。
