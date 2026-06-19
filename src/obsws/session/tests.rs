@@ -3945,3 +3945,100 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
         "Missing outputSettings.soraSdkSettings.channel_id field"
     );
 }
+
+// -----------------------------------------------------------------------
+// テキストオーバーレイ機能の無効時挙動 (機能有効時のフルパス検証は
+// TextOverlayProcessor の spawn が必要で別途扱う)
+// -----------------------------------------------------------------------
+
+/// `default_coordinator_handle()` は `ObswsSessionState::new_for_test()` を使うため
+/// テキストオーバーレイ機能が無効 (`text_overlay_config = None`) の状態である。
+/// この状態で `HisuiCreateTextOverlay` を呼ぶと `RESOURCE_ACTION_NOT_SUPPORTED` が返る。
+#[tokio::test]
+async fn hisui_create_text_overlay_returns_disabled_when_feature_off() {
+    let coordinator = default_coordinator_handle();
+    let request = crate::obsws::message::RequestMessage {
+        request_id: Some("req-1".to_owned()),
+        request_type: Some("HisuiCreateTextOverlay".to_owned()),
+        request_data: None,
+    };
+    let stats = crate::obsws::message::ObswsSessionStats::default();
+    let result = coordinator
+        .process_request(request, stats)
+        .await
+        .expect("coordinator のリクエスト処理は成功する");
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success, "機能無効時はエラー応答となる");
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
+        "REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED (606) が返る"
+    );
+}
+
+/// `HisuiUpdateTextOverlay` も機能無効時は `RESOURCE_ACTION_NOT_SUPPORTED` を返す。
+#[tokio::test]
+async fn hisui_update_text_overlay_returns_disabled_when_feature_off() {
+    let coordinator = default_coordinator_handle();
+    let request = crate::obsws::message::RequestMessage {
+        request_id: Some("req-1".to_owned()),
+        request_type: Some("HisuiUpdateTextOverlay".to_owned()),
+        request_data: None,
+    };
+    let stats = crate::obsws::message::ObswsSessionStats::default();
+    let result = coordinator
+        .process_request(request, stats)
+        .await
+        .expect("coordinator のリクエスト処理は成功する");
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success);
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED
+    );
+}
+
+/// `HisuiRemoveTextOverlay` も機能無効時は `RESOURCE_ACTION_NOT_SUPPORTED` を返す。
+#[tokio::test]
+async fn hisui_remove_text_overlay_returns_disabled_when_feature_off() {
+    let coordinator = default_coordinator_handle();
+    let request = crate::obsws::message::RequestMessage {
+        request_id: Some("req-1".to_owned()),
+        request_type: Some("HisuiRemoveTextOverlay".to_owned()),
+        request_data: None,
+    };
+    let stats = crate::obsws::message::ObswsSessionStats::default();
+    let result = coordinator
+        .process_request(request, stats)
+        .await
+        .expect("coordinator のリクエスト処理は成功する");
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success);
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED
+    );
+}
+
+/// `HisuiListTextOverlays` も機能無効時は `RESOURCE_ACTION_NOT_SUPPORTED` を返す
+/// (空配列ではなくエラーとする方針)。
+#[tokio::test]
+async fn hisui_list_text_overlays_returns_disabled_when_feature_off() {
+    let coordinator = default_coordinator_handle();
+    let request = crate::obsws::message::RequestMessage {
+        request_id: Some("req-1".to_owned()),
+        request_type: Some("HisuiListTextOverlays".to_owned()),
+        request_data: None,
+    };
+    let stats = crate::obsws::message::ObswsSessionStats::default();
+    let result = coordinator
+        .process_request(request, stats)
+        .await
+        .expect("coordinator のリクエスト処理は成功する");
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success);
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED
+    );
+}

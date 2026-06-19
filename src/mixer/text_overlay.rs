@@ -939,4 +939,272 @@ mod tests {
         assert_eq!(updated.y, 20, "y は維持される");
         assert_eq!(updated.font_size, 30, "font_size は維持される");
     }
+
+    // -----------------------------------------------------------------------
+    // ProcessorState の内部ロジックテスト
+    // -----------------------------------------------------------------------
+
+    fn make_state() -> ProcessorState {
+        let canvas_width = EvenUsize::new(1920).expect("1920 is even");
+        let canvas_height = EvenUsize::new(1080).expect("1080 is even");
+        let config = make_config();
+        ProcessorState::new(canvas_width, canvas_height, config)
+    }
+
+    fn make_input() -> TextOverlaySpecInput {
+        TextOverlaySpecInput {
+            text: "hello".to_owned(),
+            x: 10,
+            y: 20,
+            font_size: 32,
+            font_color_argb: 0xFFFFFFFF,
+            font_name: "PublicSans-Regular.ttf".to_owned(),
+            z: None,
+        }
+    }
+
+    /// add: overlay が挿入され、dirty フラグが立つ。
+    #[test]
+    fn processor_state_add_inserts_overlay_and_marks_dirty() {
+        let mut state = make_state();
+        state
+            .add("greeting".to_owned(), make_input())
+            .expect("add 成功");
+        assert!(
+            state.overlays.contains_key("greeting"),
+            "overlays に挿入される"
+        );
+        assert!(state.dirty, "dirty フラグが立つ");
+    }
+
+    /// add: 同名 overlay は AlreadyExists で拒否。
+    #[test]
+    fn processor_state_add_rejects_duplicate() {
+        let mut state = make_state();
+        state
+            .add("greeting".to_owned(), make_input())
+            .expect("初回 add 成功");
+        let err = state
+            .add("greeting".to_owned(), make_input())
+            .expect_err("重複 add は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::AlreadyExists),
+            "AlreadyExists が返る: {err:?}"
+        );
+    }
+
+    /// add: OVERLAY_LIMIT を超えると LimitExceeded で拒否。
+    #[test]
+    fn processor_state_add_rejects_limit_exceeded() {
+        let mut state = make_state();
+        for i in 0..OVERLAY_LIMIT {
+            state
+                .add(format!("overlay-{i}"), make_input())
+                .expect("上限内は成功");
+        }
+        let err = state
+            .add("over-limit".to_owned(), make_input())
+            .expect_err("上限超過は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::LimitExceeded),
+            "LimitExceeded が返る: {err:?}"
+        );
+    }
+
+    /// add: z = None は宣言順 (next_auto_z) で自動割り当てされる。
+    #[test]
+    fn processor_state_add_assigns_auto_z_in_declaration_order() {
+        let mut state = make_state();
+        state.add("a".to_owned(), make_input()).expect("add a");
+        state.add("b".to_owned(), make_input()).expect("add b");
+        state.add("c".to_owned(), make_input()).expect("add c");
+        assert_eq!(state.overlays["a"].z, 0, "1 番目は z=0");
+        assert_eq!(state.overlays["b"].z, 1, "2 番目は z=1 (後勝ち)");
+        assert_eq!(state.overlays["c"].z, 2, "3 番目は z=2");
+    }
+
+    /// add: z = Some(v) は明示値を採用し、以降の auto z は max(next, v+1) に追従する。
+    #[test]
+    fn processor_state_add_with_explicit_z_advances_auto_z() {
+        let mut state = make_state();
+        let mut input_with_z = make_input();
+        input_with_z.z = Some(100);
+        state
+            .add("a".to_owned(), input_with_z)
+            .expect("add a with z=100");
+        state
+            .add("b".to_owned(), make_input())
+            .expect("add b with auto z");
+        assert_eq!(state.overlays["a"].z, 100, "明示指定の z が採用される");
+        assert_eq!(state.overlays["b"].z, 101, "auto z は明示値の次に追従する");
+    }
+
+    /// update: 存在する overlay の指定フィールドだけが更新される。
+    #[test]
+    fn processor_state_update_modifies_only_specified_fields() {
+        let mut state = make_state();
+        state.add("g".to_owned(), make_input()).expect("初期 add");
+        let patch = TextOverlayPatch {
+            text: Some("updated".to_owned()),
+            x: Some(500),
+            ..Default::default()
+        };
+        state.update("g".to_owned(), patch).expect("update 成功");
+        let spec = &state.overlays["g"];
+        assert_eq!(spec.text, "updated", "text が更新される");
+        assert_eq!(spec.x, 500, "x が更新される");
+        assert_eq!(spec.y, 20, "y は維持される");
+        assert_eq!(spec.font_size, 32, "font_size は維持される");
+    }
+
+    /// update: 存在しない overlay は NotFound で拒否。
+    #[test]
+    fn processor_state_update_rejects_not_found() {
+        let mut state = make_state();
+        let err = state
+            .update("missing".to_owned(), TextOverlayPatch::default())
+            .expect_err("存在しない overlay の更新は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::NotFound),
+            "NotFound が返る: {err:?}"
+        );
+    }
+
+    /// remove: 存在する overlay を削除すると消える。
+    #[test]
+    fn processor_state_remove_removes_existing_overlay() {
+        let mut state = make_state();
+        state.add("g".to_owned(), make_input()).expect("初期 add");
+        state.dirty = false;
+        state.remove("g".to_owned()).expect("remove 成功");
+        assert!(!state.overlays.contains_key("g"), "overlays から消える");
+        assert!(state.dirty, "dirty フラグが立つ");
+    }
+
+    /// remove: 存在しない overlay は NotFound で拒否。
+    #[test]
+    fn processor_state_remove_rejects_not_found() {
+        let mut state = make_state();
+        let err = state
+            .remove("missing".to_owned())
+            .expect_err("存在しない overlay の削除は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::NotFound),
+            "NotFound が返る: {err:?}"
+        );
+    }
+
+    /// list: 登録されている全 overlay が返る (name と spec を含む)。
+    #[test]
+    fn processor_state_list_returns_all_overlays() {
+        let mut state = make_state();
+        state.add("a".to_owned(), make_input()).expect("add a");
+        state.add("b".to_owned(), make_input()).expect("add b");
+        let listed = state.list();
+        assert_eq!(listed.len(), 2, "2 件の overlay が返る");
+        let names: Vec<&str> = listed.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"a") && names.contains(&"b"),
+            "両方の name が含まれる"
+        );
+    }
+
+    /// render: overlay が無いときは透過 I420A (A プレーン全 0) が返る。
+    #[test]
+    fn processor_state_render_empty_returns_transparent_frame() {
+        let state = make_state();
+        let frame = state
+            .render(Duration::from_secs(0))
+            .expect("空 overlay の render は成功");
+        assert_eq!(frame.format, VideoFormat::I420A, "format は I420A");
+        let w = 1920usize;
+        let h = 1080usize;
+        let y_size = w * h;
+        let uv_size = w.div_ceil(2) * h.div_ceil(2);
+        assert_eq!(
+            frame.data.len(),
+            y_size + uv_size * 2 + y_size,
+            "I420A のレイアウト [Y | U | V | A] の合計バイト数"
+        );
+        let alpha_start = y_size + uv_size * 2;
+        assert!(
+            frame.data[alpha_start..].iter().all(|&a| a == 0),
+            "overlay 無しなら A プレーンは全 0 (完全透明)"
+        );
+    }
+
+    /// render: overlay 1 枚の描画後、A プレーンの指定 x/y 近傍に非ゼロ画素が存在する。
+    #[test]
+    fn processor_state_render_with_overlay_produces_nonzero_alpha_near_text() {
+        let mut state = make_state();
+        // canvas 中央付近にサイズ 64px のテキストを描画する
+        let input = TextOverlaySpecInput {
+            text: "T".to_owned(),
+            x: 100,
+            y: 100,
+            font_size: 64,
+            font_color_argb: 0xFFFFFFFF,
+            font_name: "PublicSans-Regular.ttf".to_owned(),
+            z: None,
+        };
+        state.add("t".to_owned(), input).expect("add 成功");
+        let frame = state.render(Duration::from_secs(0)).expect("render 成功");
+        assert_eq!(frame.format, VideoFormat::I420A, "format は I420A");
+        let w = 1920usize;
+        let h = 1080usize;
+        let y_size = w * h;
+        let uv_size = w.div_ceil(2) * h.div_ceil(2);
+        let alpha_start = y_size + uv_size * 2;
+        let alpha = &frame.data[alpha_start..];
+
+        // 描画範囲 (おおむね (100, 100) から (100+font_size, 100+font_size)) に非ゼロ画素があることを確認する。
+        // raden の baseline ベース計算で実際の描画 y は y + font.ascent() だが、
+        // font_size 64px に対するアセントは概ね 50-60px なので (100, 100)-(200, 200) には含まれる。
+        let mut nonzero_in_region = 0usize;
+        for row in 50..250 {
+            for col in 50..250 {
+                if alpha[row * w + col] > 0 {
+                    nonzero_in_region += 1;
+                }
+            }
+        }
+        assert!(
+            nonzero_in_region > 0,
+            "描画した文字 'T' の周辺領域に A != 0 のピクセルがあるはず"
+        );
+
+        // 描画範囲外 (右下 1700+) には A == 0 が広く分布していることを確認する (誤検出回避)。
+        let mut zero_in_far_region = 0usize;
+        for row in 800..900 {
+            for col in 1700..1800 {
+                if alpha[row * w + col] == 0 {
+                    zero_in_far_region += 1;
+                }
+            }
+        }
+        assert!(
+            zero_in_far_region > 9000,
+            "描画範囲外は A == 0 (透明) のピクセルが大半 (got nonzero={})",
+            10000 - zero_in_far_region
+        );
+    }
+
+    /// add でバリデーション失敗 (text が長すぎ) → InvalidText が返り、overlays は変化しない。
+    #[test]
+    fn processor_state_add_rejects_invalid_text() {
+        let mut state = make_state();
+        let mut input = make_input();
+        input.text = "a".repeat(TEXT_MAX_BYTES + 1);
+        let err = state
+            .add("g".to_owned(), input)
+            .expect_err("text 上限超過は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::InvalidText(_)),
+            "InvalidText が返る: {err:?}"
+        );
+        assert!(
+            state.overlays.is_empty(),
+            "失敗時は overlays に挿入されない"
+        );
+    }
 }
