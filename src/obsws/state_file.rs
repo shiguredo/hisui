@@ -9,7 +9,7 @@ use crate::obsws::coordinator::output_registry::{
     DEFAULT_DASH_MAX_RETAINED_SEGMENTS, DEFAULT_DASH_SEGMENT_DURATION_SECS,
     DEFAULT_HLS_MAX_RETAINED_SEGMENTS, DEFAULT_HLS_SEGMENT_DURATION_SECS, DashDestination,
     DashVariant, HlsDestination, HlsSegmentFormat, HlsVariant, ObswsDashSettings, ObswsHlsSettings,
-    ObswsRtmpOutboundSettings, ObswsSoraPublisherSettings, ObswsStreamServiceSettings,
+    ObswsRtmpOutboundSettings, ObswsSoraPublisherSettings, fmt_stream_service_envelope,
 };
 use crate::obsws::state::{
     ObswsSceneItemBlendMode, ObswsSceneItemTransform, ObswsSessionState, ObswsSrtInboundSettings,
@@ -1157,18 +1157,12 @@ impl nojson::DisplayJson for ObswsStateFile {
 impl nojson::DisplayJson for ObswsStateFileStream {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
-            f.member("streamServiceType", &self.stream_service_type)?;
-            f.member(
-                "streamServiceSettings",
-                nojson::object(|f| {
-                    if let Some(server) = &self.server {
-                        f.member("server", server)?;
-                    }
-                    if let Some(key) = &self.key {
-                        f.member("key", key)?;
-                    }
-                    Ok(())
-                }),
+            fmt_stream_service_envelope(
+                f,
+                &self.stream_service_type,
+                self.server.as_deref(),
+                self.key.as_deref(),
+                false,
             )
         })
         .fmt(f)
@@ -1480,17 +1474,6 @@ pub(crate) fn build_state_from_registry(
                 Some(data.clone())
             }
         },
-    }
-}
-
-impl ObswsStateFileStream {
-    /// ObswsStreamServiceSettings に変換する。
-    pub fn to_stream_service_settings(&self) -> ObswsStreamServiceSettings {
-        ObswsStreamServiceSettings {
-            stream_service_type: self.stream_service_type.clone(),
-            server: self.server.clone(),
-            key: self.key.clone(),
-        }
     }
 }
 

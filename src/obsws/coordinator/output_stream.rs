@@ -240,22 +240,46 @@ impl Default for ObswsStreamServiceSettings {
 impl nojson::DisplayJson for ObswsStreamServiceSettings {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         nojson::object(|f| {
-            f.member("streamServiceType", &self.stream_service_type)?;
-            f.member(
-                "streamServiceSettings",
-                nojson::object(|f| {
-                    if let Some(server) = &self.server {
-                        f.member("server", server)?;
-                    }
-                    if let Some(key) = &self.key {
-                        f.member("key", key)?;
-                    }
-                    Ok(())
-                }),
+            fmt_stream_service_envelope(
+                f,
+                &self.stream_service_type,
+                self.server.as_deref(),
+                self.key.as_deref(),
+                false,
             )
         })
         .fmt(f)
     }
+}
+
+/// `streamServiceType` + `streamServiceSettings { server, key }` の envelope を JSON に書き出す。
+///
+/// `obs_compat: true` の場合、`docs/obsws/json_naming.md` 章 4 (line 78) の OBS Studio
+/// クライアント互換要件に従い、`key` を常時出力 (None 時 `""`) し `use_auth: false` を
+/// ハードコード出力する。
+pub(crate) fn fmt_stream_service_envelope(
+    f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
+    stream_service_type: &str,
+    server: Option<&str>,
+    key: Option<&str>,
+    obs_compat: bool,
+) -> std::fmt::Result {
+    f.member("streamServiceType", stream_service_type)?;
+    f.member(
+        "streamServiceSettings",
+        nojson::object(|f| {
+            if let Some(server) = server {
+                f.member("server", server)?;
+            }
+            if obs_compat {
+                f.member("key", key.unwrap_or(""))?;
+                f.member("use_auth", false)?;
+            } else if let Some(key) = key {
+                f.member("key", key)?;
+            }
+            Ok(())
+        }),
+    )
 }
 
 impl ObswsStreamServiceSettings {
@@ -391,4 +415,154 @@ async fn stop_processors_staged_stream(
     )
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fmt_stream_service_envelope_matrix() {
+        // fmt_stream_service_envelope の入力空間 (server: Some/None × key: Some/None ×
+        // obs_compat: true/false) の 8 ケースを表駆動で網羅し、ヘルパ単体の挙動マトリクスを
+        // 単体テストで固定化する。
+        struct Case {
+            server: Option<&'static str>,
+            key: Option<&'static str>,
+            obs_compat: bool,
+            expected_server: Option<&'static str>,
+            expected_key: Option<&'static str>,
+            expected_use_auth: Option<bool>,
+        }
+
+        const TEST_SERVER: &str = "rtmp://127.0.0.1/live";
+        const TEST_KEY: &str = "stream-key";
+
+        let cases = [
+            // obs_compat: true 経路 (OBS Studio クライアント互換)
+            // key は None のとき "" で常時出力、use_auth: false が常時出力される
+            Case {
+                server: None,
+                key: None,
+                obs_compat: true,
+                expected_server: None,
+                expected_key: Some(""),
+                expected_use_auth: Some(false),
+            },
+            Case {
+                server: Some(TEST_SERVER),
+                key: None,
+                obs_compat: true,
+                expected_server: Some(TEST_SERVER),
+                expected_key: Some(""),
+                expected_use_auth: Some(false),
+            },
+            Case {
+                server: None,
+                key: Some(TEST_KEY),
+                obs_compat: true,
+                expected_server: None,
+                expected_key: Some(TEST_KEY),
+                expected_use_auth: Some(false),
+            },
+            Case {
+                server: Some(TEST_SERVER),
+                key: Some(TEST_KEY),
+                obs_compat: true,
+                expected_server: Some(TEST_SERVER),
+                expected_key: Some(TEST_KEY),
+                expected_use_auth: Some(false),
+            },
+            // obs_compat: false 経路 (内部用)
+            // key は Some のときのみ出力、use_auth は出力しない
+            Case {
+                server: None,
+                key: None,
+                obs_compat: false,
+                expected_server: None,
+                expected_key: None,
+                expected_use_auth: None,
+            },
+            Case {
+                server: Some(TEST_SERVER),
+                key: None,
+                obs_compat: false,
+                expected_server: Some(TEST_SERVER),
+                expected_key: None,
+                expected_use_auth: None,
+            },
+            Case {
+                server: None,
+                key: Some(TEST_KEY),
+                obs_compat: false,
+                expected_server: None,
+                expected_key: Some(TEST_KEY),
+                expected_use_auth: None,
+            },
+            Case {
+                server: Some(TEST_SERVER),
+                key: Some(TEST_KEY),
+                obs_compat: false,
+                expected_server: Some(TEST_SERVER),
+                expected_key: Some(TEST_KEY),
+                expected_use_auth: None,
+            },
+        ];
+
+        for case in cases {
+            let label = format!(
+                "server={:?} key={:?} obs_compat={}",
+                case.server, case.key, case.obs_compat
+            );
+            let json_text = nojson::object(|f| {
+                fmt_stream_service_envelope(
+                    f,
+                    "rtmp_custom",
+                    case.server,
+                    case.key,
+                    case.obs_compat,
+                )
+            })
+            .to_string();
+            let json = nojson::RawJson::parse(&json_text).expect("JSON must parse");
+            let stream_service_settings = json
+                .value()
+                .to_member("streamServiceSettings")
+                .expect("streamServiceSettings access must succeed")
+                .required()
+                .expect("streamServiceSettings must be present");
+
+            let actual_server: Option<String> = stream_service_settings
+                .to_member("server")
+                .expect("server access must succeed")
+                .optional()
+                .map(|v| v.try_into().expect("server must be string"));
+            assert_eq!(
+                actual_server.as_deref(),
+                case.expected_server,
+                "server mismatch ({label})"
+            );
+
+            let actual_key: Option<String> = stream_service_settings
+                .to_member("key")
+                .expect("key access must succeed")
+                .optional()
+                .map(|v| v.try_into().expect("key must be string"));
+            assert_eq!(
+                actual_key.as_deref(),
+                case.expected_key,
+                "key mismatch ({label})"
+            );
+
+            let actual_use_auth: Option<bool> = stream_service_settings
+                .to_member("use_auth")
+                .expect("use_auth access must succeed")
+                .optional()
+                .map(|v| v.try_into().expect("use_auth must be bool"));
+            assert_eq!(
+                actual_use_auth, case.expected_use_auth,
+                "use_auth mismatch ({label})"
+            );
+        }
+    }
 }
