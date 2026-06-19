@@ -2,6 +2,7 @@ pub mod av1;
 pub mod canvas;
 pub mod h264;
 pub mod h265;
+pub mod vpx;
 
 use std::{num::NonZeroUsize, str::FromStr, sync::Arc, time::Duration};
 
@@ -53,7 +54,7 @@ pub struct VideoFrame {
     /// 生フォーマット（I420 / I420A）と decoder 内部の中間表現として一時的に構築するフレーム、
     /// および外部に流れないフレームは `None` を許容する。
     ///
-    /// 現時点で未適用の経路: WebM リーダー。
+    /// 現時点で未適用の経路: WebM リーダーの AV1 / H264AnnexB 映像。
     pub sample_entry: Option<SharedSampleEntry>,
 }
 

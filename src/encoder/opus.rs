@@ -1,9 +1,7 @@
 use std::num::NonZeroUsize;
 
-use shiguredo_mp4::boxes::{DopsBox, OpusBox, SampleEntry};
-
 use crate::{
-    audio::{self, AudioFormat, AudioFrame, Channels, SampleRate},
+    audio::{AudioFormat, AudioFrame, Channels, SampleRate, opus::opus_sample_entry},
     sample_entry::SharedSampleEntry,
 };
 
@@ -26,7 +24,7 @@ impl OpusEncoder {
 
         // 出力フレームに載せるサンプルエントリーを作っておく
         let pre_skip = inner.get_lookahead()?;
-        let sample_entry = sample_entry(pre_skip);
+        let sample_entry = opus_sample_entry(pre_skip);
 
         Ok(Self {
             inner,
@@ -63,17 +61,4 @@ impl OpusEncoder {
             data: encoded.to_vec(),
         })
     }
-}
-
-fn sample_entry(pre_skip: u16) -> SampleEntry {
-    SampleEntry::Opus(OpusBox {
-        audio: audio::sample_entry_audio_fields(),
-        dops_box: DopsBox {
-            output_channel_count: Channels::STEREO.get(),
-            pre_skip,
-            input_sample_rate: SampleRate::HZ_48000.get(),
-            output_gain: 0,
-        },
-        unknown_boxes: Vec::new(),
-    })
 }
