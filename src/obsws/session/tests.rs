@@ -3941,7 +3941,7 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
 
 #[tokio::test]
 async fn handle_get_stream_service_settings_emits_use_auth_when_key_none() {
-    // (1) handle_get_stream_service_settings の obs_compat: true 経路で、
+    // handle_get_stream_service_settings の obs_compat: true 経路で、
     // key=None / server=Some のとき streamServiceSettings に "key": "" と
     // "use_auth": false が含まれることを検証する。
     let registry = ObswsSessionState::new_for_test();
@@ -4002,12 +4002,12 @@ async fn handle_get_stream_service_settings_emits_use_auth_when_key_none() {
 
 #[tokio::test]
 async fn handle_get_stream_service_settings_emits_use_auth_when_key_some() {
-    // (1) handle_get_stream_service_settings の obs_compat: true 経路で、
+    // handle_get_stream_service_settings の obs_compat: true 経路で、
     // key=Some のとき streamServiceSettings に "key": "<値>" と "use_auth": false が
     // 含まれることを検証する。obs_compat: true でも key=Some 時に else 分岐を
     // 誤って削っていないかの回帰検知。
-    // (SetStreamServiceSettings は server を必須とするため、server=None 単独の
-    // 経路は (2) ObswsStreamServiceSettings::fmt 直接テストで検証する)
+    // (SetStreamServiceSettings は server を必須とするため server=Some 経路で検証する。
+    // server=None 経路は本テストでは扱わない)
     let registry = ObswsSessionState::new_for_test();
     let handle = create_coordinator_handle(registry);
     let mut session = ObswsSession::new(None, handle);

@@ -30,7 +30,7 @@ use crate::obsws::protocol::{
 };
 use crate::{ProcessorId, TrackId};
 
-// output モジュールの Settings 型を re-export する
+// output モジュールの Settings 型とヘルパ関数を re-export する
 pub(crate) use super::output_dash::{
     DEFAULT_DASH_MAX_RETAINED_SEGMENTS, DEFAULT_DASH_SEGMENT_DURATION_SECS, DashDestination,
     DashVariant, ObswsDashSettings,
@@ -471,7 +471,7 @@ impl ObswsCoordinator {
                     &settings.stream_service_type,
                     settings.server.as_deref(),
                     settings.key.as_deref(),
-                    true, // OBS rtmp-custom.c 互換
+                    true, // OBS Studio クライアント互換
                 )
             },
         )

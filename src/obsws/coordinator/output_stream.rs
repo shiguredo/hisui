@@ -254,9 +254,9 @@ impl nojson::DisplayJson for ObswsStreamServiceSettings {
 
 /// `streamServiceType` + `streamServiceSettings { server, key }` の envelope を JSON に書き出す。
 ///
-/// 引数 `f` は `nojson::object(|f| { ... })` クロージャ内の `JsonObjectFormatter` を受け取る。
-/// `obs_compat: true` の場合、`docs/obsws/json_naming.md` 章 4 の OBS rtmp-custom.c 互換要件に従い
-/// `key` を常時出力 (None 時 `""`) し `use_auth: false` をハードコード出力する。
+/// `obs_compat: true` の場合、`docs/obsws/json_naming.md` 章 4 (line 78) の OBS Studio
+/// クライアント互換要件に従い、`key` を常時出力 (None 時 `""`) し `use_auth: false` を
+/// ハードコード出力する。
 pub(crate) fn fmt_stream_service_envelope(
     f: &mut nojson::JsonObjectFormatter<'_, '_, '_>,
     stream_service_type: &str,
@@ -423,11 +423,9 @@ mod tests {
 
     #[test]
     fn obsws_stream_service_settings_fmt_omits_obs_compat_keys() {
-        // (2) ObswsStreamServiceSettings::fmt の obs_compat: false 経路で、
+        // ObswsStreamServiceSettings::fmt の obs_compat: false 経路で、
         // server=None / key=None のとき streamServiceSettings に server / key /
-        // use_auth のいずれも含まれないことを検証する。OBS 互換差分が漏れ出て
-        // いないかの回帰検知 (use_auth が出ない、key=None で key が出ない、
-        // server=None で server が出ない)。
+        // use_auth のいずれも含まれないことを検証する (OBS 互換差分の漏出防止)。
         let settings = ObswsStreamServiceSettings {
             stream_service_type: "rtmp_custom".to_owned(),
             server: None,
@@ -448,7 +446,7 @@ mod tests {
                 .expect("use_auth access must succeed")
                 .optional()
                 .is_none(),
-            "obs_compat: false で use_auth が出力されている"
+            "use_auth must be omitted under obs_compat: false"
         );
         assert!(
             stream_service_settings
@@ -456,7 +454,7 @@ mod tests {
                 .expect("key access must succeed")
                 .optional()
                 .is_none(),
-            "obs_compat: false かつ key=None で key が出力されている"
+            "key must be omitted when key is None under obs_compat: false"
         );
         assert!(
             stream_service_settings
@@ -464,7 +462,7 @@ mod tests {
                 .expect("server access must succeed")
                 .optional()
                 .is_none(),
-            "server=None で server が出力されている"
+            "server must be omitted when server is None"
         );
     }
 }
