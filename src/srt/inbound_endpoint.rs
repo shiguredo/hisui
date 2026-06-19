@@ -796,38 +796,31 @@ impl SrtTsDemuxer {
             .ok_or_else(|| crate::Error::new("missing PTS in H264 PES"))?;
         let dts = pending.header.dts.unwrap_or(pts);
 
-        // IDR 判定と SPS NAL 収集を同じループで実施する (IDR 検出時も break せず最後まで走査)。
-        // 複数 SPS は最初の SPS を採用する。仕様上は IDR slice header → PPS → SPS と辿るのが正確だが、
-        // Hisui の入力前提 (publisher が PES に inline する SPS は同一内容) では最初の SPS で十分。
+        // IDR 判定と SPS / PPS NAL 収集を同じループで実施する (IDR 検出時も break せず最後まで走査)。
+        // 複数 SPS / PPS は全て収集して AvccBox に move する。avcC のフィールド反映には
+        // h264_sample_entry_from_sps_pps_lists 内で先頭 SPS のみが採用される。
+        // Hisui の入力前提 (publisher が PES に inline する SPS / PPS は同一内容) では先頭 SPS で十分。
         let mut keyframe = false;
-        let mut sps_nal: Option<&[u8]> = None;
+        let mut sps_list: Vec<Vec<u8>> = Vec::new();
+        let mut pps_list: Vec<Vec<u8>> = Vec::new();
         for nalu in crate::video::h264::H264AnnexBNalUnits::new(&pending.data) {
             let nalu = nalu?;
             match nalu.ty {
                 crate::video::h264::H264_NALU_TYPE_IDR => keyframe = true,
-                crate::video::h264::H264_NALU_TYPE_SPS if sps_nal.is_none() => {
-                    sps_nal = Some(nalu.data);
-                }
+                crate::video::h264::H264_NALU_TYPE_SPS => sps_list.push(nalu.data.to_vec()),
+                crate::video::h264::H264_NALU_TYPE_PPS => pps_list.push(nalu.data.to_vec()),
                 _ => {}
             }
         }
 
         if keyframe {
-            // IDR 内 inline SPS から解像度を抽出し、sample_entry と VideoFrame.size の両方に反映する。
+            // IDR 内 inline SPS / PPS から sample_entry と VideoFrame.size の両方を構築する。
             // SPS / PPS 不在 IDR や破損 NAL、SPS パース失敗は Err を返して接続を打ち切る (fail-fast)。
             // 正常な H.264 ストリームは IDR に SPS / PPS を inline するため、Err はエンコーダ側の異常とみなす。
-            let sps_nal =
-                sps_nal.ok_or_else(|| crate::Error::new("missing H.264 SPS in IDR PES"))?;
-            let (width, height) = crate::video::h264::extract_dimensions_from_sps(sps_nal)?;
-            let entry =
-                crate::video::h264::h264_sample_entry_from_annexb(width, height, &pending.data)?;
+            let (entry, frame_size) =
+                crate::video::h264::h264_sample_entry_from_sps_pps_lists(sps_list, pps_list)?;
             self.last_video_sample_entry = Some(crate::sample_entry::SharedSampleEntry::new(entry));
-            // extract_dimensions_from_sps が width == 0 / height == 0 を Err にしているため、
-            // ここでの VideoFrameSize::new は infallible。
-            self.last_video_frame_size = Some(
-                crate::video::VideoFrameSize::new(width, height)
-                    .expect("infallible: extract_dimensions_from_sps が 0 を Err 化済み"),
-            );
+            self.last_video_frame_size = Some(frame_size);
         }
 
         // 初回の SPS / PPS 含有 IDR が来るまでは P フレーム等を破棄する。

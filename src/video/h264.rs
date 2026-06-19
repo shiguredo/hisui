@@ -3,15 +3,11 @@ use shiguredo_mp4::{
     boxes::{Avc1Box, AvccBox, SampleEntry},
 };
 
-use crate::video;
+use crate::video::{self, VideoFrameSize};
 
 // H.264 の NAL ユニット前に付与されるサイズのバイト数
 // Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい
 pub const NALU_HEADER_LENGTH: usize = 4;
-
-// H.264 のプロファイルとレベル（Hisui では固定）
-pub const H264_PROFILE_BASELINE: u8 = 66;
-pub const H264_LEVEL_3_1: u8 = 31;
 
 // H.264 の NAL ユニットタイプ
 pub const H264_NALU_TYPE_IDR: u8 = 5;
@@ -88,12 +84,82 @@ pub struct H264NalUnit<'a> {
     pub data: &'a [u8],
 }
 
-pub fn h264_sample_entry_from_annexb(
-    width: usize,
-    height: usize,
-    data: &[u8],
-) -> crate::Result<SampleEntry> {
-    // H.264 ストリームから SPS と PPS と取り出す
+/// SPS / PPS リストから AVC1 サンプルエントリーと cropping 適用後の解像度を構築する
+///
+/// 入力 `sps_list[i]` / `pps_list[j]` は NAL ヘッダ 1 バイトを含む raw NAL バイト列
+/// (start code は含まない)。`H264AnnexBNalUnits::next` が返す `H264NalUnit.data` の形式と
+/// `AvccBox.sps_list / pps_list` の格納形式に揃える。
+///
+/// 内部で `parse_sps(sps_list[0])` を 1 回呼んで SPS パラメータを取り出し、avcC フィールドに
+/// 反映する。複数 SPS は先頭 SPS のパラメータのみを採用し、`AvccBox.sps_list` には全 SPS を
+/// move する (Hisui の入力前提では複数 SPS は同一内容を想定)。
+///
+/// 戻り値タプルの `VideoFrameSize` は SPS 由来の cropping 適用後解像度。`parse_sps` 内で
+/// width / height > 0 / u16::MAX 上限を保証しているため `VideoFrameSize::new` は infallible。
+pub fn h264_sample_entry_from_sps_pps_lists(
+    sps_list: Vec<Vec<u8>>,
+    pps_list: Vec<Vec<u8>>,
+) -> crate::Result<(SampleEntry, VideoFrameSize)> {
+    if sps_list.is_empty() {
+        return Err(crate::Error::new("missing H.264 SPS"));
+    }
+    if pps_list.is_empty() {
+        return Err(crate::Error::new("missing H.264 PPS"));
+    }
+
+    // 先頭 SPS のみをパースして avcC フィールドに反映する。
+    // 複数 SPS の追加検証は行わない (Hisui の入力前提では同一内容を想定)。
+    let params = parse_sps(sps_list[0].as_slice())?;
+
+    // parse_sps 内で u16::MAX 上限 + width / height > 0 をチェック済みのため、
+    // `as usize` キャストと `VideoFrameSize::new` は infallible
+    let frame_size = VideoFrameSize::new(params.width as usize, params.height as usize)
+        .expect("infallible: parse_sps が u16::MAX 上限と width / height > 0 をチェック済み");
+
+    let entry = SampleEntry::Avc1(Avc1Box {
+        visual: video::sample_entry_visual_fields(params.width as usize, params.height as usize),
+        avcc_box: AvccBox {
+            // 以下 3 フィールドは SPS の先頭 3 バイト由来の実値
+            avc_profile_indication: params.profile_idc,
+            profile_compatibility: params.constraint_set_flags,
+            avc_level_indication: params.level_idc,
+            // High 系プロファイル時のみ Some。それ以外のプロファイルでは None。
+            // shiguredo_mp4 の AvccBox::encode は 66 / 77 / 88 以外で Some を要求し、
+            // parse_sps が profile_idc を {66, 77, 88} ∪ H264_HIGH_PROFILES に限定するため、
+            // ここで Some / None のセットを誤ることはない。
+            chroma_format: params
+                .high_profile_params
+                .as_ref()
+                .map(|h| Uint::new(h.chroma_format_idc)),
+            bit_depth_luma_minus8: params
+                .high_profile_params
+                .as_ref()
+                .map(|h| Uint::new(h.bit_depth_luma_minus8)),
+            bit_depth_chroma_minus8: params
+                .high_profile_params
+                .as_ref()
+                .map(|h| Uint::new(h.bit_depth_chroma_minus8)),
+            // Hisui は MP4 出力時の NAL prefix を一律 4 バイトに統一する設計値
+            length_size_minus_one: Uint::new(NALU_HEADER_LENGTH as u8 - 1),
+            // Hisui の入力前提では SPS 拡張 NAL は発生しないため空のまま
+            sps_ext_list: Vec::new(),
+            // sps_list / pps_list は move で受け取る (clone を省く)
+            sps_list,
+            pps_list,
+        },
+        unknown_boxes: Vec::new(),
+    });
+
+    Ok((entry, frame_size))
+}
+
+/// Annex-B バイト列から AVC1 サンプルエントリーを構築する薄いラッパー
+///
+/// 内部で `H264AnnexBNalUnits` を 1 回走査して SPS / PPS NAL のみを抽出し、
+/// `h264_sample_entry_from_sps_pps_lists` を呼ぶ。SEI / IDR / Filler 等の NAL タイプは無視する。
+///
+/// 引数として `width` / `height` は受け取らない (SPS 由来の実値を avcC と visual に反映するため)。
+pub fn h264_sample_entry_from_annexb(data: &[u8]) -> crate::Result<SampleEntry> {
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();
     for nalu in H264AnnexBNalUnits::new(data) {
@@ -104,32 +170,8 @@ pub fn h264_sample_entry_from_annexb(
             _ => {}
         }
     }
-    if sps_list.is_empty() {
-        return Err(crate::Error::new("missing H.264 SPS"));
-    }
-    if pps_list.is_empty() {
-        return Err(crate::Error::new("missing H.264 PPS"));
-    }
-
-    Ok(SampleEntry::Avc1(Avc1Box {
-        visual: video::sample_entry_visual_fields(width, height),
-        avcc_box: AvccBox {
-            // 実際のエンコードストリームに合わせた値
-            sps_list,
-            pps_list,
-
-            // 以下は Hisui では固定値
-            avc_profile_indication: H264_PROFILE_BASELINE, // TODO: 実際の値に合わせる
-            avc_level_indication: H264_LEVEL_3_1,          // TODO: 実際の値に合わせる
-            profile_compatibility: 0, // いったん 0 を指定しているが、もし支障があれば調整する
-            length_size_minus_one: Uint::new(NALU_HEADER_LENGTH as u8 - 1),
-            chroma_format: None,
-            bit_depth_luma_minus8: None,
-            bit_depth_chroma_minus8: None,
-            sps_ext_list: Vec::new(),
-        },
-        unknown_boxes: Vec::new(),
-    }))
+    let (entry, _frame_size) = h264_sample_entry_from_sps_pps_lists(sps_list, pps_list)?;
+    Ok(entry)
 }
 
 /// AVC1 サンプルエントリーから width, height を抽出
@@ -144,46 +186,133 @@ pub fn extract_video_dimensions(entry: &SampleEntry) -> crate::Result<(u32, u32)
     }
 }
 
-/// H.264 のシーケンスヘッダを Annex B 形式で作成する
+/// SPS バイト列から取り出した avcC 反映用フィールド群と解像度
 ///
-/// SPS (Sequence Parameter Set) と PPS (Picture Parameter Set) を
-/// Annex B 形式で連結してシーケンスヘッダを生成します。
-/// 各 NAL ユニットの前には開始コード `0x00 0x00 0x00 0x01` が付与されます。
-pub fn create_sequence_header_annexb(sps_list: &[Vec<u8>], pps_list: &[Vec<u8>]) -> Vec<u8> {
-    let mut result = Vec::new();
-
-    // 全ての SPS を追加
-    for sps in sps_list {
-        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        result.extend_from_slice(sps);
-    }
-
-    // 全ての PPS を追加
-    for pps in pps_list {
-        result.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        result.extend_from_slice(pps);
-    }
-
-    result
+/// `parse_sps` の戻り値で、`h264_sample_entry_from_sps_pps_lists` 経由で
+/// `AvccBox` の各フィールドにマップされる。
+#[derive(Debug)]
+struct SpsParams {
+    /// avcC の `avc_profile_indication` に詰める SPS 1 バイト目
+    profile_idc: u8,
+    /// avcC の `profile_compatibility` に詰める SPS 2 バイト目
+    /// (constraint_set0..5_flag + reserved_zero_2bits の 1 バイト全体)
+    constraint_set_flags: u8,
+    /// avcC の `avc_level_indication` に詰める SPS 3 バイト目
+    level_idc: u8,
+    /// High 系プロファイル時のみ Some。それ以外のプロファイルでは None。
+    /// avcC の `chroma_format` / `bit_depth_luma_minus8` / `bit_depth_chroma_minus8` の
+    /// Some / None をこの Option の有無で 1 対 1 対応させる。
+    high_profile_params: Option<HighProfileSpsParams>,
+    /// cropping 適用後の最終解像度。`parse_sps` 内で u16::MAX 上限を保証する。
+    width: u16,
+    height: u16,
 }
 
-/// SPS NAL ユニットのバイト列から width / height を抽出する
+/// High 系プロファイル時に SPS から取り出すフィールド群
+///
+/// 各フィールドの値域は ITU-T H.264 仕様 7.4.2.1.1 に従い `parse_sps` で範囲検証済み。
+#[derive(Debug)]
+struct HighProfileSpsParams {
+    chroma_format_idc: u8,
+    bit_depth_luma_minus8: u8,
+    bit_depth_chroma_minus8: u8,
+}
+
+/// SPS NAL ユニットから profile / level / chroma / bit_depth / 解像度を抽出する内部関数
 ///
 /// 入力 `sps` は `H264AnnexBNalUnits` が返す `H264NalUnit.data` をそのまま渡す形式で、
 /// 先頭 1 バイトに NAL ヘッダ（forbidden_zero_bit + nal_ref_idc + nal_unit_type = 7）を含む。
-/// 先頭バイトの下位 5 bit が SPS の NAL unit type (7) でない場合は Err を返す。
-/// 内部で先頭 1 バイトをスキップしたうえで RBSP 抽出（emulation prevention byte 除去）を行い、
-/// ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 に従って Exp-Golomb で解像度を抽出する。
-pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> {
+/// 内部で `rbsp_from_sps_nalu` を呼んで NAL タイプ検査と RBSP 抽出を行い、
+/// ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 に従って Exp-Golomb でフィールドを取り出す。
+///
+/// `profile_idc` が仕様準拠 publisher のプロファイル群
+/// (`{66, 77, 88} ∪ H264_HIGH_PROFILES`) に含まれない値、または High 系プロファイル時に
+/// `chroma_format_idc > 3` / `bit_depth_luma_minus8 > 6` / `bit_depth_chroma_minus8 > 6` の
+/// 仕様値域外を検出した場合は Err を返す。
+fn parse_sps(sps: &[u8]) -> crate::Result<SpsParams> {
     let rbsp = rbsp_from_sps_nalu(sps)?;
     let mut reader = H264BitReader::new(&rbsp);
 
     let profile_idc = reader.read_u(8)? as u8;
-    reader.skip_u(8)?; // constraint_set0..5_flag + reserved_zero_2bits
-    reader.skip_u(8)?; // level_idc
+    let constraint_set_flags = reader.read_u(8)? as u8;
+    let level_idc = reader.read_u(8)? as u8;
     reader.skip_ue()?; // seq_parameter_set_id
 
-    let chroma_array_type = read_chroma_array_type(&mut reader, profile_idc)?;
+    // 仕様準拠 publisher のプロファイル群 ({66, 77, 88} ∪ H264_HIGH_PROFILES) 以外の
+    // profile_idc を弾く。これは shiguredo_mp4 の AvccBox::encode が
+    // `!matches!(avc_profile_indication, 66 | 77 | 88)` のとき chroma_format 等が Some を
+    // 要求するため、H264_HIGH_PROFILES に該当しない仕様外 profile_idc では None 埋めで
+    // エンコードエラーになるのを未然に防ぐ。
+    let is_high = H264_HIGH_PROFILES.contains(&profile_idc);
+    let is_baseline_main_extended = matches!(profile_idc, 66 | 77 | 88);
+    if !is_high && !is_baseline_main_extended {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: unsupported profile_idc {profile_idc}"
+        )));
+    }
+
+    let (chroma_array_type, high_profile_params) = if is_high {
+        // ITU-T H.264 仕様 7.3.2.1.1 の High 系プロファイル分岐
+        let chroma_format_idc = reader.read_ue()?;
+        // 仕様 7.4.2.1.1 で chroma_format_idc は 0..=3 の範囲
+        if chroma_format_idc > 3 {
+            return Err(crate::Error::new(format!(
+                "invalid H.264 SPS: chroma_format_idc out of spec range (0..=3): {chroma_format_idc}"
+            )));
+        }
+        let separate_colour_plane_flag = if chroma_format_idc == 3 {
+            reader.read_u(1)?
+        } else {
+            0
+        };
+        let bit_depth_luma_minus8 = reader.read_ue()?;
+        // 仕様 7.4.2.1.1 で bit_depth_luma_minus8 は 0..=6 の範囲
+        if bit_depth_luma_minus8 > 6 {
+            return Err(crate::Error::new(format!(
+                "invalid H.264 SPS: bit_depth_luma_minus8 out of spec range (0..=6): {bit_depth_luma_minus8}"
+            )));
+        }
+        let bit_depth_chroma_minus8 = reader.read_ue()?;
+        // 仕様 7.4.2.1.1 で bit_depth_chroma_minus8 は 0..=6 の範囲
+        if bit_depth_chroma_minus8 > 6 {
+            return Err(crate::Error::new(format!(
+                "invalid H.264 SPS: bit_depth_chroma_minus8 out of spec range (0..=6): {bit_depth_chroma_minus8}"
+            )));
+        }
+        reader.skip_u(1)?; // qpprime_y_zero_transform_bypass_flag
+        let seq_scaling_matrix_present_flag = reader.read_u(1)?;
+        if seq_scaling_matrix_present_flag == 1 {
+            // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個の scaling_list を読み飛ばす
+            let scaling_list_count = if chroma_format_idc == 3 { 12 } else { 8 };
+            for i in 0..scaling_list_count {
+                let seq_scaling_list_present_flag = reader.read_u(1)?;
+                if seq_scaling_list_present_flag == 1 {
+                    // 先頭 6 個は 4x4 (size 16)、残りは 8x8 (size 64)
+                    let size = if i < 6 { 16 } else { 64 };
+                    skip_scaling_list(&mut reader, size)?;
+                }
+            }
+        }
+
+        // chroma_array_type の決定（仕様 7.4.2.1.1）
+        let chroma_array_type = if separate_colour_plane_flag == 1 {
+            0
+        } else {
+            chroma_format_idc
+        };
+        // 範囲検証済みのため u32 → u8 キャストは情報損失しない
+        let high_profile_params = HighProfileSpsParams {
+            chroma_format_idc: chroma_format_idc as u8,
+            bit_depth_luma_minus8: bit_depth_luma_minus8 as u8,
+            bit_depth_chroma_minus8: bit_depth_chroma_minus8 as u8,
+        };
+        (chroma_array_type, Some(high_profile_params))
+    } else {
+        // Baseline / Main / Extended プロファイルでは chroma_format_idc が SPS に含まれないため
+        // 仕様 7.4.2.1.1 のデフォルトとして 4:2:0 (chroma_array_type = 1) を使う
+        (1, None)
+    };
+
     reader.skip_ue()?; // log2_max_frame_num_minus4
     skip_pic_order_cnt_type_extras(&mut reader)?;
     let (width, height) = read_dimensions_with_cropping(&mut reader, chroma_array_type)?;
@@ -194,9 +323,9 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
         )));
     }
 
-    // 戻り値は最終的に `sample_entry_visual_fields` で `width as u16 / height as u16` に渡される。
-    // u16 上限 (65535) を超えると silent truncation してラップした値や 0 が MP4 sample_entry に
-    // 埋め込まれるため、ここで上限を強制する。H.264 仕様 Level 6.2 の最大解像度 8192x4320 でも
+    // u16 上限 (65535) を超えると `sample_entry_visual_fields` の `width as u16 / height as u16`
+    // で silent truncation してラップした値や 0 が MP4 sample_entry に埋め込まれるため、
+    // ここで上限を強制する。H.264 仕様 Level 6.2 の最大解像度 8192x4320 でも
     // u16 に収まるため、実用範囲を狭めることはない。
     if width > u16::MAX as usize || height > u16::MAX as usize {
         return Err(crate::Error::new(format!(
@@ -204,47 +333,25 @@ pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> 
         )));
     }
 
-    Ok((width, height))
+    Ok(SpsParams {
+        profile_idc,
+        constraint_set_flags,
+        level_idc,
+        high_profile_params,
+        // 上記 u16 上限チェック済みのため `as u16` キャストは情報損失しない
+        width: width as u16,
+        height: height as u16,
+    })
 }
 
-/// High 系プロファイルの追加フィールド群を読み、`chroma_array_type` を返す。
+/// SPS NAL ユニットのバイト列から width / height を抽出する
 ///
-/// Baseline / Main / Extended プロファイルでは chroma_format_idc が SPS に含まれないため
-/// 仕様 7.4.2.1.1 のデフォルトとして 4:2:0 (`chroma_array_type = 1`) を返す。
-fn read_chroma_array_type(reader: &mut H264BitReader<'_>, profile_idc: u8) -> crate::Result<u32> {
-    if !H264_HIGH_PROFILES.contains(&profile_idc) {
-        return Ok(1);
-    }
-
-    let chroma_format_idc = reader.read_ue()?;
-    let separate_colour_plane_flag = if chroma_format_idc == 3 {
-        reader.read_u(1)?
-    } else {
-        0
-    };
-    reader.skip_ue()?; // bit_depth_luma_minus8
-    reader.skip_ue()?; // bit_depth_chroma_minus8
-    reader.skip_u(1)?; // qpprime_y_zero_transform_bypass_flag
-    let seq_scaling_matrix_present_flag = reader.read_u(1)?;
-    if seq_scaling_matrix_present_flag == 1 {
-        // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個の scaling_list を読み飛ばす
-        let scaling_list_count = if chroma_format_idc == 3 { 12 } else { 8 };
-        for i in 0..scaling_list_count {
-            let seq_scaling_list_present_flag = reader.read_u(1)?;
-            if seq_scaling_list_present_flag == 1 {
-                // 先頭 6 個は 4x4 (size 16)、残りは 8x8 (size 64)
-                let size = if i < 6 { 16 } else { 64 };
-                skip_scaling_list(reader, size)?;
-            }
-        }
-    }
-
-    // chroma_array_type の決定（仕様 7.4.2.1.1）
-    Ok(if separate_colour_plane_flag == 1 {
-        0
-    } else {
-        chroma_format_idc
-    })
+/// 入力 `sps` は `H264AnnexBNalUnits` が返す `H264NalUnit.data` をそのまま渡す形式で、
+/// 先頭 1 バイトに NAL ヘッダ（forbidden_zero_bit + nal_ref_idc + nal_unit_type = 7）を含む。
+/// 先頭バイトの下位 5 bit が SPS の NAL unit type (7) でない場合は Err を返す。
+/// 内部で `parse_sps` を呼んで cropping 適用後の解像度を取り出す。
+pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> {
+    parse_sps(sps).map(|p| (p.width as usize, p.height as usize))
 }
 
 /// pic_order_cnt_type に応じた追加フィールド群を読み飛ばす（仕様 7.3.2.1.1）
@@ -859,6 +966,10 @@ mod tests {
     /// `with_*` メソッドで各分岐を踏ませる。
     struct SpsBuilder {
         profile_idc: u8,
+        constraint_set_flags: u8,
+        chroma_format_idc: u32,
+        bit_depth_luma_minus8: u32,
+        bit_depth_chroma_minus8: u32,
         pic_width_in_mbs_minus1: u32,
         pic_height_in_map_units_minus1: u32,
         frame_mbs_only_flag: bool,
@@ -871,7 +982,8 @@ mod tests {
     impl SpsBuilder {
         /// raw 解像度 (pic_width_in_mbs_minus1 / pic_height_in_map_units_minus1 から決まる値) を
         /// 直接指定するベースビルダー。
-        /// デフォルトは Baseline + progressive + crop なし + pic_order_cnt_type=2。
+        /// デフォルトは Baseline + progressive + crop なし + pic_order_cnt_type=2 +
+        /// constraint_set_flags=0 + High 系プロファイル分岐用の chroma_format_idc=1 / bit_depth_*=0。
         fn raw(raw_width: u32, raw_height: u32) -> Self {
             assert!(
                 raw_width.is_multiple_of(16),
@@ -883,6 +995,10 @@ mod tests {
             );
             Self {
                 profile_idc: 66, // Baseline
+                constraint_set_flags: 0,
+                chroma_format_idc: 1, // 4:2:0
+                bit_depth_luma_minus8: 0,
+                bit_depth_chroma_minus8: 0,
                 pic_width_in_mbs_minus1: raw_width / 16 - 1,
                 pic_height_in_map_units_minus1: raw_height / 16 - 1,
                 frame_mbs_only_flag: true,
@@ -926,6 +1042,32 @@ mod tests {
             self
         }
 
+        fn with_profile_idc(mut self, profile_idc: u32) -> Self {
+            // u8 範囲に丸める。仕様外プロファイル値テストのために u32 シグネチャを保持する。
+            self.profile_idc = profile_idc as u8;
+            self
+        }
+
+        fn with_constraint_set_flags(mut self, flags: u8) -> Self {
+            self.constraint_set_flags = flags;
+            self
+        }
+
+        fn with_chroma_format_idc(mut self, value: u32) -> Self {
+            self.chroma_format_idc = value;
+            self
+        }
+
+        fn with_bit_depth_luma_minus8(mut self, value: u32) -> Self {
+            self.bit_depth_luma_minus8 = value;
+            self
+        }
+
+        fn with_bit_depth_chroma_minus8(mut self, value: u32) -> Self {
+            self.bit_depth_chroma_minus8 = value;
+            self
+        }
+
         fn build(self) -> Vec<u8> {
             let mut w = SpsBitWriter::new();
 
@@ -936,7 +1078,7 @@ mod tests {
             // profile_idc (u(8))
             w.write_u(8, u32::from(self.profile_idc));
             // constraint_set*_flag (6 bit) + reserved_zero_2bits (2 bit)
-            w.write_u(8, 0);
+            w.write_u(8, u32::from(self.constraint_set_flags));
             // level_idc (u(8)): 適当に Level 3.1
             w.write_u(8, 31);
             // seq_parameter_set_id
@@ -945,10 +1087,13 @@ mod tests {
             // High 系プロファイルの追加フィールド
             let is_high = H264_HIGH_PROFILES.contains(&self.profile_idc);
             if is_high {
-                w.write_ue(1); // chroma_format_idc = 1 (4:2:0)
-                // chroma_format_idc != 3 のため separate_colour_plane_flag は書かない
-                w.write_ue(0); // bit_depth_luma_minus8
-                w.write_ue(0); // bit_depth_chroma_minus8
+                w.write_ue(self.chroma_format_idc);
+                if self.chroma_format_idc == 3 {
+                    // separate_colour_plane_flag (u(1)) = 0
+                    w.write_u(1, 0);
+                }
+                w.write_ue(self.bit_depth_luma_minus8);
+                w.write_ue(self.bit_depth_chroma_minus8);
                 w.write_u(1, 0); // qpprime_y_zero_transform_bypass_flag
                 w.write_u(
                     1,
@@ -960,7 +1105,9 @@ mod tests {
                 );
                 if self.seq_scaling_matrix_present_flag {
                     // 全 seq_scaling_list_present_flag を 0 にして scaling_list 本体を読まない経路で進める
-                    for _ in 0..8 {
+                    // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個
+                    let count = if self.chroma_format_idc == 3 { 12 } else { 8 };
+                    for _ in 0..count {
                         w.write_u(1, 0);
                     }
                 }
@@ -1099,5 +1246,145 @@ mod tests {
             result.is_err(),
             "u16::MAX を超える width は Err を返すはず: {result:?}"
         );
+    }
+
+    // ----------------------------------------------------------------
+    // parse_sps の単体テスト群
+    //
+    // `extract_dimensions_from_sps` は `parse_sps` の薄いラッパーなので、
+    // 上記既存テスト群が parse_sps の (width, height) パス検証を兼ねる。
+    // ここでは parse_sps が返す avcC 反映用フィールド (profile_idc /
+    // constraint_set_flags / level_idc / high_profile_params) と
+    // 新規追加した仕様外値 Err 化の挙動を検証する。
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn parse_sps_baseline_returns_no_high_profile_params() {
+        // Baseline (profile_idc=66) では high_profile_params が None になり、
+        // profile_idc / level_idc / constraint_set_flags が SPS から取り出されること
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_constraint_set_flags(0xc0)
+            .build();
+        let params = parse_sps(&sps).expect("Baseline SPS のパース成功");
+        assert_eq!(params.profile_idc, 66, "Baseline の profile_idc");
+        assert_eq!(
+            params.constraint_set_flags, 0xc0,
+            "constraint_set_flags は SPS の RBSP byte[1] と一致"
+        );
+        assert_eq!(params.level_idc, 31, "SpsBuilder のデフォルト level_idc");
+        assert!(
+            params.high_profile_params.is_none(),
+            "Baseline では high_profile_params は None"
+        );
+    }
+
+    #[test]
+    fn parse_sps_main_returns_no_high_profile_params() {
+        // Main (profile_idc=77) でも high_profile_params が None になること
+        let sps = SpsBuilder::raw(1920, 1088).with_profile_idc(77).build();
+        let params = parse_sps(&sps).expect("Main SPS のパース成功");
+        assert_eq!(params.profile_idc, 77);
+        assert!(
+            params.high_profile_params.is_none(),
+            "Main では high_profile_params は None"
+        );
+    }
+
+    #[test]
+    fn parse_sps_high_returns_high_profile_params() {
+        // High (profile_idc=100) では high_profile_params に SPS 由来の実値が入ること
+        let sps = SpsBuilder::raw(1920, 1088).with_profile_idc(100).build();
+        let params = parse_sps(&sps).expect("High SPS のパース成功");
+        assert_eq!(params.profile_idc, 100);
+        let high = params
+            .high_profile_params
+            .expect("High では high_profile_params は Some");
+        assert_eq!(
+            high.chroma_format_idc, 1,
+            "SpsBuilder のデフォルト chroma_format_idc=1"
+        );
+        assert_eq!(high.bit_depth_luma_minus8, 0);
+        assert_eq!(high.bit_depth_chroma_minus8, 0);
+    }
+
+    #[test]
+    fn parse_sps_high10_returns_bit_depth_luma_minus8_2() {
+        // High 10 (profile_idc=110) で bit_depth_luma_minus8=2 を指定したときに
+        // SpsParams.high_profile_params.bit_depth_luma_minus8 にそのまま反映されること
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_profile_idc(110)
+            .with_bit_depth_luma_minus8(2)
+            .with_bit_depth_chroma_minus8(2)
+            .build();
+        let params = parse_sps(&sps).expect("High 10 SPS のパース成功");
+        let high = params.high_profile_params.expect("High 10 では Some");
+        assert_eq!(high.bit_depth_luma_minus8, 2);
+        assert_eq!(high.bit_depth_chroma_minus8, 2);
+    }
+
+    #[test]
+    fn parse_sps_rejects_unsupported_profile_idc() {
+        // {66, 77, 88} ∪ H264_HIGH_PROFILES のいずれにも含まれない profile_idc は Err
+        let sps = SpsBuilder::raw(1920, 1088).with_profile_idc(99).build();
+        let result = parse_sps(&sps);
+        assert!(
+            result.is_err(),
+            "仕様準拠 publisher のプロファイル群以外の profile_idc は Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_sps_rejects_chroma_format_idc_out_of_range() {
+        // High プロファイル時の chroma_format_idc > 3 (仕様 7.4.2.1.1 の値域外) は Err
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_profile_idc(100)
+            .with_chroma_format_idc(4)
+            .build();
+        let result = parse_sps(&sps);
+        assert!(
+            result.is_err(),
+            "chroma_format_idc=4 は仕様値域外で Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_sps_rejects_bit_depth_luma_minus8_out_of_range() {
+        // High プロファイル時の bit_depth_luma_minus8 > 6 (仕様 7.4.2.1.1 の値域外) は Err
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_profile_idc(100)
+            .with_bit_depth_luma_minus8(7)
+            .build();
+        let result = parse_sps(&sps);
+        assert!(
+            result.is_err(),
+            "bit_depth_luma_minus8=7 は仕様値域外で Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_sps_rejects_bit_depth_chroma_minus8_out_of_range() {
+        // High プロファイル時の bit_depth_chroma_minus8 > 6 (仕様 7.4.2.1.1 の値域外) は Err
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_profile_idc(100)
+            .with_bit_depth_chroma_minus8(7)
+            .build();
+        let result = parse_sps(&sps);
+        assert!(
+            result.is_err(),
+            "bit_depth_chroma_minus8=7 は仕様値域外で Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_sps_returns_width_height_within_u16_range() {
+        // parse_sps の戻り値タプルの width / height が SPS の cropping 適用後の値と一致し、
+        // かつ u16 範囲に収まっていることを確認する
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_cropping(0, 0, 0, 4)
+            .build();
+        let params = parse_sps(&sps).expect("crop SPS のパース成功");
+        // SpsParams.width / height は u16 型なので、`as usize` で u16 範囲内であることが型レベルに保証される
+        assert_eq!(params.width, 1920);
+        assert_eq!(params.height, 1080);
     }
 }

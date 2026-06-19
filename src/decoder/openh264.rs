@@ -164,14 +164,13 @@ mod tests {
 
     #[test]
     fn build_annexb_input_prepends_missing_sps_pps_from_sample_entry() -> crate::Result<()> {
-        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
-            320,
-            320,
-            &[
-                0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1f, 0xe5, 0x88, 0x68, 0x54, 0, 0, 0, 1, 0x68, 0xce,
-                0x06, 0xe2,
-            ],
-        )?;
+        // SPS は `crate::video::h264::SPS_320X240` (24 バイト実 SPS、Baseline 320x240) を使う。
+        // 偽 SPS では parse_sps が完走しないため、実 SPS に差し替えている。
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(&[
+            0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00, 0x00,
+            0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80, 0, 0, 0, 1,
+            0x68, 0xce, 0x06, 0xe2,
+        ])?;
         let frame = VideoFrame {
             data: vec![0, 0, 0, 2, 0x65, 0x88],
             format: VideoFormat::H264,
@@ -198,18 +197,20 @@ mod tests {
 
     #[test]
     fn build_annexb_input_keeps_existing_sps_pps() -> crate::Result<()> {
-        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
-            320,
-            320,
-            &[
-                0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1f, 0xe5, 0x88, 0x68, 0x54, 0, 0, 0, 1, 0x68, 0xce,
-                0x06, 0xe2,
-            ],
-        )?;
+        // SPS は `crate::video::h264::SPS_320X240` (24 バイト実 SPS、Baseline 320x240) を使う。
+        // 偽 SPS では parse_sps が完走しないため、実 SPS に差し替えている。
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(&[
+            0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00, 0x00,
+            0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80, 0, 0, 0, 1,
+            0x68, 0xce, 0x06, 0xe2,
+        ])?;
+        // AVCC 形式入力: SPS は 24 バイトなので NAL 長 prefix を [0, 0, 0, 24] に更新する
+        // (PPS 長 prefix [0, 0, 0, 4] と IDR 長 prefix [0, 0, 0, 2] は不変)
         let frame = VideoFrame {
             data: vec![
-                0, 0, 0, 8, 0x67, 0x42, 0x00, 0x1f, 0xe5, 0x88, 0x68, 0x54, 0, 0, 0, 4, 0x68, 0xce,
-                0x06, 0xe2, 0, 0, 0, 2, 0x65, 0x88,
+                0, 0, 0, 24, 0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00,
+                0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80, 0, 0,
+                0, 4, 0x68, 0xce, 0x06, 0xe2, 0, 0, 0, 2, 0x65, 0x88,
             ],
             format: VideoFormat::H264,
             keyframe: true,

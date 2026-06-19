@@ -274,21 +274,24 @@ impl VideoRtpReceiver {
     /// NAL 走査自身の Err はそのまま `Err` で伝播し、呼び出し側で `SessionError::Fatal` に
     /// 変換されて RTSP 接続が打ち切られる。
     fn apply_sample_entry(&mut self, frame: &DepacketizedVideoFrame) -> crate::Result<()> {
+        // IDR 判定と SPS / PPS NAL 本体収集を同じループで実施する。
+        // 3 条件 (IDR + SPS + PPS) が揃ったときのみサンプルエントリーを構築する。
         let mut has_idr = false;
-        let mut has_sps = false;
-        let mut has_pps = false;
+        let mut sps_list: Vec<Vec<u8>> = Vec::new();
+        let mut pps_list: Vec<Vec<u8>> = Vec::new();
         for nalu in crate::video::h264::H264AnnexBNalUnits::new(&frame.data) {
             let nalu = nalu?;
             match nalu.ty {
                 crate::video::h264::H264_NALU_TYPE_IDR => has_idr = true,
-                crate::video::h264::H264_NALU_TYPE_SPS => has_sps = true,
-                crate::video::h264::H264_NALU_TYPE_PPS => has_pps = true,
+                crate::video::h264::H264_NALU_TYPE_SPS => sps_list.push(nalu.data.to_vec()),
+                crate::video::h264::H264_NALU_TYPE_PPS => pps_list.push(nalu.data.to_vec()),
                 _ => {}
             }
         }
 
-        if has_idr && has_sps && has_pps {
-            let entry = crate::video::h264::h264_sample_entry_from_annexb(0, 0, &frame.data)?;
+        if has_idr && !sps_list.is_empty() && !pps_list.is_empty() {
+            let (entry, _frame_size) =
+                crate::video::h264::h264_sample_entry_from_sps_pps_lists(sps_list, pps_list)?;
             self.last_sample_entry = Some(SharedSampleEntry::new(entry));
         }
 
@@ -1283,14 +1286,14 @@ fn select_video_track(
     Ok(None)
 }
 
-/// SDP fmtp 行から `sprop-parameter-sets` (RFC 6184 §8.2.1) を抽出して、Annex-B 形式に
-/// 組み立てて `h264_sample_entry_from_annexb` でサンプルエントリーを構築する。
+/// SDP fmtp 行から `sprop-parameter-sets` (RFC 6184 §8.2.1) を抽出して、SPS / PPS NAL リストから
+/// `h264_sample_entry_from_sps_pps_lists` でサンプルエントリーを構築する。
 ///
 /// 戻り値:
 /// - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみ / SPS または PPS の
 ///   片方が欠ける場合は `Ok(None)`（`sprop-parameter-sets` は MAY なので不完全な構成は許容し、
 ///   IDR 内 inline SPS / PPS による代替経路 (`VideoRtpReceiver::apply_sample_entry`) に委ねる）
-/// - Base64 デコード失敗、NAL 走査自身の Err、`h264_sample_entry_from_annexb` の Err は
+/// - Base64 デコード失敗、`h264_sample_entry_from_sps_pps_lists` の Err は
 ///   `crate::Error` として伝播（壊れた SDP として接続を打ち切る）
 fn extract_sample_entry_from_sprop(
     attributes: &[SdpAttribute],
@@ -1307,7 +1310,10 @@ fn extract_sample_entry_from_sprop(
         return Ok(None);
     }
 
-    let mut annexb: Vec<u8> = Vec::new();
+    // sprop-parameter-sets の各要素は Base64 エンコードされた SPS / PPS NAL (start code なし)。
+    // Base64 デコード後の先頭バイトの NAL タイプで SPS / PPS を判別して直接リストへ詰める。
+    let mut sps_list: Vec<Vec<u8>> = Vec::new();
+    let mut pps_list: Vec<Vec<u8>> = Vec::new();
     for raw_entry in sprop_value.split(',') {
         let trimmed = raw_entry.trim();
         if trimmed.is_empty() {
@@ -1315,32 +1321,26 @@ fn extract_sample_entry_from_sprop(
         }
         let nal = Base64::decode_vec(trimmed)
             .map_err(|e| Error::new(format!("invalid sprop-parameter-sets base64: {e}")))?;
-        annexb.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        annexb.extend_from_slice(&nal);
-    }
-
-    if annexb.is_empty() {
-        return Ok(None);
+        if nal.is_empty() {
+            continue;
+        }
+        // NAL ヘッダ 1 バイトの下位 5 bit が NAL ユニットタイプ
+        let nal_unit_type = nal[0] & 0x1F;
+        match nal_unit_type {
+            crate::video::h264::H264_NALU_TYPE_SPS => sps_list.push(nal),
+            crate::video::h264::H264_NALU_TYPE_PPS => pps_list.push(nal),
+            _ => {}
+        }
     }
 
     // sprop に SPS と PPS が両方含まれない場合は inline 経路に委ねる。
     // fmtp 全体不在を Ok(None) で許容するのと同じ方針で、不完全な補助メタデータを fail-fast にしない。
-    let mut has_sps = false;
-    let mut has_pps = false;
-    for nalu in crate::video::h264::H264AnnexBNalUnits::new(&annexb) {
-        let nalu = nalu?;
-        match nalu.ty {
-            crate::video::h264::H264_NALU_TYPE_SPS => has_sps = true,
-            crate::video::h264::H264_NALU_TYPE_PPS => has_pps = true,
-            _ => {}
-        }
-    }
-    if !has_sps || !has_pps {
+    if sps_list.is_empty() || pps_list.is_empty() {
         return Ok(None);
     }
 
-    // width / height は 0 で構築する。RTMP / openh264 / SRT 経路と同方針。
-    let entry = crate::video::h264::h264_sample_entry_from_annexb(0, 0, &annexb)?;
+    let (entry, _frame_size) =
+        crate::video::h264::h264_sample_entry_from_sps_pps_lists(sps_list, pps_list)?;
     Ok(Some(entry))
 }
 
@@ -2190,8 +2190,16 @@ mod tests {
 
     // 映像 sample_entry テスト用の Annex-B バイト列フィクスチャ。
     // NAL header: 0x67 = SPS、0x68 = PPS、0x65 = IDR、0x41 = 非 IDR、0x85 = forbidden_zero_bit セット。
-    const SPS_INITIAL: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xab];
-    const SPS_UPDATED: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1e, 0xac];
+    // SPS は parse_sps が完走できる実 SPS バイト列 (ffmpeg + libx264 で生成した Baseline + 320x240
+    // および Baseline + 1920x1080) を使う。短い偽 SPS では parse_sps がビット切れで Err を返す。
+    const SPS_INITIAL: &[u8] = &[
+        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00,
+        0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80,
+    ];
+    const SPS_UPDATED: &[u8] = &[
+        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02, 0x27, 0xe5, 0xc0,
+        0x44, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,
+    ];
     const PPS: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x06, 0xe2];
     const IDR: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21];
     const P_FRAME: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x21, 0x6c];
