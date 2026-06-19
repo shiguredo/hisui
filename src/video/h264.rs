@@ -237,57 +237,10 @@ fn parse_sps(sps: &[u8]) -> crate::Result<SpsParams> {
         )));
     }
 
-    // High 系プロファイル分岐 (仕様 7.3.2.1.1)。範囲外値は仕様 7.4.2.1.1 を根拠に Err 化する。
+    // High 系プロファイルは追加フィールドを SPS から取り出し、それ以外は 4:2:0 デフォルトを使う
     let (chroma_array_type, high_profile_params) = if is_high {
-        let chroma_format_idc = reader.read_ue()?;
-        if chroma_format_idc > 3 {
-            return Err(crate::Error::new(format!(
-                "invalid H.264 SPS: chroma_format_idc out of spec range (0..=3): {chroma_format_idc}"
-            )));
-        }
-        let separate_colour_plane_flag = if chroma_format_idc == 3 {
-            reader.read_u(1)?
-        } else {
-            0
-        };
-        let bit_depth_luma_minus8 = reader.read_ue()?;
-        if bit_depth_luma_minus8 > 6 {
-            return Err(crate::Error::new(format!(
-                "invalid H.264 SPS: bit_depth_luma_minus8 out of spec range (0..=6): {bit_depth_luma_minus8}"
-            )));
-        }
-        let bit_depth_chroma_minus8 = reader.read_ue()?;
-        if bit_depth_chroma_minus8 > 6 {
-            return Err(crate::Error::new(format!(
-                "invalid H.264 SPS: bit_depth_chroma_minus8 out of spec range (0..=6): {bit_depth_chroma_minus8}"
-            )));
-        }
-        reader.skip_u(1)?; // qpprime_y_zero_transform_bypass_flag
-        let seq_scaling_matrix_present_flag = reader.read_u(1)?;
-        if seq_scaling_matrix_present_flag == 1 {
-            // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個の scaling_list を読み飛ばす
-            let scaling_list_count = if chroma_format_idc == 3 { 12 } else { 8 };
-            for i in 0..scaling_list_count {
-                let seq_scaling_list_present_flag = reader.read_u(1)?;
-                if seq_scaling_list_present_flag == 1 {
-                    // 先頭 6 個は 4x4 (size 16)、残りは 8x8 (size 64)
-                    let size = if i < 6 { 16 } else { 64 };
-                    skip_scaling_list(&mut reader, size)?;
-                }
-            }
-        }
-
-        let chroma_array_type = if separate_colour_plane_flag == 1 {
-            0
-        } else {
-            chroma_format_idc
-        };
-        let high_profile_params = HighProfileSpsParams {
-            chroma_format_idc: chroma_format_idc as u8,
-            bit_depth_luma_minus8: bit_depth_luma_minus8 as u8,
-            bit_depth_chroma_minus8: bit_depth_chroma_minus8 as u8,
-        };
-        (chroma_array_type, Some(high_profile_params))
+        let (chroma_array_type, params) = read_high_profile_sps_fields(&mut reader)?;
+        (chroma_array_type, Some(params))
     } else {
         // Baseline / Main / Extended は chroma_format_idc が SPS に含まれず 4:2:0 がデフォルト
         (1, None)
@@ -336,6 +289,66 @@ fn parse_sps(sps: &[u8]) -> crate::Result<SpsParams> {
 /// `parse_sps` を内部呼び出しする。
 pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> {
     parse_sps(sps).map(|p| (p.width as usize, p.height as usize))
+}
+
+/// High 系プロファイル時の SPS 追加フィールドを読み取り、`HighProfileSpsParams` と
+/// `chroma_array_type` を返す（仕様 7.3.2.1.1 の High 系プロファイル分岐）。
+///
+/// 各フィールドの値域 (chroma_format_idc は 0..=3、bit_depth_*_minus8 は 0..=6) は
+/// 仕様 7.4.2.1.1 を根拠に Err 化する。`seq_scaling_matrix_present_flag` 経路は
+/// avcC に反映先がないためビット位置を進めるためにのみ skip する。
+fn read_high_profile_sps_fields(
+    reader: &mut H264BitReader<'_>,
+) -> crate::Result<(u32, HighProfileSpsParams)> {
+    let chroma_format_idc = reader.read_ue()?;
+    if chroma_format_idc > 3 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: chroma_format_idc out of spec range (0..=3): {chroma_format_idc}"
+        )));
+    }
+    let separate_colour_plane_flag = if chroma_format_idc == 3 {
+        reader.read_u(1)?
+    } else {
+        0
+    };
+    let bit_depth_luma_minus8 = reader.read_ue()?;
+    if bit_depth_luma_minus8 > 6 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: bit_depth_luma_minus8 out of spec range (0..=6): {bit_depth_luma_minus8}"
+        )));
+    }
+    let bit_depth_chroma_minus8 = reader.read_ue()?;
+    if bit_depth_chroma_minus8 > 6 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: bit_depth_chroma_minus8 out of spec range (0..=6): {bit_depth_chroma_minus8}"
+        )));
+    }
+    reader.skip_u(1)?; // qpprime_y_zero_transform_bypass_flag
+    let seq_scaling_matrix_present_flag = reader.read_u(1)?;
+    if seq_scaling_matrix_present_flag == 1 {
+        // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個の scaling_list を読み飛ばす
+        let scaling_list_count = if chroma_format_idc == 3 { 12 } else { 8 };
+        for i in 0..scaling_list_count {
+            let seq_scaling_list_present_flag = reader.read_u(1)?;
+            if seq_scaling_list_present_flag == 1 {
+                // 先頭 6 個は 4x4 (size 16)、残りは 8x8 (size 64)
+                let size = if i < 6 { 16 } else { 64 };
+                skip_scaling_list(reader, size)?;
+            }
+        }
+    }
+
+    let chroma_array_type = if separate_colour_plane_flag == 1 {
+        0
+    } else {
+        chroma_format_idc
+    };
+    let params = HighProfileSpsParams {
+        chroma_format_idc: chroma_format_idc as u8,
+        bit_depth_luma_minus8: bit_depth_luma_minus8 as u8,
+        bit_depth_chroma_minus8: bit_depth_chroma_minus8 as u8,
+    };
+    Ok((chroma_array_type, params))
 }
 
 /// pic_order_cnt_type に応じた追加フィールド群を読み飛ばす（仕様 7.3.2.1.1）
