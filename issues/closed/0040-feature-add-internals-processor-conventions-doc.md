@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-17
-- Completed:
+- Completed: 2026-06-19
 - Model: Claude Opus 4.7
 - Branch: feature/add-internals-processor-conventions-doc
 - Polished:
@@ -111,3 +111,27 @@ Low。既存実装は規約を満たしており、ドキュメント不在に�
 - issue 0032 / 0033（RTSP / SRT Annex-B 映像経路への不変条件拡張）
 - issue 0034（writer 入口の不変条件違反検知）
 - issue 0039（writer 側 fallback 補完経路の削除可能性調査。本 issue が前提となる規約ドキュメントを定義する位置づけ）
+
+## クローズ理由（2026-06-19・既存 docs/internals/ と他 open issue で実質網羅されるため実装せず close）
+
+本 issue が想定した「プロセッサ種別ごとの規約・不変条件まとめ」の規約候補 8 項目を `docs/internals/` の既存ドキュメントおよび open issue（0039 / 0046）の射程に照合した結果、独立した統一ドキュメントを起こす意義が小さいと判断した。
+
+### 既存 docs/internals/ で網羅済み
+
+- timestamp の単調性・時刻空間: `timestamp.md`（`TimestampMapper` / `WrappingTimestampNormalizer` / `SampleBasedTimestampAligner`）
+- channels / sample_rate の前提: `mixer.md` の「sample rate / channels の統一」節
+- フレーム生成 / 消費の単位: `media_pipeline.md`（`Message::Media` / `Eos` / `Syn` の 3 種）、`mixer.md`（audio / video 比較表）
+- 統計フィールドの命名規則: `stats.md` および `processor_id.md`（カテゴリ命名規則表）
+
+### 他 open issue で吸収予定
+
+- validation 責務分担: issue 0046（5 processor 構造体の validation 責務分担を確定する）の設計方針節が「`docs/internals/` 配下に責務分担ノートとして残す（0040 との合流候補）」を明示。0046 完了時にその章として `docs/internals/` 配下に生まれる
+- sample_entry 不変条件・writer 入口違反検知: issue 0039（writer 側 fallback 補完経路の削除可能性調査）の結論次第で writer 入口違反検知節の要否が変わるため、集約は 0039 完了後に判断する
+
+### 単独 issue で起こすには分量不足
+
+keyframe 要件・エラー伝播の規約は確かに既存 docs に集約されていないが、新規 processor 追加で痛みが具体化したタイミングで既存 `docs/internals/` 配下の該当ファイルに追記する incremental approach のほうが「If it hurts, do it more often」原則と整合する。
+
+### issue 0039 への影響
+
+issue 0039 の関連節は「本 issue（0040）が前提となる規約ドキュメントを定義する位置づけ」と書いているが、0040 の規約ドキュメントは不要と判断したため、0039 はこの前提なしで進めて問題ない（0039 自体の調査範囲は writer 側 fallback の削除可否で完結する）。
