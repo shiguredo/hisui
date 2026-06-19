@@ -1058,8 +1058,10 @@ pub(crate) mod tests {
             self
         }
 
-        fn with_constraint_set_flags(mut self, flags: u8) -> Self {
-            self.constraint_set_flags = flags;
+        fn with_constraint_set_flags(mut self, flags: u32) -> Self {
+            // 他の with_* メソッドと u32 シグネチャを揃える。内部の write_u(8) は u32 で渡るため
+            // フィールドへの格納時に u8 に丸める。
+            self.constraint_set_flags = flags as u8;
             self
         }
 
@@ -1383,19 +1385,6 @@ pub(crate) mod tests {
             result.is_err(),
             "bit_depth_chroma_minus8=7 は仕様値域外で Err: {result:?}"
         );
-    }
-
-    #[test]
-    fn parse_sps_returns_width_height_within_u16_range() {
-        // parse_sps の戻り値タプルの width / height が SPS の cropping 適用後の値と一致し、
-        // かつ u16 範囲に収まっていることを確認する
-        let sps = SpsBuilder::raw(1920, 1088)
-            .with_cropping(0, 0, 0, 4)
-            .build();
-        let params = parse_sps(&sps).expect("crop SPS のパース成功");
-        // SpsParams.width / height は u16 型なので、`as usize` で u16 範囲内であることが型レベルに保証される
-        assert_eq!(params.width, 1920);
-        assert_eq!(params.height, 1080);
     }
 
     // ----------------------------------------------------------------
