@@ -47,7 +47,7 @@
 ### 1. 描画ライブラリ
 
 - shiguredo/raden (https://github.com/shiguredo/raden) v2026.1.1 を採用する (crates.io 公開済み、Apache-2.0)。Cranelift JIT ベースの CPU only な 2D ベクターグラフィックスライブラリで、GPU の無い CI 環境とも相性が良い。
-- `Cargo.toml` に `raden = "=2026.1.1"` の厳密固定で追加する。shiguredo-rust 規約は本来「マイナーまで」固定だが、raden は「実験的プロジェクトであり API や内部実装は予告なく大幅変更されうる」(公式 README) と明記された例外的状況のため、本 issue ではパッチまで含めた `=` 固定を採用する。`Cargo.toml` の依存定義に「テキストオーバーレイ描画用 (実験的、API 不安定のため `=` 固定)」のコメントを付す。
+- `Cargo.toml` に `raden = "=2026.1.1"` で追加する (hisui の依存は他のクレートと同様パッチまで含めた `=` 固定が慣行、`Cargo.toml` 冒頭 NOTE 参照)。
 - raden の連鎖依存 (`cranelift-*` 系・フォント解析系) によりビルド時間・バイナリサイズが増加する。実装着手時に CI 時間影響と clippy / fmt 等の既存 CI への影響を計測し、許容範囲外なら別途検討する。
 
 #### raden 調査結果 (確定済み)
