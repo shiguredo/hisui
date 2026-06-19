@@ -1293,7 +1293,8 @@ fn select_video_track(
 /// - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみ / SPS または PPS の
 ///   片方が欠ける場合は `Ok(None)`（`sprop-parameter-sets` は MAY なので不完全な構成は許容し、
 ///   IDR 内 inline SPS / PPS による代替経路 (`VideoRtpReceiver::apply_sample_entry`) に委ねる）
-/// - Base64 デコード失敗、`h264_sample_entry_from_sps_pps_lists` の Err は
+/// - Base64 デコード失敗、forbidden_zero_bit が立った NAL ヘッダ、
+///   `h264_sample_entry_from_sps_pps_lists` の Err は
 ///   `crate::Error` として伝播（壊れた SDP として接続を打ち切る）
 fn extract_sample_entry_from_sprop(
     attributes: &[SdpAttribute],
@@ -1323,6 +1324,13 @@ fn extract_sample_entry_from_sprop(
             .map_err(|e| Error::new(format!("invalid sprop-parameter-sets base64: {e}")))?;
         if nal.is_empty() {
             continue;
+        }
+        // NAL ヘッダ 1 バイトの最上位 bit は forbidden_zero_bit で ITU-T H.264 7.4.1 上 0 (MUST)。
+        // Annex-B 走査経路 (H264AnnexBNalUnits) と対称に Err で接続を打ち切る。
+        if (nal[0] >> 7) != 0 {
+            return Err(Error::new(
+                "invalid H.264 NAL header in sprop-parameter-sets: forbidden_zero_bit is set",
+            ));
         }
         // NAL ヘッダ 1 バイトの下位 5 bit が NAL ユニットタイプ
         let nal_unit_type = nal[0] & 0x1F;
@@ -2560,6 +2568,21 @@ mod tests {
         let err = receiver
             .apply_sample_entry(&build_test_depacketized_frame(BROKEN_NAL.to_vec()))
             .expect_err("forbidden_zero_bit が立った NAL では Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("forbidden_zero_bit"),
+            "エラーメッセージに `forbidden_zero_bit` が含まれること（実際: {display}）"
+        );
+    }
+
+    #[test]
+    fn select_video_track_returns_err_on_sprop_with_broken_nal() {
+        // sprop-parameter-sets に forbidden_zero_bit が立った NAL を含めると Err を返して
+        // 接続を打ち切る。apply_sample_entry 経路 (H264AnnexBNalUnits 経由) と対称の挙動。
+        let sprop = sprop_value_from(&[SPS_INITIAL, PPS, BROKEN_NAL]);
+        let sdp = build_test_sdp_with_fmtp(&format!("sprop-parameter-sets={sprop}"));
+        let err = parse_video_track(&sdp)
+            .expect_err("forbidden_zero_bit が立った NAL を含む sprop は Err を返すこと");
         let display = format!("{err:?}");
         assert!(
             display.contains("forbidden_zero_bit"),
