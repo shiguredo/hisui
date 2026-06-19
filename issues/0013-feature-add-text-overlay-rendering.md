@@ -71,7 +71,7 @@ raden v2026.1.1 のソースを直接確認して以下を確定済み。本表�
 #### CLI 引数
 
 - `--font-search-root <dir>`: フォント探索ルート (絶対パス必須)。サーバはこの配下のファイルのみ参照する。
-- `--default-font <fontName>`: 省略時のデフォルトフォント名 (例: `Roboto-Regular.ttf`)。
+- `--default-font <fontName>`: 省略時のデフォルトフォント名 (例: `PublicSans-Regular.ttf`)。
 
 `src/subcommand_server.rs:80-87` 近傍 (canvas 引数の隣) に `noargs::opt("font-search-root")` / `noargs::opt("default-font")` で追加し、`ObswsSessionState::new` (`src/obsws/state.rs:56-62`) と `start_obsws_server` (`src/obsws/server.rs`) に伝播させる。
 
@@ -92,7 +92,7 @@ raden v2026.1.1 のソースを直接確認して以下を確定済み。本表�
 #### その他
 
 - CJK / フォントに含まれない文字: raden の既定挙動 (silent skip、glyph_id=0 はアドバンスのみ進めて描画スキップ。tofu は出ない) のまま透過 I420A レイヤに含める。代替フォント探索・複数フォント登録の動的管理 API・フォールバックチェーン・CJK 標準フォント提供は本 issue では扱わない。
-- テスト用フォントとして Roboto Regular (Apache 2.0、Google Fonts 配布版) を `testdata/fonts/Roboto-Regular.ttf` に配置する。
+- テスト用フォントとして Public Sans Regular (SIL Open Font License 1.1、USWDS 配布版) を `testdata/fonts/PublicSans-Regular.ttf` に配置する。
 
 ### 3. 描画 API (内部)
 
@@ -256,7 +256,7 @@ ResponseData: `textOverlays` 配列。各要素は以下:
   - `docs/obsws/STATE_FILE.md` 永続化対象外追記
   - `docs/internals/mixer.md` への `z` 予約値追記
   - `README.md` に「対応プラットフォームは 64bit」を追記
-- テスト (`testdata/fonts/Roboto-Regular.ttf` を本 issue のコミットに含める):
+- テスト (`testdata/fonts/PublicSans-Regular.ttf` を本 issue のコミットに含める):
   - `src/obsws/session/tests.rs` 相当箇所に 4 メソッド往復 + 全エラーケース (`AlreadyExists` / `NotFound` / `InvalidFontName` / `FontResolveFailed` / `InvalidColor` / `InvalidFontSize` / `InvalidText` / `LimitExceeded` / `Disabled` / `MISSING_REQUEST_FIELD`) の検証を追加する。
   - `TextOverlayProcessor` の単体テストで raden → I420A 変換後の A プレーン非ゼロ領域が指定 x/y 近傍に収まっていることを検証する。
   - `pbt/` に x/y/fontSize の境界値 PBT を追加する (`text=""` / `x = i64 境界` / `fontSize = 1` / `fontSize = canvas_height` / 改行のみ / Unicode 制御文字 / フォント不在文字 / `text` 長境界 / 行数境界)。
