@@ -5,7 +5,7 @@
 obsws の設定を再起動後も復元するための永続化ファイルである。
 
 - 永続化対象: output 設定（`stream` / `record` / `rtmp_outbound` / `sora` / `hls` / `mpeg_dash`）、scene 構成、input 定義、scene item 配置
-- 永続化しない項目: runtime state（配信中/録画中の状態）、canvas 設定（CLI 引数で指定）、transition runtime state
+- 永続化しない項目: runtime state（配信中/録画中の状態）、canvas 設定（CLI 引数で指定）、transition runtime state、テキストオーバーレイ（`HisuiCreateTextOverlay` で作成した overlay は揮発的、再起動でクリアされる）
 - state file が未指定の場合、永続化は一切行われない（従来どおり起動引数とデフォルト値で動作する）
 
 ## セキュリティに関する注意

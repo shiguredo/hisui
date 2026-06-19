@@ -142,6 +142,14 @@ video mixer の RPC は `UpdateConfig` と `Finish` です。
 
 `UpdateConfig` では、削除された input の receiver を止め、新規 input を subscribe し直し、 draw order と stats を更新します。
 
+### `InputTrack.z` の予約値
+
+`InputTrack.z` (`src/mixer/video.rs` の `pub z: isize`、obsws 層の `ObswsVideoMixerInputTrack.z` は `i64`) のうち **`i64::MAX` (= 64bit 環境では `isize::MAX` と同値) はテキストオーバーレイ専用の予約値**です。一般の input track からは指定しないでください。
+
+`HisuiCreateTextOverlay` 等で作成したテキストオーバーレイは、`TextOverlayProcessor` が透過 I420A レイヤとして 1 本 publish したものを `build_composed_output_plan` (`src/obsws/output_plan.rs`) が `z = i64::MAX` の `InputTrack` として末尾に追加します。これにより、ユーザー側 input track よりも常に上に合成されます。
+
+hisui のサポート対象は 64bit プラットフォーム (`isize::MAX == i64::MAX` 前提) のみです。32bit プラットフォームは想定外で、obsws レイヤと内部 mixer レイヤの z 値が整合しなくなる可能性があります。
+
 ## Audio Realtime Mixer
 
 ### 役割
