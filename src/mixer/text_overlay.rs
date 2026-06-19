@@ -102,6 +102,12 @@ impl TextOverlayConfig {
 /// ACK/SYN back-pressure の閾値。`VideoRealtimeMixerRunner` / `ColorSource` と同じ値。
 const MAX_NOACKED_COUNT: u64 = 100;
 
+/// `TextOverlayProcessor` の出力 TrackId 文字列 (常駐インスタンスのため固定)。
+pub const TEXT_OVERLAY_TRACK_ID: &str = "program:text_overlay";
+
+/// `TextOverlayProcessor` の ProcessorId 文字列 (常駐インスタンスのため固定)。
+pub const TEXT_OVERLAY_PROCESSOR_ID: &str = "program:text_overlay_processor";
+
 /// 1 processor が同時に保持できるテキストオーバーレイの最大数 (DoS 対策の上限)。
 pub const OVERLAY_LIMIT: usize = 64;
 
@@ -115,6 +121,7 @@ pub const TEXT_MAX_LINES: usize = 64;
 ///
 /// `font_color_argb` は `0xAARRGGBB` の straight alpha 値。default (`HisuiCreateTextOverlay` で
 /// 省略時) は `0xFFFFFFFF` (不透明白)。
+/// `z` は確定値 (`TextOverlaySpecInput::z = None` の場合は Processor が宣言順から確定する)。
 #[derive(Debug, Clone)]
 pub struct TextOverlaySpec {
     pub text: String,
@@ -124,6 +131,20 @@ pub struct TextOverlaySpec {
     pub font_color_argb: u32,
     pub font_name: String,
     pub z: i64,
+}
+
+/// `HisuiCreateTextOverlay` の入力 (確定前)。
+///
+/// `z = None` の場合は Processor が「現在の最大 z + 1」を割り当てる (= 宣言順、後勝ち)。
+#[derive(Debug, Clone)]
+pub struct TextOverlaySpecInput {
+    pub text: String,
+    pub x: i64,
+    pub y: i64,
+    pub font_size: u32,
+    pub font_color_argb: u32,
+    pub font_name: String,
+    pub z: Option<i64>,
 }
 
 /// `HisuiUpdateTextOverlay` 用の部分更新パッチ。`None` は省略 (= 現状維持)。
@@ -193,7 +214,7 @@ impl std::error::Error for TextOverlayError {}
 pub enum TextOverlayRpcMessage {
     Add {
         name: String,
-        spec: TextOverlaySpec,
+        input: TextOverlaySpecInput,
         reply_tx: oneshot::Sender<Result<(), TextOverlayError>>,
     },
     Update {
@@ -316,6 +337,9 @@ struct ProcessorState {
     overlays: BTreeMap<String, TextOverlaySpec>,
     cached_frame: Option<Arc<VideoFrame>>,
     dirty: bool,
+    /// 入力 `z = None` (宣言順) を解決する際に使う次の自動 z。
+    /// `z = Some(v)` を受けた場合は `next_auto_z = max(next_auto_z, v + 1)` に更新する。
+    next_auto_z: i64,
 }
 
 impl ProcessorState {
@@ -327,6 +351,7 @@ impl ProcessorState {
             overlays: BTreeMap::new(),
             cached_frame: None,
             dirty: false,
+            next_auto_z: 0,
         }
     }
 
@@ -338,10 +363,10 @@ impl ProcessorState {
         match msg {
             TextOverlayRpcMessage::Add {
                 name,
-                spec,
+                input,
                 reply_tx,
             } => {
-                let _ = reply_tx.send(self.add(name, spec));
+                let _ = reply_tx.send(self.add(name, input));
             }
             TextOverlayRpcMessage::Update {
                 name,
@@ -359,14 +384,40 @@ impl ProcessorState {
         }
     }
 
-    fn add(&mut self, name: String, spec: TextOverlaySpec) -> Result<(), TextOverlayError> {
+    fn add(&mut self, name: String, input: TextOverlaySpecInput) -> Result<(), TextOverlayError> {
         if self.overlays.contains_key(&name) {
             return Err(TextOverlayError::AlreadyExists);
         }
         if self.overlays.len() >= OVERLAY_LIMIT {
             return Err(TextOverlayError::LimitExceeded);
         }
-        validate_spec(&spec, &self.config, self.canvas_height.get())?;
+        validate_spec_fields(
+            &input.text,
+            input.font_size,
+            &input.font_name,
+            &self.config,
+            self.canvas_height.get(),
+        )?;
+        let resolved_z = match input.z {
+            Some(z) => {
+                self.next_auto_z = self.next_auto_z.max(z.saturating_add(1));
+                z
+            }
+            None => {
+                let z = self.next_auto_z;
+                self.next_auto_z = self.next_auto_z.saturating_add(1);
+                z
+            }
+        };
+        let spec = TextOverlaySpec {
+            text: input.text,
+            x: input.x,
+            y: input.y,
+            font_size: input.font_size,
+            font_color_argb: input.font_color_argb,
+            font_name: input.font_name,
+            z: resolved_z,
+        };
         self.overlays.insert(name, spec);
         self.dirty = true;
         Ok(())
@@ -379,7 +430,15 @@ impl ProcessorState {
             .ok_or(TextOverlayError::NotFound)?
             .clone();
         let updated = apply_patch(existing, patch);
-        validate_spec(&updated, &self.config, self.canvas_height.get())?;
+        validate_spec_fields(
+            &updated.text,
+            updated.font_size,
+            &updated.font_name,
+            &self.config,
+            self.canvas_height.get(),
+        )?;
+        // 明示 z 更新で next_auto_z を後方互換に保つ
+        self.next_auto_z = self.next_auto_z.max(updated.z.saturating_add(1));
         self.overlays.insert(name, updated);
         self.dirty = true;
         Ok(())
@@ -561,14 +620,16 @@ fn unpremultiply_argb(data: &mut [u8]) {
     }
 }
 
-fn validate_spec(
-    spec: &TextOverlaySpec,
+fn validate_spec_fields(
+    text: &str,
+    font_size: u32,
+    font_name: &str,
     config: &TextOverlayConfig,
     canvas_height: usize,
 ) -> Result<(), TextOverlayError> {
-    validate_text(&spec.text)?;
-    validate_font_size(spec.font_size, canvas_height)?;
-    validate_font_name_and_resolve(&spec.font_name, config)?;
+    validate_text(text)?;
+    validate_font_size(font_size, canvas_height)?;
+    validate_font_name_and_resolve(font_name, config)?;
     // fontColor は u32 に詰める時点で必ず妥当 (`0xAARRGGBB` 範囲内) なので、ここでの追加検証は不要。
     // 値域チェックは obsws ハンドラの正規表現マッチで担保する。
     Ok(())

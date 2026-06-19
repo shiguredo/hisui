@@ -145,6 +145,7 @@ async fn create_initialized_coordinator_handle_with_pipeline_and_record_dir(
         registry.canvas_width(),
         registry.canvas_height(),
         registry.frame_rate(),
+        None,
     )
     .map_err(|e| {
         crate::Error::new(format!(

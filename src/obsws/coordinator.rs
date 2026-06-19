@@ -27,6 +27,7 @@ mod output_sora;
 mod output_stream;
 mod scene;
 mod scene_item;
+mod text_overlay;
 
 use crate::obsws::event::TaggedEvent;
 use crate::obsws::message::ObswsSessionStats;
@@ -661,6 +662,39 @@ impl ObswsCoordinator {
             "HisuiRemoveOutput" => {
                 self.handle_remove_output(&request_type, &request_id, request.request_data.as_ref())
             }
+            // --- テキストオーバーレイ ---
+            "HisuiCreateTextOverlay" => {
+                self.handle_create_text_overlay(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "HisuiUpdateTextOverlay" => {
+                self.handle_update_text_overlay(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "HisuiRemoveTextOverlay" => {
+                self.handle_remove_text_overlay(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "HisuiListTextOverlays" => {
+                self.handle_list_text_overlays(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
             // --- レジストリ状態変更なし ---
             "BroadcastCustomEvent" => {
                 self.handle_broadcast_custom_event(&request_id, request.request_data.as_ref())
@@ -841,11 +875,16 @@ impl ObswsCoordinator {
             .map(|scene| scene.scene_uuid)
             .unwrap_or_default();
         let scene_inputs = self.state.list_current_program_scene_input_entries();
+        let text_overlay_track = self
+            .state
+            .text_overlay_config()
+            .map(|_| crate::TrackId::new(crate::mixer::text_overlay::TEXT_OVERLAY_TRACK_ID));
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
             self.state.canvas_width(),
             self.state.canvas_height(),
             self.state.frame_rate(),
+            text_overlay_track,
         )
         .map_err(|e| {
             crate::Error::new(format!(
@@ -1130,6 +1169,11 @@ fn is_state_persisted_request(request_type: &str) -> bool {
             // output 管理
             | "HisuiCreateOutput"
             | "HisuiRemoveOutput"
+            // テキストオーバーレイ
+            | "HisuiCreateTextOverlay"
+            | "HisuiUpdateTextOverlay"
+            | "HisuiRemoveTextOverlay"
+            | "HisuiListTextOverlays"
     )
 }
 

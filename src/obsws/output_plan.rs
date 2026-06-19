@@ -53,11 +53,16 @@ fn round_to_even(value: f64) -> u32 {
 
 /// OBS 互換の出力プランを構築する。
 /// OBS と同様に、ソースの有無に関わらず常に映像（黒画面）と音声（無音）の両トラックを含める。
+///
+/// `text_overlay_track_id` が `Some` の場合は、video_mixer の最終 InputTrack として
+/// z = i64::MAX で TextOverlay の publish track を追加する。`None` の場合は何もしない
+/// (テキストオーバーレイ機能無効時)。
 pub fn build_composed_output_plan(
     scene_inputs: &[ObswsSceneInputEntry],
     canvas_width: crate::types::EvenUsize,
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
+    text_overlay_track_id: Option<TrackId>,
 ) -> Result<ObswsComposedOutputPlan, BuildObswsComposedOutputPlanError> {
     let mut source_plans = Vec::with_capacity(scene_inputs.len());
     let mut active_scene_inputs = Vec::with_capacity(scene_inputs.len());
@@ -86,7 +91,7 @@ pub fn build_composed_output_plan(
     let video_mixer_processor_id = ProcessorId::new("program:video_mixer");
 
     // source_plans と active_scene_inputs は同じ順序・同じ長さ
-    let video_mixer_input_tracks = source_plans
+    let mut video_mixer_input_tracks: Vec<ObswsVideoMixerInputTrack> = source_plans
         .iter()
         .zip(active_scene_inputs.iter())
         .filter_map(|(plan, scene_input)| {
@@ -158,6 +163,25 @@ pub fn build_composed_output_plan(
         })
         .collect();
 
+    // テキストオーバーレイ機能有効時のみ、video_mixer の最終 InputTrack として末尾追加する。
+    // z = i64::MAX により他の input track よりも常に上に合成される (専用予約値)。
+    if let Some(track_id) = text_overlay_track_id {
+        video_mixer_input_tracks.push(ObswsVideoMixerInputTrack {
+            track_id,
+            x: 0,
+            y: 0,
+            z: i64::MAX,
+            width: None,
+            height: None,
+            scale_x: None,
+            scale_y: None,
+            crop_top: 0,
+            crop_bottom: 0,
+            crop_left: 0,
+            crop_right: 0,
+        });
+    }
+
     Ok(ObswsComposedOutputPlan {
         source_processor_ids: source_plans
             .iter()
@@ -228,6 +252,7 @@ mod tests {
             crate::types::EvenUsize::new(1280).expect("valid width"),
             crate::types::EvenUsize::new(720).expect("valid height"),
             crate::video::FrameRate::FPS_30,
+            None,
         )
         .expect("output plan must build");
 

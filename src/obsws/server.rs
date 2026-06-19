@@ -311,14 +311,42 @@ pub async fn run_server(
         tracing::debug!("obsws initial start trigger was already completed");
     }
 
+    // テキストオーバーレイ機能が有効ならば、常駐 `TextOverlayProcessor` を spawn する。
+    // canvas は起動時固定なので、サーバ稼働中ずっと生かしてシーン切替でも再生成しない。
+    if let Some(config) = session_state.text_overlay_config().cloned() {
+        let processor = crate::mixer::text_overlay::TextOverlayProcessor::new(
+            session_state.canvas_width(),
+            session_state.canvas_height(),
+            session_state.frame_rate(),
+            crate::TrackId::new(crate::mixer::text_overlay::TEXT_OVERLAY_TRACK_ID),
+            config,
+        );
+        pipeline_handle
+            .spawn_processor(
+                crate::ProcessorId::new(crate::mixer::text_overlay::TEXT_OVERLAY_PROCESSOR_ID),
+                crate::ProcessorMetadata::new(
+                    crate::mixer::text_overlay::TEXT_OVERLAY_PROCESSOR_ID,
+                ),
+                |handle| async move { processor.run(handle).await },
+            )
+            .await
+            .map_err(|e| {
+                crate::Error::new(format!("failed to spawn text overlay processor: {e}"))
+            })?;
+    }
+
     // Program 出力を初期化する（常駐ミキサー）
     let program_output = {
         let scene_inputs = session_state.list_current_program_scene_input_entries();
+        let text_overlay_track = session_state
+            .text_overlay_config()
+            .map(|_| crate::TrackId::new(crate::mixer::text_overlay::TEXT_OVERLAY_TRACK_ID));
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
             session_state.canvas_width(),
             session_state.canvas_height(),
             session_state.frame_rate(),
+            text_overlay_track,
         )
         .map_err(|e| {
             crate::Error::new(format!(
