@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-18
-- Completed:
+- Completed: 2026-06-19
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-cleanup-json-rpc-name-remnants
 - Polished: 2026-06-19
@@ -127,3 +127,15 @@ GNU grep / BSD grep 共通の `-rnE` ERE で統一。closed 0041 と同流派。
 - closed PR #207 (`feature/remove-json-rpc` / merge commit `d4170ed8`): 本 issue の名残が生じた契機 (hisui server サブコマンドの JSON-RPC 機能全削除)。
 - closed issue 0041 (`feature/refactor-remove-unused-processor-json-impls` / merge commit `42979dae`): 5 processor 構造体の `DisplayJson` / `TryFrom` 削除。解決方法末尾 (line 150) で本 issue を含む 5 件の後追い起票候補が記録された。本 issue (0045) と open 0046 で 3 件を拾い、残る 2 件 (`endpoint_config()` テスト追加 / obsws output coordinator テスト追加) の起票管理は本 issue のスコープ外。
 - open issue 0046 (`feature/refactor-clarify-processor-validation-boundary`): 5 構造体の validation 責務分担を確定する issue。本 issue は validation のロジックは触らずリテラル文字列の内部命名衛生のみを扱うため、0046 と並行進行可能。`src/srt/inbound_endpoint.rs` の `endpoint_config()` (line 290-307) と `tsbpd_delay_duration_to_millis` (line 358-362) の周辺で先後に応じて trivial conflict は出るが、文言整合 (本 issue) と validation 移動 (0046) は意図が独立しているため機械的に解消できる。
+
+## 解決方法 (2026-06-19)
+
+`feature/refactor-cleanup-json-rpc-name-remnants` で次を実装した。3 コミット、3 ファイル +4/-6 行。
+
+- `docs/obsws/PROTOCOL_STATUS.md` の `StartStream` (line 342, 343) と `StartRecord` (line 370, 371) の 4 行を削除した。削除対象は削除済み JSON-RPC メソッド名 (`createPngFileSource` / `createVideoEncoder` / `createRtmpOutboundEndpoint` / `createVideoMixer` / `createMp4Writer`) を引用する内部実装説明 NOTE。
+- `src/srt/inbound_endpoint.rs:293` の `"keyLength requires passphrase to be specified"` を `"key_length requires passphrase to be specified"` に書き換えた (camelCase → Rust フィールド名 snake_case)。
+- `src/srt/inbound_endpoint.rs:361` の `format!("tsbpdDelayMs must be <= {}", u16::MAX)` を `format!("tsbpd_delay_ms must be <= {}", u16::MAX)` に書き換えた (同上)。
+- 完了条件の grep 2 種 (`createPng...` 系 7 メソッド名 / `tsbpdDelayMs|keyLength`) を `src/ docs/ tests/ pbt/ examples/` で実行し、すべて 0 件達成。
+- `cargo fmt --all --check` / CI 同等の cargo コマンド一式 (`cargo check --workspace` / `cargo check --workspace --no-default-features` / `cargo clippy --workspace --all-targets -- --deny warnings` / `cargo clippy --workspace --no-default-features -- --deny warnings` / `cargo test --workspace`) すべてパス。`cargo doc --no-deps` 警告数 着手時 4 → 完了時 4 (差分 0)。
+- `CHANGES.md` には記載しなかった (shiguredo-changelog 規約「`.md` 変更は反映しない」+ 利用者影響ゼロの内部命名衛生のため、closed 0036 / 0022 / 0041 と同じ先例に倣う)。
+- `/review-diff-code` で 5 観点を 1 周回し、致命的 0 件・重要 1 件・改善 4 件・削除候補 0 件を検出。重要 1 件は本 issue 実装 commit `a6523a76` のメッセージタイトルが 107 文字で shiguredo-git 規約 `{SEQ} {TITLE}` 形式 (80 文字以内) に違反していた件で、履歴書き換えは行わず再発防止メモリ ([Issue commit title format](issue-commit-title-format.md)) に記録。改善 4 件のうち変更不要 2 件 (`tsbpd_delay_ms` 命名ニュアンス / PROTOCOL_STATUS.md 章構造)、対応済み 1 件 (dead path 解消時の `endpoint_config()` テスト追加義務を本 issue 本文に申し送りとして commit `4d46d568` で追記)、本 issue スコープ外 1 件 (`endpoint_config()` 単体テスト追加 / obsws output coordinator テスト追加の独立 issue 起票推奨、closed 0041 line 150 の後追い候補 5 件中の残 2 件)。
