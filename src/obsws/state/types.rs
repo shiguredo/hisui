@@ -1403,4 +1403,7 @@ pub struct ObswsSessionState {
     pub(crate) frame_rate: crate::video::FrameRate,
     pub(crate) state_file_path: Option<PathBuf>,
     pub(crate) persistent_data: BTreeMap<String, nojson::RawJsonOwned>,
+    /// テキストオーバーレイ機能の起動時設定。
+    /// `None` のときは機能無効として扱う。
+    pub(crate) text_overlay_config: Option<crate::mixer::text_overlay::TextOverlayConfig>,
 }

@@ -98,6 +98,18 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
         .default("30")
         .take(args)
         .then(|o| o.value().parse())?;
+    let font_search_root: Option<PathBuf> = noargs::opt("font-search-root")
+        .ty("PATH")
+        .env("HISUI_SERVER_FONT_SEARCH_ROOT")
+        .doc("テキストオーバーレイ機能で参照するフォント探索ルート (絶対パス)")
+        .take(args)
+        .present_and_then(|o| o.value().parse())?;
+    let default_font: Option<String> = noargs::opt("default-font")
+        .ty("FONT_NAME")
+        .env("HISUI_SERVER_DEFAULT_FONT")
+        .doc("テキストオーバーレイのデフォルトフォント名 (--font-search-root 配下のファイル名)")
+        .take(args)
+        .present_and_then(|o| o.value().parse())?;
     let state_file: Option<PathBuf> = noargs::opt("state-file")
         .ty("PATH")
         .env("HISUI_SERVER_STATE_FILE")
@@ -150,6 +162,12 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
         _ => {}
     }
 
+    // テキストオーバーレイ機能の起動時設定を構築する。
+    // 両方未指定なら機能無効、片方のみは起動失敗、両方指定は canonicalize と raden での読み込み試行まで確認する。
+    let text_overlay_config =
+        crate::mixer::text_overlay::TextOverlayConfig::build(font_search_root, default_font)
+            .map_err(|e| noargs::Error::other(args, e))?;
+
     let addr = SocketAddr::new(host, port);
 
     run_internal(
@@ -167,6 +185,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
         canvas_height,
         frame_rate,
         state_file,
+        text_overlay_config,
         worker_threads,
         stats,
         emit_startup_info,
@@ -189,6 +208,7 @@ fn run_internal(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file: Option<PathBuf>,
+    text_overlay_config: Option<crate::mixer::text_overlay::TextOverlayConfig>,
     worker_threads: Option<NonZeroUsize>,
     stats: crate::stats::Stats,
     emit_startup_info: bool,
@@ -246,6 +266,7 @@ fn run_internal(
                             canvas_height,
                             frame_rate,
                             state_file,
+                            text_overlay_config,
                             stats,
                             emit_startup_info,
                             #[cfg(feature = "player")]
@@ -286,6 +307,7 @@ fn run_internal(
                 canvas_height,
                 frame_rate,
                 state_file,
+                text_overlay_config,
                 stats,
                 emit_startup_info,
             ))

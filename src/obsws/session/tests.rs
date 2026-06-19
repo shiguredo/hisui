@@ -1618,6 +1618,7 @@ async fn start_record_with_mp4_file_source_can_start_and_stop() -> crate::Result
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
         None,
+        None,
     );
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
@@ -1700,6 +1701,7 @@ async fn start_record_with_mp4_file_source_can_stop_immediately_after_start() ->
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
         None,
+        None,
     );
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
@@ -1771,6 +1773,7 @@ async fn start_record_with_multiple_audio_inputs_uses_audio_mixer() -> crate::Re
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
+        None,
         None,
     );
     for input_name in ["audio-file-1", "audio-file-2"] {
@@ -1850,6 +1853,7 @@ async fn start_record_with_no_inputs_succeeds() -> crate::Result<()> {
         crate::types::EvenUsize::new(1920).unwrap(),
         crate::types::EvenUsize::new(1080).unwrap(),
         crate::video::FrameRate::FPS_30,
+        None,
         None,
     );
 
@@ -2108,6 +2112,7 @@ async fn hls_output_uses_program_mixers_after_scene_item_change() -> crate::Resu
         crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
         crate::video::FrameRate::FPS_30,
         None,
+        None,
     );
     let input = ObswsInput::from_kind_and_settings(
         "mp4_file_source",
@@ -2236,6 +2241,7 @@ async fn dash_output_uses_program_mixers_after_scene_change() -> crate::Result<(
         crate::types::EvenUsize::new(1920).expect("canvas width must be valid"),
         crate::types::EvenUsize::new(1080).expect("canvas height must be valid"),
         crate::video::FrameRate::FPS_30,
+        None,
         None,
     );
     registry

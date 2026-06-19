@@ -159,6 +159,7 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
+    text_overlay_config: Option<crate::mixer::text_overlay::TextOverlayConfig>,
     stats: crate::stats::Stats,
     emit_startup_info: bool,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
@@ -260,6 +261,7 @@ pub async fn run_server(
         canvas_height,
         frame_rate,
         resolved_state_file_path,
+        text_overlay_config,
     );
 
     // state file から読み込んだ設定を反映する
