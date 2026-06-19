@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-18
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-06-19
 - Model: Opus 4.7
 - Branch: feature/refactor-h264-sample-entry-from-sps-pps-lists
 - Polished: 2026-06-19
@@ -358,4 +358,64 @@ writer 入口の `resolve_*_sample_entry` (issue 0034 で導入された fallbac
 
 ## 解決方法
 
-実装着手後にここに記述する。
+設計方針の §1 / §2 / §3 と推奨パッチ順序に沿って実装し、レビュー指摘を踏まえて追加対応した。本ブランチで合計 9 コミット。
+
+### §1 / §2 / §3: 新ヘルパー関数と薄いラッパー化
+
+- `src/video/h264.rs` に `pub fn h264_sample_entry_from_sps_pps_lists(sps_list, pps_list) -> Result<(SampleEntry, VideoFrameSize)>` を新設した。入力契約は EBSP 形式 (ISO/IEC 14496-15 §5.3.3.1、NAL ヘッダ 1 バイト含む、start code なし)。先頭 SPS のみ `parse_sps` でパースし avcC フィールドに反映する。`pps_list[i]` の NAL タイプ検査も内部で実施する。
+- `h264_sample_entry_from_annexb` のシグネチャから `width` / `height` 引数を削除し、内部で `H264AnnexBNalUnits` を 1 回走査して SPS / PPS を抽出する薄いラッパーに変更した (破壊的シグネチャ変更)。
+- `extract_dimensions_from_sps` の `pub` API シグネチャは維持し、内部実装を `parse_sps(sps).map(|p| (p.width as usize, p.height as usize))` の薄いラッパーにした。`pbt/tests/prop_h264_sps.rs` のクラッシュフリー PBT 専用 API として残置する旨を docstring に明示した。
+
+### parse_sps と SpsParams
+
+- `fn parse_sps(sps: &[u8]) -> Result<SpsParams>` を内部関数として実装した。`SpsParams` / `HighProfileSpsParams` は非 pub のモジュール内 struct。
+- ITU-T H.264 仕様 7.4.2.1.1 の値域外を Err 化: `profile_idc` が `{66, 77, 88} ∪ H264_HIGH_PROFILES` 以外、High 系で `chroma_format_idc > 3` / `bit_depth_luma_minus8 > 6` / `bit_depth_chroma_minus8 > 6`。
+- High 系プロファイル分岐は `fn read_high_profile_sps_fields(reader) -> Result<(u32, HighProfileSpsParams)>` に切り出し、`parse_sps` 本体を約 60 行短縮した。`read_chroma_array_type` は削除して新関数に統合。`rbsp_from_sps_nalu` / `skip_pic_order_cnt_type_extras` / `read_dimensions_with_cropping` は関数として残置。
+
+### 全 7 呼び出し側追従
+
+- SRT inbound `build_video_sample`: 単一ループで IDR 判定 + SPS / PPS NAL 収集 (`Vec<Vec<u8>>` + `nalu.data.to_vec()`) に統合し、`h264_sample_entry_from_sps_pps_lists` を直接呼ぶ形に変更。`extract_dimensions_from_sps` 呼び出しを削除。
+- RTSP `apply_sample_entry`: 同様に NAL 走査を 1 回化し、`Avc1Box.visual.width / .height` が SPS 由来の実値になる。
+- RTSP `extract_sample_entry_from_sprop`: Base64 デコード結果を直接 SPS / PPS リストに振り分け、`h264_sample_entry_from_sps_pps_lists` を呼ぶ。`forbidden_zero_bit` の検査 (ITU-T H.264 7.4.1 の MUST) を追加して `apply_sample_entry` 経路と対称にした。Ok(None) / Err 境界を docstring で明示。
+- openh264 encoder: `create_sequence_header_annexb` 呼び出しを削除し、`encoded.sps_list.clone()` / `encoded.pps_list.clone()` を `h264_sample_entry_from_sps_pps_lists` に直接渡す形に変更。`VideoFrame.size` は引き続き `frame.size()` (encoder 設定値) を使う既存挙動を維持。
+- video_toolbox encoder: 独自 `h264_sample_entry` 関数を削除し、`h264_sample_entry_from_sps_pps_lists` に統一。H.264 経路に「空 sps_list / pps_list でサンプルエントリー構築をスキップ」のガードを追加 (openh264 経路と対称、非 keyframe フレームでのエンコーダ落ち回避)。H.265 経路はスコープ外のため挙動を変更せず。
+- nvcodec encoder: `h264_sample_entry_from_annexb(&seq_params)` (新シグネチャ) を呼ぶ形に追従。`SharedSampleEntry::new(...)` で wrap する既存挙動を維持。
+- decoder/openh264 テスト: 偽 SPS (8 バイト) を `crate::video::h264::tests::SPS_320X240` (24 バイト実 SPS) に差し替え。AVCC 形式テストの NAL 長 prefix `[0, 0, 0, 8]` を `[0, 0, 0, 24]` に同時更新。
+
+### 定数 / 関数削除
+
+- `H264_PROFILE_BASELINE` / `H264_LEVEL_3_1` 定数を削除。
+- `src/encoder/video_toolbox.rs::h264_sample_entry` 独自関数を削除。
+- `src/video/h264.rs::create_sequence_header_annexb` 関数を削除 (本 issue 完了後の呼び出し側ゼロ)。
+- `src/encoder/video_toolbox.rs` の import 整理。
+
+### テスト追加・既存テスト維持
+
+- `src/video/h264.rs::tests` を `pub(crate) mod tests` 化し、`SPS_320X240` / `SPS_1920X1080` を `pub(crate) const` 化。Annex-B 形式は `LazyLock<Vec<u8>>` で遅延初期化 (`SPS_320X240_ANNEXB` / `SPS_1920X1080_ANNEXB`)。decoder/openh264.rs / RTSP / SRT inbound のテストフィクスチャ重複を解消。
+- `SpsBuilder` を `with_profile_idc(u32)` / `with_constraint_set_flags(u32)` / `with_chroma_format_idc(u32)` / `with_bit_depth_luma_minus8(u32)` / `with_bit_depth_chroma_minus8(u32)` で拡張。`build` 内のハードコード値をフィールド参照に置換。引数型は他の `with_*` メソッドと u32 に揃える。
+- parse_sps 単体テスト 8 件追加 (Baseline / Main / High / High10 のフィールド検証、4 件の Err 化テスト)。
+- `h264_sample_entry_from_sps_pps_lists` の単体テスト 7 件追加 (空 sps/pps の Err、Baseline / High の AvccBox マッピング、複数 SPS/PPS の保持、戻り値 frame_size、pps_list の NAL タイプ検査)。
+- RTSP に `select_video_track_returns_err_on_sprop_with_broken_nal` を追加 (forbidden_zero_bit テスト)。
+- 既存テストはすべて pass。Default build + clippy --deny warnings + fmt --check が通る (675 件)。
+
+### コメント整理 (レビュー指摘の反映)
+
+- encoder 3 経路の「VideoFrameSize 捨てる」コメント重複を解消し、`h264_sample_entry_from_sps_pps_lists` の docstring に集約。
+- `parse_sps` 内の「`// 仕様 7.4.2.1.1`」4 連発を削除し、関数 docstring に集約。
+- 自明な再説明コメント (「`as u16` キャストは情報損失しない」「move で受け取る」「Some/None セットを誤ることはない」等) を削除。
+- SRT inbound テストコメントの古い関数名 `h264_sample_entry_from_annexb` を新関数名に更新。
+- `expect()` メッセージの日本語混在を英語化。
+
+### CHANGES.md
+
+記載しない (issue 0043 の方針通り)。本 issue が触る 3 経路 (HLS / RTSP / SRT inbound) はいずれも `## develop` セクション内で初めて追加された未リリース機能で、最終的な diff として外部観測可能な変化が現れないため。closed 0030 / 0031 / 0032 / 0033 / 0034 / 0037 / 0044 と同方針。
+
+### 残懸念 (別 issue 起票候補)
+
+- `extract_video_dimensions` (`src/video/h264.rs`) の本番呼び出しゼロ。本 issue では「触らない」と明示済み。
+- `src/rtmp/frame.rs::avc_sequence_header_to_sample_entry` の `chroma_format` / `bit_depth_*` の `None` 固定。RTMP 経路は SRT / RTSP とは制御フローが異なるため別 issue。
+- `src/codec_string.rs::from_codec_pair` の `"avc1.42e01f"` 固定リテラル。代表値経路で本 issue 範囲外。
+- video_toolbox の H.265 経路 (`h265::h265_sample_entry`) との対称性回復。H.265 経路の改修は別 issue。
+- `pbt/tests/prop_h264_sps.rs` がクラッシュフリー専用テスト規約と乖離 + 本番経路から外れている件。
+- `src/srt/inbound_endpoint.rs` の `last_video_sample_entry` / `last_video_frame_size` の二重保持 (既存問題、本 issue で導入したものではない)。
+- `src/video/h264.rs` のテストファイル肥大 (累積的な改善対象)。

@@ -54,15 +54,13 @@ impl Openh264Encoder {
 
         // OpenH264 はキーフレーム要求時などに SPS/PPS が更新され得るため、
         // SPS/PPS を受け取ったフレームではサンプルエントリーを作り直して保持を更新する。
-        // 以後は全出力フレームに保持済みの最新サンプルエントリーを載せる（設計方針 2 / issue 0027）。
+        // 以後は全出力フレームに保持済みの最新サンプルエントリーを載せる。
         // これにより、下流コンポーネントが参照するコーデック設定を最新化し、
         // 古いパラメータセット参照によるデコード失敗を避ける。
         if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
-            let size = frame.size();
-            let sample_entry = h264::h264_sample_entry_from_annexb(
-                size.width,
-                size.height,
-                &h264::create_sequence_header_annexb(&encoded.sps_list, &encoded.pps_list),
+            let (sample_entry, _frame_size) = h264::h264_sample_entry_from_sps_pps_lists(
+                encoded.sps_list.clone(),
+                encoded.pps_list.clone(),
             )?;
             self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry));
         }
