@@ -416,3 +416,55 @@ async fn stop_processors_staged_stream(
     .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn obsws_stream_service_settings_fmt_omits_obs_compat_keys() {
+        // (2) ObswsStreamServiceSettings::fmt の obs_compat: false 経路で、
+        // server=None / key=None のとき streamServiceSettings に server / key /
+        // use_auth のいずれも含まれないことを検証する。OBS 互換差分が漏れ出て
+        // いないかの回帰検知 (use_auth が出ない、key=None で key が出ない、
+        // server=None で server が出ない)。
+        let settings = ObswsStreamServiceSettings {
+            stream_service_type: "rtmp_custom".to_owned(),
+            server: None,
+            key: None,
+        };
+        let json_text = nojson::Json(&settings).to_string();
+        let json = nojson::RawJson::parse(&json_text).expect("JSON must parse");
+        let stream_service_settings = json
+            .value()
+            .to_member("streamServiceSettings")
+            .expect("streamServiceSettings access must succeed")
+            .required()
+            .expect("streamServiceSettings must be present");
+
+        assert!(
+            stream_service_settings
+                .to_member("use_auth")
+                .expect("use_auth access must succeed")
+                .optional()
+                .is_none(),
+            "obs_compat: false で use_auth が出力されている"
+        );
+        assert!(
+            stream_service_settings
+                .to_member("key")
+                .expect("key access must succeed")
+                .optional()
+                .is_none(),
+            "obs_compat: false かつ key=None で key が出力されている"
+        );
+        assert!(
+            stream_service_settings
+                .to_member("server")
+                .expect("server access must succeed")
+                .optional()
+                .is_none(),
+            "server=None で server が出力されている"
+        );
+    }
+}

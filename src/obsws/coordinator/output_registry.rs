@@ -466,16 +466,12 @@ impl ObswsCoordinator {
             "GetStreamServiceSettings",
             request_id,
             |f| {
-                f.member("streamServiceType", &settings.stream_service_type)?;
-                f.member(
-                    "streamServiceSettings",
-                    nojson::object(|f| {
-                        if let Some(server) = &settings.server {
-                            f.member("server", server)?;
-                        }
-                        f.member("key", settings.key.as_deref().unwrap_or(""))?;
-                        f.member("use_auth", false)
-                    }),
+                fmt_stream_service_envelope(
+                    f,
+                    &settings.stream_service_type,
+                    settings.server.as_deref(),
+                    settings.key.as_deref(),
+                    true, // OBS rtmp-custom.c 互換
                 )
             },
         )
