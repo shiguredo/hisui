@@ -339,8 +339,6 @@ NOTE: `--state-file` 指定時、scene item の作成・削除・有効/無効�
 - [x] `StartStream`: 配信を開始する
   - NOTE: 複数映像入力に対応（`position` と `scale` と `crop` に対応。`rotation`, `blend mode` は未対応）
   - NOTE: 入力対応は `image_source` / `color_source` / `video_capture_device` / `audio_capture_device` / `mp4_file_source` / `rtmp_inbound` / `srt_inbound` / `rtsp_subscriber` / `webrtc_source`
-  - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createRtmpOutboundEndpoint` を起動する
-  - NOTE: 複数映像入力時は `createVideoMixer` を追加で起動する
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す
 - [x] `StopStream`: 配信を停止する
   - NOTE: 内部で起動した stream 用 processor を停止する
@@ -367,8 +365,6 @@ NOTE: `--state-file` 指定時、scene item の作成・削除・有効/無効�
 - [x] `StartRecord`: 録画を開始する
   - NOTE: 複数映像入力に対応（`position` と `scale` と `crop` に対応。`rotation`, `blend mode` は未対応）
   - NOTE: 入力対応は `image_source` / `color_source` / `video_capture_device` / `audio_capture_device` / `mp4_file_source` / `rtmp_inbound` / `srt_inbound` / `rtsp_subscriber` / `webrtc_source`
-  - NOTE: 内部では `createPngFileSource` -> `createVideoEncoder` -> `createMp4Writer` を起動する
-  - NOTE: 複数映像入力時は `createVideoMixer` を追加で起動する
   - NOTE: 成功時の `responseData` には `outputActive = true` を返す
   - NOTE: 録画中は hybrid MP4 形式（内部的に fragmented MP4）で書き込み、`StopRecord` 時に標準 MP4 に変換する。プロセスが異常終了した場合は、最後に flush 済みのフラグメントまでは fragmented MP4 形式として残るため、ffmpeg 等の fMP4 対応プレイヤーで再生可能
   - NOTE: 直近の未 flush 区間（途中のフラグメント）は異常終了時に失われうる。これは現在の設計上の制約である
