@@ -1,4 +1,14 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::sync::oneshot;
+
+use crate::media_pipeline::ProcessorHandle;
+use crate::types::EvenUsize;
+use crate::video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize};
+use crate::{MediaFrame, TrackId};
 
 /// テキストオーバーレイ機能の起動時設定。
 ///
@@ -89,6 +99,578 @@ impl TextOverlayConfig {
     }
 }
 
+/// ACK/SYN back-pressure の閾値。`VideoRealtimeMixerRunner` / `ColorSource` と同じ値。
+const MAX_NOACKED_COUNT: u64 = 100;
+
+/// 1 processor が同時に保持できるテキストオーバーレイの最大数 (DoS 対策の上限)。
+pub const OVERLAY_LIMIT: usize = 64;
+
+/// `text` フィールドの最大バイト数。
+pub const TEXT_MAX_BYTES: usize = 4096;
+
+/// `text` フィールドの最大行数 (`\n` 区切り)。
+pub const TEXT_MAX_LINES: usize = 64;
+
+/// テキストオーバーレイの仕様 (確定値)。
+///
+/// `font_color_argb` は `0xAARRGGBB` の straight alpha 値。default (`HisuiCreateTextOverlay` で
+/// 省略時) は `0xFFFFFFFF` (不透明白)。
+#[derive(Debug, Clone)]
+pub struct TextOverlaySpec {
+    pub text: String,
+    pub x: i64,
+    pub y: i64,
+    pub font_size: u32,
+    pub font_color_argb: u32,
+    pub font_name: String,
+    pub z: i64,
+}
+
+/// `HisuiUpdateTextOverlay` 用の部分更新パッチ。`None` は省略 (= 現状維持)。
+#[derive(Debug, Clone, Default)]
+pub struct TextOverlayPatch {
+    pub text: Option<String>,
+    pub x: Option<i64>,
+    pub y: Option<i64>,
+    pub font_size: Option<u32>,
+    pub font_color_argb: Option<u32>,
+    pub font_name: Option<String>,
+    pub z: Option<i64>,
+}
+
+/// `HisuiListTextOverlays` で返す現在状態。
+#[derive(Debug, Clone)]
+pub struct TextOverlayState {
+    pub name: String,
+    pub spec: TextOverlaySpec,
+}
+
+/// テキストオーバーレイ操作のエラー。obsws ハンドラ側で `REQUEST_STATUS_*` にマップする。
+#[derive(Debug, Clone)]
+pub enum TextOverlayError {
+    /// 同名 overlay が既に存在する (Create のみ)。
+    AlreadyExists,
+    /// 対象 overlay が存在しない (Update / Remove)。
+    NotFound,
+    /// `fontName` が `/` `\` `..` NUL バイトを含む等の文字種違反。
+    InvalidFontName(String),
+    /// `fontName` の解決失敗 (ファイルなし / ルート外 / フォント破損)。
+    FontResolveFailed(String),
+    /// `fontColor` の形式違反。
+    InvalidColor(String),
+    /// `fontSize` の範囲外。
+    InvalidFontSize(String),
+    /// `text` のバイト数 / 行数上限超過。
+    InvalidText(String),
+    /// raden 描画失敗。
+    RenderFailed(String),
+    /// `OVERLAY_LIMIT` 超過。
+    LimitExceeded,
+}
+
+impl std::fmt::Display for TextOverlayError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyExists => write!(f, "text overlay already exists"),
+            Self::NotFound => write!(f, "text overlay not found"),
+            Self::InvalidFontName(s) => write!(f, "invalid fontName: {s}"),
+            Self::FontResolveFailed(s) => write!(f, "font resolve failed: {s}"),
+            Self::InvalidColor(s) => write!(f, "invalid fontColor: {s}"),
+            Self::InvalidFontSize(s) => write!(f, "invalid fontSize: {s}"),
+            Self::InvalidText(s) => write!(f, "invalid text: {s}"),
+            Self::RenderFailed(s) => write!(f, "render failed: {s}"),
+            Self::LimitExceeded => write!(f, "text overlay limit exceeded"),
+        }
+    }
+}
+
+impl std::error::Error for TextOverlayError {}
+
+/// `TextOverlayProcessor` に対する内部 RPC メッセージ。
+///
+/// `register_rpc_sender` パターン (`VideoRealtimeMixer` 参考) で送受信する。
+#[derive(Debug)]
+pub enum TextOverlayRpcMessage {
+    Add {
+        name: String,
+        spec: TextOverlaySpec,
+        reply_tx: oneshot::Sender<Result<(), TextOverlayError>>,
+    },
+    Update {
+        name: String,
+        patch: TextOverlayPatch,
+        reply_tx: oneshot::Sender<Result<(), TextOverlayError>>,
+    },
+    Remove {
+        name: String,
+        reply_tx: oneshot::Sender<Result<(), TextOverlayError>>,
+    },
+    List {
+        reply_tx: oneshot::Sender<Vec<TextOverlayState>>,
+    },
+}
+
+/// テキストオーバーレイ描画用の processor。
+///
+/// 1 processor インスタンスが canvas 全体に対する全テキストオーバーレイを描画し、
+/// 1 本の透過 I420A track として publish する。
+/// canvas サイズ・フレームレートは起動時固定 (`new` 時に確定)、シーン切替で再生成されない。
+pub struct TextOverlayProcessor {
+    canvas_width: EvenUsize,
+    canvas_height: EvenUsize,
+    frame_rate: FrameRate,
+    output_track_id: TrackId,
+    config: TextOverlayConfig,
+}
+
+impl TextOverlayProcessor {
+    pub fn new(
+        canvas_width: EvenUsize,
+        canvas_height: EvenUsize,
+        frame_rate: FrameRate,
+        output_track_id: TrackId,
+        config: TextOverlayConfig,
+    ) -> Self {
+        Self {
+            canvas_width,
+            canvas_height,
+            frame_rate,
+            output_track_id,
+            config,
+        }
+    }
+
+    /// run ループ。
+    ///
+    /// 起動シーケンスは `notify_ready()` のみ呼び、`wait_subscribers_ready` は呼ばない
+    /// (TextOverlayProcessor は初期 processor 集合に含まれず、後発の subscriber を前提とするため)。
+    pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
+        let canvas_width = self.canvas_width;
+        let canvas_height = self.canvas_height;
+        let frame_rate = self.frame_rate;
+        let config = self.config;
+        let output_track_id = self.output_track_id;
+
+        // 内部 RPC 受信チャネル
+        let (rpc_tx, mut rpc_rx) = tokio::sync::mpsc::unbounded_channel::<TextOverlayRpcMessage>();
+        handle.register_rpc_sender(rpc_tx).await.map_err(|e| {
+            crate::Error::new(format!("failed to register text overlay rpc sender: {e}"))
+        })?;
+
+        let mut tx = handle.publish_track(output_track_id).await?;
+        handle.notify_ready();
+
+        let mut state = ProcessorState::new(canvas_width, canvas_height, config);
+        let mut frame_index = 0u64;
+        let mut noacked_sent = 0u64;
+        let start = tokio::time::Instant::now();
+        let mut ack = Some(tx.send_syn());
+
+        loop {
+            let timestamp = frames_to_timestamp(frame_rate, frame_index);
+            tokio::select! {
+                _ = tokio::time::sleep_until(start + timestamp) => {
+                    if noacked_sent > MAX_NOACKED_COUNT {
+                        if let Some(a) = ack.take() {
+                            a.await;
+                        }
+                        ack = Some(tx.send_syn());
+                        noacked_sent = 0;
+                    }
+
+                    // overlay が 1 つも無い間はフレーム送信をスキップする。
+                    // mixer 側は pending_frames 空の InputTrack を合成に含めないため、
+                    // 結果として透過レイヤがそのまま素通りする。
+                    if !state.has_overlays() {
+                        frame_index = frame_index.saturating_add(1);
+                        continue;
+                    }
+
+                    let frame = state.frame_for(timestamp)?;
+                    if !tx.send_media(MediaFrame::Video(frame)) {
+                        break;
+                    }
+                    noacked_sent = noacked_sent.saturating_add(1);
+                    frame_index = frame_index.saturating_add(1);
+                }
+                msg = rpc_rx.recv() => {
+                    let Some(msg) = msg else {
+                        // RPC 送信側が全て drop された = 通常はこのケースには到達しない。
+                        // ただし test 等で発生しうるので break する。
+                        break;
+                    };
+                    state.handle_rpc(msg);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// `TextOverlayProcessor` の run ループ内で更新される実体状態。
+struct ProcessorState {
+    canvas_width: EvenUsize,
+    canvas_height: EvenUsize,
+    config: TextOverlayConfig,
+    overlays: BTreeMap<String, TextOverlaySpec>,
+    cached_frame: Option<Arc<VideoFrame>>,
+    dirty: bool,
+}
+
+impl ProcessorState {
+    fn new(canvas_width: EvenUsize, canvas_height: EvenUsize, config: TextOverlayConfig) -> Self {
+        Self {
+            canvas_width,
+            canvas_height,
+            config,
+            overlays: BTreeMap::new(),
+            cached_frame: None,
+            dirty: false,
+        }
+    }
+
+    fn has_overlays(&self) -> bool {
+        !self.overlays.is_empty()
+    }
+
+    fn handle_rpc(&mut self, msg: TextOverlayRpcMessage) {
+        match msg {
+            TextOverlayRpcMessage::Add {
+                name,
+                spec,
+                reply_tx,
+            } => {
+                let _ = reply_tx.send(self.add(name, spec));
+            }
+            TextOverlayRpcMessage::Update {
+                name,
+                patch,
+                reply_tx,
+            } => {
+                let _ = reply_tx.send(self.update(name, patch));
+            }
+            TextOverlayRpcMessage::Remove { name, reply_tx } => {
+                let _ = reply_tx.send(self.remove(name));
+            }
+            TextOverlayRpcMessage::List { reply_tx } => {
+                let _ = reply_tx.send(self.list());
+            }
+        }
+    }
+
+    fn add(&mut self, name: String, spec: TextOverlaySpec) -> Result<(), TextOverlayError> {
+        if self.overlays.contains_key(&name) {
+            return Err(TextOverlayError::AlreadyExists);
+        }
+        if self.overlays.len() >= OVERLAY_LIMIT {
+            return Err(TextOverlayError::LimitExceeded);
+        }
+        validate_spec(&spec, &self.config, self.canvas_height.get())?;
+        self.overlays.insert(name, spec);
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn update(&mut self, name: String, patch: TextOverlayPatch) -> Result<(), TextOverlayError> {
+        let existing = self
+            .overlays
+            .get(&name)
+            .ok_or(TextOverlayError::NotFound)?
+            .clone();
+        let updated = apply_patch(existing, patch);
+        validate_spec(&updated, &self.config, self.canvas_height.get())?;
+        self.overlays.insert(name, updated);
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn remove(&mut self, name: String) -> Result<(), TextOverlayError> {
+        if self.overlays.remove(&name).is_none() {
+            return Err(TextOverlayError::NotFound);
+        }
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn list(&self) -> Vec<TextOverlayState> {
+        self.overlays
+            .iter()
+            .map(|(name, spec)| TextOverlayState {
+                name: name.clone(),
+                spec: spec.clone(),
+            })
+            .collect()
+    }
+
+    /// 指定 timestamp の I420A フレームを返す (cached が valid ならそれをタイムスタンプだけ差し替えて返す)。
+    fn frame_for(&mut self, timestamp: Duration) -> crate::Result<Arc<VideoFrame>> {
+        if self.dirty || self.cached_frame.is_none() {
+            let new_frame = self.render(timestamp)?;
+            self.cached_frame = Some(Arc::new(new_frame));
+            self.dirty = false;
+            return Ok(self
+                .cached_frame
+                .as_ref()
+                .expect("cached_frame was just assigned")
+                .clone());
+        }
+        // タイムスタンプ更新版を作る (data は Vec<u8> なので clone される)。
+        // I420A 1920x1080 で約 4.6MB / フレーム。30fps で 138MB/s のメモリ帯域消費だが
+        // CPU 帯域 (DDR4 で 25GB/s 等) に対しては 0.5% 程度で許容範囲。
+        let cached = self
+            .cached_frame
+            .as_ref()
+            .expect("dirty=false かつ cached が None になることはない");
+        let mut frame = (**cached).clone();
+        frame.timestamp = timestamp;
+        Ok(Arc::new(frame))
+    }
+
+    /// raden + libyuv で 1 枚の I420A フレームを構築する。
+    fn render(&self, timestamp: Duration) -> crate::Result<VideoFrame> {
+        let w = self.canvas_width.get();
+        let h = self.canvas_height.get();
+
+        // raden は PixelFormat::Prgb32 = premultiplied ARGB を出力する。
+        // バイト並びはリトルエンディアン環境で [B, G, R, A] となり、libyuv の ArgbImage と整合する。
+        let mut image = raden::Image::new(w as u32, h as u32, raden::PixelFormat::Prgb32);
+        let mut runtime = raden::PipelineRuntime::new();
+        {
+            let mut ctx = raden::Context::new(&mut image, &mut runtime);
+
+            // canvas を完全透明 (RGBA = 0x00000000) でクリアする。
+            ctx.set_comp_op(raden::CompOp::SrcCopy);
+            ctx.set_fill_style(raden::Rgba32::new(0, 0, 0, 0));
+            ctx.fill_rect(&raden::Rect::new(0.0, 0.0, w as f64, h as f64));
+            ctx.set_comp_op(raden::CompOp::SrcOver);
+
+            // z-order でソート (タイブレークは name のアルファベット順 = BTreeMap の iter 順)。
+            let mut sorted: Vec<(&String, &TextOverlaySpec)> = self.overlays.iter().collect();
+            sorted.sort_by(|(name_a, spec_a), (name_b, spec_b)| {
+                spec_a.z.cmp(&spec_b.z).then(name_a.cmp(name_b))
+            });
+
+            for (_, spec) in sorted {
+                let canonical = validate_font_name_and_resolve(&spec.font_name, &self.config)
+                    .map_err(|e| crate::Error::new(format!("{e}")))?;
+                let path_str = canonical
+                    .to_str()
+                    .ok_or_else(|| crate::Error::new("font path not utf-8".to_owned()))?;
+                let font_data = raden::FontData::from_file(path_str)
+                    .map_err(|e| crate::Error::new(format!("load font: {e:?}")))?;
+                let face = raden::FontFace::from_data(&font_data, 0)
+                    .map_err(|e| crate::Error::new(format!("parse font: {e:?}")))?;
+                let font = raden::Font::from_face(&face, spec.font_size as f64);
+
+                let (a, r, g, b) = (
+                    ((spec.font_color_argb >> 24) & 0xFF) as u8,
+                    ((spec.font_color_argb >> 16) & 0xFF) as u8,
+                    ((spec.font_color_argb >> 8) & 0xFF) as u8,
+                    (spec.font_color_argb & 0xFF) as u8,
+                );
+                ctx.set_fill_style(raden::Rgba32::new(r, g, b, a));
+                // raden の fill_text はベースライン座標で描画するので ascent 分下げる。
+                let baseline_y = spec.y as f64 + font.ascent();
+                ctx.fill_text(spec.x as f64, baseline_y, &font, &spec.text);
+            }
+
+            ctx.end();
+        }
+
+        // raden 出力は premultiplied なので、libyuv に渡す前に straight alpha に戻す。
+        let mut argb = image.data().to_vec();
+        unpremultiply_argb(&mut argb);
+
+        // libyuv で I420 + Alpha に変換する。
+        let y_size = w * h;
+        let uv_w = w.div_ceil(2);
+        let uv_h = h.div_ceil(2);
+        let uv_size = uv_w * uv_h;
+        let mut y_plane = vec![0u8; y_size];
+        let mut u_plane = vec![0u8; uv_size];
+        let mut v_plane = vec![0u8; uv_size];
+        let mut alpha = vec![0u8; y_size];
+
+        let argb_image = shiguredo_libyuv::ArgbImage {
+            data: &argb,
+            stride: w * 4,
+        };
+        let mut i420 = shiguredo_libyuv::I420ImageMut {
+            y: &mut y_plane,
+            y_stride: w,
+            u: &mut u_plane,
+            u_stride: uv_w,
+            v: &mut v_plane,
+            v_stride: uv_w,
+        };
+        shiguredo_libyuv::argb_to_i420_alpha(
+            &argb_image,
+            &mut i420,
+            &mut alpha,
+            w,
+            shiguredo_libyuv::ImageSize::new(w, h),
+        )
+        .map_err(|e| crate::Error::new(format!("argb_to_i420_alpha: {e}")))?;
+
+        // I420A レイアウト: [Y | U | V | A] の連続バッファ。
+        let mut data = Vec::with_capacity(y_size + uv_size * 2 + y_size);
+        data.extend_from_slice(&y_plane);
+        data.extend_from_slice(&u_plane);
+        data.extend_from_slice(&v_plane);
+        data.extend_from_slice(&alpha);
+
+        Ok(VideoFrame {
+            data,
+            format: VideoFormat::I420A,
+            keyframe: true,
+            size: Some(VideoFrameSize {
+                width: w,
+                height: h,
+            }),
+            timestamp,
+            sample_entry: None,
+        })
+    }
+}
+
+/// `frame_index` と `frame_rate` から timestamp を計算する。
+/// `obsws::source::frames_to_timestamp` と同じ式。
+fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
+    Duration::from_secs(frames.saturating_mul(frame_rate.denumerator.get() as u64))
+        / frame_rate.numerator.get() as u32
+}
+
+/// premultiplied ARGB バッファを straight alpha 形式に戻す。
+///
+/// 各ピクセルは 4 バイト (リトルエンディアン環境では `[B, G, R, A]`) で並ぶ。
+/// A == 0 のピクセルは RGB が 0 になっているのでそのまま残す。
+/// A > 0 のピクセルは `RGB_straight = (RGB_pre * 255 + A/2) / A` で復元する。
+fn unpremultiply_argb(data: &mut [u8]) {
+    for chunk in data.chunks_exact_mut(4) {
+        let a = chunk[3];
+        if a == 0 {
+            continue;
+        }
+        let a_u16 = a as u16;
+        for c in &mut chunk[..3] {
+            // 四捨五入用に A/2 を足してから A で割る。255 でクランプする。
+            let value = ((*c as u16) * 255 + a_u16 / 2) / a_u16;
+            *c = value.min(255) as u8;
+        }
+    }
+}
+
+fn validate_spec(
+    spec: &TextOverlaySpec,
+    config: &TextOverlayConfig,
+    canvas_height: usize,
+) -> Result<(), TextOverlayError> {
+    validate_text(&spec.text)?;
+    validate_font_size(spec.font_size, canvas_height)?;
+    validate_font_name_and_resolve(&spec.font_name, config)?;
+    // fontColor は u32 に詰める時点で必ず妥当 (`0xAARRGGBB` 範囲内) なので、ここでの追加検証は不要。
+    // 値域チェックは obsws ハンドラの正規表現マッチで担保する。
+    Ok(())
+}
+
+fn validate_text(text: &str) -> Result<(), TextOverlayError> {
+    if text.len() > TEXT_MAX_BYTES {
+        return Err(TextOverlayError::InvalidText(format!(
+            "text exceeds maximum {} bytes (got {})",
+            TEXT_MAX_BYTES,
+            text.len()
+        )));
+    }
+    let lines = text.matches('\n').count() + 1;
+    if lines > TEXT_MAX_LINES {
+        return Err(TextOverlayError::InvalidText(format!(
+            "text exceeds maximum {} lines (got {})",
+            TEXT_MAX_LINES, lines
+        )));
+    }
+    Ok(())
+}
+
+fn validate_font_size(size: u32, canvas_height: usize) -> Result<(), TextOverlayError> {
+    if size == 0 {
+        return Err(TextOverlayError::InvalidFontSize(
+            "fontSize must be >= 1".to_owned(),
+        ));
+    }
+    if size as usize > canvas_height {
+        return Err(TextOverlayError::InvalidFontSize(format!(
+            "fontSize {} exceeds canvas_height {}",
+            size, canvas_height
+        )));
+    }
+    Ok(())
+}
+
+/// `fontName` を path traversal 対策込みで検証してフォントファイルの canonical パスを返す。
+fn validate_font_name_and_resolve(
+    name: &str,
+    config: &TextOverlayConfig,
+) -> Result<PathBuf, TextOverlayError> {
+    if name.is_empty() {
+        return Err(TextOverlayError::InvalidFontName(
+            "fontName must not be empty".to_owned(),
+        ));
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+        return Err(TextOverlayError::InvalidFontName(format!(
+            "fontName must not contain '/', '\\', '..' or NUL (got: {name:?})"
+        )));
+    }
+    let font_path = config.font_search_root.join(name);
+    let canonical = font_path.canonicalize().map_err(|e| {
+        TextOverlayError::FontResolveFailed(format!(
+            "failed to canonicalize {}: {}",
+            font_path.display(),
+            e
+        ))
+    })?;
+    if !canonical.starts_with(&config.font_search_root) {
+        return Err(TextOverlayError::FontResolveFailed(format!(
+            "font path {} escapes search root",
+            canonical.display()
+        )));
+    }
+    let path_str = canonical
+        .to_str()
+        .ok_or_else(|| TextOverlayError::FontResolveFailed("font path not utf-8".to_owned()))?;
+    let font_data = raden::FontData::from_file(path_str)
+        .map_err(|e| TextOverlayError::FontResolveFailed(format!("load font: {e:?}")))?;
+    raden::FontFace::from_data(&font_data, 0)
+        .map_err(|e| TextOverlayError::FontResolveFailed(format!("parse font: {e:?}")))?;
+    Ok(canonical)
+}
+
+fn apply_patch(mut spec: TextOverlaySpec, patch: TextOverlayPatch) -> TextOverlaySpec {
+    if let Some(text) = patch.text {
+        spec.text = text;
+    }
+    if let Some(x) = patch.x {
+        spec.x = x;
+    }
+    if let Some(y) = patch.y {
+        spec.y = y;
+    }
+    if let Some(size) = patch.font_size {
+        spec.font_size = size;
+    }
+    if let Some(color) = patch.font_color_argb {
+        spec.font_color_argb = color;
+    }
+    if let Some(name) = patch.font_name {
+        spec.font_name = name;
+    }
+    if let Some(z) = patch.z {
+        spec.z = z;
+    }
+    spec
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +734,148 @@ mod tests {
             err.contains("nonexistent-font"),
             "エラー文言にフォント名が含まれる: {err}"
         );
+    }
+
+    fn make_config() -> TextOverlayConfig {
+        TextOverlayConfig::build(
+            Some(PathBuf::from("testdata/fonts")),
+            Some("PublicSans-Regular.ttf".to_owned()),
+        )
+        .expect("テスト用 config が組み立てられる")
+        .expect("両方指定なので Some")
+    }
+
+    /// `validate_font_name_and_resolve` が `..` を含む名前を拒否する。
+    #[test]
+    fn validate_font_name_rejects_dotdot() {
+        let config = make_config();
+        let err = validate_font_name_and_resolve("../etc/passwd", &config)
+            .expect_err("`..` を含む名前は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::InvalidFontName(_)),
+            "InvalidFontName が返る: {err:?}"
+        );
+    }
+
+    /// `/` を含む名前を拒否する。
+    #[test]
+    fn validate_font_name_rejects_slash() {
+        let config = make_config();
+        let err = validate_font_name_and_resolve("foo/bar.ttf", &config)
+            .expect_err("'/' を含む名前は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::InvalidFontName(_)),
+            "InvalidFontName が返る: {err:?}"
+        );
+    }
+
+    /// 空文字列も拒否する。
+    #[test]
+    fn validate_font_name_rejects_empty() {
+        let config = make_config();
+        let err = validate_font_name_and_resolve("", &config).expect_err("空文字列は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::InvalidFontName(_)),
+            "InvalidFontName が返る: {err:?}"
+        );
+    }
+
+    /// 実在フォント名は解決成功し、`font_search_root` 配下のパスが返る。
+    #[test]
+    fn validate_font_name_resolves_real_font() {
+        let config = make_config();
+        let resolved = validate_font_name_and_resolve("PublicSans-Regular.ttf", &config)
+            .expect("実在フォントは解決成功");
+        assert!(
+            resolved.starts_with(&config.font_search_root),
+            "解決結果は探索ルート配下に収まる: {:?}",
+            resolved
+        );
+    }
+
+    /// `text` のバイト数上限を超えるとエラー。
+    #[test]
+    fn validate_text_rejects_too_long() {
+        let text = "a".repeat(TEXT_MAX_BYTES + 1);
+        let err = validate_text(&text).expect_err("上限超過は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::InvalidText(_)),
+            "InvalidText が返る: {err:?}"
+        );
+    }
+
+    /// `text` の行数上限を超えるとエラー。
+    #[test]
+    fn validate_text_rejects_too_many_lines() {
+        let text = "\n".repeat(TEXT_MAX_LINES); // 行数 = 改行数 + 1 = LIMIT + 1
+        let err = validate_text(&text).expect_err("行数上限超過は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::InvalidText(_)),
+            "InvalidText が返る: {err:?}"
+        );
+    }
+
+    /// `fontSize = 0` は拒否される。
+    #[test]
+    fn validate_font_size_rejects_zero() {
+        let err = validate_font_size(0, 1080).expect_err("0 は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::InvalidFontSize(_)),
+            "InvalidFontSize が返る: {err:?}"
+        );
+    }
+
+    /// `fontSize > canvas_height` は拒否される。
+    #[test]
+    fn validate_font_size_rejects_too_large() {
+        let err = validate_font_size(1081, 1080).expect_err("canvas_height 超過は拒否される");
+        assert!(
+            matches!(err, TextOverlayError::InvalidFontSize(_)),
+            "InvalidFontSize が返る: {err:?}"
+        );
+    }
+
+    /// `unpremultiply_argb` の挙動: A == 0 は触らない、A == 255 は変化なし、A == 128 は約 2 倍。
+    #[test]
+    fn unpremultiply_argb_handles_basic_cases() {
+        let mut data = vec![
+            // pixel 0: 完全透明 - そのまま残る
+            0, 0, 0, 0, // pixel 1: 不透明、白
+            255, 255, 255,
+            255, // pixel 2: 半透明、premultiplied 値が 128 (= straight 255 * 128/255)
+            128, 128, 128, 128,
+        ];
+        unpremultiply_argb(&mut data);
+        // pixel 0: 透明はそのまま 0
+        assert_eq!(&data[0..4], &[0, 0, 0, 0]);
+        // pixel 1: A=255 は値変化なし (255 * 255 / 255 = 255)
+        assert_eq!(&data[4..8], &[255, 255, 255, 255]);
+        // pixel 2: A=128 で premultiplied 128 → straight 約 255
+        // 計算: (128 * 255 + 64) / 128 = (32640 + 64) / 128 = 32704 / 128 = 255
+        assert_eq!(&data[8..12], &[255, 255, 255, 128]);
+    }
+
+    /// `apply_patch`: 指定したフィールドだけが更新される。
+    #[test]
+    fn apply_patch_updates_only_specified_fields() {
+        let original = TextOverlaySpec {
+            text: "before".to_owned(),
+            x: 10,
+            y: 20,
+            font_size: 30,
+            font_color_argb: 0xFFFFFFFF,
+            font_name: "PublicSans-Regular.ttf".to_owned(),
+            z: 0,
+        };
+        let patch = TextOverlayPatch {
+            text: Some("after".to_owned()),
+            x: Some(100),
+            ..Default::default()
+        };
+        let updated = apply_patch(original, patch);
+        assert_eq!(updated.text, "after", "text は更新される");
+        assert_eq!(updated.x, 100, "x は更新される");
+        assert_eq!(updated.y, 20, "y は維持される");
+        assert_eq!(updated.font_size, 30, "font_size は維持される");
     }
 }
