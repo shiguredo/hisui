@@ -41,7 +41,7 @@ pub(crate) use super::output_hls::{
 };
 pub(crate) use super::output_rtmp::ObswsRtmpOutboundSettings;
 pub(crate) use super::output_sora::ObswsSoraPublisherSettings;
-pub(crate) use super::output_stream::ObswsStreamServiceSettings;
+pub(crate) use super::output_stream::{ObswsStreamServiceSettings, fmt_stream_service_envelope};
 
 // -----------------------------------------------------------------------
 // 型定義
