@@ -46,22 +46,25 @@
 
 ### 1. 描画ライブラリ
 
-- shiguredo/raden (https://github.com/shiguredo/raden) を採用する。Cranelift JIT ベースの CPU only な 2D ベクターグラフィックスライブラリで、GPU の無い CI 環境とも相性が良い。
-- `Cargo.toml` に厳密固定 (`raden = "=<確定バージョン>"`) で追加する。shiguredo-rust 規約は本来「マイナーまで」固定だが、raden は「実験的プロジェクトであり API や内部実装は予告なく大幅変更されうる」(公式 README) と明記された例外的状況のため、本 issue ではパッチまで含めた `=` 固定を採用する。`Cargo.toml` の依存定義に「テキストオーバーレイ描画用 (実験的、API 不安定のため `=` 固定)」のコメントを付す。
+- shiguredo/raden (https://github.com/shiguredo/raden) v2026.1.1 を採用する (crates.io 公開済み、Apache-2.0)。Cranelift JIT ベースの CPU only な 2D ベクターグラフィックスライブラリで、GPU の無い CI 環境とも相性が良い。
+- `Cargo.toml` に `raden = "=2026.1.1"` の厳密固定で追加する。shiguredo-rust 規約は本来「マイナーまで」固定だが、raden は「実験的プロジェクトであり API や内部実装は予告なく大幅変更されうる」(公式 README) と明記された例外的状況のため、本 issue ではパッチまで含めた `=` 固定を採用する。`Cargo.toml` の依存定義に「テキストオーバーレイ描画用 (実験的、API 不安定のため `=` 固定)」のコメントを付す。
 - raden の連鎖依存 (`cranelift-*` 系・フォント解析系) によりビルド時間・バイナリサイズが増加する。実装着手時に CI 時間影響と clippy / fmt 等の既存 CI への影響を計測し、許容範囲外なら別途検討する。
 
-#### raden 事前調査 (実装着手の最初のサブタスク)
+#### raden 調査結果 (確定済み)
 
-以下の項目を確定しないと §3 の描画フロー・Cargo.toml の依存解決が決まらない。`feature/add-text-overlay-rendering` ブランチでの **先頭 commit として「raden 調査結果を §1 に反映するだけのコミット」** を積み、その後に実装本体のコミットを積む形で進める (PR は本実装と同一の 1 本に統合)。
+raden v2026.1.1 のソースを直接確認して以下を確定済み。本表の項目は §2 / §3 の設計判断の根拠となる。
 
-| 項目 | 確定が必要な理由 |
+| 項目 | 確定値 |
 |---|---|
-| 採用バージョン | `=<バージョン>` の値、crates.io 公開状況 (なければ git 依存記述) |
-| 出力バイトオーダ (ARGB / ABGR / RGBA / BGRA) | 採用する `shiguredo_libyuv` 関数 (`argb_to_i420_alpha` / `rgba_to_i420` 等) が決まる |
-| premultiplied vs straight alpha | `blend_component` (`src/mixer/video.rs:1136-1148`) は straight 前提のため、premultiplied なら除算で戻すヘルパーが要る |
-| `Font` / `Canvas` の `Send + Sync` 可否 | Send でない場合は `tokio::task::LocalSet` / 毎フレーム生成等の代替設計が必要 |
-| Cranelift JIT 初回コンパイル遅延 | 数百 ms 以上なら起動時 warm-up (空テキスト描画) を行う |
-| glyph 不在時の挙動 | 本 issue は「raden の既定挙動 (tofu 等) のまま透過 I420A レイヤに含める、エラーは返さない」で確定 |
+| 採用バージョン | `=2026.1.1` (crates.io 公開済み、Apache-2.0) |
+| 出力ピクセルフォーマット | `PixelFormat::Prgb32` = 32-bit premultiplied ARGB (`0xAARRGGBB`、リトルエンディアン環境ではバイト列 `B G R A`)。`Image::new(w, h, PixelFormat::Prgb32)` で生成、`data() -> &[u8]` で参照 |
+| premultiplied vs straight alpha | **premultiplied (Prgb32)**。hisui の `blend_component` (`src/mixer/video.rs:1136-1148`) は straight 前提のため、I420A 化前に **straight 復元** (`A > 0 ? (RGB * 255 + A / 2) / A : 0` を 4 チャネル各々に適用) を `TextOverlayProcessor` 内のヘルパーで行う |
+| 採用する shiguredo_libyuv 関数 | `argb_to_i420_alpha` (`shiguredo_libyuv-2026.1.0/src/convert.rs:5216`、ARGB バイト順入力 = 上記 straight 復元後のバッファをそのまま渡せる) |
+| `FontData` / `FontFace` / `Font` / `Image` / `Context` の `Send + Sync` | 明示 `impl` なし。内部型は `Vec<u8>` / `Arc<Vec<u8>>` / プリミティブのみで auto trait による Send + Sync 成立見込み。実装時に `cargo check` で確認する。万一 `Send` 不可なら `tokio::task::LocalSet` 配下に変更する |
+| Cranelift JIT 初回コンパイル遅延 | `PipelineRuntime` がパイプラインキャッシュを持ち、同一パラメータの関数は再コンパイルしない。`TextOverlayProcessor` 起動直後に空文字列の `fill_text` を 1 回実行して JIT をウォームアップする。実遅延は実装時に計測 |
+| glyph 不在時の挙動 | `src/api/context.rs:1153-1157` で `glyph_id == 0` ならアドバンスのみ進めて描画スキップ (silent skip)。tofu は出ない。本 issue はこの既定挙動のまま透過 I420A レイヤに含める (エラーは返さない) |
+| フォントロード API | `FontData::from_file(path: &str) -> Result<FontData, FontError>` → `FontFace::from_data(&font_data, index: u32) -> Result<FontFace, FontError>` (TTC 単体は `index = 0`) → `Font::from_face(&face, size: f64) -> Font` |
+| 描画コンテキスト構築 | `PipelineRuntime::new()` (processor あたり 1 回) → `Context::new(&mut image, &mut runtime)` (描画呼び出しごと)。`Context::end()` で締める |
 
 ### 2. フォント
 
@@ -75,7 +78,7 @@
 #### 起動時検証 (CLI パース直後)
 
 - `--font-search-root` 指定時: `canonicalize` してルートパスを確定。失敗時 (存在しない / 権限なし) は **hisui プロセスを起動失敗 (abort)** させる (server 起動引数の不整合のため警告継続より安全)。
-- `--default-font` 指定時: `<root>/<fontName>` を `canonicalize` してルート配下に収まるか検証し、raden で `Font::from_path` できることまで確認。失敗時は同じく起動失敗。
+- `--default-font` 指定時: `<root>/<fontName>` を `canonicalize` してルート配下に収まるか検証し、raden で `FontData::from_file` → `FontFace::from_data` まで成功することを確認 (`Font::from_face` はサイズ依存なので起動時には行わない)。失敗時は同じく起動失敗。
 - 両方未指定: **テキストオーバーレイ機能無効** として hisui は正常起動する。`HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` / `HisuiRemoveTextOverlay` / `HisuiListTextOverlays` 呼び出し時は `RESOURCE_ACTION_NOT_SUPPORTED (606)` を返す (エラー文言で「`--font-search-root` / `--default-font` が未指定」を伝える)。
 - 片方のみ指定: 起動失敗 (CLI 引数の組として整合性を取る)。
 
@@ -88,14 +91,14 @@
 
 #### その他
 
-- CJK / フォントに含まれない文字: raden の既定挙動 (tofu 等) のまま透過 I420A レイヤに含める。代替フォント探索・複数フォント登録の動的管理 API・フォールバックチェーン・CJK 標準フォント提供は本 issue では扱わない。
+- CJK / フォントに含まれない文字: raden の既定挙動 (silent skip、glyph_id=0 はアドバンスのみ進めて描画スキップ。tofu は出ない) のまま透過 I420A レイヤに含める。代替フォント探索・複数フォント登録の動的管理 API・フォールバックチェーン・CJK 標準フォント提供は本 issue では扱わない。
 - テスト用フォントとして Roboto Regular (Apache 2.0、Google Fonts 配布版) を `testdata/fonts/Roboto-Regular.ttf` に配置する。
 
 ### 3. 描画 API (内部)
 
 #### Processor の起動・存在期間
 
-注: 以下の spawn 戦略は §1 raden 事前調査の結果 (特に `Send + Sync` 可否、JIT 初回コンパイル遅延) に依存する。`Send` 不可なら `tokio::task::LocalSet` 配下に変更する等、再決定が必要になる可能性がある。
+§1 の raden 調査結果により、`Send + Sync` は auto trait による成立見込み、JIT 初回遅延は warm-up で吸収可能と確認済み。以下の常駐 spawn 戦略で進める (実装時に `cargo check` で `Send` 成立を最終確認)。
 
 - 新規 `TextOverlayProcessor` を MediaPipeline 上の 1 processor として実装する。canvas 単一・起動時固定のため、**server 起動時に常駐 spawn し、サーバ稼働中ずっと生かす** (`src/subcommand_server.rs` の MediaPipeline 構築直後、テキストオーバーレイ機能有効時のみ)。シーン切替で再生成しない。
 - ProcessorId は `program:text_overlay_processor` 固定、出力 track_id は `program:text_overlay` 固定。canvas サイズ・frame_rate は CLI 引数から受け取り起動時固定 (実行中の追従不要)。
@@ -120,7 +123,7 @@
 
 #### 描画フロー
 
-- raden で全 overlay を 1 枚の RGBA canvas に z 順に重ね描き → `shiguredo_libyuv` (raden 出力バイト順に応じた関数、§1 raden 事前調査で確定) で I420A に変換 → `Arc<VideoFrame>` を生成して `cached_frame` に保持。`dirty = false` の間は毎フレーム Arc クローンを `publish_track` する。
+- raden の `Image (PixelFormat::Prgb32)` に全 overlay を z 順に重ね描き (premultiplied ARGB バッファ) → straight 復元ヘルパー (§1 調査結果参照) で straight ARGB へ戻す → `shiguredo_libyuv::argb_to_i420_alpha` で I420A に変換 → `Arc<VideoFrame>` を生成して `cached_frame` に保持。`dirty = false` の間は毎フレーム Arc クローンを `publish_track` する。
 - `dirty` を `true` にする条件: `text` / `x` / `y` / `fontSize` / `fontColor` / `fontName` / `z` のいずれかが変わった (Add / Update / Remove のいずれか)。canvas サイズは起動時固定のため `dirty` 化トリガにならない。
 - 全 overlay が空 (`overlays.is_empty()`) の場合は publish しない (mixer 側で `pending_frames` 空の InputTrack は何も合成しないため透明な状態となる)。
 
