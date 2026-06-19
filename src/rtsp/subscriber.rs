@@ -1289,13 +1289,20 @@ fn select_video_track(
 /// SDP fmtp 行から `sprop-parameter-sets` (RFC 6184 §8.2.1) を抽出して、SPS / PPS NAL リストから
 /// `h264_sample_entry_from_sps_pps_lists` でサンプルエントリーを構築する。
 ///
+/// パース方針: 不完全な補助メタデータは fail-fast にせず Ok(None) で代替経路に委ねる一方、
+/// 構造的に壊れた SDP は Err で接続を打ち切る。両者の境界は以下のとおり:
+///
 /// 戻り値:
-/// - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみ / SPS または PPS の
-///   片方が欠ける場合は `Ok(None)`（`sprop-parameter-sets` は MAY なので不完全な構成は許容し、
-///   IDR 内 inline SPS / PPS による代替経路 (`VideoRtpReceiver::apply_sample_entry`) に委ねる）
-/// - Base64 デコード失敗、forbidden_zero_bit が立った NAL ヘッダ、
-///   `h264_sample_entry_from_sps_pps_lists` の Err は
-///   `crate::Error` として伝播（壊れた SDP として接続を打ち切る）
+/// - 以下のいずれかは `Ok(None)`（`sprop-parameter-sets` は MAY 扱いの補助情報のため、
+///   不完全な構成は許容し IDR 内 inline SPS / PPS による代替経路
+///   (`VideoRtpReceiver::apply_sample_entry`) に委ねる）:
+///   - fmtp 不在 / `sprop-parameter-sets` 不在 / 値が空文字列 / 空要素のみ
+///   - 空 NAL (Base64 デコード結果が 0 バイト) — 該当要素のみ continue で読み飛ばす
+///   - SPS または PPS の片方が欠ける場合
+/// - 以下は `crate::Error` で伝播（壊れた SDP として接続を打ち切る）:
+///   - Base64 デコード失敗 (要素自体が不正)
+///   - forbidden_zero_bit が立った NAL ヘッダ (ITU-T H.264 7.4.1 違反)
+///   - `h264_sample_entry_from_sps_pps_lists` 内の Err (SPS パース失敗 等)
 fn extract_sample_entry_from_sprop(
     attributes: &[SdpAttribute],
     payload_type: u8,

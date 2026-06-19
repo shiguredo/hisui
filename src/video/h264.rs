@@ -86,9 +86,14 @@ pub struct H264NalUnit<'a> {
 
 /// SPS / PPS リストから AVC1 サンプルエントリーと cropping 適用後の解像度を構築する
 ///
-/// 入力 `sps_list[i]` / `pps_list[j]` は NAL ヘッダ 1 バイトを含む raw NAL バイト列
-/// (start code は含まない)。`H264AnnexBNalUnits::next` が返す `H264NalUnit.data` の形式と
-/// `AvccBox.sps_list / pps_list` の格納形式に揃える。
+/// 入力 `sps_list[i]` / `pps_list[j]` は ISO/IEC 14496-15 §5.3.3.1 で定義された EBSP 形式
+/// (emulation prevention byte 込み、NAL ヘッダ 1 バイト含む、start code は含まない)。
+/// `H264AnnexBNalUnits::next` が返す `H264NalUnit.data` の形式と `AvccBox.sps_list / pps_list`
+/// の格納形式に揃える。emulation prevention byte の除去 (RBSP 抽出) は `parse_sps` 内の
+/// `rbsp_from_sps_nalu` でのみ実施し、本関数の入力契約には除去しない。
+///
+/// `pps_list[i]` の先頭バイトに NAL タイプ検査 (`& 0x1F == H264_NALU_TYPE_PPS`) を実施する。
+/// 呼び出し側の事前判定漏れで SPS や IDR が誤って `pps_list` に混入した場合は Err を返す。
 ///
 /// 内部で `parse_sps(sps_list[0])` を 1 回呼んで SPS パラメータを取り出し、avcC フィールドに
 /// 反映する。複数 SPS は先頭 SPS のパラメータのみを採用し、`AvccBox.sps_list` には全 SPS を
@@ -107,6 +112,23 @@ pub fn h264_sample_entry_from_sps_pps_lists(
     }
     if pps_list.is_empty() {
         return Err(crate::Error::new("missing H.264 PPS"));
+    }
+
+    // pps_list の各要素が PPS NAL であることを検査する。SPS は parse_sps 内で検査される。
+    // 防御的検査で、呼び出し側 (SRT inbound / RTSP / encoder 3 経路) の事前判定漏れで
+    // SPS や IDR が混入した場合に AvccBox.pps_list へ壊れた NAL が move されるのを防ぐ。
+    for (i, pps) in pps_list.iter().enumerate() {
+        if pps.is_empty() {
+            return Err(crate::Error::new(format!(
+                "invalid H.264 PPS at index {i}: empty NAL"
+            )));
+        }
+        let nal_unit_type = pps[0] & 0x1F;
+        if nal_unit_type != H264_NALU_TYPE_PPS {
+            return Err(crate::Error::new(format!(
+                "invalid H.264 PPS at index {i}: expected nal_unit_type={H264_NALU_TYPE_PPS}, got {nal_unit_type}"
+            )));
+        }
     }
 
     let params = parse_sps(sps_list[0].as_slice())?;
@@ -1336,7 +1358,9 @@ pub(crate) mod tests {
 
     #[test]
     fn parse_sps_rejects_unsupported_profile_idc() {
-        // {66, 77, 88} ∪ H264_HIGH_PROFILES のいずれにも含まれない profile_idc は Err
+        // profile_idc=99 は {66, 77, 88} (Baseline / Main / Extended) にも
+        // H264_HIGH_PROFILES (100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135) にも
+        // 含まれない最小値で、仕様準拠 publisher が出さない値の代表値として選んでいる。
         let sps = SpsBuilder::raw(1920, 1088).with_profile_idc(99).build();
         let result = parse_sps(&sps);
         assert!(
@@ -1420,6 +1444,21 @@ pub(crate) mod tests {
         assert!(
             display.contains("missing H.264 PPS"),
             "エラーメッセージに `missing H.264 PPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h264_sample_entry_from_sps_pps_lists_returns_err_on_pps_list_with_non_pps_nal() {
+        // pps_list に PPS 以外の NAL タイプ (例: SPS の 0x67) が混入した場合は Err を返す。
+        // 呼び出し側の事前判定漏れで AvccBox.pps_list に壊れた NAL が move されるのを防ぐ。
+        let sps = SpsBuilder::raw(1920, 1088).build();
+        let non_pps_nal = vec![0x67, 0x42, 0xc0, 0x0d]; // SPS NAL ヘッダで始まる
+        let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![non_pps_nal]);
+        let err = result.expect_err("PPS 以外の NAL は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("invalid H.264 PPS"),
+            "エラーメッセージに `invalid H.264 PPS` が含まれること (実際: {display})"
         );
     }
 
