@@ -422,51 +422,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn obsws_stream_service_settings_fmt_omits_obs_compat_keys() {
-        // ObswsStreamServiceSettings::fmt の obs_compat: false 経路で、
-        // server=None / key=None のとき streamServiceSettings に server / key /
-        // use_auth のいずれも含まれないことを検証する (OBS 互換差分の漏出防止)。
-        let settings = ObswsStreamServiceSettings {
-            stream_service_type: "rtmp_custom".to_owned(),
-            server: None,
-            key: None,
-        };
-        let json_text = nojson::Json(&settings).to_string();
-        let json = nojson::RawJson::parse(&json_text).expect("JSON must parse");
-        let stream_service_settings = json
-            .value()
-            .to_member("streamServiceSettings")
-            .expect("streamServiceSettings access must succeed")
-            .required()
-            .expect("streamServiceSettings must be present");
-
-        assert!(
-            stream_service_settings
-                .to_member("use_auth")
-                .expect("use_auth access must succeed")
-                .optional()
-                .is_none(),
-            "use_auth must be omitted under obs_compat: false"
-        );
-        assert!(
-            stream_service_settings
-                .to_member("key")
-                .expect("key access must succeed")
-                .optional()
-                .is_none(),
-            "key must be omitted when key is None under obs_compat: false"
-        );
-        assert!(
-            stream_service_settings
-                .to_member("server")
-                .expect("server access must succeed")
-                .optional()
-                .is_none(),
-            "server must be omitted when server is None"
-        );
-    }
-
-    #[test]
     fn fmt_stream_service_envelope_matrix() {
         // fmt_stream_service_envelope の入力空間 (server: Some/None × key: Some/None ×
         // obs_compat: true/false) の 8 ケースを表駆動で網羅し、ヘルパ単体の挙動マトリクスを
