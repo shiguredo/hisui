@@ -139,8 +139,6 @@ impl VideoToolboxEncoder {
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
             // 最初の出力フレームの SPS/PPS からサンプルエントリーを確定して保持し、
             // 以後は全出力フレームに保持済みのサンプルエントリーを載せる。
-            // VideoFrame.size は引き続き self.width / self.height (encoder 設定 EvenUsize) を
-            // 使う既存挙動を維持し、新ヘルパー関数戻り値タプルの VideoFrameSize は捨てる。
             if self.sample_entry.is_none() {
                 let sample_entry = if self.format == VideoFormat::H264 {
                     let (entry, _frame_size) = h264::h264_sample_entry_from_sps_pps_lists(

@@ -797,9 +797,7 @@ impl SrtTsDemuxer {
         let dts = pending.header.dts.unwrap_or(pts);
 
         // IDR 判定と SPS / PPS NAL 収集を同じループで実施する (IDR 検出時も break せず最後まで走査)。
-        // 複数 SPS / PPS は全て収集して AvccBox に move する。avcC のフィールド反映には
-        // h264_sample_entry_from_sps_pps_lists 内で先頭 SPS のみが採用される。
-        // Hisui の入力前提 (publisher が PES に inline する SPS / PPS は同一内容) では先頭 SPS で十分。
+        // 複数 SPS / PPS の扱いは `h264_sample_entry_from_sps_pps_lists` の docstring を参照。
         let mut keyframe = false;
         let mut sps_list: Vec<Vec<u8>> = Vec::new();
         let mut pps_list: Vec<Vec<u8>> = Vec::new();
@@ -1286,7 +1284,7 @@ mod tests {
     }
 
     // IDR より後ろに SPS / PPS が並ぶ Annex-B ストリームでも sample_entry が確定することを検証する。
-    // `h264_sample_entry_from_annexb` が PES データ全体を走査して SPS / PPS を抽出することの回帰防止。
+    // build_video_sample が PES データ全体を走査して SPS / PPS を収集することの回帰防止。
     #[test]
     fn srt_h264_emits_sample_entry_on_idr_with_trailing_sps_pps() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
@@ -1319,8 +1317,8 @@ mod tests {
         assert!(result.is_err(), "SPS / PPS 不在 IDR は Err を返すこと");
     }
 
-    // PPS 不在（SPS のみ含有）の IDR は `h264_sample_entry_from_annexb` が `missing H.264 PPS` Err を返し、
-    // それが上位に伝播することを検証する。
+    // PPS 不在（SPS のみ含有）の IDR は `h264_sample_entry_from_sps_pps_lists` が
+    // `missing H.264 PPS` Err を返し、それが上位に伝播することを検証する。
     #[test]
     fn srt_h264_returns_err_on_idr_with_only_sps() {
         let mut demuxer = SrtTsDemuxer::new().expect("demuxer 生成に成功すること");
@@ -1331,8 +1329,8 @@ mod tests {
         assert!(result.is_err(), "PPS 不在 IDR は Err を返すこと");
     }
 
-    // SPS 不在（PPS のみ含有）の IDR は `h264_sample_entry_from_annexb` が `missing H.264 SPS` Err を返し、
-    // それが上位に伝播することを検証する。
+    // SPS 不在（PPS のみ含有）の IDR は `h264_sample_entry_from_sps_pps_lists` が
+    // `missing H.264 SPS` Err を返し、それが上位に伝播することを検証する。
     #[test]
     fn srt_h264_returns_err_on_idr_with_only_pps() {
         let mut demuxer = SrtTsDemuxer::new().expect("demuxer 生成に成功すること");

@@ -57,8 +57,6 @@ impl Openh264Encoder {
         // 以後は全出力フレームに保持済みの最新サンプルエントリーを載せる。
         // これにより、下流コンポーネントが参照するコーデック設定を最新化し、
         // 古いパラメータセット参照によるデコード失敗を避ける。
-        // VideoFrame.size は引き続き frame.size() (encoder 設定値) を使う既存挙動を維持し、
-        // 新ヘルパー関数戻り値タプルの VideoFrameSize は捨てる。
         if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let (sample_entry, _frame_size) = h264::h264_sample_entry_from_sps_pps_lists(
                 encoded.sps_list.clone(),

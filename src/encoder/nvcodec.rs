@@ -47,8 +47,6 @@ impl NvcodecEncoder {
 
         let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
         let seq_params = inner.get_sequence_params()?;
-        // 新ヘルパー関数は seq_params の SPS から実値を avcC と visual に反映する。
-        // VideoFrame.size は別の経路で encoder 設定 (width / height) から構築される既存挙動を維持。
         let sample_entry = h264::h264_sample_entry_from_annexb(&seq_params)?;
 
         Ok(Self {
