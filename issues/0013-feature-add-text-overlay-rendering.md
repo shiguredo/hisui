@@ -1,71 +1,130 @@
-# 合成映像へのテキスト (字幕) 描画に対応する
+# 合成映像へのテキストオーバーレイ描画に対応する
 
 - Priority: Medium
 - Created: 2026-06-03
 - Completed:
 - Model: Opus 4.8
 - Branch: feature/add-text-overlay-rendering
-- Polished:
+- Polished: 2026-06-19
 
 ## 目的
 
-合成映像にテキストをオーバーレイ描画できる汎用基盤を提供する。応用例: ラベル・タイムスタンプ・任意テキストの表示、別 issue 0012 (candle / Whisper 文字起こし) の結果を字幕として映像に重ねて表示する、等。本 issue は描画プリミティブと obsws 経由の操作 API までを範囲とし、字幕特有のスタイル一式 (縁取り・背景帯) や時刻スケジューリング、特定入力への追従は本 issue では扱わない。
+合成映像にテキストをオーバーレイ描画できる汎用基盤を提供する。応用例: ラベル・タイムスタンプ・任意テキストの表示、別 issue 0012 (candle / Whisper 文字起こし) の結果を字幕として映像に重ねて表示する、等。本 issue は描画プリミティブと obsws 経由の操作 API までを範囲とし、字幕特有のスタイル一式 (縁取り・背景帯)・時刻スケジューリング・特定入力への追従は扱わない。
 
 ## 優先度根拠
 
-- テキスト描画はラベル・タイムスタンプ・字幕など複数応用の前提となる汎用基盤で、単体で動作確認・マージが可能。
-- ただし業務を止めている課題ではない。
-- 以上から Medium。
+テキスト描画は複数応用の前提となる汎用基盤で、単体で動作確認・マージが可能。即時の業務影響はないため Medium。
 
 ## 現状
 
 ### 映像合成
 
-- hisui の映像合成は I420 (YUV) 上で行う:
-  - `src/video/canvas.rs` の `I420Canvas`。
-  - `src/mixer/video.rs` の `VideoRealtimeMixer` が `compose_frame` / `blend_component` で I420A レイヤをブレンドして I420 を出力する。`InputTrack` の動的追加・削除は `UpdateConfig` RPC 経由で可能。
-  - 録画合成側は `src/sora/recording_video_mixer.rs`。
-  - 色空間変換・リサイズは shiguredo_libyuv を使用する。
-- テキスト描画機能は無い。グリフをラスタライズして映像へ重ねる手段が存在しない。
+- リアルタイム合成 (`src/mixer/video.rs` の `VideoRealtimeMixer`) は I420 上で `compose_frame` / `blend_component` により I420A レイヤを z-order でブレンドして I420 を出力する。`InputTrack.z` の型は `isize` (`src/mixer/video.rs:138`)。
+- 録画合成 (`src/sora/recording_video_mixer.rs`) はリアルタイム合成とは別実装系 (`Canvas` / `mix_region` / `draw_frame`、アルファ合成なし)。本 issue のスコープ外。
+- 色空間変換・リサイズは `shiguredo_libyuv` を使用する。RGBA 系 → I420 + アルファ変換として `argb_to_i420_alpha` (`shiguredo_libyuv-2026.1.0/src/convert.rs:5216`、ARGB バイト順) などが存在する。hisui ではまだ未使用 (`src/obsws/source/png_file.rs:139` の手書き `rgba_like_to_i420a` で同等処理が回っている)。
+- canvas は hisui 全体で 1 つだけ、起動時固定 (`src/subcommand_server.rs:80-87` の `--canvas-width` / `--canvas-height`、`src/obsws/state.rs:56-62` の `ObswsSessionState::new` 経由で以降不変、実行中の resize API は無い)。obsws レスポンスの `canvasName` は OBS 互換のため `"Main"` 固定 (`src/obsws/response/general.rs:288-291`)。複数 canvas の概念はない。
+- output 出力 (`mp4_output` / `hls_output` / `mpeg_dash_output` 等) は `VideoRealtimeMixer` の出力 track (`program:mixed_video`) を購読する。`VideoRealtimeMixer` 内で TextOverlay レイヤと合成された出力がそのまま永続化される。
+- テキスト描画機能は無い。
 
 ### MediaPipeline / Processor
 
-- `src/media_pipeline.rs` に MediaPipeline の processor 概念が確立されている (`register_processor` / `spawn_processor` / `ProcessorHandle` / `subscribe_track` / `publish_track` 等)。`VideoRealtimeMixer` も 1 processor として動く。
-- `MediaFrame` / `RawVideoFrame` は内部に `Arc<VideoFrame>` を保持しており (`src/media.rs:9` / `src/video.rs:62`)、processor 間のフレーム受け渡しは Arc クローンのみでフレーム本体のメモリコピーは発生しない。
+- MediaPipeline の processor 概念が確立済み (`src/media_pipeline.rs` の `register_processor` / `spawn_processor` / `ProcessorHandle` / `subscribe_track` / `publish_track`)。
+- `MediaFrame` / `RawVideoFrame` は内部に `Arc<VideoFrame>` を保持しており (`src/media.rs:8-11` / `src/video.rs:61-62`)、processor 間のフレーム受け渡しは Arc クローンのみでフレーム本体のメモリコピーは発生しない。
+- **publish only (subscribe なし) の processor 参照実装**: `src/obsws/source/color_source.rs:20-75` / `src/obsws/source/png_file.rs:25-70`。`publish_track` のみ呼び、`notify_ready()` の直後に `wait_subscribers_ready().await?` で最初の subscriber 接続を待ち、その後 `tokio::time::sleep_until(start + frame_index * frame_period)` ループでセルフタイミングし、`MAX_NOACKED_COUNT = 100` の ack/syn による back-pressure を取る。
 
 ### obsws 独自拡張
 
-- obsws には既に hisui 独自拡張リクエストが多数存在し、命名規則 `Hisui<Verb><Noun>` が確立されている (`HisuiCreateOutput` / `HisuiRemoveOutput` / `HisuiStartSoraSubscriber` / `HisuiGetWebRtcStats` 等)。
-- 独自拡張のドキュメントは `docs/server/hisui_requests/<MethodName>.md` (個別ファイル) + `docs/server/hisui_requests/README.md` (一覧) + `docs/obsws/PROTOCOL_STATUS.md` (反映) の構造。
-- 識別子はクライアント指定の一意名が一貫した慣わし (例: `outputName`, `subscriberId`)。
+- hisui 独自拡張リクエストが多数存在し、命名規則 `Hisui<Verb><Noun>` が確立されている (`HisuiCreateOutput` / `HisuiGetWebRtcStats` 等、14 メソッド)。
+- 個別 md は `## Request` (`requestId` を含む) + `## RequestData` + `## ResponseData` + `## エラー条件` + `## 制約` の 2 段構造 (例: `docs/server/hisui_requests/HisuiCreateOutput.md`)。
+- 識別子はクライアント指定の一意名 (`outputName` / `subscriberId` 等)。
+- リクエストハンドラのディスパッチは `src/obsws/message.rs:175` の `match request_type.as_str()` で、`HisuiCreate*` 系は `src/obsws/coordinator.rs:658-661` 等で処理。RequestBatch（op=8）対応可否は `src/obsws/coordinator.rs:1131-1132` 近傍の許可リストで管理されている。
+- エラーコード定数は `src/obsws/protocol.rs:44-58` の `REQUEST_STATUS_*`。本 issue で使うのは `MISSING_REQUEST_FIELD (300)` / `INVALID_REQUEST_FIELD (400)` / `RESOURCE_NOT_FOUND (601)` / `RESOURCE_ALREADY_EXISTS (602)` / `RESOURCE_ACTION_NOT_SUPPORTED (606)`。
+- リクエストハンドラからの状態反映は `src/obsws/session/output.rs:131-137` の `update_program_mixers` 経由で `VideoRealtimeMixerUpdateConfigRequest` を送り、**`input_tracks` を全置換**する設計 (`src/mixer/video.rs:509-510`)。`output_plan.video_mixer_input_tracks` は `src/obsws/output_plan.rs:89-159` の `build_composed_output_plan` 内で `source_plans.iter().zip(active_scene_inputs.iter())` の `filter_map` クロージャ 1 つから組み立てられ、scene の input から都度再計算される (`ObswsVideoMixerInputTrack.z` の型は `i64`、`output_plan.rs:24`)。
+- `build_composed_output_plan` の呼び出し元は 2 箇所: `src/obsws/server.rs:315` (初期化時) と `src/obsws/coordinator.rs:844` (`rebuild_program_output` シーン切替時)。
 
 ## 設計方針
 
 ### 1. 描画ライブラリ
 
-- shiguredo/raden (https://github.com/shiguredo/raden) を採用する。Cranelift JIT ベースの CPU-only な 2D ベクターグラフィックスライブラリで、`fill_text(x, y, &Font, text)` でテキストを描画できる。CPU only のため GPU の無い CI 環境とも相性が良い。
-- リスク (要管理): raden は公式 README で「実験的プロジェクトであり、API や内部実装は予告なく大幅変更されうる」と明記されている。依存バージョンを厳密固定 (hisui 方針) し、API 変更時の追従コストを織り込む。
+- shiguredo/raden (https://github.com/shiguredo/raden) を採用する。Cranelift JIT ベースの CPU only な 2D ベクターグラフィックスライブラリで、GPU の無い CI 環境とも相性が良い。
+- `Cargo.toml` に厳密固定 (`raden = "=<確定バージョン>"`) で追加する。shiguredo-rust 規約は本来「マイナーまで」固定だが、raden は「実験的プロジェクトであり API や内部実装は予告なく大幅変更されうる」(公式 README) と明記された例外的状況のため、本 issue ではパッチまで含めた `=` 固定を採用する。`Cargo.toml` の依存定義に「テキストオーバーレイ描画用 (実験的、API 不安定のため `=` 固定)」のコメントを付す。
+- raden の連鎖依存 (`cranelift-*` 系・フォント解析系) によりビルド時間・バイナリサイズが増加する。実装着手時に CI 時間影響と clippy / fmt 等の既存 CI への影響を計測し、許容範囲外なら別途検討する。
+
+#### raden 事前調査 (実装着手の最初のサブタスク)
+
+以下の項目を確定しないと §3 の描画フロー・Cargo.toml の依存解決が決まらない。`feature/add-text-overlay-rendering` ブランチでの **先頭 commit として「raden 調査結果を §1 に反映するだけのコミット」** を積み、その後に実装本体のコミットを積む形で進める (PR は本実装と同一の 1 本に統合)。
+
+| 項目 | 確定が必要な理由 |
+|---|---|
+| 採用バージョン | `=<バージョン>` の値、crates.io 公開状況 (なければ git 依存記述) |
+| 出力バイトオーダ (ARGB / ABGR / RGBA / BGRA) | 採用する `shiguredo_libyuv` 関数 (`argb_to_i420_alpha` / `rgba_to_i420` 等) が決まる |
+| premultiplied vs straight alpha | `blend_component` (`src/mixer/video.rs:1136-1148`) は straight 前提のため、premultiplied なら除算で戻すヘルパーが要る |
+| `Font` / `Canvas` の `Send + Sync` 可否 | Send でない場合は `tokio::task::LocalSet` / 毎フレーム生成等の代替設計が必要 |
+| Cranelift JIT 初回コンパイル遅延 | 数百 ms 以上なら起動時 warm-up (空テキスト描画) を行う |
+| glyph 不在時の挙動 | 本 issue は「raden の既定挙動 (tofu 等) のまま透過 I420A レイヤに含める、エラーは返さない」で確定 |
 
 ### 2. フォント
 
-- フォント本体は同梱しない (リポジトリ・バイナリのいずれにも入れない)。
-- 起動時に CLI 引数で探索ルートとデフォルトフォントを指定する:
-  - `--font-search-root <dir>`: フォント探索ルート (絶対パス必須)。サーバはこの配下のファイルのみ参照する。`canonicalize` 後にルート配下チェックで path traversal を遮断する。
-  - `--default-font <fontName>`: 省略時のデフォルトフォント名 (例: `Roboto-Regular.ttf`)。`<root>/<fontName>` が起動時に解決可能であることを起動時に検証する。
-- どちらかが未指定の場合はテキストオーバーレイ機能無効 (`HisuiCreateTextOverlay` を呼ばれたらエラー応答)。
-- obsws リクエストは `fontName` (拡張子付きファイル名) で参照する。絶対パスは受け付けない (path traversal および機密ファイル参照を防ぐため)。
-- 複数フォントの動的管理 API (`HisuiCreateFont` 等)・フォールバックチェーン・CJK 標準フォント提供は本 issue では扱わない (必要になれば別 issue)。
-- テスト用フォントとして Roboto Regular (Apache 2.0、約 170KB) を `testdata/fonts/Roboto-Regular.ttf` に配置する。
+#### CLI 引数
+
+- `--font-search-root <dir>`: フォント探索ルート (絶対パス必須)。サーバはこの配下のファイルのみ参照する。
+- `--default-font <fontName>`: 省略時のデフォルトフォント名 (例: `Roboto-Regular.ttf`)。
+
+`src/subcommand_server.rs:80-87` 近傍 (canvas 引数の隣) に `noargs::opt("font-search-root")` / `noargs::opt("default-font")` で追加し、`ObswsSessionState::new` (`src/obsws/state.rs:56-62`) と `start_obsws_server` (`src/obsws/server.rs`) に伝播させる。
+
+#### 起動時検証 (CLI パース直後)
+
+- `--font-search-root` 指定時: `canonicalize` してルートパスを確定。失敗時 (存在しない / 権限なし) は **hisui プロセスを起動失敗 (abort)** させる (server 起動引数の不整合のため警告継続より安全)。
+- `--default-font` 指定時: `<root>/<fontName>` を `canonicalize` してルート配下に収まるか検証し、raden で `Font::from_path` できることまで確認。失敗時は同じく起動失敗。
+- 両方未指定: **テキストオーバーレイ機能無効** として hisui は正常起動する。`HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` / `HisuiRemoveTextOverlay` / `HisuiListTextOverlays` 呼び出し時は `RESOURCE_ACTION_NOT_SUPPORTED (606)` を返す (エラー文言で「`--font-search-root` / `--default-font` が未指定」を伝える)。
+- 片方のみ指定: 起動失敗 (CLI 引数の組として整合性を取る)。
+
+#### 安全策 (path traversal 対策)
+
+- `fontName` には `/` / `\` / `..` / NULL バイト (`\0`) を含めない (含まれていたら `INVALID_REQUEST_FIELD`)。
+- 解決後のパスは `canonicalize` してから root の `canonicalize` 結果配下に収まるか検証する (収まらなければ `INVALID_REQUEST_FIELD`)。
+- シンボリックリンクは `canonicalize` で root 外に出るため自動的に弾かれる。
+- 上記は hisui のサポート OS (macOS / Linux) で `std::fs::canonicalize` が実体パスへ解決する挙動を前提とする。Windows サポートは本 issue では考慮しない。
+
+#### その他
+
+- CJK / フォントに含まれない文字: raden の既定挙動 (tofu 等) のまま透過 I420A レイヤに含める。代替フォント探索・複数フォント登録の動的管理 API・フォールバックチェーン・CJK 標準フォント提供は本 issue では扱わない。
+- テスト用フォントとして Roboto Regular (Apache 2.0、Google Fonts 配布版) を `testdata/fonts/Roboto-Regular.ttf` に配置する。
 
 ### 3. 描画 API (内部)
 
-- `VideoRealtimeMixer` には描画機能を直接生やさず、新規 `TextOverlayProcessor` を MediaPipeline 上の 1 processor として実装する (`MediaPipeline::register_processor` / `spawn_processor` 系に乗せる)。
-- `TextOverlayProcessor` は最終キャンバス解像度の透過 I420A レイヤを 1 本の track として publish する (raden で RGBA に描画 → shiguredo_libyuv で I420A 変換)。
-- `VideoRealtimeMixer` はその track を z-order 最上位の `InputTrack` として合成する (`UpdateConfig` 経由で動的追加・削除)。
-- 位置指定は最終キャンバス上の絶対座標 (px) のみサポートする。これによりサイズ・位置の一貫性は最終キャンバス基準で自然に確保される。
-- 特定入力への追従や相対座標指定は本 issue では扱わない (必要になれば mixer のシーン情報 broadcast 機構を別途検討)。
-- 内部 RPC: `AddText` / `UpdateText` / `RemoveText` / `ListTexts` を `(canvasName, textOverlayName)` 単位で操作する。
-- 静的テキスト時は描画済み `Arc<VideoFrame>` をキャッシュし、毎フレームの publish は Arc クローンのみとする。
+#### Processor の起動・存在期間
+
+注: 以下の spawn 戦略は §1 raden 事前調査の結果 (特に `Send + Sync` 可否、JIT 初回コンパイル遅延) に依存する。`Send` 不可なら `tokio::task::LocalSet` 配下に変更する等、再決定が必要になる可能性がある。
+
+- 新規 `TextOverlayProcessor` を MediaPipeline 上の 1 processor として実装する。canvas 単一・起動時固定のため、**server 起動時に常駐 spawn し、サーバ稼働中ずっと生かす** (`src/subcommand_server.rs` の MediaPipeline 構築直後、テキストオーバーレイ機能有効時のみ)。シーン切替で再生成しない。
+- ProcessorId は `program:text_overlay_processor` 固定、出力 track_id は `program:text_overlay` 固定。canvas サイズ・frame_rate は CLI 引数から受け取り起動時固定 (実行中の追従不要)。
+- run ループは `src/mixer/video.rs:353-374` の `VideoRealtimeMixerRunner::run` を input event_rx なしで簡略化した形 (`rpc_rx` と `tokio::time::sleep_until(next_output_instant)` の 2 系統 select)。
+- 起動シーケンス: `notify_ready()` を呼んだ後、**`wait_subscribers_ready().await?` は呼ばない**。`wait_subscribers_ready` (`src/media_pipeline.rs:1120` 周辺) は「初期 processor 集合の `notify_ready` 完了」を待つ API であり、TextOverlayProcessor は初期 processor 集合に含めず、後発で接続する subscriber (output 系) を前提とする非定常 publisher として動かすため、待機 API を呼ぶ意味がない。`color_source.rs:40-41` の定番 2 行セットからは外れる扱いとなる旨をコード上のコメントで明記する。
+
+#### TextOverlay InputTrack の VideoRealtimeMixer への注入
+
+- `VideoRealtimeMixerUpdateConfigRequest` は input_tracks を全置換するため、シーン切替で TextOverlay track が落ちる。これを防ぐため:
+  - `src/obsws/output_plan.rs` の `build_composed_output_plan` のシグネチャに `text_overlay_track_id: Option<TrackId>` を追加する。`Some(track_id)` なら関数内で `video_mixer_input_tracks` を構築した後 (`.collect()` 後) に `push` (または `chain`) で **末尾 (`z = i64::MAX`) に TextOverlay InputTrack を追加** する。`None` (機能無効時) なら何もしない。
+  - 呼び出し元 4 箇所 (本体 2 箇所: `src/obsws/server.rs:315` 初期化時 / `src/obsws/coordinator.rs:844` `rebuild_program_output`、テスト 2 箇所: `src/obsws/output_plan.rs:226` の既存ユニットテスト `build_composed_output_plan_skips_dormant_inputs` / `src/obsws/session/tests.rs:143` の共通ヘルパー `create_initialized_coordinator_handle_with_pipeline_and_record_dir`) を改修する。本体 2 箇所はテキストオーバーレイ機能有効時のみ `Some(...)` を渡す。テスト 2 箇所は `None` 固定で既存挙動を保つ。
+- `i64::MAX` (`ObswsVideoMixerInputTrack.z: i64` の型に合わせる) は **テキストオーバーレイ専用予約値** とし、一般 input track が指定することを禁止する。内部の `InputTrack.z: isize` (`src/mixer/video.rs:138`) に渡すときも同等の最上位値となる (hisui のサポートターゲットは 64bit のため `isize::MAX == i64::MAX`)。
+- 複数テキストオーバーレイ間の z は `TextOverlayProcessor` 内部でソートして 1 枚の I420A に重ね合わせる段で解決する (`VideoRealtimeMixer` 側の z 配列には影響しない)。InputTrack は常に 1 つだけで、`OVERLAY_LIMIT = 64` は processor 内部の overlay マップの上限であり mixer 側の InputTrack 数とは無関係。
+
+#### 内部 RPC
+
+- `TextOverlayProcessor` は `register_rpc_sender` パターン (`src/mixer/video.rs:222-457` 参考) で `TextOverlayRpcMessage` enum (バリアント: `Add` / `Update` / `Remove` / `List`) を受け、各バリアントは `oneshot::Sender` で reply する。
+- reply 型は `Result<T, TextOverlayError>` (`T` は Add/Update/Remove で `()`、List で `Vec<TextOverlayState>`)。`TextOverlayError` のバリアントと REQUEST_STATUS マッピングは §4 のエラー対応表に集約する。
+- `TextOverlayPatch` は Update 用で全フィールド `Option<T>`、`None` = 省略 = 現状維持。JSON 上の `null` 受信は `INVALID_REQUEST_FIELD` として扱う。
+- `TextOverlayState` は `HisuiCreateTextOverlay` の全属性 (`textOverlayName` / `text` / `x` / `y` / `fontSize` / `fontColor` / `fontName` / `z`) を保持し、`List` の戻り値および JSON 化される。
+- 並列性: processor 内ループは単一 task で `rpc_rx` を順次処理する。同名 overlay の Add と Remove が同時送信された場合は受信順 (FIFO) で処理する。
+
+#### 描画フロー
+
+- raden で全 overlay を 1 枚の RGBA canvas に z 順に重ね描き → `shiguredo_libyuv` (raden 出力バイト順に応じた関数、§1 raden 事前調査で確定) で I420A に変換 → `Arc<VideoFrame>` を生成して `cached_frame` に保持。`dirty = false` の間は毎フレーム Arc クローンを `publish_track` する。
+- `dirty` を `true` にする条件: `text` / `x` / `y` / `fontSize` / `fontColor` / `fontName` / `z` のいずれかが変わった (Add / Update / Remove のいずれか)。canvas サイズは起動時固定のため `dirty` 化トリガにならない。
+- 全 overlay が空 (`overlays.is_empty()`) の場合は publish しない (mixer 側で `pending_frames` 空の InputTrack は何も合成しないため透明な状態となる)。
+
+各種上限値・位置/サイズ制約 (`OVERLAY_LIMIT = 64`、`text` 4096 バイト・64 行、`fontSize` 範囲等) は §4 RequestData 表に集約する。raden の描画コストは文字数に比例するため、巨大入力で processor がブロックして他 overlay 操作が詰まるのを防ぐ意図。なお `cached_frame` 保持で processor あたり I420A 1 フレーム分 (1920x1080 で約 3 MB) のメモリを常時占有する。
 
 ### 4. 外部 API (obsws)
 
@@ -82,92 +141,128 @@ hisui obsws 既存の独自拡張命名規則 `Hisui<Verb><Noun>` に従う。
 | `HisuiRemoveTextOverlay` | オーバーレイ削除 |
 | `HisuiListTextOverlays` | 一覧取得 |
 
-#### 識別子・スコープ
+#### 共通: Request
 
-- `textOverlayName` (string) はクライアント指定の一意名。`(canvasName, textOverlayName)` で一意 (異なる canvas に同名 OK)。
-- canvas 削除時に紐づくテキストオーバーレイは自動削除する。
+全メソッド共通: `requestId` (string、必須) のみ。
 
-#### `HisuiCreateTextOverlay` requestData
+#### 識別子
+
+`textOverlayName` (string、サーバ全体で一意) はクライアント指定。hisui は単一 canvas のため canvas スコープは導入しない。
+
+#### `HisuiCreateTextOverlay` RequestData
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `textOverlayName` | string | 必須 | canvas 内で一意 |
-| `text` | string | 必須 | `\n` 改行可 |
-| `x` / `y` | integer | 必須 | 最終キャンバス絶対座標 (左上原点、px) |
-| `fontSize` | integer | 必須 | px |
-| `fontColor` | string | - | `#RRGGBB` / `#RRGGBBAA`、default `#FFFFFFFF` |
+| `textOverlayName` | string | 必須 | サーバ全体で一意 |
+| `text` | string | 必須 | `\n` 改行可、最大 4096 バイト、最大 64 行 |
+| `x` | integer | 必須 | キャンバス絶対座標 X (左上原点、px)。負値・キャンバス外は許容 (raden 側でクリップ) |
+| `y` | integer | 必須 | キャンバス絶対座標 Y (左上原点、px)。同上 |
+| `fontSize` | integer | 必須 | px。`1` 以上 `canvas_height` 以下 |
+| `fontColor` | string | - | 正規表現 `^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$`、default `#FFFFFFFF` |
 | `fontName` | string | - | `--font-search-root` 配下のファイル名 (拡張子付き)、default は `--default-font` |
-| `canvasName` | string | - | canvas が複数あるときは必須 |
 | `z` | integer | - | overlay 間 z-order、省略時は宣言順 (= 後勝ち) |
 
-エラー条件:
+ResponseData: なし。
 
-- 同名既存: `RESOURCE_ALREADY_EXISTS`
-- `fontName` 解決失敗 (ファイルなし / ルート外): `INVALID_REQUEST_FIELD`
-- 必須フィールド欠落: `MISSING_REQUEST_FIELD`
-- `canvasName` 未指定だが canvas 複数: `MISSING_REQUEST_FIELD`
-- 指定 `canvasName` が存在しない: `RESOURCE_NOT_FOUND`
-- テキストオーバーレイ機能無効 (`--font-search-root` 等が未指定): 既存定数があれば揃える、なければ新規定義する
-
-#### `HisuiUpdateTextOverlay` requestData
+#### `HisuiUpdateTextOverlay` RequestData
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `textOverlayName` | string | 必須 | 対象識別子 (変更不可) |
-| `canvasName` | string | canvas 複数時必須 | 対象 canvas (変更不可) |
-| `text` / `x` / `y` / `fontSize` / `fontColor` / `fontName` / `z` | - | - | 送ったフィールドのみ部分更新、省略は現状維持 |
+| `text` | string | - | 省略時は現状維持 (以下同じ) |
+| `x` | integer | - | |
+| `y` | integer | - | |
+| `fontSize` | integer | - | |
+| `fontColor` | string | - | |
+| `fontName` | string | - | |
+| `z` | integer | - | |
 
-エラー条件: `RESOURCE_NOT_FOUND` (overlay or canvas) / `MISSING_REQUEST_FIELD` / `INVALID_REQUEST_FIELD` (fontName 解決失敗)。
+ResponseData: なし。
 
-#### `HisuiRemoveTextOverlay` requestData
+#### `HisuiRemoveTextOverlay` RequestData
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `textOverlayName` | string | 必須 | |
-| `canvasName` | string | canvas 複数時必須 | |
 
-エラー条件: `RESOURCE_NOT_FOUND` / `MISSING_REQUEST_FIELD`。
+ResponseData: なし。
 
-#### `HisuiListTextOverlays` requestData
+#### `HisuiListTextOverlays` RequestData
+
+なし。
+
+ResponseData: `textOverlays` 配列。各要素は以下:
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `canvasName` | string | - | 指定時はその canvas のみ、省略時は全 canvas |
+| `textOverlayName` | string | 必須 | |
+| `text` | string | 必須 | |
+| `x` | integer | 必須 | |
+| `y` | integer | 必須 | |
+| `fontSize` | integer | 必須 | |
+| `fontColor` | string | 必須 | 解決済みの値 (デフォルト適用後) |
+| `fontName` | string | 必須 | 解決済みの値 (デフォルト適用後) |
+| `z` | integer | 必須 | 解決済みの値 (宣言順から確定された値) |
 
-responseData: `textOverlays` 配列 (各要素は Create の全属性 + `canvasName`)。
+#### エラー条件 (全メソッド共通対応表)
+
+| `TextOverlayError` | REQUEST_STATUS | 適用メソッド | 条件 |
+|---|---|---|---|
+| `AlreadyExists` | `RESOURCE_ALREADY_EXISTS (602)` | Create | 同名既存 |
+| `NotFound` | `RESOURCE_NOT_FOUND (601)` | Update / Remove | 対象 overlay が存在しない |
+| (フィールド欠落) | `MISSING_REQUEST_FIELD (300)` | 全 | 必須フィールドなし |
+| `InvalidFontName` | `INVALID_REQUEST_FIELD (400)` | Create / Update | `fontName` が `/` `\` `..` `\0` を含む |
+| `FontResolveFailed` | `INVALID_REQUEST_FIELD (400)` | Create / Update | `fontName` 解決失敗 (ファイルなし / ルート外 / シンボリックリンクでルート外 / フォント破損) |
+| `InvalidColor` | `INVALID_REQUEST_FIELD (400)` | Create / Update | `fontColor` 形式違反、または JSON `null` 受信 |
+| `InvalidFontSize` | `INVALID_REQUEST_FIELD (400)` | Create / Update | `fontSize` 範囲外 |
+| `InvalidText` | `INVALID_REQUEST_FIELD (400)` | Create / Update | `text` がバイト数 / 行数上限超過 |
+| `RenderFailed` | `INVALID_REQUEST_FIELD (400)` | Create / Update | raden 描画失敗 (詳細はエラー文言) |
+| `LimitExceeded` | `RESOURCE_ACTION_NOT_SUPPORTED (606)` | Create | `OVERLAY_LIMIT` 超過 |
+| `Disabled` | `RESOURCE_ACTION_NOT_SUPPORTED (606)` | 全 | テキストオーバーレイ機能無効 |
 
 #### 共通制約
 
 - WebSocket / データチャネル両方で利用可能 (`HisuiCreateOutput` と同じ)。
-- RequestBatch (op=8) 対応 (`HisuiCreateOutput` と同じ)。
-
-#### 永続化・イベント・スケジューリング (= 含めないもの)
-
-- **永続化対象に含めない** (`--state-file` に保存しない)。テキストオーバーレイは揮発的な性質 (字幕・ラベル等の用途と整合)。クライアントが再起動を跨いで保持したい場合は `PersistentData` (KV ストア) に保存して再投入する。
-- **`TextOverlayCreated` / `TextOverlayRemoved` / `TextOverlayUpdated` 等のイベントは出さない**。現状 Hisui 系メソッド (`HisuiCreateOutput` 等) も独自イベントを出していないため整合的。将来 Hisui 系リソースのイベント通知を統一する別 issue で一括対応する。
-- **表示スケジューリング (`startAt` / `endAt` 等) を持たない**。`HisuiCreateTextOverlay` = 即表示、`HisuiRemoveTextOverlay` = 即削除のみ。スケジューリングは応用層 (字幕応用 issue 等) が時刻を見て `HisuiCreateTextOverlay` / `HisuiRemoveTextOverlay` を呼び分ける責務とする。
+- RequestBatch（op=8）対応 (`src/obsws/coordinator.rs:1131-1132` 近傍の許可リストに 4 メソッドを追加する)。
+- obsws レスポンスの `comment` フィールドは英語で記述する (CLAUDE.md「ログメッセージは全て英語」と同方針)。
 
 ### 5. ドキュメント
 
-- `docs/server/hisui_requests/HisuiCreateTextOverlay.md` 等、4 メソッド分の個別 md を作成する (既存 `HisuiCreateOutput.md` 等のフォーマットを踏襲)。
-- `docs/server/hisui_requests/README.md` に「## テキストオーバーレイ」節を追加し、4 メソッドを表記する。
+- `docs/server/hisui_requests/HisuiCreateTextOverlay.md` / `HisuiUpdateTextOverlay.md` / `HisuiRemoveTextOverlay.md` / `HisuiListTextOverlays.md` を新規作成する。構造 (`## Request` / `## RequestData` / `## ResponseData` / `## エラー条件` / `## 制約`) は `HisuiCreateOutput.md` を踏襲する。
+- `docs/server/hisui_requests/README.md` に「## テキストオーバーレイ」節を追加する。節冒頭に既存節 (例: 「Output 管理」) と同様の前提条件行「WebSocket / データチャネル両対応。RequestBatch（op=8）に対応。」を入れる。
 - `docs/obsws/PROTOCOL_STATUS.md` の独自拡張節に反映する。
+- `docs/obsws/STATE_FILE.md` の永続化対象列挙 (line 7-8) にテキストオーバーレイが永続化対象外である旨を明記する。
+- `docs/internals/mixer.md` (実在を確認済み) に「`InputTrack.z` の最大値 (`i64::MAX` 相当) はテキストオーバーレイレイヤ用の予約値、一般 input track では使用しない」を追記する。
+- `README.md` に「対応プラットフォームは 64bit (`isize::MAX == i64::MAX` 前提)」を明記する (既存に明示がないため本 issue で確定する。`docs/internals/mixer.md` の `z` 予約値説明はこの記述を参照する形で書く)。
+
+(closed 0040 で議論された `docs/internals/processor_conventions` 系のドキュメントは存在しない結論で close されているため、本 issue で追記する先はない。)
 
 ### 6. スコープ
 
-- リアルタイム (obsws 経由) のみを対象にする。
-- 録画合成 (`src/sora/recording_video_mixer.rs` / `src/sora/recording_subcommand_compose.rs`) は本 issue では扱わない (要件が出てから別途検討)。
+- リアルタイム合成 (obsws 経由) のみを対象とする。`VideoRealtimeMixer` の出力 `program:mixed_video` を購読する `mp4_output` / `hls_output` / `mpeg_dash_output` 等を通せば、テキスト描画済みの動画ファイルが結果として得られる (字幕応用 0012 の主用途もこの経路で実現される)。
+- 録画合成 (`src/sora/recording_video_mixer.rs` / `src/sora/recording_subcommand_compose.rs`) は本 issue では一切触らない。
 
 ## 完了条件
 
-- 上記 4 メソッドが obsws (WebSocket / データチャネル両方) と RequestBatch から動作する。
-- `--font-search-root` / `--default-font` の CLI 引数が動作し、絶対パス / ルート外パスは拒否される (path traversal 対策が機能している)。
-- ドキュメント (個別 md 4 本 / `README.md` / `PROTOCOL_STATUS.md`) が整備されている。
-- `testdata/fonts/Roboto-Regular.ttf` を使った integration test レベルの動作検証がある (モック / スタブを使わない、規約遵守)。
+- 4 メソッドが obsws (WebSocket / データチャネル両方) と RequestBatch（op=8）から動作する。
+- `--font-search-root` / `--default-font` の CLI 引数が動作する (両方未指定で機能無効・正常起動、片方のみで起動失敗、両方指定で起動時検証成功なら常駐 `TextOverlayProcessor` を spawn、検証失敗で起動失敗。リクエスト時の `fontName` で `..` 含む / シンボリックリンク経由でルート外を指すパスは拒否)。
+- ドキュメント整備:
+  - `docs/server/hisui_requests/` 個別 md 4 本
+  - `docs/server/hisui_requests/README.md` への節追加 (前提条件行込み)
+  - `docs/obsws/PROTOCOL_STATUS.md` 反映
+  - `docs/obsws/STATE_FILE.md` 永続化対象外追記
+  - `docs/internals/mixer.md` への `z` 予約値追記
+  - `README.md` に「対応プラットフォームは 64bit」を追記
+- テスト (`testdata/fonts/Roboto-Regular.ttf` を本 issue のコミットに含める):
+  - `src/obsws/session/tests.rs` 相当箇所に 4 メソッド往復 + 全エラーケース (`AlreadyExists` / `NotFound` / `InvalidFontName` / `FontResolveFailed` / `InvalidColor` / `InvalidFontSize` / `InvalidText` / `LimitExceeded` / `Disabled` / `MISSING_REQUEST_FIELD`) の検証を追加する。
+  - `TextOverlayProcessor` の単体テストで raden → I420A 変換後の A プレーン非ゼロ領域が指定 x/y 近傍に収まっていることを検証する。
+  - `pbt/` に x/y/fontSize の境界値 PBT を追加する (`text=""` / `x = i64 境界` / `fontSize = 1` / `fontSize = canvas_height` / 改行のみ / Unicode 制御文字 / フォント不在文字 / `text` 長境界 / 行数境界)。
 - 0012 等の他 issue に依存せず、本 issue 単独で動作確認・マージできる。
-- CHANGES.md の `## develop` に該当エントリを追記する。
+- CHANGES.md の `## develop` に `[ADD]` エントリを追記する。エントリ例 (担当者欄はコミット担当者の実 GitHub ID に置き換える。複数担当者の場合は `  - @a` / `  - @b` のように行を分ける):
 
-## 解決方法
-
-- raden で RGBA へ描画 → shiguredo_libyuv で I420A へ変換 → `TextOverlayProcessor` が透過 I420A レイヤを publish → `VideoRealtimeMixer` が z-order 最上位の `InputTrack` として合成、という流れで実装する。
-- 詳細スコープ (テスト粒度、エラー文言、`HisuiListTextOverlays` の戻り値構造の細部、機能無効時のエラーコード割り当て) は `/polish-issue` での磨き上げ時に確定する。
+```
+- [ADD] obsws 経由でリアルタイム合成映像にテキストオーバーレイを描画できるようにする
+  - 起動時 CLI 引数 `--font-search-root` / `--default-font` でフォント探索ルートとデフォルトフォントを指定する
+  - `HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` / `HisuiRemoveTextOverlay` / `HisuiListTextOverlays` の 4 メソッドを obsws 経由で利用できる
+  - @<github-id>
+```
