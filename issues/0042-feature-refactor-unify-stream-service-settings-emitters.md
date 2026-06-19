@@ -9,7 +9,7 @@
 
 ## 目的
 
-obsws の `streamServiceSettings` キーの中身を JSON 化するロジックが現状 `src/obsws/` 配下の 3 箇所で独立に書かれており、共通部分の保守追従漏れリスクを抱えている。closed issue 0003 (`feature/change-obsws-json-naming`) で `bwtest` を削除し、`docs/obsws/json_naming.md` に外向き仕様を確定させた結果、3 経路の差分が「OBS rtmp-custom.c 互換のための `use_auth: false` ハードコードと `key` の常時出力 (None 時 `""`)」だけに収束した。OBS 互換のための差分を 1 経路に閉じて、共通部分を 1 つの基盤に統合する。
+obsws の `streamServiceSettings` キーの中身を JSON 化するロジックが現状 `src/obsws/` 配下の 3 箇所で独立に書かれており、共通部分の保守追従漏れリスクを抱えている。closed issue 0003 (`feature/change-obsws-json-naming`) で `bwtest` を削除し、`docs/obsws/json_naming.md` に外向き仕様を確定させた結果、3 経路の差分が「OBS Studio クライアント互換のための `use_auth: false` ハードコードと `key` の常時出力 (None 時 `""`)」だけに収束した。OBS 互換のための差分を 1 経路に閉じて、共通部分を 1 つの基盤に統合する。
 
 ## 優先度根拠
 
@@ -61,7 +61,7 @@ Low。挙動・公開 API 不変のリファクタで緊急度はないが、(2)
 ```rust
 /// `streamServiceType` + `streamServiceSettings { server, key }` の envelope を JSON に書き出す。
 ///
-/// `obs_compat: true` の場合、`docs/obsws/json_naming.md` 章 4 の OBS rtmp-custom.c 互換要件に従い
+/// `obs_compat: true` の場合、`docs/obsws/json_naming.md` 章 4 の OBS Studio クライアント互換要件に従い
 /// `key` を常時出力 (None 時 `""`) し `use_auth: false` をハードコード出力する。
 pub(crate) fn fmt_stream_service_envelope(
     f: &mut nojson::JsonFormatter<'_, '_>,
@@ -94,13 +94,13 @@ pub(crate) fn fmt_stream_service_envelope(
 ```rust
 // (1) handle_get_stream_service_settings: build_request_response_success のクロージャ内で
 // 既に response 直下の object formatter が開いているため直接呼ぶ。
-// `true` 引数には call site で `// OBS rtmp-custom.c 互換` のコメントを付ける。
+// `true` 引数には call site で `// OBS Studio クライアント互換` のコメントを付ける。
 fmt_stream_service_envelope(
     f,
     &settings.stream_service_type,
     settings.server.as_deref(),
     settings.key.as_deref(),
-    true, // OBS rtmp-custom.c 互換
+    true, // OBS Studio クライアント互換
 )?
 
 // (2) ObswsStreamServiceSettings::fmt / (3) ObswsStateFileStream::fmt: 新規 object を開く必要があるため

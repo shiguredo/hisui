@@ -484,7 +484,7 @@ mod tests {
         const TEST_KEY: &str = "stream-key";
 
         let cases = [
-            // obs_compat: true (OBS Studio クライアント互換) 経路
+            // obs_compat: true 経路 (OBS Studio クライアント互換)
             // key は None のとき "" で常時出力、use_auth: false が常時出力される
             Case {
                 server: None,
@@ -518,7 +518,7 @@ mod tests {
                 expected_key: Some(TEST_KEY),
                 expected_use_auth: Some(false),
             },
-            // obs_compat: false (内部経路) 経路
+            // obs_compat: false 経路 (内部用)
             // key は Some のときのみ出力、use_auth は出力しない
             Case {
                 server: None,

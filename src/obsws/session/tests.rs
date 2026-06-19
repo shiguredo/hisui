@@ -3975,6 +3975,8 @@ async fn handle_get_stream_service_settings_emits_use_auth_when_key_none() {
         })
         .await;
     let text = unwrap_send_text(get_action);
+    let (get_result, _) = parse_request_status(&text);
+    assert!(get_result, "GetStreamServiceSettings must succeed");
     let json = nojson::RawJson::parse(text.text()).expect("response must be valid JSON");
     let stream_service_settings = json
         .value()
@@ -4041,6 +4043,8 @@ async fn handle_get_stream_service_settings_emits_use_auth_when_key_some() {
         })
         .await;
     let text = unwrap_send_text(get_action);
+    let (get_result, _) = parse_request_status(&text);
+    assert!(get_result, "GetStreamServiceSettings must succeed");
     let json = nojson::RawJson::parse(text.text()).expect("response must be valid JSON");
     let stream_service_settings = json
         .value()
