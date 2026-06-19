@@ -231,3 +231,58 @@ CLAUDE.md のテスト役割分担に従う。本リポジトリは PBT 基盤�
 - issue 0017（音声側の `SharedSampleEntry` 共通型導入。間接的な前提）
 - issue 0027（映像エンコーダの全フレーム付与とフレーム構造体の `SharedSampleEntry` 化）
 - issue 0034（writer 入口の不変条件違反検知）
+- issue 0047（WebM リーダーの AV1 / H264AnnexB 映像経路に sample_entry 構築を追加する。本 issue の後続）
+
+## 解決方法
+
+ブランチ `feature/add-webm-reader-sample-entry` で実装した。
+
+### sample_entry 構築関数の集約
+
+- `opus_sample_entry` を `src/audio/opus.rs` に、`vp8_sample_entry` / `vp9_sample_entry` を `src/video/vpx.rs` に新設して `pub fn` 化した。既存の `src/audio/aac.rs::create_mp4a_sample_entry` / `src/video/{av1,h264,h265}.rs` パターンに揃え、encoder と reader 双方が同一の sample_entry 構築関数を共有する形にした。
+- `parse_opus_head_pre_skip` も `src/audio/opus.rs` に集約。RFC 7845 §5.1 の OpusHead から pre_skip を抽出するヘルパで、Version != 1 / ChannelMappingFamily != 0 の仕様逸脱は Err にする。
+
+### WebmAudioReader::new
+
+- `AudioTrackHeader::read<R>(...) -> crate::Result<Option<Self>>` を新設し、INFO → TRACKS → CLUSTER の順で TRACKS を読む。音声 TRACK_ENTRY (A_OPUS) を見つけたら CodecPrivate の OpusHead から pre_skip を取得して `Some(Self { pre_skip })` を返す。
+- 音声トラック不在の WebM（映像のみ録画など、Sora 録画でも普通にある）では `Ok(None)` を返し、`WebmAudioReader::new` は `sample_entry: None` で開く（旧版互換）。`read_simple_block` で圧縮 `AudioFrame` を生成する経路は track_number 不一致で発生しないため不変条件は維持される。
+- 音声トラックあり時は `SharedSampleEntry::new(opus_sample_entry(pre_skip))` を sample_entry フィールドに保持し、`read_simple_block` で `self.sample_entry.clone()` を全フレームに付与する。
+
+### WebmVideoReader::new
+
+- `VideoTrackHeader::read` を拡張して codec / width / height を返す。CODEC_ID 取得後、TRACK_ENTRY 内残り子要素を `while !is_eos { peek_id }` ループで走査し、VIDEO master 内の PixelWidth / PixelHeight を取得する。VIDEO master 不在 / PixelWidth / PixelHeight 欠落時は警告ログを出して 0 でフォールバック。PixelDimension 抽出は `read_pixel_dimensions` ヘルパに切り出した。
+- `WebmVideoReader::new` の match で VP8 / VP9 は sample_entry を構築。AV1 / H264AnnexB は WebM CodecPrivate（AV1CodecConfigurationRecord / AVCDecoderConfigurationRecord）のパーサ実装規模が大きいため、暫定で `sample_entry: None` で開く。後続 issue 0047 で正規対応する。
+- 映像トラック不在時は `VideoTrackHeader::read` の早期 return で `VideoFormat::I420 + width=0 / height=0` を返し、match で `=> None`。`I420` をセンチネル値に流用する型の意味論不整合は注意コメントで残し、別 issue 候補とする。
+
+### 不変条件 docstring
+
+- `src/audio.rs::AudioFrame.sample_entry` の docstring から「現時点で未適用の経路: WebM リーダー。」を削除。
+- `src/video.rs::VideoFrame.sample_entry` の docstring を「現時点で未適用の経路: WebM リーダーの AV1 / H264AnnexB 映像。」に更新。例外節の完全削除は issue 0047 完了時に行う。
+
+### テスト
+
+- `src/audio/opus.rs::#[cfg(test)] mod tests`: `parse_opus_head_pre_skip` の単体テスト 5 件（too short / magic mismatch / unsupported version / unsupported channel_mapping_family / 正常 pre_skip 抽出）。
+- `tests/reader_webm_tests.rs`: 既存 VP8 + Opus テストに sample_entry 中身検証アサート追加。`testdata/archive-black-silent.webm` の実値（pre_skip = 0 / width = 640 / height = 480）と `SampleEntry::Opus.dops_box.pre_skip` / `SampleEntry::Vp08.visual.{width,height}` を `assert_eq!` で照合。
+- `src/webm/reader.rs::#[cfg(test)] mod tests`: 音声 / 映像両方の `releases_new_arc_per_construction` で、同一 testdata を 2 回開いた sample_entry が「Arc としては別物 / 実体としては等値」であることを検証。
+- AV1 / H264AnnexB の Err 経路、寸法欠落フォールバックなどの EBML フィクスチャを要するテストは Sora 録画の実態に合わせて本 issue では省略した。
+
+### review-diff-code 指摘の反映
+
+`/review-diff-code` のレビュー指摘を順次取り込んだ。
+
+- 致命的: コメント / テストコメント中の issue 番号参照 4 箇所を削除。
+- M1（依存方向の歪み）: sample_entry 構築関数を `audio::opus` / `video::vpx` モジュールに移し `pub fn` 化。`webm/reader` から `encoder/{opus,libvpx}` への逆方向依存を解消。
+- M5（width=0 / height=0 が下流に流れる）: Sora 録画前提で実害なしのため Err 化はせず、`read_pixel_dimensions` の docstring に注意コメントを残した。
+- M6（`read_audio_track_pre_skip` の音声 / 映像非対称）: `AudioTrackHeader` 構造体に昇格して `VideoTrackHeader` と API を対称化。
+- M7（`WebmVideoReader::new` の File::open エラーラップ）: 音声側と同じ `map_err` でパス情報付きにラップ。
+- M8（OpusHead Version / ChannelMappingFamily 検証）: `parse_opus_head_pre_skip` に検証を追加し、対応する単体テスト 2 件を追加。
+- M3 一部（中身検証 / 映像版 Arc 別物テスト）: 上記テスト節の通り追加。
+- 観点 2 重-4（`VideoTrackHeader::read` の責務過多）: VIDEO master 内 PixelWidth / PixelHeight 抽出を `read_pixel_dimensions` に切り出し、本体は TRACKS 走査 + TRACK_ENTRY 列挙 + CodecID マッピング + フォールバックに絞った。
+
+### 当初設計からの変更点
+
+- 当初の polish 時には AV1 / H264AnnexB を `WebmVideoReader::new` で Err にする方針だったが、Sora 録画で AV1 / H264AnnexB の WebM が普通にある事実を踏まえて `sample_entry: None` で開く形に変更した。同様に音声トラック不在の Err 化も互換性影響が大きいため `sample_entry: None` 化に変更。AV1 / H264AnnexB の正規対応（CodecPrivate パーサ実装）は後続 issue 0047 に分離した。
+
+### CHANGES.md
+
+記載なし（内部リファクタ・公開 API 変化なし・利用者挙動変化なし）。0017 / 0027 / 0030 / 0033 と同方針。
