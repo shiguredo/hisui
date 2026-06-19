@@ -3962,7 +3962,9 @@ async fn handle_get_stream_service_settings_emits_use_auth_when_key_none() {
             ),
         })
         .await;
-    let _ = unwrap_send_text(set_action);
+    let set_text = unwrap_send_text(set_action);
+    let (set_result, _) = parse_request_status(&set_text);
+    assert!(set_result, "SetStreamServiceSettings must succeed");
 
     // GetStreamServiceSettings で取得して streamServiceSettings の中身を検証
     let get_action = session
@@ -4026,7 +4028,9 @@ async fn handle_get_stream_service_settings_emits_use_auth_when_key_some() {
             ),
         })
         .await;
-    let _ = unwrap_send_text(set_action);
+    let set_text = unwrap_send_text(set_action);
+    let (set_result, _) = parse_request_status(&set_text);
+    assert!(set_result, "SetStreamServiceSettings must succeed");
 
     // GetStreamServiceSettings で取得して streamServiceSettings の中身を検証
     let get_action = session
