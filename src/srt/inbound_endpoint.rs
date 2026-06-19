@@ -290,7 +290,7 @@ impl SrtInboundEndpoint {
     fn endpoint_config(&self) -> crate::Result<SrtEndpointConfig> {
         if self.passphrase.is_none() && self.key_length.is_some() {
             return Err(crate::Error::new(
-                "keyLength requires passphrase to be specified",
+                "key_length requires passphrase to be specified",
             ));
         }
 
@@ -358,7 +358,7 @@ impl SrtInboundEndpoint {
 fn tsbpd_delay_duration_to_millis(duration: Duration) -> crate::Result<u16> {
     let millis = duration.as_millis();
     u16::try_from(millis)
-        .map_err(|_| crate::Error::new(format!("tsbpdDelayMs must be <= {}", u16::MAX)))
+        .map_err(|_| crate::Error::new(format!("tsbpd_delay_ms must be <= {}", u16::MAX)))
 }
 
 fn parse_srt_url(input_url: &str) -> std::result::Result<ParsedSrtUrl, String> {
