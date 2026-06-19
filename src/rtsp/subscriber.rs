@@ -2198,16 +2198,14 @@ mod tests {
 
     // 映像 sample_entry テスト用の Annex-B バイト列フィクスチャ。
     // NAL header: 0x67 = SPS、0x68 = PPS、0x65 = IDR、0x41 = 非 IDR、0x85 = forbidden_zero_bit セット。
-    // SPS は parse_sps が完走できる実 SPS バイト列 (ffmpeg + libx264 で生成した Baseline + 320x240
-    // および Baseline + 1920x1080) を使う。短い偽 SPS では parse_sps がビット切れで Err を返す。
-    const SPS_INITIAL: &[u8] = &[
-        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00,
-        0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80,
-    ];
-    const SPS_UPDATED: &[u8] = &[
-        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02, 0x27, 0xe5, 0xc0,
-        0x44, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,
-    ];
+    // SPS は `crate::video::h264::tests` で集約管理された実機 SPS の Annex-B 形式を参照する
+    // (短い偽 SPS では parse_sps がビット切れで Err を返すため、parse_sps を完走できる実 SPS が必要)。
+    fn sps_initial() -> &'static [u8] {
+        &crate::video::h264::tests::SPS_320X240_ANNEXB
+    }
+    fn sps_updated() -> &'static [u8] {
+        &crate::video::h264::tests::SPS_1920X1080_ANNEXB
+    }
     const PPS: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x06, 0xe2];
     const IDR: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21];
     const P_FRAME: &[u8] = &[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x21, 0x6c];
@@ -2295,7 +2293,7 @@ mod tests {
     fn select_video_track_extracts_sample_entry_from_sprop() {
         // sprop-parameter-sets に SPS + PPS を Base64 で連結して渡すと、
         // `VideoTrackConfig.sample_entry` に Avc1 SampleEntry が入る。
-        let sprop = sprop_value_from(&[SPS_INITIAL, PPS]);
+        let sprop = sprop_value_from(&[sps_initial(), PPS]);
         let sdp = build_test_sdp_with_fmtp(&format!("sprop-parameter-sets={sprop}"));
         let cfg = parse_video_track(&sdp)
             .expect("正常な sprop-parameter-sets は Ok を返すこと")
@@ -2308,7 +2306,7 @@ mod tests {
                 // avcc_box.sps_list / pps_list が Base64 デコード後の素の NAL バイト列と一致する。
                 assert_eq!(
                     avc1.avcc_box.sps_list,
-                    vec![nal_payload(SPS_INITIAL).to_vec()],
+                    vec![nal_payload(sps_initial()).to_vec()],
                     "SPS リストが期待値と一致すること"
                 );
                 assert_eq!(
@@ -2388,7 +2386,7 @@ mod tests {
     #[test]
     fn select_video_track_returns_none_when_sprop_has_only_sps() {
         // SPS のみ含む sprop は不完全な補助メタデータとして許容し、inline 経路に委ねる。
-        let sprop = sprop_value_from(&[SPS_INITIAL]);
+        let sprop = sprop_value_from(&[sps_initial()]);
         let sdp = build_test_sdp_with_fmtp(&format!("sprop-parameter-sets={sprop}"));
         let cfg = parse_video_track(&sdp)
             .expect("PPS 不在 sprop は Err にせず Ok を返すこと")
@@ -2418,7 +2416,7 @@ mod tests {
         // `last_sample_entry: None` 初期状態で SPS + PPS + IDR の 3 条件揃った frame を投入すると
         // sample_entry が確定して Some になる。
         let mut receiver = build_test_video_receiver();
-        let frame = build_test_depacketized_frame(concat_sps_pps_idr(SPS_INITIAL));
+        let frame = build_test_depacketized_frame(concat_sps_pps_idr(sps_initial()));
         receiver
             .apply_sample_entry(&frame)
             .expect("3 条件揃った frame では Ok を返すこと");
@@ -2435,7 +2433,7 @@ mod tests {
         let mut receiver = build_test_video_receiver();
         receiver
             .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
-                SPS_INITIAL,
+                sps_initial(),
             )))
             .expect("初期確定は Ok を返すこと");
         let initial = receiver
@@ -2464,7 +2462,7 @@ mod tests {
         let mut receiver = build_test_video_receiver();
         receiver
             .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
-                SPS_INITIAL,
+                sps_initial(),
             )))
             .expect("初期確定は Ok を返すこと");
         let initial = receiver
@@ -2472,7 +2470,7 @@ mod tests {
             .clone()
             .expect("初期 sample_entry が確定していること");
 
-        let mut sps_idr = SPS_INITIAL.to_vec();
+        let mut sps_idr = sps_initial().to_vec();
         sps_idr.extend_from_slice(IDR);
         receiver
             .apply_sample_entry(&build_test_depacketized_frame(sps_idr))
@@ -2492,7 +2490,7 @@ mod tests {
         let mut receiver = build_test_video_receiver();
         receiver
             .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
-                SPS_INITIAL,
+                sps_initial(),
             )))
             .expect("初期確定は Ok を返すこと");
         let initial = receiver
@@ -2519,7 +2517,7 @@ mod tests {
         let mut receiver = build_test_video_receiver();
         receiver
             .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
-                SPS_INITIAL,
+                sps_initial(),
             )))
             .expect("初期確定は Ok を返すこと");
         let initial = receiver
@@ -2529,7 +2527,7 @@ mod tests {
 
         receiver
             .apply_sample_entry(&build_test_depacketized_frame(concat_sps_pps_idr(
-                SPS_UPDATED,
+                sps_updated(),
             )))
             .expect("SPS 更新時も Ok を返すこと");
 
@@ -2579,7 +2577,7 @@ mod tests {
     fn select_video_track_returns_err_on_sprop_with_broken_nal() {
         // sprop-parameter-sets に forbidden_zero_bit が立った NAL を含めると Err を返して
         // 接続を打ち切る。apply_sample_entry 経路 (H264AnnexBNalUnits 経由) と対称の挙動。
-        let sprop = sprop_value_from(&[SPS_INITIAL, PPS, BROKEN_NAL]);
+        let sprop = sprop_value_from(&[sps_initial(), PPS, BROKEN_NAL]);
         let sdp = build_test_sdp_with_fmtp(&format!("sprop-parameter-sets={sprop}"));
         let err = parse_video_track(&sdp)
             .expect_err("forbidden_zero_bit が立った NAL を含む sprop は Err を返すこと");

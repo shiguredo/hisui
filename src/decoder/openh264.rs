@@ -162,15 +162,19 @@ fn build_annexb_input(frame: &VideoFrame) -> crate::Result<Vec<u8>> {
 mod tests {
     use super::*;
 
+    // PPS NAL を Annex-B 形式 (先頭 4 バイト start code + NAL バイト列) で表現したフィクスチャ
+    const PPS_ANNEXB: &[u8] = &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2];
+
     #[test]
     fn build_annexb_input_prepends_missing_sps_pps_from_sample_entry() -> crate::Result<()> {
-        // SPS は `crate::video::h264::SPS_320X240` (24 バイト実 SPS、Baseline 320x240) を使う。
-        // 偽 SPS では parse_sps が完走しないため、実 SPS に差し替えている。
-        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(&[
-            0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00, 0x00,
-            0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80, 0, 0, 0, 1,
-            0x68, 0xce, 0x06, 0xe2,
-        ])?;
+        // SPS は `crate::video::h264::tests::SPS_320X240` (24 バイト実 SPS、Baseline 320x240) を
+        // Annex-B 形式に展開して使う。偽 SPS では parse_sps が完走しないため、実 SPS に差し替えている。
+        let annexb: Vec<u8> = [
+            &crate::video::h264::tests::SPS_320X240_ANNEXB[..],
+            PPS_ANNEXB,
+        ]
+        .concat();
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(&annexb)?;
         let frame = VideoFrame {
             data: vec![0, 0, 0, 2, 0x65, 0x88],
             format: VideoFormat::H264,
@@ -197,21 +201,29 @@ mod tests {
 
     #[test]
     fn build_annexb_input_keeps_existing_sps_pps() -> crate::Result<()> {
-        // SPS は `crate::video::h264::SPS_320X240` (24 バイト実 SPS、Baseline 320x240) を使う。
-        // 偽 SPS では parse_sps が完走しないため、実 SPS に差し替えている。
-        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(&[
-            0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00, 0x00,
-            0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80, 0, 0, 0, 1,
-            0x68, 0xce, 0x06, 0xe2,
-        ])?;
-        // AVCC 形式入力: SPS は 24 バイトなので NAL 長 prefix を [0, 0, 0, 24] に更新する
-        // (PPS 長 prefix [0, 0, 0, 4] と IDR 長 prefix [0, 0, 0, 2] は不変)
+        // SPS は `crate::video::h264::tests::SPS_320X240` (24 バイト実 SPS、Baseline 320x240) を
+        // Annex-B 形式に展開して sample_entry 構築に使う。
+        let annexb: Vec<u8> = [
+            &crate::video::h264::tests::SPS_320X240_ANNEXB[..],
+            PPS_ANNEXB,
+        ]
+        .concat();
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(&annexb)?;
+        // AVCC 形式 frame.data を [SPS 長 prefix, SPS, PPS 長 prefix, PPS, IDR 長 prefix, IDR] で構築する。
+        // SPS は SPS_320X240 の 24 バイト、PPS は 4 バイト、IDR は 2 バイト固定。
+        let pps_nal = &PPS_ANNEXB[4..];
+        let idr_nal: &[u8] = &[0x65, 0x88];
+        let frame_data: Vec<u8> = [
+            &(crate::video::h264::tests::SPS_320X240.len() as u32).to_be_bytes()[..],
+            &crate::video::h264::tests::SPS_320X240[..],
+            &(pps_nal.len() as u32).to_be_bytes()[..],
+            pps_nal,
+            &(idr_nal.len() as u32).to_be_bytes()[..],
+            idr_nal,
+        ]
+        .concat();
         let frame = VideoFrame {
-            data: vec![
-                0, 0, 0, 24, 0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00,
-                0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80, 0, 0,
-                0, 4, 0x68, 0xce, 0x06, 0xe2, 0, 0, 0, 2, 0x65, 0x88,
-            ],
+            data: frame_data,
             format: VideoFormat::H264,
             keyframe: true,
             size: None,

@@ -1208,14 +1208,15 @@ mod tests {
     // SPS バイト列は ffmpeg + libx264 で生成した実機 SPS（解像度抽出までビット位置が届く完全 SPS）。
     // 生成手順は `src/video/h264.rs` の `mod tests` 冒頭コメントを参照。
 
-    // nal_unit_type=7（SPS）。解像度 1920x1080 (Baseline)。`extract_dimensions_from_sps` が (1920, 1080) を返す。
-    const SPS_INITIAL: [u8; 30] = [
-        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02, 0x27, 0xe5, 0xc0,
-        0x44, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,
-    ];
+    // nal_unit_type=7（SPS）。解像度 1920x1080 (Baseline)。`parse_sps` が (1920, 1080) を返す。
+    // SPS バイト列本体は `crate::video::h264::tests::SPS_1920X1080` で集約管理されており、
+    // ここでは Annex-B 形式 (先頭 4 バイト start code 付き) を関数で取り出す。
+    fn sps_initial() -> &'static [u8] {
+        &crate::video::h264::tests::SPS_1920X1080_ANNEXB
+    }
 
-    // SPS_INITIAL とは異なる解像度（1280x720、Baseline）の SPS。mid-stream で SPS が変化したシナリオの検証用。
-    // `extract_dimensions_from_sps` が (1280, 720) を返す。
+    // sps_initial() とは異なる解像度（1280x720、Baseline）の SPS。mid-stream で SPS が変化したシナリオの検証用。
+    // SPS_UPDATED は SRT inbound テスト専用のためローカルに定義する。`parse_sps` が (1280, 720) を返す。
     const SPS_UPDATED: [u8; 29] = [
         0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x1f, 0xd9, 0x00, 0x50, 0x05, 0xbb, 0x01, 0x10,
         0x00, 0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x83, 0x24, 0x80,
@@ -1237,7 +1238,7 @@ mod tests {
     fn srt_h264_emits_sample_entry_on_every_frame_after_sps_pps_idr() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        let pes1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
+        let pes1 = [sps_initial(), &PPS, &IDR].concat();
         let samples1 = demuxer
             .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
         let sample1 =
@@ -1290,7 +1291,7 @@ mod tests {
         let mut demuxer = SrtTsDemuxer::new()?;
 
         // IDR を先頭に置き、その後ろに SPS と PPS を並べる。
-        let pes = [&IDR[..], &SPS_INITIAL, &PPS].concat();
+        let pes = [&IDR[..], sps_initial(), &PPS].concat();
         let samples = demuxer
             .build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264))?;
         let sample = samples.expect("IDR 後置 SPS / PPS でも sample_entry が確定して流れること");
@@ -1323,7 +1324,7 @@ mod tests {
     fn srt_h264_returns_err_on_idr_with_only_sps() {
         let mut demuxer = SrtTsDemuxer::new().expect("demuxer 生成に成功すること");
 
-        let pes = [&SPS_INITIAL[..], &IDR].concat();
+        let pes = [sps_initial(), &IDR].concat();
         let result =
             demuxer.build_video_sample(make_h264_pending_pes(pes, 100_000), Some(StreamType::H264));
         assert!(result.is_err(), "PPS 不在 IDR は Err を返すこと");
@@ -1350,11 +1351,11 @@ mod tests {
 
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        // 初期 IDR: SPS_INITIAL から 1920x1080 を抽出して埋め込む
-        let pes1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
+        // 初期 IDR: sps_initial() から 1920x1080 を抽出して埋め込む
+        let pes1 = [sps_initial(), &PPS, &IDR].concat();
         let samples1 = demuxer
             .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
-        let sample1 = samples1.expect("SPS_INITIAL 含有 IDR でフレームが流れること");
+        let sample1 = samples1.expect("sps_initial() 含有 IDR でフレームが流れること");
         let TsSample::Video(frame1) = sample1 else {
             panic!("映像サンプルとして取り出せること");
         };
@@ -1368,12 +1369,12 @@ mod tests {
         assert_eq!(
             (avc1.visual.width, avc1.visual.height),
             (1920, 1080),
-            "Avc1Box.visual に SPS_INITIAL 由来の解像度 1920x1080 が埋め込まれていること"
+            "Avc1Box.visual に sps_initial() 由来の解像度 1920x1080 が埋め込まれていること"
         );
         assert_eq!(
             frame1.size,
             Some(crate::video::VideoFrameSize::new(1920, 1080)?),
-            "VideoFrame.size に SPS_INITIAL 由来の解像度 1920x1080 が反映されていること"
+            "VideoFrame.size に sps_initial() 由来の解像度 1920x1080 が反映されていること"
         );
 
         // 後続の P フレームも同じ解像度を引き継いで size に反映されること
@@ -1429,8 +1430,8 @@ mod tests {
     {
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        // 初期 IDR (SPS_INITIAL = 1920x1080) を確定させる
-        let pes_idr1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
+        // 初期 IDR (sps_initial() = 1920x1080) を確定させる
+        let pes_idr1 = [sps_initial(), &PPS, &IDR].concat();
         let TsSample::Video(_) = demuxer
             .build_video_sample(
                 make_h264_pending_pes(pes_idr1, 100_000),
@@ -1500,10 +1501,10 @@ mod tests {
     fn srt_h264_updates_sample_entry_on_mid_stream_sps_change() -> crate::Result<()> {
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        let pes1 = [&SPS_INITIAL[..], &PPS, &IDR].concat();
+        let pes1 = [sps_initial(), &PPS, &IDR].concat();
         let samples1 = demuxer
             .build_video_sample(make_h264_pending_pes(pes1, 100_000), Some(StreamType::H264))?;
-        let sample1 = samples1.expect("SPS_INITIAL 含有 IDR で初期確定して流れること");
+        let sample1 = samples1.expect("sps_initial() 含有 IDR で初期確定して流れること");
         let TsSample::Video(frame1) = sample1 else {
             panic!("映像サンプルとして取り出せること");
         };

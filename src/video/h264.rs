@@ -685,25 +685,38 @@ pub fn convert_annexb_to_nalu(data: &[u8], length_size: u8) -> crate::Result<Vec
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::sync::LazyLock;
+
     use super::*;
 
     // 以下の SPS バイト列は ffmpeg + libx264 で生成した実機 SPS を抽出したもの。
     // 生成コマンドは `ffmpeg -f lavfi -i testsrc=size=WIDTHxHEIGHT:rate=30 -pix_fmt yuv420p
     // -c:v libx264 -profile:v baseline -frames:v 1 -f h264 out.h264` で、
     // 先頭の SPS NAL を 2 個目の start code 直前まで切り出した。
+    //
+    // 各 SPS は本モジュール外のテスト (decoder/openh264.rs::tests, rtsp/subscriber.rs::tests,
+    // srt/inbound_endpoint.rs::tests) からも参照されるため `pub(crate)` で公開する。
 
     // Baseline プロファイル + 320x240 (16 の倍数の解像度、crop なしの最小実機 SPS パターン)
-    const SPS_320X240: [u8; 24] = [
+    pub(crate) const SPS_320X240: [u8; 24] = [
         0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00, 0x10,
         0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80,
     ];
 
     // Baseline プロファイル + 1920x1080 (16 倍数でない 1080 のため crop_bottom 経路を踏む実機 SPS)
-    const SPS_1920X1080: [u8; 26] = [
+    pub(crate) const SPS_1920X1080: [u8; 26] = [
         0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02, 0x27, 0xe5, 0xc0, 0x44, 0x00, 0x00, 0x03,
         0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,
     ];
+
+    // SPS バイト列の Annex-B 形式 (先頭 4 バイト start code + NAL バイト列) を遅延構築する。
+    // const レベルで配列連結ができないため `LazyLock<Vec<u8>>` で初期化する。
+    // 利用側は `&*SPS_320X240_ANNEXB` または `&SPS_320X240_ANNEXB[..]` で `&[u8]` として参照する。
+    pub(crate) static SPS_320X240_ANNEXB: LazyLock<Vec<u8>> =
+        LazyLock::new(|| [&[0u8, 0, 0, 1][..], &SPS_320X240].concat());
+    pub(crate) static SPS_1920X1080_ANNEXB: LazyLock<Vec<u8>> =
+        LazyLock::new(|| [&[0u8, 0, 0, 1][..], &SPS_1920X1080].concat());
 
     #[test]
     fn extract_dimensions_from_baseline_no_crop_320x240() {
