@@ -263,8 +263,8 @@ impl TextOverlayProcessor {
 
     /// run ループ。
     ///
-    /// 起動シーケンスは `notify_ready()` のみ呼び、`wait_subscribers_ready` は呼ばない
-    /// (TextOverlayProcessor は初期 processor 集合に含まれず、後発の subscriber を前提とするため)。
+    /// TextOverlayProcessor は初期 processor 集合に含まれず、後発の subscriber を
+    /// 前提とするため `wait_subscribers_ready` は呼ばない。
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         let canvas_width = self.canvas_width;
         let canvas_height = self.canvas_height;
@@ -474,13 +474,11 @@ impl ProcessorState {
                 .expect("cached_frame was just assigned")
                 .clone());
         }
-        // タイムスタンプ更新版を作る (data は Vec<u8> なので clone される)。
-        // I420A 1920x1080 で約 4.6MB / フレーム。30fps で 138MB/s のメモリ帯域消費だが
-        // CPU 帯域 (DDR4 で 25GB/s 等) に対しては 0.5% 程度で許容範囲。
+        // タイムスタンプだけ差し替えた版を返す (data は Vec<u8> なので clone される)。
         let cached = self
             .cached_frame
             .as_ref()
-            .expect("dirty=false かつ cached が None になることはない");
+            .expect("cached_frame is Some when dirty is false");
         let mut frame = (**cached).clone();
         frame.timestamp = timestamp;
         Ok(Arc::new(frame))
@@ -940,13 +938,11 @@ mod tests {
         assert_eq!(updated.font_size, 30, "font_size は維持される");
     }
 
-    // -----------------------------------------------------------------------
     // ProcessorState の内部ロジックテスト
-    // -----------------------------------------------------------------------
 
     fn make_state() -> ProcessorState {
-        let canvas_width = EvenUsize::new(1920).expect("1920 is even");
-        let canvas_height = EvenUsize::new(1080).expect("1080 is even");
+        let canvas_width = EvenUsize::new(1920).expect("1920 は偶数");
+        let canvas_height = EvenUsize::new(1080).expect("1080 は偶数");
         let config = make_config();
         ProcessorState::new(canvas_width, canvas_height, config)
     }

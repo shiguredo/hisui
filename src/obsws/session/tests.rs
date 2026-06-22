@@ -3946,10 +3946,8 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
     );
 }
 
-// -----------------------------------------------------------------------
-// テキストオーバーレイ機能の無効時挙動 (機能有効時のフルパス検証は
-// TextOverlayProcessor の spawn が必要で別途扱う)
-// -----------------------------------------------------------------------
+// テキストオーバーレイ機能の無効時挙動。
+// 機能有効時のフルパス検証は TextOverlayProcessor の spawn が必要で別途扱う。
 
 /// `default_coordinator_handle()` は `ObswsSessionState::new_for_test()` を使うため
 /// テキストオーバーレイ機能が無効 (`text_overlay_config = None`) の状態である。
