@@ -186,6 +186,109 @@ pub fn h264_sample_entry_from_annexb(data: &[u8]) -> crate::Result<SampleEntry> 
     Ok(entry)
 }
 
+/// WebM CodecPrivate の AVCDecoderConfigurationRecord (avcC) から SPS / PPS リストを抽出する。
+///
+/// ISO/IEC 14496-15 の AVCDecoderConfigurationRecord に基づき、avcC バイト列内の SPS / PPS
+/// NAL バイト列 (NAL ヘッダ 1 バイト含む、start code なし) を `(Vec<Vec<u8>>, Vec<Vec<u8>>)`
+/// で返す。各リストは avcC 内の出現順を保持する (`h264_sample_entry_from_sps_pps_lists` が
+/// `parse_sps(sps_list[0])` で先頭 SPS のパラメータを採用するため順序保証が必須)。
+///
+/// 戻り値の SPS / PPS リストはそのまま `h264_sample_entry_from_sps_pps_lists` の入力契約
+/// (EBSP 形式、NAL ヘッダ 1 バイト含む) と一致するため、中間変換なしで move できる。
+/// SPS / PPS の NAL タイプ検査は `h264_sample_entry_from_sps_pps_lists` 内で実施されるため
+/// 本関数では検査しない。
+///
+/// byte 1..=3 (`AVCProfileIndication` / `profile_compatibility` / `AVCLevelIndication`) と
+/// High 系プロファイル時の末尾追加フィールドは捨てる (`parse_sps` が SPS 由来実値で
+/// `AvccBox` を埋めるため avcC ヘッダ値は不要)。
+#[allow(clippy::type_complexity)]
+pub fn parse_avcc_sps_pps_lists(data: &[u8]) -> crate::Result<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
+    // 固定ヘッダの最小サイズは byte 0..=5 の 6 バイト
+    if data.len() < 6 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 avcC: too short (expected >= 6 bytes, got {})",
+            data.len()
+        )));
+    }
+    // byte 0: configurationVersion は 1 のみサポート
+    if data[0] != 1 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 avcC: unsupported configurationVersion {}",
+            data[0]
+        )));
+    }
+    // byte 4 下位 2 bit: lengthSizeMinusOne。Hisui の MP4 出力は NALU_HEADER_LENGTH = 4 固定で、
+    // それ以外を受理すると `AvccBox.length_size_minus_one` と乖離して下流 muxer 出力時に
+    // プレイヤーが NAL を切り出せない。byte 4 上位 6 bit の reserved はマスクで捨てる。
+    let length_size_minus_one = data[4] & 0b0000_0011;
+    if length_size_minus_one != 3 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 avcC: unsupported lengthSizeMinusOne {length_size_minus_one} (expected 3)"
+        )));
+    }
+    // byte 5 下位 5 bit: numOfSequenceParameterSets。5 bit のため上限 31 は構造的に保証される。
+    // byte 5 上位 3 bit の reserved はマスクで捨てる。
+    let num_sps = (data[5] & 0b0001_1111) as usize;
+    if num_sps == 0 {
+        return Err(crate::Error::new(
+            "invalid H.264 avcC: numOfSequenceParameterSets == 0",
+        ));
+    }
+    // byte 6 以降を逐次パースする。残バイト不足はすべて同じメッセージで返す。
+    let mut offset: usize = 6;
+    let mut sps_list: Vec<Vec<u8>> = Vec::with_capacity(num_sps);
+    for _ in 0..num_sps {
+        let nal_bytes = read_avcc_nal(data, &mut offset)?;
+        sps_list.push(nal_bytes);
+    }
+    // numOfPictureParameterSets (8 bit、最大 255)
+    if offset + 1 > data.len() {
+        return Err(crate::Error::new(
+            "invalid H.264 avcC: SPS/PPS length exceeds remaining data",
+        ));
+    }
+    let num_pps = data[offset] as usize;
+    offset += 1;
+    if num_pps == 0 {
+        return Err(crate::Error::new(
+            "invalid H.264 avcC: numOfPictureParameterSets == 0",
+        ));
+    }
+    // shiguredo_mp4::AvccBox::encode は PPS 31 個までしか encode できないため事前に Err 化する。
+    if num_pps > 31 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 avcC: numOfPictureParameterSets exceeds 31 (got {num_pps})"
+        )));
+    }
+    let mut pps_list: Vec<Vec<u8>> = Vec::with_capacity(num_pps);
+    for _ in 0..num_pps {
+        let nal_bytes = read_avcc_nal(data, &mut offset)?;
+        pps_list.push(nal_bytes);
+    }
+    // High 系プロファイル時の末尾追加フィールドは残バイトのまま読み捨て (本関数では未利用)。
+    Ok((sps_list, pps_list))
+}
+
+/// avcC リスト内の単一 NAL を読む内部ヘルパー: 16 bit BE 長フィールド + NAL バイト列。
+/// 残バイト不足の場合はすべて統一メッセージで Err を返す。
+fn read_avcc_nal(data: &[u8], offset: &mut usize) -> crate::Result<Vec<u8>> {
+    if *offset + 2 > data.len() {
+        return Err(crate::Error::new(
+            "invalid H.264 avcC: SPS/PPS length exceeds remaining data",
+        ));
+    }
+    let len = u16::from_be_bytes([data[*offset], data[*offset + 1]]) as usize;
+    *offset += 2;
+    if *offset + len > data.len() {
+        return Err(crate::Error::new(
+            "invalid H.264 avcC: SPS/PPS length exceeds remaining data",
+        ));
+    }
+    let nal = data[*offset..*offset + len].to_vec();
+    *offset += len;
+    Ok(nal)
+}
+
 /// AVC1 サンプルエントリーから width, height を抽出
 pub fn extract_video_dimensions(entry: &SampleEntry) -> crate::Result<(u32, u32)> {
     match entry {
@@ -1593,5 +1696,152 @@ pub(crate) mod tests {
         };
         assert_eq!(avc1.visual.width, 1920);
         assert_eq!(avc1.visual.height, 1080);
+    }
+
+    // avcC バイト列をテスト用に構築するヘルパー。
+    // lengthSizeMinusOne = 3 固定、reserved bit は 0xFF / 0xE0 で 1 詰めする。
+    // SPS / PPS の長さフィールドは 16 bit BE 固定。
+    fn build_avcc(sps_list: &[&[u8]], pps_list: &[&[u8]]) -> Vec<u8> {
+        assert!(
+            sps_list.len() <= 31,
+            "numOfSequenceParameterSets は 5 bit のため最大 31"
+        );
+        let mut v = vec![
+            1u8,                           // configurationVersion
+            0x42,                          // AVCProfileIndication (パーサは捨てる)
+            0xc0,                          // profile_compatibility (パーサは捨てる)
+            0x0d,                          // AVCLevelIndication (パーサは捨てる)
+            0xff, // reserved (6 bit, 全 1) + lengthSizeMinusOne (2 bit) = 3
+            0xe0 | (sps_list.len() as u8), // reserved (3 bit, 全 1) + numOfSPS (5 bit)
+        ];
+        for sps in sps_list {
+            v.extend_from_slice(&(sps.len() as u16).to_be_bytes());
+            v.extend_from_slice(sps);
+        }
+        v.push(pps_list.len() as u8); // numOfPPS (8 bit)
+        for pps in pps_list {
+            v.extend_from_slice(&(pps.len() as u16).to_be_bytes());
+            v.extend_from_slice(pps);
+        }
+        v
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_extracts_single_sps_pps() {
+        // 正常な avcC (SPS 1 個 / PPS 1 個) → 両リストが SPS / PPS バイト列と完全一致する。
+        let avcc = build_avcc(&[&SPS_320X240[..]], &[PPS_NAL]);
+        let (sps_list, pps_list) = parse_avcc_sps_pps_lists(&avcc).expect("正常 avcC でパース成功");
+        assert_eq!(sps_list.len(), 1, "SPS 数は 1 件");
+        assert_eq!(pps_list.len(), 1, "PPS 数は 1 件");
+        assert_eq!(sps_list[0], SPS_320X240, "SPS バイト列が完全一致");
+        assert_eq!(pps_list[0], PPS_NAL, "PPS バイト列が完全一致");
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_supports_multiple_sps_pps() {
+        // SPS 2 個 / PPS 2 個入りの avcC → 全部取り出し、出現順を保持する。
+        let avcc = build_avcc(&[&SPS_320X240[..], &SPS_1920X1080[..]], &[PPS_NAL, PPS_NAL]);
+        let (sps_list, pps_list) =
+            parse_avcc_sps_pps_lists(&avcc).expect("複数 SPS/PPS でパース成功");
+        assert_eq!(sps_list.len(), 2, "SPS 数は 2 件");
+        assert_eq!(pps_list.len(), 2, "PPS 数は 2 件");
+        assert_eq!(
+            sps_list[0], SPS_320X240,
+            "1 個目の SPS は SPS_320X240 (出現順保持)"
+        );
+        assert_eq!(
+            sps_list[1], SPS_1920X1080,
+            "2 個目の SPS は SPS_1920X1080 (出現順保持)"
+        );
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_returns_err_on_invalid_configuration_version() {
+        // byte 0 (configurationVersion) が 1 以外だと Err
+        let mut avcc = build_avcc(&[&SPS_320X240[..]], &[PPS_NAL]);
+        avcc[0] = 2;
+        let result = parse_avcc_sps_pps_lists(&avcc);
+        assert!(
+            result.is_err(),
+            "未サポート configurationVersion で Err が返ること: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_returns_err_on_invalid_length_size() {
+        // byte 4 下位 2 bit (lengthSizeMinusOne) が 3 以外だと Err
+        // 0xfc = 0b1111_1100 で lengthSizeMinusOne = 0
+        let mut avcc = build_avcc(&[&SPS_320X240[..]], &[PPS_NAL]);
+        avcc[4] = 0xfc;
+        let result = parse_avcc_sps_pps_lists(&avcc);
+        assert!(
+            result.is_err(),
+            "未サポート lengthSizeMinusOne で Err が返ること: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_returns_err_on_zero_sps_count() {
+        // numOfSequenceParameterSets = 0 だと Err
+        // build_avcc に空 SPS リストを渡すと byte 5 = 0xe0 となり numOfSPS = 0 になる
+        let avcc = build_avcc(&[], &[PPS_NAL]);
+        let result = parse_avcc_sps_pps_lists(&avcc);
+        assert!(
+            result.is_err(),
+            "numOfSequenceParameterSets = 0 で Err が返ること: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_returns_err_on_zero_pps_count() {
+        // numOfPictureParameterSets = 0 だと Err
+        let avcc = build_avcc(&[&SPS_320X240[..]], &[]);
+        let result = parse_avcc_sps_pps_lists(&avcc);
+        assert!(
+            result.is_err(),
+            "numOfPictureParameterSets = 0 で Err が返ること: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_returns_err_on_too_many_pps() {
+        // numOfPictureParameterSets > 31 だと Err (shiguredo_mp4::AvccBox::encode の制約)。
+        // build_avcc は実際の PPS 数しか書かないため、numOfPPS = 32 の avcC を手動構築する。
+        let mut avcc = Vec::new();
+        avcc.extend_from_slice(&[1, 0x42, 0xc0, 0x0d, 0xff, 0xe1]); // configVer / profile / compat / level / len_size=3 / numSps=1
+        avcc.extend_from_slice(&(SPS_320X240.len() as u16).to_be_bytes());
+        avcc.extend_from_slice(&SPS_320X240);
+        avcc.push(32); // numOfPPS = 32
+        for _ in 0..32 {
+            avcc.extend_from_slice(&(PPS_NAL.len() as u16).to_be_bytes());
+            avcc.extend_from_slice(PPS_NAL);
+        }
+        let result = parse_avcc_sps_pps_lists(&avcc);
+        assert!(
+            result.is_err(),
+            "numOfPictureParameterSets > 31 で Err が返ること: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_returns_err_on_truncated_sps_length() {
+        // SPS 長フィールドが残りバイトを超える avcC は Err
+        let mut avcc = build_avcc(&[&SPS_320X240[..]], &[PPS_NAL]);
+        // byte 6..=7 が SPS 長フィールド。残りバイト数を超える 0xFFFF に書き換える。
+        avcc[6] = 0xff;
+        avcc[7] = 0xff;
+        let result = parse_avcc_sps_pps_lists(&avcc);
+        assert!(
+            result.is_err(),
+            "SPS 長が残りバイトを超える avcC で Err が返ること: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_avcc_sps_pps_lists_returns_err_on_too_short() {
+        // バイト長が 6 未満だと Err (byte 0..=5 の固定ヘッダが揃わない)
+        let data = &[1u8, 0x42, 0xc0, 0x0d, 0xff]; // 5 バイト
+        let result = parse_avcc_sps_pps_lists(data);
+        assert!(result.is_err(), "5 バイト入力で Err が返ること: {result:?}");
     }
 }
