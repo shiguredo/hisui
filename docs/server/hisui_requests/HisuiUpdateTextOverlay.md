@@ -22,7 +22,7 @@
 | `fontSize` | integer | - | 同上 |
 | `fontColor` | string | - | 同上 (形式は `HisuiCreateTextOverlay` と同じ) |
 | `fontName` | string | - | 同上 (解決可能なファイル名であること) |
-| `z` | integer | - | 同上 (`i32::MIN..=i32::MAX - 1`。`i32::MAX` は内部予約値のため指定不可。Auto z への再戻しはサポートしない) |
+| `z` | integer | - | 同上 (i32 全域指定可)。 一度明示指定された z を「未指定」 (= auto z) に戻す経路はサポートしない (現状値が維持される) |
 
 ## ResponseData
 
@@ -36,7 +36,7 @@
 - `textOverlayName` やオプションフィールドの型不一致 / `null` 値: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - 対象 overlay が存在しない: `REQUEST_STATUS_RESOURCE_NOT_FOUND` (601)
 - 更新後の値の検証エラー (`fontName` / `fontColor` / `fontSize` / `text` 等): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
-- `z` が `i32::MIN..=i32::MAX - 1` の範囲外 (`i32::MAX` 含む): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
+- `z` が i32 範囲外: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 
 検証ロジックは `HisuiCreateTextOverlay` と共通。
 

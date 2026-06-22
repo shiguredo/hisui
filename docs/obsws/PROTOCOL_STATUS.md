@@ -1063,7 +1063,7 @@ Program 出力を SDL3 ウィンドウにリアルタイム表示する。`playe
 
 ### テキストオーバーレイ機能（独自拡張）
 
-合成映像にテキストをオーバーレイ描画する。サーバ起動時に `--font-search-root` と `--default-font` の両方を指定した場合のみ利用可能。`VideoRealtimeMixer` の最終 InputTrack として z = `i32::MAX` で合成され、出力は `mp4_output` / `hls_output` 等にもそのまま反映される。
+合成映像にテキストをオーバーレイ描画する。 サーバ起動時に `--font-search-root` と `--default-font` の両方を指定した場合のみ利用可能。 `VideoRealtimeMixer` 内部のテキストオーバーレイレイヤとして最上位合成され、 出力は `mp4_output` / `hls_output` 等にもそのまま反映される。
 
 詳細仕様は `docs/server/hisui_requests/HisuiCreateTextOverlay.md` 等を参照。
 
