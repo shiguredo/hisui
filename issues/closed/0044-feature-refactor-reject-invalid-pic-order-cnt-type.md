@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-18
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-06-22
 - Model: Opus 4.7
 - Branch: feature/refactor-reject-invalid-pic-order-cnt-type
 - Polished: 2026-06-22
@@ -162,7 +162,35 @@ fn parse_sps_rejects_pic_order_cnt_type_out_of_range() {
 
 ## 解決方法
 
-実装着手後にここに記述する。
+ブランチ `feature/refactor-reject-invalid-pic-order-cnt-type` で実装した。
+
+### `skip_pic_order_cnt_type_extras` への値域検査追加
+
+- `src/video/h264.rs::skip_pic_order_cnt_type_extras` 内で `reader.read_ue()` 直後に `if pic_order_cnt_type > 2 { return Err(...) }` を挿入。既存 `read_high_profile_sps_fields` 内の `chroma_format_idc > 3` / `bit_depth_*_minus8 > 6` 検査と同じ「読み出し直後に値域検査して早期 return」スタイルに統一。
+- Err メッセージは `"invalid H.264 SPS: pic_order_cnt_type out of spec range (0..=2): {pic_order_cnt_type}"` で、既存 `parse_sps` 経路の値域 Err 群 (`<field> out of spec range (0..=N): {value}`) と完全整合。
+- `match` 末尾の `_ => {}` は事前検査により `pic_order_cnt_type == 2` のときのみ通る形になり、既存コメント「pic_order_cnt_type == 2 のときは追加読み出しなし」はそのまま意味が保たれる。
+
+### `SpsBuilder` の setter 一般化
+
+- `SpsBuilder::with_pic_order_cnt_type_1()`（引数なしトグル）を削除し、`with_pic_order_cnt_type(value: u32)` を新設。既存の `with_chroma_format_idc(value: u32)` / `with_profile_idc(profile_idc: u32)` / `with_bit_depth_luma_minus8(value: u32)` 等の `u32` 引数 setter 群と命名規則・引数型を揃えた。
+- 既存テスト `extract_dimensions_handles_pic_order_cnt_type_1` の `.with_pic_order_cnt_type_1()` 呼び出しを `.with_pic_order_cnt_type(1)` に追従。関数名・アサート対象 (`extract_dimensions_from_sps`)・本体スタイルは維持。
+- `SpsBuilder::build()` の `match self.pic_order_cnt_type` ロジックは無変更（`pic_order_cnt_type = 3` でも `w.write_ue(self.pic_order_cnt_type)` で値そのものは出力され、追加バイトは `_` アームで書かない。reader 側も読み出し直後に Err を返すため整合）。
+
+### テスト追加
+
+- `parse_sps_rejects_pic_order_cnt_type_out_of_range` を `parse_sps の単体テスト群` コメントブロック内末尾、既存 `parse_sps_rejects_bit_depth_chroma_minus8_out_of_range` の直後に追加。`SpsBuilder::raw(1920, 1088).with_pic_order_cnt_type(3).build()` で `parse_sps` を呼んで `result.is_err()` のみアサート（既存 `parse_sps_rejects_*` 4 件と同じ粒度）。
+- `extract_dimensions_handles_pic_order_cnt_type_0` を `extract_dimensions_handles_pic_order_cnt_type_1` の直後に追加。`pic_order_cnt_type = 0` 経路（`log2_max_pic_order_cnt_lsb_minus4` 読み飛ばし）の正常通過と width / height 値を確認する（`/review-diff-code` の境界値補強指摘への対応）。
+
+### レビュー指摘の反映
+
+`/review-diff-code` の指摘を反映した。
+
+- テストコメントから「本 issue で追加した」表記を含む経路追跡コメント 2 行を削除。`shiguredo-issues` 規約「ソースコード本体への issue 参照禁止」と既存 `parse_sps_rejects_*` 群のコメント粒度に揃えた。
+- 境界値補強として `pic_order_cnt_type = 0` 経路の正常系単体テストを追加。
+
+### CHANGES.md
+
+記載なし。`## develop` 内中間状態の堅牢性補強で、仕様準拠の publisher (libx264 / ハードウェアエンコーダ等) が生成する SPS では発生しない挙動変化のため、利用者観測挙動に影響しない。
 
 ## 関連
 
