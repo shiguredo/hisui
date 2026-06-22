@@ -842,13 +842,17 @@ pub(crate) mod tests {
     // 各 SPS は本モジュール外のテスト (decoder/openh264.rs::tests, rtsp/subscriber.rs::tests,
     // srt/inbound_endpoint.rs::tests) からも参照されるため `pub(crate)` で公開する。
 
-    // Baseline プロファイル + 320x240 (16 の倍数の解像度、crop なしの最小実機 SPS パターン)
+    // Baseline プロファイル + 320x240 (16 の倍数の解像度、crop なしの最小実機 SPS パターン)。
+    // NAL ヘッダ (0x67) 直後の 3 バイトは profile_idc=66 (Baseline) / constraint_set_flags=0xc0 /
+    // level_idc=13 (Level 1.3)。
     pub(crate) const SPS_320X240: [u8; 24] = [
         0x67, 0x42, 0xc0, 0x0d, 0xd9, 0x01, 0x41, 0xfb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00, 0x10,
         0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x42, 0xa4, 0x80,
     ];
 
-    // Baseline プロファイル + 1920x1080 (16 倍数でない 1080 のため crop_bottom 経路を踏む実機 SPS)
+    // Baseline プロファイル + 1920x1080 (16 倍数でない 1080 のため crop_bottom 経路を踏む実機 SPS)。
+    // NAL ヘッダ (0x67) 直後の 3 バイトは profile_idc=66 (Baseline) / constraint_set_flags=0xc0 /
+    // level_idc=40 (Level 4.0)。
     pub(crate) const SPS_1920X1080: [u8; 26] = [
         0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02, 0x27, 0xe5, 0xc0, 0x44, 0x00, 0x00, 0x03,
         0x00, 0x04, 0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,

@@ -377,10 +377,10 @@ mod tests {
 
     // ラッパーが seq_header の avc_profile_indication / profile_compatibility /
     // avc_level_indication / length_size_minus_one を捨てて SPS 由来実値および固定値で avcC を
-    // 埋めることを検証するため、各フィールドに SPS 由来値とは異なるダミー値を入れる。
-    // SPS_320X240 の NAL ヘッダ (0x67) 直後の 3 バイト (= RBSP byte[0..3]) は
-    // profile_idc=66 / constraint_set_flags=0xc0 / level_idc=13。length_size_minus_one は
-    // ラッパー本体で読まれず下層が 3 固定で埋めるため、ダミー値 0 を入れても avcC は 3 になる。
+    // 埋めることを検証するため、各フィールドに SPS_320X240 (profile_idc=66 /
+    // constraint_set_flags=0xc0 / level_idc=13) とは異なるダミー値を入れる。
+    // length_size_minus_one はラッパー本体で読まれず下層が 3 固定で埋めるため、ダミー値 0 を
+    // 入れても avcC は 3 になる。
     fn dummy_passthrough_fields_seq_header() -> shiguredo_rtmp::AvcSequenceHeader {
         shiguredo_rtmp::AvcSequenceHeader {
             sps_list: vec![SPS_320X240.to_vec()],
