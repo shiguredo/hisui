@@ -196,16 +196,16 @@ impl<R: Read> ElementReader<R> {
     }
 
     // 上限サイズを呼び出し側で指定する版の read_bytes。
-    // AV1CodecConfigurationRecord / avcC は数 KB に達する可能性があり、
-    // 既存 `read_bytes` の 1024 バイト上限では足りないため、CodecPrivate 取得経路のみ
-    // 本メソッドを使って上限を 64 KB に拡大する。`read_bytes` 経由経路 (read_u64 /
-    // expect_str など) は 1024 上限のまま不変。
+    // AV1CodecConfigurationRecord / avcC のように 1024 バイト上限を超える可能性のある
+    // 要素を読むときに使う。
     fn read_bytes_with_limit(&mut self, expected_id: u32, max_size: u64) -> crate::Result<Vec<u8>> {
         self.expect_id(expected_id)?;
 
         let size = self.read_element_data_size()?;
         if size >= max_size {
-            return Err(crate::Error::new("invalid data"));
+            return Err(crate::Error::new(format!(
+                "WebM element data too large: id=0x{expected_id:X}, size={size}, max={max_size}"
+            )));
         }
 
         let mut buf = vec![0; size as usize];
@@ -376,8 +376,9 @@ impl VideoTrackHeader {
     // 戻り値タプルで返し、struct には保持しない。
     //
     // 映像トラック不在 (TRACKS 内に TRACK_NUMBER_VIDEO の TRACK_ENTRY が無い) の場合は
-    // closed 0031 の既存挙動を維持し、`(Self { codec: VideoFormat::I420 }, 0, 0, Vec::new())`
-    // のセンチネル値を返す。
+    // `(Self { codec: VideoFormat::I420 }, 0, 0, Vec::new())` のセンチネル値を返す
+    // (生 YUV を指す I420 を映像トラック不在の placeholder に流用する。
+    // Sora 録画は映像トラック必須前提で実運用では発生しない経路)。
     fn read<R: Read>(
         reader: &mut ElementReader<R>,
     ) -> crate::Result<(Self, usize, usize, Vec<u8>)> {
@@ -441,7 +442,7 @@ impl VideoTrackHeader {
             };
             if !video_seen {
                 // VIDEO master が TRACK_ENTRY 直下に不在のフォールバック。
-                // closed 0031 の既存挙動を維持し、警告ログを出して width / height = 0 で続行する。
+                // 警告ログを出して width / height = 0 で続行する。
                 tracing::warn!(
                     "WebM video TRACK_ENTRY has no Video master element; falling back to width=0 height=0"
                 );
@@ -452,10 +453,9 @@ impl VideoTrackHeader {
             Ok((Self { codec }, width, height, codec_private))
         } else {
             // 映像トラックが存在しないパターン。Sora 録画は映像トラックを必ず含む前提のため、
-            // 実運用では発生しない経路。本来「生 YUV」を指す VideoFormat::I420 を「映像トラック
-            // 不在」のセンチネル値に流用しており、型の意味論としては不純だが Sora 録画前提では
-            // この値が WebmVideoReader::read_simple_block で参照されることはない (track_number
-            // 不一致でフレーム生成が起きないため)。型抽象の整理が必要になったら別 issue で扱う。
+            // 実運用では発生しない経路。生 YUV を指す I420 を映像トラック不在の placeholder に
+            // 流用するが、Sora 録画前提では `WebmVideoReader::read_simple_block` で
+            // この値が参照されることはない (track_number 不一致でフレーム生成が起きないため)。
             tracing::warn!(
                 "WebM TRACKS has no video TRACK_ENTRY; codec set to I420 as placeholder"
             );
@@ -703,8 +703,8 @@ impl WebmVideoReader {
             VideoFormat::I420 => None,
             // VideoTrackHeader::read が返す codec は Vp8 / Vp9 / Av1 / H264AnnexB / I420 の 5 値のみで、
             // 以下は構造的に到達不能な防御。VideoFormat の他バリアント (H264 / H265 / I420A) が将来
-            // VideoTrackHeader::read のマッピングに追加されたとき silently ランタイムエラー化する余地
-            // があるため、型抽象の整理が必要になったら別 issue で扱う。
+            // VideoTrackHeader::read のマッピングに追加されたとき silently ランタイムエラー化する
+            // 余地を防ぐためのガードとして残す。
             other => {
                 return Err(crate::Error::new(format!(
                     "WebmVideoReader received unexpected video format from TRACKS: {other:?}"

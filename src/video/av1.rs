@@ -32,8 +32,7 @@ pub fn av1_sample_entry(width: EvenUsize, height: EvenUsize, config_obus: &[u8])
 /// 読み飛ばして byte 4 以降の configOBUs スライス参照を返す。byte 1..=3 の各フィールドは
 /// 検証も抽出もしない (av1_sample_entry が Av1cBox の固定値を使うため、ヘッダ実値は不要)。
 ///
-/// configOBUs が空 (data.len() == 4) でも Ok を返す。Sequence Header OBU 不在は
-/// 後段の AV1 デコーダで検出する。
+/// configOBUs が空 (data.len() == 4) でも Ok を返す。
 pub fn parse_av1_codec_private(data: &[u8]) -> crate::Result<&[u8]> {
     if data.len() < 4 {
         return Err(crate::Error::new(format!(
@@ -41,14 +40,12 @@ pub fn parse_av1_codec_private(data: &[u8]) -> crate::Result<&[u8]> {
             data.len()
         )));
     }
-    // byte 0 の最上位 bit (marker) は 1 でなければならない
     let marker = data[0] >> 7;
     if marker != 1 {
         return Err(crate::Error::new(
             "invalid AV1 CodecPrivate: marker bit is not set",
         ));
     }
-    // byte 0 の下位 7 bit (version) は 1 のみサポート
     let version = data[0] & 0b0111_1111;
     if version != 1 {
         return Err(crate::Error::new(format!(

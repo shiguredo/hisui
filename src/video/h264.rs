@@ -195,8 +195,10 @@ pub fn h264_sample_entry_from_annexb(data: &[u8]) -> crate::Result<SampleEntry> 
 ///
 /// 戻り値の SPS / PPS リストはそのまま `h264_sample_entry_from_sps_pps_lists` の入力契約
 /// (EBSP 形式、NAL ヘッダ 1 バイト含む) と一致するため、中間変換なしで move できる。
-/// SPS / PPS の NAL タイプ検査は `h264_sample_entry_from_sps_pps_lists` 内で実施されるため
-/// 本関数では検査しない。
+/// NAL タイプ検査は本関数では行わない。後段の `h264_sample_entry_from_sps_pps_lists` 内で
+/// `sps_list[0]` の SPS と全 PPS の NAL タイプを検査する。`sps_list[1..]` の NAL タイプは
+/// 検査されないため、avcC が壊れていて先頭以外の SPS スロットに非 SPS NAL が混ざっていた
+/// 場合はそのまま `AvccBox.sps_list` に move される (Hisui の入力前提では発生しない異常系)。
 ///
 /// byte 1..=3 (`AVCProfileIndication` / `profile_compatibility` / `AVCLevelIndication`) と
 /// High 系プロファイル時の末尾追加フィールドは捨てる (`parse_sps` が SPS 由来実値で
@@ -210,24 +212,22 @@ pub fn parse_avcc_sps_pps_lists(data: &[u8]) -> crate::Result<(Vec<Vec<u8>>, Vec
             data.len()
         )));
     }
-    // byte 0: configurationVersion は 1 のみサポート
     if data[0] != 1 {
         return Err(crate::Error::new(format!(
             "invalid H.264 avcC: unsupported configurationVersion {}",
             data[0]
         )));
     }
-    // byte 4 下位 2 bit: lengthSizeMinusOne。Hisui の MP4 出力は NALU_HEADER_LENGTH = 4 固定で、
-    // それ以外を受理すると `AvccBox.length_size_minus_one` と乖離して下流 muxer 出力時に
-    // プレイヤーが NAL を切り出せない。byte 4 上位 6 bit の reserved はマスクで捨てる。
+    // Hisui の MP4 出力は NALU_HEADER_LENGTH = 4 固定で、`AvccBox.length_size_minus_one`
+    // との乖離があると下流 muxer 出力後にプレイヤーが NAL を切り出せない。
+    // 上位 6 bit (reserved) はマスクで捨てる。
     let length_size_minus_one = data[4] & 0b0000_0011;
     if length_size_minus_one != 3 {
         return Err(crate::Error::new(format!(
             "invalid H.264 avcC: unsupported lengthSizeMinusOne {length_size_minus_one} (expected 3)"
         )));
     }
-    // byte 5 下位 5 bit: numOfSequenceParameterSets。5 bit のため上限 31 は構造的に保証される。
-    // byte 5 上位 3 bit の reserved はマスクで捨てる。
+    // 上位 3 bit (reserved) はマスクで捨てる。下位 5 bit のため上限 31 は構造的に保証される。
     let num_sps = (data[5] & 0b0001_1111) as usize;
     if num_sps == 0 {
         return Err(crate::Error::new(
@@ -1698,9 +1698,7 @@ pub(crate) mod tests {
         assert_eq!(avc1.visual.height, 1080);
     }
 
-    // avcC バイト列をテスト用に構築するヘルパー。
-    // lengthSizeMinusOne = 3 固定、reserved bit は 0xFF / 0xE0 で 1 詰めする。
-    // SPS / PPS の長さフィールドは 16 bit BE 固定。
+    // avcC バイト列をテスト用に構築するヘルパー (lengthSizeMinusOne = 3 固定)。
     fn build_avcc(sps_list: &[&[u8]], pps_list: &[&[u8]]) -> Vec<u8> {
         assert!(
             sps_list.len() <= 31,
