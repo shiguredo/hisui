@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-17
-- Completed:
+- Completed: 2026-06-22
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-sample-entry-fallback-paths
 - Polished:
