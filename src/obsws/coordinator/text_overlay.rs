@@ -89,7 +89,7 @@ impl ObswsCoordinator {
 
         // オプションフィールド
         let font_color_argb = match parse_optional_string(request_data, "fontColor") {
-            Some(s) => match parse_argb_color(&s) {
+            Ok(Some(s)) => match parse_argb_color(&s) {
                 Ok(v) => v,
                 Err(e) => {
                     return self.build_error_result(
@@ -100,10 +100,28 @@ impl ObswsCoordinator {
                     );
                 }
             },
-            None => DEFAULT_FONT_COLOR_ARGB,
+            Ok(None) => DEFAULT_FONT_COLOR_ARGB,
+            Err(e) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e,
+                );
+            }
         };
-        let font_name =
-            parse_optional_string(request_data, "fontName").unwrap_or(default_font_name);
+        let font_name = match parse_optional_string(request_data, "fontName") {
+            Ok(Some(s)) => s,
+            Ok(None) => default_font_name,
+            Err(e) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e,
+                );
+            }
+        };
         let z = match parse_optional_z(request_data) {
             Ok(z) => z,
             Err(e) => {
@@ -206,7 +224,7 @@ impl ObswsCoordinator {
         };
 
         let font_color_argb = match parse_optional_string(request_data, "fontColor") {
-            Some(s) => match parse_argb_color(&s) {
+            Ok(Some(s)) => match parse_argb_color(&s) {
                 Ok(v) => Some(v),
                 Err(e) => {
                     return self.build_error_result(
@@ -217,11 +235,7 @@ impl ObswsCoordinator {
                     );
                 }
             },
-            None => None,
-        };
-
-        let z = match parse_optional_z(request_data) {
-            Ok(z) => z,
+            Ok(None) => None,
             Err(e) => {
                 return self.build_error_result(
                     request_type,
@@ -231,13 +245,48 @@ impl ObswsCoordinator {
                 );
             }
         };
+
+        // patch 用のオプションフィールドをまとめてパースする。
+        // 各フィールドで null / 型不一致が発生したら即 INVALID_REQUEST_FIELD で返す。
+        let invalid = |e: String| -> CommandResult {
+            self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &e,
+            )
+        };
+        let text = match parse_optional_string(request_data, "text") {
+            Ok(v) => v,
+            Err(e) => return invalid(e),
+        };
+        let x = match parse_optional_i64(request_data, "x") {
+            Ok(v) => v,
+            Err(e) => return invalid(e),
+        };
+        let y = match parse_optional_i64(request_data, "y") {
+            Ok(v) => v,
+            Err(e) => return invalid(e),
+        };
+        let font_size = match parse_optional_u32(request_data, "fontSize") {
+            Ok(v) => v,
+            Err(e) => return invalid(e),
+        };
+        let font_name = match parse_optional_string(request_data, "fontName") {
+            Ok(v) => v,
+            Err(e) => return invalid(e),
+        };
+        let z = match parse_optional_z(request_data) {
+            Ok(v) => v,
+            Err(e) => return invalid(e),
+        };
         let patch = TextOverlayPatch {
-            text: parse_optional_string(request_data, "text"),
-            x: parse_optional_i64(request_data, "x"),
-            y: parse_optional_i64(request_data, "y"),
-            font_size: parse_optional_u32(request_data, "fontSize"),
+            text,
+            x,
+            y,
+            font_size,
             font_color_argb,
-            font_name: parse_optional_string(request_data, "fontName"),
+            font_name,
             z,
         };
 
@@ -558,20 +607,50 @@ fn parse_required_u32(request_data: &nojson::RawJsonOwned, field: &str) -> Optio
     v.try_into().ok()
 }
 
-fn parse_optional_string(request_data: &nojson::RawJsonOwned, field: &str) -> Option<String> {
-    let v = request_data.value().to_member(field).ok()?;
-    let v = v.optional()?;
-    let value: String = v.try_into().ok()?;
-    if value.is_empty() {
-        return None;
+/// オプションフィールドを文字列として取り出す。
+///
+/// - フィールド欠落: `Ok(None)` (省略 = 現状維持)
+/// - `null` 値: `Err(...)` (クライアント側の明示的な指定とみなす)
+/// - 空文字 `""`: `Ok(Some(""))` (値として受け取り、空文字許否はフィールド固有の検証に委ねる)
+/// - 型不一致: `Err(...)`
+/// - 正常値: `Ok(Some(value))`
+fn parse_optional_string(
+    request_data: &nojson::RawJsonOwned,
+    field: &str,
+) -> Result<Option<String>, String> {
+    let Ok(member) = request_data.value().to_member(field) else {
+        return Ok(None);
+    };
+    let Some(v) = member.optional() else {
+        return Ok(None);
+    };
+    if v.kind().is_null() {
+        return Err(format!("field '{field}' must not be null"));
     }
-    Some(value)
+    let value: String = v
+        .try_into()
+        .map_err(|_| format!("field '{field}' must be a string"))?;
+    Ok(Some(value))
 }
 
-fn parse_optional_i64(request_data: &nojson::RawJsonOwned, field: &str) -> Option<i64> {
-    let v = request_data.value().to_member(field).ok()?;
-    let v = v.optional()?;
-    v.try_into().ok()
+/// オプションフィールドを i64 として取り出す。null / 型不一致は `Err`、欠落は `Ok(None)`。
+fn parse_optional_i64(
+    request_data: &nojson::RawJsonOwned,
+    field: &str,
+) -> Result<Option<i64>, String> {
+    let Ok(member) = request_data.value().to_member(field) else {
+        return Ok(None);
+    };
+    let Some(v) = member.optional() else {
+        return Ok(None);
+    };
+    if v.kind().is_null() {
+        return Err(format!("field '{field}' must not be null"));
+    }
+    let value: i64 = v
+        .try_into()
+        .map_err(|_| format!("field '{field}' must be an integer"))?;
+    Ok(Some(value))
 }
 
 /// `z` フィールドを `Option<i32>` として取り出す。
@@ -580,7 +659,7 @@ fn parse_optional_i64(request_data: &nojson::RawJsonOwned, field: &str) -> Optio
 /// JSON 上は integer として受信する。i32 範囲外の値はクライアントの誤用とみなして
 /// エラー文言を返し、呼び出し側で `INVALID_REQUEST_FIELD` にマップする。
 fn parse_optional_z(request_data: &nojson::RawJsonOwned) -> Result<Option<i32>, String> {
-    let Some(v) = parse_optional_i64(request_data, "z") else {
+    let Some(v) = parse_optional_i64(request_data, "z")? else {
         return Ok(None);
     };
     i32::try_from(v)
@@ -588,10 +667,16 @@ fn parse_optional_z(request_data: &nojson::RawJsonOwned) -> Result<Option<i32>, 
         .map_err(|_| format!("z must be within i32 range (got {v})"))
 }
 
-fn parse_optional_u32(request_data: &nojson::RawJsonOwned, field: &str) -> Option<u32> {
-    let v = request_data.value().to_member(field).ok()?;
-    let v = v.optional()?;
-    v.try_into().ok()
+/// オプションフィールドを u32 として取り出す。null / 型不一致は `Err`、欠落は `Ok(None)`。
+fn parse_optional_u32(
+    request_data: &nojson::RawJsonOwned,
+    field: &str,
+) -> Result<Option<u32>, String> {
+    let v = parse_optional_i64(request_data, field)?;
+    let Some(v) = v else { return Ok(None) };
+    u32::try_from(v)
+        .map(Some)
+        .map_err(|_| format!("field '{field}' must be within u32 range (got {v})"))
 }
 
 #[cfg(test)]
@@ -645,5 +730,103 @@ mod tests {
             argb,
             "parse 後に元の u32 と一致"
         );
+    }
+
+    fn parse_owned_json(text: &str) -> nojson::RawJsonOwned {
+        nojson::RawJsonOwned::parse(text).expect("テスト JSON はパース可能であるべき")
+    }
+
+    /// 欠落フィールドは省略 (= 現状維持) として `Ok(None)` を返す。
+    #[test]
+    fn parse_optional_string_returns_none_for_missing_field() {
+        let json = parse_owned_json(r#"{"other":"value"}"#);
+        let result = parse_optional_string(&json, "missing");
+        assert_eq!(result, Ok(None), "欠落は Ok(None)");
+    }
+
+    /// 明示的な `null` 値はクライアント側の意図的な指定とみなして拒否する。
+    #[test]
+    fn parse_optional_string_rejects_null() {
+        let json = parse_owned_json(r#"{"foo":null}"#);
+        let err = parse_optional_string(&json, "foo").expect_err("null は拒否される");
+        assert!(
+            err.contains("null"),
+            "エラー文言で null 拒否を伝える: {err}"
+        );
+    }
+
+    /// 空文字は値として呼び出し側に渡す (空文字許否はフィールド固有の検証に委ねる)。
+    #[test]
+    fn parse_optional_string_passes_through_empty_string() {
+        let json = parse_owned_json(r#"{"foo":""}"#);
+        let result = parse_optional_string(&json, "foo");
+        assert_eq!(
+            result,
+            Ok(Some("".to_owned())),
+            "空文字は Ok(Some(\"\")) として透過する"
+        );
+    }
+
+    /// 文字列以外の型は拒否する。
+    #[test]
+    fn parse_optional_string_rejects_non_string_type() {
+        let json = parse_owned_json(r#"{"foo":123}"#);
+        let err = parse_optional_string(&json, "foo").expect_err("数値型は拒否される");
+        assert!(
+            err.contains("string"),
+            "エラー文言で string 期待を伝える: {err}"
+        );
+    }
+
+    /// 正常値はそのまま `Ok(Some(value))` で返る。
+    #[test]
+    fn parse_optional_string_returns_value() {
+        let json = parse_owned_json(r#"{"foo":"bar"}"#);
+        assert_eq!(
+            parse_optional_string(&json, "foo"),
+            Ok(Some("bar".to_owned()))
+        );
+    }
+
+    /// `parse_optional_i64`: 欠落は Ok(None)、null は Err、整数は Ok(Some)。
+    #[test]
+    fn parse_optional_i64_distinguishes_missing_and_null() {
+        let missing = parse_owned_json(r#"{}"#);
+        assert_eq!(
+            parse_optional_i64(&missing, "x"),
+            Ok(None),
+            "欠落は Ok(None)"
+        );
+
+        let null = parse_owned_json(r#"{"x":null}"#);
+        assert!(parse_optional_i64(&null, "x").is_err(), "null は拒否される");
+
+        let value = parse_owned_json(r#"{"x":-100}"#);
+        assert_eq!(parse_optional_i64(&value, "x"), Ok(Some(-100)));
+    }
+
+    /// `parse_optional_u32`: 負数は範囲外として拒否する。
+    #[test]
+    fn parse_optional_u32_rejects_negative_value() {
+        let json = parse_owned_json(r#"{"size":-1}"#);
+        let err = parse_optional_u32(&json, "size").expect_err("負数は拒否される");
+        assert!(
+            err.contains("u32 range"),
+            "エラー文言で u32 範囲外を伝える: {err}"
+        );
+    }
+
+    /// `parse_optional_z`: i32 範囲外は拒否、欠落は Ok(None)。
+    #[test]
+    fn parse_optional_z_rejects_out_of_i32_range() {
+        let over = parse_owned_json(r#"{"z":2147483648}"#); // i32::MAX + 1
+        let err = parse_optional_z(&over).expect_err("i32 範囲超過は拒否される");
+        assert!(
+            err.contains("i32 range"),
+            "エラー文言で i32 範囲外を伝える: {err}"
+        );
+
+        let missing = parse_owned_json(r#"{}"#);
+        assert_eq!(parse_optional_z(&missing), Ok(None), "欠落は Ok(None)");
     }
 }
