@@ -3946,6 +3946,128 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
     );
 }
 
+// -----------------------------------------------------------------------
+// テキストオーバーレイ機能のヘルパー (機能有効時)
+// -----------------------------------------------------------------------
+
+/// 機能有効時の `ObswsCoordinator` を立ち上げる。
+///
+/// `testdata/fonts/PublicSans-Regular.ttf` を `--font-search-root` 兼デフォルトフォントとして
+/// 使い、MediaPipeline + TextOverlayProcessor + program mixer 群を spawn する。
+/// 戻り値の `ObswsCoordinatorHandle` を通じて 4 メソッドの obsws リクエストが実行できる。
+async fn create_initialized_coordinator_with_text_overlay()
+-> crate::Result<crate::obsws::coordinator::ObswsCoordinatorHandle> {
+    let text_overlay_config = crate::mixer::text_overlay::TextOverlayConfig::build(
+        Some(std::path::PathBuf::from("testdata/fonts")),
+        Some("PublicSans-Regular.ttf".to_owned()),
+    )
+    .expect("テスト用 TextOverlayConfig が組み立てられる")
+    .expect("両方指定なので Some が返る");
+
+    let registry = ObswsSessionState::new_for_test_with_text_overlay(text_overlay_config.clone());
+
+    let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
+    let pipeline_handle = pipeline.handle();
+    tokio::spawn(pipeline.run());
+    pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| crate::Error::new("trigger_start: pipeline terminated"))?;
+
+    // TextOverlayProcessor を常駐 spawn する (server 起動時と同じ手順)。
+    let processor = crate::mixer::text_overlay::TextOverlayProcessor::new(
+        registry.canvas_width(),
+        registry.canvas_height(),
+        registry.frame_rate(),
+        text_overlay_config,
+    );
+    pipeline_handle
+        .spawn_processor(
+            crate::ProcessorId::new(crate::mixer::text_overlay::TEXT_OVERLAY_PROCESSOR_ID),
+            crate::ProcessorMetadata::new(crate::mixer::text_overlay::TEXT_OVERLAY_PROCESSOR_ID),
+            |handle| async move { processor.run(handle).await },
+        )
+        .await
+        .map_err(|e| crate::Error::new(format!("failed to spawn text overlay processor: {e}")))?;
+
+    // program mixer 用の output_plan には text_overlay track を含める。
+    let scene_inputs = registry.list_current_program_scene_input_entries();
+    let text_overlay_track = Some(crate::TrackId::new(
+        crate::mixer::text_overlay::TEXT_OVERLAY_TRACK_ID,
+    ));
+    let output_plan = crate::obsws::output_plan::build_composed_output_plan(
+        &scene_inputs,
+        registry.canvas_width(),
+        registry.canvas_height(),
+        registry.frame_rate(),
+        text_overlay_track,
+    )
+    .map_err(|e| crate::Error::new(format!("failed to build output plan: {}", e.message())))?;
+    crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan).await?;
+
+    let scene_uuid = registry
+        .current_program_scene()
+        .map(|s| s.scene_uuid)
+        .unwrap_or_default();
+    let program_output = crate::obsws::server::ProgramOutputState {
+        scene_uuid,
+        video_track_id: output_plan.video_track_id,
+        audio_track_id: output_plan.audio_track_id,
+        video_mixer_processor_id: output_plan.video_mixer_processor_id,
+        audio_mixer_processor_id: output_plan.audio_mixer_processor_id,
+        source_processor_ids: output_plan.source_processor_ids,
+    };
+
+    let (mut actor, handle, _shutdown_rx) = crate::obsws::coordinator::ObswsCoordinator::new(
+        registry,
+        std::path::PathBuf::from("recordings-for-test"),
+        program_output,
+        Some(pipeline_handle),
+        #[cfg(feature = "player")]
+        test_player_command_tx(),
+        #[cfg(feature = "player")]
+        test_player_media_tx(),
+    );
+    actor.start_initial_input_source_processors().await?;
+    tokio::spawn(actor.run());
+    Ok(handle)
+}
+
+/// テキストオーバーレイ系のリクエストを 1 件投げて `CommandResult` を返す。
+async fn process_text_overlay_request(
+    coordinator: &crate::obsws::coordinator::ObswsCoordinatorHandle,
+    request_id: &str,
+    request_type: &str,
+    request_data_json: Option<&str>,
+) -> crate::obsws::coordinator::CommandResult {
+    let request_data = request_data_json
+        .map(|s| nojson::RawJsonOwned::parse(s).expect("テスト requestData JSON は妥当"));
+    let request = crate::obsws::message::RequestMessage {
+        request_id: Some(request_id.to_owned()),
+        request_type: Some(request_type.to_owned()),
+        request_data,
+    };
+    let stats = crate::obsws::message::ObswsSessionStats::default();
+    coordinator
+        .process_request(request, stats)
+        .await
+        .expect("coordinator のリクエスト処理は成功する")
+}
+
+/// `HisuiListTextOverlays` レスポンスの `textOverlays` 配列の長さを返す。
+fn parse_text_overlays_count(text: &nojson::RawJsonOwned) -> usize {
+    let json = nojson::RawJson::parse(text.text()).expect("List レスポンスは JSON");
+    json.value()
+        .to_path_member(&["d", "responseData", "textOverlays"])
+        .expect("textOverlays フィールドが存在する")
+        .required()
+        .expect("textOverlays は値を持つ")
+        .to_array()
+        .expect("textOverlays は配列")
+        .count()
+}
+
+// -----------------------------------------------------------------------
 // テキストオーバーレイ機能の無効時挙動。
 // 機能有効時のフルパス検証は TextOverlayProcessor の spawn が必要で別途扱う。
 
@@ -4039,4 +4161,131 @@ async fn hisui_list_text_overlays_returns_disabled_when_feature_off() {
         code,
         crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED
     );
+}
+
+// -----------------------------------------------------------------------
+// テキストオーバーレイ機能の有効時挙動 (4 メソッド往復・エラーケース)
+// -----------------------------------------------------------------------
+
+/// 機能有効時に Create → List → Update → List → Remove → List が正しく順序処理される。
+/// List の中身も更新前後で確認することで、Create/Update/Remove の副作用が反映されることを検証する。
+#[tokio::test]
+async fn hisui_text_overlay_create_list_update_remove_roundtrip() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+
+    // 初期状態は空。
+    let initial = process_text_overlay_request(
+        &coordinator,
+        "req-initial-list",
+        "HisuiListTextOverlays",
+        None,
+    )
+    .await;
+    let (success, _) = parse_request_status(&initial.response_text);
+    assert!(success, "初期 List は成功する");
+    assert_eq!(
+        parse_text_overlays_count(&initial.response_text),
+        0,
+        "初期状態は overlay ゼロ件"
+    );
+
+    // Create で 1 件登録する。
+    let create = process_text_overlay_request(
+        &coordinator,
+        "req-create",
+        "HisuiCreateTextOverlay",
+        Some(r#"{"textOverlayName":"greeting","text":"hello","x":100,"y":200,"fontSize":48}"#),
+    )
+    .await;
+    let (success, _) = parse_request_status(&create.response_text);
+    assert!(success, "Create は成功する");
+
+    // List で 1 件返り、内容も Create で送った値と一致する。
+    let after_create = process_text_overlay_request(
+        &coordinator,
+        "req-list-after-create",
+        "HisuiListTextOverlays",
+        None,
+    )
+    .await;
+    let (success, _) = parse_request_status(&after_create.response_text);
+    assert!(success, "Create 後の List は成功する");
+    assert_eq!(
+        parse_text_overlays_count(&after_create.response_text),
+        1,
+        "Create 後は 1 件存在する"
+    );
+    let json =
+        nojson::RawJson::parse(after_create.response_text.text()).expect("List レスポンスは JSON");
+    let item_name: String = json
+        .value()
+        .to_path_member(&["d", "responseData", "textOverlays"])
+        .and_then(|v| v.required()?.to_array())
+        .expect("textOverlays は配列")
+        .next()
+        .expect("少なくとも 1 件はある")
+        .to_member("textOverlayName")
+        .and_then(|v| v.required()?.try_into())
+        .expect("textOverlayName は文字列");
+    assert_eq!(item_name, "greeting", "Create で登録した名前が List に出る");
+
+    // Update で text を更新する。
+    let update = process_text_overlay_request(
+        &coordinator,
+        "req-update",
+        "HisuiUpdateTextOverlay",
+        Some(r#"{"textOverlayName":"greeting","text":"updated"}"#),
+    )
+    .await;
+    let (success, _) = parse_request_status(&update.response_text);
+    assert!(success, "Update は成功する");
+
+    // List で更新後の text が反映されている。
+    let after_update = process_text_overlay_request(
+        &coordinator,
+        "req-list-after-update",
+        "HisuiListTextOverlays",
+        None,
+    )
+    .await;
+    let json =
+        nojson::RawJson::parse(after_update.response_text.text()).expect("List レスポンスは JSON");
+    let updated_text: String = json
+        .value()
+        .to_path_member(&["d", "responseData", "textOverlays"])
+        .and_then(|v| v.required()?.to_array())
+        .expect("textOverlays は配列")
+        .next()
+        .expect("Update 後も 1 件存在")
+        .to_member("text")
+        .and_then(|v| v.required()?.try_into())
+        .expect("text は文字列");
+    assert_eq!(updated_text, "updated", "Update で text が変わっている");
+
+    // Remove で削除する。
+    let remove = process_text_overlay_request(
+        &coordinator,
+        "req-remove",
+        "HisuiRemoveTextOverlay",
+        Some(r#"{"textOverlayName":"greeting"}"#),
+    )
+    .await;
+    let (success, _) = parse_request_status(&remove.response_text);
+    assert!(success, "Remove は成功する");
+
+    // List で 0 件に戻る。
+    let after_remove = process_text_overlay_request(
+        &coordinator,
+        "req-list-after-remove",
+        "HisuiListTextOverlays",
+        None,
+    )
+    .await;
+    assert_eq!(
+        parse_text_overlays_count(&after_remove.response_text),
+        0,
+        "Remove 後は 0 件"
+    );
+
+    Ok(())
 }

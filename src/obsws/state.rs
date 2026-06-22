@@ -101,6 +101,20 @@ impl ObswsSessionState {
         )
     }
 
+    /// テキストオーバーレイ機能を有効化した状態でテスト用 `ObswsSessionState` を生成する。
+    #[cfg(test)]
+    pub fn new_for_test_with_text_overlay(
+        text_overlay_config: crate::mixer::text_overlay::TextOverlayConfig,
+    ) -> Self {
+        Self::new(
+            crate::types::EvenUsize::new(1920).expect("1920 is even"),
+            crate::types::EvenUsize::new(1080).expect("1080 is even"),
+            crate::video::FrameRate::FPS_30,
+            None,
+            Some(text_overlay_config),
+        )
+    }
+
     /// state file から読み込んだ scene / input を一括復元する。
     ///
     /// デフォルト scene を置き換え、全 scene / input / scene item を再構築する。
