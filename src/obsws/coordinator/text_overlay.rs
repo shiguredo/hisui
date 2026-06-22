@@ -103,7 +103,17 @@ impl ObswsCoordinator {
         };
         let font_name =
             parse_optional_string(request_data, "fontName").unwrap_or(default_font_name);
-        let z = parse_optional_i64(request_data, "z");
+        let z = match parse_optional_z(request_data) {
+            Ok(z) => z,
+            Err(e) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e,
+                );
+            }
+        };
 
         let input = TextOverlaySpecInput {
             text,
@@ -209,6 +219,17 @@ impl ObswsCoordinator {
             None => None,
         };
 
+        let z = match parse_optional_z(request_data) {
+            Ok(z) => z,
+            Err(e) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                    &e,
+                );
+            }
+        };
         let patch = TextOverlayPatch {
             text: parse_optional_string(request_data, "text"),
             x: parse_optional_i64(request_data, "x"),
@@ -216,7 +237,7 @@ impl ObswsCoordinator {
             font_size: parse_optional_u32(request_data, "fontSize"),
             font_color_argb,
             font_name: parse_optional_string(request_data, "fontName"),
-            z: parse_optional_i64(request_data, "z"),
+            z,
         };
 
         let sender = match self.text_overlay_sender().await {
@@ -579,6 +600,20 @@ fn parse_optional_i64(request_data: &nojson::RawJsonOwned, field: &str) -> Optio
     let v = request_data.value().to_member(field).ok()?;
     let v = v.optional()?;
     v.try_into().ok()
+}
+
+/// `z` フィールドを `Option<i32>` として取り出す。
+///
+/// `z` は順序値のため i32 範囲で十分な精度だが、obsws の他フィールドと同じく
+/// JSON 上は integer として受信する。i32 範囲外の値はクライアントの誤用とみなして
+/// エラー文言を返し、呼び出し側で `INVALID_REQUEST_FIELD` にマップする。
+fn parse_optional_z(request_data: &nojson::RawJsonOwned) -> Result<Option<i32>, String> {
+    let Some(v) = parse_optional_i64(request_data, "z") else {
+        return Ok(None);
+    };
+    i32::try_from(v)
+        .map(Some)
+        .map_err(|_| format!("z must be within i32 range (got {v})"))
 }
 
 fn parse_optional_u32(request_data: &nojson::RawJsonOwned, field: &str) -> Option<u32> {

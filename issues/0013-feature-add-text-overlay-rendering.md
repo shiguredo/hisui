@@ -108,9 +108,9 @@ raden v2026.1.1 のソースを直接確認して以下を確定済み。本表�
 #### TextOverlay InputTrack の VideoRealtimeMixer への注入
 
 - `VideoRealtimeMixerUpdateConfigRequest` は input_tracks を全置換するため、シーン切替で TextOverlay track が落ちる。これを防ぐため:
-  - `src/obsws/output_plan.rs` の `build_composed_output_plan` のシグネチャに `text_overlay_track_id: Option<TrackId>` を追加する。`Some(track_id)` なら関数内で `video_mixer_input_tracks` を構築した後 (`.collect()` 後) に `push` (または `chain`) で **末尾 (`z = i64::MAX`) に TextOverlay InputTrack を追加** する。`None` (機能無効時) なら何もしない。
+  - `src/obsws/output_plan.rs` の `build_composed_output_plan` のシグネチャに `text_overlay_track_id: Option<TrackId>` を追加する。`Some(track_id)` なら関数内で `video_mixer_input_tracks` を構築した後 (`.collect()` 後) に `push` (または `chain`) で **末尾 (`z = i32::MAX`) に TextOverlay InputTrack を追加** する。`None` (機能無効時) なら何もしない。
   - 呼び出し元 4 箇所 (本体 2 箇所: `src/obsws/server.rs:315` 初期化時 / `src/obsws/coordinator.rs:844` `rebuild_program_output`、テスト 2 箇所: `src/obsws/output_plan.rs:226` の既存ユニットテスト `build_composed_output_plan_skips_dormant_inputs` / `src/obsws/session/tests.rs:143` の共通ヘルパー `create_initialized_coordinator_handle_with_pipeline_and_record_dir`) を改修する。本体 2 箇所はテキストオーバーレイ機能有効時のみ `Some(...)` を渡す。テスト 2 箇所は `None` 固定で既存挙動を保つ。
-- `i64::MAX` (`ObswsVideoMixerInputTrack.z: i64` の型に合わせる) は **テキストオーバーレイ専用予約値** とし、一般 input track が指定することを禁止する。内部の `InputTrack.z: isize` (`src/mixer/video.rs:138`) に渡すときも同等の最上位値となる (hisui のサポートターゲットは 64bit のため `isize::MAX == i64::MAX`)。
+- `i32::MAX` は **テキストオーバーレイ専用予約値** とし、一般 input track が指定することを禁止する。`z` は順序ソート用の値で大きな数値精度は不要なため、obsws 層の `ObswsVideoMixerInputTrack.z` と内部の `InputTrack.z` (`src/mixer/video.rs:138`) を `i32` に統一する。`HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` で i32 範囲外の `z` を受け取った場合は `INVALID_REQUEST_FIELD` を返す。
 - 複数テキストオーバーレイ間の z は `TextOverlayProcessor` 内部でソートして 1 枚の I420A に重ね合わせる段で解決する (`VideoRealtimeMixer` 側の z 配列には影響しない)。InputTrack は常に 1 つだけで、`OVERLAY_LIMIT = 64` は processor 内部の overlay マップの上限であり mixer 側の InputTrack 数とは無関係。
 
 #### 内部 RPC
@@ -235,8 +235,7 @@ ResponseData: `textOverlays` 配列。各要素は以下:
 - `docs/server/hisui_requests/README.md` に「## テキストオーバーレイ」節を追加する。節冒頭に既存節 (例: 「Output 管理」) と同様の前提条件行「WebSocket / データチャネル両対応。RequestBatch（op=8）に対応。」を入れる。
 - `docs/obsws/PROTOCOL_STATUS.md` の独自拡張節に反映する。
 - `docs/obsws/STATE_FILE.md` の永続化対象列挙 (line 7-8) にテキストオーバーレイが永続化対象外である旨を明記する。
-- `docs/internals/mixer.md` (実在を確認済み) に「`InputTrack.z` の最大値 (`i64::MAX` 相当) はテキストオーバーレイレイヤ用の予約値、一般 input track では使用しない」を追記する。
-- `README.md` に「対応プラットフォームは 64bit (`isize::MAX == i64::MAX` 前提)」を明記する (既存に明示がないため本 issue で確定する。`docs/internals/mixer.md` の `z` 予約値説明はこの記述を参照する形で書く)。
+- `docs/internals/mixer.md` (実在を確認済み) に「`InputTrack.z` の最大値 (`i32::MAX`) はテキストオーバーレイレイヤ用の予約値、一般 input track では使用しない」を追記する。
 
 (closed 0040 で議論された `docs/internals/processor_conventions` 系のドキュメントは存在しない結論で close されているため、本 issue で追記する先はない。)
 

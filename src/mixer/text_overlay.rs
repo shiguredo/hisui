@@ -130,7 +130,7 @@ pub struct TextOverlaySpec {
     pub font_size: u32,
     pub font_color_argb: u32,
     pub font_name: String,
-    pub z: i64,
+    pub z: i32,
 }
 
 /// `HisuiCreateTextOverlay` の入力 (確定前)。
@@ -144,7 +144,7 @@ pub struct TextOverlaySpecInput {
     pub font_size: u32,
     pub font_color_argb: u32,
     pub font_name: String,
-    pub z: Option<i64>,
+    pub z: Option<i32>,
 }
 
 /// `HisuiUpdateTextOverlay` 用の部分更新パッチ。`None` は省略 (= 現状維持)。
@@ -156,7 +156,7 @@ pub struct TextOverlayPatch {
     pub font_size: Option<u32>,
     pub font_color_argb: Option<u32>,
     pub font_name: Option<String>,
-    pub z: Option<i64>,
+    pub z: Option<i32>,
 }
 
 /// `HisuiListTextOverlays` で返す現在状態。
@@ -339,7 +339,7 @@ struct ProcessorState {
     dirty: bool,
     /// 入力 `z = None` (宣言順) を解決する際に使う次の自動 z。
     /// `z = Some(v)` を受けた場合は `next_auto_z = max(next_auto_z, v + 1)` に更新する。
-    next_auto_z: i64,
+    next_auto_z: i32,
 }
 
 impl ProcessorState {

@@ -135,7 +135,7 @@ pub struct InputTrack {
     pub track_id: TrackId,
     pub x: isize,
     pub y: isize,
-    pub z: isize,
+    pub z: i32,
     pub width: Option<EvenUsize>,
     pub height: Option<EvenUsize>,
     pub scale_x: Option<PositiveFiniteF64>,
@@ -191,7 +191,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
         let track_id: TrackId = value.to_member("trackId")?.required()?.try_into()?;
         let x: Option<isize> = value.to_member("x")?.try_into()?;
         let y: Option<isize> = value.to_member("y")?.try_into()?;
-        let z: Option<isize> = value.to_member("z")?.try_into()?;
+        let z: Option<i32> = value.to_member("z")?.try_into()?;
         let width: Option<EvenUsize> = value.to_member("width")?.try_into()?;
         let height: Option<EvenUsize> = value.to_member("height")?.try_into()?;
         let scale_x: Option<PositiveFiniteF64> = value.to_member("scaleX")?.try_into()?;
@@ -271,7 +271,7 @@ pub struct VideoRealtimeMixerUpdateConfigResult {
 #[derive(Debug)]
 struct DrawOrder {
     track_id: TrackId,
-    z: isize,
+    z: i32,
     index: usize,
 }
 

@@ -123,8 +123,6 @@ NVIDIA Video Codec を利用する場合は NVIDIA ドライバー 570.0 以降�
 - macOS 26 arm64
 - macOS 15 arm64
 
-いずれも 64bit プラットフォームのみをサポートします (`isize::MAX == i64::MAX` を前提とする実装があるため)。
-
 ### macOS の対応バージョン
 
 直近の 2 バージョンをサポートします。

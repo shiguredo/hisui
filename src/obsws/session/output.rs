@@ -11,7 +11,7 @@ pub fn convert_video_mixer_input_tracks(
             track_id: t.track_id.clone(),
             x: t.x as isize,
             y: t.y as isize,
-            z: t.z as isize,
+            z: t.z,
             width: t
                 .width
                 .and_then(|w| crate::types::EvenUsize::new(w as usize)),

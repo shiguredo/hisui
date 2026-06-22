@@ -21,7 +21,7 @@ pub struct ObswsVideoMixerInputTrack {
     pub track_id: TrackId,
     pub x: i64,
     pub y: i64,
-    pub z: i64,
+    pub z: i32,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub scale_x: Option<PositiveFiniteF64>,
@@ -55,7 +55,7 @@ fn round_to_even(value: f64) -> u32 {
 /// OBS と同様に、ソースの有無に関わらず常に映像（黒画面）と音声（無音）の両トラックを含める。
 ///
 /// `text_overlay_track_id` が `Some` の場合は、video_mixer の最終 InputTrack として
-/// z = i64::MAX で TextOverlay の publish track を追加する。`None` の場合は何もしない
+/// z = i32::MAX で TextOverlay の publish track を追加する。`None` の場合は何もしない
 /// (テキストオーバーレイ機能無効時)。
 pub fn build_composed_output_plan(
     scene_inputs: &[ObswsSceneInputEntry],
@@ -150,7 +150,7 @@ pub fn build_composed_output_plan(
                 track_id: video_track_id.clone(),
                 x: transform.position_x as i64,
                 y: transform.position_y as i64,
-                z: scene_input.scene_item_index as i64,
+                z: scene_input.scene_item_index as i32,
                 width,
                 height,
                 scale_x,
@@ -164,13 +164,13 @@ pub fn build_composed_output_plan(
         .collect();
 
     // テキストオーバーレイ機能有効時のみ、video_mixer の最終 InputTrack として末尾追加する。
-    // z = i64::MAX により他の input track よりも常に上に合成される (専用予約値)。
+    // z = i32::MAX により他の input track よりも常に上に合成される (専用予約値)。
     if let Some(track_id) = text_overlay_track_id {
         video_mixer_input_tracks.push(ObswsVideoMixerInputTrack {
             track_id,
             x: 0,
             y: 0,
-            z: i64::MAX,
+            z: i32::MAX,
             width: None,
             height: None,
             scale_x: None,

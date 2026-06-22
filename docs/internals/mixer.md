@@ -144,11 +144,11 @@ video mixer の RPC は `UpdateConfig` と `Finish` です。
 
 ### `InputTrack.z` の予約値
 
-`InputTrack.z` (`src/mixer/video.rs` の `pub z: isize`、obsws 層の `ObswsVideoMixerInputTrack.z` は `i64`) のうち **`i64::MAX` (= 64bit 環境では `isize::MAX` と同値) はテキストオーバーレイ専用の予約値**です。一般の input track からは指定しないでください。
+`InputTrack.z` (`src/mixer/video.rs` の `pub z: i32`、obsws 層の `ObswsVideoMixerInputTrack.z` も `i32`) のうち **`i32::MAX` はテキストオーバーレイ専用の予約値**です。一般の input track からは指定しないでください。
 
-`HisuiCreateTextOverlay` 等で作成したテキストオーバーレイは、`TextOverlayProcessor` が透過 I420A レイヤとして 1 本 publish したものを `build_composed_output_plan` (`src/obsws/output_plan.rs`) が `z = i64::MAX` の `InputTrack` として末尾に追加します。これにより、ユーザー側 input track よりも常に上に合成されます。
+`HisuiCreateTextOverlay` 等で作成したテキストオーバーレイは、`TextOverlayProcessor` が透過 I420A レイヤとして 1 本 publish したものを `build_composed_output_plan` (`src/obsws/output_plan.rs`) が `z = i32::MAX` の `InputTrack` として末尾に追加します。これにより、ユーザー側 input track よりも常に上に合成されます。
 
-hisui のサポート対象は 64bit プラットフォーム (`isize::MAX == i64::MAX` 前提) のみです。32bit プラットフォームは想定外で、obsws レイヤと内部 mixer レイヤの z 値が整合しなくなる可能性があります。
+`z` は順序ソート用の値で大きな数値精度は不要なため、obsws / 内部 mixer の両層で `i32` に統一しています。`HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` で `z` に i32 範囲外の値を渡した場合は `INVALID_REQUEST_FIELD` を返します。
 
 ## Audio Realtime Mixer
 

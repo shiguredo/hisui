@@ -23,7 +23,7 @@
 | `fontSize` | integer | 必須 | フォントサイズ (px)。`1` 以上 `canvas_height` 以下 |
 | `fontColor` | string | - | 文字色。`#RRGGBB` または `#RRGGBBAA` (正規表現 `^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$`)。省略時は `#FFFFFFFF` (不透明白) |
 | `fontName` | string | - | `--font-search-root` 配下のフォントファイル名 (拡張子付き)。省略時は `--default-font` の値 |
-| `z` | integer | - | テキストオーバーレイ間の z-order。省略時は宣言順 (現在登録されている最大 z + 1 が自動割り当てされ、後勝ち) |
+| `z` | integer | - | テキストオーバーレイ間の z-order (i32 範囲)。省略時は宣言順 (現在登録されている最大 z + 1 が自動割り当てされ、後勝ち) |
 
 ## ResponseData
 
@@ -39,6 +39,7 @@
 - `fontName` 解決失敗 (ファイルなし / ルート外 / シンボリックリンクでルート外 / フォント破損): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - `fontColor` の形式違反: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - `fontSize` の範囲外 (`0` または `canvas_height` 超過): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
+- `z` が i32 範囲外: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - `text` のバイト数 / 行数上限超過: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - raden 描画失敗 (フォント解析エラー等): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - 同時保持できるオーバーレイ数の上限 (`OVERLAY_LIMIT = 64`) 超過: `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` (606)
