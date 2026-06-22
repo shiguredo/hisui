@@ -139,11 +139,11 @@ impl VideoToolboxEncoder {
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
             // 最初の出力フレームの SPS/PPS からサンプルエントリーを確定して保持し、
             // 以後は全出力フレームに保持済みのサンプルエントリーを載せる。
-            // shiguredo_video_toolbox は keyframe 出力時のみ SPS / PPS を返すため、
-            // 非 keyframe フレームでは frame.sps_list / pps_list が空になる。H.264 経路では
-            // openh264 経路と同様に空 SPS / PPS でのサンプルエントリー構築をスキップし、
-            // 次の keyframe を待つ (空入力で h264_sample_entry_from_sps_pps_lists を呼ぶと
-            // Err になりエンコーダが落ちるため)。
+            // shiguredo_video_toolbox は keyframe 出力時のみ VPS / SPS / PPS を返すため、
+            // 非 keyframe フレームでは frame.vps_list / sps_list / pps_list が空になる。
+            // H.264 / H.265 のどちらの経路でも空入力でサンプルエントリー構築をスキップし、
+            // 次の keyframe を待つ (空入力で新ヘルパー関数を呼ぶと SPS パースで Err になり
+            // エンコーダが落ちるため)。
             if self.sample_entry.is_none() {
                 let sample_entry_opt = if self.format == VideoFormat::H264 {
                     if frame.sps_list.is_empty() || frame.pps_list.is_empty() {
@@ -155,15 +155,19 @@ impl VideoToolboxEncoder {
                         )?;
                         Some(entry)
                     }
+                } else if frame.vps_list.is_empty()
+                    || frame.sps_list.is_empty()
+                    || frame.pps_list.is_empty()
+                {
+                    None
                 } else {
-                    Some(h265::h265_sample_entry(
-                        self.width,
-                        self.height,
-                        self.fps,
+                    let (entry, _frame_size) = h265::h265_sample_entry_from_vps_sps_pps_lists(
                         frame.vps_list.clone(),
                         frame.sps_list.clone(),
                         frame.pps_list.clone(),
-                    )?)
+                        self.fps,
+                    )?;
+                    Some(entry)
                 };
                 if let Some(sample_entry) = sample_entry_opt {
                     self.sample_entry = Some(SharedSampleEntry::new(sample_entry));

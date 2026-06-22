@@ -84,8 +84,7 @@ impl NvcodecEncoder {
 
         let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
         let seq_params = inner.get_sequence_params()?;
-        let sample_entry =
-            h265::h265_sample_entry_from_annexb(width, height, options.frame_rate, &seq_params)?;
+        let sample_entry = h265::h265_sample_entry_from_annexb(&seq_params, options.frame_rate)?;
 
         Ok(Self {
             inner,

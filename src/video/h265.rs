@@ -2,7 +2,7 @@ use shiguredo_mp4::boxes::{Hvc1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
 use crate::{
     types::EvenUsize,
-    video::{self, FrameRate, bit_reader::BitReader},
+    video::{self, FrameRate, VideoFrameSize, bit_reader::BitReader},
 };
 
 pub type NalUnitArray = Vec<Vec<u8>>;
@@ -20,7 +20,6 @@ pub const H265_NALU_TYPE_PPS: u8 = 34;
 // Main / Main 10 / Main Still Picture / Format Range Extensions / High Throughput /
 // Multiview Main / Scalable Main / Screen Content Coding をカバーする。
 // Hisui の入力前提 (video_toolbox / nvcodec) もこの範囲に含まれる。
-#[allow(dead_code)]
 const H265_ALLOWED_PROFILE_IDCS: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 9];
 
 /// Annex.B 形式の H.265 をパースして、含まれている NAL ユニットを走査するためのイテレーター
@@ -99,7 +98,6 @@ pub struct H265NalUnit<'a> {
 /// `parse_hevc_sps` の戻り値で、`h265_sample_entry_from_vps_sps_pps_lists` 経由で
 /// `HvccBox` の対応フィールドにマップされる（本 issue の §1 で追加予定）。
 #[derive(Debug)]
-#[allow(dead_code)]
 struct HevcSpsParams {
     /// profile_tier_level の general_profile_space (u(2)、ITU-T H.265 仕様 7.4.4)
     general_profile_space: u8,
@@ -141,7 +139,6 @@ struct HevcSpsParams {
 /// 仕様準拠 publisher のプロファイル群 (`H265_ALLOWED_PROFILE_IDCS`) 以外、または仕様値域外の
 /// `chroma_format_idc` / `bit_depth_*_minus8` / `sps_max_sub_layers_minus1`、conformance
 /// window 適用後の解像度ゼロや u16::MAX 超過を検出した場合は Err を返す。
-#[allow(dead_code)]
 fn parse_hevc_sps(sps: &[u8]) -> crate::Result<HevcSpsParams> {
     let rbsp = rbsp_from_hevc_sps_nalu(sps)?;
     let mut reader = BitReader::new(&rbsp);
@@ -327,7 +324,6 @@ fn parse_hevc_sps(sps: &[u8]) -> crate::Result<HevcSpsParams> {
 /// chroma_format_idc / separate_colour_plane_flag から (SubWidthC, SubHeightC) を返す
 ///
 /// 仕様 6.2 / Table 6-1。conformance window cropping の単位として使う。
-#[allow(dead_code)]
 fn chroma_subsampling_factors(
     chroma_format_idc: u8,
     separate_colour_plane_flag: u32,
@@ -350,7 +346,6 @@ fn chroma_subsampling_factors(
 /// 先頭 2 バイトの NAL ヘッダ（H.265 の forbidden_zero_bit + nal_unit_type + nuh_layer_id +
 /// nuh_temporal_id_plus1）を skip し、payload 内の emulation prevention byte
 /// (`0x00 0x00 0x03`) を除去した RBSP バイト列を返す。
-#[allow(dead_code)]
 fn rbsp_from_hevc_sps_nalu(nalu: &[u8]) -> crate::Result<Vec<u8>> {
     if nalu.len() < 2 {
         return Err(crate::Error::new(
@@ -383,7 +378,124 @@ fn rbsp_from_hevc_sps_nalu(nalu: &[u8]) -> crate::Result<Vec<u8>> {
     Ok(rbsp)
 }
 
-/// H.265 サンプルエントリーを生成する
+/// VPS / SPS / PPS リストから HVC1 サンプルエントリーと cropping 適用後の解像度を構築する
+///
+/// 入力 `vps_list[i]` / `sps_list[i]` / `pps_list[j]` は ISO/IEC 14496-15 §8.3.3.1 で
+/// 定義された EBSP 形式 (emulation prevention byte 込み、NAL ヘッダ 2 バイト含む、start code
+/// なし)。`H265AnnexBNalUnits::next` が返す `H265NalUnit.data` の形式と
+/// `HvccBox.nalu_arrays[*].nalus[*]` の格納形式に揃える。
+///
+/// 各 list の全要素に対して先頭バイトの上位ビット側 nal_unit_type
+/// (`(byte[0] >> 1) & 0x3F`) を検査し、対応する NAL タイプ
+/// (`H265_NALU_TYPE_VPS` / `SPS` / `PPS`) と一致しない場合は Err を返す。
+/// 呼び出し側の事前判定漏れで VPS や IDR が誤って `sps_list` / `pps_list` に混入した場合に
+/// `HvccBox.nalu_arrays` へ壊れた NAL が move されるのを防ぐ。
+///
+/// 内部で `parse_hevc_sps(sps_list[0])` を 1 回呼んで SPS パラメータを取り出し、hvcC の
+/// 各フィールドに反映する。複数 SPS は先頭 SPS のパラメータのみを採用し、
+/// `HvccBox.nalu_arrays[SPS]` には全 SPS を move する (Hisui の入力前提では複数 SPS は
+/// 同一内容を想定)。VPS / PPS リストも `HvccBox.nalu_arrays` にそれぞれ move する。
+///
+/// 戻り値タプルの `VideoFrameSize` は SPS 由来の cropping 適用後解像度。
+/// `parse_hevc_sps` 内で width / height > 0 と u16::MAX 上限を保証しているため
+/// `VideoFrameSize::new` は infallible。呼び出し側で `VideoFrame.size` を encoder 設定値
+/// などから別途構築する場合は、タプルの第 2 要素 `VideoFrameSize` を `_` で捨ててよい
+/// (encoder 経路の既存挙動)。
+pub fn h265_sample_entry_from_vps_sps_pps_lists(
+    vps_list: NalUnitArray,
+    sps_list: NalUnitArray,
+    pps_list: NalUnitArray,
+    fps: FrameRate,
+) -> crate::Result<(SampleEntry, VideoFrameSize)> {
+    if vps_list.is_empty() {
+        return Err(crate::Error::new("missing H.265 VPS"));
+    }
+    if sps_list.is_empty() {
+        return Err(crate::Error::new("missing H.265 SPS"));
+    }
+    if pps_list.is_empty() {
+        return Err(crate::Error::new("missing H.265 PPS"));
+    }
+
+    // VPS / SPS / PPS の全要素に対して NAL タイプ検査を実施する。
+    // 呼び出し側 (video_toolbox / nvcodec) の事前判定漏れで HvccBox.nalu_arrays に
+    // 壊れた NAL が move されるのを防ぐ防御的検査。
+    check_nal_unit_types(&vps_list, H265_NALU_TYPE_VPS, "VPS")?;
+    check_nal_unit_types(&sps_list, H265_NALU_TYPE_SPS, "SPS")?;
+    check_nal_unit_types(&pps_list, H265_NALU_TYPE_PPS, "PPS")?;
+
+    let params = parse_hevc_sps(sps_list[0].as_slice())?;
+
+    let frame_size = VideoFrameSize::new(params.width as usize, params.height as usize).expect(
+        "infallible: parse_hevc_sps validates positive width / height and u16::MAX upper bound",
+    );
+
+    // Hisui ではフレームレートは固定（整数にならない場合は切り上げ）
+    let avg_frame_rate = (fps.numerator.get().div_ceil(fps.denumerator.get())) as u16;
+
+    let entry = SampleEntry::Hvc1(Hvc1Box {
+        visual: video::sample_entry_visual_fields(params.width as usize, params.height as usize),
+        hvcc_box: HvccBox {
+            general_profile_space: shiguredo_mp4::Uint::new(params.general_profile_space),
+            general_tier_flag: shiguredo_mp4::Uint::new(params.general_tier_flag),
+            general_profile_idc: shiguredo_mp4::Uint::new(params.general_profile_idc),
+            general_profile_compatibility_flags: params.general_profile_compatibility_flags,
+            general_constraint_indicator_flags: shiguredo_mp4::Uint::new(
+                params.general_constraint_indicator_flags,
+            ),
+            general_level_idc: params.general_level_idc,
+            num_temporal_layers: shiguredo_mp4::Uint::new(params.sps_max_sub_layers_minus1 + 1),
+            temporal_id_nested: shiguredo_mp4::Uint::new(params.sps_temporal_id_nesting_flag),
+
+            // SPS VUI / PPS 由来の正確な値抽出は本 issue のスコープ外で、固定値 0 を維持する。
+            min_spatial_segmentation_idc: shiguredo_mp4::Uint::new(0),
+            parallelism_type: shiguredo_mp4::Uint::new(0),
+
+            avg_frame_rate,
+            // Hisui は CFR (固定フレームレート) 前提
+            constant_frame_rate: shiguredo_mp4::Uint::new(1),
+            // Hisui ではヘッダサイズが固定であることが前提
+            length_size_minus_one: shiguredo_mp4::Uint::new(NALU_HEADER_LENGTH as u8 - 1),
+
+            chroma_format_idc: shiguredo_mp4::Uint::new(params.chroma_format_idc),
+            bit_depth_luma_minus8: shiguredo_mp4::Uint::new(params.bit_depth_luma_minus8),
+            bit_depth_chroma_minus8: shiguredo_mp4::Uint::new(params.bit_depth_chroma_minus8),
+
+            nalu_arrays: vec![
+                hvcc_nalu_array(H265_NALU_TYPE_VPS, vps_list),
+                hvcc_nalu_array(H265_NALU_TYPE_SPS, sps_list),
+                hvcc_nalu_array(H265_NALU_TYPE_PPS, pps_list),
+            ],
+        },
+        unknown_boxes: Vec::new(),
+    });
+
+    Ok((entry, frame_size))
+}
+
+/// `vps_list` / `sps_list` / `pps_list` の各要素に対して NAL タイプ検査を実施する内部ヘルパー
+///
+/// 先頭バイトから `(byte >> 1) & 0x3F` で nal_unit_type を抽出し、期待する `expected_ty` と
+/// 一致するかを確認する。空 NAL や型不一致を検出した場合は Err を返す。
+fn check_nal_unit_types(nalus: &[Vec<u8>], expected_ty: u8, label: &str) -> crate::Result<()> {
+    for (i, nalu) in nalus.iter().enumerate() {
+        if nalu.is_empty() {
+            return Err(crate::Error::new(format!(
+                "invalid H.265 {label} at index {i}: empty NAL"
+            )));
+        }
+        let nal_unit_type = (nalu[0] >> 1) & 0x3F;
+        if nal_unit_type != expected_ty {
+            return Err(crate::Error::new(format!(
+                "invalid H.265 {label} at index {i}: expected nal_unit_type={expected_ty}, got {nal_unit_type}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// H.265 サンプルエントリーを生成する (旧シグネチャ、本 issue ステップ 5 で削除予定)
+#[allow(dead_code)]
 pub fn h265_sample_entry(
     width: EvenUsize,
     height: EvenUsize,
@@ -446,17 +558,17 @@ fn hvcc_nalu_array(nalu_type: u8, nalus: NalUnitArray) -> HvccNalUintArray {
     }
 }
 
-/// Annex B 形式の H.265 データから VPS, SPS, PPS を抽出してサンプルエントリーを生成する
-pub fn h265_sample_entry_from_annexb(
-    width: usize,
-    height: usize,
-    fps: FrameRate,
-    data: &[u8],
-) -> crate::Result<SampleEntry> {
+/// Annex-B バイト列から HVC1 サンプルエントリーを構築する薄いラッパー
+///
+/// 内部で `H265AnnexBNalUnits` を 1 回走査して VPS / SPS / PPS NAL のみを抽出し、
+/// `h265_sample_entry_from_vps_sps_pps_lists` を呼ぶ。VCL / SEI / EOS / EOB 等の
+/// 他の NAL タイプは無視する。
+///
+/// 引数として `width` / `height` は受け取らない (SPS 由来の実値を hvcC と visual に反映するため)。
+pub fn h265_sample_entry_from_annexb(data: &[u8], fps: FrameRate) -> crate::Result<SampleEntry> {
     let mut vps_list = Vec::new();
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();
-
     for nalu in H265AnnexBNalUnits::new(data) {
         let nalu = nalu?;
         match nalu.ty {
@@ -466,23 +578,9 @@ pub fn h265_sample_entry_from_annexb(
             _ => {}
         }
     }
-
-    if vps_list.is_empty() {
-        return Err(crate::Error::new("missing H.265 VPS"));
-    }
-    if sps_list.is_empty() {
-        return Err(crate::Error::new("missing H.265 SPS"));
-    }
-    if pps_list.is_empty() {
-        return Err(crate::Error::new("missing H.265 PPS"));
-    }
-
-    let width = EvenUsize::new(width)
-        .ok_or_else(|| crate::Error::new(format!("H.265 width must be even, got {width}")))?;
-    let height = EvenUsize::new(height)
-        .ok_or_else(|| crate::Error::new(format!("H.265 height must be even, got {height}")))?;
-
-    h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
+    let (entry, _frame_size) =
+        h265_sample_entry_from_vps_sps_pps_lists(vps_list, sps_list, pps_list, fps)?;
+    Ok(entry)
 }
 
 #[cfg(test)]
