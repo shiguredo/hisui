@@ -454,16 +454,13 @@ impl ProcessorState {
             .get(&name)
             .ok_or(TextOverlayError::NotFound)?
             .clone();
-        // `patch.z` が `Some` のときだけ next_auto_z を進める判断材料に使う。
-        // apply_patch で `updated.z` を作ってしまうと「z 未指定 update」と「z 明示更新」を
-        // 区別できなくなるため、ここで先に取り出しておく。
+        // patch.z は apply_patch 後に「未指定」と区別できなくなるので先に退避する。
         let patch_z = patch.z;
         let updated = apply_patch(existing, patch);
         validate_text_and_font_size(&updated.text, updated.font_size, self.canvas_height.get())?;
         // 更新後の fontName でフォント解決 + キャッシュ投入を行う。
         self.resolve_font_face(&updated.font_name)?;
-        // 明示的に z を指定された場合のみ next_auto_z を進める。
-        // z 未指定の Update では既存値を温存し、auto z の進行に影響を与えない。
+        // 明示指定された z だけ next_auto_z を進める (z 未指定 Update は既存値を温存)。
         if let Some(z) = patch_z {
             self.next_auto_z = self.next_auto_z.max(z.saturating_add(1));
         }
@@ -536,7 +533,7 @@ impl ProcessorState {
         {
             let mut ctx = raden::Context::new(&mut image, &mut runtime);
 
-            // canvas を完全透明 (RGBA = 0x00000000) でクリアする。
+            // canvas を完全透明でクリア。
             ctx.set_comp_op(raden::CompOp::SrcCopy);
             ctx.set_fill_style(raden::Rgba32::new(0, 0, 0, 0));
             ctx.fill_rect(&raden::Rect::new(0.0, 0.0, w as f64, h as f64));
@@ -599,7 +596,7 @@ impl ProcessorState {
             &argb_image,
             &mut i420,
             &mut alpha,
-            w,
+            w, // alpha plane の stride (padding なし、canvas 幅と一致)
             shiguredo_libyuv::ImageSize::new(w, h),
         )
         .map_err(|e| crate::Error::new(format!("argb_to_i420_alpha: {e}")))?;
@@ -634,6 +631,10 @@ impl ProcessorState {
 /// raden の `Prgb32` (u32 = 0xAARRGGBB) のバイト順とこの関数の `chunk[3] = A`
 /// 取り出しはリトルエンディアン前提なので、ビッグエンディアン環境では
 /// 別経路が必要。コンパイル時に検出して落とす。
+///
+/// 不変条件: raden の Prgb32 出力は premultiplied なので各チャネル `c_pre <= A`
+/// を満たすはずだが、万一違反した場合は `value.min(255)` でクランプして
+/// 色情報損失となる (静かに壊れないよう assertion ではなく可視的なクランプ)。
 const _: () = assert!(
     cfg!(target_endian = "little"),
     "text overlay rendering assumes little-endian (raden Prgb32 layout)",
@@ -657,8 +658,8 @@ fn unpremultiply_argb(data: &mut [u8]) {
 ///
 /// `fontName` の検証は `ProcessorState::resolve_font_face` が担当する
 /// (キャッシュに乗せるためメソッド側に集約)。`fontColor` は u32 に詰める時点で
-/// 必ず妥当 (`0xAARRGGBB` 範囲内) なので追加検証は不要 (値域は obsws ハンドラの
-/// 正規表現マッチで担保する)。
+/// 必ず妥当 (`0xAARRGGBB` 範囲内) なので追加検証は不要 (形式違反は obsws ハンドラの
+/// `parse_argb_color` で担保する)。
 fn validate_text_and_font_size(
     text: &str,
     font_size: u32,
@@ -669,6 +670,7 @@ fn validate_text_and_font_size(
     Ok(())
 }
 
+/// `text` のバイト数と行数を検証する。pbt クレートから境界値テストするため `pub`。
 pub fn validate_text(text: &str) -> Result<(), TextOverlayError> {
     if text.len() > TEXT_MAX_BYTES {
         return Err(TextOverlayError::InvalidText(format!(
@@ -677,6 +679,7 @@ pub fn validate_text(text: &str) -> Result<(), TextOverlayError> {
             text.len()
         )));
     }
+    // 行数 = 改行数 + 1 (空文字も 1 行扱い、末尾の `\n` も 1 行を区切る)。
     let lines = text.matches('\n').count() + 1;
     if lines > TEXT_MAX_LINES {
         return Err(TextOverlayError::InvalidText(format!(
@@ -687,6 +690,7 @@ pub fn validate_text(text: &str) -> Result<(), TextOverlayError> {
     Ok(())
 }
 
+/// `fontSize` の範囲 (1..=canvas_height) を検証する。pbt クレートから境界値テストするため `pub`。
 pub fn validate_font_size(size: u32, canvas_height: usize) -> Result<(), TextOverlayError> {
     if size == 0 {
         return Err(TextOverlayError::InvalidFontSize(
@@ -1061,10 +1065,10 @@ mod tests {
         input_with_z.z = Some(100);
         state
             .add("a".to_owned(), input_with_z)
-            .expect("add a with z=100");
+            .expect("z=100 で a を add する");
         state
             .add("b".to_owned(), make_input())
-            .expect("add b with auto z");
+            .expect("auto z で b を add する");
         assert_eq!(state.overlays["a"].z, 100, "明示指定の z が採用される");
         assert_eq!(state.overlays["b"].z, 101, "auto z は明示値の次に追従する");
     }
@@ -1203,9 +1207,8 @@ mod tests {
             "描画した文字 'T' の周辺領域に A != 0 のピクセルがあるはず"
         );
 
-        // 描画範囲外 (右下 1700+) には文字が一切描画されないため、A == 0 が 100% であること
-        // を確認する (誤検出回避)。緩い閾値 (たとえば 90% 透明) では、レイアウトバグで
-        // 数百ピクセル誤描画されるケースを見逃すので、厳密に全 100x100 ピクセルを検査する。
+        // 描画範囲外 (右下 1700+) は全 100x100 ピクセルが A == 0 であることを確認する
+        // (緩い閾値だと誤描画を見逃すので厳密に検査する)。
         const FAR_REGION_TOTAL: usize = 100 * 100;
         let mut zero_in_far_region = 0usize;
         for row in 800..900 {

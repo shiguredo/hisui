@@ -1,8 +1,8 @@
 //! `src/mixer/text_overlay.rs` のバリデーション関数と `TextOverlaySpec` 構造体に対する PBT。
 //!
-//! issue 0013 の完了条件で要求された境界値ケース (text 長境界 / 行数境界 /
-//! fontSize 境界 / 改行のみ / Unicode 制御文字 / フォント不在文字 / 空文字 /
-//! x = i64 境界) を proptest で範囲網羅的に検証する。
+//! text 長境界 / 行数境界 / fontSize 境界 / 改行のみ / Unicode 制御文字 /
+//! フォント不在文字 / 空文字 / x = i64 境界の各境界値ケースを proptest で
+//! 範囲網羅的に検証する。
 //!
 //! 純粋関数 (`validate_text` / `validate_font_size`) のみを対象にし、ファイル I/O
 //! を伴う `validate_font_name_and_resolve_path` や `ProcessorState` の状態遷移は

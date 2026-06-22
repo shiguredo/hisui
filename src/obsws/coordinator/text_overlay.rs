@@ -57,7 +57,6 @@ impl ObswsCoordinator {
             );
         };
 
-        // 必須フィールド
         let name = match parse_required_non_empty_string(request_data, "textOverlayName") {
             Ok(s) => s,
             Err(e) => {
@@ -89,7 +88,6 @@ impl ObswsCoordinator {
             }
         };
 
-        // オプションフィールド
         let font_color_argb = match parse_optional_string(request_data, "fontColor") {
             Ok(Some(s)) => match parse_argb_color(&s) {
                 Ok(v) => v,
@@ -241,8 +239,7 @@ impl ObswsCoordinator {
             }
         };
 
-        // patch 用のオプションフィールドをまとめてパースする。
-        // 各フィールドで null / 型不一致が発生したら即 INVALID_REQUEST_FIELD で返す。
+        // null / 型不一致は即 INVALID_REQUEST_FIELD で返すクロージャ。
         let invalid = |e: String| -> CommandResult {
             self.build_error_result(
                 request_type,
