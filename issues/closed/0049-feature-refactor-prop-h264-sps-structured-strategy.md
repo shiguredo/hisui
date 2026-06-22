@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-19
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-06-22
 - Model: Opus 4.7
 - Branch: feature/refactor-prop-h264-sps-structured-strategy
 - Polished: 2026-06-22
@@ -694,4 +694,40 @@ proptest フレームワーク自身の出力 (`proptest: assertion failed`, `cc
 
 ## 解決方法
 
-実装着手後にここに記述する。
+ブランチ `feature/refactor-prop-h264-sps-structured-strategy` で実装した。
+
+### 本体 (`src/video/h264.rs`)
+
+- `pub const H264_HIGH_PROFILES` に昇格 (本番経路 + PBT 共有のため、docstring は仕様参照のみ)。
+- `pub struct SpsBuildParams` + `pub fn build_sps_for_pbt` を cfg なし領域に新設し、SPS バイト列ビット組み立ては `SpsBitWriter` (cfg なし非 pub) に一本化。
+- `#[cfg(test)] struct SpsBuilder` を `SpsBuildParams` の薄いラッパー (`SpsBuilder(SpsBuildParams)`) に再実装。`build()` は `build_sps_for_pbt(self.0)` 委譲のみ。既存 cfg(test) テストの `SpsBuilder::raw(...).with_*(...).build()` API シグネチャは互換維持。
+- `pub fn extract_dimensions_from_sps` を削除。既存 `extract_dimensions_*` 単体テスト 13 件のうち 11 件を `parse_sps` 直接呼びに改名 (`parse_sps_*`)、テスト #4 (`extract_dimensions_from_sps_rejects_non_sps_nal`) は `rbsp_from_sps_nalu_rejects_non_sps_nal` で代替して削除、テスト #12 (`extract_dimensions_does_not_panic_on_huge_pic_width`) はクラッシュフリー fuzz に移管して削除。
+- `src/srt/inbound_endpoint.rs` の `srt_h264_sample_entry_and_size_reflect_sps_dimensions` テスト関数の docstring コメントを `h264_sample_entry_from_sps_pps_lists` 経由の説明に書き換え。
+
+### PBT (`pbt/tests/prop_h264_sps.rs`)
+
+- 構造化 Strategy 化で全面書き換え。Ok 経路 5 件 + Err 経路 7 件の PBT 関数を `mod ok_path` / `mod err_path` で in-file 分割、cases = Ok 256 / Err 128。
+- Strategy ヘルパー (`supported_profile_idc` / `raw_width_strategy` / `raw_height_strategy(frame_mbs_only_flag)` / `high_profile_fields_strategy` / `ok_sps_strategy` / `ok_sps_with_cropping_strategy` / `expected_cropped_*` / `high_profile_chroma_array_type` / `baseline_ok_params` / `unsupported_profile_idc_strategy`) を切り出し。
+- Ok 経路で `seq_scaling_matrix_present_flag` / `frame_mbs_only_flag` / `interlaced + cropping` / `log2_max_pic_order_cnt_lsb_minus4 ∈ 0..=12` を Strategy 化して本体分岐をスイープ。Err 経路で `num_ref_frames_in_pic_order_cnt_cycle > 255` 境界を新規スイープ (closed 0044 で追加された `parse_sps::skip_pic_order_cnt_type_extras` の `> 255` Err 化が初めて到達)。
+- PPS は最小 PPS NAL `[0x68, 0xce, 0x06, 0xe2]` 固定。
+
+### fuzz (`fuzz/`)
+
+- shiguredo/mp4-rs の `fuzz/` 構成に整合 (`name = "fuzz"`、`fuzz_targets/fuzz_<name>.rs` 命名、独立 workspace、シード / `run.sh` / `rust-toolchain.toml` なし)。
+- `fuzz/fuzz_targets/fuzz_h264_sample_entry.rs` で `h264_sample_entry_from_sps_pps_lists` を直接 fuzz (SPS 先頭バイトを `0x67` 強制差し替え + PPS 固定)。
+- ルート `Cargo.toml` の `[workspace]` に `exclude = ["fuzz"]` を追加。本体 `cargo build --workspace` には混入しない。
+
+### レビュー指摘の反映
+
+`/review-diff-code` の指摘を反映した。
+
+- PBT docstring の虚偽記述 (`(1u32 << bits_needed) - 1` でシフトオーバーフロー) を実装と整合する記述 (`checked_add(1).expect(...)` で panic) に修正。
+- `src/srt/inbound_endpoint.rs:1347` コメントから存在しないシンボル名 `SPS_INITIAL` への参照を削除。
+- `build_sps_for_pbt` docstring に `raw_width / raw_height >= 16` の正の倍数前提を追記。
+- 冗長な docstring を整理 (`H264_HIGH_PROFILES` / `SpsBuildParams` / `build_sps_for_pbt` / PBT 冒頭 / `high_profile_chroma_array_type` / `rbsp_from_sps_nalu` 内コメント / cropping テスト `(params={:?})` 自動表示分など)。
+- Err 経路 PBT 6 件の `SpsBuildParams` リテラル重複を `baseline_ok_params()` ヘルパー + struct update syntax で集約。
+- `SpsBuildParams` / `build_sps_for_pbt` docstring に「本構造体/本関数は PBT (`pbt/`) と本体 `cfg(test)` からのみ呼ぶことを想定し、本番経路や hisui を library として依存する外部消費者は利用しない」旨を追記して誤用抑制を強化。
+
+### CHANGES.md
+
+記載なし。本 issue の変更は `pbt/` / `fuzz/` 配下と `src/video/h264.rs` の API 整理のみで、公開機能・出力 MP4・ログには影響しない。`H264_HIGH_PROFILES` の pub 化と `build_sps_for_pbt` / `SpsBuildParams` の新規 pub 化はテスト戦略上の API 追加で利用者向け機能ではない (docstring で PBT 専用を明示)。`extract_dimensions_from_sps` の削除は呼び出し元ゼロの pub 関数の整理。closed 0037 / 0043 / 0044 の「`## develop` 内中間状態の修正は CHANGES.md に書かない」方針と整合。

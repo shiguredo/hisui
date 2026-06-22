@@ -1344,7 +1344,8 @@ mod tests {
 
     // build_video_sample が返す sample_entry の `Avc1Box.visual.width / .height` と、
     // VideoFrame.size の両方が SPS 由来の実値（1920x1080 / 1280x720）になっていることを直接検証する。
-    // `extract_dimensions_from_sps` の出力が IDR ごとに正しく sample_entry と VideoFrame.size に流れることの回帰防止。
+    // h264_sample_entry_from_sps_pps_lists が IDR ごとに sample_entry / VideoFrame.size に
+    // 解像度を反映することの回帰防止。
     #[test]
     fn srt_h264_sample_entry_and_size_reflect_sps_dimensions() -> crate::Result<()> {
         use shiguredo_mp4::boxes::SampleEntry;
