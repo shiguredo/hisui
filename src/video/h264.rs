@@ -64,7 +64,7 @@ pub struct SpsBuildParams {
 /// `raw_width` / `raw_height` は **16 の正の倍数** であること (= `>= 16` かつ `% 16 == 0`)。
 /// 0 を渡すと `raw_width / 16 - 1` が u32 underflow して panic する。
 pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
-    let mut w = PbtSpsBitWriter::new();
+    let mut w = SpsBitWriter::new();
     // NAL ヘッダ: forbidden_zero_bit=0, nal_ref_idc=3 (binary 011), nal_unit_type=7 (binary 00111) → 0x67
     w.write_u(8, 0x67);
     w.write_u(8, u32::from(params.profile_idc));
@@ -131,20 +131,15 @@ pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
     w.into_bytes()
 }
 
-/// `build_sps_for_pbt` 専用のビット書き込みヘルパー
+/// SPS バイト列の組み立てに使う Exp-Golomb 書き込みヘルパー (仕様 9.1 / 9.1.1)
 ///
-/// `#[cfg(test)] mod tests::SpsBitWriter` と同等のロジックを cfg なし領域で独立実装する。
-/// テストモジュール内シンボルは別クレート (`pbt/`) から見えないため、本体側にコピーを置く。
-/// 仕様 9.1 / 9.1.1 の Exp-Golomb 書き込みを担当する。
-///
-/// `SpsBitWriter` と本構造体の同期は `src/video/h264.rs::tests` 内の乖離検出単体テスト
-/// (`sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_*`) で保証する。
-struct PbtSpsBitWriter {
+/// `build_sps_for_pbt` から呼ばれ、cfg(test) 内 `SpsBuilder` も `build_sps_for_pbt` 経由で利用する。
+struct SpsBitWriter {
     bytes: Vec<u8>,
     bit_count: usize,
 }
 
-impl PbtSpsBitWriter {
+impl SpsBitWriter {
     fn new() -> Self {
         Self {
             bytes: Vec::new(),
@@ -1206,93 +1201,15 @@ pub(crate) mod tests {
     // の単体テストにも使う。
     // ----------------------------------------------------------------
 
-    /// ビット単位で値を書き出すライター（仕様 9.1 / 9.1.1 の逆操作）
-    struct SpsBitWriter {
-        bytes: Vec<u8>,
-        bit_count: usize,
-    }
-
-    impl SpsBitWriter {
-        fn new() -> Self {
-            Self {
-                bytes: Vec::new(),
-                bit_count: 0,
-            }
-        }
-
-        fn write_bit(&mut self, bit: u8) {
-            let byte_idx = self.bit_count / 8;
-            let bit_idx = self.bit_count % 8;
-            if byte_idx >= self.bytes.len() {
-                self.bytes.push(0);
-            }
-            self.bytes[byte_idx] |= (bit & 1) << (7 - bit_idx);
-            self.bit_count += 1;
-        }
-
-        /// n ビット符号なし整数を MSB ファーストで書き出す（u(n)）
-        fn write_u(&mut self, n: usize, value: u32) {
-            for i in (0..n).rev() {
-                let bit = ((value >> i) & 1) as u8;
-                self.write_bit(bit);
-            }
-        }
-
-        /// 符号なし Exp-Golomb 復号の逆操作（ue(v)、仕様 9.1）
-        fn write_ue(&mut self, value: u32) {
-            // codeNum = value
-            // value + 1 の bit 表現長を取り、(長さ - 1) 個の先行 0 + value+1 の bit 表現を書く
-            let v = value
-                .checked_add(1)
-                .expect("ue(v) のテスト入力が u32::MAX を越えた場合は意図的なオーバーフロー検証用");
-            let bits_needed = 32 - v.leading_zeros() as usize;
-            for _ in 0..(bits_needed - 1) {
-                self.write_bit(0);
-            }
-            self.write_u(bits_needed, v);
-        }
-
-        /// 符号付き Exp-Golomb 復号の逆操作（se(v)、仕様 9.1.1）
-        fn write_se(&mut self, value: i32) {
-            let code_num = if value <= 0 {
-                (-(i64::from(value))) as u64 * 2
-            } else {
-                (value as u64) * 2 - 1
-            };
-            self.write_ue(code_num as u32);
-        }
-
-        fn into_bytes(self) -> Vec<u8> {
-            self.bytes
-        }
-    }
-
-    /// テスト用の SPS バイト列ビルダー
+    /// `SpsBuildParams` を fluent setter で組み立てる薄いラッパー
     ///
-    /// デフォルトは Baseline (profile_idc=66) + 1920x1080 + progressive + crop なしの最小 SPS。
-    /// `with_*` メソッドで各分岐を踏ませる。
-    struct SpsBuilder {
-        profile_idc: u8,
-        constraint_set_flags: u8,
-        chroma_format_idc: u32,
-        bit_depth_luma_minus8: u32,
-        bit_depth_chroma_minus8: u32,
-        pic_width_in_mbs_minus1: u32,
-        pic_height_in_map_units_minus1: u32,
-        frame_mbs_only_flag: bool,
-        seq_scaling_matrix_present_flag: bool,
-        pic_order_cnt_type: u32,
-        log2_max_pic_order_cnt_lsb_minus4: u32,
-        num_ref_frames_in_pic_order_cnt_cycle: u32,
-        frame_cropping_flag: bool,
-        crop_offsets: (u32, u32, u32, u32),
-    }
+    /// 内部は `SpsBuildParams` を 1 つ保持するだけで、`build()` は `build_sps_for_pbt` に委譲する。
+    /// これにより本体 SPS バイト列ロジックは `build_sps_for_pbt` の 1 箇所に集約される。
+    struct SpsBuilder(SpsBuildParams);
 
     impl SpsBuilder {
-        /// raw 解像度 (pic_width_in_mbs_minus1 / pic_height_in_map_units_minus1 から決まる値) を
-        /// 直接指定するベースビルダー。
-        /// デフォルトは Baseline + progressive + crop なし + pic_order_cnt_type=2 +
-        /// constraint_set_flags=0 + High 系プロファイル分岐用の chroma_format_idc=1 / bit_depth_*=0。
+        /// raw 解像度 (16 の倍数) を指定するベースビルダー。
+        /// デフォルトは Baseline + progressive + crop なし + pic_order_cnt_type=2 + chroma_format_idc=1。
         fn raw(raw_width: u32, raw_height: u32) -> Self {
             assert!(
                 raw_width.is_multiple_of(16),
@@ -1302,179 +1219,89 @@ pub(crate) mod tests {
                 raw_height.is_multiple_of(16),
                 "raw_height は 16 の倍数で指定すること"
             );
-            Self {
+            Self(SpsBuildParams {
                 profile_idc: 66, // Baseline
                 constraint_set_flags: 0,
+                level_idc: 31,
                 chroma_format_idc: 1, // 4:2:0
                 bit_depth_luma_minus8: 0,
                 bit_depth_chroma_minus8: 0,
-                pic_width_in_mbs_minus1: raw_width / 16 - 1,
-                pic_height_in_map_units_minus1: raw_height / 16 - 1,
+                raw_width,
+                raw_height,
                 frame_mbs_only_flag: true,
                 seq_scaling_matrix_present_flag: false,
                 pic_order_cnt_type: 2,
                 log2_max_pic_order_cnt_lsb_minus4: 0,
                 num_ref_frames_in_pic_order_cnt_cycle: 0,
-                frame_cropping_flag: false,
-                crop_offsets: (0, 0, 0, 0),
-            }
+                frame_cropping: None,
+            })
         }
 
         fn with_high_profile_and_scaling_matrix(mut self) -> Self {
-            self.profile_idc = 100; // High
-            self.seq_scaling_matrix_present_flag = true;
+            self.0.profile_idc = 100; // High
+            self.0.seq_scaling_matrix_present_flag = true;
             self
         }
 
         fn with_interlaced(mut self, raw_height_field: u32) -> Self {
-            // interlaced では pic_height_in_map_units_minus1 は field 単位（= 半分の高さ）
+            // interlaced では raw_height は field 単位 (= 半分の高さ) として渡す
             assert!(
                 raw_height_field.is_multiple_of(16),
                 "raw_height_field は 16 の倍数で指定すること"
             );
-            self.frame_mbs_only_flag = false;
-            self.pic_height_in_map_units_minus1 = raw_height_field / 16 - 1;
+            self.0.frame_mbs_only_flag = false;
+            self.0.raw_height = raw_height_field;
             self
         }
 
         fn with_pic_order_cnt_type(mut self, value: u32) -> Self {
-            self.pic_order_cnt_type = value;
-            self
-        }
-
-        fn with_log2_max_pic_order_cnt_lsb_minus4(mut self, value: u32) -> Self {
-            self.log2_max_pic_order_cnt_lsb_minus4 = value;
-            self
-        }
-
-        fn with_num_ref_frames_in_pic_order_cnt_cycle(mut self, value: u32) -> Self {
-            self.num_ref_frames_in_pic_order_cnt_cycle = value;
+            self.0.pic_order_cnt_type = value;
             self
         }
 
         fn with_cropping(mut self, left: u32, right: u32, top: u32, bottom: u32) -> Self {
-            self.frame_cropping_flag = true;
-            self.crop_offsets = (left, right, top, bottom);
+            self.0.frame_cropping = Some((left, right, top, bottom));
             self
         }
 
+        /// `pic_width_in_mbs_minus1` を直接指定する境界値テスト用 setter。
+        /// 内部では `raw_width = (value + 1) * 16` に変換して `SpsBuildParams` に格納する。
         fn with_pic_width_in_mbs_minus1(mut self, value: u32) -> Self {
-            self.pic_width_in_mbs_minus1 = value;
+            self.0.raw_width = value.checked_add(1).and_then(|v| v.checked_mul(16)).expect(
+                "pic_width_in_mbs_minus1 が u32::MAX 近傍で overflow するテストは想定しない",
+            );
             self
         }
 
         fn with_profile_idc(mut self, profile_idc: u32) -> Self {
             // u8 範囲に丸める。仕様外プロファイル値テストのために u32 シグネチャを保持する。
-            self.profile_idc = profile_idc as u8;
+            self.0.profile_idc = profile_idc as u8;
             self
         }
 
         fn with_constraint_set_flags(mut self, flags: u32) -> Self {
-            // 他の with_* メソッドと u32 シグネチャを揃える。内部の write_u(8) は u32 で渡るため
-            // フィールドへの格納時に u8 に丸める。
-            self.constraint_set_flags = flags as u8;
+            // 他の with_* メソッドと u32 シグネチャを揃える。SpsBuildParams 側は u8 のため丸める。
+            self.0.constraint_set_flags = flags as u8;
             self
         }
 
         fn with_chroma_format_idc(mut self, value: u32) -> Self {
-            self.chroma_format_idc = value;
+            self.0.chroma_format_idc = value as u8;
             self
         }
 
         fn with_bit_depth_luma_minus8(mut self, value: u32) -> Self {
-            self.bit_depth_luma_minus8 = value;
+            self.0.bit_depth_luma_minus8 = value as u8;
             self
         }
 
         fn with_bit_depth_chroma_minus8(mut self, value: u32) -> Self {
-            self.bit_depth_chroma_minus8 = value;
+            self.0.bit_depth_chroma_minus8 = value as u8;
             self
         }
 
         fn build(self) -> Vec<u8> {
-            let mut w = SpsBitWriter::new();
-
-            // NAL ヘッダ: forbidden_zero_bit=0, nal_ref_idc=3 (binary 011), nal_unit_type=7 (binary 00111)
-            // → 0x67
-            w.write_u(8, 0x67);
-
-            // profile_idc (u(8))
-            w.write_u(8, u32::from(self.profile_idc));
-            // constraint_set*_flag (6 bit) + reserved_zero_2bits (2 bit)
-            w.write_u(8, u32::from(self.constraint_set_flags));
-            // level_idc (u(8)): 適当に Level 3.1
-            w.write_u(8, 31);
-            // seq_parameter_set_id
-            w.write_ue(0);
-
-            // High 系プロファイルの追加フィールド
-            let is_high = H264_HIGH_PROFILES.contains(&self.profile_idc);
-            if is_high {
-                w.write_ue(self.chroma_format_idc);
-                if self.chroma_format_idc == 3 {
-                    // separate_colour_plane_flag (u(1)) = 0
-                    w.write_u(1, 0);
-                }
-                w.write_ue(self.bit_depth_luma_minus8);
-                w.write_ue(self.bit_depth_chroma_minus8);
-                w.write_u(1, 0); // qpprime_y_zero_transform_bypass_flag
-                w.write_u(
-                    1,
-                    if self.seq_scaling_matrix_present_flag {
-                        1
-                    } else {
-                        0
-                    },
-                );
-                if self.seq_scaling_matrix_present_flag {
-                    // 全 seq_scaling_list_present_flag を 0 にして scaling_list 本体を読まない経路で進める
-                    // chroma_format_idc が 3 のときは 12 個、それ以外は 8 個
-                    let count = if self.chroma_format_idc == 3 { 12 } else { 8 };
-                    for _ in 0..count {
-                        w.write_u(1, 0);
-                    }
-                }
-            }
-
-            // log2_max_frame_num_minus4
-            w.write_ue(0);
-            // pic_order_cnt_type
-            w.write_ue(self.pic_order_cnt_type);
-            match self.pic_order_cnt_type {
-                0 => {
-                    w.write_ue(self.log2_max_pic_order_cnt_lsb_minus4);
-                }
-                1 => {
-                    w.write_u(1, 0); // delta_pic_order_always_zero_flag
-                    w.write_se(0); // offset_for_non_ref_pic
-                    w.write_se(0); // offset_for_top_to_bottom_field
-                    w.write_ue(self.num_ref_frames_in_pic_order_cnt_cycle);
-                    // 値分の offset_for_ref_frame[i] (各 se(v) で 0 固定)
-                    for _ in 0..self.num_ref_frames_in_pic_order_cnt_cycle {
-                        w.write_se(0);
-                    }
-                }
-                _ => {}
-            }
-            w.write_ue(1); // max_num_ref_frames
-            w.write_u(1, 0); // gaps_in_frame_num_value_allowed_flag
-            w.write_ue(self.pic_width_in_mbs_minus1);
-            w.write_ue(self.pic_height_in_map_units_minus1);
-            w.write_u(1, if self.frame_mbs_only_flag { 1 } else { 0 });
-            if !self.frame_mbs_only_flag {
-                w.write_u(1, 0); // mb_adaptive_frame_field_flag
-            }
-            w.write_u(1, 0); // direct_8x8_inference_flag
-            w.write_u(1, if self.frame_cropping_flag { 1 } else { 0 });
-            if self.frame_cropping_flag {
-                w.write_ue(self.crop_offsets.0);
-                w.write_ue(self.crop_offsets.1);
-                w.write_ue(self.crop_offsets.2);
-                w.write_ue(self.crop_offsets.3);
-            }
-            // RBSP trailing bits は本実装では `pic_width_in_mbs_minus1` 以降まで読めれば不要なため省略する
-
-            w.into_bytes()
+            build_sps_for_pbt(self.0)
         }
     }
 
@@ -1883,125 +1710,6 @@ pub(crate) mod tests {
         };
         assert_eq!(avc1.visual.width, 1920);
         assert_eq!(avc1.visual.height, 1080);
-    }
-
-    // ----------------------------------------------------------------
-    // SpsBuilder と build_sps_for_pbt の乖離検出単体テスト群
-    //
-    // `build_sps_for_pbt` は別クレート (`pbt/`) から呼べる pub fn として SPS ビット組み立てロジックを
-    // cfg なし領域に独立実装している。`SpsBuilder` (cfg test 内) との二重実装が乖離した場合、
-    // PBT 経由では検出できないため (PBT 側は build_sps_for_pbt のみ使用)、本テスト群で各経路の
-    // バイト列が完全一致することを確認する。Baseline / Main / High10 / pic_order_cnt_type=0 /
-    // pic_order_cnt_type=1 の 5 経路を網羅し、is_high 分岐両側 + High 系の追加フィールド書き込み +
-    // pic_order_cnt_type=0/1 経路の log2_max_pic_order_cnt_lsb_minus4 / num_ref_frames_in_pic_order_cnt_cycle
-    // 書き込み + offset_for_ref_frame[i] ループを担保する。
-    // ----------------------------------------------------------------
-
-    /// 5 件の乖離検出テストで struct update のベースに使う Baseline 320x240 デフォルト値
-    fn baseline_sps_build_params() -> SpsBuildParams {
-        SpsBuildParams {
-            profile_idc: 66,
-            constraint_set_flags: 0,
-            level_idc: 31,
-            chroma_format_idc: 1,
-            bit_depth_luma_minus8: 0,
-            bit_depth_chroma_minus8: 0,
-            raw_width: 320,
-            raw_height: 240,
-            frame_mbs_only_flag: true,
-            seq_scaling_matrix_present_flag: false,
-            pic_order_cnt_type: 2,
-            log2_max_pic_order_cnt_lsb_minus4: 0,
-            num_ref_frames_in_pic_order_cnt_cycle: 0,
-            frame_cropping: None,
-        }
-    }
-
-    #[test]
-    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_baseline() {
-        // Baseline (profile_idc=66) 320x240、crop なし、デフォルト。is_high=false 経路を担保。
-        let from_builder = SpsBuilder::raw(320, 240).build();
-        let from_pbt = build_sps_for_pbt(baseline_sps_build_params());
-        assert_eq!(
-            from_builder, from_pbt,
-            "Baseline: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
-        );
-    }
-
-    #[test]
-    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_main() {
-        // Main (profile_idc=77) 1920x1088、デフォルト。is_high=false の別 profile_idc 経路を担保。
-        let from_builder = SpsBuilder::raw(1920, 1088).with_profile_idc(77).build();
-        let from_pbt = build_sps_for_pbt(SpsBuildParams {
-            profile_idc: 77,
-            raw_width: 1920,
-            raw_height: 1088,
-            ..baseline_sps_build_params()
-        });
-        assert_eq!(
-            from_builder, from_pbt,
-            "Main: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
-        );
-    }
-
-    #[test]
-    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_high10() {
-        // High10 (profile_idc=110) + bit_depth_luma_minus8=2 + bit_depth_chroma_minus8=2。
-        // is_high=true 経路と chroma_format_idc / bit_depth_* の SPS 書き込み分岐を担保する。
-        let from_builder = SpsBuilder::raw(1920, 1088)
-            .with_profile_idc(110)
-            .with_bit_depth_luma_minus8(2)
-            .with_bit_depth_chroma_minus8(2)
-            .build();
-        let from_pbt = build_sps_for_pbt(SpsBuildParams {
-            profile_idc: 110,
-            bit_depth_luma_minus8: 2,
-            bit_depth_chroma_minus8: 2,
-            raw_width: 1920,
-            raw_height: 1088,
-            ..baseline_sps_build_params()
-        });
-        assert_eq!(
-            from_builder, from_pbt,
-            "High10: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
-        );
-    }
-
-    #[test]
-    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_pic_order_cnt_type_0() {
-        // pic_order_cnt_type=0 経路の log2_max_pic_order_cnt_lsb_minus4 書き込み (write_ue) 担保。
-        let from_builder = SpsBuilder::raw(320, 240)
-            .with_pic_order_cnt_type(0)
-            .with_log2_max_pic_order_cnt_lsb_minus4(5)
-            .build();
-        let from_pbt = build_sps_for_pbt(SpsBuildParams {
-            pic_order_cnt_type: 0,
-            log2_max_pic_order_cnt_lsb_minus4: 5,
-            ..baseline_sps_build_params()
-        });
-        assert_eq!(
-            from_builder, from_pbt,
-            "pic_order_cnt_type=0: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
-        );
-    }
-
-    #[test]
-    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_pic_order_cnt_type_1() {
-        // pic_order_cnt_type=1 経路の num_ref_frames_in_pic_order_cnt_cycle 書き込み +
-        // offset_for_ref_frame[i] ループ (write_se(0) を値分繰り返す) を担保する。
-        let from_builder = SpsBuilder::raw(320, 240)
-            .with_pic_order_cnt_type(1)
-            .with_num_ref_frames_in_pic_order_cnt_cycle(3)
-            .build();
-        let from_pbt = build_sps_for_pbt(SpsBuildParams {
-            pic_order_cnt_type: 1,
-            num_ref_frames_in_pic_order_cnt_cycle: 3,
-            ..baseline_sps_build_params()
-        });
-        assert_eq!(
-            from_builder, from_pbt,
-            "pic_order_cnt_type=1: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
-        );
     }
 
     // avcC バイト列をテスト用に構築するヘルパー (lengthSizeMinusOne = 3 固定)。
