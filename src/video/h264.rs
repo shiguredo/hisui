@@ -21,7 +21,10 @@ pub const H264_NALU_TYPE_PPS: u8 = 8;
 pub const H264_HIGH_PROFILES: [u8; 13] =
     [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
 
-/// PBT 用 SPS 生成パラメータ (ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 準拠、PBT 専用)。
+/// PBT 用 SPS 生成パラメータ (ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 準拠)。
+///
+/// 本構造体は PBT (`pbt/`) と本体 `cfg(test)` からのみ呼ぶことを想定し、本番経路や hisui を
+/// library として依存する外部消費者は利用しない。
 ///
 /// High 系プロファイル時のみ `chroma_format_idc` / `bit_depth_*_minus8` /
 /// `seq_scaling_matrix_present_flag` が SPS バイト列に書き込まれる (Baseline / Main / Extended では無視)。
@@ -59,6 +62,9 @@ pub struct SpsBuildParams {
 }
 
 /// PBT 用に正当な SPS バイト列を組み立てる pub fn (start code は含まない、NAL ヘッダ 1 バイト `0x67` を含む)。
+///
+/// 本関数は PBT (`pbt/`) と本体 `cfg(test)` からのみ呼ぶことを想定し、本番経路や hisui を
+/// library として依存する外部消費者は利用しない。
 ///
 /// 戻り値は `h264_sample_entry_from_sps_pps_lists` の `sps_list[0]` にそのまま投入できる。
 /// `raw_width` / `raw_height` は **16 の正の倍数** であること (= `>= 16` かつ `% 16 == 0`)。
