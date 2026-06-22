@@ -5,7 +5,6 @@ use crate::mixer::text_overlay::{
     TEXT_OVERLAY_PROCESSOR_ID, TextOverlayError, TextOverlayPatch, TextOverlayRpcMessage,
     TextOverlaySpecInput, TextOverlayState,
 };
-use crate::obsws::coordinator::output_registry::parse_required_string;
 use crate::obsws::coordinator::{CommandResult, ObswsCoordinator};
 use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_DATA,
@@ -16,6 +15,19 @@ use crate::obsws::protocol::{
 
 /// `fontColor` 省略時のデフォルト値 (不透明白)。
 const DEFAULT_FONT_COLOR_ARGB: u32 = 0xFFFFFFFF;
+
+/// 必須フィールドのパース失敗種別。
+///
+/// `Missing` (欠落 / null / 空文字) は `MISSING_REQUEST_FIELD`、
+/// `Invalid` (型違反 / 範囲外) は `INVALID_REQUEST_FIELD` にマップする。
+/// 従来は両者を `Option` で潰していたため型違反まで Missing で返っていた。
+#[derive(Debug, PartialEq)]
+enum RequiredFieldError {
+    /// フィールド欠落、明示的な null、または空文字 (識別子として不適)。
+    Missing,
+    /// 型違反 (string 期待で integer 等) や範囲外 (u32 範囲外の負数等)。
+    Invalid(String),
+}
 
 impl ObswsCoordinator {
     pub(crate) async fn handle_create_text_overlay(
@@ -46,45 +58,35 @@ impl ObswsCoordinator {
         };
 
         // 必須フィールド
-        let Some(name) = parse_required_string(request_data, "textOverlayName") else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing or empty textOverlayName field",
-            );
+        let name = match parse_required_non_empty_string(request_data, "textOverlayName") {
+            Ok(s) => s,
+            Err(e) => {
+                return self.map_required_field_error(
+                    request_type,
+                    request_id,
+                    "textOverlayName",
+                    e,
+                );
+            }
         };
-        let Some(text) = parse_required_string(request_data, "text") else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing text field",
-            );
+        // text は空文字も valid 値として扱う (issue 仕様: 「最大 4096 バイト、最大 64 行」のみ規定)。
+        let text = match parse_required_string_field(request_data, "text") {
+            Ok(s) => s,
+            Err(e) => return self.map_required_field_error(request_type, request_id, "text", e),
         };
-        let Some(x) = parse_required_i64(request_data, "x") else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing or invalid x field",
-            );
+        let x = match parse_required_i64_field(request_data, "x") {
+            Ok(v) => v,
+            Err(e) => return self.map_required_field_error(request_type, request_id, "x", e),
         };
-        let Some(y) = parse_required_i64(request_data, "y") else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing or invalid y field",
-            );
+        let y = match parse_required_i64_field(request_data, "y") {
+            Ok(v) => v,
+            Err(e) => return self.map_required_field_error(request_type, request_id, "y", e),
         };
-        let Some(font_size) = parse_required_u32(request_data, "fontSize") else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing or invalid fontSize field",
-            );
+        let font_size = match parse_required_u32_field(request_data, "fontSize") {
+            Ok(v) => v,
+            Err(e) => {
+                return self.map_required_field_error(request_type, request_id, "fontSize", e);
+            }
         };
 
         // オプションフィールド
@@ -209,13 +211,16 @@ impl ObswsCoordinator {
             );
         };
 
-        let Some(name) = parse_required_string(request_data, "textOverlayName") else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing or empty textOverlayName field",
-            );
+        let name = match parse_required_non_empty_string(request_data, "textOverlayName") {
+            Ok(s) => s,
+            Err(e) => {
+                return self.map_required_field_error(
+                    request_type,
+                    request_id,
+                    "textOverlayName",
+                    e,
+                );
+            }
         };
 
         let font_color_argb = match parse_optional_string(request_data, "fontColor") {
@@ -349,13 +354,16 @@ impl ObswsCoordinator {
             );
         };
 
-        let Some(name) = parse_required_string(request_data, "textOverlayName") else {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_MISSING_REQUEST_FIELD,
-                "Missing or empty textOverlayName field",
-            );
+        let name = match parse_required_non_empty_string(request_data, "textOverlayName") {
+            Ok(s) => s,
+            Err(e) => {
+                return self.map_required_field_error(
+                    request_type,
+                    request_id,
+                    "textOverlayName",
+                    e,
+                );
+            }
         };
 
         let sender = match self.text_overlay_sender().await {
@@ -461,6 +469,31 @@ impl ObswsCoordinator {
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
                 "text overlay processor dropped reply channel",
+            ),
+        }
+    }
+
+    /// `RequiredFieldError` を obsws の `requestStatus` にマップして `CommandResult` を作る。
+    /// 呼び出し側ハンドラの 5 必須フィールド分の match を簡素化するためのヘルパー。
+    fn map_required_field_error(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        field_name: &str,
+        error: RequiredFieldError,
+    ) -> CommandResult {
+        match error {
+            RequiredFieldError::Missing => self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                &format!("Missing or empty {field_name} field"),
+            ),
+            RequiredFieldError::Invalid(message) => self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                &message,
             ),
         }
     }
@@ -579,24 +612,70 @@ fn parse_argb_color(s: &str) -> Result<u32, TextOverlayError> {
     Ok((a << 24) | rgb)
 }
 
-fn parse_required_i64(request_data: &nojson::RawJsonOwned, field: &str) -> Option<i64> {
-    let v = request_data
-        .value()
-        .to_member(field)
-        .ok()?
-        .required()
-        .ok()?;
-    v.try_into().ok()
+/// 必須文字列フィールドを取り出す (空文字も `Ok` として渡す版)。
+/// 欠落 / null は `Missing`、型違反は `Invalid`。
+/// `text` のように「空文字が valid 値」のフィールド向け。
+fn parse_required_string_field(
+    request_data: &nojson::RawJsonOwned,
+    field: &str,
+) -> Result<String, RequiredFieldError> {
+    let Ok(member) = request_data.value().to_member(field) else {
+        return Err(RequiredFieldError::Missing);
+    };
+    let Some(v) = member.optional() else {
+        return Err(RequiredFieldError::Missing);
+    };
+    if v.kind().is_null() {
+        return Err(RequiredFieldError::Missing);
+    }
+    v.try_into()
+        .map_err(|_| RequiredFieldError::Invalid(format!("field '{field}' must be a string")))
 }
 
-fn parse_required_u32(request_data: &nojson::RawJsonOwned, field: &str) -> Option<u32> {
-    let v = request_data
-        .value()
-        .to_member(field)
-        .ok()?
-        .required()
-        .ok()?;
-    v.try_into().ok()
+/// 必須文字列フィールドを取り出す (空文字も `Missing` とする版)。
+/// 識別子フィールド (`textOverlayName` 等) は空文字を valid 値として扱えないため
+/// こちらを使う。
+fn parse_required_non_empty_string(
+    request_data: &nojson::RawJsonOwned,
+    field: &str,
+) -> Result<String, RequiredFieldError> {
+    let s = parse_required_string_field(request_data, field)?;
+    if s.is_empty() {
+        return Err(RequiredFieldError::Missing);
+    }
+    Ok(s)
+}
+
+/// 必須 i64 フィールドを取り出す。欠落 / null は `Missing`、型違反は `Invalid`。
+fn parse_required_i64_field(
+    request_data: &nojson::RawJsonOwned,
+    field: &str,
+) -> Result<i64, RequiredFieldError> {
+    let Ok(member) = request_data.value().to_member(field) else {
+        return Err(RequiredFieldError::Missing);
+    };
+    let Some(v) = member.optional() else {
+        return Err(RequiredFieldError::Missing);
+    };
+    if v.kind().is_null() {
+        return Err(RequiredFieldError::Missing);
+    }
+    v.try_into()
+        .map_err(|_| RequiredFieldError::Invalid(format!("field '{field}' must be an integer")))
+}
+
+/// 必須 u32 フィールドを取り出す。i64 経由で受けてから u32 範囲を確認する。
+/// 範囲外 (負数等) は `Invalid` として扱う。
+fn parse_required_u32_field(
+    request_data: &nojson::RawJsonOwned,
+    field: &str,
+) -> Result<u32, RequiredFieldError> {
+    let v = parse_required_i64_field(request_data, field)?;
+    u32::try_from(v).map_err(|_| {
+        RequiredFieldError::Invalid(format!(
+            "field '{field}' must be within u32 range (got {v})"
+        ))
+    })
 }
 
 /// オプションフィールドを文字列として取り出す。
@@ -820,5 +899,85 @@ mod tests {
 
         let missing = parse_owned_json(r#"{}"#);
         assert_eq!(parse_optional_z(&missing), Ok(None), "欠落は Ok(None)");
+    }
+
+    // -- 必須フィールドパーサ (Missing と Invalid を区別する版) のテスト --
+
+    fn assert_missing<T: std::fmt::Debug>(result: Result<T, RequiredFieldError>) {
+        match result {
+            Err(RequiredFieldError::Missing) => {}
+            other => panic!("Missing を期待したが {other:?}"),
+        }
+    }
+
+    fn assert_invalid<T: std::fmt::Debug>(result: Result<T, RequiredFieldError>) {
+        match result {
+            Err(RequiredFieldError::Invalid(_)) => {}
+            other => panic!("Invalid を期待したが {other:?}"),
+        }
+    }
+
+    /// `parse_required_string_field`: 空文字も valid 値として透過する (text 向け)。
+    #[test]
+    fn parse_required_string_field_passes_empty_through() {
+        let json = parse_owned_json(r#"{"text":""}"#);
+        assert_eq!(
+            parse_required_string_field(&json, "text"),
+            Ok(String::new())
+        );
+    }
+
+    /// `parse_required_string_field`: 欠落 / null / 型違反の挙動。
+    #[test]
+    fn parse_required_string_field_classifies_failures() {
+        assert_missing(parse_required_string_field(
+            &parse_owned_json(r#"{}"#),
+            "foo",
+        ));
+        assert_missing(parse_required_string_field(
+            &parse_owned_json(r#"{"foo":null}"#),
+            "foo",
+        ));
+        assert_invalid(parse_required_string_field(
+            &parse_owned_json(r#"{"foo":123}"#),
+            "foo",
+        ));
+    }
+
+    /// `parse_required_non_empty_string`: 識別子向けに空文字も Missing として扱う。
+    #[test]
+    fn parse_required_non_empty_string_rejects_empty() {
+        assert_missing(parse_required_non_empty_string(
+            &parse_owned_json(r#"{"name":""}"#),
+            "name",
+        ));
+    }
+
+    /// `parse_required_i64_field`: 文字列を渡されたら Invalid を返す
+    /// (= 従来は Missing で返って混乱の元だった経路の回帰防止)。
+    #[test]
+    fn parse_required_i64_field_classifies_type_mismatch_as_invalid() {
+        assert_invalid(parse_required_i64_field(
+            &parse_owned_json(r#"{"x":"abc"}"#),
+            "x",
+        ));
+        assert_missing(parse_required_i64_field(&parse_owned_json(r#"{}"#), "x"));
+        assert_eq!(
+            parse_required_i64_field(&parse_owned_json(r#"{"x":-42}"#), "x"),
+            Ok(-42)
+        );
+    }
+
+    /// `parse_required_u32_field`: 負数は範囲外として Invalid。
+    #[test]
+    fn parse_required_u32_field_rejects_negative() {
+        assert_invalid(parse_required_u32_field(
+            &parse_owned_json(r#"{"size":-1}"#),
+            "size",
+        ));
+        assert_eq!(
+            parse_required_u32_field(&parse_owned_json(r#"{"size":48}"#), "size"),
+            Ok(48u32)
+        );
     }
 }

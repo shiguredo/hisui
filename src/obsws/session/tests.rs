@@ -4601,3 +4601,41 @@ async fn hisui_create_text_overlay_returns_missing_request_field_when_required_m
     }
     Ok(())
 }
+
+/// 必須フィールドの型違反は INVALID_REQUEST_FIELD で返るべきで、MISSING_REQUEST_FIELD ではない。
+/// 過去に Option ベースの parser が型違反を Missing 扱いしていた回帰を防ぐ。
+#[tokio::test]
+async fn hisui_create_text_overlay_returns_invalid_request_field_for_type_mismatch()
+-> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+    // 各必須フィールドに「期待型ではない値」を入れる。
+    let bodies = [
+        // textOverlayName が数値 (string 期待)
+        r#"{"textOverlayName":123,"text":"x","x":0,"y":0,"fontSize":32}"#,
+        // text が真偽値 (string 期待)
+        r#"{"textOverlayName":"a","text":true,"x":0,"y":0,"fontSize":32}"#,
+        // x が文字列 (integer 期待)
+        r#"{"textOverlayName":"a","text":"x","x":"abc","y":0,"fontSize":32}"#,
+        // y がオブジェクト (integer 期待)
+        r#"{"textOverlayName":"a","text":"x","x":0,"y":{},"fontSize":32}"#,
+        // fontSize が負数 (u32 範囲外)
+        r#"{"textOverlayName":"a","text":"x","x":0,"y":0,"fontSize":-1}"#,
+    ];
+    for (i, body) in bodies.iter().enumerate() {
+        let result = process_text_overlay_request(
+            &coordinator,
+            &format!("req-type-mismatch-{i}"),
+            "HisuiCreateTextOverlay",
+            Some(body),
+        )
+        .await;
+        let (success, code) = parse_request_status(&result.response_text);
+        assert!(!success, "ケース {i} は拒否される: body={body}");
+        assert_eq!(
+            code,
+            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "ケース {i} は INVALID_REQUEST_FIELD (400): body={body}"
+        );
+    }
+    Ok(())
+}
