@@ -318,7 +318,6 @@ pub async fn run_server(
             session_state.canvas_width(),
             session_state.canvas_height(),
             session_state.frame_rate(),
-            crate::TrackId::new(crate::mixer::text_overlay::TEXT_OVERLAY_TRACK_ID),
             config,
         );
         pipeline_handle

@@ -1162,7 +1162,7 @@ fn clipped_span(src_len: usize, dst_len: usize, dst_pos: isize) -> (usize, usize
     (src_start, dst_start, copy_len)
 }
 
-fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
+pub(super) fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
     Duration::from_secs(frames.saturating_mul(frame_rate.denumerator.get() as u64))
         / frame_rate.numerator.get() as u32
 }

@@ -830,7 +830,10 @@ impl ObswsCoordinator {
 // パースヘルパー
 // -----------------------------------------------------------------------
 
-fn parse_required_string(request_data: &nojson::RawJsonOwned, field: &str) -> Option<String> {
+pub(super) fn parse_required_string(
+    request_data: &nojson::RawJsonOwned,
+    field: &str,
+) -> Option<String> {
     let value: Option<String> = request_data
         .value()
         .to_member(field)

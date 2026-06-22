@@ -3,8 +3,9 @@ use tokio::sync::{mpsc, oneshot};
 use crate::ProcessorId;
 use crate::mixer::text_overlay::{
     TEXT_OVERLAY_PROCESSOR_ID, TextOverlayError, TextOverlayPatch, TextOverlayRpcMessage,
-    TextOverlaySpec, TextOverlaySpecInput, TextOverlayState,
+    TextOverlaySpecInput, TextOverlayState,
 };
+use crate::obsws::coordinator::output_registry::parse_required_string;
 use crate::obsws::coordinator::{CommandResult, ObswsCoordinator};
 use crate::obsws::protocol::{
     REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_DATA,
@@ -494,25 +495,10 @@ fn map_text_overlay_error(error: &TextOverlayError) -> (i64, String) {
 }
 
 fn text_overlay_state_to_json(state: &TextOverlayState) -> nojson::RawJsonOwned {
-    let TextOverlayState { name, spec } = state;
-    let spec = spec.clone();
-    let name = name.clone();
+    let name = state.name.clone();
+    let spec = state.spec.clone();
     nojson::RawJsonOwned::object(move |f| {
         f.member("textOverlayName", &name)?;
-        f.member("text", &spec.text)?;
-        f.member("x", spec.x)?;
-        f.member("y", spec.y)?;
-        f.member("fontSize", spec.font_size)?;
-        f.member("fontColor", argb_to_hex_string(spec.font_color_argb))?;
-        f.member("fontName", &spec.font_name)?;
-        f.member("z", spec.z)
-    })
-}
-
-#[allow(dead_code)]
-fn spec_to_json(spec: &TextOverlaySpec) -> nojson::RawJsonOwned {
-    let spec = spec.clone();
-    nojson::RawJsonOwned::object(move |f| {
         f.member("text", &spec.text)?;
         f.member("x", spec.x)?;
         f.member("y", spec.y)?;
@@ -550,20 +536,6 @@ fn parse_argb_color(s: &str) -> Result<u32, String> {
         0xFF
     };
     Ok((a << 24) | rgb)
-}
-
-fn parse_required_string(request_data: &nojson::RawJsonOwned, field: &str) -> Option<String> {
-    let value: Option<String> = request_data
-        .value()
-        .to_member(field)
-        .ok()?
-        .try_into()
-        .ok()?;
-    let value = value?;
-    if value.is_empty() {
-        return None;
-    }
-    Some(value)
 }
 
 fn parse_required_i64(request_data: &nojson::RawJsonOwned, field: &str) -> Option<i64> {

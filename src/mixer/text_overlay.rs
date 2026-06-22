@@ -240,7 +240,6 @@ pub struct TextOverlayProcessor {
     canvas_width: EvenUsize,
     canvas_height: EvenUsize,
     frame_rate: FrameRate,
-    output_track_id: TrackId,
     config: TextOverlayConfig,
 }
 
@@ -249,14 +248,12 @@ impl TextOverlayProcessor {
         canvas_width: EvenUsize,
         canvas_height: EvenUsize,
         frame_rate: FrameRate,
-        output_track_id: TrackId,
         config: TextOverlayConfig,
     ) -> Self {
         Self {
             canvas_width,
             canvas_height,
             frame_rate,
-            output_track_id,
             config,
         }
     }
@@ -270,7 +267,6 @@ impl TextOverlayProcessor {
         let canvas_height = self.canvas_height;
         let frame_rate = self.frame_rate;
         let config = self.config;
-        let output_track_id = self.output_track_id;
 
         // 内部 RPC 受信チャネル
         let (rpc_tx, mut rpc_rx) = tokio::sync::mpsc::unbounded_channel::<TextOverlayRpcMessage>();
@@ -278,7 +274,9 @@ impl TextOverlayProcessor {
             crate::Error::new(format!("failed to register text overlay rpc sender: {e}"))
         })?;
 
-        let mut tx = handle.publish_track(output_track_id).await?;
+        let mut tx = handle
+            .publish_track(TrackId::new(TEXT_OVERLAY_TRACK_ID))
+            .await?;
         handle.notify_ready();
 
         let mut state = ProcessorState::new(canvas_width, canvas_height, config);
@@ -288,7 +286,7 @@ impl TextOverlayProcessor {
         let mut ack = Some(tx.send_syn());
 
         loop {
-            let timestamp = frames_to_timestamp(frame_rate, frame_index);
+            let timestamp = super::video::frames_to_timestamp(frame_rate, frame_index);
             tokio::select! {
                 _ = tokio::time::sleep_until(start + timestamp) => {
                     if noacked_sent > MAX_NOACKED_COUNT {
@@ -591,18 +589,19 @@ impl ProcessorState {
     }
 }
 
-/// `frame_index` と `frame_rate` から timestamp を計算する。
-/// `obsws::source::frames_to_timestamp` と同じ式。
-fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
-    Duration::from_secs(frames.saturating_mul(frame_rate.denumerator.get() as u64))
-        / frame_rate.numerator.get() as u32
-}
-
 /// premultiplied ARGB バッファを straight alpha 形式に戻す。
 ///
 /// 各ピクセルは 4 バイト (リトルエンディアン環境では `[B, G, R, A]`) で並ぶ。
 /// A == 0 のピクセルは RGB が 0 になっているのでそのまま残す。
 /// A > 0 のピクセルは `RGB_straight = (RGB_pre * 255 + A/2) / A` で復元する。
+///
+/// raden の `Prgb32` (u32 = 0xAARRGGBB) のバイト順とこの関数の `chunk[3] = A`
+/// 取り出しはリトルエンディアン前提なので、ビッグエンディアン環境では
+/// 別経路が必要。コンパイル時に検出して落とす。
+const _: () = assert!(
+    cfg!(target_endian = "little"),
+    "text overlay rendering assumes little-endian (raden Prgb32 layout)",
+);
 fn unpremultiply_argb(data: &mut [u8]) {
     for chunk in data.chunks_exact_mut(4) {
         let a = chunk[3];
