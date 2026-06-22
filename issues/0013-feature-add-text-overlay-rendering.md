@@ -58,10 +58,10 @@ raden v2026.1.1 のソースを直接確認して以下を確定済み。本表�
 |---|---|
 | 採用バージョン | `=2026.1.1` (crates.io 公開済み、Apache-2.0) |
 | 出力ピクセルフォーマット | `PixelFormat::Prgb32` = 32-bit premultiplied ARGB (`0xAARRGGBB`、リトルエンディアン環境ではバイト列 `B G R A`)。`Image::new(w, h, PixelFormat::Prgb32)` で生成、`data() -> &[u8]` で参照 |
-| premultiplied vs straight alpha | **premultiplied (Prgb32)**。hisui の `blend_component` (`src/mixer/video.rs:1136-1148`) は straight 前提のため、I420A 化前に **straight 復元** (`A > 0 ? (RGB * 255 + A / 2) / A : 0` を 4 チャネル各々に適用) を `TextOverlayProcessor` 内のヘルパーで行う |
+| premultiplied vs straight alpha | **premultiplied (Prgb32)**。hisui の `blend_component` (`src/mixer/video.rs:1136-1148`) は straight 前提のため、I420A 化前に **straight 復元** (`A > 0 ? (RGB * 255 + A / 2) / A : 0` を 4 チャネル各々に適用) を mixer のテキストレイヤモジュール内のヘルパーで行う |
 | 採用する shiguredo_libyuv 関数 | `argb_to_i420_alpha` (`shiguredo_libyuv-2026.1.0/src/convert.rs:5216`、ARGB バイト順入力 = 上記 straight 復元後のバッファをそのまま渡せる) |
 | `FontData` / `FontFace` / `Font` / `Image` / `Context` の `Send + Sync` | 明示 `impl` なし。内部型は `Vec<u8>` / `Arc<Vec<u8>>` / プリミティブのみで auto trait による Send + Sync 成立見込み。実装時に `cargo check` で確認する。万一 `Send` 不可なら `tokio::task::LocalSet` 配下に変更する |
-| Cranelift JIT 初回コンパイル遅延 | `PipelineRuntime` がパイプラインキャッシュを持ち、同一パラメータの関数は再コンパイルしない。`TextOverlayProcessor` 起動直後に空文字列の `fill_text` を 1 回実行して JIT をウォームアップする。実遅延は実装時に計測 |
+| Cranelift JIT 初回コンパイル遅延 | `PipelineRuntime` がパイプラインキャッシュを持ち、同一パラメータの関数は再コンパイルしない。`VideoRealtimeMixer` のテキストレイヤ初期化直後に空文字列の `fill_text` を 1 回実行して JIT をウォームアップする。実遅延は実装時に計測 |
 | glyph 不在時の挙動 | `src/api/context.rs:1153-1157` で `glyph_id == 0` ならアドバンスのみ進めて描画スキップ (silent skip)。tofu は出ない。本 issue はこの既定挙動のまま透過 I420A レイヤに含める (エラーは返さない) |
 | フォントロード API | `FontData::from_file(path: &str) -> Result<FontData, FontError>` → `FontFace::from_data(&font_data, index: u32) -> Result<FontFace, FontError>` (TTC 単体は `index = 0`) → `Font::from_face(&face, size: f64) -> Font` |
 | 描画コンテキスト構築 | `PipelineRuntime::new()` (processor あたり 1 回) → `Context::new(&mut image, &mut runtime)` (描画呼び出しごと)。`Context::end()` で締める |
@@ -96,38 +96,49 @@ raden v2026.1.1 のソースを直接確認して以下を確定済み。本表�
 
 ### 3. 描画 API (内部)
 
-#### Processor の起動・存在期間
+#### VideoRealtimeMixer 内部レイヤとしての統合
 
-§1 の raden 調査結果により、`Send + Sync` は auto trait による成立見込み、JIT 初回遅延は warm-up で吸収可能と確認済み。以下の常駐 spawn 戦略で進める (実装時に `cargo check` で `Send` 成立を最終確認)。
+§1 の raden 調査結果により、`Send + Sync` は auto trait による成立見込み、JIT 初回遅延は warm-up で吸収可能と確認済み (実装時に `cargo check` で `Send` 成立を最終確認)。
 
-- 新規 `TextOverlayProcessor` を MediaPipeline 上の 1 processor として実装する。canvas 単一・起動時固定のため、**server 起動時に常駐 spawn し、サーバ稼働中ずっと生かす** (`src/subcommand_server.rs` の MediaPipeline 構築直後、テキストオーバーレイ機能有効時のみ)。シーン切替で再生成しない。
-- ProcessorId は `program:text_overlay_processor` 固定、出力 track_id は `program:text_overlay` 固定。canvas サイズ・frame_rate は CLI 引数から受け取り起動時固定 (実行中の追従不要)。
-- run ループは `src/mixer/video.rs:353-374` の `VideoRealtimeMixerRunner::run` を input event_rx なしで簡略化した形 (`rpc_rx` と `tokio::time::sleep_until(next_output_instant)` の 2 系統 select)。
-- 起動シーケンス: `notify_ready()` を呼んだ後、**`wait_subscribers_ready().await?` は呼ばない**。`wait_subscribers_ready` (`src/media_pipeline.rs:1120` 周辺) は「初期 processor 集合の `notify_ready` 完了」を待つ API であり、TextOverlayProcessor は初期 processor 集合に含めず、後発で接続する subscriber (output 系) を前提とする非定常 publisher として動かすため、待機 API を呼ぶ意味がない。`color_source.rs:40-41` の定番 2 行セットからは外れる扱いとなる旨をコード上のコメントで明記する。
+- テキストオーバーレイ機能は `VideoRealtimeMixer` の **内部レイヤ** として組み込む。`MediaPipeline` 上で独立した processor (`TextOverlayProcessor`) を spawn する形は採らない。これは以下の理由による:
+  - リアルタイム合成専用機能で、別 mixer や別経路からの再利用シナリオが現状ない (録画合成の `recording_video_mixer.rs` は本 issue ではスコープ外、字幕応用 0012 も `VideoRealtimeMixer` 経路を使う)。
+  - 別 processor 構成は「`VideoRealtimeMixer` の最終 InputTrack として `z = i32::MAX` で接続」する必要があり、`InputTrack.z` の特殊値予約というクライアント API への漏れ出しが発生する。
+  - 別 processor 構成は subscribe/publish の channel オーバーヘッドと中間バッファの追加コピーを伴う。
+- 機能有効時は `VideoRealtimeMixer` 構築時に `text_overlay_layer: Option<TextOverlayLayer>` を持たせる。canvas 単一・起動時固定のため、サーバ稼働中ずっと同じレイヤを使う (シーン切替で再生成しない)。canvas サイズ・frame_rate は mixer の値をそのまま使う。
+- 機能無効時は `None`。obsws ハンドラ側で機能無効を検出して `RESOURCE_ACTION_NOT_SUPPORTED (606)` を返す (§4 参照)。
 
-#### TextOverlay InputTrack の VideoRealtimeMixer への注入
+#### compose_frame での合成
 
-- `VideoRealtimeMixerUpdateConfigRequest` は input_tracks を全置換するため、シーン切替で TextOverlay track が落ちる。これを防ぐため:
-  - `src/obsws/output_plan.rs` の `build_composed_output_plan` のシグネチャに `text_overlay_track_id: Option<TrackId>` を追加する。`Some(track_id)` なら関数内で `video_mixer_input_tracks` を構築した後 (`.collect()` 後) に `push` (または `chain`) で **末尾 (`z = i32::MAX`) に TextOverlay InputTrack を追加** する。`None` (機能無効時) なら何もしない。
-  - 呼び出し元 4 箇所 (本体 2 箇所: `src/obsws/server.rs:315` 初期化時 / `src/obsws/coordinator.rs:844` `rebuild_program_output`、テスト 2 箇所: `src/obsws/output_plan.rs:226` の既存ユニットテスト `build_composed_output_plan_skips_dormant_inputs` / `src/obsws/session/tests.rs:143` の共通ヘルパー `create_initialized_coordinator_handle_with_pipeline_and_record_dir`) を改修する。本体 2 箇所はテキストオーバーレイ機能有効時のみ `Some(...)` を渡す。テスト 2 箇所は `None` 固定で既存挙動を保つ。
-- `i32::MAX` は **テキストオーバーレイ専用予約値** とし、一般 input track が指定することを禁止する。`z` は順序ソート用の値で大きな数値精度は不要なため、obsws 層の `ObswsVideoMixerInputTrack.z` と内部の `InputTrack.z` (`src/mixer/video.rs:138`) を `i32` に統一する。`HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` で i32 範囲外の `z` を受け取った場合は `INVALID_REQUEST_FIELD` を返す。
-- 複数テキストオーバーレイ間の z は `TextOverlayProcessor` 内部でソートして 1 枚の I420A に重ね合わせる段で解決する (`VideoRealtimeMixer` 側の z 配列には影響しない)。InputTrack は常に 1 つだけで、`OVERLAY_LIMIT = 64` は processor 内部の overlay マップの上限であり mixer 側の InputTrack 数とは無関係。
+- `VideoRealtimeMixer::compose_frame` の最終段で、`text_overlay_layer` が `Some` かつ overlay が 1 つ以上ある場合、テキストレイヤが生成した I420A バッファを最上位レイヤとして既存の合成済み I420 に blend する。既存の `blend_component` (`src/mixer/video.rs:1136-1148`) を I420A 入力に対する最上位レイヤ合成として再利用する。
+- 「最上位レイヤ」という性質はソート用の z 値ではなく、mixer 内部の合成順序 (一般 InputTrack の合成後にテキストレイヤを最後に重ねる) で表現する。これにより `InputTrack.z` の予約値という外部に漏れる概念は不要になる。
+- 一般 input track の `InputTrack.z` (`src/mixer/video.rs:138`) と obsws 層の `ObswsVideoMixerInputTrack.z` (`src/obsws/output_plan.rs:24`) は `i32` で揃える (32bit プラットフォームでの `isize` 不整合を避けるため)。クライアントは i32 全域を z として指定できる。
+- 複数テキストオーバーレイ間の z はテキストレイヤ内部でソートして 1 枚の I420A に重ね合わせる段で解決する。`VideoRealtimeMixer` の `input_tracks` には現れない。
 
 #### 内部 RPC
 
-- `TextOverlayProcessor` は `register_rpc_sender` パターン (`src/mixer/video.rs:222-457` 参考) で `TextOverlayRpcMessage` enum (バリアント: `Add` / `Update` / `Remove` / `List`) を受け、各バリアントは `oneshot::Sender` で reply する。
+- `VideoRealtimeMixer` は既存の `register_rpc_sender` パターン (`src/mixer/video.rs:222-457` 参考) で、既存の `VideoRealtimeMixerCommand` とは **独立した** 2 つ目の RPC sender として `TextOverlayRpcMessage` enum (バリアント: `Add` / `Update` / `Remove` / `List`) を register する。これにより既存の `VideoRealtimeMixerUpdateConfigRequest` 系 RPC への影響を最小化する。
 - reply 型は `Result<T, TextOverlayError>` (`T` は Add/Update/Remove で `()`、List で `Vec<TextOverlayState>`)。`TextOverlayError` のバリアントと REQUEST_STATUS マッピングは §4 のエラー対応表に集約する。
 - `TextOverlayPatch` は Update 用で全フィールド `Option<T>`、`None` = 省略 = 現状維持。JSON 上の `null` 受信は `INVALID_REQUEST_FIELD` として扱う。
 - `TextOverlayState` は `HisuiCreateTextOverlay` の全属性 (`textOverlayName` / `text` / `x` / `y` / `fontSize` / `fontColor` / `fontName` / `z`) を保持し、`List` の戻り値および JSON 化される。
-- 並列性: processor 内ループは単一 task で `rpc_rx` を順次処理する。同名 overlay の Add と Remove が同時送信された場合は受信順 (FIFO) で処理する。
+- 並列性: mixer のメインループ (`tokio::select!`) で `text_overlay_rpc_rx` も受けて単一 task で順次処理する。同名 overlay の Add と Remove が同時送信された場合は受信順 (FIFO) で処理する。
 
 #### 描画フロー
 
-- raden の `Image (PixelFormat::Prgb32)` に全 overlay を z 順に重ね描き (premultiplied ARGB バッファ) → straight 復元ヘルパー (§1 調査結果参照) で straight ARGB へ戻す → `shiguredo_libyuv::argb_to_i420_alpha` で I420A に変換 → `Arc<VideoFrame>` を生成して `cached_frame` に保持。`dirty = false` の間は毎フレーム Arc クローンを `publish_track` する。
+- raden の `Image (PixelFormat::Prgb32)` に全 overlay を z 順に重ね描き (premultiplied ARGB バッファ) → straight 復元ヘルパー (§1 調査結果参照) で straight ARGB へ戻す → `shiguredo_libyuv::argb_to_i420_alpha` で I420A に変換し、テキストレイヤ内に cached I420A バッファとして保持。
+- `compose_frame` 末尾で cached I420A バッファを最上位レイヤとして `blend_component` 経由で合成する。
+- `dirty` フラグで再描画を回避する: `dirty = true` の場合のみ raden 描画 → I420A 変換を実行し、`dirty = false` の間は cached バッファをそのまま blend する。
 - `dirty` を `true` にする条件: `text` / `x` / `y` / `fontSize` / `fontColor` / `fontName` / `z` のいずれかが変わった (Add / Update / Remove のいずれか)。canvas サイズは起動時固定のため `dirty` 化トリガにならない。
-- 全 overlay が空 (`overlays.is_empty()`) の場合は publish しない (mixer 側で `pending_frames` 空の InputTrack は何も合成しないため透明な状態となる)。
+- 全 overlay が空 (`overlays.is_empty()`) の場合は何も合成しない (`compose_frame` の最終段で early return)。
 
-各種上限値・位置/サイズ制約 (`OVERLAY_LIMIT = 64`、`text` 4096 バイト・64 行、`fontSize` 範囲等) は §4 RequestData 表に集約する。raden の描画コストは文字数に比例するため、巨大入力で processor がブロックして他 overlay 操作が詰まるのを防ぐ意図。なお `cached_frame` 保持で processor あたり I420A 1 フレーム分 (1920x1080 で約 3 MB) のメモリを常時占有する。
+各種上限値・位置/サイズ制約 (`OVERLAY_LIMIT = 64`、`text` 4096 バイト・64 行、`fontSize` 範囲等) は §4 RequestData 表に集約する。raden の描画コストは文字数に比例するため、巨大入力で mixer のメインループがブロックして他 RPC が詰まるのを防ぐ意図。なお cached I420A 保持で mixer あたり 1 フレーム分 (1920x1080 で約 4.6 MB) のメモリを常時占有する。
+
+#### モジュール構成 (実装の指針)
+
+- `src/mixer/text_overlay.rs` は廃止する。
+- `src/mixer/video.rs` の `VideoRealtimeMixer` から `pub mod text_overlay;` で `src/mixer/video/text_overlay.rs` を参照する。
+- `src/mixer/video/text_overlay.rs` には公開 API (`TextOverlayConfig` / `TextOverlayError` / `TextOverlayRpcMessage` / 型・定数) を配置する。
+- 内部実装は `src/mixer/video/text_overlay/` ディレクトリ配下のサブモジュール (例: `layer.rs` = `TextOverlayLayer` 本体、`validate.rs` = 検証関数) に分割する。
+- `mod.rs` は採用しない (hisui のスタイル踏襲)。
 
 ### 4. 外部 API (obsws)
 
@@ -234,7 +245,7 @@ ResponseData: `textOverlays` 配列。各要素は以下:
 - `docs/server/hisui_requests/README.md` に「## テキストオーバーレイ」節を追加する。節冒頭に既存節 (例: 「Output 管理」) と同様の前提条件行「WebSocket / データチャネル両対応。RequestBatch（op=8）に対応。」を入れる。
 - `docs/obsws/PROTOCOL_STATUS.md` の独自拡張節に反映する。
 - `docs/obsws/STATE_FILE.md` の永続化対象列挙 (line 7-8) にテキストオーバーレイが永続化対象外である旨を明記する。
-- `docs/internals/mixer.md` (実在を確認済み) に「`InputTrack.z` の最大値 (`i32::MAX`) はテキストオーバーレイレイヤ用の予約値、一般 input track では使用しない」を追記する。
+- `docs/internals/mixer.md` (実在を確認済み) に「`VideoRealtimeMixer` のテキストオーバーレイレイヤ」節を追記し、(a) mixer 内部レイヤとして組み込まれていること、(b) `compose_frame` の最終段で最上位合成される順序の規約、(c) `InputTrack.z` には予約値を持たないこと、を明記する。`InputTrack.z` の型は `i32` (32bit プラットフォーム対応のため `isize` から変更) に揃える旨も合わせて記載する。
 
 (closed 0040 で議論された `docs/internals/processor_conventions` 系のドキュメントは存在しない結論で close されているため、本 issue で追記する先はない。)
 
@@ -246,17 +257,16 @@ ResponseData: `textOverlays` 配列。各要素は以下:
 ## 完了条件
 
 - 4 メソッドが obsws (WebSocket / データチャネル両方) と RequestBatch（op=8）から動作する。
-- `--font-search-root` / `--default-font` の CLI 引数が動作する (両方未指定で機能無効・正常起動、片方のみで起動失敗、両方指定で起動時検証成功なら常駐 `TextOverlayProcessor` を spawn、検証失敗で起動失敗。リクエスト時の `fontName` で `..` 含む / シンボリックリンク経由でルート外を指すパスは拒否)。
+- `--font-search-root` / `--default-font` の CLI 引数が動作する (両方未指定で機能無効・正常起動、片方のみで起動失敗、両方指定で起動時検証成功なら `VideoRealtimeMixer` 構築時にテキストレイヤを初期化、検証失敗で起動失敗。リクエスト時の `fontName` で `..` 含む / シンボリックリンク経由でルート外を指すパスは拒否)。
 - ドキュメント整備:
   - `docs/server/hisui_requests/` 個別 md 4 本
   - `docs/server/hisui_requests/README.md` への節追加 (前提条件行込み)
   - `docs/obsws/PROTOCOL_STATUS.md` 反映
   - `docs/obsws/STATE_FILE.md` 永続化対象外追記
-  - `docs/internals/mixer.md` への `z` 予約値追記
-  - `README.md` に「対応プラットフォームは 64bit」を追記
+  - `docs/internals/mixer.md` へのテキストオーバーレイレイヤ節追記
 - テスト (`testdata/fonts/PublicSans-Regular.ttf` を本 issue のコミットに含める):
   - `src/obsws/session/tests.rs` 相当箇所に 4 メソッド往復 + 全エラーケース (`AlreadyExists` / `NotFound` / `InvalidFontName` / `FontResolveFailed` / `InvalidColor` / `InvalidFontSize` / `InvalidText` / `LimitExceeded` / `Disabled` / `MISSING_REQUEST_FIELD`) の検証を追加する。
-  - `TextOverlayProcessor` の単体テストで raden → I420A 変換後の A プレーン非ゼロ領域が指定 x/y 近傍に収まっていることを検証する。
+  - `VideoRealtimeMixer` のテキストレイヤモジュールの単体テストで、raden → I420A 変換後の A プレーン非ゼロ領域が指定 x/y 近傍に収まっていることを検証する。`compose_frame` の最終段でテキストレイヤが最上位合成されることも確認する。
   - `pbt/` に x/y/fontSize の境界値 PBT を追加する (`text=""` / `x = i64 境界` / `fontSize = 1` / `fontSize = canvas_height` / 改行のみ / Unicode 制御文字 / フォント不在文字 / `text` 長境界 / 行数境界)。
 - 0012 等の他 issue に依存せず、本 issue 単独で動作確認・マージできる。
 - CHANGES.md の `## develop` に `[ADD]` エントリを追記する。エントリ例 (担当者欄はコミット担当者の実 GitHub ID に置き換える。複数担当者の場合は `  - @a` / `  - @b` のように行を分ける):
