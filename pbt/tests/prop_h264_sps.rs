@@ -81,6 +81,7 @@ fn ok_sps_strategy() -> impl Strategy<Value = SpsBuildParams> {
         any::<u8>(),
         raw_width_strategy(),
         any::<bool>(),
+        any::<bool>(),
         prop::sample::select(vec![0u32, 1, 2]),
     )
         .prop_flat_map(
@@ -90,6 +91,7 @@ fn ok_sps_strategy() -> impl Strategy<Value = SpsBuildParams> {
                 level_idc,
                 raw_width,
                 frame_mbs_only_flag,
+                seq_scaling_matrix_present_flag,
                 pic_order_cnt_type,
             )| {
                 // raw_height は frame_mbs_only_flag に応じて u16::MAX 内で生成する。
@@ -110,7 +112,7 @@ fn ok_sps_strategy() -> impl Strategy<Value = SpsBuildParams> {
                         raw_width,
                         raw_height,
                         frame_mbs_only_flag,
-                        seq_scaling_matrix_present_flag: false,
+                        seq_scaling_matrix_present_flag,
                         pic_order_cnt_type,
                         frame_cropping: None,
                     }
@@ -122,38 +124,54 @@ fn ok_sps_strategy() -> impl Strategy<Value = SpsBuildParams> {
 /// cropping 反映検証用の Ok 経路 Strategy
 ///
 /// raw_width / raw_height を小さめに固定し、crop_offsets で実用範囲のクロップを掛ける。
-/// アンダーフローや u16::MAX 超過に至らないよう値域を抑える。
+/// アンダーフローや u16::MAX 超過に至らないよう値域を抑える (interlaced 時は raw_height * 2 が
+/// frame 単位高さになるが、最大 1088 * 2 = 2176 で u16::MAX 内、crop_offsets 0..=3 の最大削除量
+/// `crop_unit_y * (t + b) = 4 * 6 = 24` に対しても 240 * 2 - 24 = 456 でアンダーフローしない)。
 fn ok_sps_with_cropping_strategy() -> impl Strategy<Value = SpsBuildParams> {
     (
         supported_profile_idc(),
         prop::sample::select(vec![320u32, 640, 1280, 1920]),
         prop::sample::select(vec![240u32, 480, 720, 1088]),
+        any::<bool>(),
+        any::<bool>(),
         0u32..=3,
         0u32..=3,
         0u32..=3,
         0u32..=3,
     )
-        .prop_flat_map(|(profile_idc, raw_width, raw_height, l, r, t, b)| {
-            let high_strategy = if H264_HIGH_PROFILES.contains(&profile_idc) {
-                high_profile_fields_strategy().boxed()
-            } else {
-                Just(HighProfileFields::default()).boxed()
-            };
-            high_strategy.prop_map(move |high| SpsBuildParams {
+        .prop_flat_map(
+            |(
                 profile_idc,
-                constraint_set_flags: 0,
-                level_idc: 31,
-                chroma_format_idc: high.chroma_format_idc,
-                bit_depth_luma_minus8: high.bit_depth_luma_minus8,
-                bit_depth_chroma_minus8: high.bit_depth_chroma_minus8,
                 raw_width,
                 raw_height,
-                frame_mbs_only_flag: true,
-                seq_scaling_matrix_present_flag: false,
-                pic_order_cnt_type: 2,
-                frame_cropping: Some((l, r, t, b)),
-            })
-        })
+                frame_mbs_only_flag,
+                seq_scaling_matrix_present_flag,
+                l,
+                r,
+                t,
+                b,
+            )| {
+                let high_strategy = if H264_HIGH_PROFILES.contains(&profile_idc) {
+                    high_profile_fields_strategy().boxed()
+                } else {
+                    Just(HighProfileFields::default()).boxed()
+                };
+                high_strategy.prop_map(move |high| SpsBuildParams {
+                    profile_idc,
+                    constraint_set_flags: 0,
+                    level_idc: 31,
+                    chroma_format_idc: high.chroma_format_idc,
+                    bit_depth_luma_minus8: high.bit_depth_luma_minus8,
+                    bit_depth_chroma_minus8: high.bit_depth_chroma_minus8,
+                    raw_width,
+                    raw_height,
+                    frame_mbs_only_flag,
+                    seq_scaling_matrix_present_flag,
+                    pic_order_cnt_type: 2,
+                    frame_cropping: Some((l, r, t, b)),
+                })
+            },
+        )
 }
 
 /// `SpsBuildParams` から chroma_array_type を算出する (仕様 7.4.2.1.1、separate_colour_plane_flag=0 前提)。
