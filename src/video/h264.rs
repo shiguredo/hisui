@@ -1214,6 +1214,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn extract_dimensions_handles_pic_order_cnt_type_0() {
+        // pic_order_cnt_type=0 の経路（log2_max_pic_order_cnt_lsb_minus4 の読み飛ばし）を踏んでも
+        // pic_width / pic_height まで正しく到達できること
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_pic_order_cnt_type(0)
+            .build();
+        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
+        assert_eq!((width, height), (1920, 1088));
+    }
+
+    #[test]
     fn extract_dimensions_handles_interlaced_frame_mbs_only_flag_zero() {
         // frame_mbs_only_flag=0 のとき mb_adaptive_frame_field_flag を読む経路を踏み、
         // raw_height = (pic_height_in_map_units_minus1 + 1) * 16 * 2 と算出されること。
