@@ -4639,3 +4639,50 @@ async fn hisui_create_text_overlay_returns_invalid_request_field_for_type_mismat
     }
     Ok(())
 }
+
+/// `z = i32::MAX` はテキストオーバーレイレイヤの予約値のため Create / Update で拒否される。
+/// 内部の VideoRealtimeMixer で text overlay と一般 input track の z が衝突するのを防ぐ。
+#[tokio::test]
+async fn hisui_text_overlay_rejects_reserved_z_value() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+
+    // Create で z = i32::MAX (2147483647) を渡すと拒否される。
+    let create = process_text_overlay_request(
+        &coordinator,
+        "req-create-reserved-z",
+        "HisuiCreateTextOverlay",
+        Some(r#"{"textOverlayName":"x","text":"x","x":0,"y":0,"fontSize":32,"z":2147483647}"#),
+    )
+    .await;
+    let (success, code) = parse_request_status(&create.response_text);
+    assert!(!success, "Create で予約値 z は拒否される");
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+        "予約値拒否は INVALID_REQUEST_FIELD (400)"
+    );
+
+    // Update でも同様に拒否される。先に通常の overlay を Create してから Update を試す。
+    process_text_overlay_request(
+        &coordinator,
+        "req-create-for-update",
+        "HisuiCreateTextOverlay",
+        Some(r#"{"textOverlayName":"a","text":"x","x":0,"y":0,"fontSize":32}"#),
+    )
+    .await;
+    let update = process_text_overlay_request(
+        &coordinator,
+        "req-update-reserved-z",
+        "HisuiUpdateTextOverlay",
+        Some(r#"{"textOverlayName":"a","z":2147483647}"#),
+    )
+    .await;
+    let (success, code) = parse_request_status(&update.response_text);
+    assert!(!success, "Update でも予約値 z は拒否される");
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+        "Update も INVALID_REQUEST_FIELD (400)"
+    );
+    Ok(())
+}

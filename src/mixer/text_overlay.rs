@@ -311,8 +311,9 @@ impl TextOverlayProcessor {
                 }
                 msg = rpc_rx.recv() => {
                     let Some(msg) = msg else {
-                        // RPC 送信側が全て drop された = 通常はこのケースには到達しない。
-                        // ただし test 等で発生しうるので break する。
+                        // RPC 送信側が全て drop された = 通常運用では bug 想定。
+                        // テスト等で発生しうるが、本番で来たら検知できるよう warn ログを出す。
+                        tracing::warn!("text overlay rpc channel closed unexpectedly");
                         break;
                     };
                     state.handle_rpc(msg);

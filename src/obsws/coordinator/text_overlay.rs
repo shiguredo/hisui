@@ -724,15 +724,22 @@ fn parse_optional_i64(
 /// `z` フィールドを `Option<i32>` として取り出す。
 ///
 /// `z` は順序値のため i32 範囲で十分な精度だが、obsws の他フィールドと同じく
-/// JSON 上は integer として受信する。i32 範囲外の値はクライアントの誤用とみなして
-/// エラー文言を返し、呼び出し側で `INVALID_REQUEST_FIELD` にマップする。
+/// JSON 上は integer として受信する。
+/// 許容範囲は `i32::MIN..=i32::MAX - 1` で、`i32::MAX` は
+/// `ObswsVideoMixerInputTrack` で text overlay レイヤ用に予約されているため拒否する
+/// (一般 input track と同じ z にすると合成順序が壊れる)。
+/// 範囲外はクライアントの誤用とみなし、呼び出し側で `INVALID_REQUEST_FIELD` にマップする。
 fn parse_optional_z(request_data: &nojson::RawJsonOwned) -> Result<Option<i32>, String> {
     let Some(v) = parse_optional_i64(request_data, "z")? else {
         return Ok(None);
     };
-    i32::try_from(v)
-        .map(Some)
-        .map_err(|_| format!("z must be within i32 range (got {v})"))
+    let z = i32::try_from(v).map_err(|_| format!("z must be within i32 range (got {v})"))?;
+    if z == i32::MAX {
+        return Err(format!(
+            "z = i32::MAX is reserved for the text overlay layer (got {v})"
+        ));
+    }
+    Ok(Some(z))
 }
 
 /// オプションフィールドを u32 として取り出す。null / 型不一致は `Err`、欠落は `Ok(None)`。
@@ -896,6 +903,26 @@ mod tests {
 
         let missing = parse_owned_json(r#"{}"#);
         assert_eq!(parse_optional_z(&missing), Ok(None), "欠落は Ok(None)");
+    }
+
+    /// `parse_optional_z`: i32::MAX はテキストオーバーレイレイヤの予約値のため拒否される。
+    /// クライアントが指定すると一般 input track と合成順序が衝突するので INVALID で返す。
+    #[test]
+    fn parse_optional_z_rejects_reserved_i32_max() {
+        let json = parse_owned_json(r#"{"z":2147483647}"#); // i32::MAX
+        let err = parse_optional_z(&json).expect_err("i32::MAX は予約値のため拒否される");
+        assert!(
+            err.contains("reserved"),
+            "エラー文言で予約値であることを伝える: {err}"
+        );
+
+        // 直前値 (i32::MAX - 1) は許容される。
+        let ok = parse_owned_json(r#"{"z":2147483646}"#); // i32::MAX - 1
+        assert_eq!(
+            parse_optional_z(&ok),
+            Ok(Some(i32::MAX - 1)),
+            "i32::MAX - 1 は許容される"
+        );
     }
 
     // -- 必須フィールドパーサ (Missing と Invalid を区別する版) のテスト --
