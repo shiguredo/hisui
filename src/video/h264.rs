@@ -1420,8 +1420,6 @@ pub(crate) mod tests {
     #[test]
     fn parse_sps_rejects_pic_order_cnt_type_out_of_range() {
         // pic_order_cnt_type=3 (仕様 7.4.2.1.1 の {0,1,2} 値域外) は Err
-        // SpsBuilder::raw のデフォルト profile_idc=66 (Baseline) のため read_high_profile_sps_fields を
-        // 経由せず skip_pic_order_cnt_type_extras に直行し、本 issue で追加した値域検査で Err になる。
         let sps = SpsBuilder::raw(1920, 1088)
             .with_pic_order_cnt_type(3)
             .build();
