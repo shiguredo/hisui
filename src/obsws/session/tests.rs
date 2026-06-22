@@ -4056,7 +4056,8 @@ fn parse_text_overlays_count(text: &nojson::RawJsonOwned) -> usize {
 
 // -----------------------------------------------------------------------
 // テキストオーバーレイ機能の無効時挙動。
-// 機能有効時のフルパス検証は TextOverlayProcessor の spawn が必要で別途扱う。
+// 機能有効時のフルパス検証は VideoRealtimeMixer の構築と TextOverlayLayer の
+// raden 描画が必要なため、 mixer モジュール側の単体テストで別途扱う。
 
 /// `default_coordinator_handle()` は `ObswsSessionState::new_for_test()` を使うため
 /// テキストオーバーレイ機能が無効 (`text_overlay_config = None`) の状態である。
