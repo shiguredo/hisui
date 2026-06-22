@@ -338,6 +338,12 @@ struct ProcessorState {
     /// 入力 `z = None` (宣言順) を解決する際に使う次の自動 z。
     /// `z = Some(v)` を受けた場合は `next_auto_z = max(next_auto_z, v + 1)` に更新する。
     next_auto_z: i32,
+    /// canonical なフォントパスから `FontFace` への参照キャッシュ。
+    ///
+    /// Add / Update の validate と render の両方から `resolve_font_face` を経由してアクセスし、
+    /// 同一フォントの再読み込みを避ける。`--font-search-root` 配下は起動後に置換されない
+    /// 前提のため、エントリの破棄は行わない (overlay 削除でも残す)。
+    font_cache: BTreeMap<PathBuf, Arc<raden::FontFace>>,
 }
 
 impl ProcessorState {
@@ -350,7 +356,35 @@ impl ProcessorState {
             cached_frame: None,
             dirty: false,
             next_auto_z: 0,
+            font_cache: BTreeMap::new(),
         }
+    }
+
+    /// canonical path をキーにフォントをキャッシュ参照する。
+    ///
+    /// キャッシュミス時のみディスクからロードして `FontFace` を作る。
+    /// path 検証 (文字種 / canonicalize / root 配下) は `validate_font_name_and_resolve_path` が担当する。
+    fn resolve_font_face(
+        &mut self,
+        font_name: &str,
+    ) -> Result<Arc<raden::FontFace>, TextOverlayError> {
+        let canonical = validate_font_name_and_resolve_path(font_name, &self.config)?;
+        if let Some(face) = self.font_cache.get(&canonical) {
+            return Ok(face.clone());
+        }
+        let path_str = canonical.to_str().ok_or_else(|| {
+            TextOverlayError::FontResolveFailed(format!(
+                "font path {} is not utf-8",
+                canonical.display()
+            ))
+        })?;
+        let font_data = raden::FontData::from_file(path_str)
+            .map_err(|e| TextOverlayError::FontResolveFailed(format!("load font: {e:?}")))?;
+        let face = raden::FontFace::from_data(&font_data, 0)
+            .map_err(|e| TextOverlayError::FontResolveFailed(format!("parse font: {e:?}")))?;
+        let face = Arc::new(face);
+        self.font_cache.insert(canonical, face.clone());
+        Ok(face)
     }
 
     fn has_overlays(&self) -> bool {
@@ -389,13 +423,9 @@ impl ProcessorState {
         if self.overlays.len() >= OVERLAY_LIMIT {
             return Err(TextOverlayError::LimitExceeded);
         }
-        validate_spec_fields(
-            &input.text,
-            input.font_size,
-            &input.font_name,
-            &self.config,
-            self.canvas_height.get(),
-        )?;
+        validate_text_and_font_size(&input.text, input.font_size, self.canvas_height.get())?;
+        // フォント解決成功時はキャッシュに乗り、後段の render では再ロードしない。
+        self.resolve_font_face(&input.font_name)?;
         let resolved_z = match input.z {
             Some(z) => {
                 self.next_auto_z = self.next_auto_z.max(z.saturating_add(1));
@@ -428,13 +458,9 @@ impl ProcessorState {
             .ok_or(TextOverlayError::NotFound)?
             .clone();
         let updated = apply_patch(existing, patch);
-        validate_spec_fields(
-            &updated.text,
-            updated.font_size,
-            &updated.font_name,
-            &self.config,
-            self.canvas_height.get(),
-        )?;
+        validate_text_and_font_size(&updated.text, updated.font_size, self.canvas_height.get())?;
+        // 更新後の fontName でフォント解決 + キャッシュ投入を行う。
+        self.resolve_font_face(&updated.font_name)?;
         // 明示 z 更新で next_auto_z を後方互換に保つ
         self.next_auto_z = self.next_auto_z.max(updated.z.saturating_add(1));
         self.overlays.insert(name, updated);
@@ -483,7 +509,7 @@ impl ProcessorState {
     }
 
     /// raden + libyuv で 1 枚の I420A フレームを構築する。
-    fn render(&self, timestamp: Duration) -> crate::Result<VideoFrame> {
+    fn render(&mut self, timestamp: Duration) -> crate::Result<VideoFrame> {
         let w = self.canvas_width.get();
         let h = self.canvas_height.get();
 
@@ -491,6 +517,18 @@ impl ProcessorState {
         // バイト並びはリトルエンディアン環境で [B, G, R, A] となり、libyuv の ArgbImage と整合する。
         let mut image = raden::Image::new(w as u32, h as u32, raden::PixelFormat::Prgb32);
         let mut runtime = raden::PipelineRuntime::new();
+
+        // ループ内で `&mut self`(`resolve_font_face`) を呼ぶため、overlay の借用を解放しておく。
+        // z-order でソートし、タイブレークは name のアルファベット順 (BTreeMap の iter 順)。
+        let mut sorted: Vec<(String, TextOverlaySpec)> = self
+            .overlays
+            .iter()
+            .map(|(name, spec)| (name.clone(), spec.clone()))
+            .collect();
+        sorted.sort_by(|(name_a, spec_a), (name_b, spec_b)| {
+            spec_a.z.cmp(&spec_b.z).then(name_a.cmp(name_b))
+        });
+
         {
             let mut ctx = raden::Context::new(&mut image, &mut runtime);
 
@@ -500,22 +538,16 @@ impl ProcessorState {
             ctx.fill_rect(&raden::Rect::new(0.0, 0.0, w as f64, h as f64));
             ctx.set_comp_op(raden::CompOp::SrcOver);
 
-            // z-order でソート (タイブレークは name のアルファベット順 = BTreeMap の iter 順)。
-            let mut sorted: Vec<(&String, &TextOverlaySpec)> = self.overlays.iter().collect();
-            sorted.sort_by(|(name_a, spec_a), (name_b, spec_b)| {
-                spec_a.z.cmp(&spec_b.z).then(name_a.cmp(name_b))
-            });
-
-            for (_, spec) in sorted {
-                let canonical = validate_font_name_and_resolve(&spec.font_name, &self.config)
-                    .map_err(|e| crate::Error::new(format!("{e}")))?;
-                let path_str = canonical
-                    .to_str()
-                    .ok_or_else(|| crate::Error::new("font path not utf-8".to_owned()))?;
-                let font_data = raden::FontData::from_file(path_str)
-                    .map_err(|e| crate::Error::new(format!("load font: {e:?}")))?;
-                let face = raden::FontFace::from_data(&font_data, 0)
-                    .map_err(|e| crate::Error::new(format!("parse font: {e:?}")))?;
+            for (name, spec) in &sorted {
+                // フォント解決失敗時は該当 overlay だけスキップして他は描画継続する。
+                // run ループ全体を落とすと List も含めた全 RPC が止まるため、影響範囲を局所化する。
+                let face = match self.resolve_font_face(&spec.font_name) {
+                    Ok(face) => face,
+                    Err(e) => {
+                        tracing::warn!("skip overlay '{name}' due to font resolve error: {e}");
+                        continue;
+                    }
+                };
                 let font = raden::Font::from_face(&face, spec.font_size as f64);
 
                 let (a, r, g, b) = (
@@ -617,18 +649,19 @@ fn unpremultiply_argb(data: &mut [u8]) {
     }
 }
 
-fn validate_spec_fields(
+/// `fontName` 以外のフィールドを検証する。
+///
+/// `fontName` の検証は `ProcessorState::resolve_font_face` が担当する
+/// (キャッシュに乗せるためメソッド側に集約)。`fontColor` は u32 に詰める時点で
+/// 必ず妥当 (`0xAARRGGBB` 範囲内) なので追加検証は不要 (値域は obsws ハンドラの
+/// 正規表現マッチで担保する)。
+fn validate_text_and_font_size(
     text: &str,
     font_size: u32,
-    font_name: &str,
-    config: &TextOverlayConfig,
     canvas_height: usize,
 ) -> Result<(), TextOverlayError> {
     validate_text(text)?;
     validate_font_size(font_size, canvas_height)?;
-    validate_font_name_and_resolve(font_name, config)?;
-    // fontColor は u32 に詰める時点で必ず妥当 (`0xAARRGGBB` 範囲内) なので、ここでの追加検証は不要。
-    // 値域チェックは obsws ハンドラの正規表現マッチで担保する。
     Ok(())
 }
 
@@ -665,8 +698,12 @@ fn validate_font_size(size: u32, canvas_height: usize) -> Result<(), TextOverlay
     Ok(())
 }
 
-/// `fontName` を path traversal 対策込みで検証してフォントファイルの canonical パスを返す。
-fn validate_font_name_and_resolve(
+/// `fontName` を path traversal 対策込みで検証して canonical なフォントパスを返す。
+///
+/// 文字種チェック (`/`, `\`, `..`, NUL の不在) と canonicalize 後の `--font-search-root`
+/// 配下チェックのみを行う。フォントの実体読み込みと parse は呼び出し側の責務で、
+/// `ProcessorState::resolve_font_face` がキャッシュ込みで処理する。
+fn validate_font_name_and_resolve_path(
     name: &str,
     config: &TextOverlayConfig,
 ) -> Result<PathBuf, TextOverlayError> {
@@ -694,13 +731,6 @@ fn validate_font_name_and_resolve(
             canonical.display()
         )));
     }
-    let path_str = canonical
-        .to_str()
-        .ok_or_else(|| TextOverlayError::FontResolveFailed("font path not utf-8".to_owned()))?;
-    let font_data = raden::FontData::from_file(path_str)
-        .map_err(|e| TextOverlayError::FontResolveFailed(format!("load font: {e:?}")))?;
-    raden::FontFace::from_data(&font_data, 0)
-        .map_err(|e| TextOverlayError::FontResolveFailed(format!("parse font: {e:?}")))?;
     Ok(canonical)
 }
 
@@ -803,11 +833,11 @@ mod tests {
         .expect("両方指定なので Some")
     }
 
-    /// `validate_font_name_and_resolve` が `..` を含む名前を拒否する。
+    /// `validate_font_name_and_resolve_path` が `..` を含む名前を拒否する。
     #[test]
     fn validate_font_name_rejects_dotdot() {
         let config = make_config();
-        let err = validate_font_name_and_resolve("../etc/passwd", &config)
+        let err = validate_font_name_and_resolve_path("../etc/passwd", &config)
             .expect_err("`..` を含む名前は拒否される");
         assert!(
             matches!(err, TextOverlayError::InvalidFontName(_)),
@@ -819,7 +849,7 @@ mod tests {
     #[test]
     fn validate_font_name_rejects_slash() {
         let config = make_config();
-        let err = validate_font_name_and_resolve("foo/bar.ttf", &config)
+        let err = validate_font_name_and_resolve_path("foo/bar.ttf", &config)
             .expect_err("'/' を含む名前は拒否される");
         assert!(
             matches!(err, TextOverlayError::InvalidFontName(_)),
@@ -831,7 +861,8 @@ mod tests {
     #[test]
     fn validate_font_name_rejects_empty() {
         let config = make_config();
-        let err = validate_font_name_and_resolve("", &config).expect_err("空文字列は拒否される");
+        let err =
+            validate_font_name_and_resolve_path("", &config).expect_err("空文字列は拒否される");
         assert!(
             matches!(err, TextOverlayError::InvalidFontName(_)),
             "InvalidFontName が返る: {err:?}"
@@ -842,7 +873,7 @@ mod tests {
     #[test]
     fn validate_font_name_resolves_real_font() {
         let config = make_config();
-        let resolved = validate_font_name_and_resolve("PublicSans-Regular.ttf", &config)
+        let resolved = validate_font_name_and_resolve_path("PublicSans-Regular.ttf", &config)
             .expect("実在フォントは解決成功");
         assert!(
             resolved.starts_with(&config.font_search_root),
@@ -1107,7 +1138,7 @@ mod tests {
     /// render: overlay が無いときは透過 I420A (A プレーン全 0) が返る。
     #[test]
     fn processor_state_render_empty_returns_transparent_frame() {
-        let state = make_state();
+        let mut state = make_state();
         let frame = state
             .render(Duration::from_secs(0))
             .expect("空 overlay の render は成功");
@@ -1200,6 +1231,58 @@ mod tests {
         assert!(
             state.overlays.is_empty(),
             "失敗時は overlays に挿入されない"
+        );
+    }
+
+    /// 同じ fontName の overlay を複数 add しても font_cache は 1 エントリしか持たない。
+    /// ディスク I/O は初回のみで、再 add や render では再ロードしない。
+    #[test]
+    fn processor_state_caches_font_across_multiple_overlays() {
+        let mut state = make_state();
+        state
+            .add("a".to_owned(), make_input())
+            .expect("1 つ目の add は成功");
+        state
+            .add("b".to_owned(), make_input())
+            .expect("2 つ目の add も成功");
+        assert_eq!(
+            state.font_cache.len(),
+            1,
+            "同一フォントは 1 エントリだけキャッシュされる"
+        );
+    }
+
+    /// `resolve_font_face` を直接呼ぶと初回はキャッシュに乗り、2 回目以降は同じ Arc が返る。
+    #[test]
+    fn resolve_font_face_returns_cached_arc_on_second_call() {
+        let mut state = make_state();
+        let face1 = state
+            .resolve_font_face("PublicSans-Regular.ttf")
+            .expect("初回解決は成功");
+        assert_eq!(state.font_cache.len(), 1, "初回でキャッシュに乗る");
+        let face2 = state
+            .resolve_font_face("PublicSans-Regular.ttf")
+            .expect("2 回目もキャッシュヒットで成功");
+        assert!(
+            Arc::ptr_eq(&face1, &face2),
+            "同じ Arc<FontFace> がキャッシュから返る"
+        );
+    }
+
+    /// `resolve_font_face` の path 検証エラー (`/` を含む) は `InvalidFontName` を返し、キャッシュには影響しない。
+    #[test]
+    fn resolve_font_face_rejects_invalid_path_without_polluting_cache() {
+        let mut state = make_state();
+        // raden::FontFace は Debug を実装しないため Result::expect_err は使えない。
+        // match で Err を直接取り出して内容を確認する。
+        match state.resolve_font_face("foo/bar.ttf") {
+            Err(TextOverlayError::InvalidFontName(_)) => {}
+            Err(other) => panic!("InvalidFontName 以外のエラー: {other:?}"),
+            Ok(_) => panic!("不正な fontName が解決成功するのは想定外"),
+        }
+        assert!(
+            state.font_cache.is_empty(),
+            "検証失敗時はキャッシュに何も入らない"
         );
     }
 }
