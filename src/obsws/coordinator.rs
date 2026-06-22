@@ -1169,11 +1169,6 @@ fn is_state_persisted_request(request_type: &str) -> bool {
             // output 管理
             | "HisuiCreateOutput"
             | "HisuiRemoveOutput"
-            // テキストオーバーレイ
-            | "HisuiCreateTextOverlay"
-            | "HisuiUpdateTextOverlay"
-            | "HisuiRemoveTextOverlay"
-            | "HisuiListTextOverlays"
     )
 }
 
@@ -1203,4 +1198,30 @@ fn parse_custom_event_data(
         return Err(event_data.invalid("object is required"));
     }
     nojson::RawJsonOwned::try_from(event_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// テキストオーバーレイは揮発的な機能 (再起動でクリアされる) のため、
+    /// `is_state_persisted_request` の対象外でなければならない。
+    /// 過去にこの 4 メソッドを誤って永続化対象に含めた結果、
+    /// 内容変化のない state file の再書き込みが毎リクエストで走り、
+    /// さらに write 失敗時にサーバが強制終了してしまう問題が発生した。
+    /// 同じ間違いを将来再導入しないためのリグレッションガード。
+    #[test]
+    fn text_overlay_methods_are_not_state_persisted() {
+        for method in [
+            "HisuiCreateTextOverlay",
+            "HisuiUpdateTextOverlay",
+            "HisuiRemoveTextOverlay",
+            "HisuiListTextOverlays",
+        ] {
+            assert!(
+                !is_state_persisted_request(method),
+                "{method} は揮発機能のため state file 永続化対象外であるべき",
+            );
+        }
+    }
 }
