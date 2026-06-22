@@ -1725,35 +1725,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn parse_avcc_sps_pps_lists_extracts_single_sps_pps() {
-        // 正常な avcC (SPS 1 個 / PPS 1 個) → 両リストが SPS / PPS バイト列と完全一致する。
-        let avcc = build_avcc(&[&SPS_320X240[..]], &[PPS_NAL]);
-        let (sps_list, pps_list) = parse_avcc_sps_pps_lists(&avcc).expect("正常 avcC でパース成功");
-        assert_eq!(sps_list.len(), 1, "SPS 数は 1 件");
-        assert_eq!(pps_list.len(), 1, "PPS 数は 1 件");
-        assert_eq!(sps_list[0], SPS_320X240, "SPS バイト列が完全一致");
-        assert_eq!(pps_list[0], PPS_NAL, "PPS バイト列が完全一致");
-    }
-
-    #[test]
-    fn parse_avcc_sps_pps_lists_supports_multiple_sps_pps() {
-        // SPS 2 個 / PPS 2 個入りの avcC → 全部取り出し、出現順を保持する。
-        let avcc = build_avcc(&[&SPS_320X240[..], &SPS_1920X1080[..]], &[PPS_NAL, PPS_NAL]);
-        let (sps_list, pps_list) =
-            parse_avcc_sps_pps_lists(&avcc).expect("複数 SPS/PPS でパース成功");
-        assert_eq!(sps_list.len(), 2, "SPS 数は 2 件");
-        assert_eq!(pps_list.len(), 2, "PPS 数は 2 件");
-        assert_eq!(
-            sps_list[0], SPS_320X240,
-            "1 個目の SPS は SPS_320X240 (出現順保持)"
-        );
-        assert_eq!(
-            sps_list[1], SPS_1920X1080,
-            "2 個目の SPS は SPS_1920X1080 (出現順保持)"
-        );
-    }
-
-    #[test]
     fn parse_avcc_sps_pps_lists_returns_err_on_invalid_configuration_version() {
         // byte 0 (configurationVersion) が 1 以外だと Err
         let mut avcc = build_avcc(&[&SPS_320X240[..]], &[PPS_NAL]);

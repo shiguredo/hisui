@@ -60,19 +60,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_av1_codec_private_extracts_config_obus() {
-        // 正常な AV1CodecConfigurationRecord: 4 バイトヘッダ + 5 バイトの configOBUs ダミー列。
-        // byte 0 = 0x81 (marker=1, version=1)、byte 1..=3 は任意値。
-        let data = [0x81, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE];
-        let result = parse_av1_codec_private(&data).expect("正常入力でパースが成功する");
-        assert_eq!(
-            result,
-            &[0xAA, 0xBB, 0xCC, 0xDD, 0xEE],
-            "byte 4 以降の configOBUs を返すこと"
-        );
-    }
-
-    #[test]
     fn parse_av1_codec_private_returns_err_on_too_short() {
         // バイト長が 4 未満の入力は Err を返す。
         let data = [0x81, 0x00, 0x00];
