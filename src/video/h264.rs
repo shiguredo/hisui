@@ -15,9 +15,187 @@ pub const H264_NALU_TYPE_SEI: u8 = 6;
 pub const H264_NALU_TYPE_SPS: u8 = 7;
 pub const H264_NALU_TYPE_PPS: u8 = 8;
 
-// High 系プロファイル群（ITU-T H.264 (2017/06) 仕様 7.3.2.1.1 の `if (profile_idc == ...)` 条件節）
-// 該当プロファイルでは SPS に chroma_format_idc 以下の追加フィールド群が含まれる
-const H264_HIGH_PROFILES: [u8; 13] = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
+/// High 系プロファイル群 (ITU-T H.264 (2017/06) 仕様 7.3.2.1.1 の `if (profile_idc == ...)` 条件節)。
+///
+/// 該当プロファイルでは SPS に chroma_format_idc 以下の追加フィールド群が含まれる。
+/// 仕様改訂で要素が増減する可能性があるため、将来の仕様アップデート時に同期する。
+pub const H264_HIGH_PROFILES: [u8; 13] =
+    [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
+
+/// PBT 用 SPS 生成パラメータ
+///
+/// 本構造体は PBT (`pbt/tests/prop_h264_sps.rs`) からのみ使うことを想定し、本番経路からは利用しない。
+/// 値域は ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 に対応する。
+/// High 系プロファイル時のみ `chroma_format_idc` / `bit_depth_*_minus8` / `seq_scaling_matrix_present_flag`
+/// が SPS バイト列に書き込まれる (Baseline / Main / Extended では無視)。
+#[derive(Debug, Clone, Copy)]
+pub struct SpsBuildParams {
+    /// SPS 1 バイト目 (avcC の avc_profile_indication)
+    pub profile_idc: u8,
+    /// SPS 2 バイト目 (constraint_set0..5_flag + reserved_zero_2bits の 1 バイト全体)
+    pub constraint_set_flags: u8,
+    /// SPS 3 バイト目 (avcC の avc_level_indication)
+    pub level_idc: u8,
+    /// High 系プロファイル時の chroma_format_idc (0..=7、仕様 Ok 値域は 0..=3)
+    pub chroma_format_idc: u8,
+    /// High 系プロファイル時の bit_depth_luma_minus8 (0..=7、仕様 Ok 値域は 0..=6)
+    pub bit_depth_luma_minus8: u8,
+    /// High 系プロファイル時の bit_depth_chroma_minus8 (0..=7、仕様 Ok 値域は 0..=6)
+    pub bit_depth_chroma_minus8: u8,
+    /// マクロブロック境界の raw 解像度 (16 の倍数)。pic_width_in_mbs_minus1 = raw_width / 16 - 1 で書き込む
+    pub raw_width: u32,
+    /// マクロブロック境界の raw 解像度 (16 の倍数)。pic_height_in_map_units_minus1 = raw_height / 16 - 1 で書き込む
+    pub raw_height: u32,
+    /// progressive (true) / interlaced (false)
+    pub frame_mbs_only_flag: bool,
+    /// High 系プロファイル時のみ意味あり (Strategy で全 seq_scaling_list_present_flag = 0 を前提とする)
+    pub seq_scaling_matrix_present_flag: bool,
+    /// 仕様 7.4.2.1.1 の 0..=2 が Ok 値域。本構造体では Err 経路検証のため u32 で任意値を受け取る
+    pub pic_order_cnt_type: u32,
+    /// `Some((left, right, top, bottom))` で frame_cropping_flag=1 を立てて crop_offsets を書き込む
+    pub frame_cropping: Option<(u32, u32, u32, u32)>,
+}
+
+/// PBT (`pbt/tests/prop_h264_sps.rs`) から構造化 Strategy で SPS バイト列を生成するためのヘルパー
+///
+/// 本関数はテスト戦略 (PBT) からのみ使うことを想定し、本番経路からは呼ばない。
+/// 引数の値域は ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 に対応する。
+/// `raw_width` / `raw_height` は 16 の倍数 (マクロブロック境界) であること。
+/// Strategy 側で `(raw_width % 16 == 0) && (raw_height % 16 == 0)` を保証して渡す。
+///
+/// 戻り値は NAL ヘッダ 1 バイト (`0x67`) 含む raw NAL バイト列 (start code は含まない)。
+/// `h264_sample_entry_from_sps_pps_lists` の `sps_list[0]` にそのまま投入できる。
+pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
+    let mut w = PbtSpsBitWriter::new();
+    // NAL ヘッダ: forbidden_zero_bit=0, nal_ref_idc=3 (binary 011), nal_unit_type=7 (binary 00111) → 0x67
+    w.write_u(8, 0x67);
+    w.write_u(8, u32::from(params.profile_idc));
+    w.write_u(8, u32::from(params.constraint_set_flags));
+    w.write_u(8, u32::from(params.level_idc));
+    w.write_ue(0); // seq_parameter_set_id
+    let is_high = H264_HIGH_PROFILES.contains(&params.profile_idc);
+    if is_high {
+        w.write_ue(u32::from(params.chroma_format_idc));
+        if params.chroma_format_idc == 3 {
+            // separate_colour_plane_flag = 0 固定 (chroma_array_type == chroma_format_idc を保つため)
+            w.write_u(1, 0);
+        }
+        w.write_ue(u32::from(params.bit_depth_luma_minus8));
+        w.write_ue(u32::from(params.bit_depth_chroma_minus8));
+        w.write_u(1, 0); // qpprime_y_zero_transform_bypass_flag
+        w.write_u(1, u32::from(params.seq_scaling_matrix_present_flag));
+        if params.seq_scaling_matrix_present_flag {
+            // 全 seq_scaling_list_present_flag を 0 にして scaling_list 本体を読まない経路で進める
+            // chroma_format_idc=3 で 12 個、それ以外は 8 個 (仕様 7.3.2.1.1)
+            let count = if params.chroma_format_idc == 3 { 12 } else { 8 };
+            for _ in 0..count {
+                w.write_u(1, 0);
+            }
+        }
+    }
+    w.write_ue(0); // log2_max_frame_num_minus4
+    w.write_ue(params.pic_order_cnt_type);
+    match params.pic_order_cnt_type {
+        0 => {
+            w.write_ue(0); // log2_max_pic_order_cnt_lsb_minus4
+        }
+        1 => {
+            w.write_u(1, 0); // delta_pic_order_always_zero_flag
+            w.write_se(0); // offset_for_non_ref_pic
+            w.write_se(0); // offset_for_top_to_bottom_field
+            w.write_ue(0); // num_ref_frames_in_pic_order_cnt_cycle (要素数 0)
+        }
+        _ => {}
+    }
+    w.write_ue(1); // max_num_ref_frames
+    w.write_u(1, 0); // gaps_in_frame_num_value_allowed_flag
+    let pic_width_in_mbs_minus1 = params.raw_width / 16 - 1;
+    let pic_height_in_map_units_minus1 = params.raw_height / 16 - 1;
+    w.write_ue(pic_width_in_mbs_minus1);
+    w.write_ue(pic_height_in_map_units_minus1);
+    w.write_u(1, u32::from(params.frame_mbs_only_flag));
+    if !params.frame_mbs_only_flag {
+        w.write_u(1, 0); // mb_adaptive_frame_field_flag
+    }
+    w.write_u(1, 0); // direct_8x8_inference_flag
+    w.write_u(1, u32::from(params.frame_cropping.is_some()));
+    if let Some((l, r, t, b)) = params.frame_cropping {
+        w.write_ue(l);
+        w.write_ue(r);
+        w.write_ue(t);
+        w.write_ue(b);
+    }
+    // RBSP trailing bits は parse_sps が pic_width_in_mbs_minus1 以降を読み終えるまで不要なため省略する
+    w.into_bytes()
+}
+
+/// `build_sps_for_pbt` 専用のビット書き込みヘルパー
+///
+/// `#[cfg(test)] mod tests::SpsBitWriter` と同等のロジックを cfg なし領域で独立実装する。
+/// テストモジュール内シンボルは別クレート (`pbt/`) から見えないため、本体側にコピーを置く。
+/// 仕様 9.1 / 9.1.1 の Exp-Golomb 書き込みを担当する。
+///
+/// `SpsBitWriter` と本構造体の同期は `src/video/h264.rs::tests` 内の乖離検出単体テスト
+/// (`sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_*`) で保証する。
+struct PbtSpsBitWriter {
+    bytes: Vec<u8>,
+    bit_count: usize,
+}
+
+impl PbtSpsBitWriter {
+    fn new() -> Self {
+        Self {
+            bytes: Vec::new(),
+            bit_count: 0,
+        }
+    }
+
+    /// 1 ビットを書き込む。バイト境界を跨ぐときは新規バイトを Vec に push する
+    fn write_bit(&mut self, bit: u8) {
+        let byte_idx = self.bit_count / 8;
+        let bit_idx = self.bit_count % 8;
+        if byte_idx >= self.bytes.len() {
+            self.bytes.push(0);
+        }
+        self.bytes[byte_idx] |= (bit & 1) << (7 - bit_idx);
+        self.bit_count += 1;
+    }
+
+    /// n ビット符号なし整数を MSB ファーストで書き出す (u(n))
+    fn write_u(&mut self, n: usize, value: u32) {
+        for i in (0..n).rev() {
+            let bit = ((value >> i) & 1) as u8;
+            self.write_bit(bit);
+        }
+    }
+
+    /// 符号なし Exp-Golomb 復号の逆操作 (ue(v)、仕様 9.1)
+    fn write_ue(&mut self, value: u32) {
+        // value + 1 の bit 表現長を取り、(長さ - 1) 個の先行 0 + value+1 の bit 表現を書く
+        let v = value
+            .checked_add(1)
+            .expect("PBT 入力が u32::MAX に到達しないこと (overflow した場合は実装バグ)");
+        let bits_needed = 32 - v.leading_zeros() as usize;
+        for _ in 0..(bits_needed - 1) {
+            self.write_bit(0);
+        }
+        self.write_u(bits_needed, v);
+    }
+
+    /// 符号付き Exp-Golomb 復号の逆操作 (se(v)、仕様 9.1.1)
+    fn write_se(&mut self, value: i32) {
+        let code_num = if value <= 0 {
+            (-(i64::from(value))) as u64 * 2
+        } else {
+            (value as u64) * 2 - 1
+        };
+        self.write_ue(code_num as u32);
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+}
 
 /// Annex.B 形式の H.264 をパースして、含まれている NAL ユニットを走査するためのイテレーター
 #[derive(Debug)]
@@ -298,21 +476,6 @@ fn parse_sps(sps: &[u8]) -> crate::Result<SpsParams> {
     })
 }
 
-/// SPS NAL ユニットのバイト列から cropping 適用後の width / height を抽出する
-///
-/// 入力 `sps` は `H264AnnexBNalUnits` が返す `H264NalUnit.data` をそのまま渡す形式で、
-/// 先頭 1 バイトに NAL ヘッダ（forbidden_zero_bit + nal_ref_idc + nal_unit_type = 7）を含む。
-/// 内部で `parse_sps` を呼ぶ薄いラッパーで、Err 条件は `parse_sps` と同じ
-/// (NAL タイプ不一致 / 仕様準拠プロファイル群外の profile_idc / 仕様値域外の chroma_format_idc
-/// または bit_depth_*_minus8 / u16 上限超過の解像度 等)。
-///
-/// 本関数は本番経路からは呼ばれず、`pbt/tests/prop_h264_sps.rs` のクラッシュフリー PBT 専用の
-/// 公開 API として残している。本番経路は `h264_sample_entry_from_sps_pps_lists` 経由で
-/// `parse_sps` を内部呼び出しする。
-pub fn extract_dimensions_from_sps(sps: &[u8]) -> crate::Result<(usize, usize)> {
-    parse_sps(sps).map(|p| (p.width as usize, p.height as usize))
-}
-
 /// High 系プロファイル時の SPS 追加フィールドを読み取り、`HighProfileSpsParams` と
 /// `chroma_array_type` を返す（仕様 7.3.2.1.1 の High 系プロファイル分岐）。
 ///
@@ -499,9 +662,10 @@ fn rbsp_from_sps_nalu(nalu: &[u8]) -> crate::Result<Vec<u8>> {
     if nalu.is_empty() {
         return Err(crate::Error::new("invalid H.264 SPS: empty NAL unit"));
     }
-    // `extract_dimensions_from_sps` は pub で外部から呼ばれ得るため、release ビルドでも NAL タイプを検査する。
-    // ここで検出された場合のエラーメッセージは「NAL タイプの不一致」として、後段のビットリーダで失敗するよりも
-    // 早い段階で原因が分かるようにする。
+    // SPS パース経路の早期エラー検出として NAL タイプを検査する (後段のビットリーダで失敗するよりも
+    // 早い段階で原因が分かるようにする)。
+    // `rbsp_from_sps_nalu` は `parse_sps` の内部呼び出しに加え `rbsp_from_sps_nalu_rejects_non_sps_nal`
+    // から直接呼ばれて NAL タイプ検査の回帰防止を担保する。
     let nal_unit_type = nalu[0] & 0x1F;
     if nal_unit_type != H264_NALU_TYPE_SPS {
         return Err(crate::Error::new(format!(
@@ -760,25 +924,28 @@ pub(crate) mod tests {
         LazyLock::new(|| [&[0u8, 0, 0, 1][..], &SPS_1920X1080].concat());
 
     #[test]
-    fn extract_dimensions_from_baseline_no_crop_320x240() {
+    fn parse_sps_from_baseline_no_crop_320x240() {
         // crop なし (16 倍数解像度) のときに raw_width / raw_height をそのまま返すこと
-        let (width, height) = extract_dimensions_from_sps(&SPS_320X240).expect("SPS パース成功");
-        assert_eq!((width, height), (320, 240));
+        let params = parse_sps(&SPS_320X240).expect("SPS パース成功");
+        assert_eq!((params.width as usize, params.height as usize), (320, 240));
     }
 
     #[test]
-    fn extract_dimensions_from_baseline_with_crop_1920x1080() {
+    fn parse_sps_from_baseline_with_crop_1920x1080() {
         // libx264 が 1920x1080 を表現する際の実機パターン (raw 1920x1088 + crop_bottom=4) を
         // 仕様準拠で正しく解釈して 1920x1080 を返すこと
-        let (width, height) = extract_dimensions_from_sps(&SPS_1920X1080).expect("SPS パース成功");
-        assert_eq!((width, height), (1920, 1080));
+        let params = parse_sps(&SPS_1920X1080).expect("SPS パース成功");
+        assert_eq!(
+            (params.width as usize, params.height as usize),
+            (1920, 1080)
+        );
     }
 
     #[test]
-    fn extract_dimensions_fails_on_truncated_sps() {
+    fn parse_sps_fails_on_truncated_sps() {
         // SPS 末尾でビット切れになる入力では Err を返すこと
         let truncated = &SPS_1920X1080[..5]; // NAL ヘッダ + 数バイトだけ残す
-        let result = extract_dimensions_from_sps(truncated);
+        let result = parse_sps(truncated);
         assert!(
             result.is_err(),
             "短すぎる SPS は Err を返すはず: {result:?}"
@@ -809,12 +976,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn extract_dimensions_from_sps_rejects_non_sps_nal() {
-        // SPS 以外の NAL（先頭バイトの下位 5 bit が 7 でないもの）を渡すと Err を返すこと。
-        // pub 関数として誤呼出時に release ビルドでも検出できることの回帰防止。
-        // 0x68 は PPS の NAL ヘッダ（nal_unit_type = 8）。
+    fn rbsp_from_sps_nalu_rejects_non_sps_nal() {
+        // SPS 以外の NAL (先頭バイトの下位 5 bit が 7 でないもの) を渡すと Err を返すこと。
+        // 0x68 は PPS の NAL ヘッダ (nal_unit_type = 8)。
         let pps_nal = [0x68, 0xce, 0x06, 0xe2];
-        let result = extract_dimensions_from_sps(&pps_nal);
+        let result = rbsp_from_sps_nalu(&pps_nal);
         assert!(
             result.is_err(),
             "SPS 以外の NAL は Err を返すはず: {result:?}"
@@ -1192,68 +1358,83 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn extract_dimensions_handles_high_profile_with_scaling_matrix() {
+    fn parse_sps_handles_high_profile_with_scaling_matrix() {
         // High profile かつ seq_scaling_matrix_present_flag=1（全 list_present_flag=0）で
         // scaling_list 本体を読まずに pic_width / pic_height まで正しく到達できること
         let sps = SpsBuilder::raw(1920, 1088)
             .with_high_profile_and_scaling_matrix()
             .build();
-        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
-        assert_eq!((width, height), (1920, 1088));
+        let params = parse_sps(&sps).expect("SPS パース成功");
+        assert_eq!(
+            (params.width as usize, params.height as usize),
+            (1920, 1088)
+        );
     }
 
     #[test]
-    fn extract_dimensions_handles_pic_order_cnt_type_1() {
+    fn parse_sps_handles_pic_order_cnt_type_1() {
         // pic_order_cnt_type=1 の経路（delta_pic_order_always_zero_flag / offset_for_*）を踏んでも
         // pic_width / pic_height まで正しく到達できること
         let sps = SpsBuilder::raw(1920, 1088)
             .with_pic_order_cnt_type(1)
             .build();
-        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
-        assert_eq!((width, height), (1920, 1088));
+        let params = parse_sps(&sps).expect("SPS パース成功");
+        assert_eq!(
+            (params.width as usize, params.height as usize),
+            (1920, 1088)
+        );
     }
 
     #[test]
-    fn extract_dimensions_handles_pic_order_cnt_type_0() {
+    fn parse_sps_handles_pic_order_cnt_type_0() {
         // pic_order_cnt_type=0 の経路（log2_max_pic_order_cnt_lsb_minus4 の読み飛ばし）を踏んでも
         // pic_width / pic_height まで正しく到達できること
         let sps = SpsBuilder::raw(1920, 1088)
             .with_pic_order_cnt_type(0)
             .build();
-        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
-        assert_eq!((width, height), (1920, 1088));
+        let params = parse_sps(&sps).expect("SPS パース成功");
+        assert_eq!(
+            (params.width as usize, params.height as usize),
+            (1920, 1088)
+        );
     }
 
     #[test]
-    fn extract_dimensions_handles_interlaced_frame_mbs_only_flag_zero() {
+    fn parse_sps_handles_interlaced_frame_mbs_only_flag_zero() {
         // frame_mbs_only_flag=0 のとき mb_adaptive_frame_field_flag を読む経路を踏み、
         // raw_height = (pic_height_in_map_units_minus1 + 1) * 16 * 2 と算出されること。
         // field 単位の高さ 544 を渡すと frame 高さ 1088 が得られる。
         let sps = SpsBuilder::raw(1920, 1088).with_interlaced(544).build();
-        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
-        assert_eq!((width, height), (1920, 1088));
+        let params = parse_sps(&sps).expect("SPS パース成功");
+        assert_eq!(
+            (params.width as usize, params.height as usize),
+            (1920, 1088)
+        );
     }
 
     #[test]
-    fn extract_dimensions_handles_frame_cropping_to_1080() {
+    fn parse_sps_handles_frame_cropping_to_1080() {
         // ffmpeg / libx264 が 1920x1080 を表現する際の典型パターン:
         //   raw 1920x1088 + frame_cropping_flag=1 + crop_bottom=4
         //   (CropUnitY=2, 2*(0+4)=8 を 1088 から削って 1080)
         let sps = SpsBuilder::raw(1920, 1088)
             .with_cropping(0, 0, 0, 4)
             .build();
-        let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
-        assert_eq!((width, height), (1920, 1080));
+        let params = parse_sps(&sps).expect("SPS パース成功");
+        assert_eq!(
+            (params.width as usize, params.height as usize),
+            (1920, 1080)
+        );
     }
 
     #[test]
-    fn extract_dimensions_rejects_crop_underflow() {
+    fn parse_sps_rejects_crop_underflow() {
         // crop 値が raw 解像度を超える場合は Err を返すこと（checked_sub アンダーフロー）。
         // 1 MB ( = 16x16) の raw 解像度に対し、crop で横を 400 = 2*(100+100) 削ろうとする。
         let sps = SpsBuilder::raw(16, 16)
             .with_cropping(100, 100, 0, 0)
             .build();
-        let result = extract_dimensions_from_sps(&sps);
+        let result = parse_sps(&sps);
         assert!(
             result.is_err(),
             "crop アンダーフローは Err を返すはず: {result:?}"
@@ -1261,12 +1442,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn extract_dimensions_rejects_zero_dimensions_after_cropping() {
+    fn parse_sps_rejects_zero_dimensions_after_cropping() {
         // crop 適用後に width / height が 0 になる場合は Err を返すこと。
         // raw 1MB x 1MB (16x16) から crop で 16 横 削るとちょうど 0 になる。
         // CropUnitX=2 のため crop_left=4, crop_right=4 で 2*(4+4)=16 削る。
         let sps = SpsBuilder::raw(16, 32).with_cropping(4, 4, 0, 0).build();
-        let result = extract_dimensions_from_sps(&sps);
+        let result = parse_sps(&sps);
         assert!(
             result.is_err(),
             "crop 後に width が 0 になる場合は Err を返すはず: {result:?}"
@@ -1274,25 +1455,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn extract_dimensions_does_not_panic_on_huge_pic_width() {
-        // pic_width_in_mbs_minus1 が巨大値の場合、checked_mul で Err になることがある。
-        // 32 bit 環境ではオーバーフローで Err、64 bit 環境では巨大値で Ok になることがあるため、
-        // ここではパニックしないこと（Ok か Err のどちらかが返ること）だけ確認する。
-        let sps = SpsBuilder::raw(16, 16)
-            .with_pic_width_in_mbs_minus1(u32::MAX / 2)
-            .build();
-        let _ = extract_dimensions_from_sps(&sps);
-    }
-
-    #[test]
-    fn extract_dimensions_rejects_width_exceeding_u16_max() {
+    fn parse_sps_rejects_width_exceeding_u16_max() {
         // pic_width_in_mbs_minus1=4095 で raw_width=65536 (= u16::MAX + 1) になり、
         // `sample_entry_visual_fields` の `width as u16` で 0 にラップする入力。
         // u16 上限を超える解像度は Err で弾くこと（外部入力で MP4 sample_entry に 0 が埋まらないため）。
         let sps = SpsBuilder::raw(16, 16)
             .with_pic_width_in_mbs_minus1(4095)
             .build();
-        let result = extract_dimensions_from_sps(&sps);
+        let result = parse_sps(&sps);
         assert!(
             result.is_err(),
             "u16::MAX を超える width は Err を返すはず: {result:?}"
@@ -1302,11 +1472,10 @@ pub(crate) mod tests {
     // ----------------------------------------------------------------
     // parse_sps の単体テスト群
     //
-    // `extract_dimensions_from_sps` は `parse_sps` の薄いラッパーなので、
-    // 上記既存テスト群が parse_sps の (width, height) パス検証を兼ねる。
+    // 上記既存テスト群は parse_sps 直接呼びで (width, height) パスを検証する。
     // ここでは parse_sps が返す avcC 反映用フィールド (profile_idc /
     // constraint_set_flags / level_idc / high_profile_params) と
-    // 新規追加した仕様外値 Err 化の挙動を検証する。
+    // 仕様外値 Err 化の挙動を検証する。
     // ----------------------------------------------------------------
 
     #[test]
@@ -1593,5 +1762,92 @@ pub(crate) mod tests {
         };
         assert_eq!(avc1.visual.width, 1920);
         assert_eq!(avc1.visual.height, 1080);
+    }
+
+    // ----------------------------------------------------------------
+    // SpsBuilder と build_sps_for_pbt の乖離検出単体テスト群
+    //
+    // `build_sps_for_pbt` は別クレート (`pbt/`) から呼べる pub fn として SPS ビット組み立てロジックを
+    // cfg なし領域に独立実装している。`SpsBuilder` (cfg test 内) との二重実装が乖離した場合、
+    // PBT 経由では検出できないため (PBT 側は build_sps_for_pbt のみ使用)、本テスト群で各経路の
+    // バイト列が完全一致することを確認する。Baseline / Main / High10 の 3 経路を網羅し、
+    // is_high 分岐両側 + High 系の chroma_format_idc / bit_depth_* 書き込み分岐を担保する。
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_baseline() {
+        // Baseline (profile_idc=66) 320x240、crop なし、デフォルト。is_high=false 経路を担保。
+        let from_builder = SpsBuilder::raw(320, 240).build();
+        let from_pbt = build_sps_for_pbt(SpsBuildParams {
+            profile_idc: 66,
+            constraint_set_flags: 0,
+            level_idc: 31,
+            chroma_format_idc: 1,
+            bit_depth_luma_minus8: 0,
+            bit_depth_chroma_minus8: 0,
+            raw_width: 320,
+            raw_height: 240,
+            frame_mbs_only_flag: true,
+            seq_scaling_matrix_present_flag: false,
+            pic_order_cnt_type: 2,
+            frame_cropping: None,
+        });
+        assert_eq!(
+            from_builder, from_pbt,
+            "Baseline: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
+        );
+    }
+
+    #[test]
+    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_main() {
+        // Main (profile_idc=77) 1920x1088、デフォルト。is_high=false の別 profile_idc 経路を担保。
+        let from_builder = SpsBuilder::raw(1920, 1088).with_profile_idc(77).build();
+        let from_pbt = build_sps_for_pbt(SpsBuildParams {
+            profile_idc: 77,
+            constraint_set_flags: 0,
+            level_idc: 31,
+            chroma_format_idc: 1,
+            bit_depth_luma_minus8: 0,
+            bit_depth_chroma_minus8: 0,
+            raw_width: 1920,
+            raw_height: 1088,
+            frame_mbs_only_flag: true,
+            seq_scaling_matrix_present_flag: false,
+            pic_order_cnt_type: 2,
+            frame_cropping: None,
+        });
+        assert_eq!(
+            from_builder, from_pbt,
+            "Main: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
+        );
+    }
+
+    #[test]
+    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_high10() {
+        // High10 (profile_idc=110) + bit_depth_luma_minus8=2 + bit_depth_chroma_minus8=2。
+        // is_high=true 経路と chroma_format_idc / bit_depth_* の SPS 書き込み分岐を担保する。
+        let from_builder = SpsBuilder::raw(1920, 1088)
+            .with_profile_idc(110)
+            .with_bit_depth_luma_minus8(2)
+            .with_bit_depth_chroma_minus8(2)
+            .build();
+        let from_pbt = build_sps_for_pbt(SpsBuildParams {
+            profile_idc: 110,
+            constraint_set_flags: 0,
+            level_idc: 31,
+            chroma_format_idc: 1,
+            bit_depth_luma_minus8: 2,
+            bit_depth_chroma_minus8: 2,
+            raw_width: 1920,
+            raw_height: 1088,
+            frame_mbs_only_flag: true,
+            seq_scaling_matrix_present_flag: false,
+            pic_order_cnt_type: 2,
+            frame_cropping: None,
+        });
+        assert_eq!(
+            from_builder, from_pbt,
+            "High10: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
+        );
     }
 }
