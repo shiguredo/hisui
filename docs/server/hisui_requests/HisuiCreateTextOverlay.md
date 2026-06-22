@@ -41,7 +41,6 @@
 - `fontSize` の範囲外 (`0` または `canvas_height` 超過): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - `z` が i32 範囲外: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - `text` のバイト数 / 行数上限超過: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
-- raden 描画失敗 (フォント解析エラー等): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - 同時保持できるオーバーレイ数の上限 (`OVERLAY_LIMIT = 64`) 超過: `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` (606)
 
 ## 制約

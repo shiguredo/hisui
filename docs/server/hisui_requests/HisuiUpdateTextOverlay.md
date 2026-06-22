@@ -36,7 +36,6 @@
 - 対象 overlay が存在しない: `REQUEST_STATUS_RESOURCE_NOT_FOUND` (601)
 - 更新後の値の検証エラー (`fontName` / `fontColor` / `fontSize` / `text` 等): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - `z` が i32 範囲外: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
-- raden 描画失敗: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 
 検証ロジックは `HisuiCreateTextOverlay` と共通。
 

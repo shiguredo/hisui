@@ -183,8 +183,6 @@ pub enum TextOverlayError {
     InvalidFontSize(String),
     /// `text` のバイト数 / 行数上限超過。
     InvalidText(String),
-    /// raden 描画失敗。
-    RenderFailed(String),
     /// `OVERLAY_LIMIT` 超過。
     LimitExceeded,
 }
@@ -199,7 +197,6 @@ impl std::fmt::Display for TextOverlayError {
             Self::InvalidColor(s) => write!(f, "invalid fontColor: {s}"),
             Self::InvalidFontSize(s) => write!(f, "invalid fontSize: {s}"),
             Self::InvalidText(s) => write!(f, "invalid text: {s}"),
-            Self::RenderFailed(s) => write!(f, "render failed: {s}"),
             Self::LimitExceeded => write!(f, "text overlay limit exceeded"),
         }
     }

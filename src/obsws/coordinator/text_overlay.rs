@@ -92,12 +92,7 @@ impl ObswsCoordinator {
             Ok(Some(s)) => match parse_argb_color(&s) {
                 Ok(v) => v,
                 Err(e) => {
-                    return self.build_error_result(
-                        request_type,
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        &e,
-                    );
+                    return self.build_text_overlay_error_result(request_type, request_id, e);
                 }
             },
             Ok(None) => DEFAULT_FONT_COLOR_ARGB,
@@ -227,12 +222,7 @@ impl ObswsCoordinator {
             Ok(Some(s)) => match parse_argb_color(&s) {
                 Ok(v) => Some(v),
                 Err(e) => {
-                    return self.build_error_result(
-                        request_type,
-                        request_id,
-                        REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                        &e,
-                    );
+                    return self.build_text_overlay_error_result(request_type, request_id, e);
                 }
             },
             Ok(None) => None,
@@ -532,10 +522,6 @@ fn map_text_overlay_error(error: &TextOverlayError) -> (i64, String) {
             REQUEST_STATUS_INVALID_REQUEST_FIELD,
             format!("invalid text: {s}"),
         ),
-        TextOverlayError::RenderFailed(s) => (
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            format!("render failed: {s}"),
-        ),
         TextOverlayError::LimitExceeded => (
             REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
             "text overlay limit exceeded".to_owned(),
@@ -568,19 +554,25 @@ fn argb_to_hex_string(argb: u32) -> String {
     )
 }
 
-fn parse_argb_color(s: &str) -> Result<u32, String> {
-    let stripped = s
-        .strip_prefix('#')
-        .ok_or_else(|| format!("fontColor must start with '#': {s:?}"))?;
+fn parse_argb_color(s: &str) -> Result<u32, TextOverlayError> {
+    let stripped = s.strip_prefix('#').ok_or_else(|| {
+        TextOverlayError::InvalidColor(format!("fontColor must start with '#': {s:?}"))
+    })?;
     if stripped.len() != 6 && stripped.len() != 8 {
-        return Err(format!("fontColor must be #RRGGBB or #RRGGBBAA: {s:?}"));
+        return Err(TextOverlayError::InvalidColor(format!(
+            "fontColor must be #RRGGBB or #RRGGBBAA: {s:?}"
+        )));
     }
     if !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("fontColor must be hex: {s:?}"));
+        return Err(TextOverlayError::InvalidColor(format!(
+            "fontColor must be hex: {s:?}"
+        )));
     }
-    let rgb = u32::from_str_radix(&stripped[..6], 16).map_err(|_| format!("invalid hex: {s:?}"))?;
+    let rgb = u32::from_str_radix(&stripped[..6], 16)
+        .map_err(|_| TextOverlayError::InvalidColor(format!("invalid hex: {s:?}")))?;
     let a = if stripped.len() == 8 {
-        u32::from_str_radix(&stripped[6..8], 16).map_err(|_| format!("invalid hex: {s:?}"))?
+        u32::from_str_radix(&stripped[6..8], 16)
+            .map_err(|_| TextOverlayError::InvalidColor(format!("invalid hex: {s:?}")))?
     } else {
         0xFF
     };

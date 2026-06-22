@@ -219,7 +219,6 @@ ResponseData: `textOverlays` 配列。各要素は以下:
 | `InvalidColor` | `INVALID_REQUEST_FIELD (400)` | Create / Update | `fontColor` 形式違反、または JSON `null` 受信 |
 | `InvalidFontSize` | `INVALID_REQUEST_FIELD (400)` | Create / Update | `fontSize` 範囲外 |
 | `InvalidText` | `INVALID_REQUEST_FIELD (400)` | Create / Update | `text` がバイト数 / 行数上限超過 |
-| `RenderFailed` | `INVALID_REQUEST_FIELD (400)` | Create / Update | raden 描画失敗 (詳細はエラー文言) |
 | `LimitExceeded` | `RESOURCE_ACTION_NOT_SUPPORTED (606)` | Create | `OVERLAY_LIMIT` 超過 |
 | `Disabled` | `RESOURCE_ACTION_NOT_SUPPORTED (606)` | 全 | テキストオーバーレイ機能無効 |
 
