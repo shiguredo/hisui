@@ -454,12 +454,19 @@ impl ProcessorState {
             .get(&name)
             .ok_or(TextOverlayError::NotFound)?
             .clone();
+        // `patch.z` が `Some` のときだけ next_auto_z を進める判断材料に使う。
+        // apply_patch で `updated.z` を作ってしまうと「z 未指定 update」と「z 明示更新」を
+        // 区別できなくなるため、ここで先に取り出しておく。
+        let patch_z = patch.z;
         let updated = apply_patch(existing, patch);
         validate_text_and_font_size(&updated.text, updated.font_size, self.canvas_height.get())?;
         // 更新後の fontName でフォント解決 + キャッシュ投入を行う。
         self.resolve_font_face(&updated.font_name)?;
-        // 明示 z 更新で next_auto_z を後方互換に保つ
-        self.next_auto_z = self.next_auto_z.max(updated.z.saturating_add(1));
+        // 明示的に z を指定された場合のみ next_auto_z を進める。
+        // z 未指定の Update では既存値を温存し、auto z の進行に影響を与えない。
+        if let Some(z) = patch_z {
+            self.next_auto_z = self.next_auto_z.max(z.saturating_add(1));
+        }
         self.overlays.insert(name, updated);
         self.dirty = true;
         Ok(())
@@ -1196,7 +1203,10 @@ mod tests {
             "描画した文字 'T' の周辺領域に A != 0 のピクセルがあるはず"
         );
 
-        // 描画範囲外 (右下 1700+) には A == 0 が広く分布していることを確認する (誤検出回避)。
+        // 描画範囲外 (右下 1700+) には文字が一切描画されないため、A == 0 が 100% であること
+        // を確認する (誤検出回避)。緩い閾値 (たとえば 90% 透明) では、レイアウトバグで
+        // 数百ピクセル誤描画されるケースを見逃すので、厳密に全 100x100 ピクセルを検査する。
+        const FAR_REGION_TOTAL: usize = 100 * 100;
         let mut zero_in_far_region = 0usize;
         for row in 800..900 {
             for col in 1700..1800 {
@@ -1205,10 +1215,11 @@ mod tests {
                 }
             }
         }
-        assert!(
-            zero_in_far_region > 9000,
-            "描画範囲外は A == 0 (透明) のピクセルが大半 (got nonzero={})",
-            10000 - zero_in_far_region
+        assert_eq!(
+            zero_in_far_region,
+            FAR_REGION_TOTAL,
+            "描画範囲外は A == 0 (透明) であるべき (got nonzero={})",
+            FAR_REGION_TOTAL - zero_in_far_region
         );
     }
 

@@ -1081,6 +1081,6 @@ Program 出力を SDL3 ウィンドウにリアルタイム表示する。`playe
 - WebSocket / データチャネル両方で利用可能
 - RequestBatch（op=8）に対応
 - 機能無効時 (`--font-search-root` / `--default-font` 未指定): 全メソッドが `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` (606) を返す
-- 同時保持できるオーバーレイ数の上限: `OVERLAY_LIMIT = 64`
+- 同時保持できるオーバーレイ数の上限: 64
 - 永続化対象外 (`--state-file` 指定時もテキストオーバーレイは保存されず、再起動でクリアされる)
 - 専用イベントは発火しない (Created / Updated / Removed の通知は将来検討)
