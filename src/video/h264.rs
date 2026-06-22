@@ -49,6 +49,11 @@ pub struct SpsBuildParams {
     pub seq_scaling_matrix_present_flag: bool,
     /// 仕様 7.4.2.1.1 の 0..=2 が Ok 値域。本構造体では Err 経路検証のため u32 で任意値を受け取る
     pub pic_order_cnt_type: u32,
+    /// `pic_order_cnt_type=0` のときのみ SPS バイト列に書き込む (仕様 7.4.2.1.1 の Ok 値域は 0..=12)
+    pub log2_max_pic_order_cnt_lsb_minus4: u32,
+    /// `pic_order_cnt_type=1` のときのみ SPS バイト列に書き込む (仕様 7.4.2.1.1 の Ok 値域は 0..=255)。
+    /// 値分の `offset_for_ref_frame[i]` (各 `write_se(0)`) も続けて書き出される
+    pub num_ref_frames_in_pic_order_cnt_cycle: u32,
     /// `Some((left, right, top, bottom))` で frame_cropping_flag=1 を立てて crop_offsets を書き込む
     pub frame_cropping: Option<(u32, u32, u32, u32)>,
 }
@@ -90,13 +95,17 @@ pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
     w.write_ue(params.pic_order_cnt_type);
     match params.pic_order_cnt_type {
         0 => {
-            w.write_ue(0); // log2_max_pic_order_cnt_lsb_minus4
+            w.write_ue(params.log2_max_pic_order_cnt_lsb_minus4);
         }
         1 => {
             w.write_u(1, 0); // delta_pic_order_always_zero_flag
             w.write_se(0); // offset_for_non_ref_pic
             w.write_se(0); // offset_for_top_to_bottom_field
-            w.write_ue(0); // num_ref_frames_in_pic_order_cnt_cycle (要素数 0)
+            w.write_ue(params.num_ref_frames_in_pic_order_cnt_cycle);
+            // 値分の offset_for_ref_frame[i] (各 se(v) で 0 固定)
+            for _ in 0..params.num_ref_frames_in_pic_order_cnt_cycle {
+                w.write_se(0);
+            }
         }
         _ => {}
     }
@@ -1273,6 +1282,8 @@ pub(crate) mod tests {
         frame_mbs_only_flag: bool,
         seq_scaling_matrix_present_flag: bool,
         pic_order_cnt_type: u32,
+        log2_max_pic_order_cnt_lsb_minus4: u32,
+        num_ref_frames_in_pic_order_cnt_cycle: u32,
         frame_cropping_flag: bool,
         crop_offsets: (u32, u32, u32, u32),
     }
@@ -1302,6 +1313,8 @@ pub(crate) mod tests {
                 frame_mbs_only_flag: true,
                 seq_scaling_matrix_present_flag: false,
                 pic_order_cnt_type: 2,
+                log2_max_pic_order_cnt_lsb_minus4: 0,
+                num_ref_frames_in_pic_order_cnt_cycle: 0,
                 frame_cropping_flag: false,
                 crop_offsets: (0, 0, 0, 0),
             }
@@ -1326,6 +1339,16 @@ pub(crate) mod tests {
 
         fn with_pic_order_cnt_type(mut self, value: u32) -> Self {
             self.pic_order_cnt_type = value;
+            self
+        }
+
+        fn with_log2_max_pic_order_cnt_lsb_minus4(mut self, value: u32) -> Self {
+            self.log2_max_pic_order_cnt_lsb_minus4 = value;
+            self
+        }
+
+        fn with_num_ref_frames_in_pic_order_cnt_cycle(mut self, value: u32) -> Self {
+            self.num_ref_frames_in_pic_order_cnt_cycle = value;
             self
         }
 
@@ -1419,13 +1442,17 @@ pub(crate) mod tests {
             w.write_ue(self.pic_order_cnt_type);
             match self.pic_order_cnt_type {
                 0 => {
-                    w.write_ue(0); // log2_max_pic_order_cnt_lsb_minus4
+                    w.write_ue(self.log2_max_pic_order_cnt_lsb_minus4);
                 }
                 1 => {
                     w.write_u(1, 0); // delta_pic_order_always_zero_flag
                     w.write_se(0); // offset_for_non_ref_pic
                     w.write_se(0); // offset_for_top_to_bottom_field
-                    w.write_ue(0); // num_ref_frames_in_pic_order_cnt_cycle (要素数 0)
+                    w.write_ue(self.num_ref_frames_in_pic_order_cnt_cycle);
+                    // 値分の offset_for_ref_frame[i] (各 se(v) で 0 固定)
+                    for _ in 0..self.num_ref_frames_in_pic_order_cnt_cycle {
+                        w.write_se(0);
+                    }
                 }
                 _ => {}
             }
@@ -1864,15 +1891,15 @@ pub(crate) mod tests {
     // `build_sps_for_pbt` は別クレート (`pbt/`) から呼べる pub fn として SPS ビット組み立てロジックを
     // cfg なし領域に独立実装している。`SpsBuilder` (cfg test 内) との二重実装が乖離した場合、
     // PBT 経由では検出できないため (PBT 側は build_sps_for_pbt のみ使用)、本テスト群で各経路の
-    // バイト列が完全一致することを確認する。Baseline / Main / High10 の 3 経路を網羅し、
-    // is_high 分岐両側 + High 系の chroma_format_idc / bit_depth_* 書き込み分岐を担保する。
+    // バイト列が完全一致することを確認する。Baseline / Main / High10 / pic_order_cnt_type=0 /
+    // pic_order_cnt_type=1 の 5 経路を網羅し、is_high 分岐両側 + High 系の追加フィールド書き込み +
+    // pic_order_cnt_type=0/1 経路の log2_max_pic_order_cnt_lsb_minus4 / num_ref_frames_in_pic_order_cnt_cycle
+    // 書き込み + offset_for_ref_frame[i] ループを担保する。
     // ----------------------------------------------------------------
 
-    #[test]
-    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_baseline() {
-        // Baseline (profile_idc=66) 320x240、crop なし、デフォルト。is_high=false 経路を担保。
-        let from_builder = SpsBuilder::raw(320, 240).build();
-        let from_pbt = build_sps_for_pbt(SpsBuildParams {
+    /// 5 件の乖離検出テストで struct update のベースに使う Baseline 320x240 デフォルト値
+    fn baseline_sps_build_params() -> SpsBuildParams {
+        SpsBuildParams {
             profile_idc: 66,
             constraint_set_flags: 0,
             level_idc: 31,
@@ -1884,8 +1911,17 @@ pub(crate) mod tests {
             frame_mbs_only_flag: true,
             seq_scaling_matrix_present_flag: false,
             pic_order_cnt_type: 2,
+            log2_max_pic_order_cnt_lsb_minus4: 0,
+            num_ref_frames_in_pic_order_cnt_cycle: 0,
             frame_cropping: None,
-        });
+        }
+    }
+
+    #[test]
+    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_baseline() {
+        // Baseline (profile_idc=66) 320x240、crop なし、デフォルト。is_high=false 経路を担保。
+        let from_builder = SpsBuilder::raw(320, 240).build();
+        let from_pbt = build_sps_for_pbt(baseline_sps_build_params());
         assert_eq!(
             from_builder, from_pbt,
             "Baseline: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
@@ -1898,17 +1934,9 @@ pub(crate) mod tests {
         let from_builder = SpsBuilder::raw(1920, 1088).with_profile_idc(77).build();
         let from_pbt = build_sps_for_pbt(SpsBuildParams {
             profile_idc: 77,
-            constraint_set_flags: 0,
-            level_idc: 31,
-            chroma_format_idc: 1,
-            bit_depth_luma_minus8: 0,
-            bit_depth_chroma_minus8: 0,
             raw_width: 1920,
             raw_height: 1088,
-            frame_mbs_only_flag: true,
-            seq_scaling_matrix_present_flag: false,
-            pic_order_cnt_type: 2,
-            frame_cropping: None,
+            ..baseline_sps_build_params()
         });
         assert_eq!(
             from_builder, from_pbt,
@@ -1927,21 +1955,52 @@ pub(crate) mod tests {
             .build();
         let from_pbt = build_sps_for_pbt(SpsBuildParams {
             profile_idc: 110,
-            constraint_set_flags: 0,
-            level_idc: 31,
-            chroma_format_idc: 1,
             bit_depth_luma_minus8: 2,
             bit_depth_chroma_minus8: 2,
             raw_width: 1920,
             raw_height: 1088,
-            frame_mbs_only_flag: true,
-            seq_scaling_matrix_present_flag: false,
-            pic_order_cnt_type: 2,
-            frame_cropping: None,
+            ..baseline_sps_build_params()
         });
         assert_eq!(
             from_builder, from_pbt,
             "High10: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
+        );
+    }
+
+    #[test]
+    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_pic_order_cnt_type_0() {
+        // pic_order_cnt_type=0 経路の log2_max_pic_order_cnt_lsb_minus4 書き込み (write_ue) 担保。
+        let from_builder = SpsBuilder::raw(320, 240)
+            .with_pic_order_cnt_type(0)
+            .with_log2_max_pic_order_cnt_lsb_minus4(5)
+            .build();
+        let from_pbt = build_sps_for_pbt(SpsBuildParams {
+            pic_order_cnt_type: 0,
+            log2_max_pic_order_cnt_lsb_minus4: 5,
+            ..baseline_sps_build_params()
+        });
+        assert_eq!(
+            from_builder, from_pbt,
+            "pic_order_cnt_type=0: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
+        );
+    }
+
+    #[test]
+    fn sps_builder_and_build_sps_for_pbt_emit_byte_compatible_sps_pic_order_cnt_type_1() {
+        // pic_order_cnt_type=1 経路の num_ref_frames_in_pic_order_cnt_cycle 書き込み +
+        // offset_for_ref_frame[i] ループ (write_se(0) を値分繰り返す) を担保する。
+        let from_builder = SpsBuilder::raw(320, 240)
+            .with_pic_order_cnt_type(1)
+            .with_num_ref_frames_in_pic_order_cnt_cycle(3)
+            .build();
+        let from_pbt = build_sps_for_pbt(SpsBuildParams {
+            pic_order_cnt_type: 1,
+            num_ref_frames_in_pic_order_cnt_cycle: 3,
+            ..baseline_sps_build_params()
+        });
+        assert_eq!(
+            from_builder, from_pbt,
+            "pic_order_cnt_type=1: SpsBuilder と build_sps_for_pbt のバイト列が乖離"
         );
     }
 

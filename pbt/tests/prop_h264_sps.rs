@@ -83,6 +83,8 @@ fn ok_sps_strategy() -> impl Strategy<Value = SpsBuildParams> {
         any::<bool>(),
         any::<bool>(),
         prop::sample::select(vec![0u32, 1, 2]),
+        // pic_order_cnt_type=0 経路で踏まれる仕様 Ok 値域 0..=12 (仕様 7.4.2.1.1)
+        0u32..=12,
     )
         .prop_flat_map(
             |(
@@ -93,6 +95,7 @@ fn ok_sps_strategy() -> impl Strategy<Value = SpsBuildParams> {
                 frame_mbs_only_flag,
                 seq_scaling_matrix_present_flag,
                 pic_order_cnt_type,
+                log2_max_pic_order_cnt_lsb_minus4,
             )| {
                 // raw_height は frame_mbs_only_flag に応じて u16::MAX 内で生成する。
                 let height_strategy = raw_height_strategy(frame_mbs_only_flag);
@@ -114,6 +117,9 @@ fn ok_sps_strategy() -> impl Strategy<Value = SpsBuildParams> {
                         frame_mbs_only_flag,
                         seq_scaling_matrix_present_flag,
                         pic_order_cnt_type,
+                        log2_max_pic_order_cnt_lsb_minus4,
+                        // num_ref_frames_in_pic_order_cnt_cycle は別 PBT で境界スイープする (0 固定)
+                        num_ref_frames_in_pic_order_cnt_cycle: 0,
                         frame_cropping: None,
                     }
                 })
@@ -168,6 +174,8 @@ fn ok_sps_with_cropping_strategy() -> impl Strategy<Value = SpsBuildParams> {
                     frame_mbs_only_flag,
                     seq_scaling_matrix_present_flag,
                     pic_order_cnt_type: 2,
+                    log2_max_pic_order_cnt_lsb_minus4: 0,
+                    num_ref_frames_in_pic_order_cnt_cycle: 0,
                     frame_cropping: Some((l, r, t, b)),
                 })
             },
@@ -460,6 +468,8 @@ mod err_path {
             frame_mbs_only_flag: true,
             seq_scaling_matrix_present_flag: false,
             pic_order_cnt_type: 2,
+            log2_max_pic_order_cnt_lsb_minus4: 0,
+            num_ref_frames_in_pic_order_cnt_cycle: 0,
             frame_cropping: None,
         }
     }
@@ -604,6 +614,33 @@ mod err_path {
                 prop_assert!(
                     result.is_err(),
                     "raw_width={raw_width} (>u16::MAX) は Err のはず"
+                );
+            }
+        }
+
+        /// pic_order_cnt_type=1 + num_ref_frames_in_pic_order_cnt_cycle の境界 (≤255: Ok / ≥256: Err) を検証する
+        /// (本体 `parse_sps::skip_pic_order_cnt_type_extras` が `> 255` で Err 化)
+        #[test]
+        fn prop_h264_sample_entry_num_ref_frames_in_pic_order_cnt_cycle_boundary(
+            num_ref_frames_in_pic_order_cnt_cycle
+                in prop::sample::select(vec![0u32, 1, 100, 255, 256, 1000]),
+        ) {
+            let params = SpsBuildParams {
+                pic_order_cnt_type: 1,
+                num_ref_frames_in_pic_order_cnt_cycle,
+                ..baseline_ok_params()
+            };
+            let sps = build_sps_for_pbt(params);
+            let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()]);
+            if num_ref_frames_in_pic_order_cnt_cycle <= 255 {
+                prop_assert!(
+                    result.is_ok(),
+                    "num_ref_frames_in_pic_order_cnt_cycle={num_ref_frames_in_pic_order_cnt_cycle} (≤255) は Ok のはず: {result:?}"
+                );
+            } else {
+                prop_assert!(
+                    result.is_err(),
+                    "num_ref_frames_in_pic_order_cnt_cycle={num_ref_frames_in_pic_order_cnt_cycle} (≥256) は Err のはず"
                 );
             }
         }
