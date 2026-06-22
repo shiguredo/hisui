@@ -1069,7 +1069,7 @@ fn compose_frame(
     if let Some(layer) = text_overlay_layer
         && !layer.is_empty()
     {
-        let overlay_frame = layer.ensure_rendered(timestamp)?;
+        let overlay_frame = layer.ensure_rendered()?;
         let raw = RawVideoFrame::from_video_frame(overlay_frame)?;
         canvas.draw_frame_clipped(0, 0, &raw)?;
     }

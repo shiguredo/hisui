@@ -8,7 +8,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::types::EvenUsize;
 use crate::video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize};
@@ -152,29 +151,30 @@ impl TextOverlayLayer {
 
     /// 次の `compose_frame` 呼び出し前に、 必要なら再描画して cached I420A を更新する。
     ///
-    /// 戻り値は最新の cached I420A `Arc<VideoFrame>`。 `overlays.is_empty()` の場合は呼び出さない
-    /// (呼び出し側で early return する)。
-    pub fn ensure_rendered(&mut self, timestamp: Duration) -> crate::Result<Arc<VideoFrame>> {
+    /// 戻り値は cached I420A の `Arc<VideoFrame>` を Arc 参照のみで共有したもの。
+    /// `overlays.is_empty()` の場合は呼び出さない (呼び出し側で early return する)。
+    ///
+    /// 不変条件: ここで返した `VideoFrame.timestamp` は呼び出し側で読まれない。
+    /// `compose_frame` の追加合成段は `RealtimeI420Canvas::draw_frame_clipped` 経由で
+    /// pixel data のみ参照し、 timestamp は外側で出力 `VideoFrame` 構築時に別途設定する。
+    /// このため `VideoFrame` 全体を clone (= `data: Vec<u8>` のコピー、 1920x1080 で約 5 MB)
+    /// する必要はなく、 Arc 参照だけ増やせばよい。
+    pub fn ensure_rendered(&mut self) -> crate::Result<Arc<VideoFrame>> {
         debug_assert!(
             !self.overlays.is_empty(),
             "ensure_rendered は overlay が 1 件以上ある前提"
         );
 
         if self.dirty || self.cached_frame.is_none() {
-            let frame = self.render(timestamp)?;
+            let frame = self.render()?;
             self.cached_frame = Some(Arc::new(frame));
             self.dirty = false;
         }
-        // タイムスタンプだけ差し替えた新しい Arc を返す。 cached_frame の data は再利用しつつ、
-        // VideoFrame 全体は新しい Arc にまとめる。 これにより compose_frame 側での timestamp が
-        // 整合する。
         let cached = self
             .cached_frame
             .as_ref()
             .expect("cached_frame is Some after rendering");
-        let mut frame = (**cached).clone();
-        frame.timestamp = timestamp;
-        Ok(Arc::new(frame))
+        Ok(Arc::clone(cached))
     }
 
     /// 新規 overlay を追加する。
@@ -264,7 +264,12 @@ impl TextOverlayLayer {
     }
 
     /// raden + libyuv で 1 枚の I420A フレームを構築する。
-    fn render(&mut self, timestamp: Duration) -> crate::Result<VideoFrame> {
+    ///
+    /// 構築する `VideoFrame.timestamp` は `Duration::ZERO` で固定する。
+    /// テキストオーバーレイの cached frame は `compose_frame` 内で pixel data のみ
+    /// 参照され、 timestamp は読まれないため、 任意値で構わない (上の `ensure_rendered` の
+    /// コメント参照)。
+    fn render(&mut self) -> crate::Result<VideoFrame> {
         let w = self.canvas_width.get();
         let h = self.canvas_height.get();
 
@@ -370,7 +375,8 @@ impl TextOverlayLayer {
                 width: w,
                 height: h,
             }),
-            timestamp,
+            // timestamp は呼び出し側で読まれないため任意値で構わない (ensure_rendered のコメント参照)。
+            timestamp: std::time::Duration::ZERO,
             sample_entry: None,
         })
     }
@@ -622,7 +628,7 @@ mod tests {
             z: None,
         };
         layer.add("t".to_owned(), input).expect("add に成功");
-        let frame = layer.render(Duration::from_secs(0)).expect("render に成功");
+        let frame = layer.render().expect("render に成功");
         assert_eq!(frame.format, VideoFormat::I420A, "format は I420A");
         let w = 1920usize;
         let h = 1080usize;
