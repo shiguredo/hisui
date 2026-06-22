@@ -236,7 +236,7 @@ pub fn parse_avcc_sps_pps_lists(data: &[u8]) -> crate::Result<(Vec<Vec<u8>>, Vec
     }
     // byte 6 以降を逐次パースする。残バイト不足はすべて同じメッセージで返す。
     let mut offset: usize = 6;
-    let mut sps_list: Vec<Vec<u8>> = Vec::with_capacity(num_sps);
+    let mut sps_list: Vec<Vec<u8>> = Vec::new();
     for _ in 0..num_sps {
         let nal_bytes = read_avcc_nal(data, &mut offset)?;
         sps_list.push(nal_bytes);
@@ -260,7 +260,7 @@ pub fn parse_avcc_sps_pps_lists(data: &[u8]) -> crate::Result<(Vec<Vec<u8>>, Vec
             "invalid H.264 avcC: numOfPictureParameterSets exceeds 31 (got {num_pps})"
         )));
     }
-    let mut pps_list: Vec<Vec<u8>> = Vec::with_capacity(num_pps);
+    let mut pps_list: Vec<Vec<u8>> = Vec::new();
     for _ in 0..num_pps {
         let nal_bytes = read_avcc_nal(data, &mut offset)?;
         pps_list.push(nal_bytes);
