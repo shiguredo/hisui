@@ -833,6 +833,8 @@ impl Iterator for WebmVideoReader {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -902,5 +904,51 @@ mod tests {
             entry_b.get(),
             "実体は同値なので writer 側で dedup されること"
         );
+    }
+
+    #[test]
+    fn read_bytes_with_limit_succeeds_with_size_below_limit() {
+        // ID_CODEC_PRIVATE (0x63A2、2 バイト vint) + size = 4 (1 バイト vint 0x84) + 4 バイト data。
+        // max_size = 16 で size = 4 はリミット内のため、正常にデータを取り出せる。
+        let bytes: Vec<u8> = vec![
+            0x63, 0xa2, // ID_CODEC_PRIVATE
+            0x84, // vint size = 4
+            0xaa, 0xbb, 0xcc, 0xdd, // data
+        ];
+        let mut reader = ElementReader::new(Cursor::new(bytes));
+        let result = reader
+            .read_bytes_with_limit(ID_CODEC_PRIVATE, 16)
+            .expect("リミット内の正常入力でパース成功");
+        assert_eq!(result, vec![0xaa, 0xbb, 0xcc, 0xdd]);
+    }
+
+    #[test]
+    fn read_bytes_with_limit_returns_err_when_size_reaches_limit() {
+        // ID_CODEC_PRIVATE + size = 16 (1 バイト vint 0x90)。max_size = 16 のため
+        // 境界条件 `size >= max_size` で Err を返すこと (size ちょうども拒否される)。
+        let bytes: Vec<u8> = vec![
+            0x63, 0xa2, // ID_CODEC_PRIVATE
+            0x90, // vint size = 16 (data 本体は Err 前に読まれないため省略)
+        ];
+        let mut reader = ElementReader::new(Cursor::new(bytes));
+        let result = reader.read_bytes_with_limit(ID_CODEC_PRIVATE, 16);
+        assert!(
+            result.is_err(),
+            "size == max_size は境界判定 `>=` で Err を返すこと: {result:?}"
+        );
+    }
+
+    #[test]
+    fn read_bytes_with_limit_returns_err_on_id_mismatch() {
+        // ID_CODEC_ID (0x86、1 バイト vint) + size = 4 + 4 バイト data を書き込み、
+        // `expected_id = ID_CODEC_PRIVATE` で読み込もうとすると ID 不一致で Err を返すこと。
+        let bytes: Vec<u8> = vec![
+            0x86, // ID_CODEC_ID (期待値の ID_CODEC_PRIVATE と異なる)
+            0x84, // vint size = 4
+            0xaa, 0xbb, 0xcc, 0xdd, // data
+        ];
+        let mut reader = ElementReader::new(Cursor::new(bytes));
+        let result = reader.read_bytes_with_limit(ID_CODEC_PRIVATE, 16);
+        assert!(result.is_err(), "ID 不一致時に Err が返ること: {result:?}");
     }
 }
