@@ -662,7 +662,7 @@ fn validate_text_and_font_size(
     Ok(())
 }
 
-fn validate_text(text: &str) -> Result<(), TextOverlayError> {
+pub fn validate_text(text: &str) -> Result<(), TextOverlayError> {
     if text.len() > TEXT_MAX_BYTES {
         return Err(TextOverlayError::InvalidText(format!(
             "text exceeds maximum {} bytes (got {})",
@@ -680,7 +680,7 @@ fn validate_text(text: &str) -> Result<(), TextOverlayError> {
     Ok(())
 }
 
-fn validate_font_size(size: u32, canvas_height: usize) -> Result<(), TextOverlayError> {
+pub fn validate_font_size(size: u32, canvas_height: usize) -> Result<(), TextOverlayError> {
     if size == 0 {
         return Err(TextOverlayError::InvalidFontSize(
             "fontSize must be >= 1".to_owned(),
