@@ -16,6 +16,77 @@ pub const H265_NALU_TYPE_VPS: u8 = 32;
 pub const H265_NALU_TYPE_SPS: u8 = 33;
 pub const H265_NALU_TYPE_PPS: u8 = 34;
 
+/// Annex.B 形式の H.265 をパースして、含まれている NAL ユニットを走査するためのイテレーター
+///
+/// H.265 の NAL ユニットヘッダは 2 バイト構造（ITU-T H.265 仕様 7.3.1.2）で、
+/// 第 1 バイトに forbidden_zero_bit (1 bit) と nal_unit_type (6 bit)、
+/// 第 2 バイトに nuh_layer_id (6 bit) と nuh_temporal_id_plus1 (3 bit) が分割配置される。
+/// 本イテレーターは start code 直後の 1 バイトから nal_unit_type を抽出するのみで、
+/// 第 2 バイト以降は呼び出し側に渡す `data` に含めて返す。
+#[derive(Debug)]
+pub struct H265AnnexBNalUnits<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> H265AnnexBNalUnits<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+
+    fn next_nal_unit(&mut self) -> crate::Result<Option<H265NalUnit<'a>>> {
+        if self.data.is_empty() {
+            return Ok(None);
+        }
+
+        if self.data.starts_with(&[0, 0, 1]) {
+            self.data = &self.data[3..];
+        } else if self.data.starts_with(&[0, 0, 0, 1]) {
+            self.data = &self.data[4..];
+        } else {
+            return Err(crate::Error::new("no H.265 start code prefix"));
+        };
+        if self.data.is_empty() {
+            return Err(crate::Error::new("empty H.265 NAL unit"));
+        }
+
+        let header = self.data[0];
+        if (header >> 7) != 0 {
+            return Err(crate::Error::new(
+                "invalid H.265 NAL header: forbidden_zero_bit is set",
+            ));
+        }
+
+        // H.265 の nal_unit_type は NAL ヘッダ第 1 バイトの bit 1-6 (上位ビット側から 2 番目を MSB とする 6 ビット)
+        let nal_unit_type = (header >> 1) & 0x3F;
+
+        let i = self
+            .data
+            .windows(4)
+            .position(|w| matches!(w, [0, 0, 1, _] | [0, 0, 0, 1]))
+            .unwrap_or(self.data.len());
+        let data = &self.data[..i];
+        self.data = &self.data[i..];
+        Ok(Some(H265NalUnit {
+            ty: nal_unit_type,
+            data,
+        }))
+    }
+}
+
+impl<'a> Iterator for H265AnnexBNalUnits<'a> {
+    type Item = crate::Result<H265NalUnit<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_nal_unit().transpose()
+    }
+}
+
+#[derive(Debug)]
+pub struct H265NalUnit<'a> {
+    pub ty: u8,
+    pub data: &'a [u8],
+}
+
 /// H.265 サンプルエントリーを生成する
 pub fn h265_sample_entry(
     width: EvenUsize,
@@ -86,59 +157,18 @@ pub fn h265_sample_entry_from_annexb(
     fps: FrameRate,
     data: &[u8],
 ) -> crate::Result<SampleEntry> {
-    // H.265 ストリームから VPS, SPS, PPS を取り出す
     let mut vps_list = Vec::new();
     let mut sps_list = Vec::new();
     let mut pps_list = Vec::new();
 
-    let mut pos = 0;
-    while pos < data.len() {
-        // スタートコードを探す (0x00000001 or 0x000001)
-        let start_code_len = if pos + 4 <= data.len() && data[pos..pos + 4] == [0, 0, 0, 1] {
-            4
-        } else if pos + 3 <= data.len() && data[pos..pos + 3] == [0, 0, 1] {
-            3
-        } else if pos == 0 {
-            return Err(crate::Error::new("No H.265 start code found at beginning"));
-        } else {
-            break;
-        };
-
-        pos += start_code_len;
-
-        if pos >= data.len() {
-            break;
+    for nalu in H265AnnexBNalUnits::new(data) {
+        let nalu = nalu?;
+        match nalu.ty {
+            H265_NALU_TYPE_VPS => vps_list.push(nalu.data.to_vec()),
+            H265_NALU_TYPE_SPS => sps_list.push(nalu.data.to_vec()),
+            H265_NALU_TYPE_PPS => pps_list.push(nalu.data.to_vec()),
+            _ => {}
         }
-
-        // 次のスタートコードまたはデータ終端を探す
-        let nalu_start = pos;
-        let mut nalu_end = data.len();
-
-        for i in (pos + 3)..data.len() {
-            if i + 4 <= data.len() && data[i..i + 4] == [0, 0, 0, 1] {
-                nalu_end = i;
-                break;
-            }
-            if i + 3 <= data.len() && data[i..i + 3] == [0, 0, 1] {
-                nalu_end = i;
-                break;
-            }
-        }
-
-        let nalu = &data[nalu_start..nalu_end];
-        if !nalu.is_empty() {
-            // H.265 NAL unit type は最初のバイトの上位6ビット（bit 1-6）
-            let nal_unit_type = (nalu[0] >> 1) & 0x3F;
-
-            match nal_unit_type {
-                H265_NALU_TYPE_VPS => vps_list.push(nalu.to_vec()),
-                H265_NALU_TYPE_SPS => sps_list.push(nalu.to_vec()),
-                H265_NALU_TYPE_PPS => pps_list.push(nalu.to_vec()),
-                _ => {}
-            }
-        }
-
-        pos = nalu_end;
     }
 
     if vps_list.is_empty() {
@@ -157,4 +187,122 @@ pub fn h265_sample_entry_from_annexb(
         .ok_or_else(|| crate::Error::new(format!("H.265 height must be even, got {height}")))?;
 
     h265_sample_entry(width, height, fps, vps_list, sps_list, pps_list)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // テスト用に VPS / SPS / PPS の NAL ヘッダ 2 バイトを定数化する。
+    // 第 1 バイト: forbidden_zero_bit (1 bit) = 0 / nal_unit_type (6 bit) / nuh_layer_id 最上位 1 bit = 0
+    // 第 2 バイト: nuh_layer_id 下位 5 bit = 0 / nuh_temporal_id_plus1 (3 bit) = 1
+    // VPS (nal_unit_type=32): (32 << 1) | 0 = 0x40
+    const VPS_HEADER: [u8; 2] = [0x40, 0x01];
+    // SPS (nal_unit_type=33): (33 << 1) | 0 = 0x42
+    const SPS_HEADER: [u8; 2] = [0x42, 0x01];
+    // PPS (nal_unit_type=34): (34 << 1) | 0 = 0x44
+    const PPS_HEADER: [u8; 2] = [0x44, 0x01];
+
+    #[test]
+    fn h265_annexb_iterator_parses_vps_sps_pps_with_4byte_start_code() {
+        // 4 バイト start code [0, 0, 0, 1] で区切られた VPS / SPS / PPS を順に取り出せること
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0, 0, 0, 1]);
+        data.extend_from_slice(&VPS_HEADER);
+        data.push(0xaa);
+        data.extend_from_slice(&[0, 0, 0, 1]);
+        data.extend_from_slice(&SPS_HEADER);
+        data.push(0xbb);
+        data.extend_from_slice(&[0, 0, 0, 1]);
+        data.extend_from_slice(&PPS_HEADER);
+        data.push(0xcc);
+
+        let nalus: Vec<_> = H265AnnexBNalUnits::new(&data)
+            .collect::<crate::Result<Vec<_>>>()
+            .expect("3 個の NAL ユニットを取り出せること");
+        assert_eq!(nalus.len(), 3);
+        assert_eq!(nalus[0].ty, H265_NALU_TYPE_VPS);
+        assert_eq!(nalus[0].data, &[0x40, 0x01, 0xaa]);
+        assert_eq!(nalus[1].ty, H265_NALU_TYPE_SPS);
+        assert_eq!(nalus[1].data, &[0x42, 0x01, 0xbb]);
+        assert_eq!(nalus[2].ty, H265_NALU_TYPE_PPS);
+        assert_eq!(nalus[2].data, &[0x44, 0x01, 0xcc]);
+    }
+
+    #[test]
+    fn h265_annexb_iterator_parses_with_3byte_start_code() {
+        // 3 バイト start code [0, 0, 1] でも NAL タイプを取り出せること
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0, 0, 1]);
+        data.extend_from_slice(&VPS_HEADER);
+        data.push(0x55);
+
+        let nalus: Vec<_> = H265AnnexBNalUnits::new(&data)
+            .collect::<crate::Result<Vec<_>>>()
+            .expect("3 バイト start code でも 1 個取り出せること");
+        assert_eq!(nalus.len(), 1);
+        assert_eq!(nalus[0].ty, H265_NALU_TYPE_VPS);
+    }
+
+    #[test]
+    fn h265_annexb_iterator_returns_none_for_empty_input() {
+        // 空入力ではイテレーターが None を返すこと
+        let mut iter = H265AnnexBNalUnits::new(&[]);
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn h265_annexb_iterator_rejects_missing_start_code_prefix() {
+        // start code 無しでイテレートすると Err になること
+        let data = [0x40, 0x01, 0xaa];
+        let mut iter = H265AnnexBNalUnits::new(&data);
+        let result = iter
+            .next()
+            .expect("start code 無しの先頭 NAL は Err を返す");
+        assert!(result.is_err(), "start code 無しは Err: {result:?}");
+    }
+
+    #[test]
+    fn h265_annexb_iterator_rejects_empty_nal_unit() {
+        // start code 直後がデータ終端だと「empty H.265 NAL unit」 Err になること
+        let data = [0, 0, 0, 1];
+        let mut iter = H265AnnexBNalUnits::new(&data);
+        let result = iter.next().expect("空 NAL ユニットは Err を返す");
+        assert!(result.is_err(), "空 NAL は Err: {result:?}");
+    }
+
+    #[test]
+    fn h265_annexb_iterator_rejects_forbidden_zero_bit_set() {
+        // forbidden_zero_bit (NAL ヘッダ第 1 バイトの MSB) が 1 だと Err になること
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0, 0, 0, 1]);
+        data.push(0x80 | 0x40); // forbidden_zero_bit = 1, nal_unit_type = 32
+        data.push(0x01);
+
+        let mut iter = H265AnnexBNalUnits::new(&data);
+        let result = iter
+            .next()
+            .expect("forbidden_zero_bit 立ちの NAL は Err を返す");
+        assert!(result.is_err(), "forbidden_zero_bit 立ちは Err: {result:?}");
+    }
+
+    #[test]
+    fn h265_annexb_iterator_extracts_nal_type_from_upper_6_bits() {
+        // NAL タイプ抽出が `(byte >> 1) & 0x3F` で行われること
+        // (H.264 の `& 0x1F` との違いを担保する)
+        // nal_unit_type = 32 (VPS) のとき byte 0 = (32 << 1) | 0 = 0x40 で取り出せる
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0, 0, 0, 1]);
+        data.push(0x40);
+        data.push(0x01);
+        data.push(0xff);
+
+        let nalus: Vec<_> = H265AnnexBNalUnits::new(&data)
+            .collect::<crate::Result<Vec<_>>>()
+            .expect("VPS NAL を取り出せること");
+        assert_eq!(
+            nalus[0].ty, 32,
+            "nal_unit_type = 32 (VPS) として抽出されること"
+        );
+    }
 }
