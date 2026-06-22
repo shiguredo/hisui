@@ -447,6 +447,17 @@ impl VideoTrackHeader {
                     "WebM video TRACK_ENTRY has no Video master element; falling back to width=0 height=0"
                 );
             }
+            // AV1 / H264AnnexB は sample_entry 構築に CodecPrivate (AV1CodecConfigurationRecord /
+            // avcC) を必要とする。欠落時はパーサが「too short」を返してしまい原因が分からないため、
+            // ここで明示的に検出して `AudioTrackHeader::read` の OpusHead 欠落検出と対称な
+            // 診断メッセージを返す。
+            if matches!(codec, VideoFormat::Av1 | VideoFormat::H264AnnexB)
+                && codec_private.is_empty()
+            {
+                return Err(crate::Error::new(format!(
+                    "video TRACK_ENTRY missing CodecPrivate element for {codec:?}"
+                )));
+            }
             found = Some((codec, width, height, codec_private));
         }
         if let Some((codec, width, height, codec_private)) = found {
