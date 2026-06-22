@@ -517,45 +517,24 @@ impl ObswsCoordinator {
         request_id: &str,
         error: TextOverlayError,
     ) -> CommandResult {
-        let (code, message) = map_text_overlay_error(&error);
-        self.build_error_result(request_type, request_id, code, &message)
+        let code = text_overlay_error_status_code(&error);
+        self.build_error_result(request_type, request_id, code, &error.to_string())
     }
 }
 
-fn map_text_overlay_error(error: &TextOverlayError) -> (i64, String) {
+/// `TextOverlayError` のバリアントから対応する `REQUEST_STATUS_*` コードを返す。
+/// クライアント向けの文言は `TextOverlayError::Display` 実装が担当する
+/// (旧 `map_text_overlay_error` で二重に書いていた文言生成をなくしている)。
+fn text_overlay_error_status_code(error: &TextOverlayError) -> i64 {
     match error {
-        TextOverlayError::AlreadyExists => (
-            REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
-            "text overlay already exists".to_owned(),
-        ),
-        TextOverlayError::NotFound => (
-            REQUEST_STATUS_RESOURCE_NOT_FOUND,
-            "text overlay not found".to_owned(),
-        ),
-        TextOverlayError::InvalidFontName(s) => (
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            format!("invalid fontName: {s}"),
-        ),
-        TextOverlayError::FontResolveFailed(s) => (
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            format!("fontName resolve failed: {s}"),
-        ),
-        TextOverlayError::InvalidColor(s) => (
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            format!("invalid fontColor: {s}"),
-        ),
-        TextOverlayError::InvalidFontSize(s) => (
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            format!("invalid fontSize: {s}"),
-        ),
-        TextOverlayError::InvalidText(s) => (
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            format!("invalid text: {s}"),
-        ),
-        TextOverlayError::LimitExceeded => (
-            REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
-            "text overlay limit exceeded".to_owned(),
-        ),
+        TextOverlayError::AlreadyExists => REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+        TextOverlayError::NotFound => REQUEST_STATUS_RESOURCE_NOT_FOUND,
+        TextOverlayError::InvalidFontName(_)
+        | TextOverlayError::FontResolveFailed(_)
+        | TextOverlayError::InvalidColor(_)
+        | TextOverlayError::InvalidFontSize(_)
+        | TextOverlayError::InvalidText(_) => REQUEST_STATUS_INVALID_REQUEST_FIELD,
+        TextOverlayError::LimitExceeded => REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
     }
 }
 

@@ -189,11 +189,13 @@ pub enum TextOverlayError {
 
 impl std::fmt::Display for TextOverlayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // obsws ハンドラから `error.to_string()` 経由でクライアント向け文言として
+        // 使われるため、フィールド名 (fontName / fontColor 等) を含む形で書く。
         match self {
             Self::AlreadyExists => write!(f, "text overlay already exists"),
             Self::NotFound => write!(f, "text overlay not found"),
             Self::InvalidFontName(s) => write!(f, "invalid fontName: {s}"),
-            Self::FontResolveFailed(s) => write!(f, "font resolve failed: {s}"),
+            Self::FontResolveFailed(s) => write!(f, "fontName resolve failed: {s}"),
             Self::InvalidColor(s) => write!(f, "invalid fontColor: {s}"),
             Self::InvalidFontSize(s) => write!(f, "invalid fontSize: {s}"),
             Self::InvalidText(s) => write!(f, "invalid text: {s}"),
