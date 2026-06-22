@@ -1,17 +1,17 @@
-//! `src/mixer/text_overlay.rs` のバリデーション関数と `TextOverlaySpec` 構造体に対する PBT。
+//! `src/mixer/video/text_overlay/` のバリデーション関数と `TextOverlaySpec` 構造体に対する PBT。
 //!
 //! text 長境界 / 行数境界 / fontSize 境界 / 改行のみ / Unicode 制御文字 /
 //! フォント不在文字 / 空文字 / x = i64 境界の各境界値ケースを proptest で
 //! 範囲網羅的に検証する。
 //!
-//! 純粋関数 (`validate_text` / `validate_font_size`) のみを対象にし、ファイル I/O
-//! を伴う `validate_font_name_and_resolve_path` や `ProcessorState` の状態遷移は
-//! スコープ外。これらは `src/mixer/text_overlay.rs` の単体テストと
+//! 純粋関数 (`validate_text` / `validate_font_size`) のみを対象にし、 ファイル I/O
+//! を伴う `validate_font_name_and_resolve_path` や `TextOverlayLayer` の状態遷移は
+//! スコープ外。 これらは `src/mixer/video/text_overlay/layer.rs` の単体テストと
 //! `src/obsws/session/tests.rs` の obsws 経由テストでカバーされている。
 
-use hisui::mixer::text_overlay::{
-    TEXT_MAX_BYTES, TEXT_MAX_LINES, TextOverlayError, TextOverlaySpec, validate_font_size,
-    validate_text,
+use hisui::mixer::video::text_overlay::validate::{validate_font_size, validate_text};
+use hisui::mixer::video::text_overlay::{
+    TEXT_MAX_BYTES, TEXT_MAX_LINES, TextOverlayError, TextOverlaySpec,
 };
 use proptest::prelude::*;
 

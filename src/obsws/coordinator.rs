@@ -875,16 +875,11 @@ impl ObswsCoordinator {
             .map(|scene| scene.scene_uuid)
             .unwrap_or_default();
         let scene_inputs = self.state.list_current_program_scene_input_entries();
-        let text_overlay_track = self
-            .state
-            .text_overlay_config()
-            .map(|_| crate::TrackId::new(crate::mixer::text_overlay::TEXT_OVERLAY_TRACK_ID));
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
             self.state.canvas_width(),
             self.state.canvas_height(),
             self.state.frame_rate(),
-            text_overlay_track,
         )
         .map_err(|e| {
             crate::Error::new(format!(

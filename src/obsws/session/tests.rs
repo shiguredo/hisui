@@ -145,7 +145,6 @@ async fn create_initialized_coordinator_handle_with_pipeline_and_record_dir(
         registry.canvas_width(),
         registry.canvas_height(),
         registry.frame_rate(),
-        None,
     )
     .map_err(|e| {
         crate::Error::new(format!(
@@ -154,7 +153,8 @@ async fn create_initialized_coordinator_handle_with_pipeline_and_record_dir(
         ))
     })?;
 
-    crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan).await?;
+    crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan, None)
+        .await?;
 
     let scene_uuid = registry
         .current_program_scene()
@@ -3953,11 +3953,12 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
 /// 機能有効時の `ObswsCoordinator` を立ち上げる。
 ///
 /// `testdata/fonts/PublicSans-Regular.ttf` を `--font-search-root` 兼デフォルトフォントとして
-/// 使い、MediaPipeline + TextOverlayProcessor + program mixer 群を spawn する。
+/// 使い、 MediaPipeline + program mixer 群 (ビデオミキサーは内部レイヤとして
+/// テキストオーバーレイ機能を有効化) を spawn する。
 /// 戻り値の `ObswsCoordinatorHandle` を通じて 4 メソッドの obsws リクエストが実行できる。
 async fn create_initialized_coordinator_with_text_overlay()
 -> crate::Result<crate::obsws::coordinator::ObswsCoordinatorHandle> {
-    let text_overlay_config = crate::mixer::text_overlay::TextOverlayConfig::build(
+    let text_overlay_config = crate::mixer::video::text_overlay::TextOverlayConfig::build(
         Some(std::path::PathBuf::from("testdata/fonts")),
         Some("PublicSans-Regular.ttf".to_owned()),
     )
@@ -3974,36 +3975,22 @@ async fn create_initialized_coordinator_with_text_overlay()
         .await
         .map_err(|_| crate::Error::new("trigger_start: pipeline terminated"))?;
 
-    // TextOverlayProcessor を常駐 spawn する (server 起動時と同じ手順)。
-    let processor = crate::mixer::text_overlay::TextOverlayProcessor::new(
-        registry.canvas_width(),
-        registry.canvas_height(),
-        registry.frame_rate(),
-        text_overlay_config,
-    );
-    pipeline_handle
-        .spawn_processor(
-            crate::ProcessorId::new(crate::mixer::text_overlay::TEXT_OVERLAY_PROCESSOR_ID),
-            crate::ProcessorMetadata::new(crate::mixer::text_overlay::TEXT_OVERLAY_PROCESSOR_ID),
-            |handle| async move { processor.run(handle).await },
-        )
-        .await
-        .map_err(|e| crate::Error::new(format!("failed to spawn text overlay processor: {e}")))?;
-
-    // program mixer 用の output_plan には text_overlay track を含める。
+    // 新設計ではテキストオーバーレイ機能は VideoRealtimeMixer の内部レイヤとして
+    // `start_mixer_processors` 経由で組み込まれる (旧設計の独立 processor spawn は不要)。
     let scene_inputs = registry.list_current_program_scene_input_entries();
-    let text_overlay_track = Some(crate::TrackId::new(
-        crate::mixer::text_overlay::TEXT_OVERLAY_TRACK_ID,
-    ));
     let output_plan = crate::obsws::output_plan::build_composed_output_plan(
         &scene_inputs,
         registry.canvas_width(),
         registry.canvas_height(),
         registry.frame_rate(),
-        text_overlay_track,
     )
     .map_err(|e| crate::Error::new(format!("failed to build output plan: {}", e.message())))?;
-    crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan).await?;
+    crate::obsws::session::output::start_mixer_processors(
+        &pipeline_handle,
+        &output_plan,
+        Some(text_overlay_config),
+    )
+    .await?;
 
     let scene_uuid = registry
         .current_program_scene()
@@ -4485,7 +4472,7 @@ async fn hisui_create_text_overlay_rejects_invalid_text() -> crate::Result<()> {
     let coordinator = create_initialized_coordinator_with_text_overlay().await?;
 
     // バイト数上限超過 (TEXT_MAX_BYTES = 4096)
-    let too_long = "a".repeat(crate::mixer::text_overlay::TEXT_MAX_BYTES + 1);
+    let too_long = "a".repeat(crate::mixer::video::text_overlay::TEXT_MAX_BYTES + 1);
     let body = format!(
         r#"{{"textOverlayName":"text-bytes","text":"{too_long}","x":0,"y":0,"fontSize":32}}"#
     );
@@ -4504,7 +4491,7 @@ async fn hisui_create_text_overlay_rejects_invalid_text() -> crate::Result<()> {
     );
 
     // 行数上限超過 (TEXT_MAX_LINES = 64)
-    let too_many_newlines = "\\n".repeat(crate::mixer::text_overlay::TEXT_MAX_LINES);
+    let too_many_newlines = "\\n".repeat(crate::mixer::video::text_overlay::TEXT_MAX_LINES);
     let body = format!(
         r#"{{"textOverlayName":"text-lines","text":"{too_many_newlines}","x":0,"y":0,"fontSize":32}}"#
     );
@@ -4530,7 +4517,7 @@ async fn hisui_create_text_overlay_rejects_when_limit_exceeded() -> crate::Resul
     let coordinator = create_initialized_coordinator_with_text_overlay().await?;
 
     // OVERLAY_LIMIT 個までは成功する。
-    for i in 0..crate::mixer::text_overlay::OVERLAY_LIMIT {
+    for i in 0..crate::mixer::video::text_overlay::OVERLAY_LIMIT {
         let body =
             format!(r#"{{"textOverlayName":"overlay-{i}","text":"x","x":0,"y":0,"fontSize":32}}"#);
         let result = process_text_overlay_request(
@@ -4640,49 +4627,23 @@ async fn hisui_create_text_overlay_returns_invalid_request_field_for_type_mismat
     Ok(())
 }
 
-/// `z = i32::MAX` はテキストオーバーレイレイヤの予約値のため Create / Update で拒否される。
-/// 内部の VideoRealtimeMixer で text overlay と一般 input track の z が衝突するのを防ぐ。
+/// 新設計ではテキストオーバーレイ機能を VideoRealtimeMixer の内部レイヤとして
+/// 組み込むため、 旧設計のような `z = i32::MAX` 予約値は存在しない。
+/// 一般 input track と layer の z が衝突する経路自体がなくなったため、
+/// クライアントは i32 全域を z として指定できる。
 #[tokio::test]
-async fn hisui_text_overlay_rejects_reserved_z_value() -> crate::Result<()> {
+async fn hisui_text_overlay_accepts_i32_max_as_z_value() -> crate::Result<()> {
     let coordinator = create_initialized_coordinator_with_text_overlay().await?;
 
-    // Create で z = i32::MAX (2147483647) を渡すと拒否される。
+    // Create で z = i32::MAX (2147483647) を渡しても成功する。
     let create = process_text_overlay_request(
         &coordinator,
-        "req-create-reserved-z",
+        "req-create-i32-max-z",
         "HisuiCreateTextOverlay",
         Some(r#"{"textOverlayName":"x","text":"x","x":0,"y":0,"fontSize":32,"z":2147483647}"#),
     )
     .await;
-    let (success, code) = parse_request_status(&create.response_text);
-    assert!(!success, "Create で予約値 z は拒否される");
-    assert_eq!(
-        code,
-        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-        "予約値拒否は INVALID_REQUEST_FIELD (400)"
-    );
-
-    // Update でも同様に拒否される。先に通常の overlay を Create してから Update を試す。
-    process_text_overlay_request(
-        &coordinator,
-        "req-create-for-update",
-        "HisuiCreateTextOverlay",
-        Some(r#"{"textOverlayName":"a","text":"x","x":0,"y":0,"fontSize":32}"#),
-    )
-    .await;
-    let update = process_text_overlay_request(
-        &coordinator,
-        "req-update-reserved-z",
-        "HisuiUpdateTextOverlay",
-        Some(r#"{"textOverlayName":"a","z":2147483647}"#),
-    )
-    .await;
-    let (success, code) = parse_request_status(&update.response_text);
-    assert!(!success, "Update でも予約値 z は拒否される");
-    assert_eq!(
-        code,
-        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
-        "Update も INVALID_REQUEST_FIELD (400)"
-    );
+    let (success, _) = parse_request_status(&create.response_text);
+    assert!(success, "新設計では z = i32::MAX も受け付ける");
     Ok(())
 }

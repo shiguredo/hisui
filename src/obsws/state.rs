@@ -59,7 +59,7 @@ impl ObswsSessionState {
         canvas_height: crate::types::EvenUsize,
         frame_rate: crate::video::FrameRate,
         state_file_path: Option<PathBuf>,
-        text_overlay_config: Option<crate::mixer::text_overlay::TextOverlayConfig>,
+        text_overlay_config: Option<crate::mixer::video::text_overlay::TextOverlayConfig>,
     ) -> Self {
         let mut scenes_by_name = BTreeMap::new();
         scenes_by_name.insert(
@@ -104,7 +104,7 @@ impl ObswsSessionState {
     /// テキストオーバーレイ機能を有効化した状態でテスト用 `ObswsSessionState` を生成する。
     #[cfg(test)]
     pub fn new_for_test_with_text_overlay(
-        text_overlay_config: crate::mixer::text_overlay::TextOverlayConfig,
+        text_overlay_config: crate::mixer::video::text_overlay::TextOverlayConfig,
     ) -> Self {
         Self::new(
             crate::types::EvenUsize::new(1920).expect("1920 is even"),
@@ -802,7 +802,9 @@ impl ObswsSessionState {
         self.frame_rate
     }
 
-    pub fn text_overlay_config(&self) -> Option<&crate::mixer::text_overlay::TextOverlayConfig> {
+    pub fn text_overlay_config(
+        &self,
+    ) -> Option<&crate::mixer::video::text_overlay::TextOverlayConfig> {
         self.text_overlay_config.as_ref()
     }
 

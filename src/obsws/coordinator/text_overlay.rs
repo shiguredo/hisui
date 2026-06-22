@@ -1,9 +1,9 @@
 use tokio::sync::{mpsc, oneshot};
 
 use crate::ProcessorId;
-use crate::mixer::text_overlay::{
-    TEXT_OVERLAY_PROCESSOR_ID, TextOverlayError, TextOverlayPatch, TextOverlayRpcMessage,
-    TextOverlaySpecInput, TextOverlayState,
+use crate::mixer::video::VideoRealtimeMixerRpcMessage;
+use crate::mixer::video::text_overlay::{
+    TextOverlayCommand, TextOverlayError, TextOverlayPatch, TextOverlaySpecInput, TextOverlayState,
 };
 use crate::obsws::coordinator::{CommandResult, ObswsCoordinator};
 use crate::obsws::protocol::{
@@ -153,18 +153,20 @@ impl ObswsCoordinator {
         };
         let (reply_tx, reply_rx) = oneshot::channel();
         if sender
-            .send(TextOverlayRpcMessage::Add {
-                name,
-                input,
-                reply_tx,
-            })
+            .send(VideoRealtimeMixerRpcMessage::TextOverlay(
+                TextOverlayCommand::Add {
+                    name,
+                    input,
+                    reply_tx,
+                },
+            ))
             .is_err()
         {
             return self.build_error_result(
                 request_type,
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "text overlay processor is not running",
+                "video mixer rpc channel is closed",
             );
         }
         match reply_rx.await {
@@ -180,7 +182,7 @@ impl ObswsCoordinator {
                 request_type,
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "text overlay processor dropped reply channel",
+                "video mixer dropped reply channel",
             ),
         }
     }
@@ -295,18 +297,20 @@ impl ObswsCoordinator {
         };
         let (reply_tx, reply_rx) = oneshot::channel();
         if sender
-            .send(TextOverlayRpcMessage::Update {
-                name,
-                patch,
-                reply_tx,
-            })
+            .send(VideoRealtimeMixerRpcMessage::TextOverlay(
+                TextOverlayCommand::Update {
+                    name,
+                    patch,
+                    reply_tx,
+                },
+            ))
             .is_err()
         {
             return self.build_error_result(
                 request_type,
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "text overlay processor is not running",
+                "video mixer rpc channel is closed",
             );
         }
         match reply_rx.await {
@@ -322,7 +326,7 @@ impl ObswsCoordinator {
                 request_type,
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "text overlay processor dropped reply channel",
+                "video mixer dropped reply channel",
             ),
         }
     }
@@ -376,14 +380,16 @@ impl ObswsCoordinator {
         };
         let (reply_tx, reply_rx) = oneshot::channel();
         if sender
-            .send(TextOverlayRpcMessage::Remove { name, reply_tx })
+            .send(VideoRealtimeMixerRpcMessage::TextOverlay(
+                TextOverlayCommand::Remove { name, reply_tx },
+            ))
             .is_err()
         {
             return self.build_error_result(
                 request_type,
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "text overlay processor is not running",
+                "video mixer rpc channel is closed",
             );
         }
         match reply_rx.await {
@@ -399,7 +405,7 @@ impl ObswsCoordinator {
                 request_type,
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "text overlay processor dropped reply channel",
+                "video mixer dropped reply channel",
             ),
         }
     }
@@ -432,14 +438,16 @@ impl ObswsCoordinator {
         };
         let (reply_tx, reply_rx) = oneshot::channel();
         if sender
-            .send(TextOverlayRpcMessage::List { reply_tx })
+            .send(VideoRealtimeMixerRpcMessage::TextOverlay(
+                TextOverlayCommand::List { reply_tx },
+            ))
             .is_err()
         {
             return self.build_error_result(
                 request_type,
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "text overlay processor is not running",
+                "video mixer rpc channel is closed",
             );
         }
         match reply_rx.await {
@@ -465,7 +473,7 @@ impl ObswsCoordinator {
                 request_type,
                 request_id,
                 REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "text overlay processor dropped reply channel",
+                "video mixer dropped reply channel",
             ),
         }
     }
@@ -495,20 +503,26 @@ impl ObswsCoordinator {
         }
     }
 
-    /// `TextOverlayProcessor` の RPC 送信側を取得する。
+    /// `VideoRealtimeMixer` の RPC 送信側を取得する。
+    ///
+    /// 新設計ではテキストオーバーレイ機能を `VideoRealtimeMixer` の内部レイヤとして
+    /// 組み込んでおり、 `VideoRealtimeMixerRpcMessage::TextOverlay(...)` バリアント
+    /// 経由で Add / Update / Remove / List を送る。 `register_rpc_sender` が同一
+    /// processor で 1 sender しか許さない制約に従って、 sender 自体は既存の
+    /// `program:video_mixer` のものを共有する。
     async fn text_overlay_sender(
         &self,
-    ) -> Result<mpsc::UnboundedSender<TextOverlayRpcMessage>, String> {
+    ) -> Result<mpsc::UnboundedSender<VideoRealtimeMixerRpcMessage>, String> {
         let handle = self
             .pipeline_handle
             .as_ref()
             .ok_or_else(|| "media pipeline handle is not available".to_owned())?;
         handle
-            .get_rpc_sender::<mpsc::UnboundedSender<TextOverlayRpcMessage>>(&ProcessorId::new(
-                TEXT_OVERLAY_PROCESSOR_ID,
-            ))
+            .get_rpc_sender::<mpsc::UnboundedSender<VideoRealtimeMixerRpcMessage>>(
+                &ProcessorId::new("program:video_mixer"),
+            )
             .await
-            .map_err(|e| format!("failed to get text overlay rpc sender: {e}"))
+            .map_err(|e| format!("failed to get video mixer rpc sender: {e}"))
     }
 
     fn build_text_overlay_error_result(
@@ -702,22 +716,16 @@ fn parse_optional_i64(
 
 /// `z` フィールドを `Option<i32>` として取り出す。
 ///
-/// `z` は順序値のため i32 範囲で十分な精度だが、obsws の他フィールドと同じく
-/// JSON 上は integer として受信する。
-/// 許容範囲は `i32::MIN..=i32::MAX - 1` で、`i32::MAX` は
-/// `ObswsVideoMixerInputTrack` で text overlay レイヤ用に予約されているため拒否する
-/// (一般 input track と同じ z にすると合成順序が壊れる)。
-/// 範囲外はクライアントの誤用とみなし、呼び出し側で `INVALID_REQUEST_FIELD` にマップする。
+/// `z` は順序値のため i32 範囲で十分な精度。 obsws の他フィールドと同じく
+/// JSON 上は integer として受信し、 i32 範囲外はクライアントの誤用とみなして
+/// 呼び出し側で `INVALID_REQUEST_FIELD` にマップする。 新設計ではテキストオーバーレイ
+/// 機能を mixer 内部レイヤとして組み込んだため、 旧設計のような `i32::MAX` 予約値は
+/// 存在しない (クライアントは i32 全域を z として指定できる)。
 fn parse_optional_z(request_data: &nojson::RawJsonOwned) -> Result<Option<i32>, String> {
     let Some(v) = parse_optional_i64(request_data, "z")? else {
         return Ok(None);
     };
     let z = i32::try_from(v).map_err(|_| format!("z must be within i32 range (got {v})"))?;
-    if z == i32::MAX {
-        return Err(format!(
-            "z = i32::MAX is reserved for the text overlay layer (got {v})"
-        ));
-    }
     Ok(Some(z))
 }
 
@@ -871,23 +879,15 @@ mod tests {
         assert_eq!(parse_optional_z(&missing), Ok(None), "欠落は Ok(None)");
     }
 
-    /// `parse_optional_z`: i32::MAX はテキストオーバーレイレイヤの予約値のため拒否される。
-    /// クライアントが指定すると一般 input track と合成順序が衝突するので INVALID で返す。
+    /// `parse_optional_z`: 新設計では i32::MAX も valid な値として受け付ける。
+    /// 旧設計の予約値 (`i32::MAX`) は廃止された。
     #[test]
-    fn parse_optional_z_rejects_reserved_i32_max() {
+    fn parse_optional_z_accepts_i32_max() {
         let json = parse_owned_json(r#"{"z":2147483647}"#); // i32::MAX
-        let err = parse_optional_z(&json).expect_err("i32::MAX は予約値のため拒否される");
-        assert!(
-            err.contains("reserved"),
-            "エラー文言で予約値であることを伝える: {err}"
-        );
-
-        // 直前値 (i32::MAX - 1) は許容される。
-        let ok = parse_owned_json(r#"{"z":2147483646}"#); // i32::MAX - 1
         assert_eq!(
-            parse_optional_z(&ok),
-            Ok(Some(i32::MAX - 1)),
-            "i32::MAX - 1 は許容される"
+            parse_optional_z(&json),
+            Ok(Some(i32::MAX)),
+            "新設計では i32::MAX も受け付ける"
         );
     }
 

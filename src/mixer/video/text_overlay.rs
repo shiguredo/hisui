@@ -1,0 +1,305 @@
+//! `VideoRealtimeMixer` の内部レイヤとして組み込まれるテキストオーバーレイ機能。
+//!
+//! 本モジュールは公開 API (Config / Error / 各種 Spec / 定数) を集約する。
+//! `TextOverlayLayer` 本体は `layer` サブモジュールに、 検証関数は `validate`
+//! サブモジュールに分離している。
+//!
+//! 旧設計では独立した `TextOverlayProcessor` を `MediaPipeline` 上に常駐 spawn し、
+//! `z = i32::MAX` 予約値で `VideoRealtimeMixer` の最終 InputTrack として接続していたが、
+//! 新設計では `VideoRealtimeMixer` の内部レイヤとして組み込み、 `compose_frame` の
+//! 追加合成段で `RealtimeI420Canvas::draw_frame_clipped` 経由で最上位合成する。
+
+use std::path::PathBuf;
+
+use tokio::sync::oneshot;
+
+pub mod layer;
+pub mod validate;
+
+pub use self::layer::TextOverlayLayer;
+
+/// テキストオーバーレイ機能の起動時設定。
+///
+/// CLI 引数 `--font-search-root` と `--default-font` の両方が指定された場合のみ
+/// `Some` となり、 テキストオーバーレイ機能が有効になる。
+/// 両方とも未指定の場合は `None` で、 機能は無効として扱う (obsws の
+/// `HisuiCreateTextOverlay` 等は `RESOURCE_ACTION_NOT_SUPPORTED` を返す)。
+/// 片方のみ指定された場合は起動時にエラーとする。
+#[derive(Debug, Clone)]
+pub struct TextOverlayConfig {
+    /// canonicalize 済みのフォント探索ルート (絶対パス)。
+    ///
+    /// 実際のフォントファイル参照時は `<font_search_root>/<font_name>` を canonicalize した
+    /// 結果が、 この root の prefix を持つことを必ず確認する (path traversal 対策)。
+    pub font_search_root: PathBuf,
+
+    /// `HisuiCreateTextOverlay` で `fontName` が省略された場合に使う既定フォント名。
+    ///
+    /// `<font_search_root>/<default_font_name>` が起動時に解決・読み込み可能であることを
+    /// `TextOverlayConfig::build` で検証済み。
+    pub default_font_name: String,
+}
+
+impl TextOverlayConfig {
+    /// CLI 引数から `TextOverlayConfig` を構築する。
+    ///
+    /// - 両方 `None`: `Ok(None)` (機能無効として正常起動)
+    /// - 片方のみ `Some`: `Err` (CLI 引数の組として不整合のため起動失敗)
+    /// - 両方 `Some`: 起動時検証 (canonicalize、 root 内チェック、 raden での読み込み試行) を
+    ///   経て `Ok(Some(...))` を返す。 検証失敗時は `Err`
+    pub fn build(
+        font_search_root: Option<PathBuf>,
+        default_font_name: Option<String>,
+    ) -> Result<Option<Self>, String> {
+        match (font_search_root, default_font_name) {
+            (None, None) => Ok(None),
+            (Some(_), None) => {
+                Err("--font-search-root and --default-font must be specified together".to_owned())
+            }
+            (None, Some(_)) => {
+                Err("--font-search-root and --default-font must be specified together".to_owned())
+            }
+            (Some(root), Some(name)) => {
+                let canonical_root = root.canonicalize().map_err(|e| {
+                    format!(
+                        "failed to canonicalize --font-search-root {}: {}",
+                        root.display(),
+                        e
+                    )
+                })?;
+                let font_path = canonical_root.join(&name);
+                let canonical_font = font_path.canonicalize().map_err(|e| {
+                    format!(
+                        "failed to canonicalize default font {}: {}",
+                        font_path.display(),
+                        e
+                    )
+                })?;
+                if !canonical_font.starts_with(&canonical_root) {
+                    return Err(format!(
+                        "default font {} escapes --font-search-root {}",
+                        canonical_font.display(),
+                        canonical_root.display()
+                    ));
+                }
+                let path_str = canonical_font.to_str().ok_or_else(|| {
+                    format!(
+                        "default font path {} is not valid UTF-8",
+                        canonical_font.display()
+                    )
+                })?;
+                let font_data = raden::FontData::from_file(path_str).map_err(|e| {
+                    format!(
+                        "failed to load default font {}: {:?}",
+                        canonical_font.display(),
+                        e
+                    )
+                })?;
+                raden::FontFace::from_data(&font_data, 0).map_err(|e| {
+                    format!(
+                        "failed to parse default font {}: {:?}",
+                        canonical_font.display(),
+                        e
+                    )
+                })?;
+                Ok(Some(Self {
+                    font_search_root: canonical_root,
+                    default_font_name: name,
+                }))
+            }
+        }
+    }
+}
+
+/// 1 mixer が同時に保持できるテキストオーバーレイの最大数 (DoS 対策の上限)。
+pub const OVERLAY_LIMIT: usize = 64;
+
+/// `text` フィールドの最大バイト数。
+pub const TEXT_MAX_BYTES: usize = 4096;
+
+/// `text` フィールドの最大行数 (`\n` 区切り)。
+pub const TEXT_MAX_LINES: usize = 64;
+
+/// テキストオーバーレイの仕様 (確定値)。
+///
+/// `font_color_argb` は `0xAARRGGBB` の straight alpha 値。 default (`HisuiCreateTextOverlay` で
+/// 省略時) は `0xFFFFFFFF` (不透明白)。
+/// `z` は確定値 (`TextOverlaySpecInput::z = None` の場合はレイヤが宣言順から確定する)。
+#[derive(Debug, Clone)]
+pub struct TextOverlaySpec {
+    pub text: String,
+    pub x: i64,
+    pub y: i64,
+    pub font_size: u32,
+    pub font_color_argb: u32,
+    pub font_name: String,
+    pub z: i32,
+}
+
+/// `HisuiCreateTextOverlay` の入力 (確定前)。
+///
+/// `z = None` の場合はレイヤが「現在の最大 z + 1」を割り当てる (= 宣言順、 後勝ち)。
+#[derive(Debug, Clone)]
+pub struct TextOverlaySpecInput {
+    pub text: String,
+    pub x: i64,
+    pub y: i64,
+    pub font_size: u32,
+    pub font_color_argb: u32,
+    pub font_name: String,
+    pub z: Option<i32>,
+}
+
+/// `HisuiUpdateTextOverlay` 用の部分更新パッチ。 `None` は省略 (= 現状維持)。
+#[derive(Debug, Clone, Default)]
+pub struct TextOverlayPatch {
+    pub text: Option<String>,
+    pub x: Option<i64>,
+    pub y: Option<i64>,
+    pub font_size: Option<u32>,
+    pub font_color_argb: Option<u32>,
+    pub font_name: Option<String>,
+    pub z: Option<i32>,
+}
+
+/// `HisuiListTextOverlays` で返す現在状態。
+#[derive(Debug, Clone)]
+pub struct TextOverlayState {
+    pub name: String,
+    pub spec: TextOverlaySpec,
+}
+
+/// テキストオーバーレイ操作のエラー。 obsws ハンドラ側で `REQUEST_STATUS_*` にマップする。
+#[derive(Debug, Clone)]
+pub enum TextOverlayError {
+    /// 同名 overlay が既に存在する (Create のみ)。
+    AlreadyExists,
+    /// 対象 overlay が存在しない (Update / Remove)。
+    NotFound,
+    /// `fontName` が `/` `\` `..` NUL バイトを含む等の文字種違反。
+    InvalidFontName(String),
+    /// `fontName` の解決失敗 (ファイルなし / ルート外 / フォント破損)。
+    FontResolveFailed(String),
+    /// `fontColor` の形式違反。
+    InvalidColor(String),
+    /// `fontSize` の範囲外。
+    InvalidFontSize(String),
+    /// `text` のバイト数 / 行数上限超過。
+    InvalidText(String),
+    /// `OVERLAY_LIMIT` 超過。
+    LimitExceeded,
+}
+
+impl std::fmt::Display for TextOverlayError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // obsws ハンドラから `error.to_string()` 経由でクライアント向け文言として
+        // 使われるため、 フィールド名 (fontName / fontColor 等) を含む形で書く。
+        match self {
+            Self::AlreadyExists => write!(f, "text overlay already exists"),
+            Self::NotFound => write!(f, "text overlay not found"),
+            Self::InvalidFontName(s) => write!(f, "invalid fontName: {s}"),
+            Self::FontResolveFailed(s) => write!(f, "fontName resolve failed: {s}"),
+            Self::InvalidColor(s) => write!(f, "invalid fontColor: {s}"),
+            Self::InvalidFontSize(s) => write!(f, "invalid fontSize: {s}"),
+            Self::InvalidText(s) => write!(f, "invalid text: {s}"),
+            Self::LimitExceeded => write!(f, "text overlay limit exceeded"),
+        }
+    }
+}
+
+impl std::error::Error for TextOverlayError {}
+
+/// `VideoRealtimeMixer` のテキストオーバーレイ系 RPC バリアントに渡される追加メッセージ群。
+///
+/// `register_rpc_sender` は同一 processor で 1 sender しか登録できない (`media_pipeline.rs`)
+/// ため、 既存の `VideoRealtimeMixerRpcMessage` enum 内のバリアントとして統合する。
+/// ここで使われるバリアントは `VideoRealtimeMixerRpcMessage::TextOverlayAdd` 等。
+///
+/// reply 型はそれぞれ `Result<T, TextOverlayError>` (Add/Update/Remove は `T = ()`、
+/// List は `T = Vec<TextOverlayState>`) で、 obsws ハンドラが reply を待ち受けてマップする。
+#[derive(Debug)]
+pub enum TextOverlayCommand {
+    Add {
+        name: String,
+        input: TextOverlaySpecInput,
+        reply_tx: oneshot::Sender<Result<(), TextOverlayError>>,
+    },
+    Update {
+        name: String,
+        patch: TextOverlayPatch,
+        reply_tx: oneshot::Sender<Result<(), TextOverlayError>>,
+    },
+    Remove {
+        name: String,
+        reply_tx: oneshot::Sender<Result<(), TextOverlayError>>,
+    },
+    List {
+        reply_tx: oneshot::Sender<Vec<TextOverlayState>>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 両方未指定なら機能無効 (Ok(None))。
+    #[test]
+    fn build_returns_none_when_both_unspecified() {
+        let result = TextOverlayConfig::build(None, None).expect("両方未指定は正常起動");
+        assert!(result.is_none(), "両方未指定では機能無効を表す None になる");
+    }
+
+    /// font-search-root のみ指定はエラー。
+    #[test]
+    fn build_returns_err_when_only_root_specified() {
+        let err = TextOverlayConfig::build(Some(PathBuf::from("/")), None)
+            .expect_err("片方のみ指定はエラーになる");
+        assert!(
+            err.contains("--font-search-root and --default-font"),
+            "エラー文言で両方必須を伝える: {err}"
+        );
+    }
+
+    /// default-font のみ指定はエラー。
+    #[test]
+    fn build_returns_err_when_only_default_font_specified() {
+        let err = TextOverlayConfig::build(None, Some("foo.ttf".to_owned()))
+            .expect_err("片方のみ指定はエラーになる");
+        assert!(
+            err.contains("--font-search-root and --default-font"),
+            "エラー文言で両方必須を伝える: {err}"
+        );
+    }
+
+    /// 両方指定で実在フォントなら Ok(Some(...))。
+    #[test]
+    fn build_succeeds_with_real_font_in_testdata() {
+        let root = PathBuf::from("testdata/fonts");
+        let config = TextOverlayConfig::build(
+            Some(root.clone()),
+            Some("PublicSans-Regular.ttf".to_owned()),
+        )
+        .expect("testdata の Public Sans Regular は解決・読み込み可能")
+        .expect("両方指定なら Some が返る");
+        assert!(
+            config.font_search_root.is_absolute(),
+            "canonicalize 後は絶対パスになる: {:?}",
+            config.font_search_root
+        );
+        assert_eq!(config.default_font_name, "PublicSans-Regular.ttf");
+    }
+
+    /// 探索ルート配下に存在しないフォント名を指定するとエラー。
+    #[test]
+    fn build_returns_err_when_default_font_does_not_exist() {
+        let err = TextOverlayConfig::build(
+            Some(PathBuf::from("testdata/fonts")),
+            Some("nonexistent-font.ttf".to_owned()),
+        )
+        .expect_err("存在しないフォントはエラー");
+        assert!(
+            err.contains("nonexistent-font"),
+            "エラー文言にフォント名が含まれる: {err}"
+        );
+    }
+}

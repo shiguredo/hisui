@@ -159,7 +159,7 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
-    text_overlay_config: Option<crate::mixer::text_overlay::TextOverlayConfig>,
+    text_overlay_config: Option<crate::mixer::video::text_overlay::TextOverlayConfig>,
     stats: crate::stats::Stats,
     emit_startup_info: bool,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
@@ -311,41 +311,16 @@ pub async fn run_server(
         tracing::debug!("obsws initial start trigger was already completed");
     }
 
-    // テキストオーバーレイ機能が有効ならば、常駐 `TextOverlayProcessor` を spawn する。
-    // canvas は起動時固定なので、サーバ稼働中ずっと生かしてシーン切替でも再生成しない。
-    if let Some(config) = session_state.text_overlay_config().cloned() {
-        let processor = crate::mixer::text_overlay::TextOverlayProcessor::new(
-            session_state.canvas_width(),
-            session_state.canvas_height(),
-            session_state.frame_rate(),
-            config,
-        );
-        pipeline_handle
-            .spawn_processor(
-                crate::ProcessorId::new(crate::mixer::text_overlay::TEXT_OVERLAY_PROCESSOR_ID),
-                crate::ProcessorMetadata::new(
-                    crate::mixer::text_overlay::TEXT_OVERLAY_PROCESSOR_ID,
-                ),
-                |handle| async move { processor.run(handle).await },
-            )
-            .await
-            .map_err(|e| {
-                crate::Error::new(format!("failed to spawn text overlay processor: {e}"))
-            })?;
-    }
-
-    // Program 出力を初期化する（常駐ミキサー）
+    // Program 出力を初期化する（常駐ミキサー）。
+    // テキストオーバーレイ機能が有効な場合は、 ビデオミキサー内部のレイヤとして組み込まれる
+    // (旧設計のように別 processor を spawn する形は採らない)。
     let program_output = {
         let scene_inputs = session_state.list_current_program_scene_input_entries();
-        let text_overlay_track = session_state
-            .text_overlay_config()
-            .map(|_| crate::TrackId::new(crate::mixer::text_overlay::TEXT_OVERLAY_TRACK_ID));
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
             &scene_inputs,
             session_state.canvas_width(),
             session_state.canvas_height(),
             session_state.frame_rate(),
-            text_overlay_track,
         )
         .map_err(|e| {
             crate::Error::new(format!(
@@ -354,8 +329,13 @@ pub async fn run_server(
             ))
         })?;
 
-        crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan)
-            .await?;
+        let text_overlay_config = session_state.text_overlay_config().cloned();
+        crate::obsws::session::output::start_mixer_processors(
+            &pipeline_handle,
+            &output_plan,
+            text_overlay_config,
+        )
+        .await?;
 
         tracing::info!(
             "program output initialized: video={}, audio={}",

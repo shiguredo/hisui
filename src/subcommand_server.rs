@@ -165,7 +165,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
     // テキストオーバーレイ機能の起動時設定を構築する。
     // 両方未指定なら機能無効、片方のみは起動失敗、両方指定は canonicalize と raden での読み込み試行まで確認する。
     let text_overlay_config =
-        crate::mixer::text_overlay::TextOverlayConfig::build(font_search_root, default_font)
+        crate::mixer::video::text_overlay::TextOverlayConfig::build(font_search_root, default_font)
             .map_err(|e| noargs::Error::other(args, e))?;
 
     let addr = SocketAddr::new(host, port);
@@ -208,7 +208,7 @@ fn run_internal(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file: Option<PathBuf>,
-    text_overlay_config: Option<crate::mixer::text_overlay::TextOverlayConfig>,
+    text_overlay_config: Option<crate::mixer::video::text_overlay::TextOverlayConfig>,
     worker_threads: Option<NonZeroUsize>,
     stats: crate::stats::Stats,
     emit_startup_info: bool,
