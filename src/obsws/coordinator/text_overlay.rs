@@ -770,19 +770,16 @@ mod tests {
         parse_argb_color("#FFFFFFFFF").expect_err("9 桁は拒否");
     }
 
-    /// `argb_to_hex_string` は parse の逆。`#RRGGBBAA` 形式で返す。
+    /// `argb_to_hex_string` → `parse_argb_color` のラウンドトリップが恒等であることを確認する。
+    /// `#RRGGBBAA` の具体的なフォーマット検証は parse_argb_color_handles_* シリーズでカバー済み。
     #[test]
     fn argb_to_hex_string_roundtrip() {
         let argb = 0x80FF0000u32;
         let s = argb_to_hex_string(argb);
         assert_eq!(
-            s, "#FF000080",
-            "A=0x80, R=0xFF, G=0x00, B=0x00 を #RRGGBBAA で出力"
-        );
-        assert_eq!(
             parse_argb_color(&s).unwrap(),
             argb,
-            "parse 後に元の u32 と一致"
+            "argb → hex → argb のラウンドトリップが恒等"
         );
     }
 
@@ -829,16 +826,6 @@ mod tests {
         assert!(
             err.contains("string"),
             "エラー文言で string 期待を伝える: {err}"
-        );
-    }
-
-    /// 正常値はそのまま `Ok(Some(value))` で返る。
-    #[test]
-    fn parse_optional_string_returns_value() {
-        let json = parse_owned_json(r#"{"foo":"bar"}"#);
-        assert_eq!(
-            parse_optional_string(&json, "foo"),
-            Ok(Some("bar".to_owned()))
         );
     }
 

@@ -1006,7 +1006,7 @@ mod tests {
         let mut state = make_state();
         state
             .add("greeting".to_owned(), make_input())
-            .expect("add 成功");
+            .expect("add に成功");
         assert!(
             state.overlays.contains_key("greeting"),
             "overlays に挿入される"
@@ -1052,9 +1052,15 @@ mod tests {
     #[test]
     fn processor_state_add_assigns_auto_z_in_declaration_order() {
         let mut state = make_state();
-        state.add("a".to_owned(), make_input()).expect("add a");
-        state.add("b".to_owned(), make_input()).expect("add b");
-        state.add("c".to_owned(), make_input()).expect("add c");
+        state
+            .add("a".to_owned(), make_input())
+            .expect("a を add する");
+        state
+            .add("b".to_owned(), make_input())
+            .expect("b を add する");
+        state
+            .add("c".to_owned(), make_input())
+            .expect("c を add する");
         assert_eq!(state.overlays["a"].z, 0, "1 番目は z=0");
         assert_eq!(state.overlays["b"].z, 1, "2 番目は z=1 (後勝ち)");
         assert_eq!(state.overlays["c"].z, 2, "3 番目は z=2");
@@ -1080,13 +1086,15 @@ mod tests {
     #[test]
     fn processor_state_update_modifies_only_specified_fields() {
         let mut state = make_state();
-        state.add("g".to_owned(), make_input()).expect("初期 add");
+        state
+            .add("g".to_owned(), make_input())
+            .expect("初期 add に成功");
         let patch = TextOverlayPatch {
             text: Some("updated".to_owned()),
             x: Some(500),
             ..Default::default()
         };
-        state.update("g".to_owned(), patch).expect("update 成功");
+        state.update("g".to_owned(), patch).expect("update に成功");
         let spec = &state.overlays["g"];
         assert_eq!(spec.text, "updated", "text が更新される");
         assert_eq!(spec.x, 500, "x が更新される");
@@ -1111,9 +1119,11 @@ mod tests {
     #[test]
     fn processor_state_remove_removes_existing_overlay() {
         let mut state = make_state();
-        state.add("g".to_owned(), make_input()).expect("初期 add");
+        state
+            .add("g".to_owned(), make_input())
+            .expect("初期 add に成功");
         state.dirty = false;
-        state.remove("g".to_owned()).expect("remove 成功");
+        state.remove("g".to_owned()).expect("remove に成功");
         assert!(!state.overlays.contains_key("g"), "overlays から消える");
         assert!(state.dirty, "dirty フラグが立つ");
     }
@@ -1135,8 +1145,12 @@ mod tests {
     #[test]
     fn processor_state_list_returns_all_overlays() {
         let mut state = make_state();
-        state.add("a".to_owned(), make_input()).expect("add a");
-        state.add("b".to_owned(), make_input()).expect("add b");
+        state
+            .add("a".to_owned(), make_input())
+            .expect("a を add する");
+        state
+            .add("b".to_owned(), make_input())
+            .expect("b を add する");
         let listed = state.list();
         assert_eq!(listed.len(), 2, "2 件の overlay が返る");
         let names: Vec<&str> = listed.iter().map(|s| s.name.as_str()).collect();
@@ -1184,8 +1198,8 @@ mod tests {
             font_name: "PublicSans-Regular.ttf".to_owned(),
             z: None,
         };
-        state.add("t".to_owned(), input).expect("add 成功");
-        let frame = state.render(Duration::from_secs(0)).expect("render 成功");
+        state.add("t".to_owned(), input).expect("add に成功");
+        let frame = state.render(Duration::from_secs(0)).expect("render に成功");
         assert_eq!(frame.format, VideoFormat::I420A, "format は I420A");
         let w = 1920usize;
         let h = 1080usize;
