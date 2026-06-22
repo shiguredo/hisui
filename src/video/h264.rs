@@ -18,16 +18,13 @@ pub const H264_NALU_TYPE_PPS: u8 = 8;
 /// High 系プロファイル群 (ITU-T H.264 (2017/06) 仕様 7.3.2.1.1 の `if (profile_idc == ...)` 条件節)。
 ///
 /// 該当プロファイルでは SPS に chroma_format_idc 以下の追加フィールド群が含まれる。
-/// 仕様改訂で要素が増減する可能性があるため、将来の仕様アップデート時に同期する。
 pub const H264_HIGH_PROFILES: [u8; 13] =
     [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
 
-/// PBT 用 SPS 生成パラメータ
+/// PBT 用 SPS 生成パラメータ (ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 準拠、PBT 専用)。
 ///
-/// 本構造体は PBT (`pbt/tests/prop_h264_sps.rs`) からのみ使うことを想定し、本番経路からは利用しない。
-/// 値域は ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 に対応する。
-/// High 系プロファイル時のみ `chroma_format_idc` / `bit_depth_*_minus8` / `seq_scaling_matrix_present_flag`
-/// が SPS バイト列に書き込まれる (Baseline / Main / Extended では無視)。
+/// High 系プロファイル時のみ `chroma_format_idc` / `bit_depth_*_minus8` /
+/// `seq_scaling_matrix_present_flag` が SPS バイト列に書き込まれる (Baseline / Main / Extended では無視)。
 #[derive(Debug, Clone, Copy)]
 pub struct SpsBuildParams {
     /// SPS 1 バイト目 (avcC の avc_profile_indication)
@@ -56,15 +53,11 @@ pub struct SpsBuildParams {
     pub frame_cropping: Option<(u32, u32, u32, u32)>,
 }
 
-/// PBT (`pbt/tests/prop_h264_sps.rs`) から構造化 Strategy で SPS バイト列を生成するためのヘルパー
+/// PBT 用に正当な SPS バイト列を組み立てる pub fn (start code は含まない、NAL ヘッダ 1 バイト `0x67` を含む)。
 ///
-/// 本関数はテスト戦略 (PBT) からのみ使うことを想定し、本番経路からは呼ばない。
-/// 引数の値域は ITU-T H.264 仕様 7.3.2.1.1 / 7.4.2.1.1 に対応する。
-/// `raw_width` / `raw_height` は 16 の倍数 (マクロブロック境界) であること。
-/// Strategy 側で `(raw_width % 16 == 0) && (raw_height % 16 == 0)` を保証して渡す。
-///
-/// 戻り値は NAL ヘッダ 1 バイト (`0x67`) 含む raw NAL バイト列 (start code は含まない)。
-/// `h264_sample_entry_from_sps_pps_lists` の `sps_list[0]` にそのまま投入できる。
+/// 戻り値は `h264_sample_entry_from_sps_pps_lists` の `sps_list[0]` にそのまま投入できる。
+/// `raw_width` / `raw_height` は **16 の正の倍数** であること (= `>= 16` かつ `% 16 == 0`)。
+/// 0 を渡すと `raw_width / 16 - 1` が u32 underflow して panic する。
 pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
     let mut w = PbtSpsBitWriter::new();
     // NAL ヘッダ: forbidden_zero_bit=0, nal_ref_idc=3 (binary 011), nal_unit_type=7 (binary 00111) → 0x67
@@ -765,10 +758,8 @@ fn rbsp_from_sps_nalu(nalu: &[u8]) -> crate::Result<Vec<u8>> {
     if nalu.is_empty() {
         return Err(crate::Error::new("invalid H.264 SPS: empty NAL unit"));
     }
-    // SPS パース経路の早期エラー検出として NAL タイプを検査する (後段のビットリーダで失敗するよりも
-    // 早い段階で原因が分かるようにする)。
-    // `rbsp_from_sps_nalu` は `parse_sps` の内部呼び出しに加え `rbsp_from_sps_nalu_rejects_non_sps_nal`
-    // から直接呼ばれて NAL タイプ検査の回帰防止を担保する。
+    // SPS パース経路の早期エラー検出として NAL タイプを検査する
+    // (後段のビットリーダで失敗するよりも早い段階で原因が分かるようにする)。
     let nal_unit_type = nalu[0] & 0x1F;
     if nal_unit_type != H264_NALU_TYPE_SPS {
         return Err(crate::Error::new(format!(

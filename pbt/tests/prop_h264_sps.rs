@@ -1,16 +1,7 @@
-//! `src/video/h264.rs` の `h264_sample_entry_from_sps_pps_lists` 経路に対する構造化 PBT
+//! `h264_sample_entry_from_sps_pps_lists` 経路に対する構造化 PBT
 //!
-//! 構造化 Strategy で生成した正当な SPS バイト列を `h264_sample_entry_from_sps_pps_lists` に
-//! 投入し、戻り値の `Avc1Box` / `VideoFrameSize` の不変条件を検証する。
-//!
-//! Ok 経路は profile_idc / chroma_format / bit_depth / cropping / sps_list / pps_list の
-//! round-trip 性質と、`visual.width / .height` と `VideoFrameSize` の整合を確認する。
-//! Err 経路は仕様外入力を Strategy でスイープし `parse_sps` の境界判定が崩れていないことを
-//! 確認する (代表値での Err 検証は `src/video/h264.rs::tests` の `parse_sps_rejects_*` 群が
-//! 維持する。本 PBT は値域全体スイープで責務を分離する)。
-//!
-//! クラッシュフリー検証は本 PBT のスコープ外で、`fuzz/fuzz_targets/` 配下の cargo-fuzz
-//! ターゲットが担う。
+//! Ok / Err 経路の責務分担は各 `mod` のヘッダコメントを参照。
+//! クラッシュフリー検証は `fuzz/fuzz_targets/fuzz_h264_sample_entry.rs` が担う。
 
 use hisui::video::h264::{
     H264_HIGH_PROFILES, SpsBuildParams, build_sps_for_pbt, h264_sample_entry_from_sps_pps_lists,
@@ -165,13 +156,7 @@ fn ok_sps_with_cropping_strategy() -> impl Strategy<Value = SpsBuildParams> {
         })
 }
 
-/// High 系プロファイル時の chroma_array_type を `SpsBuildParams` から算出する
-///
-/// 仕様 7.4.2.1.1: chroma_array_type = if separate_colour_plane_flag == 1 { 0 } else { chroma_format_idc }
-/// `SpsBuildParams` は separate_colour_plane_flag をパラメータ化しておらず、`build_sps_for_pbt` は
-/// chroma_format_idc=3 のとき separate_colour_plane_flag=0 を書き込む前提のため
-/// chroma_array_type == chroma_format_idc とみなせる。
-/// 非 High 系では `parse_sps` が chroma_array_type=1 (4:2:0 デフォルト) を使うため 1 を返す。
+/// `SpsBuildParams` から chroma_array_type を算出する (仕様 7.4.2.1.1、separate_colour_plane_flag=0 前提)。
 fn high_profile_chroma_array_type(params: &SpsBuildParams) -> u32 {
     if H264_HIGH_PROFILES.contains(&params.profile_idc) {
         u32::from(params.chroma_format_idc)
@@ -406,26 +391,22 @@ mod ok_path {
             prop_assert_eq!(
                 frame_size.width as u32,
                 expected_w,
-                "frame_size.width が cropping 期待値と一致しない (params={:?})",
-                params
+                "frame_size.width が cropping 期待値と一致しない"
             );
             prop_assert_eq!(
                 frame_size.height as u32,
                 expected_h,
-                "frame_size.height が cropping 期待値と一致しない (params={:?})",
-                params
+                "frame_size.height が cropping 期待値と一致しない"
             );
             prop_assert_eq!(
                 avc1.visual.width as u32,
                 expected_w,
-                "visual.width が cropping 期待値と一致しない (params={:?})",
-                params
+                "visual.width が cropping 期待値と一致しない"
             );
             prop_assert_eq!(
                 avc1.visual.height as u32,
                 expected_h,
-                "visual.height が cropping 期待値と一致しない (params={:?})",
-                params
+                "visual.height が cropping 期待値と一致しない"
             );
         }
     }
@@ -587,10 +568,8 @@ mod err_path {
 
         /// pic_order_cnt_type の境界 + 巨大値で Err 値域を検証する
         ///
-        /// `build_sps_for_pbt` 内部の `PbtSpsBitWriter::write_ue` は `value + 1` の bit 表現を書き出すため
-        /// `value` が `2^30 - 1` 付近を超えると内部 `(1u32 << bits_needed) - 1` でシフトオーバーフローする。
-        /// `u32::MAX` 自体の Err 経路は本体 `parse_sps::read_ue` の `leading_zeros > 31` Err と独立に
-        /// 保護されており、本 PBT では実用範囲 (上限 100_000) のスイープで境界 (≤2: Ok / ≥3: Err) を検証する。
+        /// `value=u32::MAX` のとき `PbtSpsBitWriter::write_ue` 内の `value.checked_add(1).expect(...)` で
+        /// panic するため、本 PBT では実用範囲 (上限 100_000) のスイープで境界 (≤2: Ok / ≥3: Err) を検証する。
         #[test]
         fn prop_h264_sample_entry_pic_order_cnt_type_boundary(
             pic_order_cnt_type in prop::sample::select(vec![0u32, 1, 2, 3, 4, 100, 1000, 100_000]),
