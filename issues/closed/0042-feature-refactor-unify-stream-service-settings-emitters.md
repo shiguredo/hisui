@@ -2,14 +2,14 @@
 
 - Priority: Low
 - Created: 2026-06-18
-- Completed:
+- Completed: 2026-06-19
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-unify-stream-service-settings-emitters
 - Polished: 2026-06-19
 
 ## 目的
 
-obsws の `streamServiceSettings` キーの中身を JSON 化するロジックが現状 `src/obsws/` 配下の 3 箇所で独立に書かれており、共通部分の保守追従漏れリスクを抱えている。closed issue 0003 (`feature/change-obsws-json-naming`) で `bwtest` を削除し、`docs/obsws/json_naming.md` に外向き仕様を確定させた結果、3 経路の差分が「OBS rtmp-custom.c 互換のための `use_auth: false` ハードコードと `key` の常時出力 (None 時 `""`)」だけに収束した。OBS 互換のための差分を 1 経路に閉じて、共通部分を 1 つの基盤に統合する。
+obsws の `streamServiceSettings` キーの中身を JSON 化するロジックが現状 `src/obsws/` 配下の 3 箇所で独立に書かれており、共通部分の保守追従漏れリスクを抱えている。closed issue 0003 (`feature/change-obsws-json-naming`) で `bwtest` を削除し、`docs/obsws/json_naming.md` に外向き仕様を確定させた結果、3 経路の差分が「OBS Studio クライアント互換のための `use_auth: false` ハードコードと `key` の常時出力 (None 時 `""`)」だけに収束した。OBS 互換のための差分を 1 経路に閉じて、共通部分を 1 つの基盤に統合する。
 
 ## 優先度根拠
 
@@ -61,7 +61,7 @@ Low。挙動・公開 API 不変のリファクタで緊急度はないが、(2)
 ```rust
 /// `streamServiceType` + `streamServiceSettings { server, key }` の envelope を JSON に書き出す。
 ///
-/// `obs_compat: true` の場合、`docs/obsws/json_naming.md` 章 4 の OBS rtmp-custom.c 互換要件に従い
+/// `obs_compat: true` の場合、`docs/obsws/json_naming.md` 章 4 の OBS Studio クライアント互換要件に従い
 /// `key` を常時出力 (None 時 `""`) し `use_auth: false` をハードコード出力する。
 pub(crate) fn fmt_stream_service_envelope(
     f: &mut nojson::JsonFormatter<'_, '_>,
@@ -94,13 +94,13 @@ pub(crate) fn fmt_stream_service_envelope(
 ```rust
 // (1) handle_get_stream_service_settings: build_request_response_success のクロージャ内で
 // 既に response 直下の object formatter が開いているため直接呼ぶ。
-// `true` 引数には call site で `// OBS rtmp-custom.c 互換` のコメントを付ける。
+// `true` 引数には call site で `// OBS Studio クライアント互換` のコメントを付ける。
 fmt_stream_service_envelope(
     f,
     &settings.stream_service_type,
     settings.server.as_deref(),
     settings.key.as_deref(),
-    true, // OBS rtmp-custom.c 互換
+    true, // OBS Studio クライアント互換
 )?
 
 // (2) ObswsStreamServiceSettings::fmt / (3) ObswsStateFileStream::fmt: 新規 object を開く必要があるため
@@ -158,22 +158,46 @@ nojson::object(|f| {
 
 ## 解決方法
 
-実装ステップ:
+ブランチ `feature/refactor-unify-stream-service-settings-emitters` で実装した。
 
-1. `src/obsws/coordinator/output_stream.rs` に `fmt_stream_service_envelope` 関数を追加する
-2. (2) `ObswsStreamServiceSettings::fmt` を共通ヘルパ呼び出しに書き換える (`obs_compat: false`)
-3. (3) `state_file.rs::ObswsStateFileStream::fmt` を共通ヘルパ呼び出しに書き換える (`obs_compat: false`)
-4. (1) `output_registry.rs::handle_get_stream_service_settings` を共通ヘルパ呼び出しに書き換える (`obs_compat: true`)
-5. 完了条件節に列挙した追加テスト 3 件 ((1) 経路 2 件 + (2) 経路 1 件) を実装する
-6. 既存テスト (`session/tests.rs:3093` 周辺、`state_file.rs::tests`) が通ることを確認する
+### 共通ヘルパの導入と 3 経路の集約
 
-### コミット分割
+- `src/obsws/coordinator/output_stream.rs` に `fmt_stream_service_envelope` 関数を `pub(crate) fn` で新設し、`streamServiceType` + `streamServiceSettings { server, key }` envelope の出力を集約した。`obs_compat: bool` フラグで OBS Studio クライアント互換差分 (`use_auth: false` ハードコード + `key` 常時出力 (None 時 `""`)) を切り替える。
+- (1) `handle_get_stream_service_settings` (`output_registry.rs`)、(2) `ObswsStreamServiceSettings::fmt` (`output_stream.rs`)、(3) `ObswsStateFileStream::fmt` (`state_file.rs`) の 3 経路を共通ヘルパ呼び出しに置き換えた。
+- 呼び出し側の nesting context が異なるため、(1) は `build_request_response_success` のクロージャ内で直接呼び、(2) (3) は `nojson::object(|f| ...)` で包む形を使い分けた。
+- `output_registry.rs:44` の `pub(crate) use` で `fmt_stream_service_envelope` を re-export し、`state_file.rs` からも `output_registry` 経由で参照する。
 
-`shiguredo-git` 規約 (`{SEQ} {TITLE}` 形式) に従い、blame 汚染範囲を限定するため論理単位で分ける。ヘルパ関数を単独コミットで導入すると呼び出し元 0 で `cargo clippy --deny warnings` の dead_code 警告が出るため、ヘルパ追加と (2) の差し替えを 1 コミットに同梱する:
+### 死にコード削除
 
-1. 実装ステップ 1 + 2: `0042 obsws stream service settings の共通ヘルパ fmt_stream_service_envelope を導入し ObswsStreamServiceSettings::fmt を寄せる`
-2. 実装ステップ 3: `0042 ObswsStateFileStream::fmt を共通ヘルパに寄せる`
-3. 実装ステップ 4 + 5 + 6: `0042 handle_get_stream_service_settings を共通ヘルパ + obs_compat フラグに書き換える`
+- `src/obsws/state_file.rs` の `ObswsStateFileStream::to_stream_service_settings()` は (3) が `fmt_stream_service_envelope` を直接呼ぶ形に変わり呼び出し元が完全消滅したため `impl` ブロックごと削除した。`state_file.rs` の use 文から `ObswsStreamServiceSettings` も除いた。
+
+### 設計方針からの乖離点
+
+- 設計方針 §1 のシグネチャ案 `f: &mut nojson::JsonFormatter<'_, '_>` は実装時の型エラーで `&mut nojson::JsonObjectFormatter<'_, '_, '_>` に修正した (`nojson::object` クロージャ内の formatter 型は `JsonObjectFormatter`)。
+- (1) `key_some` テストは `parse_set_stream_service_settings_fields` (`response.rs:855`) が `server` を `required_non_empty_string_member` で必須として読むため、`SetStreamServiceSettings` 経由で `server=None` 状態を作れない。`server=Some` 経路で「`key=Some` + `use_auth: false` 出力」の検証に絞り、`server=None` 時のキー省略は `fmt_stream_service_envelope_matrix` の 8 ケース表駆動テストで担保する形に変更した。
+- 「OBS Studio クライアント互換」表現に統一した (実装側のコード・docstring・issue 本文すべて。設計方針節の `OBS rtmp-custom.c 互換` 表記も含む)。`use_auth` / `key` default の OBS Studio ソース裏取りは行わず `docs/obsws/json_naming.md` 章 4 line 78 の確定要件を真とする方針で確定した。
+
+### テスト
+
+- `src/obsws/coordinator/output_stream.rs::#[cfg(test)] mod tests` に表駆動テスト `fmt_stream_service_envelope_matrix` を追加し、`server × key × obs_compat` の 8 ケースを網羅した。当初 (2) 経路用に追加した単体テスト `obsws_stream_service_settings_fmt_omits_obs_compat_keys` は表駆動テストに完全包含されるため最終的に削除した。`ObswsStreamServiceSettings::fmt` は 5 行のラッパでワイヤリング誤りは PR レビューで気付けるレベルと判断。`ObswsStateFileStream::fmt` (3) 側も同方針で個別単体テストは追加せず、既存 `state_file.rs::tests` の `roundtrip_*` シリーズで bit 互換を担保する。
+- `src/obsws/session/tests.rs` に (1) 経路の動作確認テスト 2 件 (`handle_get_stream_service_settings_emits_use_auth_when_key_none` / `_some`) を追加。Set / Get 両方の `requestStatus.result == true` を `parse_request_status` で assert する。
+- `cargo test --lib obsws` で 319 件全件 pass を確認。
+
+### CHANGES.md
+
+記載なし。内部リファクタで利用者から見える挙動・公開 API・state file の永続化フォーマットは一切変化しないため。
+
+### 設計方針への追記 (将来検討)
+
+- `obs_compat: bool` は「`key` 常時出力 + `use_auth: false` ハードコード」の 2 効果連動。OBS Studio クライアント互換要件が 2 種類以上に増えた場合は enum (`StreamServiceCompat { Internal, ObsStudio }` 等) への昇格を別 issue で検討する。
+
+### レビュー指摘の反映
+
+`/review-diff-code` 2 周分のレビュー指摘を順次対応した。
+
+- 1 周目: docstring 章 4 引用文言、テストコメント乖離、Set 成否 assert、ヘルパ直接テスト不足を反映。コメント簡素化と命名 (`fmt_stream_service_envelope`) を `fmt_with_credentials` パターンに揃えた。
+- 2 周目: コメント語重複の整理、Get 経路の result assert 追加、`OBS rtmp-custom.c` → `OBS Studio クライアント` 表現統一、(2) 経路単体テストと表駆動の重複削除を反映。
+- 「表駆動を hisui 既存規約のタプル形式に揃える」指摘は、hisui 既存の表駆動が 2-4 要素タプルで 6 要素タプルの先例がなく、`struct Case` 方式のフィールド名による self-documentation を優先して見送った。
 
 ## 関連
 

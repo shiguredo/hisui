@@ -63,6 +63,8 @@
   - 機能無効時は全 4 メソッドが `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` を返す
   - テキストオーバーレイは揮発的 (`--state-file` には保存されず、再起動でクリアされる)
   - @sile
+- [ADD] cargo-fuzz による fuzz テスト基盤を `fuzz/` ディレクトリに導入する
+  - @sile
 - [ADD] hisui 共通フラグとして `--emit-exit-metrics` を追加し、サブコマンドの終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
   - 環境変数 `HISUI_EMIT_EXIT_METRICS` でも有効化できる
   - `list-codecs` / `tune` を指定した場合は内部メトリクスを持たないため、指定しても出力は空 (`{"type":"metrics","metrics":[]}`) になる

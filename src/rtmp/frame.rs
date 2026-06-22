@@ -6,7 +6,7 @@ use crate::{
     Error,
     audio::{AudioFrame, Channels, SampleRate},
     sample_entry::SharedSampleEntry,
-    video::VideoFrame,
+    video::{VideoFrame, VideoFrameSize},
 };
 
 /// RTMP フレーム処理の共通ロジック（送信側）
@@ -254,16 +254,16 @@ impl RtmpIncomingFrameHandler {
             let seq_header = shiguredo_rtmp::AvcSequenceHeader::from_bytes(&frame.data)
                 .map_err(|e| Error::new(format!("failed to parse AVC sequence header: {e}")))?;
 
-            // いったん解像度は 0 扱いにしておく
-            // TODO: SPS から実際の width, height を抽出
-            let width = 0;
-            let height = 0;
-
-            // SampleEntry を生成
-            let sample_entry = avc_sequence_header_to_sample_entry(&seq_header, width, height)?;
+            // SampleEntry と SPS 由来の解像度を取得 (frame_size はデバッグログ出力のみで使う。
+            // 下流に渡す VideoFrame.size は別経路で再エンコード時に新規構築される)
+            let (sample_entry, frame_size) = avc_sequence_header_to_sample_entry(&seq_header)?;
             self.video_sample_entry = Some(sample_entry);
 
-            tracing::debug!("Received H.264 sequence header: {}x{}", width, height);
+            tracing::debug!(
+                "Received H.264 sequence header: {}x{}",
+                frame_size.width,
+                frame_size.height,
+            );
             return Ok(None);
         }
         if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::EndOfSequence) {
@@ -347,28 +347,113 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> crate::Result<Vec<u8
     }
 }
 
-/// AvcSequenceHeader から SampleEntry を生成（RTMP 受信用）
+/// AvcSequenceHeader を h264_sample_entry_from_sps_pps_lists に委譲する薄いラッパー。
+///
+/// seq_header の avc_profile_indication / profile_compatibility / avc_level_indication /
+/// length_size_minus_one は捨て、SPS 由来実値と NALU_HEADER_LENGTH 由来の固定値で avcC を埋める。
+/// publisher が length_size_minus_one != 3 を送った場合は avcC の値と後続フレームの NAL 長
+/// prefix サイズが乖離するが、Hisui のデコーダ系は NAL 長 prefix を NALU_HEADER_LENGTH = 4
+/// バイト固定で読むため、3 以外を使う publisher は本ラッパーの有無に関わらずデコード失敗する。
 fn avc_sequence_header_to_sample_entry(
     seq_header: &shiguredo_rtmp::AvcSequenceHeader,
-    width: usize,
-    height: usize,
-) -> crate::Result<SampleEntry> {
-    use shiguredo_mp4::{Uint, boxes::Avc1Box, boxes::AvccBox};
+) -> crate::Result<(SampleEntry, VideoFrameSize)> {
+    crate::video::h264::h264_sample_entry_from_sps_pps_lists(
+        seq_header.sps_list.clone(),
+        seq_header.pps_list.clone(),
+    )
+}
 
-    Ok(SampleEntry::Avc1(Avc1Box {
-        visual: crate::video::sample_entry_visual_fields(width, height),
-        avcc_box: AvccBox {
-            sps_list: seq_header.sps_list.clone(),
-            pps_list: seq_header.pps_list.clone(),
-            avc_profile_indication: seq_header.avc_profile_indication,
-            avc_level_indication: seq_header.avc_level_indication,
-            profile_compatibility: seq_header.profile_compatibility,
-            length_size_minus_one: Uint::new(seq_header.length_size_minus_one),
-            chroma_format: None,
-            bit_depth_luma_minus8: None,
-            bit_depth_chroma_minus8: None,
-            sps_ext_list: Vec::new(),
-        },
-        unknown_boxes: Vec::new(),
-    }))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::video::h264::tests::{PPS_NAL, SPS_320X240};
+
+    // ラッパーはプロファイル分岐を持たず下層に委譲するだけのため、High プロファイル時の
+    // chroma_format / bit_depth_* の SPS 由来 Some 反映は src/video/h264.rs::tests の
+    // h264_sample_entry_from_sps_pps_lists_maps_high_sps_to_avcc で担保される。本モジュールでは
+    // ラッパー固有の振る舞い (seq_header の上層 4 フィールドが捨てられて SPS 由来実値で
+    // 上書きされること、sps_list / pps_list がパススルーされること) を Baseline SPS 1 件で
+    // 確認する。
+
+    // ラッパーが seq_header の avc_profile_indication / profile_compatibility /
+    // avc_level_indication / length_size_minus_one を捨てて SPS 由来実値および固定値で avcC を
+    // 埋めることを検証するため、各フィールドに SPS_320X240 (profile_idc=66 /
+    // constraint_set_flags=0xc0 / level_idc=13) とは異なるダミー値を入れる。
+    // length_size_minus_one はラッパー本体で読まれず下層が 3 固定で埋めるため、ダミー値 0 を
+    // 入れても avcC は 3 になる。
+    fn dummy_passthrough_fields_seq_header() -> shiguredo_rtmp::AvcSequenceHeader {
+        shiguredo_rtmp::AvcSequenceHeader {
+            sps_list: vec![SPS_320X240.to_vec()],
+            pps_list: vec![PPS_NAL.to_vec()],
+            avc_profile_indication: 0xff,
+            profile_compatibility: 0x00,
+            avc_level_indication: 0xff,
+            length_size_minus_one: 0,
+        }
+    }
+
+    #[test]
+    fn avc_sequence_header_to_sample_entry_maps_baseline_sps_to_avcc() {
+        // Baseline SPS で薄いラッパー化後の avcC / visual / frame_size を検証する
+        let seq_header = dummy_passthrough_fields_seq_header();
+
+        let (entry, frame_size) = avc_sequence_header_to_sample_entry(&seq_header)
+            .expect("Baseline SPS のラッパー呼び出し成功");
+
+        let SampleEntry::Avc1(avc1) = entry else {
+            panic!("Avc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+
+        // avcC が SPS 由来実値で埋まり、seq_header 由来のダミー値は捨てられている
+        assert_eq!(avc1.avcc_box.avc_profile_indication, 66);
+        assert_eq!(avc1.avcc_box.profile_compatibility, 0xc0);
+        assert_eq!(avc1.avcc_box.avc_level_indication, 13);
+        // length_size_minus_one は NALU_HEADER_LENGTH - 1 = 3 で固定
+        assert_eq!(avc1.avcc_box.length_size_minus_one.get(), 3);
+        // Baseline プロファイルでは chroma_format / bit_depth_* は None
+        assert!(avc1.avcc_box.chroma_format.is_none());
+        assert!(avc1.avcc_box.bit_depth_luma_minus8.is_none());
+        assert!(avc1.avcc_box.bit_depth_chroma_minus8.is_none());
+        // sps_list / pps_list が seq_header からクローンされて AvccBox に詰められる
+        assert_eq!(avc1.avcc_box.sps_list, vec![SPS_320X240.to_vec()]);
+        assert_eq!(avc1.avcc_box.pps_list, vec![PPS_NAL.to_vec()]);
+        // visual.width / .height が SPS 由来実値で埋まる (0 ではない)
+        assert_eq!(avc1.visual.width, 320);
+        assert_eq!(avc1.visual.height, 240);
+        // 戻り値タプルの VideoFrameSize も SPS 由来実値
+        assert_eq!(frame_size.width, 320);
+        assert_eq!(frame_size.height, 240);
+    }
+
+    #[test]
+    fn avc_sequence_header_to_sample_entry_returns_err_on_empty_sps_list() {
+        // sps_list 空のときは下層 h264_sample_entry_from_sps_pps_lists 由来の Err が伝播する
+        let mut seq_header = dummy_passthrough_fields_seq_header();
+        seq_header.sps_list = vec![];
+
+        let result = avc_sequence_header_to_sample_entry(&seq_header);
+
+        let err = result.expect_err("sps_list 空は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("missing H.264 SPS"),
+            "想定外のエラーメッセージ: {display}",
+        );
+    }
+
+    #[test]
+    fn avc_sequence_header_to_sample_entry_returns_err_on_empty_pps_list() {
+        // pps_list 空のときは下層 h264_sample_entry_from_sps_pps_lists 由来の Err が伝播する
+        let mut seq_header = dummy_passthrough_fields_seq_header();
+        seq_header.pps_list = vec![];
+
+        let result = avc_sequence_header_to_sample_entry(&seq_header);
+
+        let err = result.expect_err("pps_list 空は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("missing H.264 PPS"),
+            "想定外のエラーメッセージ: {display}",
+        );
+    }
 }

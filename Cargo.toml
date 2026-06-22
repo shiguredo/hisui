@@ -20,6 +20,7 @@ members = [
   "examples/sora_source",
   "pbt"
 ]
+exclude = ["fuzz"]
 
 [workspace.dependencies]
 noargs = "=0.4.3"

@@ -30,7 +30,7 @@ use crate::obsws::protocol::{
 };
 use crate::{ProcessorId, TrackId};
 
-// output モジュールの Settings 型を re-export する
+// output モジュールの Settings 型とヘルパ関数を re-export する
 pub(crate) use super::output_dash::{
     DEFAULT_DASH_MAX_RETAINED_SEGMENTS, DEFAULT_DASH_SEGMENT_DURATION_SECS, DashDestination,
     DashVariant, ObswsDashSettings,
@@ -41,7 +41,7 @@ pub(crate) use super::output_hls::{
 };
 pub(crate) use super::output_rtmp::ObswsRtmpOutboundSettings;
 pub(crate) use super::output_sora::ObswsSoraPublisherSettings;
-pub(crate) use super::output_stream::ObswsStreamServiceSettings;
+pub(crate) use super::output_stream::{ObswsStreamServiceSettings, fmt_stream_service_envelope};
 
 // -----------------------------------------------------------------------
 // 型定義
@@ -466,16 +466,12 @@ impl ObswsCoordinator {
             "GetStreamServiceSettings",
             request_id,
             |f| {
-                f.member("streamServiceType", &settings.stream_service_type)?;
-                f.member(
-                    "streamServiceSettings",
-                    nojson::object(|f| {
-                        if let Some(server) = &settings.server {
-                            f.member("server", server)?;
-                        }
-                        f.member("key", settings.key.as_deref().unwrap_or(""))?;
-                        f.member("use_auth", false)
-                    }),
+                fmt_stream_service_envelope(
+                    f,
+                    &settings.stream_service_type,
+                    settings.server.as_deref(),
+                    settings.key.as_deref(),
+                    true, // OBS Studio クライアント互換
                 )
             },
         )

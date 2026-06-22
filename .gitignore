@@ -3,6 +3,9 @@
 # test
 /recordings
 
+# proptest が失敗ケースを永続化するファイル (ローカル開発用、リポジトリには含めない)
+*.proptest-regressions
+
 # macos
 .DS_Store
 

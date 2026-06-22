@@ -1,17 +1,12 @@
 use std::collections::VecDeque;
 
-use shiguredo_mp4::{
-    Uint,
-    boxes::{Avc1Box, AvccBox, SampleEntry},
-};
-
 use crate::{
     encoder::VideoEncoderOptions,
     sample_entry::SharedSampleEntry,
     types::{CodecName, EvenUsize},
-    video::h264::{H264_LEVEL_3_1, H264_PROFILE_BASELINE, NALU_HEADER_LENGTH},
+    video::h264,
     video::h265,
-    video::{self, FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
+    video::{FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
 #[derive(Debug)]
@@ -144,25 +139,35 @@ impl VideoToolboxEncoder {
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
             // 最初の出力フレームの SPS/PPS からサンプルエントリーを確定して保持し、
             // 以後は全出力フレームに保持済みのサンプルエントリーを載せる。
+            // shiguredo_video_toolbox は keyframe 出力時のみ SPS / PPS を返すため、
+            // 非 keyframe フレームでは frame.sps_list / pps_list が空になる。H.264 経路では
+            // openh264 経路と同様に空 SPS / PPS でのサンプルエントリー構築をスキップし、
+            // 次の keyframe を待つ (空入力で h264_sample_entry_from_sps_pps_lists を呼ぶと
+            // Err になりエンコーダが落ちるため)。
             if self.sample_entry.is_none() {
-                let sample_entry = if self.format == VideoFormat::H264 {
-                    h264_sample_entry(
-                        self.width,
-                        self.height,
-                        frame.sps_list.clone(),
-                        frame.pps_list.clone(),
-                    )?
+                let sample_entry_opt = if self.format == VideoFormat::H264 {
+                    if frame.sps_list.is_empty() || frame.pps_list.is_empty() {
+                        None
+                    } else {
+                        let (entry, _frame_size) = h264::h264_sample_entry_from_sps_pps_lists(
+                            frame.sps_list.clone(),
+                            frame.pps_list.clone(),
+                        )?;
+                        Some(entry)
+                    }
                 } else {
-                    h265::h265_sample_entry(
+                    Some(h265::h265_sample_entry(
                         self.width,
                         self.height,
                         self.fps,
                         frame.vps_list.clone(),
                         frame.sps_list.clone(),
                         frame.pps_list.clone(),
-                    )?
+                    )?)
                 };
-                self.sample_entry = Some(SharedSampleEntry::new(sample_entry));
+                if let Some(sample_entry) = sample_entry_opt {
+                    self.sample_entry = Some(SharedSampleEntry::new(sample_entry));
+                }
             }
 
             self.output_queue.push_back(VideoFrame {
@@ -179,31 +184,4 @@ impl VideoToolboxEncoder {
         }
         Ok(())
     }
-}
-
-fn h264_sample_entry(
-    width: EvenUsize,
-    height: EvenUsize,
-    sps_list: Vec<Vec<u8>>,
-    pps_list: Vec<Vec<u8>>,
-) -> crate::Result<SampleEntry> {
-    Ok(SampleEntry::Avc1(Avc1Box {
-        visual: video::sample_entry_visual_fields(width.get(), height.get()),
-        avcc_box: AvccBox {
-            // 実際のエンコードストリームに合わせた値
-            sps_list,
-            pps_list,
-
-            // 以下は Hisui では固定値
-            avc_profile_indication: H264_PROFILE_BASELINE,
-            avc_level_indication: H264_LEVEL_3_1,
-            profile_compatibility: 0, // いったん 0 を指定しているが、もし支障があれば調整する
-            length_size_minus_one: Uint::new(NALU_HEADER_LENGTH as u8 - 1),
-            chroma_format: None,
-            bit_depth_luma_minus8: None,
-            bit_depth_chroma_minus8: None,
-            sps_ext_list: Vec::new(),
-        },
-        unknown_boxes: Vec::new(),
-    }))
 }
