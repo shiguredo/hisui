@@ -1,9 +1,6 @@
 use shiguredo_mp4::boxes::{Hvc1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
-use crate::{
-    types::EvenUsize,
-    video::{self, FrameRate, VideoFrameSize, bit_reader::BitReader},
-};
+use crate::video::{self, FrameRate, VideoFrameSize, bit_reader::BitReader};
 
 pub type NalUnitArray = Vec<Vec<u8>>;
 
@@ -96,7 +93,7 @@ pub struct H265NalUnit<'a> {
 /// SPS NAL ユニットから取り出した hvcC 反映用フィールド群
 ///
 /// `parse_hevc_sps` の戻り値で、`h265_sample_entry_from_vps_sps_pps_lists` 経由で
-/// `HvccBox` の対応フィールドにマップされる（本 issue の §1 で追加予定）。
+/// `HvccBox` の対応フィールドにマップされる。
 #[derive(Debug)]
 struct HevcSpsParams {
     /// profile_tier_level の general_profile_space (u(2)、ITU-T H.265 仕様 7.4.4)
@@ -492,62 +489,6 @@ fn check_nal_unit_types(nalus: &[Vec<u8>], expected_ty: u8, label: &str) -> crat
         }
     }
     Ok(())
-}
-
-/// H.265 サンプルエントリーを生成する (旧シグネチャ、本 issue ステップ 5 で削除予定)
-#[allow(dead_code)]
-pub fn h265_sample_entry(
-    width: EvenUsize,
-    height: EvenUsize,
-    fps: FrameRate,
-    vps_list: NalUnitArray,
-    sps_list: NalUnitArray,
-    pps_list: NalUnitArray,
-) -> crate::Result<SampleEntry> {
-    // [NOTE]
-    // H.265 を表現するためのボックスには hev1 もあり、機能的には hev1 と hvc1 は
-    // ほぼ同様（後者の場合にはキーフレームのサンプルデータ本体に SPS などの情報を付与することが必須なのが異なる）だが、
-    // hev1 は Apple 系の動画プレイヤーでサポートされていないため、ここでは hvc1 を使用している
-    Ok(SampleEntry::Hvc1(Hvc1Box {
-        visual: video::sample_entry_visual_fields(width.get(), height.get()),
-        hvcc_box: HvccBox {
-            // 以下はSora の録画ファイルに合わせた値（必要に応じて調整すること）
-            general_profile_compatibility_flags: 0x60000000,
-            general_constraint_indicator_flags: shiguredo_mp4::Uint::new(0xb00000000000),
-            general_level_idc: 123,
-            general_profile_space: shiguredo_mp4::Uint::new(0),
-            general_tier_flag: shiguredo_mp4::Uint::new(0),
-            num_temporal_layers: shiguredo_mp4::Uint::new(0),
-            temporal_id_nested: shiguredo_mp4::Uint::new(0),
-            min_spatial_segmentation_idc: shiguredo_mp4::Uint::new(0),
-            parallelism_type: shiguredo_mp4::Uint::new(0),
-
-            // Hisui ではフレームレートは固定（整数にならない場合は切り上げ）
-            avg_frame_rate: (fps.numerator.get().div_ceil(fps.denumerator.get())) as u16,
-            constant_frame_rate: shiguredo_mp4::Uint::new(1), // CFR (固定フレームレート)
-
-            // Hisui ではヘッダサイズが固定であることが前提
-            length_size_minus_one: shiguredo_mp4::Uint::new(NALU_HEADER_LENGTH as u8 - 1),
-
-            // 以下は実際のストリームから取得した値
-            nalu_arrays: vec![
-                hvcc_nalu_array(H265_NALU_TYPE_VPS, vps_list),
-                hvcc_nalu_array(H265_NALU_TYPE_SPS, sps_list),
-                hvcc_nalu_array(H265_NALU_TYPE_PPS, pps_list),
-            ],
-
-            // これ以降はエンコーダーへの指定に対応する値を設定している
-
-            // 色空間 (4:2:0)
-            chroma_format_idc: shiguredo_mp4::Uint::new(1),
-
-            // kVTProfileLevel_HEVC_Main_AutoLevel に対応する値
-            general_profile_idc: shiguredo_mp4::Uint::new(1), // Main
-            bit_depth_luma_minus8: shiguredo_mp4::Uint::new(0), // 8 ビット深度
-            bit_depth_chroma_minus8: shiguredo_mp4::Uint::new(0), // 8 ビット深度
-        },
-        unknown_boxes: Vec::new(),
-    }))
 }
 
 fn hvcc_nalu_array(nalu_type: u8, nalus: NalUnitArray) -> HvccNalUintArray {
