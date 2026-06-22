@@ -376,6 +376,12 @@ fn read_high_profile_sps_fields(
 /// pic_order_cnt_type に応じた追加フィールド群を読み飛ばす（仕様 7.3.2.1.1）
 fn skip_pic_order_cnt_type_extras(reader: &mut H264BitReader<'_>) -> crate::Result<()> {
     let pic_order_cnt_type = reader.read_ue()?;
+    // 仕様 7.4.2.1.1 で 0 / 1 / 2 のいずれかと規定されているため、それ以外は仕様外として弾く。
+    if pic_order_cnt_type > 2 {
+        return Err(crate::Error::new(format!(
+            "invalid H.264 SPS: pic_order_cnt_type out of spec range (0..=2): {pic_order_cnt_type}"
+        )));
+    }
     match pic_order_cnt_type {
         0 => {
             reader.skip_ue()?; // log2_max_pic_order_cnt_lsb_minus4
@@ -1058,8 +1064,8 @@ pub(crate) mod tests {
             self
         }
 
-        fn with_pic_order_cnt_type_1(mut self) -> Self {
-            self.pic_order_cnt_type = 1;
+        fn with_pic_order_cnt_type(mut self, value: u32) -> Self {
+            self.pic_order_cnt_type = value;
             self
         }
 
@@ -1201,7 +1207,7 @@ pub(crate) mod tests {
         // pic_order_cnt_type=1 の経路（delta_pic_order_always_zero_flag / offset_for_*）を踏んでも
         // pic_width / pic_height まで正しく到達できること
         let sps = SpsBuilder::raw(1920, 1088)
-            .with_pic_order_cnt_type_1()
+            .with_pic_order_cnt_type(1)
             .build();
         let (width, height) = extract_dimensions_from_sps(&sps).expect("SPS パース成功");
         assert_eq!((width, height), (1920, 1088));
@@ -1408,6 +1414,21 @@ pub(crate) mod tests {
         assert!(
             result.is_err(),
             "bit_depth_chroma_minus8=7 は仕様値域外で Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_sps_rejects_pic_order_cnt_type_out_of_range() {
+        // pic_order_cnt_type=3 (仕様 7.4.2.1.1 の {0,1,2} 値域外) は Err
+        // SpsBuilder::raw のデフォルト profile_idc=66 (Baseline) のため read_high_profile_sps_fields を
+        // 経由せず skip_pic_order_cnt_type_extras に直行し、本 issue で追加した値域検査で Err になる。
+        let sps = SpsBuilder::raw(1920, 1088)
+            .with_pic_order_cnt_type(3)
+            .build();
+        let result = parse_sps(&sps);
+        assert!(
+            result.is_err(),
+            "pic_order_cnt_type=3 は仕様値域外で Err: {result:?}"
         );
     }
 
