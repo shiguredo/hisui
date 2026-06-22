@@ -6,7 +6,7 @@ use crate::{
     Error,
     audio::{AudioFrame, Channels, SampleRate},
     sample_entry::SharedSampleEntry,
-    video::VideoFrame,
+    video::{VideoFrame, VideoFrameSize},
 };
 
 /// RTMP フレーム処理の共通ロジック（送信側）
@@ -254,16 +254,15 @@ impl RtmpIncomingFrameHandler {
             let seq_header = shiguredo_rtmp::AvcSequenceHeader::from_bytes(&frame.data)
                 .map_err(|e| Error::new(format!("failed to parse AVC sequence header: {e}")))?;
 
-            // いったん解像度は 0 扱いにしておく
-            // TODO: SPS から実際の width, height を抽出
-            let width = 0;
-            let height = 0;
-
-            // SampleEntry を生成
-            let sample_entry = avc_sequence_header_to_sample_entry(&seq_header, width, height)?;
+            // SampleEntry と SPS 由来の解像度を取得
+            let (sample_entry, frame_size) = avc_sequence_header_to_sample_entry(&seq_header)?;
             self.video_sample_entry = Some(sample_entry);
 
-            tracing::debug!("Received H.264 sequence header: {}x{}", width, height);
+            tracing::debug!(
+                "Received H.264 sequence header: {}x{}",
+                frame_size.width,
+                frame_size.height,
+            );
             return Ok(None);
         }
         if frame.avc_packet_type == Some(shiguredo_rtmp::AvcPacketType::EndOfSequence) {
@@ -347,28 +346,20 @@ pub fn create_video_sequence_header(entry: &SampleEntry) -> crate::Result<Vec<u8
     }
 }
 
-/// AvcSequenceHeader から SampleEntry を生成（RTMP 受信用）
+/// AvcSequenceHeader.sps_list / .pps_list を h264_sample_entry_from_sps_pps_lists に委譲する薄いラッパー。
+///
+/// 入力契約は h264_sample_entry_from_sps_pps_lists と同じ EBSP 形式 (NAL ヘッダ 1 バイト含む、start
+/// code なし)。shiguredo_rtmp::AvcSequenceHeader::from_bytes が AVCDecoderConfigurationRecord から
+/// 取り出す sps_list / pps_list の格納形式と一致するため、そのまま clone して渡す。
+///
+/// seq_header.avc_profile_indication / profile_compatibility / avc_level_indication /
+/// length_size_minus_one は捨てて、すべて SPS 由来実値および固定値で avcC を埋める
+/// (length_size_minus_one は Hisui 全体方針の NALU_HEADER_LENGTH = 4 バイト固定に揃える)。
 fn avc_sequence_header_to_sample_entry(
     seq_header: &shiguredo_rtmp::AvcSequenceHeader,
-    width: usize,
-    height: usize,
-) -> crate::Result<SampleEntry> {
-    use shiguredo_mp4::{Uint, boxes::Avc1Box, boxes::AvccBox};
-
-    Ok(SampleEntry::Avc1(Avc1Box {
-        visual: crate::video::sample_entry_visual_fields(width, height),
-        avcc_box: AvccBox {
-            sps_list: seq_header.sps_list.clone(),
-            pps_list: seq_header.pps_list.clone(),
-            avc_profile_indication: seq_header.avc_profile_indication,
-            avc_level_indication: seq_header.avc_level_indication,
-            profile_compatibility: seq_header.profile_compatibility,
-            length_size_minus_one: Uint::new(seq_header.length_size_minus_one),
-            chroma_format: None,
-            bit_depth_luma_minus8: None,
-            bit_depth_chroma_minus8: None,
-            sps_ext_list: Vec::new(),
-        },
-        unknown_boxes: Vec::new(),
-    }))
+) -> crate::Result<(SampleEntry, VideoFrameSize)> {
+    crate::video::h264::h264_sample_entry_from_sps_pps_lists(
+        seq_header.sps_list.clone(),
+        seq_header.pps_list.clone(),
+    )
 }
