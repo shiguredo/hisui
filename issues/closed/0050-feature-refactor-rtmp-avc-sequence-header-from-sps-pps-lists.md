@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-19
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-06-22
 - Model: Opus 4.7
 - Branch: feature/refactor-rtmp-avc-sequence-header-from-sps-pps-lists
 - Polished: 2026-06-22
@@ -261,4 +261,26 @@ mod tests {
 
 ## 解決方法
 
-実装着手後にここに記述する。
+完了条件に従い、4 コミットで対応した。
+
+1. `src/rtmp/frame.rs::avc_sequence_header_to_sample_entry` を `h264_sample_entry_from_sps_pps_lists(seq_header.sps_list.clone(), seq_header.pps_list.clone())` の 1 行委譲のみで構成される薄いラッパーに置き換えた。シグネチャは `fn(seq_header: &shiguredo_rtmp::AvcSequenceHeader) -> Result<(SampleEntry, VideoFrameSize)>` に変更し、独自の `Avc1Box` / `AvccBox` 組み立てロジックを削除した。`src/rtmp/frame.rs` の use 宣言に `use crate::video::VideoFrameSize;` を追加した。
+2. `src/rtmp/frame.rs::process_video_frame` の H.264 SequenceHeader 経路で `let width = 0; let height = 0;` と TODO コメント 2 行を削除し、改修後の `avc_sequence_header_to_sample_entry(&seq_header)` の戻り値タプルから `frame_size` を受け取って `tracing::debug!` に SPS 由来実値で出力するよう更新した。
+3. `src/video/h264.rs::tests::PPS_NAL` を `pub(crate)` 化し、`src/rtmp/frame.rs` 末尾に `#[cfg(test)] mod tests` を新設して `avc_sequence_header_to_sample_entry` の単体テストを 3 件追加した (Baseline SPS 反映 + 空 SPS Err + 空 PPS Err)。
+4. `src/video/h264.rs::tests` の `SPS_320X240` / `SPS_1920X1080` 定義コメントに NAL ヘッダ直後 3 バイトの SPS パラメータ (profile_idc=66 / constraint_set_flags=0xc0 / level_idc) を追記し、フィクスチャ提供元にバイト解析を集約した。
+
+副次的な外部観測可能な挙動変化:
+
+- `tracing::debug!("Received H.264 sequence header: {}x{}", ...)` の出力が "0x0" → SPS 由来実値に変わった。
+- 保持される `Avc1Box.avcc_box` の `chroma_format` / `bit_depth_*` が High 系プロファイル時に `None` → `Some(SPS 由来実値)` に変わった。`avc_profile_indication` / `profile_compatibility` / `avc_level_indication` も `seq_header` 由来 → SPS 由来実値に変わった。
+- `length_size_minus_one` が `seq_header` 由来 (0..=3) → `Uint::new(3)` 固定に変わった。
+- `parse_sps` 厳格化により、改修前は通っていた仕様外 publisher (profile_idc が `{66, 77, 88} ∪ H264_HIGH_PROFILES` 外 / High 系 + chroma_format_idc > 3 / bit_depth_*_minus8 > 6 / 解像度 0 / u16::MAX 超 等) は SequenceHeader 受信時点で Err になり接続切断される (既存 fail-fast 方針と整合)。
+
+CHANGES.md は `## develop` 内未リリースのため記載しない (issue 0043 closed と同方針)。
+
+### 残懸念 (別 issue 起票候補)
+
+- **PBT 化**: ラッパー固有の振る舞い (seq_header の上層 4 フィールドが結果不変、sps_list / pps_list のパススルー) は PBT 向きで、現状の単体テスト 3 件は PBT で代替可能。`pbt/tests/prop_rtmp_frame.rs` 新設を別 issue 候補とする。
+- **ラッパー存在意義の再考**: 薄いラッパー (1 行委譲) を残すか、`process_video_frame` 内にインライン化するか。issue 0048 (H.265 同型) 着手時に「H.264 RTMP / H.265 全経路を同じ判断で揃える」観点で再評価する候補。
+- **3 以外の `length_size_minus_one` publisher 対応**: 受信フレーム payload を 4 バイト prefix に変換する経路、または受信時 Err 化。現状コードでもデコード失敗するため新規 broken window ではないが、明示的な早期検出は将来別 issue 候補。
+- **issue 0048 への双方向リンク追加**: 0048 側 `## 関連` に本 issue 0050 への参照を追記する作業 (コード変更なし、develop ブランチで直接対応可)。
+- **closed/0043 残懸念のうち未起票項目**: `extract_video_dimensions` 削除判定、`src/codec_string.rs::from_codec_pair` 内 `"avc1.42e01f"` 固定リテラル、AV1 経路 `av1_sample_entry` の固定値解消は本 issue / 0048 のいずれもカバーせず、未起票で残る。
