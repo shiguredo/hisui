@@ -2,7 +2,7 @@ use shiguredo_mp4::boxes::{Hvc1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
 use crate::{
     types::EvenUsize,
-    video::{self, FrameRate},
+    video::{self, FrameRate, bit_reader::BitReader},
 };
 
 pub type NalUnitArray = Vec<Vec<u8>>;
@@ -15,6 +15,13 @@ pub use crate::video::h264::NALU_HEADER_LENGTH;
 pub const H265_NALU_TYPE_VPS: u8 = 32;
 pub const H265_NALU_TYPE_SPS: u8 = 33;
 pub const H265_NALU_TYPE_PPS: u8 = 34;
+
+// 仕様準拠 publisher が出す general_profile_idc の許容値群（ITU-T H.265 仕様 Annex A.3）。
+// Main / Main 10 / Main Still Picture / Format Range Extensions / High Throughput /
+// Multiview Main / Scalable Main / Screen Content Coding をカバーする。
+// Hisui の入力前提 (video_toolbox / nvcodec) もこの範囲に含まれる。
+#[allow(dead_code)]
+const H265_ALLOWED_PROFILE_IDCS: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 9];
 
 /// Annex.B 形式の H.265 をパースして、含まれている NAL ユニットを走査するためのイテレーター
 ///
@@ -85,6 +92,295 @@ impl<'a> Iterator for H265AnnexBNalUnits<'a> {
 pub struct H265NalUnit<'a> {
     pub ty: u8,
     pub data: &'a [u8],
+}
+
+/// SPS NAL ユニットから取り出した hvcC 反映用フィールド群
+///
+/// `parse_hevc_sps` の戻り値で、`h265_sample_entry_from_vps_sps_pps_lists` 経由で
+/// `HvccBox` の対応フィールドにマップされる（本 issue の §1 で追加予定）。
+#[derive(Debug)]
+#[allow(dead_code)]
+struct HevcSpsParams {
+    /// profile_tier_level の general_profile_space (u(2)、ITU-T H.265 仕様 7.4.4)
+    general_profile_space: u8,
+    /// profile_tier_level の general_tier_flag (u(1))
+    general_tier_flag: u8,
+    /// profile_tier_level の general_profile_idc (u(5))
+    general_profile_idc: u8,
+    /// profile_tier_level の general_profile_compatibility_flag[0..32] を MSB ファーストで詰めた値
+    general_profile_compatibility_flags: u32,
+    /// profile_tier_level の general_progressive_source_flag 以下の連続 48 bit を u64 の bit 47..0 に詰めた値
+    general_constraint_indicator_flags: u64,
+    /// profile_tier_level の general_level_idc (u(8))
+    general_level_idc: u8,
+    /// SPS の sps_max_sub_layers_minus1 (u(3)、仕様 7.4.3.2.1 で 0..=6)
+    sps_max_sub_layers_minus1: u8,
+    /// SPS の sps_temporal_id_nesting_flag (u(1))
+    sps_temporal_id_nesting_flag: u8,
+    /// SPS の chroma_format_idc (0..=3、parse_hevc_sps で範囲検証済み)
+    chroma_format_idc: u8,
+    /// SPS の bit_depth_luma_minus8 (0..=7、HvccBox の Uint<u8, 3> 制約に整合)
+    bit_depth_luma_minus8: u8,
+    /// SPS の bit_depth_chroma_minus8 (0..=7、HvccBox の Uint<u8, 3> 制約に整合)
+    bit_depth_chroma_minus8: u8,
+    /// conformance window 適用後の width (parse_hevc_sps 内で > 0 / u16::MAX 上限を保証)
+    width: u16,
+    /// conformance window 適用後の height
+    height: u16,
+}
+
+/// SPS NAL ユニットから profile_tier_level / chroma / bit_depth / 解像度を抽出する内部関数
+///
+/// 入力 `sps` は `H265AnnexBNalUnits` が返す `H265NalUnit.data` をそのまま渡す形式で、
+/// 先頭 2 バイトに NAL ヘッダ（forbidden_zero_bit + nal_unit_type + nuh_layer_id +
+/// nuh_temporal_id_plus1）を含む。内部で `rbsp_from_hevc_sps_nalu` を呼んで NAL タイプ
+/// 検査と RBSP 抽出（emulation prevention byte 除去）を行い、ITU-T H.265 仕様 7.3.2.2.1 /
+/// 7.3.3 / 7.4.3 に従って Exp-Golomb（ue(v)）と固定長ビットフィールド（u(n)）でフィールドを
+/// 読み取る。
+///
+/// 仕様準拠 publisher のプロファイル群 (`H265_ALLOWED_PROFILE_IDCS`) 以外、または仕様値域外の
+/// `chroma_format_idc` / `bit_depth_*_minus8` / `sps_max_sub_layers_minus1`、conformance
+/// window 適用後の解像度ゼロや u16::MAX 超過を検出した場合は Err を返す。
+#[allow(dead_code)]
+fn parse_hevc_sps(sps: &[u8]) -> crate::Result<HevcSpsParams> {
+    let rbsp = rbsp_from_hevc_sps_nalu(sps)?;
+    let mut reader = BitReader::new(&rbsp);
+
+    // sps_video_parameter_set_id (u(4))
+    reader.skip_u(4)?;
+    // sps_max_sub_layers_minus1 (u(3))
+    let sps_max_sub_layers_minus1 = reader.read_u(3)? as u8;
+    if sps_max_sub_layers_minus1 > 6 {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: sps_max_sub_layers_minus1 out of spec range (0..=6): {sps_max_sub_layers_minus1}"
+        )));
+    }
+    // sps_temporal_id_nesting_flag (u(1))
+    let sps_temporal_id_nesting_flag = reader.read_u(1)? as u8;
+
+    // profile_tier_level(1, sps_max_sub_layers_minus1) （仕様 7.3.3）
+    let general_profile_space = reader.read_u(2)? as u8;
+    let general_tier_flag = reader.read_u(1)? as u8;
+    let general_profile_idc = reader.read_u(5)? as u8;
+    if !H265_ALLOWED_PROFILE_IDCS.contains(&general_profile_idc) {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: unsupported general_profile_idc {general_profile_idc}"
+        )));
+    }
+    let general_profile_compatibility_flags = reader.read_u(32)?;
+    // 48 bit の constraint indicator flags は BitReader::read_u が n > 32 で Err を返す
+    // 制約のため、上位 32 bit + 下位 16 bit に分けて読んでから u64 に組み立てる。
+    let constraint_upper = reader.read_u(32)? as u64;
+    let constraint_lower = reader.read_u(16)? as u64;
+    let general_constraint_indicator_flags = (constraint_upper << 16) | constraint_lower;
+    let general_level_idc = reader.read_u(8)? as u8;
+
+    // サブレイヤー毎の present flag を読みつつ保持する。後段の sub_layer profile / level
+    // 領域 skip は各 flag の値に依存するため、ここで Vec に格納する。Hisui の Single layer
+    // 前提 (sps_max_sub_layers_minus1 == 0) ではこのループは 1 回も実行されない。
+    let mut sub_layer_present_flags: Vec<(u8, u8)> =
+        Vec::with_capacity(sps_max_sub_layers_minus1 as usize);
+    for _ in 0..sps_max_sub_layers_minus1 {
+        let prof = reader.read_u(1)? as u8;
+        let lvl = reader.read_u(1)? as u8;
+        sub_layer_present_flags.push((prof, lvl));
+    }
+    // sps_max_sub_layers_minus1 > 0 のとき reserved_zero_2bits[i] を i = sps_max_sub_layers_minus1..8 個読む
+    // （合計 (8 - sps_max_sub_layers_minus1) * 2 bit）。sps_max_sub_layers_minus1 == 0 のときは読まない。
+    if sps_max_sub_layers_minus1 > 0 {
+        let reserved_bits = (8 - sps_max_sub_layers_minus1 as usize) * 2;
+        reader.skip_u(reserved_bits)?;
+    }
+    // 各サブレイヤーの profile / level 領域を flag に応じて skip する。
+    // sub_layer profile 88 bit = profile_space(2) + tier_flag(1) + profile_idc(5) +
+    // profile_compatibility(32) + constraint_indicator_flags(48)。
+    // sub_layer_level_idc は 8 bit。
+    for &(prof, lvl) in &sub_layer_present_flags {
+        if prof == 1 {
+            reader.skip_u(2)?;
+            reader.skip_u(1)?;
+            reader.skip_u(5)?;
+            reader.skip_u(32)?;
+            reader.skip_u(32)?;
+            reader.skip_u(16)?;
+        }
+        if lvl == 1 {
+            reader.skip_u(8)?;
+        }
+    }
+
+    // sps_seq_parameter_set_id (ue(v))
+    reader.skip_ue()?;
+
+    // chroma_format_idc (ue(v))
+    let chroma_format_idc_u32 = reader.read_ue()?;
+    if chroma_format_idc_u32 > 3 {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: chroma_format_idc out of spec range (0..=3): {chroma_format_idc_u32}"
+        )));
+    }
+    let chroma_format_idc = chroma_format_idc_u32 as u8;
+    // separate_colour_plane_flag (u(1))（chroma_format_idc == 3 のときのみ）
+    let separate_colour_plane_flag = if chroma_format_idc == 3 {
+        reader.read_u(1)?
+    } else {
+        0
+    };
+
+    // pic_width_in_luma_samples / pic_height_in_luma_samples (ue(v))
+    let pic_width_in_luma_samples = reader.read_ue()? as usize;
+    let pic_height_in_luma_samples = reader.read_ue()? as usize;
+
+    // conformance_window_flag (u(1))
+    let conformance_window_flag = reader.read_u(1)?;
+    let (conf_win_left, conf_win_right, conf_win_top, conf_win_bottom) =
+        if conformance_window_flag == 1 {
+            let l = reader.read_ue()? as usize;
+            let r = reader.read_ue()? as usize;
+            let t = reader.read_ue()? as usize;
+            let b = reader.read_ue()? as usize;
+            (l, r, t, b)
+        } else {
+            (0, 0, 0, 0)
+        };
+
+    // bit_depth_luma_minus8 (ue(v))
+    let bit_depth_luma_minus8_u32 = reader.read_ue()?;
+    if bit_depth_luma_minus8_u32 > 7 {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: bit_depth_luma_minus8 out of spec range (0..=7): {bit_depth_luma_minus8_u32}"
+        )));
+    }
+    let bit_depth_luma_minus8 = bit_depth_luma_minus8_u32 as u8;
+
+    // bit_depth_chroma_minus8 (ue(v))
+    let bit_depth_chroma_minus8_u32 = reader.read_ue()?;
+    if bit_depth_chroma_minus8_u32 > 7 {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: bit_depth_chroma_minus8 out of spec range (0..=7): {bit_depth_chroma_minus8_u32}"
+        )));
+    }
+    let bit_depth_chroma_minus8 = bit_depth_chroma_minus8_u32 as u8;
+
+    // conformance window 適用後の解像度を計算する（仕様 6.2 / 7.4.3.2.1 / Table 6-1）。
+    let (sub_width_c, sub_height_c) =
+        chroma_subsampling_factors(chroma_format_idc, separate_colour_plane_flag);
+    let crop_x = conf_win_left
+        .checked_add(conf_win_right)
+        .and_then(|v| v.checked_mul(sub_width_c))
+        .ok_or_else(|| {
+            crate::Error::new(
+                "invalid H.265 SPS: conformance window crop_x overflow during width calculation",
+            )
+        })?;
+    let crop_y = conf_win_top
+        .checked_add(conf_win_bottom)
+        .and_then(|v| v.checked_mul(sub_height_c))
+        .ok_or_else(|| {
+            crate::Error::new(
+                "invalid H.265 SPS: conformance window crop_y overflow during height calculation",
+            )
+        })?;
+    let width = pic_width_in_luma_samples
+        .checked_sub(crop_x)
+        .ok_or_else(|| {
+            crate::Error::new(
+                "invalid H.265 SPS: conformance window crop_x exceeds pic_width_in_luma_samples (underflow)",
+            )
+        })?;
+    let height = pic_height_in_luma_samples
+        .checked_sub(crop_y)
+        .ok_or_else(|| {
+            crate::Error::new(
+                "invalid H.265 SPS: conformance window crop_y exceeds pic_height_in_luma_samples (underflow)",
+            )
+        })?;
+
+    if width == 0 || height == 0 {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: zero dimensions after conformance window crop (width={width}, height={height})"
+        )));
+    }
+    if width > u16::MAX as usize || height > u16::MAX as usize {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: dimensions exceed u16::MAX (width={width}, height={height})"
+        )));
+    }
+
+    Ok(HevcSpsParams {
+        general_profile_space,
+        general_tier_flag,
+        general_profile_idc,
+        general_profile_compatibility_flags,
+        general_constraint_indicator_flags,
+        general_level_idc,
+        sps_max_sub_layers_minus1,
+        sps_temporal_id_nesting_flag,
+        chroma_format_idc,
+        bit_depth_luma_minus8,
+        bit_depth_chroma_minus8,
+        width: width as u16,
+        height: height as u16,
+    })
+}
+
+/// chroma_format_idc / separate_colour_plane_flag から (SubWidthC, SubHeightC) を返す
+///
+/// 仕様 6.2 / Table 6-1。conformance window cropping の単位として使う。
+#[allow(dead_code)]
+fn chroma_subsampling_factors(
+    chroma_format_idc: u8,
+    separate_colour_plane_flag: u32,
+) -> (usize, usize) {
+    // chroma_format_idc == 3 + separate_colour_plane_flag == 1 は ChromaArrayType = 0 として扱う
+    if separate_colour_plane_flag == 1 {
+        return (1, 1);
+    }
+    match chroma_format_idc {
+        0 => (1, 1), // monochrome
+        1 => (2, 2), // 4:2:0
+        2 => (2, 1), // 4:2:2
+        3 => (1, 1), // 4:4:4
+        _ => unreachable!("chroma_format_idc は parse_hevc_sps で 0..=3 に絞られている"),
+    }
+}
+
+/// SPS NAL ユニットから RBSP を抽出する
+///
+/// 先頭 2 バイトの NAL ヘッダ（H.265 の forbidden_zero_bit + nal_unit_type + nuh_layer_id +
+/// nuh_temporal_id_plus1）を skip し、payload 内の emulation prevention byte
+/// (`0x00 0x00 0x03`) を除去した RBSP バイト列を返す。
+#[allow(dead_code)]
+fn rbsp_from_hevc_sps_nalu(nalu: &[u8]) -> crate::Result<Vec<u8>> {
+    if nalu.len() < 2 {
+        return Err(crate::Error::new(
+            "invalid H.265 SPS: NAL unit too short (expected >= 2 bytes)",
+        ));
+    }
+    let nal_unit_type = (nalu[0] >> 1) & 0x3F;
+    if nal_unit_type != H265_NALU_TYPE_SPS {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: expected nal_unit_type={H265_NALU_TYPE_SPS}, got {nal_unit_type}"
+        )));
+    }
+    let payload = &nalu[2..];
+    let mut rbsp = Vec::with_capacity(payload.len());
+    let mut i = 0;
+    while i < payload.len() {
+        if i + 2 < payload.len()
+            && payload[i] == 0x00
+            && payload[i + 1] == 0x00
+            && payload[i + 2] == 0x03
+        {
+            rbsp.push(0x00);
+            rbsp.push(0x00);
+            i += 3;
+        } else {
+            rbsp.push(payload[i]);
+            i += 1;
+        }
+    }
+    Ok(rbsp)
 }
 
 /// H.265 サンプルエントリーを生成する
@@ -190,7 +486,7 @@ pub fn h265_sample_entry_from_annexb(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     // テスト用に VPS / SPS / PPS の NAL ヘッダ 2 バイトを定数化する。
@@ -304,5 +600,432 @@ mod tests {
             nalus[0].ty, 32,
             "nal_unit_type = 32 (VPS) として抽出されること"
         );
+    }
+
+    // ----------------------------------------------------------------
+    // 仕様準拠の H.265 SPS バイト列ビルダー（テスト専用）
+    //
+    // ITU-T H.265 仕様 7.3.2.2.1 / 7.3.3 / 7.4.3 に従って SPS を組み立てる。
+    // Main / Main 10 / Main Still Picture の正常系と、各 Err 経路 (chroma_format_idc / bit_depth /
+    // sps_max_sub_layers_minus1 / general_profile_idc / cropping アンダーフロー等) を
+    // 確実に踏ませるためのビルダー。Hisui の入力前提は単一レイヤー (sps_max_sub_layers_minus1 == 0)。
+    // ----------------------------------------------------------------
+
+    /// ビット単位で値を書き出すライター（仕様 9.x の逆操作）
+    struct HevcSpsBitWriter {
+        bytes: Vec<u8>,
+        bit_count: usize,
+    }
+
+    impl HevcSpsBitWriter {
+        fn new() -> Self {
+            Self {
+                bytes: Vec::new(),
+                bit_count: 0,
+            }
+        }
+
+        fn write_bit(&mut self, bit: u8) {
+            let byte_idx = self.bit_count / 8;
+            let bit_idx = self.bit_count % 8;
+            if byte_idx >= self.bytes.len() {
+                self.bytes.push(0);
+            }
+            self.bytes[byte_idx] |= (bit & 1) << (7 - bit_idx);
+            self.bit_count += 1;
+        }
+
+        /// n ビット符号なし整数を MSB ファーストで書き出す（u(n)）
+        fn write_u(&mut self, n: usize, value: u64) {
+            for i in (0..n).rev() {
+                let bit = ((value >> i) & 1) as u8;
+                self.write_bit(bit);
+            }
+        }
+
+        /// 符号なし Exp-Golomb 復号の逆操作（ue(v)、仕様 9.x）
+        fn write_ue(&mut self, value: u32) {
+            // value + 1 の bit 表現長を取り、(長さ - 1) 個の先行 0 + value+1 の bit 表現を書く
+            let v = value
+                .checked_add(1)
+                .expect("ue(v) のテスト入力が u32::MAX を越えた");
+            let bits_needed = 32 - v.leading_zeros() as usize;
+            for _ in 0..(bits_needed - 1) {
+                self.write_bit(0);
+            }
+            self.write_u(bits_needed, v as u64);
+        }
+
+        fn into_bytes(self) -> Vec<u8> {
+            self.bytes
+        }
+    }
+
+    /// テスト用の H.265 SPS バイト列ビルダー
+    ///
+    /// デフォルト: Main プロファイル + sps_max_sub_layers_minus1=0 (Single layer) +
+    /// 4:2:0 + 8-bit + 解像度引数指定 + conformance window 無し。
+    pub(crate) struct HevcSpsBuilder {
+        general_profile_space: u32,
+        general_tier_flag: u32,
+        general_profile_idc: u32,
+        general_profile_compatibility_flags: u32,
+        general_constraint_indicator_flags: u64,
+        general_level_idc: u32,
+        sps_max_sub_layers_minus1: u32,
+        sps_temporal_id_nesting_flag: u32,
+        chroma_format_idc: u32,
+        bit_depth_luma_minus8: u32,
+        bit_depth_chroma_minus8: u32,
+        pic_width_in_luma_samples: u32,
+        pic_height_in_luma_samples: u32,
+        conformance_window_flag: bool,
+        conf_win_offsets: (u32, u32, u32, u32),
+    }
+
+    impl HevcSpsBuilder {
+        /// 解像度を直接指定するベースビルダー。デフォルトは Main + Level 3.1 + 4:2:0 +
+        /// 8-bit + Single layer + crop なし。
+        pub(crate) fn raw(pic_width: u32, pic_height: u32) -> Self {
+            Self {
+                general_profile_space: 0,
+                general_tier_flag: 0,
+                general_profile_idc: 1, // Main
+                general_profile_compatibility_flags: 0x60000000,
+                general_constraint_indicator_flags: 0xb00000000000,
+                general_level_idc: 93, // Level 3.1
+                sps_max_sub_layers_minus1: 0,
+                sps_temporal_id_nesting_flag: 1,
+                chroma_format_idc: 1, // 4:2:0
+                bit_depth_luma_minus8: 0,
+                bit_depth_chroma_minus8: 0,
+                pic_width_in_luma_samples: pic_width,
+                pic_height_in_luma_samples: pic_height,
+                conformance_window_flag: false,
+                conf_win_offsets: (0, 0, 0, 0),
+            }
+        }
+
+        pub(crate) fn with_general_profile_idc(mut self, v: u32) -> Self {
+            self.general_profile_idc = v;
+            self
+        }
+
+        pub(crate) fn with_general_level_idc(mut self, v: u32) -> Self {
+            self.general_level_idc = v;
+            self
+        }
+
+        pub(crate) fn with_general_profile_compatibility_flags(mut self, v: u32) -> Self {
+            self.general_profile_compatibility_flags = v;
+            self
+        }
+
+        pub(crate) fn with_general_constraint_indicator_flags(mut self, v: u64) -> Self {
+            self.general_constraint_indicator_flags = v;
+            self
+        }
+
+        pub(crate) fn with_general_profile_space(mut self, v: u32) -> Self {
+            self.general_profile_space = v;
+            self
+        }
+
+        pub(crate) fn with_general_tier_flag(mut self, v: u32) -> Self {
+            self.general_tier_flag = v;
+            self
+        }
+
+        pub(crate) fn with_sps_max_sub_layers_minus1(mut self, v: u32) -> Self {
+            self.sps_max_sub_layers_minus1 = v;
+            self
+        }
+
+        pub(crate) fn with_chroma_format_idc(mut self, v: u32) -> Self {
+            self.chroma_format_idc = v;
+            self
+        }
+
+        pub(crate) fn with_bit_depth_luma_minus8(mut self, v: u32) -> Self {
+            self.bit_depth_luma_minus8 = v;
+            self
+        }
+
+        pub(crate) fn with_bit_depth_chroma_minus8(mut self, v: u32) -> Self {
+            self.bit_depth_chroma_minus8 = v;
+            self
+        }
+
+        pub(crate) fn with_conformance_window(
+            mut self,
+            left: u32,
+            right: u32,
+            top: u32,
+            bottom: u32,
+        ) -> Self {
+            self.conformance_window_flag = true;
+            self.conf_win_offsets = (left, right, top, bottom);
+            self
+        }
+
+        pub(crate) fn build(self) -> Vec<u8> {
+            let mut w = HevcSpsBitWriter::new();
+
+            // NAL ヘッダ 2 バイト: forbidden_zero_bit=0, nal_unit_type=33 (SPS), nuh_layer_id=0,
+            // nuh_temporal_id_plus1=1 → 0x42 0x01
+            w.write_u(8, 0x42);
+            w.write_u(8, 0x01);
+
+            // sps_video_parameter_set_id (u(4))
+            w.write_u(4, 0);
+            // sps_max_sub_layers_minus1 (u(3))
+            w.write_u(3, self.sps_max_sub_layers_minus1 as u64);
+            // sps_temporal_id_nesting_flag (u(1))
+            w.write_u(1, self.sps_temporal_id_nesting_flag as u64);
+
+            // profile_tier_level (1, sps_max_sub_layers_minus1)
+            w.write_u(2, self.general_profile_space as u64);
+            w.write_u(1, self.general_tier_flag as u64);
+            w.write_u(5, self.general_profile_idc as u64);
+            w.write_u(32, self.general_profile_compatibility_flags as u64);
+            // 48 bit の constraint indicator flags
+            w.write_u(
+                32,
+                (self.general_constraint_indicator_flags >> 16) & 0xFFFFFFFF,
+            );
+            w.write_u(16, self.general_constraint_indicator_flags & 0xFFFF);
+            w.write_u(8, self.general_level_idc as u64);
+
+            // sps_max_sub_layers_minus1 == 0 のとき sub_layer present flag ループと reserved_zero_2bits は無し
+            // sps_max_sub_layers_minus1 > 0 のときは sub_layer_*_present_flag を 0 / reserved_zero_2bits を埋める
+            for _ in 0..self.sps_max_sub_layers_minus1 {
+                w.write_u(1, 0); // sub_layer_profile_present_flag[i] = 0
+                w.write_u(1, 0); // sub_layer_level_present_flag[i] = 0
+            }
+            if self.sps_max_sub_layers_minus1 > 0 {
+                let reserved_bits = (8 - self.sps_max_sub_layers_minus1 as usize) * 2;
+                for _ in 0..reserved_bits {
+                    w.write_u(1, 0);
+                }
+            }
+
+            // sps_seq_parameter_set_id (ue(v))
+            w.write_ue(0);
+
+            // chroma_format_idc (ue(v))
+            w.write_ue(self.chroma_format_idc);
+            if self.chroma_format_idc == 3 {
+                // separate_colour_plane_flag (u(1)) = 0
+                w.write_u(1, 0);
+            }
+
+            // pic_width_in_luma_samples / pic_height_in_luma_samples (ue(v))
+            w.write_ue(self.pic_width_in_luma_samples);
+            w.write_ue(self.pic_height_in_luma_samples);
+
+            // conformance_window_flag (u(1))
+            w.write_u(1, if self.conformance_window_flag { 1 } else { 0 });
+            if self.conformance_window_flag {
+                w.write_ue(self.conf_win_offsets.0);
+                w.write_ue(self.conf_win_offsets.1);
+                w.write_ue(self.conf_win_offsets.2);
+                w.write_ue(self.conf_win_offsets.3);
+            }
+
+            // bit_depth_luma_minus8 / bit_depth_chroma_minus8 (ue(v))
+            w.write_ue(self.bit_depth_luma_minus8);
+            w.write_ue(self.bit_depth_chroma_minus8);
+
+            // 残りのフィールド (log2_max_pic_order_cnt_lsb_minus4 等) は本実装では読まないため省略する。
+            // RBSP trailing bits も省略する。
+
+            w.into_bytes()
+        }
+    }
+
+    #[test]
+    fn parse_hevc_sps_main_profile_returns_field_values() {
+        // Main プロファイル (general_profile_idc=1) のデフォルトビルダーで profile / level /
+        // compat / constraint / chroma / bit_depth が SPS 由来の値で返ること
+        let sps = HevcSpsBuilder::raw(1920, 1080).build();
+        let params = parse_hevc_sps(&sps).expect("Main SPS のパース成功");
+        assert_eq!(params.general_profile_idc, 1);
+        assert_eq!(params.general_level_idc, 93);
+        assert_eq!(params.general_profile_space, 0);
+        assert_eq!(params.general_tier_flag, 0);
+        assert_eq!(params.general_profile_compatibility_flags, 0x60000000);
+        assert_eq!(params.general_constraint_indicator_flags, 0xb00000000000);
+        assert_eq!(params.chroma_format_idc, 1);
+        assert_eq!(params.bit_depth_luma_minus8, 0);
+        assert_eq!(params.bit_depth_chroma_minus8, 0);
+        assert_eq!(params.sps_max_sub_layers_minus1, 0);
+        assert_eq!(params.sps_temporal_id_nesting_flag, 1);
+        assert_eq!(params.width, 1920);
+        assert_eq!(params.height, 1080);
+    }
+
+    #[test]
+    fn parse_hevc_sps_main10_profile_returns_bit_depth_2() {
+        // Main 10 プロファイル (general_profile_idc=2 + bit_depth_*_minus8=2) を反映できること
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_general_profile_idc(2)
+            .with_bit_depth_luma_minus8(2)
+            .with_bit_depth_chroma_minus8(2)
+            .build();
+        let params = parse_hevc_sps(&sps).expect("Main 10 SPS のパース成功");
+        assert_eq!(params.general_profile_idc, 2);
+        assert_eq!(params.bit_depth_luma_minus8, 2);
+        assert_eq!(params.bit_depth_chroma_minus8, 2);
+    }
+
+    #[test]
+    fn parse_hevc_sps_applies_conformance_window_cropping() {
+        // conformance_window_flag=1 + crop_right=8 + crop_bottom=8 の場合、
+        // 4:2:0 ストリームでは SubWidthC=2, SubHeightC=2 で
+        // width = 1920 - 2*(0+8) = 1904 / height = 1080 - 2*(0+8) = 1064 になること
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_conformance_window(0, 8, 0, 8)
+            .build();
+        let params = parse_hevc_sps(&sps).expect("crop SPS のパース成功");
+        assert_eq!(params.width, 1904);
+        assert_eq!(params.height, 1064);
+    }
+
+    #[test]
+    fn parse_hevc_sps_rejects_unsupported_profile_idc() {
+        // general_profile_idc = 10 (H265_ALLOWED_PROFILE_IDCS にも入っていない値) で Err
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_general_profile_idc(10)
+            .build();
+        let result = parse_hevc_sps(&sps);
+        assert!(
+            result.is_err(),
+            "許容リスト外の general_profile_idc は Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_hevc_sps_rejects_chroma_format_idc_out_of_range() {
+        // chroma_format_idc = 4 (仕様 7.4.3.2.1 で 0..=3) は Err
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_chroma_format_idc(4)
+            .build();
+        let result = parse_hevc_sps(&sps);
+        assert!(
+            result.is_err(),
+            "chroma_format_idc=4 は仕様値域外で Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_hevc_sps_rejects_bit_depth_luma_minus8_out_of_range() {
+        // bit_depth_luma_minus8 = 8 (HvccBox の Uint<u8, 3> 制約 0..=7 を超える) は Err
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_bit_depth_luma_minus8(8)
+            .build();
+        let result = parse_hevc_sps(&sps);
+        assert!(
+            result.is_err(),
+            "bit_depth_luma_minus8=8 は HvccBox 値域外で Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_hevc_sps_rejects_bit_depth_chroma_minus8_out_of_range() {
+        // bit_depth_chroma_minus8 = 8 (HvccBox の Uint<u8, 3> 制約 0..=7 を超える) は Err
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_bit_depth_chroma_minus8(8)
+            .build();
+        let result = parse_hevc_sps(&sps);
+        assert!(
+            result.is_err(),
+            "bit_depth_chroma_minus8=8 は HvccBox 値域外で Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_hevc_sps_rejects_sps_max_sub_layers_minus1_out_of_range() {
+        // sps_max_sub_layers_minus1 = 7 (仕様 7.4.3.2.1 で 0..=6) は Err
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_sps_max_sub_layers_minus1(7)
+            .build();
+        let result = parse_hevc_sps(&sps);
+        assert!(
+            result.is_err(),
+            "sps_max_sub_layers_minus1=7 は仕様値域外で Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_hevc_sps_rejects_zero_dimensions_after_cropping() {
+        // crop 適用後に width が 0 になるケース。pic_width=16 / SubWidthC=2 / crop_left=4 + crop_right=4
+        // → 16 - 2*(4+4) = 0 で Err
+        let sps = HevcSpsBuilder::raw(16, 32)
+            .with_conformance_window(4, 4, 0, 0)
+            .build();
+        let result = parse_hevc_sps(&sps);
+        assert!(
+            result.is_err(),
+            "crop 後に width が 0 になる場合は Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_hevc_sps_rejects_crop_underflow() {
+        // crop 値が pic_width を超えるケース。pic_width=16 / SubWidthC=2 / crop_left=100 + crop_right=100
+        // → 2*(100+100) = 400 を 16 から引けず Err
+        let sps = HevcSpsBuilder::raw(16, 32)
+            .with_conformance_window(100, 100, 0, 0)
+            .build();
+        let result = parse_hevc_sps(&sps);
+        assert!(result.is_err(), "crop アンダーフローは Err: {result:?}");
+    }
+
+    #[test]
+    fn parse_hevc_sps_round_trips_profile_tier_level_fields_from_builder() {
+        // HevcSpsBuilder の profile_tier_level 系 with_* メソッドが parse_hevc_sps の戻り値に
+        // そのまま反映されることを担保する round-trip テスト。デフォルト値以外を全部設定する。
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_general_profile_space(2)
+            .with_general_tier_flag(1)
+            .with_general_profile_idc(2) // Main 10
+            .with_general_profile_compatibility_flags(0x40000000)
+            .with_general_constraint_indicator_flags(0x123456789abc)
+            .with_general_level_idc(120)
+            .build();
+        let params = parse_hevc_sps(&sps).expect("round-trip SPS のパース成功");
+        assert_eq!(params.general_profile_space, 2);
+        assert_eq!(params.general_tier_flag, 1);
+        assert_eq!(params.general_profile_idc, 2);
+        assert_eq!(params.general_profile_compatibility_flags, 0x40000000);
+        assert_eq!(params.general_constraint_indicator_flags, 0x123456789abc);
+        assert_eq!(params.general_level_idc, 120);
+    }
+
+    #[test]
+    fn rbsp_from_hevc_sps_nalu_rejects_non_sps_nal_type() {
+        // VPS の NAL ヘッダ (nal_unit_type=32) を渡すと Err になること
+        let nalu = [0x40, 0x01, 0x00];
+        let result = rbsp_from_hevc_sps_nalu(&nalu);
+        assert!(result.is_err(), "SPS 以外の NAL は Err: {result:?}");
+    }
+
+    #[test]
+    fn rbsp_from_hevc_sps_nalu_rejects_short_input() {
+        // 1 バイト入力 (NAL ヘッダ 2 バイトに満たない) は Err
+        let nalu = [0x42];
+        let result = rbsp_from_hevc_sps_nalu(&nalu);
+        assert!(result.is_err(), "短い NAL は Err: {result:?}");
+    }
+
+    #[test]
+    fn rbsp_from_hevc_sps_nalu_removes_emulation_prevention_bytes() {
+        // 0x00 0x00 0x03 パターンを RBSP 抽出時に 0x00 0x00 に縮約すること
+        // NAL ヘッダ 2 バイト (0x42 0x01) + payload (0x00 0x00 0x03 0xff) を入れる
+        let nalu = [0x42, 0x01, 0x00, 0x00, 0x03, 0xff];
+        let rbsp = rbsp_from_hevc_sps_nalu(&nalu).expect("RBSP 抽出成功");
+        // payload 4 バイトから emulation prevention byte 1 個分が削れる
+        assert_eq!(rbsp.len(), 3);
+        assert_eq!(rbsp, vec![0x00, 0x00, 0xff]);
     }
 }
