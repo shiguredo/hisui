@@ -20,7 +20,6 @@ members = [
   "examples/sora_source",
   "pbt"
 ]
-# fuzz/ は libfuzzer-sys (nightly 依存) を持つため本体 workspace から除外する
 exclude = ["fuzz"]
 
 [workspace.dependencies]
