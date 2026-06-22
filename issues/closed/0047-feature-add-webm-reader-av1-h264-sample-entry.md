@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-18
-- Completed:
+- Completed: 2026-06-22
 - Model: Claude Opus 4.7
 - Branch: feature/add-webm-reader-av1-h264-sample-entry
 - Polished: 2026-06-22
@@ -260,3 +260,95 @@ rg -n 'parse_av1_codec_private|parse_avcc_sps_pps_lists' src/
 - issue 0034 (closed): writer 側 sample_entry 欠落検知の `resolve_*_sample_entry` 導入
 - issue 0043 (closed): `h264_sample_entry_from_sps_pps_lists` 新設。本 issue の H264AnnexB 経路で直接利用する
 - issue 0048 (open): `h265_sample_entry` を VPS / SPS / PPS リスト受け取り版にリファクタ。AV1 経路の固定値解消は同 issue で「将来別 issue」として予告
+
+## 解決方法
+
+ブランチ `feature/add-webm-reader-av1-h264-sample-entry` で実装した。
+
+### パーサ新設
+
+- `src/video/av1.rs` に `parse_av1_codec_private(data: &[u8]) -> Result<&[u8]>` を追加。
+  AV1CodecConfigurationRecord の固定 4 バイトヘッダ (marker / version) を検証して、
+  byte 4 以降の configOBUs スライス参照を返す。byte 1..=3 は `av1_sample_entry` が Av1cBox の
+  固定値を使うため検証も抽出もしない。
+- `src/video/h264.rs` に `parse_avcc_sps_pps_lists(data: &[u8]) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>)>`
+  を追加。avcC を逐次パースして SPS / PPS リストを出現順保持で返す。configurationVersion=1 /
+  lengthSizeMinusOne=3 / numOfSequenceParameterSets in 1..=31 / numOfPictureParameterSets in 1..=31
+  を検証する。byte 1..=3 と High 系プロファイル末尾追加フィールドは `parse_sps` が SPS 由来実値で
+  AvccBox を埋めるため捨てる。
+
+### WebmVideoReader::new の有効化
+
+- `VideoTrackHeader::read` を `AudioTrackHeader::read` と同じ TrackEntry 単一 peek_id ループ構造に
+  変更し、`skip_until(ID_CODEC_ID)` を廃止。Matroska 仕様で TrackEntry 内子要素順序が規定
+  されていないため、CodecPrivate が CodecID より先に出る WebM でも取りこぼさない構造になった。
+- `VideoTrackHeader` 構造体を `codec: VideoFormat` のみに削減し、戻り値タプル
+  `(Self, usize, usize, Vec<u8>)` で width / height / codec_private を返す。
+- `read_pixel_dimensions` の責務を VIDEO master 内ループのみに縮小。VIDEO master 不在の警告位置を
+  `VideoTrackHeader::read` の peek_id ループ走査完了直後に移した。
+- `ElementReader::read_bytes_with_limit(id, max_size)` を新設し、CodecPrivate 取得経路のみ上限を
+  64 KB に拡大。`read_bytes` は `read_bytes_with_limit(id, 1024)` の薄いラッパーに統合した。
+- `WebmVideoReader::new` の match 分岐で AV1 / H264AnnexB を `Some(SharedSampleEntry::new(...))` に
+  変更。AV1 は `parse_av1_codec_private` + `av1_sample_entry`、H264AnnexB は `parse_avcc_sps_pps_lists`
+  + `h264_sample_entry_from_sps_pps_lists` を呼ぶ。VP8 / VP9 経路は `header.width` / `header.height`
+  参照をローカル変数 `width` / `height` に置換した。
+- AV1 / H264AnnexB で CodecPrivate が欠落していた場合は `VideoTrackHeader::read` が
+  `"video TRACK_ENTRY missing CodecPrivate element for ..."` の診断付き Err を返す
+  (`AudioTrackHeader::read` の OpusHead 欠落検査と対称)。
+
+### 不変条件 docstring
+
+- `src/video.rs::VideoFrame.sample_entry` docstring から「現時点で未適用の経路: WebM リーダーの
+  AV1 / H264AnnexB 映像。」の 1 行を削除。不変条件「圧縮 `VideoFrame` は常に `Some` を持つ」が
+  全 WebM 経路で成立する状態になった。
+
+### テスト
+
+- `src/video/av1.rs::tests` に `parse_av1_codec_private` の単体テスト 3 件 (各境界 Err のみ。
+  ラウンドトリップは PBT で代替)。
+- `src/video/h264.rs::tests` に `parse_avcc_sps_pps_lists` の単体テスト 7 件 (configurationVersion /
+  lengthSizeMinusOne / numOfSPS / numOfPPS 各境界 Err、ラウンドトリップは PBT で代替)。テスト
+  ヘルパー `build_avcc(sps_list, pps_list) -> Vec<u8>` も新設。
+- `src/webm/reader.rs::tests` に `ElementReader::read_bytes_with_limit` の単体テスト 3 件
+  (正常経路 / `size == max_size` 境界 Err / ID 不一致 Err)。
+- `pbt/tests/prop_av1.rs` / `pbt/tests/prop_h264_avcc.rs` で `parse_av1_codec_private` /
+  `parse_avcc_sps_pps_lists` のラウンドトリップ性質を PBT 化。
+- 既存テスト (`tests/reader_webm_tests.rs` VP8 + Opus 2 件、`src/webm/reader.rs::tests` の
+  `releases_new_arc_per_construction` 2 件) は変更なしで pass。
+
+### review-diff-code 指摘の反映
+
+`/review-diff-code` のレビュー指摘を順次取り込んだ。
+
+- 致命的: ソースコード内に残っていた issue 番号 / issue 言及 4 箇所を削除。
+- 重要: `Vec::with_capacity` を `Vec::new()` に変更 (`shiguredo-rust` 規約「入力バイナリの
+  デコード経路で `Vec::with_capacity` を使わない」)、`read_bytes_with_limit` のエラーメッセージを
+  `"invalid data"` から `"WebM element data too large: id=..., size=..., max=..."` の診断付きに具体化、
+  `read_bytes` を `read_bytes_with_limit(id, 1024)` のラッパーに統合 (重複削減)、CodecPrivate
+  欠落時の事前検査追加 (`AudioTrackHeader::read` と対称)、`parse_avcc_sps_pps_lists` の docstring の
+  SPS 検査記述を実態に合わせて正確化。
+- 改善: docstring / 自明な行コメント / build_avcc 直上コメントの冗長削除、
+  `parse_av1_codec_private` docstring の「Sequence Header OBU 不在は後段デコーダで検出」
+  (下流挙動への保証は本関数の責務外) を削除。
+- PBT 移行後の `extracts_*` / `supports_*` 単体テスト 3 件を削除 (`shiguredo-rust` 規約「PBT で
+  カバーできるものを単体テストで書かない」)。
+
+### スコープ外として後続に委ねた項目
+
+- `av1_sample_entry` の Hisui 固定値解消。Av1cBox の Main profile / 4:2:0 / 8-bit が WebM AV1
+  ソースで固定値となる broken window で、open 0048 で「将来別 issue」として予告済み。
+- AV1 / H264AnnexB WebM の reader 経路 e2e テスト。`WebmVideoReader::new` が `Path` のみ
+  受け取る API 制約と、testdata に AV1 / H264AnnexB の WebM ファイルが無いため見送り。
+  testdata 追加 / `WebmVideoReader::new` の `Read` 受け取り版 API 追加で対応可能。
+- `VideoTrackHeader::read` の新規分岐 4 経路 (CodecID 不在 / VIDEO 不在 / 複数 TRACK_ENTRY /
+  映像トラック不在) の単体テスト。合成 EBML フィクスチャ整備が必要。
+- `parse_av1_codec_private` / `parse_avcc_sps_pps_lists` の命名を仕様用語ベース
+  (`parse_av1c` / `parse_avcc`) に揃える件。再利用性の改善案。
+- `src/video/h264.rs` のテストモジュール分割 (1847 行)。
+
+### CHANGES.md
+
+記載なし (closed 0017 / 0027 / 0030 / 0031 / 0037 / 0043 と同方針)。本 issue は内部リファクタ +
+broken window 解消で、(a) 公開 API 変化は新規 `pub fn` 追加のみ、(b) compose 経路の出力 MP4 の
+bytes diff は無い、(c) 副次効果は writer 側 warn ログ抑止と inspect 経路で sample_entry が
+`Some` で観測できるようになる内部観測の変化のみ。

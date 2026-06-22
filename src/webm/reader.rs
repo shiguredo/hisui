@@ -10,9 +10,11 @@ use crate::{
         opus::{opus_sample_entry, parse_opus_head_pre_skip},
     },
     sample_entry::SharedSampleEntry,
-    types::CodecName,
+    types::{CodecName, EvenUsize},
     video::{
         VideoFormat, VideoFrame,
+        av1::{av1_sample_entry, parse_av1_codec_private},
+        h264::{h264_sample_entry_from_sps_pps_lists, parse_avcc_sps_pps_lists},
         vpx::{vp8_sample_entry, vp9_sample_entry},
     },
 };
@@ -180,13 +182,23 @@ impl<R: Read> ElementReader<R> {
         Ok(u64::from_be_bytes(bytes))
     }
 
+    // 1024 バイト上限版。OpusHead や TimestampScale など Sora 録画で 1024 を超えない要素用。
     fn read_bytes(&mut self, expected_id: u32) -> crate::Result<Vec<u8>> {
+        self.read_bytes_with_limit(expected_id, 1024)
+    }
+
+    // 上限サイズを呼び出し側で指定する版の read_bytes。
+    // AV1CodecConfigurationRecord / avcC のように 1024 バイト上限を超える可能性のある
+    // 要素を読むときに使う。
+    fn read_bytes_with_limit(&mut self, expected_id: u32, max_size: u64) -> crate::Result<Vec<u8>> {
         self.expect_id(expected_id)?;
 
         let size = self.read_element_data_size()?;
-        if size >= 1024 {
-            return Err(crate::Error::new("invalid data"));
-        } // 念のために大きすぎる値はエラーにしておく
+        if size >= max_size {
+            return Err(crate::Error::new(format!(
+                "WebM element data too large: id=0x{expected_id:X}, size={size}, max={max_size}"
+            )));
+        }
 
         let mut buf = vec![0; size as usize];
         self.inner.read_exact(&mut buf)?;
@@ -343,64 +355,128 @@ impl AudioTrackHeader {
 #[derive(Debug)]
 struct VideoTrackHeader {
     codec: VideoFormat,
-    width: usize,
-    height: usize,
 }
 
 impl VideoTrackHeader {
-    fn read<R: Read>(reader: &mut ElementReader<R>) -> crate::Result<Self> {
-        let mut reader = reader.read_master(ID_TRACKS)?;
-        loop {
-            if reader.is_eos() {
-                // 映像トラックが存在しないパターン。Sora 録画は映像トラックを必ず含む前提のため、
-                // 実運用では発生しない経路。本来「生 YUV」を指す VideoFormat::I420 を「映像トラック
-                // 不在」のセンチネル値に流用しており、型の意味論としては不純だが Sora 録画前提では
-                // この値が WebmVideoReader::read_simple_block で参照されることはない (track_number
-                // 不一致でフレーム生成が起きないため)。型抽象の整理が必要になったら別 issue で扱う。
-                tracing::warn!(
-                    "WebM TRACKS has no video TRACK_ENTRY; codec set to I420 as placeholder"
-                );
-                return Ok(Self {
-                    codec: VideoFormat::I420,
-                    width: 0,
-                    height: 0,
-                });
-            }
-
-            let mut reader = reader.read_master(ID_TRACK_ENTRY)?;
-            let track_number = reader.read_u64(ID_TRACK_NUMBER)?;
-            if track_number != TRACK_NUMBER_VIDEO {
-                reader.skip_all()?;
+    // TRACKS を走査して映像 TRACK_ENTRY を 1 件取り出す。
+    // `AudioTrackHeader::read` と対称に、TRACK_ENTRY 直下を単一 peek_id ループで走査して
+    // CodecID / CodecPrivate / Video master をまとめて拾う。Matroska 仕様で TRACK_ENTRY 内
+    // 子要素順序は規定されていないため、CodecPrivate が CodecID より先に出る WebM でも
+    // 取りこぼさない構造になる。
+    //
+    // width / height / codec_private は `WebmVideoReader::new` のローカル変数で消費するため
+    // 戻り値タプルで返し、struct には保持しない。
+    //
+    // 映像トラック不在 (TRACKS 内に TRACK_NUMBER_VIDEO の TRACK_ENTRY が無い) の場合は
+    // `(Self { codec: VideoFormat::I420 }, 0, 0, Vec::new())` のセンチネル値を返す
+    // (生 YUV を指す I420 を映像トラック不在の placeholder に流用する。
+    // Sora 録画は映像トラック必須前提で実運用では発生しない経路)。
+    fn read<R: Read>(
+        reader: &mut ElementReader<R>,
+    ) -> crate::Result<(Self, usize, usize, Vec<u8>)> {
+        let mut tracks_reader = reader.read_master(ID_TRACKS)?;
+        let mut found: Option<(VideoFormat, usize, usize, Vec<u8>)> = None;
+        while !tracks_reader.is_eos() {
+            let mut entry = tracks_reader.read_master(ID_TRACK_ENTRY)?;
+            let track_number = entry.read_u64(ID_TRACK_NUMBER)?;
+            if track_number != TRACK_NUMBER_VIDEO || found.is_some() {
+                // 対象外トラック、または既に映像 TRACK_ENTRY を処理済み。
+                // `AudioTrackHeader::read` と対称に、found 後も break せず残り TRACK_ENTRY を消費する。
+                entry.skip_all()?;
                 continue;
             }
-
-            reader.skip_until(ID_CODEC_ID)?;
-            let bytes = reader.read_bytes(ID_CODEC_ID)?;
-            let codec = match bytes.as_slice() {
-                b"V_VP8" => VideoFormat::Vp8,
-                b"V_VP9" => VideoFormat::Vp9,
-                b"V_AV1" => VideoFormat::Av1,
-                b"V_MPEG4/ISO/AVC" => VideoFormat::H264AnnexB,
-                _ => {
-                    return Err(crate::Error::new(format!(
-                        "unknown video codec ID: {bytes:?}"
-                    )));
+            // TRACK_ENTRY 内残り子要素を peek_id ループで走査する。
+            let mut codec: Option<VideoFormat> = None;
+            let mut codec_private: Vec<u8> = Vec::new();
+            let mut width: usize = 0;
+            let mut height: usize = 0;
+            let mut video_seen = false;
+            while !entry.is_eos() {
+                let id = entry.peek_id()?;
+                match id {
+                    ID_CODEC_ID => {
+                        let bytes = entry.read_bytes(ID_CODEC_ID)?;
+                        codec = Some(match bytes.as_slice() {
+                            b"V_VP8" => VideoFormat::Vp8,
+                            b"V_VP9" => VideoFormat::Vp9,
+                            b"V_AV1" => VideoFormat::Av1,
+                            b"V_MPEG4/ISO/AVC" => VideoFormat::H264AnnexB,
+                            _ => {
+                                return Err(crate::Error::new(format!(
+                                    "unknown video codec ID: {bytes:?}"
+                                )));
+                            }
+                        });
+                    }
+                    ID_CODEC_PRIVATE => {
+                        // AV1CodecConfigurationRecord / avcC は 1024 バイトを超える可能性があるため
+                        // CodecPrivate 専用の `read_bytes_with_limit` を使い上限を 64 KB に拡大する。
+                        codec_private = entry.read_bytes_with_limit(ID_CODEC_PRIVATE, 64 * 1024)?;
+                    }
+                    ID_VIDEO => {
+                        video_seen = true;
+                        let mut video_reader = entry.read_master(ID_VIDEO)?;
+                        let (w, h) = read_pixel_dimensions(&mut video_reader)?;
+                        width = w;
+                        height = h;
+                    }
+                    _ => {
+                        // FlagLacing / Language など本 reader では使わない子要素は読み捨て。
+                        entry.read_id()?;
+                        entry.skip_element_data()?;
+                    }
                 }
+            }
+            let Some(codec) = codec else {
+                return Err(crate::Error::new(
+                    "video TRACK_ENTRY missing CodecID element",
+                ));
             };
-
-            let (width, height) = read_pixel_dimensions(&mut reader)?;
-            return Ok(Self {
-                codec,
-                width,
-                height,
-            });
+            if !video_seen {
+                // VIDEO master が TRACK_ENTRY 直下に不在のフォールバック。
+                // 警告ログを出して width / height = 0 で続行する。
+                tracing::warn!(
+                    "WebM video TRACK_ENTRY has no Video master element; falling back to width=0 height=0"
+                );
+            }
+            // AV1 / H264AnnexB は sample_entry 構築に CodecPrivate (AV1CodecConfigurationRecord /
+            // avcC) を必要とする。欠落時はパーサが「too short」を返してしまい原因が分からないため、
+            // ここで明示的に検出して `AudioTrackHeader::read` の OpusHead 欠落検出と対称な
+            // 診断メッセージを返す。
+            if matches!(codec, VideoFormat::Av1 | VideoFormat::H264AnnexB)
+                && codec_private.is_empty()
+            {
+                return Err(crate::Error::new(format!(
+                    "video TRACK_ENTRY missing CodecPrivate element for {codec:?}"
+                )));
+            }
+            found = Some((codec, width, height, codec_private));
+        }
+        if let Some((codec, width, height, codec_private)) = found {
+            Ok((Self { codec }, width, height, codec_private))
+        } else {
+            // 映像トラックが存在しないパターン。Sora 録画は映像トラックを必ず含む前提のため、
+            // 実運用では発生しない経路。生 YUV を指す I420 を映像トラック不在の placeholder に
+            // 流用するが、Sora 録画前提では `WebmVideoReader::read_simple_block` で
+            // この値が参照されることはない (track_number 不一致でフレーム生成が起きないため)。
+            tracing::warn!(
+                "WebM TRACKS has no video TRACK_ENTRY; codec set to I420 as placeholder"
+            );
+            Ok((
+                Self {
+                    codec: VideoFormat::I420,
+                },
+                0,
+                0,
+                Vec::new(),
+            ))
         }
     }
 }
 
-// TRACK_ENTRY 直下の残り子要素を peek_id ループで走査し、VIDEO master 内の PixelWidth /
-// PixelHeight を取得する。VIDEO が無い・PixelWidth / PixelHeight が無い場合は 0 で
-// フォールバックして警告ログを出す。
+// VIDEO master 内の PixelWidth / PixelHeight を取得する。
+// PixelWidth / PixelHeight が VIDEO master 内に無い場合は 0 でフォールバックして警告ログを出す
+// (VIDEO master 自体が TRACK_ENTRY 直下に不在の場合の警告は `VideoTrackHeader::read` 側で出す)。
 //
 // width=0 / height=0 のフォールバック値はそのまま VP8 / VP9 の sample_entry に載って下流に
 // 流れる。Sora 録画前提では発生しない異常系のため Err にはしないが、もし sample_entry 経由で
@@ -408,43 +484,27 @@ impl VideoTrackHeader {
 // 扱われる可能性がある。compose 経路 (src/sora/recording_reader.rs) では再エンコードで
 // sample_entry が差し替わるため実害は無い。
 fn read_pixel_dimensions<R: Read>(
-    reader: &mut ElementReader<std::io::Take<R>>,
+    video_reader: &mut ElementReader<std::io::Take<R>>,
 ) -> crate::Result<(usize, usize)> {
     let mut width: usize = 0;
     let mut height: usize = 0;
-    let mut video_seen = false;
-    while !reader.is_eos() {
-        let id = reader.peek_id()?;
-        if id == ID_VIDEO {
-            video_seen = true;
-            let mut video_reader = reader.read_master(ID_VIDEO)?;
-            while !video_reader.is_eos() {
-                let inner_id = video_reader.peek_id()?;
-                match inner_id {
-                    ID_PIXEL_WIDTH => {
-                        width = video_reader.read_u64(ID_PIXEL_WIDTH)? as usize;
-                    }
-                    ID_PIXEL_HEIGHT => {
-                        height = video_reader.read_u64(ID_PIXEL_HEIGHT)? as usize;
-                    }
-                    _ => {
-                        // Video master 内の他の子要素 (FrameRate / DisplayWidth など) は本 reader では使わない。
-                        video_reader.read_id()?;
-                        video_reader.skip_element_data()?;
-                    }
-                }
+    while !video_reader.is_eos() {
+        let inner_id = video_reader.peek_id()?;
+        match inner_id {
+            ID_PIXEL_WIDTH => {
+                width = video_reader.read_u64(ID_PIXEL_WIDTH)? as usize;
             }
-        } else {
-            // TRACK_ENTRY 直下の他の子要素 (FlagLacing / Language など) は本 reader では使わない。
-            reader.read_id()?;
-            reader.skip_element_data()?;
+            ID_PIXEL_HEIGHT => {
+                height = video_reader.read_u64(ID_PIXEL_HEIGHT)? as usize;
+            }
+            _ => {
+                // Video master 内の他の子要素 (FrameRate / DisplayWidth など) は本 reader では使わない。
+                video_reader.read_id()?;
+                video_reader.skip_element_data()?;
+            }
         }
     }
-    if !video_seen {
-        tracing::warn!(
-            "WebM video TRACK_ENTRY has no Video master element; falling back to width=0 height=0"
-        );
-    } else if width == 0 || height == 0 {
+    if width == 0 || height == 0 {
         tracing::warn!(
             width,
             height,
@@ -622,28 +682,32 @@ impl WebmVideoReader {
         reader.skip_until(ID_INFO)?;
         check_info_element(&mut reader)?;
 
-        let header = VideoTrackHeader::read(&mut reader)?;
-        // VP8 / VP9 のみ sample_entry を構築する。AV1 / H264AnnexB は Sora 録画の WebM で普通に
-        // 出力されるが、それぞれ AV1CodecConfigurationRecord / AVCDecoderConfigurationRecord
-        // (avcC) のパーサ実装が必要で本 PR スコープ外。当面 sample_entry: None で開いて旧版
-        // 互換の挙動を維持し、compose 経路では再エンコードで sample_entry が確定する形に委ねる
-        // (writer 入口の resolve_*_sample_entry も二重防護で動く)。詳細は後続 issue で扱う。
-        // I420 (映像トラック不在のフォールバック) は生フォーマットで不変条件の対象外のため None を保持する。
+        let (header, width, height, codec_private) = VideoTrackHeader::read(&mut reader)?;
+        // VP8 / VP9 / AV1 / H264AnnexB は CodecPrivate (AV1CodecConfigurationRecord / avcC) を
+        // 解析して sample_entry を構築する。I420 (映像トラック不在のフォールバック) は生フォーマットで
+        // 不変条件の対象外のため None を保持する。
         let sample_entry = match header.codec {
-            VideoFormat::Vp8 => Some(SharedSampleEntry::new(vp8_sample_entry(
-                header.width,
-                header.height,
-            ))),
-            VideoFormat::Vp9 => Some(SharedSampleEntry::new(vp9_sample_entry(
-                header.width,
-                header.height,
-            ))),
-            VideoFormat::Av1 | VideoFormat::H264AnnexB => None,
+            VideoFormat::Vp8 => Some(SharedSampleEntry::new(vp8_sample_entry(width, height))),
+            VideoFormat::Vp9 => Some(SharedSampleEntry::new(vp9_sample_entry(width, height))),
+            VideoFormat::Av1 => {
+                let config_obus = parse_av1_codec_private(&codec_private)?;
+                Some(SharedSampleEntry::new(av1_sample_entry(
+                    EvenUsize::truncating_new(width),
+                    EvenUsize::truncating_new(height),
+                    config_obus,
+                )))
+            }
+            VideoFormat::H264AnnexB => {
+                let (sps_list, pps_list) = parse_avcc_sps_pps_lists(&codec_private)?;
+                let (entry, _frame_size) =
+                    h264_sample_entry_from_sps_pps_lists(sps_list, pps_list)?;
+                Some(SharedSampleEntry::new(entry))
+            }
             VideoFormat::I420 => None,
             // VideoTrackHeader::read が返す codec は Vp8 / Vp9 / Av1 / H264AnnexB / I420 の 5 値のみで、
             // 以下は構造的に到達不能な防御。VideoFormat の他バリアント (H264 / H265 / I420A) が将来
-            // VideoTrackHeader::read のマッピングに追加されたとき silently ランタイムエラー化する余地
-            // があるため、型抽象の整理が必要になったら別 issue で扱う。
+            // VideoTrackHeader::read のマッピングに追加されたとき silently ランタイムエラー化する
+            // 余地を防ぐためのガードとして残す。
             other => {
                 return Err(crate::Error::new(format!(
                     "WebmVideoReader received unexpected video format from TRACKS: {other:?}"
@@ -772,6 +836,8 @@ impl Iterator for WebmVideoReader {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -841,5 +907,51 @@ mod tests {
             entry_b.get(),
             "実体は同値なので writer 側で dedup されること"
         );
+    }
+
+    #[test]
+    fn read_bytes_with_limit_succeeds_with_size_below_limit() {
+        // ID_CODEC_PRIVATE (0x63A2、2 バイト vint) + size = 4 (1 バイト vint 0x84) + 4 バイト data。
+        // max_size = 16 で size = 4 はリミット内のため、正常にデータを取り出せる。
+        let bytes: Vec<u8> = vec![
+            0x63, 0xa2, // ID_CODEC_PRIVATE
+            0x84, // vint size = 4
+            0xaa, 0xbb, 0xcc, 0xdd, // data
+        ];
+        let mut reader = ElementReader::new(Cursor::new(bytes));
+        let result = reader
+            .read_bytes_with_limit(ID_CODEC_PRIVATE, 16)
+            .expect("リミット内の正常入力でパース成功");
+        assert_eq!(result, vec![0xaa, 0xbb, 0xcc, 0xdd]);
+    }
+
+    #[test]
+    fn read_bytes_with_limit_returns_err_when_size_reaches_limit() {
+        // ID_CODEC_PRIVATE + size = 16 (1 バイト vint 0x90)。max_size = 16 のため
+        // 境界条件 `size >= max_size` で Err を返すこと (size ちょうども拒否される)。
+        let bytes: Vec<u8> = vec![
+            0x63, 0xa2, // ID_CODEC_PRIVATE
+            0x90, // vint size = 16 (data 本体は Err 前に読まれないため省略)
+        ];
+        let mut reader = ElementReader::new(Cursor::new(bytes));
+        let result = reader.read_bytes_with_limit(ID_CODEC_PRIVATE, 16);
+        assert!(
+            result.is_err(),
+            "size == max_size は境界判定 `>=` で Err を返すこと: {result:?}"
+        );
+    }
+
+    #[test]
+    fn read_bytes_with_limit_returns_err_on_id_mismatch() {
+        // ID_CODEC_ID (0x86、1 バイト vint) + size = 4 + 4 バイト data を書き込み、
+        // `expected_id = ID_CODEC_PRIVATE` で読み込もうとすると ID 不一致で Err を返すこと。
+        let bytes: Vec<u8> = vec![
+            0x86, // ID_CODEC_ID (期待値の ID_CODEC_PRIVATE と異なる)
+            0x84, // vint size = 4
+            0xaa, 0xbb, 0xcc, 0xdd, // data
+        ];
+        let mut reader = ElementReader::new(Cursor::new(bytes));
+        let result = reader.read_bytes_with_limit(ID_CODEC_PRIVATE, 16);
+        assert!(result.is_err(), "ID 不一致時に Err が返ること: {result:?}");
     }
 }
