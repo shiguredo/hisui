@@ -182,17 +182,9 @@ impl<R: Read> ElementReader<R> {
         Ok(u64::from_be_bytes(bytes))
     }
 
+    // 1024 バイト上限版。OpusHead や TimestampScale など Sora 録画で 1024 を超えない要素用。
     fn read_bytes(&mut self, expected_id: u32) -> crate::Result<Vec<u8>> {
-        self.expect_id(expected_id)?;
-
-        let size = self.read_element_data_size()?;
-        if size >= 1024 {
-            return Err(crate::Error::new("invalid data"));
-        } // 念のために大きすぎる値はエラーにしておく
-
-        let mut buf = vec![0; size as usize];
-        self.inner.read_exact(&mut buf)?;
-        Ok(buf)
+        self.read_bytes_with_limit(expected_id, 1024)
     }
 
     // 上限サイズを呼び出し側で指定する版の read_bytes。
