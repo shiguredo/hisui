@@ -1553,7 +1553,7 @@ pub(crate) mod tests {
     // ----------------------------------------------------------------
 
     // PPS バイト列 (NAL ヘッダ 0x68 + 任意 payload)。テスト全体で共有する。
-    const PPS_NAL: &[u8] = &[0x68, 0xce, 0x06, 0xe2];
+    pub(crate) const PPS_NAL: &[u8] = &[0x68, 0xce, 0x06, 0xe2];
 
     #[test]
     fn h264_sample_entry_from_sps_pps_lists_returns_err_on_empty_sps_list() {
