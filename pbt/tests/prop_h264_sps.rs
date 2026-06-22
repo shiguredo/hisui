@@ -428,6 +428,24 @@ mod err_path {
         })
     }
 
+    /// Baseline 系 Ok の固定パラメータ (各 Err 経路テストで struct update のベースに使う)
+    fn baseline_ok_params() -> SpsBuildParams {
+        SpsBuildParams {
+            profile_idc: 66,
+            constraint_set_flags: 0,
+            level_idc: 31,
+            chroma_format_idc: 1,
+            bit_depth_luma_minus8: 0,
+            bit_depth_chroma_minus8: 0,
+            raw_width: 320,
+            raw_height: 240,
+            frame_mbs_only_flag: true,
+            seq_scaling_matrix_present_flag: false,
+            pic_order_cnt_type: 2,
+            frame_cropping: None,
+        }
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig {
             cases: 128,
@@ -439,20 +457,7 @@ mod err_path {
         fn prop_h264_sample_entry_rejects_unsupported_profile_idc(
             profile_idc in unsupported_profile_idc_strategy(),
         ) {
-            let params = SpsBuildParams {
-                profile_idc,
-                constraint_set_flags: 0,
-                level_idc: 31,
-                chroma_format_idc: 1,
-                bit_depth_luma_minus8: 0,
-                bit_depth_chroma_minus8: 0,
-                raw_width: 320,
-                raw_height: 240,
-                frame_mbs_only_flag: true,
-                seq_scaling_matrix_present_flag: false,
-                pic_order_cnt_type: 2,
-                frame_cropping: None,
-            };
+            let params = SpsBuildParams { profile_idc, ..baseline_ok_params() };
             let sps = build_sps_for_pbt(params);
             let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()]);
             prop_assert!(
@@ -469,17 +474,8 @@ mod err_path {
         ) {
             let params = SpsBuildParams {
                 profile_idc: high_profile_idc,
-                constraint_set_flags: 0,
-                level_idc: 31,
                 chroma_format_idc,
-                bit_depth_luma_minus8: 0,
-                bit_depth_chroma_minus8: 0,
-                raw_width: 320,
-                raw_height: 240,
-                frame_mbs_only_flag: true,
-                seq_scaling_matrix_present_flag: false,
-                pic_order_cnt_type: 2,
-                frame_cropping: None,
+                ..baseline_ok_params()
             };
             let sps = build_sps_for_pbt(params);
             let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()]);
@@ -504,17 +500,8 @@ mod err_path {
         ) {
             let params = SpsBuildParams {
                 profile_idc: high_profile_idc,
-                constraint_set_flags: 0,
-                level_idc: 31,
-                chroma_format_idc: 1,
                 bit_depth_luma_minus8,
-                bit_depth_chroma_minus8: 0,
-                raw_width: 320,
-                raw_height: 240,
-                frame_mbs_only_flag: true,
-                seq_scaling_matrix_present_flag: false,
-                pic_order_cnt_type: 2,
-                frame_cropping: None,
+                ..baseline_ok_params()
             };
             let sps = build_sps_for_pbt(params);
             let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()]);
@@ -539,17 +526,8 @@ mod err_path {
         ) {
             let params = SpsBuildParams {
                 profile_idc: high_profile_idc,
-                constraint_set_flags: 0,
-                level_idc: 31,
-                chroma_format_idc: 1,
-                bit_depth_luma_minus8: 0,
                 bit_depth_chroma_minus8,
-                raw_width: 320,
-                raw_height: 240,
-                frame_mbs_only_flag: true,
-                seq_scaling_matrix_present_flag: false,
-                pic_order_cnt_type: 2,
-                frame_cropping: None,
+                ..baseline_ok_params()
             };
             let sps = build_sps_for_pbt(params);
             let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()]);
@@ -574,20 +552,7 @@ mod err_path {
         fn prop_h264_sample_entry_pic_order_cnt_type_boundary(
             pic_order_cnt_type in prop::sample::select(vec![0u32, 1, 2, 3, 4, 100, 1000, 100_000]),
         ) {
-            let params = SpsBuildParams {
-                profile_idc: 66,
-                constraint_set_flags: 0,
-                level_idc: 31,
-                chroma_format_idc: 1,
-                bit_depth_luma_minus8: 0,
-                bit_depth_chroma_minus8: 0,
-                raw_width: 320,
-                raw_height: 240,
-                frame_mbs_only_flag: true,
-                seq_scaling_matrix_present_flag: false,
-                pic_order_cnt_type,
-                frame_cropping: None,
-            };
+            let params = SpsBuildParams { pic_order_cnt_type, ..baseline_ok_params() };
             let sps = build_sps_for_pbt(params);
             let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()]);
             if pic_order_cnt_type <= 2 {
@@ -609,20 +574,7 @@ mod err_path {
             mb_count in 4090u32..=4100,
         ) {
             let raw_width = mb_count * 16; // 65440..=65600 (u16::MAX 周辺)
-            let params = SpsBuildParams {
-                profile_idc: 66,
-                constraint_set_flags: 0,
-                level_idc: 31,
-                chroma_format_idc: 1,
-                bit_depth_luma_minus8: 0,
-                bit_depth_chroma_minus8: 0,
-                raw_width,
-                raw_height: 16,
-                frame_mbs_only_flag: true,
-                seq_scaling_matrix_present_flag: false,
-                pic_order_cnt_type: 2,
-                frame_cropping: None,
-            };
+            let params = SpsBuildParams { raw_width, raw_height: 16, ..baseline_ok_params() };
             let sps = build_sps_for_pbt(params);
             let result = h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()]);
             if raw_width <= u16::MAX as u32 {
