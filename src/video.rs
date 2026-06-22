@@ -1,4 +1,5 @@
 pub mod av1;
+pub mod bit_reader;
 pub mod canvas;
 pub mod h264;
 pub mod h265;
