@@ -4289,3 +4289,315 @@ async fn hisui_text_overlay_create_list_update_remove_roundtrip() -> crate::Resu
 
     Ok(())
 }
+
+/// 同名の Create を 2 回呼ぶと 2 回目は RESOURCE_ALREADY_EXISTS で拒否される。
+#[tokio::test]
+async fn hisui_create_text_overlay_rejects_duplicate_name() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+    let body = r#"{"textOverlayName":"dup","text":"x","x":0,"y":0,"fontSize":32}"#;
+
+    let first = process_text_overlay_request(
+        &coordinator,
+        "req-create-1",
+        "HisuiCreateTextOverlay",
+        Some(body),
+    )
+    .await;
+    let (success, _) = parse_request_status(&first.response_text);
+    assert!(success, "初回 Create は成功");
+
+    let second = process_text_overlay_request(
+        &coordinator,
+        "req-create-2",
+        "HisuiCreateTextOverlay",
+        Some(body),
+    )
+    .await;
+    let (success, code) = parse_request_status(&second.response_text);
+    assert!(!success, "重複 Create は失敗");
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
+        "重複は RESOURCE_ALREADY_EXISTS (602)"
+    );
+    Ok(())
+}
+
+/// 未登録名で Update すると RESOURCE_NOT_FOUND で拒否される。
+#[tokio::test]
+async fn hisui_update_text_overlay_rejects_unknown_name() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+    let result = process_text_overlay_request(
+        &coordinator,
+        "req-update-missing",
+        "HisuiUpdateTextOverlay",
+        Some(r#"{"textOverlayName":"missing","text":"x"}"#),
+    )
+    .await;
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success);
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+        "未登録は RESOURCE_NOT_FOUND (601)"
+    );
+    Ok(())
+}
+
+/// 未登録名で Remove すると RESOURCE_NOT_FOUND で拒否される。
+#[tokio::test]
+async fn hisui_remove_text_overlay_rejects_unknown_name() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+    let result = process_text_overlay_request(
+        &coordinator,
+        "req-remove-missing",
+        "HisuiRemoveTextOverlay",
+        Some(r#"{"textOverlayName":"missing"}"#),
+    )
+    .await;
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success);
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
+        "未登録は RESOURCE_NOT_FOUND (601)"
+    );
+    Ok(())
+}
+
+/// `fontName` に path traversal 文字 (`/` `\` `..` NUL) を含む値は INVALID_REQUEST_FIELD で拒否される。
+#[tokio::test]
+async fn hisui_create_text_overlay_rejects_invalid_font_name() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+    // 各禁止文字パターンを 1 リクエストで 1 つずつ試す。
+    for (label, font_name_json) in [
+        ("slash", r#""foo/bar.ttf""#),
+        ("backslash", r#""foo\\bar.ttf""#),
+        ("dotdot", r#""../etc/passwd""#),
+        // NUL バイトは JSON 文字列として "\u0000" でエンコードする
+        ("nul", r#""evil\u0000.ttf""#),
+    ] {
+        let body = format!(
+            r#"{{"textOverlayName":"name-{label}","text":"x","x":0,"y":0,"fontSize":32,"fontName":{font_name_json}}}"#
+        );
+        let result = process_text_overlay_request(
+            &coordinator,
+            &format!("req-{label}"),
+            "HisuiCreateTextOverlay",
+            Some(&body),
+        )
+        .await;
+        let (success, code) = parse_request_status(&result.response_text);
+        assert!(!success, "{label} は拒否される");
+        assert_eq!(
+            code,
+            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "{label} は INVALID_REQUEST_FIELD (400)"
+        );
+    }
+    Ok(())
+}
+
+/// 存在しないフォントファイルを指定すると FontResolveFailed 経路で INVALID_REQUEST_FIELD が返る。
+#[tokio::test]
+async fn hisui_create_text_overlay_rejects_unresolvable_font() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+    let result = process_text_overlay_request(
+        &coordinator,
+        "req-unresolvable",
+        "HisuiCreateTextOverlay",
+        Some(
+            r#"{"textOverlayName":"x","text":"x","x":0,"y":0,"fontSize":32,"fontName":"nonexistent.ttf"}"#,
+        ),
+    )
+    .await;
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success);
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+        "解決失敗は INVALID_REQUEST_FIELD (400)"
+    );
+    Ok(())
+}
+
+/// 不正な `fontColor` (`#GGGGGG` / `#FF` / `#` 不在 / 9 桁) は INVALID_REQUEST_FIELD で拒否される。
+#[tokio::test]
+async fn hisui_create_text_overlay_rejects_invalid_color() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+    for (label, color) in [
+        ("non-hex", "#GGGGGG"),
+        ("too-short", "#FF"),
+        ("missing-hash", "FF0000"),
+        ("nine-digits", "#FFFFFFFFF"),
+    ] {
+        let body = format!(
+            r#"{{"textOverlayName":"color-{label}","text":"x","x":0,"y":0,"fontSize":32,"fontColor":"{color}"}}"#
+        );
+        let result = process_text_overlay_request(
+            &coordinator,
+            &format!("req-color-{label}"),
+            "HisuiCreateTextOverlay",
+            Some(&body),
+        )
+        .await;
+        let (success, code) = parse_request_status(&result.response_text);
+        assert!(!success, "{label} は拒否される");
+        assert_eq!(
+            code,
+            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "{label} は INVALID_REQUEST_FIELD (400)"
+        );
+    }
+    Ok(())
+}
+
+/// `fontSize` が範囲外 (0 / canvas_height 超過) は INVALID_REQUEST_FIELD で拒否される。
+/// canvas は new_for_test_with_text_overlay で 1920x1080 固定なので 1081 を境界外とする。
+#[tokio::test]
+async fn hisui_create_text_overlay_rejects_invalid_font_size() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+    for (label, font_size) in [("zero", 0u32), ("too-large", 1081u32)] {
+        let body = format!(
+            r#"{{"textOverlayName":"size-{label}","text":"x","x":0,"y":0,"fontSize":{font_size}}}"#
+        );
+        let result = process_text_overlay_request(
+            &coordinator,
+            &format!("req-size-{label}"),
+            "HisuiCreateTextOverlay",
+            Some(&body),
+        )
+        .await;
+        let (success, code) = parse_request_status(&result.response_text);
+        assert!(!success, "{label} は拒否される");
+        assert_eq!(
+            code,
+            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            "{label} は INVALID_REQUEST_FIELD (400)"
+        );
+    }
+    Ok(())
+}
+
+/// `text` がバイト数または行数の上限を超えると INVALID_REQUEST_FIELD で拒否される。
+#[tokio::test]
+async fn hisui_create_text_overlay_rejects_invalid_text() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+
+    // バイト数上限超過 (TEXT_MAX_BYTES = 4096)
+    let too_long = "a".repeat(crate::mixer::text_overlay::TEXT_MAX_BYTES + 1);
+    let body = format!(
+        r#"{{"textOverlayName":"text-bytes","text":"{too_long}","x":0,"y":0,"fontSize":32}}"#
+    );
+    let result = process_text_overlay_request(
+        &coordinator,
+        "req-text-bytes",
+        "HisuiCreateTextOverlay",
+        Some(&body),
+    )
+    .await;
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success, "バイト数上限超過は拒否");
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD
+    );
+
+    // 行数上限超過 (TEXT_MAX_LINES = 64)
+    let too_many_newlines = "\\n".repeat(crate::mixer::text_overlay::TEXT_MAX_LINES);
+    let body = format!(
+        r#"{{"textOverlayName":"text-lines","text":"{too_many_newlines}","x":0,"y":0,"fontSize":32}}"#
+    );
+    let result = process_text_overlay_request(
+        &coordinator,
+        "req-text-lines",
+        "HisuiCreateTextOverlay",
+        Some(&body),
+    )
+    .await;
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success, "行数上限超過は拒否");
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD
+    );
+    Ok(())
+}
+
+/// `OVERLAY_LIMIT` (= 64) を超える Create は RESOURCE_ACTION_NOT_SUPPORTED で拒否される。
+#[tokio::test]
+async fn hisui_create_text_overlay_rejects_when_limit_exceeded() -> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+
+    // OVERLAY_LIMIT 個までは成功する。
+    for i in 0..crate::mixer::text_overlay::OVERLAY_LIMIT {
+        let body =
+            format!(r#"{{"textOverlayName":"overlay-{i}","text":"x","x":0,"y":0,"fontSize":32}}"#);
+        let result = process_text_overlay_request(
+            &coordinator,
+            &format!("req-{i}"),
+            "HisuiCreateTextOverlay",
+            Some(&body),
+        )
+        .await;
+        let (success, _) = parse_request_status(&result.response_text);
+        assert!(success, "{i} 個目までは成功する");
+    }
+
+    // 65 個目は拒否される。
+    let body = r#"{"textOverlayName":"over-limit","text":"x","x":0,"y":0,"fontSize":32}"#;
+    let result = process_text_overlay_request(
+        &coordinator,
+        "req-over",
+        "HisuiCreateTextOverlay",
+        Some(body),
+    )
+    .await;
+    let (success, code) = parse_request_status(&result.response_text);
+    assert!(!success, "上限超過は拒否");
+    assert_eq!(
+        code,
+        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
+        "LimitExceeded は RESOURCE_ACTION_NOT_SUPPORTED (606) にマップされる"
+    );
+    Ok(())
+}
+
+/// 必須フィールドが欠落していると MISSING_REQUEST_FIELD で拒否される。
+/// `textOverlayName` / `text` / `x` / `y` / `fontSize` の各欠落を確認する。
+#[tokio::test]
+async fn hisui_create_text_overlay_returns_missing_request_field_when_required_missing()
+-> crate::Result<()> {
+    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
+
+    // 各必須フィールドをそれぞれ欠落させた 5 種の requestData。
+    let bodies = [
+        // textOverlayName なし
+        r#"{"text":"x","x":0,"y":0,"fontSize":32}"#,
+        // text なし
+        r#"{"textOverlayName":"a","x":0,"y":0,"fontSize":32}"#,
+        // x なし
+        r#"{"textOverlayName":"a","text":"x","y":0,"fontSize":32}"#,
+        // y なし
+        r#"{"textOverlayName":"a","text":"x","x":0,"fontSize":32}"#,
+        // fontSize なし
+        r#"{"textOverlayName":"a","text":"x","x":0,"y":0}"#,
+    ];
+    for (i, body) in bodies.iter().enumerate() {
+        let result = process_text_overlay_request(
+            &coordinator,
+            &format!("req-missing-{i}"),
+            "HisuiCreateTextOverlay",
+            Some(body),
+        )
+        .await;
+        let (success, code) = parse_request_status(&result.response_text);
+        assert!(!success, "ケース {i} は拒否される: body={body}");
+        assert_eq!(
+            code,
+            crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+            "ケース {i} は MISSING_REQUEST_FIELD (300): body={body}"
+        );
+    }
+    Ok(())
+}
