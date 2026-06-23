@@ -123,3 +123,91 @@ impl<'a> BitReader<'a> {
         self.read_se().map(|_| ())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_ue_decodes_specification_examples() {
+        // ITU-T H.264 仕様 9.1 表 9-1 の代表的な値を網羅的に検証する
+        // codeNum = 0 → "1"
+        // codeNum = 1 → "010"
+        // codeNum = 2 → "011"
+        // codeNum = 3 → "00100"
+        // codeNum = 4 → "00101"
+        // codeNum = 5 → "00110"
+        // codeNum = 6 → "00111"
+        let data = [
+            // "1 010 011 00100 00101 00110 00111" を 8 bit 単位に詰める
+            // MSB から bit 0..27 を順に並べると次の 4 バイトになる:
+            //   1010 0110 = 0xa6
+            //   0100 0010 = 0x42
+            //   1001 1000 = 0x98
+            //   1110 0000 = 0xe0（最後の 3 bit は "111"、残り 5 bit は 0 padding）
+            0xa6, 0x42, 0x98, 0xe0,
+        ];
+        let mut reader = BitReader::new(&data);
+        let expected = [0u32, 1, 2, 3, 4, 5, 6];
+        for &want in &expected {
+            let got = reader.read_ue().expect("ue(v) 読み出し成功");
+            assert_eq!(got, want, "ue(v) のデコード結果が期待値と一致すること");
+        }
+    }
+
+    #[test]
+    fn read_se_decodes_specification_examples() {
+        // ITU-T H.264 仕様 9.1.1 表 9-3 の代表的な値:
+        // ue codeNum 0 → se 0
+        // ue codeNum 1 → se 1
+        // ue codeNum 2 → se -1
+        // ue codeNum 3 → se 2
+        // ue codeNum 4 → se -2
+        // ue を順に並べたバイト列を使う
+        // ue: 1, 010, 011, 00100, 00101 = "1 010 011 00100 00101" を 8 bit 単位
+        // 1 0 1 0 0 1 1 0 = 0xa6
+        // 0 1 0 0 0 0 1 0 = 0x42
+        // 1 ... 0 埋め → 0x80
+        let data = [0xa6, 0x42, 0x80];
+        let mut reader = BitReader::new(&data);
+        let expected = [0i32, 1, -1, 2, -2];
+        for &want in &expected {
+            let got = reader.read_se().expect("se(v) 読み出し成功");
+            assert_eq!(got, want, "se(v) のデコード結果が期待値と一致すること");
+        }
+    }
+
+    #[test]
+    fn read_u_fails_on_exhausted_buffer() {
+        // バッファ末尾を超えた読み出しで Err を返すこと
+        let data = [0xff];
+        let mut reader = BitReader::new(&data);
+        // 8 bit 読めるが、9 bit 目で Err
+        assert!(reader.read_u(8).is_ok());
+        assert!(
+            reader.read_u(1).is_err(),
+            "exhausted buffer で Err を返すはず"
+        );
+    }
+
+    #[test]
+    fn read_u_rejects_too_large_n() {
+        // read_u(n) で n > 32 は Err を返すこと
+        let data = [0xff; 8];
+        let mut reader = BitReader::new(&data);
+        assert!(reader.read_u(33).is_err(), "n > 32 は Err を返すはず");
+    }
+
+    #[test]
+    fn read_ue_rejects_excessive_leading_zeros() {
+        // 0 ビットを 32 個以上連続させると `1u32 << 32` がシフト範囲外になるため Err を返すこと
+        // 32 個の連続 0 = 4 バイトすべて 0x00 にして、その後を埋める
+        let data = [0x00, 0x00, 0x00, 0x00, 0xff, 0xff];
+        let mut reader = BitReader::new(&data);
+        let result = reader.read_ue();
+        assert!(
+            result.is_err(),
+            "leading_zeros が 31 を超えると Err を返すはず: {result:?}"
+        );
+    }
+}
