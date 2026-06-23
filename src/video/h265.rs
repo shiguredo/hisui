@@ -168,14 +168,16 @@ fn parse_hevc_sps(sps: &[u8]) -> crate::Result<HevcSpsParams> {
     let general_level_idc = reader.read_u(8)? as u8;
 
     // サブレイヤー毎の present flag を読みつつ保持する。後段の sub_layer profile / level
-    // 領域 skip は各 flag の値に依存するため、ここで Vec に格納する。Hisui の Single layer
-    // 前提 (sps_max_sub_layers_minus1 == 0) ではこのループは 1 回も実行されない。
-    let mut sub_layer_present_flags: Vec<(u8, u8)> =
-        Vec::with_capacity(sps_max_sub_layers_minus1 as usize);
-    for _ in 0..sps_max_sub_layers_minus1 {
+    // 領域 skip は各 flag の値に依存するため一旦保持する必要があるが、
+    // sps_max_sub_layers_minus1 は parse_hevc_sps で 0..=6 に制限済みなので
+    // 最大 6 要素の固定配列で十分 (Hisui の Single layer 前提 sps_max_sub_layers_minus1 == 0 では
+    // ループは 1 回も実行されない)。
+    let mut sub_layer_present_flags: [(u8, u8); 6] = [(0, 0); 6];
+    let sub_layer_count = sps_max_sub_layers_minus1 as usize;
+    for slot in sub_layer_present_flags.iter_mut().take(sub_layer_count) {
         let prof = reader.read_u(1)? as u8;
         let lvl = reader.read_u(1)? as u8;
-        sub_layer_present_flags.push((prof, lvl));
+        *slot = (prof, lvl);
     }
     // sps_max_sub_layers_minus1 > 0 のとき reserved_zero_2bits[i] を i = sps_max_sub_layers_minus1..8 個読む
     // （合計 (8 - sps_max_sub_layers_minus1) * 2 bit）。sps_max_sub_layers_minus1 == 0 のときは読まない。
@@ -187,7 +189,7 @@ fn parse_hevc_sps(sps: &[u8]) -> crate::Result<HevcSpsParams> {
     // sub_layer profile 88 bit = profile_space(2) + tier_flag(1) + profile_idc(5) +
     // profile_compatibility(32) + constraint_indicator_flags(48)。
     // sub_layer_level_idc は 8 bit。
-    for &(prof, lvl) in &sub_layer_present_flags {
+    for &(prof, lvl) in sub_layer_present_flags.iter().take(sub_layer_count) {
         if prof == 1 {
             reader.skip_u(2)?;
             reader.skip_u(1)?;
