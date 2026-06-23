@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-03
-- Completed:
+- Completed: 2026-06-23
 - Model: Opus 4.8
 - Branch: feature/add-text-overlay-rendering
 - Polished: 2026-06-22
@@ -129,7 +129,7 @@ raden v2026.1.1 のソースを直接確認して以下を確定済み。本表�
 - `TextOverlayPatch` は Update 用で全フィールド `Option<T>`、`None` = 省略 = 現状維持。JSON 上の `null` 受信は `INVALID_REQUEST_FIELD` として扱う (Create / Update 共通)。
 - `TextOverlayState` は `HisuiCreateTextOverlay` の全属性 (`textOverlayName` / `text` / `x` / `y` / `fontSize` / `fontColor` / `fontName` / `z`) を保持し、`List` の戻り値および JSON 化される。
 - 並列性: `VideoRealtimeMixerRunner::run` (`src/mixer/video.rs:353-374`) の `tokio::select!` メインループが既存 `rpc_rx` を単一 task で順次処理する設計のため、テキストオーバーレイ系バリアントも自動的に同一 task で順次処理される。同名 overlay の Add と Remove が同時送信された場合は受信順 (FIFO) で処理する。
-- 描画ブロック注意: `compose_frame` は同期実行のため、描画中は次の RPC を待たせる。raden 描画の所要時間は文字数に比例するため、上限値 (`OVERLAY_LIMIT = 64` × `text` 4096 バイト × 64 行) で 1 フレーム描画コストが cadence (例: FPS=30 で 33ms) 内に収まることを実装時に計測する。超過した場合は描画 (raden + I420A 変換) を `tokio::task::spawn_blocking` でバックグラウンドに逃がす形へ切り替え、cached I420A の差し替えを次の `compose_frame` 呼び出し時に反映する設計に変更する。
+- 描画ブロック注意: `compose_frame` は同期実行のため、描画中は次の RPC を待たせる。raden 描画の所要時間は文字数に比例するため、上限値 (`OVERLAY_LIMIT = 1024` × `text` 65536 バイト × 1024 行) で 1 フレーム描画コストが cadence (例: FPS=30 で 33ms) 内に収まることを実装時に計測する。超過した場合は描画 (raden + I420A 変換) を `tokio::task::spawn_blocking` でバックグラウンドに逃がす形へ切り替え、cached I420A の差し替えを次の `compose_frame` 呼び出し時に反映する設計に変更する。
 
 #### 描画フロー
 
@@ -219,7 +219,7 @@ hisui obsws 既存の独自拡張命名規則 `Hisui<Verb><Noun>` に従う。
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `textOverlayName` | string | 必須 | サーバ全体で一意。空文字は `INVALID_REQUEST_FIELD` |
-| `text` | string | 必須 | `\n` 改行可、最大 `TEXT_MAX_BYTES = 4096` バイト・最大 `TEXT_MAX_LINES = 64` 行。空文字 (`""`) は `INVALID_REQUEST_FIELD` (`MISSING_REQUEST_FIELD` ではない) |
+| `text` | string | 必須 | `\n` 改行可、最大 `TEXT_MAX_BYTES = 65536` バイト・最大 `TEXT_MAX_LINES = 1024` 行。空文字 (`""`) は `INVALID_REQUEST_FIELD` (`MISSING_REQUEST_FIELD` ではない) |
 | `x` | integer (i64 範囲) | 必須 | キャンバス絶対座標 X (左上原点、px)。負値・キャンバス外は許容 (テキストレイヤ内でクリップ)。i64 範囲外は `INVALID_REQUEST_FIELD` |
 | `y` | integer (i64 範囲) | 必須 | キャンバス絶対座標 Y (左上原点、px)。同上 |
 | `fontSize` | integer | 必須 | px。`1` 以上 `canvas_height` 以下。範囲外は `INVALID_REQUEST_FIELD` |
