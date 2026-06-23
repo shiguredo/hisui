@@ -18,10 +18,10 @@
 |-----------|-----|------|------|
 | `textOverlayName` | string | 必須 | サーバ全体で一意な識別名 |
 | `text` | string | 必須 | 表示するテキスト。`\n` で改行可能。最大 4096 バイト、最大 64 行 |
-| `x` | integer | 必須 | キャンバス絶対座標 X (左上原点、px)。負値・キャンバス外も許容 (描画は raden 側でクリップ) |
+| `x` | integer | 必須 | キャンバス絶対座標 X (左上原点、px)。負値・キャンバス外も許容 (描画側でクリップ) |
 | `y` | integer | 必須 | キャンバス絶対座標 Y (左上原点、px)。同上 |
 | `fontSize` | integer | 必須 | フォントサイズ (px)。`1` 以上 `canvas_height` 以下 |
-| `fontColor` | string | - | 文字色。`#RRGGBB` または `#RRGGBBAA` (正規表現 `^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$`)。省略時は `#FFFFFFFF` (不透明白) |
+| `fontColor` | string | - | 文字色。`#RRGGBB` または `#RRGGBBAA`。省略時は `#FFFFFFFF` (不透明白) |
 | `fontName` | string | - | `--font-search-root` 配下のフォントファイル名 (拡張子付き)。省略時は `--default-font` の値 |
 | `z` | integer | - | テキストオーバーレイ間の z-order (i32 全域指定可)。 省略時は宣言順 (現在登録されている最大 z + 1 が自動割り当てされ、 後勝ち) |
 

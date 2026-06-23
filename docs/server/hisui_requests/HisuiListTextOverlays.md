@@ -20,6 +20,8 @@
 
 ### `textOverlays` 配列の各要素
 
+Create 時に省略可能なフィールド (`fontColor` / `fontName` / `z`) は、 省略時のデフォルト適用または自動割り当て後の現在値が返ります。
+
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `textOverlayName` | string | 必須 | 識別名 |
@@ -27,9 +29,9 @@
 | `x` | integer | 必須 | キャンバス絶対座標 X |
 | `y` | integer | 必須 | キャンバス絶対座標 Y |
 | `fontSize` | integer | 必須 | フォントサイズ (px) |
-| `fontColor` | string | 必須 | `#RRGGBBAA` 形式の解決済みの値 |
-| `fontName` | string | 必須 | 解決済みのフォントファイル名 |
-| `z` | integer | 必須 | 解決済みの z-order (`HisuiCreateTextOverlay` で z 省略時に自動割り当てされた値も含む) |
+| `fontColor` | string | 必須 | `#RRGGBBAA` 形式 |
+| `fontName` | string | 必須 | フォントファイル名 |
+| `z` | integer | 必須 | z-order |
 
 ## エラー条件
 
