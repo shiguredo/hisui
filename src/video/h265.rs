@@ -999,6 +999,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn parse_hevc_sps_rejects_profile_idc_in_unsupported_hole() {
+        // 許容リスト {1, 2, 3, 4, 5, 6, 7, 9} の穴 (= 8) で Err になること。
+        // 単なる「上限超過」ではなく「許容リストの穴」を検出することの担保。
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_general_profile_idc(8)
+            .build();
+        let result = parse_hevc_sps(&sps);
+        assert!(
+            result.is_err(),
+            "許容リストの穴 (profile_idc=8) は Err: {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_hevc_sps_accepts_each_allowed_profile_idc() {
+        // 許容リスト {1, 2, 3, 4, 5, 6, 7, 9} の全 8 値が parse 成功し、
+        // 取り出された profile_idc が入力値と一致すること。
+        // 許容リストを誤って一部だけ受理する実装ミスの回帰を防ぐ。
+        for &profile in &[1u32, 2, 3, 4, 5, 6, 7, 9] {
+            let sps = HevcSpsBuilder::raw(1920, 1080)
+                .with_general_profile_idc(profile)
+                .build();
+            let params = parse_hevc_sps(&sps).unwrap_or_else(|e| {
+                panic!("profile_idc={profile} は許容リスト内なので Ok を返すべき: {e:?}")
+            });
+            assert_eq!(params.general_profile_idc, profile as u8);
+        }
+    }
+
+    #[test]
     fn parse_hevc_sps_rejects_chroma_format_idc_out_of_range() {
         // chroma_format_idc = 4 (仕様 7.4.3.2.1 で 0..=3) は Err
         let sps = HevcSpsBuilder::raw(1920, 1080)
