@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::types::EvenUsize;
-use crate::video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize};
+use crate::video::{VideoFormat, VideoFrame, VideoFrameSize};
 
 use super::validate::{
     apply_patch, validate_font_name_and_resolve_path, validate_text_and_font_size,
@@ -22,15 +22,13 @@ use super::{
 ///
 /// 機能有効時のみ `Some` で保持され、 `compose_frame` の追加合成段で
 /// 既存の合成済み I420 に最上位レイヤとして I420A バッファをブレンドする。
-/// canvas サイズ・frame_rate は構築時に固定し、 シーン切替で再生成されない。
+/// canvas サイズは構築時に固定し、 シーン切替で再生成されない。
 ///
 /// `raden::FontFace` は `Debug` を実装しないため、 `TextOverlayLayer` も
 /// `Debug` を持たない (外側の `VideoRealtimeMixerRunner` も `Debug` 派生から外す)。
 pub struct TextOverlayLayer {
     canvas_width: EvenUsize,
     canvas_height: EvenUsize,
-    #[allow(dead_code)]
-    frame_rate: FrameRate,
     config: TextOverlayConfig,
     overlays: BTreeMap<String, TextOverlaySpec>,
     cached_frame: Option<Arc<VideoFrame>>,
@@ -55,13 +53,11 @@ impl TextOverlayLayer {
     pub fn new(
         canvas_width: EvenUsize,
         canvas_height: EvenUsize,
-        frame_rate: FrameRate,
         config: TextOverlayConfig,
     ) -> crate::Result<Self> {
         let mut layer = Self {
             canvas_width,
             canvas_height,
-            frame_rate,
             config,
             overlays: BTreeMap::new(),
             cached_frame: None,
@@ -415,7 +411,6 @@ fn unpremultiply_argb(data: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::video::FrameRate;
 
     fn make_layer() -> TextOverlayLayer {
         let config = TextOverlayConfig::build(
@@ -427,7 +422,6 @@ mod tests {
         TextOverlayLayer::new(
             EvenUsize::new(1920).expect("1920 は偶数"),
             EvenUsize::new(1080).expect("1080 は偶数"),
-            FrameRate::FPS_30,
             config,
         )
         .expect("テスト用 TextOverlayLayer が構築できる")

@@ -79,14 +79,9 @@ impl VideoRealtimeMixer {
         } = self;
 
         // 機能有効時はテキストオーバーレイレイヤを構築 (warm-up 含む)。
-        // canvas サイズ・frame_rate は構築時固定でシーン切替で再生成しない。
+        // canvas サイズは構築時固定でシーン切替で再生成しない。
         let text_overlay_layer = match text_overlay_config {
-            Some(config) => Some(TextOverlayLayer::new(
-                canvas_width,
-                canvas_height,
-                frame_rate,
-                config,
-            )?),
+            Some(config) => Some(TextOverlayLayer::new(canvas_width, canvas_height, config)?),
             None => None,
         };
 
