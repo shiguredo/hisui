@@ -530,10 +530,6 @@ pub struct Mp4Writer {
     muxer: Mp4FileMuxer,
     next_position: u64,
     core: WriterCore,
-    // エンコード済みフレームでの sample_entry 不変条件違反を救済するための補完値。
-    // 通常時（受信フレームに sample_entry がある場合）に更新し、違反時のみ消費する。
-    fallback_audio_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
-    fallback_video_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
 }
 
 impl Mp4Writer {
@@ -584,8 +580,6 @@ impl Mp4Writer {
             muxer,
             next_position,
             core: WriterCore::new(input_audio_track_id, input_video_track_id, stats),
-            fallback_audio_sample_entry: None,
-            fallback_video_sample_entry: None,
         })
     }
 
@@ -997,37 +991,7 @@ impl Mp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Audio(sample)) => {
                 self.core.stats.add_received_audio_data();
-                // エンコード済みフレームに sample_entry が必ず載る不変条件を writer 入口で
-                // 監視する。違反時は警告ログを出してから補完値で差し替えるか、補完値が無ければ
-                // skip する。track 無効化中の受信フレームも違反観測の対象に含めるため、
-                // input_audio_track_id ガードより前に判定する。
-                // 違反検知前に `add_received_audio_data` は計上済みのため、skip パスでも
-                // 受信観測の連続性は保たれる。
-                let sample = match crate::sample_entry::resolve_audio_sample_entry(
-                    &sample,
-                    &mut self.fallback_audio_sample_entry,
-                ) {
-                    crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
-                    crate::sample_entry::SampleEntryResolution::Patched(patched) => {
-                        tracing::warn!(
-                            frame_format = ?sample.format,
-                            timestamp_us = sample.timestamp.as_micros() as u64,
-                            "mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
-                        );
-                        Some(Arc::new(patched))
-                    }
-                    crate::sample_entry::SampleEntryResolution::Skip => {
-                        tracing::warn!(
-                            frame_format = ?sample.format,
-                            timestamp_us = sample.timestamp.as_micros() as u64,
-                            "mp4_writer audio frame without sample_entry; encoded-frame invariant violated"
-                        );
-                        None
-                    }
-                };
-                if let Some(sample) = sample
-                    && self.core.input_audio_track_id.is_some()
-                {
+                if self.core.input_audio_track_id.is_some() {
                     self.core.handle_input_sample(
                         InputTrackKind::Audio,
                         Some(crate::MediaFrame::Audio(sample)),
@@ -1054,34 +1018,7 @@ impl Mp4Writer {
         match msg {
             crate::Message::Media(crate::MediaFrame::Video(sample)) => {
                 self.core.stats.add_received_video_data();
-                // 音声と同じく、エンコード済みフレーム不変条件を writer 入口で監視する。
-                // 違反検知前に `add_received_video_data` は計上済みのため、skip パスでも
-                // 受信観測の連続性は保たれる。
-                let sample = match crate::sample_entry::resolve_video_sample_entry(
-                    &sample,
-                    &mut self.fallback_video_sample_entry,
-                ) {
-                    crate::sample_entry::SampleEntryResolution::Pass => Some(sample),
-                    crate::sample_entry::SampleEntryResolution::Patched(patched) => {
-                        tracing::warn!(
-                            frame_format = ?sample.format,
-                            timestamp_us = sample.timestamp.as_micros() as u64,
-                            "mp4_writer video frame without sample_entry; encoded-frame invariant violated"
-                        );
-                        Some(Arc::new(patched))
-                    }
-                    crate::sample_entry::SampleEntryResolution::Skip => {
-                        tracing::warn!(
-                            frame_format = ?sample.format,
-                            timestamp_us = sample.timestamp.as_micros() as u64,
-                            "mp4_writer video frame without sample_entry; encoded-frame invariant violated"
-                        );
-                        None
-                    }
-                };
-                if let Some(sample) = sample
-                    && self.core.input_video_track_id.is_some()
-                {
+                if self.core.input_video_track_id.is_some() {
                     self.core.handle_input_sample(
                         InputTrackKind::Video,
                         Some(crate::MediaFrame::Video(sample)),
