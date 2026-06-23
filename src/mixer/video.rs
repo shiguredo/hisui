@@ -490,9 +490,13 @@ impl VideoRealtimeMixerRunner {
 
     fn handle_text_overlay_command(&mut self, command: TextOverlayCommand) {
         let Some(layer) = self.text_overlay_layer.as_mut() else {
-            // text_overlay_config が無いのに RPC が来た = obsws 側の整合性 bug。
-            // ハンドラ側で機能無効を弾くべきだが、 万一漏れた場合に備えて warn のみ出す。
-            tracing::warn!("received text overlay rpc while feature disabled (dropping)");
+            // obsws ハンドラ層が機能無効を弾く責務を持つため、 ここに到達するのは
+            // ハンドラ側の整合性 bug。 reply を drop することで呼び出し側は
+            // RecvError 経由で REQUEST_PROCESSING_FAILED を受け取る。
+            tracing::error!(
+                "BUG: text overlay rpc reached video mixer while feature is disabled; \
+                 reply will be dropped and client will receive REQUEST_PROCESSING_FAILED"
+            );
             return;
         };
         match command {
