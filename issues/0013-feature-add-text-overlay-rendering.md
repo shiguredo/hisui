@@ -315,6 +315,10 @@ ResponseData: `textOverlays` 配列。各要素は以下:
 - リアルタイム合成 (obsws 経由) のみを対象とする。`VideoRealtimeMixer` の出力 `program:mixed_video` を購読する `mp4_output` / `hls_output` / `mpeg_dash_output` 等を通せば、テキスト描画済みの動画ファイルが結果として得られる (字幕応用 0012 の主用途もこの経路で実現される)。
 - 録画合成 (`src/sora/recording_video_mixer.rs` / `src/sora/recording_subcommand_compose.rs`) は本 issue では一切触らない。
 
+#### 将来案メモ (本 issue では対応しない)
+
+- `MediaFrame` enum (`src/media.rs:8`) に `Text` バリアントを生やす案。 文字起こし等で「映像/音声トラックを解析しつつ途中でテキストフレームを挿入する」 ような pipeline を MediaPipeline 上で自然に表現できる可能性がある。 本 issue は video mixer の内部レイヤとして組み込む案で確定済みだが、 0012 (ML 推論) や 0014 (ML 結果出力) と組み合わせる将来の設計で再検討する余地がある。
+
 ## 完了条件
 
 - 4 メソッドが obsws (WebSocket / データチャネル両方) と RequestBatch（op=8）から動作する。
