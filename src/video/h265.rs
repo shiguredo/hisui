@@ -82,6 +82,13 @@ impl<'a> Iterator for H265AnnexBNalUnits<'a> {
     }
 }
 
+/// H.265 の Annex-B NAL ユニット 1 個分
+///
+/// `ty` は NAL ヘッダ第 1 バイトの bit 1-6 (`(byte[0] >> 1) & 0x3F`) から抽出した
+/// nal_unit_type (6 bit、0..=63、`H265_NALU_TYPE_*` と比較する)。
+/// `data` は start code を除いた NAL バイト列で、NAL ヘッダ 2 バイトを含む EBSP 形式
+/// (emulation prevention byte 込み、未除去)。RBSP への変換 (emulation prevention byte の
+/// 除去) は呼び出し側 (例: `rbsp_from_hevc_sps_nalu`) で実施する。
 #[derive(Debug)]
 pub struct H265NalUnit<'a> {
     pub ty: u8,
