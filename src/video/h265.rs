@@ -4,8 +4,6 @@ use crate::video::{
     self, FrameRate, VideoFrameSize, bit_reader::BitReader, h264::find_next_annexb_start_code,
 };
 
-pub type NalUnitArray = Vec<Vec<u8>>;
-
 // H.265 の NAL ユニット前に付与されるサイズのバイト数
 // Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい（H.264と同様）
 pub use crate::video::h264::NALU_HEADER_LENGTH;
@@ -406,9 +404,9 @@ fn rbsp_from_hevc_sps_nalu(nalu: &[u8]) -> crate::Result<Vec<u8>> {
 /// などから別途構築する場合は、タプルの第 2 要素 `VideoFrameSize` を `_` で捨ててよい
 /// (encoder 経路の既存挙動)。
 pub fn h265_sample_entry_from_vps_sps_pps_lists(
-    vps_list: NalUnitArray,
-    sps_list: NalUnitArray,
-    pps_list: NalUnitArray,
+    vps_list: Vec<Vec<u8>>,
+    sps_list: Vec<Vec<u8>>,
+    pps_list: Vec<Vec<u8>>,
     fps: FrameRate,
 ) -> crate::Result<(SampleEntry, VideoFrameSize)> {
     if vps_list.is_empty() {
@@ -498,7 +496,7 @@ fn check_nal_unit_types(nalus: &[Vec<u8>], expected_ty: u8, label: &str) -> crat
     Ok(())
 }
 
-fn hvcc_nalu_array(nalu_type: u8, nalus: NalUnitArray) -> HvccNalUintArray {
+fn hvcc_nalu_array(nalu_type: u8, nalus: Vec<Vec<u8>>) -> HvccNalUintArray {
     HvccNalUintArray {
         array_completeness: shiguredo_mp4::Uint::new(1), // true
         nal_unit_type: shiguredo_mp4::Uint::new(nalu_type),
