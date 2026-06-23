@@ -1,6 +1,8 @@
 use shiguredo_mp4::boxes::{Hvc1Box, HvccBox, HvccNalUintArray, SampleEntry};
 
-use crate::video::{self, FrameRate, VideoFrameSize, bit_reader::BitReader};
+use crate::video::{
+    self, FrameRate, VideoFrameSize, bit_reader::BitReader, h264::find_next_annexb_start_code,
+};
 
 pub type NalUnitArray = Vec<Vec<u8>>;
 
@@ -62,11 +64,7 @@ impl<'a> H265AnnexBNalUnits<'a> {
         // H.265 の nal_unit_type は NAL ヘッダ第 1 バイトの bit 1-6 (上位ビット側から 2 番目を MSB とする 6 ビット)
         let nal_unit_type = (header >> 1) & 0x3F;
 
-        let i = self
-            .data
-            .windows(4)
-            .position(|w| matches!(w, [0, 0, 1, _] | [0, 0, 0, 1]))
-            .unwrap_or(self.data.len());
+        let i = find_next_annexb_start_code(self.data).unwrap_or(self.data.len());
         let data = &self.data[..i];
         self.data = &self.data[i..];
         Ok(Some(H265NalUnit {
@@ -646,6 +644,27 @@ pub(crate) mod tests {
             .next()
             .expect("forbidden_zero_bit 立ちの NAL は Err を返す");
         assert!(result.is_err(), "forbidden_zero_bit 立ちは Err: {result:?}");
+    }
+
+    #[test]
+    fn h265_annexb_iterator_handles_trailing_3byte_start_code() {
+        // バッファ末尾が次の NAL の 3 バイト start code で終わる場合、現在の NAL に
+        // start code が混入しないこと (windows(4) ベースの探索では末尾 3 バイトを検出できず
+        // 現在 NAL の末尾に start code が混入する回帰を防ぐ)。
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0, 0, 0, 1]);
+        data.extend_from_slice(&VPS_HEADER);
+        data.push(0xaa);
+        data.extend_from_slice(&[0, 0, 1]); // 末尾 3 バイト start code (NAL ボディなし)
+
+        let mut iter = H265AnnexBNalUnits::new(&data);
+        let nalu = iter
+            .next()
+            .expect("最初の NAL がある")
+            .expect("最初の NAL のパース成功");
+        // 現在 NAL の data には末尾 3 バイト start code が混入しない
+        assert_eq!(nalu.ty, H265_NALU_TYPE_VPS);
+        assert_eq!(nalu.data, &[0x40, 0x01, 0xaa]);
     }
 
     #[test]

@@ -56,11 +56,7 @@ impl<'a> H264AnnexBNalUnits<'a> {
         let _nal_ref_idc = header >> 5;
         let nal_unit_type = header & 0b0001_1111;
 
-        let i = self
-            .data
-            .windows(4)
-            .position(|w| matches!(w, [0, 0, 1, _] | [0, 0, 0, 1]))
-            .unwrap_or(self.data.len());
+        let i = find_next_annexb_start_code(self.data).unwrap_or(self.data.len());
         let data = &self.data[..i];
         self.data = &self.data[i..];
         Ok(Some(H264NalUnit {
@@ -68,6 +64,28 @@ impl<'a> H264AnnexBNalUnits<'a> {
             data,
         }))
     }
+}
+
+/// Annex-B 形式の `data` から次の start code (3 バイト `[0, 0, 1]` または
+/// 4 バイト `[0, 0, 0, 1]`) の開始位置を返す。
+///
+/// `windows(4)` ベースの探索だと末尾 3 バイトが `[0, 0, 1]` で終わる場合に検出漏れが
+/// 発生する (`windows(4)` は `data.len() - 3` 個の window しか生成しないため、末尾の
+/// 3-byte start code を評価する 4-byte window が存在しない) ので、手書きループで
+/// `[0, 0, 1]` を探し、直前バイトが 0 なら 4-byte start code として境界を 1 つ手前に
+/// する形にする。
+pub(crate) fn find_next_annexb_start_code(data: &[u8]) -> Option<usize> {
+    let mut j = 0;
+    while j + 3 <= data.len() {
+        if data[j] == 0 && data[j + 1] == 0 && data[j + 2] == 1 {
+            if j > 0 && data[j - 1] == 0 {
+                return Some(j - 1);
+            }
+            return Some(j);
+        }
+        j += 1;
+    }
+    None
 }
 
 impl<'a> Iterator for H264AnnexBNalUnits<'a> {
@@ -751,6 +769,55 @@ pub(crate) mod tests {
         // crop なし (16 倍数解像度) のときに raw_width / raw_height をそのまま返すこと
         let (width, height) = extract_dimensions_from_sps(&SPS_320X240).expect("SPS パース成功");
         assert_eq!((width, height), (320, 240));
+    }
+
+    #[test]
+    fn find_next_annexb_start_code_detects_trailing_3byte_start_code() {
+        // バッファ末尾が 3 バイト start code `[0, 0, 1]` で終わる場合に検出できること。
+        // バッファ境界で Annex-B を分割して受信するストリーミング経路で発生し得る回帰を防ぐ。
+        let data = [0xaa, 0x00, 0x00, 0x01];
+        assert_eq!(find_next_annexb_start_code(&data), Some(1));
+    }
+
+    #[test]
+    fn find_next_annexb_start_code_detects_4byte_start_code_when_preceded_by_zero() {
+        // 4 バイト start code `[0, 0, 0, 1]` の場合、先頭 0 バイトの位置を返すこと
+        let data = [0xaa, 0x00, 0x00, 0x00, 0x01, 0xbb];
+        assert_eq!(find_next_annexb_start_code(&data), Some(1));
+    }
+
+    #[test]
+    fn find_next_annexb_start_code_returns_none_when_no_start_code() {
+        // start code が無いバッファでは None を返すこと
+        let data = [0xaa, 0xbb, 0xcc, 0xdd];
+        assert_eq!(find_next_annexb_start_code(&data), None);
+    }
+
+    #[test]
+    fn find_next_annexb_start_code_returns_none_for_short_buffer() {
+        // 3 バイト未満は start code に成り得ないので None を返すこと
+        assert_eq!(find_next_annexb_start_code(&[]), None);
+        assert_eq!(find_next_annexb_start_code(&[0]), None);
+        assert_eq!(find_next_annexb_start_code(&[0, 0]), None);
+    }
+
+    #[test]
+    fn h264_annexb_iterator_handles_trailing_3byte_start_code() {
+        // バッファ末尾が次の NAL の 3 バイト start code で終わる場合、現在の NAL に
+        // start code が混入しないこと (windows(4) ベースだと末尾 3 バイトを検出できず
+        // 現在 NAL の末尾に start code が混入する回帰を防ぐ)。
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0, 0, 0, 1]);
+        data.extend_from_slice(&[0x67, 0xaa]); // SPS NAL ヘッダ + ペイロード
+        data.extend_from_slice(&[0, 0, 1]); // 末尾 3 バイト start code (NAL ボディなし)
+
+        let mut iter = H264AnnexBNalUnits::new(&data);
+        let nalu = iter
+            .next()
+            .expect("最初の NAL がある")
+            .expect("最初の NAL のパース成功");
+        // 現在 NAL の data には末尾 3 バイト start code が混入しない
+        assert_eq!(nalu.data, &[0x67, 0xaa]);
     }
 
     #[test]
