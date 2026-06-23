@@ -131,11 +131,6 @@ impl TextOverlayLayer {
         Ok(face)
     }
 
-    /// 現在 overlay が 1 件もない (= 何も合成しない) かどうか。
-    pub fn is_empty(&self) -> bool {
-        self.overlays.is_empty()
-    }
-
     /// テスト用に `overlays` を読み取る。 本番コードからは使わない。
     #[cfg(test)]
     pub(super) fn overlays(&self) -> &BTreeMap<String, TextOverlaySpec> {
@@ -154,17 +149,15 @@ impl TextOverlayLayer {
         self.font_cache.len()
     }
 
-    /// 次の `compose_frame` 呼び出し前に、 必要なら再描画して cached I420A を更新する。
+    /// 次の `compose_frame` 呼び出し前に、 必要なら再描画して cached I420A を返す。
     ///
-    /// 戻り値は cached I420A の `Arc<VideoFrame>` で、 timestamp は読まれない
-    /// (合成段は pixel data のみ参照する)。
-    /// `overlays.is_empty()` の場合は呼び出さない (呼び出し側で early return する)。
-    pub fn ensure_rendered(&mut self) -> crate::Result<Arc<VideoFrame>> {
-        debug_assert!(
-            !self.overlays.is_empty(),
-            "ensure_rendered は overlay が 1 件以上ある前提"
-        );
-
+    /// overlay が 1 件もない場合は `Ok(None)` を返す。 1 件以上ある場合は
+    /// cached I420A の `Arc<VideoFrame>` を `Ok(Some(...))` で返す
+    /// (`VideoFrame.timestamp` は呼び出し側で読まれない前提で、 合成段は pixel data のみ参照)。
+    pub fn ensure_rendered(&mut self) -> crate::Result<Option<Arc<VideoFrame>>> {
+        if self.overlays.is_empty() {
+            return Ok(None);
+        }
         if self.dirty || self.cached_frame.is_none() {
             let frame = self.render()?;
             self.cached_frame = Some(Arc::new(frame));
@@ -174,7 +167,7 @@ impl TextOverlayLayer {
             .cached_frame
             .as_ref()
             .expect("cached_frame is Some after rendering");
-        Ok(Arc::clone(cached))
+        Ok(Some(Arc::clone(cached)))
     }
 
     /// 新規 overlay を追加する。

@@ -1082,9 +1082,8 @@ fn compose_frame(
     // 一般 InputTrack の draw_order ループ後に重ねるため、
     // overlay は常に他の input track より上に描画される。
     if let Some(layer) = text_overlay_layer
-        && !layer.is_empty()
+        && let Some(overlay_frame) = layer.ensure_rendered()?
     {
-        let overlay_frame = layer.ensure_rendered()?;
         let raw = RawVideoFrame::from_video_frame(overlay_frame)?;
         canvas.draw_frame_clipped(0, 0, &raw)?;
     }
