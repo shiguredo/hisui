@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-22
-- Completed:
+- Completed: 2026-06-23
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-remove-writer-sample-entry-fallback
 - Polished: 2026-06-23
@@ -188,4 +188,50 @@ writer 後続処理は `Option<SharedSampleEntry>` 型のままで触らない�
 
 ## 解決方法
 
-実装着手後にここに記述する。
+### fallback 補完経路の削除
+
+- `src/sample_entry.rs` の `resolve_audio_sample_entry` / `resolve_video_sample_entry` 関数・`SampleEntryResolution<T>` enum・関連単体テスト 8 件（`resolve_audio_*` 4 件 + `resolve_video_*` 4 件）を削除した。`changed_since_*` 4 件と `ptr_eq_*` 2 件は fallback と無関係なので残した。
+- `Mp4Writer` / `HybridMp4Writer` / `DashWriter` / `HlsWriter` の `fallback_audio_sample_entry` / `fallback_video_sample_entry` フィールド・コンストラクタ初期化・入口 match 処理（8 サイト）を削除した。16 個の `tracing::warn!` "encoded-frame invariant violated" も同時に消えた。
+- 削除に伴い未使用になった `use std::sync::Arc;` および `use crate::sample_entry::SharedSampleEntry;` を `src/mp4/hybrid_writer.rs` から削除し、テストモジュールで必要な分は `mod tests` 内で個別 import するようにした。
+
+### テストの削除
+
+- `src/mp4/hybrid_writer.rs` の `mod tests` から fallback 関連の 8 件（`hybrid_writer_falls_back_*` / `hybrid_writer_skips_first_frame_*` / `hybrid_writer_resolves_sample_entry_even_when_*_track_id_is_disabled` / `hybrid_writer_preserves_fallback_across_consecutive_violations_*`）を削除した。
+- `pbt/tests/prop_sample_entry.rs` ファイル全件を削除した。
+- `pbt/Cargo.toml` の `shiguredo_mp4` dev-dependency は `prop_h264_sps.rs` で利用継続のため残し、用途コメントを書き換えた。
+
+### `maybe_flush_initial_pending` のコメント書き換え
+
+- `src/mp4/hybrid_writer.rs::HybridMp4Writer::maybe_flush_initial_pending` の `&& let Some(...)` ガードは「ベストエフォートのリカバリ経路」として残した。
+- 周辺コメントを「writer 入口の fallback で補完済み」前提から「入力側不変条件で常に Some」前提に書き換え、未確定 pending を黙ってスキップする防御的フォールバックとして `if let Some` を残す旨を明示した。
+
+### `SharedSampleEntry::ptr_eq` の docstring 修正
+
+- fallback 文脈の言及 2 行を削除し、「`changed_since` の `Arc::ptr_eq` 短絡経路が崩れた場合に検知する観測用 API」の記述は維持した。レビュー指摘を反映してテスト観測用 API である旨を明示した。
+
+### docs/internals/ に不変条件を明文化
+
+- `docs/internals/sample_entry_invariant.md` を新規作成し、不変条件の定義・適用範囲（リーダー / エンコーダの責務分担表）・確立できない場合の扱い・writer 側の前提・新規入力経路追加時のチェックリストを記載した。
+- `docs/internals/README.md` の目次に追記した。
+- `AudioFrame.sample_entry`（`src/audio.rs`）/ `VideoFrame.sample_entry`（`src/video.rs`）の docstring 末尾に新規ドキュメントへの参照（パス文字列。rustdoc 上で死にリンクにならないよう Markdown リンク記法は使わない）を追記した。
+
+### レビュー指摘の反映
+
+`/review-diff-code` を 1 周回し、観点 1（批判者）/ 2（設計・抽象化・可読性）/ 3（整合性）/ 4（テスト戦略）/ 6（削除候補）の指摘を集約した。
+
+- コメント・docstring・docs の文言整理（重要 1 件 + 改善 6 件）を反映した。
+- 不変条件ドキュメントの「保留する設計」記述を実装の暗黙前提に揃えて書き換えた（openh264 / VideoToolbox は実装上「最初の出力フレームが必ず keyframe」という API レベル非保証の前提に依存している事実を明示した）。
+- `make_video_frame` ヘルパと最初のテスト関数の間の空行欠如を修正した。
+- 削除に伴い `input_*_track_id == None`（track 無効化中）の違反観測連続性が失われた件を、不変条件ドキュメントの「writer 側の前提」節に「責任の所在を入力側に集約する方針として意図的に放棄した」と明示した。
+
+### スコープ外として後続に委ねた項目
+
+- **openh264 / VideoToolbox エンコーダで sample_entry 未確定間の出力フレーム保留設計**: 観点 1 のレビューで挙がった「最初の出力フレームが必ず keyframe である暗黙前提への依存」を実装レベルで堅牢化する作業。issue 0054 として起票した。
+- **`HlsWriter` の MpegTs 経路で sample_entry None 時の静かな劣化を Err 化**: 観点 1 のレビューで挙がった `convert_length_prefixed_to_annexb` / `extract_aac_config` のハードコードフォールバック対応。issue 0055 として起票した。
+- **テストカバレッジ強化**: `Mp4Writer` / `DashWriter` / `HlsWriter` の writer インスタンス単体テスト不在、各 encoder の sample_entry 不変条件テスト不足、PBT 削除後の Property 検証経路再構築、encoder の Arc 同一性テスト欠落。既存負債として issue 0034 でも将来課題とされていたもので、本 issue では対応しない。
+- **不変条件を型レベル / 実行時に強制する設計**: `MediaFrame::audio` / `video` コンストラクタで `debug_assert`、または newtype 型導入。投資が大きいため本 issue ではスコープ外。
+- **writer 周辺コードの既存コメント内に残る `issue NNNN` 形式の参照**: shiguredo-issues 規約違反として issue 0034 から持ち越された負債。本 issue では清算しない。
+
+### CHANGES.md
+
+`## develop` への記載は行わなかった。本 issue で削除する fallback コードは issue 0034 で develop に追加されたもので未リリースであり、`shiguredo-changelog` の「派生元ブランチとの最終的な差分のみを記載すること」「開発ブランチ内の中間状態の修正は記載しないこと」に従う（最終 diff として現れない）。`docs/internals/` 新規ドキュメント追加も `.md` 変更で対象外。
