@@ -20,7 +20,6 @@ const DEFAULT_FONT_COLOR_ARGB: u32 = 0xFFFFFFFF;
 ///
 /// `Missing` (欠落 / null / 空文字) は `MISSING_REQUEST_FIELD`、
 /// `Invalid` (型違反 / 範囲外) は `INVALID_REQUEST_FIELD` にマップする。
-/// 従来は両者を `Option` で潰していたため型違反まで Missing で返っていた。
 #[derive(Debug, PartialEq)]
 enum RequiredFieldError {
     /// フィールド欠落、明示的な null、または空文字 (識別子として不適)。
@@ -940,8 +939,7 @@ mod tests {
         ));
     }
 
-    /// `parse_required_i64_field`: 文字列を渡されたら Invalid を返す
-    /// (= 従来は Missing で返って混乱の元だった経路の回帰防止)。
+    /// `parse_required_i64_field`: 文字列を渡されたら Invalid を返す。
     #[test]
     fn parse_required_i64_field_classifies_type_mismatch_as_invalid() {
         assert_invalid(parse_required_i64_field(

@@ -4098,7 +4098,7 @@ async fn hisui_update_text_overlay_returns_disabled_when_feature_off() {
         .await
         .expect("coordinator のリクエスト処理は成功する");
     let (success, code) = parse_request_status(&result.response_text);
-    assert!(!success);
+    assert!(!success, "エラー応答となる");
     assert_eq!(
         code,
         crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED
@@ -4120,7 +4120,7 @@ async fn hisui_remove_text_overlay_returns_disabled_when_feature_off() {
         .await
         .expect("coordinator のリクエスト処理は成功する");
     let (success, code) = parse_request_status(&result.response_text);
-    assert!(!success);
+    assert!(!success, "エラー応答となる");
     assert_eq!(
         code,
         crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED
@@ -4143,7 +4143,7 @@ async fn hisui_list_text_overlays_returns_disabled_when_feature_off() {
         .await
         .expect("coordinator のリクエスト処理は成功する");
     let (success, code) = parse_request_status(&result.response_text);
-    assert!(!success);
+    assert!(!success, "エラー応答となる");
     assert_eq!(
         code,
         crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED
@@ -4322,7 +4322,7 @@ async fn hisui_update_text_overlay_rejects_unknown_name() -> crate::Result<()> {
     )
     .await;
     let (success, code) = parse_request_status(&result.response_text);
-    assert!(!success);
+    assert!(!success, "エラー応答となる");
     assert_eq!(
         code,
         crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
@@ -4343,7 +4343,7 @@ async fn hisui_remove_text_overlay_rejects_unknown_name() -> crate::Result<()> {
     )
     .await;
     let (success, code) = parse_request_status(&result.response_text);
-    assert!(!success);
+    assert!(!success, "エラー応答となる");
     assert_eq!(
         code,
         crate::obsws::protocol::REQUEST_STATUS_RESOURCE_NOT_FOUND,
@@ -4399,7 +4399,7 @@ async fn hisui_create_text_overlay_rejects_unresolvable_font() -> crate::Result<
     )
     .await;
     let (success, code) = parse_request_status(&result.response_text);
-    assert!(!success);
+    assert!(!success, "エラー応答となる");
     assert_eq!(
         code,
         crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
@@ -4531,7 +4531,7 @@ async fn hisui_create_text_overlay_rejects_when_limit_exceeded() -> crate::Resul
         assert!(success, "{i} 個目までは成功する");
     }
 
-    // 65 個目は拒否される。
+    // OVERLAY_LIMIT を超える Create は拒否される。
     let body = r#"{"textOverlayName":"over-limit","text":"x","x":0,"y":0,"fontSize":32}"#;
     let result = process_text_overlay_request(
         &coordinator,
@@ -4590,7 +4590,6 @@ async fn hisui_create_text_overlay_returns_missing_request_field_when_required_m
 }
 
 /// 必須フィールドの型違反は INVALID_REQUEST_FIELD で返るべきで、MISSING_REQUEST_FIELD ではない。
-/// 過去に Option ベースの parser が型違反を Missing 扱いしていた回帰を防ぐ。
 #[tokio::test]
 async fn hisui_create_text_overlay_returns_invalid_request_field_for_type_mismatch()
 -> crate::Result<()> {
@@ -4627,9 +4626,7 @@ async fn hisui_create_text_overlay_returns_invalid_request_field_for_type_mismat
     Ok(())
 }
 
-/// テキストオーバーレイの `z` フィールドは i32 全域 (`i32::MAX` 含む) を valid 値として
-/// 受け付ける。 layer 内部で z をソートして合成するため一般 input track の z 空間
-/// との衝突はない。
+/// テキストオーバーレイの `z` フィールドは i32::MAX も valid 値として受け付ける。
 #[tokio::test]
 async fn hisui_text_overlay_accepts_i32_max_as_z_value() -> crate::Result<()> {
     let coordinator = create_initialized_coordinator_with_text_overlay().await?;

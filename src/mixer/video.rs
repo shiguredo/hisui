@@ -1055,8 +1055,8 @@ fn compose_frame(
     }
 
     // テキストオーバーレイレイヤを最上位として追加合成する。
-    // 一般 InputTrack の draw_order ループ後に重ねることで、 ソート用 z 値ではなく
-    // 「合成順序」 で「最上位」 という性質を表現する (z 予約値はクライアント API に漏らさない)。
+    // 一般 InputTrack の draw_order ループ後に重ねるため、
+    // overlay は常に他の input track より上に描画される。
     if let Some(layer) = text_overlay_layer
         && !layer.is_empty()
     {

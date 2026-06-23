@@ -3,9 +3,6 @@
 //! 本モジュールは公開 API (Config / Error / 各種 Spec / 定数) を集約する。
 //! `TextOverlayLayer` 本体は `layer` サブモジュールに、 検証関数は `validate`
 //! サブモジュールに分離している。
-//!
-//! `VideoRealtimeMixer` 構築時に layer が生成され、 `compose_frame` の追加合成段で
-//! `RealtimeI420Canvas::draw_frame_clipped` 経由で最上位レイヤとして合成される。
 
 use std::path::PathBuf;
 
@@ -22,9 +19,8 @@ pub use self::layer::TextOverlayLayer;
 #[derive(Debug, Clone)]
 pub struct TextOverlayConfig {
     /// canonicalize 済みのフォント探索ルート (絶対パス)。
-    ///
-    /// 実際のフォントファイル参照時は `<font_search_root>/<font_name>` を canonicalize した
-    /// 結果が、 この root の prefix を持つことを必ず確認する (path traversal 対策)。
+    /// 個別フォント参照の path traversal 検証は
+    /// `validate::validate_font_name_and_resolve_path` で行う。
     pub font_search_root: PathBuf,
 
     /// `fontName` が省略された場合に使う既定フォント名。
@@ -61,8 +57,8 @@ impl TextOverlayConfig {
                 canonical_root.display()
             )));
         }
-        // NOTE: raden::FontData::from_file が将来的に &Path を取れるようになれば
-        //       (shiguredo/raden issue 0041)、 ここの to_str() 変換は不要になる。
+        // NOTE: raden::FontData::from_file が将来 &Path を取れるようになれば
+        //       to_str() 変換は不要になる。
         let path_str = canonical_font.to_str().ok_or_else(|| {
             crate::Error::new(format!(
                 "default font path {} is not valid UTF-8",
@@ -169,8 +165,6 @@ pub enum TextOverlayError {
 
 impl std::fmt::Display for TextOverlayError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // obsws ハンドラから `error.to_string()` 経由でクライアント向け文言として
-        // 使われるため、 フィールド名 (fontName / fontColor 等) を含む形で書く。
         match self {
             Self::AlreadyExists => write!(f, "text overlay already exists"),
             Self::NotFound => write!(f, "text overlay not found"),
@@ -189,11 +183,11 @@ impl std::error::Error for TextOverlayError {}
 /// `VideoRealtimeMixer` のテキストオーバーレイ系 RPC バリアントに渡される追加メッセージ群。
 ///
 /// `register_rpc_sender` は同一 processor で 1 sender しか登録できない (`media_pipeline.rs`)
-/// ため、 既存の `VideoRealtimeMixerRpcMessage` enum 内のバリアントとして統合する。
-/// ここで使われるバリアントは `VideoRealtimeMixerRpcMessage::TextOverlayAdd` 等。
+/// ため、 既存の `VideoRealtimeMixerRpcMessage` enum 内に `TextOverlay(TextOverlayCommand)`
+/// バリアントとして統合する形で取り回す。
 ///
-/// reply 型はそれぞれ `Result<T, TextOverlayError>` (Add/Update/Remove は `T = ()`、
-/// List は `T = Vec<TextOverlayState>`) で、 obsws ハンドラが reply を待ち受けてマップする。
+/// reply 型は Add/Update/Remove が `Result<(), TextOverlayError>`、 List が
+/// `Vec<TextOverlayState>` で、 obsws ハンドラが reply を待ち受けてマップする。
 #[derive(Debug)]
 pub enum TextOverlayCommand {
     Add {

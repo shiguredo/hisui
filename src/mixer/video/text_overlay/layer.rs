@@ -49,7 +49,7 @@ impl std::fmt::Debug for TextOverlayLayer {
             .field("canvas_height", &self.canvas_height)
             .field("config", &self.config)
             .field("overlays", &self.overlays)
-            .field("cached_frame_present", &self.cached_frame.is_some())
+            .field("cached_frame", &self.cached_frame.is_some())
             .field("dirty", &self.dirty)
             .field("next_auto_z", &self.next_auto_z)
             .field(
@@ -121,8 +121,8 @@ impl TextOverlayLayer {
         if let Some(face) = self.font_cache.get(&canonical) {
             return Ok(face.clone());
         }
-        // NOTE: raden::FontData::from_file が将来的に &Path を取れるようになれば
-        //       (shiguredo/raden issue 0041)、 ここの to_str() 変換は不要になる。
+        // NOTE: raden::FontData::from_file が将来 &Path を取れるようになれば
+        //       to_str() 変換は不要になる。
         let path_str = canonical.to_str().ok_or_else(|| {
             TextOverlayError::FontResolveFailed(format!(
                 "font path {} is not utf-8",
@@ -282,7 +282,6 @@ impl TextOverlayLayer {
         let mut image = raden::Image::new(w as u32, h as u32, raden::PixelFormat::Prgb32);
         let mut runtime = raden::PipelineRuntime::new();
 
-        // ループ内で `&mut self` (`resolve_font_face`) を呼ぶため、 overlay の借用を解放しておく。
         // z-order でソートし、 タイブレークは name のアルファベット順 (BTreeMap の iter 順)。
         let mut sorted: Vec<(String, TextOverlaySpec)> = self
             .overlays
@@ -303,8 +302,9 @@ impl TextOverlayLayer {
             ctx.set_comp_op(raden::CompOp::SrcOver);
 
             for (name, spec) in &sorted {
-                // フォント解決失敗時は該当 overlay だけスキップして他は描画継続する。
-                // run ループ全体を落とすと List も含めた全 RPC が止まるため、 影響範囲を局所化する。
+                // フォント解決失敗時はその overlay のみスキップして描画を継続する。
+                // mixer メインループ全体を落とすと List も含めた全 RPC が止まるため、
+                // 影響を局所化する (add 時に validate + font_cache 投入済みで通常は到達しない防御コード)。
                 let face = match self.resolve_font_face(&spec.font_name) {
                     Ok(face) => face,
                     Err(e) => {
@@ -387,17 +387,13 @@ impl TextOverlayLayer {
 
 /// premultiplied ARGB バッファを straight alpha 形式に戻す。
 ///
-/// 各ピクセルは 4 バイト (リトルエンディアン環境では `[B, G, R, A]`) で並ぶ。
+/// 各ピクセルは 4 バイト `[B, G, R, A]` (raden Prgb32 をリトルエンディアン環境で読んだ並び) で並ぶ。
 /// A == 0 のピクセルは RGB が 0 になっているのでそのまま残す。
 /// A > 0 のピクセルは `RGB_straight = (RGB_pre * 255 + A/2) / A` で復元する。
 ///
-/// raden の `Prgb32` (u32 = 0xAARRGGBB) のバイト順とこの関数の `chunk[3] = A`
-/// 取り出しはリトルエンディアン前提なので、 ビッグエンディアン環境では
-/// 別経路が必要。 コンパイル時に検出して落とす。
-///
 /// 不変条件: raden の Prgb32 出力は premultiplied なので各チャネル `c_pre <= A`
-/// を満たすはずだが、 万一違反した場合は `value.min(255)` でクランプして
-/// 色情報損失となる (静かに壊れないよう assertion ではなく可視的なクランプ)。
+/// を満たす。 万一違反した場合は `value.min(255)` でクランプして以後の処理を続ける
+/// (検出が必要になったら `debug_assert!` 等を追加する)。
 const _: () = assert!(
     cfg!(target_endian = "little"),
     "text overlay rendering assumes little-endian (raden Prgb32 layout)",

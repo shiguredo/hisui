@@ -128,7 +128,7 @@ proptest! {
 
     /// `TextOverlaySpec` が任意の i64 値 (= MIN〜MAX 全域) の x / y で構築でき、
     /// panic も overflow も起こさない。
-    /// validate 関数を経由しない経路の確認 (issue で x/y は raden 側でクリップする仕様)。
+    /// validate 関数を経由しない経路の確認 (x / y は raden 側でクリップする仕様)。
     #[test]
     fn text_overlay_spec_constructs_for_any_i64_xy(x in any::<i64>(), y in any::<i64>()) {
         let spec = TextOverlaySpec {

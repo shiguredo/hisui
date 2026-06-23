@@ -1199,12 +1199,9 @@ fn parse_custom_event_data(
 mod tests {
     use super::*;
 
-    /// テキストオーバーレイは揮発的な機能 (再起動でクリアされる) のため、
-    /// `is_state_persisted_request` の対象外でなければならない。
-    /// 過去にこの 4 メソッドを誤って永続化対象に含めた結果、
-    /// 内容変化のない state file の再書き込みが毎リクエストで走り、
-    /// さらに write 失敗時にサーバが強制終了してしまう問題が発生した。
-    /// 同じ間違いを将来再導入しないためのリグレッションガード。
+    /// テキストオーバーレイは揮発機能 (再起動でクリアされる) のため永続化対象外。
+    /// `is_state_persisted_request` に追加すると毎リクエストで state file 書き込みが
+    /// 走り、 write 失敗時のサーバ強制終了に巻き込まれる。
     #[test]
     fn text_overlay_methods_are_not_state_persisted() {
         for method in [
