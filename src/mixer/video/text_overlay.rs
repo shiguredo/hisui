@@ -80,6 +80,8 @@ impl TextOverlayConfig {
                         canonical_root.display()
                     ));
                 }
+                // NOTE: raden::FontData::from_file が将来的に &Path を取れるようになれば
+                //       (shiguredo/raden issue 0041)、 ここの to_str() 変換は不要になる。
                 let path_str = canonical_font.to_str().ok_or_else(|| {
                     format!(
                         "default font path {} is not valid UTF-8",
