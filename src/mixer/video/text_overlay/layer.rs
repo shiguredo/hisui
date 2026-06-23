@@ -36,8 +36,9 @@ pub struct TextOverlayLayer {
     /// canonical なフォントパスから `FontFace` への参照キャッシュ。
     ///
     /// Add / Update の validate と render の両方から `resolve_font_face` を経由してアクセスし、
-    /// 同一フォントの再読み込みを避ける。 `--font-search-root` 配下は起動後に置換されない
-    /// 前提のため、 エントリの破棄は行わない (overlay 削除でも残す)。
+    /// 同一フォントの再読み込みを避ける。 エントリは破棄しない (overlay 削除でも残す)。
+    /// canonical なパスをキーにするため、 cache の最大エントリ数は実質
+    /// 「`--font-search-root` 配下のフォントファイル数」 で抑えられる。
     font_cache: BTreeMap<PathBuf, Arc<raden::FontFace>>,
 }
 
