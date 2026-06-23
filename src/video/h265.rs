@@ -538,6 +538,33 @@ pub(crate) mod tests {
     // PPS (nal_unit_type=34): (34 << 1) | 0 = 0x44
     const PPS_HEADER: [u8; 2] = [0x44, 0x01];
 
+    // 以下の SPS バイト列は ffmpeg + libx265 で生成した実機 SPS を抽出したもの。
+    // 生成コマンドは `ffmpeg -f lavfi -i testsrc=size=WIDTHxHEIGHT:rate=30 -pix_fmt yuv420p
+    // -c:v libx265 -frames:v 1 -f hevc out.h265` で、Annex-B 形式の出力から SPS NAL
+    // (nal_unit_type=33、start code 直後の 1 バイト目が 0x42 で始まる NAL) を
+    // 次の start code 直前まで切り出した。emulation prevention byte (`0x00 0x00 0x03`) も
+    // そのまま含まれており、`rbsp_from_hevc_sps_nalu` 経路での RBSP 抽出を実機データで担保する。
+    //
+    // 各 SPS は本モジュール外のテスト (将来追加される decoder / rtmp / srt 等の H.265 テスト) からも
+    // 参照可能なように `pub(crate)` で公開する。
+
+    // x265 4.1 が `testsrc=640x480` Main profile / Level-3 で出力する SPS。
+    // 16 の倍数解像度で conformance window 不要。emulation prevention byte が 5 箇所含まれる。
+    pub(crate) const HEVC_SPS_640X480: [u8; 42] = [
+        0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00,
+        0x03, 0x00, 0x5a, 0xa0, 0x05, 0x02, 0x01, 0xe1, 0x65, 0x95, 0x9a, 0x49, 0x32, 0xbc, 0x05,
+        0xa0, 0x20, 0x00, 0x00, 0x03, 0x00, 0x20, 0x00, 0x00, 0x03, 0x03, 0xc1,
+    ];
+
+    // x265 4.1 が `testsrc=1920x1080` Main profile / Level-4 で出力する SPS。
+    // raw 1920x1088 + conformance_window で 1920x1080 を表現する典型パターン。
+    // emulation prevention byte が 4 箇所含まれる。
+    pub(crate) const HEVC_SPS_1920X1080: [u8; 42] = [
+        0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00,
+        0x03, 0x00, 0x78, 0xa0, 0x03, 0xc0, 0x80, 0x10, 0xe5, 0x96, 0x56, 0x69, 0x24, 0xca, 0xf0,
+        0x16, 0x80, 0x80, 0x00, 0x00, 0x03, 0x00, 0x80, 0x00, 0x00, 0x0f, 0x04,
+    ];
+
     #[test]
     fn h265_annexb_iterator_parses_vps_sps_pps_with_4byte_start_code() {
         // 4 バイト start code [0, 0, 0, 1] で区切られた VPS / SPS / PPS を順に取り出せること
@@ -1317,6 +1344,83 @@ pub(crate) mod tests {
         let SampleEntry::Hvc1(hvc1) = entry else {
             panic!("Hvc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
         };
+        assert_eq!(hvc1.visual.width, 1920);
+        assert_eq!(hvc1.visual.height, 1080);
+    }
+
+    #[test]
+    fn parse_hevc_sps_parses_real_x265_640x480_sps() {
+        // x265 が出力する実機 640x480 SPS を parse_hevc_sps に通し、
+        // profile_tier_level / chroma / bit_depth / 解像度が仕様準拠の実値で取り出せること、
+        // および 5 箇所の emulation prevention byte が `rbsp_from_hevc_sps_nalu` で
+        // 正しく除去されてビット位置を進められることを担保する。
+        // x265 の出力ログでは "Main profile, Level-3 (Main tier)" なので
+        // general_profile_idc=1 / general_level_idc=90 / general_tier_flag=0 を期待する。
+        let params = parse_hevc_sps(&HEVC_SPS_640X480).expect("実機 640x480 SPS のパース成功");
+        assert_eq!(params.general_profile_idc, 1, "Main プロファイル");
+        assert_eq!(
+            params.general_level_idc, 90,
+            "Level 3.0 の level_idc は仕様 Annex A で 90"
+        );
+        assert_eq!(params.general_tier_flag, 0, "Main tier");
+        assert_eq!(params.general_profile_space, 0);
+        assert_eq!(params.chroma_format_idc, 1, "yuv420p で 4:2:0");
+        assert_eq!(params.bit_depth_luma_minus8, 0, "8-bit");
+        assert_eq!(params.bit_depth_chroma_minus8, 0);
+        assert_eq!(params.sps_max_sub_layers_minus1, 0, "Single layer");
+        assert_eq!(params.width, 640);
+        assert_eq!(params.height, 480);
+    }
+
+    #[test]
+    fn parse_hevc_sps_parses_real_x265_1920x1080_sps_with_conformance_window() {
+        // x265 が出力する実機 1920x1080 SPS を parse_hevc_sps に通し、
+        // raw 1920x1088 + conformance window 適用後の 1920x1080 として正しく解釈されることを
+        // 担保する。x265 の出力ログでは "Main profile, Level-4 (Main tier)" なので
+        // general_level_idc=120 を期待する。
+        let params = parse_hevc_sps(&HEVC_SPS_1920X1080).expect("実機 1920x1080 SPS のパース成功");
+        assert_eq!(params.general_profile_idc, 1);
+        assert_eq!(
+            params.general_level_idc, 120,
+            "Level 4.0 の level_idc は仕様 Annex A で 120"
+        );
+        assert_eq!(params.chroma_format_idc, 1);
+        assert_eq!(params.bit_depth_luma_minus8, 0);
+        assert_eq!(params.bit_depth_chroma_minus8, 0);
+        assert_eq!(
+            params.width, 1920,
+            "raw 1920 から conformance window 適用後も 1920"
+        );
+        assert_eq!(
+            params.height, 1080,
+            "raw 1088 から conformance window crop_bottom で 1080"
+        );
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_with_real_x265_1920x1080_sps_maps_to_hvcc() {
+        // 実機 1920x1080 SPS を `h265_sample_entry_from_vps_sps_pps_lists` 経由で渡し、
+        // emulation prevention byte 込みの SPS から HvccBox の各フィールドが
+        // SPS 由来実値で埋まることの結合担保を行う。Sora 録画固定値
+        // (general_level_idc=123 等) で埋まる旧挙動の回帰防止。
+        let (entry, frame_size) = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal()],
+            vec![HEVC_SPS_1920X1080.to_vec()],
+            vec![dummy_pps_nal()],
+            FrameRate::FPS_30,
+        )
+        .expect("実機 SPS で Hvc1 SampleEntry を構築できること");
+        assert_eq!(frame_size.width, 1920);
+        assert_eq!(frame_size.height, 1080);
+        let SampleEntry::Hvc1(hvc1) = entry else {
+            panic!("Hvc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        assert_eq!(hvc1.hvcc_box.general_profile_idc.get(), 1);
+        assert_eq!(hvc1.hvcc_box.general_level_idc, 120);
+        assert_eq!(hvc1.hvcc_box.chroma_format_idc.get(), 1);
+        assert_eq!(hvc1.hvcc_box.bit_depth_luma_minus8.get(), 0);
+        assert_eq!(hvc1.hvcc_box.bit_depth_chroma_minus8.get(), 0);
+        assert_eq!(hvc1.hvcc_box.num_temporal_layers.get(), 1);
         assert_eq!(hvc1.visual.width, 1920);
         assert_eq!(hvc1.visual.height, 1080);
     }
