@@ -300,8 +300,7 @@ struct DrawOrder {
     index: usize,
 }
 
-// `TextOverlayLayer` が `raden::FontFace` を内包しており `Debug` を実装しないため、
-// `Runner` 全体としても `Debug` 派生を持たせない。
+#[derive(Debug)]
 struct VideoRealtimeMixerRunner {
     processor_handle: ProcessorHandle,
     canvas_width: usize,

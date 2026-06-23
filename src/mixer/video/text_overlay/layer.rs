@@ -23,9 +23,6 @@ use super::{
 /// 機能有効時のみ `Some` で保持され、 `compose_frame` の追加合成段で
 /// 既存の合成済み I420 に最上位レイヤとして I420A バッファをブレンドする。
 /// canvas サイズは構築時に固定し、 シーン切替で再生成されない。
-///
-/// `raden::FontFace` は `Debug` を実装しないため、 `TextOverlayLayer` も
-/// `Debug` を持たない (外側の `VideoRealtimeMixerRunner` も `Debug` 派生から外す)。
 pub struct TextOverlayLayer {
     canvas_width: EvenUsize,
     canvas_height: EvenUsize,
@@ -42,6 +39,25 @@ pub struct TextOverlayLayer {
     /// 同一フォントの再読み込みを避ける。 `--font-search-root` 配下は起動後に置換されない
     /// 前提のため、 エントリの破棄は行わない (overlay 削除でも残す)。
     font_cache: BTreeMap<PathBuf, Arc<raden::FontFace>>,
+}
+
+impl std::fmt::Debug for TextOverlayLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // raden::FontFace と VideoFrame.data の生バイト列はダンプしないように調整する。
+        f.debug_struct("TextOverlayLayer")
+            .field("canvas_width", &self.canvas_width)
+            .field("canvas_height", &self.canvas_height)
+            .field("config", &self.config)
+            .field("overlays", &self.overlays)
+            .field("cached_frame_present", &self.cached_frame.is_some())
+            .field("dirty", &self.dirty)
+            .field("next_auto_z", &self.next_auto_z)
+            .field(
+                "font_cache_keys",
+                &self.font_cache.keys().collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
 impl TextOverlayLayer {
