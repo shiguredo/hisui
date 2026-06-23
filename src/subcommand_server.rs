@@ -164,9 +164,18 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
 
     // テキストオーバーレイ機能の起動時設定を構築する。
     // 両方未指定なら機能無効、片方のみは起動失敗、両方指定は canonicalize と raden での読み込み試行まで確認する。
-    let text_overlay_config =
-        crate::mixer::video::text_overlay::TextOverlayConfig::build(font_search_root, default_font)
-            .map_err(|e| noargs::Error::other(args, e))?;
+    let text_overlay_config = match (font_search_root, default_font) {
+        (None, None) => None,
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(noargs::Error::other(
+                args,
+                "--font-search-root and --default-font must be specified together",
+            ));
+        }
+        (Some(root), Some(name)) => Some(
+            crate::mixer::video::text_overlay::TextOverlayConfig::new(root, name)?,
+        ),
+    };
 
     let addr = SocketAddr::new(host, port);
 

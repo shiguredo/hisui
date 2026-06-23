@@ -65,7 +65,7 @@ impl TextOverlayLayer {
     ///
     /// raden の `PipelineRuntime` を一度作って空文字列 `fill_text` を呼び、
     /// JIT コンパイラを warm-up する。 ここでデフォルトフォントをロード・キャッシュする
-    /// (起動時検証はすでに `TextOverlayConfig::build` で済んでいるため、 ここでは読み込みのみ)。
+    /// (起動時検証はすでに `TextOverlayConfig::new` で済んでいるため、 ここでは読み込みのみ)。
     pub fn new(
         canvas_width: EvenUsize,
         canvas_height: EvenUsize,
@@ -83,7 +83,7 @@ impl TextOverlayLayer {
         };
 
         // デフォルトフォントを事前にロードしてキャッシュに乗せる。
-        // 起動時検証で読み込み可能であることは確認済み (`TextOverlayConfig::build`) なので
+        // 起動時検証で読み込み可能であることは確認済み (`TextOverlayConfig::new`) なので
         // ここでの失敗は想定外だが、 万一の場合は `crate::Error` に変換して上位に伝える。
         let default_name = layer.config.default_font_name.clone();
         layer
@@ -422,12 +422,11 @@ mod tests {
     use super::*;
 
     fn make_layer() -> TextOverlayLayer {
-        let config = TextOverlayConfig::build(
-            Some(PathBuf::from("testdata/fonts")),
-            Some("PublicSans-Regular.ttf".to_owned()),
+        let config = TextOverlayConfig::new(
+            PathBuf::from("testdata/fonts"),
+            "PublicSans-Regular.ttf".to_owned(),
         )
-        .expect("テスト用 config が組み立てられる")
-        .expect("両方指定なので Some");
+        .expect("テスト用 config が組み立てられる");
         TextOverlayLayer::new(
             EvenUsize::new(1920).expect("1920 は偶数"),
             EvenUsize::new(1080).expect("1080 は偶数"),

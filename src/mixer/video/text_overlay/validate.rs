@@ -133,12 +133,11 @@ mod tests {
     use super::*;
 
     fn make_config() -> TextOverlayConfig {
-        TextOverlayConfig::build(
-            Some(PathBuf::from("testdata/fonts")),
-            Some("PublicSans-Regular.ttf".to_owned()),
+        TextOverlayConfig::new(
+            PathBuf::from("testdata/fonts"),
+            "PublicSans-Regular.ttf".to_owned(),
         )
         .expect("テスト用 config が組み立てられる")
-        .expect("両方指定なので Some")
     }
 
     /// `validate_font_name_and_resolve_path` が `..` を含む名前を拒否する。

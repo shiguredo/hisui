@@ -3958,12 +3958,11 @@ async fn start_output_uses_output_kind_even_when_name_matches_legacy_builtin() {
 /// 戻り値の `ObswsCoordinatorHandle` を通じて 4 メソッドの obsws リクエストが実行できる。
 async fn create_initialized_coordinator_with_text_overlay()
 -> crate::Result<crate::obsws::coordinator::ObswsCoordinatorHandle> {
-    let text_overlay_config = crate::mixer::video::text_overlay::TextOverlayConfig::build(
-        Some(std::path::PathBuf::from("testdata/fonts")),
-        Some("PublicSans-Regular.ttf".to_owned()),
+    let text_overlay_config = crate::mixer::video::text_overlay::TextOverlayConfig::new(
+        std::path::PathBuf::from("testdata/fonts"),
+        "PublicSans-Regular.ttf".to_owned(),
     )
-    .expect("テスト用 TextOverlayConfig が組み立てられる")
-    .expect("両方指定なので Some が返る");
+    .expect("テスト用 TextOverlayConfig が組み立てられる");
 
     let registry = ObswsSessionState::new_for_test_with_text_overlay(text_overlay_config.clone());
 
