@@ -185,6 +185,7 @@ writer 後続処理は `Option<SharedSampleEntry>` 型のままで触らない�
 - closed/0030 / closed/0031 / closed/0032 / closed/0033（入力側リーダー経路の不変条件確立）
 - closed/0017 / closed/0027（エンコーダ経路の不変条件確立）
 - closed/0040（`docs/internals/` 配下に規約ドキュメントを追加する直近の先例）
+- 0054 / 0055（本 issue のレビューで発見された fail-safety 補強の後続 issue）
 
 ## 解決方法
 
