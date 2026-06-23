@@ -521,6 +521,42 @@ mod tests {
         );
     }
 
+    /// add: z = Some(i32::MAX) を受けた後、 next_auto_z は saturating_add で
+    /// i32::MAX に飽和し、 以降の auto z (z = None) も i32::MAX が割り当てられる。
+    /// 同 z 重複時の render 順序は overlays (BTreeMap) の name 昇順で決定的。
+    /// OVERLAY_LIMIT = 1024 のため通常運用では到達しないが、 クライアントが明示的に
+    /// i32::MAX を指定した場合の挙動を仕様として確定する。
+    #[test]
+    fn add_with_z_i32_max_saturates_next_auto_z() {
+        let mut layer = make_layer();
+        let mut input_with_max_z = make_input();
+        input_with_max_z.z = Some(i32::MAX);
+        layer
+            .add("a".to_owned(), input_with_max_z)
+            .expect("z=i32::MAX で a を add する");
+        layer
+            .add("b".to_owned(), make_input())
+            .expect("auto z で b を add する");
+        layer
+            .add("c".to_owned(), make_input())
+            .expect("auto z で c を add する");
+        assert_eq!(
+            layer.overlays()["a"].z,
+            i32::MAX,
+            "明示指定の i32::MAX が採用される"
+        );
+        assert_eq!(
+            layer.overlays()["b"].z,
+            i32::MAX,
+            "next_auto_z が飽和して b も i32::MAX"
+        );
+        assert_eq!(
+            layer.overlays()["c"].z,
+            i32::MAX,
+            "c も同じく i32::MAX (saturating_add で増えない)"
+        );
+    }
+
     /// update: 存在する overlay の指定フィールドだけが更新される。
     #[test]
     fn update_modifies_only_specified_fields() {
