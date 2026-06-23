@@ -40,10 +40,10 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 
 | エンコーダ | ファイル | サンプルエントリー確立タイミング |
 |---|---|---|
-| openh264 | `src/encoder/openh264.rs` | 最初の出力フレームの SPS / PPS から確定し、以降の全フレームへ伝播 |
+| openh264 | `src/encoder/openh264.rs` | 最初の keyframe の SPS / PPS で確定するまで内部退避、確定後に保留フレームを一括 push および以降の全フレームへ伝播 |
 | svt_av1 | `src/encoder/svt_av1.rs` | コンストラクタで確定し、全フレームへ載せる |
 | libvpx | `src/encoder/libvpx.rs` | コンストラクタで確定し、全フレームへ載せる |
-| VideoToolbox | `src/encoder/video_toolbox.rs` | 最初の keyframe 出力時の SPS / PPS / VPS から確定し、以降の全フレームへ伝播 |
+| VideoToolbox | `src/encoder/video_toolbox.rs` | H.264 は最初の keyframe の SPS / PPS で確定するまで内部退避、確定後に保留フレームを一括 push および以降の全フレームへ伝播。H.265 は初回反復で無条件に確定し、退避は発生しない |
 | NVENC | `src/encoder/nvcodec.rs` | コンストラクタで確定し、全フレームへ載せる |
 | fdk-aac | `src/encoder/fdk_aac.rs` | コンストラクタで確定し、全フレームへ載せる |
 | AudioToolbox | `src/encoder/audio_toolbox.rs` | コンストラクタで確定し、全フレームへ載せる |
@@ -58,7 +58,9 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 - RTSP 経路で SPS / PPS が未到来の場合はフレームをバッファリングして待機し、揃ってから圧縮 `VideoFrame` を生成する
 - SRT 経路で AnnexB の SPS / PPS が未到来の場合も同様にバッファリング
 
-エンコーダ側で「最初の keyframe より前に出力が出る」可能性を持つもの（openh264 / VideoToolbox 等）は、現状の実装では出力フレームを保留せず `sample_entry: None` のまま下流に流す経路を持つ。VTCompressionSession / openh264 の通常動作として「最初の出力フレームが必ず keyframe」となるため実運用上は破綻しないが、これは API レベルの保証ではなく暗黙の運用前提である。前提が崩れた場合は writer 入口で不変条件違反となり、muxer の `MissingSampleEntry` Err 等で検知される。
+エンコーダ側で「最初の keyframe より前に出力が出る」可能性を持つもの（openh264 / VideoToolbox H.264 経路）は、sample_entry が確定するまで出力フレームを内部退避し、SPS / PPS が揃ったタイミングで保留分を一括 push する。これにより writer 入口で `sample_entry: None` の圧縮フレームを観測することは仕様上不可能となる。退避フレーム数が上限を超えた場合、および sample_entry を確立せずに `finish` された場合はエンコーダ Err を返す。
+
+なお `VideoToolboxEncoder` の H.265 経路は `h265_sample_entry` が空 VPS / SPS / PPS リストでも `Ok` を返す実装のため、初回フレームから無条件で sample_entry が確定する。空 NALU 配列で hvcC を作ってしまう挙動の妥当性は別途検討する余地があるが、本不変条件としては `sample_entry: Some` が常に立つことだけが保証されればよい。
 
 ## writer 側の前提
 
