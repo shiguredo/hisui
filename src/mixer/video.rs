@@ -493,9 +493,6 @@ impl VideoRealtimeMixerRunner {
             // text_overlay_config が無いのに RPC が来た = obsws 側の整合性 bug。
             // ハンドラ側で機能無効を弾くべきだが、 万一漏れた場合に備えて warn のみ出す。
             tracing::warn!("received text overlay rpc while feature disabled (dropping)");
-            // reply_tx を握ったまま drop すると呼び出し側が RecvError で戻るため、
-            // ハンドラ側はその経路でもエラーレスポンスを返せる。
-            drop(command);
             return;
         };
         match command {
