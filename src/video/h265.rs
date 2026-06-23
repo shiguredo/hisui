@@ -614,6 +614,33 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn h265_annexb_iterator_handles_mixed_3byte_and_4byte_start_codes() {
+        // 実機エンコーダ出力で起こり得る 4 バイト → 3 バイト → 4 バイト の start code 混在を
+        // 正しく 3 個の NAL に切り分けられること。
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0, 0, 0, 1]); // 4 バイト start code
+        data.extend_from_slice(&VPS_HEADER);
+        data.push(0xaa);
+        data.extend_from_slice(&[0, 0, 1]); // 3 バイト start code
+        data.extend_from_slice(&SPS_HEADER);
+        data.push(0xbb);
+        data.extend_from_slice(&[0, 0, 0, 1]); // 4 バイト start code
+        data.extend_from_slice(&PPS_HEADER);
+        data.push(0xcc);
+
+        let nalus: Vec<_> = H265AnnexBNalUnits::new(&data)
+            .collect::<crate::Result<Vec<_>>>()
+            .expect("start code 混在でも 3 個取り出せること");
+        assert_eq!(nalus.len(), 3);
+        assert_eq!(nalus[0].ty, H265_NALU_TYPE_VPS);
+        assert_eq!(nalus[0].data, &[0x40, 0x01, 0xaa]);
+        assert_eq!(nalus[1].ty, H265_NALU_TYPE_SPS);
+        assert_eq!(nalus[1].data, &[0x42, 0x01, 0xbb]);
+        assert_eq!(nalus[2].ty, H265_NALU_TYPE_PPS);
+        assert_eq!(nalus[2].data, &[0x44, 0x01, 0xcc]);
+    }
+
+    #[test]
     fn h265_annexb_iterator_returns_none_for_empty_input() {
         // 空入力ではイテレーターが None を返すこと
         let mut iter = H265AnnexBNalUnits::new(&[]);
