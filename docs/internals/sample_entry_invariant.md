@@ -21,8 +21,6 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 生フォーマット（`format.codec_name()` が `None` を返すフレーム）は不変条件の対象外であり、`sample_entry: None` が許容される。
 具体的には音声側で `I16Be`、映像側で `I420` / `I420A` 等。
 
-生フォーマットは mixer / encoder の手前で処理されるため通常 writer 入口に直接届くことは無いが、防御的な意味で `None` を許容しておく。
-
 ## 適用範囲（入力側全経路）
 
 不変条件は writer の上流に位置する **すべての入力経路** で確立する必要がある。
@@ -36,7 +34,7 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 | WebM ファイル | `src/webm/reader.rs` | `Tracks` 要素読み出し時にトラックごとに確定し、各サンプルへ載せる |
 | RTSP 経路 | `src/rtsp/subscriber.rs` | SDP の `sprop-parameter-sets` または inline SPS / PPS / IDR 揃いで確定し、以降のフレームへ載せる |
 | SRT 経路 | `src/srt/inbound_endpoint.rs` | AAC は `AudioSpecificConfig`、映像は AnnexB の SPS / PPS / IDR 揃いで確定し、以降のフレームへ載せる |
-| Sora 録画 MP4 | `src/sora/recording_mp4_reader.rs` | MP4 ファイルと同じく `stsd` 由来 |
+| Sora 録画 MP4 | `src/sora/recording_mp4_reader.rs` | `stsd` ボックス読み出し時にトラックごとに確定し、各サンプルへ載せる（MP4 リーダーと同じ経路） |
 
 ### エンコーダ（生フレームを符号化して圧縮フレームを生成）
 
@@ -64,16 +62,9 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 
 ## writer 側の前提
 
-入力側で不変条件が確立しているため、writer 側はサンプルエントリーが `None` の圧縮フレームを想定しない。
-具体的には:
-
-- `src/mp4/writer.rs`（`Mp4Writer`）
-- `src/mp4/hybrid_writer.rs`（`HybridMp4Writer`）
-- `src/dash/writer.rs`（`DashWriter`）
-- `src/hls/writer.rs`（`HlsWriter`）
-
-これらの writer 入口は補完値（fallback）や違反検知ロジックを持たず、サンプルエントリーが常に `Some` である前提で動作する。
-万一不変条件が破られた場合は muxer が最初のサンプルで panic か Err を返す形となるため、CI のテスト（PBT / 単体 / e2e）で破壊を検知する設計である。
+`src/mp4/writer.rs`（`Mp4Writer`）/ `src/mp4/hybrid_writer.rs`（`HybridMp4Writer`）/ `src/dash/writer.rs`（`DashWriter`）/ `src/hls/writer.rs`（`HlsWriter`）の writer 入口は補完値（fallback）や違反検知ロジックを持たず、入力側で不変条件が確立している前提で動作する。
+万一不変条件が破られた場合は muxer が最初のサンプルで `MissingSampleEntry` Err を返してパイプラインを fail-fast 停止させる。
+退行検知は各入力経路（リーダー / エンコーダ）の単体テストおよび e2e テストで担保する。
 
 ## 新規入力経路追加時のチェックリスト
 

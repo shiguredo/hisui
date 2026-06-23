@@ -388,10 +388,8 @@ impl HybridMp4Writer {
         let mut samples = Vec::new();
         let mut data_offset = 0;
 
-        // この経路はベストエフォートのリカバリで、pending の sample_entry が未確定なら単にスキップする。
-        // 入力側不変条件で圧縮フレームの sample_entry は常に Some になるためここに来る pending は
-        // 通常常に Some だが、`if let Some` パターンを残して「未確定 pending は単にスキップ」の
-        // ベストエフォート方針を独立した動機で保つ。
+        // ベストエフォートのリカバリ経路。入力側不変条件で sample_entry は常に Some だが、
+        // 未確定 pending を黙ってスキップする防御的フォールバックとして `if let Some` を残す。
         if let Some(pending) = self.core.pending_video_frame.as_ref()
             && let Some(ref sample_entry) = pending.sample_entry
         {

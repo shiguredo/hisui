@@ -33,9 +33,10 @@ impl SharedSampleEntry {
 
     /// 2 つの `SharedSampleEntry` が同一の `Arc` を共有しているかを判定する。
     ///
-    /// `changed_since` の `Arc::ptr_eq` 短絡経路が崩れた場合
-    /// （`get().clone()` で再 wrap する実装に書き換わるなど）に検知できるよう、Arc の同一性
-    /// だけを観測できる API として用意する。
+    /// テストで `Arc::ptr_eq` 短絡経路の崩れを検知するための観測用 API。
+    /// `changed_since` 内の `Arc::ptr_eq` 短絡が `get().clone()` で再 wrap する実装に
+    /// 書き換わって Arc 同一性が壊れた場合に検知できるよう用意する
+    /// （リーダー / エンコーダの単体テスト経由で利用される）。
     pub fn ptr_eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
