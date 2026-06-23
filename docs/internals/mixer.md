@@ -142,16 +142,15 @@ video mixer の RPC は `UpdateConfig` と `Finish` です。
 
 `UpdateConfig` では、削除された input の receiver を止め、新規 input を subscribe し直し、 draw order と stats を更新します。
 
-### `VideoRealtimeMixer` のテキストオーバーレイレイヤ
+### テキストオーバーレイレイヤ
 
-テキストオーバーレイ機能 (`HisuiCreateTextOverlay` 等) は、 `VideoRealtimeMixer` の **内部レイヤ** として組み込まれています。
+`HisuiCreateTextOverlay` 等で扱うテキスト描画は、 入力 track と並べる独立 processor ではなく、 video mixer の **内部レイヤ** として組み込まれています。
 
-- (a) 機能有効時のみ `VideoRealtimeMixerRunner.text_overlay_layer: Option<TextOverlayLayer>` フィールドに保持されます。 `VideoRealtimeMixer::run()` 冒頭で `TextOverlayLayer::new` が呼ばれ、 raden の JIT warm-up とデフォルトフォントのプリロードを行います。
-- (b) `compose_frame` (`src/mixer/video.rs` の自由関数) の追加合成段で、 一般 InputTrack の `draw_order` ループ後に `RealtimeI420Canvas::draw_frame_clipped(0, 0, &overlay_frame)` を呼んで最上位合成します。 「最上位レイヤ」 という性質はソート用の z 値ではなく、 mixer 内部の合成順序で表現します。
-- (c) `InputTrack.z` (`src/mixer/video.rs` の `pub z: i32`、 obsws 層の `ObswsVideoMixerInputTrack.z` も `i32`) には **予約値を持ちません**。 クライアントは i32 全域を z として指定できます。 `z` は順序ソート用の値で大きな数値精度は不要なため、 obsws / 内部 mixer の両層で `i32` に統一しています。 `HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` で `z` に i32 範囲外の値を渡した場合のみ `INVALID_REQUEST_FIELD` を返します。
-- (d) 複数のテキストオーバーレイ間の z は `TextOverlayLayer` 内部でソートして 1 枚の I420A バッファに重ね合わせる段で解決します (`VideoRealtimeMixer.input_tracks` には現れません)。
+- 機能有効時のみレイヤが構築され、 起動直後にデフォルトフォントのプリロードと描画ランタイムの warm-up を行います。
+- 一般の input track を z 順に合成した後、 テキストレイヤを最上位に重ねる順序が固定されています。 「最上位」 は z 値ではなく合成順で表現するため、 `InputTrack.z` には予約値がなく、 クライアントは z 全域を自由に指定できます。
+- 複数のテキストオーバーレイ間の z はレイヤ内部でソートされ、 入力 track の z 空間とは独立です。
 
-RPC は `VideoRealtimeMixerRpcMessage::TextOverlay(TextOverlayCommand)` バリアントを介して `VideoRealtimeMixer` 経由で送ります。 `register_rpc_sender` が同一 processor で 1 sender しか許さない制約に従って、 sender 自体は既存の video mixer のものを共有します。
+RPC は video mixer の既存 RPC sender に統合されています (`register_rpc_sender` は 1 processor あたり 1 sender しか登録できないため)。
 
 ## Audio Realtime Mixer
 
