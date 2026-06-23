@@ -865,10 +865,10 @@ pub(crate) mod tests {
         pub(crate) fn build(self) -> Vec<u8> {
             let mut w = HevcSpsBitWriter::new();
 
-            // NAL ヘッダ 2 バイト: forbidden_zero_bit=0, nal_unit_type=33 (SPS), nuh_layer_id=0,
-            // nuh_temporal_id_plus1=1 → 0x42 0x01
-            w.write_u(8, 0x42);
-            w.write_u(8, 0x01);
+            // NAL ヘッダ 2 バイト (SPS_HEADER 定数経由で本モジュール内の VPS/SPS/PPS 定数と DRY を保つ)
+            for &b in &SPS_HEADER {
+                w.write_u(8, u64::from(b));
+            }
 
             // sps_video_parameter_set_id (u(4))
             w.write_u(4, 0);
