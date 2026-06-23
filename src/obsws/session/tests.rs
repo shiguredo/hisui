@@ -4471,7 +4471,7 @@ async fn hisui_create_text_overlay_rejects_invalid_font_size() -> crate::Result<
 async fn hisui_create_text_overlay_rejects_invalid_text() -> crate::Result<()> {
     let coordinator = create_initialized_coordinator_with_text_overlay().await?;
 
-    // バイト数上限超過 (TEXT_MAX_BYTES = 4096)
+    // バイト数上限超過 (TEXT_MAX_BYTES 超え)
     let too_long = "a".repeat(crate::mixer::video::text_overlay::TEXT_MAX_BYTES + 1);
     let body = format!(
         r#"{{"textOverlayName":"text-bytes","text":"{too_long}","x":0,"y":0,"fontSize":32}}"#
@@ -4490,7 +4490,7 @@ async fn hisui_create_text_overlay_rejects_invalid_text() -> crate::Result<()> {
         crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD
     );
 
-    // 行数上限超過 (TEXT_MAX_LINES = 64)
+    // 行数上限超過 (TEXT_MAX_LINES 超え)
     let too_many_newlines = "\\n".repeat(crate::mixer::video::text_overlay::TEXT_MAX_LINES);
     let body = format!(
         r#"{{"textOverlayName":"text-lines","text":"{too_many_newlines}","x":0,"y":0,"fontSize":32}}"#
@@ -4511,7 +4511,7 @@ async fn hisui_create_text_overlay_rejects_invalid_text() -> crate::Result<()> {
     Ok(())
 }
 
-/// `OVERLAY_LIMIT` (= 64) を超える Create は RESOURCE_ACTION_NOT_SUPPORTED で拒否される。
+/// `OVERLAY_LIMIT` を超える Create は RESOURCE_ACTION_NOT_SUPPORTED で拒否される。
 #[tokio::test]
 async fn hisui_create_text_overlay_rejects_when_limit_exceeded() -> crate::Result<()> {
     let coordinator = create_initialized_coordinator_with_text_overlay().await?;

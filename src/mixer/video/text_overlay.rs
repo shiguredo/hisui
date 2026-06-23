@@ -88,14 +88,14 @@ impl TextOverlayConfig {
     }
 }
 
-/// 1 mixer が同時に保持できるテキストオーバーレイの最大数 (DoS 対策の上限)。
-pub const OVERLAY_LIMIT: usize = 64;
+/// 1 mixer が同時に保持できるテキストオーバーレイの最大数。
+pub const OVERLAY_LIMIT: usize = 1024;
 
 /// `text` フィールドの最大バイト数。
-pub const TEXT_MAX_BYTES: usize = 4096;
+pub const TEXT_MAX_BYTES: usize = 65536;
 
 /// `text` フィールドの最大行数 (`\n` 区切り)。
-pub const TEXT_MAX_LINES: usize = 64;
+pub const TEXT_MAX_LINES: usize = 1024;
 
 /// テキストオーバーレイの仕様 (確定値)。
 ///

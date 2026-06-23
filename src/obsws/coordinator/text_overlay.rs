@@ -68,7 +68,7 @@ impl ObswsCoordinator {
                 );
             }
         };
-        // text は空文字も valid 値として扱う (issue 仕様: 「最大 4096 バイト、最大 64 行」のみ規定)。
+        // text は空文字も valid 値として扱う (バイト数 / 行数の上限は validate_text で確認する)。
         let text = match parse_required_string_field(request_data, "text") {
             Ok(s) => s,
             Err(e) => return self.map_required_field_error(request_type, request_id, "text", e),

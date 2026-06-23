@@ -17,7 +17,7 @@
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
 | `textOverlayName` | string | 必須 | サーバ全体で一意な識別名 |
-| `text` | string | 必須 | 表示するテキスト。`\n` で改行可能。最大 4096 バイト、最大 64 行 |
+| `text` | string | 必須 | 表示するテキスト。`\n` で改行可能。最大 65536 バイト、最大 1024 行 |
 | `x` | integer | 必須 | キャンバス絶対座標 X (左上原点、px)。負値・キャンバス外も許容 (描画側でクリップ) |
 | `y` | integer | 必須 | キャンバス絶対座標 Y (左上原点、px)。同上 |
 | `fontSize` | integer | 必須 | フォントサイズ (px)。`1` 以上 `canvas_height` 以下 |
@@ -42,7 +42,7 @@
 - `fontSize` の範囲外 (`0` または `canvas_height` 超過): `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - `z` が i32 範囲外: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
 - `text` のバイト数 / 行数上限超過: `REQUEST_STATUS_INVALID_REQUEST_FIELD` (400)
-- 同時保持できるオーバーレイ数 (最大 64) を超える: `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` (606)
+- 同時保持できるオーバーレイ数 (最大 1024) を超える: `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` (606)
 
 ## 制約
 
