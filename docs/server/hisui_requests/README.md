@@ -38,3 +38,17 @@ WebSocket / データチャネル両方で利用可能。RequestBatch（op=8）�
 | [HisuiListSoraSourceTracks](HisuiListSoraSourceTracks.md) | 受信中のリモートトラック一覧を取得する |
 | [HisuiAttachSoraSourceTrack](HisuiAttachSoraSourceTrack.md) | トラックを `sora_source` input に紐付ける |
 | [HisuiDetachSoraSourceTrack](HisuiDetachSoraSourceTrack.md) | トラックを `sora_source` input から解除する |
+
+## テキストオーバーレイ
+
+WebSocket / データチャネル両対応。RequestBatch（op=8）に対応。
+
+サーバ起動時に `--font-search-root` と `--default-font` の両方を指定した場合のみ利用可能。
+機能無効時は全メソッドが `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` を返す。
+
+| リクエスト | 説明 |
+|-----------|------|
+| [HisuiCreateTextOverlay](HisuiCreateTextOverlay.md) | テキストオーバーレイを作成して即時表示する |
+| [HisuiUpdateTextOverlay](HisuiUpdateTextOverlay.md) | 既存テキストオーバーレイの属性を部分更新する |
+| [HisuiRemoveTextOverlay](HisuiRemoveTextOverlay.md) | テキストオーバーレイを削除する |
+| [HisuiListTextOverlays](HisuiListTextOverlays.md) | サーバ全体のテキストオーバーレイ一覧と現在状態を取得する |

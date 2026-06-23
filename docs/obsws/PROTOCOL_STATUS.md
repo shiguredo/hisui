@@ -1060,3 +1060,27 @@ Program 出力を SDL3 ウィンドウにリアルタイム表示する。`playe
 - 設定不要（`SetOutputSettings` は受理するが何もしない）
 - 二重開始: `StartOutput` が `OUTPUT_RUNNING` エラーを返す
 - 未起動停止: `StopOutput` が `OUTPUT_NOT_RUNNING` エラーを返す
+
+### テキストオーバーレイ機能（独自拡張）
+
+合成映像にテキストをオーバーレイ描画する。 サーバ起動時に `--font-search-root` と `--default-font` の両方を指定した場合のみ利用可能。 `VideoRealtimeMixer` 内部のテキストオーバーレイレイヤとして最上位合成され、 出力は `mp4_output` / `hls_output` 等にもそのまま反映される。
+
+詳細仕様は `docs/server/hisui_requests/HisuiCreateTextOverlay.md` 等を参照。
+
+#### 専用リクエスト
+
+| リクエスト | 説明 |
+|---|---|
+| `HisuiCreateTextOverlay` | テキストオーバーレイを作成して即時表示する |
+| `HisuiUpdateTextOverlay` | 既存テキストオーバーレイの属性を部分更新する |
+| `HisuiRemoveTextOverlay` | テキストオーバーレイを削除する |
+| `HisuiListTextOverlays` | テキストオーバーレイ一覧と現在状態を取得する |
+
+#### 制約
+
+- WebSocket / データチャネル両方で利用可能
+- RequestBatch（op=8）に対応
+- 機能無効時 (`--font-search-root` / `--default-font` 未指定): 全メソッドが `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` (606) を返す
+- 同時保持できるオーバーレイ数の上限: 1024
+- 永続化対象外 (`--state-file` 指定時もテキストオーバーレイは保存されず、再起動でクリアされる)
+- 専用イベントは発火しない

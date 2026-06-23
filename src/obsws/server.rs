@@ -159,6 +159,7 @@ pub async fn run_server(
     canvas_height: crate::types::EvenUsize,
     frame_rate: crate::video::FrameRate,
     state_file_path: Option<PathBuf>,
+    text_overlay_config: Option<crate::mixer::video::text_overlay::TextOverlayConfig>,
     stats: crate::stats::Stats,
     emit_startup_info: bool,
     #[cfg(feature = "player")] player_command_tx: std::sync::mpsc::SyncSender<
@@ -260,6 +261,7 @@ pub async fn run_server(
         canvas_height,
         frame_rate,
         resolved_state_file_path,
+        text_overlay_config,
     );
 
     // state file から読み込んだ設定を反映する
@@ -309,7 +311,8 @@ pub async fn run_server(
         tracing::debug!("obsws initial start trigger was already completed");
     }
 
-    // Program 出力を初期化する（常駐ミキサー）
+    // Program 出力を初期化する（常駐ミキサー）。
+    // テキストオーバーレイ機能が有効な場合は、 ビデオミキサー内部のレイヤとして組み込まれる。
     let program_output = {
         let scene_inputs = session_state.list_current_program_scene_input_entries();
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(
@@ -325,8 +328,13 @@ pub async fn run_server(
             ))
         })?;
 
-        crate::obsws::session::output::start_mixer_processors(&pipeline_handle, &output_plan)
-            .await?;
+        let text_overlay_config = session_state.text_overlay_config().cloned();
+        crate::obsws::session::output::start_mixer_processors(
+            &pipeline_handle,
+            &output_plan,
+            text_overlay_config,
+        )
+        .await?;
 
         tracing::info!(
             "program output initialized: video={}, audio={}",

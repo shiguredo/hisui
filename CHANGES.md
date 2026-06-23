@@ -56,6 +56,13 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
+- [ADD] obsws 経由でリアルタイム合成映像にテキストオーバーレイを描画できるようにする
+  - 起動時 CLI 引数 `--font-search-root` / `--default-font` でフォント探索ルートとデフォルトフォントを指定する (両方未指定なら機能無効として正常起動、片方のみは起動失敗)
+  - `HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` / `HisuiRemoveTextOverlay` / `HisuiListTextOverlays` の 4 メソッドを obsws (WebSocket / データチャネル両対応、RequestBatch 対応) 経由で利用できる
+  - 描画は raden (Cranelift JIT ベースの CPU 専用 2D ベクターグラフィックスライブラリ) で行い、`shiguredo_libyuv::argb_to_i420_alpha` で I420A に変換して `VideoRealtimeMixer` の最上位レイヤとして合成する
+  - 機能無効時は全 4 メソッドが `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` を返す
+  - テキストオーバーレイは揮発的 (`--state-file` には保存されず、再起動でクリアされる)
+  - @sile
 - [ADD] cargo-fuzz による fuzz テスト基盤を `fuzz/` ディレクトリに導入する
   - @sile
 - [ADD] hisui 共通フラグとして `--emit-exit-metrics` を追加し、サブコマンドの終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
@@ -79,6 +86,8 @@
   - `destination.type` に `"filesystem"` または `"s3"` を指定して出力先を切り替える
   - S3 出力先にはオブジェクトライフタイム指定（`lifetime_days`）を設定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
+  - @sile
+- [ADD] 依存ライブラリに raden 2026.2.0-canary.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.4 を追加する
   - @sile

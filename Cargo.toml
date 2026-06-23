@@ -58,6 +58,7 @@ mpeg2ts = "=0.6.0"
 noargs = { workspace = true }
 nojson = { workspace = true }
 nopng = "=0.1.1"
+raden = "=2026.2.0-canary.0"
 rustls = {
   version = "=0.23.40",
   default-features = false,
