@@ -4,10 +4,8 @@
 //! `TextOverlayLayer` 本体は `layer` サブモジュールに、 検証関数は `validate`
 //! サブモジュールに分離している。
 //!
-//! 旧設計では独立した `TextOverlayProcessor` を `MediaPipeline` 上に常駐 spawn し、
-//! `z = i32::MAX` 予約値で `VideoRealtimeMixer` の最終 InputTrack として接続していたが、
-//! 新設計では `VideoRealtimeMixer` の内部レイヤとして組み込み、 `compose_frame` の
-//! 追加合成段で `RealtimeI420Canvas::draw_frame_clipped` 経由で最上位合成する。
+//! `VideoRealtimeMixer` 構築時に layer が生成され、 `compose_frame` の追加合成段で
+//! `RealtimeI420Canvas::draw_frame_clipped` 経由で最上位レイヤとして合成される。
 
 use std::path::PathBuf;
 

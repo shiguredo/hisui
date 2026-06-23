@@ -2,8 +2,6 @@
 //!
 //! `VideoRealtimeMixerRunner` の内部状態として保持され、 `compose_frame` の
 //! 追加合成段で「raden 描画 → straight 復元 → I420A 変換 → cached I420A 保持」 を行う。
-//! 旧設計の独立 `TextOverlayProcessor` における `ProcessorState` 相当の役割を担うが、
-//! publish track や ack/syn back-pressure は持たない。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

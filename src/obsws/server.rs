@@ -312,8 +312,7 @@ pub async fn run_server(
     }
 
     // Program 出力を初期化する（常駐ミキサー）。
-    // テキストオーバーレイ機能が有効な場合は、 ビデオミキサー内部のレイヤとして組み込まれる
-    // (旧設計のように別 processor を spawn する形は採らない)。
+    // テキストオーバーレイ機能が有効な場合は、 ビデオミキサー内部のレイヤとして組み込まれる。
     let program_output = {
         let scene_inputs = session_state.list_current_program_scene_input_entries();
         let output_plan = crate::obsws::output_plan::build_composed_output_plan(

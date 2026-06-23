@@ -505,11 +505,11 @@ impl ObswsCoordinator {
 
     /// `VideoRealtimeMixer` の RPC 送信側を取得する。
     ///
-    /// 新設計ではテキストオーバーレイ機能を `VideoRealtimeMixer` の内部レイヤとして
-    /// 組み込んでおり、 `VideoRealtimeMixerRpcMessage::TextOverlay(...)` バリアント
-    /// 経由で Add / Update / Remove / List を送る。 `register_rpc_sender` が同一
-    /// processor で 1 sender しか許さない制約に従って、 sender 自体は既存の
-    /// `program:video_mixer` のものを共有する。
+    /// テキストオーバーレイ機能は `VideoRealtimeMixer` の内部レイヤとして組み込まれて
+    /// おり、 `VideoRealtimeMixerRpcMessage::TextOverlay(...)` バリアント経由で
+    /// Add / Update / Remove / List を送る。 sender 自体は既存の `program:video_mixer`
+    /// のものを共有する (`register_rpc_sender` は同一 processor で 1 sender しか
+    /// 許さない)。
     async fn text_overlay_sender(
         &self,
     ) -> Result<mpsc::UnboundedSender<VideoRealtimeMixerRpcMessage>, String> {
@@ -537,8 +537,7 @@ impl ObswsCoordinator {
 }
 
 /// `TextOverlayError` のバリアントから対応する `REQUEST_STATUS_*` コードを返す。
-/// クライアント向けの文言は `TextOverlayError::Display` 実装が担当する
-/// (旧 `map_text_overlay_error` で二重に書いていた文言生成をなくしている)。
+/// クライアント向けの文言は `TextOverlayError::Display` 実装が担当する。
 fn text_overlay_error_status_code(error: &TextOverlayError) -> i64 {
     match error {
         TextOverlayError::AlreadyExists => REQUEST_STATUS_RESOURCE_ALREADY_EXISTS,
@@ -718,9 +717,8 @@ fn parse_optional_i64(
 ///
 /// `z` は順序値のため i32 範囲で十分な精度。 obsws の他フィールドと同じく
 /// JSON 上は integer として受信し、 i32 範囲外はクライアントの誤用とみなして
-/// 呼び出し側で `INVALID_REQUEST_FIELD` にマップする。 新設計ではテキストオーバーレイ
-/// 機能を mixer 内部レイヤとして組み込んだため、 旧設計のような `i32::MAX` 予約値は
-/// 存在しない (クライアントは i32 全域を z として指定できる)。
+/// 呼び出し側で `INVALID_REQUEST_FIELD` にマップする。 i32::MAX を含む i32 全域が
+/// 有効値で、 予約値は持たない。
 fn parse_optional_z(request_data: &nojson::RawJsonOwned) -> Result<Option<i32>, String> {
     let Some(v) = parse_optional_i64(request_data, "z")? else {
         return Ok(None);
@@ -879,15 +877,14 @@ mod tests {
         assert_eq!(parse_optional_z(&missing), Ok(None), "欠落は Ok(None)");
     }
 
-    /// `parse_optional_z`: 新設計では i32::MAX も valid な値として受け付ける。
-    /// 旧設計の予約値 (`i32::MAX`) は廃止された。
+    /// `parse_optional_z`: i32::MAX を含む i32 全域が valid な値として受け付けられる。
     #[test]
     fn parse_optional_z_accepts_i32_max() {
         let json = parse_owned_json(r#"{"z":2147483647}"#); // i32::MAX
         assert_eq!(
             parse_optional_z(&json),
             Ok(Some(i32::MAX)),
-            "新設計では i32::MAX も受け付ける"
+            "i32::MAX も受け付ける"
         );
     }
 

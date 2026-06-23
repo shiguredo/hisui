@@ -3975,8 +3975,8 @@ async fn create_initialized_coordinator_with_text_overlay()
         .await
         .map_err(|_| crate::Error::new("trigger_start: pipeline terminated"))?;
 
-    // 新設計ではテキストオーバーレイ機能は VideoRealtimeMixer の内部レイヤとして
-    // `start_mixer_processors` 経由で組み込まれる (旧設計の独立 processor spawn は不要)。
+    // テキストオーバーレイ機能は VideoRealtimeMixer の内部レイヤとして
+    // `start_mixer_processors` 経由で組み込まれる。
     let scene_inputs = registry.list_current_program_scene_input_entries();
     let output_plan = crate::obsws::output_plan::build_composed_output_plan(
         &scene_inputs,
@@ -4628,10 +4628,9 @@ async fn hisui_create_text_overlay_returns_invalid_request_field_for_type_mismat
     Ok(())
 }
 
-/// 新設計ではテキストオーバーレイ機能を VideoRealtimeMixer の内部レイヤとして
-/// 組み込むため、 旧設計のような `z = i32::MAX` 予約値は存在しない。
-/// 一般 input track と layer の z が衝突する経路自体がなくなったため、
-/// クライアントは i32 全域を z として指定できる。
+/// テキストオーバーレイの `z` フィールドは i32 全域 (`i32::MAX` 含む) を valid 値として
+/// 受け付ける。 layer 内部で z をソートして合成するため一般 input track の z 空間
+/// との衝突はない。
 #[tokio::test]
 async fn hisui_text_overlay_accepts_i32_max_as_z_value() -> crate::Result<()> {
     let coordinator = create_initialized_coordinator_with_text_overlay().await?;
@@ -4645,7 +4644,7 @@ async fn hisui_text_overlay_accepts_i32_max_as_z_value() -> crate::Result<()> {
     )
     .await;
     let (success, _) = parse_request_status(&create.response_text);
-    assert!(success, "新設計では z = i32::MAX も受け付ける");
+    assert!(success, "i32::MAX も z として受け付ける");
     Ok(())
 }
 

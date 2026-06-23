@@ -47,8 +47,7 @@ pub fn convert_audio_mixer_input_tracks(
 /// 映像・音声ミキサープロセッサを起動する（エンコーダは含まない）。
 ///
 /// `text_overlay_config` が `Some` の場合は、 ビデオミキサー内部のテキストオーバーレイ
-/// レイヤを有効化する。 旧設計では別 processor として spawn していたが、 新設計では
-/// `VideoRealtimeMixer` の内部レイヤとして組み込む (シーン切替で温存される)。
+/// レイヤを有効化する (mixer 構築時にのみ受け取り、 シーン切替で温存される)。
 pub async fn start_mixer_processors(
     pipeline_handle: &crate::MediaPipelineHandle,
     output_plan: &crate::obsws::output_plan::ObswsComposedOutputPlan,
