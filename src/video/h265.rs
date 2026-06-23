@@ -1067,4 +1067,289 @@ pub(crate) mod tests {
         assert_eq!(rbsp.len(), 3);
         assert_eq!(rbsp, vec![0x00, 0x00, 0xff]);
     }
+
+    // ----------------------------------------------------------------
+    // h265_sample_entry_from_vps_sps_pps_lists / h265_sample_entry_from_annexb の単体テスト群
+    //
+    // 新ヘルパー関数の空入力 Err / NAL タイプ全要素検査 Err / HvccBox フィールドの
+    // SPS 由来値反映 / 複数 VPS / SPS / PPS の順序保持 / conformance window 適用後の
+    // VideoFrameSize / Annex-B 経由の薄いラッパー統合経路を直接検証する。
+    // ----------------------------------------------------------------
+
+    /// テスト用のダミー VPS NAL バイト列 (NAL タイプ検査のみ通る最小サイズ)
+    fn dummy_vps_nal() -> Vec<u8> {
+        VPS_HEADER.to_vec()
+    }
+
+    /// テスト用のダミー PPS NAL バイト列 (NAL タイプ検査のみ通る最小サイズ)
+    fn dummy_pps_nal() -> Vec<u8> {
+        PPS_HEADER.to_vec()
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_returns_err_on_empty_vps_list() {
+        // vps_list が空のときは `missing H.265 VPS` Err を返す
+        let sps = HevcSpsBuilder::raw(1920, 1080).build();
+        let result = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![],
+            vec![sps],
+            vec![dummy_pps_nal()],
+            FrameRate::FPS_30,
+        );
+        let err = result.expect_err("vps_list 空は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("missing H.265 VPS"),
+            "エラーメッセージに `missing H.265 VPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_returns_err_on_empty_sps_list() {
+        // sps_list が空のときは `missing H.265 SPS` Err を返す
+        let result = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal()],
+            vec![],
+            vec![dummy_pps_nal()],
+            FrameRate::FPS_30,
+        );
+        let err = result.expect_err("sps_list 空は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("missing H.265 SPS"),
+            "エラーメッセージに `missing H.265 SPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_returns_err_on_empty_pps_list() {
+        // pps_list が空のときは `missing H.265 PPS` Err を返す
+        let sps = HevcSpsBuilder::raw(1920, 1080).build();
+        let result = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal()],
+            vec![sps],
+            vec![],
+            FrameRate::FPS_30,
+        );
+        let err = result.expect_err("pps_list 空は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("missing H.265 PPS"),
+            "エラーメッセージに `missing H.265 PPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_returns_err_on_vps_list_with_non_vps_nal_at_index_1()
+     {
+        // vps_list の index 1 に SPS NAL を混入させた場合に Err を返す (全要素検査の担保)
+        let sps = HevcSpsBuilder::raw(1920, 1080).build();
+        let non_vps_nal = vec![0x42, 0x01]; // SPS NAL ヘッダ
+        let result = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal(), non_vps_nal],
+            vec![sps],
+            vec![dummy_pps_nal()],
+            FrameRate::FPS_30,
+        );
+        let err = result.expect_err("VPS 以外の NAL は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("invalid H.265 VPS"),
+            "エラーメッセージに `invalid H.265 VPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_returns_err_on_sps_list_with_non_sps_nal_at_index_1()
+     {
+        // sps_list の index 1 に VPS NAL を混入させた場合に Err を返す
+        let sps = HevcSpsBuilder::raw(1920, 1080).build();
+        let non_sps_nal = vec![0x40, 0x01]; // VPS NAL ヘッダ
+        let result = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal()],
+            vec![sps, non_sps_nal],
+            vec![dummy_pps_nal()],
+            FrameRate::FPS_30,
+        );
+        let err = result.expect_err("SPS 以外の NAL は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("invalid H.265 SPS"),
+            "エラーメッセージに `invalid H.265 SPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_returns_err_on_pps_list_with_non_pps_nal_at_index_1()
+     {
+        // pps_list の index 1 に SPS NAL を混入させた場合に Err を返す
+        let sps = HevcSpsBuilder::raw(1920, 1080).build();
+        let non_pps_nal = vec![0x42, 0x01]; // SPS NAL ヘッダ
+        let result = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal()],
+            vec![sps],
+            vec![dummy_pps_nal(), non_pps_nal],
+            FrameRate::FPS_30,
+        );
+        let err = result.expect_err("PPS 以外の NAL は Err を返すこと");
+        let display = format!("{err:?}");
+        assert!(
+            display.contains("invalid H.265 PPS"),
+            "エラーメッセージに `invalid H.265 PPS` が含まれること (実際: {display})"
+        );
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_maps_main_sps_to_hvcc() {
+        // Main プロファイル + Level 3.1 / Single layer の SPS の各フィールドが HvccBox に
+        // 1:1 で反映されることを直接検証する。Sora 録画固定値 (general_level_idc: 123 等) で
+        // 埋まる旧挙動の回帰防止。
+        let sps = HevcSpsBuilder::raw(1920, 1080).build();
+        let (entry, _frame_size) = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal()],
+            vec![sps],
+            vec![dummy_pps_nal()],
+            FrameRate::FPS_30,
+        )
+        .expect("Main SPS のパース成功");
+        let SampleEntry::Hvc1(hvc1) = entry else {
+            panic!("Hvc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        assert_eq!(hvc1.hvcc_box.general_profile_idc.get(), 1);
+        assert_eq!(hvc1.hvcc_box.general_level_idc, 93);
+        assert_eq!(hvc1.hvcc_box.general_profile_space.get(), 0);
+        assert_eq!(hvc1.hvcc_box.general_tier_flag.get(), 0);
+        assert_eq!(
+            hvc1.hvcc_box.general_profile_compatibility_flags,
+            0x60000000
+        );
+        assert_eq!(
+            hvc1.hvcc_box.general_constraint_indicator_flags.get(),
+            0xb00000000000
+        );
+        assert_eq!(hvc1.hvcc_box.chroma_format_idc.get(), 1);
+        assert_eq!(hvc1.hvcc_box.bit_depth_luma_minus8.get(), 0);
+        assert_eq!(hvc1.hvcc_box.bit_depth_chroma_minus8.get(), 0);
+        // Single layer (sps_max_sub_layers_minus1=0 → num_temporal_layers=1)
+        assert_eq!(hvc1.hvcc_box.num_temporal_layers.get(), 1);
+        // sps_temporal_id_nesting_flag のデフォルト 1 を反映
+        assert_eq!(hvc1.hvcc_box.temporal_id_nested.get(), 1);
+        // visual.width / .height が SPS 由来実値
+        assert_eq!(hvc1.visual.width, 1920);
+        assert_eq!(hvc1.visual.height, 1080);
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_maps_main10_sps_to_hvcc() {
+        // Main 10 プロファイル (general_profile_idc=2 + bit_depth_*_minus8=2) の SPS が
+        // HvccBox の bit_depth_*_minus8 に 2 として反映されることを検証する。
+        // luma と chroma に異なる値を入れてフィールド取り違えを検出可能にする。
+        let sps = HevcSpsBuilder::raw(1920, 1080)
+            .with_general_profile_idc(2)
+            .with_bit_depth_luma_minus8(2)
+            .with_bit_depth_chroma_minus8(4)
+            .build();
+        let (entry, _frame_size) = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal()],
+            vec![sps],
+            vec![dummy_pps_nal()],
+            FrameRate::FPS_30,
+        )
+        .expect("Main 10 SPS のパース成功");
+        let SampleEntry::Hvc1(hvc1) = entry else {
+            panic!("Hvc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        assert_eq!(hvc1.hvcc_box.general_profile_idc.get(), 2);
+        assert_eq!(hvc1.hvcc_box.bit_depth_luma_minus8.get(), 2);
+        assert_eq!(hvc1.hvcc_box.bit_depth_chroma_minus8.get(), 4);
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_preserves_all_vps_sps_pps_in_nalu_arrays() {
+        // vps_list / sps_list / pps_list に複数 NAL を渡したとき、HvccBox.nalu_arrays の
+        // VPS / SPS / PPS スロットに全 NAL がそのままの順序で move されることを直接検証する。
+        // 先頭 SPS のパラメータのみが hvcC フィールドに反映される (Hisui の入力前提) ことの確認も兼ねる。
+        let sps_a = HevcSpsBuilder::raw(1920, 1080).build();
+        let sps_b = HevcSpsBuilder::raw(320, 240).build();
+        let vps_a = dummy_vps_nal();
+        let vps_b = vec![0x40, 0x02]; // 別の VPS NAL ヘッダ (nuh_temporal_id_plus1=2 違い)
+        let pps_a = dummy_pps_nal();
+        let pps_b = vec![0x44, 0x02];
+
+        let (entry, _frame_size) = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![vps_a.clone(), vps_b.clone()],
+            vec![sps_a.clone(), sps_b.clone()],
+            vec![pps_a.clone(), pps_b.clone()],
+            FrameRate::FPS_30,
+        )
+        .expect("複数 VPS / SPS / PPS でもパース成功");
+        let SampleEntry::Hvc1(hvc1) = entry else {
+            panic!("Hvc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        // nalu_arrays は VPS / SPS / PPS の 3 配列をこの順で持つ
+        assert_eq!(hvc1.hvcc_box.nalu_arrays.len(), 3);
+        assert_eq!(hvc1.hvcc_box.nalu_arrays[0].nalus, vec![vps_a, vps_b]);
+        assert_eq!(hvc1.hvcc_box.nalu_arrays[1].nalus, vec![sps_a, sps_b]);
+        assert_eq!(hvc1.hvcc_box.nalu_arrays[2].nalus, vec![pps_a, pps_b]);
+        // 先頭 SPS (1920x1080) のパラメータが反映されている
+        assert_eq!(hvc1.visual.width, 1920);
+        assert_eq!(hvc1.visual.height, 1080);
+    }
+
+    #[test]
+    fn h265_sample_entry_from_vps_sps_pps_lists_returns_frame_size_from_cropping() {
+        // 戻り値タプルの第 2 要素 `VideoFrameSize` が SPS の conformance window 適用後の
+        // 解像度と一致し、`Hvc1Box.visual.width / .height` にも同じ値が反映されることを
+        // 直接検証する。1920x1088 raw + crop_bottom=4 で 1920x1080 になる典型パターン
+        // (SubHeightC=2 で 2 * (0 + 4) = 8 削って 1080)。
+        let sps = HevcSpsBuilder::raw(1920, 1088)
+            .with_conformance_window(0, 0, 0, 4)
+            .build();
+        let (entry, frame_size) = h265_sample_entry_from_vps_sps_pps_lists(
+            vec![dummy_vps_nal()],
+            vec![sps],
+            vec![dummy_pps_nal()],
+            FrameRate::FPS_30,
+        )
+        .expect("crop SPS のパース成功");
+        assert_eq!(frame_size.width, 1920);
+        assert_eq!(frame_size.height, 1080);
+        let SampleEntry::Hvc1(hvc1) = entry else {
+            panic!("Hvc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        assert_eq!(hvc1.visual.width, 1920);
+        assert_eq!(hvc1.visual.height, 1080);
+    }
+
+    #[test]
+    fn h265_sample_entry_from_annexb_builds_hvc1_sample_entry_from_concatenated_annexb() {
+        // VPS / SPS / PPS を 4 バイト start code で連結した Annex-B バイト列を
+        // `h265_sample_entry_from_annexb` に渡し、薄いラッパーが
+        // `H265AnnexBNalUnits` 走査 → 新ヘルパー呼び出しを経て Hvc1 SampleEntry を構築できる
+        // ことを検証する。HvccBox.nalu_arrays に VPS / SPS / PPS が正しく詰まることも担保。
+        let sps = HevcSpsBuilder::raw(1920, 1080).build();
+        let vps = dummy_vps_nal();
+        let pps = dummy_pps_nal();
+
+        let mut annexb = Vec::new();
+        annexb.extend_from_slice(&[0, 0, 0, 1]);
+        annexb.extend_from_slice(&vps);
+        annexb.extend_from_slice(&[0, 0, 0, 1]);
+        annexb.extend_from_slice(&sps);
+        annexb.extend_from_slice(&[0, 0, 0, 1]);
+        annexb.extend_from_slice(&pps);
+
+        let entry = h265_sample_entry_from_annexb(&annexb, FrameRate::FPS_30)
+            .expect("Annex-B 経由で Hvc1 SampleEntry を構築できること");
+        let SampleEntry::Hvc1(hvc1) = entry else {
+            panic!("Hvc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        // 解像度が SPS 由来実値で反映される
+        assert_eq!(hvc1.visual.width, 1920);
+        assert_eq!(hvc1.visual.height, 1080);
+        // VPS / SPS / PPS が nalu_arrays に詰まる
+        assert_eq!(hvc1.hvcc_box.nalu_arrays[0].nalus, vec![vps]);
+        assert_eq!(hvc1.hvcc_box.nalu_arrays[1].nalus, vec![sps]);
+        assert_eq!(hvc1.hvcc_box.nalu_arrays[2].nalus, vec![pps]);
+    }
 }
