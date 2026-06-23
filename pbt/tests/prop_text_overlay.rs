@@ -9,9 +9,10 @@
 //! スコープ外。 これらは `src/mixer/video/text_overlay/layer.rs` の単体テストと
 //! `src/obsws/session/tests.rs` の obsws 経由テストでカバーされている。
 
-use hisui::mixer::video::text_overlay::validate::{validate_font_size, validate_text};
+use hisui::mixer::video::text_overlay::layer::unpremultiply_argb;
+use hisui::mixer::video::text_overlay::validate::{apply_patch, validate_font_size, validate_text};
 use hisui::mixer::video::text_overlay::{
-    TEXT_MAX_BYTES, TEXT_MAX_LINES, TextOverlayError, TextOverlaySpec,
+    TEXT_MAX_BYTES, TEXT_MAX_LINES, TextOverlayError, TextOverlayPatch, TextOverlaySpec,
 };
 use proptest::prelude::*;
 
@@ -142,6 +143,88 @@ proptest! {
         };
         prop_assert_eq!(spec.x, x);
         prop_assert_eq!(spec.y, y);
+    }
+
+    /// `apply_patch` は patch の `Some(v)` フィールドだけを `v` で上書きし、
+    /// `None` フィールドは spec の元値を維持する (= 7 フィールド独立性)。
+    /// 将来フィールドを追加する際、 同じ assertion パターンで容易に拡張できる。
+    #[test]
+    fn apply_patch_overrides_only_specified_fields(
+        text in any::<String>(),
+        x in any::<i64>(),
+        y in any::<i64>(),
+        font_size in any::<u32>(),
+        font_color_argb in any::<u32>(),
+        font_name in any::<String>(),
+        z in any::<i32>(),
+        patch_text in any::<Option<String>>(),
+        patch_x in any::<Option<i64>>(),
+        patch_y in any::<Option<i64>>(),
+        patch_font_size in any::<Option<u32>>(),
+        patch_font_color_argb in any::<Option<u32>>(),
+        patch_font_name in any::<Option<String>>(),
+        patch_z in any::<Option<i32>>(),
+    ) {
+        let spec = TextOverlaySpec {
+            text: text.clone(),
+            x,
+            y,
+            font_size,
+            font_color_argb,
+            font_name: font_name.clone(),
+            z,
+        };
+        let patch = TextOverlayPatch {
+            text: patch_text.clone(),
+            x: patch_x,
+            y: patch_y,
+            font_size: patch_font_size,
+            font_color_argb: patch_font_color_argb,
+            font_name: patch_font_name.clone(),
+            z: patch_z,
+        };
+        let result = apply_patch(spec, patch);
+        prop_assert_eq!(result.text, patch_text.unwrap_or(text));
+        prop_assert_eq!(result.x, patch_x.unwrap_or(x));
+        prop_assert_eq!(result.y, patch_y.unwrap_or(y));
+        prop_assert_eq!(result.font_size, patch_font_size.unwrap_or(font_size));
+        prop_assert_eq!(
+            result.font_color_argb,
+            patch_font_color_argb.unwrap_or(font_color_argb)
+        );
+        prop_assert_eq!(result.font_name, patch_font_name.unwrap_or(font_name));
+        prop_assert_eq!(result.z, patch_z.unwrap_or(z));
+    }
+
+    /// `unpremultiply_argb`: A == 0 のピクセルは入力 RGB をそのまま残し、 A も 0 のままにする。
+    #[test]
+    fn unpremultiply_argb_keeps_zero_alpha_pixel_unchanged(
+        b in any::<u8>(),
+        g in any::<u8>(),
+        r in any::<u8>(),
+    ) {
+        let mut data = vec![b, g, r, 0];
+        unpremultiply_argb(&mut data);
+        prop_assert_eq!(data, vec![b, g, r, 0]);
+    }
+
+    /// `unpremultiply_argb`: premultiplied 不変条件 `c <= a` 成立時、 復元結果は
+    /// `(c * 255 + a/2) / a` (四捨五入の整数除算) と一致する。
+    /// A 値はそのまま残る。
+    #[test]
+    fn unpremultiply_argb_recovers_straight_alpha_when_invariant_holds(
+        a in 1u8..=255,
+        c_raw in 0u8..=255,
+    ) {
+        // c <= a になるよう制限 (debug_assert で panic する不変条件違反ケースは除外)。
+        let c = c_raw.min(a);
+        let mut data = vec![c, c, c, a];
+        unpremultiply_argb(&mut data);
+        let expected = (((c as u16) * 255 + (a as u16) / 2) / (a as u16)) as u8;
+        prop_assert_eq!(data[0], expected);
+        prop_assert_eq!(data[1], expected);
+        prop_assert_eq!(data[2], expected);
+        prop_assert_eq!(data[3], a);
     }
 }
 

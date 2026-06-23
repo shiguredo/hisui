@@ -103,7 +103,7 @@ pub(super) fn validate_font_name_and_resolve_path(
 
 /// `TextOverlayPatch` を既存の `TextOverlaySpec` に適用する純粋関数。
 /// 指定されたフィールドだけが更新される (`None` は現状維持)。
-pub(super) fn apply_patch(mut spec: TextOverlaySpec, patch: TextOverlayPatch) -> TextOverlaySpec {
+pub fn apply_patch(mut spec: TextOverlaySpec, patch: TextOverlayPatch) -> TextOverlaySpec {
     if let Some(text) = patch.text {
         spec.text = text;
     }
