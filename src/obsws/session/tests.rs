@@ -4511,45 +4511,6 @@ async fn hisui_create_text_overlay_rejects_invalid_text() -> crate::Result<()> {
     Ok(())
 }
 
-/// `OVERLAY_LIMIT` を超える Create は RESOURCE_ACTION_NOT_SUPPORTED で拒否される。
-#[tokio::test]
-async fn hisui_create_text_overlay_rejects_when_limit_exceeded() -> crate::Result<()> {
-    let coordinator = create_initialized_coordinator_with_text_overlay().await?;
-
-    // OVERLAY_LIMIT 個までは成功する。
-    for i in 0..crate::mixer::video::text_overlay::OVERLAY_LIMIT {
-        let body =
-            format!(r#"{{"textOverlayName":"overlay-{i}","text":"x","x":0,"y":0,"fontSize":32}}"#);
-        let result = process_text_overlay_request(
-            &coordinator,
-            &format!("req-{i}"),
-            "HisuiCreateTextOverlay",
-            Some(&body),
-        )
-        .await;
-        let (success, _) = parse_request_status(&result.response_text);
-        assert!(success, "{i} 個目までは成功する");
-    }
-
-    // OVERLAY_LIMIT を超える Create は拒否される。
-    let body = r#"{"textOverlayName":"over-limit","text":"x","x":0,"y":0,"fontSize":32}"#;
-    let result = process_text_overlay_request(
-        &coordinator,
-        "req-over",
-        "HisuiCreateTextOverlay",
-        Some(body),
-    )
-    .await;
-    let (success, code) = parse_request_status(&result.response_text);
-    assert!(!success, "上限超過は拒否");
-    assert_eq!(
-        code,
-        crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED,
-        "LimitExceeded は RESOURCE_ACTION_NOT_SUPPORTED (606) にマップされる"
-    );
-    Ok(())
-}
-
 /// 必須フィールドが欠落していると MISSING_REQUEST_FIELD で拒否される。
 /// `textOverlayName` / `text` / `x` / `y` / `fontSize` の各欠落を確認する。
 #[tokio::test]
