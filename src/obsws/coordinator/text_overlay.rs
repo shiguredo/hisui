@@ -35,6 +35,9 @@ impl ObswsCoordinator {
         request_id: &str,
         request_data: Option<&nojson::RawJsonOwned>,
     ) -> CommandResult {
+        // Create だけはパース段で default_font_name が必要なので、 ここで機能無効を弾く
+        // (Update / Remove / List はパース段で config を参照しないので、
+        //  機能無効判定はヘルパ内で 1 回だけ行う)。
         let default_font_name = match self.state.text_overlay_config() {
             Some(c) => c.default_font_name.clone(),
             None => {
@@ -138,52 +141,14 @@ impl ObswsCoordinator {
             z,
         };
 
-        // Processor へ Add リクエストを送る
-        let sender = match self.text_overlay_sender().await {
-            Ok(s) => s,
-            Err(e) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    &e,
-                );
+        self.send_text_overlay_unit_command(request_type, request_id, |reply_tx| {
+            TextOverlayCommand::Add {
+                name,
+                input,
+                reply_tx,
             }
-        };
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if sender
-            .send(VideoRealtimeMixerRpcMessage::TextOverlay(
-                TextOverlayCommand::Add {
-                    name,
-                    input,
-                    reply_tx,
-                },
-            ))
-            .is_err()
-        {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "video mixer rpc channel is closed",
-            );
-        }
-        match reply_rx.await {
-            Ok(Ok(())) => self.build_result_from_response(
-                crate::obsws::response::build_request_response_success_no_data(
-                    request_type,
-                    request_id,
-                ),
-                Vec::new(),
-            ),
-            Ok(Err(e)) => self.build_text_overlay_error_result(request_type, request_id, e),
-            Err(_) => self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "video mixer dropped reply channel",
-            ),
-        }
+        })
+        .await
     }
 
     pub(crate) async fn handle_update_text_overlay(
@@ -283,51 +248,14 @@ impl ObswsCoordinator {
             z,
         };
 
-        let sender = match self.text_overlay_sender().await {
-            Ok(s) => s,
-            Err(e) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    &e,
-                );
+        self.send_text_overlay_unit_command(request_type, request_id, |reply_tx| {
+            TextOverlayCommand::Update {
+                name,
+                patch,
+                reply_tx,
             }
-        };
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if sender
-            .send(VideoRealtimeMixerRpcMessage::TextOverlay(
-                TextOverlayCommand::Update {
-                    name,
-                    patch,
-                    reply_tx,
-                },
-            ))
-            .is_err()
-        {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "video mixer rpc channel is closed",
-            );
-        }
-        match reply_rx.await {
-            Ok(Ok(())) => self.build_result_from_response(
-                crate::obsws::response::build_request_response_success_no_data(
-                    request_type,
-                    request_id,
-                ),
-                Vec::new(),
-            ),
-            Ok(Err(e)) => self.build_text_overlay_error_result(request_type, request_id, e),
-            Err(_) => self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "video mixer dropped reply channel",
-            ),
-        }
+        })
+        .await
     }
 
     pub(crate) async fn handle_remove_text_overlay(
@@ -366,47 +294,10 @@ impl ObswsCoordinator {
             }
         };
 
-        let sender = match self.text_overlay_sender().await {
-            Ok(s) => s,
-            Err(e) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                    &e,
-                );
-            }
-        };
-        let (reply_tx, reply_rx) = oneshot::channel();
-        if sender
-            .send(VideoRealtimeMixerRpcMessage::TextOverlay(
-                TextOverlayCommand::Remove { name, reply_tx },
-            ))
-            .is_err()
-        {
-            return self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "video mixer rpc channel is closed",
-            );
-        }
-        match reply_rx.await {
-            Ok(Ok(())) => self.build_result_from_response(
-                crate::obsws::response::build_request_response_success_no_data(
-                    request_type,
-                    request_id,
-                ),
-                Vec::new(),
-            ),
-            Ok(Err(e)) => self.build_text_overlay_error_result(request_type, request_id, e),
-            Err(_) => self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
-                "video mixer dropped reply channel",
-            ),
-        }
+        self.send_text_overlay_unit_command(request_type, request_id, |reply_tx| {
+            TextOverlayCommand::Remove { name, reply_tx }
+        })
+        .await
     }
 
     pub(crate) async fn handle_list_text_overlays(
@@ -468,6 +359,61 @@ impl ObswsCoordinator {
                 ),
                 Vec::new(),
             ),
+            Err(_) => self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "video mixer dropped reply channel",
+            ),
+        }
+    }
+
+    /// Add/Update/Remove の共通骨格 (sender 取得 / send / reply 待ち / エラーマッピング)
+    /// を 1 箇所に集約する。 各ハンドラは `build_command` クロージャで
+    /// `TextOverlayCommand` のバリアントを組み立てるだけでよい。
+    /// 機能無効判定は各ハンドラの先頭で行うため、 ここでは扱わない。
+    async fn send_text_overlay_unit_command<F>(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        build_command: F,
+    ) -> CommandResult
+    where
+        F: FnOnce(oneshot::Sender<Result<(), TextOverlayError>>) -> TextOverlayCommand,
+    {
+        let sender = match self.text_overlay_sender().await {
+            Ok(s) => s,
+            Err(e) => {
+                return self.build_error_result(
+                    request_type,
+                    request_id,
+                    REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                    &e,
+                );
+            }
+        };
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let command = build_command(reply_tx);
+        if sender
+            .send(VideoRealtimeMixerRpcMessage::TextOverlay(command))
+            .is_err()
+        {
+            return self.build_error_result(
+                request_type,
+                request_id,
+                REQUEST_STATUS_REQUEST_PROCESSING_FAILED,
+                "video mixer rpc channel is closed",
+            );
+        }
+        match reply_rx.await {
+            Ok(Ok(())) => self.build_result_from_response(
+                crate::obsws::response::build_request_response_success_no_data(
+                    request_type,
+                    request_id,
+                ),
+                Vec::new(),
+            ),
+            Ok(Err(e)) => self.build_text_overlay_error_result(request_type, request_id, e),
             Err(_) => self.build_error_result(
                 request_type,
                 request_id,
