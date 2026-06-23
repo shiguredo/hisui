@@ -1514,4 +1514,21 @@ pub(crate) mod tests {
         assert_eq!(hvc1.hvcc_box.nalu_arrays[1].nalus, vec![sps]);
         assert_eq!(hvc1.hvcc_box.nalu_arrays[2].nalus, vec![pps]);
     }
+
+    #[test]
+    fn chroma_subsampling_factors_returns_subwidthc_subheightc_per_chroma_format_idc() {
+        // 仕様 6.2 / Table 6-1 の全 chroma_format_idc 値 (0..=3) と
+        // separate_colour_plane_flag=1 の特例で (SubWidthC, SubHeightC) が
+        // 正しく返ることを直接検証する。Table 6-1 マッピングの誤実装を防ぐ。
+        assert_eq!(chroma_subsampling_factors(0, 0), (1, 1), "monochrome");
+        assert_eq!(chroma_subsampling_factors(1, 0), (2, 2), "4:2:0");
+        assert_eq!(chroma_subsampling_factors(2, 0), (2, 1), "4:2:2");
+        assert_eq!(chroma_subsampling_factors(3, 0), (1, 1), "4:4:4");
+        // chroma_format_idc=3 + separate_colour_plane_flag=1 は ChromaArrayType=0 として扱う
+        assert_eq!(
+            chroma_subsampling_factors(3, 1),
+            (1, 1),
+            "separate_colour_plane_flag=1 で ChromaArrayType=0 扱い"
+        );
+    }
 }
