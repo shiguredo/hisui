@@ -142,15 +142,15 @@ video mixer の RPC は `UpdateConfig` と `Finish` です。
 
 `UpdateConfig` では、削除された input の receiver を止め、新規 input を subscribe し直し、 draw order と stats を更新します。
 
+テキストオーバーレイ操作 (`HisuiCreateTextOverlay` 等) も同じ RPC sender 経由で同じ runner が処理します。
+
 ### テキストオーバーレイレイヤ
 
-`HisuiCreateTextOverlay` 等で扱うテキスト描画は、 入力 track と並べる独立 processor ではなく、 video mixer の **内部レイヤ** として組み込まれています。
+`HisuiCreateTextOverlay` 等で扱うテキスト描画は、 video mixer の **内部レイヤ** として組み込まれています。
 
 - 機能有効時のみレイヤが構築され、 起動直後にデフォルトフォントのプリロードと描画ランタイムの warm-up を行います。
 - 一般の input track を z 順に合成した後、 テキストレイヤを最上位に重ねる順序が固定されています。 「最上位」 は z 値ではなく合成順で表現するため、 `InputTrack.z` には予約値がなく、 クライアントは z 全域を自由に指定できます。
 - 複数のテキストオーバーレイ間の z はレイヤ内部でソートされ、 入力 track の z 空間とは独立です。
-
-RPC は video mixer の既存 RPC sender に統合されています (`register_rpc_sender` は 1 processor あたり 1 sender しか登録できないため)。
 
 ## Audio Realtime Mixer
 
