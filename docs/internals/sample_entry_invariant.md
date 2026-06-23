@@ -58,7 +58,7 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 - RTSP 経路で SPS / PPS が未到来の場合はフレームをバッファリングして待機し、揃ってから圧縮 `VideoFrame` を生成する
 - SRT 経路で AnnexB の SPS / PPS が未到来の場合も同様にバッファリング
 
-エンコーダ側で「最初の keyframe より前に出力が出る」可能性を持つもの（openh264 / VideoToolbox 等）は、SPS / PPS 揃うまで出力を保留する設計とすることで不変条件を保つ。
+エンコーダ側で「最初の keyframe より前に出力が出る」可能性を持つもの（openh264 / VideoToolbox 等）は、現状の実装では出力フレームを保留せず `sample_entry: None` のまま下流に流す経路を持つ。VTCompressionSession / openh264 の通常動作として「最初の出力フレームが必ず keyframe」となるため実運用上は破綻しないが、これは API レベルの保証ではなく暗黙の運用前提である。前提が崩れた場合は writer 入口で不変条件違反となり、muxer の `MissingSampleEntry` Err 等で検知される。
 
 ## writer 側の前提
 
