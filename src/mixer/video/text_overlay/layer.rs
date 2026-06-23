@@ -384,8 +384,9 @@ impl TextOverlayLayer {
 /// A > 0 のピクセルは `RGB_straight = (RGB_pre * 255 + A/2) / A` で復元する。
 ///
 /// 不変条件: raden の Prgb32 出力は premultiplied なので各チャネル `c_pre <= A`
-/// を満たす。 万一違反した場合は `value.min(255)` でクランプして以後の処理を続ける
-/// (検出が必要になったら `debug_assert!` 等を追加する)。
+/// を満たす。 違反すると `value > 255` となるため、 debug ビルドでは
+/// `debug_assert!` で顕在化させ、 release ビルドでは `value.min(255)` でクランプして
+/// 以後の処理を続ける (色情報損失あり)。
 const _: () = assert!(
     cfg!(target_endian = "little"),
     "text overlay rendering assumes little-endian (raden Prgb32 layout)",
@@ -398,8 +399,13 @@ fn unpremultiply_argb(data: &mut [u8]) {
         }
         let a_u16 = a as u16;
         for c in &mut chunk[..3] {
-            // 四捨五入用に A/2 を足してから A で割る。 255 でクランプする。
+            // 四捨五入用に A/2 を足してから A で割る。
             let value = ((*c as u16) * 255 + a_u16 / 2) / a_u16;
+            debug_assert!(
+                value <= 255,
+                "premultiplied invariant violated (c_pre > A): c={c} a={a}",
+                c = *c,
+            );
             *c = value.min(255) as u8;
         }
     }
