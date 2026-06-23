@@ -428,7 +428,7 @@ pub fn h265_sample_entry_from_vps_sps_pps_lists(
     check_nal_unit_types(&sps_list, H265_NALU_TYPE_SPS, "SPS")?;
     check_nal_unit_types(&pps_list, H265_NALU_TYPE_PPS, "PPS")?;
 
-    let params = parse_hevc_sps(sps_list[0].as_slice())?;
+    let params = parse_hevc_sps(&sps_list[0])?;
 
     let frame_size = VideoFrameSize::new(params.width as usize, params.height as usize).expect(
         "infallible: parse_hevc_sps validates positive width / height and u16::MAX upper bound",
