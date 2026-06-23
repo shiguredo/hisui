@@ -1083,6 +1083,7 @@ mod tests {
             sample_entry: sample_entry.map(SharedSampleEntry::new),
         }
     }
+
     #[test]
     fn hybrid_writer_finalizes_readable_streams_with_per_frame_sample_entry() -> crate::Result<()> {
         // エンコード済みフレームには常に sample_entry が載るため、フラグメント先頭サンプルにも
