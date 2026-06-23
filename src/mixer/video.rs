@@ -523,6 +523,26 @@ impl VideoRealtimeMixerRunner {
         &mut self,
         request: VideoRealtimeMixerUpdateConfigRequest,
     ) -> crate::Result<VideoRealtimeMixerUpdateConfigResult> {
+        // canvas サイズと frame rate は hisui 全体で起動時 CLI 引数で固定する方針のため、
+        // UpdateConfig 経由で変更されない。 万一変更要求が来たら error を返す
+        // (将来動的変更を入れる際は text_overlay_layer / runtime 構成の追従設計とセットで実装する)。
+        if request.canvas_width.get() != self.canvas_width
+            || request.canvas_height.get() != self.canvas_height
+        {
+            return Err(Error::new(format!(
+                "canvas size change is not supported via UpdateConfig (current: {}x{}, requested: {}x{})",
+                self.canvas_width,
+                self.canvas_height,
+                request.canvas_width.get(),
+                request.canvas_height.get(),
+            )));
+        }
+        if request.frame_rate != self.frame_rate {
+            return Err(Error::new(format!(
+                "frame rate change is not supported via UpdateConfig (current: {:?}, requested: {:?})",
+                self.frame_rate, request.frame_rate,
+            )));
+        }
         let previous_canvas_width = self.canvas_width;
         let previous_canvas_height = self.canvas_height;
         let previous_frame_rate = self.frame_rate;
