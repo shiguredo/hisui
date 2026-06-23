@@ -57,15 +57,7 @@ impl TextOverlayConfig {
                 canonical_root.display()
             )));
         }
-        // NOTE: raden::FontData::from_file が将来 &Path を取れるようになれば
-        //       to_str() 変換は不要になる。
-        let path_str = canonical_font.to_str().ok_or_else(|| {
-            crate::Error::new(format!(
-                "default font path {} is not valid UTF-8",
-                canonical_font.display()
-            ))
-        })?;
-        let font_data = raden::FontData::from_file(path_str).map_err(|e| {
+        let font_data = raden::FontData::from_file(&canonical_font).map_err(|e| {
             crate::Error::new(format!(
                 "failed to load default font {}: {e:?}",
                 canonical_font.display()

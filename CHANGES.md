@@ -87,7 +87,7 @@
   - S3 出力先にはオブジェクトライフタイム指定（`lifetime_days`）を設定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile
-- [ADD] 依存ライブラリに raden 2026.1.1 を追加する
+- [ADD] 依存ライブラリに raden 2026.2.0-canary.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.4 を追加する
   - @sile

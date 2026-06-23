@@ -121,15 +121,7 @@ impl TextOverlayLayer {
         if let Some(face) = self.font_cache.get(&canonical) {
             return Ok(face.clone());
         }
-        // NOTE: raden::FontData::from_file が将来 &Path を取れるようになれば
-        //       to_str() 変換は不要になる。
-        let path_str = canonical.to_str().ok_or_else(|| {
-            TextOverlayError::FontResolveFailed(format!(
-                "font path {} is not utf-8",
-                canonical.display()
-            ))
-        })?;
-        let font_data = raden::FontData::from_file(path_str)
+        let font_data = raden::FontData::from_file(&canonical)
             .map_err(|e| TextOverlayError::FontResolveFailed(format!("load font: {e:?}")))?;
         let face = raden::FontFace::from_data(&font_data, 0)
             .map_err(|e| TextOverlayError::FontResolveFailed(format!("parse font: {e:?}")))?;
