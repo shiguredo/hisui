@@ -442,7 +442,7 @@ pub fn h265_sample_entry_from_vps_sps_pps_lists(
             num_temporal_layers: shiguredo_mp4::Uint::new(params.sps_max_sub_layers_minus1 + 1),
             temporal_id_nested: shiguredo_mp4::Uint::new(params.sps_temporal_id_nesting_flag),
 
-            // SPS VUI / PPS 由来の正確な値抽出は本 issue のスコープ外で、固定値 0 を維持する。
+            // SPS VUI / PPS から正確な値を抽出する処理は未実装で、固定値 0 を維持する。
             min_spatial_segmentation_idc: shiguredo_mp4::Uint::new(0),
             parallelism_type: shiguredo_mp4::Uint::new(0),
 
