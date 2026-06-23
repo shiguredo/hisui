@@ -266,10 +266,6 @@ struct DashWriter {
     /// ABR 結合 MPD 用のコーデック文字列通知 channel。
     /// 送信は 1 回のみ。送信後および non-ABR 時は None。
     codec_string_sender: Option<tokio::sync::oneshot::Sender<crate::codec_string::CodecString>>,
-    /// エンコード済みフレームでの sample_entry 不変条件違反を救済するための補完値。
-    /// 通常時（受信フレームに sample_entry がある場合）に更新し、違反時のみ消費する。
-    fallback_audio_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
-    fallback_video_sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
     stats: DashWriterStats,
 }
 
@@ -356,8 +352,6 @@ impl DashWriter {
             skip_mpd,
             codec_resolution: CodecResolutionState::Pending,
             codec_string_sender,
-            fallback_audio_sample_entry: None,
-            fallback_video_sample_entry: None,
             stats,
         })
     }
@@ -457,38 +451,6 @@ impl DashWriter {
     /// キーフレームかつセグメント尺が target を超えていたらセグメントを切り替える。
     async fn handle_video_frame(&mut self, frame: &crate::VideoFrame) -> crate::Result<()> {
         self.stats.total_input_video_frame_count.inc();
-        // エンコード済みフレーム不変条件の違反検知と fallback 補完。
-        // 早期 return（非キーフレーム時のセグメント未開始 skip）より前で判定し、
-        // fallback の連続的な更新を保つ。
-        // 違反検知前に `total_input_video_frame_count` は計上済みのため、skip パスでも
-        // 受信観測の連続性は保たれる。
-        // `patched_holder` は Patched アームで生成したフレーム実体を本関数のスコープで
-        // 生かすための delayed-initialized ローカル。Pass は引数の参照、Patched は
-        // ローカルへの参照に統一して以後 `frame` を shadow する。
-        let patched_holder;
-        let frame = match crate::sample_entry::resolve_video_sample_entry(
-            frame,
-            &mut self.fallback_video_sample_entry,
-        ) {
-            crate::sample_entry::SampleEntryResolution::Pass => frame,
-            crate::sample_entry::SampleEntryResolution::Patched(v) => {
-                tracing::warn!(
-                    frame_format = ?frame.format,
-                    timestamp_us = frame.timestamp.as_micros() as u64,
-                    "dash_writer video frame without sample_entry; encoded-frame invariant violated"
-                );
-                patched_holder = v;
-                &patched_holder
-            }
-            crate::sample_entry::SampleEntryResolution::Skip => {
-                tracing::warn!(
-                    frame_format = ?frame.format,
-                    timestamp_us = frame.timestamp.as_micros() as u64,
-                    "dash_writer video frame without sample_entry; encoded-frame invariant violated"
-                );
-                return Ok(());
-            }
-        };
         // キーフレームでセグメント切り替え判定
         if frame.keyframe
             && let Some(ref info) = self.current_segment_info
@@ -569,36 +531,6 @@ impl DashWriter {
     /// オーディオフレーム処理
     async fn handle_audio_frame(&mut self, frame: &crate::AudioFrame) -> crate::Result<()> {
         self.stats.total_input_audio_frame_count.inc();
-        // 映像と同様、エンコード済みフレーム不変条件を writer 入口で監視する。
-        // 違反検知前に `total_input_audio_frame_count` は計上済みのため、skip パスでも
-        // 受信観測の連続性は保たれる。
-        // `patched_holder` は Patched アームで生成したフレーム実体を本関数のスコープで
-        // 生かすための delayed-initialized ローカル。Pass は引数の参照、Patched は
-        // ローカルへの参照に統一して以後 `frame` を shadow する。
-        let patched_holder;
-        let frame = match crate::sample_entry::resolve_audio_sample_entry(
-            frame,
-            &mut self.fallback_audio_sample_entry,
-        ) {
-            crate::sample_entry::SampleEntryResolution::Pass => frame,
-            crate::sample_entry::SampleEntryResolution::Patched(v) => {
-                tracing::warn!(
-                    frame_format = ?frame.format,
-                    timestamp_us = frame.timestamp.as_micros() as u64,
-                    "dash_writer audio frame without sample_entry; encoded-frame invariant violated"
-                );
-                patched_holder = v;
-                &patched_holder
-            }
-            crate::sample_entry::SampleEntryResolution::Skip => {
-                tracing::warn!(
-                    frame_format = ?frame.format,
-                    timestamp_us = frame.timestamp.as_micros() as u64,
-                    "dash_writer audio frame without sample_entry; encoded-frame invariant violated"
-                );
-                return Ok(());
-            }
-        };
         // SampleEntry から正確なコーデック文字列を確定する
         if let Some(ref entry) = frame.sample_entry
             && !matches!(

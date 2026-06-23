@@ -1,0 +1,19 @@
+[package]
+name = "fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hisui = { path = ".." }
+
+[[bin]]
+name = "fuzz_h264_sample_entry"
+path = "fuzz_targets/fuzz_h264_sample_entry.rs"
+test = false
+doc = false
+bench = false
