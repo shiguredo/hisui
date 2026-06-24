@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use crate::{
     encoder::VideoEncoderOptions,
     sample_entry::SharedSampleEntry,
@@ -7,21 +5,10 @@ use crate::{
     video::{RawVideoFrame, VideoFormat, VideoFrame},
 };
 
-// pending_output に同時保持できる最大フレーム数。
-// sample_entry が確定する前に到達し得る健全状態の出力フレーム数 (通常は 0 〜 数フレーム)
-// に余裕を持たせた値で、これを超えたら異常状態として Err を返す。
-const MAX_PENDING_OUTPUT_FRAMES: usize = 64;
-
 #[derive(Debug)]
 pub struct Openh264Encoder {
     inner: shiguredo_openh264::Encoder,
-    // sample_entry が確定済みのフレームを保持する出力キュー。
-    // next_encoded_frame で先頭から取り出す。
-    output_queue: VecDeque<VideoFrame>,
-    // sample_entry 未確定の間にエンコードされたフレームを一時退避する内部バッファ。
-    // SPS/PPS が揃って last_sample_entry が確定した時点で drain して
-    // output_queue に流し、以降の保留は発生しない。
-    pending_output: VecDeque<VideoFrame>,
+    encoded: Option<VideoFrame>,
     force_idr_pending: bool,
     // 最後に確定したサンプルエントリー。SPS/PPS を含むフレームで更新し、全出力フレームに載せる。
     // openh264 はキーフレーム要求等で SPS/PPS がストリーム途中で変わりうるため、最新値に追従する。
@@ -46,8 +33,7 @@ impl Openh264Encoder {
         let inner = shiguredo_openh264::Encoder::new(lib, config)?;
         Ok(Self {
             inner,
-            output_queue: VecDeque::new(),
-            pending_output: VecDeque::new(),
+            encoded: None,
             force_idr_pending: false,
             last_sample_entry: None,
         })
@@ -71,20 +57,23 @@ impl Openh264Encoder {
         // 以後は全出力フレームに保持済みの最新サンプルエントリーを載せる。
         // これにより、下流コンポーネントが参照するコーデック設定を最新化し、
         // 古いパラメータセット参照によるデコード失敗を避ける。
-        //
-        // sample_entry_just_established は「last_sample_entry が None から Some に
-        // 遷移したターン」を表す。このターンでだけ pending_output に退避していた
-        // 保留フレームをフラッシュする。すでに Some になっていた以降の更新では
-        // pending_output は常に空のため drain は不要。
-        let sample_entry_just_established = self.last_sample_entry.is_none()
-            && !encoded.sps_list.is_empty()
-            && !encoded.pps_list.is_empty();
         if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let (sample_entry, _frame_size) = h264::h264_sample_entry_from_sps_pps_lists(
                 encoded.sps_list.clone(),
                 encoded.pps_list.clone(),
             )?;
             self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry));
+        }
+
+        // sample_entry 未確定のまま出力フレームを下流に流すと writer 入口で
+        // 不変条件 (圧縮フレームの sample_entry は必ず Some) に違反するため、
+        // ここで fail-fast 停止する。openh264 の通常動作では「最初の出力フレームが
+        // 必ず keyframe で SPS / PPS が同梱される」ため、この経路には到達しない。
+        // 到達した場合はエンコーダの挙動が暗黙の前提から外れている異常状態を示す。
+        if self.last_sample_entry.is_none() {
+            return Err(crate::Error::new(
+                "openh264 encoder produced output before SPS/PPS established the sample_entry",
+            ));
         }
 
         // AnnexB から MP4 向けの形式に変換する
@@ -108,65 +97,25 @@ impl Openh264Encoder {
             self.force_idr_pending = false;
         }
 
-        let frame_out = VideoFrame {
+        self.encoded = Some(VideoFrame {
             data,
             format: VideoFormat::H264,
             keyframe: is_keyframe,
             size: Some(frame.size()),
             timestamp: video_frame.timestamp,
             sample_entry: self.last_sample_entry.clone(),
-        };
-
-        if self.last_sample_entry.is_some() {
-            // sample_entry 確定済み: output_queue に直接積む。
-            // 確定が今ターンで起きた場合だけ、pending_output に溜まっていた
-            // 保留フレームに sample_entry を載せて先にフラッシュする。
-            // 退避は出力順 = 入力順で並んでいるため、フラッシュ後に当該ターンの
-            // フレームを積むことで PTS 順序を維持する。
-            if sample_entry_just_established {
-                let entry = self
-                    .last_sample_entry
-                    .clone()
-                    .expect("確定処理直後なので Some が保証されている");
-                for mut pending in self.pending_output.drain(..) {
-                    pending.sample_entry = Some(entry.clone());
-                    self.output_queue.push_back(pending);
-                }
-            }
-            self.output_queue.push_back(frame_out);
-        } else {
-            // sample_entry 未確定: 内部バッファに退避する。
-            // 上限超過時は異常状態として Err を返すが、エンコーダ自体は使用可能と
-            // して扱うため pending_output だけ clear して呼び出し側の再開を許す。
-            if self.pending_output.len() >= MAX_PENDING_OUTPUT_FRAMES {
-                self.pending_output.clear();
-                return Err(crate::Error::new(format!(
-                    "openh264 encoder pending output overflow before sample_entry is established (limit={})",
-                    MAX_PENDING_OUTPUT_FRAMES
-                )));
-            }
-            self.pending_output.push_back(frame_out);
-        }
+        });
 
         Ok(())
     }
 
-    // 内部エンコーダ側のフラッシュは持たないため、保留フレームが残っていれば
-    // 異常終了として Err を返す (一度も keyframe が出ずに finish された状態)。
+    // 他のエンコーダーに合わせてメソッドだけ用意しておく
     pub fn finish(&mut self) -> crate::Result<()> {
-        if !self.pending_output.is_empty() {
-            let discarded = self.pending_output.len();
-            self.pending_output.clear();
-            return Err(crate::Error::new(format!(
-                "openh264 encoder finished without establishing sample_entry; {} frames discarded",
-                discarded
-            )));
-        }
         Ok(())
     }
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
+        self.encoded.take()
     }
 
     pub fn request_keyframe(&mut self) {
@@ -230,8 +179,6 @@ mod tests {
     // 全出力フレームに sample_entry が載る不変条件を検証する。
     // openh264 は最初の出力フレームに SPS/PPS が含まれ、以降は last_sample_entry を
     // 全フレームに伝播させる。2 フレーム目以降でも Some になることを確認する。
-    // あわせて sample_entry 確定後に pending_output が空であることも観測する
-    // (確定タイミングで drain される設計の事後条件)。
     fn assert_every_output_frame_has_sample_entry(
         mut encoder: Openh264Encoder,
     ) -> crate::Result<()> {
@@ -245,14 +192,6 @@ mod tests {
                 );
                 output_count += 1;
             }
-            // sample_entry 確定後は pending_output が空のままになる事後条件を確認する。
-            if encoder.last_sample_entry.is_some() {
-                assert!(
-                    encoder.pending_output.is_empty(),
-                    "sample_entry 確定後に pending_output が残存している（残存数: {}）",
-                    encoder.pending_output.len()
-                );
-            }
         }
         encoder.finish()?;
         while let Some(frame) = encoder.next_encoded_frame() {
@@ -262,12 +201,6 @@ mod tests {
             );
             output_count += 1;
         }
-        // finish 後も pending_output は空であるはず。
-        assert!(
-            encoder.pending_output.is_empty(),
-            "finish 後に pending_output が残存している（残存数: {}）",
-            encoder.pending_output.len()
-        );
         // 全フレーム付与を確認するには 2 フレーム以上の出力が必要。
         assert!(
             output_count >= 2,
