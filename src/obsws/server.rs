@@ -732,14 +732,17 @@ async fn handle_http_connection(
                         proxy_to_upstream(&mut writer, &request, upstream, peer_addr).await
                     {
                         tracing::warn!("Reverse proxy error for {peer_addr}: {e}");
+                        // ボディなしの応答でも Content-Length: 0 を載せたいので空ボディを明示する。
                         let error_response = Response::new(502, "Bad Gateway")
-                            .expect("infallible: fixed status/reason");
+                            .expect("infallible: fixed status/reason")
+                            .body(Vec::new());
                         // 502 送信失敗は無視する（クライアントが切断している可能性がある）
                         let _ = write_response(&mut writer, &error_response).await;
                     }
                 } else {
                     let response = Response::new(405, "Method Not Allowed")
-                        .expect("infallible: fixed status/reason");
+                        .expect("infallible: fixed status/reason")
+                        .body(Vec::new());
                     if let Err(e) = write_response(&mut writer, &response).await {
                         if is_client_disconnect(&e) {
                             tracing::warn!("obsws http 499 Client Closed Request from {peer_addr}");
@@ -749,8 +752,9 @@ async fn handle_http_connection(
                     }
                 }
             } else {
-                let response =
-                    Response::new(404, "Not Found").expect("infallible: fixed status/reason");
+                let response = Response::new(404, "Not Found")
+                    .expect("infallible: fixed status/reason")
+                    .body(Vec::new());
                 if let Err(e) = write_response(&mut writer, &response).await {
                     if is_client_disconnect(&e) {
                         tracing::warn!("obsws http 499 Client Closed Request from {peer_addr}");

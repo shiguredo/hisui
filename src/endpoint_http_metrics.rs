@@ -14,13 +14,15 @@ pub async fn handle_request(
     pipeline_handle: &crate::MediaPipelineHandle,
 ) -> Response {
     if request.method() != "GET" {
-        // 固定 status / reason / ヘッダー名・値での Response 構築は shiguredo_http11 の
-        // バリデーションを必ず通る想定。失敗した場合は実装バグ。
+        // 固定 status / reason / ヘッダー名・値での Response 構築はバリデーションを通る想定。
+        // 失敗した場合は実装バグ。
         let mut response =
             Response::new(405, "Method Not Allowed").expect("infallible: fixed status/reason");
         response
             .add_header("Allow", "GET")
             .expect("infallible: fixed header");
+        // ボディなしの応答でも Content-Length: 0 を載せたいので空ボディを明示する。
+        response.set_body(Vec::new());
         return response;
     }
 
