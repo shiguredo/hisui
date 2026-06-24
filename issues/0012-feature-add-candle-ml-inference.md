@@ -1,70 +1,137 @@
-# candle を用いた ML 推論機能 (文字起こし・物体検出) に正式対応する
+# candle を用いた ML 推論機能 (文字起こし) の正式対応 (索引 issue)
 
 - Priority: Medium
 - Created: 2026-06-03
 - Completed:
 - Model: Opus 4.8
-- Branch: feature/add-candle-ml-inference
+- Branch: -
 - Polished:
 
-## 目的
+## 本 issue の位置づけ
 
-PR #246 「[DO NOT MERGE] ML 機能をお試しする」(https://github.com/shiguredo/hisui/pull/246) で、Rust 製 ML 推論フレームワーク candle を用いた ML 機能の PoC を実装済み。このお試し成果のうち本番に値するものを選別し、正式な機能として hisui に取り込む。
+本 issue は元々 PoC ブランチ (PR #246) の成果から candle (Rust 製 ML 推論フレームワーク) 系機能を hisui に正式対応として取り込むためのものとして起票された。議論の結果、対応範囲が **依存追加 / MediaPipeline 拡張 / 音声前処理ライブラリ / 推論基盤 / 利用者向けサブコマンド** の独立した層にまたがるため、5 つの子 issue に分割した。
 
-具体的には次の 2 系統:
+本 issue 自体は実装作業を伴わず、**子 issue の索引・全体方針の記録** としてのみ機能する。実装は子 issue で行う。
 
-- 音声入力に対する Whisper 文字起こし (transcription)
-- 映像フレームに対する YOLOv8 物体検出
+## 子 issue 一覧
 
-特に文字起こしは、別 issue 0013「合成映像へのテキスト (字幕) 描画」と組み合わせて、合成映像への字幕オーバーレイ表示の基盤になる。これが本対応を進める主目的。
+| # | issue | 内容 | 依存 |
+|---|---|---|---|
+| 0059 | candle feature 追加と ML モデル取得スクリプト | Cargo.toml の candle feature 追加、device 検出骨格、scripts/download_ml_models.py、ci.yml に test-candle 骨格 | - |
+| 0060 | MediaFrame::Text バリアントを追加する | MediaFrame::Text(Arc<TextFrame>) 新設、既存 match 箇所への Text ブランチ追加 | - |
+| 0061 | Silero VAD と音声前処理ライブラリを実装する | Silero VAD ライブラリ (candle-onnx)、リサンプル、buffer、PBT | 0059 |
+| 0062 | Whisper 文字起こしエンジンと TranscriptionService/Processor を実装する | Whisper ライブラリ、ワーカープール、MediaPipeline processor | 0059, 0060, 0061 |
+| 0063 | hisui -x transcribe 実験的サブコマンドを追加する | subcommand_transcribe (WAV/MP4 入力 → JSON LINE 出力)、--experimental(-x) フラグ復活、ドキュメント、CHANGES.md エントリ、test-candle CI で実推論有効化 | 0062 |
 
-## 優先度根拠
+### 依存関係
 
-- PoC は PR #246 で動作確認済みのため、ゼロからの研究ではなく「正式対応への引き上げ」であり実現性が高い。
-- 一方で candle と関連クレート (candle-core / candle-nn / candle-transformers / candle-onnx, tokenizers) という比較的大きな依存追加を伴い、feature 設計・モデル配布・ビルド / CI への影響など設計判断が必要で、即マージできる小変更ではない。
-- 文字起こしオーバーレイという明確なユースケースはあるが、現時点で業務を止めている課題ではない。
-- 以上から High ではなく、Low でもなく Medium。
+```
+0059 ─┐
+       ├──→ 0061 ─┐
+0060 ─┘            ├──→ 0062 ──→ 0063
+                   ┘
+```
 
-## 現状
+- 0059 と 0060 は互いに独立で並行可能
+- 0061 は 0059 (candle 依存) に依存
+- 0062 は 0059, 0060, 0061 全部に依存
+- 0063 は 0062 に依存し、本系列の利用者向け統合層となる
 
-- develop には ML 機能は無い (`src/ml/` は存在せず、CHANGES.md にも該当エントリ無し)。実装は PR #246 ブランチにのみ存在する。
-- PR #246 で追加済みの構成 (正式対応の実装リファレンス):
-  - 依存: `candle` feature 配下に candle-core / candle-nn / candle-transformers (=0.10.2)、Silero VAD 用に candle-onnx、tokenizers。
-  - `src/ml/`: `device.rs` (CPU / Metal / CUDA デバイス選択)、`yolo.rs` (YOLOv8 物体検出、safetensors 重みロード、I420 フレームへの推論・描画)、`mod.rs`。
-  - `src/ml/audio/`: `whisper.rs` / `silero_vad.rs` / `vad.rs` / `processor.rs` / `decode.rs` / `buffer.rs` / `config.rs` / `multilingual.rs` / `mod.rs` (Whisper 文字起こし + VAD)。
-  - `src/subcommand_ml.rs`: `ml` / `ml audio` サブコマンド。`ml audio` はマイク入力 48 kHz を Whisper で文字起こしし、Silero VAD + RMS フォールバックで無音チャンクをスキップする。`--vad-trim` / `--language` / `--task` を持つ。`candle` feature のみでビルド可 (player 不要)。
-  - `scripts/download_ml_models.sh`: Whisper tiny / Silero VAD / YOLOv8s の重み取得。
-  - `docs/command_ml.md`: コマンド説明。
-  - 映像系は MediaPipeline の VideoRealtimeMixer 上に ML 推論プロセッサとして統合 (モデルは `Arc` 共有で複数カメラへ適用)。ML 前処理の I420 → RGB 変換・リサイズは shiguredo_libyuv (SIMD) で実施。
-- PoC のため [DO NOT MERGE] とされており、このまま develop へは入れられない。
+## 確定方針 (議論成果)
 
-## 設計方針
+### スコープ
 
-本 issue は「PoC をそのままマージする」のではなく、正式対応として以下を詰める。
+- Whisper 文字起こし + Silero VAD のみを 0061-0063 で正式対応する
+- YOLO 物体検出は別 issue にスピンアウトする (PoC PR #246 で実装済みだが本系列とは分離)
+- candle 依存追加 (0059) はスコープに関係なく一律発生する
 
-1. feature 分割
-   - `candle` feature を default off の optional とし、ML を使わない通常ビルドに影響を与えない。
-   - 依存バージョンは hisui の方針 (Cargo.toml 冒頭 NOTE「依存は突然挙動が変わらないようバージョンは厳密一致で指定」) に従い `=0.10.2` の exact pin を維持する (AGENTS.md の「マイナーまで」より hisui の実態を優先する)。
-   - 各依存に用途コメントを付す (AGENTS.md「依存ライブラリには用途をコメントで明記」)。
-2. スコープの確定 (要判断)
-   - PoC には Whisper 文字起こし・YOLO 物体検出・Silero VAD が含まれる。正式対応として全てを入れるか、まず文字起こし (+ VAD) に絞り YOLO は別 issue にするかを決める。文字起こしは 0013 と直結するため優先度が高い。
-3. モデルの取得・配布
-   - `scripts/download_ml_models.sh` でのダウンロード方式を維持するか別手段にするかを決める。モデルファイルはリポジトリに含めない。
-4. デバイス選択
-   - `src/ml/device.rs` の CPU / Metal / CUDA 切り替えを、hisui の対応プラットフォーム (macOS / Linux、nvcodec feature 等) と整合する形に整理する。
-5. テスト方針
-   - hisui は「モックやスタブを使わない」「PBT / fuzzing 優先」が規約。ML 推論は実モデル・実入力での検証になるため、CI でのモデル取得可否・実行コスト・推論結果の決定性 (ブレ) をどう扱うかを設計する。
+### VAD
 
-## 完了条件
+- Silero VAD (ONNX) を採用する
+- 代替候補 (WebRTC VAD / RNNoise / nnnoiseless) より精度・多言語汎化で優位
+- candle-onnx + ビルド時 protoc 依存を許容する
 
-- candle を `candle` feature (default off) として正式に依存追加し、通常ビルド (`cargo build` / `cargo test`) に影響しないこと。
-- 正式対応スコープに含めた機能 (最低限 Whisper 文字起こし) がサブコマンドとして動作すること。
-- モデル取得手順がドキュメント化されていること。
-- テスト方針が確定し、規約 (モック禁止) に反しない形で最低限の検証があること。
-- CHANGES.md の `## develop` に該当エントリ ([ADD] candle …) を追記すること。
+### Whisper モデル管理
 
-## 解決方法
+- ワーカープール方式: TranscriptionService が M 個の WhisperModel を保持し、N 個の TranscriptionProcessor が推論キューに発話区間を投入する
+- デフォルト M = 1、CLI / 設定で可変
+- モデルは差し替え可能 (CLI 引数で tiny / base / small / medium / large 等を指定)
+- 実用想定は small 以上 (ウェブ会議用途、日本語含む)。tiny は動作確認・デモ用
+- candle の Whisper 実装は KV cache を持つため、Arc 共有では Mutex 排他で直列化される。スループットを上げるには M を増やしてモデル個別ロードが必要
 
-- 実装は PR #246 をベースに、上記設計方針で取捨選択・整理して develop 向けに作り直す。
-- スコープ (YOLO を含めるか) と CI でのモデル / 推論の扱いは、本 issue を `/polish-issue` で磨き上げる際に確定する。
-- 推論結果を表に出す部分は本 issue では扱わない。映像への字幕重畳は 0013、外部への出力口は 0014 に委ねる。本 issue は推論結果をデータとして得るところまでを範囲とする。
+### 推論実行
+
+- 推論本体は tokio::task::spawn_blocking で別スレッドに逃がす (CPU-bound のため async ワーカー starve を回避)
+- GPU 利用時 (candle-metal / candle-cuda) も同期待ちで拘束されるため同様
+
+### 結果通知
+
+- MediaPipeline 流儀準拠で MediaFrame::Text(Arc<TextFrame>) を新設し、TranscriptionProcessor は publish_track で結果を流す
+- TextFrame は start / end / text / language / no_speech_prob / avg_logprob の 6 フィールド
+- input_track_id は持たない (subscribe した TrackId で判別)
+- 0014 (外部出力経路) の議論はこの上に乗る
+
+### 入力源とサブコマンド
+
+- 0012 系列ではファイル入力 (WAV + MP4) のみを最小動作確認入り口とする
+- MP4 は hisui 既存の mp4 reader + 音声デコーダー (Opus / AAC) を流用する
+- WAV は最小の自前 reader で対応する
+- `hisui -x transcribe <input>` 実験的サブコマンドを新設する
+- `--experimental(-x)` フラグ必須 (過去 pipeline サブコマンドのパターンを復活)
+- 標準出力に JSON LINE で結果書き出し (動作確認用の簡易出力)
+- compose / server (obsws) 統合は本系列の範囲外。別 issue で TranscriptionService / TranscriptionProcessor を再利用する
+
+### モデル取得・配布
+
+- `scripts/download_ml_models.py` を新設する (PoC の .sh は廃止)
+- リポジトリで既に Python が first-class (uv / pyproject.toml / canary.py) なので Python ツールに統一
+- 標準ライブラリのみ (huggingface_hub 等の追加依存なし)
+- `uv run scripts/download_ml_models.py <target>` で起動
+- モデルファイルはリポジトリに含めない (.gitignore 済み)
+- CLI は `--model-dir <path>` 必須 (デフォルトパスを持たない)
+
+### テスト戦略
+
+- 4 階層構成: unit / PBT / integration / e2e
+- モック禁止規約に従い実モデル・実音声で integration テスト
+- Whisper 非決定性は緩い不変条件 (text 非空 + keyword substring + 品質指標範囲 + 言語判定厳密一致) で吸収
+- CI に test-candle job 追加 (whisper-tiny + silero-vad、GitHub Actions cache)
+- testdata の音声サンプルは CC0 / パブリックドメインを別途調達
+- 詳細 (cache key 設計、env var 命名、testdata 具体調達、許容閾値、PBT 不変条件、e2e 検証項目) は実装着手時に再検討
+
+### device feature 構成
+
+- PoC の 3 段踏襲: candle / candle-metal / candle-cuda
+- src/ml/device.rs の自動検出ロジック踏襲 (Metal/CUDA feature 有効時に試行、失敗時 CPU fallback)
+- 0012 系列の CI は CPU only。Metal / CUDA の CI 組込は別 issue
+
+### CHANGES.md
+
+- 利用者から見える変更のみ [ADD] エントリ。内部実装 (MediaFrame バリアント追加、ライブラリ、Service / Processor) はエントリ書かない
+- 想定 3 エントリ: candle 依存追加 (0059) / download_ml_models.py (0059) / hisui -x transcribe (0063)
+- 担当者は @sile
+- 文体は shiguredo-changelog 規約準拠
+
+## 将来検討事項
+
+### 本系列の延長
+
+- compose 系統合: Sora アーカイブから字幕付き mp4 を生成する issue
+- server (obsws) 系統合: リアルタイム文字起こし + obsws API
+- 多形式入力対応 (WebM / Opus 等)
+- 0014 (ML 結果出力経路) との接続点設計
+
+### モデル・推論基盤
+
+- distil-whisper / kotoba-whisper など派生モデル対応
+- ML ワーカープール基盤化 (Whisper 専用 → ML 全般の共通基盤に格上げ)
+- candle-metal / candle-cuda の CI 組込
+
+### MediaPipeline 拡張
+
+- メディアトラックの「ストリーム / セッション帰属」メタ情報 (映像と音声を同一ソースとして紐付ける仕組み)
+- MediaFrame::Text を活用した他機能 (字幕重畳ブリッジ等は 0014 / 別 issue)
+
+### スピンアウト
+
+- YOLO 物体検出 (映像系 ML、PoC PR #246 で実装済み、別 issue 化予定)
