@@ -16,26 +16,26 @@
     "cleanup": "git clean -ffdx --exclude .env"
   },
   "dependencies": {
-    "@preact/signals": "2.9.1",
+    "@preact/signals": "2.9.2",
     "preact": "10.29.2",
     "preact-iso": "2.12.0"
   },
   "devDependencies": {
     "@fast-check/vitest": "0.4.1",
-    "@playwright/test": "1.60.0",
+    "@playwright/test": "1.61.0",
     "@preact/preset-vite": "2.10.5",
-    "@tailwindcss/vite": "4.3.0",
-    "@types/node": "25.9.1",
-    "@vitest/browser": "4.1.7",
-    "@vitest/browser-playwright": "4.1.7",
+    "@tailwindcss/vite": "4.3.1",
+    "@types/node": "26.0.0",
+    "@vitest/browser": "4.1.9",
+    "@vitest/browser-playwright": "4.1.9",
     "dotenv": "17.4.2",
     "fast-check": "4.8.0",
     "jsdom": "29.1.1",
-    "tailwindcss": "4.3.0",
+    "tailwindcss": "4.3.1",
     "typescript": "6.0.3",
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.1.22",
-    "vite-plus": "0.1.22",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.22",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.1.24",
+    "vite-plus": "0.1.24",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.24",
     "vitest-browser-preact": "1.0.0"
   },
   "engines": {
