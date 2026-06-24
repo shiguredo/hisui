@@ -40,6 +40,16 @@ impl VideoToolboxEncoder {
                 "BUG: VideoToolbox H.264 config must use H264 codec settings",
             ));
         }
+        // B フレーム並べ替えを許すと VTCompressionSession の出力順が入力順と異なり、
+        // handle_encoded の input_queue ペアリングで timestamp 同期が崩れる。
+        // shiguredo_video_toolbox 側も allow_frame_reordering: false を前提として
+        // 設計されているため、true で生成しようとした時点でコンストラクタ Err にする。
+        if config.allow_frame_reordering {
+            return Err(crate::Error::new(
+                "VideoToolbox H.264 encoder does not support allow_frame_reordering=true \
+                 (timestamp synchronization assumes reorder-free output)",
+            ));
+        }
         let inner = shiguredo_video_toolbox::Encoder::new(config)?;
         Ok(Self {
             inner,
@@ -68,6 +78,16 @@ impl VideoToolboxEncoder {
         if !matches!(config.codec, shiguredo_video_toolbox::CodecConfig::Hevc(_)) {
             return Err(crate::Error::new(
                 "BUG: VideoToolbox H.265 config must use HEVC codec settings",
+            ));
+        }
+        // B フレーム並べ替えを許すと VTCompressionSession の出力順が入力順と異なり、
+        // handle_encoded の input_queue ペアリングで timestamp 同期が崩れる。
+        // shiguredo_video_toolbox 側も allow_frame_reordering: false を前提として
+        // 設計されているため、true で生成しようとした時点でコンストラクタ Err にする。
+        if config.allow_frame_reordering {
+            return Err(crate::Error::new(
+                "VideoToolbox H.265 encoder does not support allow_frame_reordering=true \
+                 (timestamp synchronization assumes reorder-free output)",
             ));
         }
         let inner = shiguredo_video_toolbox::Encoder::new(config)?;
