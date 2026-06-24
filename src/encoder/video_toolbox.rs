@@ -163,8 +163,8 @@ impl VideoToolboxEncoder {
             // 非 keyframe フレームでは frame.sps_list 等が空になる。
             // sample_entry 未確定のまま素材が空の出力が来たら writer 入口の不変条件
             // (圧縮フレームの sample_entry は有効でなければならない) を満たせないため
-            // fail-fast 停止する。h265_sample_entry は空入力でも Ok を返すが、空 NAL リストの
-            // hvcC は壊れた sample_entry になるため H.265 経路でも事前にガードする。
+            // fail-fast 停止する。h264 / h265 のヘルパー関数も空入力では Err を返すが、
+            // ここで先に空チェックして PTS / keyframe を含む診断情報付き Err を返す。
             if self.sample_entry.is_none() {
                 let sample_entry = if self.format == VideoFormat::H264 {
                     if frame.sps_list.is_empty() || frame.pps_list.is_empty() {
@@ -192,14 +192,13 @@ impl VideoToolboxEncoder {
                             frame.keyframe,
                         )));
                     }
-                    h265::h265_sample_entry(
-                        self.width,
-                        self.height,
-                        self.fps,
+                    let (entry, _frame_size) = h265::h265_sample_entry_from_vps_sps_pps_lists(
                         frame.vps_list.clone(),
                         frame.sps_list.clone(),
                         frame.pps_list.clone(),
-                    )?
+                        self.fps,
+                    )?;
+                    entry
                 };
                 self.sample_entry = Some(SharedSampleEntry::new(sample_entry));
             }

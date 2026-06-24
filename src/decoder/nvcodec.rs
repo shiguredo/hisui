@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use super::DecodeConfig;
 use crate::video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
@@ -8,12 +9,50 @@ use crate::video::h265::{
 };
 use crate::video::{VideoFormat, VideoFrame};
 
+/// デコード完了を受け取る共有キューとエラー保持用スロット
+type DecodedQueue = Arc<Mutex<VecDeque<shiguredo_nvcodec::DecodedFrame<()>>>>;
+type ErrorSlot = Arc<Mutex<Option<crate::Error>>>;
+
 #[derive(Debug)]
 pub struct NvcodecDecoder {
-    inner: shiguredo_nvcodec::Decoder,
+    inner: shiguredo_nvcodec::Decoder<
+        shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
+    >,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
+    // デコード完了は別スレッドからコールバックで通知されるため、共有キュー越しに本スレッド側へ受け渡してから処理する。
+    decoded_queue: DecodedQueue,
+    error_slot: ErrorSlot,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
+}
+
+/// shiguredo_nvcodec::Decoder の生成に必要な共有状態とハンドラを構築する
+fn build_handler() -> (
+    shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
+    DecodedQueue,
+    ErrorSlot,
+) {
+    let decoded_queue: DecodedQueue = Arc::new(Mutex::new(VecDeque::new()));
+    let error_slot: ErrorSlot = Arc::new(Mutex::new(None));
+    let queue_for_handler = decoded_queue.clone();
+    let error_for_handler = error_slot.clone();
+    let handler = shiguredo_nvcodec::FnDecodeHandler::new(move |result| match result {
+        Ok(frame) => {
+            let mut queue = queue_for_handler
+                .lock()
+                .expect("nvcodec decoded queue lock poisoned");
+            queue.push_back(frame);
+        }
+        Err(err) => {
+            let mut slot = error_for_handler
+                .lock()
+                .expect("nvcodec error slot lock poisoned");
+            if slot.is_none() {
+                *slot = Some(crate::Error::new(format!("nvcodec decode error: {err}")));
+            }
+        }
+    });
+    (handler, decoded_queue, error_slot)
 }
 
 impl NvcodecDecoder {
@@ -21,10 +60,13 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(H264) decoder");
         let mut config = params.nvcodec_h264.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::H264;
+        let (handler, decoded_queue, error_slot) = build_handler();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            decoded_queue,
+            error_slot,
             parameter_sets: None,
         })
     }
@@ -33,10 +75,13 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(H265) decoder");
         let mut config = params.nvcodec_h265.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Hevc;
+        let (handler, decoded_queue, error_slot) = build_handler();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            decoded_queue,
+            error_slot,
             parameter_sets: None,
         })
     }
@@ -45,10 +90,13 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(AV1) decoder");
         let mut config = params.nvcodec_av1.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Av1;
+        let (handler, decoded_queue, error_slot) = build_handler();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            decoded_queue,
+            error_slot,
             parameter_sets: None,
         })
     }
@@ -57,10 +105,13 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(VP8) decoder");
         let mut config = params.nvcodec_vp8.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp8;
+        let (handler, decoded_queue, error_slot) = build_handler();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            decoded_queue,
+            error_slot,
             parameter_sets: None,
         })
     }
@@ -69,10 +120,13 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(VP9) decoder");
         let mut config = params.nvcodec_vp9.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp9;
+        let (handler, decoded_queue, error_slot) = build_handler();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config)?,
+            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            decoded_queue,
+            error_slot,
             parameter_sets: None,
         })
     }
@@ -150,20 +204,40 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        self.inner.decode(&data)?;
+        self.inner.decode(&data, ())?;
         self.input_queue.push_back(frame.to_stripped());
         self.handle_decoded_frames()?;
         Ok(())
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {
-        self.inner.finish()?;
+        // flush で in-flight 完了を待ち合わせる
+        self.inner.flush()?;
         self.handle_decoded_frames()?;
         Ok(())
     }
 
     fn handle_decoded_frames(&mut self) -> crate::Result<()> {
-        while let Some(nv12_frame) = self.inner.next_frame()? {
+        // ハンドラ側で記録されたエラーがあれば最優先で返す
+        if let Some(err) = self
+            .error_slot
+            .lock()
+            .expect("nvcodec error slot lock poisoned")
+            .take()
+        {
+            return Err(err);
+        }
+        loop {
+            let nv12_frame = {
+                let mut queue = self
+                    .decoded_queue
+                    .lock()
+                    .expect("nvcodec decoded queue lock poisoned");
+                queue.pop_front()
+            };
+            let Some(nv12_frame) = nv12_frame else {
+                break;
+            };
             let input_frame = self
                 .input_queue
                 .pop_front()

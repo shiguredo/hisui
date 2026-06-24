@@ -788,7 +788,7 @@ fn enumerate_video_device_property_items(
     match property_name {
         "device_id" => {
             let mut items = Vec::new();
-            for device in device_list.devices() {
+            for device in &device_list {
                 let name = device.name().unwrap_or_else(|_| "Unknown".to_owned());
                 let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
                 items.push(ObswsPropertyItem {
@@ -801,7 +801,7 @@ fn enumerate_video_device_property_items(
         }
         "formats" => {
             let mut items = Vec::new();
-            for device in device_list.devices() {
+            for device in &device_list {
                 // device_id が指定されている場合はそのデバイスだけフィルタする
                 if let Some(target_id) = device_id {
                     let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
@@ -831,7 +831,7 @@ fn enumerate_video_device_property_items(
         }
         "pixel_format" => {
             let mut values = BTreeSet::new();
-            for device in device_list.devices() {
+            for device in &device_list {
                 if let Some(target_id) = device_id {
                     let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
                     if unique_id != target_id {
@@ -849,6 +849,9 @@ fn enumerate_video_device_property_items(
                         shiguredo_video_device::PixelFormat::I420 => {
                             values.insert("I420".to_owned());
                         }
+                        shiguredo_video_device::PixelFormat::Mjpeg => {
+                            values.insert("MJPEG".to_owned());
+                        }
                         shiguredo_video_device::PixelFormat::Unknown(_) => {}
                     }
                 }
@@ -865,7 +868,7 @@ fn enumerate_video_device_property_items(
         }
         "fps" => {
             let mut values = BTreeSet::new();
-            for device in device_list.devices() {
+            for device in &device_list {
                 if let Some(target_id) = device_id {
                     let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
                     if unique_id != target_id {

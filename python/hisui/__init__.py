@@ -4,7 +4,6 @@ Hisui - Python wrapper for Recording Composition Tool
 
 import json
 import subprocess
-from pathlib import Path
 from typing import Any
 
 
