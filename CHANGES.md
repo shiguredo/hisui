@@ -170,7 +170,7 @@
   - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
   - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
-- [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_dav1d のバージョンを 2026.2.0-canary.0 にあげる
   - このバージョンから shiguredo_dav1d crate のリポジトリが <https://github.com/shiguredo/dav1d-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
@@ -205,7 +205,7 @@
   - @sile
 - [UPDATE] noargs crate のバージョンを 0.4.3 に上げる
   - @sile
-- [UPDATE] rustls crate のバージョンを 0.23.40 に上げる
+- [UPDATE] rustls crate のバージョンを 0.23.41 に上げる
   - @sile
 - [UPDATE] aws-lc-rs crate のバージョンを 1.17.0 に上げる
   - @sile
@@ -218,22 +218,30 @@
 - [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0 から <https://github.com/shiguredo/openh264-rs> に独立しており、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_nvcodec のバージョンを 2026.2.0 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが <https://github.com/shiguredo/nvcodec-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libvpx のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_libvpx のバージョンを 2026.2.0-canary.0 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが <https://github.com/shiguredo/libvpx-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libyuv のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_libyuv のバージョンを 2026.2.0-canary.1 にあげる
   - このバージョンから shiguredo_libyuv crate のリポジトリが <https://github.com/shiguredo/libyuv-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.1 にあげる
   - このバージョンから shiguredo_video_toolbox crate のリポジトリが <https://github.com/shiguredo/video-toolbox-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.2.0-canary.0 にあげる
   - このバージョンから shiguredo_audio_toolbox crate のリポジトリが <https://github.com/shiguredo/audio-toolbox-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.3.0 にあげる
+  - @sile
+- [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.5 にあげる
+  - @sile
+- [UPDATE] shiguredo_video_device のバージョンを 2026.2.0-canary.1 にあげる
+  - @sile
+- [UPDATE] raw_player のバージョンを 2026.2.0-canary.0 にあげる
+  - @sile
+- [UPDATE] tempfile crate のバージョンを 3.27.0 に上げる
   - @sile
 - [FIX] inspect が途中で壊れた fMP4 (録画プロセスのクラッシュ等でフラグメントが不完全なもの) を demux できずエラーになる問題を修正する
   - フラグメントが途中までしか書かれていない場合 (moof / mdat のヘッダや本体が末尾で切れている、または trun が宣言するサンプルデータが mdat に収まらない) は、エラーにせず、そこまでに読めたサンプルを返して終了する

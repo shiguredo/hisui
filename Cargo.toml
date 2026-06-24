@@ -26,7 +26,7 @@ exclude = ["fuzz"]
 noargs = "=0.4.3"
 nojson = "=0.3.12"
 shiguredo_http11 = "=2026.1.1"
-shiguredo_libvpx = "=2026.1.0"
+shiguredo_libvpx = "=2026.2.0-canary.0"
 shiguredo_mp4 = "=2026.3.0"
 shiguredo_opus = "=2026.1.0"
 shiguredo_webrtc = "=0.147.2"
@@ -60,7 +60,7 @@ nojson = { workspace = true }
 nopng = "=0.1.1"
 raden = "=2026.2.0-canary.0"
 rustls = {
-  version = "=0.23.40",
+  version = "=0.23.41",
   default-features = false,
   features = [
     "aws-lc-rs",
@@ -77,14 +77,14 @@ shiguredo_mpd = "=2026.1.0-canary.0"
 shiguredo_rtmp = "=2026.1.0-canary.6"
 shiguredo_rtsp = "=2026.1.0-canary.0"
 shiguredo_s3 = {
-  version = "=2026.1.0-canary.4",
+  version = "=2026.1.0-canary.5",
   default-features = false,
   features = [
     "aws_lc_rs",
   ]
 }
 shiguredo_srt = "=2026.1.0-canary.1"
-shiguredo_video_device = "=2026.1.0"
+shiguredo_video_device = "=2026.2.0-canary.1"
 shiguredo_webrtc = { workspace = true }
 sora_sdk = "=2026.1.0-canary.9"
 tokio = { workspace = true }
@@ -92,10 +92,10 @@ tokio-rustls = "=0.26.4"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-shiguredo_dav1d = "=2026.1.0"
+shiguredo_dav1d = "=2026.2.0-canary.0"
 shiguredo_libvpx = { workspace = true }
-shiguredo_libyuv = "=2026.1.0"
-shiguredo_nvcodec = { version = "=2026.1.0", optional = true }
+shiguredo_libyuv = "=2026.2.0-canary.1"
+shiguredo_nvcodec = { version = "=2026.2.0", optional = true }
 shiguredo_openh264 = "=2026.1.0"
 shiguredo_opus = { workspace = true }
 shiguredo_svt_av1 = "=2026.1.0"
@@ -104,13 +104,13 @@ shiguredo_websocket = { workspace = true }
 
 shiguredo_fdk_aac = { version = "=2026.1.0-canary.1", optional = true }
 
-raw_player = { version = "=2026.1.0", optional = true }
+raw_player = { version = "=2026.2.0-canary.0", optional = true }
 
 [dev-dependencies]
-tempfile = "3.18.0"
+tempfile = "3.27.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-shiguredo_audio_toolbox = "=2026.1.0"
+shiguredo_audio_toolbox = "=2026.2.0-canary.0"
 shiguredo_video_toolbox = "=2026.1.1"
 
 [features]
