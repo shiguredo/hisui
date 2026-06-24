@@ -145,9 +145,9 @@ impl LibvpxEncoder {
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
-    use std::sync::Arc;
 
     use super::*;
+    use crate::encoder::test_helpers::raw_i420_frame;
     use crate::types::EvenUsize;
     use crate::video::FrameRate;
 
@@ -165,25 +165,6 @@ mod tests {
             },
             encode_params: crate::encoder::default_video_encode_config_for_rpc(),
         }
-    }
-
-    // 64x64 の I420 グレーフレームを作る。
-    fn raw_i420_frame(ts_ms: u64) -> RawVideoFrame {
-        let (width, height) = (64usize, 64usize);
-        let y_size = width * height;
-        let uv_size = (width / 2) * (height / 2);
-        let data: Vec<u8> = std::iter::repeat_n(16u8, y_size)
-            .chain(std::iter::repeat_n(128u8, uv_size * 2))
-            .collect();
-        let frame = VideoFrame {
-            data,
-            format: VideoFormat::I420,
-            keyframe: true,
-            size: Some(VideoFrameSize { width, height }),
-            timestamp: std::time::Duration::from_millis(ts_ms),
-            sample_entry: None,
-        };
-        RawVideoFrame::from_i420_video_frame(Arc::new(frame)).expect("有効な I420 フレーム")
     }
 
     // 全出力フレームに sample_entry が載る不変条件を検証する（issue 0027 の核心）。

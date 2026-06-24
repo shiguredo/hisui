@@ -52,17 +52,33 @@ impl Openh264Encoder {
             return Ok(());
         };
 
-        // OpenH264 はキーフレーム要求時などに SPS/PPS が更新され得るため、
-        // SPS/PPS を受け取ったフレームではサンプルエントリーを作り直して保持を更新する。
-        // 以後は全出力フレームに保持済みの最新サンプルエントリーを載せる。
-        // これにより、下流コンポーネントが参照するコーデック設定を最新化し、
-        // 古いパラメータセット参照によるデコード失敗を避ける。
+        // OpenH264 はキーフレーム要求時などに SPS/PPS がストリーム途中で更新され得るため、
+        // SPS/PPS を含むフレームではサンプルエントリーを作り直して保持を更新し、
+        // 以後の全出力フレームには保持済みの最新サンプルエントリーを載せる。
         if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let (sample_entry, _frame_size) = h264::h264_sample_entry_from_sps_pps_lists(
                 encoded.sps_list.clone(),
                 encoded.pps_list.clone(),
             )?;
             self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry));
+        }
+
+        // is_keyframe は通常時の VideoFrame 構築でも使うが、Err 発火時の診断情報
+        // (非 keyframe 先行か、keyframe なのに SPS/PPS なしか) として有用なため
+        // ここで先に求めておく。
+        let is_keyframe = matches!(
+            encoded.frame_type,
+            shiguredo_openh264::FrameType::Idr | shiguredo_openh264::FrameType::I
+        );
+
+        // sample_entry 未確定で出力フレームを下流に流すと writer 入口の不変条件
+        // (圧縮フレームの sample_entry は必ず Some) に違反するため fail-fast 停止する。
+        if self.last_sample_entry.is_none() {
+            return Err(crate::Error::new(format!(
+                "openh264 encoder produced output before SPS/PPS established the sample_entry \
+                 (pts={:?}, keyframe={is_keyframe})",
+                video_frame.timestamp,
+            )));
         }
 
         // AnnexB から MP4 向けの形式に変換する
@@ -78,10 +94,6 @@ impl Openh264Encoder {
             data.extend_from_slice(nal.data);
         }
 
-        let is_keyframe = matches!(
-            encoded.frame_type,
-            shiguredo_openh264::FrameType::Idr | shiguredo_openh264::FrameType::I
-        );
         if self.force_idr_pending && is_keyframe {
             self.force_idr_pending = false;
         }
@@ -115,11 +127,11 @@ impl Openh264Encoder {
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
-    use std::sync::Arc;
 
     use super::*;
+    use crate::encoder::test_helpers::raw_i420_frame;
     use crate::types::{CodecName, EvenUsize};
-    use crate::video::{FrameRate, VideoFrameSize};
+    use crate::video::FrameRate;
 
     // openh264 ライブラリを環境変数 OPENH264_PATH からロードする。
     // 未設定の場合は None を返す（テストスキップ）。
@@ -146,26 +158,7 @@ mod tests {
         }
     }
 
-    // 64x64 の I420 グレーフレームを作る。
-    fn raw_i420_frame(ts_ms: u64) -> RawVideoFrame {
-        let (width, height) = (64usize, 64usize);
-        let y_size = width * height;
-        let uv_size = (width / 2) * (height / 2);
-        let data: Vec<u8> = std::iter::repeat_n(16u8, y_size)
-            .chain(std::iter::repeat_n(128u8, uv_size * 2))
-            .collect();
-        let frame = VideoFrame {
-            data,
-            format: VideoFormat::I420,
-            keyframe: true,
-            size: Some(VideoFrameSize { width, height }),
-            timestamp: std::time::Duration::from_millis(ts_ms),
-            sample_entry: None,
-        };
-        RawVideoFrame::from_i420_video_frame(Arc::new(frame)).expect("有効な I420 フレームのはず")
-    }
-
-    // 全出力フレームに sample_entry が載る不変条件を検証する（issue 0027 の核心）。
+    // 全出力フレームに sample_entry が載る不変条件を検証する。
     // openh264 は最初の出力フレームに SPS/PPS が含まれ、以降は last_sample_entry を
     // 全フレームに伝播させる。2 フレーム目以降でも Some になることを確認する。
     fn assert_every_output_frame_has_sample_entry(
@@ -198,16 +191,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn openh264_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        // OPENH264_PATH が未設定の環境ではスキップする。
-        let Some(lib) = load_openh264_lib() else {
-            eprintln!("OPENH264_PATH が未設定のためスキップ");
-            return Ok(());
-        };
-        assert_every_output_frame_has_sample_entry(Openh264Encoder::new(lib, &options())?)
-    }
-
     // 各出力フレームに載った sample_entry が、エンコーダが保持する最新値
     // (last_sample_entry) と一致することを検証する。openh264 は SPS/PPS を含むフレームでだけ
     // サンプルエントリーを作り直し、SPS/PPS を含まない P フレームには保持済みの最新値を載せる。
@@ -223,6 +206,16 @@ mod tests {
             encoder.last_sample_entry.as_ref().map(|e| e.get()),
             "出力フレームの sample_entry がエンコーダ保持の最新値と一致しない"
         );
+    }
+
+    #[test]
+    fn openh264_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
+        // OPENH264_PATH が未設定の環境ではスキップする。
+        let Some(lib) = load_openh264_lib() else {
+            eprintln!("OPENH264_PATH が未設定のためスキップ");
+            return Ok(());
+        };
+        assert_every_output_frame_has_sample_entry(Openh264Encoder::new(lib, &options())?)
     }
 
     #[test]
