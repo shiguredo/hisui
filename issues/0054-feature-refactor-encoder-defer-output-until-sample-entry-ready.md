@@ -62,6 +62,8 @@ Low。openh264 / VTCompressionSession の通常動作では「最初の出力フ
 
 既存テスト（`openh264_sets_sample_entry_on_every_output_frame` / `openh264_sets_sample_entry_after_keyframe_request` / `video_toolbox_h264_sets_sample_entry_on_every_output_frame` / `video_toolbox_h265_sets_sample_entry_on_every_output_frame`）が引き続き通ることで「通常動作では Err 経路に到達しないこと」を確認する。
 
+CI 検証経路: openh264 系テストは `.github/workflows/ci.yml` の `test-openh264` ジョブで libopenh264 を実体配置して `OPENH264_PATH` を渡して走らせる。VideoToolbox 系テストは self-hosted macOS ARM64 で `cargo test --workspace` を回す `test-apple-toolbox` ジョブで担保する。env 未設定でローカル `cargo test` を実行した場合は openh264 系テストが `eprintln!` してスキップする実装で、これは libvpx / svt_av1 / VideoToolbox など他エンコーダ単体テストと同じ流儀。
+
 新規 Err 経路の単体テストは追加しない。理由: モック禁止下で実エンコーダから「最初の出力が非 keyframe」となる状態を作る現実的手段が無いため、テストとして実装できない。test-only helper や設定変更は追加負債のため取らない。
 
 ### 5. ドキュメント更新
