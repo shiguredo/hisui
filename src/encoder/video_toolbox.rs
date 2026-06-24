@@ -137,18 +137,14 @@ impl VideoToolboxEncoder {
                 .input_queue
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
-            // 最初の出力フレームの SPS/PPS からサンプルエントリーを確定して保持し、
-            // 以後は全出力フレームに保持済みのサンプルエントリーを載せる。
+            // 最初の出力フレームの SPS / PPS からサンプルエントリーを確定して保持し、
+            // 以後の全出力フレームには保持済みのサンプルエントリーを載せる。
             // shiguredo_video_toolbox は keyframe 出力時のみ SPS / PPS を返すため、
             // 非 keyframe フレームでは frame.sps_list / pps_list が空になる。
-            // H.264 経路で sample_entry 未確定のまま SPS / PPS が空の出力が来た場合は
+            // H.264 経路で sample_entry 未確定のまま SPS / PPS が空の出力が来たら、
             // writer 入口の不変条件 (圧縮フレームの sample_entry は必ず Some) を満たせない
-            // ため fail-fast 停止する。VTCompressionSession は B フレーム並べ替えを使わない
-            // 構成 (allow_frame_reordering: false 固定) では「最初の出力が必ず keyframe」と
-            // なるため、この経路には到達しない。到達した場合はエンコーダの挙動が暗黙の
-            // 前提から外れている異常状態を示す。
-            // H.265 経路は h265_sample_entry が空 VPS / SPS / PPS でも Ok を返す実装のため、
-            // 初回反復で必ず sample_entry が確定し、空 SPS / PPS の Err 経路には到達しない。
+            // ため fail-fast 停止する。H.265 経路は h265_sample_entry が空 VPS / SPS / PPS でも
+            // Ok を返す実装のため、初回反復で必ず sample_entry が確定する。
             if self.sample_entry.is_none() {
                 let sample_entry = if self.format == VideoFormat::H264 {
                     if frame.sps_list.is_empty() || frame.pps_list.is_empty() {

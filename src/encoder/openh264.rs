@@ -52,11 +52,9 @@ impl Openh264Encoder {
             return Ok(());
         };
 
-        // OpenH264 はキーフレーム要求時などに SPS/PPS が更新され得るため、
-        // SPS/PPS を受け取ったフレームではサンプルエントリーを作り直して保持を更新する。
-        // 以後は全出力フレームに保持済みの最新サンプルエントリーを載せる。
-        // これにより、下流コンポーネントが参照するコーデック設定を最新化し、
-        // 古いパラメータセット参照によるデコード失敗を避ける。
+        // OpenH264 はキーフレーム要求時などに SPS/PPS がストリーム途中で更新され得るため、
+        // SPS/PPS を含むフレームではサンプルエントリーを作り直して保持を更新し、
+        // 以後の全出力フレームには保持済みの最新サンプルエントリーを載せる。
         if !encoded.sps_list.is_empty() && !encoded.pps_list.is_empty() {
             let (sample_entry, _frame_size) = h264::h264_sample_entry_from_sps_pps_lists(
                 encoded.sps_list.clone(),
@@ -65,11 +63,8 @@ impl Openh264Encoder {
             self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry));
         }
 
-        // sample_entry 未確定のまま出力フレームを下流に流すと writer 入口で
-        // 不変条件 (圧縮フレームの sample_entry は必ず Some) に違反するため、
-        // ここで fail-fast 停止する。openh264 の通常動作では「最初の出力フレームが
-        // 必ず keyframe で SPS / PPS が同梱される」ため、この経路には到達しない。
-        // 到達した場合はエンコーダの挙動が暗黙の前提から外れている異常状態を示す。
+        // sample_entry 未確定で出力フレームを下流に流すと writer 入口の不変条件
+        // (圧縮フレームの sample_entry は必ず Some) に違反するため fail-fast 停止する。
         if self.last_sample_entry.is_none() {
             return Err(crate::Error::new(
                 "openh264 encoder produced output before SPS/PPS established the sample_entry",
