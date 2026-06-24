@@ -87,6 +87,7 @@ CI 検証経路: openh264 系テストは `.github/workflows/ci.yml` の `test-o
 - `src/encoder/openh264.rs::Openh264Encoder::encode` への Err 経路追加
 - `src/encoder/video_toolbox.rs::VideoToolboxEncoder::handle_encoded` への Err 経路追加 (H.264 / H.265 両経路)
 - `docs/internals/sample_entry_invariant.md` の表・「確立できない場合の扱い」節の書き換え
+- `src/encoder/test_helpers.rs` 新設による `raw_i420_frame` の 4 エンコーダ間共通化 (本 PR のレビューで指摘された既存重複)
 
 含まないもの:
 
