@@ -56,6 +56,13 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
+- [ADD] obsws 経由でリアルタイム合成映像にテキストオーバーレイを描画できるようにする
+  - 起動時 CLI 引数 `--font-search-root` / `--default-font` でフォント探索ルートとデフォルトフォントを指定する (両方未指定なら機能無効として正常起動、片方のみは起動失敗)
+  - `HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` / `HisuiRemoveTextOverlay` / `HisuiListTextOverlays` の 4 メソッドを obsws (WebSocket / データチャネル両対応、RequestBatch 対応) 経由で利用できる
+  - 描画は raden (Cranelift JIT ベースの CPU 専用 2D ベクターグラフィックスライブラリ) で行い、`shiguredo_libyuv::argb_to_i420_alpha` で I420A に変換して `VideoRealtimeMixer` の最上位レイヤとして合成する
+  - 機能無効時は全 4 メソッドが `REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED` を返す
+  - テキストオーバーレイは揮発的 (`--state-file` には保存されず、再起動でクリアされる)
+  - @sile
 - [ADD] cargo-fuzz による fuzz テスト基盤を `fuzz/` ディレクトリに導入する
   - @sile
 - [ADD] hisui 共通フラグとして `--emit-exit-metrics` を追加し、サブコマンドの終了時に内部メトリクスを JSON Lines 形式で標準出力へ出力する
@@ -80,6 +87,8 @@
   - S3 出力先にはオブジェクトライフタイム指定（`lifetime_days`）を設定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile
+- [ADD] 依存ライブラリに raden 2026.2.0-canary.0 を追加する
+  - @sile
 - [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.4 を追加する
   - @sile
 - [ADD] obsws の Output に HLS ライブ出力 (`outputName: "hls"`) を追加する
@@ -95,7 +104,7 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.9 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.11 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
@@ -121,7 +130,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.147.2 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.150.2 を追加する
   - @sile
 - [ADD] `server` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui server` で WebSocket サーバーを起動できる
@@ -142,7 +151,7 @@
   - 未対応 RequestType は `Unknown request type` のエラーで応答する
   - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_websocket 2026.1.0 を追加する
+- [ADD] 依存ライブラリに shiguredo_websocket 2026.3.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに base64 0.22.1 を追加する
   - @sile
@@ -161,7 +170,7 @@
   - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
   - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
-- [UPDATE] shiguredo_dav1d のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_dav1d のバージョンを 2026.2.0-canary.0 にあげる
   - このバージョンから shiguredo_dav1d crate のリポジトリが <https://github.com/shiguredo/dav1d-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
@@ -173,7 +182,7 @@
 - [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0 にあげる
   - このバージョンから shiguredo_svt_av1 crate のリポジトリが <https://github.com/shiguredo/svt-av1-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
+- [UPDATE] shiguredo_http11 のバージョンを 2026.6.1 にあげる
   - @voluntas
 - [UPDATE] `libc` 0.2.186 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
@@ -196,7 +205,7 @@
   - @sile
 - [UPDATE] noargs crate のバージョンを 0.4.3 に上げる
   - @sile
-- [UPDATE] rustls crate のバージョンを 0.23.40 に上げる
+- [UPDATE] rustls crate のバージョンを 0.23.41 に上げる
   - @sile
 - [UPDATE] aws-lc-rs crate のバージョンを 1.17.0 に上げる
   - @sile
@@ -209,22 +218,30 @@
 - [UPDATE] shiguredo_openh264 のバージョンを 2026.1.0 にあげる
   - shiguredo_openh264 crate のリポジトリは 2026.1.0 から <https://github.com/shiguredo/openh264-rs> に独立しており、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_nvcodec のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_nvcodec のバージョンを 2026.2.0 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが <https://github.com/shiguredo/nvcodec-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libvpx のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_libvpx のバージョンを 2026.2.0-canary.0 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが <https://github.com/shiguredo/libvpx-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libyuv のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_libyuv のバージョンを 2026.2.0-canary.1 にあげる
   - このバージョンから shiguredo_libyuv crate のリポジトリが <https://github.com/shiguredo/libyuv-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.1 にあげる
   - このバージョンから shiguredo_video_toolbox crate のリポジトリが <https://github.com/shiguredo/video-toolbox-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.1.0 にあげる
+- [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.2.0-canary.0 にあげる
   - このバージョンから shiguredo_audio_toolbox crate のリポジトリが <https://github.com/shiguredo/audio-toolbox-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_mp4 のバージョンを 2026.3.0 にあげる
+  - @sile
+- [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.5 にあげる
+  - @sile
+- [UPDATE] shiguredo_video_device のバージョンを 2026.2.0-canary.2 にあげる
+  - @sile
+- [UPDATE] raw_player のバージョンを 2026.2.0-canary.0 にあげる
+  - @sile
+- [UPDATE] tempfile crate のバージョンを 3.27.0 に上げる
   - @sile
 - [UPDATE] H.265 エンコード時の hvcC ボックスを SPS / VPS 由来実値で埋めるように変更する
   - @sile

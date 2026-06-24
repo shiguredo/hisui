@@ -10,6 +10,10 @@ use crate::{
     video::{FrameRate, RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize},
 };
 
+pub mod text_overlay;
+
+use self::text_overlay::{TextOverlayCommand, TextOverlayConfig, TextOverlayLayer};
+
 const MAX_NOACKED_COUNT: u64 = 100;
 
 #[derive(Debug)]
@@ -19,6 +23,10 @@ pub struct VideoRealtimeMixer {
     pub frame_rate: FrameRate,
     pub input_tracks: Vec<InputTrack>,
     pub output_track_id: TrackId,
+    /// 機能有効時のみ `Some`。 JSON 経由のパースには現れず、 mixer 構築側
+    /// (`start_mixer_processors`) で直接設定する。 シリアライズ対象でもないため、
+    /// `DisplayJson` 実装では無視する。
+    pub text_overlay_config: Option<TextOverlayConfig>,
 }
 
 impl nojson::DisplayJson for VideoRealtimeMixer {
@@ -52,6 +60,9 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
             frame_rate: frame_rate.unwrap_or(FrameRate::FPS_30),
             input_tracks,
             output_track_id,
+            // JSON 経由 (compose サブコマンド等) では機能無効固定で構築する。
+            // obsws server 経由の構築では `text_overlay_config` を別途差し込む。
+            text_overlay_config: None,
         })
     }
 }
@@ -64,7 +75,15 @@ impl VideoRealtimeMixer {
             frame_rate,
             input_tracks,
             output_track_id,
+            text_overlay_config,
         } = self;
+
+        // 機能有効時はテキストオーバーレイレイヤを構築 (warm-up 含む)。
+        // canvas サイズは構築時固定でシーン切替で再生成しない。
+        let text_overlay_layer = match text_overlay_config {
+            Some(config) => Some(TextOverlayLayer::new(canvas_width, canvas_height, config)?),
+            None => None,
+        };
 
         let mut stats = handle.stats();
         let stats = VideoRealtimeMixerStats::new(&mut stats);
@@ -124,6 +143,7 @@ impl VideoRealtimeMixer {
             ack,
             finishing: false,
             stats,
+            text_overlay_layer,
         }
         .run()
         .await
@@ -135,7 +155,7 @@ pub struct InputTrack {
     pub track_id: TrackId,
     pub x: isize,
     pub y: isize,
-    pub z: isize,
+    pub z: i32,
     pub width: Option<EvenUsize>,
     pub height: Option<EvenUsize>,
     pub scale_x: Option<PositiveFiniteF64>,
@@ -191,7 +211,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for InputTrack {
         let track_id: TrackId = value.to_member("trackId")?.required()?.try_into()?;
         let x: Option<isize> = value.to_member("x")?.try_into()?;
         let y: Option<isize> = value.to_member("y")?.try_into()?;
-        let z: Option<isize> = value.to_member("z")?.try_into()?;
+        let z: Option<i32> = value.to_member("z")?.try_into()?;
         let width: Option<EvenUsize> = value.to_member("width")?.try_into()?;
         let height: Option<EvenUsize> = value.to_member("height")?.try_into()?;
         let scale_x: Option<PositiveFiniteF64> = value.to_member("scaleX")?.try_into()?;
@@ -227,6 +247,11 @@ pub enum VideoRealtimeMixerRpcMessage {
     Finish {
         reply_tx: tokio::sync::oneshot::Sender<()>,
     },
+    /// `HisuiCreateTextOverlay` 経由でテキストオーバーレイを追加する。
+    ///
+    /// `register_rpc_sender` は同一 processor で 2 回目の登録を拒否する設計のため、
+    /// テキストオーバーレイ系 RPC は本 enum に統合する (別 sender にしない)。
+    TextOverlay(TextOverlayCommand),
 }
 
 #[derive(Debug, Clone)]
@@ -271,7 +296,7 @@ pub struct VideoRealtimeMixerUpdateConfigResult {
 #[derive(Debug)]
 struct DrawOrder {
     track_id: TrackId,
-    z: isize,
+    z: i32,
     index: usize,
 }
 
@@ -295,6 +320,9 @@ struct VideoRealtimeMixerRunner {
     ack: Option<crate::Ack>,
     finishing: bool,
     stats: VideoRealtimeMixerStats,
+    /// 機能有効時のみ `Some`。 `compose_frame` の追加合成段で最上位レイヤとして合成する。
+    /// `UpdateConfig` では一切変更しない (シーン切替で温存される)。
+    text_overlay_layer: Option<TextOverlayLayer>,
 }
 
 #[derive(Debug)]
@@ -410,6 +438,7 @@ impl VideoRealtimeMixerRunner {
             &self.draw_order,
             &self.states,
             &self.stats,
+            self.text_overlay_layer.as_mut(),
         )?;
         if !self.output_tx.send_video(frame) {
             return Ok(false);
@@ -451,15 +480,73 @@ impl VideoRealtimeMixerRunner {
                 self.finishing = true;
                 let _ = reply_tx.send(());
             }
+            VideoRealtimeMixerRpcMessage::TextOverlay(command) => {
+                self.handle_text_overlay_command(command);
+            }
         }
 
         Ok(())
+    }
+
+    fn handle_text_overlay_command(&mut self, command: TextOverlayCommand) {
+        let Some(layer) = self.text_overlay_layer.as_mut() else {
+            // obsws ハンドラ層が機能無効を弾く責務を持つため、 ここに到達するのは
+            // ハンドラ側の整合性 bug。 reply を drop することで呼び出し側は
+            // RecvError 経由で REQUEST_PROCESSING_FAILED を受け取る。
+            tracing::error!(
+                "BUG: text overlay rpc reached video mixer while feature is disabled; \
+                 reply will be dropped and client will receive REQUEST_PROCESSING_FAILED"
+            );
+            return;
+        };
+        match command {
+            TextOverlayCommand::Add {
+                name,
+                input,
+                reply_tx,
+            } => {
+                let _ = reply_tx.send(layer.add(name, input));
+            }
+            TextOverlayCommand::Update {
+                name,
+                patch,
+                reply_tx,
+            } => {
+                let _ = reply_tx.send(layer.update(name, patch));
+            }
+            TextOverlayCommand::Remove { name, reply_tx } => {
+                let _ = reply_tx.send(layer.remove(name));
+            }
+            TextOverlayCommand::List { reply_tx } => {
+                let _ = reply_tx.send(layer.list());
+            }
+        }
     }
 
     fn update_config(
         &mut self,
         request: VideoRealtimeMixerUpdateConfigRequest,
     ) -> crate::Result<VideoRealtimeMixerUpdateConfigResult> {
+        // canvas サイズと frame rate は hisui 全体で起動時 CLI 引数で固定する方針のため、
+        // UpdateConfig 経由で変更されない。 万一変更要求が来たら error を返す
+        // (将来動的変更を入れる際は text_overlay_layer / runtime 構成の追従設計とセットで実装する)。
+        if request.canvas_width.get() != self.canvas_width
+            || request.canvas_height.get() != self.canvas_height
+        {
+            return Err(Error::new(format!(
+                "canvas size change is not supported via UpdateConfig (current: {}x{}, requested: {}x{})",
+                self.canvas_width,
+                self.canvas_height,
+                request.canvas_width.get(),
+                request.canvas_height.get(),
+            )));
+        }
+        if request.frame_rate != self.frame_rate {
+            return Err(Error::new(format!(
+                "frame rate change is not supported via UpdateConfig (current: {:?}, requested: {:?})",
+                self.frame_rate, request.frame_rate,
+            )));
+        }
         let previous_canvas_width = self.canvas_width;
         let previous_canvas_height = self.canvas_height;
         let previous_frame_rate = self.frame_rate;
@@ -918,6 +1005,7 @@ fn compose_frame(
     draw_order: &[DrawOrder],
     states: &HashMap<TrackId, InputTrackState>,
     stats: &VideoRealtimeMixerStats,
+    text_overlay_layer: Option<&mut TextOverlayLayer>,
 ) -> crate::Result<VideoFrame> {
     let mut canvas = RealtimeI420Canvas::new(canvas_width, canvas_height);
 
@@ -988,6 +1076,16 @@ fn compose_frame(
 
         let resized = RawVideoFrame::from_video_frame(Arc::new(resized))?;
         canvas.draw_frame_clipped(x, y, &resized)?;
+    }
+
+    // テキストオーバーレイレイヤを最上位として追加合成する。
+    // 一般 InputTrack の draw_order ループ後に重ねるため、
+    // overlay は常に他の input track より上に描画される。
+    if let Some(layer) = text_overlay_layer
+        && let Some(overlay_frame) = layer.ensure_rendered()?
+    {
+        let raw = RawVideoFrame::from_video_frame(overlay_frame)?;
+        canvas.draw_frame_clipped(0, 0, &raw)?;
     }
 
     Ok(VideoFrame {
@@ -1162,7 +1260,7 @@ fn clipped_span(src_len: usize, dst_len: usize, dst_pos: isize) -> (usize, usize
     (src_start, dst_start, copy_len)
 }
 
-fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
+pub(super) fn frames_to_timestamp(frame_rate: FrameRate, frames: u64) -> Duration {
     Duration::from_secs(frames.saturating_mul(frame_rate.denumerator.get() as u64))
         / frame_rate.numerator.get() as u32
 }
@@ -1618,6 +1716,7 @@ mod tests {
                 },
             ],
             output_track_id: output_track_id.clone(),
+            text_overlay_config: None,
         };
 
         let mixer_processor = pipeline_handle
@@ -1966,7 +2065,7 @@ mod tests {
         let mut stats_registry = crate::stats::Stats::new();
         let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
 
-        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states, &stats)?;
+        let frame = compose_frame(2, 2, Duration::ZERO, &draw_order, &states, &stats, None)?;
 
         assert_eq!(frame.format, VideoFormat::I420);
         assert_eq!(frame.data[0], 100);
@@ -2036,7 +2135,7 @@ mod tests {
         let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
 
         // エラーにならずスキップされ、黒キャンバスが返ること
-        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, &stats)?;
+        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, &stats, None)?;
         assert_eq!(frame.format, VideoFormat::I420);
         // Y プレーンが黒 (0) のままであること
         assert!(frame.data[..64 * 64].iter().all(|&b| b == 0));
@@ -2083,7 +2182,7 @@ mod tests {
         let stats = VideoRealtimeMixerStats::new(&mut stats_registry);
 
         // エラーにならずスキップされ、黒キャンバスが返ること
-        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, &stats)?;
+        let frame = compose_frame(64, 64, Duration::ZERO, &draw_order, &states, &stats, None)?;
         assert_eq!(frame.format, VideoFormat::I420);
         assert!(frame.data[..64 * 64].iter().all(|&b| b == 0));
         // クロップスキップカウンターがインクリメントされていること

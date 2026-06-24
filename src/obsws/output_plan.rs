@@ -21,7 +21,7 @@ pub struct ObswsVideoMixerInputTrack {
     pub track_id: TrackId,
     pub x: i64,
     pub y: i64,
-    pub z: i64,
+    pub z: i32,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub scale_x: Option<PositiveFiniteF64>,
@@ -53,6 +53,10 @@ fn round_to_even(value: f64) -> u32 {
 
 /// OBS 互換の出力プランを構築する。
 /// OBS と同様に、ソースの有無に関わらず常に映像（黒画面）と音声（無音）の両トラックを含める。
+///
+/// テキストオーバーレイは `VideoRealtimeMixer` の内部レイヤとして合成されるため、
+/// ここでは特別な InputTrack を追加しない。 機能の有効/無効は
+/// `start_mixer_processors` の `text_overlay_config` 引数で制御される。
 pub fn build_composed_output_plan(
     scene_inputs: &[ObswsSceneInputEntry],
     canvas_width: crate::types::EvenUsize,
@@ -86,7 +90,7 @@ pub fn build_composed_output_plan(
     let video_mixer_processor_id = ProcessorId::new("program:video_mixer");
 
     // source_plans と active_scene_inputs は同じ順序・同じ長さ
-    let video_mixer_input_tracks = source_plans
+    let video_mixer_input_tracks: Vec<ObswsVideoMixerInputTrack> = source_plans
         .iter()
         .zip(active_scene_inputs.iter())
         .filter_map(|(plan, scene_input)| {
@@ -145,7 +149,7 @@ pub fn build_composed_output_plan(
                 track_id: video_track_id.clone(),
                 x: transform.position_x as i64,
                 y: transform.position_y as i64,
-                z: scene_input.scene_item_index as i64,
+                z: scene_input.scene_item_index as i32,
                 width,
                 height,
                 scale_x,

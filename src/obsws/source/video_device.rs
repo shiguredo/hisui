@@ -194,6 +194,9 @@ fn convert_captured_frame_to_i420(
         shiguredo_video_device::PixelFormat::Yuy2 => {
             Err(Error::new("unsupported pixel format: YUY2"))
         }
+        shiguredo_video_device::PixelFormat::Mjpeg => {
+            Err(Error::new("unsupported pixel format: MJPEG"))
+        }
         shiguredo_video_device::PixelFormat::Unknown(raw) => Err(Error::new(format!(
             "unsupported pixel format: unknown ({raw})"
         ))),

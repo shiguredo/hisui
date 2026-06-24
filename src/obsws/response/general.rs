@@ -98,6 +98,11 @@ const BASE_AVAILABLE_REQUESTS: &[&str] = &[
     // Output 管理
     "HisuiCreateOutput",
     "HisuiRemoveOutput",
+    // テキストオーバーレイ
+    "HisuiCreateTextOverlay",
+    "HisuiUpdateTextOverlay",
+    "HisuiRemoveTextOverlay",
+    "HisuiListTextOverlays",
 ];
 
 pub fn build_get_version_response(

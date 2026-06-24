@@ -27,6 +27,7 @@ mod output_sora;
 mod output_stream;
 mod scene;
 mod scene_item;
+mod text_overlay;
 
 use crate::obsws::event::TaggedEvent;
 use crate::obsws::message::ObswsSessionStats;
@@ -661,6 +662,39 @@ impl ObswsCoordinator {
             "HisuiRemoveOutput" => {
                 self.handle_remove_output(&request_type, &request_id, request.request_data.as_ref())
             }
+            // --- テキストオーバーレイ ---
+            "HisuiCreateTextOverlay" => {
+                self.handle_create_text_overlay(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "HisuiUpdateTextOverlay" => {
+                self.handle_update_text_overlay(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "HisuiRemoveTextOverlay" => {
+                self.handle_remove_text_overlay(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
+            "HisuiListTextOverlays" => {
+                self.handle_list_text_overlays(
+                    &request_type,
+                    &request_id,
+                    request.request_data.as_ref(),
+                )
+                .await
+            }
             // --- レジストリ状態変更なし ---
             "BroadcastCustomEvent" => {
                 self.handle_broadcast_custom_event(&request_id, request.request_data.as_ref())
@@ -1159,4 +1193,27 @@ fn parse_custom_event_data(
         return Err(event_data.invalid("object is required"));
     }
     nojson::RawJsonOwned::try_from(event_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// テキストオーバーレイは揮発機能 (再起動でクリアされる) のため永続化対象外。
+    /// `is_state_persisted_request` に追加すると毎リクエストで state file 書き込みが
+    /// 走り、 write 失敗時のサーバ強制終了に巻き込まれる。
+    #[test]
+    fn text_overlay_methods_are_not_state_persisted() {
+        for method in [
+            "HisuiCreateTextOverlay",
+            "HisuiUpdateTextOverlay",
+            "HisuiRemoveTextOverlay",
+            "HisuiListTextOverlays",
+        ] {
+            assert!(
+                !is_state_persisted_request(method),
+                "{method} は揮発機能のため state file 永続化対象外であるべき",
+            );
+        }
+    }
 }

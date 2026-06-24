@@ -772,7 +772,7 @@ async fn recv_video_encoder_rpc_message_or_pending(
 
 #[derive(Debug)]
 enum VideoEncoderInner {
-    Libvpx(LibvpxEncoder),
+    Libvpx(Box<LibvpxEncoder>), // Box は clippy::large_enum_variant 対策
     Openh264(Openh264Encoder),
     SvtAv1(SvtAv1Encoder),
     #[cfg(target_os = "macos")]
@@ -784,12 +784,12 @@ enum VideoEncoderInner {
 impl VideoEncoderInner {
     fn new_vp8(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let encoder = LibvpxEncoder::new_vp8(options)?;
-        Ok(Self::Libvpx(encoder))
+        Ok(Self::Libvpx(Box::new(encoder)))
     }
 
     fn new_vp9(options: &VideoEncoderOptions) -> crate::Result<Self> {
         let encoder = LibvpxEncoder::new_vp9(options)?;
-        Ok(Self::Libvpx(encoder))
+        Ok(Self::Libvpx(Box::new(encoder)))
     }
 
     fn new_openh264(lib: Openh264Library, options: &VideoEncoderOptions) -> crate::Result<Self> {

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use crate::{
     encoder::VideoEncoderOptions,
@@ -10,16 +11,54 @@ use crate::{
     video::{RawVideoFrame, VideoFormat, VideoFrame},
 };
 
+/// エンコード完了を受け取る共有キューとエラー保持用スロット
+type EncodedQueue = Arc<Mutex<VecDeque<shiguredo_nvcodec::EncodedFrame<()>>>>;
+type ErrorSlot = Arc<Mutex<Option<crate::Error>>>;
+
 #[derive(Debug)]
 pub struct NvcodecEncoder {
-    inner: shiguredo_nvcodec::Encoder,
+    inner: shiguredo_nvcodec::Encoder<
+        shiguredo_nvcodec::FnEncodeHandler<(), shiguredo_nvcodec::Error>,
+    >,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
+    // エンコード完了は別スレッドからコールバックで通知されるため、共有キュー越しに本スレッド側へ受け渡してから処理する。
+    encoded_queue: EncodedQueue,
+    error_slot: ErrorSlot,
     // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
     sample_entry: SharedSampleEntry,
     encoded_format: VideoFormat,
     av1_sequence_header: Vec<u8>,
     force_keyframe_next: bool,
+}
+
+/// shiguredo_nvcodec::Encoder の生成に必要な共有状態とハンドラを構築する
+fn build_handler() -> (
+    shiguredo_nvcodec::FnEncodeHandler<(), shiguredo_nvcodec::Error>,
+    EncodedQueue,
+    ErrorSlot,
+) {
+    let encoded_queue: EncodedQueue = Arc::new(Mutex::new(VecDeque::new()));
+    let error_slot: ErrorSlot = Arc::new(Mutex::new(None));
+    let queue_for_handler = encoded_queue.clone();
+    let error_for_handler = error_slot.clone();
+    let handler = shiguredo_nvcodec::FnEncodeHandler::new(move |result| match result {
+        Ok(frame) => {
+            let mut queue = queue_for_handler
+                .lock()
+                .expect("nvcodec encoded queue lock poisoned");
+            queue.push_back(frame);
+        }
+        Err(err) => {
+            let mut slot = error_for_handler
+                .lock()
+                .expect("nvcodec error slot lock poisoned");
+            if slot.is_none() {
+                *slot = Some(crate::Error::new(format!("nvcodec encode error: {err}")));
+            }
+        }
+    });
+    (handler, encoded_queue, error_slot)
 }
 
 impl NvcodecEncoder {
@@ -45,7 +84,8 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec h264 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
+        let (handler, encoded_queue, error_slot) = build_handler();
+        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
         let seq_params = inner.get_sequence_params()?;
         let sample_entry = h264::h264_sample_entry_from_annexb(&seq_params)?;
 
@@ -53,6 +93,8 @@ impl NvcodecEncoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            encoded_queue,
+            error_slot,
             sample_entry: SharedSampleEntry::new(sample_entry),
             encoded_format: VideoFormat::H264,
             av1_sequence_header: Vec::new(),
@@ -82,7 +124,8 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec h265 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
+        let (handler, encoded_queue, error_slot) = build_handler();
+        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
         let seq_params = inner.get_sequence_params()?;
         let sample_entry = h265::h265_sample_entry_from_annexb(&seq_params, options.frame_rate)?;
 
@@ -90,6 +133,8 @@ impl NvcodecEncoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            encoded_queue,
+            error_slot,
             sample_entry: SharedSampleEntry::new(sample_entry),
             encoded_format: VideoFormat::H265,
             av1_sequence_header: Vec::new(),
@@ -123,7 +168,8 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec av1 encoder config: {config:?}");
 
-        let mut inner = shiguredo_nvcodec::Encoder::new(config)?;
+        let (handler, encoded_queue, error_slot) = build_handler();
+        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
 
         // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
         // には以下の記載がある:
@@ -144,6 +190,8 @@ impl NvcodecEncoder {
             inner,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
+            encoded_queue,
+            error_slot,
             sample_entry: SharedSampleEntry::new(sample_entry),
             encoded_format: VideoFormat::Av1,
             av1_sequence_header: seq_params,
@@ -197,8 +245,13 @@ impl NvcodecEncoder {
             output_spspps: false,
         };
         self.force_keyframe_next = false;
-        self.inner.encode(&nv12_data, &encode_options)?;
+        self.inner.encode(&nv12_data, &encode_options, ())?;
         self.input_queue.push_back(video_frame.to_stripped());
+        // shiguredo_nvcodec のエンコーダーは内部の worker スレッドで非同期にエンコードし、
+        // encode() は即時 return する。上位パイプラインは同期 pull 型で、上位側でペース制御
+        // しないと内部キューが溢れて encode() が "encoder buffer is full" で失敗するため、
+        // 投入直後に flush() で 1 フレーム分の完了を待って同期動作させる。
+        self.inner.flush()?;
         self.handle_encoded_frames()?;
         Ok(())
     }
@@ -208,13 +261,33 @@ impl NvcodecEncoder {
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {
-        self.inner.finish()?;
+        // flush で in-flight 完了を待ち合わせる
+        self.inner.flush()?;
         self.handle_encoded_frames()?;
         Ok(())
     }
 
     fn handle_encoded_frames(&mut self) -> crate::Result<()> {
-        while let Some(encoded_frame) = self.inner.next_frame() {
+        // ハンドラ側で記録されたエラーがあれば最優先で返す
+        if let Some(err) = self
+            .error_slot
+            .lock()
+            .expect("nvcodec error slot lock poisoned")
+            .take()
+        {
+            return Err(err);
+        }
+        loop {
+            let encoded_frame = {
+                let mut queue = self
+                    .encoded_queue
+                    .lock()
+                    .expect("nvcodec encoded queue lock poisoned");
+                queue.pop_front()
+            };
+            let Some(encoded_frame) = encoded_frame else {
+                break;
+            };
             let input_frame = self
                 .input_queue
                 .pop_front()
@@ -229,7 +302,7 @@ impl NvcodecEncoder {
             // AV1 の場合は変換不要だが、キーフレームに Sequence Header が含まれていない場合は付与
             // H.264/H.265 の場合は Annex B から MP4 形式に変換
             let frame_data = if self.encoded_format == VideoFormat::Av1 {
-                let mut data = encoded_frame.into_data();
+                let (mut data, _) = encoded_frame.into_parts();
 
                 // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与
                 if keyframe && !self.has_sequence_header(&data) {

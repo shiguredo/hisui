@@ -13,18 +13,28 @@ pub async fn handle_request(
     request: &Request,
     pipeline_handle: &crate::MediaPipelineHandle,
 ) -> Response {
-    if request.method != "GET" {
-        let mut response = Response::new(405, "Method Not Allowed");
-        response.add_header("Allow", "GET");
+    if request.method() != "GET" {
+        // 固定 status / reason / ヘッダー名・値での Response 構築はバリデーションを通る想定。
+        // 失敗した場合は実装バグ。
+        let mut response =
+            Response::new(405, "Method Not Allowed").expect("infallible: fixed status/reason");
+        response
+            .add_header("Allow", "GET")
+            .expect("infallible: fixed header");
+        // ボディなしの応答でも Content-Length: 0 を載せたいので空ボディを明示する。
+        response.set_body(Vec::new());
         return response;
     }
 
-    let response_format = match parse_metrics_response_format(request.uri.as_str()) {
+    let response_format = match parse_metrics_response_format(request.uri()) {
         Ok(response_format) => response_format,
         Err(e) => {
-            let mut response = Response::new(400, "Bad Request");
-            response.add_header("Content-Type", "text/plain; charset=utf-8");
-            response.body = e.into_bytes();
+            let mut response =
+                Response::new(400, "Bad Request").expect("infallible: fixed status/reason");
+            response
+                .add_header("Content-Type", "text/plain; charset=utf-8")
+                .expect("infallible: fixed header");
+            response.set_body(e.into_bytes());
             return response;
         }
     };
@@ -34,33 +44,47 @@ pub async fn handle_request(
         {
             Ok(mut text) => {
                 append_tokio_runtime_metrics(&mut text);
-                let mut response = Response::new(200, "OK");
-                response.add_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
-                response.body = text.into_bytes();
+                let mut response =
+                    Response::new(200, "OK").expect("infallible: fixed status/reason");
+                response
+                    .add_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+                    .expect("infallible: fixed header");
+                response.set_body(text.into_bytes());
                 response
             }
             Err(e) => {
-                let mut response = Response::new(500, "Internal Server Error");
-                response.add_header("Content-Type", "text/plain; charset=utf-8");
-                response.body =
-                    format!("failed to render Prometheus metrics: {}", e.display()).into_bytes();
+                let mut response = Response::new(500, "Internal Server Error")
+                    .expect("infallible: fixed status/reason");
+                response
+                    .add_header("Content-Type", "text/plain; charset=utf-8")
+                    .expect("infallible: fixed header");
+                response.set_body(
+                    format!("failed to render Prometheus metrics: {}", e.display()).into_bytes(),
+                );
                 response
             }
         },
         MetricsResponseFormat::PrometheusJson => {
             match render_prometheus_json_metrics(pipeline_handle) {
                 Ok(json) => {
-                    let mut response = Response::new(200, "OK");
-                    response.add_header("Content-Type", "application/json; charset=utf-8");
-                    response.body = json.to_string().into_bytes();
+                    let mut response =
+                        Response::new(200, "OK").expect("infallible: fixed status/reason");
+                    response
+                        .add_header("Content-Type", "application/json; charset=utf-8")
+                        .expect("infallible: fixed header");
+                    response.set_body(json.to_string().into_bytes());
                     response
                 }
                 Err(e) => {
-                    let mut response = Response::new(500, "Internal Server Error");
-                    response.add_header("Content-Type", "text/plain; charset=utf-8");
-                    response.body =
+                    let mut response = Response::new(500, "Internal Server Error")
+                        .expect("infallible: fixed status/reason");
+                    response
+                        .add_header("Content-Type", "text/plain; charset=utf-8")
+                        .expect("infallible: fixed header");
+                    response.set_body(
                         format!("failed to render Prometheus metrics JSON: {}", e.display())
-                            .into_bytes();
+                            .into_bytes(),
+                    );
                     response
                 }
             }
@@ -154,21 +178,23 @@ fn append_tokio_runtime_metrics(text: &mut String) {
 mod tests {
     use super::*;
 
+    /// テスト用の固定リテラル method / uri から Request を作る。
+    /// Request::new はバリデーションのため Result を返すがリテラル値は無効になりえないので expect で展開する。
+    /// Method は TryFrom<&'static str> しか実装していないので引数も 'static で受ける。
+    fn make_request(method: &'static str, uri: &'static str) -> Request {
+        Request::new(method, uri).expect("infallible: fixed method/uri")
+    }
+
     #[tokio::test]
     async fn metrics_endpoint_rejects_non_get() {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
             .expect("failed to create media pipeline");
         let handle = pipeline.handle();
-        let request = Request::new("POST", "/metrics");
+        let request = make_request("POST", "/metrics");
 
         let response = handle_request(&request, &handle).await;
-        assert_eq!(response.status_code, 405);
-        assert!(
-            response
-                .headers
-                .iter()
-                .any(|(name, value)| name == "Allow" && value == "GET")
-        );
+        assert_eq!(response.status_code(), 405);
+        assert_eq!(response.get_header("Allow"), Some("GET"));
     }
 
     #[tokio::test]
@@ -178,14 +204,21 @@ mod tests {
         let handle = pipeline.handle();
         let mut stats = handle.stats();
         stats.counter("requests_total").inc();
-        let request = Request::new("GET", "/metrics");
+        let request = make_request("GET", "/metrics");
 
         let response = handle_request(&request, &handle).await;
-        assert_eq!(response.status_code, 200);
-        assert!(response.headers.iter().any(|(name, value)| {
-            name == "Content-Type" && value == "text/plain; version=0.0.4; charset=utf-8"
-        }));
-        let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
+        assert_eq!(response.status_code(), 200);
+        assert_eq!(
+            response.get_header("Content-Type"),
+            Some("text/plain; version=0.0.4; charset=utf-8")
+        );
+        let body = String::from_utf8(
+            response
+                .body_bytes()
+                .expect("response must have body")
+                .to_vec(),
+        )
+        .expect("body must be valid UTF-8");
         assert!(body.contains("# TYPE hisui_requests_total counter"));
         assert!(body.contains("hisui_requests_total 1"));
         assert!(body.contains("# TYPE hisui_tokio_num_workers gauge"));
@@ -207,11 +240,17 @@ mod tests {
         // 行う counter 登録を実行することが目的。登録された counter 名が `/metrics` のテキスト
         // 出力に反映されるため、廃止された 4 メトリクスがここで誤って登録されると body に出現する。
         let _writer_stats = crate::mp4::writer::Mp4WriterStats::new(&mut stats, 0);
-        let request = Request::new("GET", "/metrics");
+        let request = make_request("GET", "/metrics");
 
         let response = handle_request(&request, &handle).await;
-        assert_eq!(response.status_code, 200);
-        let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
+        assert_eq!(response.status_code(), 200);
+        let body = String::from_utf8(
+            response
+                .body_bytes()
+                .expect("response must have body")
+                .to_vec(),
+        )
+        .expect("body must be valid UTF-8");
         assert!(
             !body.contains("hisui_total_received_audio_sample_entry_count"),
             "廃止メトリクス hisui_total_received_audio_sample_entry_count が含まれないこと"
@@ -237,11 +276,17 @@ mod tests {
         let handle = pipeline.handle();
         let mut stats = handle.stats();
         stats.counter("bad-metric-name").inc();
-        let request = Request::new("GET", "/metrics");
+        let request = make_request("GET", "/metrics");
 
         let response = handle_request(&request, &handle).await;
-        assert_eq!(response.status_code, 500);
-        let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
+        assert_eq!(response.status_code(), 500);
+        let body = String::from_utf8(
+            response
+                .body_bytes()
+                .expect("response must have body")
+                .to_vec(),
+        )
+        .expect("body must be valid UTF-8");
         assert!(body.contains("failed to render Prometheus metrics"));
     }
 
@@ -252,14 +297,21 @@ mod tests {
         let handle = pipeline.handle();
         let mut stats = handle.stats();
         stats.counter("requests_total").inc();
-        let request = Request::new("GET", "/metrics?format=json");
+        let request = make_request("GET", "/metrics?format=json");
 
         let response = handle_request(&request, &handle).await;
-        assert_eq!(response.status_code, 200);
-        assert!(response.headers.iter().any(|(name, value)| {
-            name == "Content-Type" && value == "application/json; charset=utf-8"
-        }));
-        let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
+        assert_eq!(response.status_code(), 200);
+        assert_eq!(
+            response.get_header("Content-Type"),
+            Some("application/json; charset=utf-8")
+        );
+        let body = String::from_utf8(
+            response
+                .body_bytes()
+                .expect("response must have body")
+                .to_vec(),
+        )
+        .expect("body must be valid UTF-8");
         assert!(body.contains("\"name\":\"hisui_requests_total\""));
         assert!(body.contains("\"type\":\"COUNTER\""));
         assert!(body.contains("\"value\":\"1\""));
@@ -273,11 +325,17 @@ mod tests {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
             .expect("failed to create media pipeline");
         let handle = pipeline.handle();
-        let request = Request::new("GET", "/metrics?format=xml");
+        let request = make_request("GET", "/metrics?format=xml");
 
         let response = handle_request(&request, &handle).await;
-        assert_eq!(response.status_code, 400);
-        let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
+        assert_eq!(response.status_code(), 400);
+        let body = String::from_utf8(
+            response
+                .body_bytes()
+                .expect("response must have body")
+                .to_vec(),
+        )
+        .expect("body must be valid UTF-8");
         assert!(body.contains("unsupported metrics format"));
     }
 
@@ -286,13 +344,14 @@ mod tests {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
             .expect("failed to create media pipeline");
         let handle = pipeline.handle();
-        let request = Request::new("GET", "/metrics?format=%6a%73%6f%6e");
+        let request = make_request("GET", "/metrics?format=%6a%73%6f%6e");
 
         let response = handle_request(&request, &handle).await;
-        assert_eq!(response.status_code, 200);
-        assert!(response.headers.iter().any(|(name, value)| {
-            name == "Content-Type" && value == "application/json; charset=utf-8"
-        }));
+        assert_eq!(response.status_code(), 200);
+        assert_eq!(
+            response.get_header("Content-Type"),
+            Some("application/json; charset=utf-8")
+        );
     }
 
     #[tokio::test]
@@ -300,11 +359,21 @@ mod tests {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())
             .expect("failed to create media pipeline");
         let handle = pipeline.handle();
-        let request = Request::new("GET", "/metrics?format=%ZZ");
+        // Request::new は URI の percent エンコーディング妥当性まで検証するので、
+        // 構文不正な URI (`%ZZ` 等) は Request 構築時に弾かれる。
+        // handle_request 内の percent_decode 失敗パスを検証したいので、
+        // 構文は正しいが UTF-8 として不正な `%C0%A0` (overlong sequence) を使う。
+        let request = make_request("GET", "/metrics?format=%C0%A0");
 
         let response = handle_request(&request, &handle).await;
-        assert_eq!(response.status_code, 400);
-        let body = String::from_utf8(response.body).expect("body must be valid UTF-8");
+        assert_eq!(response.status_code(), 400);
+        let body = String::from_utf8(
+            response
+                .body_bytes()
+                .expect("response must have body")
+                .to_vec(),
+        )
+        .expect("body must be valid UTF-8");
         assert!(body.contains("invalid request URI"));
     }
 }
