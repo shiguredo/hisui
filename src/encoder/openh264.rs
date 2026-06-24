@@ -191,16 +191,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn openh264_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        // OPENH264_PATH が未設定の環境ではスキップする。
-        let Some(lib) = load_openh264_lib() else {
-            eprintln!("OPENH264_PATH が未設定のためスキップ");
-            return Ok(());
-        };
-        assert_every_output_frame_has_sample_entry(Openh264Encoder::new(lib, &options())?)
-    }
-
     // 各出力フレームに載った sample_entry が、エンコーダが保持する最新値
     // (last_sample_entry) と一致することを検証する。openh264 は SPS/PPS を含むフレームでだけ
     // サンプルエントリーを作り直し、SPS/PPS を含まない P フレームには保持済みの最新値を載せる。
@@ -216,6 +206,16 @@ mod tests {
             encoder.last_sample_entry.as_ref().map(|e| e.get()),
             "出力フレームの sample_entry がエンコーダ保持の最新値と一致しない"
         );
+    }
+
+    #[test]
+    fn openh264_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
+        // OPENH264_PATH が未設定の環境ではスキップする。
+        let Some(lib) = load_openh264_lib() else {
+            eprintln!("OPENH264_PATH が未設定のためスキップ");
+            return Ok(());
+        };
+        assert_every_output_frame_has_sample_entry(Openh264Encoder::new(lib, &options())?)
     }
 
     #[test]
