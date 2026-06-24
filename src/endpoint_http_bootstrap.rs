@@ -3,17 +3,29 @@ use shiguredo_http11::{Request, Response};
 use crate::webrtc::p2p_session::{BootstrapError, WebRtcP2pSessionManager};
 
 fn build_error_response(status: u16, reason: &str) -> Response {
-    Response::new(status, reason)
+    // 固定の status / reason / ヘッダー名・値で構築するので shiguredo_http11 の
+    // バリデーションは通る想定。失敗した場合は実装バグ。
+    let response = Response::new(status, reason).expect("infallible: fixed status/reason");
+    let response = response
         .header("Content-Type", "text/plain")
+        .expect("infallible: fixed header");
+    let response = response
         .header("Connection", "close")
-        .body(reason.as_bytes().to_vec())
+        .expect("infallible: fixed header");
+    response.body(reason.as_bytes().to_vec())
 }
 
 fn build_sdp_response(status: u16, reason: &str, sdp: &str) -> Response {
-    Response::new(status, reason)
+    // 固定の status / reason / ヘッダー名・値で構築するので shiguredo_http11 の
+    // バリデーションは通る想定。失敗した場合は実装バグ。
+    let response = Response::new(status, reason).expect("infallible: fixed status/reason");
+    let response = response
         .header("Content-Type", "application/sdp")
+        .expect("infallible: fixed header");
+    let response = response
         .header("Connection", "close")
-        .body(sdp.as_bytes().to_vec())
+        .expect("infallible: fixed header");
+    response.body(sdp.as_bytes().to_vec())
 }
 
 pub struct BootstrapEndpoint {
@@ -31,29 +43,25 @@ impl BootstrapEndpoint {
     }
 
     pub async fn handle_request(&self, request: &Request) -> Response {
-        if request.uri.as_str() != "/bootstrap" {
+        if request.uri() != "/bootstrap" {
             return build_error_response(404, "Not Found");
         }
 
-        if request.method != "POST" {
+        if request.method() != "POST" {
             return build_error_response(405, "Method Not Allowed");
         }
 
-        let content_type = request
-            .headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-            .map(|(_, v)| v.as_str())
-            .unwrap_or("");
+        let content_type = request.get_header("content-type").unwrap_or("");
         if !content_type.starts_with("application/sdp") {
             return build_error_response(415, "Unsupported Media Type");
         }
 
-        if request.body.is_empty() {
+        let body = request.body_bytes().unwrap_or(&[]);
+        if body.is_empty() {
             return build_error_response(400, "Bad Request");
         }
 
-        let offer_sdp = String::from_utf8_lossy(&request.body).to_string();
+        let offer_sdp = String::from_utf8_lossy(body).to_string();
         match self.session_manager.bootstrap(&offer_sdp).await {
             Ok(answer_sdp) => build_sdp_response(201, "Created", &answer_sdp),
             Err(BootstrapError::SessionAlreadyExists) => build_error_response(409, "Conflict"),

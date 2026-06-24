@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use shiguredo_http11::uri::Uri;
-use shiguredo_http11::{Request, RequestDecoder, Response, ResponseDecoder};
+use shiguredo_http11::{HttpHead, Request, RequestDecoder, Response, ResponseDecoder};
 use shiguredo_websocket::{
     CloseCode, ConnectionEvent, ConnectionOutput, ConnectionState, ServerConnectionOptions,
     WebSocketServerConnection,
@@ -707,8 +707,10 @@ async fn handle_http_connection(
             let keep_alive = request.is_keep_alive();
 
             // ローカルエンドポイント
-            let local_response = match request_path(request.uri.as_str()) {
-                "/.ok" => Some(Response::new(204, "No Content")),
+            let local_response = match request_path(request.uri()) {
+                "/.ok" => {
+                    Some(Response::new(204, "No Content").expect("infallible: fixed status/reason"))
+                }
                 "/bootstrap" => Some(bootstrap_endpoint.handle_request(&request).await),
                 "/metrics" => Some(
                     crate::endpoint_http_metrics::handle_request(&request, &pipeline_handle).await,
@@ -725,17 +727,19 @@ async fn handle_http_connection(
                     return Err(e.into());
                 }
             } else if let Some(upstream) = &upstream_config {
-                if request.method == "GET" {
+                if request.method() == "GET" {
                     if let Err(e) =
                         proxy_to_upstream(&mut writer, &request, upstream, peer_addr).await
                     {
                         tracing::warn!("Reverse proxy error for {peer_addr}: {e}");
-                        let error_response = Response::new(502, "Bad Gateway");
+                        let error_response = Response::new(502, "Bad Gateway")
+                            .expect("infallible: fixed status/reason");
                         // 502 送信失敗は無視する（クライアントが切断している可能性がある）
                         let _ = write_response(&mut writer, &error_response).await;
                     }
                 } else {
-                    let response = Response::new(405, "Method Not Allowed");
+                    let response = Response::new(405, "Method Not Allowed")
+                        .expect("infallible: fixed status/reason");
                     if let Err(e) = write_response(&mut writer, &response).await {
                         if is_client_disconnect(&e) {
                             tracing::warn!("obsws http 499 Client Closed Request from {peer_addr}");
@@ -745,7 +749,8 @@ async fn handle_http_connection(
                     }
                 }
             } else {
-                let response = Response::new(404, "Not Found");
+                let response =
+                    Response::new(404, "Not Found").expect("infallible: fixed status/reason");
                 if let Err(e) = write_response(&mut writer, &response).await {
                     if is_client_disconnect(&e) {
                         tracing::warn!("obsws http 499 Client Closed Request from {peer_addr}");
@@ -839,7 +844,12 @@ async fn write_response(
     writer: &mut BufWriter<impl tokio::io::AsyncWrite + Unpin>,
     response: &Response,
 ) -> io::Result<()> {
-    writer.write_all(&response.encode()).await?;
+    // 呼び出し側は Response::new + 固定ヘッダーで構築した値しか渡さないので、
+    // shiguredo_http11 の encode バリデーション失敗は実装バグ。
+    let encoded = response
+        .encode()
+        .expect("infallible: response built from valid components");
+    writer.write_all(&encoded).await?;
     writer.flush().await?;
     Ok(())
 }
@@ -879,37 +889,37 @@ async fn proxy_to_upstream(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // upstream URI を構築する
     let upstream_uri = if config.path_prefix == "/" || config.path_prefix.is_empty() {
-        client_request.uri.clone()
+        client_request.uri().to_string()
     } else {
         let prefix = config.path_prefix.trim_end_matches('/');
-        format!("{prefix}{}", client_request.uri)
+        format!("{prefix}{}", client_request.uri())
     };
 
     // upstream リクエストを構築する
-    let mut upstream_request = Request::new("GET", &upstream_uri);
-    upstream_request.add_header("Host", &config.host);
-    upstream_request.add_header("Connection", "close");
+    let mut upstream_request = Request::new("GET", upstream_uri)?;
+    upstream_request.add_header("Host", config.host.as_str())?;
+    upstream_request.add_header("Connection", "close")?;
 
     // クライアントヘッダーを転送する（hop-by-hop と Host を除外）
-    for (name, value) in &client_request.headers {
-        let name_lower = name.to_ascii_lowercase();
+    for (name, value) in client_request.headers() {
+        let name_lower = name.as_str().to_ascii_lowercase();
         if name_lower == "host" {
             continue;
         }
         if HOP_BY_HOP_HEADERS.contains(&name_lower.as_str()) {
             continue;
         }
-        upstream_request.add_header(name, value);
+        upstream_request.add_header(name.clone(), value.as_str())?;
     }
 
     // X-Forwarded-For ヘッダーを追加する
-    upstream_request.add_header("X-Forwarded-For", &client_addr.ip().to_string());
+    upstream_request.add_header("X-Forwarded-For", client_addr.ip().to_string())?;
 
     // upstream に接続する
     let mut upstream = TcpOrTlsStream::connect(&config.host, config.port, config.tls).await?;
 
     // upstream にリクエストを送信する
-    upstream.write_all(&upstream_request.encode()).await?;
+    upstream.write_all(&upstream_request.encode()?).await?;
     upstream.flush().await?;
 
     // upstream レスポンスを受信する
@@ -926,7 +936,10 @@ async fn proxy_to_upstream(
 
         if let Some(response) = response_decoder.decode()? {
             // レスポンスを downstream に転送する
-            if let Err(e) = downstream.write_all(&response.encode()).await {
+            let encoded = response
+                .encode()
+                .map_err(|e| format!("failed to encode upstream response: {e}"))?;
+            if let Err(e) = downstream.write_all(&encoded).await {
                 if is_client_disconnect(&e) {
                     tracing::warn!("499 Client Closed Request from {client_addr}");
                     return Ok(());

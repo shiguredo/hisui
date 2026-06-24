@@ -104,7 +104,7 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.9 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.11 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
@@ -130,7 +130,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.147.2 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.150.1 を追加する
   - @sile
 - [ADD] `server` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui server` で WebSocket サーバーを起動できる
@@ -151,7 +151,7 @@
   - 未対応 RequestType は `Unknown request type` のエラーで応答する
   - OBS WebSocket 互換機能の実装状況管理ファイル `docs/obsws/PROTOCOL_STATUS.md` を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_websocket 2026.1.0 を追加する
+- [ADD] 依存ライブラリに shiguredo_websocket 2026.3.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに base64 0.22.1 を追加する
   - @sile
@@ -182,7 +182,7 @@
 - [UPDATE] shiguredo_svt_av1 のバージョンを 2026.1.0 にあげる
   - このバージョンから shiguredo_svt_av1 crate のリポジトリが <https://github.com/shiguredo/svt-av1-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_http11 のバージョンを 2026.1.1 にあげる
+- [UPDATE] shiguredo_http11 のバージョンを 2026.6.1 にあげる
   - @voluntas
 - [UPDATE] `libc` 0.2.186 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
