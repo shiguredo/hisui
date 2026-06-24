@@ -249,6 +249,15 @@ impl NvcodecEncoder {
         self.force_keyframe_next = false;
         self.inner.encode(&nv12_data, &encode_options, ())?;
         self.input_queue.push_back(video_frame.to_stripped());
+        // shiguredo_nvcodec 2026.2.0 のエンコーダーは内部に worker / drain スレッドを持ち、
+        // encode() は非同期にジョブを投入して即時 return する。
+        // hisui の上位パイプラインは現状同期 pull 型なので、
+        // ペース制御をしないと内部キューが溢れて encode() が
+        // "encoder buffer is full" で失敗する。
+        // ここでは投入直後に flush() を呼んで 1 フレーム分の完了を待ち、
+        // 旧 API と同じ 1 frame in / 1 frame out の動作を維持する。
+        // 真のパイプライン非同期化は上位インターフェースの再設計とセットで別途行う。
+        self.inner.flush()?;
         self.handle_encoded_frames()?;
         Ok(())
     }
