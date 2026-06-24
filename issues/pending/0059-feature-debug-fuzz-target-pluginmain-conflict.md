@@ -114,3 +114,10 @@ hisui で fuzz target を追加して初めて表面化しただけで、 webrtc
 - 上流対応待ちの間、 hisui 側で暫定回避策が必要かどうか検討する
   (案: `fuzz/build.rs` で `libwebrtc_c.a` をコピーし `ar d` で当該 .o を削った
   ものを link search path に差し込む)。
+
+## pending の理由
+
+完了条件 (fuzz バイナリの起動 / `test-fuzz` ジョブの再有効化) は、
+webrtc-rs もしくは shiguredo-webrtc-build 側の prebuilt 修正に依存する。
+上流対応待ちのため `issues/pending/` に置き、 上流対応完了後に reopened で
+戻して残作業を進める。
