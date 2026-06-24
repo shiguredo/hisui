@@ -11,6 +11,9 @@ pub mod svt_av1;
 #[cfg(target_os = "macos")]
 pub mod video_toolbox;
 
+#[cfg(test)]
+mod test_helpers;
+
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
