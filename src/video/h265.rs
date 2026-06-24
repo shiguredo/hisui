@@ -337,7 +337,7 @@ fn chroma_subsampling_factors(
         1 => (2, 2), // 4:2:0
         2 => (2, 1), // 4:2:2
         3 => (1, 1), // 4:4:4
-        _ => unreachable!("chroma_format_idc は parse_hevc_sps で 0..=3 に絞られている"),
+        _ => unreachable!(),
     }
 }
 
