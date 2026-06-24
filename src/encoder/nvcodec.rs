@@ -22,8 +22,7 @@ pub struct NvcodecEncoder {
     >,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    // shiguredo_nvcodec 2026.2.0 以降はエンコード完了が別スレッドからコールバックで通知されるため、
-    // 共有キュー越しに本スレッド側へ受け渡してから処理する。
+    // エンコード完了は別スレッドからコールバックで通知されるため、共有キュー越しに本スレッド側へ受け渡してから処理する。
     encoded_queue: EncodedQueue,
     error_slot: ErrorSlot,
     // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
@@ -249,14 +248,10 @@ impl NvcodecEncoder {
         self.force_keyframe_next = false;
         self.inner.encode(&nv12_data, &encode_options, ())?;
         self.input_queue.push_back(video_frame.to_stripped());
-        // shiguredo_nvcodec 2026.2.0 のエンコーダーは内部に worker / drain スレッドを持ち、
-        // encode() は非同期にジョブを投入して即時 return する。
-        // hisui の上位パイプラインは現状同期 pull 型なので、
-        // ペース制御をしないと内部キューが溢れて encode() が
-        // "encoder buffer is full" で失敗する。
-        // ここでは投入直後に flush() を呼んで 1 フレーム分の完了を待ち、
-        // 旧 API と同じ 1 frame in / 1 frame out の動作を維持する。
-        // 真のパイプライン非同期化は上位インターフェースの再設計とセットで別途行う。
+        // shiguredo_nvcodec のエンコーダーは内部の worker スレッドで非同期にエンコードし、
+        // encode() は即時 return する。上位パイプラインは同期 pull 型で、上位側でペース制御
+        // しないと内部キューが溢れて encode() が "encoder buffer is full" で失敗するため、
+        // 投入直後に flush() で 1 フレーム分の完了を待って同期動作させる。
         self.inner.flush()?;
         self.handle_encoded_frames()?;
         Ok(())
@@ -267,7 +262,7 @@ impl NvcodecEncoder {
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {
-        // shiguredo_nvcodec 2026.2.0 では finish が廃止され、flush で in-flight 完了を待つ
+        // flush で in-flight 完了を待ち合わせる
         self.inner.flush()?;
         self.handle_encoded_frames()?;
         Ok(())
@@ -308,7 +303,6 @@ impl NvcodecEncoder {
             // AV1 の場合は変換不要だが、キーフレームに Sequence Header が含まれていない場合は付与
             // H.264/H.265 の場合は Annex B から MP4 形式に変換
             let frame_data = if self.encoded_format == VideoFormat::Av1 {
-                // shiguredo_nvcodec 2026.2.0 では into_data が廃止され、into_parts でデータと user_data を返す
                 let (mut data, _) = encoded_frame.into_parts();
 
                 // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与

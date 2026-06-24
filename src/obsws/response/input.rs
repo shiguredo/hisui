@@ -782,10 +782,10 @@ fn enumerate_video_device_property_items(
 ) -> Result<Vec<ObswsPropertyItem>, String> {
     use std::collections::BTreeSet;
 
-    // shiguredo_video_device 2026.2.0 系では、Linux で /dev/video* が一つもない場合などに
+    // Linux で /dev/video* が一つもないなどデバイス未検出の環境では
     // VideoDeviceList::enumerate() が Err(DeviceAccessDenied) を返す。
     // obsws のプロパティ列挙としては「デバイスが見つからない」と「失敗」を区別する必要がないため、
-    // Err は警告ログだけ残して空リスト扱いで処理を続ける。
+    // Err は debug ログだけ残して空リスト扱いで処理を続ける。
     let device_list = match shiguredo_video_device::VideoDeviceList::enumerate() {
         Ok(list) => Some(list),
         Err(e) => {

@@ -20,8 +20,7 @@ pub struct NvcodecDecoder {
     >,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
-    // shiguredo_nvcodec 2026.2.0 以降はデコード完了が別スレッドからコールバックで通知されるため、
-    // 共有キュー越しに本スレッド側へ受け渡してから処理する。
+    // デコード完了は別スレッドからコールバックで通知されるため、共有キュー越しに本スレッド側へ受け渡してから処理する。
     decoded_queue: DecodedQueue,
     error_slot: ErrorSlot,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
@@ -212,7 +211,7 @@ impl NvcodecDecoder {
     }
 
     pub fn finish(&mut self) -> crate::Result<()> {
-        // shiguredo_nvcodec 2026.2.0 では finish が廃止され、flush で in-flight 完了を待つ
+        // flush で in-flight 完了を待ち合わせる
         self.inner.flush()?;
         self.handle_decoded_frames()?;
         Ok(())
