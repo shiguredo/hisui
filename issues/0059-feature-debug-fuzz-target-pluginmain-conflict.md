@@ -86,12 +86,31 @@ main があるため衝突せず、 本問題は fuzz target でだけ顕在化�
   `-artifact_prefix=...` を認識できず、 短縮表示で `-a` までを示しているもの。
 - ローカル (macOS aarch64): `Unknown option: -artifact_prefix=...` — 同じ箇所の全文表示。
 
+### bisect 結果 (いつから問題が入ったか)
+
+webrtc-rs の各 stable release の macos_arm64 用 prebuilt
+(`https://github.com/shiguredo/webrtc-rs/releases/download/{ver}/libwebrtc_c-macos_arm64.tar.gz`)
+を curl で取得し、 `ar t` で 3 つの問題 .o の有無を直接確認した。
+
+| バージョン | 公開日 | 3 つの問題 .o の有無 |
+| --- | --- | --- |
+| 0.150.2 (現在) | 2026-06-23 | あり |
+| 0.150.1 | 2026-06-12 | あり |
+| 0.148.0 | 2026-05-16 | あり |
+| 0.147.2 | 2026-04-22 | あり |
+| 0.146.0 | 2026-03-15 | あり |
+| 0.145.2 | 2026-02-26 | あり |
+| 0.145.0 | 2026-02-12 | `macos_arm64` 用 prebuilt が release に存在せず (HTTP 404) |
+
+結論として、 直近のデグレではなく、 webrtc-rs prebuilt は少なくとも
+2026-02-26 公開の 0.145.2 から同じ 3 つの host tool object を含み続けている。
+hisui で fuzz target を追加して初めて表面化しただけで、 webrtc-rs のリリース
+ワークフロー自体に長期的に潜んでいた問題と判断できる。
+
 ### 残作業
 
 - shiguredo-webrtc-build へ上流バグ報告 (prebuilt から `main.o` / `cppgen_plugin.o`
   / `protozero_plugin.o` を除外してもらう)。
-- webrtc-rs のバージョンを段階的に戻して、 問題がどのバージョンから入ったか
-  bisect する。
 - 上流対応待ちの間、 hisui 側で暫定回避策が必要かどうか検討する
   (案: `fuzz/build.rs` で `libwebrtc_c.a` をコピーし `ar d` で当該 .o を削った
   ものを link search path に差し込む)。
