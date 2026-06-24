@@ -782,13 +782,24 @@ fn enumerate_video_device_property_items(
 ) -> Result<Vec<ObswsPropertyItem>, String> {
     use std::collections::BTreeSet;
 
-    let device_list = shiguredo_video_device::VideoDeviceList::enumerate()
-        .map_err(|e| format!("failed to enumerate video devices: {e}"))?;
+    // shiguredo_video_device 2026.2.0 系では、Linux で /dev/video* が一つもない場合などに
+    // VideoDeviceList::enumerate() が Err(DeviceAccessDenied) を返す。
+    // obsws のプロパティ列挙としては「デバイスが見つからない」と「失敗」を区別する必要がないため、
+    // Err は警告ログだけ残して空リスト扱いで処理を続ける。
+    let device_list = match shiguredo_video_device::VideoDeviceList::enumerate() {
+        Ok(list) => Some(list),
+        Err(e) => {
+            tracing::debug!("failed to enumerate video devices, treating as empty: {e}");
+            None
+        }
+    };
+    let devices: &[shiguredo_video_device::VideoDevice] =
+        device_list.as_ref().map(|l| l.as_slice()).unwrap_or(&[]);
 
     match property_name {
         "device_id" => {
             let mut items = Vec::new();
-            for device in &device_list {
+            for device in devices {
                 let name = device.name().unwrap_or_else(|_| "Unknown".to_owned());
                 let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
                 items.push(ObswsPropertyItem {
@@ -801,7 +812,7 @@ fn enumerate_video_device_property_items(
         }
         "formats" => {
             let mut items = Vec::new();
-            for device in &device_list {
+            for device in devices {
                 // device_id が指定されている場合はそのデバイスだけフィルタする
                 if let Some(target_id) = device_id {
                     let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
@@ -831,7 +842,7 @@ fn enumerate_video_device_property_items(
         }
         "pixel_format" => {
             let mut values = BTreeSet::new();
-            for device in &device_list {
+            for device in devices {
                 if let Some(target_id) = device_id {
                     let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
                     if unique_id != target_id {
@@ -868,7 +879,7 @@ fn enumerate_video_device_property_items(
         }
         "fps" => {
             let mut values = BTreeSet::new();
-            for device in &device_list {
+            for device in devices {
                 if let Some(target_id) = device_id {
                     let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
                     if unique_id != target_id {
