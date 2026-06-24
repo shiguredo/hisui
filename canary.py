@@ -11,9 +11,7 @@ def update_version(file_path: str, dry_run: bool) -> Optional[str]:
 
     # [package] セクション内のバージョンのみを取得
     package_section_match = re.search(
-        r'\[package\].*?version\s*=\s*"([\d\.\w-]+)"',
-        content,
-        re.DOTALL
+        r'\[package\].*?version\s*=\s*"([\d\.\w-]+)"', content, re.DOTALL
     )
     if not package_section_match:
         raise ValueError("Version not found in [package] section of Cargo.toml")
@@ -21,9 +19,9 @@ def update_version(file_path: str, dry_run: bool) -> Optional[str]:
     current_version: str = package_section_match.group(1)
 
     # [package] セクションの開始位置を見つける
-    package_start = content.find('[package]')
+    package_start = content.find("[package]")
     # 次のセクション ([dependencies] など) の開始位置を見つける
-    next_section = re.search(r'\n\[(?!package)', content[package_start:])
+    next_section = re.search(r"\n\[(?!package)", content[package_start:])
     if next_section:
         package_end = package_start + next_section.start()
         package_content = content[package_start:package_end]
@@ -36,7 +34,7 @@ def update_version(file_path: str, dry_run: bool) -> Optional[str]:
             r'(version\s*=\s*")(\d+\.\d+\.\d+-canary\.)(\d+)',
             lambda m: f"{m.group(1)}{m.group(2)}{int(m.group(3)) + 1}",
             package_content,
-            count=1  # 最初の1つだけを更新
+            count=1,  # 最初の1つだけを更新
         )
     else:
         # -canary.X がない場合、次のマイナーバージョンにして -canary.0 を追加
@@ -44,7 +42,7 @@ def update_version(file_path: str, dry_run: bool) -> Optional[str]:
             r'(version\s*=\s*")(\d+)\.(\d+)\.(\d+)',
             lambda m: f"{m.group(1)}{m.group(2)}.{int(m.group(3)) + 1}.0-canary.0",
             package_content,
-            count=1  # 最初の1つだけを更新
+            count=1,  # 最初の1つだけを更新
         )
 
     if count == 0:
@@ -58,9 +56,7 @@ def update_version(file_path: str, dry_run: bool) -> Optional[str]:
 
     # 新しいバージョンを確認 ([package] セクションから)
     new_package_version_match = re.search(
-        r'\[package\].*?version\s*=\s*"([\d\.\w-]+)"',
-        new_content,
-        re.DOTALL
+        r'\[package\].*?version\s*=\s*"([\d\.\w-]+)"', new_content, re.DOTALL
     )
     if not new_package_version_match:
         raise ValueError("Failed to extract the new version after the update.")
