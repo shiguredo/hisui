@@ -1,6 +1,7 @@
 use tokio::sync::{mpsc, oneshot};
 
 use crate::ProcessorId;
+use crate::color::{Color, ColorParseError};
 use crate::mixer::video::VideoRealtimeMixerRpcMessage;
 use crate::mixer::video::text_overlay::{
     TextOverlayCommand, TextOverlayError, TextOverlayPatch, TextOverlaySpecInput, TextOverlayState,
@@ -91,10 +92,18 @@ impl ObswsCoordinator {
         };
 
         let font_color_argb = match parse_optional_string(request_data, "fontColor") {
-            Ok(Some(s)) => match parse_argb_color(&s) {
-                Ok(v) => v,
+            Ok(Some(s)) => match Color::from_hex(&s) {
+                Ok(c) => c.to_argb_u32(),
                 Err(e) => {
-                    return self.build_text_overlay_error_result(request_type, request_id, e);
+                    return self.build_text_overlay_error_result(
+                        request_type,
+                        request_id,
+                        TextOverlayError::InvalidColor(format_color_parse_error(
+                            "fontColor",
+                            &s,
+                            e,
+                        )),
+                    );
                 }
             },
             Ok(None) => DEFAULT_FONT_COLOR_ARGB,
@@ -188,10 +197,18 @@ impl ObswsCoordinator {
         };
 
         let font_color_argb = match parse_optional_string(request_data, "fontColor") {
-            Ok(Some(s)) => match parse_argb_color(&s) {
-                Ok(v) => Some(v),
+            Ok(Some(s)) => match Color::from_hex(&s) {
+                Ok(c) => Some(c.to_argb_u32()),
                 Err(e) => {
-                    return self.build_text_overlay_error_result(request_type, request_id, e);
+                    return self.build_text_overlay_error_result(
+                        request_type,
+                        request_id,
+                        TextOverlayError::InvalidColor(format_color_parse_error(
+                            "fontColor",
+                            &s,
+                            e,
+                        )),
+                    );
                 }
             },
             Ok(None) => None,
@@ -505,45 +522,25 @@ fn text_overlay_state_to_json(state: &TextOverlayState) -> nojson::RawJsonOwned 
         f.member("x", spec.x)?;
         f.member("y", spec.y)?;
         f.member("fontSize", spec.font_size)?;
-        f.member("fontColor", argb_to_hex_string(spec.font_color_argb))?;
+        f.member(
+            "fontColor",
+            Color::from_argb_u32(spec.font_color_argb).to_hex_string(),
+        )?;
         f.member("fontName", &spec.font_name)?;
         f.member("z", spec.z)
     })
 }
 
-fn argb_to_hex_string(argb: u32) -> String {
-    format!(
-        "#{:02X}{:02X}{:02X}{:02X}",
-        (argb >> 16) & 0xFF,
-        (argb >> 8) & 0xFF,
-        argb & 0xFF,
-        (argb >> 24) & 0xFF,
-    )
-}
-
-fn parse_argb_color(s: &str) -> Result<u32, TextOverlayError> {
-    let stripped = s.strip_prefix('#').ok_or_else(|| {
-        TextOverlayError::InvalidColor(format!("fontColor must start with '#': {s:?}"))
-    })?;
-    if stripped.len() != 6 && stripped.len() != 8 {
-        return Err(TextOverlayError::InvalidColor(format!(
-            "fontColor must be #RRGGBB or #RRGGBBAA: {s:?}"
-        )));
+/// `Color::from_hex` 失敗時に `fontColor must ...` 形式の comment 文言を組み立てる。
+/// `field` は将来 `backgroundColor` 等で再利用するため引数化している。
+fn format_color_parse_error(field: &str, input: &str, e: ColorParseError) -> String {
+    match e {
+        ColorParseError::MissingHashPrefix => format!("{field} must start with '#': {input:?}"),
+        ColorParseError::InvalidLength(_) => {
+            format!("{field} must be #RRGGBB or #RRGGBBAA: {input:?}")
+        }
+        ColorParseError::InvalidHex => format!("{field} must be hex: {input:?}"),
     }
-    if !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(TextOverlayError::InvalidColor(format!(
-            "fontColor must be hex: {s:?}"
-        )));
-    }
-    let rgb = u32::from_str_radix(&stripped[..6], 16)
-        .map_err(|_| TextOverlayError::InvalidColor(format!("invalid hex: {s:?}")))?;
-    let a = if stripped.len() == 8 {
-        u32::from_str_radix(&stripped[6..8], 16)
-            .map_err(|_| TextOverlayError::InvalidColor(format!("invalid hex: {s:?}")))?
-    } else {
-        0xFF
-    };
-    Ok((a << 24) | rgb)
 }
 
 /// 必須文字列フィールドを取り出す (空文字も `Ok` として渡す版)。
@@ -687,52 +684,6 @@ fn parse_optional_u32(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `#RRGGBB` 形式は A=0xFF とみなされる。
-    #[test]
-    fn parse_argb_color_handles_rgb_only() {
-        let v = parse_argb_color("#FF0000").expect("#FF0000 は妥当");
-        assert_eq!(v, 0xFFFF0000, "A=0xFF, R=0xFF, G=0x00, B=0x00");
-    }
-
-    /// `#RRGGBBAA` 形式が正しく u32 (0xAARRGGBB) に変換される。
-    #[test]
-    fn parse_argb_color_handles_rgba() {
-        let v = parse_argb_color("#FF000080").expect("#FF000080 は妥当");
-        assert_eq!(v, 0x80FF0000, "A=0x80, R=0xFF, G=0x00, B=0x00");
-    }
-
-    /// 不正な文字種は拒否される。
-    #[test]
-    fn parse_argb_color_rejects_non_hex() {
-        parse_argb_color("#GGGGGG").expect_err("hex 以外は拒否");
-    }
-
-    /// `#` プレフィックスがないと拒否。
-    #[test]
-    fn parse_argb_color_rejects_missing_hash() {
-        parse_argb_color("FF0000").expect_err("# 不在は拒否");
-    }
-
-    /// 桁数が 6 / 8 以外は拒否。
-    #[test]
-    fn parse_argb_color_rejects_wrong_length() {
-        parse_argb_color("#FFF").expect_err("3 桁は拒否");
-        parse_argb_color("#FFFFFFFFF").expect_err("9 桁は拒否");
-    }
-
-    /// `argb_to_hex_string` → `parse_argb_color` のラウンドトリップが恒等であることを確認する。
-    /// `#RRGGBBAA` の具体的なフォーマット検証は parse_argb_color_handles_* シリーズでカバー済み。
-    #[test]
-    fn argb_to_hex_string_roundtrip() {
-        let argb = 0x80FF0000u32;
-        let s = argb_to_hex_string(argb);
-        assert_eq!(
-            parse_argb_color(&s).unwrap(),
-            argb,
-            "argb → hex → argb のラウンドトリップが恒等"
-        );
-    }
 
     fn parse_owned_json(text: &str) -> nojson::RawJsonOwned {
         nojson::RawJsonOwned::parse(text).expect("テスト JSON はパース可能であるべき")

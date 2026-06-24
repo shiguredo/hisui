@@ -835,12 +835,12 @@ fn parse_overlay_bool_setting(
 }
 
 fn validate_hex_color(color: &Option<String>) -> Result<(), ParseInputSettingsError> {
-    if let Some(c) = color
-        && crate::obsws::source::webrtc_source::parse_hex_color(c).is_none()
-    {
-        return Err(ParseInputSettingsError::InvalidInputSettings(format!(
-            "invalid color format: expected #RRGGBB, got {c}"
-        )));
+    if let Some(c) = color {
+        crate::color::Color::from_hex_rgb(c).map_err(|_| {
+            ParseInputSettingsError::InvalidInputSettings(format!(
+                "invalid color format: expected #RRGGBB, got {c}"
+            ))
+        })?;
     }
     Ok(())
 }
