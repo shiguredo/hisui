@@ -212,13 +212,7 @@ fn parse_hevc_sps(sps: &[u8]) -> crate::Result<HevcSpsParams> {
     reader.skip_ue()?;
 
     // chroma_format_idc (ue(v))
-    let chroma_format_idc_u32 = reader.read_ue()?;
-    if chroma_format_idc_u32 > 3 {
-        return Err(crate::Error::new(format!(
-            "invalid H.265 SPS: chroma_format_idc out of spec range (0..=3): {chroma_format_idc_u32}"
-        )));
-    }
-    let chroma_format_idc = chroma_format_idc_u32 as u8;
+    let chroma_format_idc = read_ue_as_u8_bounded(&mut reader, 3, "chroma_format_idc")?;
     // separate_colour_plane_flag (u(1))（chroma_format_idc == 3 のときのみ）
     let separate_colour_plane_flag = if chroma_format_idc == 3 {
         reader.read_u(1)?
@@ -243,23 +237,9 @@ fn parse_hevc_sps(sps: &[u8]) -> crate::Result<HevcSpsParams> {
             (0, 0, 0, 0)
         };
 
-    // bit_depth_luma_minus8 (ue(v))
-    let bit_depth_luma_minus8_u32 = reader.read_ue()?;
-    if bit_depth_luma_minus8_u32 > 7 {
-        return Err(crate::Error::new(format!(
-            "invalid H.265 SPS: bit_depth_luma_minus8 out of spec range (0..=7): {bit_depth_luma_minus8_u32}"
-        )));
-    }
-    let bit_depth_luma_minus8 = bit_depth_luma_minus8_u32 as u8;
-
-    // bit_depth_chroma_minus8 (ue(v))
-    let bit_depth_chroma_minus8_u32 = reader.read_ue()?;
-    if bit_depth_chroma_minus8_u32 > 7 {
-        return Err(crate::Error::new(format!(
-            "invalid H.265 SPS: bit_depth_chroma_minus8 out of spec range (0..=7): {bit_depth_chroma_minus8_u32}"
-        )));
-    }
-    let bit_depth_chroma_minus8 = bit_depth_chroma_minus8_u32 as u8;
+    // bit_depth_luma_minus8 / bit_depth_chroma_minus8 (ue(v))
+    let bit_depth_luma_minus8 = read_ue_as_u8_bounded(&mut reader, 7, "bit_depth_luma_minus8")?;
+    let bit_depth_chroma_minus8 = read_ue_as_u8_bounded(&mut reader, 7, "bit_depth_chroma_minus8")?;
 
     // conformance window 適用後の解像度を計算する（仕様 6.2 / 7.4.3.2.1 / Table 6-1）。
     let (sub_width_c, sub_height_c) =
@@ -321,6 +301,24 @@ fn parse_hevc_sps(sps: &[u8]) -> crate::Result<HevcSpsParams> {
         width: width as u16,
         height: height as u16,
     })
+}
+
+/// ue(v) を読み出し、値が `max` 以下であることを検証してから u8 にキャストする内部ヘルパー
+///
+/// 仕様値域 (例: chroma_format_idc は 0..=3、bit_depth_*_minus8 は 0..=7) を超えた場合は
+/// 統一フォーマットの `invalid H.265 SPS: <field_name> out of spec range (0..=<max>): <value>` Err を返す。
+fn read_ue_as_u8_bounded(
+    reader: &mut BitReader<'_>,
+    max: u32,
+    field_name: &str,
+) -> crate::Result<u8> {
+    let v = reader.read_ue()?;
+    if v > max {
+        return Err(crate::Error::new(format!(
+            "invalid H.265 SPS: {field_name} out of spec range (0..={max}): {v}"
+        )));
+    }
+    Ok(v as u8)
 }
 
 /// chroma_format_idc / separate_colour_plane_flag から (SubWidthC, SubHeightC) を返す
