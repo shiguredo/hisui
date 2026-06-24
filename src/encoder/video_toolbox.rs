@@ -137,14 +137,14 @@ impl VideoToolboxEncoder {
                 .input_queue
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
-            // 最初の出力フレームの SPS / PPS からサンプルエントリーを確定して保持し、
-            // 以後の全出力フレームには保持済みのサンプルエントリーを載せる。
-            // shiguredo_video_toolbox は keyframe 出力時のみ SPS / PPS を返すため、
-            // 非 keyframe フレームでは frame.sps_list / pps_list が空になる。
-            // H.264 経路で sample_entry 未確定のまま SPS / PPS が空の出力が来たら、
-            // writer 入口の不変条件 (圧縮フレームの sample_entry は必ず Some) を満たせない
-            // ため fail-fast 停止する。H.265 経路は h265_sample_entry が空 VPS / SPS / PPS でも
-            // Ok を返す実装のため、初回反復で必ず sample_entry が確定する。
+            // 最初の出力フレームの SPS / PPS (H.265 は VPS も) からサンプルエントリーを
+            // 確定して保持し、以後の全出力フレームには保持済みのサンプルエントリーを載せる。
+            // shiguredo_video_toolbox は keyframe 出力時のみ SPS / PPS / VPS を返すため、
+            // 非 keyframe フレームでは frame.sps_list 等が空になる。
+            // sample_entry 未確定のまま素材が空の出力が来たら writer 入口の不変条件
+            // (圧縮フレームの sample_entry は有効でなければならない) を満たせないため
+            // fail-fast 停止する。h265_sample_entry は空入力でも Ok を返すが、空 NAL リストの
+            // hvcC は壊れた sample_entry になるため H.265 経路でも事前にガードする。
             if self.sample_entry.is_none() {
                 let sample_entry = if self.format == VideoFormat::H264 {
                     if frame.sps_list.is_empty() || frame.pps_list.is_empty() {
@@ -158,6 +158,14 @@ impl VideoToolboxEncoder {
                     )?;
                     entry
                 } else {
+                    if frame.vps_list.is_empty()
+                        || frame.sps_list.is_empty()
+                        || frame.pps_list.is_empty()
+                    {
+                        return Err(crate::Error::new(
+                            "video_toolbox encoder produced H.265 output before VPS/SPS/PPS established the sample_entry",
+                        ));
+                    }
                     h265::h265_sample_entry(
                         self.width,
                         self.height,

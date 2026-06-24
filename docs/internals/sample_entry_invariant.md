@@ -9,12 +9,12 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 
 ## 不変条件
 
-> **writer 入口に届く圧縮（エンコード済み）フレームの `sample_entry` は必ず `Some` でなければならない**
+> **writer 入口に届く圧縮（エンコード済み）フレームの `sample_entry` は必ず `Some` であり、かつ中身が有効でなければならない**
 
 ここで「圧縮フレーム」とは `format.codec_name()` が `Some` を返すフレーム（コーデック名を持つ符号化済みデータ）を指す。
 具体的には音声側で `Opus` / `Aac`、映像側で `H264` / `H265` / `Vp8` / `Vp9` / `Av1` 等が対象。
 
-不変条件を満たさないフレーム（圧縮なのに `sample_entry: None`）は writer 側で対処手段を持たない（補完値の保険を入れないため、muxer が最初のサンプルでサンプルエントリーを得られず処理が破綻する）。
+不変条件は型レベル (`Some` であること) と意味レベル (中身が有効であること) の双方を要求する。型レベル違反 (圧縮なのに `sample_entry: None`) は muxer が最初のサンプルでサンプルエントリーを得られず処理が破綻する。意味レベル違反 (例: 空 NALU 配列で構築された壊れた `hvcC`) は muxer に渡せても出力ファイルが再生不能となる「静かな破壊」を引き起こす。writer 側はどちらも補完値の保険を持たないため、両者を入力側で確立する必要がある。
 
 ## 対象外
 
@@ -43,7 +43,7 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 | openh264 | `src/encoder/openh264.rs` | 最初の keyframe の SPS / PPS から確定し、以降の全フレームへ伝播。確定前に出力が起きた場合はエンコーダ Err |
 | svt_av1 | `src/encoder/svt_av1.rs` | コンストラクタで確定し、全フレームへ載せる |
 | libvpx | `src/encoder/libvpx.rs` | コンストラクタで確定し、全フレームへ載せる |
-| VideoToolbox | `src/encoder/video_toolbox.rs` | H.264 は最初の keyframe の SPS / PPS から確定し、確定前に出力が起きた場合はエンコーダ Err。H.265 は初回反復で無条件に確定 |
+| VideoToolbox | `src/encoder/video_toolbox.rs` | H.264 は最初の keyframe の SPS / PPS から、H.265 は VPS / SPS / PPS から確定し、以降の全フレームへ伝播。確定前に出力が起きた場合はエンコーダ Err |
 | NVENC | `src/encoder/nvcodec.rs` | コンストラクタで確定し、全フレームへ載せる |
 | fdk-aac | `src/encoder/fdk_aac.rs` | コンストラクタで確定し、全フレームへ載せる |
 | AudioToolbox | `src/encoder/audio_toolbox.rs` | コンストラクタで確定し、全フレームへ載せる |
@@ -58,9 +58,11 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 - RTSP 経路で SPS / PPS が未到来の場合はフレームをバッファリングして待機し、揃ってから圧縮 `VideoFrame` を生成する
 - SRT 経路で AnnexB の SPS / PPS が未到来の場合も同様にバッファリング
 
-エンコーダ側で「最初の keyframe より前に出力が出る」可能性を持つもの（openh264 / VideoToolbox H.264 経路）は、sample_entry が確定する前に出力フレームを組み立てる事態をエンコーダ Err として fail-fast 停止する。openh264 / VTCompressionSession の通常動作では「最初の出力フレームが必ず keyframe で SPS / PPS が同梱される」ため、この Err 経路には到達しない。到達した場合はエンコーダの挙動が暗黙の前提から外れている異常状態を示し、writer 入口で `sample_entry: None` の圧縮フレームを観測することは仕様上発生しない。
+エンコーダ側で「最初の keyframe より前に出力が出る」可能性を持つもの（openh264 / VideoToolbox の H.264 / H.265 経路）は、sample_entry が確定する前に出力フレームを組み立てる事態をエンコーダ Err として fail-fast 停止する。openh264 / VTCompressionSession の通常動作では「最初の出力フレームが必ず keyframe で SPS / PPS (H.265 は VPS も) が同梱される」ため、この Err 経路には到達しない。到達した場合はエンコーダの挙動が暗黙の前提から外れている異常状態を示す。
 
-なお `VideoToolboxEncoder` の H.265 経路は `h265_sample_entry` が空 VPS / SPS / PPS リストでも `Ok` を返す実装のため、初回フレームから無条件で sample_entry が確定する。空 NALU 配列で hvcC を作ってしまう挙動の妥当性は別途検討する余地があるが、本不変条件としては `sample_entry: Some` が常に立つことだけが保証されればよい。
+なお `h265_sample_entry` 自体は空 VPS / SPS / PPS リストでも `Ok` を返す実装のため、不変条件は呼び出し側 (encoder 等) でガードして確立する。RTSP / WebM など他の呼び出し経路では既に素材揃いを待ってから呼ぶ設計のため、`h265_sample_entry` 内部に空入力チェックを追加する必要はない。
+
+本不変条件は単に `sample_entry: Some` であることだけでなく、**有効な sample_entry が確立されていること** を意味する。空 NALU 配列で構築された壊れた `hvcC` は型レベルでは `Some` を満たすが、意味的不変条件は満たさない。各入力経路は意味レベルで不変条件を確立する責務を負う。
 
 ## writer 側の前提
 
