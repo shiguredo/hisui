@@ -63,12 +63,22 @@ impl Openh264Encoder {
             self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry));
         }
 
+        // is_keyframe は通常時の VideoFrame 構築でも使うが、Err 発火時の診断情報
+        // (非 keyframe 先行か、keyframe なのに SPS/PPS なしか) として有用なため
+        // ここで先に求めておく。
+        let is_keyframe = matches!(
+            encoded.frame_type,
+            shiguredo_openh264::FrameType::Idr | shiguredo_openh264::FrameType::I
+        );
+
         // sample_entry 未確定で出力フレームを下流に流すと writer 入口の不変条件
         // (圧縮フレームの sample_entry は必ず Some) に違反するため fail-fast 停止する。
         if self.last_sample_entry.is_none() {
-            return Err(crate::Error::new(
-                "openh264 encoder produced output before SPS/PPS established the sample_entry",
-            ));
+            return Err(crate::Error::new(format!(
+                "openh264 encoder produced output before SPS/PPS established the sample_entry \
+                 (pts={:?}, keyframe={is_keyframe})",
+                video_frame.timestamp,
+            )));
         }
 
         // AnnexB から MP4 向けの形式に変換する
@@ -84,10 +94,6 @@ impl Openh264Encoder {
             data.extend_from_slice(nal.data);
         }
 
-        let is_keyframe = matches!(
-            encoded.frame_type,
-            shiguredo_openh264::FrameType::Idr | shiguredo_openh264::FrameType::I
-        );
         if self.force_idr_pending && is_keyframe {
             self.force_idr_pending = false;
         }

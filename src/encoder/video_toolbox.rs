@@ -168,9 +168,12 @@ impl VideoToolboxEncoder {
             if self.sample_entry.is_none() {
                 let sample_entry = if self.format == VideoFormat::H264 {
                     if frame.sps_list.is_empty() || frame.pps_list.is_empty() {
-                        return Err(crate::Error::new(
-                            "video_toolbox encoder produced H.264 output before SPS/PPS established the sample_entry",
-                        ));
+                        return Err(crate::Error::new(format!(
+                            "video_toolbox encoder produced H.264 output before SPS/PPS established the sample_entry \
+                             (pts={:?}, keyframe={})",
+                            input_frame.as_video_frame().timestamp,
+                            frame.keyframe,
+                        )));
                     }
                     let (entry, _frame_size) = h264::h264_sample_entry_from_sps_pps_lists(
                         frame.sps_list.clone(),
@@ -182,9 +185,12 @@ impl VideoToolboxEncoder {
                         || frame.sps_list.is_empty()
                         || frame.pps_list.is_empty()
                     {
-                        return Err(crate::Error::new(
-                            "video_toolbox encoder produced H.265 output before VPS/SPS/PPS established the sample_entry",
-                        ));
+                        return Err(crate::Error::new(format!(
+                            "video_toolbox encoder produced H.265 output before VPS/SPS/PPS established the sample_entry \
+                             (pts={:?}, keyframe={})",
+                            input_frame.as_video_frame().timestamp,
+                            frame.keyframe,
+                        )));
                     }
                     h265::h265_sample_entry(
                         self.width,
