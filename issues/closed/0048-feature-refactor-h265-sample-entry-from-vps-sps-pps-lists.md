@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-19
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-06-24
 - Model: Opus 4.7
 - Branch: feature/refactor-h265-sample-entry-from-vps-sps-pps-lists
 - Polished: 2026-06-22
@@ -451,4 +451,56 @@ closed/0050 で確立した shiguredo-issues 規約に従い、実装コード (
 
 ## 解決方法
 
-実装着手後にここに記述する。
+推奨パッチ順序の 6 ステップを踏みつつ、`/review-diff-code` で指摘された致命的・重要・改善を順次反映する形で対応した。
+
+### 推奨パッチ順序の実装 (6 ステップ)
+
+1. **BitReader 共有化**: `src/video/h264.rs::H264BitReader` を `src/video/bit_reader.rs::BitReader` に切り出し、codec 中立名にリネームした。エラーメッセージから H.264 固有の語彙を外し `bit reader: ...` プレフィックスに統一した。`skip_scaling_list` 等の H.264 固有ロジックは h264.rs に残した。
+2. **H265AnnexBNalUnits 追加**: H.264 経路の `H264AnnexBNalUnits` と対称の汎用イテレーターを新設し、`forbidden_zero_bit` 検査と `(byte >> 1) & 0x3F` で nal_unit_type を抽出する形にした。既存 `h265_sample_entry_from_annexb` 内の手書き Annex-B 走査を置き換えた。
+3. **parse_hevc_sps + HevcSpsBuilder 追加**: `parse_hevc_sps` / `HevcSpsParams` / `rbsp_from_hevc_sps_nalu` / `chroma_subsampling_factors` を `src/video/h265.rs` に追加し、`H265_ALLOWED_PROFILE_IDCS` (`{1, 2, 3, 4, 5, 6, 7, 9}`) / `chroma_format_idc > 3` / `bit_depth_*_minus8 > 7` / `sps_max_sub_layers_minus1 > 6` / 解像度 0 / `u16::MAX` 超の Err 化を初日から組み込んだ。テストモジュールに合成 SPS ビルダー `HevcSpsBuilder` を追加し、`parse_hevc_sps` の正常系・Err 経路を網羅した。
+4. **新ヘルパー関数 + 全 2 呼び出し側追従**: `h265_sample_entry_from_vps_sps_pps_lists(vps_list, sps_list, pps_list, fps) -> Result<(SampleEntry, VideoFrameSize)>` を新設し、`HvccBox` の各フィールドを SPS / VPS 由来実値で埋めるようにした。`h265_sample_entry_from_annexb` を破壊的シグネチャ変更 (`fn(data: &[u8], fps: FrameRate) -> Result<SampleEntry>`) の薄いラッパーに変更した。`src/encoder/video_toolbox.rs::handle_encoded` の H.265 経路を新ヘルパー呼び出しに切り替え、空 VPS / SPS / PPS frame の skip ガードを追加した (H.264 経路と対称)。`src/encoder/nvcodec.rs::new_h265` を新シグネチャに追従させた。`src/codec_string.rs::tests` の H.265 fixture 2 箇所を Main プロファイル + Level 3.1 / Single layer ベース (`general_level_idc: 123 → 93`, `num_temporal_layers: 0 → 1`, `temporal_id_nested: 0 → 1`) に更新した。
+5. **dead code 削除**: 旧 `h265_sample_entry` 関数と Sora 録画固定値コメント (「Sora の録画ファイルに合わせた値」「色空間 (4:2:0)」「kVTProfileLevel_HEVC_Main_AutoLevel に対応する値」「8 ビット深度」) を削除した。`src/video/h265.rs` の `use crate::types::EvenUsize;` も削除した。
+
+### レビュー指摘の反映 (致命的)
+
+- **CHANGES.md エントリ追加**: `## develop` 内に `[UPDATE]` で「H.265 エンコード時の hvcC ボックスを SPS / VPS 由来実値で埋めるように変更する」を追記した。
+- **新ヘルパー関数の単体テスト 11 件追加**: `h265_sample_entry_from_vps_sps_pps_lists` に対する空 list Err 3 件 / 各 list 全要素 NAL タイプ検査 Err 3 件 / Main hvcC マッピング / Main 10 bit_depth / 複数 NAL 順序保持 / cropping VideoFrameSize / Annex-B 薄ラッパー統合の各テストを追加した。
+- **実機 HEVC SPS バイト列定数追加**: `HEVC_SPS_640X480` (Main / Level-3, emulation prevention byte 5 個) と `HEVC_SPS_1920X1080` (Main / Level-4, conformance window 経路, emulation prevention byte 4 個) を `pub(crate) const` で追加し、`parse_hevc_sps` と `h265_sample_entry_from_vps_sps_pps_lists` の結合担保テスト 3 件を追加した。
+
+### レビュー指摘の反映 (重要・改善)
+
+- Annex-B イテレーターの末尾 3 バイト start code 検出漏れを H.264 / H.265 両経路で修正した (共通ヘルパー `find_next_annexb_start_code` を h264.rs に新設して共有)。
+- `sub_layer_present_flags` を `Vec` から `[(u8, u8); 6]` 固定配列に置き換えた (parse_hevc_sps で 0..=6 に制限済みのため heap 確保不要)。
+- `H265NalUnit` に docstring を追加して入力契約 (NAL ヘッダ 2 バイト含む EBSP 形式) を明示した。
+- `BitReader` の単体テスト 5 件を h264.rs から bit_reader.rs に移動した (共有モジュールに責務を集約)。
+- `general_profile_idc` 許容リストの穴 (`profile_idc=8`) と全許容値 8 個 (`{1, 2, 3, 4, 5, 6, 7, 9}`) の境界テストを追加した。
+- `chroma_subsampling_factors` の Table 6-1 マッピング (4 ケース + `separate_colour_plane_flag=1` の特例) 単体テストを追加した。
+- `H265AnnexBNalUnits` の 3 バイト / 4 バイト start code 混在パターンのテストを追加した。
+- `HevcSpsBuilder::build()` の NAL ヘッダハードコードを `SPS_HEADER` 定数経由に統一した (DRY)。
+- `NalUnitArray` 型エイリアスを削除して `Vec<Vec<u8>>` 直書きに揃えた (H.264 経路との対称性回復)。
+- `parse_hevc_sps` 内の 3 箇所で繰り返されていた ue(v) 値域検査 + u8 キャストのパターンを `read_ue_as_u8_bounded` ヘルパー関数に共通化した。
+- `chroma_subsampling_factors::unreachable!()` の長文コメントを自明として削った。
+- 冗長な `sps_list[0].as_slice()` を `&sps_list[0]` に簡略化した。
+- `SPS VUI / PPS 由来抽出` のコメントから issue 由来表現を除き中立表現に書き換えた。
+
+### CHANGES.md
+
+`## develop` 内 `[UPDATE]` で記載した (リリース済み機能の hvcC 内部実値化と空 VPS / SPS / PPS skip ガード追加を伴うため)。本文ドラフトを issue で提示した内容を簡潔化し、タイトル 1 行 + `@sile` の最小エントリにした。
+
+### 副次的な外部観測可能挙動変化
+
+- `HvccBox` の各フィールド (`general_profile_idc` / `general_level_idc` / `general_profile_compatibility_flags` / `general_constraint_indicator_flags` / `chroma_format_idc` / `bit_depth_*_minus8` / `num_temporal_layers` / `temporal_id_nested`) が Sora 録画固定値 → SPS / VPS 由来実値に変わる。
+- `build_hevc_codec_string` 経由で生成される H.265 codec_string (HLS / MPEG-DASH マニフェスト含む) が SPS / VPS 由来実値ベースに変わる。
+- `src/encoder/video_toolbox.rs::handle_encoded` の H.265 経路で、空 VPS / SPS / PPS の frame に対するサンプルエントリー構築をスキップする挙動が追加される (H.264 経路と対称化、nvcodec 経路の挙動は変わらない)。
+- `parse_hevc_sps` 内の Err 化拡張で、仕様値域外 SPS (`chroma_format_idc > 3` / `bit_depth_*_minus8 > 7` / `sps_max_sub_layers_minus1 > 6` / `general_profile_idc` 許容リスト外 / 解像度 0 / `u16::MAX` 超) は SPS 受信時点で Err になり、上位 fail-fast 経路に伝播する。
+
+### 残懸念 (別 issue 起票候補)
+
+- **`src/rtsp/subscriber.rs::BitReader` の統合**: `src/video/bit_reader.rs::BitReader` と同名・同等機能の独自実装が subscriber 側に残っており、`BitReader` という汎用名前空間を 2 箇所が確保している。`open/0058` として起票済み。
+- **`NALU_HEADER_LENGTH` の横方向依存**: `src/video/h265.rs` で `pub use crate::video::h264::NALU_HEADER_LENGTH;` として H.264 モジュールから再エクスポートしている。実害ゼロのため起票しないと判断したが、broken window として残置。
+- **`parse_hevc_sps` の関数分割**: 約 180 行のフラット関数。H.264 経路 (`parse_sps`) のような `read_high_profile_sps_fields` 相当のヘルパーへの切り出し余地がある。現状のテスト網羅で品質は担保されているため起票しないと判断したが、将来 H.265 仕様拡張時に再評価候補。
+- **AV1 経路 (`src/video/av1.rs::av1_sample_entry`) の Hisui 固定値解消**: closed/0047 が本 issue を AV1 固定値解消の予告先として参照済み。将来別 issue として起票候補。
+- **`avg_frame_rate` の ISO/IEC 14496-15 §8.3.3.1 仕様 (256 倍単位) への準拠**: 現状の `(fps.numerator.get().div_ceil(fps.denumerator.get())) as u16` は仕様の `frames in 256 seconds` と 256 倍ずれている。将来別 issue として起票候補。
+- **`min_spatial_segmentation_idc` / `parallelism_type` の SPS VUI / PPS 由来実値抽出**: 本 issue では固定値 0 を維持。実装範囲が広がるため将来別 issue として起票候補。
+- **H.265 SPS パーサの PBT 追加**: closed/0049 の構造化 Strategy 完了済み。本 issue では新設しない判断としたが、H.264 経路と対称な PBT 追加は将来別 issue として起票候補。
+- **video_toolbox H.265 経路の 3 連 `clone`**: `frame.vps_list.clone()` 等は `std::mem::take` で move 可能。ただし H.264 経路も同じパターンのため、対称化を保つには両経路を一括対応する別 issue として起票候補。
