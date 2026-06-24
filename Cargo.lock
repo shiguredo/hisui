@@ -1567,9 +1567,9 @@ checksum = "b475c218cf15d056ed3e48c9e98693135b261b79530881e63b162650b236fdec"
 
 [[package]]
 name = "shiguredo_video_device"
-version = "2026.2.0-canary.1"
+version = "2026.2.0-canary.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "228bf640d999058058574ecf4dad6b404f6589d279637df651d81782747ffd7a"
+checksum = "a15430c034f07a5b3a843d85880b325708ce34a8d9787985790215a9ccc8bab8"
 dependencies = [
  "bindgen",
  "cc",
@@ -1600,9 +1600,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_webrtc"
-version = "0.150.1"
+version = "0.150.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2037fa1d1f9534bb1216d1759d90a5496aca56cf1aae5e5cbd80096642312424"
+checksum = "ff0d559e88708d2b5f7f9ec5909c4e8f795bb68707c5d6f113fa53d80b6f8836"
 dependencies = [
  "bindgen",
  "nojson",

@@ -130,7 +130,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.150.1 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.150.2 を追加する
   - @sile
 - [ADD] `server` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui server` で WebSocket サーバーを起動できる
@@ -237,7 +237,7 @@
   - @sile
 - [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.5 にあげる
   - @sile
-- [UPDATE] shiguredo_video_device のバージョンを 2026.2.0-canary.1 にあげる
+- [UPDATE] shiguredo_video_device のバージョンを 2026.2.0-canary.2 にあげる
   - @sile
 - [UPDATE] raw_player のバージョンを 2026.2.0-canary.0 にあげる
   - @sile
