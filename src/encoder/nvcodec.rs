@@ -127,8 +127,7 @@ impl NvcodecEncoder {
         let (handler, encoded_queue, error_slot) = build_handler();
         let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
         let seq_params = inner.get_sequence_params()?;
-        let sample_entry =
-            h265::h265_sample_entry_from_annexb(width, height, options.frame_rate, &seq_params)?;
+        let sample_entry = h265::h265_sample_entry_from_annexb(&seq_params, options.frame_rate)?;
 
         Ok(Self {
             inner,

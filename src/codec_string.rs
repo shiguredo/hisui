@@ -448,23 +448,25 @@ mod tests {
         );
     }
 
-    /// H.265 の SampleEntry は src/video/h265.rs の h265_sample_entry() が生成する値と一致すること
+    /// H.265 の SampleEntry は src/video/h265.rs の h265_sample_entry_from_vps_sps_pps_lists() が
+    /// Main プロファイル + Level 3.1 / Single layer ストリームに対して生成する値と一致すること
     #[test]
     fn video_codec_string_from_hvc1_sample_entry() {
         use shiguredo_mp4::Uint;
         use shiguredo_mp4::boxes::*;
 
-        // src/video/h265.rs の h265_sample_entry() と同じフィールド値
+        // src/video/h265.rs の h265_sample_entry_from_vps_sps_pps_lists() が
+        // Main プロファイル + Level 3.1 / Single layer の SPS に対して生成する典型値
         let entry = SampleEntry::Hvc1(Hvc1Box {
             visual: test_visual_fields(),
             hvcc_box: HvccBox {
                 general_profile_compatibility_flags: 0x60000000,
                 general_constraint_indicator_flags: Uint::new(0xb00000000000),
-                general_level_idc: 123,
+                general_level_idc: 93,
                 general_profile_space: Uint::new(0),
                 general_tier_flag: Uint::new(0),
-                num_temporal_layers: Uint::new(0),
-                temporal_id_nested: Uint::new(0),
+                num_temporal_layers: Uint::new(1),
+                temporal_id_nested: Uint::new(1),
                 min_spatial_segmentation_idc: Uint::new(0),
                 parallelism_type: Uint::new(0),
                 avg_frame_rate: 30,
@@ -562,16 +564,18 @@ mod tests {
         use shiguredo_mp4::Uint;
         use shiguredo_mp4::boxes::*;
 
+        // src/video/h265.rs の h265_sample_entry_from_vps_sps_pps_lists() が
+        // Main プロファイル + Level 3.1 / Single layer の SPS に対して生成する典型値
         let video = SampleEntry::Hvc1(Hvc1Box {
             visual: test_visual_fields(),
             hvcc_box: HvccBox {
                 general_profile_compatibility_flags: 0x60000000,
                 general_constraint_indicator_flags: Uint::new(0xb00000000000),
-                general_level_idc: 123,
+                general_level_idc: 93,
                 general_profile_space: Uint::new(0),
                 general_tier_flag: Uint::new(0),
-                num_temporal_layers: Uint::new(0),
-                temporal_id_nested: Uint::new(0),
+                num_temporal_layers: Uint::new(1),
+                temporal_id_nested: Uint::new(1),
                 min_spatial_segmentation_idc: Uint::new(0),
                 parallelism_type: Uint::new(0),
                 avg_frame_rate: 30,
