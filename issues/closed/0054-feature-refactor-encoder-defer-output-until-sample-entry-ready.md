@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-23
-- Completed:
+- Completed: 2026-06-24
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-encoder-defer-output-until-sample-entry-ready
 - Polished: 2026-06-23
@@ -111,3 +111,38 @@ CI 検証経路: openh264 系テストは `.github/workflows/ci.yml` の `test-o
 - 0055（HlsWriter MpegTs 経路の Err 化。本 issue と性質が一対）
 - closed/0027（エンコーダの sample_entry 全フレーム付与）
 - `docs/internals/sample_entry_invariant.md`
+
+## 解決方法
+
+### sample_entry 未確定時の Err 化 (本体)
+
+- `src/encoder/openh264.rs::Openh264Encoder::encode` で SPS / PPS 検出による `last_sample_entry` 更新の **後** に `self.last_sample_entry.is_none()` を判定し、未確定なら `crate::Error::new(...)` で fail-fast 停止する経路を追加した。
+- `src/encoder/video_toolbox.rs::VideoToolboxEncoder::handle_encoded` の H.264 経路で SPS / PPS 空のときに同様の Err 経路を追加した。さらに H.265 経路でも `frame.vps_list` / `sps_list` / `pps_list` のいずれかが空なら Err を返すガードを追加した。`h265_sample_entry` 自体には手を入れず、呼び出し側でガードする方針 (RTSP / WebM など他の呼び出し経路への副作用を避ける)。
+- 退避バッファ・上限超過 Err・finish 時 pending 残置 Err は採用しなかった (救済シナリオが死活経路となるため)。検討経緯は本 issue のコミット履歴に残る (A 設計 → B 設計の切り替え)。
+
+### VideoToolbox の構成前提を実装で守る
+
+- `src/encoder/video_toolbox.rs::VideoToolboxEncoder::new_h264` / `new_h265` で `config.allow_frame_reordering == true` ならコンストラクタ Err にした。B フレーム並べ替えで `input_queue` ペアリングが崩れる前提を実装レベルで守る。`shiguredo_video_toolbox` 側も `allow_frame_reordering: false` を前提として設計されている。
+
+### Err メッセージの診断情報
+
+- openh264 / video_toolbox の Err 文に入力 PTS と `is_keyframe` (または `frame.keyframe`) を含めた。異常状態の種類 (非 keyframe 先行か、keyframe なのに SPS / PPS なしか) を切り分けられる。openh264 では `is_keyframe` 判定を Err 直前に持ち上げた。
+
+### テストヘルパ共通化
+
+- `src/encoder/test_helpers.rs` を新設し、4 エンコーダ (openh264 / video_toolbox / libvpx / svt_av1) で重複していた `raw_i420_frame` を集約した。`#[cfg(test)] mod test_helpers;` を `src/encoder.rs` で宣言し、各エンコーダの `mod tests` から `use crate::encoder::test_helpers::raw_i420_frame;` で利用する。
+- openh264 テストの `assert_carries_latest_sample_entry` ヘルパを 2 つのテスト関数の前にまとめてヘルパ群を集約した。
+
+### ドキュメント更新
+
+- `docs/internals/sample_entry_invariant.md` の不変条件節を「型レベル (`Some` であること) と意味レベル (中身が有効であること) の双方」を要求する形に書き換えた。空 NALU 配列で構築された壊れた `hvcC` は型レベルでは `Some` を満たすが意味的不変条件は満たさない、と明示した。
+- エンコーダ責務分担表の openh264 / VideoToolbox 行を「最初の keyframe の SPS / PPS (H.265 は VPS も) から確定、確定前に出力が起きた場合はエンコーダ Err」に揃えた。
+- 「確立できない場合の扱い」節を Err 化方針に書き換えた。
+
+### CI 検証経路
+
+- 本改修の通常動作検証は `.github/workflows/ci.yml` の `test-openh264` ジョブ (Ubuntu + libopenh264 を Cisco からダウンロードして `OPENH264_PATH` 設定) と `test-apple-toolbox` ジョブ (self-hosted macOS ARM64) で担保される旨を issue テスト方針節に注記した。
+
+### CHANGES.md
+
+`## develop` には記載しなかった。本改修は writer 入口 fallback 削除 (issue 0051) と同じく未リリース期間の内部実装堅牢化で、shiguredo-changelog の「派生元ブランチとの最終的な差分のみを記載すること」に該当しない。新規 `Err` 条件は理論上観測可能だが、入力側不変条件が確立している環境では実運用上発火しない。
