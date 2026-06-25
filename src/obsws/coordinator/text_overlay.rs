@@ -98,11 +98,7 @@ impl ObswsCoordinator {
                     return self.build_text_overlay_error_result(
                         request_type,
                         request_id,
-                        TextOverlayError::InvalidColor(format_color_parse_error(
-                            "fontColor",
-                            &s,
-                            e,
-                        )),
+                        TextOverlayError::InvalidColor(format_font_color_parse_error(&s, e)),
                     );
                 }
             },
@@ -203,11 +199,7 @@ impl ObswsCoordinator {
                     return self.build_text_overlay_error_result(
                         request_type,
                         request_id,
-                        TextOverlayError::InvalidColor(format_color_parse_error(
-                            "fontColor",
-                            &s,
-                            e,
-                        )),
+                        TextOverlayError::InvalidColor(format_font_color_parse_error(&s, e)),
                     );
                 }
             },
@@ -532,13 +524,15 @@ fn text_overlay_state_to_json(state: &TextOverlayState) -> nojson::RawJsonOwned 
 }
 
 /// `Color::from_hex` 失敗時に `fontColor must ...` 形式の comment 文言を組み立てる。
-fn format_color_parse_error(field: &str, input: &str, e: ColorParseError) -> String {
+/// 上位の `TextOverlayError::InvalidColor` の Display 実装が `"invalid fontColor: ..."` の
+/// prefix を付けるため、 本関数の戻り値も `fontColor must ...` で `fontColor` を含む。
+fn format_font_color_parse_error(input: &str, e: ColorParseError) -> String {
     match e {
-        ColorParseError::MissingHashPrefix => format!("{field} must start with '#': {input:?}"),
+        ColorParseError::MissingHashPrefix => format!("fontColor must start with '#': {input:?}"),
         ColorParseError::InvalidLength(_) => {
-            format!("{field} must be #RRGGBB or #RRGGBBAA: {input:?}")
+            format!("fontColor must be #RRGGBB or #RRGGBBAA: {input:?}")
         }
-        ColorParseError::InvalidHex => format!("{field} must be hex: {input:?}"),
+        ColorParseError::InvalidHex => format!("fontColor must be hex: {input:?}"),
     }
 }
 
