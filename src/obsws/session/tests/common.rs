@@ -2,15 +2,16 @@
 //!
 //! 各サブモジュールから `use super::common::*;` で参照される汎用ヘルパー群を `pub(super)` で公開する。
 
+use std::time::Duration;
+
 use shiguredo_websocket::CloseCode;
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::session::{ObswsSession, SessionAction};
 use crate::obsws::state::ObswsSessionState;
-use std::time::Duration;
 
 /// テスト用の ProgramOutputState を生成する
-pub(super) fn test_program_output() -> crate::obsws::server::ProgramOutputState {
+fn test_program_output() -> crate::obsws::server::ProgramOutputState {
     crate::obsws::server::ProgramOutputState {
         scene_uuid: "scene-default".to_owned(),
         video_track_id: crate::TrackId::new("program:mixed_video"),
