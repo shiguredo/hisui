@@ -18,7 +18,7 @@ use crate::{
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     sample_entry::SharedSampleEntry,
     timestamp::mapper::TimestampMapper,
-    video::{VideoFormat, VideoFrame, bit_reader},
+    video::{VideoFormat, VideoFrame, bit_reader::BitReader},
 };
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20);
@@ -1079,12 +1079,12 @@ impl AacRtpDepacketizer {
         const AAC_AU_HEADER_CONTEXT: &str = "invalid AAC AU header";
 
         let au_headers = &packet.payload[2..2 + au_headers_length_bytes];
-        let mut reader = bit_reader::BitReader::new(au_headers);
+        let mut bit_reader = BitReader::new(au_headers);
         let mut au_sizes = Vec::new();
         let mut first = true;
         let mut consumed_bits = 0usize;
         while consumed_bits < au_headers_length_bits {
-            let size = reader
+            let size = bit_reader
                 .read_u(self.size_length as usize)
                 .map_err(|e| e.with_context(AAC_AU_HEADER_CONTEXT))?
                 as usize;
@@ -1094,7 +1094,7 @@ impl AacRtpDepacketizer {
             } else {
                 self.index_delta_length
             };
-            let _ = reader
+            let _ = bit_reader
                 .read_u(index_bits as usize)
                 .map_err(|e| e.with_context(AAC_AU_HEADER_CONTEXT))?;
             consumed_bits = consumed_bits.saturating_add(index_bits as usize);
