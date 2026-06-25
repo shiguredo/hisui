@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-24
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-06-25
 - Model: Opus 4.7
 - Branch: feature/refactor-unify-rtsp-au-header-bit-reader
 - Polished: 2026-06-25
@@ -13,12 +13,12 @@ closed/0048 で `src/video/bit_reader.rs::BitReader` を codec 中立な汎用�
 
 ## 優先度根拠
 
-Low。内部リファクタリングが主目的だが、副次的な外部観測可能挙動変化を伴う。
+Low。内部リファクタリングが主目的。RTSP 機能自体は `## develop` 内の未リリース機能のため、本 issue の副次的な挙動変化は外部リリース観点では「develop 内の中間状態の修正」に該当し CHANGES.md 記載は不要 (`shiguredo-changelog` 規約準拠)。
 
 - subscriber 側の利用箇所は `AacRtpDepacketizer::depacketize` 1 箇所のみで影響範囲が狭い。
 - closed/0048 の `### 残懸念` で本 issue を予告済み。片肺のまま放置するとレビュー時の認知負荷が継続する。
 
-副次的な外部観測可能挙動変化:
+副次的な内部挙動変化 (develop 内に閉じる、CHANGES.md 不要):
 
 - AU header パース失敗時のエラーメッセージが共有 BitReader 由来 (`"bit reader: exhausted before requested read"`) に変わる。`### エラーメッセージの粒度` 参照の上で `Error::with_context` 経由で context 付き文言 (`"invalid AAC AU header: bit reader: exhausted before requested read"` 等) に wrap し、AU header 経路と SPS パース経路の Err をログから切り分けられるようにする。
 - fmtp の `sizelength` / `indexlength` / `indexdeltalength` のいずれかが 32 超のとき、現状は壊れた値を素通ししていたが、修正後は session 確立時点で Err になる (`### RFC 3640 §3.3.6 準拠の fmtp パラメータ検証` 参照)。実用上の RTSP 配信側で 32 超を送る実装は想定外。
@@ -206,15 +206,7 @@ H.264 / H.265 SPS パース経路は wrap しない (これらは video モジ�
 
 ### CHANGES.md
 
-`## develop` 内に以下の `[UPDATE]` で記載する。fmtp パラメータ上限検査の追加と subscriber 側 BitReader の統合に伴うエラーメッセージ変化を 1 エントリにまとめる。タイトル文面・段落数は実装着手時に `shiguredo-changelog` スキルの規約を再確認して微調整する。
-
-```
-- [UPDATE] RTSP MPEG4-GENERIC (AAC) の fmtp 検証と AU header パーサの内部実装を整理する
-  - fmtp の sizeLength / indexLength / indexDeltaLength のいずれかが 32 を超える場合は RTSP セッション確立時点で拒否する
-  - AAC AU header パース用の独自 BitReader を H.264 / H.265 SPS パーサと共有する汎用 BitReader に統合する
-  - AU header パース失敗時のエラーメッセージが `invalid AAC AU header: bit reader: exhausted before requested read` に変わる
-  - @sile
-```
+CHANGES.md への記載は **不要**。RTSP 機能自体が `## develop` 内の未リリース機能で、本 issue の変更 (BitReader 統合・fmtp 上限検査・エラー文言変化) はいずれも未リリース機能の中間修正に該当する。`shiguredo-changelog` 規約「変更履歴は派生元ブランチとの最終的な差分のみを記載すること。開発ブランチ内の中間状態の修正は記載しないこと」に従い、エントリは追加しない。closed/0048 がリリース済み機能 (video_toolbox H.265 / nvcodec H.265 が 2025.2.0 以降 release 済み) の hvcC 内部実値化を `[UPDATE]` で記載した判断軸とは異なる点に注意する。
 
 ## 関連
 
@@ -229,4 +221,27 @@ H.264 / H.265 SPS パース経路は wrap しない (これらは video モジ�
 
 ## 解決方法
 
-実装着手後にここに記述する。
+推奨パッチ順序の 6 ステップを 1 コミットでまとめて対応した。
+
+### 実装内容
+
+1. **bit_reader.rs docstring 更新**: 用途を H.264 / H.265 SPS パーサ限定の記述から MPEG4-GENERIC AAC AU header パースを含む形に拡張した。Exp-Golomb 系メソッドが H.264 / H.265 経路のみで利用される旨も明記した。
+2. **subscriber.rs の独自 BitReader 削除**: `struct BitReader` / `impl BitReader` (`#[derive(Debug)]` 行を含む) を削除した。
+3. **import 追加**: `use crate::video::{..., bit_reader}` を `video::{VideoFormat, VideoFrame}` ブロックに追加し、`bit_reader::BitReader::new(...)` でモジュール単位で参照する形にした。
+4. **`AacRtpDepacketizer::depacketize` の置換**: `read_bits(u8)` を `read_u(u8 as usize)` に書き換え、Err 経路は `Error::with_context("invalid AAC AU header")` で前置 context を付けた。ローカル変数名は `bit_reader` モジュール名と衝突しないよう `reader` にリネームした。
+5. **fmtp 上限検査追加**: `select_audio_track` の `size_length == 0` 検査の隣に `size_length > 32` / `index_length > 32` / `index_delta_length > 32` の Err 化を追加し、RFC 3640 §3.3.6 値域外の SDP を session 確立時点で fail-fast するようにした。
+6. **テスト追加**: `src/rtsp/subscriber.rs::tests` に新規 5 件 (`depacketize_aac_with_zero_index_length` / `depacketize_aac_wraps_bit_reader_error` / `select_audio_track_rejects_size_length_over_32` / `select_audio_track_rejects_index_length_over_32` / `select_audio_track_rejects_index_delta_length_over_32`) を追加し、audio fmtp で SDP を組み立てる helper (`build_test_sdp_with_audio_fmtp` / `parse_audio_track`) も追加した。
+
+### CHANGES.md
+
+RTSP 機能が未リリースのため、`shiguredo-changelog` 規約「開発ブランチ内の中間状態の修正は記載しないこと」に従い CHANGES.md エントリは追加しない。
+
+### 検証
+
+- `cargo check`: pass
+- `cargo clippy --all-targets -- --deny warnings`: pass
+- `cargo fmt --all -- --check`: pass
+- `cargo test --lib 'rtsp::subscriber::tests'`: 31 件 pass (新規 5 件含む)
+- `cargo test --lib 'video::bit_reader'`: 5 件 pass
+- `cargo test --lib 'video::h264'`: 43 件 pass
+- `cargo test --lib 'video::h265'`: 40 件 pass
