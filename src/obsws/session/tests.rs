@@ -1,7 +1,8 @@
-// Phase 1 で `tests/common.rs` に共通ヘルパー 23 件を物理移動した。
-// 暫定の `use common::*;` はエントリポイント直下に残るテストが
-// ヘルパーを修飾なしで呼び続けられるようにするもの。
-// 全テストが各サブモジュールへ移動完了する Phase 14 で `mod common;` 含めて整理する。
+// `src/obsws/session.rs` から `#[cfg(test)] #[path = "session/tests.rs"]` で読み込まれるテストエントリポイント。
+//
+// 共通ヘルパーは `tests/common.rs` に集約し、各機能群のテストはサブモジュールに分かれている。
+// 専用ヘルパーは利用するサブモジュール内に閉じる (例: text_overlay 専用 3 件は `tests/text_overlay.rs` 内)。
+// `output_player` は `#[cfg(feature = "player")]` でモジュール宣言ごとゲートしている。
 #[path = "tests/common.rs"]
 mod common;
 #[path = "tests/input.rs"]
