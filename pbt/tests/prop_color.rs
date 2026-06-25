@@ -3,7 +3,7 @@
 //! u32 → Color → u32 / u32 → hex → Color → u32 のラウンドトリップと、
 //! `from_hex` / `from_hex_rgb` の受理範囲の境界を proptest で範囲網羅的に検証する。
 
-use hisui::color::{Color, ColorParseError};
+use hisui::color::Color;
 use proptest::prelude::*;
 
 proptest! {
@@ -57,43 +57,36 @@ proptest! {
     fn from_hex_accepts_8digit_but_from_hex_rgb_rejects(hex8 in "[0-9A-Fa-f]{8}") {
         let s = format!("#{hex8}");
         prop_assert!(
-            Color::from_hex(&s).is_ok(),
+            Color::from_hex(&s).is_some(),
             "8 桁 hex は from_hex で成功するはず"
         );
-        prop_assert_eq!(
-            Color::from_hex_rgb(&s),
-            Err(ColorParseError::InvalidLength { actual: 8 }),
-            "8 桁 hex は from_hex_rgb で actual=8 として拒否されるはず"
+        prop_assert!(
+            Color::from_hex_rgb(&s).is_none(),
+            "8 桁 hex は from_hex_rgb で None を返すはず"
         );
     }
 
-    // `#` を除いた長さが 6 / 8 のいずれでもない `#` 付き hex 文字列は
-    // from_hex が InvalidLength { actual: <#を除いた長さ> } で拒否する。
+    // `#` を除いた長さが 6 / 8 のいずれでもない `#` 付き hex 文字列は from_hex が None を返す。
     #[test]
     fn from_hex_rejects_non_6_or_8_lengths(
         hex in "[0-9A-Fa-f]{1,5}|[0-9A-Fa-f]{7}|[0-9A-Fa-f]{9,16}"
     ) {
-        let expected_actual = hex.len();
         let s = format!("#{hex}");
-        prop_assert_eq!(
-            Color::from_hex(&s),
-            Err(ColorParseError::InvalidLength { actual: expected_actual }),
-            "6 / 8 桁以外は from_hex で actual=<#を除いた長さ> として拒否されるはず"
+        prop_assert!(
+            Color::from_hex(&s).is_none(),
+            "6 / 8 桁以外は from_hex で None を返すはず"
         );
     }
 
-    // `#` を除いた長さが 6 ではない `#` 付き hex 文字列は
-    // from_hex_rgb が InvalidLength { actual: <#を除いた長さ> } で拒否する。
+    // `#` を除いた長さが 6 ではない `#` 付き hex 文字列は from_hex_rgb が None を返す。
     #[test]
     fn from_hex_rgb_rejects_non_6_lengths(
         hex in "[0-9A-Fa-f]{1,5}|[0-9A-Fa-f]{7,16}"
     ) {
-        let expected_actual = hex.len();
         let s = format!("#{hex}");
-        prop_assert_eq!(
-            Color::from_hex_rgb(&s),
-            Err(ColorParseError::InvalidLength { actual: expected_actual }),
-            "6 桁以外は from_hex_rgb で actual=<#を除いた長さ> として拒否されるはず"
+        prop_assert!(
+            Color::from_hex_rgb(&s).is_none(),
+            "6 桁以外は from_hex_rgb で None を返すはず"
         );
     }
 
@@ -101,15 +94,13 @@ proptest! {
     // 下限 0 桁で空文字の挙動も同時にカバーされる。
     #[test]
     fn both_parsers_reject_missing_hash(no_hash in "[0-9A-Fa-f]{0,16}") {
-        prop_assert_eq!(
-            Color::from_hex(&no_hash),
-            Err(ColorParseError::MissingHashPrefix),
-            "# 不在文字列は from_hex で MissingHashPrefix として拒否されるはず"
+        prop_assert!(
+            Color::from_hex(&no_hash).is_none(),
+            "# 不在文字列は from_hex で None を返すはず"
         );
-        prop_assert_eq!(
-            Color::from_hex_rgb(&no_hash),
-            Err(ColorParseError::MissingHashPrefix),
-            "# 不在文字列は from_hex_rgb で MissingHashPrefix として拒否されるはず"
+        prop_assert!(
+            Color::from_hex_rgb(&no_hash).is_none(),
+            "# 不在文字列は from_hex_rgb で None を返すはず"
         );
     }
 }

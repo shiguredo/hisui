@@ -9,32 +9,17 @@ pub struct Color {
     pub a: u8,
 }
 
-/// `Color::from_hex` / `Color::from_hex_rgb` のパース失敗種別。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ColorParseError {
-    /// `#` プレフィックス不在 (空文字もここに分類する)。
-    MissingHashPrefix,
-    /// `#` を除いた後のバイト長が 6 / 8 以外。 `actual` は `#` を除いた後のバイト長。
-    InvalidLength { actual: usize },
-    /// hex 以外の文字が含まれる。
-    InvalidHex,
-}
-
 impl Color {
     /// `#RRGGBB` (a=0xFF として扱う) と `#RRGGBBAA` の両方を受け付ける。
-    /// 空文字は `MissingHashPrefix` で拒否する。
+    /// 6 / 8 桁以外 / 空文字 / `#` 不在 / hex 以外の文字を含む場合はすべて `None` を返す。
     /// 大文字・小文字いずれの hex も受理する。
-    pub fn from_hex(s: &str) -> Result<Self, ColorParseError> {
-        let stripped = s
-            .strip_prefix('#')
-            .ok_or(ColorParseError::MissingHashPrefix)?;
+    pub fn from_hex(s: &str) -> Option<Self> {
+        let stripped = s.strip_prefix('#')?;
         if stripped.len() != 6 && stripped.len() != 8 {
-            return Err(ColorParseError::InvalidLength {
-                actual: stripped.len(),
-            });
+            return None;
         }
         if !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(ColorParseError::InvalidHex);
+            return None;
         }
         let r = u8::from_str_radix(&stripped[0..2], 16).expect(
             "unreachable: length and hex digits validated above; implementation bug if reached",
@@ -52,23 +37,16 @@ impl Color {
         } else {
             0xFF
         };
-        Ok(Self { r, g, b, a })
+        Some(Self { r, g, b, a })
     }
 
-    /// `#RRGGBB` のみ受け付ける。 6 桁以外は `InvalidLength(<#を除いた長さ>)` で拒否する
-    /// (8 桁を渡しても `InvalidLength(8)` で拒否される)。
-    /// 空文字 / `#` 不在は `MissingHashPrefix` で拒否する (`from_hex` と同じ挙動)。
-    /// 成功時は `a = 0xFF` を埋める。
-    pub fn from_hex_rgb(s: &str) -> Result<Self, ColorParseError> {
-        // 8 桁を弾く受理範囲チェックだけ先に行い、 残りの hex 検証と r/g/b 抽出は
-        // 6 桁分岐の挙動が `from_hex` と同一なのでそのまま委譲する (`a = 0xFF` が埋まる)。
-        let stripped = s
-            .strip_prefix('#')
-            .ok_or(ColorParseError::MissingHashPrefix)?;
+    /// `#RRGGBB` のみ受け付ける。 6 桁以外 / 空文字 / `#` 不在 / hex 以外の文字を
+    /// 含む場合はすべて `None` を返す。 成功時は `a = 0xFF` を埋める。
+    pub fn from_hex_rgb(s: &str) -> Option<Self> {
+        // 6 桁分岐の挙動は `from_hex` と同一なので、 8 桁を弾くチェックだけ先に行って委譲する。
+        let stripped = s.strip_prefix('#')?;
         if stripped.len() != 6 {
-            return Err(ColorParseError::InvalidLength {
-                actual: stripped.len(),
-            });
+            return None;
         }
         Self::from_hex(s)
     }
@@ -103,29 +81,24 @@ impl Color {
 mod tests {
     use super::*;
 
-    /// hex 以外の文字が含まれる場合は `InvalidHex` を返す。
+    /// hex 以外の文字が含まれる場合は `None` を返す。
     #[test]
     fn from_hex_rejects_non_hex_chars() {
         assert_eq!(
             Color::from_hex("#GGGGGG"),
-            Err(ColorParseError::InvalidHex),
-            "hex 以外の文字は InvalidHex で拒否されるはず"
+            None,
+            "hex 以外の文字を含む入力は None を返すはず"
         );
     }
 
-    /// 6 / 8 桁以外は `InvalidLength(<#を除いた長さ>)` で拒否する。
-    /// `InvalidLength` の引数値仕様 (`#` を除いた後の長さ) を境界値で確認する。
+    /// 6 / 8 桁以外は `None` を返す (境界値: 3 桁と 9 桁)。
     #[test]
     fn from_hex_rejects_wrong_length() {
-        assert_eq!(
-            Color::from_hex("#FFF"),
-            Err(ColorParseError::InvalidLength { actual: 3 }),
-            "3 桁は actual=3 として拒否されるはず"
-        );
+        assert_eq!(Color::from_hex("#FFF"), None, "3 桁入力は None を返すはず");
         assert_eq!(
             Color::from_hex("#FFFFFFFFF"),
-            Err(ColorParseError::InvalidLength { actual: 9 }),
-            "9 桁は actual=9 として拒否されるはず"
+            None,
+            "9 桁入力は None を返すはず"
         );
     }
 }

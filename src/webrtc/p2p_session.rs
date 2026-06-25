@@ -2028,7 +2028,7 @@ fn resolve_chroma_key_config(
 ) -> Option<ChromaKeyConfig> {
     let color = background_key_color?;
     let tolerance = background_key_tolerance?;
-    let (r, g, b) = crate::color::Color::from_hex_rgb(color).ok()?.to_rgb();
+    let (r, g, b) = crate::color::Color::from_hex_rgb(color)?.to_rgb();
     let (key_u, key_v) = crate::obsws::source::webrtc_source::rgb_to_uv_bt601(r, g, b);
     Some(ChromaKeyConfig {
         key_u,

@@ -836,7 +836,7 @@ fn parse_overlay_bool_setting(
 
 fn validate_hex_color(color: &Option<String>) -> Result<(), ParseInputSettingsError> {
     if let Some(c) = color {
-        crate::color::Color::from_hex_rgb(c).map_err(|_| {
+        crate::color::Color::from_hex_rgb(c).ok_or_else(|| {
             ParseInputSettingsError::InvalidInputSettings(format!(
                 "invalid color format: expected #RRGGBB, got {c}"
             ))

@@ -19,7 +19,7 @@ pub struct ColorSource {
 impl ColorSource {
     pub async fn run(self, outer_processor: ProcessorHandle) -> Result<()> {
         let (r, g, b) = Color::from_hex_rgb(&self.color)
-            .map_err(|_| crate::Error::new(format!("invalid color format: {}", self.color)))?
+            .ok_or_else(|| crate::Error::new(format!("invalid color format: {}", self.color)))?
             .to_rgb();
         let (y, u, v) = rgb_to_yuv_bt601_int(r, g, b);
 

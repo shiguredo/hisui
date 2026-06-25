@@ -1,7 +1,7 @@
 use tokio::sync::{mpsc, oneshot};
 
 use crate::ProcessorId;
-use crate::color::{Color, ColorParseError};
+use crate::color::Color;
 use crate::mixer::video::VideoRealtimeMixerRpcMessage;
 use crate::mixer::video::text_overlay::{
     TextOverlayCommand, TextOverlayError, TextOverlayPatch, TextOverlaySpecInput, TextOverlayState,
@@ -93,12 +93,14 @@ impl ObswsCoordinator {
 
         let font_color_argb = match parse_optional_string(request_data, "fontColor") {
             Ok(Some(s)) => match Color::from_hex(&s) {
-                Ok(c) => c.to_argb_u32(),
-                Err(e) => {
+                Some(c) => c.to_argb_u32(),
+                None => {
                     return self.build_text_overlay_error_result(
                         request_type,
                         request_id,
-                        TextOverlayError::InvalidColor(format_font_color_parse_error(&s, e)),
+                        TextOverlayError::InvalidColor(format!(
+                            "fontColor must be #RRGGBB or #RRGGBBAA: {s:?}"
+                        )),
                     );
                 }
             },
@@ -194,12 +196,14 @@ impl ObswsCoordinator {
 
         let font_color_argb = match parse_optional_string(request_data, "fontColor") {
             Ok(Some(s)) => match Color::from_hex(&s) {
-                Ok(c) => Some(c.to_argb_u32()),
-                Err(e) => {
+                Some(c) => Some(c.to_argb_u32()),
+                None => {
                     return self.build_text_overlay_error_result(
                         request_type,
                         request_id,
-                        TextOverlayError::InvalidColor(format_font_color_parse_error(&s, e)),
+                        TextOverlayError::InvalidColor(format!(
+                            "fontColor must be #RRGGBB or #RRGGBBAA: {s:?}"
+                        )),
                     );
                 }
             },
@@ -523,19 +527,6 @@ fn text_overlay_state_to_json(state: &TextOverlayState) -> nojson::RawJsonOwned 
     })
 }
 
-/// `Color::from_hex` 失敗時に `fontColor must ...` 形式の comment 文言を組み立てる。
-/// 上位の `TextOverlayError::InvalidColor` の Display 実装が `"invalid fontColor: ..."` の
-/// prefix を付けるため、 本関数の戻り値も `fontColor must ...` で `fontColor` を含む。
-fn format_font_color_parse_error(input: &str, e: ColorParseError) -> String {
-    match e {
-        ColorParseError::MissingHashPrefix => format!("fontColor must start with '#': {input:?}"),
-        ColorParseError::InvalidLength { .. } => {
-            format!("fontColor must be #RRGGBB or #RRGGBBAA: {input:?}")
-        }
-        ColorParseError::InvalidHex => format!("fontColor must be hex: {input:?}"),
-    }
-}
-
 /// 必須文字列フィールドを取り出す (空文字も `Ok` として渡す版)。
 /// 欠落 / null は `Missing`、型違反は `Invalid`。
 /// `text` のように「空文字が valid 値」のフィールド向け。
@@ -680,36 +671,6 @@ mod tests {
 
     fn parse_owned_json(text: &str) -> nojson::RawJsonOwned {
         nojson::RawJsonOwned::parse(text).expect("テスト JSON はパース可能であるべき")
-    }
-
-    /// `MissingHashPrefix` は `fontColor must start with '#': ...` 文言に展開される。
-    #[test]
-    fn format_font_color_parse_error_maps_missing_hash() {
-        assert_eq!(
-            format_font_color_parse_error("abc", ColorParseError::MissingHashPrefix),
-            "fontColor must start with '#': \"abc\"",
-            "MissingHashPrefix は `must start with '#'` 文言にマップされるはず"
-        );
-    }
-
-    /// `InvalidLength` は内部の `actual` 値に関わらず `fontColor must be #RRGGBB or #RRGGBBAA: ...` 文言に展開される。
-    #[test]
-    fn format_font_color_parse_error_maps_invalid_length() {
-        assert_eq!(
-            format_font_color_parse_error("#abc", ColorParseError::InvalidLength { actual: 3 }),
-            "fontColor must be #RRGGBB or #RRGGBBAA: \"#abc\"",
-            "InvalidLength は `must be #RRGGBB or #RRGGBBAA` 文言にマップされるはず"
-        );
-    }
-
-    /// `InvalidHex` は `fontColor must be hex: ...` 文言に展開される。
-    #[test]
-    fn format_font_color_parse_error_maps_invalid_hex() {
-        assert_eq!(
-            format_font_color_parse_error("#GGGGGG", ColorParseError::InvalidHex),
-            "fontColor must be hex: \"#GGGGGG\"",
-            "InvalidHex は `must be hex` 文言にマップされるはず"
-        );
     }
 
     /// 欠落フィールドは省略 (= 現状維持) として `Ok(None)` を返す。

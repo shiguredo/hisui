@@ -64,9 +64,9 @@
 
 ### 配置場所とモジュール登録
 
-`src/color.rs` を新規作成し、 `src/lib.rs` に `pub mod color;` を追加する。 `Color` / `ColorParseError` / 全メソッド / 全フィールドは `pub` で公開する (`crate::color::Color::...` の形で hisui crate 内の全呼び出し元から参照される)。
+`src/color.rs` を新規作成し、 `src/lib.rs` に `pub mod color;` を追加する。 `Color` / 全メソッド / 全フィールドは `pub` で公開する (`crate::color::Color::...` の形で hisui crate 内の全呼び出し元から参照される)。
 
-PBT は別 crate (`pbt`) に置く既存設計 (proptest 依存を hisui 本体に持ち込まないため) に従うため、 PBT が `use hisui::color::{Color, ColorParseError};` で参照できるよう `pub` での公開を選ぶ。 `pub(crate)` だと別 crate からの参照が成立しない。 既存の `pub mod audio;` / `pub mod media;` 等のドメイン汎用名モジュールと整合する。 将来の breaking は `shiguredo-rust` 規約 (`#[non_exhaustive]` 禁止、 「将来 variant や field を追加するときは素直に破壊的変更として扱う」) に沿って `CHANGES.md` に記載する形で運用する。
+PBT は別 crate (`pbt`) に置く既存設計 (proptest 依存を hisui 本体に持ち込まないため) に従うため、 PBT が `use hisui::color::Color;` で参照できるよう `pub` での公開を選ぶ。 `pub(crate)` だと別 crate からの参照が成立しない。 既存の `pub mod audio;` / `pub mod media;` 等のドメイン汎用名モジュールと整合する。 将来の breaking は `shiguredo-rust` 規約 (`#[non_exhaustive]` 禁止、 「将来 variant や field を追加するときは素直に破壊的変更として扱う」) に沿って `CHANGES.md` に記載する形で運用する。
 
 obsws 配下 (`src/obsws/color.rs`) ではなく crate root に置く理由は以下:
 
@@ -81,8 +81,10 @@ obsws 配下 (`src/obsws/color.rs`) ではなく crate root に置く理由は�
 
 統一型 1 つで定義する。 `Rgb` / `Rgba` 2 型分離案は採用しない (呼び出し側に「alpha が要るか」の分岐が増えるため)。
 
+失敗種別を呼び出し元が区別しないため、 戻り値型は `Option<Self>` で表現する。 細かい失敗種別 (`#` 不在 / 桁数違い / hex 以外) を別文言に出し分ける呼び出し元はなく、 hex 色表記のルール自体がシンプルで「間違っている」とだけ伝われば十分。 専用エラー enum (`ColorParseError` 等) は定義しない。
+
 ```rust
-/// hex 文字列由来の色値。 alpha は常に保持し、 `#RRGGBB` 入力時は 0xFF (不透明) を埋める。
+/// hex 文字列由来の色値。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
     pub r: u8,
@@ -93,46 +95,29 @@ pub struct Color {
 
 impl Color {
     /// `#RRGGBB` (a=0xFF として扱う) と `#RRGGBBAA` の両方を受け付ける。
-    /// 空文字は `MissingHashPrefix` で拒否する。
-    pub fn from_hex(s: &str) -> Result<Self, ColorParseError>;
+    /// 6 / 8 桁以外 / 空文字 / `#` 不在 / hex 以外の文字を含む場合はすべて `None` を返す。
+    /// 大文字・小文字いずれの hex も受理する。
+    pub fn from_hex(s: &str) -> Option<Self>;
 
-    /// `#RRGGBB` のみ受け付ける。 6 桁以外は `InvalidLength(stripped.len())` で拒否する
-    /// (8 桁を渡しても `InvalidLength(8)` で拒否される)。
-    /// 空文字 / `#` 不在は `MissingHashPrefix` で拒否する (`from_hex` と同じ挙動)。
-    /// 成功時は `a = 0xFF` を埋める。
-    pub fn from_hex_rgb(s: &str) -> Result<Self, ColorParseError>;
+    /// `#RRGGBB` のみ受け付ける。 6 桁以外 / 空文字 / `#` 不在 / hex 以外の文字を
+    /// 含む場合はすべて `None` を返す。 成功時は `a = 0xFF` を埋める。
+    pub fn from_hex_rgb(s: &str) -> Option<Self>;
 
-    /// ARGB u32 (`0xAARRGGBB` レイアウト) から Color を構築する。 無謬な変換。
-    pub const fn from_argb_u32(argb: u32) -> Self;
+    /// ARGB u32 (`0xAARRGGBB` レイアウト) から `Color` を構築する。 失敗しない変換。
+    pub fn from_argb_u32(argb: u32) -> Self;
 
     /// 常に 8 桁 `#RRGGBBAA` を出力する (alpha=0xFF でも `FF` を付与、 hex は大文字)。
     pub fn to_hex_string(&self) -> String;
 
     /// ARGB u32 (`((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)`) を返す。
-    pub const fn to_argb_u32(&self) -> u32;
+    pub fn to_argb_u32(&self) -> u32;
 
     /// `(r, g, b)` 順のタプル。 alpha は捨てる。
-    pub const fn rgb_tuple(&self) -> (u8, u8, u8);
+    pub fn to_rgb(&self) -> (u8, u8, u8);
 }
 ```
 
-### ColorParseError 型
-
-```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ColorParseError {
-    /// `#` プレフィックス不在 (空文字もここに分類)。
-    MissingHashPrefix,
-    /// `#` を除いた後の文字数が 6 / 8 以外。 引数値は `#` を除いた後の長さ。
-    InvalidLength(usize),
-    /// hex 以外の文字が含まれる。
-    InvalidHex,
-}
-```
-
-`Display` / `std::error::Error` は実装しない。 呼び出し元はバリアントごとに文言整形を行う (後述)。
-
-入力の大文字・小文字は両方受理する (`u8::from_str_radix` / `u32::from_str_radix` の挙動を維持)。 出力は大文字固定。
+入力の大文字・小文字は両方受理する (`u8::from_str_radix` の挙動を維持)。 出力は大文字固定。
 
 ### 受理範囲の維持
 
@@ -143,36 +128,29 @@ pub enum ColorParseError {
 
 将来 `color_source` 等で `#RRGGBBAA` も受理する変更は別途 change カテゴリの issue として起票する (本 issue では扱わない)。
 
-### エラー文言の整形
+### エラー文言
 
-`text_overlay.rs` 側だけが `ColorParseError` の 3 バリアントを別文言に出し分ける (`fontColor must ...` 系)。 `validate_hex_color` 側は単一文言 (`expected #RRGGBB, got ...`) で出すため分岐不要。 したがって整形ヘルパは `text_overlay.rs` 内 private fn として配置する。 現状は `fontColor` 専用だが、 将来 `backgroundColor` 等の hex 色フィールドが追加されたときに同じヘルパを再利用できるよう `field` を引数化しておく:
+`fontColor` のエラー文言は呼び出し元 (`text_overlay.rs`) で 1 種類 (`fontColor must be #RRGGBB or #RRGGBBAA: ...`) に統合する。 `#` 忘れ・桁数違い・hex 以外のいずれの入力ミスでも同じ文言を返すが、 hex 色表記のルールはシンプルなので利用者は文言だけで自分で気づける。 旧 `parse_argb_color` の 3 種別出し分けは廃止する。
 
-```rust
-/// `Color::from_hex` 失敗時に既存 `parse_argb_color` 互換の文言を組み立てる。
-fn format_color_parse_error(field: &str, input: &str, e: ColorParseError) -> String {
-    match e {
-        ColorParseError::MissingHashPrefix => format!("{field} must start with '#': {input:?}"),
-        ColorParseError::InvalidLength(_) => format!("{field} must be #RRGGBB or #RRGGBBAA: {input:?}"),
-        ColorParseError::InvalidHex => format!("{field} must be hex: {input:?}"),
-    }
-}
-```
+`validate_hex_color` (state/types.rs) は引き続き単一文言 (`invalid color format: expected #RRGGBB, got ...`) を維持する。
 
 ### 各呼び出し元の書き換え
 
 #### text_overlay.rs Create 経路 (`handle_create_text_overlay`)
 
-既存の 2 段 match (`parse_optional_string → parse_argb_color`) を維持し、 内側だけ差し替える。 戻り値は `font_color_argb: u32` に直接代入する。
+既存の 2 段 match (`parse_optional_string → parse_argb_color`) を維持し、 内側を `Color::from_hex` + `Option` 分岐に差し替える。 戻り値は `font_color_argb: u32` に直接代入する。
 
 ```rust
 let font_color_argb = match parse_optional_string(request_data, "fontColor") {
     Ok(Some(s)) => match Color::from_hex(&s) {
-        Ok(c) => c.to_argb_u32(),
-        Err(e) => {
+        Some(c) => c.to_argb_u32(),
+        None => {
             return self.build_text_overlay_error_result(
                 request_type,
                 request_id,
-                TextOverlayError::InvalidColor(format_color_parse_error("fontColor", &s, e)),
+                TextOverlayError::InvalidColor(format!(
+                    "fontColor must be #RRGGBB or #RRGGBBAA: {s:?}"
+                )),
             );
         }
     },
@@ -183,17 +161,19 @@ let font_color_argb = match parse_optional_string(request_data, "fontColor") {
 
 #### text_overlay.rs Update 経路 (`handle_update_text_overlay`)
 
-戻り値型は `font_color_argb: Option<u32>`。 `Ok(c) => Some(c.to_argb_u32())` で `Option` にラップする。
+戻り値型は `font_color_argb: Option<u32>`。 `Some(c) => Some(c.to_argb_u32())` で `Option` にラップする。
 
 ```rust
 let font_color_argb = match parse_optional_string(request_data, "fontColor") {
     Ok(Some(s)) => match Color::from_hex(&s) {
-        Ok(c) => Some(c.to_argb_u32()),
-        Err(e) => {
+        Some(c) => Some(c.to_argb_u32()),
+        None => {
             return self.build_text_overlay_error_result(
                 request_type,
                 request_id,
-                TextOverlayError::InvalidColor(format_color_parse_error("fontColor", &s, e)),
+                TextOverlayError::InvalidColor(format!(
+                    "fontColor must be #RRGGBB or #RRGGBBAA: {s:?}"
+                )),
             );
         }
     },
@@ -210,22 +190,22 @@ f.member("fontColor", Color::from_argb_u32(spec.font_color_argb).to_hex_string()
 
 #### color_source.rs `ColorSource::run`
 
-旧 `use super::webrtc_source::parse_hex_color;` を削除し、 `use crate::color::Color;` を追加する。
+旧 `use super::webrtc_source::parse_hex_color;` を削除し、 `use crate::color::Color;` を追加する。 `Option` を `.ok_or_else(...)` で `Result` に橋渡しする。
 
 ```rust
 let (r, g, b) = Color::from_hex_rgb(&self.color)
-    .map_err(|_| crate::Error::new(format!("invalid color format: {}", self.color)))?
-    .rgb_tuple();
+    .ok_or_else(|| crate::Error::new(format!("invalid color format: {}", self.color)))?
+    .to_rgb();
 ```
 
 #### state/types.rs `validate_hex_color`
 
-関数自体は残し、 中身を差し替える。 シグネチャ (`&Option<String>` 受け取り) は変更しない (呼び出し元 2 箇所のスタイルを維持するため)。
+関数自体は残し、 中身を差し替える。 シグネチャ (`&Option<String>` 受け取り) は変更しない。
 
 ```rust
 fn validate_hex_color(color: &Option<String>) -> Result<(), ParseInputSettingsError> {
     if let Some(c) = color {
-        crate::color::Color::from_hex_rgb(c).map_err(|_| {
+        crate::color::Color::from_hex_rgb(c).ok_or_else(|| {
             ParseInputSettingsError::InvalidInputSettings(format!(
                 "invalid color format: expected #RRGGBB, got {c}"
             ))
@@ -237,12 +217,12 @@ fn validate_hex_color(color: &Option<String>) -> Result<(), ParseInputSettingsEr
 
 #### p2p_session.rs `resolve_chroma_key_config`
 
-関数全体の戻り値型 `Option<ChromaKeyConfig>` は変えない。 `Color::from_hex_rgb` の `Result` を `.ok()?` で `Option` セマンティクスに合わせる。 `rgb_to_uv_bt601` 呼び出しは維持する。
+関数全体の戻り値型 `Option<ChromaKeyConfig>` は変えない。 `Color::from_hex_rgb` の戻り値が `Option<Color>` なので、 そのまま `?` で `None` を伝播できる。 `rgb_to_uv_bt601` 呼び出しは維持する。
 
 ```rust
 let color = background_key_color?;
 let tolerance = background_key_tolerance?;
-let (r, g, b) = crate::color::Color::from_hex_rgb(color).ok()?.rgb_tuple();
+let (r, g, b) = crate::color::Color::from_hex_rgb(color)?.to_rgb();
 let (key_u, key_v) = crate::obsws::source::webrtc_source::rgb_to_uv_bt601(r, g, b);
 ```
 
@@ -259,23 +239,23 @@ let (key_u, key_v) = crate::obsws::source::webrtc_source::rgb_to_uv_bt601(r, g, 
 
 ### PBT (`pbt/tests/prop_color.rs` を新規作成)
 
-ラウンドトリップなど proptest で範囲網羅できるプロパティを書く。 関数名は既存 `pbt/tests/prop_text_overlay.rs` の説明的命名スタイル (`<対象>_<挙動>_<条件>`) に揃える。 strategy は `[0-9A-Fa-f]{6}` / `[0-9A-Fa-f]{8}` のように hex 文字限定で生成する (hex 以外の文字列は単体テストの責務)。
+ラウンドトリップなど proptest で範囲網羅できるプロパティを書く。 関数名は既存 `pbt/tests/prop_text_overlay.rs` の説明的命名スタイル (`<対象>_<挙動>_<条件>`) に揃える。
 
 - `argb_u32_roundtrips_via_color` 任意 u32 で `from_argb_u32 → to_argb_u32` が元値と一致する
 - `argb_u32_roundtrips_via_hex_string` 任意 u32 で `from_argb_u32 → to_hex_string → from_hex → to_argb_u32` が元値と一致する
-- `from_hex_and_from_hex_rgb_agree_on_6digit` 任意 `#RRGGBB` 文字列 (strategy `[0-9A-Fa-f]{6}` を `#` プレフィックス付きで生成) で `from_hex` と `from_hex_rgb` がともに成功し、 結果の `Color` が一致する (両者とも `a = 0xFF`)
-- `from_hex_accepts_8digit_but_from_hex_rgb_rejects` 任意 `#RRGGBBAA` 文字列 (strategy `[0-9A-Fa-f]{8}` を `#` プレフィックス付きで生成) で `from_hex` は成功、 `from_hex_rgb` は必ず `Err(ColorParseError::InvalidLength(8))` を返す
-- `both_parsers_reject_missing_hash` `#` を含まない任意 hex 文字列 (strategy `[0-9A-Fa-f]{0,16}`) で `from_hex` と `from_hex_rgb` がともに `Err(ColorParseError::MissingHashPrefix)` を返す
+- `to_hex_string_matches_uppercase_8digit_pattern` 任意 u32 → `from_argb_u32 → to_hex_string` が `#` + 8 桁大文字 hex の構造を持つ
+- `from_hex_and_from_hex_rgb_agree_on_6digit` 任意 `#RRGGBB` 文字列 (`[0-9A-Fa-f]{6}`) で `from_hex` と `from_hex_rgb` がともに成功し、 結果の `Color` が一致する (両者とも `a = 0xFF`)
+- `from_hex_accepts_8digit_but_from_hex_rgb_rejects` 任意 `#RRGGBBAA` 文字列 (`[0-9A-Fa-f]{8}`) で `from_hex` は `Some`、 `from_hex_rgb` は `None` を返す
+- `from_hex_rejects_non_6_or_8_lengths` 任意の 6 / 8 桁以外の hex (`[0-9A-Fa-f]{1,5}|[0-9A-Fa-f]{7}|[0-9A-Fa-f]{9,16}`) で `from_hex` は `None` を返す
+- `from_hex_rgb_rejects_non_6_lengths` 任意の 6 桁以外の hex (`[0-9A-Fa-f]{1,5}|[0-9A-Fa-f]{7,16}`) で `from_hex_rgb` は `None` を返す
+- `both_parsers_reject_missing_hash` `#` を含まない任意 hex 文字列 (`[0-9A-Fa-f]{0,16}`) で `from_hex` / `from_hex_rgb` がともに `None` を返す
 
 ### 単体テスト (`src/color.rs` の `mod tests`)
 
 PBT で実現しにくいエラーパス・境界値のみを書く。
 
-- `from_hex_accepts_lowercase` (大文字小文字混在の `#abCD12` が受理されることを明示確認)
-- `from_hex_rejects_empty` (`""` が `MissingHashPrefix`)
-- `from_hex_rejects_non_hex_chars` (`#GGGGGG` が `InvalidHex`)
-- `from_hex_rejects_wrong_length` (3 桁 `#FFF` と 9 桁 `#FFFFFFFFF` がそれぞれ `InvalidLength(3)` / `InvalidLength(9)`)
-- `to_hex_string_always_8_digits_uppercase` (`a=0xFF` でも `FF` が付き、 hex は大文字。 代表色 `#FF0000FF` / `#00FF00FF` / `#0000FFFF` / `#000000FF` / `#FFFFFFFF` を列挙)
+- `from_hex_rejects_non_hex_chars` (`#GGGGGG` が `None`)
+- `from_hex_rejects_wrong_length` (3 桁 `#FFF` と 9 桁 `#FFFFFFFFF` がいずれも `None`)
 
 ### 既存テストの扱い
 
@@ -289,19 +269,19 @@ PBT で実現しにくいエラーパス・境界値のみを書く。
 
 - state file に保存される `color` / `background_key_color` の文字列フォーマット (`#RRGGBB`) は変更しない
 - obsws レスポンスの `fontColor` フィールドは引き続き常に 8 桁 `#RRGGBBAA` 形式・大文字で出力する
-- 既存エラー応答の comment 文言 (`fontColor must start with '#'` / `fontColor must be #RRGGBB or #RRGGBBAA` / `fontColor must be hex` / `expected #RRGGBB, got ...`) は維持する
+- `fontColor` の不正入力時のエラー文言は `fontColor must be #RRGGBB or #RRGGBBAA: ...` の 1 種類に統合する (旧 `parse_argb_color` の 3 種別出し分け文言は廃止)。 `expected #RRGGBB, got ...` (`color_source` 等の検証エラー文言) は維持する
 - `TextOverlaySpec::font_color_argb: u32` のフィールド型は変更しない (mixer / layer / validate への波及を避ける)
 
 ## 完了条件
 
-- `src/color.rs` が新規作成され、 `Color` / `ColorParseError` と上記 API が定義されている
+- `src/color.rs` が新規作成され、 `Color` と上記 API が定義されている
 - `src/lib.rs` に `pub mod color;` が追加されている
 - 上記「各呼び出し元の書き換え」のとおり、 obsws / webrtc 配下の全呼び出し元 (`text_overlay.rs` の Create / Update / state_to_json / `color_source.rs` / `state/types.rs` / `p2p_session.rs`) が `Color` 経由に切り替わっている
 - 旧 `pub fn parse_hex_color` (`webrtc_source.rs`)、 `parse_argb_color` / `argb_to_hex_string` (`text_overlay.rs`) が削除されている
 - `validate_hex_color` (`state/types.rs`) は関数として残り、 内部が `Color::from_hex_rgb` 経由に置き換わっている
 - `pbt/tests/prop_color.rs` が新規作成され、 上記 PBT プロパティを含む
 - `grep -rEn 'parse_hex_color|parse_argb_color|argb_to_hex_string' src/ pbt/ tests/ examples/ fuzz/` で `src/color.rs` および `pbt/tests/prop_color.rs` 以外に出現がない
-- 既存の受理範囲・拒否範囲・主要エラー文言キーワード (`fontColor must` / `expected #RRGGBB`) が変わっていない
+- 既存の受理範囲・拒否範囲が変わっていない。 `fontColor` のエラー文言は 1 種類 (`fontColor must be #RRGGBB or #RRGGBBAA: ...`) に統合され、 `expected #RRGGBB` (`validate_hex_color` 経路) は維持される
 - `cargo test --all-targets` がすべて通る
 - `cargo fmt --check` および `cargo clippy --all-targets -- -D warnings` がすべて通る
 
@@ -311,20 +291,19 @@ PBT で実現しにくいエラーパス・境界値のみを書く。
 
 ## CHANGES.md について
 
-内部リファクタであり外部から観測可能な挙動 (state file フォーマット、 obsws レスポンス、 受理範囲、 主要エラー文言キーワード) は変えないため `CHANGES.md` には記載しない (`shiguredo-changelog` 規約準拠)。
+内部リファクタであり外部から観測可能な挙動 (state file フォーマット、 obsws レスポンス、 受理範囲) は変えないため `CHANGES.md` には記載しない (`shiguredo-changelog` 規約準拠)。 `fontColor` のエラー文言は 1 種類に統合するが、 主要キーワード `fontColor must` は維持されておりクライアント側の文言文字列パースは想定外のため非互換扱いしない。
 
 ## 解決方法
 
-`src/color.rs` を新規作成し共通 `Color` 型と `ColorParseError` を集約した。
+`src/color.rs` を新規作成し共通 `Color` 型を集約した。
 
 実装の主な内訳:
 
-- 配置: `src/color.rs` を crate root に置き、 `src/lib.rs` に `pub mod color;` を追加した。 PBT (`pbt/tests/prop_color.rs`) が別 crate から `use hisui::color::{Color, ColorParseError};` で参照する必要があるため `pub` で公開する方針に正規化した
-- API: `Color::from_hex` / `from_hex_rgb` / `from_argb_u32` / `to_hex_string` / `to_argb_u32` / `to_rgb` を実装した。 `from_hex_rgb` は 6 桁チェック後に `from_hex` に委譲する形で実装重複を解消した
-- エラー: `ColorParseError` の `MissingHashPrefix` / `InvalidLength { actual: usize }` / `InvalidHex` を定義した。 ペイロード意味を struct variant で自己ドキュメント化している
+- 配置: `src/color.rs` を crate root に置き、 `src/lib.rs` に `pub mod color;` を追加した。 PBT (`pbt/tests/prop_color.rs`) が別 crate から `use hisui::color::Color;` で参照する必要があるため `pub` で公開する方針に正規化した
+- API: `Color::from_hex` / `from_hex_rgb` / `from_argb_u32` / `to_hex_string` / `to_argb_u32` / `to_rgb` を実装した。 戻り値型は `Option<Self>` で統一し、 失敗種別を呼び出し元が区別しない実態に合わせた (専用エラー enum は導入しない)。 `from_hex_rgb` は 6 桁チェック後に `from_hex` に委譲する形で実装重複を解消した
 - 旧関数の置き換え: `parse_argb_color` / `argb_to_hex_string` (`text_overlay.rs`) と `pub fn parse_hex_color` (`webrtc_source.rs`) を削除し、 全呼び出し元 (text_overlay の Create / Update / state_to_json、 `color_source.rs`、 `state/types.rs::validate_hex_color` の内部、 `p2p_session.rs::resolve_chroma_key_config`) を `Color` 経由に書き換えた
-- 文言整形: `text_overlay.rs` 内に private fn `format_font_color_parse_error(input, e)` を置き、 既存 comment 文言 (`fontColor must ...` 系) を維持した
-- テスト: `pbt/tests/prop_color.rs` を新規作成し、 ARGB ラウンドトリップ / 6 桁・8 桁の受理 / 6 桁以外の `InvalidLength` / `#` 不在の `MissingHashPrefix` / 出力フォーマット (`#` + 8 桁大文字 hex) を網羅した。 `format_font_color_parse_error` の 3 バリアント文言マッピングは `text_overlay.rs` 内 `mod tests` で単体テストを追加した
-- 受理範囲は変えていない (`fontColor` は 6/8 桁、 `color_source` の `color` / `webrtc_source` の `background_key_color` は 6 桁のみ)。 既存 state file フォーマット・obsws レスポンス・主要エラー文言キーワードを維持している
+- 文言整形: `fontColor` のエラー文言を 1 種類 (`fontColor must be #RRGGBB or #RRGGBBAA: ...`) に統合し、 旧 `parse_argb_color` の 3 種別出し分けは廃止した。 `validate_hex_color` 側は単一文言 (`expected #RRGGBB, got ...`) を維持した
+- テスト: `pbt/tests/prop_color.rs` を新規作成し、 ARGB ラウンドトリップ / 6 桁・8 桁の受理 / 6 桁以外と 6/8 桁以外の `None` / `#` 不在の `None` / 出力フォーマット (`#` + 8 桁大文字 hex) を網羅した
+- 受理範囲は変えていない (`fontColor` は 6/8 桁、 `color_source` の `color` / `webrtc_source` の `background_key_color` は 6 桁のみ)。 既存 state file フォーマット・obsws レスポンスを維持している
 
 `cargo test --workspace --all-targets` / `cargo fmt --check` / `cargo clippy --workspace --all-targets -- -D warnings` がすべて通ることを確認した。
