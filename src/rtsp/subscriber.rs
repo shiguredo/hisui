@@ -1082,13 +1082,15 @@ impl AacRtpDepacketizer {
         let mut bit_reader = BitReader::new(au_headers);
         let mut au_sizes = Vec::new();
         let mut first = true;
+        // size_length / index_bits はそれぞれ 32 以下に検査済みで、au_headers_length_bits は
+        // u16 由来の usize 値のため、consumed_bits の overflow は発生しない。
         let mut consumed_bits = 0usize;
         while consumed_bits < au_headers_length_bits {
             let size = bit_reader
                 .read_u(self.size_length as usize)
                 .map_err(|e| e.with_context(AAC_AU_HEADER_CONTEXT))?
                 as usize;
-            consumed_bits = consumed_bits.saturating_add(self.size_length as usize);
+            consumed_bits += self.size_length as usize;
             let index_bits = if first {
                 self.index_length
             } else {
@@ -1097,7 +1099,7 @@ impl AacRtpDepacketizer {
             let _ = bit_reader
                 .read_u(index_bits as usize)
                 .map_err(|e| e.with_context(AAC_AU_HEADER_CONTEXT))?;
-            consumed_bits = consumed_bits.saturating_add(index_bits as usize);
+            consumed_bits += index_bits as usize;
             first = false;
             au_sizes.push(size);
         }
