@@ -67,6 +67,55 @@ GitHub Actions などの CI 環境で `maturin build` を実行するための�
   run: ./scripts/maturin_build.sh --release
 ```
 
+## download_ml_models.py
+
+### 目的
+
+Hugging Face から ML 推論用モデルファイル（Whisper / Silero VAD 等）を取得するためのスクリプト
+
+### 説明
+
+`candle` feature 配下の ML 推論機能を動かすには、`whisper-tiny` / `silero-vad` などのモデルファイルを Hugging Face から取得して `--dest` で指定したディレクトリに配置する必要があります。本スクリプトは標準ライブラリのみ（追加の Python 依存なし）で次を行います。
+
+- ターゲット名（`whisper-tiny` / `silero-vad` 等）ごとに HF の `resolve/main` URL から複数ファイルを取得
+- ファイルごとに SHA256 を検証（期待値はスクリプト先頭の `TARGETS` dict に埋め込み済み）
+- 既に保存済みでサイズと SHA256 が一致しているファイルは skip
+- ダウンロード中は `.tmp` 一時ファイルに書き込み、完了後に atomic rename
+- `429` / 5xx / connection error は最大 3 回リトライ（指数バックオフ 2 / 4 / 8 秒）、`429` 以外の 4xx は即時失敗
+
+**HF 側でモデルが更新された場合**: CI が SHA256 mismatch で落ちて気付くので、最新ファイルを手元で再取得して `sha256sum` で値を取り直し、`TARGETS` dict を更新する PR を出すこと。`expected_sha256` を空文字に戻して 1 回実行すると検証スキップで再取得され、`sha256sum` で値が取れます。
+
+**新規ターゲットを追加する場合**: `TARGETS` dict に `<モデル種別>[-<サイズ/バリアント>]` のケバブケースのキーで `FileSpec` のリストを追加してください。保存先は `<dest>/<target_key>/<file_in_repo>` 規約で算出されます。
+
+### 使い方
+
+```bash
+# 既定の取得対象
+uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny silero-vad
+
+# whisper-tiny だけ取得
+uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny
+```
+
+`--dest` は必須でデフォルト値を持ちません。`ml-models/` は `.gitignore` 済みのパスです。
+
+### 動作の流れ
+
+1. CLI 引数を解析（`--dest` 必須、ターゲット名は `TARGETS` dict のキーから選択）
+2. `--dest` の存在と書き込み権限を確認
+3. ターゲット内の各 `FileSpec` について URL を組み立て、HTTP GET（リトライあり）
+4. SHA256 を検証（期待値が空ならスキップして warn 出力）、mismatch なら 1 ラウンドだけ再取得
+5. `.tmp` ファイルから本来のパスへ `os.replace` で atomic rename
+
+終了コード:
+
+- 0 = 成功
+- 1 = 予期しない exception
+- 2 = CLI 引数エラー
+- 3 = ネットワーク失敗
+- 4 = SHA256 mismatch（再取得後も不一致）
+- 5 = `--dest` ディレクトリが書き込み不可
+
 ## バージョン形式について
 
 ### Cargo (Rust) のバージョン形式
