@@ -1036,6 +1036,13 @@ struct AacRtpDepacketizer {
 
 impl AacRtpDepacketizer {
     fn new(size_length: u8, index_length: u8, index_delta_length: u8) -> Self {
+        // size_length が 0 だと depacketize 内の AU header ループで consumed_bits が
+        // 進まず無限ループに陥る。本番経路では select_audio_track の fmtp 検査で弾かれるが、
+        // struct の不変条件として debug ビルドで明示的に固定する。
+        debug_assert!(
+            size_length > 0,
+            "AacRtpDepacketizer requires size_length > 0"
+        );
         Self {
             size_length,
             index_length,
@@ -1067,6 +1074,10 @@ impl AacRtpDepacketizer {
             ));
         }
 
+        // 共有 BitReader の Err は AU header 経路と SPS パース経路で同一文言になるため、
+        // ログから経路を識別できるように with_context で AU header 由来を前置する。
+        const AAC_AU_HEADER_CONTEXT: &str = "invalid AAC AU header";
+
         let au_headers = &packet.payload[2..2 + au_headers_length_bytes];
         let mut reader = bit_reader::BitReader::new(au_headers);
         let mut au_sizes = Vec::new();
@@ -1075,7 +1086,7 @@ impl AacRtpDepacketizer {
         while consumed_bits < au_headers_length_bits {
             let size = reader
                 .read_u(self.size_length as usize)
-                .map_err(|e| e.with_context("invalid AAC AU header"))?
+                .map_err(|e| e.with_context(AAC_AU_HEADER_CONTEXT))?
                 as usize;
             consumed_bits = consumed_bits.saturating_add(self.size_length as usize);
             let index_bits = if first {
@@ -1085,7 +1096,7 @@ impl AacRtpDepacketizer {
             };
             let _ = reader
                 .read_u(index_bits as usize)
-                .map_err(|e| e.with_context("invalid AAC AU header"))?;
+                .map_err(|e| e.with_context(AAC_AU_HEADER_CONTEXT))?;
             consumed_bits = consumed_bits.saturating_add(index_bits as usize);
             first = false;
             au_sizes.push(size);
@@ -1757,6 +1768,24 @@ mod tests {
         assert_eq!(
             err.display(),
             "AAC fmtp indexDeltaLength must be 32 or less"
+        );
+    }
+
+    #[test]
+    fn select_audio_track_accepts_lengths_at_boundary_32() {
+        // 上限値 (= 32) は共有 BitReader::read_u が Ok を返す境界。
+        // `> 32` Err 化と `== 32` 受理の境界を 3 フィールド一括で担保する。
+        let sdp = build_test_sdp_with_audio_fmtp(
+            "profile-level-id=1;mode=AAC-hbr;sizelength=32;indexlength=32;indexdeltalength=32;config=1190",
+        );
+        let cfg = parse_audio_track(&sdp)
+            .expect("sizelength=32 / indexlength=32 / indexdeltalength=32 は Ok を返すこと")
+            .expect("AudioTrackConfig が返ること");
+        assert_eq!(cfg.size_length, 32, "size_length が 32 で受理されること");
+        assert_eq!(cfg.index_length, 32, "index_length が 32 で受理されること");
+        assert_eq!(
+            cfg.index_delta_length, 32,
+            "index_delta_length が 32 で受理されること"
         );
     }
 
