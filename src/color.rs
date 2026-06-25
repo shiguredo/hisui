@@ -94,7 +94,7 @@ impl Color {
     }
 
     /// `(r, g, b)` 順のタプル。 alpha は捨てる。
-    pub fn rgb_tuple(&self) -> (u8, u8, u8) {
+    pub fn to_rgb(&self) -> (u8, u8, u8) {
         (self.r, self.g, self.b)
     }
 }
@@ -127,65 +127,5 @@ mod tests {
             Err(ColorParseError::InvalidLength { actual: 9 }),
             "9 桁は actual=9 として拒否されるはず"
         );
-    }
-
-    /// 代表色について `to_hex_string` が `a=0xFF` でも 8 桁を返し、
-    /// hex は大文字であることを確認する。
-    #[test]
-    fn to_hex_string_always_8_digits_uppercase() {
-        let cases = [
-            (
-                Color {
-                    r: 0xFF,
-                    g: 0x00,
-                    b: 0x00,
-                    a: 0xFF,
-                },
-                "#FF0000FF",
-            ),
-            (
-                Color {
-                    r: 0x00,
-                    g: 0xFF,
-                    b: 0x00,
-                    a: 0xFF,
-                },
-                "#00FF00FF",
-            ),
-            (
-                Color {
-                    r: 0x00,
-                    g: 0x00,
-                    b: 0xFF,
-                    a: 0xFF,
-                },
-                "#0000FFFF",
-            ),
-            (
-                Color {
-                    r: 0x00,
-                    g: 0x00,
-                    b: 0x00,
-                    a: 0xFF,
-                },
-                "#000000FF",
-            ),
-            (
-                Color {
-                    r: 0xFF,
-                    g: 0xFF,
-                    b: 0xFF,
-                    a: 0xFF,
-                },
-                "#FFFFFFFF",
-            ),
-        ];
-        for (color, expected) in cases {
-            assert_eq!(
-                color.to_hex_string(),
-                expected,
-                "{expected:?} は 8 桁大文字で出力されるはず"
-            );
-        }
     }
 }

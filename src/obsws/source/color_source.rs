@@ -20,7 +20,7 @@ impl ColorSource {
     pub async fn run(self, outer_processor: ProcessorHandle) -> Result<()> {
         let (r, g, b) = Color::from_hex_rgb(&self.color)
             .map_err(|_| crate::Error::new(format!("invalid color format: {}", self.color)))?
-            .rgb_tuple();
+            .to_rgb();
         let (y, u, v) = rgb_to_yuv_bt601_int(r, g, b);
 
         // ソースサイズは SceneItem の transform で制御されるため、

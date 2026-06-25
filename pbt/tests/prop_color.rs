@@ -22,6 +22,20 @@ proptest! {
         prop_assert_eq!(restored, argb, "u32 → hex → Color → u32 のラウンドトリップは恒等であるはず");
     }
 
+    // 任意 u32 → from_argb_u32 → to_hex_string が `#` + 8 桁大文字 hex (`#[0-9A-F]{8}`) であることを検証する。
+    // 既存 `argb_u32_roundtrips_via_hex_string` は値の往復一致を見るが、
+    // 出力フォーマット (長さ / プレフィックス / 大文字 / 文字種) は本プロパティで直接確認する。
+    #[test]
+    fn to_hex_string_matches_uppercase_8digit_pattern(argb in any::<u32>()) {
+        let s = Color::from_argb_u32(argb).to_hex_string();
+        prop_assert_eq!(s.len(), 9, "出力は # + 8 桁 hex の合計 9 文字であるはず");
+        prop_assert!(s.starts_with('#'), "出力は # で始まるはず");
+        prop_assert!(
+            s.chars().skip(1).all(|c| c.is_ascii_digit() || ('A'..='F').contains(&c)),
+            "出力の hex 部分は 0-9 / A-F の大文字のみで構成されるはず"
+        );
+    }
+
     #[test]
     fn from_hex_and_from_hex_rgb_agree_on_6digit(hex6 in "[0-9A-Fa-f]{6}") {
         let s = format!("#{hex6}");
