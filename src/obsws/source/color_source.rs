@@ -1,9 +1,8 @@
 use crate::{
     ProcessorHandle, Result, TrackId,
+    color::Color,
     video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize, rgb_to_yuv_bt601_int},
 };
-
-use super::webrtc_source::parse_hex_color;
 
 const MAX_NOACKED_COUNT: u64 = 100;
 
@@ -19,8 +18,9 @@ pub struct ColorSource {
 
 impl ColorSource {
     pub async fn run(self, outer_processor: ProcessorHandle) -> Result<()> {
-        let (r, g, b) = parse_hex_color(&self.color)
-            .ok_or_else(|| crate::Error::new(format!("invalid color format: {}", self.color)))?;
+        let (r, g, b) = Color::from_hex_rgb(&self.color)
+            .ok_or_else(|| crate::Error::new(format!("invalid color format: {}", self.color)))?
+            .to_rgb();
         let (y, u, v) = rgb_to_yuv_bt601_int(r, g, b);
 
         // ソースサイズは SceneItem の transform で制御されるため、
