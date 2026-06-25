@@ -14,8 +14,8 @@ pub struct Color {
 pub enum ColorParseError {
     /// `#` プレフィックス不在 (空文字もここに分類する)。
     MissingHashPrefix,
-    /// `#` を除いた後の文字数が 6 / 8 以外。 引数値は `#` を除いた後の長さ。
-    InvalidLength(usize),
+    /// `#` を除いた後のバイト長が 6 / 8 以外。 `actual` は `#` を除いた後のバイト長。
+    InvalidLength { actual: usize },
     /// hex 以外の文字が含まれる。
     InvalidHex,
 }
@@ -29,7 +29,9 @@ impl Color {
             .strip_prefix('#')
             .ok_or(ColorParseError::MissingHashPrefix)?;
         if stripped.len() != 6 && stripped.len() != 8 {
-            return Err(ColorParseError::InvalidLength(stripped.len()));
+            return Err(ColorParseError::InvalidLength {
+                actual: stripped.len(),
+            });
         }
         if !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(ColorParseError::InvalidHex);
@@ -64,7 +66,9 @@ impl Color {
             .strip_prefix('#')
             .ok_or(ColorParseError::MissingHashPrefix)?;
         if stripped.len() != 6 {
-            return Err(ColorParseError::InvalidLength(stripped.len()));
+            return Err(ColorParseError::InvalidLength {
+                actual: stripped.len(),
+            });
         }
         Self::from_hex(s)
     }
@@ -143,13 +147,13 @@ mod tests {
     fn from_hex_rejects_wrong_length() {
         assert_eq!(
             Color::from_hex("#FFF"),
-            Err(ColorParseError::InvalidLength(3)),
-            "3 桁は InvalidLength(3) で拒否されるはず"
+            Err(ColorParseError::InvalidLength { actual: 3 }),
+            "3 桁は actual=3 として拒否されるはず"
         );
         assert_eq!(
             Color::from_hex("#FFFFFFFFF"),
-            Err(ColorParseError::InvalidLength(9)),
-            "9 桁は InvalidLength(9) で拒否されるはず"
+            Err(ColorParseError::InvalidLength { actual: 9 }),
+            "9 桁は actual=9 として拒否されるはず"
         );
     }
 

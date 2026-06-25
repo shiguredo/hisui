@@ -529,7 +529,7 @@ fn text_overlay_state_to_json(state: &TextOverlayState) -> nojson::RawJsonOwned 
 fn format_font_color_parse_error(input: &str, e: ColorParseError) -> String {
     match e {
         ColorParseError::MissingHashPrefix => format!("fontColor must start with '#': {input:?}"),
-        ColorParseError::InvalidLength(_) => {
+        ColorParseError::InvalidLength { .. } => {
             format!("fontColor must be #RRGGBB or #RRGGBBAA: {input:?}")
         }
         ColorParseError::InvalidHex => format!("fontColor must be hex: {input:?}"),

@@ -48,8 +48,8 @@ proptest! {
         );
         prop_assert_eq!(
             Color::from_hex_rgb(&s),
-            Err(ColorParseError::InvalidLength(8)),
-            "8 桁 hex は from_hex_rgb で InvalidLength(8) として拒否されるはず"
+            Err(ColorParseError::InvalidLength { actual: 8 }),
+            "8 桁 hex は from_hex_rgb で actual=8 として拒否されるはず"
         );
     }
 
