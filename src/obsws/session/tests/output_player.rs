@@ -9,7 +9,6 @@ use crate::obsws::state::ObswsSessionState;
 
 use super::common::*;
 
-#[cfg(feature = "player")]
 #[tokio::test]
 async fn start_output_player_with_closed_control_channel_returns_processing_failed() {
     let registry = ObswsSessionState::new_for_test();
@@ -51,7 +50,6 @@ async fn start_output_player_with_closed_control_channel_returns_processing_fail
     assert_eq!(parse_request_type(&text), "StartOutput");
 }
 
-#[cfg(feature = "player")]
 #[tokio::test]
 async fn player_lifecycle_stop_updates_output_status() {
     let registry = ObswsSessionState::new_for_test();
@@ -137,7 +135,6 @@ async fn player_lifecycle_stop_updates_output_status() {
     pipeline_task.abort();
 }
 
-#[cfg(feature = "player")]
 #[tokio::test]
 async fn start_output_player_returns_processing_failed_when_subscriber_startup_fails() {
     let registry = ObswsSessionState::new_for_test();
@@ -215,7 +212,6 @@ async fn start_output_player_returns_processing_failed_when_subscriber_startup_f
     pipeline_task.abort();
 }
 
-#[cfg(feature = "player")]
 #[tokio::test]
 async fn stale_player_stopped_event_does_not_deactivate_restarted_player() {
     let registry = ObswsSessionState::new_for_test();
