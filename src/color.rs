@@ -58,25 +58,15 @@ impl Color {
     /// 空文字 / `#` 不在は `MissingHashPrefix` で拒否する (`from_hex` と同じ挙動)。
     /// 成功時は `a = 0xFF` を埋める。
     pub fn from_hex_rgb(s: &str) -> Result<Self, ColorParseError> {
+        // 8 桁を弾く受理範囲チェックだけ先に行い、 残りの hex 検証と r/g/b 抽出は
+        // 6 桁分岐の挙動が `from_hex` と同一なのでそのまま委譲する (`a = 0xFF` が埋まる)。
         let stripped = s
             .strip_prefix('#')
             .ok_or(ColorParseError::MissingHashPrefix)?;
         if stripped.len() != 6 {
             return Err(ColorParseError::InvalidLength(stripped.len()));
         }
-        if !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(ColorParseError::InvalidHex);
-        }
-        let r = u8::from_str_radix(&stripped[0..2], 16).expect(
-            "unreachable: length and hex digits validated above; implementation bug if reached",
-        );
-        let g = u8::from_str_radix(&stripped[2..4], 16).expect(
-            "unreachable: length and hex digits validated above; implementation bug if reached",
-        );
-        let b = u8::from_str_radix(&stripped[4..6], 16).expect(
-            "unreachable: length and hex digits validated above; implementation bug if reached",
-        );
-        Ok(Self { r, g, b, a: 0xFF })
+        Self::from_hex(s)
     }
 
     /// ARGB u32 (`0xAARRGGBB` レイアウト) から `Color` を構築する。 失敗しない変換。
