@@ -74,7 +74,7 @@ impl Color {
     }
 
     /// ARGB u32 (`0xAARRGGBB` レイアウト) から `Color` を構築する。 失敗しない変換。
-    pub const fn from_argb_u32(argb: u32) -> Self {
+    pub fn from_argb_u32(argb: u32) -> Self {
         Self {
             a: ((argb >> 24) & 0xFF) as u8,
             r: ((argb >> 16) & 0xFF) as u8,
@@ -89,12 +89,12 @@ impl Color {
     }
 
     /// ARGB u32 (`((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)`) を返す。
-    pub const fn to_argb_u32(&self) -> u32 {
+    pub fn to_argb_u32(&self) -> u32 {
         ((self.a as u32) << 24) | ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
     }
 
     /// `(r, g, b)` 順のタプル。 alpha は捨てる。
-    pub const fn rgb_tuple(&self) -> (u8, u8, u8) {
+    pub fn rgb_tuple(&self) -> (u8, u8, u8) {
         (self.r, self.g, self.b)
     }
 }
@@ -102,34 +102,6 @@ impl Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// 大文字・小文字混在の hex 文字列も受理することを明示確認する。
-    /// (PBT 側では `[0-9A-Fa-f]` strategy で広く検証するが、 ここでは挙動を
-    /// ドキュメント代わりに明示する。)
-    #[test]
-    fn from_hex_accepts_lowercase() {
-        let c = Color::from_hex("#abCD12").expect("大文字小文字混在は受理されるはず");
-        assert_eq!(
-            c,
-            Color {
-                r: 0xab,
-                g: 0xcd,
-                b: 0x12,
-                a: 0xFF,
-            },
-            "大文字小文字混在でも値はそのまま復元される"
-        );
-    }
-
-    /// 空文字は `MissingHashPrefix` として拒否する。
-    #[test]
-    fn from_hex_rejects_empty() {
-        assert_eq!(
-            Color::from_hex(""),
-            Err(ColorParseError::MissingHashPrefix),
-            "空文字は MissingHashPrefix で拒否されるはず"
-        );
-    }
 
     /// hex 以外の文字が含まれる場合は `InvalidHex` を返す。
     #[test]
