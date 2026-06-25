@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-23
-- Completed:
+- Completed: 2026-06-25
 - Model: Opus 4.7
 - Branch: feature/refactor-hex-color
 - Polished: 2026-06-24
@@ -312,3 +312,19 @@ PBT で実現しにくいエラーパス・境界値のみを書く。
 ## CHANGES.md について
 
 内部リファクタであり外部から観測可能な挙動 (state file フォーマット、 obsws レスポンス、 受理範囲、 主要エラー文言キーワード) は変えないため `CHANGES.md` には記載しない (`shiguredo-changelog` 規約準拠)。
+
+## 解決方法
+
+`src/color.rs` を新規作成し共通 `Color` 型と `ColorParseError` を集約した。
+
+実装の主な内訳:
+
+- 配置: `src/color.rs` を crate root に置き、 `src/lib.rs` に `pub mod color;` を追加した。 PBT (`pbt/tests/prop_color.rs`) が別 crate から `use hisui::color::{Color, ColorParseError};` で参照する必要があるため `pub` で公開する方針に正規化した
+- API: `Color::from_hex` / `from_hex_rgb` / `from_argb_u32` / `to_hex_string` / `to_argb_u32` / `to_rgb` を実装した。 `from_hex_rgb` は 6 桁チェック後に `from_hex` に委譲する形で実装重複を解消した
+- エラー: `ColorParseError` の `MissingHashPrefix` / `InvalidLength { actual: usize }` / `InvalidHex` を定義した。 ペイロード意味を struct variant で自己ドキュメント化している
+- 旧関数の置き換え: `parse_argb_color` / `argb_to_hex_string` (`text_overlay.rs`) と `pub fn parse_hex_color` (`webrtc_source.rs`) を削除し、 全呼び出し元 (text_overlay の Create / Update / state_to_json、 `color_source.rs`、 `state/types.rs::validate_hex_color` の内部、 `p2p_session.rs::resolve_chroma_key_config`) を `Color` 経由に書き換えた
+- 文言整形: `text_overlay.rs` 内に private fn `format_font_color_parse_error(input, e)` を置き、 既存 comment 文言 (`fontColor must ...` 系) を維持した
+- テスト: `pbt/tests/prop_color.rs` を新規作成し、 ARGB ラウンドトリップ / 6 桁・8 桁の受理 / 6 桁以外の `InvalidLength` / `#` 不在の `MissingHashPrefix` / 出力フォーマット (`#` + 8 桁大文字 hex) を網羅した。 `format_font_color_parse_error` の 3 バリアント文言マッピングは `text_overlay.rs` 内 `mod tests` で単体テストを追加した
+- 受理範囲は変えていない (`fontColor` は 6/8 桁、 `color_source` の `color` / `webrtc_source` の `background_key_color` は 6 桁のみ)。 既存 state file フォーマット・obsws レスポンス・主要エラー文言キーワードを維持している
+
+`cargo test --workspace --all-targets` / `cargo fmt --check` / `cargo clippy --workspace --all-targets -- -D warnings` がすべて通ることを確認した。
