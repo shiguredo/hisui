@@ -168,15 +168,34 @@ H.264 / H.265 SPS パース経路は wrap しない (これらは video モジ�
 
 ## テスト追加
 
-以下を `src/rtsp/subscriber.rs::tests` に新規追加する。
+### 単体テスト (`src/rtsp/subscriber.rs::tests`)
 
-- `depacketize_aac_with_zero_index_length`: `index_length = 0` / `index_delta_length = 0` の fmtp で複数 AU を取り出せること (RFC 3640 §3.3.6 で許容される正常系を、新 BitReader の `read_u(0) -> Ok(0)` 経路として担保)。
+PBT で表現しづらい Err 文言 assert と境界値受理に絞って新規追加する。
+
 - `select_audio_track_rejects_size_length_over_32`: fmtp に `sizelength=33` を含む SDP で session 確立時点で Err になること。文言は `"AAC fmtp sizeLength must be 32 or less"`。
 - `select_audio_track_rejects_index_length_over_32`: 同上 (`indexlength=33`、文言は `"AAC fmtp indexLength must be 32 or less"`)。
 - `select_audio_track_rejects_index_delta_length_over_32`: 同上 (`indexdeltalength=33`、文言は `"AAC fmtp indexDeltaLength must be 32 or less"`)。
-- `depacketize_aac_wraps_bit_reader_error`: `au_headers` slice が消費しきれない (例: `au_headers_length_bits` を意図的に大きく設定して `read_u` が枯渇する) packet で、`depacketize` 由来の Err の `reason` が `"invalid AAC AU header: "` で始まることを assert (`with_context` の挙動担保。`crate::Error.reason` フィールドを直接参照するか、`err.display()` を使う)。
+- `select_audio_track_accepts_lengths_at_boundary_32`: 上限値 (= 32) は共有 `BitReader::read_u` が Ok を返す境界。`> 32` Err 化と `== 32` 受理の境界を 3 フィールド一括で担保する。
+- `depacketize_aac_wraps_bit_reader_error`: `au_headers` slice が消費しきれない (例: `au_headers_length_bits` を意図的に大きく設定して `read_u` が枯渇する) packet で、`depacketize` 由来の Err の `reason` が `"invalid AAC AU header: "` で始まることを assert (`with_context` の挙動担保)。
 
-既存 `depacketize_aac_with_multiple_aus` / `depacketize_aac_rejects_zero_au_header_length` は変更不要 (本文 `### 確認済み事項 (grep / テスト)` 参照)。
+既存 `depacketize_aac_rejects_zero_au_header_length` は変更不要。
+
+### PBT (`pbt/tests/prop_rtsp_subscriber.rs`)
+
+`shiguredo-rust` 規約「unittest は PBT で実現できないものだけを書くこと」に従い、ラウンドトリップとクラッシュフリーを PBT で網羅する。本体側に PBT 用 helper を pub で公開する (`build_sps_for_pbt` 先例と同型):
+
+- `pub fn build_aac_rtp_payload_for_pbt(size_length, index_length, index_delta_length, au_data)`: RFC 3640 §3.3.6 の AU-headers-length + au_headers + au_data を組み立てる。
+- `pub fn depacketize_aac_payload_for_pbt(size_length, index_length, index_delta_length, payload)`: `AacRtpDepacketizer::depacketize` の戻り値から `data` バイト列のリストを取り出す薄いラッパー。fmtp 値域検査も内包する。
+
+PBT のテスト 2 件:
+
+- `prop_depacketize_aac_roundtrips_au_data`: 任意の `(size_length: 1..=32, index_length: 0..=32, index_delta_length: 0..=32, au_data)` で build → depacketize の往復が完全一致すること。
+- `prop_depacketize_aac_does_not_panic`: 任意の `(0..=u8::MAX, 0..=u8::MAX, 0..=u8::MAX, payload: 0..=1024 bytes)` で depacketize が panic しないこと。
+
+### 単体テストから PBT に統合した項目 (削除済み)
+
+- `depacketize_aac_with_multiple_aus` (1 ケース `(13, 3, 3)` + AU 2 個): ラウンドトリップ PBT のサンプル空間に含まれるため削除。
+- `depacketize_aac_with_zero_index_length` (1 ケース `(13, 0, 0)` + AU 2 個): 同上。
 
 ## 完了条件
 
@@ -195,8 +214,10 @@ H.264 / H.265 SPS パース経路は wrap しない (これらは video モジ�
 
 ### テスト
 
-- `## テスト追加` の 5 テストが追加され pass する。
-- 既存テスト `depacketize_aac_with_multiple_aus` / `depacketize_aac_rejects_zero_au_header_length` が pass する。
+- `## テスト追加 > 単体テスト` の 5 テストが追加され pass する。
+- `## テスト追加 > PBT` の 2 テスト (`prop_depacketize_aac_roundtrips_au_data` / `prop_depacketize_aac_does_not_panic`) が `pbt/tests/prop_rtsp_subscriber.rs` に追加され pass する (`cargo test -p pbt --test prop_rtsp_subscriber`)。
+- 既存テスト `depacketize_aac_rejects_zero_au_header_length` が pass する。
+- 旧単体テスト `depacketize_aac_with_multiple_aus` / `depacketize_aac_with_zero_index_length` は PBT に統合のため削除する。
 
 ### CI / feature gate
 
@@ -221,16 +242,18 @@ CHANGES.md への記載は **不要**。RTSP 機能自体が `## develop` 内の
 
 ## 解決方法
 
-推奨パッチ順序の 6 ステップを 1 コミットでまとめて対応した。
+推奨パッチ順序を起点に実装し、その後 `/review-diff-code` の指摘反映と PBT 追加を別コミットに分けて対応した。
 
 ### 実装内容
 
-1. **bit_reader.rs docstring 更新**: 用途を H.264 / H.265 SPS パーサ限定の記述から MPEG4-GENERIC AAC AU header パースを含む形に拡張した。Exp-Golomb 系メソッドが H.264 / H.265 経路のみで利用される旨も明記した。
+1. **bit_reader.rs docstring 更新**: 用途を H.264 / H.265 SPS パーサ限定の記述から MPEG4-GENERIC AAC AU header パースを含む形に拡張し、Exp-Golomb 系メソッドが H.264 / H.265 経路のみで利用される旨も明記した。Exp-Golomb の出典は「ITU-T 仕様」から「H.264 / H.265 仕様」に書き換えた (本ファイルが MPEG4-GENERIC AAC 経路でも利用されるため出典限定を避ける)。
 2. **subscriber.rs の独自 BitReader 削除**: `struct BitReader` / `impl BitReader` (`#[derive(Debug)]` 行を含む) を削除した。
-3. **import 追加**: `use crate::video::{..., bit_reader}` を `video::{VideoFormat, VideoFrame}` ブロックに追加し、`bit_reader::BitReader::new(...)` でモジュール単位で参照する形にした。
-4. **`AacRtpDepacketizer::depacketize` の置換**: `read_bits(u8)` を `read_u(u8 as usize)` に書き換え、Err 経路は `Error::with_context("invalid AAC AU header")` で前置 context を付けた。ローカル変数名は `bit_reader` モジュール名と衝突しないよう `reader` にリネームした。
-5. **fmtp 上限検査追加**: `select_audio_track` の `size_length == 0` 検査の隣に `size_length > 32` / `index_length > 32` / `index_delta_length > 32` の Err 化を追加し、RFC 3640 §3.3.6 値域外の SDP を session 確立時点で fail-fast するようにした。
-6. **テスト追加**: `src/rtsp/subscriber.rs::tests` に新規 5 件 (`depacketize_aac_with_zero_index_length` / `depacketize_aac_wraps_bit_reader_error` / `select_audio_track_rejects_size_length_over_32` / `select_audio_track_rejects_index_length_over_32` / `select_audio_track_rejects_index_delta_length_over_32`) を追加し、audio fmtp で SDP を組み立てる helper (`build_test_sdp_with_audio_fmtp` / `parse_audio_track`) も追加した。
+3. **import 追加**: `use crate::video::{VideoFormat, VideoFrame, bit_reader::BitReader}` (型単独 import、h264.rs / h265.rs と同型) で参照する形にした。
+4. **`AacRtpDepacketizer::depacketize` の置換**: `read_bits(u8)` を `read_u(u8 as usize)` に書き換え、Err 経路は `Error::with_context("invalid AAC AU header")` で前置 context を付けた (`crate::Error` は Display 未実装のため `format!("{e}")` ではなく `with_context` を使う)。context 文言は関数内 `const AAC_AU_HEADER_CONTEXT: &str` に集約した。`consumed_bits` は `saturating_add` から素直な `+=` に置き換え、overflow しない根拠をコメントで明示した。
+5. **fmtp 上限検査追加**: `select_audio_track` の `size_length == 0` 検査の隣に `size_length > 32` / `index_length > 32` / `index_delta_length > 32` の Err 化を追加し、RFC 3640 §3.3.6 値域外の SDP を session 確立時点で fail-fast するようにした (上限は共有 `BitReader::read_u` の `n > 32` 制約に由来する旨をコメントで明示)。
+6. **`AacRtpDepacketizer::new` 防御追加**: `debug_assert!(size_length > 0)` を追加して、無限ループの不変条件を struct レベルでも固定した (本番経路では `select_audio_track` で弾かれているが struct 単体の保証として残す)。
+7. **PBT 追加 (`pbt/tests/prop_rtsp_subscriber.rs` 新設)**: ラウンドトリップ (`prop_depacketize_aac_roundtrips_au_data`) とクラッシュフリー (`prop_depacketize_aac_does_not_panic`) を新規追加。`subscriber.rs` に PBT 用 pub helper を 2 つ追加 (`build_aac_rtp_payload_for_pbt` / `depacketize_aac_payload_for_pbt`)。PBT で代替できる旧単体テスト 2 件 (`depacketize_aac_with_multiple_aus` / `depacketize_aac_with_zero_index_length`) は削除した。
+8. **単体テスト追加**: 残す 5 件 (`select_audio_track_rejects_*_over_32` 3 件 / `select_audio_track_accepts_lengths_at_boundary_32` / `depacketize_aac_wraps_bit_reader_error`) を `src/rtsp/subscriber.rs::tests` に追加し、audio fmtp で SDP を組み立てる helper (`build_test_sdp_with_audio_fmtp` / `parse_audio_track`) も追加した。
 
 ### CHANGES.md
 
@@ -241,7 +264,8 @@ RTSP 機能が未リリースのため、`shiguredo-changelog` 規約「開発�
 - `cargo check`: pass
 - `cargo clippy --all-targets -- --deny warnings`: pass
 - `cargo fmt --all -- --check`: pass
-- `cargo test --lib 'rtsp::subscriber::tests'`: 31 件 pass (新規 5 件含む)
+- `cargo test --lib 'rtsp::subscriber::tests'`: 30 件 pass (新規 5 件 + 既存、PBT 移行で 2 件削除)
 - `cargo test --lib 'video::bit_reader'`: 5 件 pass
 - `cargo test --lib 'video::h264'`: 43 件 pass
 - `cargo test --lib 'video::h265'`: 40 件 pass
+- `cargo test -p pbt --test prop_rtsp_subscriber`: 2 件 pass (ラウンドトリップ + クラッシュフリー、各 256 cases)
