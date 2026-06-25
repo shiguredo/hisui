@@ -7,7 +7,7 @@
 //! 純粋関数 (`validate_text` / `validate_font_size`) のみを対象にし、 ファイル I/O
 //! を伴う `validate_font_name_and_resolve_path` や `TextOverlayLayer` の状態遷移は
 //! スコープ外。 これらは `src/mixer/video/text_overlay/layer.rs` の単体テストと
-//! `src/obsws/session/tests.rs` の obsws 経由テストでカバーされている。
+//! `src/obsws/session/tests/text_overlay.rs` の obsws 経由テストでカバーされている。
 
 use hisui::mixer::video::text_overlay::layer::unpremultiply_argb;
 use hisui::mixer::video::text_overlay::validate::{apply_patch, validate_font_size, validate_text};
