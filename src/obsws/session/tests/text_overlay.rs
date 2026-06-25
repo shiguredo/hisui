@@ -1,7 +1,8 @@
 //! TextOverlay 系のテストと専用ヘルパー。
 //!
-//! 旧 `src/obsws/session/tests.rs` の line 3949-4607 から物理移動した 16 件のテストと専用ヘルパー 3 件 (`create_initialized_coordinator_with_text_overlay` / `process_text_overlay_request` / `parse_text_overlays_count`) を集約する。
-//! `parse_text_overlays_count` は命名上は JSON パーサ系の汎用ヘルパーに見えるが、利用箇所が text_overlay 関連 1 件のみのため `common.rs` には移動せずここに留める。
+//! 機能無効時 (`text_overlay_config = None`) の 4 メソッドのエラー応答と、
+//! 機能有効時の Create / List / Update / Remove の往復・バリデーション挙動を検証する。
+//! 機能有効時のフルパス描画検証 (`VideoRealtimeMixer` 構築 + `TextOverlayLayer` 描画) は mixer モジュール側の単体テストで扱う。
 
 use crate::obsws::state::ObswsSessionState;
 
@@ -110,11 +111,6 @@ fn parse_text_overlays_count(text: &nojson::RawJsonOwned) -> usize {
         .count()
 }
 
-// -----------------------------------------------------------------------
-// テキストオーバーレイ機能の無効時挙動。
-// 機能有効時のフルパス検証は VideoRealtimeMixer の構築と TextOverlayLayer の
-// raden 描画が必要なため、 mixer モジュール側の単体テストで別途扱う。
-
 /// `default_coordinator_handle()` は `ObswsSessionState::new_for_test()` を使うため
 /// テキストオーバーレイ機能が無効 (`text_overlay_config = None`) の状態である。
 /// この状態で `HisuiCreateTextOverlay` を呼ぶと `RESOURCE_ACTION_NOT_SUPPORTED` が返る。
@@ -206,10 +202,6 @@ async fn hisui_list_text_overlays_returns_disabled_when_feature_off() {
         crate::obsws::protocol::REQUEST_STATUS_RESOURCE_ACTION_NOT_SUPPORTED
     );
 }
-
-// -----------------------------------------------------------------------
-// テキストオーバーレイ機能の有効時挙動 (4 メソッド往復・エラーケース)
-// -----------------------------------------------------------------------
 
 /// 機能有効時に Create → List → Update → List → Remove → List が正しく順序処理される。
 /// List の中身も更新前後で確認することで、Create/Update/Remove の副作用が反映されることを検証する。

@@ -1,7 +1,6 @@
 //! テスト共通ヘルパー。
 //!
-//! 旧 `src/obsws/session/tests.rs` の line 17-185 / 255-389 / 392-438 から物理移動した汎用ヘルパー 23 件を集約する。
-//! 関数本体・引数・戻り値型・属性 (`#[cfg(...)]`) は一切変更せず、可視性のみ `pub(super)` 化している。
+//! 各サブモジュールから `use super::common::*;` で参照される汎用ヘルパー群を `pub(super)` で公開する。
 
 use shiguredo_websocket::CloseCode;
 

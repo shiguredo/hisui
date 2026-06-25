@@ -1,6 +1,4 @@
 //! PersistentData 系のテスト (SetPersistentData / GetPersistentData)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 2915-3055 から物理移動した 4 件を集約する。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::{

@@ -1,6 +1,4 @@
 //! Input 系のテスト (Input の作成 / 削除 / 設定変更 / 名前変更)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 822-1053 から物理移動した 6 件を集約する。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::{

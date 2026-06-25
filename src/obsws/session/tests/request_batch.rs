@@ -1,6 +1,4 @@
-//! RequestBatch 系のテスト。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 2863-2913 から物理移動した 2 件を集約する。
+//! RequestBatch 系のテスト (`haltOnFailure` の挙動)。
 
 use crate::obsws::session::SessionAction;
 

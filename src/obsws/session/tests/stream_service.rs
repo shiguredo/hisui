@@ -1,6 +1,4 @@
-//! StreamServiceSettings 系のテスト (handle_get_stream_service_settings)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 4608-4739 から物理移動した 2 件を集約する。
+//! StreamServiceSettings 系のテスト (`handle_get_stream_service_settings`)。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::session::ObswsSession;

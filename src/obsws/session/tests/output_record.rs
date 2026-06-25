@@ -1,8 +1,4 @@
 //! Output (record) 系のテスト (StartRecord / StopRecord)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 1593-1990 周辺から物理移動した 6 件を集約する。
-//! 元ファイルでは record 系と stream 系のテストが行番号順に交錯しており、
-//! ここには record 系 (`start_record_*` / `stop_record_*`) のみを集める。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::{

@@ -1,6 +1,5 @@
 //! Output (HLS / DASH) 系のテスト。
 //!
-//! 旧 `src/obsws/session/tests.rs` の line 2109 / 2239 から物理移動した 2 件を集約する。
 //! テスト名に `scene_item` / `scene` を含むが、検証対象は HLS / DASH 出力経路 (program mixer の挙動)。
 
 use crate::obsws::message::RequestMessage;

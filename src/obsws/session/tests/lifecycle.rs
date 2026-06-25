@@ -1,6 +1,4 @@
 //! Lifecycle 系のテスト (identify / sleep / broadcast / authentication / RPC version)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 441-656 / 1559-1592 から物理移動した 14 件を集約する。
 
 use crate::obsws::auth::{ObswsAuthentication, build_authentication_response};
 use crate::obsws::message::RequestMessage;

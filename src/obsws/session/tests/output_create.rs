@@ -1,6 +1,4 @@
 //! Output (create / settings) 系のテスト (HisuiCreateOutput / SetOutputSettings / SetRecordDirectory)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 3056-3957 から物理移動した 17 件を集約する。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD;
@@ -8,8 +6,6 @@ use crate::obsws::session::ObswsSession;
 use crate::obsws::state::ObswsSessionState;
 
 use super::common::*;
-
-// --- HisuiCreateOutput 回帰テスト ---
 
 #[tokio::test]
 async fn hisui_create_output_stream_reads_stream_service_settings() {
@@ -299,8 +295,6 @@ async fn hisui_create_output_sora_with_metadata_preserves_it() {
     assert_eq!(metadata_key, "value");
 }
 
-// --- SetOutputSettings の入力検証テスト ---
-
 #[tokio::test]
 async fn set_output_settings_rejects_invalid_record_directory_type() {
     let registry = ObswsSessionState::new_for_test();
@@ -472,8 +466,6 @@ async fn set_output_settings_null_clears_sora_channel_id() {
     assert!(channel_id.is_none());
 }
 
-// --- SetRecordDirectory + HisuiCreateOutput の既定値連携テスト ---
-
 #[tokio::test]
 async fn set_record_directory_updates_default_for_future_mp4_outputs() {
     let registry = ObswsSessionState::new_for_test();
@@ -536,8 +528,6 @@ async fn set_record_directory_updates_default_for_future_mp4_outputs() {
         .expect("recordDirectory must be string");
     assert_eq!(dir, "/tmp/new-recordings");
 }
-
-// --- HisuiCreateOutput の型検証テスト ---
 
 #[tokio::test]
 async fn hisui_create_output_rejects_invalid_record_directory_type() {

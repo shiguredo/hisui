@@ -1,8 +1,4 @@
 //! Output (stream) 系のテスト (StartStream / StopStream)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 1916-2392 周辺から物理移動した 3 件を集約する。
-//! 元ファイルでは record 系と stream 系のテストが行番号順に交錯しており、
-//! ここには stream 系 (`start_stream_*`) のみを集める。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED;

@@ -1,6 +1,4 @@
 //! SceneItem 系のテスト (SceneItem の作成 / 削除 / プロパティ更新 / 再インデックス)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 1054-1558 から物理移動した 9 件を集約する。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::{

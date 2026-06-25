@@ -1,7 +1,4 @@
 //! Scene 系のテスト (Scene の作成 / 切替 / 削除)。
-//!
-//! 旧 `src/obsws/session/tests.rs` の line 188-253 / 657-820 から物理移動した 7 件を集約する。
-//! 先頭 2 件 (line 188 / 236) は元ファイルでヘルパー定義の合間に挿入されていた。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::OBSWS_EVENT_SUB_SCENES;

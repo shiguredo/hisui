@@ -1,6 +1,5 @@
 //! Output (toggle / stop / start / remove / その他 lifecycle) 系のテスト。
 //!
-//! 旧 `src/obsws/session/tests.rs` の line 2448-2547 / 3178 / 3854 / 3895 から物理移動した 7 件を集約する。
 //! Record / Stream / HLS / DASH / Player のいずれにも属さない混在群。
 
 use crate::obsws::message::RequestMessage;

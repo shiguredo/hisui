@@ -1,8 +1,6 @@
 //! Output (player) 系のテスト。
 //!
-//! 旧 `src/obsws/session/tests.rs` の line 2550-2862 から物理移動した 4 件を集約する。
-//! ファイル全体は `tests.rs` の `mod output_player;` 宣言に付いた `#[cfg(feature = "player")]` によりゲートされる。
-//! 各関数定義に残っている `#[cfg(feature = "player")]` は冗長だが、関数単位での見落とし防止のため残す。
+//! ファイル全体は `tests.rs` の `mod output_player;` 宣言に付いた `#[cfg(feature = "player")]` でゲートされる。
 
 use crate::obsws::message::RequestMessage;
 use crate::obsws::protocol::REQUEST_STATUS_REQUEST_PROCESSING_FAILED;
