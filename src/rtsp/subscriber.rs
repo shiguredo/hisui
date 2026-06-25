@@ -18,7 +18,7 @@ use crate::{
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     sample_entry::SharedSampleEntry,
     timestamp::mapper::TimestampMapper,
-    video::{VideoFormat, VideoFrame},
+    video::{VideoFormat, VideoFrame, bit_reader},
 };
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20);
@@ -1068,19 +1068,24 @@ impl AacRtpDepacketizer {
         }
 
         let au_headers = &packet.payload[2..2 + au_headers_length_bytes];
-        let mut bit_reader = BitReader::new(au_headers);
+        let mut reader = bit_reader::BitReader::new(au_headers);
         let mut au_sizes = Vec::new();
         let mut first = true;
         let mut consumed_bits = 0usize;
         while consumed_bits < au_headers_length_bits {
-            let size = bit_reader.read_bits(self.size_length)? as usize;
+            let size = reader
+                .read_u(self.size_length as usize)
+                .map_err(|e| e.with_context("invalid AAC AU header"))?
+                as usize;
             consumed_bits = consumed_bits.saturating_add(self.size_length as usize);
             let index_bits = if first {
                 self.index_length
             } else {
                 self.index_delta_length
             };
-            let _ = bit_reader.read_bits(index_bits)?;
+            let _ = reader
+                .read_u(index_bits as usize)
+                .map_err(|e| e.with_context("invalid AAC AU header"))?;
             consumed_bits = consumed_bits.saturating_add(index_bits as usize);
             first = false;
             au_sizes.push(size);
@@ -1105,42 +1110,6 @@ impl AacRtpDepacketizer {
         }
 
         Ok(access_units)
-    }
-}
-
-#[derive(Debug)]
-struct BitReader<'a> {
-    bytes: &'a [u8],
-    bit_offset: usize,
-}
-
-impl<'a> BitReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self {
-            bytes,
-            bit_offset: 0,
-        }
-    }
-
-    fn read_bits(&mut self, bit_count: u8) -> crate::Result<u32> {
-        if bit_count == 0 {
-            return Ok(0);
-        }
-        let total_bits = self.bytes.len().saturating_mul(8);
-        let end = self.bit_offset.saturating_add(bit_count as usize);
-        if end > total_bits {
-            return Err(Error::new("bitstream is truncated"));
-        }
-
-        let mut value = 0u32;
-        for _ in 0..bit_count {
-            let byte_index = self.bit_offset / 8;
-            let bit_index = 7 - (self.bit_offset % 8);
-            let bit = (self.bytes[byte_index] >> bit_index) & 1;
-            value = (value << 1) | u32::from(bit);
-            self.bit_offset += 1;
-        }
-        Ok(value)
     }
 }
 
@@ -1403,6 +1372,18 @@ fn select_audio_track(
 
         if size_length == 0 {
             return Err(Error::new("AAC fmtp sizeLength must be greater than 0"));
+        }
+        // RFC 3640 §3.3.6 で AU-size / AU-index / AU-index-delta のビット幅を指定する。
+        // 共有 BitReader::read_u は n > 32 で Err を返すため、SDP fmtp 受領時点で
+        // 32 超を弾いて session 確立時に fail-fast させる。
+        if size_length > 32 {
+            return Err(Error::new("AAC fmtp sizeLength must be 32 or less"));
+        }
+        if index_length > 32 {
+            return Err(Error::new("AAC fmtp indexLength must be 32 or less"));
+        }
+        if index_delta_length > 32 {
+            return Err(Error::new("AAC fmtp indexDeltaLength must be 32 or less"));
         }
 
         return Ok(Some(AudioTrackConfig {
@@ -1670,6 +1651,104 @@ mod tests {
         assert_eq!(
             err.display(),
             "invalid AAC RTP payload: AU header length must be greater than 0"
+        );
+    }
+
+    #[test]
+    fn depacketize_aac_with_zero_index_length() {
+        // RFC 3640 §3.3.6 で `indexLength = 0` / `indexDeltaLength = 0` は AU-index フィールドを
+        // 省略する設定として合法。共有 BitReader の `read_u(0)` がループ 0 回で `Ok(0)` を返す
+        // 経路と組み合わせて、複数 AU を正しく取り出せることを担保する。
+        let depacketizer = AacRtpDepacketizer::new(13, 0, 0);
+        let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
+        header.marker = true;
+        // AU-headers-length: 26 bits (13 bit * 2 AU、AU-index は 0 bit のため省略)
+        // AU#0 size=4 -> 13 bit `0000000000100`
+        // AU#1 size=2 -> 13 bit `0000000000010`
+        // 26 bit を MSB ファーストで詰めると 4 バイト (右側 6 bit は padding):
+        //   byte 0: 0000_0000 = 0x00
+        //   byte 1: 0010_0000 = 0x20 (AU#0 末尾 3 bit `100` + AU#1 先頭 5 bit `00000`)
+        //   byte 2: 0000_0000 = 0x00
+        //   byte 3: 1000_0000 = 0x80 (AU#1 末尾 1 bit `1` を bit 24 に置き、続く `0` と padding 6 bit)
+        let payload = vec![
+            0x00, 0x1a, 0x00, 0x20, 0x00, 0x80, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22,
+        ];
+        let packet = shiguredo_rtsp::RtpPacket {
+            header,
+            extension: None,
+            payload,
+            padding_size: 0,
+        };
+
+        let aus = depacketizer.depacketize(&packet).expect("must depacketize");
+        assert_eq!(aus.len(), 2, "AU が 2 個取り出せること");
+        assert_eq!(aus[0].data, vec![0xaa, 0xbb, 0xcc, 0xdd]);
+        assert_eq!(aus[1].data, vec![0x11, 0x22]);
+    }
+
+    #[test]
+    fn depacketize_aac_wraps_bit_reader_error() {
+        // `au_headers` slice の実 bit 数で消費しきれない要求量 (AU#2 を読みに行く) を仕込む。
+        // size_length=13 / index_length=3 / index_delta_length=3 のため、
+        // AU#0 + AU#1 で 32 bit、AU#2 の size を読みに行った時点で `read_u` が枯渇 Err を返す。
+        // `Error::with_context` の prefix が付くことを reason フィールドで担保する。
+        let depacketizer = AacRtpDepacketizer::new(13, 3, 3);
+        let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
+        header.marker = true;
+        // au_headers_length_bits = 33 (= 0x21、5 byte 切り上げ = 40 bit 利用可能)
+        // au_headers は AU#0 + AU#1 (合計 32 bit) を埋め、AU#2 用 13 bit の途中で枯渇する。
+        let payload = vec![
+            0x00, 0x21, 0x00, 0x20, 0x00, 0x10, 0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22,
+        ];
+        let packet = shiguredo_rtsp::RtpPacket {
+            header,
+            extension: None,
+            payload,
+            padding_size: 0,
+        };
+
+        let err = depacketizer.depacketize(&packet).expect_err("must reject");
+        assert!(
+            err.reason.starts_with("invalid AAC AU header: "),
+            "Err の reason に AAC AU header context 文言が前置されること: {}",
+            err.reason
+        );
+        assert!(
+            err.reason
+                .contains("bit reader: exhausted before requested read"),
+            "Err の reason に元の BitReader エラー文言が含まれること: {}",
+            err.reason
+        );
+    }
+
+    #[test]
+    fn select_audio_track_rejects_size_length_over_32() {
+        // RFC 3640 §3.3.6 の値域外 (`sizelength=33`) を SDP fmtp 受領時点で fail-fast する。
+        let sdp = build_test_sdp_with_audio_fmtp(
+            "profile-level-id=1;mode=AAC-hbr;sizelength=33;indexlength=3;indexdeltalength=3;config=1190",
+        );
+        let err = parse_audio_track(&sdp).expect_err("sizelength=33 は Err になること");
+        assert_eq!(err.display(), "AAC fmtp sizeLength must be 32 or less");
+    }
+
+    #[test]
+    fn select_audio_track_rejects_index_length_over_32() {
+        let sdp = build_test_sdp_with_audio_fmtp(
+            "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=33;indexdeltalength=3;config=1190",
+        );
+        let err = parse_audio_track(&sdp).expect_err("indexlength=33 は Err になること");
+        assert_eq!(err.display(), "AAC fmtp indexLength must be 32 or less");
+    }
+
+    #[test]
+    fn select_audio_track_rejects_index_delta_length_over_32() {
+        let sdp = build_test_sdp_with_audio_fmtp(
+            "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=33;config=1190",
+        );
+        let err = parse_audio_track(&sdp).expect_err("indexdeltalength=33 は Err になること");
+        assert_eq!(
+            err.display(),
+            "AAC fmtp indexDeltaLength must be 32 or less"
         );
     }
 
@@ -2275,6 +2354,33 @@ mod tests {
              a=fmtp:96 {fmtp_params}\r\n\
              a=control:trackID=0\r\n"
         )
+    }
+
+    // MPEG4-GENERIC (AAC) の audio メディアのみを含む SDP テキストを返す。
+    // `a=fmtp:97 {fmtp_params}` で fmtp パラメータを差し替えられる。
+    fn build_test_sdp_with_audio_fmtp(fmtp_params: &str) -> String {
+        format!(
+            "v=0\r\n\
+             o=- 0 0 IN IP4 127.0.0.1\r\n\
+             s=hisui-test\r\n\
+             t=0 0\r\n\
+             a=control:*\r\n\
+             m=audio 9002 RTP/AVP 97\r\n\
+             a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n\
+             a=fmtp:97 {fmtp_params}\r\n\
+             a=control:trackID=1\r\n"
+        )
+    }
+
+    // SDP テキストから音声メディアを取り出して `select_audio_track` を呼ぶ薄いラッパ。
+    fn parse_audio_track(sdp_text: &str) -> crate::Result<Option<AudioTrackConfig>> {
+        let parsed = Sdp::parse(sdp_text).expect("テスト用 SDP がパースできること");
+        let media = parsed
+            .media
+            .iter()
+            .find(|m| m.media_type.eq_ignore_ascii_case("audio"))
+            .expect("audio メディアが SDP に存在すること");
+        select_audio_track(media, "rtsp://example.com/")
     }
 
     // SDP テキストから映像メディアを取り出して `select_video_track` を呼ぶ薄いラッパ。
