@@ -209,6 +209,7 @@ pub(super) fn parse_request_type(text: &nojson::RawJsonOwned) -> String {
         .expect("requestType must be string")
 }
 
+#[cfg(feature = "player")]
 pub(super) fn parse_output_active(text: &nojson::RawJsonOwned) -> bool {
     let json = nojson::RawJson::parse(text.text()).expect("response must be valid json");
     json.value()
