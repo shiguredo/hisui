@@ -1084,6 +1084,12 @@ impl AacRtpDepacketizer {
         let mut first = true;
         // size_length / index_bits はそれぞれ 32 以下に検査済みで、au_headers_length_bits は
         // u16 由来の usize 値のため、consumed_bits の overflow は発生しない。
+        //
+        // 現実装は AU-Index / AU-Index-delta を読み捨て、各 AU の RTP タイムスタンプを
+        // packet header の timestamp と Vec 内位置から計算する (後段の data_offset ループ参照)。
+        // RFC 3640 §3.2.1 の interleaving モード (publisher が AU を並び替えて送信し、
+        // 受信側が AU-Index で並べ直す経路) は非対応。Sora 等の典型 publisher は
+        // non-interleaved (AU-Index = 0, AU-Index-delta = 0) で送信するため実害はない。
         let mut consumed_bits = 0usize;
         while consumed_bits < au_headers_length_bits {
             let size = bit_reader
