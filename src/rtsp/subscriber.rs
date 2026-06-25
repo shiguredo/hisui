@@ -1126,6 +1126,129 @@ impl AacRtpDepacketizer {
     }
 }
 
+/// PBT 用に RFC 3640 §3.3.6 の AU-headers-length + au_headers + au_data を組み立てる pub fn。
+///
+/// 本関数は PBT (`pbt/`) と本体 `cfg(test)` からのみ呼ぶことを想定し、本番経路や hisui を
+/// library として依存する外部消費者は利用しない。
+///
+/// `size_length` / `index_length` / `index_delta_length` は 0..=32 の値を取る。
+/// `au_data` の各 AU のバイト長は `(1 << size_length) - 1` 以下である必要がある (溢れると assert)。
+pub fn build_aac_rtp_payload_for_pbt(
+    size_length: u8,
+    index_length: u8,
+    index_delta_length: u8,
+    au_data: &[Vec<u8>],
+) -> Vec<u8> {
+    assert!(size_length <= 32, "size_length must be <= 32");
+    assert!(index_length <= 32, "index_length must be <= 32");
+    assert!(index_delta_length <= 32, "index_delta_length must be <= 32");
+    assert!(!au_data.is_empty(), "au_data must not be empty");
+    let size_cap = if size_length == 0 {
+        1u64
+    } else if size_length >= 32 {
+        u64::from(u32::MAX)
+    } else {
+        (1u64 << size_length) - 1
+    };
+    for au in au_data {
+        assert!(
+            (au.len() as u64) <= size_cap,
+            "AU size exceeds size_length bit width"
+        );
+    }
+
+    // au_headers の合計ビット数を算出する。
+    let au_headers_length_bits = (size_length as usize)
+        + (index_length as usize)
+        + (au_data.len() - 1) * ((size_length as usize) + (index_delta_length as usize));
+    let au_headers_length_bytes = au_headers_length_bits.div_ceil(8);
+
+    let mut payload = Vec::new();
+    // AU-headers-length (16 bit) を big-endian で書く。
+    payload.extend_from_slice(
+        &u16::try_from(au_headers_length_bits)
+            .expect("AU headers length exceeds u16 range")
+            .to_be_bytes(),
+    );
+
+    // au_headers を MSB ファーストで bit-by-bit に詰める。
+    let mut au_headers = vec![0u8; au_headers_length_bytes];
+    let mut bit_offset = 0usize;
+    for (i, au) in au_data.iter().enumerate() {
+        write_bits_msb_first(
+            &mut au_headers,
+            &mut bit_offset,
+            size_length,
+            au.len() as u64,
+        );
+        let index_bits = if i == 0 {
+            index_length
+        } else {
+            index_delta_length
+        };
+        write_bits_msb_first(&mut au_headers, &mut bit_offset, index_bits, 0);
+    }
+    payload.extend_from_slice(&au_headers);
+
+    for au in au_data {
+        payload.extend_from_slice(au);
+    }
+
+    payload
+}
+
+/// `build_aac_rtp_payload_for_pbt` 用のビット書き込みヘルパー (MSB ファースト)。
+fn write_bits_msb_first(buf: &mut [u8], bit_offset: &mut usize, n: u8, value: u64) {
+    for i in 0..n {
+        let bit = ((value >> (n - 1 - i)) & 1) as u8;
+        let byte_index = *bit_offset / 8;
+        let bit_index = 7 - (*bit_offset % 8);
+        buf[byte_index] |= bit << bit_index;
+        *bit_offset += 1;
+    }
+}
+
+/// PBT 用に AAC RTP MPEG4-GENERIC payload を depacketize する pub fn。
+///
+/// 本関数は PBT (`pbt/`) と本体 `cfg(test)` からのみ呼ぶことを想定し、本番経路や hisui を
+/// library として依存する外部消費者は利用しない。
+///
+/// 戻り値は AU の `data` バイト列のリスト。`size_length` / `index_length` /
+/// `index_delta_length` の値域 (`select_audio_track` で検査する範囲) を本関数内でも
+/// 事前検査して、`AacRtpDepacketizer::new` の `debug_assert!(size_length > 0)` に
+/// 引っかからないようにする。
+pub fn depacketize_aac_payload_for_pbt(
+    size_length: u8,
+    index_length: u8,
+    index_delta_length: u8,
+    payload: &[u8],
+) -> crate::Result<Vec<Vec<u8>>> {
+    if size_length == 0 {
+        return Err(Error::new("AAC fmtp sizeLength must be greater than 0"));
+    }
+    if size_length > 32 {
+        return Err(Error::new("AAC fmtp sizeLength must be 32 or less"));
+    }
+    if index_length > 32 {
+        return Err(Error::new("AAC fmtp indexLength must be 32 or less"));
+    }
+    if index_delta_length > 32 {
+        return Err(Error::new("AAC fmtp indexDeltaLength must be 32 or less"));
+    }
+    let depacketizer = AacRtpDepacketizer::new(size_length, index_length, index_delta_length);
+    let packet = shiguredo_rtsp::RtpPacket {
+        header: shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1),
+        extension: None,
+        payload: payload.to_vec(),
+        padding_size: 0,
+    };
+    Ok(depacketizer
+        .depacketize(&packet)?
+        .into_iter()
+        .map(|au| au.data)
+        .collect())
+}
+
 fn parse_rtsp_input_url(input_url: &str) -> Result<ParsedRtspUrl, String> {
     let uri = Uri::parse(input_url).map_err(|e| format!("failed to parse URL: {e}"))?;
     let scheme = uri
@@ -1623,32 +1746,6 @@ mod tests {
     }
 
     #[test]
-    fn depacketize_aac_with_multiple_aus() {
-        let depacketizer = AacRtpDepacketizer::new(13, 3, 3);
-        let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
-        header.marker = true;
-        // AU-header-length: 32 bits
-        // AU#0 size=4 index=0 -> 0000000000100 000
-        // AU#1 size=2 index-delta=0 -> 0000000000010 000
-        let payload = vec![
-            0x00, 0x20, 0x00, 0x20, 0x00, 0x10, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22,
-        ];
-        let packet = shiguredo_rtsp::RtpPacket {
-            header,
-            extension: None,
-            payload,
-            padding_size: 0,
-        };
-
-        let aus = depacketizer.depacketize(&packet).expect("must depacketize");
-        assert_eq!(aus.len(), 2);
-        assert_eq!(aus[0].rtp_timestamp, 9000);
-        assert_eq!(aus[0].data, vec![0xaa, 0xbb, 0xcc, 0xdd]);
-        assert_eq!(aus[1].rtp_timestamp, 10024);
-        assert_eq!(aus[1].data, vec![0x11, 0x22]);
-    }
-
-    #[test]
     fn depacketize_aac_rejects_zero_au_header_length() {
         let depacketizer = AacRtpDepacketizer::new(13, 3, 3);
         let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
@@ -1665,40 +1762,6 @@ mod tests {
             err.display(),
             "invalid AAC RTP payload: AU header length must be greater than 0"
         );
-    }
-
-    #[test]
-    fn depacketize_aac_with_zero_index_length() {
-        // RFC 3640 §3.3.6 で `indexLength = 0` / `indexDeltaLength = 0` は AU-index フィールドを
-        // 省略する設定として合法。共有 BitReader の `read_u(0)` がループ 0 回で `Ok(0)` を返す
-        // 経路と組み合わせて、複数 AU を正しく取り出せることを担保する。
-        let depacketizer = AacRtpDepacketizer::new(13, 0, 0);
-        let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
-        header.marker = true;
-        // AU-headers-length: 26 bits (13 bit * 2 AU、AU-index は 0 bit のため省略)
-        // AU#0 size=4 -> 13 bit `0000000000100`
-        // AU#1 size=2 -> 13 bit `0000000000010`
-        // 26 bit を MSB ファーストで詰めると 4 バイト (右側 6 bit は padding):
-        //   byte 0: 0000_0000 = 0x00
-        //   byte 1: 0010_0000 = 0x20 (AU#0 末尾 3 bit `100` + AU#1 先頭 5 bit `00000`)
-        //   byte 2: 0000_0000 = 0x00
-        //   byte 3: 1000_0000 = 0x80 (AU#1 末尾 2 bit `10` を bit 24-25 に置き、続く padding 6 bit)
-        let payload = vec![
-            0x00, 0x1a, 0x00, 0x20, 0x00, 0x80, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22,
-        ];
-        let packet = shiguredo_rtsp::RtpPacket {
-            header,
-            extension: None,
-            payload,
-            padding_size: 0,
-        };
-
-        let aus = depacketizer
-            .depacketize(&packet)
-            .expect("AAC AU が depacketize できること");
-        assert_eq!(aus.len(), 2, "AU が 2 個取り出せること");
-        assert_eq!(aus[0].data, vec![0xaa, 0xbb, 0xcc, 0xdd]);
-        assert_eq!(aus[1].data, vec![0x11, 0x22]);
     }
 
     #[test]
