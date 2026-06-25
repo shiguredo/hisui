@@ -1373,9 +1373,9 @@ fn select_audio_track(
         if size_length == 0 {
             return Err(Error::new("AAC fmtp sizeLength must be greater than 0"));
         }
-        // RFC 3640 §3.3.6 で AU-size / AU-index / AU-index-delta のビット幅を指定する。
-        // 共有 BitReader::read_u は n > 32 で Err を返すため、SDP fmtp 受領時点で
-        // 32 超を弾いて session 確立時に fail-fast させる。
+        // RFC 3640 §3.3.6 で AU-size / AU-index / AU-index-delta のビット幅を fmtp で渡す
+        // (RFC 自体は上限を明示しない)。上限は共有 BitReader::read_u の制約 (n > 32 で Err)
+        // に由来するため、SDP fmtp 受領時点で 32 超を弾いて session 確立時に fail-fast させる。
         if size_length > 32 {
             return Err(Error::new("AAC fmtp sizeLength must be 32 or less"));
         }
@@ -1669,7 +1669,7 @@ mod tests {
         //   byte 0: 0000_0000 = 0x00
         //   byte 1: 0010_0000 = 0x20 (AU#0 末尾 3 bit `100` + AU#1 先頭 5 bit `00000`)
         //   byte 2: 0000_0000 = 0x00
-        //   byte 3: 1000_0000 = 0x80 (AU#1 末尾 1 bit `1` を bit 24 に置き、続く `0` と padding 6 bit)
+        //   byte 3: 1000_0000 = 0x80 (AU#1 末尾 2 bit `10` を bit 24-25 に置き、続く padding 6 bit)
         let payload = vec![
             0x00, 0x1a, 0x00, 0x20, 0x00, 0x80, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22,
         ];
@@ -1680,7 +1680,9 @@ mod tests {
             padding_size: 0,
         };
 
-        let aus = depacketizer.depacketize(&packet).expect("must depacketize");
+        let aus = depacketizer
+            .depacketize(&packet)
+            .expect("AAC AU が depacketize できること");
         assert_eq!(aus.len(), 2, "AU が 2 個取り出せること");
         assert_eq!(aus[0].data, vec![0xaa, 0xbb, 0xcc, 0xdd]);
         assert_eq!(aus[1].data, vec![0x11, 0x22]);
@@ -1695,8 +1697,10 @@ mod tests {
         let depacketizer = AacRtpDepacketizer::new(13, 3, 3);
         let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
         header.marker = true;
-        // au_headers_length_bits = 33 (= 0x21、5 byte 切り上げ = 40 bit 利用可能)
-        // au_headers は AU#0 + AU#1 (合計 32 bit) を埋め、AU#2 用 13 bit の途中で枯渇する。
+        // au_headers_length_bits = 33 (= 0x21)。au_headers slice は ceil(33 / 8) = 5 byte
+        // (= 40 bit) 利用可能で、ループ条件 `consumed_bits < 33` のもと AU#0 + AU#1 で
+        // 32 bit 消費後、3 周目で AU#2 の size 13 bit を要求し bit 45 まで読もうとして
+        // bit 40 で枯渇する。
         let payload = vec![
             0x00, 0x21, 0x00, 0x20, 0x00, 0x10, 0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22,
         ];
@@ -1707,7 +1711,9 @@ mod tests {
             padding_size: 0,
         };
 
-        let err = depacketizer.depacketize(&packet).expect_err("must reject");
+        let err = depacketizer
+            .depacketize(&packet)
+            .expect_err("AU header 枯渇で Err になること");
         assert!(
             err.reason.starts_with("invalid AAC AU header: "),
             "Err の reason に AAC AU header context 文言が前置されること: {}",
@@ -1733,6 +1739,7 @@ mod tests {
 
     #[test]
     fn select_audio_track_rejects_index_length_over_32() {
+        // RFC 3640 §3.3.6 の値域外 (`indexlength=33`) を SDP fmtp 受領時点で fail-fast する。
         let sdp = build_test_sdp_with_audio_fmtp(
             "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=33;indexdeltalength=3;config=1190",
         );
@@ -1742,6 +1749,7 @@ mod tests {
 
     #[test]
     fn select_audio_track_rejects_index_delta_length_over_32() {
+        // RFC 3640 §3.3.6 の値域外 (`indexdeltalength=33`) を SDP fmtp 受領時点で fail-fast する。
         let sdp = build_test_sdp_with_audio_fmtp(
             "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=33;config=1190",
         );
