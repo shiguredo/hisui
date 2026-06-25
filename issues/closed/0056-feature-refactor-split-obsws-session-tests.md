@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-23
-- Completed:
+- Completed: 2026-06-25
 - Model: Opus 4.7
 - Branch: feature/refactor-split-obsws-session-tests
 - Polished: 2026-06-25
@@ -540,3 +540,81 @@ grep -n "src/obsws/session/tests.rs" pbt/tests/prop_text_overlay.rs
 - closed issue 0042 (`feature/refactor-unify-stream-service-settings-emitters`): `session/tests.rs:3093` 等への行番号参照があるが、closed issue は historic record として更新しない。本 issue で `handle_get_stream_service_settings_*` 2 テストは `tests/stream_service.rs` へ移動する。
 - closed issue 0053 (`feature/refactor-hex-color`): `hisui_create_text_overlay_rejects_invalid_color` 等を参照しているが、closed のため更新しない。該当テストは `tests/text_overlay.rs` へ移動する。
 - open issue 0046 / 0052: 「前提条件」節を参照。
+
+## 解決方法
+
+ブランチ `feature/refactor-split-obsws-session-tests` で実装した。
+
+### ディレクトリ構成
+
+`src/obsws/session/tests.rs` を 36 行のエントリポイントに縮小し、`#[path = "tests/<name>.rs"]` 属性で 15 サブモジュールを宣言する形に再構成した。`#[path]` のネストは `src/` 配下に前例がない構成のため、Phase 1 開始前に `cargo check` でシンボル解決を検証した上で本実装に入った (`pub(super)` で兄弟サブモジュールから参照可能であることを確認)。
+
+```
+src/obsws/session/
+├── output.rs                 (既存、本体側サブモジュール。変更なし)
+└── tests/                    (新設)
+    ├── common.rs             (共通ヘルパー 23 件)
+    ├── lifecycle.rs          (14 件)
+    ├── scene.rs              (7 件)
+    ├── scene_item.rs         (9 件)
+    ├── input.rs              (6 件)
+    ├── output_record.rs      (6 件)
+    ├── output_stream.rs      (3 件)
+    ├── output_hls_dash.rs    (2 件)
+    ├── output_misc_lifecycle.rs (7 件)
+    ├── output_player.rs      (4 件、cfg(feature = "player") でゲート)
+    ├── output_create.rs      (17 件)
+    ├── request_batch.rs      (2 件)
+    ├── persistent_data.rs    (4 件)
+    ├── stream_service.rs     (2 件)
+    └── text_overlay.rs       (16 件 + 専用ヘルパー 3 件)
+src/obsws/session/tests.rs    (エントリポイント、`mod` 宣言のみ)
+```
+
+### 設計方針からの乖離点
+
+- 設計方針 6 で「`tests/output_player.rs` の各関数定義に残す `#[cfg(feature = "player")]` は冗長だが現状を残す」と決めたが、レビュー後に削除した。ファイル全体が `mod output_player;` 宣言の `#[cfg(feature = "player")]` でゲートされているため、関数単位の `#[cfg]` は到達不能な二重ゲートと判断した。
+- 設計方針 4 で 23 件すべてを `pub(super)` 化する方針としたが、`test_program_output` は `common.rs` 内部のみで使われるためレビュー後に file-private (`fn`) に戻した。
+- 設計方針 5 で `cargo clippy --workspace --no-default-features -- -D warnings` を完了条件としていたが、`--tests` を含まないため `parse_output_active` の dead_code 警告を捕捉できなかった。レビューで顕在化したので `parse_output_active` に `#[cfg(feature = "player")]` を付与して解消した。
+
+### コミット粒度
+
+issue 設計方針 7 で 14 phase × 1 commit を計画したが、レビュー対応で 4 commit 追加して計 18 commit となった (`develop` からの差分):
+
+1. Phase 0: polished (1 件)
+2. Phase 1-14: 機能群ごとの切り出し (14 件)
+3. レビュー対応 4 件:
+   - サブモジュール doc コメントの整理 (1 件、観点 W4 / W5 / W6 メタコメント / W8 / W9)
+   - `tests/request_batch.rs` の `ObswsSession::new` をフルパス呼び出しから元のスタイルに戻す (本体不変原則違反の修正、1 件)
+   - `tests/common.rs::parse_output_active` を `#[cfg(feature = "player")]` に限定 (dead_code 警告解消、1 件)
+   - `tests/output_player.rs` の冗長な関数単位 `#[cfg]` 削除 (1 件)
+   - `tests/common.rs::test_program_output` を private 化 + `use` 順序を Rust 慣例に揃える (1 件)
+
+### CHANGES.md
+
+記載なし。テストコード内の構造変更のみで、利用者から見える挙動・公開 API・出力 JSON・state file の永続化フォーマット・テスト関数名は一切変化しないため。
+
+### テスト
+
+- `cargo test --lib obsws::session` (default = `["player"]` 込み): 99 件 pass
+- `cargo test --lib obsws::session --no-default-features`: 95 件 pass (player 4 件除外、期待値どおり)
+- `cargo fmt --all --check`: pass
+- `cargo clippy --lib --tests -- -D warnings`: pass
+- `cargo clippy --lib --tests --no-default-features -- -D warnings`: pass
+
+`--all-features` はローカル環境では `fdk-aac` のヘッダ不在で失敗するため CI で確認する。
+
+### 関連参照の更新
+
+- `pbt/tests/prop_text_overlay.rs:10` の doc コメントを新パス `src/obsws/session/tests/text_overlay.rs` に更新した。
+- `issues/closed/` 配下の旧パス参照 (closed/0003 / closed/0013 / closed/0042 等) は historic record として更新していない。
+
+### レビュー後に別 issue 起票を見送った指摘
+
+`/review-diff-code` で挙がった以下の項目は、本 PR 内で対処せず別 issue 化も見送った。実害が顕在化した時点で個別に対応する:
+
+- `tests/output_misc_lifecycle.rs` の責務混在 7 件再分割: 7 件 274 行で grep 性に問題なく、追加テストで肥大化したら検討
+- 全 14 サブモジュールの `use super::common::*;` glob を明示 import に置換: `pub(super)` でスコープ限定された glob は Rust テストコードで一般的、衝突が起きたら直す方針
+- `common.rs` 内ヘルパーで単一サブモジュール専用のもの (`parse_request_batch_results` / `parse_identified_message` / `unwrap_close` / `parse_output_active` / `wait_for_processor_presence`) を該当サブモジュールに移すかの方針統一: 設計判断が伴うため CODEBASE.md / AGENTS.md レベルで明文化したい意欲が出たタイミングで対応
+- `parse_request_status` 内部と本体での JSON 二重パース解消ヘルパー追加: テスト実行速度に問題なし
+- ヘルパー本体の絶対パス (`crate::obsws::coordinator::ObswsCoordinator::new(...)` 等) を `use` 文経由に統一: 機械的整理で挙動不変、気が向いたタイミングで別 PR
