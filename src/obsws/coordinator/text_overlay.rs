@@ -682,6 +682,36 @@ mod tests {
         nojson::RawJsonOwned::parse(text).expect("テスト JSON はパース可能であるべき")
     }
 
+    /// `MissingHashPrefix` は `fontColor must start with '#': ...` 文言に展開される。
+    #[test]
+    fn format_font_color_parse_error_maps_missing_hash() {
+        assert_eq!(
+            format_font_color_parse_error("abc", ColorParseError::MissingHashPrefix),
+            "fontColor must start with '#': \"abc\"",
+            "MissingHashPrefix は `must start with '#'` 文言にマップされるはず"
+        );
+    }
+
+    /// `InvalidLength` は内部の `actual` 値に関わらず `fontColor must be #RRGGBB or #RRGGBBAA: ...` 文言に展開される。
+    #[test]
+    fn format_font_color_parse_error_maps_invalid_length() {
+        assert_eq!(
+            format_font_color_parse_error("#abc", ColorParseError::InvalidLength { actual: 3 }),
+            "fontColor must be #RRGGBB or #RRGGBBAA: \"#abc\"",
+            "InvalidLength は `must be #RRGGBB or #RRGGBBAA` 文言にマップされるはず"
+        );
+    }
+
+    /// `InvalidHex` は `fontColor must be hex: ...` 文言に展開される。
+    #[test]
+    fn format_font_color_parse_error_maps_invalid_hex() {
+        assert_eq!(
+            format_font_color_parse_error("#GGGGGG", ColorParseError::InvalidHex),
+            "fontColor must be hex: \"#GGGGGG\"",
+            "InvalidHex は `must be hex` 文言にマップされるはず"
+        );
+    }
+
     /// 欠落フィールドは省略 (= 現状維持) として `Ok(None)` を返す。
     #[test]
     fn parse_optional_string_returns_none_for_missing_field() {

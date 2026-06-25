@@ -53,6 +53,36 @@ proptest! {
         );
     }
 
+    // `#` を除いた長さが 6 / 8 のいずれでもない `#` 付き hex 文字列は
+    // from_hex が InvalidLength { actual: <#を除いた長さ> } で拒否する。
+    #[test]
+    fn from_hex_rejects_non_6_or_8_lengths(
+        hex in "[0-9A-Fa-f]{1,5}|[0-9A-Fa-f]{7}|[0-9A-Fa-f]{9,16}"
+    ) {
+        let expected_actual = hex.len();
+        let s = format!("#{hex}");
+        prop_assert_eq!(
+            Color::from_hex(&s),
+            Err(ColorParseError::InvalidLength { actual: expected_actual }),
+            "6 / 8 桁以外は from_hex で actual=<#を除いた長さ> として拒否されるはず"
+        );
+    }
+
+    // `#` を除いた長さが 6 ではない `#` 付き hex 文字列は
+    // from_hex_rgb が InvalidLength { actual: <#を除いた長さ> } で拒否する。
+    #[test]
+    fn from_hex_rgb_rejects_non_6_lengths(
+        hex in "[0-9A-Fa-f]{1,5}|[0-9A-Fa-f]{7,16}"
+    ) {
+        let expected_actual = hex.len();
+        let s = format!("#{hex}");
+        prop_assert_eq!(
+            Color::from_hex_rgb(&s),
+            Err(ColorParseError::InvalidLength { actual: expected_actual }),
+            "6 桁以外は from_hex_rgb で actual=<#を除いた長さ> として拒否されるはず"
+        );
+    }
+
     // 上限 16 桁は 8 桁 (`from_hex` の受理上限) の倍までを「`#` 不在」として網羅する意図。
     // 下限 0 桁で空文字の挙動も同時にカバーされる。
     #[test]
