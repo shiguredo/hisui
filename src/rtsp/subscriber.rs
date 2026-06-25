@@ -1126,12 +1126,38 @@ impl AacRtpDepacketizer {
     }
 }
 
+/// RFC 3640 §3.3.6 の `sizeLength` / `indexLength` / `indexDeltaLength` の値域を検査する。
+///
+/// `sizeLength == 0` および `> 32` を Err 化する。32 超を弾く根拠は共有 `BitReader::read_u`
+/// の制約 (n > 32 で Err) で、SDP fmtp 受領時点 (`select_audio_track`) と PBT helper
+/// (`depacketize_aac_payload_for_pbt`) の双方から呼ぶ単一情報源。
+fn validate_aac_fmtp_lengths(
+    size_length: u8,
+    index_length: u8,
+    index_delta_length: u8,
+) -> crate::Result<()> {
+    if size_length == 0 {
+        return Err(Error::new("AAC fmtp sizeLength must be greater than 0"));
+    }
+    if size_length > 32 {
+        return Err(Error::new("AAC fmtp sizeLength must be 32 or less"));
+    }
+    if index_length > 32 {
+        return Err(Error::new("AAC fmtp indexLength must be 32 or less"));
+    }
+    if index_delta_length > 32 {
+        return Err(Error::new("AAC fmtp indexDeltaLength must be 32 or less"));
+    }
+    Ok(())
+}
+
 /// PBT 用に RFC 3640 §3.3.6 の AU-headers-length + au_headers + au_data を組み立てる pub fn。
 ///
 /// 本関数は PBT (`pbt/`) と本体 `cfg(test)` からのみ呼ぶことを想定し、本番経路や hisui を
 /// library として依存する外部消費者は利用しない。
 ///
-/// `size_length` / `index_length` / `index_delta_length` は 0..=32 の値を取る。
+/// `size_length` は 1..=32、`index_length` / `index_delta_length` は 0..=32 の値を取る
+/// (`size_length == 0` は AacRtpDepacketizer 側の `debug_assert!(size_length > 0)` と整合)。
 /// `au_data` の各 AU のバイト長は `(1 << size_length) - 1` 以下である必要がある (溢れると assert)。
 pub fn build_aac_rtp_payload_for_pbt(
     size_length: u8,
@@ -1139,13 +1165,14 @@ pub fn build_aac_rtp_payload_for_pbt(
     index_delta_length: u8,
     au_data: &[Vec<u8>],
 ) -> Vec<u8> {
-    assert!(size_length <= 32, "size_length must be <= 32");
+    assert!(
+        (1..=32).contains(&size_length),
+        "size_length must be in 1..=32"
+    );
     assert!(index_length <= 32, "index_length must be <= 32");
     assert!(index_delta_length <= 32, "index_delta_length must be <= 32");
     assert!(!au_data.is_empty(), "au_data must not be empty");
-    let size_cap = if size_length == 0 {
-        1u64
-    } else if size_length >= 32 {
+    let size_cap = if size_length >= 32 {
         u64::from(u32::MAX)
     } else {
         (1u64 << size_length) - 1
@@ -1223,18 +1250,7 @@ pub fn depacketize_aac_payload_for_pbt(
     index_delta_length: u8,
     payload: &[u8],
 ) -> crate::Result<Vec<Vec<u8>>> {
-    if size_length == 0 {
-        return Err(Error::new("AAC fmtp sizeLength must be greater than 0"));
-    }
-    if size_length > 32 {
-        return Err(Error::new("AAC fmtp sizeLength must be 32 or less"));
-    }
-    if index_length > 32 {
-        return Err(Error::new("AAC fmtp indexLength must be 32 or less"));
-    }
-    if index_delta_length > 32 {
-        return Err(Error::new("AAC fmtp indexDeltaLength must be 32 or less"));
-    }
+    validate_aac_fmtp_lengths(size_length, index_length, index_delta_length)?;
     let depacketizer = AacRtpDepacketizer::new(size_length, index_length, index_delta_length);
     let packet = shiguredo_rtsp::RtpPacket {
         header: shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1),
@@ -1506,21 +1522,7 @@ fn select_audio_track(
             .and_then(|v| v.parse::<u8>().ok())
             .unwrap_or(3);
 
-        if size_length == 0 {
-            return Err(Error::new("AAC fmtp sizeLength must be greater than 0"));
-        }
-        // RFC 3640 §3.3.6 で AU-size / AU-index / AU-index-delta のビット幅を fmtp で渡す
-        // (RFC 自体は上限を明示しない)。上限は共有 BitReader::read_u の制約 (n > 32 で Err)
-        // に由来するため、SDP fmtp 受領時点で 32 超を弾いて session 確立時に fail-fast させる。
-        if size_length > 32 {
-            return Err(Error::new("AAC fmtp sizeLength must be 32 or less"));
-        }
-        if index_length > 32 {
-            return Err(Error::new("AAC fmtp indexLength must be 32 or less"));
-        }
-        if index_delta_length > 32 {
-            return Err(Error::new("AAC fmtp indexDeltaLength must be 32 or less"));
-        }
+        validate_aac_fmtp_lengths(size_length, index_length, index_delta_length)?;
 
         return Ok(Some(AudioTrackConfig {
             control_url,

@@ -28,10 +28,8 @@ const MAX_AU_SIZE: usize = 64;
 const MAX_AU_COUNT: usize = 8;
 
 /// `size_length` が表現可能な最大 AU バイト長を返す (Strategy で AU サイズを切り詰めるため)。
+/// Strategy は `size_length: 1..=32` に絞っているため `size_length == 0` には対応しない。
 fn au_size_cap(size_length: u8) -> usize {
-    if size_length == 0 {
-        return 0;
-    }
     if size_length >= 32 {
         return MAX_AU_SIZE;
     }
@@ -105,12 +103,18 @@ proptest! {
 
     /// 任意の fmtp パラメータと任意の payload バイト列で `depacketize_aac_payload_for_pbt`
     /// が panic しないこと (Result で表現される、クラッシュフリー)。
+    ///
+    /// `payload` の上限 8200 byte は AU-headers-length (u16) 最大値 65535 bit =
+    /// `div_ceil(8) = 8192 byte` を超えるよう設定し、`BitReader` ループ内部の境界処理も
+    /// 含めてカバーする。`size_length == 0` や `> 32` は helper 入口の
+    /// `validate_aac_fmtp_lengths` で Err 化されるため、`AacRtpDepacketizer::new` の
+    /// `debug_assert!(size_length > 0)` には到達しない。
     #[test]
     fn prop_depacketize_aac_does_not_panic(
         size_length in 0u8..=u8::MAX,
         index_length in 0u8..=u8::MAX,
         index_delta_length in 0u8..=u8::MAX,
-        payload in proptest::collection::vec(any::<u8>(), 0..=1024),
+        payload in proptest::collection::vec(any::<u8>(), 0..=8200),
     ) {
         let _ = depacketize_aac_payload_for_pbt(
             size_length,
