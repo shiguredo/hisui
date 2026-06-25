@@ -15,6 +15,8 @@ pub mod media;
 pub mod media_pipeline;
 pub mod metrics;
 pub mod mixer;
+#[cfg(feature = "candle")]
+pub mod ml;
 pub mod mp4;
 pub mod obsws;
 pub mod progress;
