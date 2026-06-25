@@ -1,12 +1,12 @@
 //! RequestBatch 系のテスト (`haltOnFailure` の挙動)。
 
-use crate::obsws::session::SessionAction;
+use crate::obsws::session::{ObswsSession, SessionAction};
 
 use super::common::*;
 
 #[tokio::test]
 async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
-    let mut session = crate::obsws::session::ObswsSession::new(None, default_coordinator_handle());
+    let mut session = ObswsSession::new(None, default_coordinator_handle());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
@@ -30,7 +30,7 @@ async fn request_batch_with_halt_on_failure_stops_after_first_failure() {
 
 #[tokio::test]
 async fn request_batch_without_halt_on_failure_continues_after_failure() {
-    let mut session = crate::obsws::session::ObswsSession::new(None, default_coordinator_handle());
+    let mut session = ObswsSession::new(None, default_coordinator_handle());
     let identify_action = session
         .on_text_message(r#"{"op":1,"d":{"rpcVersion":1,"eventSubscriptions":0}}"#)
         .await
