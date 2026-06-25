@@ -64,14 +64,16 @@
 
 ### 配置場所とモジュール登録
 
-`src/color.rs` を新規作成し、 `src/lib.rs` に `pub(crate) mod color;` を追加する。 `Color` / `ColorParseError` / 全メソッド / 全フィールドは `pub(crate)` で公開する (`crate::color::Color::...` の形で全呼び出し元から参照される)。
+`src/color.rs` を新規作成し、 `src/lib.rs` に `pub mod color;` を追加する。 `Color` / `ColorParseError` / 全メソッド / 全フィールドは `pub` で公開する (`crate::color::Color::...` の形で hisui crate 内の全呼び出し元から参照される)。
+
+PBT は別 crate (`pbt`) に置く既存設計 (proptest 依存を hisui 本体に持ち込まないため) に従うため、 PBT が `use hisui::color::{Color, ColorParseError};` で参照できるよう `pub` での公開を選ぶ。 `pub(crate)` だと別 crate からの参照が成立しない。 既存の `pub mod audio;` / `pub mod media;` 等のドメイン汎用名モジュールと整合する。 将来の breaking は `shiguredo-rust` 規約 (`#[non_exhaustive]` 禁止、 「将来 variant や field を追加するときは素直に破壊的変更として扱う」) に沿って `CHANGES.md` に記載する形で運用する。
 
 obsws 配下 (`src/obsws/color.rs`) ではなく crate root に置く理由は以下:
 
 - 呼び出し元が obsws 内 (`text_overlay.rs` / `color_source.rs` / `state/types.rs`) だけでなく webrtc 内 (`p2p_session.rs::resolve_chroma_key_config`) にもまたがる
 - パース対象の hex 文字列フォーマット (`#RRGGBB` / `#RRGGBBAA`) は OBS WebSocket 固有ではなく汎用 (CSS 標準) なため、 obsws 専用モジュールに置くと命名と責務が乖離する
 - 現状すでに発生している `webrtc → obsws::source` のクロスレイヤ依存 (hex 色解析だけのために存在) を解消できる
-- 既存の `src/lib.rs` には `pub mod audio;` `pub mod media;` 等のドメイン汎用名モジュールが並ぶ前例があり、 `pub(crate) mod color;` を crate root に追加するスタイルに整合する
+- 既存の `src/lib.rs` には `pub mod audio;` `pub mod media;` 等のドメイン汎用名モジュールが並ぶ前例があり、 `pub mod color;` を crate root に追加するスタイルに整合する
 
 モジュールの doc コメントで「現状は obsws と webrtc/p2p_session から使う汎用 hex 色型」と明示し、 過剰汎化と誤読されないようにする。
 
@@ -82,35 +84,35 @@ obsws 配下 (`src/obsws/color.rs`) ではなく crate root に置く理由は�
 ```rust
 /// hex 文字列由来の色値。 alpha は常に保持し、 `#RRGGBB` 入力時は 0xFF (不透明) を埋める。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Color {
-    pub(crate) r: u8,
-    pub(crate) g: u8,
-    pub(crate) b: u8,
-    pub(crate) a: u8,
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
 }
 
 impl Color {
     /// `#RRGGBB` (a=0xFF として扱う) と `#RRGGBBAA` の両方を受け付ける。
     /// 空文字は `MissingHashPrefix` で拒否する。
-    pub(crate) fn from_hex(s: &str) -> Result<Self, ColorParseError>;
+    pub fn from_hex(s: &str) -> Result<Self, ColorParseError>;
 
     /// `#RRGGBB` のみ受け付ける。 6 桁以外は `InvalidLength(stripped.len())` で拒否する
     /// (8 桁を渡しても `InvalidLength(8)` で拒否される)。
     /// 空文字 / `#` 不在は `MissingHashPrefix` で拒否する (`from_hex` と同じ挙動)。
     /// 成功時は `a = 0xFF` を埋める。
-    pub(crate) fn from_hex_rgb(s: &str) -> Result<Self, ColorParseError>;
+    pub fn from_hex_rgb(s: &str) -> Result<Self, ColorParseError>;
 
     /// ARGB u32 (`0xAARRGGBB` レイアウト) から Color を構築する。 無謬な変換。
-    pub(crate) const fn from_argb_u32(argb: u32) -> Self;
+    pub const fn from_argb_u32(argb: u32) -> Self;
 
     /// 常に 8 桁 `#RRGGBBAA` を出力する (alpha=0xFF でも `FF` を付与、 hex は大文字)。
-    pub(crate) fn to_hex_string(&self) -> String;
+    pub fn to_hex_string(&self) -> String;
 
     /// ARGB u32 (`((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)`) を返す。
-    pub(crate) const fn to_argb_u32(&self) -> u32;
+    pub const fn to_argb_u32(&self) -> u32;
 
     /// `(r, g, b)` 順のタプル。 alpha は捨てる。
-    pub(crate) const fn rgb_tuple(&self) -> (u8, u8, u8);
+    pub const fn rgb_tuple(&self) -> (u8, u8, u8);
 }
 ```
 
@@ -118,7 +120,7 @@ impl Color {
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ColorParseError {
+pub enum ColorParseError {
     /// `#` プレフィックス不在 (空文字もここに分類)。
     MissingHashPrefix,
     /// `#` を除いた後の文字数が 6 / 8 以外。 引数値は `#` を除いた後の長さ。
@@ -293,7 +295,7 @@ PBT で実現しにくいエラーパス・境界値のみを書く。
 ## 完了条件
 
 - `src/color.rs` が新規作成され、 `Color` / `ColorParseError` と上記 API が定義されている
-- `src/lib.rs` に `pub(crate) mod color;` が追加されている
+- `src/lib.rs` に `pub mod color;` が追加されている
 - 上記「各呼び出し元の書き換え」のとおり、 obsws / webrtc 配下の全呼び出し元 (`text_overlay.rs` の Create / Update / state_to_json / `color_source.rs` / `state/types.rs` / `p2p_session.rs`) が `Color` 経由に切り替わっている
 - 旧 `pub fn parse_hex_color` (`webrtc_source.rs`)、 `parse_argb_color` / `argb_to_hex_string` (`text_overlay.rs`) が削除されている
 - `validate_hex_color` (`state/types.rs`) は関数として残り、 内部が `Color::from_hex_rgb` 経由に置き換わっている
