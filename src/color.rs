@@ -1,11 +1,6 @@
 //! hex 色文字列を扱う共通 Color 型。
-//!
-//! 現状は obsws (`text_overlay` / `color_source` / `state::types::validate_hex_color`) と
-//! webrtc (`p2p_session::resolve_chroma_key_config`) から使われる汎用 hex 色型。
-//! 入力フォーマット (`#RRGGBB` / `#RRGGBBAA`) は CSS 標準であり obsws 固有ではないため、
-//! crate root に置いて両モジュールから共通利用する。
 
-/// hex 文字列由来の色値。 alpha は常に保持し、 `#RRGGBB` 入力時は 0xFF (不透明) を埋める。
+/// hex 文字列由来の色値。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
     pub r: u8,
@@ -15,10 +10,6 @@ pub struct Color {
 }
 
 /// `Color::from_hex` / `Color::from_hex_rgb` のパース失敗種別。
-///
-/// `Display` / `std::error::Error` は実装しない。 呼び出し元はバリアントごとに
-/// 個別の文言を組み立てる (text_overlay 経路は `fontColor must ...` 系、
-/// validate_hex_color 経路は単一文言)。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColorParseError {
     /// `#` プレフィックス不在 (空文字もここに分類する)。
@@ -43,12 +34,19 @@ impl Color {
         if !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(ColorParseError::InvalidHex);
         }
-        // 長さと hex 文字性は確認済みなので from_str_radix は失敗しない。
-        let r = u8::from_str_radix(&stripped[0..2], 16).expect("hex digits already validated");
-        let g = u8::from_str_radix(&stripped[2..4], 16).expect("hex digits already validated");
-        let b = u8::from_str_radix(&stripped[4..6], 16).expect("hex digits already validated");
+        let r = u8::from_str_radix(&stripped[0..2], 16).expect(
+            "unreachable: length and hex digits validated above; implementation bug if reached",
+        );
+        let g = u8::from_str_radix(&stripped[2..4], 16).expect(
+            "unreachable: length and hex digits validated above; implementation bug if reached",
+        );
+        let b = u8::from_str_radix(&stripped[4..6], 16).expect(
+            "unreachable: length and hex digits validated above; implementation bug if reached",
+        );
         let a = if stripped.len() == 8 {
-            u8::from_str_radix(&stripped[6..8], 16).expect("hex digits already validated")
+            u8::from_str_radix(&stripped[6..8], 16).expect(
+                "unreachable: length and hex digits validated above; implementation bug if reached",
+            )
         } else {
             0xFF
         };
@@ -69,13 +67,19 @@ impl Color {
         if !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(ColorParseError::InvalidHex);
         }
-        let r = u8::from_str_radix(&stripped[0..2], 16).expect("hex digits already validated");
-        let g = u8::from_str_radix(&stripped[2..4], 16).expect("hex digits already validated");
-        let b = u8::from_str_radix(&stripped[4..6], 16).expect("hex digits already validated");
+        let r = u8::from_str_radix(&stripped[0..2], 16).expect(
+            "unreachable: length and hex digits validated above; implementation bug if reached",
+        );
+        let g = u8::from_str_radix(&stripped[2..4], 16).expect(
+            "unreachable: length and hex digits validated above; implementation bug if reached",
+        );
+        let b = u8::from_str_radix(&stripped[4..6], 16).expect(
+            "unreachable: length and hex digits validated above; implementation bug if reached",
+        );
         Ok(Self { r, g, b, a: 0xFF })
     }
 
-    /// ARGB u32 (`0xAARRGGBB` レイアウト) から `Color` を構築する。 無謬な変換。
+    /// ARGB u32 (`0xAARRGGBB` レイアウト) から `Color` を構築する。 失敗しない変換。
     pub const fn from_argb_u32(argb: u32) -> Self {
         Self {
             a: ((argb >> 24) & 0xFF) as u8,

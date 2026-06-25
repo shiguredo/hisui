@@ -2,22 +2,17 @@
 //!
 //! u32 → Color → u32 / u32 → hex → Color → u32 のラウンドトリップと、
 //! `from_hex` / `from_hex_rgb` の受理範囲の境界を proptest で範囲網羅的に検証する。
-//! hex 以外の文字を含むケースは挙動が分岐するため strategy で hex 文字に限定し、
-//! 単体テストの責務 (`src/color.rs` の `mod tests`) と切り分けている。
 
 use hisui::color::{Color, ColorParseError};
 use proptest::prelude::*;
 
 proptest! {
-    /// 任意 u32 で `from_argb_u32` → `to_argb_u32` が元値と一致する (Color 構造体経由の往復一致)。
     #[test]
     fn argb_u32_roundtrips_via_color(argb in any::<u32>()) {
         let restored = Color::from_argb_u32(argb).to_argb_u32();
         prop_assert_eq!(restored, argb, "u32 → Color → u32 のラウンドトリップは恒等であるはず");
     }
 
-    /// 任意 u32 で `from_argb_u32` → `to_hex_string` → `from_hex` → `to_argb_u32` が元値と一致する
-    /// (hex 文字列を介した往復一致)。
     #[test]
     fn argb_u32_roundtrips_via_hex_string(argb in any::<u32>()) {
         let s = Color::from_argb_u32(argb).to_hex_string();
@@ -27,8 +22,6 @@ proptest! {
         prop_assert_eq!(restored, argb, "u32 → hex → Color → u32 のラウンドトリップは恒等であるはず");
     }
 
-    /// 任意 `#RRGGBB` 文字列 (6 桁 hex) で `from_hex` と `from_hex_rgb` がともに成功し、
-    /// 結果の Color が一致する (両者とも `a = 0xFF` を埋める仕様)。
     #[test]
     fn from_hex_and_from_hex_rgb_agree_on_6digit(hex6 in "[0-9A-Fa-f]{6}") {
         let s = format!("#{hex6}");
@@ -46,8 +39,6 @@ proptest! {
         );
     }
 
-    /// 任意 `#RRGGBBAA` 文字列 (8 桁 hex) で `from_hex` は成功し、
-    /// `from_hex_rgb` は必ず `InvalidLength(8)` で拒否される。
     #[test]
     fn from_hex_accepts_8digit_but_from_hex_rgb_rejects(hex8 in "[0-9A-Fa-f]{8}") {
         let s = format!("#{hex8}");
@@ -62,9 +53,8 @@ proptest! {
         );
     }
 
-    /// `#` を含まない任意 hex 文字列 (0〜16 桁の hex 文字列) で
-    /// `from_hex` / `from_hex_rgb` がともに `MissingHashPrefix` を返す。
-    /// 空文字も含むため、 空文字の挙動も同時にカバーされる。
+    // 上限 16 桁は 8 桁 (`from_hex` の受理上限) の倍までを「`#` 不在」として網羅する意図。
+    // 下限 0 桁で空文字の挙動も同時にカバーされる。
     #[test]
     fn both_parsers_reject_missing_hash(no_hash in "[0-9A-Fa-f]{0,16}") {
         prop_assert_eq!(

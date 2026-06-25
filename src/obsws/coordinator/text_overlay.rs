@@ -532,7 +532,6 @@ fn text_overlay_state_to_json(state: &TextOverlayState) -> nojson::RawJsonOwned 
 }
 
 /// `Color::from_hex` 失敗時に `fontColor must ...` 形式の comment 文言を組み立てる。
-/// `field` は将来 `backgroundColor` 等で再利用するため引数化している。
 fn format_color_parse_error(field: &str, input: &str, e: ColorParseError) -> String {
     match e {
         ColorParseError::MissingHashPrefix => format!("{field} must start with '#': {input:?}"),
