@@ -535,11 +535,12 @@ pub(crate) mod tests {
     // 第 1 バイト: forbidden_zero_bit (1 bit) = 0 / nal_unit_type (6 bit) / nuh_layer_id 最上位 1 bit = 0
     // 第 2 バイト: nuh_layer_id 下位 5 bit = 0 / nuh_temporal_id_plus1 (3 bit) = 1
     // VPS (nal_unit_type=32): (32 << 1) | 0 = 0x40
-    const VPS_HEADER: [u8; 2] = [0x40, 0x01];
+    // VPS / PPS は本モジュール外のテストからも参照可能なように `pub(crate)` で公開する。
+    pub(crate) const HEVC_VPS_NAL: &[u8] = &[0x40, 0x01];
     // SPS (nal_unit_type=33): (33 << 1) | 0 = 0x42
     const SPS_HEADER: [u8; 2] = [0x42, 0x01];
     // PPS (nal_unit_type=34): (34 << 1) | 0 = 0x44
-    const PPS_HEADER: [u8; 2] = [0x44, 0x01];
+    pub(crate) const HEVC_PPS_NAL: &[u8] = &[0x44, 0x01];
 
     // 以下の SPS バイト列は ffmpeg + libx265 で生成した実機 SPS を抽出したもの。
     // 生成コマンドは `ffmpeg -f lavfi -i testsrc=size=WIDTHxHEIGHT:rate=30 -pix_fmt yuv420p
@@ -573,13 +574,13 @@ pub(crate) mod tests {
         // 4 バイト start code [0, 0, 0, 1] で区切られた VPS / SPS / PPS を順に取り出せること
         let mut data = Vec::new();
         data.extend_from_slice(&[0, 0, 0, 1]);
-        data.extend_from_slice(&VPS_HEADER);
+        data.extend_from_slice(HEVC_VPS_NAL);
         data.push(0xaa);
         data.extend_from_slice(&[0, 0, 0, 1]);
         data.extend_from_slice(&SPS_HEADER);
         data.push(0xbb);
         data.extend_from_slice(&[0, 0, 0, 1]);
-        data.extend_from_slice(&PPS_HEADER);
+        data.extend_from_slice(HEVC_PPS_NAL);
         data.push(0xcc);
 
         let nalus: Vec<_> = H265AnnexBNalUnits::new(&data)
@@ -599,7 +600,7 @@ pub(crate) mod tests {
         // 3 バイト start code [0, 0, 1] でも NAL タイプを取り出せること
         let mut data = Vec::new();
         data.extend_from_slice(&[0, 0, 1]);
-        data.extend_from_slice(&VPS_HEADER);
+        data.extend_from_slice(HEVC_VPS_NAL);
         data.push(0x55);
 
         let nalus: Vec<_> = H265AnnexBNalUnits::new(&data)
@@ -615,13 +616,13 @@ pub(crate) mod tests {
         // 正しく 3 個の NAL に切り分けられること。
         let mut data = Vec::new();
         data.extend_from_slice(&[0, 0, 0, 1]); // 4 バイト start code
-        data.extend_from_slice(&VPS_HEADER);
+        data.extend_from_slice(HEVC_VPS_NAL);
         data.push(0xaa);
         data.extend_from_slice(&[0, 0, 1]); // 3 バイト start code
         data.extend_from_slice(&SPS_HEADER);
         data.push(0xbb);
         data.extend_from_slice(&[0, 0, 0, 1]); // 4 バイト start code
-        data.extend_from_slice(&PPS_HEADER);
+        data.extend_from_slice(HEVC_PPS_NAL);
         data.push(0xcc);
 
         let nalus: Vec<_> = H265AnnexBNalUnits::new(&data)
@@ -685,7 +686,7 @@ pub(crate) mod tests {
         // 現在 NAL の末尾に start code が混入する回帰を防ぐ)。
         let mut data = Vec::new();
         data.extend_from_slice(&[0, 0, 0, 1]);
-        data.extend_from_slice(&VPS_HEADER);
+        data.extend_from_slice(HEVC_VPS_NAL);
         data.push(0xaa);
         data.extend_from_slice(&[0, 0, 1]); // 末尾 3 バイト start code (NAL ボディなし)
 
@@ -1186,12 +1187,12 @@ pub(crate) mod tests {
 
     /// テスト用のダミー VPS NAL バイト列 (NAL タイプ検査のみ通る最小サイズ)
     fn dummy_vps_nal() -> Vec<u8> {
-        VPS_HEADER.to_vec()
+        HEVC_VPS_NAL.to_vec()
     }
 
     /// テスト用のダミー PPS NAL バイト列 (NAL タイプ検査のみ通る最小サイズ)
     fn dummy_pps_nal() -> Vec<u8> {
-        PPS_HEADER.to_vec()
+        HEVC_PPS_NAL.to_vec()
     }
 
     #[test]
