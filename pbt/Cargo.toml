@@ -13,5 +13,7 @@ hisui = { path = ".." }
 nojson = { workspace = true }
 # prop_h264_sps PBT で SampleEntry を直接構築するため
 shiguredo_mp4 = { workspace = true }
+# prop_aac_rtp PBT で RtpPacket / RtpHeader を組み立てるため
+shiguredo_rtsp = { workspace = true }
 # Property-Based Testing 本体
 proptest = "1.11"

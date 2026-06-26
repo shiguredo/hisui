@@ -15,7 +15,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     Error, ProcessorHandle, TrackId, TrackPublisher,
-    audio::{AudioFormat, AudioFrame, Channels, SampleRate},
+    audio::{
+        AudioFormat, AudioFrame, Channels, SampleRate,
+        aac::{AacRtpDepacketizer, validate_aac_fmtp_lengths},
+    },
     sample_entry::SharedSampleEntry,
     timestamp::mapper::TimestampMapper,
     video::{VideoFormat, VideoFrame},
@@ -24,7 +27,6 @@ use crate::{
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20);
 const RECONNECT_DELAY_INITIAL: Duration = Duration::from_millis(500);
 const RECONNECT_DELAY_MAX: Duration = Duration::from_secs(5);
-const AAC_AU_SAMPLES: u64 = 1024;
 const DEFAULT_RTSP_PORT: u16 = 554;
 
 #[derive(Debug, Clone)]
@@ -1021,129 +1023,6 @@ impl H264RtpDepacketizer {
     }
 }
 
-#[derive(Debug, Clone)]
-struct AudioAccessUnit {
-    rtp_timestamp: u32,
-    data: Vec<u8>,
-}
-
-#[derive(Debug)]
-struct AacRtpDepacketizer {
-    size_length: u8,
-    index_length: u8,
-    index_delta_length: u8,
-}
-
-impl AacRtpDepacketizer {
-    fn new(size_length: u8, index_length: u8, index_delta_length: u8) -> Self {
-        Self {
-            size_length,
-            index_length,
-            index_delta_length,
-        }
-    }
-
-    fn depacketize(
-        &self,
-        packet: &shiguredo_rtsp::RtpPacket,
-    ) -> crate::Result<Vec<AudioAccessUnit>> {
-        if packet.payload.len() < 2 {
-            return Err(Error::new(
-                "invalid AAC RTP payload: missing AU header length",
-            ));
-        }
-
-        let au_headers_length_bits =
-            u16::from_be_bytes([packet.payload[0], packet.payload[1]]) as usize;
-        if au_headers_length_bits == 0 {
-            return Err(Error::new(
-                "invalid AAC RTP payload: AU header length must be greater than 0",
-            ));
-        }
-        let au_headers_length_bytes = au_headers_length_bits.div_ceil(8);
-        if packet.payload.len() < 2 + au_headers_length_bytes {
-            return Err(Error::new(
-                "invalid AAC RTP payload: AU headers are truncated",
-            ));
-        }
-
-        let au_headers = &packet.payload[2..2 + au_headers_length_bytes];
-        let mut bit_reader = BitReader::new(au_headers);
-        let mut au_sizes = Vec::new();
-        let mut first = true;
-        let mut consumed_bits = 0usize;
-        while consumed_bits < au_headers_length_bits {
-            let size = bit_reader.read_bits(self.size_length)? as usize;
-            consumed_bits = consumed_bits.saturating_add(self.size_length as usize);
-            let index_bits = if first {
-                self.index_length
-            } else {
-                self.index_delta_length
-            };
-            let _ = bit_reader.read_bits(index_bits)?;
-            consumed_bits = consumed_bits.saturating_add(index_bits as usize);
-            first = false;
-            au_sizes.push(size);
-        }
-
-        let mut data_offset = 2 + au_headers_length_bytes;
-        let mut access_units = Vec::with_capacity(au_sizes.len());
-        for (index, au_size) in au_sizes.into_iter().enumerate() {
-            if data_offset + au_size > packet.payload.len() {
-                return Err(Error::new("invalid AAC RTP payload: AU data is truncated"));
-            }
-
-            let raw_timestamp = packet
-                .header
-                .timestamp
-                .wrapping_add((index as u32).saturating_mul(AAC_AU_SAMPLES as u32));
-            access_units.push(AudioAccessUnit {
-                rtp_timestamp: raw_timestamp,
-                data: packet.payload[data_offset..data_offset + au_size].to_vec(),
-            });
-            data_offset += au_size;
-        }
-
-        Ok(access_units)
-    }
-}
-
-#[derive(Debug)]
-struct BitReader<'a> {
-    bytes: &'a [u8],
-    bit_offset: usize,
-}
-
-impl<'a> BitReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self {
-            bytes,
-            bit_offset: 0,
-        }
-    }
-
-    fn read_bits(&mut self, bit_count: u8) -> crate::Result<u32> {
-        if bit_count == 0 {
-            return Ok(0);
-        }
-        let total_bits = self.bytes.len().saturating_mul(8);
-        let end = self.bit_offset.saturating_add(bit_count as usize);
-        if end > total_bits {
-            return Err(Error::new("bitstream is truncated"));
-        }
-
-        let mut value = 0u32;
-        for _ in 0..bit_count {
-            let byte_index = self.bit_offset / 8;
-            let bit_index = 7 - (self.bit_offset % 8);
-            let bit = (self.bytes[byte_index] >> bit_index) & 1;
-            value = (value << 1) | u32::from(bit);
-            self.bit_offset += 1;
-        }
-        Ok(value)
-    }
-}
-
 fn parse_rtsp_input_url(input_url: &str) -> Result<ParsedRtspUrl, String> {
     let uri = Uri::parse(input_url).map_err(|e| format!("failed to parse URL: {e}"))?;
     let scheme = uri
@@ -1401,9 +1280,7 @@ fn select_audio_track(
             .and_then(|v| v.parse::<u8>().ok())
             .unwrap_or(3);
 
-        if size_length == 0 {
-            return Err(Error::new("AAC fmtp sizeLength must be greater than 0"));
-        }
+        validate_aac_fmtp_lengths(size_length, index_length, index_delta_length)?;
 
         return Ok(Some(AudioTrackConfig {
             control_url,
@@ -1629,32 +1506,6 @@ mod tests {
     }
 
     #[test]
-    fn depacketize_aac_with_multiple_aus() {
-        let depacketizer = AacRtpDepacketizer::new(13, 3, 3);
-        let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
-        header.marker = true;
-        // AU-header-length: 32 bits
-        // AU#0 size=4 index=0 -> 0000000000100 000
-        // AU#1 size=2 index-delta=0 -> 0000000000010 000
-        let payload = vec![
-            0x00, 0x20, 0x00, 0x20, 0x00, 0x10, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22,
-        ];
-        let packet = shiguredo_rtsp::RtpPacket {
-            header,
-            extension: None,
-            payload,
-            padding_size: 0,
-        };
-
-        let aus = depacketizer.depacketize(&packet).expect("must depacketize");
-        assert_eq!(aus.len(), 2);
-        assert_eq!(aus[0].rtp_timestamp, 9000);
-        assert_eq!(aus[0].data, vec![0xaa, 0xbb, 0xcc, 0xdd]);
-        assert_eq!(aus[1].rtp_timestamp, 10024);
-        assert_eq!(aus[1].data, vec![0x11, 0x22]);
-    }
-
-    #[test]
     fn depacketize_aac_rejects_zero_au_header_length() {
         let depacketizer = AacRtpDepacketizer::new(13, 3, 3);
         let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
@@ -1670,6 +1521,96 @@ mod tests {
         assert_eq!(
             err.display(),
             "invalid AAC RTP payload: AU header length must be greater than 0"
+        );
+    }
+
+    #[test]
+    fn depacketize_aac_wraps_bit_reader_error() {
+        // `au_headers` slice の実 bit 数で消費しきれない要求量 (AU#2 を読みに行く) を仕込む。
+        // size_length=13 / index_length=3 / index_delta_length=3 のため、
+        // AU#0 + AU#1 で 32 bit、AU#2 の size を読みに行った時点で `read_u` が枯渇 Err を返す。
+        // `Error::with_context` の prefix が付くことを reason フィールドで担保する。
+        let depacketizer = AacRtpDepacketizer::new(13, 3, 3);
+        let mut header = shiguredo_rtsp::rtp::RtpHeader::new(97, 1, 9000, 1);
+        header.marker = true;
+        // au_headers_length_bits = 33 (= 0x21)。au_headers slice は ceil(33 / 8) = 5 byte
+        // (= 40 bit) 利用可能で、ループ条件 `consumed_bits < 33` のもと AU#0 + AU#1 で
+        // 32 bit 消費後、3 周目で AU#2 の size 13 bit を要求し bit 45 まで読もうとして
+        // bit 40 で枯渇する。
+        let payload = vec![
+            0x00, 0x21, 0x00, 0x20, 0x00, 0x10, 0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22,
+        ];
+        let packet = shiguredo_rtsp::RtpPacket {
+            header,
+            extension: None,
+            payload,
+            padding_size: 0,
+        };
+
+        let err = depacketizer
+            .depacketize(&packet)
+            .expect_err("AU header 枯渇で Err になること");
+        assert!(
+            err.reason.starts_with("invalid AAC AU header: "),
+            "Err の reason に AAC AU header context 文言が前置されること: {}",
+            err.reason
+        );
+        assert!(
+            err.reason
+                .contains("bit reader: exhausted before requested read"),
+            "Err の reason に元の BitReader エラー文言が含まれること: {}",
+            err.reason
+        );
+    }
+
+    #[test]
+    fn select_audio_track_rejects_size_length_over_32() {
+        // RFC 3640 §3.3.6 の値域外 (`sizelength=33`) を SDP fmtp 受領時点で fail-fast する。
+        let sdp = build_test_sdp_with_audio_fmtp(
+            "profile-level-id=1;mode=AAC-hbr;sizelength=33;indexlength=3;indexdeltalength=3;config=1190",
+        );
+        let err = parse_audio_track(&sdp).expect_err("sizelength=33 は Err になること");
+        assert_eq!(err.display(), "AAC fmtp sizeLength must be 32 or less");
+    }
+
+    #[test]
+    fn select_audio_track_rejects_index_length_over_32() {
+        // RFC 3640 §3.3.6 の値域外 (`indexlength=33`) を SDP fmtp 受領時点で fail-fast する。
+        let sdp = build_test_sdp_with_audio_fmtp(
+            "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=33;indexdeltalength=3;config=1190",
+        );
+        let err = parse_audio_track(&sdp).expect_err("indexlength=33 は Err になること");
+        assert_eq!(err.display(), "AAC fmtp indexLength must be 32 or less");
+    }
+
+    #[test]
+    fn select_audio_track_rejects_index_delta_length_over_32() {
+        // RFC 3640 §3.3.6 の値域外 (`indexdeltalength=33`) を SDP fmtp 受領時点で fail-fast する。
+        let sdp = build_test_sdp_with_audio_fmtp(
+            "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=33;config=1190",
+        );
+        let err = parse_audio_track(&sdp).expect_err("indexdeltalength=33 は Err になること");
+        assert_eq!(
+            err.display(),
+            "AAC fmtp indexDeltaLength must be 32 or less"
+        );
+    }
+
+    #[test]
+    fn select_audio_track_accepts_lengths_at_boundary_32() {
+        // 上限値 (= 32) は共有 BitReader::read_u が Ok を返す境界。
+        // `> 32` Err 化と `== 32` 受理の境界を 3 フィールド一括で担保する。
+        let sdp = build_test_sdp_with_audio_fmtp(
+            "profile-level-id=1;mode=AAC-hbr;sizelength=32;indexlength=32;indexdeltalength=32;config=1190",
+        );
+        let cfg = parse_audio_track(&sdp)
+            .expect("sizelength=32 / indexlength=32 / indexdeltalength=32 は Ok を返すこと")
+            .expect("AudioTrackConfig が返ること");
+        assert_eq!(cfg.size_length, 32, "size_length が 32 で受理されること");
+        assert_eq!(cfg.index_length, 32, "index_length が 32 で受理されること");
+        assert_eq!(
+            cfg.index_delta_length, 32,
+            "index_delta_length が 32 で受理されること"
         );
     }
 
@@ -2275,6 +2216,33 @@ mod tests {
              a=fmtp:96 {fmtp_params}\r\n\
              a=control:trackID=0\r\n"
         )
+    }
+
+    // MPEG4-GENERIC (AAC) の audio メディアのみを含む SDP テキストを返す。
+    // `a=fmtp:97 {fmtp_params}` で fmtp パラメータを差し替えられる。
+    fn build_test_sdp_with_audio_fmtp(fmtp_params: &str) -> String {
+        format!(
+            "v=0\r\n\
+             o=- 0 0 IN IP4 127.0.0.1\r\n\
+             s=hisui-test\r\n\
+             t=0 0\r\n\
+             a=control:*\r\n\
+             m=audio 9002 RTP/AVP 97\r\n\
+             a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n\
+             a=fmtp:97 {fmtp_params}\r\n\
+             a=control:trackID=1\r\n"
+        )
+    }
+
+    // SDP テキストから音声メディアを取り出して `select_audio_track` を呼ぶ薄いラッパ。
+    fn parse_audio_track(sdp_text: &str) -> crate::Result<Option<AudioTrackConfig>> {
+        let parsed = Sdp::parse(sdp_text).expect("テスト用 SDP がパースできること");
+        let media = parsed
+            .media
+            .iter()
+            .find(|m| m.media_type.eq_ignore_ascii_case("audio"))
+            .expect("audio メディアが SDP に存在すること");
+        select_audio_track(media, "rtsp://example.com/")
     }
 
     // SDP テキストから映像メディアを取り出して `select_video_track` を呼ぶ薄いラッパ。
