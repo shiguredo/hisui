@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -16,14 +17,15 @@ pub struct RtmpPublisherOptions {
     /// 出力先のネットワークないしサーバーが過負荷に陥っていると判断して、
     /// 接続を強制終了する（エラー扱い）
     ///
-    /// デフォルト値は 1000
-    pub max_buffered_frame_count: usize,
+    /// デフォルト値は 1000。`NonZeroUsize` で 1 以上を型レベルに保証する。
+    pub max_buffered_frame_count: NonZeroUsize,
 }
 
 impl Default for RtmpPublisherOptions {
     fn default() -> Self {
         Self {
-            max_buffered_frame_count: 1000, // FPS にもよるけど概ね 10 秒分くらい
+            // FPS にもよるけど概ね 10 秒分くらい
+            max_buffered_frame_count: NonZeroUsize::new(1000).expect("non-zero constant"),
         }
     }
 }
@@ -135,7 +137,7 @@ impl RtmpPublisher {
         let url = parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
             .map_err(|e| Error::new(format!("invalid output_url: {e}")))?;
 
-        let (tx, rx) = tokio::sync::mpsc::channel(self.options.max_buffered_frame_count);
+        let (tx, rx) = tokio::sync::mpsc::channel(self.options.max_buffered_frame_count.get());
 
         let mut runner = RtmpPublishRunner {
             url,
