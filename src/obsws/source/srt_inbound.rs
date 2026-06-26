@@ -23,15 +23,20 @@ pub(super) fn build_record_source_plan(
     let raw_video_track_id = TrackId::new(format!("input:raw_video:{source_key}"));
     let raw_audio_track_id = TrackId::new(format!("input:raw_audio:{source_key}"));
 
-    let endpoint = crate::srt::inbound_endpoint::SrtInboundEndpoint {
-        input_url: input_url.to_owned(),
-        output_audio_track_id: Some(raw_audio_track_id.clone()),
-        output_video_track_id: Some(raw_video_track_id.clone()),
-        stream_id: settings.stream_id.clone(),
-        passphrase: settings.passphrase.clone(),
-        key_length: None,
-        tsbpd_delay_ms: None,
-    };
+    let endpoint = crate::srt::inbound_endpoint::SrtInboundEndpoint::new(
+        input_url.to_owned(),
+        Some(raw_audio_track_id.clone()),
+        Some(raw_video_track_id.clone()),
+        crate::srt::inbound_endpoint::SrtInboundEndpointOptions {
+            stream_id: settings.stream_id.clone(),
+            passphrase: settings.passphrase.clone(),
+            key_length: None,
+            tsbpd_delay_ms: None,
+        },
+    )
+    .map_err(|e| {
+        BuildObswsRecordSourcePlanError::InvalidInput(format!("invalid srt_inbound config: {e}"))
+    })?;
 
     Ok(ObswsRecordSourcePlan {
         source_processor_ids: vec![source_processor_id.clone()],
@@ -78,8 +83,8 @@ mod tests {
         match &plan.requests[0] {
             ObswsSourceRequest::CreateSrtInboundEndpoint { endpoint, .. } => {
                 assert_eq!(endpoint.input_url, "srt://127.0.0.1:9000");
-                assert_eq!(endpoint.stream_id.as_deref(), Some("test-stream"));
-                assert_eq!(endpoint.passphrase.as_deref(), Some("secret123456"));
+                assert_eq!(endpoint.options.stream_id.as_deref(), Some("test-stream"));
+                assert_eq!(endpoint.options.passphrase.as_deref(), Some("secret123456"));
             }
             _ => panic!("expected CreateSrtInboundEndpoint"),
         }
@@ -99,8 +104,8 @@ mod tests {
 
         match &plan.requests[0] {
             ObswsSourceRequest::CreateSrtInboundEndpoint { endpoint, .. } => {
-                assert_eq!(endpoint.stream_id, None);
-                assert_eq!(endpoint.passphrase, None);
+                assert_eq!(endpoint.options.stream_id, None);
+                assert_eq!(endpoint.options.passphrase, None);
             }
             _ => panic!("expected CreateSrtInboundEndpoint"),
         }
