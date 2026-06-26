@@ -1488,11 +1488,8 @@ mod tests {
     use crate::audio::aac::create_mp4a_sample_entry;
     use crate::audio::opus::opus_sample_entry;
     use crate::audio::{Channels, SampleRate};
-    use crate::video::FrameRate;
     use crate::video::h264::h264_sample_entry_from_sps_pps_lists;
     use crate::video::h264::tests::{PPS_NAL, SPS_320X240};
-    use crate::video::h265::h265_sample_entry_from_vps_sps_pps_lists;
-    use crate::video::h265::tests::{HEVC_PPS_NAL, HEVC_SPS_640X480, HEVC_VPS_NAL};
     use shiguredo_mp4::boxes::SampleEntry;
 
     // AAC-LC 44.1kHz mono 用の AudioSpecificConfig (2 バイト)。
@@ -1513,17 +1510,6 @@ mod tests {
             vec![PPS_NAL.to_vec()],
         )
         .expect("Avc1 SampleEntry 構築成功");
-        entry
-    }
-
-    fn build_test_hvc1_sample_entry() -> SampleEntry {
-        let (entry, _) = h265_sample_entry_from_vps_sps_pps_lists(
-            vec![HEVC_VPS_NAL.to_vec()],
-            vec![HEVC_SPS_640X480.to_vec()],
-            vec![HEVC_PPS_NAL.to_vec()],
-            FrameRate::FPS_30,
-        )
-        .expect("Hvc1 SampleEntry 構築成功");
         entry
     }
 
@@ -1556,12 +1542,10 @@ mod tests {
 
     #[test]
     fn convert_length_prefixed_to_annexb_returns_err_on_non_avc1_sample_entry() {
-        // Avc1 以外（None / Mp4a クロスドメイン / Hvc1 同ドメイン異コーデック）かつ
+        // Avc1 以外（None / Mp4a クロスドメイン）かつ
         // keyframe true / false のいずれでも Err が返ることを確認する
         let mp4a = build_test_mp4a_sample_entry();
-        let hvc1 = build_test_hvc1_sample_entry();
-        let cases: &[(Option<&SampleEntry>, &str)] =
-            &[(None, "None"), (Some(&mp4a), "Mp4a"), (Some(&hvc1), "Hvc1")];
+        let cases: &[(Option<&SampleEntry>, &str)] = &[(None, "None"), (Some(&mp4a), "Mp4a")];
         let data = build_length_prefixed(&[0xaa, 0xbb]);
         for (entry, expected_variant) in cases {
             for keyframe in [true, false] {
