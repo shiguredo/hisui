@@ -25,6 +25,7 @@ pub(crate) mod output_registry;
 mod output_rtmp;
 mod output_sora;
 mod output_stream;
+mod parse_helpers;
 mod scene;
 mod scene_item;
 mod text_overlay;
