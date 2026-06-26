@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-24
-- Completed:
+- Completed: 2026-06-26
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-callback-friendly-codec-interface
 - Prototype Branch:
@@ -269,7 +269,97 @@ hisui コードが下位 ABI callback ハンドラを直接実装しているの
 
 ### 3. 決定
 
-採用案・棄却理由 (再考トリガー含む)・後続実装 issue の分割粒度案・依存順序、または「現状維持」結論を Decision Owner が本 issue 内に追記し、決定日 (YYYY-MM-DD) と決定者 (`@sile`) を併記する。
+- 採用案: **案 C (全エンコーダー Sender 出力に統一)**
+- 決定日: 2026-06-26
+- 決定者: `@sile`
+
+#### 採用理由 (定性判断)
+
+ユーザー判断軸「互換性・修正量を気にしない、VideoEncoder 自体を非同期寄りにする、今後の HW エンコーダーが非同期化していくトレンドを前提」のもとで、コードベース全体の単純性 + 将来の HW 非同期化への素直さで C が他案を上回る:
+
+1. **`VideoEncoderInner` enum の dispatch が `encode()` だけに集約**: `next_encoded_frame()` 系の dispatch (`src/encoder.rs:862-872`) が消える
+2. **inner 構造が 1 系統に揃う**: 同期 inner も非同期 inner も「Sender push 型」に統一。「inner ごとに違うパターン」を読み解く認知負荷が消える
+3. **上位 aggregation コードが消える**: `drain_encoded_frames` + `push_encoded_frame_with_metrics` 相当の集約処理が `run()` の Receiver 1 ループに集約される
+4. **テストパターン統一**: 全 inner テストが「`tokio::sync::mpsc::channel(N)` を作って Sender 渡して Receiver で受ける」1 パターンに集約
+5. **callback friendly 定義 (ホップ数上限 1) を真に満たす**: 案 A は途中段階で、C はその徹底版
+
+#### 採用基準 (定量しきい値) の判定スキップ
+
+§2 の計測 ((i)/(ii)) は本 issue ではスキップする。理由:
+
+- 本判断は「将来の HW 非同期化への素直さ」「コードベース全体の単純性」という **設計品質に基づく定性判断** であり、定量しきい値で決めるべき性質ではない
+- flush 撤廃自体は採用案 C で技術的に達成可能 (bounded `tokio::sync::mpsc::channel` でバックプレッシャを発生させ、`NvcodecEncoder` の callback ハンドラ内で `tx.blocking_send` / `tx.try_send` 経路で出力 → `flush()` 強制を撤廃できる)
+- 実機性能計測は後続実装 issue (c) で `NvcodecEncoder` の flush 撤廃時に実施し、想定通り並列性が回復しているかを確認する
+
+#### 棄却された案
+
+| 案 | 棄却理由 | 再考トリガー |
+|----|----------|---------------|
+| A | C の中間段階。同期 inner で `output_queue + next_encoded_frame()` の旧構造が残り「2 系統」が解消されないため、コードベース全体の単純性で C に劣る | 同期 inner (`LibvpxEncoder` 等) で `Sender::send().await` 経路が想定以上に重い / 借用境界が解けないことが (a) 実装段階で判明した場合、A に後退する |
+| B | `shiguredo-rust` 規約「トレイトを作らない」の必要条件 (評価軸 9) NG。許可取得しても push/pull 2 系統の維持コストが残る | 規約が緩和され、かつ push/pull 両系統を併存させたい外部互換要求が出た場合 |
+| D-1 | nvcodec のみで完結する局所修正で、今後の HW 非同期化トレンドに対する将来コストが残る | nvcodec の修正だけで急いで済ませたい運用要求が単発で出た場合 |
+| D-2 | inner レベルの構造が古いまま (`next_encoded_frame()` を残す)、callback friendly 定義 (ホップ 1) を満たさない。`handle_input_sample` の async 化で RPC 並行性ロスの懸念 | C 採用後に (a) の実装が困難と判明し、上位だけ async 化する妥協案として落ち場が必要な場合 |
+| D-3 | D-1 + D-2 併用でバックプレッシャ責務が二重化、保守コスト増 | D-2 単独 (or C 単独) で塞ぎきれない GPU パイプライン上限要因が後続計測で判明した場合 |
+
+#### 実装前提 (採用案 C)
+
+- **Sender 型**: `tokio::sync::mpsc::Sender<crate::Result<VideoFrame>>` (bounded、初期容量 N=8 を推奨、計測 / 実装段階で調整可)
+- **バックプレッシャ戦略**: bounded 容量 N で `tx.send(...).await` (溢れたら待つ)。非同期 inner の callback 内では `tx.blocking_send(...)` (callback が tokio runtime 外なら) または `tx.try_send(...)` + 容量超過時の上位ペーシング待ち。同期 inner は `encode()` を `async fn` 化して `tx.send(...).await` を直接呼ぶ
+- **エラー伝搬経路**: `Result<VideoFrame, crate::Error>` を Sender に流す形に統一。`error_slot: Arc<Mutex<Option<Error>>>` (`src/encoder/nvcodec.rs` / `src/decoder/nvcodec.rs`) は廃止し、callback 内 `Err` は即時に `tx.send(Err(_))` で通知する
+- **RPC (keyframe 要求) との両立 + 順序保証**: 現状の「RPC 受信 → `keyframe_request_pending = true` → 次の input フレーム到着時に inner に伝える」(`src/encoder.rs:694-699`) 経路を維持。inner が async 化しても受け方は不変
+- **メトリクス計上責務の配置**: `run()` 内の Receiver 受信ループに集約。現状 `push_encoded_frame_with_metrics` (`src/encoder.rs:724-732`) で行っている `total_output_video_frame_count_metric.inc()` / keyframe 判定 / sample_entry 不変条件 (closed/0027) は Receiver 受信側に移植
+- **既存 `drain_*_output` ヘルパの扱い**: `drain_video_encoder_output` (`src/encoder.rs:745-764`) と `drain_encoded_frames` は廃止。`run()` の `tokio::select!` の腕に `encoded_rx.recv().await` を追加し、受信フレームを直接 `output_tx.send_media()` に渡す
+- **`shiguredo-rust` 規約**: トレイト追加なし (`VideoEncoderInner` enum は維持)、`#[non_exhaustive]` 不使用、規約上の許可取得は不要
+
+#### end-to-end テスト雛形 (モック禁止規約整合の確認)
+
+採用案 C のもとで「nvcodec encoder + recording_video_mixer の end-to-end 相当」のテストは以下の構造で書ける (モック不使用 + 実エンコーダ + tokio channel):
+
+```rust
+#[tokio::test]
+async fn test_nvcodec_encoder_to_receiver_e2e() {
+    let stats = crate::stats::Stats::new();
+    let (tx, mut rx) =
+        tokio::sync::mpsc::channel::<crate::Result<VideoFrame>>(8);
+
+    // 1. C 形式: NvcodecEncoder を Sender を受け取って生成する
+    let mut encoder = NvcodecEncoder::new_h264(&options, tx).expect("encoder");
+
+    // 2. 実フレームを投入 (生成 I420 でも実カメラフレームでも可)
+    let raw_frame = generate_test_raw_video_frame(1920, 1080);
+    encoder.encode(raw_frame).await.expect("encode");
+    encoder.finish().await.expect("finish");
+
+    // 3. Receiver でエンコード結果を受信
+    let frame = rx.recv().await.expect("receive").expect("ok frame");
+
+    // 4. closed/0027 / closed/0054 由来の不変条件を確認
+    assert_eq!(frame.format, VideoFormat::H264);
+    assert!(frame.sample_entry.is_some());
+}
+```
+
+`recording_video_mixer` 連携テストも、`rx` 側を mixer の入力 track に bridge する形で同じ枠で書ける。モック / スタブは不要 (`shiguredo-rust` 規約 OK)。
+
+#### 後続実装 issue の分割粒度案
+
+依存順序: **`a → (b ∥ d) → c → e`**
+
+| ID | タイトル (案) | 影響ファイル | 推定 LOC | 依存先 | 追加 / 改修対象テスト | 後方互換影響 |
+|----|---------------|---------------|----------|---------|------------------------|---------------|
+| (a) | `VideoEncoder` interface を C 形式に変更し `LibvpxEncoder` を追従させる | `src/encoder.rs`, `src/encoder/libvpx.rs`, `src/encoder/test_helpers.rs` | 数百行 | なし | `LibvpxEncoder` 末尾テスト群を Sender 形式に書き換え | 内部 API のみ (library として外部公開していない) |
+| (b) | `Openh264Encoder` / `SvtAv1Encoder` を C 形式に追従させる | `src/encoder/openh264.rs`, `src/encoder/svt_av1.rs`, 各末尾テスト | 数百行 | (a) | 各末尾テスト群を Sender 形式に書き換え | 内部 API のみ |
+| (c) | `NvcodecEncoder` を C 形式に追従させ `flush()` 強制を撤廃し `error_slot` を廃止する。実機 H.264 / H.265 / AV1 で flush 撤廃の wall-clock 計測を実施 | `src/encoder/nvcodec.rs`, `src/encoder.rs` (関連箇所) | 数百行 | (a) | nvcodec encoder の end-to-end テストと flush 撤廃前後の計測ログを `[ADD]` の補足として追記 | 内部 API のみ。`nvcodec` feature 経由なので default ビルドへの影響なし |
+| (d) | `VideoToolboxEncoder` を C 形式に追従させる | `src/encoder/video_toolbox.rs`, 末尾テスト | 数百行 | (a) | 末尾テスト群を Sender 形式に書き換え | 内部 API のみ (macOS target のみ) |
+| (e) | `VideoDecoder` 系を C 形式に追従させる (Libvpx/Openh264/Dav1d/VideoToolbox/Nvcodec、`VideoDecoder` 内部の `decoded` / `poll_output` 廃止) | `src/decoder.rs`, `src/decoder/*.rs` | 千行超 | (a)〜(d) (encoder 側の知見をフィードバック) | encoder と同様の対称構造に揃える | 内部 API のみ |
+
+備考:
+
+- Audio 系 (AudioEncoder / AudioDecoder) は本 issue スコープ外なので分割例に含めない (再設計動機が成立しないため現状維持)
+- (a) を最初に置く理由: ここで C 形式の interface が成立可能かを実装可否検証する。困難なら案 A への後退を判断する弾力性ポイント
+- (b) と (d) は (a) 完了後に並列実施可能 (b は同期エンコーダー、d は VideoToolbox の非同期エンコーダーで独立)
+- (c) は (a) のインターフェース確定後に着手。flush 撤廃と `error_slot` 廃止を一括で行う
+- (e) は encoder 側の知見が出揃ってから decoder へフィードバック
 
 ## CHANGES.md について
 
