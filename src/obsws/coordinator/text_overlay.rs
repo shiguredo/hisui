@@ -109,35 +109,20 @@ impl ObswsCoordinator {
             },
             Ok(None) => DEFAULT_FONT_COLOR_ARGB,
             Err(e) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e,
-                );
+                return self.build_invalid_field_error_result(request_type, request_id, &e);
             }
         };
         let font_name = match parse_optional_string(request_data, "fontName") {
             Ok(Some(s)) => s,
             Ok(None) => default_font_name,
             Err(e) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e,
-                );
+                return self.build_invalid_field_error_result(request_type, request_id, &e);
             }
         };
         let z = match parse_optional_z(request_data) {
             Ok(z) => z,
             Err(e) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e,
-                );
+                return self.build_invalid_field_error_result(request_type, request_id, &e);
             }
         };
 
@@ -212,47 +197,33 @@ impl ObswsCoordinator {
             },
             Ok(None) => None,
             Err(e) => {
-                return self.build_error_result(
-                    request_type,
-                    request_id,
-                    REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                    &e,
-                );
+                return self.build_invalid_field_error_result(request_type, request_id, &e);
             }
         };
 
-        // null / 型不一致は即 INVALID_REQUEST_FIELD で返すクロージャ。
-        let invalid = |e: String| -> CommandResult {
-            self.build_error_result(
-                request_type,
-                request_id,
-                REQUEST_STATUS_INVALID_REQUEST_FIELD,
-                &e,
-            )
-        };
         let text = match parse_optional_string(request_data, "text") {
             Ok(v) => v,
-            Err(e) => return invalid(e),
+            Err(e) => return self.build_invalid_field_error_result(request_type, request_id, &e),
         };
         let x = match parse_optional_i64(request_data, "x") {
             Ok(v) => v,
-            Err(e) => return invalid(e),
+            Err(e) => return self.build_invalid_field_error_result(request_type, request_id, &e),
         };
         let y = match parse_optional_i64(request_data, "y") {
             Ok(v) => v,
-            Err(e) => return invalid(e),
+            Err(e) => return self.build_invalid_field_error_result(request_type, request_id, &e),
         };
         let font_size = match parse_optional_u32(request_data, "fontSize") {
             Ok(v) => v,
-            Err(e) => return invalid(e),
+            Err(e) => return self.build_invalid_field_error_result(request_type, request_id, &e),
         };
         let font_name = match parse_optional_string(request_data, "fontName") {
             Ok(v) => v,
-            Err(e) => return invalid(e),
+            Err(e) => return self.build_invalid_field_error_result(request_type, request_id, &e),
         };
         let z = match parse_optional_z(request_data) {
             Ok(v) => v,
-            Err(e) => return invalid(e),
+            Err(e) => return self.build_invalid_field_error_result(request_type, request_id, &e),
         };
         let patch = TextOverlayPatch {
             text,

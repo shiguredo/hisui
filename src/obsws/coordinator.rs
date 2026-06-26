@@ -983,6 +983,22 @@ impl ObswsCoordinator {
         self.build_error_result(request_type, request_id, status_code, &status_comment)
     }
 
+    /// `parse_optional_*` の Err 等で取得した汎用メッセージを `INVALID_REQUEST_FIELD` で返す薄いラッパー。
+    /// オプションフィールドの型違反 / null を扱う各ハンドラから呼び出して呼び出し側を 1 行化する。
+    fn build_invalid_field_error_result(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        message: &str,
+    ) -> CommandResult {
+        self.build_error_result(
+            request_type,
+            request_id,
+            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            message,
+        )
+    }
+
     /// output 設定変更リクエスト成功後に state の設定を outputs BTreeMap に同期する。
     /// Phase 6 で SetOutputSettings を coordinator 経由に移行するまでの暫定措置。
     /// outputs BTreeMap から GetOutputStatus レスポンスを構築する。
