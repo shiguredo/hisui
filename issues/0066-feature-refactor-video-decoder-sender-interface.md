@@ -124,7 +124,7 @@ pub async fn run(
     } = self;
 
     // 出力 task → 入力 task への shutdown 伝達 (下流 close 検知時)
-    let cancel = tokio_util::sync::CancellationToken::new();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let input_handle = tokio::spawn(run_input(
         inner,
@@ -133,13 +133,13 @@ pub async fn run(
         total_input_video_frame_count_metric,
         engine_metric,
         codec_metric,
-        cancel.clone(),
+        shutdown_rx,
     ));
     let output_handle = tokio::spawn(run_output(
         output_tx,
         decoded_rx,
         total_output_video_frame_count_metric,
-        cancel,
+        shutdown_tx,
     ));
 
     // 両 task の結果を回収する。JoinError は crate::Error に変換する
@@ -152,7 +152,7 @@ pub async fn run(
 }
 ```
 
-依存追加: `tokio_util` workspace 依存を追加する (本 issue 内で `Cargo.toml` 編集対象に含める)。`tokio::sync::oneshot` での代替も可能だが、`CancellationToken` の方が複数所有者で共有しやすく実装が素直なため採用。
+依存追加なし: 既存の `tokio::sync::oneshot::channel` で 1 対 1 の shutdown 伝達を実現する (`tokio_util::sync::CancellationToken` は複数所有可能で高機能だが、本 issue の用途は出力 task → 入力 task の 1 対 1 通知のみで oneshot で十分)。
 
 ### EOS / エラー終了の経路
 
@@ -167,8 +167,8 @@ pub async fn run(
 
 **ケース B: 下流 close (出力 task 側で検知)**
 1. 出力 task の `output_tx.send_media()` が `false` を返す (pipeline closed)
-2. 出力 task は `cancel.cancel()` で入力 task に shutdown 伝達 → `return Err(crate::Error::new("pipeline closed before decoder finished"))` で fail-fast
-3. 入力 task は `cancel.cancelled()` を `tokio::select!` で監視しており、cancel 検知で抜ける
+2. 出力 task は `let _ = shutdown_tx.send(());` (送信先 drop でも代用可) で入力 task に shutdown 伝達 → `return Err(crate::Error::new("pipeline closed before decoder finished"))` で fail-fast
+3. 入力 task は `&mut shutdown_rx` を `tokio::select!` の腕に追加して監視しており、shutdown 受信 (or 送信側 drop) で抜ける
 4. 出力 task はこのケースでは `send_eos` を呼ばない (下流が既に閉じているため)
 
 **ケース C: inner エラー (入力 task 側で発生)**
@@ -257,7 +257,6 @@ mp4 reader は subscribe_track 経路ではなく自前で decoder に push す�
   - (b) `Openh264Decoder` で keyframe 入力時に `finish()` 経由の旧 frame と新 keyframe 由来 frame が両方 Sender に送信され、順序が保たれること
   - (c) `VideoToolboxDecoder` で再初期化条件下 (SPS/PPS 変化など) で Sender 送信完了 → 再初期化 → 次フレーム送信の順序が保たれること
 - 既存 `src/decoder.rs:720-821` のエンジン選択テストは inner variant pattern match を `#[tokio::test]` + Sender 形式で維持
-- `Cargo.toml` に `tokio_util` workspace 依存が追加されている
 - `cargo fmt --all --check`
 - `cargo check --workspace`
 - `cargo check --workspace --no-default-features`
@@ -284,7 +283,7 @@ mp4 reader は subscribe_track 経路ではなく自前で decoder に push す�
 
 ### 3. VideoDecoder::run() の 2 task 分離構造
 
-設計方針 §「`run()` ループの構造」に従う。`run(self, input_rx, output_tx, decoded_rx)` 内で 2 sub-task (`run_input` / `run_output`) を `tokio::spawn` して `tokio::join!` で待ち合わせる。`tokio_util::sync::CancellationToken` で出力 task → 入力 task の shutdown 伝達を行う。EOS / エラー終了は §「EOS / エラー終了の経路」のケース A/B/C に従う。
+設計方針 §「`run()` ループの構造」に従う。`run(self, input_rx, output_tx, decoded_rx)` 内で 2 sub-task (`run_input` / `run_output`) を `tokio::spawn` して `tokio::join!` で待ち合わせる。`tokio::sync::oneshot::channel` で出力 task → 入力 task の shutdown 伝達を行う (依存追加なし)。EOS / エラー終了は §「EOS / エラー終了の経路」のケース A/B/C に従う。
 
 ### 4. drain_video_decoder_output / discard_*_output 廃止と外部利用箇所の書き換え
 
