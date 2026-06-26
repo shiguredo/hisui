@@ -91,6 +91,164 @@ pub fn create_mp4a_sample_entry(
     }))
 }
 
+/// MPEG4-GENERIC mode AAC RTP の 1 AU 取り出し時間 (= 1024 サンプル単位、ISO/IEC 14496-3)。
+const AAC_AU_SAMPLES: u64 = 1024;
+
+/// MPEG4-GENERIC AAC RTP の AU header と AU データを取り出すデパケッタイザー。
+///
+/// RFC 3640 §3.3.6 で規定される `sizeLength` / `indexLength` / `indexDeltaLength` の
+/// fmtp パラメータを受けて、RTP payload から複数の AU を取り出す。
+///
+/// 現実装は AU-Index / AU-Index-delta を読み捨て、各 AU の RTP タイムスタンプを packet
+/// header の timestamp と Vec 内位置から計算する。RFC 3640 §3.2.1 の interleaving モード
+/// (publisher が AU を並び替えて送信し、受信側が AU-Index で並べ直す経路) は非対応。
+/// Sora 等の典型 publisher は non-interleaved (AU-Index = 0, AU-Index-delta = 0) で
+/// 送信するため実害はない。
+#[derive(Debug)]
+pub struct AacRtpDepacketizer {
+    size_length: u8,
+    index_length: u8,
+    index_delta_length: u8,
+}
+
+/// RTP payload から取り出した 1 AU の情報。
+#[derive(Debug, Clone)]
+pub struct AudioAccessUnit {
+    /// AU 単位で再計算した RTP タイムスタンプ。
+    pub rtp_timestamp: u32,
+    /// AU バイト列 (生 AAC データ)。
+    pub data: Vec<u8>,
+}
+
+impl AacRtpDepacketizer {
+    pub fn new(size_length: u8, index_length: u8, index_delta_length: u8) -> Self {
+        // size_length が 0 だと depacketize 内の AU header ループで consumed_bits が
+        // 進まず無限ループに陥る。本番経路では validate_aac_fmtp_lengths で弾かれるが、
+        // struct の不変条件として debug ビルドで明示的に固定する。
+        debug_assert!(
+            size_length > 0,
+            "AacRtpDepacketizer requires size_length > 0"
+        );
+        Self {
+            size_length,
+            index_length,
+            index_delta_length,
+        }
+    }
+
+    pub fn depacketize(
+        &self,
+        packet: &shiguredo_rtsp::RtpPacket,
+    ) -> crate::Result<Vec<AudioAccessUnit>> {
+        if packet.payload.len() < 2 {
+            return Err(crate::Error::new(
+                "invalid AAC RTP payload: missing AU header length",
+            ));
+        }
+
+        let au_headers_length_bits =
+            u16::from_be_bytes([packet.payload[0], packet.payload[1]]) as usize;
+        if au_headers_length_bits == 0 {
+            return Err(crate::Error::new(
+                "invalid AAC RTP payload: AU header length must be greater than 0",
+            ));
+        }
+        let au_headers_length_bytes = au_headers_length_bits.div_ceil(8);
+        if packet.payload.len() < 2 + au_headers_length_bytes {
+            return Err(crate::Error::new(
+                "invalid AAC RTP payload: AU headers are truncated",
+            ));
+        }
+
+        // 共有 BitReader の Err は AU header 経路と SPS パース経路で同一文言になるため、
+        // ログから経路を識別できるように with_context で AU header 由来を前置する。
+        const AAC_AU_HEADER_CONTEXT: &str = "invalid AAC AU header";
+
+        let au_headers = &packet.payload[2..2 + au_headers_length_bytes];
+        let mut bit_reader = crate::video::bit_reader::BitReader::new(au_headers);
+        let mut au_sizes = Vec::new();
+        let mut first = true;
+        // size_length / index_bits はそれぞれ 32 以下に検査済みで、au_headers_length_bits は
+        // u16 由来の usize 値のため、consumed_bits の overflow は発生しない。
+        //
+        // 現実装は AU-Index / AU-Index-delta を読み捨て、各 AU の RTP タイムスタンプを
+        // packet header の timestamp と Vec 内位置から計算する (後段の data_offset ループ参照)。
+        // RFC 3640 §3.2.1 の interleaving モード (publisher が AU を並び替えて送信し、
+        // 受信側が AU-Index で並べ直す経路) は非対応。Sora 等の典型 publisher は
+        // non-interleaved (AU-Index = 0, AU-Index-delta = 0) で送信するため実害はない。
+        let mut consumed_bits = 0usize;
+        while consumed_bits < au_headers_length_bits {
+            let size = bit_reader
+                .read_u(self.size_length as usize)
+                .map_err(|e| e.with_context(AAC_AU_HEADER_CONTEXT))?
+                as usize;
+            consumed_bits += self.size_length as usize;
+            let index_bits = if first {
+                self.index_length
+            } else {
+                self.index_delta_length
+            };
+            let _ = bit_reader
+                .read_u(index_bits as usize)
+                .map_err(|e| e.with_context(AAC_AU_HEADER_CONTEXT))?;
+            consumed_bits += index_bits as usize;
+            first = false;
+            au_sizes.push(size);
+        }
+
+        let mut data_offset = 2 + au_headers_length_bytes;
+        let mut access_units = Vec::with_capacity(au_sizes.len());
+        for (index, au_size) in au_sizes.into_iter().enumerate() {
+            if data_offset + au_size > packet.payload.len() {
+                return Err(crate::Error::new(
+                    "invalid AAC RTP payload: AU data is truncated",
+                ));
+            }
+
+            let raw_timestamp = packet
+                .header
+                .timestamp
+                .wrapping_add((index as u32).saturating_mul(AAC_AU_SAMPLES as u32));
+            access_units.push(AudioAccessUnit {
+                rtp_timestamp: raw_timestamp,
+                data: packet.payload[data_offset..data_offset + au_size].to_vec(),
+            });
+            data_offset += au_size;
+        }
+
+        Ok(access_units)
+    }
+}
+
+/// RFC 3640 §3.3.6 の `sizeLength` / `indexLength` / `indexDeltaLength` の値域を検査する。
+///
+/// `sizeLength == 0` および `> 32` を Err 化する。32 超を弾く根拠は共有 `BitReader::read_u`
+/// の制約 (n > 32 で Err) で、SDP fmtp 受領時点 (RTSP の `select_audio_track`) と PBT の
+/// 双方から呼ぶ単一情報源。
+pub fn validate_aac_fmtp_lengths(
+    size_length: u8,
+    index_length: u8,
+    index_delta_length: u8,
+) -> crate::Result<()> {
+    if size_length == 0 {
+        return Err(crate::Error::new(
+            "AAC fmtp sizeLength must be greater than 0",
+        ));
+    }
+    if size_length > 32 {
+        return Err(crate::Error::new("AAC fmtp sizeLength must be 32 or less"));
+    }
+    if index_length > 32 {
+        return Err(crate::Error::new("AAC fmtp indexLength must be 32 or less"));
+    }
+    if index_delta_length > 32 {
+        return Err(crate::Error::new(
+            "AAC fmtp indexDeltaLength must be 32 or less",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
