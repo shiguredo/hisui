@@ -65,7 +65,7 @@ impl ObswsCoordinator {
                 return self.build_result_from_response(response, Vec::new());
             }
         };
-        // text は空文字も valid 値として扱う (バイト数 / 行数の上限は validate_text で確認する)。
+        // text は空文字も valid 値として扱う (バイト数 / 行数の上限はミキサー側で検証する)。
         let text = match parse_required_string_field(request_data, "text") {
             Ok(s) => s,
             Err(e) => {
@@ -530,6 +530,8 @@ fn parse_optional_z(request_data: &nojson::RawJsonOwned) -> Result<Option<i32>, 
 mod tests {
     use super::*;
 
+    /// `parse_helpers.rs::tests` にも同名の複製がある (`#[cfg(test)] mod tests` を跨いだ共有手段がないため)。
+    /// シグネチャ変更時は両方を同時に更新すること。
     fn parse_owned_json(text: &str) -> nojson::RawJsonOwned {
         nojson::RawJsonOwned::parse(text).expect("テスト JSON はパース可能であるべき")
     }
