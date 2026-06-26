@@ -18,6 +18,14 @@ use tokio::time::Instant;
 const TS_PACKET_SIZE: usize = 188;
 
 /// SRT Inbound Endpoint
+///
+/// フィールドの不変条件は `Self::new()` で eager 検証される。
+/// フィールドは `pub(crate)` のため crate 外からは `new()` 経由でのみ組み立てられる。
+///
+/// 以下の検証は遅延 (`run()` 内):
+/// - URL 構文妥当性 (`parse_srt_url`)
+/// - `keyLength requires passphrase` (`endpoint_config()`)
+/// - `tsbpd_delay_ms <= u16::MAX` (`tsbpd_delay_duration_to_millis`)
 pub struct SrtInboundEndpoint {
     pub(crate) input_url: String,
     pub(crate) output_audio_track_id: Option<crate::TrackId>,

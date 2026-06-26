@@ -29,6 +29,13 @@ const RECONNECT_DELAY_INITIAL: Duration = Duration::from_millis(500);
 const RECONNECT_DELAY_MAX: Duration = Duration::from_secs(5);
 const DEFAULT_RTSP_PORT: u16 = 554;
 
+/// RTSP Subscriber
+///
+/// フィールドの不変条件は `Self::new()` で eager 検証される。
+/// フィールドは `pub(crate)` のため crate 外からは `new()` 経由でのみ組み立てられる。
+///
+/// 以下の検証は遅延 (`run()` 内):
+/// - URL 構文妥当性 (`parse_rtsp_input_url`)
 #[derive(Debug, Clone)]
 pub struct RtspSubscriber {
     pub(crate) input_url: String,

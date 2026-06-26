@@ -30,6 +30,13 @@ impl Default for RtmpPublisherOptions {
     }
 }
 
+/// RTMP Publisher
+///
+/// フィールドの不変条件は `Self::new()` で eager 検証される。
+/// フィールドは `pub(crate)` のため crate 外からは `new()` 経由でのみ組み立てられる。
+///
+/// 以下の検証は遅延 (`run()` 内):
+/// - URL 構文妥当性 (`parse_rtmp_url`)
 #[derive(Debug, Clone)]
 pub struct RtmpPublisher {
     pub(crate) output_url: String,
