@@ -75,7 +75,6 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 | `DashWriter` / `HlsWriter` (fMP4 経路) | muxer (`MissingSampleEntry` / `MixedSampleEntries`) | `tracing::warn!` で握り潰し、該当フレームをスキップ |
 | `HlsWriter` (MpegTs 経路) | ヘルパ (`convert_length_prefixed_to_annexb` / `extract_aac_config`) | `tracing::warn!` で握り潰し、該当フレームをスキップ |
 
-`HlsWriter` (MpegTs 経路) のみ Err 発生箇所が muxer ではなくヘルパなのは、MpegTs 経路が `Fmp4SegmentMuxer` を経由せず `mpeg2ts::ts::TsPacketWriter` を直接使うため、不変条件違反の第一線がヘルパ関数になることによる。
 退行検知は各入力経路（リーダー / エンコーダ）の単体テストおよび e2e テストで担保する。
 
 なお、`input_*_track_id == None`（track 無効化中）に受信した違反フレームを観測する手段も writer 側には持たない。以前は警告ログとカウンタで観測連続性を保っていたが、責任の所在を入力側に集約する方針として意図的に放棄した。track 無効化中も含めて違反は入力側で発生しない前提で運用する。

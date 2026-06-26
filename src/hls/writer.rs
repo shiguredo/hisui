@@ -1151,9 +1151,7 @@ fn convert_length_prefixed_to_annexb(
     sample_entry: Option<&shiguredo_mp4::boxes::SampleEntry>,
     keyframe: bool,
 ) -> crate::Result<Vec<u8>> {
-    // sample_entry が `Avc1` 以外（`None` 含む）の場合は fail-safe に Err を返す。
-    // 入力側不変条件 (`docs/internals/sample_entry_invariant.md`) のもとでは到達しない経路だが、
-    // 違反フレームが流入したときに不正な ADTS / AnnexB を静かに出力するのを防ぐ。
+    // 不正な AnnexB を静かに出力するのを防ぐため、`Avc1` 以外は fail-safe に Err を返す。
     let Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) = sample_entry else {
         return Err(crate::Error::new(format!(
             "HLS MpegTs video: convert_length_prefixed_to_annexb expected Avc1 sample_entry, but got {}",
@@ -1261,9 +1259,8 @@ fn wrap_raw_aac_in_adts(
 fn extract_aac_config(
     sample_entry: Option<&shiguredo_mp4::boxes::SampleEntry>,
 ) -> crate::Result<(u8, u8, u8)> {
-    // sample_entry が `Mp4a` 以外、または `Mp4a` でも `dec_specific_info` 欠落 /
-    // `audio_specific_config` 2 バイト未満の場合は fail-safe に Err を返す。
-    // ADTS ヘッダの周波数 / チャンネル数が実データと一致しないまま出力される「静かな破壊」を防ぐ。
+    // ADTS ヘッダの周波数 / チャンネル数が実データと一致しないまま出力される「静かな破壊」を防ぐため、
+    // `Mp4a` 以外と `Mp4a` 内部状態異常はいずれも Err にする。
     let Some(shiguredo_mp4::boxes::SampleEntry::Mp4a(mp4a)) = sample_entry else {
         return Err(crate::Error::new(format!(
             "HLS MpegTs audio: extract_aac_config expected Mp4a sample_entry, but got {}",
@@ -1297,10 +1294,6 @@ fn extract_aac_config(
 }
 
 /// `SampleEntry` のバリアント名を Err メッセージ用に文字列化する。
-///
-/// `Debug` 出力は内部フィールド全体を含むため運用ログでは使えない。
-/// `shiguredo_mp4` 側で `SampleEntry` にバリアントが追加された場合は
-/// `match` の網羅性チェックでコンパイル時 Err になる。
 fn sample_entry_variant_name(entry: Option<&shiguredo_mp4::boxes::SampleEntry>) -> &'static str {
     use shiguredo_mp4::boxes::SampleEntry;
     match entry {
