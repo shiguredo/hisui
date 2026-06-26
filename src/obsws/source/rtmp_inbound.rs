@@ -23,13 +23,16 @@ pub(super) fn build_record_source_plan(
     let raw_video_track_id = TrackId::new(format!("input:raw_video:{source_key}"));
     let raw_audio_track_id = TrackId::new(format!("input:raw_audio:{source_key}"));
 
-    let endpoint = crate::rtmp::inbound_endpoint::RtmpInboundEndpoint {
-        input_url: input_url.to_owned(),
-        stream_name: settings.stream_name.clone(),
-        output_audio_track_id: Some(raw_audio_track_id.clone()),
-        output_video_track_id: Some(raw_video_track_id.clone()),
-        options: Default::default(),
-    };
+    let endpoint = crate::rtmp::inbound_endpoint::RtmpInboundEndpoint::new(
+        input_url.to_owned(),
+        settings.stream_name.clone(),
+        Some(raw_audio_track_id.clone()),
+        Some(raw_video_track_id.clone()),
+        Default::default(),
+    )
+    .map_err(|e| {
+        BuildObswsRecordSourcePlanError::InvalidInput(format!("invalid rtmp_inbound config: {e}"))
+    })?;
 
     Ok(ObswsRecordSourcePlan {
         source_processor_ids: vec![source_processor_id.clone()],

@@ -23,11 +23,16 @@ pub(super) fn build_record_source_plan(
     let raw_video_track_id = TrackId::new(format!("input:raw_video:{source_key}"));
     let raw_audio_track_id = TrackId::new(format!("input:raw_audio:{source_key}"));
 
-    let subscriber = crate::rtsp::subscriber::RtspSubscriber {
-        input_url: input_url.to_owned(),
-        output_video_track_id: Some(raw_video_track_id.clone()),
-        output_audio_track_id: Some(raw_audio_track_id.clone()),
-    };
+    let subscriber = crate::rtsp::subscriber::RtspSubscriber::new(
+        input_url.to_owned(),
+        Some(raw_audio_track_id.clone()),
+        Some(raw_video_track_id.clone()),
+    )
+    .map_err(|e| {
+        BuildObswsRecordSourcePlanError::InvalidInput(format!(
+            "invalid rtsp_subscriber config: {e}"
+        ))
+    })?;
 
     Ok(ObswsRecordSourcePlan {
         source_processor_ids: vec![source_processor_id.clone()],

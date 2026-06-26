@@ -380,13 +380,14 @@ async fn start_stream_processors(
     )
     .await?;
     // RTMP パブリッシャーを起動する
-    let publisher = crate::rtmp::publisher::RtmpPublisher {
-        output_url: output_url.to_owned(),
-        stream_name: stream_key.map(|s| s.to_owned()),
-        input_audio_track_id: Some(run.audio.encoded_track_id.clone()),
-        input_video_track_id: Some(run.video.encoded_track_id.clone()),
-        options: Default::default(),
-    };
+    let publisher = crate::rtmp::publisher::RtmpPublisher::new(
+        output_url.to_owned(),
+        stream_key.map(|s| s.to_owned()),
+        Some(run.audio.encoded_track_id.clone()),
+        Some(run.video.encoded_track_id.clone()),
+        Default::default(),
+    )
+    .map_err(|e| crate::Error::new(format!("invalid rtmp_publisher config: {e}")))?;
     crate::rtmp::publisher::create_processor(
         pipeline_handle,
         publisher,

@@ -279,13 +279,14 @@ async fn start_rtmp_outbound_processors(
         frame_rate,
     )
     .await?;
-    let endpoint = crate::rtmp::outbound_endpoint::RtmpOutboundEndpoint {
-        output_url: output_url.to_owned(),
-        stream_name: stream_name.map(|s| s.to_owned()),
-        input_audio_track_id: Some(run.audio.encoded_track_id.clone()),
-        input_video_track_id: Some(run.video.encoded_track_id.clone()),
-        options: Default::default(),
-    };
+    let endpoint = crate::rtmp::outbound_endpoint::RtmpOutboundEndpoint::new(
+        output_url.to_owned(),
+        stream_name.map(|s| s.to_owned()),
+        Some(run.audio.encoded_track_id.clone()),
+        Some(run.video.encoded_track_id.clone()),
+        Default::default(),
+    )
+    .map_err(|e| crate::Error::new(format!("invalid rtmp_outbound_endpoint config: {e}")))?;
     crate::rtmp::outbound_endpoint::create_processor(
         pipeline_handle,
         endpoint,
