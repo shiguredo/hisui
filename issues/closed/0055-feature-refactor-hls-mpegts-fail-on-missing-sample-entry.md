@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-23
-- Completed:
+- Completed: 2026-06-26
 - Model: Opus 4.7
 - Branch: feature/refactor-hls-mpegts-fail-on-missing-sample-entry
 - Polished: 2026-06-26
@@ -196,3 +196,46 @@ track 無効化中も含めて違反は入力側で発生しない前提で運�
 - `docs/internals/sample_entry_invariant.md`
 
 ## 解決方法
+
+### ヘルパ関数の Err 化
+
+- `src/hls/writer.rs::convert_length_prefixed_to_annexb` の関数冒頭で `let-else` パターンを使い `&Avc1Box` を取り出し、`Avc1` 以外（`None` 含む）の場合は `HLS MpegTs video: convert_length_prefixed_to_annexb expected Avc1 sample_entry, but got {variant_name}` の Err を返す形にした。これに伴い `length_size` の `_ => 4` フォールバック分岐と `Some(Avc1)` 分解の二重チェック（`if keyframe && let Some(Avc1) = sample_entry { ... }`）の死コードを除去した。
+- `src/hls/writer.rs::extract_aac_config` を 3 経路（`sample_entry` が `None` か `Mp4a` 以外 / `Mp4a` だが `dec_specific_info` 欠落 / `audio_specific_config` が 2 バイト未満）すべてで Err 化した。`expected X, but got Y` のコンマ区切り形式に揃え、内部状態違反は `expected dec_specific_info to be Some, but got None` / `expected audio_specific_config to be at least 2 bytes, but got {len} bytes` の形にした。
+- `src/hls/writer.rs::wrap_raw_aac_in_adts` は変更不要。内部の `extract_aac_config(sample_entry)?` の `?` 伝播で `handle_audio_frame` まで透過的に届く。
+- `HLS ... error: ...` の `tracing::warn!` で握り潰される運用は変えていないため、違反フレームスキップが連続した場合は該当区間で映像コマ抜け / 音声無音が発生し得るが、不正出力（ファイル再生失敗）は起きない。
+
+### SampleEntry バリアント名取り出しヘルパの追加
+
+- Err メッセージで `Avc1` 等のバリアント名を文字列化するため、`src/hls/writer.rs` 内に `fn sample_entry_variant_name(entry: Option<&shiguredo_mp4::boxes::SampleEntry>) -> &'static str` を追加した。`Debug` 出力は内部フィールド全体を含むため運用ログでは使えない。`shiguredo_mp4` 側で `SampleEntry` にバリアントが追加された場合は `match` の網羅性チェックでコンパイル時 Err になる。
+- 現状の利用者は `convert_length_prefixed_to_annexb` / `extract_aac_config` の 2 箇所のみで他 writer に呼び手は無いため、`src/sample_entry.rs` や `src/codec_string.rs` への汎用化は行わず writer 内に局所化した。将来複数 writer で類似の文字列化が必要になった時点で `shiguredo_mp4::SampleEntry::name()` の上流提案 / hisui 内集約を検討する余地として残す。
+
+### テスト追加
+
+- `src/hls/writer.rs` に `mod tests` を新設し以下を追加した。
+  - `convert_length_prefixed_to_annexb_returns_err_on_non_avc1_sample_entry`: `None` / `Mp4a` で keyframe true / false いずれでも Err
+  - `convert_length_prefixed_to_annexb_succeeds_on_avc1_keyframe`: IDR slice NAL ヘッダ（`0x65`）で `start_code + SPS + start_code + PPS + start_code + NAL` の順序を `assert_eq!` で完全一致確認
+  - `convert_length_prefixed_to_annexb_succeeds_on_avc1_non_keyframe`: non-IDR slice NAL ヘッダ（`0x41`）で SPS/PPS 非注入を完全一致確認
+  - `extract_aac_config_returns_err_on_non_mp4a_sample_entry`: `None` / `Avc1` / `Opus` で Err
+  - `extract_aac_config_returns_err_on_missing_dec_specific_info` / `_on_short_audio_specific_config`: `Mp4a` 内部状態異常 2 ケースで Err
+  - `extract_aac_config_succeeds_on_mp4a_aac_lc_44k_mono`: ASC `[0x12, 0x08]` で `(2, 4, 1)` を assert
+  - `extract_aac_config_succeeds_on_mp4a_aac_lc_32k_mono_with_byte_crossing_freq_index`: ASC `[0x12, 0x88]` で `(2, 5, 1)` を assert し、`sampling_frequency_index = ((asc[0] & 0x07) << 1) | (asc[1] >> 7)` のバイトまたぎ結合を担保
+- テストヘルパは `build_test_mp4a_box(asc: &[u8]) -> Mp4aBox` を共通化して、正常系 / `dec_specific_info: None` / `asc.len() == 1` の 3 構成パターンで `let-else + unreachable!` 重複を解消した。
+- 既存テスト用に `crate::video::h264::tests::{SPS_320X240, PPS_NAL}` を使い、Avc1 SampleEntry は `h264_sample_entry_from_sps_pps_lists` で構築する形に揃えた（`src/rtmp/frame.rs` / `src/decoder/openh264.rs` / `src/rtsp/subscriber.rs` / `src/srt/inbound_endpoint.rs` と同じ集約参照パターン）。
+- `wrap_raw_aac_in_adts` の Err 伝播テストと `sample_entry_variant_name` 自体の単体テストは追加しなかった。前者は `extract_aac_config_returns_err_on_*` で `?` 伝播がコンパイル時保証され、後者は `match` の網羅性で担保される。後者は全 10 バリアント網羅で取り違え検知能力を上げる余地があるが、`Hev1` / `Vp08` / `Vp09` / `Av01` / `Flac` / `Unknown` の構築コストが他より高く、本 issue では見送った。
+
+### docs/internals/sample_entry_invariant.md の整合性整理
+
+- 「writer 側の前提」節（67-73 行）の「muxer が最初のサンプルで `MissingSampleEntry` Err を返してパイプライン fail-fast 停止」記述は `Mp4Writer` / `HybridMp4Writer` にしか合致しないため、4 writer / 3 経路グループの Err 発生箇所と上位 `run` での扱いをテーブル形式で書き直した。
+- 表前後の散文（「writer 入口は補完値や違反検知ロジックを持たず」「退行検知は …」「`input_*_track_id == None` の…」）は既存記述をそのまま残し、節タイトル `## writer 側の前提` も維持して後続 `## 新規入力経路追加時のチェックリスト` との階層関係を保った。
+
+### CHANGES.md
+
+`## develop` への記載は行わなかった。本 issue で改修した `convert_length_prefixed_to_annexb` / `extract_aac_config` は HLS MpegTs 経路として `## develop` の `[ADD] obsws の Output に HLS ライブ出力` で未リリース機能として導入されたもので、`shiguredo-changelog` の「派生元ブランチとの最終的な差分のみを記載すること」「開発ブランチ内の中間状態の修正は記載しないこと」に従った（最終 diff として現れない）。closed/0051 / closed/0054 の判定と同じ理屈。
+
+### スコープ外として後続に委ねた項目
+
+- `convert_length_prefixed_to_annexb` の `length_size = 1 / 2 / 3` 正常経路と既存 Err 経路（`unsupported NALU length size` / `NALU length exceeds remaining data`）の単体テスト不在。本 issue の趣旨「sample_entry None 時の Err 化」と直交するため、別 issue でテストカバレッジ補強を扱う候補。
+- `sample_entry_variant_name` の全 10 バリアント網羅テスト（バリアント名文字列リテラルの取り違え検知）。実装難易度がやや高く、本 issue では見送った。
+- `wrap_raw_aac_in_adts` で `audio_object_type > 4`（AAC-HE / AAC-LD 等）のときに `profile << 6` が u8 でラップして誤 ADTS profile を出力する経路。本 issue 趣旨「静かな破壊を防ぐ」と同じ性質の追加 fail-safety で、別 issue 起票候補。
+- `extract_aac_config` / `convert_length_prefixed_to_annexb` のラウンドトリップ PBT。
+- `src/hls/writer.rs` の `src/hls/mpegts.rs` 分離（1700 行超でモジュール分割の余地）。

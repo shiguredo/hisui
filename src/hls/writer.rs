@@ -1151,12 +1151,14 @@ fn convert_length_prefixed_to_annexb(
     sample_entry: Option<&shiguredo_mp4::boxes::SampleEntry>,
     keyframe: bool,
 ) -> crate::Result<Vec<u8>> {
-    let length_size = match sample_entry {
-        Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) => {
-            avc1.avcc_box.length_size_minus_one.get() as usize + 1
-        }
-        _ => 4, // デフォルトは 4 バイト
+    // 不正な AnnexB を静かに出力するのを防ぐため、`Avc1` 以外は fail-safe に Err を返す。
+    let Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) = sample_entry else {
+        return Err(crate::Error::new(format!(
+            "HLS MpegTs video: convert_length_prefixed_to_annexb expected Avc1 sample_entry, but got {}",
+            sample_entry_variant_name(sample_entry)
+        )));
     };
+    let length_size = avc1.avcc_box.length_size_minus_one.get() as usize + 1;
 
     let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
     let mut result = Vec::with_capacity(data.len());
@@ -1164,7 +1166,7 @@ fn convert_length_prefixed_to_annexb(
     // キーフレームの場合は SPS/PPS を先頭に注入する。
     // エンコーダーは SPS/PPS を sample_entry にのみ格納し、フレーム本体には含めない場合がある。
     // MPEG-TS ではセグメント先頭のキーフレームに SPS/PPS が必要。
-    if keyframe && let Some(shiguredo_mp4::boxes::SampleEntry::Avc1(avc1)) = sample_entry {
+    if keyframe {
         for sps in &avc1.avcc_box.sps_list {
             result.extend_from_slice(start_code);
             result.extend_from_slice(sps);
@@ -1257,18 +1259,27 @@ fn wrap_raw_aac_in_adts(
 fn extract_aac_config(
     sample_entry: Option<&shiguredo_mp4::boxes::SampleEntry>,
 ) -> crate::Result<(u8, u8, u8)> {
+    // ADTS ヘッダの周波数 / チャンネル数が実データと一致しないまま出力される「静かな破壊」を防ぐため、
+    // `Mp4a` 以外と `Mp4a` 内部状態異常はいずれも Err にする。
     let Some(shiguredo_mp4::boxes::SampleEntry::Mp4a(mp4a)) = sample_entry else {
-        // SampleEntry が無い場合のフォールバック: AAC-LC, 48kHz, stereo
-        return Ok((2, 3, 2));
+        return Err(crate::Error::new(format!(
+            "HLS MpegTs audio: extract_aac_config expected Mp4a sample_entry, but got {}",
+            sample_entry_variant_name(sample_entry)
+        )));
     };
 
     let Some(ref dec_specific_info) = mp4a.esds_box.es.dec_config_descr.dec_specific_info else {
-        return Ok((2, 3, 2));
+        return Err(crate::Error::new(
+            "HLS MpegTs audio: extract_aac_config expected dec_specific_info to be Some, but got None".to_string(),
+        ));
     };
 
     let asc = &dec_specific_info.payload;
     if asc.len() < 2 {
-        return Ok((2, 3, 2));
+        return Err(crate::Error::new(format!(
+            "HLS MpegTs audio: extract_aac_config expected audio_specific_config to be at least 2 bytes, but got {} bytes",
+            asc.len()
+        )));
     }
 
     let audio_object_type = (asc[0] >> 3) & 0x1F;
@@ -1280,6 +1291,24 @@ fn extract_aac_config(
         sampling_frequency_index,
         channel_configuration,
     ))
+}
+
+/// `SampleEntry` のバリアント名を Err メッセージ用に文字列化する。
+fn sample_entry_variant_name(entry: Option<&shiguredo_mp4::boxes::SampleEntry>) -> &'static str {
+    use shiguredo_mp4::boxes::SampleEntry;
+    match entry {
+        None => "None",
+        Some(SampleEntry::Avc1(_)) => "Avc1",
+        Some(SampleEntry::Hev1(_)) => "Hev1",
+        Some(SampleEntry::Hvc1(_)) => "Hvc1",
+        Some(SampleEntry::Vp08(_)) => "Vp08",
+        Some(SampleEntry::Vp09(_)) => "Vp09",
+        Some(SampleEntry::Av01(_)) => "Av01",
+        Some(SampleEntry::Opus(_)) => "Opus",
+        Some(SampleEntry::Mp4a(_)) => "Mp4a",
+        Some(SampleEntry::Flac(_)) => "Flac",
+        Some(SampleEntry::Unknown(_)) => "Unknown",
+    }
 }
 
 /// HLS writer プロセッサの設定。
@@ -1451,4 +1480,213 @@ pub fn write_master_playlist(
     })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::aac::create_mp4a_sample_entry;
+    use crate::audio::opus::opus_sample_entry;
+    use crate::audio::{Channels, SampleRate};
+    use crate::video::h264::h264_sample_entry_from_sps_pps_lists;
+    use crate::video::h264::tests::{PPS_NAL, SPS_320X240};
+    use shiguredo_mp4::boxes::{Mp4aBox, SampleEntry};
+
+    // AAC-LC 44.1kHz mono 用の AudioSpecificConfig (2 バイト)。
+    // ビット配置: object_type=2 (5 bit) / freq_index=4 (4 bit) / channel_config=1 (4 bit)
+    const ASC_AAC_LC_44K_MONO: &[u8] = &[0x12, 0x08];
+
+    // length-prefixed NAL バイト列の組み立て: 4 バイト big-endian length + NAL 本体
+    fn build_length_prefixed(nal: &[u8]) -> Vec<u8> {
+        let mut data = Vec::with_capacity(4 + nal.len());
+        data.extend_from_slice(&(nal.len() as u32).to_be_bytes());
+        data.extend_from_slice(nal);
+        data
+    }
+
+    fn build_test_avc1_sample_entry() -> SampleEntry {
+        let (entry, _) = h264_sample_entry_from_sps_pps_lists(
+            vec![SPS_320X240.to_vec()],
+            vec![PPS_NAL.to_vec()],
+        )
+        .expect("Avc1 SampleEntry 構築成功");
+        entry
+    }
+
+    // 任意の ASC バイト列で `Mp4aBox` を構築するヘルパ。
+    // SampleRate / Channels は extract_aac_config のビット抽出経路と独立な audio フィールドなので
+    // 全テストで 44.1kHz / mono に固定し、ASC だけ呼び出し側で可変にする。
+    fn build_test_mp4a_box(asc: &[u8]) -> Mp4aBox {
+        let entry = create_mp4a_sample_entry(
+            asc,
+            SampleRate::from_u32(44_100).expect("44.1kHz SampleRate 構築成功"),
+            Channels::MONO,
+        )
+        .expect("Mp4a SampleEntry 構築成功");
+        let SampleEntry::Mp4a(m) = entry else {
+            unreachable!("create_mp4a_sample_entry always returns SampleEntry::Mp4a")
+        };
+        m
+    }
+
+    fn build_test_mp4a_sample_entry() -> SampleEntry {
+        SampleEntry::Mp4a(build_test_mp4a_box(ASC_AAC_LC_44K_MONO))
+    }
+
+    fn build_test_mp4a_without_dec_specific_info() -> SampleEntry {
+        let mut m = build_test_mp4a_box(ASC_AAC_LC_44K_MONO);
+        m.esds_box.es.dec_config_descr.dec_specific_info = None;
+        SampleEntry::Mp4a(m)
+    }
+
+    fn build_test_mp4a_with_short_asc() -> SampleEntry {
+        let mut m = build_test_mp4a_box(ASC_AAC_LC_44K_MONO);
+        if let Some(ref mut dec_specific_info) = m.esds_box.es.dec_config_descr.dec_specific_info {
+            dec_specific_info.payload = vec![0x12];
+        }
+        SampleEntry::Mp4a(m)
+    }
+
+    #[test]
+    fn convert_length_prefixed_to_annexb_returns_err_on_non_avc1_sample_entry() {
+        // Avc1 以外（None / Mp4a クロスドメイン）かつ
+        // keyframe true / false のいずれでも Err が返ることを確認する
+        let mp4a = build_test_mp4a_sample_entry();
+        let cases: &[(Option<&SampleEntry>, &str)] = &[(None, "None"), (Some(&mp4a), "Mp4a")];
+        let data = build_length_prefixed(&[0xaa, 0xbb]);
+        for (entry, expected_variant) in cases {
+            for keyframe in [true, false] {
+                let err = convert_length_prefixed_to_annexb(&data, *entry, keyframe)
+                    .expect_err("non-Avc1 sample_entry では Err が返るはず");
+                let display = err.display().to_string();
+                assert!(
+                    display.contains("HLS MpegTs video"),
+                    "経路接頭辞が含まれていない: {display}"
+                );
+                assert!(
+                    display.contains("expected Avc1 sample_entry"),
+                    "期待バリアントが含まれていない: {display}"
+                );
+                assert!(
+                    display.contains(*expected_variant),
+                    "実バリアント名 {expected_variant} が含まれていない: {display}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn convert_length_prefixed_to_annexb_succeeds_on_avc1_keyframe() {
+        // Avc1 + keyframe=true で Ok。
+        // start_code + SPS + start_code + PPS + start_code + NAL 本体 の順で並ぶことを完全一致で確認する。
+        let entry = build_test_avc1_sample_entry();
+        // IDR slice NAL ヘッダ (forbidden_zero_bit=0 / nal_ref_idc=3 / nal_unit_type=5)
+        let nal: &[u8] = &[0x65, 0xaa, 0xbb, 0xcc, 0xdd];
+        let data = build_length_prefixed(nal);
+        let result = convert_length_prefixed_to_annexb(&data, Some(&entry), true)
+            .expect("Avc1 keyframe では Ok のはず");
+        let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
+        let mut expected = Vec::new();
+        expected.extend_from_slice(start_code);
+        expected.extend_from_slice(&SPS_320X240);
+        expected.extend_from_slice(start_code);
+        expected.extend_from_slice(PPS_NAL);
+        expected.extend_from_slice(start_code);
+        expected.extend_from_slice(nal);
+        assert_eq!(
+            result, expected,
+            "keyframe では start_code + SPS + start_code + PPS + start_code + NAL の順で並ぶ"
+        );
+    }
+
+    #[test]
+    fn convert_length_prefixed_to_annexb_succeeds_on_avc1_non_keyframe() {
+        // Avc1 + keyframe=false で Ok。SPS / PPS は注入されず start_code + NAL 本体のみとなる
+        let entry = build_test_avc1_sample_entry();
+        // non-IDR slice NAL ヘッダ (forbidden_zero_bit=0 / nal_ref_idc=2 / nal_unit_type=1)
+        let nal: &[u8] = &[0x41, 0xaa, 0xbb, 0xcc, 0xdd];
+        let data = build_length_prefixed(nal);
+        let result = convert_length_prefixed_to_annexb(&data, Some(&entry), false)
+            .expect("Avc1 non-keyframe では Ok のはず");
+        let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
+        let mut expected = Vec::new();
+        expected.extend_from_slice(start_code);
+        expected.extend_from_slice(nal);
+        assert_eq!(
+            result, expected,
+            "non-keyframe では start_code + NAL 本体のみが出力される"
+        );
+    }
+
+    #[test]
+    fn extract_aac_config_returns_err_on_non_mp4a_sample_entry() {
+        // Mp4a 以外（None / Avc1 クロスドメイン / Opus 同ドメイン異コーデック）で Err
+        let avc1 = build_test_avc1_sample_entry();
+        let opus = opus_sample_entry(0);
+        let cases: &[(Option<&SampleEntry>, &str)] =
+            &[(None, "None"), (Some(&avc1), "Avc1"), (Some(&opus), "Opus")];
+        for (entry, expected_variant) in cases {
+            let err =
+                extract_aac_config(*entry).expect_err("non-Mp4a sample_entry では Err が返るはず");
+            let display = err.display().to_string();
+            assert!(
+                display.contains("HLS MpegTs audio"),
+                "経路接頭辞が含まれていない: {display}"
+            );
+            assert!(
+                display.contains("expected Mp4a sample_entry"),
+                "期待バリアントが含まれていない: {display}"
+            );
+            assert!(
+                display.contains(*expected_variant),
+                "実バリアント名 {expected_variant} が含まれていない: {display}"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_aac_config_returns_err_on_missing_dec_specific_info() {
+        // Mp4a だが dec_specific_info が None のときは Err
+        let entry = build_test_mp4a_without_dec_specific_info();
+        let err = extract_aac_config(Some(&entry)).expect_err("dec_specific_info None では Err");
+        let display = err.display().to_string();
+        assert!(display.contains("HLS MpegTs audio"));
+        assert!(display.contains("expected dec_specific_info to be Some"));
+    }
+
+    #[test]
+    fn extract_aac_config_returns_err_on_short_audio_specific_config() {
+        // Mp4a だが audio_specific_config が 1 バイトしかない場合は Err
+        let entry = build_test_mp4a_with_short_asc();
+        let err =
+            extract_aac_config(Some(&entry)).expect_err("audio_specific_config 1 バイトでは Err");
+        let display = err.display().to_string();
+        assert!(display.contains("HLS MpegTs audio"));
+        assert!(display.contains("expected audio_specific_config to be at least 2 bytes"));
+    }
+
+    #[test]
+    fn extract_aac_config_succeeds_on_mp4a_aac_lc_44k_mono() {
+        // AAC-LC 44.1kHz mono の正常な Mp4a で (2, 4, 1) を返す。
+        // 各フィールド値を別の数値にすることで bit 位置の取り違えを検出できる
+        let entry = build_test_mp4a_sample_entry();
+        let (audio_object_type, sampling_frequency_index, channel_configuration) =
+            extract_aac_config(Some(&entry)).expect("正常 Mp4a では Ok のはず");
+        assert_eq!(audio_object_type, 2);
+        assert_eq!(sampling_frequency_index, 4);
+        assert_eq!(channel_configuration, 1);
+    }
+
+    #[test]
+    fn extract_aac_config_succeeds_on_mp4a_aac_lc_32k_mono_with_byte_crossing_freq_index() {
+        // sampling_frequency_index はバイトをまたぐビット (`(asc[0] & 0x07) << 1 | (asc[1] >> 7)`) のため、
+        // `asc[1] >> 7` を非ゼロにするケースで結合ロジックの欠陥を検出する。
+        // ASC `[0x12, 0x88]`: audio_object_type=2 / freq_index=5 (32kHz) / channel_configuration=1 (mono)
+        let entry = SampleEntry::Mp4a(build_test_mp4a_box(&[0x12, 0x88]));
+        let (audio_object_type, sampling_frequency_index, channel_configuration) =
+            extract_aac_config(Some(&entry)).expect("正常 Mp4a では Ok のはず");
+        assert_eq!(audio_object_type, 2);
+        assert_eq!(sampling_frequency_index, 5);
+        assert_eq!(channel_configuration, 1);
+    }
 }
