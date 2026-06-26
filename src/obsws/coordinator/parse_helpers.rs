@@ -7,6 +7,8 @@
 ///
 /// `Missing` (欠落 / null / 空文字) は `MISSING_REQUEST_FIELD`、
 /// `Invalid` (型違反 / 範囲外) は `INVALID_REQUEST_FIELD` にマップする。
+/// `Invalid` のメッセージは `field '{name}' must be ...` 形式でフィールド名を含む規約とする
+/// (応答 comment にそのまま使われるため、 生成元の parse_required_* 関数側で組み立てる)。
 #[derive(Debug, PartialEq)]
 pub(super) enum RequiredFieldError {
     Missing,
