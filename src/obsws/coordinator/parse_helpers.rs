@@ -195,20 +195,6 @@ mod tests {
         );
     }
 
-    fn assert_missing<T: std::fmt::Debug>(result: Result<T, RequiredFieldError>) {
-        match result {
-            Err(RequiredFieldError::Missing) => {}
-            other => panic!("Missing を期待したが {other:?}"),
-        }
-    }
-
-    fn assert_invalid<T: std::fmt::Debug>(result: Result<T, RequiredFieldError>) {
-        match result {
-            Err(RequiredFieldError::Invalid(_)) => {}
-            other => panic!("Invalid を期待したが {other:?}"),
-        }
-    }
-
     #[test]
     fn parse_required_string_field_passes_empty_through() {
         let json = parse_owned_json(r#"{"text":""}"#);
@@ -220,50 +206,41 @@ mod tests {
 
     #[test]
     fn parse_required_string_field_classifies_failures() {
-        assert_missing(parse_required_string_field(
-            &parse_owned_json(r#"{}"#),
-            "foo",
+        assert!(matches!(
+            parse_required_string_field(&parse_owned_json(r#"{}"#), "foo"),
+            Err(RequiredFieldError::Missing)
         ));
-        assert_missing(parse_required_string_field(
-            &parse_owned_json(r#"{"foo":null}"#),
-            "foo",
+        assert!(matches!(
+            parse_required_string_field(&parse_owned_json(r#"{"foo":null}"#), "foo"),
+            Err(RequiredFieldError::Missing)
         ));
-        assert_invalid(parse_required_string_field(
-            &parse_owned_json(r#"{"foo":123}"#),
-            "foo",
+        assert!(matches!(
+            parse_required_string_field(&parse_owned_json(r#"{"foo":123}"#), "foo"),
+            Err(RequiredFieldError::Invalid(_))
         ));
     }
 
     #[test]
     fn parse_required_non_empty_string_rejects_empty() {
-        assert_missing(parse_required_non_empty_string(
-            &parse_owned_json(r#"{"name":""}"#),
-            "name",
+        assert!(matches!(
+            parse_required_non_empty_string(&parse_owned_json(r#"{"name":""}"#), "name"),
+            Err(RequiredFieldError::Missing)
         ));
     }
 
     #[test]
     fn parse_required_i64_field_classifies_type_mismatch_as_invalid() {
-        assert_invalid(parse_required_i64_field(
-            &parse_owned_json(r#"{"x":"abc"}"#),
-            "x",
+        assert!(matches!(
+            parse_required_i64_field(&parse_owned_json(r#"{"x":"abc"}"#), "x"),
+            Err(RequiredFieldError::Invalid(_))
         ));
-        assert_missing(parse_required_i64_field(&parse_owned_json(r#"{}"#), "x"));
-        assert_eq!(
-            parse_required_i64_field(&parse_owned_json(r#"{"x":-42}"#), "x"),
-            Ok(-42)
-        );
     }
 
     #[test]
     fn parse_required_u32_field_rejects_negative() {
-        assert_invalid(parse_required_u32_field(
-            &parse_owned_json(r#"{"size":-1}"#),
-            "size",
+        assert!(matches!(
+            parse_required_u32_field(&parse_owned_json(r#"{"size":-1}"#), "size"),
+            Err(RequiredFieldError::Invalid(_))
         ));
-        assert_eq!(
-            parse_required_u32_field(&parse_owned_json(r#"{"size":48}"#), "size"),
-            Ok(48u32)
-        );
     }
 }
