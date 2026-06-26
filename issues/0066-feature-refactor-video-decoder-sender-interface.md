@@ -185,7 +185,7 @@ pub async fn run(
 - **VideoToolboxDecoder**: `decoded: Option<VideoFrame>` 廃止。`reinitialize_if_need` の `decoded.is_some()` ガード条件は廃止し、代わりに `decode().await` 内で `tx.send().await` 完了を経た後に次の `decode().await` が始まるシーケンスを担保 (run_input task の sequential await で自然に成立)。bounded 容量 N の最小値検討 (N=1 で実害が無ければ採用、ただし `forward task` が drain 速ければ N=1 が最も同期的に近い)
 - **NvcodecDecoder**: コンストラクタ `new_h264(.., tx)` で `tx` を `move` で `FnDecodeHandler` クロージャに内包。`build_handler` (現 `src/decoder/nvcodec.rs:29-56`) のシグネチャを `fn build_handler(tx: Sender<crate::Result<VideoFrame>>, input_queue: Arc<Mutex<VecDeque<VideoFrame>>>) -> FnDecodeHandler<...>` に変更。callback 内で `input_queue.pop_front()` → NV12→I420 変換 (`shiguredo_libyuv::nv12_to_i420`、`block_in_place` 範囲に含む) → `tx.blocking_send(Ok(frame))` の順で実行 (`tokio::task::block_in_place` 経由で tokio worker block を safe にする)。`input_queue` は `Arc<Mutex<VecDeque<VideoFrame>>>` 化して callback と `decode()` push 側で共有。callback が input より先に走るケース (`pop_front()` が None) は `shiguredo_nvcodec` 仕様上ありえないと暫定し、`expect("decoded frame produced without input frame")` で fail-fast
 
-注: NvcodecDecoder の callback dispatch スレッド規約 (`cuvidParseVideoData` の同期 dispatch 仕様、フレーム順序保証) は実装着手前に `shiguredo_nvcodec` 側ソースを確認して本 issue に追記する (Polish フェーズで Decision Owner が実調査)。本 issue 起票時点では `block_in_place + blocking_send` 案 + 投入順保証前提で進める。
+調査結果 (実装着手前に確認済み): `shiguredo_nvcodec 2026.2.0` の `Decoder::decode()` (`~/.cargo/registry/.../shiguredo_nvcodec-2026.2.0/src/decode.rs:235-252`) は `cuvidParseVideoData` を **同期呼出** している。NVIDIA Video Decoder SDK の仕様上、callback は `cuvidParseVideoData` を呼んだスレッド上で同期実行される。よって hisui の `FnDecodeHandler` クロージャは `decoder.decode().await` を実行している tokio worker thread 上で同期実行される。hisui は multi-thread runtime (`Cargo.toml` の `rt-multi-thread` feature) を採用しているため、`tokio::task::block_in_place + tx.blocking_send(...)` が安全に使える (current-thread runtime では panic するが本プロジェクトでは該当しない)。フレーム順序保証は cuvid parser の sequential dispatch (1 packet 投入 → 1 frame callback) で担保される。
 
 ### バックプレッシャ戦略
 
@@ -251,7 +251,7 @@ mp4 reader は subscribe_track 経路ではなく自前で decoder に push す�
 - 「現状」§ 外部利用箇所表のすべての行が Sender 経路 (設計方針 §「外部利用箇所の Sender 化パターン」) に置き換わっている
 - mp4 reader の `recreate_decoders` / `flush_decoders` / `reset_for_restart` / `apply_seek` がすべて async fn 化され、呼出元 15 箇所が `.await` 付与で追従している
 - mp4 reader の `TrackSender` (`:1446`) の SYN/ACK バックプレッシャ (`MAX_NOACKED_COUNT = 100`) が decoder task 側で維持されている (回帰なし)
-- `cuvidParseVideoData` callback dispatch スレッド規約の調査結果と、NvcodecDecoder の採用方式 (`blocking_send` / `try_send` / 他)、および callback 順序保証 (`pop_front()` None が起きないことの根拠) が本 issue に追記されている
+- NvcodecDecoder の採用方式 (`block_in_place + blocking_send` を採用、設計方針 §「各 inner の Sender 化形態」末尾の調査結果に基づく) を実装
 - end-to-end テストが `src/decoder/nvcodec.rs` に追加され、以下の最小ケースを検証する:
   - (a) `NvcodecDecoder` で callback 内 `Err` が次回 decode 呼出を待たず Receiver に届くこと
   - (b) `Openh264Decoder` で keyframe 入力時に `finish()` 経由の旧 frame と新 keyframe 由来 frame が両方 Sender に送信され、順序が保たれること
