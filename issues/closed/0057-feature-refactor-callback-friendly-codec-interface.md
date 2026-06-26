@@ -341,25 +341,23 @@ async fn test_nvcodec_encoder_to_receiver_e2e() {
 
 `recording_video_mixer` 連携テストも、`rx` 側を mixer の入力 track に bridge する形で同じ枠で書ける。モック / スタブは不要 (`shiguredo-rust` 規約 OK)。
 
-#### 後続実装 issue の分割粒度案
+#### 後続実装 issue の分割
 
-依存順序: **`a → (b ∥ d) → c → e`**
+実装着手段階で encoder 側 / decoder 側の 2 分割に絞った。decoder が encoder より単純 (RPC keyframe 経路なし / `flush()` 強制同期化なし / sample_entry 不変条件なし / メトリクス計上が `total_output_video_frame_count_metric` のみ) なので、より単純な decoder で C 形式 interface パターンを先行確立し、encoder で複雑な要件 (RPC / flush 撤廃 / メトリクス重 / `error_slot` 廃止) を解く流れにする。
 
-| ID | タイトル (案) | 影響ファイル | 推定 LOC | 依存先 | 追加 / 改修対象テスト | 後方互換影響 |
-|----|---------------|---------------|----------|---------|------------------------|---------------|
-| (a) | `VideoEncoder` interface を C 形式に変更し `LibvpxEncoder` を追従させる | `src/encoder.rs`, `src/encoder/libvpx.rs`, `src/encoder/test_helpers.rs` | 数百行 | なし | `LibvpxEncoder` 末尾テスト群を Sender 形式に書き換え | 内部 API のみ (library として外部公開していない) |
-| (b) | `Openh264Encoder` / `SvtAv1Encoder` を C 形式に追従させる | `src/encoder/openh264.rs`, `src/encoder/svt_av1.rs`, 各末尾テスト | 数百行 | (a) | 各末尾テスト群を Sender 形式に書き換え | 内部 API のみ |
-| (c) | `NvcodecEncoder` を C 形式に追従させ `flush()` 強制を撤廃し `error_slot` を廃止する。実機 H.264 / H.265 / AV1 で flush 撤廃の wall-clock 計測を実施 | `src/encoder/nvcodec.rs`, `src/encoder.rs` (関連箇所) | 数百行 | (a) | nvcodec encoder の end-to-end テストと flush 撤廃前後の計測ログを `[ADD]` の補足として追記 | 内部 API のみ。`nvcodec` feature 経由なので default ビルドへの影響なし |
-| (d) | `VideoToolboxEncoder` を C 形式に追従させる | `src/encoder/video_toolbox.rs`, 末尾テスト | 数百行 | (a) | 末尾テスト群を Sender 形式に書き換え | 内部 API のみ (macOS target のみ) |
-| (e) | `VideoDecoder` 系を C 形式に追従させる (Libvpx/Openh264/Dav1d/VideoToolbox/Nvcodec、`VideoDecoder` 内部の `decoded` / `poll_output` 廃止) | `src/decoder.rs`, `src/decoder/*.rs` | 千行超 | (a)〜(d) (encoder 側の知見をフィードバック) | encoder と同様の対称構造に揃える | 内部 API のみ |
+依存順序: **`0066 → 0067`**
+
+| ID | 範囲 | 推定 LOC | 依存先 | 後方互換影響 |
+|----|------|----------|---------|---------------|
+| open/0066 (`feature/refactor-video-decoder-sender-interface`) | VideoDecoder + 全 inner (Libvpx/Openh264/Dav1d/VideoToolbox/Nvcodec) を Sender 出力に統一、`error_slot` 廃止 | 千行前後 | なし | 内部 API のみ |
+| open/0067 (`feature/refactor-video-encoder-sender-interface`) | VideoEncoder + 全 inner (Libvpx/Openh264/SvtAv1/VideoToolbox/Nvcodec) を Sender 出力に統一、`NvcodecEncoder` の `flush()` 強制撤廃、`error_slot` 廃止、メトリクス計上の `run()` 受信側移植、RPC keyframe 経路維持 | 千行台 | 内部 API のみ |
 
 備考:
 
-- Audio 系 (AudioEncoder / AudioDecoder) は本 issue スコープ外なので分割例に含めない (再設計動機が成立しないため現状維持)
-- (a) を最初に置く理由: ここで C 形式の interface が成立可能かを実装可否検証する。困難なら案 A への後退を判断する弾力性ポイント
-- (b) と (d) は (a) 完了後に並列実施可能 (b は同期エンコーダー、d は VideoToolbox の非同期エンコーダーで独立)
-- (c) は (a) のインターフェース確定後に着手。flush 撤廃と `error_slot` 廃止を一括で行う
-- (e) は encoder 側の知見が出揃ってから decoder へフィードバック
+- Audio 系 (AudioEncoder / AudioDecoder) は本 issue スコープ外なので分割に含めない (再設計動機が成立しないため現状維持)
+- 0066 を先に置く理由: 単純な題材で C 形式の interface が成立可能かを実装可否検証する。困難なら採用案 C を再検討 (案 A への後退) する弾力性ポイント
+- 0067 は 0066 完了後に着手し、0066 で確定した Sender 型 / enum dispatch 形式を踏襲する
+- 各 inner ごとに分割しない理由: `VideoEncoderInner` / `VideoDecoderInner` enum dispatch は全 variant 揃って初めて C 形式になるため、途中段階で adapter を挟むのは捨てコードになる (Premature Optimization)。1 PR 内で全 variant をまとめて書き換える方がコードベース全体の単純性に貢献する
 
 ## CHANGES.md について
 
