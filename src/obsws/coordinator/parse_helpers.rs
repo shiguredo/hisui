@@ -1,9 +1,7 @@
 //! obsws ハンドラ向け JSON フィールド解析ヘルパー。
-
-use crate::obsws::protocol::{
-    REQUEST_STATUS_INVALID_REQUEST_FIELD, REQUEST_STATUS_MISSING_REQUEST_FIELD,
-};
-use crate::obsws::response::build_request_response_error;
+//!
+//! `RequiredFieldError` から `CommandResult` への変換は `ObswsCoordinator::build_required_field_error_result`
+//! が担う (`build_error_result` を経由して `RequestBatchResult` を直接組み立てる)。
 
 /// 必須フィールドのパース失敗種別。
 ///
@@ -13,29 +11,6 @@ use crate::obsws::response::build_request_response_error;
 pub(super) enum RequiredFieldError {
     Missing,
     Invalid(String),
-}
-
-/// `RequiredFieldError` を obsws の `requestStatus` にマップしてエラー応答 JSON を作る。
-pub(super) fn build_required_field_error_response(
-    request_type: &str,
-    request_id: &str,
-    field_name: &str,
-    error: RequiredFieldError,
-) -> nojson::RawJsonOwned {
-    match error {
-        RequiredFieldError::Missing => build_request_response_error(
-            request_type,
-            request_id,
-            REQUEST_STATUS_MISSING_REQUEST_FIELD,
-            &format!("Missing or empty {field_name} field"),
-        ),
-        RequiredFieldError::Invalid(message) => build_request_response_error(
-            request_type,
-            request_id,
-            REQUEST_STATUS_INVALID_REQUEST_FIELD,
-            &message,
-        ),
-    }
 }
 
 /// 必須文字列フィールド (空文字も valid 値として透過するフィールド向け)。

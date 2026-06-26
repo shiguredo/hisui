@@ -14,9 +14,8 @@ use crate::obsws::protocol::{
 };
 
 use super::parse_helpers::{
-    build_required_field_error_response, parse_optional_i64, parse_optional_string,
-    parse_optional_u32, parse_required_i64_field, parse_required_non_empty_string,
-    parse_required_string_field, parse_required_u32_field,
+    parse_optional_i64, parse_optional_string, parse_optional_u32, parse_required_i64_field,
+    parse_required_non_empty_string, parse_required_string_field, parse_required_u32_field,
 };
 
 /// `fontColor` 省略時のデフォルト値 (不透明白)。
@@ -56,46 +55,42 @@ impl ObswsCoordinator {
         let name = match parse_required_non_empty_string(request_data, "textOverlayName") {
             Ok(s) => s,
             Err(e) => {
-                let response = build_required_field_error_response(
+                return self.build_required_field_error_result(
                     request_type,
                     request_id,
                     "textOverlayName",
                     e,
                 );
-                return self.build_result_from_response(response, Vec::new());
             }
         };
         // text は空文字も valid 値として扱う (バイト数 / 行数の上限はミキサー側で検証する)。
         let text = match parse_required_string_field(request_data, "text") {
             Ok(s) => s,
             Err(e) => {
-                let response =
-                    build_required_field_error_response(request_type, request_id, "text", e);
-                return self.build_result_from_response(response, Vec::new());
+                return self.build_required_field_error_result(request_type, request_id, "text", e);
             }
         };
         let x = match parse_required_i64_field(request_data, "x") {
             Ok(v) => v,
             Err(e) => {
-                let response =
-                    build_required_field_error_response(request_type, request_id, "x", e);
-                return self.build_result_from_response(response, Vec::new());
+                return self.build_required_field_error_result(request_type, request_id, "x", e);
             }
         };
         let y = match parse_required_i64_field(request_data, "y") {
             Ok(v) => v,
             Err(e) => {
-                let response =
-                    build_required_field_error_response(request_type, request_id, "y", e);
-                return self.build_result_from_response(response, Vec::new());
+                return self.build_required_field_error_result(request_type, request_id, "y", e);
             }
         };
         let font_size = match parse_required_u32_field(request_data, "fontSize") {
             Ok(v) => v,
             Err(e) => {
-                let response =
-                    build_required_field_error_response(request_type, request_id, "fontSize", e);
-                return self.build_result_from_response(response, Vec::new());
+                return self.build_required_field_error_result(
+                    request_type,
+                    request_id,
+                    "fontSize",
+                    e,
+                );
             }
         };
 
@@ -193,13 +188,12 @@ impl ObswsCoordinator {
         let name = match parse_required_non_empty_string(request_data, "textOverlayName") {
             Ok(s) => s,
             Err(e) => {
-                let response = build_required_field_error_response(
+                return self.build_required_field_error_result(
                     request_type,
                     request_id,
                     "textOverlayName",
                     e,
                 );
-                return self.build_result_from_response(response, Vec::new());
             }
         };
 
@@ -307,13 +301,12 @@ impl ObswsCoordinator {
         let name = match parse_required_non_empty_string(request_data, "textOverlayName") {
             Ok(s) => s,
             Err(e) => {
-                let response = build_required_field_error_response(
+                return self.build_required_field_error_result(
                     request_type,
                     request_id,
                     "textOverlayName",
                     e,
                 );
-                return self.build_result_from_response(response, Vec::new());
             }
         };
 

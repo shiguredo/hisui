@@ -961,6 +961,28 @@ impl ObswsCoordinator {
         }
     }
 
+    /// `RequiredFieldError` を obsws の `requestStatus` にマップして `CommandResult` を作る。
+    /// 必須フィールドのパース失敗を扱う各ハンドラから呼び出して match 分岐を簡素化する。
+    fn build_required_field_error_result(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        field_name: &str,
+        error: parse_helpers::RequiredFieldError,
+    ) -> CommandResult {
+        let (status_code, status_comment) = match error {
+            parse_helpers::RequiredFieldError::Missing => (
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                format!("Missing or empty {field_name} field"),
+            ),
+            parse_helpers::RequiredFieldError::Invalid(message) => (
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                message,
+            ),
+        };
+        self.build_error_result(request_type, request_id, status_code, &status_comment)
+    }
+
     /// output 設定変更リクエスト成功後に state の設定を outputs BTreeMap に同期する。
     /// Phase 6 で SetOutputSettings を coordinator 経由に移行するまでの暫定措置。
     /// outputs BTreeMap から GetOutputStatus レスポンスを構築する。
