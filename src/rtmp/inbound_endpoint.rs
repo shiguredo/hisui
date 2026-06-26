@@ -23,6 +23,62 @@ pub struct RtmpInboundEndpoint {
     pub options: RtmpInboundEndpointOptions,
 }
 
+/// `RtmpInboundEndpoint::new()` が返す検証エラー
+#[derive(Debug)]
+pub enum RtmpInboundEndpointBuildError {
+    EmptyInputUrl,
+    EmptyStreamName,
+    NoTrackId,
+}
+
+impl std::fmt::Display for RtmpInboundEndpointBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyInputUrl => write!(f, "input_url must not be empty"),
+            Self::EmptyStreamName => {
+                write!(f, "stream_name must not be empty when specified")
+            }
+            Self::NoTrackId => write!(
+                f,
+                "at least one of output_audio_track_id / output_video_track_id must be set"
+            ),
+        }
+    }
+}
+
+impl RtmpInboundEndpoint {
+    /// `RtmpInboundEndpoint` を構築する。以下を eager 検証する:
+    /// - `EmptyInputUrl`: `input_url` 非空
+    /// - `EmptyStreamName`: `stream_name` 指定時の非空
+    /// - `NoTrackId`: `output_audio_track_id` / `output_video_track_id` の少なくとも一方が必須
+    pub fn new(
+        input_url: String,
+        stream_name: Option<String>,
+        output_audio_track_id: Option<crate::TrackId>,
+        output_video_track_id: Option<crate::TrackId>,
+        options: RtmpInboundEndpointOptions,
+    ) -> Result<Self, RtmpInboundEndpointBuildError> {
+        if input_url.is_empty() {
+            return Err(RtmpInboundEndpointBuildError::EmptyInputUrl);
+        }
+        if let Some(name) = &stream_name
+            && name.is_empty()
+        {
+            return Err(RtmpInboundEndpointBuildError::EmptyStreamName);
+        }
+        if output_audio_track_id.is_none() && output_video_track_id.is_none() {
+            return Err(RtmpInboundEndpointBuildError::NoTrackId);
+        }
+        Ok(Self {
+            input_url,
+            stream_name,
+            output_audio_track_id,
+            output_video_track_id,
+            options,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RtmpInboundEndpointStats {
     is_listening_metric: crate::stats::StatsFlag,

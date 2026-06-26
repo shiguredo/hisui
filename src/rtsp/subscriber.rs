@@ -32,8 +32,50 @@ const DEFAULT_RTSP_PORT: u16 = 554;
 #[derive(Debug, Clone)]
 pub struct RtspSubscriber {
     pub input_url: String,
-    pub output_video_track_id: Option<TrackId>,
     pub output_audio_track_id: Option<TrackId>,
+    pub output_video_track_id: Option<TrackId>,
+}
+
+/// `RtspSubscriber::new()` が返す検証エラー
+#[derive(Debug)]
+pub enum RtspSubscriberBuildError {
+    EmptyInputUrl,
+    NoTrackId,
+}
+
+impl std::fmt::Display for RtspSubscriberBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyInputUrl => write!(f, "input_url must not be empty"),
+            Self::NoTrackId => write!(
+                f,
+                "at least one of output_audio_track_id / output_video_track_id must be set"
+            ),
+        }
+    }
+}
+
+impl RtspSubscriber {
+    /// `RtspSubscriber` を構築する。以下を eager 検証する:
+    /// - `EmptyInputUrl`: `input_url` 非空
+    /// - `NoTrackId`: `output_audio_track_id` / `output_video_track_id` の少なくとも一方が必須
+    pub fn new(
+        input_url: String,
+        output_audio_track_id: Option<TrackId>,
+        output_video_track_id: Option<TrackId>,
+    ) -> Result<Self, RtspSubscriberBuildError> {
+        if input_url.is_empty() {
+            return Err(RtspSubscriberBuildError::EmptyInputUrl);
+        }
+        if output_audio_track_id.is_none() && output_video_track_id.is_none() {
+            return Err(RtspSubscriberBuildError::NoTrackId);
+        }
+        Ok(Self {
+            input_url,
+            output_audio_track_id,
+            output_video_track_id,
+        })
+    }
 }
 
 impl RtspSubscriber {

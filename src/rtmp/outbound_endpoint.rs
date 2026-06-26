@@ -39,6 +39,62 @@ pub struct RtmpOutboundEndpoint {
     pub options: RtmpOutboundEndpointOptions,
 }
 
+/// `RtmpOutboundEndpoint::new()` が返す検証エラー
+#[derive(Debug)]
+pub enum RtmpOutboundEndpointBuildError {
+    EmptyOutputUrl,
+    EmptyStreamName,
+    NoTrackId,
+}
+
+impl std::fmt::Display for RtmpOutboundEndpointBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyOutputUrl => write!(f, "output_url must not be empty"),
+            Self::EmptyStreamName => {
+                write!(f, "stream_name must not be empty when specified")
+            }
+            Self::NoTrackId => write!(
+                f,
+                "at least one of input_audio_track_id / input_video_track_id must be set"
+            ),
+        }
+    }
+}
+
+impl RtmpOutboundEndpoint {
+    /// `RtmpOutboundEndpoint` を構築する。以下を eager 検証する:
+    /// - `EmptyOutputUrl`: `output_url` 非空
+    /// - `EmptyStreamName`: `stream_name` 指定時の非空
+    /// - `NoTrackId`: `input_audio_track_id` / `input_video_track_id` の少なくとも一方が必須
+    pub fn new(
+        output_url: String,
+        stream_name: Option<String>,
+        input_audio_track_id: Option<TrackId>,
+        input_video_track_id: Option<TrackId>,
+        options: RtmpOutboundEndpointOptions,
+    ) -> Result<Self, RtmpOutboundEndpointBuildError> {
+        if output_url.is_empty() {
+            return Err(RtmpOutboundEndpointBuildError::EmptyOutputUrl);
+        }
+        if let Some(name) = &stream_name
+            && name.is_empty()
+        {
+            return Err(RtmpOutboundEndpointBuildError::EmptyStreamName);
+        }
+        if input_audio_track_id.is_none() && input_video_track_id.is_none() {
+            return Err(RtmpOutboundEndpointBuildError::NoTrackId);
+        }
+        Ok(Self {
+            output_url,
+            stream_name,
+            input_audio_track_id,
+            input_video_track_id,
+            options,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RtmpOutboundEndpointStats {
     total_sent_bytes: crate::stats::StatsCounter,
