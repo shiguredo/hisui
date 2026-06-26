@@ -19,10 +19,10 @@ const TS_PACKET_SIZE: usize = 188;
 
 /// SRT Inbound Endpoint
 pub struct SrtInboundEndpoint {
-    pub input_url: String,
-    pub output_audio_track_id: Option<crate::TrackId>,
-    pub output_video_track_id: Option<crate::TrackId>,
-    pub options: SrtInboundEndpointOptions,
+    pub(crate) input_url: String,
+    pub(crate) output_audio_track_id: Option<crate::TrackId>,
+    pub(crate) output_video_track_id: Option<crate::TrackId>,
+    pub(crate) options: SrtInboundEndpointOptions,
 }
 
 /// `SrtInboundEndpoint` 用オプション群

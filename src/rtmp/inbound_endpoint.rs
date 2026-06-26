@@ -16,11 +16,11 @@ pub struct RtmpInboundEndpointOptions {
 
 /// RTMP Inbound Endpoint
 pub struct RtmpInboundEndpoint {
-    pub input_url: String,
-    pub stream_name: Option<String>,
-    pub output_audio_track_id: Option<crate::TrackId>,
-    pub output_video_track_id: Option<crate::TrackId>,
-    pub options: RtmpInboundEndpointOptions,
+    pub(crate) input_url: String,
+    pub(crate) stream_name: Option<String>,
+    pub(crate) output_audio_track_id: Option<crate::TrackId>,
+    pub(crate) output_video_track_id: Option<crate::TrackId>,
+    pub(crate) options: RtmpInboundEndpointOptions,
 }
 
 /// `RtmpInboundEndpoint::new()` が返す検証エラー

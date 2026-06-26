@@ -32,11 +32,11 @@ pub struct RtmpOutboundEndpointOptions {
 
 #[derive(Debug, Clone)]
 pub struct RtmpOutboundEndpoint {
-    pub output_url: String,
-    pub stream_name: Option<String>,
-    pub input_audio_track_id: Option<TrackId>,
-    pub input_video_track_id: Option<TrackId>,
-    pub options: RtmpOutboundEndpointOptions,
+    pub(crate) output_url: String,
+    pub(crate) stream_name: Option<String>,
+    pub(crate) input_audio_track_id: Option<TrackId>,
+    pub(crate) input_video_track_id: Option<TrackId>,
+    pub(crate) options: RtmpOutboundEndpointOptions,
 }
 
 /// `RtmpOutboundEndpoint::new()` が返す検証エラー

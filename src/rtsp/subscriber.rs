@@ -31,9 +31,9 @@ const DEFAULT_RTSP_PORT: u16 = 554;
 
 #[derive(Debug, Clone)]
 pub struct RtspSubscriber {
-    pub input_url: String,
-    pub output_audio_track_id: Option<TrackId>,
-    pub output_video_track_id: Option<TrackId>,
+    pub(crate) input_url: String,
+    pub(crate) output_audio_track_id: Option<TrackId>,
+    pub(crate) output_video_track_id: Option<TrackId>,
 }
 
 /// `RtspSubscriber::new()` が返す検証エラー

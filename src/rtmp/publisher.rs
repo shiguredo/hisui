@@ -30,11 +30,11 @@ impl Default for RtmpPublisherOptions {
 
 #[derive(Debug, Clone)]
 pub struct RtmpPublisher {
-    pub output_url: String,
-    pub stream_name: Option<String>,
-    pub input_audio_track_id: Option<TrackId>,
-    pub input_video_track_id: Option<TrackId>,
-    pub options: RtmpPublisherOptions,
+    pub(crate) output_url: String,
+    pub(crate) stream_name: Option<String>,
+    pub(crate) input_audio_track_id: Option<TrackId>,
+    pub(crate) input_video_track_id: Option<TrackId>,
+    pub(crate) options: RtmpPublisherOptions,
 }
 
 /// `RtmpPublisher::new()` が返す検証エラー
