@@ -65,6 +65,7 @@ jobs:
       - run: cargo test --features nvcodec -p hisui -- --test-threads=1
       - run: cargo check --features candle,candle-cuda -p hisui
       - run: cargo clippy --features candle,candle-cuda -p hisui --all-targets -- --deny warnings
+      - run: cargo test --features candle,candle-cuda -p hisui -- --test-threads=1
 
   test-apple-toolbox:
     runs-on:
