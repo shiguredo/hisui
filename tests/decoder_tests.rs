@@ -110,6 +110,11 @@ async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegat
 
     // wrap delegation: handle_input_sample_sync 経由で inner.decode → sink.emit_ok を実行する
     decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
+    // EOS で inner.finish() → flush を踏ませる
+    // (Nvcodec は callback が別 thread から非同期に呼ばれるため、 ここで flush 待ち合わせしないと
+    //  直後の poll_output_sync で channel が空のまま Pending が返ってしまう。
+    //  Libvpx 等の同期 inner では既に sink.emit_ok 済なので EOS は no-op に近い)
+    decoder.handle_input_sample_sync(None)?;
 
     // poll_output_sync の Ok(Ok(frame)) 分岐: try_recv で frame を取り出して Processed を返す
     let output = decoder.poll_output_sync()?;
