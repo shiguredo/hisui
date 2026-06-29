@@ -56,7 +56,7 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
-- [ADD] オプション依存として candle 系ライブラリ (candle-core 0.10.2 / candle-nn 0.10.2 / candle-transformers 0.10.2 / candle-onnx 0.10.2 / tokenizers 0.22.0) を追加する
+- [ADD] オプション依存として candle 系ライブラリ (candle-core 0.11.0 / candle-nn 0.11.0 / candle-transformers 0.11.0 / candle-onnx 0.11.0 / tokenizers 0.22.0) を追加する
   - `candle` / `candle-cuda` / `candle-metal` feature 配下で有効化する
   - candle-onnx のビルドに `protoc` (Ubuntu の `protobuf-compiler` 等) が必要になる
   - 本リリースのバイナリ配布物には含めない (将来の利用者向けサブコマンドが揃うタイミングで再検討する)
