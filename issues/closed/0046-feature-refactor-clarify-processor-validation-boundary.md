@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-06-18
-- Completed:
+- Completed: 2026-06-29
 - Model: Claude Opus 4.7
 - Reporter: @sile
 - Branch: feature/refactor-clarify-processor-validation-boundary
@@ -560,3 +560,47 @@ obsws coordinator 側の既存 `mod tests` のフィールド read アクセス�
 
 - closed issue 0041 (`feature/refactor-remove-unused-processor-json-impls` / merge commit `42979dae` / 2026-06-18 完了): 本 issue 対象の不変条件が削除された直接の契機
 - closed issue 0040 (`feature/add-internals-processor-conventions-doc` / commit `aa3c589a` / 2026-06-19 close): 本 issue の `docs/internals/processor_validation.md` 作成を 0040 の代替成果物として確定
+
+## 解決方法 (2026-06-29)
+
+`feature/refactor-clarify-processor-validation-boundary` で次を実装した。コード変更 13 コミット、16 ファイル + 整理 commit。
+
+### 実装内容
+
+- 5 構造体 (`RtmpInboundEndpoint` / `RtmpOutboundEndpoint` / `RtmpPublisher` / `SrtInboundEndpoint` / `RtspSubscriber`) に `*BuildError` enum (`Debug` 派生 + `Display` 実装) と `pub fn new() -> Result<Self, *BuildError>` を追加した
+- 本体 5 構造体のフィールドを `pub` → `pub(crate)` に格下げし、`new()` を唯一の組立経路とした (struct 自体は `pub` 維持)
+- `RtmpPublisherOptions::max_buffered_frame_count` を `usize` → `NonZeroUsize` に昇格し、`tokio::sync::mpsc::channel(0)` panic を型レベルで排除
+- `SrtInboundEndpoint` のフィールドを `SrtInboundEndpointOptions` に集約し、他 4 構造体と「本体 + Options」スタイルを統一
+- `RtspSubscriber` のフィールド宣言順 / `new()` 引数順を `audio, video` に揃え、5 構造体で統一
+- obsws 経路 5 箇所 (`src/obsws/coordinator/` 2 箇所 + `src/obsws/source/` 3 箇所) をリテラル組立から `new()?` 呼びに置換し、エラーメッセージプレフィックスを `"invalid <module_snake_case> config: {e}"` で統一
+- `start_*_processors` で encoder 起動前に `new()` 検証を済ませ、検証失敗時の encoder processor リークを防止
+- `tests/{rtmp_publisher,rtmp_inbound_endpoint,rtmp_outbound_endpoint,srt_inbound_endpoint,rtsp_subscriber}_tests.rs` を 5 ファイル新設し、各 `*BuildError` バリアントと正常系の組み合わせを覆った
+- obsws 経路 3 ファイルの `mod tests` に `is_source_startable_accepts_empty_input_url` と `build_record_source_plan_rejects_empty_input_url` を追加し、空文字弾きの責務分担を退行検知
+- `docs/internals/processor_validation.md` を新規作成し、設計原則 (eager / lazy / 型保証 / Display 実装 / Options 集約) と新規 processor 追加時の確認事項を集約
+
+### レビュー対応 (`/review-diff-code`)
+
+レビューで指摘された致命的・重要を反映した:
+
+- 致命的 (F1): docs/internals/ ノートから issue 番号 / ブランチ名 / commit hash を削除
+- 重要 (W1): obsws coordinator の encoder 起動前に `new()` 検証を済ませる順序入れ替え
+- 重要 (W2 / W3): 5 構造体本体と `new()` の doc コメントから実装詳細の列挙を削り、設計原則は `docs/internals/processor_validation.md` に集約
+- 重要 (W4): tests の `let _ = endpoint;` 19 箇所を削除し、正常系を `Result<(), *BuildError>` + `?` パターンに置換
+- 重要 (W6): `RtmpInboundEndpointOptions` / `RtmpOutboundEndpointOptions` の `cert_path` / `key_path` を Some にする正常系、および SRT で `key_length` / `tsbpd_delay_ms` を Some にする正常系を追加
+- 重要 (W7): obsws/source 3 ファイルの `mod tests` に `is_source_startable` の空文字境界テストと `build_record_source_plan` の InvalidInput 検証を追加
+- 重要 (W8): `SrtInboundEndpointOptions` フィールドの `//` を `///` に統一
+- 重要 (W9): `options_default_max_buffered_frame_count_is_1000` テストを削除 (Default 実装と同じリテラルを書く二重宣言で退行検知価値が薄いため)
+- 改善 (I3 / I4 / I5 / I8): テストコメントを「退行検知の対象」に書き直し、`..Default::default()` 化、reject テストでクロスペア (audio=None + video=Some) 採用、`*BuildError` doc 末尾の句点統一
+
+### スコープ外で別 issue 候補とした項目
+
+- `RtmpPublisher::run` 内の `parse_rtmp_url` 2 重呼び出し
+- `RtmpInboundEndpointOptions` / `RtmpOutboundEndpointOptions` の空 PathBuf 検証
+- 5 構造体の派生属性統一 (`Debug` / `Clone` 派生)
+- obsws `is_source_startable` の空文字弾き (本 issue では `new()?` で弾く方針)
+- テスト 5 ファイル間の重複を共通ヘルパ化 (review W5)
+- `tests/test_<module>.rs` 命名規約と既存実態 (`*_tests.rs`) の SKILL 改定 (review 観点 3 改善)
+
+### 検証
+
+CI 同等の `cargo fmt --all --check` / `cargo check --workspace` / `cargo check --workspace --no-default-features` / `cargo clippy --workspace --all-targets -- --deny warnings` / `cargo clippy --workspace --no-default-features -- --deny warnings` / `cargo test --workspace` / `cargo test --workspace --no-default-features` をすべてパスした。`CHANGES.md` には記載しなかった (issue 本文で確定した方針通り)。
