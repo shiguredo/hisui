@@ -351,26 +351,24 @@ impl OutputSink {
 
     /// 出力フレームを 1 件送信して `total_output_video_frame_count_metric` を 1 inc する。
     ///
-    /// `tx.send` 失敗 (= Receiver が drop された) は構造体不変条件違反 = bug のため `debug_assert!` で潰す
-    /// (`AsyncVideoDecoder` 内で sink と rx は同居するため、 通常時には起こらない)。
+    /// `tx.send` 失敗 (= Receiver が drop された) は構造体不変条件違反 = bug のため `unreachable!()`
+    /// で release ビルドも含めて即時 panic で検出する (`AsyncVideoDecoder` 内で sink と rx は同居
+    /// するため通常時には起こらない。 `poll_output_sync` の `Disconnected` 分岐と同じ方針)。
+    /// inc は send 成功後に行うことで「送信できなかった frame をカウントする」嘘を物理的に防ぐ。
     pub fn emit_ok(&self, frame: VideoFrame) {
+        if self.tx.send(Ok(frame)).is_err() {
+            unreachable!("decoder output sink receiver dropped before sink (bug)");
+        }
         self.total_output_metric.inc();
-        let send_result = self.tx.send(Ok(frame));
-        debug_assert!(
-            send_result.is_ok(),
-            "decoder output sink receiver dropped before sink (bug)"
-        );
     }
 
     /// エラーを 1 件送信する (metric は inc しない)。
     ///
-    /// `tx.send` 失敗 (= Receiver が drop された) は構造体不変条件違反 = bug のため `debug_assert!` で潰す。
+    /// `tx.send` 失敗時の扱いは `emit_ok` と同じ (`unreachable!()` で即時 panic)。
     pub fn emit_err(&self, err: crate::Error) {
-        let send_result = self.tx.send(Err(err));
-        debug_assert!(
-            send_result.is_ok(),
-            "decoder output sink receiver dropped before sink (bug)"
-        );
+        if self.tx.send(Err(err)).is_err() {
+            unreachable!("decoder output sink receiver dropped before sink (bug)");
+        }
     }
 }
 
