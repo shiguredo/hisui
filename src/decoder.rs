@@ -451,11 +451,14 @@ impl AsyncVideoDecoder {
                 }
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                // sink (= tx) は `inner` (Initial variant あるいは実 inner) 内で生存しているため、
-                // Disconnected は inner 内 sink がすべて drop された後にしか起きない bug。
-                Err(crate::Error::new(
-                    "decoder output channel disconnected unexpectedly (sink dropped before rx)",
-                ))
+                // sink (= tx) は `inner` (Initial variant 内 sink、 もしくは実 inner の sink フィールド、
+                // もしくは NvcodecDecoder の callback closure) 内で生存しており、 さらに `OutputSink::clone`
+                // で配布された複製も生存しているため、 `AsyncVideoDecoder` 自身が live な間は
+                // すべての tx が drop される経路はない。 したがって Disconnected は構造上到達不能な
+                // 不変条件違反 (= bug) であり、 silent に Err で覆い隠さず即時 panic で検出する。
+                unreachable!(
+                    "decoder output channel disconnected unexpectedly (sink dropped before rx)"
+                )
             }
         }
     }
