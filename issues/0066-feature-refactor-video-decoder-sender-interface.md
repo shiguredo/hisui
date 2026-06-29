@@ -364,11 +364,38 @@ async fn test_nvcodec_decoder_to_receiver_e2e() {
 
 実装着手後、step 3-6 (5 inner Sender 化 + VideoDecoder::run() 2 task 化) + simple 外部利用箇所 (subcommand_inspect / recording_subcommand_compose / recording_subcommand_vmaf) までは想定通り進んだ。WIP commit (`af5f63ce`) 時点でビルド未通過。
 
-残り作業 (RTMP/RTSP/SRT inbound endpoint + Mp4FileReader 再設計 + obsws/source/file_mp4) で **想定 1500-2500 行を超える可能性が高い** 複雑化課題が判明したため整理する。
+残り作業 (RTMP/RTSP/SRT inbound endpoint + Mp4FileReader 再設計 + obsws/source/file_mp4) で **想定 1500-2500 行を超える可能性が高い** 複雑化課題が判明したため整理する。方針は本節ではまだ確定させず、後の Decision Owner 判断のために状況と選択肢を網羅する。
+
+### 実装進捗スナップショット (WIP commit `af5f63ce` 時点)
+
+**完了 (Sender 化済み)**:
+- `src/decoder/libvpx.rs`: LibvpxDecoder を `tx` 内包 + `async fn decode/finish` に書き換え済み
+- `src/decoder/dav1d.rs`: Dav1dDecoder を同形に書き換え済み
+- `src/decoder/openh264.rs`: Openh264Decoder を同形に書き換え (keyframe 時 `finish().await` で 0〜2 フレーム送信実装)、`build_annexb_input` テスト 2 件は無変更で残置
+- `src/decoder/video_toolbox.rs`: VideoToolboxDecoder を同形に書き換え (`decoded: Option<VideoFrame>` 廃止、`reinitialize_if_need` の `decoded.is_some()` ガード廃止、`finish` は no-op として残置)
+- `src/decoder/nvcodec.rs`: NvcodecDecoder を同形に書き換え (`input_queue: Arc<Mutex<VecDeque>>` 化、`decoded_queue` / `error_slot` 廃止、`build_handler` シグネチャ変更、callback 内で NV12→I420 変換 + `tokio::task::block_in_place` + `tx.blocking_send`)
+- `src/decoder.rs`: VideoDecoder 構造体を Sender 内蔵 + `(decoder, rx)` タプル戻りに変更、`VideoDecoder::run(self, handle, input_track_id, output_track_id, decoded_rx)` を 2 sub-task (`run_video_decoder_input_task` / `run_video_decoder_output_task`) + `tokio::sync::oneshot` shutdown 経路に分離、`drain_video_decoder_output` / `poll_output` / `next_decoded_frame` 系 dispatch 廃止、エンジン選択テスト 3 件を `#[tokio::test]` に追従
+- `src/subcommand_inspect.rs`: `let (video_decoder, video_decoded_rx) = VideoDecoder::new(...)` 形に追従
+- `src/sora/recording_subcommand_compose.rs`: 同形に追従
+- `src/sora/recording_subcommand_vmaf.rs`: 同形に追従 (2 箇所)
+
+**未着手 (本セッション以降)**:
+- `src/rtmp/inbound_endpoint.rs` (構造体 `decoder: Option<VideoDecoder>` + `handle_input_sample` + `drain_video_decoder_output` 経路)
+- `src/rtsp/subscriber.rs` (同上)
+- `src/srt/inbound_endpoint.rs` (同上)
+- `src/mp4/reader.rs` (`Mp4FileReader::set_video_decoder` + `recreate_decoders` / `flush_decoders` / `reset_for_restart` / `apply_seek` async fn 化、呼出元 15 箇所追従、`drain_video_decoder_output` / `discard_video_decoder_output` 利用 + `video_sender: TrackSender` の SYN/ACK 背圧維持)
+- `src/obsws/source/file_mp4.rs` (`reader.set_video_decoder(decoder)` 廃止)
+- 新規 fixture `crate::video::h264::tests::build_test_h264_keyframe()` 追加
+- end-to-end テスト 3 ケース ((a) Nvcodec callback Err 即時通知 / (b) Openh264 keyframe finish 順序 / (c) VideoToolbox 再初期化順序)
+- `cargo fmt --all --check` / `cargo check --workspace[ --no-default-features]` / `cargo clippy --workspace --all-targets -- --deny warnings[ --no-default-features]` / `cargo test --workspace[ --no-default-features]` の通過確認
+
+**cargo check の現状 (WIP commit `af5f63ce`)**: 22 errors。すべて未着手ファイル 4 件 (`src/mp4/reader.rs`、`src/rtmp/inbound_endpoint.rs`、`src/rtsp/subscriber.rs`、`src/srt/inbound_endpoint.rs`) の旧 API 参照 (`drain_video_decoder_output` / `handle_input_sample` / `poll_output` / `VideoDecoder::new` の旧シグネチャ / `set_video_decoder` の旧シグネチャ) によるもの。decoder 本体のリファクタ自体は完結している。
 
 ### 課題 1: VideoDecoder::run シグネチャと外部利用箇所の不一致
 
 本実装では `VideoDecoder::run(self, handle: ProcessorHandle, input_track_id, output_track_id, decoded_rx)` シグネチャを採用し、内部で `subscribe_track` / `publish_track` / `notify_ready` / `wait_subscribers_ready` を呼ぶ形にした。これは compose / vmaf / inspect / Mp4FileReader 経由の `MediaPipeline::spawn_processor` 利用パターンには合致するが、**RTMP/RTSP/SRT inbound endpoint は subscribe_track 経路を使わず、構造体内 `Option<VideoDecoder>` を保持して自前 frame で `decoder.handle_input_sample(frame)` を直接呼ぶ pull pattern** であり、新シグネチャと整合しない。
+
+なお issue 0066 §設計方針 (本文 §「`run()` ループの構造」) の擬似コードでは `pub async fn run(self, input_rx, output_tx, decoded_rx)` の汎用シグネチャを示していたが、実装段階で `MediaPipeline::spawn_processor` の `move |handle| async { ... }` クロージャ内利用との整合性を優先して `(handle, input_track_id, output_track_id, decoded_rx)` 版を選んだ。この選択は inbound 系を考慮していなかった (本 issue は polish 5 周回したが、inbound 系の pull pattern を見落としていた)。
 
 ### 課題 2: RTMP/RTSP/SRT inbound endpoint の構造改修規模
 
@@ -376,8 +403,9 @@ async fn test_nvcodec_decoder_to_receiver_e2e() {
 - 構造体内 `decoder: Option<VideoDecoder>` を `decoder_input_tx: Option<mpsc::Sender<Message>>` + `decoder_join_handle: Option<JoinHandle<crate::Result<()>>>` に置換
 - 受信ループ全体を「自前で input track を `tokio::sync::broadcast` で作成 → `tokio::spawn(decoder.run(handle, input_track_id, output_track_id, decoded_rx))` 起動 → 受信フレームを broadcast 送信」の構造に再設計
 - 終了時の join_handle await + drop シーケンス追加
+- `publish_samples` 等のヘルパ関数の引数型変更 (例: `&mut Option<VideoDecoder>` → `&mut Option<(JoinHandle, Sender)>`) と呼出元追従
 
-各 200-300 行規模で、合計 600-900 行。`MessageReceiver` (broadcast Receiver) を自前で作る方法も検討が必要。
+各 200-300 行規模で、合計 600-900 行。`MessageReceiver` (broadcast Receiver) を自前で作る方法 (生 `tokio::sync::broadcast::channel` か、`MediaPipeline` の補助 API か) も検討が必要。
 
 ### 課題 3: Mp4FileReader の async fn 化波及
 
@@ -385,21 +413,74 @@ async fn test_nvcodec_decoder_to_receiver_e2e() {
 - `recreate_decoders` / `flush_decoders` / `reset_for_restart` / `apply_seek` の async fn 化
 - 呼出元 15 箇所 (`:339, :350, :378, :383, :465, :475, :479, :484, :494, :498, :503, :519, :523, :528, :645`) の `.await` 付与
 - `TrackSender` ラッパー (SYN/ACK 背圧 `MAX_NOACKED_COUNT=100`) を decoder task 側で維持
-- `set_video_decoder` 廃止 + `obsws/source/file_mp4.rs` 改修
+- `discard_video_decoder_output` (`src/mp4/reader.rs:1388`) と audio 側 `discard_decoder_output` (`:1382`) の Sender 化対応
+- `set_video_decoder` (`src/mp4/reader.rs:318`) 廃止 + `obsws/source/file_mp4.rs:54, 61` 改修
 
 500-800 行規模。
 
 ### 解決策の選択肢
 
-- **(α) スコープ縮小**: 本 issue 0066 を mp4 系 (compose / vmaf / inspect / Mp4FileReader / obsws/file_mp4) のみで完了し、RTMP/RTSP/SRT inbound の Sender 化は **別 issue (0068 として新規起票)** に切り出す。issue 0067 (encoder) 着手前に inbound 系を片付ける。本 issue の「全使用側を Sender 化」宣言を緩める必要あり
-- **(β) `VideoDecoder::run` シグネチャを `(input_rx, output_tx, decoded_rx)` 汎用形に変更**: compose / vmaf / inspect / Mp4FileReader 側で `subscribe_track` / `publish_track` を別途呼び、inbound endpoint も自前 channel を直接渡す。全使用側で書き換え対象が広がり、1000+ 行追加追従
-- **(γ) ハイブリッド**: `VideoDecoder::run` は現状の `(handle, input_track_id, output_track_id, decoded_rx)` 維持しつつ、`VideoDecoder::run_with_channels(input_rx, output_tx, decoded_rx)` の低レベル API を追加し、inbound endpoint は後者を使う。API 表面が 2 つになるトレードオフ
+| 方針 | 影響範囲 | 追加作業量 | 中間状態の clean さ | 採用案 C との整合 | 将来 inbound 対応の柔軟性 |
+|------|----------|------------|---------------------|---------------------|----------------------------|
+| (α) スコープ縮小: 本 issue は mp4 系のみ、inbound は別 issue 0068 | mp4 系のみ | 残り 600-800 行 | mp4 系完全統一、inbound は旧 API 維持の中途半端 | 「全使用側を Sender 化」宣言を緩める | 別 issue 0068 で再設計可能 |
+| (β) `VideoDecoder::run` シグネチャを `(input_rx, output_tx, decoded_rx)` 汎用形に変更し全 8 ファイル追従 | 全使用側 (8+ ファイル) | 残り 1500-2000 行 | 全 API 統一、最終形 | 完全整合 | 不要 |
+| (γ) `run` + `run_with_channels` の 2 API 並存 | 全使用側、ただし API 2 つ | 残り 1200-1500 行 | API 表面 2 つの保守コスト | 部分整合 (内部 2 系統) | 一定の柔軟性 |
+
+### 選択肢ごとの具体的な未着手作業
+
+**(α) を採用する場合**:
+1. 本 issue 本文の「現状」§ 外部利用箇所表で RTMP/RTSP/SRT inbound 3 行を「scope 外、別 issue 0068 で対応」と注記 (削除はしない、移管参照として残す)
+2. 完了条件から inbound 関連項目を削除
+3. 別 issue 0068 を `/create-issue` で起票 (タイトル例: `RTMP/RTSP/SRT inbound endpoint の VideoDecoder を Sender 出力に統一する`)
+4. closed/0057 §3 分割表に 0068 を追加 (依存順序: `0066 → 0067 → 0068` または `0066 → (0067 ∥ 0068)`)
+5. Mp4FileReader + obsws/file_mp4 の Sender 化を本 issue で実装 (残り 600-800 行)
+6. テスト追加 + cargo check 通過
+
+**(β) を採用する場合**:
+1. `VideoDecoder::run` を `(input_rx, output_tx, decoded_rx)` シグネチャに変更
+2. compose / vmaf / inspect (既に追従済み) で `subscribe_track` / `publish_track` / `notify_ready` / `wait_subscribers_ready` を呼ぶ形に再追従
+3. Mp4FileReader 改修 + obsws/file_mp4
+4. RTMP/RTSP/SRT inbound 3 ファイルを自前 broadcast channel pattern で書き換え
+5. テスト追加 + cargo check 通過
+
+**(γ) を採用する場合**:
+1. `VideoDecoder` に `run_with_channels(input_rx, output_tx, decoded_rx)` を追加 ((β) と同じ実体)、既存の `run` は内部で channel を作成して `run_with_channels` を呼ぶ wrapper にする
+2. Mp4FileReader 改修 + obsws/file_mp4
+3. RTMP/RTSP/SRT inbound 3 ファイルを `run_with_channels` 利用で書き換え
+4. テスト追加 + cargo check 通過
+
+### 設計判断の保留事項
+
+- **VideoDecoder::run シグネチャ**: 現状実装 `(handle, input_track_id, output_track_id, decoded_rx)` を維持するか、issue 0066 §設計方針の擬似コード通り `(input_rx, output_tx, decoded_rx)` 汎用形に変更するか
+- **inbound 系の input channel 作成方法**: 生 `tokio::sync::broadcast::channel` を直接使うか、`MediaPipeline` に補助 API を追加するか
+- **`MessageReceiver` の type alias**: 現状 `tokio::sync::broadcast::Receiver<Message>` のラッパー。自前 broadcast pattern と整合するか確認必要
+- **`TrackSender` の所有移譲方式**: Mp4FileReader 内の `TrackSender` (SYN/ACK 背圧) を decoder task に move するか、decoder 内部に等価な背圧機構を導入するか
+- **N=1 vs N=8 (VideoToolbox)**: 本 issue 起票時点で N=8 暫定固定、別 issue で計測する方針。本 issue 完了時には N=8 で進める
+
+### 再開時の手順案
+
+方針 (α/β/γ) 確定後の作業順:
+
+1. WIP commit `af5f63ce` から作業ブランチを継続 (本ブランチ `feature/refactor-video-decoder-sender-interface`)
+2. 方針確定に伴う decoder.rs / 各 inner の追加修正があれば実施 (β 採用なら `run` シグネチャ変更)
+3. Mp4FileReader (mp4/reader.rs) 改修
+4. obsws/source/file_mp4 改修
+5. (β または γ) RTMP/RTSP/SRT inbound 3 ファイル改修 / (α) この step skip
+6. 新規 fixture `build_test_h264_keyframe` 追加 (`src/video/h264.rs::tests`)
+7. end-to-end テスト 3 ケース追加 (`src/decoder/nvcodec.rs` 末尾)
+8. `cargo fmt --all && cargo check --workspace && cargo clippy --workspace --all-targets -- --deny warnings && cargo test --workspace` 通過確認
+9. `--no-default-features` 系チェック通過確認
+10. (α 採用時) 別 issue 0068 を `/create-issue` で起票、本 issue 本文の「現状」§ 外部利用箇所表と完了条件を inbound 除外形に修正
+11. 最終 commit (WIP の squash も検討、ただし WIP は git 履歴として残す方が筋)
+12. PR 作成
 
 ### 次の方針相談ポイント (Decision Owner = @sile)
 
 - 上記 (α) / (β) / (γ) のいずれを採用するか
-- (α) を採用する場合、別 issue 0068 の起票方針 (inbound 3 ファイル + 既存の callback friendly 設計をどう適用するか)
-- 本 issue 完了基準を「mp4 系のみ Sender 化、inbound は別 issue」に絞った場合、「現状」§ 外部利用箇所表の inbound 行をどう扱うか (一旦削除して別 issue に移管、または「scope 外」と注記)
+- (α) を採用する場合、別 issue 0068 の起票方針 (inbound 3 ファイル + 既存の callback friendly 設計をどう適用するか) と、closed/0057 §3 分割表への追記
+- 「現状」§ 外部利用箇所表の inbound 行をどう扱うか (一旦削除して別 issue に移管、または「scope 外」と注記)
+- VideoDecoder::run シグネチャを変更するか否か (β/γ 採用時の追加作業を許容するか)
+- WIP commit `af5f63ce` を squash するかしないか (本 PR に WIP 履歴を残すか)
 
 ## CHANGES.md について
 
