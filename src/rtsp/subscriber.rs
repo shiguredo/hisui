@@ -39,7 +39,7 @@ pub struct RtspSubscriber {
     pub(crate) output_video_track_id: Option<TrackId>,
 }
 
-/// `RtspSubscriber::new()` が返す検証エラー
+/// `RtspSubscriber::new()` が返す検証エラー。
 #[derive(Debug)]
 pub enum RtspSubscriberBuildError {
     EmptyInputUrl,

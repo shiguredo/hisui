@@ -25,7 +25,7 @@ pub struct RtmpInboundEndpoint {
     pub(crate) options: RtmpInboundEndpointOptions,
 }
 
-/// `RtmpInboundEndpoint::new()` が返す検証エラー
+/// `RtmpInboundEndpoint::new()` が返す検証エラー。
 #[derive(Debug)]
 pub enum RtmpInboundEndpointBuildError {
     EmptyInputUrl,

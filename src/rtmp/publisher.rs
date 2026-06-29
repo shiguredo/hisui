@@ -42,7 +42,7 @@ pub struct RtmpPublisher {
     pub(crate) options: RtmpPublisherOptions,
 }
 
-/// `RtmpPublisher::new()` が返す検証エラー
+/// `RtmpPublisher::new()` が返す検証エラー。
 #[derive(Debug)]
 pub enum RtmpPublisherBuildError {
     EmptyOutputUrl,

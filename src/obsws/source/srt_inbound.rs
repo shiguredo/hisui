@@ -124,4 +124,31 @@ mod tests {
             passphrase: None,
         }));
     }
+
+    // is_source_startable は空文字を弾かず、最終的な検証は new()? で行う責務分担を退行検知する
+    #[test]
+    fn is_source_startable_accepts_empty_input_url() {
+        assert!(is_source_startable(&ObswsSrtInboundSettings {
+            input_url: Some(String::new()),
+            stream_id: None,
+            passphrase: None,
+        }));
+    }
+
+    // 空 input_url は build_record_source_plan の new()? で InvalidInput として弾かれることを退行検知する
+    #[test]
+    fn build_record_source_plan_rejects_empty_input_url() {
+        let err = build_record_source_plan(
+            &ObswsSrtInboundSettings {
+                input_url: Some(String::new()),
+                stream_id: None,
+                passphrase: None,
+            },
+            "0",
+        )
+        .err()
+        .expect("空 input_url は拒否される");
+        let BuildObswsRecordSourcePlanError::InvalidInput(msg) = err;
+        assert!(msg.contains("invalid srt_inbound config"));
+    }
 }

@@ -42,7 +42,7 @@ pub struct RtmpOutboundEndpoint {
     pub(crate) options: RtmpOutboundEndpointOptions,
 }
 
-/// `RtmpOutboundEndpoint::new()` が返す検証エラー
+/// `RtmpOutboundEndpoint::new()` が返す検証エラー。
 #[derive(Debug)]
 pub enum RtmpOutboundEndpointBuildError {
     EmptyOutputUrl,

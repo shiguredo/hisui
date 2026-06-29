@@ -30,17 +30,17 @@ pub struct SrtInboundEndpoint {
 /// `SrtInboundEndpoint` 用オプション群
 #[derive(Debug, Clone, Default)]
 pub struct SrtInboundEndpointOptions {
-    // SRT caller が送る streamid の期待値（省略時は検証しない）。
+    /// SRT caller が送る streamid の期待値（省略時は検証しない）。
     pub stream_id: Option<String>,
-    // SRT 暗号化（KM ハンドシェイク）を有効化するパスフレーズ。
+    /// SRT 暗号化（KM ハンドシェイク）を有効化するパスフレーズ。
     pub passphrase: Option<String>,
-    // SRT 暗号化の鍵長（passphrase 指定時のみ有効）。
+    /// SRT 暗号化の鍵長（passphrase 指定時のみ有効）。
     pub key_length: Option<KeyLength>,
-    // TSBPD 遅延。
+    /// TSBPD 遅延。
     pub tsbpd_delay_ms: Option<Duration>,
 }
 
-/// `SrtInboundEndpoint::new()` が返す検証エラー
+/// `SrtInboundEndpoint::new()` が返す検証エラー。
 #[derive(Debug)]
 pub enum SrtInboundEndpointBuildError {
     EmptyInputUrl,
