@@ -464,7 +464,7 @@ closed/0057 §3 で採用案 C の長所として挙げられた 5 項目を本 
 - **0068 line 158 / 0067 line 85 の Branch 表記修正**: ファイル名 rename に合わせて `feature/refactor-add-async-video-decoder` 表記に統一 (本 PR 内で同時 commit)
 - **closed/0057 §3 分割表更新**: `issues/closed/0057-feature-refactor-callback-friendly-codec-interface.md` line 350-353 に 0068 行追加 + 末尾備考に方針 (δ) 注記を本 PR 内で同時 commit。 追加文字列の具体例は §解決方法 6 参照
 - 新規 end-to-end テスト 2 ケースが追加されている:
-  - (a) `src/decoder/nvcodec.rs` 末尾: `NvcodecDecoder` で callback 内 `Err` が次回 `try_recv()` で取得できる。 `#[cfg(feature = "nvcodec")]` ガード + GPU 環境のないテストでも実行可能な形 (構造体生成は `is_cuda_library_available()` 等でガード、 channel 経由検証は `OutputSink` を直接生成して `emit_err` を呼ぶ形で書く)
+  - (a) `src/decoder/nvcodec.rs` 末尾: callback の Err 分岐共通処理 `clear_input_queue_and_emit_err` の単体テスト。 `input_queue` クリアと `sink.emit_err` 経由の channel 配信が物理ペアリングされていることを GPU 不要で検証する。 `NvcodecDecoder` 構造体生成テストは GPU 必須のため本 issue では追加せず、 既存 integration test (`tests/e2e.rs::simple_single_source_vp9_nvcodec` 等の `--features nvcodec` CI ジョブ) で実体カバレッジを担保する
   - (c) `tests/decoder_tests.rs` (integration test): 実 VP9 fixture を 1 frame 読み込み `AsyncVideoDecoder::handle_input_sample_sync` → `next_decoded_frame_async` の wrap delegation 全段を踏破できることを `#[tokio::test(flavor = "multi_thread")]` で検証 (sink を private 内部から取り出す smoke test では検証できない「inner.decode と sink.emit_ok の繋ぎ込み」の正常性を担保)
   - (旧 (b) Openh264 keyframe シーケンス順序保証テストは見送り。 `decode()` 内の `if frame.keyframe { self.finish()?; }` の直後で同じ `sink.emit_ok` 呼出が 1 本の関数フローで連続するため、 順序保証はコードレベルで自明。 動的 fixture を捏造して OpenH264 ライブラリに通すと CI で実 codec 判定に失敗するため、 ユニットテスト化には実 H.264 fixture が必要で投資対効果が低い)
 - メトリクス検証はテスト内では行わない (inner 直叩きでは `total_input` が増えない仕様)
@@ -591,7 +591,7 @@ while let Ok(result) = rx.try_recv() {
 
 完了条件 (a)(c) の 2 ケースを以下に配置 ((b) は見送り、 §完了条件 参照):
 
-- (a) `src/decoder/nvcodec.rs` 末尾: `OutputSink` を直接生成して `emit_err` を呼び、 `rx.try_recv()` で `Err` を取得できることを検証 (GPU 不要、 channel 部分のみ)。 加えて `#[cfg(feature = "nvcodec")]` で構造体生成テストも別途追加 (`is_cuda_library_available()` でガード)
+- (a) `src/decoder/nvcodec.rs` 末尾: callback の Err 分岐共通処理 `clear_input_queue_and_emit_err` を関数抽出して単体テスト (GPU 不要、 input_queue クリアと sink.emit_err のペアリング検証)。 構造体生成テストは GPU 必須のため本 issue では追加せず、 `--features nvcodec` の既存 integration test で代替する
 - (c) `src/decoder.rs` 末尾: `AsyncVideoDecoder::next_decoded_frame_async()` の `#[tokio::test(flavor = "multi_thread")]` で正常動作確認
 
 ### 9. 既存テストの追従
