@@ -360,6 +360,47 @@ async fn test_nvcodec_decoder_to_receiver_e2e() {
 
 モック / スタブは不要 (`shiguredo-rust` 規約 OK)。
 
+## 実装途中で発見された複雑化課題 (2026-06-29 追記)
+
+実装着手後、step 3-6 (5 inner Sender 化 + VideoDecoder::run() 2 task 化) + simple 外部利用箇所 (subcommand_inspect / recording_subcommand_compose / recording_subcommand_vmaf) までは想定通り進んだ。WIP commit (`af5f63ce`) 時点でビルド未通過。
+
+残り作業 (RTMP/RTSP/SRT inbound endpoint + Mp4FileReader 再設計 + obsws/source/file_mp4) で **想定 1500-2500 行を超える可能性が高い** 複雑化課題が判明したため整理する。
+
+### 課題 1: VideoDecoder::run シグネチャと外部利用箇所の不一致
+
+本実装では `VideoDecoder::run(self, handle: ProcessorHandle, input_track_id, output_track_id, decoded_rx)` シグネチャを採用し、内部で `subscribe_track` / `publish_track` / `notify_ready` / `wait_subscribers_ready` を呼ぶ形にした。これは compose / vmaf / inspect / Mp4FileReader 経由の `MediaPipeline::spawn_processor` 利用パターンには合致するが、**RTMP/RTSP/SRT inbound endpoint は subscribe_track 経路を使わず、構造体内 `Option<VideoDecoder>` を保持して自前 frame で `decoder.handle_input_sample(frame)` を直接呼ぶ pull pattern** であり、新シグネチャと整合しない。
+
+### 課題 2: RTMP/RTSP/SRT inbound endpoint の構造改修規模
+
+3 ファイル (`src/rtmp/inbound_endpoint.rs`, `src/rtsp/subscriber.rs`, `src/srt/inbound_endpoint.rs`) はそれぞれ:
+- 構造体内 `decoder: Option<VideoDecoder>` を `decoder_input_tx: Option<mpsc::Sender<Message>>` + `decoder_join_handle: Option<JoinHandle<crate::Result<()>>>` に置換
+- 受信ループ全体を「自前で input track を `tokio::sync::broadcast` で作成 → `tokio::spawn(decoder.run(handle, input_track_id, output_track_id, decoded_rx))` 起動 → 受信フレームを broadcast 送信」の構造に再設計
+- 終了時の join_handle await + drop シーケンス追加
+
+各 200-300 行規模で、合計 600-900 行。`MessageReceiver` (broadcast Receiver) を自前で作る方法も検討が必要。
+
+### 課題 3: Mp4FileReader の async fn 化波及
+
+`Mp4FileReader` も subscribe_track 経路ではなく `video_sender.sender` 直渡しで `drain_video_decoder_output(decoder, &mut sender.sender)` を呼ぶ pull pattern。さらに:
+- `recreate_decoders` / `flush_decoders` / `reset_for_restart` / `apply_seek` の async fn 化
+- 呼出元 15 箇所 (`:339, :350, :378, :383, :465, :475, :479, :484, :494, :498, :503, :519, :523, :528, :645`) の `.await` 付与
+- `TrackSender` ラッパー (SYN/ACK 背圧 `MAX_NOACKED_COUNT=100`) を decoder task 側で維持
+- `set_video_decoder` 廃止 + `obsws/source/file_mp4.rs` 改修
+
+500-800 行規模。
+
+### 解決策の選択肢
+
+- **(α) スコープ縮小**: 本 issue 0066 を mp4 系 (compose / vmaf / inspect / Mp4FileReader / obsws/file_mp4) のみで完了し、RTMP/RTSP/SRT inbound の Sender 化は **別 issue (0068 として新規起票)** に切り出す。issue 0067 (encoder) 着手前に inbound 系を片付ける。本 issue の「全使用側を Sender 化」宣言を緩める必要あり
+- **(β) `VideoDecoder::run` シグネチャを `(input_rx, output_tx, decoded_rx)` 汎用形に変更**: compose / vmaf / inspect / Mp4FileReader 側で `subscribe_track` / `publish_track` を別途呼び、inbound endpoint も自前 channel を直接渡す。全使用側で書き換え対象が広がり、1000+ 行追加追従
+- **(γ) ハイブリッド**: `VideoDecoder::run` は現状の `(handle, input_track_id, output_track_id, decoded_rx)` 維持しつつ、`VideoDecoder::run_with_channels(input_rx, output_tx, decoded_rx)` の低レベル API を追加し、inbound endpoint は後者を使う。API 表面が 2 つになるトレードオフ
+
+### 次の方針相談ポイント (Decision Owner = @sile)
+
+- 上記 (α) / (β) / (γ) のいずれを採用するか
+- (α) を採用する場合、別 issue 0068 の起票方針 (inbound 3 ファイル + 既存の callback friendly 設計をどう適用するか)
+- 本 issue 完了基準を「mp4 系のみ Sender 化、inbound は別 issue」に絞った場合、「現状」§ 外部利用箇所表の inbound 行をどう扱うか (一旦削除して別 issue に移管、または「scope 外」と注記)
+
 ## CHANGES.md について
 
 内部リファクタにつき記載不要。`VideoDecoder` 系は library として外部公開していないため、API 変更の後方互換影響は obsws coordinator / mixer / writer / subcommand 階層等の crate 内利用箇所のみ。
