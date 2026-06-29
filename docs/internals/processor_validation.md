@@ -2,10 +2,6 @@
 
 この文書は、5 つの processor 構造体（`RtmpInboundEndpoint` / `RtmpOutboundEndpoint` / `RtmpPublisher` / `SrtInboundEndpoint` / `RtspSubscriber`）について、フィールドの不変条件をどこで保証するかをまとめます。
 
-過去の経緯として、これら 5 構造体には `impl TryFrom<nojson::RawJsonValue>` が存在し、構造体を組み立てる際に eager に validation を実施していました。
-当該実装は `feature/refactor-remove-unused-processor-json-impls`（merge commit `42979dae`）で JSON-RPC 経路廃止に伴い削除されており、削除直後はフィールドが `pub` のままで型システムから保証されない暴露面が残っていました。
-本文書は `feature/refactor-clarify-processor-validation-boundary` での再整理結果を、規約として残すためのものです（`feature/add-internals-processor-conventions-doc` の commit `aa3c589a` で 0040 を close した際に、本ノートを 0046 完了時に生やす方針が確定しています）。
-
 ## 不変条件
 
 > **5 構造体のフィールドは、`Self::new()` を経由した組立で eager に検証される。フィールドは `pub(crate)` のため crate 外から直接組み立てることはできない。**
@@ -113,6 +109,3 @@ obsws WebSocket 経由で空文字が来た場合、startable 判定では `true
 - `src/obsws/coordinator/` および `src/obsws/source/`（obsws 経路からの組立点）
 - `src/error.rs`（`crate::Error` の設計方針：`From<E> for Error` 自動変換は実装しない）
 - [`sample_entry_invariant.md`](sample_entry_invariant.md)（writer 入口の sample_entry 不変条件）
-- `feature/refactor-remove-unused-processor-json-impls`（merge commit `42979dae`）: 旧 `TryFrom` 経路の削除
-- `feature/refactor-clarify-processor-validation-boundary`: 本ノートの成果物となるブランチ
-- `feature/add-internals-processor-conventions-doc`（commit `aa3c589a`）: 本ノートを生やす方針を決めた close 判断
