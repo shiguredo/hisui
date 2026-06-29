@@ -82,7 +82,7 @@ closed issue 0057 §3 採用案 C「実装前提」に従う。issue 0066 (decod
 ## 関連
 
 - closed/0057 (`feature/refactor-callback-friendly-codec-interface`): 設計検討の親 issue。本 issue は §3 採用案 C の encoder 部分実装
-- open/0066 (`feature/refactor-video-decoder-sender-interface`): decoder 側の先行 PR。本 issue は 0066 完了後に着手する
+- open/0066 (`feature/refactor-add-async-video-decoder`): decoder 側の先行 PR。本 issue は 0066 完了後に着手する
 - closed/0027 (`feature/refactor-video-sample-entry-all-frames`): 「映像エンコーダは全出力フレームに sample_entry を載せる」不変条件。本 issue の Receiver 受信ループで維持責任を保つ
 - closed/0030 (`feature/refactor-encoded-frame-sample-entry-invariant`): エンコード済みフレームの sample_entry 必須化。同上
 - closed/0051 (`feature/refactor-remove-writer-sample-entry-fallback`): writer 入口の不変条件 (圧縮フレームの sample_entry は必ず `Some`)。本 issue の Receiver 受信ループで違反しない設計を維持
