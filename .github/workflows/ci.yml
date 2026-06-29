@@ -61,7 +61,7 @@ jobs:
           echo "CUDA_PATH=/usr/local/cuda" >> $GITHUB_ENV
           echo "/usr/local/cuda/bin" >> $GITHUB_PATH
       - run: cargo check --features nvcodec -p hisui
-      - run: cargo clippy --features nvcodec -p hisui -- --deny warnings
+      - run: cargo clippy --features nvcodec -p hisui --all-targets -- --deny warnings
       - run: cargo test --features nvcodec -p hisui -- --test-threads=1
       - run: cargo check --features candle,candle-cuda -p hisui
       - run: cargo clippy --features candle,candle-cuda -p hisui --all-targets -- --deny warnings
@@ -86,8 +86,10 @@ jobs:
           brew update
           brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config protobuf
       - run: cargo check --workspace
-      - run: cargo clippy --workspace -- --deny warnings
+      - run: cargo clippy --workspace --all-targets -- --deny warnings
       - run: cargo test --workspace
+      - run: cargo check --features candle,candle-metal -p hisui
+      - run: cargo clippy --features candle,candle-metal -p hisui --all-targets -- --deny warnings
       - run: cargo test --features candle,candle-metal -p hisui
 
   test-fdk-aac:
