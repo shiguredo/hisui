@@ -884,47 +884,6 @@ mod tests {
         );
     }
 
-    /// `AsyncVideoDecoder::next_decoded_frame_async` で sink から emit された frame を受信できることを確認する
-    ///
-    /// inner を実 codec で初期化すると fixture が必要になるため、 `Initial` variant 内の sink を
-    /// pattern matching で取り出して直接 `emit_ok` を呼ぶ形で検証する。 これは `AsyncVideoDecoder` の
-    /// sink → channel → `next_decoded_frame_async` の経路が正しく繋がっているかの smoke test。
-    #[tokio::test(flavor = "multi_thread")]
-    async fn async_video_decoder_next_decoded_frame_async_returns_emitted_frame() -> Result<()> {
-        let options = VideoDecoderOptions::default();
-        let stats = crate::stats::Stats::new();
-        let mut decoder = AsyncVideoDecoder::new(options, stats);
-
-        // Initial variant 内の sink を取り出して直接 emit する (実 inner を初期化せずに channel 経路だけ検証)
-        let sink = match &decoder.inner {
-            VideoDecoderInner::Initial { sink, .. } => sink.clone(),
-            _ => panic!("初期状態は Initial variant が期待される"),
-        };
-
-        let test_frame = VideoFrame {
-            data: vec![1, 2, 3],
-            format: VideoFormat::Vp9,
-            keyframe: true,
-            size: Some(VideoFrameSize {
-                width: 16,
-                height: 16,
-            }),
-            timestamp: Duration::from_millis(0),
-            sample_entry: None,
-        };
-        sink.emit_ok(test_frame.clone());
-
-        match decoder.next_decoded_frame_async().await {
-            Some(Ok(frame)) => {
-                assert_eq!(frame.data, vec![1, 2, 3]);
-                assert_eq!(frame.format, VideoFormat::Vp9);
-            }
-            other => panic!("正常フレーム (Some(Ok(_))) を期待したが {other:?} を受信した"),
-        }
-
-        Ok(())
-    }
-
     /// size ありの VP9 フレームでは macOS 対応環境なら VideoToolbox、非対応なら Libvpx が選ばれることを確認する
     #[test]
     fn vp9_with_size_selects_available_engine() {

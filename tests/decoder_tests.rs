@@ -48,6 +48,46 @@ fn av1_multi_resolutions() -> hisui::Result<()> {
     Ok(())
 }
 
+/// `AsyncVideoDecoder` の wrap delegation 経路を実 VP9 fixture で検証する
+///
+/// 検証対象パス: `AsyncVideoDecoder::handle_input_sample_sync` → `VideoDecoderInner::decode`
+/// → `Initial` → `Libvpx` への遷移 → `LibvpxDecoder::decode` → `sink.emit_ok` → 内部 channel
+/// → `rx.recv` → `next_decoded_frame_async` の全段を 1 frame で踏破することを確認する。
+///
+/// これは sink を private 内部から取り出す smoke test (旧 (c) テスト) では検証できなかった
+/// 「inner.decode と sink.emit_ok の繋ぎ込み」の正常性回帰検出となる。
+#[tokio::test(flavor = "multi_thread")]
+async fn async_video_decoder_processes_real_vp9_frame_via_wrap_delegation() -> hisui::Result<()> {
+    use hisui::MediaFrame;
+    use hisui::decoder::AsyncVideoDecoder;
+
+    // 既存 vp9_multi_resolutions と同じ fixture を 1 frame だけ使う
+    let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
+    let first_frame = reader
+        .next()
+        .expect("少なくとも 1 frame 含まれているはず")?;
+
+    let options = VideoDecoderOptions::default();
+    let stats = hisui::stats::Stats::new();
+    let mut decoder = AsyncVideoDecoder::new(options, stats);
+
+    // wrap delegation: handle_input_sample_sync 経由で inner.decode → sink.emit_ok を実行する
+    decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
+    // EOS で inner.finish() 経由を踏ませて未排出フレームをすべて吐かせる
+    decoder.handle_input_sample_sync(None)?;
+
+    // wrap delegation: rx.recv 経由で正常 frame を取得できることを確認する
+    match decoder.next_decoded_frame_async().await {
+        Some(Ok(frame)) => {
+            let size = frame.size().expect("VP9 fixture は size を持つはず");
+            assert_eq!(size.width, 640, "fixture 解像度と一致するはず");
+            assert_eq!(size.height, 480, "fixture 解像度と一致するはず");
+        }
+        other => panic!("正常 frame (Some(Ok(_))) を期待したが {other:?} を受信した"),
+    }
+    Ok(())
+}
+
 fn multi_resolutions_test<I>(reader0: I, reader1: I) -> hisui::Result<()>
 where
     I: Iterator<Item = hisui::Result<VideoFrame>>,
