@@ -136,8 +136,7 @@ jobs:
 
   test-candle:
     # 本 job は candle feature 有効ビルドの妥当性 (protoc / onig / candle 依存解決) と
-    # 最小 device テストを検証する。0061 で actions/cache@v4 + uv + 実モデル取得を、
-    # 0062 で実推論テストを順次積み増す。
+    # 最小 device テストを検証する。
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
