@@ -23,11 +23,16 @@ pub(super) fn build_record_source_plan(
     let raw_video_track_id = TrackId::new(format!("input:raw_video:{source_key}"));
     let raw_audio_track_id = TrackId::new(format!("input:raw_audio:{source_key}"));
 
-    let subscriber = crate::rtsp::subscriber::RtspSubscriber {
-        input_url: input_url.to_owned(),
-        output_video_track_id: Some(raw_video_track_id.clone()),
-        output_audio_track_id: Some(raw_audio_track_id.clone()),
-    };
+    let subscriber = crate::rtsp::subscriber::RtspSubscriber::new(
+        input_url.to_owned(),
+        Some(raw_audio_track_id.clone()),
+        Some(raw_video_track_id.clone()),
+    )
+    .map_err(|e| {
+        BuildObswsRecordSourcePlanError::InvalidInput(format!(
+            "invalid rtsp_subscriber config: {e}"
+        ))
+    })?;
 
     Ok(ObswsRecordSourcePlan {
         source_processor_ids: vec![source_processor_id.clone()],
@@ -88,5 +93,28 @@ mod tests {
         assert!(is_source_startable(&ObswsRtspSubscriberSettings {
             input_url: Some("rtsp://127.0.0.1:554/stream".to_owned()),
         }));
+    }
+
+    // is_source_startable は空文字を弾かず、最終的な検証は new()? で行う責務分担を退行検知する
+    #[test]
+    fn is_source_startable_accepts_empty_input_url() {
+        assert!(is_source_startable(&ObswsRtspSubscriberSettings {
+            input_url: Some(String::new()),
+        }));
+    }
+
+    // 空 input_url は build_record_source_plan の new()? で InvalidInput として弾かれることを退行検知する
+    #[test]
+    fn build_record_source_plan_rejects_empty_input_url() {
+        let err = build_record_source_plan(
+            &ObswsRtspSubscriberSettings {
+                input_url: Some(String::new()),
+            },
+            "0",
+        )
+        .err()
+        .expect("空 input_url は拒否される");
+        let BuildObswsRecordSourcePlanError::InvalidInput(msg) = err;
+        assert!(msg.contains("invalid rtsp_subscriber config"));
     }
 }

@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -16,25 +17,82 @@ pub struct RtmpPublisherOptions {
     /// 出力先のネットワークないしサーバーが過負荷に陥っていると判断して、
     /// 接続を強制終了する（エラー扱い）
     ///
-    /// デフォルト値は 1000
-    pub max_buffered_frame_count: usize,
+    /// デフォルト値は 1000。`NonZeroUsize` で 1 以上を型レベルに保証する。
+    pub max_buffered_frame_count: NonZeroUsize,
 }
 
 impl Default for RtmpPublisherOptions {
     fn default() -> Self {
         Self {
-            max_buffered_frame_count: 1000, // FPS にもよるけど概ね 10 秒分くらい
+            // FPS にもよるけど概ね 10 秒分くらい
+            max_buffered_frame_count: NonZeroUsize::new(1000).expect("non-zero constant"),
         }
     }
 }
 
+/// RTMP Publisher
+///
+/// フィールドの不変条件は `Self::new()` で eager 検証される。
 #[derive(Debug, Clone)]
 pub struct RtmpPublisher {
-    pub output_url: String,
-    pub stream_name: Option<String>,
-    pub input_audio_track_id: Option<TrackId>,
-    pub input_video_track_id: Option<TrackId>,
-    pub options: RtmpPublisherOptions,
+    pub(crate) output_url: String,
+    pub(crate) stream_name: Option<String>,
+    pub(crate) input_audio_track_id: Option<TrackId>,
+    pub(crate) input_video_track_id: Option<TrackId>,
+    pub(crate) options: RtmpPublisherOptions,
+}
+
+/// `RtmpPublisher::new()` が返す検証エラー。
+#[derive(Debug)]
+pub enum RtmpPublisherBuildError {
+    EmptyOutputUrl,
+    EmptyStreamName,
+    NoTrackId,
+}
+
+impl std::fmt::Display for RtmpPublisherBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyOutputUrl => write!(f, "output_url must not be empty"),
+            Self::EmptyStreamName => {
+                write!(f, "stream_name must not be empty when specified")
+            }
+            Self::NoTrackId => write!(
+                f,
+                "at least one of input_audio_track_id / input_video_track_id must be set"
+            ),
+        }
+    }
+}
+
+impl RtmpPublisher {
+    /// `RtmpPublisher` を構築する。
+    pub fn new(
+        output_url: String,
+        stream_name: Option<String>,
+        input_audio_track_id: Option<TrackId>,
+        input_video_track_id: Option<TrackId>,
+        options: RtmpPublisherOptions,
+    ) -> Result<Self, RtmpPublisherBuildError> {
+        if output_url.is_empty() {
+            return Err(RtmpPublisherBuildError::EmptyOutputUrl);
+        }
+        if let Some(name) = &stream_name
+            && name.is_empty()
+        {
+            return Err(RtmpPublisherBuildError::EmptyStreamName);
+        }
+        if input_audio_track_id.is_none() && input_video_track_id.is_none() {
+            return Err(RtmpPublisherBuildError::NoTrackId);
+        }
+        Ok(Self {
+            output_url,
+            stream_name,
+            input_audio_track_id,
+            input_video_track_id,
+            options,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +137,7 @@ impl RtmpPublisher {
         let url = parse_rtmp_url(&self.output_url, self.stream_name.as_deref())
             .map_err(|e| Error::new(format!("invalid output_url: {e}")))?;
 
-        let (tx, rx) = tokio::sync::mpsc::channel(self.options.max_buffered_frame_count);
+        let (tx, rx) = tokio::sync::mpsc::channel(self.options.max_buffered_frame_count.get());
 
         let mut runner = RtmpPublishRunner {
             url,

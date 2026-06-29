@@ -23,13 +23,16 @@ pub(super) fn build_record_source_plan(
     let raw_video_track_id = TrackId::new(format!("input:raw_video:{source_key}"));
     let raw_audio_track_id = TrackId::new(format!("input:raw_audio:{source_key}"));
 
-    let endpoint = crate::rtmp::inbound_endpoint::RtmpInboundEndpoint {
-        input_url: input_url.to_owned(),
-        stream_name: settings.stream_name.clone(),
-        output_audio_track_id: Some(raw_audio_track_id.clone()),
-        output_video_track_id: Some(raw_video_track_id.clone()),
-        options: Default::default(),
-    };
+    let endpoint = crate::rtmp::inbound_endpoint::RtmpInboundEndpoint::new(
+        input_url.to_owned(),
+        settings.stream_name.clone(),
+        Some(raw_audio_track_id.clone()),
+        Some(raw_video_track_id.clone()),
+        Default::default(),
+    )
+    .map_err(|e| {
+        BuildObswsRecordSourcePlanError::InvalidInput(format!("invalid rtmp_inbound config: {e}"))
+    })?;
 
     Ok(ObswsRecordSourcePlan {
         source_processor_ids: vec![source_processor_id.clone()],
@@ -110,5 +113,30 @@ mod tests {
             input_url: Some("rtmp://127.0.0.1:1935/live".to_owned()),
             stream_name: None,
         }));
+    }
+
+    // is_source_startable は空文字を弾かず、最終的な検証は new()? で行う責務分担を退行検知する
+    #[test]
+    fn is_source_startable_accepts_empty_input_url() {
+        assert!(is_source_startable(&ObswsRtmpInboundSettings {
+            input_url: Some(String::new()),
+            stream_name: None,
+        }));
+    }
+
+    // 空 input_url は build_record_source_plan の new()? で InvalidInput として弾かれることを退行検知する
+    #[test]
+    fn build_record_source_plan_rejects_empty_input_url() {
+        let err = build_record_source_plan(
+            &ObswsRtmpInboundSettings {
+                input_url: Some(String::new()),
+                stream_name: None,
+            },
+            "0",
+        )
+        .err()
+        .expect("空 input_url は拒否される");
+        let BuildObswsRecordSourcePlanError::InvalidInput(msg) = err;
+        assert!(msg.contains("invalid rtmp_inbound config"));
     }
 }
