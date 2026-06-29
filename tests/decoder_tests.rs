@@ -120,6 +120,56 @@ async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegat
     Ok(())
 }
 
+/// メトリクス二重計上禁止の回帰検出: 1 frame 入力 → `total_input` が 1 inc、
+/// 1 frame 出力 → `total_output` が 1 inc されることを wrap delegation 全段で確認する
+///
+/// issue 0066 設計動機 (`OutputSink` で send と inc を物理的に強制ペアリング) が
+/// 「emit_ok 経路で metric の add(2) 等の二重計上が混入しても検出されない」状態にならないよう、
+/// 量的検証を end-to-end で担保する。
+#[tokio::test(flavor = "multi_thread")]
+async fn async_video_decoder_metrics_increment_once_per_frame_via_wrap_delegation()
+-> hisui::Result<()> {
+    use hisui::MediaFrame;
+    use hisui::decoder::AsyncVideoDecoder;
+
+    let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
+    let first_frame = reader
+        .next()
+        .expect("少なくとも 1 frame 含まれているはず")?;
+
+    // metric handle を先に取得しておく
+    // (Stats::counter は同 name に同 Arc を返す get_or_insert_entry なので、
+    //  ここで取った counter と decoder 内部の counter は同じ Arc を共有する)
+    let mut stats = hisui::stats::Stats::new();
+    let total_input = stats.counter("total_input_video_frame_count");
+    let total_output = stats.counter("total_output_video_frame_count");
+
+    let mut decoder = AsyncVideoDecoder::new(VideoDecoderOptions::default(), stats);
+
+    // 1 frame 入力 → wrap delegation 経由で inner.decode → sink.emit_ok まで実行する
+    decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
+    // 1 frame 出力取得 → rx.recv で取り出す
+    let _output = decoder
+        .next_decoded_frame_async()
+        .await
+        .expect("frame が emit されているはず")?;
+
+    // 二重計上禁止契約: 入力 1 frame = total_input +1
+    assert_eq!(
+        total_input.get(),
+        1,
+        "1 frame 入力で total_input が 1 inc されるはず (二重計上禁止)"
+    );
+    // 二重計上禁止契約: 出力 1 frame = total_output +1 (OutputSink::emit_ok 経由で物理ペアリング)
+    assert_eq!(
+        total_output.get(),
+        1,
+        "1 frame 出力で total_output が 1 inc されるはず (二重計上禁止)"
+    );
+
+    Ok(())
+}
+
 fn multi_resolutions_test<I>(reader0: I, reader1: I) -> hisui::Result<()>
 where
     I: Iterator<Item = hisui::Result<VideoFrame>>,
