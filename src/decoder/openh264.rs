@@ -2,26 +2,37 @@ use std::collections::VecDeque;
 
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
+use tokio::sync::mpsc;
 
 use crate::video::{VideoFormat, VideoFrame};
 
+/// Sender 化された OpenH264 デコーダー
+///
+/// keyframe 入力時には先に `finish()` を呼んで旧 SPS/PPS バッファをフラッシュしてから
+/// 新 keyframe を decode するため、1 回の `decode()` 呼出で 0〜2 フレームを Sender に送信する
+/// 可能性がある (旧 finish 由来 0〜1 + 新 decode 由来 0〜1)。
 #[derive(Debug)]
 pub struct Openh264Decoder {
     inner: shiguredo_openh264::Decoder,
+    // デコード済みフレームと元入力フレームを対応付けるための保持列
     input_queue: VecDeque<VideoFrame>,
-    output_queue: VecDeque<VideoFrame>,
+    // デコード結果を上位 run() の Receiver に流す Sender
+    tx: mpsc::Sender<crate::Result<VideoFrame>>,
 }
 
 impl Openh264Decoder {
-    pub fn new(lib: Openh264Library) -> crate::Result<Self> {
+    pub fn new(
+        lib: Openh264Library,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         Ok(Self {
             inner: shiguredo_openh264::Decoder::new(lib)?,
             input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
+            tx,
         })
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
+    pub async fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB) {
             return Err(crate::Error::new(format!(
                 "expected H264 or H264AnnexB format, got {:?}",
@@ -33,7 +44,9 @@ impl Openh264Decoder {
             // SPS / PPS などが変わると、デコーダーのバッファ内のフレームが失われることがあるようなので、
             // 変更の可能性があるキーフレームを処理する前に、常に finish() を呼ぶようにしている。
             // （よりちゃんとやるなら、frame.data をパースして SPS / PPS の変更をチェックするようにするといい）
-            self.finish()?;
+            // finish() 経由の旧フレームも先に Sender に送信されるため、本 keyframe 処理を含めて
+            // 1 回の decode() で 0〜2 フレーム送信される。
+            self.finish().await?;
         }
 
         let decoded = if matches!(frame.format, VideoFormat::H264) {
@@ -53,11 +66,14 @@ impl Openh264Decoder {
             .pop_front()
             .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
         let output_frame = Self::to_rgb_frame(input_frame, decoded)?;
-        self.output_queue.push_back(output_frame);
+        self.tx
+            .send(Ok(output_frame))
+            .await
+            .map_err(|_| crate::Error::new("decoded frame channel closed"))?;
         Ok(())
     }
 
-    pub fn finish(&mut self) -> crate::Result<()> {
+    pub async fn finish(&mut self) -> crate::Result<()> {
         let Some(decoded) = self.inner.finish()? else {
             return Ok(());
         };
@@ -66,7 +82,10 @@ impl Openh264Decoder {
             .pop_front()
             .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
         let output_frame = Self::to_rgb_frame(input_frame, decoded)?;
-        self.output_queue.push_back(output_frame);
+        self.tx
+            .send(Ok(output_frame))
+            .await
+            .map_err(|_| crate::Error::new("decoded frame channel closed"))?;
         Ok(())
     }
 
@@ -85,10 +104,6 @@ impl Openh264Decoder {
             frame.u_stride(),
             frame.v_stride(),
         ))
-    }
-
-    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
     }
 }
 

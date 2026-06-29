@@ -14,6 +14,7 @@ pub mod video_toolbox;
 use std::collections::VecDeque;
 
 use shiguredo_openh264::Openh264Library;
+use tokio::sync::mpsc;
 
 use self::dav1d::Dav1dDecoder;
 use self::libvpx::LibvpxDecoder;
@@ -24,7 +25,7 @@ use self::opus::OpusDecoder;
 #[cfg(target_os = "macos")]
 use self::video_toolbox::VideoToolboxDecoder;
 use crate::{
-    Error, Message, ProcessorHandle, Result, TrackId,
+    Error, Message, MessageReceiver, ProcessorHandle, Result, TrackId, TrackPublisher,
     audio::{AudioFormat, AudioFrame},
     media::MediaFrame,
     types::{CodecName, EngineName},
@@ -326,19 +327,32 @@ pub struct VideoDecoderOptions {
     pub engines: Option<Vec<EngineName>>,
 }
 
+/// 内部 channel の容量
+///
+/// `inner.decode()` 1 回が送出しうる最大フレーム数 + 余裕で N=8 とする
+/// (例: Openh264 は keyframe 時の finish() 経由で最大 2 フレーム送出するため、N >= 4 が必須)。
+const INTERNAL_CHANNEL_CAPACITY: usize = 8;
+
 #[derive(Debug)]
 pub struct VideoDecoder {
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_output_video_frame_count_metric: crate::stats::StatsCounter,
-    decoded: VecDeque<VideoFrame>,
-    eos: bool,
     inner: VideoDecoderInner,
+    // 内部 inner → run() 出力 task の橋渡し用 Sender
+    // (decode 完了フレームを上位の `mpsc::Receiver` 側に流す)
+    tx: mpsc::Sender<crate::Result<VideoFrame>>,
 }
 
 impl VideoDecoder {
-    pub fn new(options: VideoDecoderOptions, mut compose_stats: crate::stats::Stats) -> Self {
+    /// VideoDecoder と、対の Receiver (内部 channel の受信側) を生成する。
+    ///
+    /// 戻り値の Receiver は呼出側で保持し、 `run()` 起動時に引数で戻す。
+    pub fn new(
+        options: VideoDecoderOptions,
+        mut compose_stats: crate::stats::Stats,
+    ) -> (Self, mpsc::Receiver<crate::Result<VideoFrame>>) {
         let engine_metric = compose_stats.string("engine");
         let codec_metric = compose_stats.string("codec");
         let total_input_video_frame_count_metric =
@@ -346,87 +360,73 @@ impl VideoDecoder {
         let total_output_video_frame_count_metric =
             compose_stats.counter("total_output_video_frame_count");
         compose_stats.flag("error").set(false);
-        Self {
+        let (tx, rx) = mpsc::channel(INTERNAL_CHANNEL_CAPACITY);
+        (
+            Self {
+                engine_metric,
+                codec_metric,
+                total_input_video_frame_count_metric,
+                total_output_video_frame_count_metric,
+                inner: VideoDecoderInner::new(options),
+                tx,
+            },
+            rx,
+        )
+    }
+
+    /// 入力 / 出力を 2 sub-task に分離して実行する。
+    ///
+    /// - run_input task: input_rx 受信 → inner.decode() → 内部 channel (tx) に push
+    /// - run_output task: 内部 channel (decoded_rx) 受信 → output_tx.send_media()
+    /// - 出力 task が下流 close を検知したら oneshot で入力 task に shutdown 伝達
+    /// - 入力 task が EOS を受けたら inner.finish() で残フレームを流して tx drop、
+    ///   出力 task は channel close を検知して send_eos して終了
+    pub async fn run(
+        self,
+        handle: ProcessorHandle,
+        input_track_id: TrackId,
+        output_track_id: TrackId,
+        decoded_rx: mpsc::Receiver<crate::Result<VideoFrame>>,
+    ) -> Result<()> {
+        let input_rx = handle.subscribe_track(input_track_id);
+        let output_tx = handle.publish_track(output_track_id).await?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
+
+        let Self {
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
             total_output_video_frame_count_metric,
-            decoded: VecDeque::new(),
-            eos: false,
-            inner: VideoDecoderInner::new(options),
-        }
-    }
+            inner,
+            tx,
+        } = self;
 
-    pub async fn run(
-        mut self,
-        handle: ProcessorHandle,
-        input_track_id: TrackId,
-        output_track_id: TrackId,
-    ) -> Result<()> {
-        let mut input_rx = handle.subscribe_track(input_track_id);
-        let mut output_tx = handle.publish_track(output_track_id).await?;
-        handle.notify_ready();
-        handle.wait_subscribers_ready().await?;
+        // 出力 task → 入力 task への shutdown 伝達 (下流 close 検知時)
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-        loop {
-            let message = input_rx.recv().await;
-            let is_eos = matches!(message, Message::Eos);
+        let input_handle = tokio::spawn(run_video_decoder_input_task(
+            inner,
+            tx,
+            input_rx,
+            total_input_video_frame_count_metric,
+            engine_metric,
+            codec_metric,
+            shutdown_rx,
+        ));
+        let output_handle = tokio::spawn(run_video_decoder_output_task(
+            output_tx,
+            decoded_rx,
+            total_output_video_frame_count_metric,
+            shutdown_tx,
+        ));
 
-            self.handle_input_message(message)?;
-
-            match drain_video_decoder_output(&mut self, &mut output_tx)? {
-                DrainResult::PipelineClosed | DrainResult::Finished => {
-                    output_tx.send_eos();
-                    break;
-                }
-                DrainResult::Pending => {}
-            }
-
-            if is_eos {
-                return Err(Error::new("video decoder still pending after EOS"));
-            }
-        }
-
+        let (input_result, output_result) = tokio::join!(input_handle, output_handle);
+        input_result
+            .map_err(|e| Error::new(format!("video decoder input task panicked: {e}")))??;
+        output_result
+            .map_err(|e| Error::new(format!("video decoder output task panicked: {e}")))??;
         Ok(())
-    }
-
-    pub fn handle_input_message(&mut self, message: Message) -> Result<()> {
-        match message {
-            Message::Media(sample) => self.handle_input_sample(Some(sample)),
-            Message::Eos => self.handle_input_sample(None),
-            Message::Syn(_) => Ok(()),
-        }
-    }
-
-    pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
-        if let Some(sample) = sample {
-            let frame = sample.expect_video()?;
-
-            self.total_input_video_frame_count_metric.inc();
-
-            self.inner
-                .decode(&frame, &self.codec_metric, &self.engine_metric)?;
-        } else {
-            self.eos = true;
-            self.inner.finish()?;
-        };
-
-        while let Some(frame) = self.inner.next_decoded_frame() {
-            self.total_output_video_frame_count_metric.inc();
-            self.decoded.push_back(frame);
-        }
-
-        Ok(())
-    }
-
-    pub fn poll_output(&mut self) -> Result<DecoderRunOutput> {
-        if let Some(frame) = self.decoded.pop_front() {
-            Ok(DecoderRunOutput::Processed(MediaFrame::video(frame)))
-        } else if self.eos {
-            Ok(DecoderRunOutput::Finished)
-        } else {
-            Ok(DecoderRunOutput::Pending)
-        }
     }
 
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
@@ -511,25 +511,82 @@ pub fn drain_audio_decoder_output(
     }
 }
 
-pub fn drain_video_decoder_output(
-    decoder: &mut VideoDecoder,
-    output_tx: &mut crate::TrackPublisher,
-) -> Result<DrainResult> {
+/// VideoDecoder の入力 task ループ
+///
+/// 入力 track からメッセージを受信して inner.decode() を呼ぶ。EOS 受信時は
+/// inner.finish() で残フレームを内部 channel に流してから tx を drop して終了する。
+/// 出力 task から shutdown 通知 (下流 close 検知時) を受けたら即座に抜ける。
+async fn run_video_decoder_input_task(
+    mut inner: VideoDecoderInner,
+    tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    mut input_rx: MessageReceiver,
+    total_input_metric: crate::stats::StatsCounter,
+    engine_metric: crate::stats::StatsString,
+    codec_metric: crate::stats::StatsString,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<()> {
     loop {
-        match decoder.poll_output()? {
-            DecoderRunOutput::Processed(sample) => {
-                if !output_tx.send_media(sample) {
-                    return Ok(DrainResult::PipelineClosed);
+        tokio::select! {
+            // 出力 task からの shutdown 通知で抜ける
+            _ = &mut shutdown_rx => return Ok(()),
+            message = input_rx.recv() => {
+                match message {
+                    Message::Media(sample) => {
+                        let frame = sample.expect_video()?;
+                        total_input_metric.inc();
+                        inner
+                            .decode(&frame, &codec_metric, &engine_metric, &tx)
+                            .await?;
+                    }
+                    Message::Eos => {
+                        // EOS 順序保証: inner.finish() で残フレームを内部 channel に全送出してから
+                        // tx を drop して出力 task に channel close を通知する。
+                        inner.finish().await?;
+                        drop(tx);
+                        return Ok(());
+                    }
+                    Message::Syn(_) => {}
                 }
-            }
-            DecoderRunOutput::Pending => {
-                return Ok(DrainResult::Pending);
-            }
-            DecoderRunOutput::Finished => {
-                return Ok(DrainResult::Finished);
             }
         }
     }
+}
+
+/// VideoDecoder の出力 task ループ
+///
+/// 内部 channel から `Result<VideoFrame>` を受信し、Ok なら下流に流す。
+/// Err 受信時 (inner エラー) は closed/0054 整合の fail-fast で送 EOS + Err 返却。
+/// send_media が false (下流 close) の場合は入力 task に shutdown 通知してから fail-fast。
+/// 内部 channel close (入力 task の EOS シーケンス完了) を検知したら send_eos して終了。
+async fn run_video_decoder_output_task(
+    mut output_tx: TrackPublisher,
+    mut decoded_rx: mpsc::Receiver<crate::Result<VideoFrame>>,
+    total_output_metric: crate::stats::StatsCounter,
+    shutdown_tx: tokio::sync::oneshot::Sender<()>,
+) -> Result<()> {
+    let mut shutdown_tx = Some(shutdown_tx);
+    while let Some(result) = decoded_rx.recv().await {
+        match result {
+            Ok(frame) => {
+                total_output_metric.inc();
+                if !output_tx.send_media(MediaFrame::video(frame)) {
+                    // 下流 close 検知 → 入力 task に shutdown 通知して fail-fast
+                    if let Some(tx) = shutdown_tx.take() {
+                        let _ = tx.send(());
+                    }
+                    return Err(Error::new("pipeline closed before video decoder finished"));
+                }
+            }
+            Err(e) => {
+                // inner エラー → fail-fast (closed/0054 整合)
+                output_tx.send_eos();
+                return Err(e);
+            }
+        }
+    }
+    // 内部 channel close (= 入力 task の EOS シーケンス完了) → 通常終了
+    output_tx.send_eos();
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -558,6 +615,7 @@ impl VideoDecoderInner {
         codec_metric: &crate::stats::StatsString,
         engine_metric: &crate::stats::StatsString,
         options: VideoDecoderOptions,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
     ) -> crate::Result<()> {
         let codec = frame.format.codec_name().ok_or_else(|| {
             crate::Error::new(format!("unexpected video format: {:?}", frame.format))
@@ -595,45 +653,45 @@ impl VideoDecoderInner {
         match (engine, codec) {
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H264) => {
-                *self = NvcodecDecoder::new_h264(&options.decode_params).map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_h264(&options.decode_params, tx).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H265) => {
-                *self = NvcodecDecoder::new_h265(&options.decode_params).map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_h265(&options.decode_params, tx).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Vp8) => {
-                *self = NvcodecDecoder::new_vp8(&options.decode_params).map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_vp8(&options.decode_params, tx).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Vp9) => {
-                *self = NvcodecDecoder::new_vp9(&options.decode_params).map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_vp9(&options.decode_params, tx).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Av1) => {
-                *self = NvcodecDecoder::new_av1(&options.decode_params).map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_av1(&options.decode_params, tx).map(Self::Nvcodec)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H264) => {
-                *self = VideoToolboxDecoder::new_h264(frame)
+                *self = VideoToolboxDecoder::new_h264(frame, tx)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
-                *self = VideoToolboxDecoder::new_h265(frame)
+                *self = VideoToolboxDecoder::new_h265(frame, tx)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::Vp9) => {
-                *self = VideoToolboxDecoder::new_vp9(frame)
+                *self = VideoToolboxDecoder::new_vp9(frame, tx)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::Av1) => {
-                *self = VideoToolboxDecoder::new_av1(frame)
+                *self = VideoToolboxDecoder::new_av1(frame, tx)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
@@ -641,16 +699,16 @@ impl VideoDecoderInner {
                 let lib = options.openh264_lib.ok_or_else(|| {
                     crate::Error::new("OpenH264 library is required for H.264 decoding")
                 })?;
-                *self = Openh264Decoder::new(lib.clone()).map(Self::Openh264)?;
+                *self = Openh264Decoder::new(lib.clone(), tx).map(Self::Openh264)?;
             }
             (Some(EngineName::Libvpx), CodecName::Vp8) => {
-                *self = LibvpxDecoder::new_vp8().map(Self::Libvpx)?;
+                *self = LibvpxDecoder::new_vp8(tx).map(Self::Libvpx)?;
             }
             (Some(EngineName::Libvpx), CodecName::Vp9) => {
-                *self = LibvpxDecoder::new_vp9().map(Self::Libvpx)?;
+                *self = LibvpxDecoder::new_vp9(tx).map(Self::Libvpx)?;
             }
             (Some(EngineName::Dav1d), CodecName::Av1) => {
-                *self = Dav1dDecoder::new().map(Self::Dav1d)?;
+                *self = Dav1dDecoder::new(tx).map(Self::Dav1d)?;
             }
             _ => {
                 return Err(crate::Error::new(format!(
@@ -667,53 +725,47 @@ impl VideoDecoderInner {
         Ok(())
     }
 
-    fn decode(
+    /// async fn 統一シグネチャ
+    ///
+    /// Initial 状態の場合は最初に `initialize_decoder` で実 decoder を生成し、
+    /// `tx.clone()` を内包させてから dispatch する。
+    async fn decode(
         &mut self,
         frame: &VideoFrame,
         codec_metric: &crate::stats::StatsString,
         engine_metric: &crate::stats::StatsString,
+        tx: &mpsc::Sender<crate::Result<VideoFrame>>,
     ) -> crate::Result<()> {
+        if let Self::Initial { options } = self {
+            let options = options.clone();
+            self.initialize_decoder(frame, codec_metric, engine_metric, options, tx.clone())?;
+        }
         match self {
-            Self::Initial { options } => {
-                let options = options.clone();
-                self.initialize_decoder(frame, codec_metric, engine_metric, options)?;
-                self.decode(frame, codec_metric, engine_metric)
+            Self::Initial { .. } => {
+                unreachable!("decoder must have been initialized above")
             }
-            Self::Libvpx(decoder) => decoder.decode(frame),
-            Self::Openh264(decoder) => decoder.decode(frame),
-            Self::Dav1d(decoder) => decoder.decode(frame),
+            Self::Libvpx(decoder) => decoder.decode(frame).await,
+            Self::Openh264(decoder) => decoder.decode(frame).await,
+            Self::Dav1d(decoder) => decoder.decode(frame).await,
             #[cfg(target_os = "macos")]
-            Self::VideoToolbox(decoder) => decoder.decode(frame),
+            Self::VideoToolbox(decoder) => decoder.decode(frame).await,
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(decoder) => decoder.decode(frame),
+            Self::Nvcodec(decoder) => decoder.decode(frame).await,
         }
     }
 
-    fn finish(&mut self) -> crate::Result<()> {
+    async fn finish(&mut self) -> crate::Result<()> {
         match self {
             Self::Initial { .. } => {}
-            Self::Libvpx(decoder) => decoder.finish()?,
-            Self::Openh264(decoder) => decoder.finish()?,
-            Self::Dav1d(decoder) => decoder.finish()?,
+            Self::Libvpx(decoder) => decoder.finish().await?,
+            Self::Openh264(decoder) => decoder.finish().await?,
+            Self::Dav1d(decoder) => decoder.finish().await?,
             #[cfg(target_os = "macos")]
-            Self::VideoToolbox(_decoder) => {}
+            Self::VideoToolbox(decoder) => decoder.finish().await?,
             #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(decoder) => decoder.finish()?,
+            Self::Nvcodec(decoder) => decoder.finish().await?,
         }
         Ok(())
-    }
-
-    fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        match self {
-            Self::Initial { .. } => None,
-            Self::Libvpx(decoder) => decoder.next_decoded_frame(),
-            Self::Openh264(decoder) => decoder.next_decoded_frame(),
-            Self::Dav1d(decoder) => decoder.next_decoded_frame(),
-            #[cfg(target_os = "macos")]
-            Self::VideoToolbox(decoder) => decoder.next_decoded_frame(),
-            #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(decoder) => decoder.next_decoded_frame(),
-        }
     }
 }
 
@@ -736,8 +788,8 @@ mod tests {
     }
 
     /// size: None の VP9 フレームで VideoToolbox がスキップされ Libvpx が選ばれることを確認する
-    #[test]
-    fn vp9_without_size_skips_video_toolbox() {
+    #[tokio::test]
+    async fn vp9_without_size_skips_video_toolbox() {
         let frame = VideoFrame {
             data: vec![],
             format: VideoFormat::Vp9,
@@ -749,9 +801,20 @@ mod tests {
 
         let engines = vec![EngineName::VideoToolbox, EngineName::Libvpx];
         let stats = crate::stats::Stats::new();
-        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
-        // デコーダーを初期化する（空データなのでデコード自体は失敗するが、エンジン選択は成功するはず）
-        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+        // Sender 化に伴い `new` は (decoder, rx) のタプルを返す
+        let (mut decoder, _rx) = VideoDecoder::new(options_without_nvcodec(engines), stats);
+        // 空データなので実際の decode は失敗するが、Initial → 実 decoder への遷移
+        // (initialize_decoder) は成功するため、その結果の inner variant を検証する
+        let (tx_test, _rx_test) = mpsc::channel(8);
+        let _ = decoder
+            .inner
+            .decode(
+                &frame,
+                &decoder.codec_metric,
+                &decoder.engine_metric,
+                &tx_test,
+            )
+            .await;
 
         assert!(
             matches!(decoder.inner, VideoDecoderInner::Libvpx(_)),
@@ -761,8 +824,8 @@ mod tests {
     }
 
     /// size: None の AV1 フレームで VideoToolbox がスキップされ Dav1d が選ばれることを確認する
-    #[test]
-    fn av1_without_size_skips_video_toolbox() {
+    #[tokio::test]
+    async fn av1_without_size_skips_video_toolbox() {
         let frame = VideoFrame {
             data: vec![],
             format: VideoFormat::Av1,
@@ -774,8 +837,17 @@ mod tests {
 
         let engines = vec![EngineName::VideoToolbox, EngineName::Dav1d];
         let stats = crate::stats::Stats::new();
-        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
-        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+        let (mut decoder, _rx) = VideoDecoder::new(options_without_nvcodec(engines), stats);
+        let (tx_test, _rx_test) = mpsc::channel(8);
+        let _ = decoder
+            .inner
+            .decode(
+                &frame,
+                &decoder.codec_metric,
+                &decoder.engine_metric,
+                &tx_test,
+            )
+            .await;
 
         assert!(
             matches!(decoder.inner, VideoDecoderInner::Dav1d(_)),
@@ -785,8 +857,8 @@ mod tests {
     }
 
     /// size ありの VP9 フレームでは macOS 対応環境なら VideoToolbox、非対応なら Libvpx が選ばれることを確認する
-    #[test]
-    fn vp9_with_size_selects_available_engine() {
+    #[tokio::test]
+    async fn vp9_with_size_selects_available_engine() {
         let frame = VideoFrame {
             data: vec![],
             format: VideoFormat::Vp9,
@@ -801,8 +873,17 @@ mod tests {
 
         let engines = vec![EngineName::VideoToolbox, EngineName::Libvpx];
         let stats = crate::stats::Stats::new();
-        let mut decoder = VideoDecoder::new(options_without_nvcodec(engines), stats);
-        let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
+        let (mut decoder, _rx) = VideoDecoder::new(options_without_nvcodec(engines), stats);
+        let (tx_test, _rx_test) = mpsc::channel(8);
+        let _ = decoder
+            .inner
+            .decode(
+                &frame,
+                &decoder.codec_metric,
+                &decoder.engine_metric,
+                &tx_test,
+            )
+            .await;
 
         // size ありなら VideoToolbox がスキップされずにエンジン選択が行われることを確認する。
         // どちらが選ばれるかは実行環境の VP9 ハードウェアデコード対応状況に依存するため、

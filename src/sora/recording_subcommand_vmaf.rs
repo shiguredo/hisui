@@ -359,11 +359,13 @@ async fn setup_vmaf_pipeline(
             decoder_processor_id,
             crate::ProcessorMetadata::new(decoder_processor_type),
             move |handle| {
-                let decoder = VideoDecoder::new(decoder_options_for_decoder, handle.stats());
+                let (decoder, decoded_rx) =
+                    VideoDecoder::new(decoder_options_for_decoder, handle.stats());
                 decoder.run(
                     handle,
                     reader_output_track_id.clone(),
                     decoder_output_track_id_for_decoder.clone(),
+                    decoded_rx,
                 )
             },
             &mut processor_tasks,
@@ -477,11 +479,12 @@ async fn setup_vmaf_pipeline(
         decoded_decoder_processor_id,
         crate::ProcessorMetadata::new(decoded_decoder_processor_type),
         move |handle| {
-            let decoder = VideoDecoder::new(decoder_options, handle.stats());
+            let (decoder, decoded_rx) = VideoDecoder::new(decoder_options, handle.stats());
             decoder.run(
                 handle,
                 encoder_output_track_id_for_decoder.clone(),
                 decoder_output_track_id_for_decoder.clone(),
+                decoded_rx,
             )
         },
         &mut processor_tasks,

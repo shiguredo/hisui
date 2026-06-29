@@ -2,6 +2,8 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use tokio::sync::mpsc;
+
 use super::DecodeConfig;
 use crate::video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
 use crate::video::h265::{
@@ -9,129 +11,192 @@ use crate::video::h265::{
 };
 use crate::video::{VideoFormat, VideoFrame};
 
-/// デコード完了を受け取る共有キューとエラー保持用スロット
-type DecodedQueue = Arc<Mutex<VecDeque<shiguredo_nvcodec::DecodedFrame<()>>>>;
-type ErrorSlot = Arc<Mutex<Option<crate::Error>>>;
+/// 入力フレーム保持列の型エイリアス
+///
+/// `shiguredo_nvcodec` の callback と `decode()` push 側で共有するため `Arc<Mutex<>>` 化している。
+type SharedInputQueue = Arc<Mutex<VecDeque<VideoFrame>>>;
 
+/// Sender 化された NVDEC (NVIDIA hardware) デコーダー
+///
+/// 旧 `decoded_queue` / `error_slot` の中継キューを廃止し、`FnDecodeHandler` の callback 内で
+/// 直接 NV12→I420 変換と `tx.blocking_send()` を実行する。callback は
+/// `shiguredo_nvcodec::Decoder::decode()` を呼んだ tokio worker thread 上で同期 dispatch される
+/// (NVIDIA Video Decoder SDK の `cuvidParseVideoData` 同期仕様) ため、`tokio::task::block_in_place`
+/// で worker block を safe にした上で `blocking_send` を呼ぶ。
 #[derive(Debug)]
 pub struct NvcodecDecoder {
     inner: shiguredo_nvcodec::Decoder<
         shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
     >,
-    input_queue: VecDeque<VideoFrame>,
-    output_queue: VecDeque<VideoFrame>,
-    // デコード完了は別スレッドからコールバックで通知されるため、共有キュー越しに本スレッド側へ受け渡してから処理する。
-    decoded_queue: DecodedQueue,
-    error_slot: ErrorSlot,
+    // callback と decode() push 側で共有する入力フレーム保持列
+    input_queue: SharedInputQueue,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
 }
 
-/// shiguredo_nvcodec::Decoder の生成に必要な共有状態とハンドラを構築する
-fn build_handler() -> (
-    shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
-    DecodedQueue,
-    ErrorSlot,
-) {
-    let decoded_queue: DecodedQueue = Arc::new(Mutex::new(VecDeque::new()));
-    let error_slot: ErrorSlot = Arc::new(Mutex::new(None));
-    let queue_for_handler = decoded_queue.clone();
-    let error_for_handler = error_slot.clone();
-    let handler = shiguredo_nvcodec::FnDecodeHandler::new(move |result| match result {
-        Ok(frame) => {
-            let mut queue = queue_for_handler
-                .lock()
-                .expect("nvcodec decoded queue lock poisoned");
-            queue.push_back(frame);
+/// `shiguredo_nvcodec::Decoder` の生成に必要なハンドラを構築する
+///
+/// callback 内で:
+/// 1. 共有 `input_queue` から対応する入力フレームを取り出す
+/// 2. NV12→I420 変換を実行
+/// 3. `tokio::task::block_in_place` + `tx.blocking_send()` で上位 Receiver に流す
+fn build_handler(
+    tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    input_queue: SharedInputQueue,
+) -> shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error> {
+    shiguredo_nvcodec::FnDecodeHandler::new(move |result| match result {
+        Ok(nv12_frame) => {
+            let input_frame = {
+                let mut queue = input_queue
+                    .lock()
+                    .expect("nvcodec input queue lock poisoned");
+                queue.pop_front()
+            };
+            let Some(input_frame) = input_frame else {
+                // shiguredo_nvcodec の cuvidParseVideoData は投入順に callback を呼ぶ
+                // 仕様のため、ここで None になることは想定外。設計通りなら起きないが
+                // 安全側で fail-fast でエラーを上位に伝搬する。
+                tokio::task::block_in_place(|| {
+                    let _ = tx.blocking_send(Err(crate::Error::new(
+                        "decoded frame produced without input frame",
+                    )));
+                });
+                return;
+            };
+
+            // NV12 から I420 への変換
+            let width = nv12_frame.width();
+            let height = nv12_frame.height();
+
+            // I420 用のバッファを確保
+            let y_size = width * height;
+            let uv_width = width.div_ceil(2);
+            let uv_height = height.div_ceil(2);
+            let uv_size = uv_width * uv_height;
+            let total_size = y_size + uv_size * 2;
+
+            let mut i420_data = vec![0u8; total_size];
+            let (y_plane, rest) = i420_data.split_at_mut(y_size);
+            let (u_plane, v_plane) = rest.split_at_mut(uv_size);
+
+            let src = shiguredo_libyuv::Nv12Image {
+                y: nv12_frame.y_plane(),
+                y_stride: nv12_frame.y_stride(),
+                uv: nv12_frame.uv_plane(),
+                uv_stride: nv12_frame.uv_stride(),
+            };
+
+            let mut dst = shiguredo_libyuv::I420ImageMut {
+                y: y_plane,
+                y_stride: width,
+                u: u_plane,
+                u_stride: uv_width,
+                v: v_plane,
+                v_stride: uv_width,
+            };
+
+            let size = shiguredo_libyuv::ImageSize::new(width, height);
+            if let Err(e) = shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size) {
+                tokio::task::block_in_place(|| {
+                    let _ = tx.blocking_send(Err(e.into()));
+                });
+                return;
+            }
+
+            let out = VideoFrame::new_i420(
+                input_frame,
+                width,
+                height,
+                y_plane,
+                u_plane,
+                v_plane,
+                width,
+                uv_width,
+                uv_width,
+            );
+
+            tokio::task::block_in_place(|| {
+                let _ = tx.blocking_send(Ok(out));
+            });
         }
         Err(err) => {
-            let mut slot = error_for_handler
-                .lock()
-                .expect("nvcodec error slot lock poisoned");
-            if slot.is_none() {
-                *slot = Some(crate::Error::new(format!("nvcodec decode error: {err}")));
-            }
+            // callback 内エラーは即時に Sender 経由で上位 Receiver に通知する
+            tokio::task::block_in_place(|| {
+                let _ = tx.blocking_send(Err(crate::Error::new(format!(
+                    "nvcodec decode error: {err}"
+                ))));
+            });
         }
-    });
-    (handler, decoded_queue, error_slot)
+    })
 }
 
 impl NvcodecDecoder {
-    pub fn new_h264(params: &DecodeConfig) -> crate::Result<Self> {
+    pub fn new_h264(
+        params: &DecodeConfig,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(H264) decoder");
         let mut config = params.nvcodec_h264.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::H264;
-        let (handler, decoded_queue, error_slot) = build_handler();
-        Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            decoded_queue,
-            error_slot,
-            parameter_sets: None,
-        })
+        Self::new_inner(config, tx)
     }
 
-    pub fn new_h265(params: &DecodeConfig) -> crate::Result<Self> {
+    pub fn new_h265(
+        params: &DecodeConfig,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(H265) decoder");
         let mut config = params.nvcodec_h265.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Hevc;
-        let (handler, decoded_queue, error_slot) = build_handler();
-        Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            decoded_queue,
-            error_slot,
-            parameter_sets: None,
-        })
+        Self::new_inner(config, tx)
     }
 
-    pub fn new_av1(params: &DecodeConfig) -> crate::Result<Self> {
+    pub fn new_av1(
+        params: &DecodeConfig,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(AV1) decoder");
         let mut config = params.nvcodec_av1.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Av1;
-        let (handler, decoded_queue, error_slot) = build_handler();
-        Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            decoded_queue,
-            error_slot,
-            parameter_sets: None,
-        })
+        Self::new_inner(config, tx)
     }
 
-    pub fn new_vp8(params: &DecodeConfig) -> crate::Result<Self> {
+    pub fn new_vp8(
+        params: &DecodeConfig,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(VP8) decoder");
         let mut config = params.nvcodec_vp8.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp8;
-        let (handler, decoded_queue, error_slot) = build_handler();
-        Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            decoded_queue,
-            error_slot,
-            parameter_sets: None,
-        })
+        Self::new_inner(config, tx)
     }
 
-    pub fn new_vp9(params: &DecodeConfig) -> crate::Result<Self> {
+    pub fn new_vp9(
+        params: &DecodeConfig,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         tracing::debug!("create nvcodec(VP9) decoder");
         let mut config = params.nvcodec_vp9.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp9;
-        let (handler, decoded_queue, error_slot) = build_handler();
+        Self::new_inner(config, tx)
+    }
+
+    /// 全コーデック共通の生成ロジック
+    ///
+    /// `input_queue` を `Arc<Mutex<>>` で生成し、handler と decoder 構造体の両方で共有する。
+    fn new_inner(
+        config: shiguredo_nvcodec::DecoderConfig,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
+        let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let handler = build_handler(tx, input_queue.clone());
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            decoded_queue,
-            error_slot,
+            input_queue,
             parameter_sets: None,
         })
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
+    pub async fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !matches!(
             frame.format,
             VideoFormat::H264
@@ -204,98 +269,23 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        self.inner.decode(&data, ())?;
-        self.input_queue.push_back(frame.to_stripped());
-        self.handle_decoded_frames()?;
-        Ok(())
-    }
-
-    pub fn finish(&mut self) -> crate::Result<()> {
-        // flush で in-flight 完了を待ち合わせる
-        self.inner.flush()?;
-        self.handle_decoded_frames()?;
-        Ok(())
-    }
-
-    fn handle_decoded_frames(&mut self) -> crate::Result<()> {
-        // ハンドラ側で記録されたエラーがあれば最優先で返す
-        if let Some(err) = self
-            .error_slot
-            .lock()
-            .expect("nvcodec error slot lock poisoned")
-            .take()
+        // input_queue に投入してから decode を呼ぶ (callback 内で pop_front するため)
         {
-            return Err(err);
-        }
-        loop {
-            let nv12_frame = {
-                let mut queue = self
-                    .decoded_queue
-                    .lock()
-                    .expect("nvcodec decoded queue lock poisoned");
-                queue.pop_front()
-            };
-            let Some(nv12_frame) = nv12_frame else {
-                break;
-            };
-            let input_frame = self
+            let mut queue = self
                 .input_queue
-                .pop_front()
-                .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
-
-            // NV12 から I420 への変換
-            let width = nv12_frame.width();
-            let height = nv12_frame.height();
-
-            // I420 用のバッファを確保
-            let y_size = width * height;
-            let uv_width = width.div_ceil(2);
-            let uv_height = height.div_ceil(2);
-            let uv_size = uv_width * uv_height;
-            let total_size = y_size + uv_size * 2;
-
-            let mut i420_data = vec![0u8; total_size];
-            let (y_plane, rest) = i420_data.split_at_mut(y_size);
-            let (u_plane, v_plane) = rest.split_at_mut(uv_size);
-
-            // libyuv を使って NV12 から I420 に変換
-            let src = shiguredo_libyuv::Nv12Image {
-                y: nv12_frame.y_plane(),
-                y_stride: nv12_frame.y_stride(),
-                uv: nv12_frame.uv_plane(),
-                uv_stride: nv12_frame.uv_stride(),
-            };
-
-            let mut dst = shiguredo_libyuv::I420ImageMut {
-                y: y_plane,
-                y_stride: width,
-                u: u_plane,
-                u_stride: uv_width,
-                v: v_plane,
-                v_stride: uv_width,
-            };
-
-            let size = shiguredo_libyuv::ImageSize::new(width, height);
-            shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size)?;
-
-            // I420 VideoFrame を作成
-            self.output_queue.push_back(VideoFrame::new_i420(
-                input_frame,
-                width,
-                height,
-                y_plane,
-                u_plane,
-                v_plane,
-                width,
-                uv_width,
-                uv_width,
-            ));
+                .lock()
+                .expect("nvcodec input queue lock poisoned");
+            queue.push_back(frame.to_stripped());
         }
+        self.inner.decode(&data, ())?;
         Ok(())
     }
 
-    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
+    pub async fn finish(&mut self) -> crate::Result<()> {
+        // flush で in-flight 完了を待ち合わせる。callback は flush の内部で同期 dispatch されて
+        // 残フレームをすべて Sender に流す。
+        self.inner.flush()?;
+        Ok(())
     }
 }
 

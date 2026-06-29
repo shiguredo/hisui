@@ -212,7 +212,9 @@ async fn setup_pipeline(
             )
             .await?;
 
-        let video_decoder = VideoDecoder::new(
+        // Sender 化に伴い VideoDecoder::new は (decoder, rx) のタプルを返す。
+        // rx は run() の引数として戻し、内部 2 task 構造の橋渡し用 channel として利用する。
+        let (video_decoder, video_decoded_rx) = VideoDecoder::new(
             VideoDecoderOptions {
                 openh264_lib,
                 decode_params: Default::default(),
@@ -229,6 +231,7 @@ async fn setup_pipeline(
                         handle,
                         crate::TrackId::new(VIDEO_ENCODED_TRACK_ID),
                         crate::TrackId::new(VIDEO_DECODED_TRACK_ID),
+                        video_decoded_rx,
                     )
                 },
             )

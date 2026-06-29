@@ -1,4 +1,5 @@
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
+use tokio::sync::mpsc;
 
 use crate::{
     video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, NALU_HEADER_LENGTH},
@@ -6,10 +7,15 @@ use crate::{
     video::{VideoFormat, VideoFrame},
 };
 
+/// Sender 化された VideoToolbox デコーダー
+///
+/// デコード済みフレームはコンストラクタで受け取った `tx` 経由で上位に送信する。
+/// 旧版の `decoded: Option<VideoFrame>` の pull 用バッファと「pending 中の再初期化拒否」
+/// ガードは廃止し、reinitialize は run() の sequential await により「直前 frame の
+/// `tx.send().await` 完了後に到達する」シーケンスで自然に成立する。
 #[derive(Debug)]
 pub struct VideoToolboxDecoder {
     inner: shiguredo_video_toolbox::Decoder,
-    decoded: Option<VideoFrame>,
 
     // デコーダーの再初期化が必要かどうかの判定に使うフィールド
     //
@@ -19,10 +25,16 @@ pub struct VideoToolboxDecoder {
     sps: Vec<u8>,
     pps: Vec<u8>,
     resolution: Option<(u32, u32)>,
+
+    // デコード結果を上位 run() の Receiver に流す Sender
+    tx: mpsc::Sender<crate::Result<VideoFrame>>,
 }
 
 impl VideoToolboxDecoder {
-    pub fn new_h264(frame: &VideoFrame) -> crate::Result<Self> {
+    pub fn new_h264(
+        frame: &VideoFrame,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         let (sps, pps) = get_h264_sps_pps(frame)?;
         tracing::debug!("Initialize H.264 decoder: sps={sps:?}, pps={pps:?}");
 
@@ -37,15 +49,18 @@ impl VideoToolboxDecoder {
             })?;
         Ok(Self {
             inner,
-            decoded: None,
             vps: Vec::new(),
             sps,
             pps,
             resolution: None,
+            tx,
         })
     }
 
-    pub fn new_h265(frame: &VideoFrame) -> crate::Result<Self> {
+    pub fn new_h265(
+        frame: &VideoFrame,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         let (vps, sps, pps) = get_h265_vps_sps_pps(frame)?;
         tracing::debug!("Initialize H.265 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
 
@@ -61,31 +76,39 @@ impl VideoToolboxDecoder {
             })?;
         Ok(Self {
             inner,
-            decoded: None,
             vps: vps.to_vec(),
             sps: sps.to_vec(),
             pps: pps.to_vec(),
             resolution: None,
+            tx,
         })
     }
 
-    pub fn new_vp9(frame: &VideoFrame) -> crate::Result<Self> {
+    pub fn new_vp9(
+        frame: &VideoFrame,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         let (width, height) = get_frame_resolution(frame, "VP9")?;
         tracing::debug!("Initialize VP9 decoder: width={width}, height={height}");
         Self::new_raw_codec(
             shiguredo_video_toolbox::DecoderCodec::Vp9 { width, height },
             width,
             height,
+            tx,
         )
     }
 
-    pub fn new_av1(frame: &VideoFrame) -> crate::Result<Self> {
+    pub fn new_av1(
+        frame: &VideoFrame,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
+    ) -> crate::Result<Self> {
         let (width, height) = get_frame_resolution(frame, "AV1")?;
         tracing::debug!("Initialize AV1 decoder: width={width}, height={height}");
         Self::new_raw_codec(
             shiguredo_video_toolbox::DecoderCodec::Av1 { width, height },
             width,
             height,
+            tx,
         )
     }
 
@@ -94,6 +117,7 @@ impl VideoToolboxDecoder {
         codec: shiguredo_video_toolbox::DecoderCodec<'_>,
         width: u32,
         height: u32,
+        tx: mpsc::Sender<crate::Result<VideoFrame>>,
     ) -> crate::Result<Self> {
         let inner =
             shiguredo_video_toolbox::Decoder::new(shiguredo_video_toolbox::DecoderConfig {
@@ -102,11 +126,11 @@ impl VideoToolboxDecoder {
             })?;
         Ok(Self {
             inner,
-            decoded: None,
             vps: Vec::new(),
             sps: Vec::new(),
             pps: Vec::new(),
             resolution: Some((width, height)),
+            tx,
         })
     }
 
@@ -114,6 +138,10 @@ impl VideoToolboxDecoder {
     //
     // H264/H265: VPS/SPS/PPS の変化で判定
     // VP9/AV1: 解像度の変化で判定
+    //
+    // Sender 化により、直前 frame は run_input task の sequential await によって
+    // `tx.send().await` 完了後に到達するため、旧版の「decoded pending 中は再初期化拒否」
+    // ガードは不要になっている。
     //
     // [NOTE] WebM 対応がなくなったら VideoDecoder 側でサンプルエントリーの変更を見てハンドリングできる
     fn reinitialize_if_need(&mut self, frame: &VideoFrame) -> crate::Result<()> {
@@ -125,32 +153,18 @@ impl VideoToolboxDecoder {
         match frame.format {
             VideoFormat::H265 => {
                 // [NOTE] VPS / SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
-                if let Ok((vps, sps, pps)) = get_h265_vps_sps_pps(frame) {
-                    if vps == self.vps && sps == self.sps && pps == self.pps {
-                        return Ok(());
-                    }
-
-                    if self.decoded.is_some() {
-                        return Err(crate::Error::new(
-                            "cannot reinitialize decoder while decoded frame is pending",
-                        ));
-                    }
-                    *self = Self::new_h265(frame)?;
+                if let Ok((vps, sps, pps)) = get_h265_vps_sps_pps(frame)
+                    && (vps != self.vps || sps != self.sps || pps != self.pps)
+                {
+                    *self = Self::new_h265(frame, self.tx.clone())?;
                 }
             }
             VideoFormat::H264 | VideoFormat::H264AnnexB => {
                 // [NOTE] SPS / PPS が存在しない場合には、デコード情報が変わっていないと判断して何もしない
-                if let Ok((sps, pps)) = get_h264_sps_pps(frame) {
-                    if sps == self.sps && pps == self.pps {
-                        return Ok(());
-                    }
-
-                    if self.decoded.is_some() {
-                        return Err(crate::Error::new(
-                            "cannot reinitialize decoder while decoded frame is pending",
-                        ));
-                    }
-                    *self = Self::new_h264(frame)?;
+                if let Ok((sps, pps)) = get_h264_sps_pps(frame)
+                    && (sps != self.sps || pps != self.pps)
+                {
+                    *self = Self::new_h264(frame, self.tx.clone())?;
                 }
             }
             VideoFormat::Vp9 => {
@@ -170,24 +184,21 @@ impl VideoToolboxDecoder {
         &mut self,
         frame: &VideoFrame,
         codec_name: &str,
-        constructor: fn(&VideoFrame) -> crate::Result<Self>,
+        constructor: fn(
+            &VideoFrame,
+            mpsc::Sender<crate::Result<VideoFrame>>,
+        ) -> crate::Result<Self>,
     ) -> crate::Result<()> {
         let (new_width, new_height) = get_frame_resolution(frame, codec_name)?;
         if Some((new_width, new_height)) == self.resolution {
             return Ok(());
         }
 
-        if self.decoded.is_some() {
-            return Err(crate::Error::new(
-                "cannot reinitialize decoder while decoded frame is pending",
-            ));
-        }
-
-        *self = constructor(frame)?;
+        *self = constructor(frame, self.tx.clone())?;
         Ok(())
     }
 
-    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
+    pub async fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> {
         if !matches!(
             frame.format,
             VideoFormat::H264
@@ -227,7 +238,7 @@ impl VideoToolboxDecoder {
             ));
         };
 
-        self.decoded = Some(VideoFrame::new_i420(
+        let out = VideoFrame::new_i420(
             frame.to_stripped(),
             decoded.width(),
             decoded.height(),
@@ -237,12 +248,20 @@ impl VideoToolboxDecoder {
             decoded.y_stride(),
             decoded.u_stride(),
             decoded.v_stride(),
-        ));
+        );
+        self.tx
+            .send(Ok(out))
+            .await
+            .map_err(|_| crate::Error::new("decoded frame channel closed"))?;
         Ok(())
     }
 
-    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        self.decoded.take()
+    /// VideoToolbox 内部に flush 経路が無いため finish は no-op
+    ///
+    /// (現状実装と同じ。 `VideoDecoderInner::finish` の dispatch から呼ばれる前提で
+    /// シグネチャを合わせる)
+    pub async fn finish(&mut self) -> crate::Result<()> {
+        Ok(())
     }
 }
 
