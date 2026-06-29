@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-25
-- Completed:
+- Completed: 2026-06-29
 - Model: Opus 4.7
 - Branch: feature/fix-self-hosted-nvidia-cuda-toolkit
 - Polished:
@@ -69,7 +69,11 @@ runner セットアップ手順は内部運用ドキュメントに記載する�
 
 ## 解決方法
 
-1. self-hosted runner (NVIDIA-Video-Codec-SDK ラベル) に SSH 等でログインし、`apt install -y nvidia-cuda-toolkit` を実行する (バージョン整合性の確認込み)
-2. `nvcc --version` で PATH からの実行を確認
-3. hisui の `test-nvidia-video-codec` ジョブを再実行 (該当 PR の Re-run failed jobs 等) し、4 つの cargo step すべてが green になることを確認する
-4. 万一 candle-core 0.10.2 が `apt install nvidia-cuda-toolkit` で入る CUDA バージョンと非互換な場合、`shiguredo/github-actions` の `setup-cuda-toolkit` Composite Action が入れる `CUDA_VERSION: 13.0.2` に合わせて手動セットアップする方向に切り替える
+起票時の想定と異なり、`nvcc` は self-hosted runner に既にインストール済みであったが `PATH` が通っていなかった。さらに、candle-onnx のビルドには別途 `protoc` (`protobuf-compiler`) が必要だが、それも runner にインストールされていなかった。以下の 2 点で対応した。
+
+- issue 0059 のブランチで `.github/workflows/ci.yml` の `test-nvidia-video-codec` ジョブに CUDA PATH を通す step を追加した (`CUDA_PATH=/usr/local/cuda` を `$GITHUB_ENV` に、`/usr/local/cuda/bin` を `$GITHUB_PATH` に設定)
+- self-hosted runner 管理者に `protobuf-compiler` の事前インストールを依頼して対応した
+
+結果として、`test-nvidia-video-codec` ジョブで `cargo check --features candle,candle-cuda -p hisui` と `cargo clippy --features candle,candle-cuda -p hisui --all-targets -- --deny warnings` の両方が green になることを CI で確認した。
+
+「runner に `nvidia-cuda-toolkit` を新規インストールする」という起票時の方針 A は不要であった。設計方針 / 完了条件は起票時の理解で書いたものをそのまま残し、本セクションで実態を明示する。
