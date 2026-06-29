@@ -81,7 +81,7 @@ Hugging Face から ML 推論用モデルファイル（Whisper / Silero VAD 等
 - ファイルごとに SHA256 を検証（期待値はスクリプト先頭の `TARGETS` dict に埋め込み済み）
 - 既に保存済みでサイズと SHA256 が一致しているファイルは skip
 - ダウンロード中は `.tmp` 一時ファイルに書き込み、完了後に atomic rename
-- `429` / 5xx / connection error は最大 3 回リトライ（指数バックオフ 2 / 4 / 8 秒）、`429` 以外の 4xx は即時失敗
+- `429` / 5xx / connection error は最大 3 回リトライ（指数バックオフ 2 / 4 秒）、`429` 以外の 4xx は即時失敗
 
 **HF 側でモデルが更新された場合**: CI が SHA256 mismatch で落ちて気付くので、最新ファイルを手元で再取得して `sha256sum` で値を取り直し、`TARGETS` dict を更新する PR を出すこと。`expected_sha256` を空文字に戻して 1 回実行すると検証スキップで再取得され、`sha256sum` で値が取れます。
 
@@ -104,7 +104,7 @@ uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny
 1. CLI 引数を解析（`--dest` 必須、ターゲット名は `TARGETS` dict のキーから選択）
 2. `--dest` の存在と書き込み権限を確認
 3. ターゲット内の各 `FileSpec` について URL を組み立て、HTTP GET（リトライあり）
-4. SHA256 を検証（期待値が空ならスキップして warn 出力）、mismatch なら 1 ラウンドだけ再取得
+4. SHA256 を検証（期待値が空ならスキップして warn 出力）、mismatch なら即終了（HF 側更新が原因なら再取得しても無意味）
 5. `.tmp` ファイルから本来のパスへ `os.replace` で atomic rename
 
 終了コード:

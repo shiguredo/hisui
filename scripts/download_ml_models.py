@@ -66,14 +66,13 @@ TARGETS: dict[str, list[FileSpec]] = {
 
 USER_AGENT = "hisui-download/2026.1"
 HF_BASE_URL = "https://huggingface.co"
+HTTP_TIMEOUT_SECONDS = 60
 MAX_RETRIES = 3
-BACKOFF_SECONDS = [2, 4, 8]
+BACKOFF_SECONDS = [2, 4]
 
 
-# 終了コード規約
+# 終了コード規約 (Python 既定の 1 / argparse 既定の 2 は予約として README で説明する)
 EXIT_SUCCESS = 0
-EXIT_UNCAUGHT = 1  # Python 既定 (例外時)
-EXIT_CLI_ERROR = 2  # argparse 既定
 EXIT_NETWORK_FAILED = 3
 EXIT_SHA256_MISMATCH = 4
 EXIT_DIR_NOT_WRITABLE = 5
@@ -96,7 +95,10 @@ def compute_sha256(path: Path) -> str:
 def download_once(url: str, dest_tmp: Path) -> None:
     """単発ダウンロード。失敗時は urllib の例外をそのまま投げる。"""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request) as response, dest_tmp.open("wb") as out:
+    with (
+        urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response,
+        dest_tmp.open("wb") as out,
+    ):
         while True:
             chunk = response.read(1024 * 1024)
             if not chunk:
@@ -107,7 +109,7 @@ def download_once(url: str, dest_tmp: Path) -> None:
 def download_with_retry(url: str, dest_tmp: Path) -> None:
     """4xx (429 以外) は即時失敗、429 / 5xx / connection error は最大 3 回リトライ。
 
-    失敗が確定したら SystemExit(EXIT_NETWORK_FAILED) で終了する。
+    失敗が確定したら .tmp を片付けて SystemExit(EXIT_NETWORK_FAILED) で終了する。
     """
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES):
@@ -115,13 +117,14 @@ def download_with_retry(url: str, dest_tmp: Path) -> None:
             download_once(url, dest_tmp)
             return
         except urllib.error.HTTPError as err:
-            last_error = err
             if 400 <= err.code < 500 and err.code != 429:
                 print(
                     f"  HTTP {err.code} (no retry): {url}",
                     file=sys.stderr,
                 )
+                dest_tmp.unlink(missing_ok=True)
                 sys.exit(EXIT_NETWORK_FAILED)
+            last_error = err
             print(
                 f"  HTTP {err.code} (attempt {attempt + 1}/{MAX_RETRIES}): {url}",
                 file=sys.stderr,
@@ -135,6 +138,7 @@ def download_with_retry(url: str, dest_tmp: Path) -> None:
         if attempt + 1 < MAX_RETRIES:
             time.sleep(BACKOFF_SECONDS[attempt])
     print(f"  giving up after {MAX_RETRIES} retries: {last_error}", file=sys.stderr)
+    dest_tmp.unlink(missing_ok=True)
     sys.exit(EXIT_NETWORK_FAILED)
 
 
@@ -155,23 +159,16 @@ def fetch_one(spec: FileSpec, dest_dir: Path, target_key: str) -> None:
     download_with_retry(url, dest_tmp)
 
     # SHA256 期待値が空ならスキップ (初回ハッシュ取得用)、
-    # mismatch なら 1 ラウンドだけ再取得を試みる。
+    # mismatch なら .tmp を片付けて即終了する (HF 側更新が原因なら再取得しても無意味)。
     if spec.expected_sha256:
         actual = compute_sha256(dest_tmp)
         if actual != spec.expected_sha256:
             print(
-                f"  SHA256 mismatch (expected={spec.expected_sha256}, actual={actual}); retrying",
+                f"  SHA256 mismatch (expected={spec.expected_sha256}, actual={actual})",
                 file=sys.stderr,
             )
-            download_with_retry(url, dest_tmp)
-            actual = compute_sha256(dest_tmp)
-            if actual != spec.expected_sha256:
-                print(
-                    f"  SHA256 still mismatch (expected={spec.expected_sha256}, actual={actual}); giving up",
-                    file=sys.stderr,
-                )
-                dest_tmp.unlink(missing_ok=True)
-                sys.exit(EXIT_SHA256_MISMATCH)
+            dest_tmp.unlink(missing_ok=True)
+            sys.exit(EXIT_SHA256_MISMATCH)
     else:
         actual = compute_sha256(dest_tmp)
         print(
