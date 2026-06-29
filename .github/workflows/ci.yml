@@ -59,8 +59,10 @@ jobs:
       - run: cargo check --features nvcodec -p hisui
       - run: cargo clippy --features nvcodec -p hisui -- --deny warnings
       - run: cargo test --features nvcodec -p hisui -- --test-threads=1
-      - run: cargo check --features candle,candle-cuda -p hisui
-      - run: cargo clippy --features candle,candle-cuda -p hisui --all-targets -- --deny warnings
+      # TODO: self-hosted runner に nvcc が事前インストールされていないため candle-cuda 経路をビルドできない。
+      # runner に nvidia-cuda-toolkit が導入されたら以下の 2 行を有効化する。
+      # - run: cargo check --features candle,candle-cuda -p hisui
+      # - run: cargo clippy --features candle,candle-cuda -p hisui --all-targets -- --deny warnings
 
   test-apple-toolbox:
     runs-on:
