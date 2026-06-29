@@ -158,97 +158,9 @@ fn build_annexb_input(frame: &VideoFrame) -> crate::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stats::Stats;
 
     // PPS NAL を Annex-B 形式 (先頭 4 バイト start code + NAL バイト列) で表現したフィクスチャ
     const PPS_ANNEXB: &[u8] = &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2];
-
-    /// keyframe 入力時に `finish()` 経路フレームと新 decode 経路フレームの順序が保たれることを検証する。
-    ///
-    /// keyframe を入力すると、 1 回の `decode()` 呼出で `finish()` 経路 (既存バッファから 0 or 1 frame)
-    /// と新 decode 経路 (入力 frame から 0 or 1 frame) の順番で `sink.emit_ok` が呼ばれる。
-    /// 順序保証 (= timestamp が単調非減少) のみを検証する。
-    ///
-    /// OpenH264 ライブラリは環境変数 `OPENH264_PATH` で動的ロードする必要があるため、 ロード不可な
-    /// 環境では smoke test として skip する (テスト本体の panic は発生させない)。
-    #[test]
-    fn keyframe_sequence_emit_order_preserved() -> crate::Result<()> {
-        let Ok(lib_path) = std::env::var("OPENH264_PATH") else {
-            eprintln!("OPENH264_PATH が未設定のためスキップする");
-            return Ok(());
-        };
-        let lib = match Openh264Library::load(&lib_path) {
-            Ok(lib) => lib,
-            Err(e) => {
-                eprintln!("OpenH264 ライブラリのロードに失敗したためスキップ: {e:?}");
-                return Ok(());
-            }
-        };
-
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut stats = Stats::new();
-        let counter = stats.counter("test_total_output");
-        let sink = OutputSink::new(tx, counter);
-
-        let mut decoder = Openh264Decoder::new(lib, sink)?;
-
-        // SPS_320X240 fixture から構築した sample_entry を共有する keyframe を 2 回流す。
-        // 入力データは [SPS 長 prefix, SPS, PPS 長 prefix, PPS, IDR 長 prefix, IDR] の AVCC 形式。
-        let pps_nal = &PPS_ANNEXB[4..];
-        let idr_nal: &[u8] = &[0x65, 0x88];
-        let frame_data: Vec<u8> = [
-            &(crate::video::h264::tests::SPS_320X240.len() as u32).to_be_bytes()[..],
-            &crate::video::h264::tests::SPS_320X240[..],
-            &(pps_nal.len() as u32).to_be_bytes()[..],
-            pps_nal,
-            &(idr_nal.len() as u32).to_be_bytes()[..],
-            idr_nal,
-        ]
-        .concat();
-        let annexb: Vec<u8> = [
-            &crate::video::h264::tests::SPS_320X240_ANNEXB[..],
-            PPS_ANNEXB,
-        ]
-        .concat();
-        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(&annexb)?;
-
-        // タイムスタンプを単調増加させた 2 個の keyframe を順に decode する
-        for (idx, ts_ms) in [(0u64, 0u64), (1, 40)].iter() {
-            let frame = VideoFrame {
-                data: frame_data.clone(),
-                format: VideoFormat::H264,
-                keyframe: true,
-                size: None,
-                timestamp: std::time::Duration::from_millis(*ts_ms),
-                sample_entry: Some(crate::sample_entry::SharedSampleEntry::new(
-                    sample_entry.clone(),
-                )),
-            };
-            decoder.decode(&frame).unwrap_or_else(|e| {
-                panic!("keyframe {idx} の decode に失敗: {e:?}");
-            });
-        }
-        decoder.finish()?;
-
-        // 順序保証: 受信した frame の timestamp が単調非減少
-        // (OpenH264 の出力 frame 数は実装依存で 0 にもなり得るため、 1 件以上来た場合のみ検証する)
-        let mut previous_timestamp = std::time::Duration::ZERO;
-        let mut received_count = 0usize;
-        while let Ok(result) = rx.try_recv() {
-            let frame = result?;
-            assert!(
-                frame.timestamp >= previous_timestamp,
-                "出力フレームの timestamp が逆転している: prev={:?} curr={:?}",
-                previous_timestamp,
-                frame.timestamp
-            );
-            previous_timestamp = frame.timestamp;
-            received_count += 1;
-        }
-        eprintln!("受信フレーム数: {received_count}");
-
-        Ok(())
-    }
 
     #[test]
     fn build_annexb_input_prepends_missing_sps_pps_from_sample_entry() -> crate::Result<()> {

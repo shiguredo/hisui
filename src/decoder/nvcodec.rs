@@ -19,12 +19,9 @@ pub struct NvcodecDecoder {
     inner: shiguredo_nvcodec::Decoder<
         shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
     >,
-    // decode() で push、 callback で pop する FIFO キュー。
-    // (a) 案: callback 側で I420 変換 + emit を行うため、 Arc<Mutex<VecDeque>> 化している。
+    // decode() で push、 callback で pop する FIFO キュー
+    // (callback 側で I420 変換 + emit を行うため Arc<Mutex<VecDeque>> 化している)
     input_queue: InputQueue,
-    // 出力 sink。 callback closure にも clone を渡しているが、 inner の dispatch path 上で
-    // self.sink を再利用する余地を確保するため struct にも保持する。
-    sink: OutputSink,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ (本スレッド側のみが更新する)
 }
 
@@ -128,11 +125,10 @@ impl NvcodecDecoder {
         let mut config = params.nvcodec_h264.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::H264;
         let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink.clone());
+        let handler = build_handler(input_queue.clone(), sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue,
-            sink,
             parameter_sets: None,
         })
     }
@@ -142,11 +138,10 @@ impl NvcodecDecoder {
         let mut config = params.nvcodec_h265.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Hevc;
         let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink.clone());
+        let handler = build_handler(input_queue.clone(), sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue,
-            sink,
             parameter_sets: None,
         })
     }
@@ -156,11 +151,10 @@ impl NvcodecDecoder {
         let mut config = params.nvcodec_av1.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Av1;
         let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink.clone());
+        let handler = build_handler(input_queue.clone(), sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue,
-            sink,
             parameter_sets: None,
         })
     }
@@ -170,11 +164,10 @@ impl NvcodecDecoder {
         let mut config = params.nvcodec_vp8.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp8;
         let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink.clone());
+        let handler = build_handler(input_queue.clone(), sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue,
-            sink,
             parameter_sets: None,
         })
     }
@@ -184,11 +177,10 @@ impl NvcodecDecoder {
         let mut config = params.nvcodec_vp9.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp9;
         let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink.clone());
+        let handler = build_handler(input_queue.clone(), sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
             input_queue,
-            sink,
             parameter_sets: None,
         })
     }

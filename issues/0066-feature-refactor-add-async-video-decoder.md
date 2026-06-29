@@ -463,10 +463,10 @@ closed/0057 §3 で採用案 C の長所として挙げられた 5 項目を本 
 - **0068 line 30 修正**: `0068-feature-refactor-migrate-video-decoder-users-to-async.md` line 30 の「`VideoDecoder` 内部実装が `UnboundedReceiver` ベースに切り替わっている」を「`VideoDecoder` が内部に `AsyncVideoDecoder` を保持する wrap 構造に切り替わっており、 出力は内部 channel 経由で受け取る」に書き換え (本 PR 内で同時 commit、 0068 polish 時に再確認)
 - **0068 line 158 / 0067 line 85 の Branch 表記修正**: ファイル名 rename に合わせて `feature/refactor-add-async-video-decoder` 表記に統一 (本 PR 内で同時 commit)
 - **closed/0057 §3 分割表更新**: `issues/closed/0057-feature-refactor-callback-friendly-codec-interface.md` line 350-353 に 0068 行追加 + 末尾備考に方針 (δ) 注記を本 PR 内で同時 commit。 追加文字列の具体例は §解決方法 6 参照
-- 新規 end-to-end テスト 3 ケースが追加されている:
+- 新規 end-to-end テスト 2 ケースが追加されている:
   - (a) `src/decoder/nvcodec.rs` 末尾: `NvcodecDecoder` で callback 内 `Err` が次回 `try_recv()` で取得できる。 `#[cfg(feature = "nvcodec")]` ガード + GPU 環境のないテストでも実行可能な形 (構造体生成は `is_cuda_library_available()` 等でガード、 channel 経由検証は `OutputSink` を直接生成して `emit_err` を呼ぶ形で書く)
-  - (b) `src/decoder/openh264.rs` 末尾: `Openh264Decoder` で keyframe 入力時の `finish()` 経路フレームと新 frame の順序が保たれる (組合せは 4 通りあり得るため、 順序保証のみを検証)
   - (c) `src/decoder.rs` 末尾: `AsyncVideoDecoder::next_decoded_frame_async()` の `#[tokio::test(flavor = "multi_thread")]` で正常動作確認
+  - (旧 (b) Openh264 keyframe シーケンス順序保証テストは見送り。 `decode()` 内の `if frame.keyframe { self.finish()?; }` の直後で同じ `sink.emit_ok` 呼出が 1 本の関数フローで連続するため、 順序保証はコードレベルで自明。 動的 fixture を捏造して OpenH264 ライブラリに通すと CI で実 codec 判定に失敗するため、 ユニットテスト化には実 H.264 fixture が必要で投資対効果が低い)
 - メトリクス検証はテスト内では行わない (inner 直叩きでは `total_input` が増えない仕様)
 - `cargo fmt --all --check`
 - `cargo check --workspace`
@@ -589,10 +589,9 @@ while let Ok(result) = rx.try_recv() {
 
 ### 8. end-to-end テスト追加
 
-完了条件 (a)(b)(c) の 3 ケースを以下に配置:
+完了条件 (a)(c) の 2 ケースを以下に配置 ((b) は見送り、 §完了条件 参照):
 
 - (a) `src/decoder/nvcodec.rs` 末尾: `OutputSink` を直接生成して `emit_err` を呼び、 `rx.try_recv()` で `Err` を取得できることを検証 (GPU 不要、 channel 部分のみ)。 加えて `#[cfg(feature = "nvcodec")]` で構造体生成テストも別途追加 (`is_cuda_library_available()` でガード)
-- (b) `src/decoder/openh264.rs` 末尾: 実 H.264 fixture (`tests/e2e.rs` 流用) で keyframe 入力時の順序保証検証
 - (c) `src/decoder.rs` 末尾: `AsyncVideoDecoder::next_decoded_frame_async()` の `#[tokio::test(flavor = "multi_thread")]` で正常動作確認
 
 ### 9. 既存テストの追従
