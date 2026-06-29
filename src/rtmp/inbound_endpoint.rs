@@ -17,11 +17,6 @@ pub struct RtmpInboundEndpointOptions {
 /// RTMP Inbound Endpoint
 ///
 /// フィールドの不変条件は `Self::new()` で eager 検証される。
-/// フィールドは `pub(crate)` のため crate 外からは `new()` 経由でのみ組み立てられる。
-///
-/// 以下の検証は遅延 (`run()` 内):
-/// - URL 構文妥当性 (`parse_rtmp_url`)
-/// - TLS 有効時の `cert_path` / `key_path` ペア性 (`get_cert_and_key_paths`)
 pub struct RtmpInboundEndpoint {
     pub(crate) input_url: String,
     pub(crate) stream_name: Option<String>,
@@ -54,10 +49,7 @@ impl std::fmt::Display for RtmpInboundEndpointBuildError {
 }
 
 impl RtmpInboundEndpoint {
-    /// `RtmpInboundEndpoint` を構築する。以下を eager 検証する:
-    /// - `EmptyInputUrl`: `input_url` 非空
-    /// - `EmptyStreamName`: `stream_name` 指定時の非空
-    /// - `NoTrackId`: `output_audio_track_id` / `output_video_track_id` の少なくとも一方が必須
+    /// `RtmpInboundEndpoint` を構築する。
     pub fn new(
         input_url: String,
         stream_name: Option<String>,
