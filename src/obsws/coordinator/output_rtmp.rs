@@ -270,6 +270,16 @@ async fn start_rtmp_outbound_processors(
     run: &ObswsRtmpOutboundRun,
     frame_rate: crate::video::FrameRate,
 ) -> crate::Result<()> {
+    // encoder を起動する前にエンドポイントの組立検証を済ませて、
+    // 検証失敗時に encoder processor がリークしないようにする
+    let endpoint = crate::rtmp::outbound_endpoint::RtmpOutboundEndpoint::new(
+        output_url.to_owned(),
+        stream_name.map(|s| s.to_owned()),
+        Some(run.audio.encoded_track_id.clone()),
+        Some(run.video.encoded_track_id.clone()),
+        Default::default(),
+    )
+    .map_err(|e| crate::Error::new(format!("invalid rtmp_outbound_endpoint config: {e}")))?;
     // RTMP outbound は AAC エンコーディングを使用する（RTMP の制約）
     super::output::start_encoder_processors(
         pipeline_handle,
@@ -279,14 +289,6 @@ async fn start_rtmp_outbound_processors(
         frame_rate,
     )
     .await?;
-    let endpoint = crate::rtmp::outbound_endpoint::RtmpOutboundEndpoint::new(
-        output_url.to_owned(),
-        stream_name.map(|s| s.to_owned()),
-        Some(run.audio.encoded_track_id.clone()),
-        Some(run.video.encoded_track_id.clone()),
-        Default::default(),
-    )
-    .map_err(|e| crate::Error::new(format!("invalid rtmp_outbound_endpoint config: {e}")))?;
     crate::rtmp::outbound_endpoint::create_processor(
         pipeline_handle,
         endpoint,
