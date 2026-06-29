@@ -65,18 +65,28 @@ fn handle_decode_callback(
             }
         }
         Err(err) => {
-            // shiguredo_nvcodec lib 側は drain_frames で Err 時に pending_user_data.clear() を行うため、
-            // hisui 側の input_queue も同じタイミングでクリアして残骸を残さない
-            // (残しておくと後続 decode で input_frame / nv12_frame の timestamp 入れ違いという silent bug を生む)
-            {
-                let mut q = input_queue
-                    .lock()
-                    .expect("nvcodec input queue lock poisoned");
-                q.clear();
-            }
-            sink.emit_err(crate::Error::new(format!("nvcodec decode error: {err}")));
+            clear_input_queue_and_emit_err(
+                input_queue,
+                sink,
+                crate::Error::new(format!("nvcodec decode error: {err}")),
+            );
         }
     }
+}
+
+/// callback の Err 分岐共通処理: `input_queue` をクリアして `sink` に `Err` を流す。
+///
+/// shiguredo_nvcodec lib 側は `drain_frames` の Err 時に `pending_user_data.clear()` を行うため、
+/// hisui 側の `input_queue` も同じタイミングでクリアして残骸を残さない
+/// (残しておくと後続 decode で input_frame / nv12_frame の timestamp 入れ違いという silent bug を生む)。
+fn clear_input_queue_and_emit_err(input_queue: &InputQueue, sink: &OutputSink, err: crate::Error) {
+    {
+        let mut q = input_queue
+            .lock()
+            .expect("nvcodec input queue lock poisoned");
+        q.clear();
+    }
+    sink.emit_err(err);
 }
 
 /// NV12 フォーマットの decoded frame を I420 に変換して `VideoFrame` を構築する
@@ -375,22 +385,50 @@ fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> bool {
 mod tests {
     use super::*;
     use crate::stats::Stats;
+    use crate::video::VideoFormat;
 
-    /// callback 内で発生した `Err` を `sink.emit_err` 経由で channel に流したものが
-    /// 上位の `rx.try_recv()` で受信できることを検証する (GPU 不要、 channel 部分のみ)
+    /// テスト用 `VideoFrame` を 1 件生成する (data・フォーマットは適当な値)
+    fn make_dummy_video_frame() -> VideoFrame {
+        VideoFrame {
+            data: vec![0x00],
+            format: VideoFormat::H264,
+            keyframe: true,
+            size: None,
+            timestamp: std::time::Duration::ZERO,
+            sample_entry: None,
+        }
+    }
+
+    /// callback の Err 分岐に相当する `clear_input_queue_and_emit_err` が
+    /// (1) `input_queue` の残骸を完全クリアし、 (2) `sink` 経由で `Err` を rx へ流す
+    /// ことを検証する。
+    ///
+    /// これにより shiguredo_nvcodec lib 側 `pending_user_data.clear()` と整合させた
+    /// silent timestamp 入れ違い bug の回帰検出を担保する。
     #[test]
-    fn emit_err_propagates_through_channel() {
-        // sink と rx を直接生成 (NvcodecDecoder 構造体生成は GPU が必要なため避ける)
+    fn clear_input_queue_and_emit_err_clears_queue_and_sends_error() {
+        // input_queue に「callback Err 発生時点で残ってしまうはずだった」残骸を 2 件 push する
+        let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::from(vec![
+            make_dummy_video_frame(),
+            make_dummy_video_frame(),
+        ])));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut stats = Stats::new();
         let counter = stats.counter("test_total_output");
-        let sink = OutputSink::new(tx, counter);
+        let sink = OutputSink::new(tx, counter.clone());
 
-        // callback 内の `sink.emit_err(...)` 相当の呼出
-        let test_error = crate::Error::new("test nvcodec callback error");
-        sink.emit_err(test_error);
+        clear_input_queue_and_emit_err(
+            &input_queue,
+            &sink,
+            crate::Error::new("test nvcodec callback error"),
+        );
 
-        // 上位の `poll_output_sync` 相当: `try_recv` で `Ok(Err(e))` を受信
+        // (1) input_queue の残骸が完全クリアされている
+        assert!(
+            input_queue.lock().expect("lock").is_empty(),
+            "callback Err 後に input_queue がクリアされているはず (timestamp 入れ違い silent bug 防止)"
+        );
+        // (2) sink 経由で Err が rx に届いている
         match rx.try_recv() {
             Ok(Err(e)) => {
                 let msg = e.display().to_string();
@@ -399,7 +437,13 @@ mod tests {
                     "予期したエラーメッセージが含まれていない: {msg}"
                 );
             }
-            other => panic!("Err(...) を期待したが {other:?} を受信した"),
+            other => panic!("Ok(Err(_)) を期待したが {other:?} を受信した"),
         }
+        // emit_err は counter を inc しない (R-4 の二重計上禁止契約)
+        assert_eq!(
+            counter.get(),
+            0,
+            "Err 経路は total_output_metric を inc しないはず"
+        );
     }
 }
