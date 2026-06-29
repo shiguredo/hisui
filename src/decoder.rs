@@ -1032,4 +1032,33 @@ mod tests {
 
         sink.emit_ok(make_test_video_frame(vec![1, 2, 3]));
     }
+
+    /// `poll_output_sync` の Empty + eos==true 分岐: EOS 受信後で channel 空なら `Finished` を返す
+    #[test]
+    fn poll_output_sync_returns_finished_when_eos_and_channel_empty() {
+        let mut decoder =
+            AsyncVideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
+        // EOS で eos=true に遷移させる (inner は Initial のまま、 channel も空)
+        decoder
+            .handle_input_sample_sync(None)
+            .expect("EOS は Initial でも Ok");
+
+        assert!(
+            matches!(decoder.poll_output_sync(), Ok(DecoderRunOutput::Finished)),
+            "Empty + eos==true で Finished を期待した"
+        );
+    }
+
+    /// `poll_output_sync` の Empty + eos==false 分岐: 初期状態 (channel 空、 eos 未設定) なら `Pending` を返す
+    #[test]
+    fn poll_output_sync_returns_pending_when_not_eos_and_channel_empty() {
+        let mut decoder =
+            AsyncVideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
+        // handle_input_sample_sync を一度も呼ばない (eos=false、 channel 空)
+
+        assert!(
+            matches!(decoder.poll_output_sync(), Ok(DecoderRunOutput::Pending)),
+            "Empty + eos==false で Pending を期待した"
+        );
+    }
 }

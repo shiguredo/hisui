@@ -88,6 +88,38 @@ async fn async_video_decoder_processes_real_vp9_frame_via_wrap_delegation() -> h
     Ok(())
 }
 
+/// `poll_output_sync` の Ok(Ok(frame)) 分岐 ((1)) を実 VP9 fixture で踏破する
+///
+/// 同期 wrap (`VideoDecoder::poll_output`) が `AsyncVideoDecoder::poll_output_sync` に delegate
+/// する経路の正常性回帰検出。 上の `next_decoded_frame_async` 版と同じ frame 入力で、
+/// 取り出し API だけ `poll_output_sync` (同期 try_recv 経由) に切り替えて検証する。
+#[tokio::test(flavor = "multi_thread")]
+async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegation()
+-> hisui::Result<()> {
+    use hisui::MediaFrame;
+    use hisui::decoder::{AsyncVideoDecoder, DecoderRunOutput};
+
+    let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
+    let first_frame = reader
+        .next()
+        .expect("少なくとも 1 frame 含まれているはず")?;
+
+    let options = VideoDecoderOptions::default();
+    let stats = hisui::stats::Stats::new();
+    let mut decoder = AsyncVideoDecoder::new(options, stats);
+
+    // wrap delegation: handle_input_sample_sync 経由で inner.decode → sink.emit_ok を実行する
+    decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
+
+    // poll_output_sync の Ok(Ok(frame)) 分岐: try_recv で frame を取り出して Processed を返す
+    let output = decoder.poll_output_sync()?;
+    assert!(
+        matches!(output, DecoderRunOutput::Processed(_)),
+        "実 VP9 fixture から Processed を期待した (poll_output_sync 経由)"
+    );
+    Ok(())
+}
+
 fn multi_resolutions_test<I>(reader0: I, reader1: I) -> hisui::Result<()>
 where
     I: Iterator<Item = hisui::Result<VideoFrame>>,
