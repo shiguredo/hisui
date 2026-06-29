@@ -1,0 +1,106 @@
+//! `src/color.rs` の Color 型に対する PBT。
+//!
+//! u32 → Color → u32 / u32 → hex → Color → u32 のラウンドトリップと、
+//! `from_hex` / `from_hex_rgb` の受理範囲の境界を proptest で範囲網羅的に検証する。
+
+use hisui::color::Color;
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn argb_u32_roundtrips_via_color(argb in any::<u32>()) {
+        let restored = Color::from_argb_u32(argb).to_argb_u32();
+        prop_assert_eq!(restored, argb, "u32 → Color → u32 のラウンドトリップは恒等であるはず");
+    }
+
+    #[test]
+    fn argb_u32_roundtrips_via_hex_string(argb in any::<u32>()) {
+        let s = Color::from_argb_u32(argb).to_hex_string();
+        let restored = Color::from_hex(&s)
+            .expect("Color 自身が生成した hex は from_hex で必ず成功するはず")
+            .to_argb_u32();
+        prop_assert_eq!(restored, argb, "u32 → hex → Color → u32 のラウンドトリップは恒等であるはず");
+    }
+
+    // 任意 u32 → from_argb_u32 → to_hex_string が `#` + 8 桁大文字 hex (`#[0-9A-F]{8}`) であることを検証する。
+    // 既存 `argb_u32_roundtrips_via_hex_string` は値の往復一致を見るが、
+    // 出力フォーマット (長さ / プレフィックス / 大文字 / 文字種) は本プロパティで直接確認する。
+    #[test]
+    fn to_hex_string_matches_uppercase_8digit_pattern(argb in any::<u32>()) {
+        let s = Color::from_argb_u32(argb).to_hex_string();
+        prop_assert_eq!(s.len(), 9, "出力は # + 8 桁 hex の合計 9 文字であるはず");
+        prop_assert!(s.starts_with('#'), "出力は # で始まるはず");
+        prop_assert!(
+            s.chars().skip(1).all(|c| c.is_ascii_digit() || ('A'..='F').contains(&c)),
+            "出力の hex 部分は 0-9 / A-F の大文字のみで構成されるはず"
+        );
+    }
+
+    #[test]
+    fn from_hex_and_from_hex_rgb_agree_on_6digit(hex6 in "[0-9A-Fa-f]{6}") {
+        let s = format!("#{hex6}");
+        let from_hex_result = Color::from_hex(&s)
+            .expect("6 桁 hex は from_hex で成功するはず");
+        let from_hex_rgb_result = Color::from_hex_rgb(&s)
+            .expect("6 桁 hex は from_hex_rgb で成功するはず");
+        prop_assert_eq!(
+            from_hex_result, from_hex_rgb_result,
+            "6 桁入力では from_hex と from_hex_rgb の結果は完全に一致するはず"
+        );
+        prop_assert_eq!(
+            from_hex_result.a, 0xFF,
+            "6 桁 from_hex の alpha は 0xFF が埋まるはず"
+        );
+    }
+
+    #[test]
+    fn from_hex_accepts_8digit_but_from_hex_rgb_rejects(hex8 in "[0-9A-Fa-f]{8}") {
+        let s = format!("#{hex8}");
+        prop_assert!(
+            Color::from_hex(&s).is_some(),
+            "8 桁 hex は from_hex で成功するはず"
+        );
+        prop_assert!(
+            Color::from_hex_rgb(&s).is_none(),
+            "8 桁 hex は from_hex_rgb で None を返すはず"
+        );
+    }
+
+    // `#` を除いた長さが 6 / 8 のいずれでもない `#` 付き hex 文字列は from_hex が None を返す。
+    #[test]
+    fn from_hex_rejects_non_6_or_8_lengths(
+        hex in "[0-9A-Fa-f]{1,5}|[0-9A-Fa-f]{7}|[0-9A-Fa-f]{9,16}"
+    ) {
+        let s = format!("#{hex}");
+        prop_assert!(
+            Color::from_hex(&s).is_none(),
+            "6 / 8 桁以外は from_hex で None を返すはず"
+        );
+    }
+
+    // `#` を除いた長さが 6 ではない `#` 付き hex 文字列は from_hex_rgb が None を返す。
+    #[test]
+    fn from_hex_rgb_rejects_non_6_lengths(
+        hex in "[0-9A-Fa-f]{1,5}|[0-9A-Fa-f]{7,16}"
+    ) {
+        let s = format!("#{hex}");
+        prop_assert!(
+            Color::from_hex_rgb(&s).is_none(),
+            "6 桁以外は from_hex_rgb で None を返すはず"
+        );
+    }
+
+    // 上限 16 桁は 8 桁 (`from_hex` の受理上限) の倍までを「`#` 不在」として網羅する意図。
+    // 下限 0 桁で空文字の挙動も同時にカバーされる。
+    #[test]
+    fn both_parsers_reject_missing_hash(no_hash in "[0-9A-Fa-f]{0,16}") {
+        prop_assert!(
+            Color::from_hex(&no_hash).is_none(),
+            "# 不在文字列は from_hex で None を返すはず"
+        );
+        prop_assert!(
+            Color::from_hex_rgb(&no_hash).is_none(),
+            "# 不在文字列は from_hex_rgb で None を返すはず"
+        );
+    }
+}

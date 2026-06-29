@@ -66,8 +66,15 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 
 ## writer 側の前提
 
-`src/mp4/writer.rs`（`Mp4Writer`）/ `src/mp4/hybrid_writer.rs`（`HybridMp4Writer`）/ `src/dash/writer.rs`（`DashWriter`）/ `src/hls/writer.rs`（`HlsWriter`）の writer 入口は補完値（fallback）や違反検知ロジックを持たず、入力側で不変条件が確立している前提で動作する。
-万一不変条件が破られた場合は muxer が最初のサンプルで `MissingSampleEntry` Err を返してパイプラインを fail-fast 停止させる。
+各 writer は基本的に補完値（fallback）や違反検知ロジックを持たず、入力側で不変条件が確立している前提で動作する。
+万一不変条件が破られた場合の Err 発生箇所と上位 `run` での扱いは経路ごとに異なる。
+
+| writer | Err 発生箇所 | 上位 `run` での扱い |
+|---|---|---|
+| `Mp4Writer` / `HybridMp4Writer` | muxer (`MissingSampleEntry`) | `?` 伝播してパイプライン fail-fast 停止 |
+| `DashWriter` / `HlsWriter` (fMP4 経路) | muxer (`MissingSampleEntry` / `MixedSampleEntries`) | `tracing::warn!` で握り潰し、該当フレームをスキップ |
+| `HlsWriter` (MpegTs 経路) | ヘルパ (`convert_length_prefixed_to_annexb` / `extract_aac_config`) | `tracing::warn!` で握り潰し、該当フレームをスキップ |
+
 退行検知は各入力経路（リーダー / エンコーダ）の単体テストおよび e2e テストで担保する。
 
 なお、`input_*_track_id == None`（track 無効化中）に受信した違反フレームを観測する手段も writer 側には持たない。以前は警告ログとカウンタで観測連続性を保っていたが、責任の所在を入力側に集約する方針として意図的に放棄した。track 無効化中も含めて違反は入力側で発生しない前提で運用する。

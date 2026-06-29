@@ -18,18 +18,53 @@ use tokio::time::Instant;
 const TS_PACKET_SIZE: usize = 188;
 
 /// SRT Inbound Endpoint
+///
+/// フィールドの不変条件は `Self::new()` で eager 検証される。
 pub struct SrtInboundEndpoint {
-    pub input_url: String,
-    pub output_audio_track_id: Option<crate::TrackId>,
-    pub output_video_track_id: Option<crate::TrackId>,
-    // SRT caller が送る streamid の期待値（省略時は検証しない）。
+    pub(crate) input_url: String,
+    pub(crate) output_audio_track_id: Option<crate::TrackId>,
+    pub(crate) output_video_track_id: Option<crate::TrackId>,
+    pub(crate) options: SrtInboundEndpointOptions,
+}
+
+/// `SrtInboundEndpoint` 用オプション群
+#[derive(Debug, Clone, Default)]
+pub struct SrtInboundEndpointOptions {
+    /// SRT caller が送る streamid の期待値（省略時は検証しない）。
     pub stream_id: Option<String>,
-    // SRT 暗号化（KM ハンドシェイク）を有効化するパスフレーズ。
+    /// SRT 暗号化（KM ハンドシェイク）を有効化するパスフレーズ。
     pub passphrase: Option<String>,
-    // SRT 暗号化の鍵長（passphrase 指定時のみ有効）。
+    /// SRT 暗号化の鍵長（passphrase 指定時のみ有効）。
     pub key_length: Option<KeyLength>,
-    // TSBPD 遅延。
+    /// TSBPD 遅延。
     pub tsbpd_delay_ms: Option<Duration>,
+}
+
+/// `SrtInboundEndpoint::new()` が返す検証エラー。
+#[derive(Debug)]
+pub enum SrtInboundEndpointBuildError {
+    EmptyInputUrl,
+    EmptyStreamId,
+    EmptyPassphrase,
+    NoTrackId,
+}
+
+impl std::fmt::Display for SrtInboundEndpointBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyInputUrl => write!(f, "input_url must not be empty"),
+            Self::EmptyStreamId => {
+                write!(f, "stream_id must not be empty when specified")
+            }
+            Self::EmptyPassphrase => {
+                write!(f, "passphrase must not be empty when specified")
+            }
+            Self::NoTrackId => write!(
+                f,
+                "at least one of output_audio_track_id / output_video_track_id must be set"
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -288,21 +323,53 @@ impl SrtInboundEndpoint {
     }
 
     fn endpoint_config(&self) -> crate::Result<SrtEndpointConfig> {
-        if self.passphrase.is_none() && self.key_length.is_some() {
+        if self.options.passphrase.is_none() && self.options.key_length.is_some() {
             return Err(crate::Error::new(
                 "key_length requires passphrase to be specified",
             ));
         }
 
         Ok(SrtEndpointConfig {
-            stream_id: self.stream_id.clone(),
-            passphrase: self.passphrase.clone(),
-            key_length: self.key_length.unwrap_or(KeyLength::Aes128),
+            stream_id: self.options.stream_id.clone(),
+            passphrase: self.options.passphrase.clone(),
+            key_length: self.options.key_length.unwrap_or(KeyLength::Aes128),
             tsbpd_delay: self
+                .options
                 .tsbpd_delay_ms
                 .map(tsbpd_delay_duration_to_millis)
                 .transpose()?
                 .unwrap_or(120),
+        })
+    }
+
+    /// `SrtInboundEndpoint` を構築する。
+    pub fn new(
+        input_url: String,
+        output_audio_track_id: Option<crate::TrackId>,
+        output_video_track_id: Option<crate::TrackId>,
+        options: SrtInboundEndpointOptions,
+    ) -> Result<Self, SrtInboundEndpointBuildError> {
+        if input_url.is_empty() {
+            return Err(SrtInboundEndpointBuildError::EmptyInputUrl);
+        }
+        if let Some(id) = &options.stream_id
+            && id.is_empty()
+        {
+            return Err(SrtInboundEndpointBuildError::EmptyStreamId);
+        }
+        if let Some(pass) = &options.passphrase
+            && pass.is_empty()
+        {
+            return Err(SrtInboundEndpointBuildError::EmptyPassphrase);
+        }
+        if output_audio_track_id.is_none() && output_video_track_id.is_none() {
+            return Err(SrtInboundEndpointBuildError::NoTrackId);
+        }
+        Ok(Self {
+            input_url,
+            output_audio_track_id,
+            output_video_track_id,
+            options,
         })
     }
 

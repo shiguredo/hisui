@@ -25,6 +25,7 @@ pub(crate) mod output_registry;
 mod output_rtmp;
 mod output_sora;
 mod output_stream;
+mod parse_helpers;
 mod scene;
 mod scene_item;
 mod text_overlay;
@@ -958,6 +959,44 @@ impl ObswsCoordinator {
                 response_data: None,
             },
         }
+    }
+
+    /// `RequiredFieldError` を obsws の `requestStatus` にマップして `CommandResult` を作る。
+    /// 必須フィールドのパース失敗を扱う各ハンドラから呼び出して match 分岐を簡素化する。
+    fn build_required_field_error_result(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        field_name: &str,
+        error: parse_helpers::RequiredFieldError,
+    ) -> CommandResult {
+        let (status_code, status_comment) = match error {
+            parse_helpers::RequiredFieldError::Missing => (
+                crate::obsws::protocol::REQUEST_STATUS_MISSING_REQUEST_FIELD,
+                format!("Missing or empty {field_name} field"),
+            ),
+            parse_helpers::RequiredFieldError::Invalid(message) => (
+                crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+                message,
+            ),
+        };
+        self.build_error_result(request_type, request_id, status_code, &status_comment)
+    }
+
+    /// `parse_optional_*` の Err 等で取得した汎用メッセージを `INVALID_REQUEST_FIELD` で返す薄いラッパー。
+    /// オプションフィールドの型違反 / null を扱う各ハンドラから呼び出して呼び出し側を 1 行化する。
+    fn build_invalid_field_error_result(
+        &self,
+        request_type: &str,
+        request_id: &str,
+        message: &str,
+    ) -> CommandResult {
+        self.build_error_result(
+            request_type,
+            request_id,
+            crate::obsws::protocol::REQUEST_STATUS_INVALID_REQUEST_FIELD,
+            message,
+        )
     }
 
     /// output 設定変更リクエスト成功後に state の設定を outputs BTreeMap に同期する。

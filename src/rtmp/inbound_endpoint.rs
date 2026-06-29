@@ -15,12 +15,67 @@ pub struct RtmpInboundEndpointOptions {
 }
 
 /// RTMP Inbound Endpoint
+///
+/// フィールドの不変条件は `Self::new()` で eager 検証される。
 pub struct RtmpInboundEndpoint {
-    pub input_url: String,
-    pub stream_name: Option<String>,
-    pub output_audio_track_id: Option<crate::TrackId>,
-    pub output_video_track_id: Option<crate::TrackId>,
-    pub options: RtmpInboundEndpointOptions,
+    pub(crate) input_url: String,
+    pub(crate) stream_name: Option<String>,
+    pub(crate) output_audio_track_id: Option<crate::TrackId>,
+    pub(crate) output_video_track_id: Option<crate::TrackId>,
+    pub(crate) options: RtmpInboundEndpointOptions,
+}
+
+/// `RtmpInboundEndpoint::new()` が返す検証エラー。
+#[derive(Debug)]
+pub enum RtmpInboundEndpointBuildError {
+    EmptyInputUrl,
+    EmptyStreamName,
+    NoTrackId,
+}
+
+impl std::fmt::Display for RtmpInboundEndpointBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyInputUrl => write!(f, "input_url must not be empty"),
+            Self::EmptyStreamName => {
+                write!(f, "stream_name must not be empty when specified")
+            }
+            Self::NoTrackId => write!(
+                f,
+                "at least one of output_audio_track_id / output_video_track_id must be set"
+            ),
+        }
+    }
+}
+
+impl RtmpInboundEndpoint {
+    /// `RtmpInboundEndpoint` を構築する。
+    pub fn new(
+        input_url: String,
+        stream_name: Option<String>,
+        output_audio_track_id: Option<crate::TrackId>,
+        output_video_track_id: Option<crate::TrackId>,
+        options: RtmpInboundEndpointOptions,
+    ) -> Result<Self, RtmpInboundEndpointBuildError> {
+        if input_url.is_empty() {
+            return Err(RtmpInboundEndpointBuildError::EmptyInputUrl);
+        }
+        if let Some(name) = &stream_name
+            && name.is_empty()
+        {
+            return Err(RtmpInboundEndpointBuildError::EmptyStreamName);
+        }
+        if output_audio_track_id.is_none() && output_video_track_id.is_none() {
+            return Err(RtmpInboundEndpointBuildError::NoTrackId);
+        }
+        Ok(Self {
+            input_url,
+            stream_name,
+            output_audio_track_id,
+            output_video_track_id,
+            options,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]

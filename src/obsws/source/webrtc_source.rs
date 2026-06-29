@@ -68,18 +68,6 @@ pub fn apply_chroma_key(
     i420a_data
 }
 
-/// #RRGGBB 形式の色文字列を RGB に変換する。
-pub fn parse_hex_color(color: &str) -> Option<(u8, u8, u8)> {
-    let color = color.strip_prefix('#')?;
-    if color.len() != 6 {
-        return None;
-    }
-    let r = u8::from_str_radix(&color[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&color[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&color[4..6], 16).ok()?;
-    Some((r, g, b))
-}
-
 /// RGB を BT.601 で YUV に変換し、U と V を返す。
 pub fn rgb_to_uv_bt601(r: u8, g: u8, b: u8) -> (u8, u8) {
     let r = r as f64;
@@ -93,16 +81,6 @@ pub fn rgb_to_uv_bt601(r: u8, g: u8, b: u8) -> (u8, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_hex_color() {
-        assert_eq!(parse_hex_color("#00FF00"), Some((0, 255, 0)));
-        assert_eq!(parse_hex_color("#FF0000"), Some((255, 0, 0)));
-        assert_eq!(parse_hex_color("#000000"), Some((0, 0, 0)));
-        assert_eq!(parse_hex_color("#FFFFFF"), Some((255, 255, 255)));
-        assert_eq!(parse_hex_color("00FF00"), None); // # なし
-        assert_eq!(parse_hex_color("#0FF"), None); // 短すぎ
-    }
 
     #[test]
     fn test_rgb_to_uv_bt601_green() {

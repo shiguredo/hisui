@@ -2024,6 +2024,7 @@ dependencies = [
  "nojson",
  "proptest",
  "shiguredo_mp4",
+ "shiguredo_rtsp",
 ]
 
 [[package]]
