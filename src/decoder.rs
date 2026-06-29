@@ -962,4 +962,115 @@ mod tests {
             std::mem::discriminant(&decoder.inner_decoder.inner)
         );
     }
+
+    /// テスト用の最小 `VideoFrame` を作る (data は任意のバイト列、 timestamp は 0)
+    fn make_test_video_frame(data: Vec<u8>) -> VideoFrame {
+        VideoFrame {
+            data,
+            format: VideoFormat::Vp9,
+            keyframe: true,
+            size: None,
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        }
+    }
+
+    /// `emit_ok` は frame を rx に送信し、 `total_output_metric` を 1 inc する
+    #[test]
+    fn output_sink_emit_ok_sends_frame_and_increments_metric() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats = crate::stats::Stats::new();
+        let counter = stats.counter("test_total_output");
+        let sink = OutputSink::new(tx, counter.clone());
+
+        let frame = make_test_video_frame(vec![1, 2, 3]);
+        sink.emit_ok(frame);
+
+        match rx.try_recv() {
+            Ok(Ok(received)) => {
+                assert_eq!(
+                    received.data,
+                    vec![1, 2, 3],
+                    "送信した frame と一致するはず"
+                );
+            }
+            other => panic!("Ok(Ok(_)) を期待したが {other:?} を受信した"),
+        }
+        assert_eq!(
+            counter.get(),
+            1,
+            "emit_ok 1 回で counter は 1 inc されるはず"
+        );
+    }
+
+    /// `emit_err` は err を rx に送信するが、 `total_output_metric` を inc しない
+    ///
+    /// (issue 0066 設計動機「emit_ok だけが counter を inc する」契約の回帰検出。
+    /// この契約が崩れるとメトリクス二重計上 / 不正計上の温床になる)
+    #[test]
+    fn output_sink_emit_err_sends_error_without_incrementing_metric() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats = crate::stats::Stats::new();
+        let counter = stats.counter("test_total_output");
+        let sink = OutputSink::new(tx, counter.clone());
+
+        sink.emit_err(crate::Error::new("test sink error"));
+
+        match rx.try_recv() {
+            Ok(Err(e)) => {
+                let msg = e.display().to_string();
+                assert!(
+                    msg.contains("test sink error"),
+                    "送信したエラーメッセージが含まれているはず: {msg}"
+                );
+            }
+            other => panic!("Ok(Err(_)) を期待したが {other:?} を受信した"),
+        }
+        assert_eq!(counter.get(), 0, "emit_err は counter を inc しないはず");
+    }
+
+    /// `OutputSink::clone()` で複製した 2 つの sink から emit しても、 同一の rx で受信できる
+    ///
+    /// (NvcodecDecoder の build_handler が sink.clone() を callback closure に move する設計の
+    /// 不変条件を回帰検出する)
+    #[test]
+    fn output_sink_clone_shares_channel() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats = crate::stats::Stats::new();
+        let counter = stats.counter("test_total_output");
+        let sink_a = OutputSink::new(tx, counter.clone());
+        let sink_b = sink_a.clone();
+
+        sink_a.emit_ok(make_test_video_frame(vec![0xAA]));
+        sink_b.emit_ok(make_test_video_frame(vec![0xBB]));
+
+        let first = rx.try_recv().expect("1 件目を受信できるはず");
+        let second = rx.try_recv().expect("2 件目を受信できるはず");
+        let first = first.expect("Ok のはず");
+        let second = second.expect("Ok のはず");
+        assert_eq!(first.data, vec![0xAA], "FIFO 順で sink_a 由来が先");
+        assert_eq!(second.data, vec![0xBB], "FIFO 順で sink_b 由来が後");
+        assert_eq!(
+            counter.get(),
+            2,
+            "2 つの sink (clone でも同一 metric を共有) から各 1 回 emit_ok で合計 2 inc"
+        );
+    }
+
+    /// rx を先に drop した後の `emit_ok` は unreachable!() で panic する
+    ///
+    /// (構造体不変条件: sink と rx は `AsyncVideoDecoder` 内で同居するため、
+    /// 通常運用ではこの状況に到達しない。 万一 sink/rx の所有関係を将来変更してしまった場合に
+    /// silent fail させず即時 panic で bug を検出する R-3 方針の回帰検出)
+    #[test]
+    #[should_panic(expected = "decoder output sink receiver dropped before sink")]
+    fn output_sink_emit_ok_panics_when_receiver_dropped() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats = crate::stats::Stats::new();
+        let counter = stats.counter("test_total_output");
+        let sink = OutputSink::new(tx, counter);
+        drop(rx); // rx を先に drop する
+
+        sink.emit_ok(make_test_video_frame(vec![1, 2, 3]));
+    }
 }
