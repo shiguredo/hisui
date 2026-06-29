@@ -1,236 +1,174 @@
-# VideoDecoder 系とその利用箇所を Sender 出力に統一する
+# AsyncVideoDecoder を追加し VideoDecoder を内部 channel ベースに改修する
 
 - Priority: Medium
 - Created: 2026-06-26
 - Completed:
 - Model: Claude Opus 4.7
-- Branch: feature/refactor-video-decoder-sender-interface
-- Polished: 2026-06-26
+- Branch: feature/refactor-add-async-video-decoder
+- Polished:
 - Reporter: @sile
 - Decision Owner: @sile
 
 ## 目的
 
-closed issue 0057 で確定した採用案 C (全エンコーダー / デコーダーを `tokio::sync::mpsc::Sender<crate::Result<VideoFrame>>` 出力に統一) を **VideoDecoder 系と全利用箇所に適用する** 先行 PR。
+closed issue 0057 で確定した採用案 C (全エンコーダー / デコーダーを Sender 経由の出力に統一) を、**段階的に移行可能な形で** VideoDecoder 系に適用する。
 
-最終形: 全使用側が「`let (decoder, decoded_rx) = VideoDecoder::new(options, stats);` → `tokio::spawn(decoder.run(input_rx, output_tx, decoded_rx))`」の 1 パターンに統一。`drain_video_decoder_output` / `discard_video_decoder_output` ヘルパと `set_video_decoder` 後注入パターンは完全に廃止し、中途半端な「2 系統共存」状態を残さない。
+具体的には:
 
-詳細な動機・採用理由は closed/0057 §3 参照。
+1. **`AsyncVideoDecoder` を新規追加**: 内部 channel から `recv().await` でフレームを受け取る非同期インターフェース
+2. **既存 `VideoDecoder` (同期) を内部 channel ベースに改修**: 旧 `VecDeque<VideoFrame>` を `tokio::sync::mpsc::UnboundedSender` / `UnboundedReceiver` に置き換え、`next_decoded_frame()` は `Receiver::try_recv()` で取り出す形にする。**外部 API (同期 pull 型) は維持** し、既存使用側の書き換えは不要
+3. **inner 層は AsyncVideoDecoder / VideoDecoder の両方で共有**: 各 inner (`LibvpxDecoder` / `Openh264Decoder` / `Dav1dDecoder` / `VideoToolboxDecoder` / `NvcodecDecoder`) はコンストラクタで `Sender` を受け取って内包し、`decode()` 内で出力フレームを Sender に push する形に統一。同期 inner は `tx.try_send()` で push (内部 channel は unbounded のため失敗しない)、非同期 inner (Nvcodec) は callback 内で push
 
-### スコープ拡大の前提
+これにより、本 issue では **既存使用側 (compose / vmaf / inspect / mp4 reader / rtmp / rtsp / srt / obsws/file_mp4) の書き換えは一切不要** になる。各使用側の `AsyncVideoDecoder` への移行は **別 issue で段階的に** 行う。
 
-本 issue は decoder 内部の API 変更だけでは完結しない。外部利用箇所 (mp4/reader, rtsp, srt, rtmp, subcommand 系, obsws/source/file_mp4) も本 issue 内で完全に Sender 化する。これを段階分けせず 1 PR で揃える理由は中途半端な 2 系統共存の回避 (closed/0057 §3 採用案 C 整合)。
-
-兄弟 issue 0067 (encoder 側) も同様のスコープ拡大が必要 (encoder 外部利用箇所も Sender 化)。本 issue 完了時の 0067 polish で対称拡大する。
+詳細な動機・採用理由は closed/0057 §3 参照。closed/0057 の採用案 C で禁じていた「中途半端な 2 系統共存」は本方針では **意図的に許容** する (移行コストを段階分けする戦略)。closed/0057 §3 分割表も方針変更を反映するために更新が必要。
 
 ## 優先度根拠
 
 Medium。
 
 - closed issue 0057 で採用案が確定済み。実装着手段階に入っているため Medium 維持
-- 依存先: 0067 (encoder) は本 issue 完了後に同パターンで対称展開
-- 採用案 C 再検討 (案 A への後退) トリガー: 各 inner の `&mut self` 借用境界が `async fn` 化で解けない / PR 行数が想定 (約 2000-2500 行) を 1.5 倍以上に超える / mp4 reader の `recreate_decoders` 再設計が困難で代替案が無い、のいずれかが判明した時点
-- 判断者: Decision Owner (`@sile`)
+- 依存先: 0067 (encoder) は本 issue 完了後に同パターンで対称展開 (`AsyncAudioEncoder` も同様)
+- 本方針 (δ) は polish 段階の (α) / (β) / (γ) を踏まえて、Decision Owner の判断で確定した第 4 案。既存使用側を 1 つも壊さず Async 系インターフェースを追加できるため、段階的移行が安全
+- 採用案 C 再検討トリガー: 内部 channel ベース改修が同期 API の挙動 (`next_decoded_frame` の戻り値、`finish` のタイミング等) を変えてしまう場合は、対応方法を Decision Owner が判断
 
 ## 現状
 
 `src/decoder.rs` および `src/decoder/*.rs` の各 inner の構造は closed issue 0057 「現状」§の表を参照。本 issue 固有の論点は以下:
 
-### 上位 VideoDecoder の構造
+### 既存 VideoDecoder の内部構造
 
-- `VideoDecoder.decoded: VecDeque<VideoFrame>` (`src/decoder.rs:335`) + `poll_output()` (`src/decoder.rs:422-430`) で同期 pull
-- `VideoDecoderInner::Initial { options }` (`src/decoder.rs:537-553`) で最初の入力フレーム到着時の遷移は `decode()` 内 (`src/decoder.rs:677-681`) で実行
-- `VideoDecoder::run()` (`src/decoder.rs:360-391`) は素朴 `loop { input_rx.recv().await; ... drain_video_decoder_output(...) }` 構造で **`tokio::select!` 不使用**
+- `VideoDecoder.decoded: VecDeque<VideoFrame>` (`src/decoder.rs:335`) で同期 pull
+- `VideoDecoder::next_decoded_frame()` 系 dispatch (実体は `inner.next_decoded_frame()` → `output_queue.pop_front()`)
+- `VideoDecoder::poll_output()` (`src/decoder.rs:422-430`) で `MediaFrame::video(frame)` に包んで返す
+- `drain_video_decoder_output` (`src/decoder.rs:514-533`) で `VideoDecoder::poll_output()` を回しながら `TrackPublisher::send_media()` に流す
 
-### 外部利用箇所 (本 issue で全部書き換え対象)
+これら同期 pull API は **全て維持する**。内部のフレーム保持構造を `VecDeque` から `tokio::sync::mpsc::UnboundedReceiver` に置き換えるだけ。`next_decoded_frame()` の戻り値型 (`Option<VideoFrame>`) と挙動 (queue が空なら `None`) は不変。
 
-| 利用パターン | 対象ファイル | 用途 |
-|--------------|--------------|------|
-| `drain_video_decoder_output` pull 型 | `src/mp4/reader.rs:1236, 1286` (2 行) | mp4 read ループから decoder を pull |
-| 同上 | `src/rtsp/subscriber.rs:662` | RTSP 受信から pull |
-| 同上 | `src/srt/inbound_endpoint.rs:445` | SRT 受信から pull |
-| 同上 | `src/rtmp/inbound_endpoint.rs:422` | RTMP 受信から pull |
-| `discard_video_decoder_output` pull warm-up drain | `src/mp4/reader.rs:1388` | mp4 reader 内 decoder warm-up 中の出力破棄 |
-| `VideoDecoder::new` 外部生成 | `src/subcommand_inspect.rs:215` | inspect 単発 decode |
-| 同上 | `src/rtsp/subscriber.rs:64` | RTSP 用 |
-| 同上 | `src/srt/inbound_endpoint.rs:169` | SRT 用 |
-| 同上 | `src/rtmp/inbound_endpoint.rs:112` | RTMP 用 |
-| 同上 | `src/sora/recording_subcommand_vmaf.rs:362, 480` (2 行) | vmaf 用 |
-| 同上 | `src/sora/recording_subcommand_compose.rs:463` | compose 用 |
-| 同上 | `src/obsws/source/file_mp4.rs:54` | obsws file mp4 source 用 |
-| `VideoDecoder::new` 内部 self-recreate | `src/mp4/reader.rs:1369` (`recreate_decoders` `:1350` 内) | mp4 reader が `loop_playback` 再生のたびに decoder を作り直す |
-| `set_video_decoder` 後注入 | `src/obsws/source/file_mp4.rs:61` (注入先 `Mp4FileReader::set_video_decoder` `src/mp4/reader.rs:318`) | mp4 reader への decoder 注入 |
+### 各 inner の現状出力モデル
 
-合計: `drain_*` 利用 4 ファイル / 5 call site、`discard_video_decoder_output` 1 箇所、`VideoDecoder::new` 利用 8 ファイル / 9 call site、`set_video_decoder` 1 箇所。
+| 実装 | 内部 API | 内部キュー | 備考 |
+|------|----------|------------|------|
+| `LibvpxDecoder` | 同期 | `input_queue` + `output_queue` | `decode()` 内で `handle_decoded_frames()` を呼ぶ |
+| `Openh264Decoder` | 同期 | `input_queue` + `output_queue` | keyframe 入力時に `finish()` 経由で 0〜2 フレーム送信 |
+| `Dav1dDecoder` | 同期 | `input_queue` + `output_queue` | |
+| `VideoToolboxDecoder` | 非同期 | `decoded: Option<VideoFrame>` 単発 | `shiguredo_video_toolbox` 内で std::sync::mpsc 化済み |
+| `NvcodecDecoder` | 非同期 | `decoded_queue: Arc<Mutex<VecDeque>>` + `input_queue` + `error_slot` | hisui コードが `FnDecodeHandler` を直接実装 |
 
-### mp4 reader の制御フロー (Sender 化で配慮必須)
+各 inner の `output_queue` / `decoded_queue` (および `next_decoded_frame()` API) を廃止し、代わりに **コンストラクタで `tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>` を受け取って内包** する形に統一する。同期 inner では `decode()` 内で同期的に `tx.try_send()` する (unbounded なので失敗しない)。非同期 inner (Nvcodec) では callback 内から `tx.send()` する (unbounded なので `block_in_place` 不要)。
 
-`Mp4FileReader` は `subscribe_track` 経路を **使わず**、内部で `decoder.handle_input_sample(...)` に直接 push して `drain_video_decoder_output(decoder, &mut sender.sender)` で同期 drain する構造 (`src/mp4/reader.rs:1230-1290` 周辺)。output 側は mp4 reader 自身が `publish_track` で取得した `video_sender: Option<TrackSender>` (`src/mp4/reader.rs:1446` で定義) を保持し、decoder にも `&mut sender.sender` (内部の `TrackPublisher`) を渡している。
+### 外部利用箇所 (本 issue では一切書き換えない)
 
-`TrackSender` ラッパーは `noacked_sent: u64` (`:1446` 周辺フィールド) を持ち、`prepare_send` (`:1462-1470`) で `MAX_NOACKED_COUNT = 100` (`:24`) を超えたら SYN ACK 待ちを行う **独自バックプレッシャ機構** が組み込まれている。Sender 化後はこの SYN/ACK 背圧を decoder task 側で維持する必要がある (詳細は §設計方針)。
+- `drain_video_decoder_output` pull 型: `src/mp4/reader.rs:1236, 1286` (2 行) / `src/rtsp/subscriber.rs:662` / `src/srt/inbound_endpoint.rs:445` / `src/rtmp/inbound_endpoint.rs:422`
+- `discard_video_decoder_output` (`src/mp4/reader.rs:1388`)
+- `VideoDecoder::new` 外部生成 (9 call sites)
+- `set_video_decoder` (`src/obsws/source/file_mp4.rs:61` → `Mp4FileReader::set_video_decoder` `src/mp4/reader.rs:318`)
 
-`recreate_decoders` (`src/mp4/reader.rs:1350`) は `loop_playback` 再生のたびに decoder を作り直す。呼出元は **`:475, :494, :519, :645, :1346` の 5 箇所** (うち `:1346` は `reset_for_restart` 内、`:645` は `apply_seek` 内)。`flush_decoders` (`src/mp4/reader.rs:1274`) は `:339, :350` から呼ばれ、decoder の残出力を drain する。Sender 化後はこれらすべて `async fn` 化が必要。
-
-`TrackPublisher` は **`Clone` 不可**。`Drop` 実装で subscriber を pipeline に返却するため、decoder task に move-only で渡す設計に確定する。
-
-### 各 inner の固有挙動 (Sender 化で配慮必須)
-
-- **Openh264Decoder** (`src/decoder/openh264.rs:32-37, 60-71`): `decode()` 内で keyframe 入力時に先に `self.finish()` を呼び、バッファ内残フレーム (旧 SPS/PPS 由来) を flush してから新 keyframe を decode する。1 回の `decode()` で **0〜2 フレーム送信** が発生する
-- **VideoToolboxDecoder** (`reinitialize_if_need` `src/decoder/video_toolbox.rs:119-166`、ヘルパ `reinitialize_raw_codec_if_need` `:169-188`): SPS/PPS 変化や解像度変化時にデコーダー再初期化。`self.decoded.is_some()` (= 直前 frame が pull 未消費) なら `Err` を返す不変条件あり。`decoded: Option<VideoFrame>` (`src/decoder/video_toolbox.rs:12`) は 1 フレーム/decode 単発
-- **NvcodecDecoder** (`src/decoder/nvcodec.rs:13-14` 型エイリアス / `:24-25` フィールド / `:29-56` `build_handler` / `:220-295` `handle_decoded_frames`): hisui コードが `FnDecodeHandler` を直接実装し、`decoded_queue: Arc<Mutex<VecDeque>>` + `input_queue: VecDeque<VideoFrame>` + `error_slot: Arc<Mutex<Option<Error>>>` で callback 結果を退避してから pull。`handle_decoded_frames` 内で `input_queue.pop_front()` して対応する `VideoFrame` を取得し、`shiguredo_libyuv::nv12_to_i420` で NV12→I420 変換して `VideoFrame::new_i420` を組み立てる
+これらは **すべて現状のまま動く**。`VideoDecoder::new` のシグネチャは変えず、`next_decoded_frame()` / `poll_output()` も挙動不変。
 
 ### メトリクス計上の現状
 
-- `total_input_video_frame_count_metric.inc()` (`src/decoder.rs:405`、フィールド宣言 `:333`、let 束縛 `:345`): 入力フレーム数
-- `total_output_video_frame_count_metric.inc()` (`src/decoder.rs:415`、フィールド宣言 `:334`、let 束縛 `:346`): 出力フレーム数
+- `total_input_video_frame_count_metric.inc()` (`src/decoder.rs:333, 345, 405`): 入力フレーム数
+- `total_output_video_frame_count_metric.inc()` (`src/decoder.rs:334, 346, 415`): 出力フレーム数
 
-decoder には sample_entry 不変条件 (closed/0027) や keyframe 判定の計上義務はない (encoder の責務)。decoder 出力フレームは `VideoFrame::new_i420` で `sample_entry: None` 設定なので、上位で不変条件チェック不要。
+これらの計上ポイントも維持する (内部構造を `VecDeque` から `UnboundedReceiver` に置き換えるだけ)。
 
 ## 設計方針
 
-closed issue 0057 §3 採用案 C「実装前提」を踏襲する。本 issue 固有の決定は以下:
+### 内部 channel を core にした 2 系統 API 提供
 
-### Sender の流路と所有関係 (確定版)
+```
+       +--------------+
+input  |  各 inner    |   tx (内部 channel)         rx (内部 Receiver)
+-----> | decode/finish| ---------------------+----> +-----------+
+       |   (sync fn)  |                      |      | VideoDecoder       <-- 同期 API (既存維持)
+       +--------------+                      |      |   next_decoded_frame() = rx.try_recv()
+                                             |      +-----------+
+                                             |
+                                             +----> +-----------+
+                                                    | AsyncVideoDecoder  <-- 非同期 API (新規)
+                                                    |   recv().await
+                                                    +-----------+
+```
 
-**2 種類の channel を分離する**:
+- **内部 channel**: `tokio::sync::mpsc::unbounded_channel::<crate::Result<VideoFrame>>()` (unbounded で `try_send` 失敗なし、`block_in_place` 不要)
+- **`VideoDecoder` (同期、既存維持)**: 内部に `rx: UnboundedReceiver` を持ち、`next_decoded_frame()` は `self.rx.try_recv().ok().and_then(|r| r.ok())` で実装。エラーの伝搬は次節で議論
+- **`AsyncVideoDecoder` (新規)**: 内部に `rx: UnboundedReceiver` を持ち、`next_decoded_frame_async()` (仮称) は `self.rx.recv().await` で実装
+- **共有部分**: 内部 inner (`VideoDecoderInner` enum) と Sender / Receiver の所有関係を共通化する。`VideoDecoder` と `AsyncVideoDecoder` で構造体定義を共有する形 (一方が他方を内包する) もありうる
 
-- **外部 → VideoDecoder の入力**: 既存の `input_rx: MessageReceiver` を `run()` に引数で渡す
-- **VideoDecoder 内部 inner → run() の橋渡し用 channel**: `VideoDecoder::new(options, stats)` の戻り値を `(decoder, decoded_rx)` のタプルにし、`decoded_rx` は外部が保持して `run()` 起動時に引数で戻す。`decoder` 構造体側は対の `tx` のみ保持。`Initial → 実 decoder` 遷移時に `self.tx.clone()` (素の Sender clone、Arc 不要) を inner に渡す
-- **VideoDecoder → 外部の出力**: `run()` に `output_tx: TrackPublisher` を引数で渡す。`output_tx` は decoder task が move-only で独占所有
+### 構造体設計の選択肢
 
-`run()` シグネチャ: `pub async fn run(self, input_rx: MessageReceiver, output_tx: TrackPublisher, decoded_rx: mpsc::Receiver<crate::Result<VideoFrame>>) -> crate::Result<()>`
-
-### `run()` ループの構造: 入力 / 出力を 2 task に分離
-
-同一 task 内 `tokio::select!` の `await` 中に他腕が停止する問題 (入力腕の `inner.decode().await` が内部 channel 満杯で `tx.send().await` 待ちになると Receiver 腕が drain できず deadlock) を避けるため、`run()` 内で **2 つの sub-task を `tokio::spawn` する** 構造に確定する。
-
-`VideoDecoder` を擬似コードレベルで `let Self { ... } = self;` で分解し、各フィールドを 2 task に分配する (新型 `InnerRunner`/`OutputRunner` を別途定義する必要はない):
+**選択肢 (1): `VideoDecoder` を core にして `AsyncVideoDecoder` が `VideoDecoder` を包む**
 
 ```rust
-pub async fn run(
-    self,
-    input_rx: MessageReceiver,
-    output_tx: TrackPublisher,
-    decoded_rx: mpsc::Receiver<crate::Result<VideoFrame>>,
-) -> crate::Result<()> {
-    let Self {
-        engine_metric,
-        codec_metric,
-        total_input_video_frame_count_metric,
-        total_output_video_frame_count_metric,
-        tx,
-        inner,
-        ..
-    } = self;
+pub struct VideoDecoder {
+    inner: VideoDecoderInner,
+    rx: UnboundedReceiver<crate::Result<VideoFrame>>,
+    // tx は inner に渡し済み (構造体には保持しない)
+    // metrics 等
+}
 
-    // 出力 task → 入力 task への shutdown 伝達 (下流 close 検知時)
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+pub struct AsyncVideoDecoder {
+    inner_decoder: VideoDecoder,  // wrap
+}
 
-    let input_handle = tokio::spawn(run_input(
-        inner,
-        tx,
-        input_rx,
-        total_input_video_frame_count_metric,
-        engine_metric,
-        codec_metric,
-        shutdown_rx,
-    ));
-    let output_handle = tokio::spawn(run_output(
-        output_tx,
-        decoded_rx,
-        total_output_video_frame_count_metric,
-        shutdown_tx,
-    ));
-
-    // 両 task の結果を回収する。JoinError は crate::Error に変換する
-    let (input_result, output_result) = tokio::join!(input_handle, output_handle);
-    input_result
-        .map_err(|e| crate::Error::new(format!("decoder input task panicked: {e}")))??;
-    output_result
-        .map_err(|e| crate::Error::new(format!("decoder output task panicked: {e}")))??;
-    Ok(())
+impl AsyncVideoDecoder {
+    pub async fn next_decoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>> {
+        self.inner_decoder.rx.recv().await
+    }
 }
 ```
 
-依存追加なし: 既存の `tokio::sync::oneshot::channel` で 1 対 1 の shutdown 伝達を実現する (`tokio_util::sync::CancellationToken` は複数所有可能で高機能だが、本 issue の用途は出力 task → 入力 task の 1 対 1 通知のみで oneshot で十分)。
-
-### EOS / エラー終了の経路
-
-入力 task / 出力 task の終了経路を以下 3 ケースで整理する:
-
-**ケース A: 通常 EOS**
-1. 入力 task が `Message::Eos` を受信
-2. 入力 task が `inner.finish().await` で内部 channel に残フレームを全送出 (この finish 由来フレームも出力 task 側で `forward_decoded_frame` を経由するためメトリクスは漏れなく計上される)
-3. 入力 task が `tx` を drop (= 内部 channel close シグナル)
-4. 出力 task の `decoded_rx.recv()` が None を返す → 出力 task 側で `output_tx.send_eos()` を呼んで終了
-5. `handle_input_message` 内では `Message::Eos` を **no-op** に変更し、上記シーケンスとの二重 finish を避ける
-
-**ケース B: 下流 close (出力 task 側で検知)**
-1. 出力 task の `output_tx.send_media()` が `false` を返す (pipeline closed)
-2. 出力 task は `let _ = shutdown_tx.send(());` (送信先 drop でも代用可) で入力 task に shutdown 伝達 → `return Err(crate::Error::new("pipeline closed before decoder finished"))` で fail-fast
-3. 入力 task は `&mut shutdown_rx` を `tokio::select!` の腕に追加して監視しており、shutdown 受信 (or 送信側 drop) で抜ける
-4. 出力 task はこのケースでは `send_eos` を呼ばない (下流が既に閉じているため)
-
-**ケース C: inner エラー (入力 task 側で発生)**
-1. 入力 task の `inner.decode().await` が `Err` を返す
-2. 入力 task は `tx.send(Err(_)).await` で出力 task にエラー伝達 → 自身は `Err` を返して終了
-3. 出力 task は `Err` 受信時に `output_tx.send_eos()` を呼んでから `return Err(_)` で fail-fast (closed/0054 整合)
-
-### 各 inner の Sender 化形態 (全 variant 統一)
-
-全 inner が **コンストラクタで `tx: tokio::sync::mpsc::Sender<crate::Result<VideoFrame>>` を受け取って内包** する形に統一する (Sender は内部 `Arc` なので素 clone で OK、`Arc<Sender>` ラップ不要)。`VideoDecoderInner::decode` の統一シグネチャは `async fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()>`。
-
-- **同期 inner (Libvpx / Openh264 / Dav1d)**: 同期 decode → 各出力 frame を `self.tx.send(Ok(frame)).await?` で push
-- **Openh264Decoder** の keyframe シーケンス: `if frame.keyframe { self.finish().await?; }` (旧 SPS/PPS 由来 0〜1 フレーム送信) → 新 frame decode + `tx.send(Ok(...)).await?` (0〜1 フレーム送信)
-- **VideoToolboxDecoder**: `decoded: Option<VideoFrame>` 廃止。`reinitialize_if_need` の `decoded.is_some()` ガード条件は廃止し、代わりに `decode().await` 内で `tx.send().await` 完了を経た後に次の `decode().await` が始まるシーケンスを担保 (run_input task の sequential await で自然に成立)。bounded 容量 N の最小値検討 (N=1 で実害が無ければ採用、ただし `forward task` が drain 速ければ N=1 が最も同期的に近い)
-- **NvcodecDecoder**: コンストラクタ `new_h264(.., tx)` で `tx` を `move` で `FnDecodeHandler` クロージャに内包。`build_handler` (現 `src/decoder/nvcodec.rs:29-56`) のシグネチャを `fn build_handler(tx: Sender<crate::Result<VideoFrame>>, input_queue: Arc<Mutex<VecDeque<VideoFrame>>>) -> FnDecodeHandler<...>` に変更。callback 内で `input_queue.pop_front()` → NV12→I420 変換 (`shiguredo_libyuv::nv12_to_i420`、`block_in_place` 範囲に含む) → `tx.blocking_send(Ok(frame))` の順で実行 (`tokio::task::block_in_place` 経由で tokio worker block を safe にする)。`input_queue` は `Arc<Mutex<VecDeque<VideoFrame>>>` 化して callback と `decode()` push 側で共有。callback が input より先に走るケース (`pop_front()` が None) は `shiguredo_nvcodec` 仕様上ありえないと暫定し、`expect("decoded frame produced without input frame")` で fail-fast
-
-調査結果 (実装着手前に確認済み): `shiguredo_nvcodec 2026.2.0` の `Decoder::decode()` (`~/.cargo/registry/.../shiguredo_nvcodec-2026.2.0/src/decode.rs:235-252`) は `cuvidParseVideoData` を **同期呼出** している。NVIDIA Video Decoder SDK の仕様上、callback は `cuvidParseVideoData` を呼んだスレッド上で同期実行される。よって hisui の `FnDecodeHandler` クロージャは `decoder.decode().await` を実行している tokio worker thread 上で同期実行される。hisui は multi-thread runtime (`Cargo.toml` の `rt-multi-thread` feature) を採用しているため、`tokio::task::block_in_place + tx.blocking_send(...)` が安全に使える (current-thread runtime では panic するが本プロジェクトでは該当しない)。フレーム順序保証は cuvid parser の sequential dispatch (1 packet 投入 → 1 frame callback) で担保される。
-
-### バックプレッシャ戦略
-
-- 内部 channel: `tokio::sync::mpsc::channel(N)` (bounded)。N=8 を暫定値とし、N=1 と N=8 の比較は別 issue で計測 (本 issue は N=8 暫定固定で完成扱い)
-- N の最小制約: `inner.decode()` 1 回が一度に送信しうる最大フレーム数 + 余裕 (Openh264 で最大 2 → N >= 4)
-- broadcast の lag drop: `MediaPipeline::subscribe_track` (`tokio::sync::broadcast` ベース) の lag drop で上位 receiver 遅延を吸収 (closed/0057 採用案 C 整合)
-
-### 外部利用箇所の Sender 化パターン
-
-全使用側が以下の共通パターンに揃う:
+**選択肢 (2): `AsyncVideoDecoder` を core にして `VideoDecoder` が wrap**
 
 ```rust
-let (decoder, decoded_rx) = VideoDecoder::new(options, stats);
-let join_handle = tokio::spawn(decoder.run(input_rx, output_tx, decoded_rx));
-// 使用側は input 経路 (subscribe_track or 自前 mpsc) への送信と、output 経路からの取り出しのみ
-// 終了時: input_rx を drop → decoder.run() ループ完走 → join_handle.await
+pub struct AsyncVideoDecoder {
+    inner: VideoDecoderInner,
+    rx: UnboundedReceiver<crate::Result<VideoFrame>>,
+}
+
+pub struct VideoDecoder {
+    inner_decoder: AsyncVideoDecoder,
+}
+
+impl VideoDecoder {
+    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
+        self.inner_decoder.rx.try_recv().ok().and_then(|r| r.ok())
+    }
+}
 ```
 
-#### mp4 reader (`Mp4FileReader`) の再設計
+**選択肢 (3): 2 つの独立構造体 + 共通の inner ヘルパ trait**
 
-mp4 reader は subscribe_track 経路ではなく自前で decoder に push する構造のため、Sender pattern では以下に再設計:
+両者を独立構造体として保持し、共通の inner trait (`VideoDecoderInner`) を持つ。
 
-1. mp4 reader 内部で `let (input_tx, input_rx) = mpsc::channel(M);` を生成し、decoder task に渡す
-2. `let (decoder, decoded_rx) = VideoDecoder::new(options, stats);`
-3. **`output_tx`/`TrackSender` の所有を decoder task に移す**: 現状の `video_sender: Option<TrackSender>` (`:1446`) は decoder task が独占所有する形に変える。具体的には、`TrackSender` ラッパーごと decoder task に move して、`TrackSender::prepare_send` (`:1462`) ベースの SYN/ACK 背圧 (`MAX_NOACKED_COUNT = 100`) を decoder task 内 (出力 task) で維持する。decoder の `run()` シグネチャを「`TrackSender` 受け取り版」と「`TrackPublisher` 受け取り版」に分けるか、`TrackSender` を生成済みのまま渡せるよう `VideoDecoder::new` の引数を拡張するかは実装段階で決定。設計の前提は **「SYN/ACK 背圧を回帰させない」**
-4. `let join_handle = tokio::spawn(decoder.run(input_rx, output_tx_or_sender, decoded_rx));`
-5. mp4 read ループで `input_tx.send(Message::Media(frame)).await?` でフレーム供給
-6. `recreate_decoders` 時 (Restart 経路): 前 spawn の `input_tx` を drop → `join_handle.await?` で待つ → 上記 1〜4 で再 spawn。Restart 時は `inner.finish()` を呼ばずに drop することで残フレームを破棄する旧構造と等価な挙動を維持する (loop_playback 再生開始時に decode 残バッファは不要)
-7. `flush_decoders` 時 (停止経路): `input_tx.send(Message::Eos).await?` → drop → `join_handle.await?` で finish 経由の残フレーム送出を待つ
-8. `discard_video_decoder_output` (`src/mp4/reader.rs:1388`) は warm-up 中の出力破棄用ヘルパなので、Sender pattern では「decoder task を立ち上げ、出力 task の `decoded_rx` を warm-up 期間中は捨てる」処理に置き換えるか、warm-up を decoder task 内部の責務に変える。audio 側 `discard_decoder_output` (`:1382`) も同様に書き換える
+実装着手段階で Decision Owner が選択する。シンプル性で言えば (1) または (2)。
 
-`recreate_decoders` (`src/mp4/reader.rs:1350`)、`flush_decoders` (`:1274`)、`reset_for_restart` (`:1340`)、`apply_seek` (`:638`) はすべて `async fn` 化する必要があり、呼出元 (`:339, :350, :378, :383, :465, :475, :479, :484, :494, :498, :503, :519, :523, :528, :645` の 15 箇所、 すべて既に `async` コンテキスト内なので `.await` 付与で追従) も書き換える。
+### 各 inner の Sender 化形態
 
-`Mp4FileReader::set_video_decoder` (`src/mp4/reader.rs:318`) は廃止し、mp4 reader が options を受け取って自前で decoder を spawn する。`obsws/source/file_mp4.rs:54-61` の `VideoDecoder::new` + `set_video_decoder` 経路は消失する。
+`VideoDecoderInner` の各 variant をコンストラクタで `tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>` を受け取って内包する形に統一する。
 
-#### RTMP / RTSP / SRT inbound endpoint
+- **同期 inner (Libvpx / Openh264 / Dav1d)**: `decode()` は **同期 fn** のまま。内部で出力フレームを `self.tx.send(Ok(frame))` で push (unbounded なので失敗しない)。await は不要
+- **VideoToolboxDecoder**: `decode()` 同期 fn のまま。`decoded: Option<VideoFrame>` を廃止して直接 `self.tx.send(Ok(frame))`。`reinitialize_if_need` の `decoded.is_some()` ガードは不要 (sequential 呼出で frame が積まれる順序は保たれる)
+- **NvcodecDecoder**: `decode()` 同期 fn のまま。`FnDecodeHandler` 内で `tx.send(Ok(frame))` を直接呼ぶ (unbounded なので `block_in_place + blocking_send` 不要)。`error_slot` / `decoded_queue` は廃止し、callback 内エラーは `tx.send(Err(_))` で即時通知
 
-現状 `subscriber.rs` 構造体内に `decoder: Option<VideoDecoder>` を持って同期 pull していたが、Sender pattern では以下に書き換える:
+inner の `decode` / `finish` シグネチャは現状の同期 fn を維持 (`async fn` 化不要、`block_on` も不要、tokio runtime context 依存なし)。
 
-- 構造体内に `decoder_join_handle: Option<tokio::task::JoinHandle<crate::Result<()>>>` と `decoder_input_tx: Option<mpsc::Sender<Message>>` を持つ
-- decoder 起動時に `(decoder, decoded_rx) = VideoDecoder::new(...)` + `tokio::spawn(decoder.run(input_rx, output_tx, decoded_rx))` で task 化
-- 受信したフレームは `decoder_input_tx.send(...).await` で投入
-- 終了時に `decoder_input_tx` を drop → `join_handle.await?` で待つ
+### unbounded channel 採用の正当化
 
-### `shiguredo-rust` 規約整合
+- inner は frame ごとに 1〜2 フレーム push するだけで、 突発的に大量送信することはない
+- 内部 channel が `unbounded` でも実用上のメモリ使用量増加は小さい (raw I420 1080p で 1 フレーム約 3MB、通常は数フレーム以内に消費)
+- バックプレッシャは下流の `output_tx: TrackPublisher` の `send_media` で発生 (broadcast の lag drop 経由)
+- `bounded` channel + `block_in_place + blocking_send` の複雑性を避け、シンプル性を優先
+
+### エラー伝搬
+
+- `Result<VideoFrame, crate::Error>` を Sender に流す形に統一
+- 同期 inner の `decode()` 中で発生したエラーは、`decode()` の戻り値で `Err` を返す形を維持 (Sender には流さない)
+- 非同期 inner (Nvcodec) の callback 内エラーは Sender 経由で `Err(_)` を即時通知 (`error_slot` 廃止)
+- 同期 `VideoDecoder::next_decoded_frame()` は `Option<VideoFrame>` を返す既存挙動を維持: `rx.try_recv()` で取得した `Result<VideoFrame, Error>` のうち `Err` は無視 (or log) して `None` を返す。エラー伝搬は別経路 (例: 次回の `decode()` 呼出時に蓄積 Err を返す) で行うか、`poll_output()` の戻り値で `Err` を返すか、Decision Owner が選択
+
+### shiguredo-rust 規約整合
 
 - トレイト追加なし (`VideoDecoderInner` enum を維持)
 - `#[non_exhaustive]` 不使用
@@ -239,24 +177,19 @@ mp4 reader は subscribe_track 経路ではなく自前で decoder に push す�
 
 ## 完了条件
 
-- 「解決方法」§の step 1〜9 すべてが実装され、以下の旧構造がコードベースから完全に消えている:
-  - `VideoDecoder.decoded: VecDeque<VideoFrame>`
-  - `VideoDecoder::poll_output()`
-  - `VideoDecoderInner::next_decoded_frame()` 系 dispatch
-  - `drain_video_decoder_output` / `discard_video_decoder_output` / `discard_decoder_output` (audio) ヘルパ
-  - `NvcodecDecoder::error_slot` および `decoded_queue` の中継キュー
-  - `VideoToolboxDecoder::decoded: Option<VideoFrame>` フィールド
-  - `Mp4FileReader::set_video_decoder` (`src/mp4/reader.rs:318`)
-- `total_input_video_frame_count_metric.inc()` (現状 `:405` の 1 箇所) は入力 task 内に集約され、`total_output_video_frame_count_metric.inc()` (現状 `:415` の 1 箇所) も出力 task 内 1 箇所に共通ヘルパ (例: `forward_decoded_frame()`) で集約されている
-- 「現状」§ 外部利用箇所表のすべての行が Sender 経路 (設計方針 §「外部利用箇所の Sender 化パターン」) に置き換わっている
-- mp4 reader の `recreate_decoders` / `flush_decoders` / `reset_for_restart` / `apply_seek` がすべて async fn 化され、呼出元 15 箇所が `.await` 付与で追従している
-- mp4 reader の `TrackSender` (`:1446`) の SYN/ACK バックプレッシャ (`MAX_NOACKED_COUNT = 100`) が decoder task 側で維持されている (回帰なし)
-- NvcodecDecoder の採用方式 (`block_in_place + blocking_send` を採用、設計方針 §「各 inner の Sender 化形態」末尾の調査結果に基づく) を実装
-- end-to-end テストが `src/decoder/nvcodec.rs` に追加され、以下の最小ケースを検証する:
-  - (a) `NvcodecDecoder` で callback 内 `Err` が次回 decode 呼出を待たず Receiver に届くこと
-  - (b) `Openh264Decoder` で keyframe 入力時に `finish()` 経由の旧 frame と新 keyframe 由来 frame が両方 Sender に送信され、順序が保たれること
-  - (c) `VideoToolboxDecoder` で再初期化条件下 (SPS/PPS 変化など) で Sender 送信完了 → 再初期化 → 次フレーム送信の順序が保たれること
-- 既存 `src/decoder.rs:720-821` のエンジン選択テストは inner variant pattern match を `#[tokio::test]` + Sender 形式で維持
+- `AsyncVideoDecoder` 構造体が `src/decoder.rs` に新規追加され、 `next_decoded_frame_async() -> Option<crate::Result<VideoFrame>>` (or 類似の async API) を提供する
+- 既存 `VideoDecoder` の内部実装が `VecDeque` から `tokio::sync::mpsc::unbounded_channel` ベースに切り替わっている
+- 既存 `VideoDecoder::next_decoded_frame()` / `VideoDecoder::poll_output()` / `drain_video_decoder_output` の **外部 API 挙動は不変** (戻り値型・タイミング・エラー伝搬経路すべて維持)
+- 各 inner (`Libvpx` / `Openh264` / `Dav1d` / `VideoToolbox` / `Nvcodec`) のコンストラクタが `tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>` を受け取って内包する形に変更されている
+- 各 inner の `output_queue` / `decoded_queue` / `error_slot` / `decoded: Option<VideoFrame>` 等の中継キューが廃止されている
+- 各 inner の `next_decoded_frame()` 系 API が廃止されている
+- 各 inner の `decode()` / `finish()` シグネチャは同期 fn のまま維持 (async fn 化なし)
+- `MediaPipeline` / `ProcessorHandle` 経由の既存使用側 (compose / vmaf / inspect / mp4 reader / rtmp / rtsp / srt / obsws/file_mp4) は **一切書き換えない** (バイナリ互換維持を確認)
+- 新規 end-to-end テスト (`src/decoder/nvcodec.rs` 末尾) が追加され、以下を検証:
+  - (a) `NvcodecDecoder` で callback 内 `Err` が次回 `try_recv()` で取得できる
+  - (b) `Openh264Decoder` で keyframe 入力時に `finish()` 経由の旧フレーム + 新フレームが両方 Receiver に届く
+  - (c) `AsyncVideoDecoder::next_decoded_frame_async()` で正常に `recv().await` できる
+- 既存 `src/decoder.rs:720-821` のエンジン選択テストは現状形 (同期 `decoder.handle_input_sample(...)`) のまま動く
 - `cargo fmt --all --check`
 - `cargo check --workspace`
 - `cargo check --workspace --no-default-features`
@@ -269,225 +202,94 @@ mp4 reader は subscribe_track 経路ではなく自前で decoder に push す�
 
 ## 解決方法
 
-設計方針 §で確定した方針に従って以下の step を実装する。各 step の詳細は設計方針 §の対応箇所を参照。
+### 1. 内部 channel 型の確定
 
-### 1. inner の Sender 化
+`type DecoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;` のような型エイリアスを `src/decoder.rs` に追加。各 inner のコンストラクタで受け取る型を統一する。
 
-設計方針 §「各 inner の Sender 化形態」に従う。全 inner のコンストラクタを `new(..., tx: tokio::sync::mpsc::Sender<crate::Result<VideoFrame>>) -> crate::Result<Self>` に統一、`VideoDecoderInner::decode` を `async fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()>` に統一する。
+### 2. inner の Sender 化 (同期 fn のまま)
 
-### 2. VideoDecoder 構造体の書き換え
+各 inner のコンストラクタを `new(..., tx: DecoderOutputSender) -> crate::Result<Self>` 形に変更。`output_queue` / `decoded_queue` / `error_slot` / `decoded: Option<VideoFrame>` を廃止。
 
-- `VideoDecoder.decoded: VecDeque<VideoFrame>` を廃止し、代わりに `tx: tokio::sync::mpsc::Sender<crate::Result<VideoFrame>>` を保持
-- `VideoDecoder::new(options, stats)` の戻り値を `(VideoDecoder, mpsc::Receiver<...>)` のタプルにし、内部 channel の `rx` を返す
-- `VideoDecoder::poll_output()` (`src/decoder.rs:422-430`) と `VideoDecoderInner::next_decoded_frame()` (`src/decoder.rs:706-717`) 系 dispatch を廃止
+- **同期 inner (Libvpx / Openh264 / Dav1d)**: `decode()` 内で `self.tx.send(Ok(frame)).expect("unbounded channel never closed")` の形で push (send は unbounded なので `closed` のみが Err、その場合は VideoDecoder が drop された後 = bug なので panic で良い)
+- **VideoToolboxDecoder**: 同様に `decode()` 同期 fn 内で `self.tx.send(Ok(frame))`、`reinitialize_if_need` の `decoded.is_some()` ガードを廃止
+- **NvcodecDecoder**: `FnDecodeHandler` 内で `tx.send(Ok(frame))` / `tx.send(Err(_))` を直接呼ぶ。`input_queue` は callback と `decode()` push 側で共有 (`Arc<Mutex<>>` 化)、`error_slot` / `decoded_queue` 廃止
 
-### 3. VideoDecoder::run() の 2 task 分離構造
+### 3. VideoDecoder の内部 channel 化
 
-設計方針 §「`run()` ループの構造」に従う。`run(self, input_rx, output_tx, decoded_rx)` 内で 2 sub-task (`run_input` / `run_output`) を `tokio::spawn` して `tokio::join!` で待ち合わせる。`tokio::sync::oneshot::channel` で出力 task → 入力 task の shutdown 伝達を行う (依存追加なし)。EOS / エラー終了は §「EOS / エラー終了の経路」のケース A/B/C に従う。
+`VideoDecoder` 構造体に `rx: tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>` を追加 (`decoded: VecDeque<VideoFrame>` を置換)。
 
-### 4. drain_video_decoder_output / discard_*_output 廃止と外部利用箇所の書き換え
+- `VideoDecoder::new(options, stats)` 内で `let (tx, rx) = tokio::sync::mpsc::unbounded_channel();` を作成、tx を inner に渡す
+- `VideoDecoder::next_decoded_frame()`: 戻り値型 `Option<VideoFrame>` を維持しつつ、実装を `self.rx.try_recv().ok().and_then(|r| r.ok())` 等に変更 (エラーの扱いは §設計方針エラー伝搬で確定)
+- `VideoDecoder::poll_output()`: 既存挙動を維持 (内部実装だけ変更)
+- `drain_video_decoder_output`: 既存挙動を維持
+- `handle_input_sample` / `handle_input_message`: 既存挙動を維持
 
-「現状」§ 外部利用箇所表の `drain_video_decoder_output` 5 call site、`discard_video_decoder_output` 1 call site、`discard_decoder_output` (audio) 1 call site、`VideoDecoder::new` 9 call site を、設計方針 §「外部利用箇所の Sender 化パターン」に従って書き換える。mp4 reader は §5 で扱う。
+### 4. AsyncVideoDecoder の新規追加
 
-### 5. mp4 reader (`Mp4FileReader`) の再設計
-
-設計方針 §「mp4 reader (`Mp4FileReader`) の再設計」の 1〜8 シーケンスを実装。呼出元 grep 結果 (`:339, :350, :378, :383, :465, :475, :479, :484, :494, :498, :503, :519, :523, :528, :645` 等) を `.await` 付与で追従。`Mp4FileReader::set_video_decoder` (`src/mp4/reader.rs:318`) と `obsws/source/file_mp4.rs:54, 61` の `VideoDecoder::new` + `set_video_decoder` 呼出を削除。`TrackSender` の SYN/ACK 背圧維持の具体形態 (decoder task に丸ごと move か、`MAX_NOACKED_COUNT` を内部 channel N に置換するか) を実装段階で確定。
-
-### 6. NvcodecDecoder の error_slot 廃止と input_queue 共有化
-
-設計方針 §「各 inner の Sender 化形態 NvcodecDecoder」に従う。削除対象:
-
-- `error_slot: Arc<Mutex<Option<Error>>>` 型エイリアス (`src/decoder/nvcodec.rs:14`) とフィールド (`:25`)
-- `decoded_queue: Arc<Mutex<VecDeque>>` の中継キューフィールドと型エイリアス (`:13, :24`)
-- `handle_decoded_frames()` (`src/decoder/nvcodec.rs:220-295`) の error_slot 取り出しロジックと中継キュー pop ロジック
-
-変更対象:
-
-- `input_queue: VecDeque<VideoFrame>` を `Arc<Mutex<VecDeque<VideoFrame>>>` に変更
-- `build_handler` (`src/decoder/nvcodec.rs:29-56`) のシグネチャを `fn build_handler(tx: Sender<crate::Result<VideoFrame>>, input_queue: Arc<Mutex<VecDeque<VideoFrame>>>) -> FnDecodeHandler<...>` に変更し、callback 内で input pop → NV12→I420 変換 → `tx.blocking_send(...)` を直接呼ぶ
-
-### 7. VideoToolboxDecoder の reinitialize_if_need 再設計
-
-設計方針 §「各 inner の Sender 化形態 VideoToolboxDecoder」に従う。削除対象: `decoded: Option<VideoFrame>` フィールド (`src/decoder/video_toolbox.rs:12`) と `reinitialize_if_need` 内ガード (`:131-134, :147-151, :180-183`)。
-
-### 8. Initial に sender を含めない設計
-
-- `VideoDecoderInner::Initial { options }` (`src/decoder.rs:537-553`) は現状の構造を維持
-- `VideoDecoder` 構造体側に `tx: tokio::sync::mpsc::Sender<...>` を保持し、`initialize_decoder` (`src/decoder.rs:555-668`) で実 decoder 生成時に `self.tx.clone()` を渡す
-- Initial 状態のまま EOS 到達時は `self.tx` を drop して終了
-
-### 9. テスト書き換え
-
-- 既存 `src/decoder.rs:720-821` のエンジン選択テスト (`vp9_without_size_skips_video_toolbox` 系) は `#[tokio::test]` に置換し、`(decoder, _rx) = VideoDecoder::new(...)` 形式で `inner` の variant pattern match を維持する最小改変
-- 各 decoder 末尾テスト (`src/decoder/openh264.rs:161-247` の `build_annexb_input` テスト等) は本 issue の API 変更影響範囲のみ書き換え
-- 新規 end-to-end テストを `src/decoder/nvcodec.rs` に追加 (完了条件の (a)(b)(c) を検証)
-- テスト fixture は既存 `crate::video::h264::tests::SPS_320X240_ANNEXB` 系 (`src/video/h264.rs:911`、`pub(crate)` 可視性) を流用する
-- end-to-end テスト雛形で参照する `build_test_h264_keyframe()` は本 issue 内で `src/video/h264.rs` の `pub(crate) mod tests` に新規追加する (既存 `SPS_320X240_ANNEXB` を流用して最小 H.264 keyframe バイト列 `[SPS, PPS, IDR slice]` を組み立てる)。新規追加もテスト書き換え範囲に含む
-
-end-to-end テスト雛形:
+設計方針 §構造体設計の選択肢から (1) / (2) / (3) を選択。本 issue 起票時の暫定推奨は (2) (`AsyncVideoDecoder` core + `VideoDecoder` wrap)。
 
 ```rust
-#[tokio::test]
-#[cfg(feature = "nvcodec")]
-async fn test_nvcodec_decoder_to_receiver_e2e() {
-    // CUDA 非搭載 CI では skip する
-    if !shiguredo_nvcodec::is_cuda_library_available() {
-        return;
+pub struct AsyncVideoDecoder {
+    inner: VideoDecoderInner,
+    rx: tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>,
+    // metrics 等
+}
+
+impl AsyncVideoDecoder {
+    pub fn new(options: VideoDecoderOptions, stats: crate::stats::Stats) -> Self { ... }
+    pub fn decode(&mut self, frame: &VideoFrame) -> crate::Result<()> { ... }  // 同期 fn
+    pub fn finish(&mut self) -> crate::Result<()> { ... }  // 同期 fn
+    pub async fn next_decoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>> {
+        self.rx.recv().await
     }
-
-    let (tx, mut rx) =
-        tokio::sync::mpsc::channel::<crate::Result<VideoFrame>>(8);
-    let input_queue =
-        std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
-
-    let decode_params = DecodeConfig::default();
-    let mut decoder =
-        NvcodecDecoder::new_h264(&decode_params, tx, input_queue.clone()).expect("decoder");
-
-    // 実 H.264 fixture を投入
-    let input_frame = crate::video::h264::tests::build_test_h264_keyframe();
-    decoder.decode(&input_frame).await.expect("decode");
-    decoder.finish().await.expect("finish");
-
-    // Receiver でデコード結果を受信
-    let frame = rx.recv().await.expect("receive").expect("ok frame");
-
-    // 不変条件確認 (decoder 出力は raw I420)
-    assert_eq!(frame.format, VideoFormat::I420);
-    assert!(frame.sample_entry.is_none());
 }
 ```
 
-モック / スタブは不要 (`shiguredo-rust` 規約 OK)。
+### 5. end-to-end テスト追加
 
-## 実装途中で発見された複雑化課題 (2026-06-29 追記)
+`src/decoder/nvcodec.rs` 末尾に以下を追加:
 
-実装着手後、step 3-6 (5 inner Sender 化 + VideoDecoder::run() 2 task 化) + simple 外部利用箇所 (subcommand_inspect / recording_subcommand_compose / recording_subcommand_vmaf) までは想定通り進んだ。WIP commit (`af5f63ce`) 時点でビルド未通過。
+- (a) NvcodecDecoder + tokio mpsc channel で callback Err 即時通知を検証
+- (b) Openh264Decoder + tokio mpsc channel で keyframe finish 順序を検証
+- (c) AsyncVideoDecoder の `next_decoded_frame_async()` の正常動作を検証
 
-残り作業 (RTMP/RTSP/SRT inbound endpoint + Mp4FileReader 再設計 + obsws/source/file_mp4) で **想定 1500-2500 行を超える可能性が高い** 複雑化課題が判明したため整理する。方針は本節ではまだ確定させず、後の Decision Owner 判断のために状況と選択肢を網羅する。
+### 6. 既存テストの追従
 
-### 実装進捗スナップショット (WIP commit `af5f63ce` 時点)
+`src/decoder.rs:720-821` のエンジン選択テストは外部 API (`VideoDecoder::new` / `handle_input_sample`) の挙動が不変なので **そのまま動く** はず。動かなければ最小改変で追従する。
 
-**完了 (Sender 化済み)**:
-- `src/decoder/libvpx.rs`: LibvpxDecoder を `tx` 内包 + `async fn decode/finish` に書き換え済み
-- `src/decoder/dav1d.rs`: Dav1dDecoder を同形に書き換え済み
-- `src/decoder/openh264.rs`: Openh264Decoder を同形に書き換え (keyframe 時 `finish().await` で 0〜2 フレーム送信実装)、`build_annexb_input` テスト 2 件は無変更で残置
-- `src/decoder/video_toolbox.rs`: VideoToolboxDecoder を同形に書き換え (`decoded: Option<VideoFrame>` 廃止、`reinitialize_if_need` の `decoded.is_some()` ガード廃止、`finish` は no-op として残置)
-- `src/decoder/nvcodec.rs`: NvcodecDecoder を同形に書き換え (`input_queue: Arc<Mutex<VecDeque>>` 化、`decoded_queue` / `error_slot` 廃止、`build_handler` シグネチャ変更、callback 内で NV12→I420 変換 + `tokio::task::block_in_place` + `tx.blocking_send`)
-- `src/decoder.rs`: VideoDecoder 構造体を Sender 内蔵 + `(decoder, rx)` タプル戻りに変更、`VideoDecoder::run(self, handle, input_track_id, output_track_id, decoded_rx)` を 2 sub-task (`run_video_decoder_input_task` / `run_video_decoder_output_task`) + `tokio::sync::oneshot` shutdown 経路に分離、`drain_video_decoder_output` / `poll_output` / `next_decoded_frame` 系 dispatch 廃止、エンジン選択テスト 3 件を `#[tokio::test]` に追従
-- `src/subcommand_inspect.rs`: `let (video_decoder, video_decoded_rx) = VideoDecoder::new(...)` 形に追従
-- `src/sora/recording_subcommand_compose.rs`: 同形に追従
-- `src/sora/recording_subcommand_vmaf.rs`: 同形に追従 (2 箇所)
+## 段階的移行 (本 issue では実施しない)
 
-**未着手 (本セッション以降)**:
-- `src/rtmp/inbound_endpoint.rs` (構造体 `decoder: Option<VideoDecoder>` + `handle_input_sample` + `drain_video_decoder_output` 経路)
-- `src/rtsp/subscriber.rs` (同上)
-- `src/srt/inbound_endpoint.rs` (同上)
-- `src/mp4/reader.rs` (`Mp4FileReader::set_video_decoder` + `recreate_decoders` / `flush_decoders` / `reset_for_restart` / `apply_seek` async fn 化、呼出元 15 箇所追従、`drain_video_decoder_output` / `discard_video_decoder_output` 利用 + `video_sender: TrackSender` の SYN/ACK 背圧維持)
-- `src/obsws/source/file_mp4.rs` (`reader.set_video_decoder(decoder)` 廃止)
-- 新規 fixture `crate::video::h264::tests::build_test_h264_keyframe()` 追加
-- end-to-end テスト 3 ケース ((a) Nvcodec callback Err 即時通知 / (b) Openh264 keyframe finish 順序 / (c) VideoToolbox 再初期化順序)
-- `cargo fmt --all --check` / `cargo check --workspace[ --no-default-features]` / `cargo clippy --workspace --all-targets -- --deny warnings[ --no-default-features]` / `cargo test --workspace[ --no-default-features]` の通過確認
+各使用側の `VideoDecoder` → `AsyncVideoDecoder` への移行は **別 issue で 1 箇所ずつ段階的に** 実施する。最終的に同期 `VideoDecoder` の使用箇所がゼロになった時点で `VideoDecoder` 自体を削除し、`AsyncVideoDecoder` を `VideoDecoder` にリネームする (この最終ステップも別 issue)。
 
-**cargo check の現状 (WIP commit `af5f63ce`)**: 22 errors。すべて未着手ファイル 4 件 (`src/mp4/reader.rs`、`src/rtmp/inbound_endpoint.rs`、`src/rtsp/subscriber.rs`、`src/srt/inbound_endpoint.rs`) の旧 API 参照 (`drain_video_decoder_output` / `handle_input_sample` / `poll_output` / `VideoDecoder::new` の旧シグネチャ / `set_video_decoder` の旧シグネチャ) によるもの。decoder 本体のリファクタ自体は完結している。
+移行候補の優先順位 (暫定):
 
-### 課題 1: VideoDecoder::run シグネチャと外部利用箇所の不一致
+1. `subcommand_inspect` (単発 decode、最も小さい影響範囲)
+2. `recording_subcommand_compose` / `recording_subcommand_vmaf` (`spawn_processor` 経由)
+3. mp4 reader (`Mp4FileReader::recreate_decoders` async fn 化を含む大改修)
+4. RTMP / RTSP / SRT inbound endpoint (構造体改修を含む大改修)
+5. obsws/source/file_mp4 (mp4 reader 改修と連動)
 
-本実装では `VideoDecoder::run(self, handle: ProcessorHandle, input_track_id, output_track_id, decoded_rx)` シグネチャを採用し、内部で `subscribe_track` / `publish_track` / `notify_ready` / `wait_subscribers_ready` を呼ぶ形にした。これは compose / vmaf / inspect / Mp4FileReader 経由の `MediaPipeline::spawn_processor` 利用パターンには合致するが、**RTMP/RTSP/SRT inbound endpoint は subscribe_track 経路を使わず、構造体内 `Option<VideoDecoder>` を保持して自前 frame で `decoder.handle_input_sample(frame)` を直接呼ぶ pull pattern** であり、新シグネチャと整合しない。
-
-なお issue 0066 §設計方針 (本文 §「`run()` ループの構造」) の擬似コードでは `pub async fn run(self, input_rx, output_tx, decoded_rx)` の汎用シグネチャを示していたが、実装段階で `MediaPipeline::spawn_processor` の `move |handle| async { ... }` クロージャ内利用との整合性を優先して `(handle, input_track_id, output_track_id, decoded_rx)` 版を選んだ。この選択は inbound 系を考慮していなかった (本 issue は polish 5 周回したが、inbound 系の pull pattern を見落としていた)。
-
-### 課題 2: RTMP/RTSP/SRT inbound endpoint の構造改修規模
-
-3 ファイル (`src/rtmp/inbound_endpoint.rs`, `src/rtsp/subscriber.rs`, `src/srt/inbound_endpoint.rs`) はそれぞれ:
-- 構造体内 `decoder: Option<VideoDecoder>` を `decoder_input_tx: Option<mpsc::Sender<Message>>` + `decoder_join_handle: Option<JoinHandle<crate::Result<()>>>` に置換
-- 受信ループ全体を「自前で input track を `tokio::sync::broadcast` で作成 → `tokio::spawn(decoder.run(handle, input_track_id, output_track_id, decoded_rx))` 起動 → 受信フレームを broadcast 送信」の構造に再設計
-- 終了時の join_handle await + drop シーケンス追加
-- `publish_samples` 等のヘルパ関数の引数型変更 (例: `&mut Option<VideoDecoder>` → `&mut Option<(JoinHandle, Sender)>`) と呼出元追従
-
-各 200-300 行規模で、合計 600-900 行。`MessageReceiver` (broadcast Receiver) を自前で作る方法 (生 `tokio::sync::broadcast::channel` か、`MediaPipeline` の補助 API か) も検討が必要。
-
-### 課題 3: Mp4FileReader の async fn 化波及
-
-`Mp4FileReader` も subscribe_track 経路ではなく `video_sender.sender` 直渡しで `drain_video_decoder_output(decoder, &mut sender.sender)` を呼ぶ pull pattern。さらに:
-- `recreate_decoders` / `flush_decoders` / `reset_for_restart` / `apply_seek` の async fn 化
-- 呼出元 15 箇所 (`:339, :350, :378, :383, :465, :475, :479, :484, :494, :498, :503, :519, :523, :528, :645`) の `.await` 付与
-- `TrackSender` ラッパー (SYN/ACK 背圧 `MAX_NOACKED_COUNT=100`) を decoder task 側で維持
-- `discard_video_decoder_output` (`src/mp4/reader.rs:1388`) と audio 側 `discard_decoder_output` (`:1382`) の Sender 化対応
-- `set_video_decoder` (`src/mp4/reader.rs:318`) 廃止 + `obsws/source/file_mp4.rs:54, 61` 改修
-
-500-800 行規模。
-
-### 解決策の選択肢
-
-| 方針 | 影響範囲 | 追加作業量 | 中間状態の clean さ | 採用案 C との整合 | 将来 inbound 対応の柔軟性 |
-|------|----------|------------|---------------------|---------------------|----------------------------|
-| (α) スコープ縮小: 本 issue は mp4 系のみ、inbound は別 issue 0068 | mp4 系のみ | 残り 600-800 行 | mp4 系完全統一、inbound は旧 API 維持の中途半端 | 「全使用側を Sender 化」宣言を緩める | 別 issue 0068 で再設計可能 |
-| (β) `VideoDecoder::run` シグネチャを `(input_rx, output_tx, decoded_rx)` 汎用形に変更し全 8 ファイル追従 | 全使用側 (8+ ファイル) | 残り 1500-2000 行 | 全 API 統一、最終形 | 完全整合 | 不要 |
-| (γ) `run` + `run_with_channels` の 2 API 並存 | 全使用側、ただし API 2 つ | 残り 1200-1500 行 | API 表面 2 つの保守コスト | 部分整合 (内部 2 系統) | 一定の柔軟性 |
-
-### 選択肢ごとの具体的な未着手作業
-
-**(α) を採用する場合**:
-1. 本 issue 本文の「現状」§ 外部利用箇所表で RTMP/RTSP/SRT inbound 3 行を「scope 外、別 issue 0068 で対応」と注記 (削除はしない、移管参照として残す)
-2. 完了条件から inbound 関連項目を削除
-3. 別 issue 0068 を `/create-issue` で起票 (タイトル例: `RTMP/RTSP/SRT inbound endpoint の VideoDecoder を Sender 出力に統一する`)
-4. closed/0057 §3 分割表に 0068 を追加 (依存順序: `0066 → 0067 → 0068` または `0066 → (0067 ∥ 0068)`)
-5. Mp4FileReader + obsws/file_mp4 の Sender 化を本 issue で実装 (残り 600-800 行)
-6. テスト追加 + cargo check 通過
-
-**(β) を採用する場合**:
-1. `VideoDecoder::run` を `(input_rx, output_tx, decoded_rx)` シグネチャに変更
-2. compose / vmaf / inspect (既に追従済み) で `subscribe_track` / `publish_track` / `notify_ready` / `wait_subscribers_ready` を呼ぶ形に再追従
-3. Mp4FileReader 改修 + obsws/file_mp4
-4. RTMP/RTSP/SRT inbound 3 ファイルを自前 broadcast channel pattern で書き換え
-5. テスト追加 + cargo check 通過
-
-**(γ) を採用する場合**:
-1. `VideoDecoder` に `run_with_channels(input_rx, output_tx, decoded_rx)` を追加 ((β) と同じ実体)、既存の `run` は内部で channel を作成して `run_with_channels` を呼ぶ wrapper にする
-2. Mp4FileReader 改修 + obsws/file_mp4
-3. RTMP/RTSP/SRT inbound 3 ファイルを `run_with_channels` 利用で書き換え
-4. テスト追加 + cargo check 通過
-
-### 設計判断の保留事項
-
-- **VideoDecoder::run シグネチャ**: 現状実装 `(handle, input_track_id, output_track_id, decoded_rx)` を維持するか、issue 0066 §設計方針の擬似コード通り `(input_rx, output_tx, decoded_rx)` 汎用形に変更するか
-- **inbound 系の input channel 作成方法**: 生 `tokio::sync::broadcast::channel` を直接使うか、`MediaPipeline` に補助 API を追加するか
-- **`MessageReceiver` の type alias**: 現状 `tokio::sync::broadcast::Receiver<Message>` のラッパー。自前 broadcast pattern と整合するか確認必要
-- **`TrackSender` の所有移譲方式**: Mp4FileReader 内の `TrackSender` (SYN/ACK 背圧) を decoder task に move するか、decoder 内部に等価な背圧機構を導入するか
-- **N=1 vs N=8 (VideoToolbox)**: 本 issue 起票時点で N=8 暫定固定、別 issue で計測する方針。本 issue 完了時には N=8 で進める
-
-### 再開時の手順案
-
-方針 (α/β/γ) 確定後の作業順:
-
-1. WIP commit `af5f63ce` から作業ブランチを継続 (本ブランチ `feature/refactor-video-decoder-sender-interface`)
-2. 方針確定に伴う decoder.rs / 各 inner の追加修正があれば実施 (β 採用なら `run` シグネチャ変更)
-3. Mp4FileReader (mp4/reader.rs) 改修
-4. obsws/source/file_mp4 改修
-5. (β または γ) RTMP/RTSP/SRT inbound 3 ファイル改修 / (α) この step skip
-6. 新規 fixture `build_test_h264_keyframe` 追加 (`src/video/h264.rs::tests`)
-7. end-to-end テスト 3 ケース追加 (`src/decoder/nvcodec.rs` 末尾)
-8. `cargo fmt --all && cargo check --workspace && cargo clippy --workspace --all-targets -- --deny warnings && cargo test --workspace` 通過確認
-9. `--no-default-features` 系チェック通過確認
-10. (α 採用時) 別 issue 0068 を `/create-issue` で起票、本 issue 本文の「現状」§ 外部利用箇所表と完了条件を inbound 除外形に修正
-11. 最終 commit (WIP の squash も検討、ただし WIP は git 履歴として残す方が筋)
-12. PR 作成
-
-### 次の方針相談ポイント (Decision Owner = @sile)
-
-- 上記 (α) / (β) / (γ) のいずれを採用するか
-- (α) を採用する場合、別 issue 0068 の起票方針 (inbound 3 ファイル + 既存の callback friendly 設計をどう適用するか) と、closed/0057 §3 分割表への追記
-- 「現状」§ 外部利用箇所表の inbound 行をどう扱うか (一旦削除して別 issue に移管、または「scope 外」と注記)
-- VideoDecoder::run シグネチャを変更するか否か (β/γ 採用時の追加作業を許容するか)
-- WIP commit `af5f63ce` を squash するかしないか (本 PR に WIP 履歴を残すか)
+各移行 issue で「2 系統共存中の中間状態を 1 つずつ消していく」進め方をする。
 
 ## CHANGES.md について
 
-内部リファクタにつき記載不要。`VideoDecoder` 系は library として外部公開していないため、API 変更の後方互換影響は obsws coordinator / mixer / writer / subcommand 階層等の crate 内利用箇所のみ。
+内部リファクタにつき記載不要。`VideoDecoder` 系は library として外部公開していないため、API 変更の後方互換影響は本 issue ではゼロ (既存 API 挙動を維持)。後続移行 issue でも各々判断する。
 
 ## 関連
 
-- closed/0057 (`feature/refactor-callback-friendly-codec-interface`): 設計検討の親 issue。本 issue は §3 採用案 C の decoder 部分実装。本 issue でスコープを「decoder 内部 + 外部利用箇所」に拡大したため、closed/0057 §3 分割表も対称的に更新 (本 issue 完了時に追記、または 0067 polish 時に併せて更新)
-- closed/0054 (`feature/refactor-encoder-defer-output-until-sample-entry-ready`): encoder で sample_entry 未確定時の出力を `Err` 化する fail-fast 整備。decoder 側は sample_entry 不変条件の対象外だが、本 issue でも採用案 C に従い `Result<VideoFrame>` 流路を採用
-- open/0067 (`feature/refactor-video-encoder-sender-interface`): 後続 PR。本 issue で確立した C 形式 interface を encoder に展開する。依存順序: `0066 → 0067`。本 issue 完了時に 0067 polish で「encoder + 外部利用箇所」へスコープ対称拡大する
+- closed/0057 (`feature/refactor-callback-friendly-codec-interface`): 設計検討の親 issue。本 issue は §3 採用案 C の decoder 部分実装。本 issue で「2 系統共存 + 段階移行」方針 (δ) を採用したため、closed/0057 §3 で禁じていた「中途半端な 2 系統共存」を意図的に許容する形になる。closed/0057 §3 分割表の更新が必要 (本 issue 完了時に追記、または別途整理)
+- closed/0054 (`feature/refactor-encoder-defer-output-until-sample-entry-ready`): encoder で sample_entry 未確定時の出力を `Err` 化する fail-fast 整備。decoder 側は sample_entry 不変条件の対象外だが、本 issue でも `Result<VideoFrame>` 流路を採用
+- open/0067 (`feature/refactor-video-encoder-sender-interface`): 後続 PR。本 issue で確立した「`Async*` 追加 + 同期既存維持 + 段階移行」パターンを encoder に展開する。依存順序: `0066 → 0067`
+- 本 issue ブランチ: `feature/refactor-video-decoder-sender-interface` は方針 (γ) 時代の WIP 実装 (`af5f63ce` および後続 commit) を保持しているが、方針 (δ) 採用に伴い **このブランチでは継続実装しない**。新ブランチ (例: `feature/refactor-add-async-video-decoder` 仮称) を develop から切って (δ) 実装を進める。旧ブランチは参考資料として残置 (close なしに保持、最終的に方針確定後に削除判断)
+
+## 過去の polish レビュー結果と方針 (δ) 採用に至った経緯
+
+本 issue は当初「全使用側を Sender 化、2 系統共存を残さない」採用案 C (closed/0057 §3 確定) で polish (5 周レビュー) 済み (`ea7f1ab5 0066 polished VideoDecoder 系とその利用箇所を Sender 出力に統一する`)。
+
+その後実装着手 (`feature/refactor-video-decoder-sender-interface` ブランチ、`af5f63ce` 他 commit) の途中で、RTMP/RTSP/SRT inbound endpoint と Mp4FileReader が想定以上に大規模な改修を要することが判明 (詳細は git log の `46626303` / `8d9d1163` commit を参照)。Decision Owner と相談した結果、以下の (δ) 方針に切り替えることになった:
+
+- **AsyncVideoDecoder を新規追加 + 既存 VideoDecoder の内部だけ channel 化 (外部 API 維持) + 段階的移行**
+
+これにより、本 issue では既存使用側を 1 つも変更せずに済み、最終形 (全使用側 Async) への移行は段階的に進められる。closed/0057 §3 の「中途半端な 2 系統共存禁止」とは方針が異なるため、closed/0057 §3 も併せて見直す必要がある。
+
+本 issue 本文は (δ) 方針への切り替えに伴い 2026-06-29 に全面書き換えされた drafty 版。本格的な polish (5 周レビュー) は別途実施する必要がある (`Polished:` フィールドが空のまま)。
