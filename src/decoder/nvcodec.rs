@@ -65,6 +65,15 @@ fn handle_decode_callback(
             }
         }
         Err(err) => {
+            // shiguredo_nvcodec lib 側は drain_frames で Err 時に pending_user_data.clear() を行うため、
+            // hisui 側の input_queue も同じタイミングでクリアして残骸を残さない
+            // (残しておくと後続 decode で input_frame / nv12_frame の timestamp 入れ違いという silent bug を生む)
+            {
+                let mut q = input_queue
+                    .lock()
+                    .expect("nvcodec input queue lock poisoned");
+                q.clear();
+            }
             sink.emit_err(crate::Error::new(format!("nvcodec decode error: {err}")));
         }
     }
@@ -270,9 +279,16 @@ impl NvcodecDecoder {
         Ok(())
     }
 
+    /// in-flight フレームの decode 完了を待ち合わせる。
+    ///
+    /// `shiguredo_nvcodec::Decoder::flush()` の戻り時点で callback はすべて同期的に呼び切られている
+    /// 前提であり、 残フレーム / Err の emit はその callback 内で完了するため、 ここでは追加処理不要。
+    ///
+    /// **重要**: callback 内で発生した Err は `sink.emit_err()` 経由で内部 channel に積まれており、
+    /// `finish()` の戻り値からは検出できない。 利用側は `finish()` の直後に `poll_output_sync` の
+    /// `try_recv` ループ (= `drain_video_decoder_output` 経由) で残物を全て吸い出すこと。
+    /// 旧実装 (`error_slot` 同期 take) との挙動互換は `VideoDecoder::run` の drain ループで担保される。
     pub fn finish(&mut self) -> crate::Result<()> {
-        // flush で in-flight 完了を待ち合わせる (callback が同期的に呼び切られる前提)。
-        // 残フレームの emit は callback 内で完了するため、 ここでは追加処理不要。
         self.inner.flush()?;
         Ok(())
     }
@@ -327,6 +343,34 @@ fn extract_parameter_sets_annexb(
     }
 }
 
+/// データの先頭にパラメータセットが含まれているかチェック
+fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> bool {
+    if data.len() < NALU_HEADER_LENGTH + 1 {
+        return false;
+    }
+
+    match format {
+        VideoFormat::H265 => {
+            // H.265 の NAL unit type は 2バイト目の上位6ビット
+            let nal_unit_type = (data[NALU_HEADER_LENGTH] >> 1) & 0x3F;
+            matches!(
+                nal_unit_type,
+                H265_NALU_TYPE_PPS | H265_NALU_TYPE_SPS | H265_NALU_TYPE_VPS
+            )
+        }
+        VideoFormat::H264 => {
+            // H.264 の NAL unit type は下位5ビット
+            let nal_unit_type = data[NALU_HEADER_LENGTH] & 0x1F;
+            matches!(nal_unit_type, H264_NALU_TYPE_SPS | H264_NALU_TYPE_PPS)
+        }
+        VideoFormat::Av1 => {
+            // AV1はパラメータセットの概念が異なるため常にfalse
+            false
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,33 +401,5 @@ mod tests {
             }
             other => panic!("Err(...) を期待したが {other:?} を受信した"),
         }
-    }
-}
-
-/// データの先頭にパラメータセットが含まれているかチェック
-fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> bool {
-    if data.len() < NALU_HEADER_LENGTH + 1 {
-        return false;
-    }
-
-    match format {
-        VideoFormat::H265 => {
-            // H.265 の NAL unit type は 2バイト目の上位6ビット
-            let nal_unit_type = (data[NALU_HEADER_LENGTH] >> 1) & 0x3F;
-            matches!(
-                nal_unit_type,
-                H265_NALU_TYPE_PPS | H265_NALU_TYPE_SPS | H265_NALU_TYPE_VPS
-            )
-        }
-        VideoFormat::H264 => {
-            // H.264 の NAL unit type は下位5ビット
-            let nal_unit_type = data[NALU_HEADER_LENGTH] & 0x1F;
-            matches!(nal_unit_type, H264_NALU_TYPE_SPS | H264_NALU_TYPE_PPS)
-        }
-        VideoFormat::Av1 => {
-            // AV1はパラメータセットの概念が異なるため常にfalse
-            false
-        }
-        _ => false,
     }
 }
