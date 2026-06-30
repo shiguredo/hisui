@@ -11,6 +11,14 @@
 
 文字起こし結果や将来のテキストメタデータを MediaPipeline 上で扱えるよう、`MediaFrame` enum に `Text(Arc<TextFrame>)` バリアントを追加する。これは親 issue 0012 系列の MediaPipeline 拡張層であり、0062 (Whisper 推論基盤) が結果を publish_track で流す際の受け皿となる。
 
+## 検討する代替案
+
+現状の「MediaFrame::Text バリアント追加」案以外に、以下の代替案を polish 段階で比較検討する。最終的にどちらか 1 つに確定する。
+
+- **MediaFrame とは別の内部イベント経路 (TextEvent Bus 等) を新設する案**: TranscriptionProcessor の出力を MediaFrame ではなく、独立した内部イベント経路 (publish/subscribe) で伝送する。obsws / CLI / compose の各利用層はこの内部経路を購読する。obsws 連携は「内部経路 → obsws Event 変換層」の階層構造で実現し、obsws Event はその上に乗る形にする (obsws を未使用な CLI / compose も同じ内部経路でカバー)。MediaFrame の 97 箇所への影響を避けられるが、新規の内部イベント機構を設計する負担がある
+
+「obsws Event 単独 (内部経路なし)」案は CLI / compose 用途を満たせないため不採用。「ハイブリッド (TranscriptionProcessor が複数経路を直接 publish する)」案は複雑化のため不採用方針とする。
+
 ## 優先度根拠
 
 本系列の中核 0062 / 0063 の前提となるが、本 issue 単独では利用者向けの機能を提供しない。後続 issue がマージされて初めて利用者から見える機能が完成するため、Medium。
