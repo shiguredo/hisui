@@ -124,7 +124,7 @@ def fetch_one(spec: FileSpec, dest_dir: Path, target_key: str) -> None:
         raise
 
     # SHA256 期待値が空ならスキップ (初回ハッシュ取得用)、
-    # mismatch なら .tmp を片付けて即終了する (HF 側更新が原因なら再取得しても無意味)。
+    # ミスマッチなら .tmp を片付けて即終了する (HF 側更新が原因なら再取得しても無意味)。
     if spec.expected_sha256:
         actual = compute_sha256(dest_tmp)
         if actual != spec.expected_sha256:
