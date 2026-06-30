@@ -48,7 +48,7 @@ jobs:
     runs-on:
       group: Self
       labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install rustup
@@ -71,7 +71,7 @@ jobs:
     runs-on:
       group: Self
       labels: [self-hosted, macOS, ARM64]
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: 🍺 Set up Homebrew
@@ -141,7 +141,7 @@ jobs:
     # 本 job は candle feature 有効ビルドの妥当性 (protoc / onig / candle 依存解決) と
     # 最小 device テストを検証する。
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - run: rustup update stable
