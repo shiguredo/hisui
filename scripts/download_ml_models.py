@@ -13,8 +13,6 @@ import argparse
 import hashlib
 import os
 import sys
-import time
-import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import NamedTuple
@@ -64,16 +62,12 @@ TARGETS: dict[str, list[FileSpec]] = {
     ],
 }
 
-USER_AGENT = "hisui-download/2026.1"
 HF_BASE_URL = "https://huggingface.co"
 HTTP_TIMEOUT_SECONDS = 60
-MAX_RETRIES = 3
-BACKOFF_SECONDS = [2, 4]
 
 
 # 終了コード規約 (Python 既定の 1 / argparse 既定の 2 は予約として README で説明する)
 EXIT_SUCCESS = 0
-EXIT_NETWORK_FAILED = 3
 EXIT_SHA256_MISMATCH = 4
 EXIT_DIR_NOT_WRITABLE = 5
 
@@ -92,11 +86,14 @@ def compute_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def download_once(url: str, dest_tmp: Path) -> None:
-    """単発ダウンロード。失敗時は urllib の例外をそのまま投げる。"""
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def download_to(url: str, dest_tmp: Path) -> None:
+    """単発ダウンロード。失敗時は urllib の例外をそのまま投げる。
+
+    開発者が手で実行する想定のため自前のリトライ・バックオフは持たない。
+    失敗したら再実行で続きから取れる (取得済みファイルは SHA256 で skip される)。
+    """
     with (
-        urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response,
+        urllib.request.urlopen(url, timeout=HTTP_TIMEOUT_SECONDS) as response,
         dest_tmp.open("wb") as out,
     ):
         while True:
@@ -104,42 +101,6 @@ def download_once(url: str, dest_tmp: Path) -> None:
             if not chunk:
                 break
             out.write(chunk)
-
-
-def download_with_retry(url: str, dest_tmp: Path) -> None:
-    """4xx (429 以外) は即時失敗、429 / 5xx / connection error は最大 3 回リトライ。
-
-    失敗が確定したら .tmp を片付けて SystemExit(EXIT_NETWORK_FAILED) で終了する。
-    """
-    last_error: Exception | None = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            download_once(url, dest_tmp)
-            return
-        except urllib.error.HTTPError as err:
-            if 400 <= err.code < 500 and err.code != 429:
-                print(
-                    f"  HTTP {err.code} (no retry): {url}",
-                    file=sys.stderr,
-                )
-                dest_tmp.unlink(missing_ok=True)
-                sys.exit(EXIT_NETWORK_FAILED)
-            last_error = err
-            print(
-                f"  HTTP {err.code} (attempt {attempt + 1}/{MAX_RETRIES}): {url}",
-                file=sys.stderr,
-            )
-        except urllib.error.URLError as err:
-            last_error = err
-            print(
-                f"  connection error (attempt {attempt + 1}/{MAX_RETRIES}): {err}",
-                file=sys.stderr,
-            )
-        if attempt + 1 < MAX_RETRIES:
-            time.sleep(BACKOFF_SECONDS[attempt])
-    print(f"  giving up after {MAX_RETRIES} retries: {last_error}", file=sys.stderr)
-    dest_tmp.unlink(missing_ok=True)
-    sys.exit(EXIT_NETWORK_FAILED)
 
 
 def fetch_one(spec: FileSpec, dest_dir: Path, target_key: str) -> None:
@@ -156,7 +117,11 @@ def fetch_one(spec: FileSpec, dest_dir: Path, target_key: str) -> None:
 
     dest_tmp = dest_path.with_suffix(dest_path.suffix + ".tmp")
     print(f"  downloading {url}")
-    download_with_retry(url, dest_tmp)
+    try:
+        download_to(url, dest_tmp)
+    except BaseException:
+        dest_tmp.unlink(missing_ok=True)
+        raise
 
     # SHA256 期待値が空ならスキップ (初回ハッシュ取得用)、
     # mismatch なら .tmp を片付けて即終了する (HF 側更新が原因なら再取得しても無意味)。
