@@ -1,10 +1,10 @@
 use candle_core::Device;
 
-/// ML 推論用 device を自動検出する。
+/// ML 推論用デバイスを自動検出する。
 ///
 /// 試行順序は CUDA → Metal → CPU。GPU 初期化に失敗した場合は warn ログを残して
 /// CPU にフォールバックする。各バックエンドのコンテキスト確保は重い手続きなので、
-/// 取得した Device インスタンスはそのまま返す (再初期化はしない)。
+/// 取得した `Device` インスタンスはそのまま返す (再初期化はしない)。
 pub fn select_device() -> Device {
     #[cfg(feature = "candle-cuda")]
     match Device::new_cuda(0) {

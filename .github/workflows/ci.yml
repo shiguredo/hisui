@@ -138,8 +138,7 @@ jobs:
       - run: cargo test -p hisui
 
   test-candle:
-    # 本 job は candle feature 有効ビルドの妥当性 (protoc / onig / candle 依存解決) と
-    # 最小 device テストを検証する。
+    # 本 job は candle feature 有効ビルドの妥当性と最小デバイステストを検証する。
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
