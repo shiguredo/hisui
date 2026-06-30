@@ -11,3 +11,4 @@
 
 # model
 *.safetensors
+/ml-models/

@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-24
-- Completed:
+- Completed: 2026-06-30
 - Model: Opus 4.7
 - Branch: feature/add-candle-feature
 - Polished: 2026-06-24
@@ -334,51 +334,35 @@ candle 5 crate を 1 エントリにまとめる根拠は「`candle` feature 1 �
 
 ## 解決方法
 
-`feature/try-candle` ブランチ (PR #246) を参照元とし、次の 4 系統を本 issue 仕様に合わせて移植・書き直しする (`.sh` は `.py` で新規実装、`device.rs` は API 簡素化のため `feature/try-candle` から書き直し):
+candle 0.11.0 を hisui のオプション依存として導入し、`select_device()` 関数と ML モデル取得スクリプトの骨格を整備した。本 issue は親 issue 0012 系列の基盤層で、推論機能本体は後続 issue (0061 / 0062 / 0064) で追加する。
 
-- `Cargo.toml` の features 3 段と optional 依存 5 件
-- `src/ml/mod.rs` (PoC では `pub mod audio; pub mod device; pub mod yolo;` だが本 issue では `pub mod device;` のみ)
-- `src/ml/device.rs` (本 issue の API シグネチャに合わせて書き直し、「PoC との差分」節参照)
-- `scripts/download_ml_models.sh` → `scripts/download_ml_models.py` への書き直し
+実装した主な変更:
 
-他の依存バージョン (tokio / rustls / raw_player / shiguredo_s3 など) は develop の現状を維持し PoC から引きずらない。
+- `Cargo.toml`: `candle` / `candle-cuda` / `candle-metal` feature と candle-core / candle-nn / candle-transformers / candle-onnx / tokenizers の 5 optional 依存を追加 (バージョン厳密一致、`dep:` プレフィックス採用で同名 feature の自動生成を抑止)
+- `src/lib.rs`: `#[cfg(feature = "candle")] pub mod ml;` を mixer の直下に追加
+- `src/ml.rs` / `src/ml/device.rs`: `pub fn select_device() -> candle_core::Device` 1 関数のみ。試行順序は CUDA → Metal → CPU、失敗時は warn ログを残して CPU フォールバック (polish 段階の素案で設けた `MlDevice` enum は YAGNI のため廃止して関数 1 つに集約)
+- `tests/test_ml_device.rs`: `select_device_does_not_panic` と feature 別の Metal / CUDA バリアントテスト
+- `scripts/download_ml_models.py`: 標準ライブラリのみ、リトライ・User-Agent 設定なし、`whisper-tiny` / `silero-vad` の SHA256 検証付きダウンロード (開発者手動実行向けに最小実装)
+- `scripts/README.md`: `## maturin スクリプト` と `## download_ml_models.py` の 2 セクションに再構成
+- `.gitignore`: `/ml-models/` を追加
+- `.github/workflows/ci.yml`: `test-candle` ジョブ新設、`test-apple-toolbox` に candle-metal の check / clippy / test、`test-nvidia-video-codec` に candle-cuda の check / clippy / test、両 self-hosted ジョブに CUDA PATH 設定、関連ジョブの `timeout-minutes` を 20 に統一
+- `CHANGES.md`: candle 系オプション依存追加と download_ml_models.py 追加の 2 ADD エントリ
 
-PoC から **取り込まない** もの (各取り込み先 issue を併記):
+PoC ブランチ `feature/try-candle` (PR #246) からは candle 系依存と device 検出骨格のみを移植し、以下は本 issue では取り込まなかった (各取り込み先 issue を併記):
 
-- `src/ml/yolo.rs` および `src/ml/mod.rs` への `pub mod yolo;` 追加・`MlModel` enum 追加 (0064 で取り込む)
-- `src/ml/audio/` 配下および `src/ml/mod.rs` への `pub mod audio;` 追加 (0061 / 0062 で取り込む)
+- `src/ml/yolo.rs` および `MlModel` enum (0064 で取り込む)
+- `src/ml/audio/` 配下 (0061 / 0062 で取り込む)
 - `src/subcommand_ml.rs` (PoC のマイク入力サブコマンド、0064 / 0061 / 0062 で再設計)
 - `src/main.rs` への subcommand 追加 (本系列では 0063 で対応)
-- `From<candle_core::Error> for crate::Error` impl (0061 / 0062 / 0064 の先着で追加。挿入位置は `src/error.rs` の既存 `#[cfg(feature = "nvcodec")]` impl 直下・`#[cfg(test)] mod tests` の直前)
+- `From<candle_core::Error> for crate::Error` impl (0061 / 0062 / 0064 の先着で `src/error.rs` に追加。挿入位置は既存 `#[cfg(feature = "nvcodec")]` impl 直下・`#[cfg(test)] mod tests` の直前)
 
-### 後続 issue 側に必要な追記 (本 issue マージ後の宿題)
+### 後続 issue 側に必要な追記
 
-本 issue の責務分担を成立させるため、以下を後続 issue 本文 (polish) で追記する必要がある。本 issue のレビュー / マージ時に後続 issue 担当者へ周知する:
+本 issue の責務分担を成立させるため、後続 issue で以下を追記する。
 
-- 0061: `src/ml/mod.rs` への `pub mod audio;` 1 行追加、`From<candle_core::Error> for crate::Error` 先着導入 (0062 / 0064 がまだ着手前なら本 issue で導入)
-- 0062: 0061 で `From<candle_core::Error>` 未導入なら本 issue で導入
-- 0064: `src/ml/mod.rs` への `pub mod yolo;` 1 行追加、`MlModel` enum 追加、`From<candle_core::Error>` 未導入なら本 issue で導入
+- 0061: `src/ml.rs` への `pub mod audio;` 追加、`From<candle_core::Error>` の先着導入
+- 0064: `src/ml.rs` への `pub mod yolo;` 追加、`MlModel` enum 追加
 
-### 想定 commit 構成
+### 関連 issue
 
-`shiguredo-git` 規約 (1 コミット = 1 論理単位、`{SEQ} {変更内容}` 形式) に従い、次の 4 commit で構成する:
-
-1. `0059 candle feature と device 検出骨格を追加する` (Cargo.toml / src/lib.rs / src/ml/{mod,device}.rs + tests)
-2. `0059 ML モデル取得スクリプトを追加する` (scripts/download_ml_models.py / scripts/README.md / .gitignore)
-3. `0059 CI に test-candle ジョブと Metal/CUDA ビルド検証を追加する` (.github/workflows/ci.yml)
-4. `0059 CHANGES.md に candle 依存追加と download_ml_models.py のエントリを追加する` (CHANGES.md)
-
-### 実装ステップ目安
-
-1. 事前確認: candle-core / candle-onnx 0.10.2 と tokenizers 0.22.0 の `rust-version` (MSRV) が `1.95` 以下であることと、yank されていないことを `cargo search` および各 crate の `Cargo.toml` で確認
-2. `Cargo.toml` に features と optional 依存 5 件を追加
-3. `src/lib.rs` に `#[cfg(feature = "candle")] pub mod ml;` を追加 (この時点で `ml` モジュール未作成のためコンパイル不可、cfg gate 忘れを早期検出)
-4. `src/ml/mod.rs` を新規作成 (`pub mod device;` 1 行)
-5. `src/ml/device.rs` を新規作成 (`MlDevice` enum + `auto()` + `to_candle_device()` + tests)
-6. `scripts/download_ml_models.py` を新規作成 (`TARGETS` の `expected_sha256` を空文字で初期化)
-7. ローカルで `uv run scripts/download_ml_models.py --dest /tmp/ml-models whisper-tiny silero-vad` を実行し、取得ファイルの SHA256 を `sha256sum` で取得して `TARGETS` dict に埋め込み、再実行して mismatch しないことを確認
-8. `scripts/README.md` 追記、`.gitignore` 更新
-9. `.github/workflows/ci.yml` 更新 (test-candle ジョブ追加、slack_notify.needs 追加、test-apple-toolbox と test-nvidia-video-codec への step 追加、両 self-hosted ジョブの timeout-minutes を 30 に引き上げ)
-10. すべての完了条件コマンドを green に (test-apple-toolbox / test-nvidia-video-codec への変更は self-hosted ジョブのため CI 結果は PR push 後に初検証となる旨を想定しておく)
-11. `CHANGES.md` に 2 エントリを追加
-12. 上記「想定 commit 構成」の 4 commit に分けて push、PR 作成 (self-hosted ジョブの事前準備 [test-nvidia-video-codec への `protobuf-compiler` 事前インストール依頼] を PR 本文に明記)
+- 0065 (closed): self-hosted runner (test-nvidia-video-codec) で CUDA PATH 設定と `protobuf-compiler` 事前インストールが必要だった件は本 issue 内 commit + runner 管理者対応で解消済み

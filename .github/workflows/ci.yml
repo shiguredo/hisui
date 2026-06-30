@@ -48,7 +48,7 @@ jobs:
     runs-on:
       group: Self
       labels: [self-hosted, linux, x64, NVIDIA-Video-Codec-SDK]
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install rustup
@@ -56,15 +56,22 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
       - name: Update PATH
         run: echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+      - name: Setup CUDA PATH
+        run: |
+          echo "CUDA_PATH=/usr/local/cuda" >> $GITHUB_ENV
+          echo "/usr/local/cuda/bin" >> $GITHUB_PATH
       - run: cargo check --features nvcodec -p hisui
-      - run: cargo clippy --features nvcodec -p hisui -- --deny warnings
+      - run: cargo clippy --features nvcodec -p hisui --all-targets -- --deny warnings
       - run: cargo test --features nvcodec -p hisui -- --test-threads=1
+      - run: cargo check --features candle,candle-cuda -p hisui
+      - run: cargo clippy --features candle,candle-cuda -p hisui --all-targets -- --deny warnings
+      - run: cargo test --features candle,candle-cuda -p hisui -- --test-threads=1
 
   test-apple-toolbox:
     runs-on:
       group: Self
       labels: [self-hosted, macOS, ARM64]
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: 🍺 Set up Homebrew
@@ -77,10 +84,13 @@ jobs:
       - name: Install packages to build external dependencies
         run: |
           brew update
-          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config
+          brew install meson ninja nasm yasm cmake automake autoconf libtool pkg-config protobuf
       - run: cargo check --workspace
-      - run: cargo clippy --workspace -- --deny warnings
+      - run: cargo clippy --workspace --all-targets -- --deny warnings
       - run: cargo test --workspace
+      - run: cargo check --features candle,candle-metal -p hisui
+      - run: cargo clippy --features candle,candle-metal -p hisui --all-targets -- --deny warnings
+      - run: cargo test --features candle,candle-metal -p hisui
 
   test-fdk-aac:
     runs-on: ubuntu-24.04
@@ -126,6 +136,24 @@ jobs:
           bzip2 -d "${OPENH264_ARCHIVE}"
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
       - run: cargo test -p hisui
+
+  test-candle:
+    # 本 job は candle feature 有効ビルドの妥当性と最小デバイステストを検証する。
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - run: rustup update stable
+      - name: Install packages to build external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake libx11-dev libpulse-dev protobuf-compiler
+      - uses: shiguredo/github-actions/.github/actions/rust-cache@main
+        with:
+          os: ubuntu-24.04
+          toolchain: stable
+      - run: cargo clippy --features candle --all-targets -p hisui -- --deny warnings
+      - run: cargo test --features candle -p hisui
 
   test-fuzz:
     # libFuzzer ベースの fuzz target がビルド + 短時間実行で動くことだけ確認するジョブ
@@ -269,6 +297,7 @@ jobs:
       - test-apple-toolbox
       - test-fdk-aac
       - test-openh264
+      - test-candle
       - test-fuzz
       - ubuntu-binary
       - macos-binary

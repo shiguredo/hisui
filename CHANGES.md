@@ -56,6 +56,15 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
+- [ADD] オプション依存として candle 系ライブラリ (candle-core 0.11.0 / candle-nn 0.11.0 / candle-transformers 0.11.0 / candle-onnx 0.11.0 / tokenizers 0.22.0) を追加する
+  - `candle` / `candle-cuda` / `candle-metal` feature 配下で有効化する
+  - candle-onnx のビルドに `protoc` (Ubuntu の `protobuf-compiler` 等) が必要になる
+  - 本リリースのバイナリ配布物には含めない (将来の利用者向けサブコマンドが揃うタイミングで再検討する)
+  - @sile
+- [ADD] ML モデル取得スクリプト `scripts/download_ml_models.py` を追加する
+  - Hugging Face から `whisper-tiny` / `silero-vad` のモデルを取得する標準ライブラリのみの Python スクリプト
+  - 起動: `uv run scripts/download_ml_models.py --dest <DIR> <TARGET> [<TARGET> ...]`
+  - @sile
 - [ADD] obsws 経由でリアルタイム合成映像にテキストオーバーレイを描画できるようにする
   - 起動時 CLI 引数 `--font-search-root` / `--default-font` でフォント探索ルートとデフォルトフォントを指定する (両方未指定なら機能無効として正常起動、片方のみは起動失敗)
   - `HisuiCreateTextOverlay` / `HisuiUpdateTextOverlay` / `HisuiRemoveTextOverlay` / `HisuiListTextOverlays` の 4 メソッドを obsws (WebSocket / データチャネル両対応、RequestBatch 対応) 経由で利用できる
