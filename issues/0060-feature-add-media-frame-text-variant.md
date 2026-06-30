@@ -29,6 +29,24 @@
 
 ## 設計方針
 
+### text 専用 track 運用
+
+TranscriptionProcessor は **入力 audio track とは別の text 専用 track** を新規に作って publish_track する。subscriber は用途に応じて選択的に subscribe する。
+
+- `transcribe` サブコマンド (0063): text track を subscribe して標準出力に JSON LINE 出力
+- obsws: text track を subscribe して Event 変換層を通して WebSocket 配信
+- 字幕オーバーレイブリッジ (将来の別 issue): text track + 描画レイアウト設定を組み合わせて VideoRealtimeMixer に描画指示
+- audio / video subscriber (`src/mp4/writer.rs`、`src/mixer/audio.rs`、`src/mixer/video.rs`、`src/sora/recording_*` 等): text track を subscribe しないため、TextFrame は流入しない
+
+この track 分離運用が以下を成立させる:
+
+- **subscriber 側の柔軟性**: 用途ごとに subscribe を選択することで、結果データの流れを subscribe トポロジーで制御できる
+- **「Text が流入しない」保証**: subscribe_track で text 専用 track を購読しない subscriber には MediaFrame::Text が流れない。後述パターン A / パターン C の「Text 流入想定なし」分類はこの track 分離で担保する
+- **MediaFrame の概念汚染を限定**: MediaFrame に Text バリアントを足すが、audio/video subscriber 側からは「subscribe しない track のバリアント」として実質的に隔離されるため、概念上の混在は限定的になる
+- **既存 MediaPipeline 機構の流用**: 新規の broadcast 機構や独自整列ロジックを設計せず、`subscribe_track` / `publish_track` / `TrackId` / `register_processor` をそのまま使える
+
+N:1 集約 (複数 audio → 1 text) や用途別 track 分離が必要になった場合は、TranscriptionProcessor の登録単位を増やすか track 設計を見直すことで対応する。本 issue は構造拡張のみで、track 設計の詳細は 0062 で確定する。
+
 ### TextFrame 構造体
 
 `src/text.rs` を新設し、以下を定義する (既存 `src/audio.rs` / `src/video.rs` と同じ流儀)。`src/lib.rs` に `pub mod text;` と `pub use text::TextFrame;` を追加する。
@@ -61,7 +79,7 @@ pub struct TextFrame {
 - `MediaFrame::timestamp()` が返す値は `start` (下流の整列順序は start 基準)。`end` は subscriber が `expect_text()` 後に TextFrame からアクセスする
 - `no_speech_prob` / `avg_logprob` を `Option<f32>` にする理由: TextFrame は将来 Whisper 以外の生成元 (字幕入力等) からも使い得るため。Whisper の出力経路では常に `Some` が期待される
 - `language` を `Option<String>` にする理由: Whisper の言語自動検出が失敗するケース、および TextFrame を Whisper 以外から生成するケースで `None` を許容する
-- `input_track_id` は持たない (既存 Audio / Video と同流儀。subscribe した TrackId で判別)
+- `input_track_id` は持たない (既存 Audio / Video と同流儀。subscribe した TrackId で判別)。text 専用 track 運用 (上述) と組み合わせることで、subscriber は自分が subscribe した text track の TrackId を知っているため、フレームに埋める必要はない
 
 ### MediaFrame 拡張
 
@@ -80,11 +98,12 @@ pub struct TextFrame {
 Text バリアント追加で網羅性検査がコンパイル時に効くため、対応漏れは `cargo check --workspace --all-features` で機械的に検出できる。各箇所を以下 3 パターンに分類して対応する (判定基準: 実コードに `_ =>` フォールスルーがあるかと、その内容が `{}` か `Err` か)。
 
 - **パターン A (網羅 match、Text を購読しない側): `MediaFrame::Text(_) => {}` で握りつぶす**
-  - subscribe_track 経路上 Text が流れてこない writer / transform 系
+  - text 専用 track 運用 (前述) によって subscribe 経路上 Text が流れてこない writer / transform 系
   - 握りつぶす根拠を 1 行の日本語コメントで残す
 - **パターン B (網羅 match、Audio / Video 専用処理の入口): `MediaFrame::Text(_) => Err(...)` で明示エラー**
   - エラー文言は kind_name() ベースの統一テンプレを使う
 - **パターン C (既存 `_ =>` フォールスルー有り): Text ブランチを明示追加することを原則とする**
+  - text 専用 track 運用 (前述) によって実運用上は Text が流入しないが、コンパイル時の網羅性検査と将来のバリアント追加時の検出を優先して明示分岐を入れる
   - 単純 match (例: `src/dash/writer.rs` 等): `MediaFrame::Text(_) =>` を `_ =>` の前に挿入し、`_ =>` を撤去
   - タプル match (例: `src/mp4/writer.rs:487-509` の `match (track_kind, sample)`): `MediaFrame::Text(_) =>` 単独構文は書けない。`(_, Some(MediaFrame::Text(_))) => Err(...)` を既存 `_ => Err("BUG: ...")` の前に挿入し、`_ =>` は BUG 用 (track_kind と Audio/Video の不一致検出) として温存する。エラー文言はパターン B と同じ kind_name() ベースの統一テンプレを使う
   - 局所 enum に MediaFrame を変換する箇所 (例: `src/rtmp/outbound_endpoint.rs:397-406` の `MediaFrame → ClientMediaFrame` 変換): 局所 enum 側に `Text` バリアントを追加せず、`MediaFrame::Text(_) => Err(...)` で MediaFrame 段階で弾く
