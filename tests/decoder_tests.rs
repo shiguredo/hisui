@@ -48,13 +48,15 @@ fn av1_multi_resolutions() -> hisui::Result<()> {
     Ok(())
 }
 
-/// `AsyncVideoDecoder` のラッパーによる委譲経路を実 VP9 フィクスチャで検証する
+/// `AsyncVideoDecoder::next_decoded_frame_async` の非同期取り出し経路を実 VP9 フィクスチャで検証する
 ///
 /// 検証対象パス: `AsyncVideoDecoder::handle_input_sample_sync` → `VideoDecoderInner::decode`
 /// → `Initial` → `Libvpx` への遷移 → `LibvpxDecoder::decode` → `sink.emit_ok` → 内部チャンネル
 /// → `rx.recv` → `next_decoded_frame_async` の全段を 1 フレームで踏破することを確認する。
+/// `VideoDecoder` 経由の同期ラップ経路は別テスト (`_via_wrap_delegation`) が担当する。
 #[tokio::test(flavor = "multi_thread")]
-async fn async_video_decoder_processes_real_vp9_frame_via_wrap_delegation() -> hisui::Result<()> {
+async fn async_video_decoder_processes_real_vp9_frame_via_next_decoded_frame_async()
+-> hisui::Result<()> {
     use hisui::MediaFrame;
     use hisui::decoder::AsyncVideoDecoder;
 
@@ -68,12 +70,12 @@ async fn async_video_decoder_processes_real_vp9_frame_via_wrap_delegation() -> h
     let stats = hisui::stats::Stats::new();
     let mut decoder = AsyncVideoDecoder::new(options, stats);
 
-    // ラッパーによる委譲: `handle_input_sample_sync` 経由で `inner.decode` → `sink.emit_ok` を実行する
+    // 非同期経路: `handle_input_sample_sync` 経由で `inner.decode` → `sink.emit_ok` を実行する
     decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
     // EOS で `inner.finish()` 経由を踏ませて未排出フレームをすべて吐かせる
     decoder.handle_input_sample_sync(None)?;
 
-    // ラッパーによる委譲: `rx.recv` 経由で正常フレームを取得できることを確認する
+    // 非同期取り出し: `rx.recv` 経由で正常フレームを取得できることを確認する
     match decoder.next_decoded_frame_async().await {
         Some(Ok(frame)) => {
             let size = frame.size().expect("VP9 フィクスチャは size を持つはず");
@@ -85,16 +87,17 @@ async fn async_video_decoder_processes_real_vp9_frame_via_wrap_delegation() -> h
     Ok(())
 }
 
-/// `poll_output_sync` の `Ok(Ok(frame))` 分岐 ((1)) を実 VP9 フィクスチャで踏破する
+/// `VideoDecoder::poll_output` の同期ラップ経路を実 VP9 フィクスチャで踏破する
 ///
-/// 同期ラッパー (`VideoDecoder::poll_output`) が `AsyncVideoDecoder::poll_output_sync` に委譲する
-/// 経路の正常性回帰検出。 上の `next_decoded_frame_async` 版と同じフレーム入力で、
-/// 取り出し API だけ `poll_output_sync` (同期 `try_recv` 経由) に切り替えて検証する。
-#[tokio::test(flavor = "multi_thread")]
-async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegation()
--> hisui::Result<()> {
+/// 検証対象パス: `VideoDecoder::handle_input_sample` → `AsyncVideoDecoder::handle_input_sample_sync`
+/// → `VideoDecoderInner::decode` → `sink.emit_ok` → 内部チャンネル →
+/// `VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync` の全段を実際に踏む。
+/// wrap 側 (`VideoDecoder`) が同期 API をそのまま `AsyncVideoDecoder` に委譲していることを、
+/// 上位 API 呼び出しだけで検出できるようにする回帰テスト。
+#[test]
+fn video_decoder_poll_output_returns_processed_via_wrap_delegation() -> hisui::Result<()> {
     use hisui::MediaFrame;
-    use hisui::decoder::{AsyncVideoDecoder, DecoderRunOutput};
+    use hisui::decoder::DecoderRunOutput;
 
     let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
     let first_frame = reader
@@ -103,34 +106,34 @@ async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegat
 
     let options = VideoDecoderOptions::default();
     let stats = hisui::stats::Stats::new();
-    let mut decoder = AsyncVideoDecoder::new(options, stats);
+    let mut decoder = VideoDecoder::new(options, stats);
 
-    // ラッパーによる委譲: `handle_input_sample_sync` 経由で `inner.decode` → `sink.emit_ok` を実行する
-    decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
+    // wrap 経路: `VideoDecoder::handle_input_sample` → 内部 `AsyncVideoDecoder` に委譲される
+    decoder.handle_input_sample(Some(MediaFrame::video(first_frame)))?;
     // EOS で `inner.finish()` を経由してフラッシュを踏ませ、 非同期な内部デコーダーの
-    // コールバック完了を待ち合わせる (`poll_output_sync` が `Pending` を返さないようにするため)。
-    decoder.handle_input_sample_sync(None)?;
+    // コールバック完了を待ち合わせる (`poll_output` が `Pending` を返さないようにするため)。
+    decoder.handle_input_sample(None)?;
 
-    // `poll_output_sync` の `Ok(Ok(frame))` 分岐: `try_recv` でフレームを取り出して `Processed` を返す
-    let output = decoder.poll_output_sync()?;
+    // wrap 経路: `VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync` に委譲
+    let output = decoder.poll_output()?;
     assert!(
         matches!(output, DecoderRunOutput::Processed(_)),
-        "実 VP9 フィクスチャから Processed を期待した (poll_output_sync 経由)"
+        "実 VP9 フィクスチャから Processed を期待した (VideoDecoder::poll_output 経由)"
     );
     Ok(())
 }
 
 /// メトリクス二重計上禁止の回帰検出: 1 フレーム入力 → `total_input` が 1 増分、
-/// 1 フレーム出力 → `total_output` が 1 増分されることをラッパーによる委譲経路の全段で確認する
+/// 1 フレーム出力 → `total_output` が 1 増分されることを `VideoDecoder` の wrap 経路で確認する
 ///
 /// `OutputSink` が送信と増分を物理的に強制ペアリングする契約が
 /// 「emit_ok 経路でメトリクスの `add(2)` 等の二重計上が混入しても検出されない」状態にならないよう、
-/// 量的検証を end-to-end で担保する。
-#[tokio::test(flavor = "multi_thread")]
-async fn async_video_decoder_metrics_increment_once_per_frame_via_wrap_delegation()
--> hisui::Result<()> {
+/// 量的検証を wrap 経路経由 (`VideoDecoder::handle_input_sample` / `poll_output`) の
+/// end-to-end で担保する。
+#[test]
+fn video_decoder_metrics_increment_once_per_frame_via_wrap_delegation() -> hisui::Result<()> {
     use hisui::MediaFrame;
-    use hisui::decoder::AsyncVideoDecoder;
+    use hisui::decoder::DecoderRunOutput;
 
     let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
     let first_frame = reader
@@ -144,15 +147,21 @@ async fn async_video_decoder_metrics_increment_once_per_frame_via_wrap_delegatio
     let total_input = stats.counter("total_input_video_frame_count");
     let total_output = stats.counter("total_output_video_frame_count");
 
-    let mut decoder = AsyncVideoDecoder::new(VideoDecoderOptions::default(), stats);
+    let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
 
-    // 1 フレーム入力 → ラッパーによる委譲経路で `inner.decode` → `sink.emit_ok` まで実行する
-    decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
-    // 1 フレーム出力取得 → `rx.recv` で取り出す
-    let _output = decoder
-        .next_decoded_frame_async()
-        .await
-        .expect("フレームが emit されているはず")?;
+    // 1 フレーム入力 → wrap 経路 (`VideoDecoder::handle_input_sample`) 経由で
+    // 内部 `AsyncVideoDecoder::handle_input_sample_sync` → `inner.decode` → `sink.emit_ok` まで実行する
+    decoder.handle_input_sample(Some(MediaFrame::video(first_frame)))?;
+    // EOS でフラッシュを踏ませて、非同期な内部デコーダーのコールバック完了を待ち合わせる
+    decoder.handle_input_sample(None)?;
+
+    // 1 フレーム出力取得 → wrap 経路 (`VideoDecoder::poll_output`) 経由で
+    // 内部 `AsyncVideoDecoder::poll_output_sync` → `try_recv` でフレームを取り出す
+    let output = decoder.poll_output()?;
+    assert!(
+        matches!(output, DecoderRunOutput::Processed(_)),
+        "実 VP9 フィクスチャから Processed を期待した (VideoDecoder::poll_output 経由)"
+    );
 
     // 二重計上禁止契約: 入力 1 フレーム = `total_input` を 1 増分
     assert_eq!(
