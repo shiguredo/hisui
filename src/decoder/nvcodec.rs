@@ -9,9 +9,9 @@ use crate::video::h265::{
 };
 use crate::video::{VideoFormat, VideoFrame};
 
-/// 本スレッド側 (`decode()` 呼出側) が push し、 CUDA worker thread から呼ばれる
-/// callback 側が pop する FIFO キュー。 lock 保持区間は **push_back / pop_front のみ** に限定し、
-/// 重い処理 (NV12→I420 変換等) は lock 解放後に実行する。
+/// 本スレッド側 (`decode()` 呼出側) が要素を追加し、 CUDA ワーカースレッドから呼ばれる
+/// コールバック側が取り出す FIFO キュー。 ロック保持区間は **`push_back` / `pop_front` のみ** に限定し、
+/// 重い処理 (NV12→I420 変換等) はロック解放後に実行する。
 type InputQueue = Arc<Mutex<VecDeque<VideoFrame>>>;
 
 #[derive(Debug)]
@@ -19,16 +19,16 @@ pub struct NvcodecDecoder {
     inner: shiguredo_nvcodec::Decoder<
         shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
     >,
-    // decode() で push、 callback で pop する FIFO キュー
-    // (callback 側で I420 変換 + emit を行うため Arc<Mutex<VecDeque>> 化している)
+    // `decode()` で追加し、 コールバックで取り出す FIFO キュー
+    // (コールバック側で I420 変換とシンクへの emit を行うため `Arc<Mutex<VecDeque>>` 化している)
     input_queue: InputQueue,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ (本スレッド側のみが更新する)
 }
 
-/// CUDA worker thread から呼ばれる callback の本体を共有 closure 化したもの。
+/// CUDA ワーカースレッドから呼ばれるコールバックの本体を共有クロージャ化したもの。
 ///
 /// `input_queue` の `Mutex` ホールドスコープは **`pop_front()` のみ** に限定し、
-/// NV12→I420 変換は lock 解放後に実行する (本スレッド側次回 `decode()` の `push_back` を
+/// NV12→I420 変換はロック解放後に実行する (本スレッド側の次回 `decode()` の `push_back` を
 /// 不必要にブロックしないため)。
 fn build_handler(
     input_queue: InputQueue,
@@ -46,7 +46,7 @@ fn handle_decode_callback(
 ) {
     match result {
         Ok(nv12_frame) => {
-            // lock 保持は pop_front のみ。 libyuv 変換は lock 解放後。
+            // ロック保持は `pop_front` のみ。 libyuv 変換はロック解放後に実行する。
             let input_frame = {
                 let mut q = input_queue
                     .lock()
@@ -74,11 +74,12 @@ fn handle_decode_callback(
     }
 }
 
-/// callback の Err 分岐共通処理: `input_queue` をクリアして `sink` に `Err` を流す。
+/// コールバックの `Err` 分岐共通処理: `input_queue` をクリアして `sink` に `Err` を流す。
 ///
-/// shiguredo_nvcodec lib 側は `drain_frames` の Err 時に `pending_user_data.clear()` を行うため、
+/// `shiguredo_nvcodec` 側は `drain_frames` の `Err` 時に `pending_user_data.clear()` を行うため、
 /// hisui 側の `input_queue` も同じタイミングでクリアして残骸を残さない
-/// (残しておくと後続 decode で input_frame / nv12_frame の timestamp 入れ違いという silent bug を生む)。
+/// (残しておくと後続の `decode` で入力フレームと NV12 フレームのタイムスタンプ入れ違いという
+///  静かなバグを生む)。
 fn clear_input_queue_and_emit_err(input_queue: &InputQueue, sink: &OutputSink, err: crate::Error) {
     {
         let mut q = input_queue
@@ -89,7 +90,7 @@ fn clear_input_queue_and_emit_err(input_queue: &InputQueue, sink: &OutputSink, e
     sink.emit_err(err);
 }
 
-/// NV12 フォーマットの decoded frame を I420 に変換して `VideoFrame` を構築する
+/// NV12 フォーマットのデコード済みフレームを I420 に変換して `VideoFrame` を構築する
 fn convert_nv12_to_i420(
     input_frame: VideoFrame,
     nv12_frame: shiguredo_nvcodec::DecodedFrame<()>,
@@ -278,7 +279,7 @@ impl NvcodecDecoder {
         };
 
         self.inner.decode(&data, ())?;
-        // input_queue の lock 保持は push_back のみ。
+        // `input_queue` のロック保持は `push_back` のみに限定する。
         {
             let mut q = self
                 .input_queue
@@ -289,15 +290,16 @@ impl NvcodecDecoder {
         Ok(())
     }
 
-    /// in-flight フレームの decode 完了を待ち合わせる。
+    /// 進行中のフレームのデコード完了を待ち合わせる。
     ///
-    /// `shiguredo_nvcodec::Decoder::flush()` の戻り時点で callback はすべて同期的に呼び切られている
-    /// 前提であり、 残フレーム / Err の emit はその callback 内で完了するため、 ここでは追加処理不要。
+    /// `shiguredo_nvcodec::Decoder::flush()` の戻り時点でコールバックはすべて同期的に呼び切られている
+    /// 前提であり、 残フレームおよびエラーのシンクへの emit はそのコールバック内で完了するため、
+    /// ここでは追加処理不要。
     ///
-    /// **重要**: callback 内で発生した Err は `sink.emit_err()` 経由で内部 channel に積まれており、
+    /// **重要**: コールバック内で発生した `Err` は `sink.emit_err()` 経由で内部チャンネルに積まれており、
     /// `finish()` の戻り値からは検出できない。 利用側は `finish()` の直後に `poll_output_sync` の
     /// `try_recv` ループ (= `drain_video_decoder_output` 経由) で残物を全て吸い出すこと。
-    /// 旧実装 (`error_slot` 同期 take) との挙動互換は `VideoDecoder::run` の drain ループで担保される。
+    /// 旧実装 (`error_slot` 同期取り出し) との挙動互換は `VideoDecoder::run` の排出ループで担保される。
     pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.flush()?;
         Ok(())
@@ -387,7 +389,7 @@ mod tests {
     use crate::stats::Stats;
     use crate::video::VideoFormat;
 
-    /// テスト用 `VideoFrame` を 1 件生成する (data・フォーマットは適当な値)
+    /// テスト用 `VideoFrame` を 1 件生成する (データ・フォーマットは適当な値)
     fn make_dummy_video_frame() -> VideoFrame {
         VideoFrame {
             data: vec![0x00],
@@ -399,15 +401,15 @@ mod tests {
         }
     }
 
-    /// callback の Err 分岐に相当する `clear_input_queue_and_emit_err` が
-    /// (1) `input_queue` の残骸を完全クリアし、 (2) `sink` 経由で `Err` を rx へ流す
+    /// コールバックの `Err` 分岐に相当する `clear_input_queue_and_emit_err` が
+    /// (1) `input_queue` の残骸を完全クリアし、 (2) `sink` 経由で `Err` を受信側へ流す
     /// ことを検証する。
     ///
-    /// これにより shiguredo_nvcodec lib 側 `pending_user_data.clear()` と整合させた
-    /// silent timestamp 入れ違い bug の回帰検出を担保する。
+    /// これにより `shiguredo_nvcodec` 側の `pending_user_data.clear()` と整合させた
+    /// 静かなタイムスタンプ入れ違いバグの回帰検出を担保する。
     #[test]
     fn clear_input_queue_and_emit_err_clears_queue_and_sends_error() {
-        // input_queue に「callback Err 発生時点で残ってしまうはずだった」残骸を 2 件 push する
+        // `input_queue` に「コールバック `Err` 発生時点で残ってしまうはずだった」残骸を 2 件追加する
         let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::from(vec![
             make_dummy_video_frame(),
             make_dummy_video_frame(),
@@ -423,12 +425,12 @@ mod tests {
             crate::Error::new("test nvcodec callback error"),
         );
 
-        // (1) input_queue の残骸が完全クリアされている
+        // (1) `input_queue` の残骸が完全クリアされている
         assert!(
             input_queue.lock().expect("lock").is_empty(),
-            "callback Err 後に input_queue がクリアされているはず (timestamp 入れ違い silent bug 防止)"
+            "コールバック Err 後に input_queue がクリアされているはず (タイムスタンプ入れ違いバグ防止)"
         );
-        // (2) sink 経由で Err が rx に届いている
+        // (2) `sink` 経由で `Err` が受信側に届いている
         match rx.try_recv() {
             Ok(Err(e)) => {
                 let msg = e.display().to_string();
@@ -439,11 +441,11 @@ mod tests {
             }
             other => panic!("Ok(Err(_)) を期待したが {other:?} を受信した"),
         }
-        // emit_err は counter を inc しない (R-4 の二重計上禁止契約)
+        // `emit_err` はカウンターを増分しない (R-4 の二重計上禁止契約)
         assert_eq!(
             counter.get(),
             0,
-            "Err 経路は total_output_metric を inc しないはず"
+            "Err 経路は total_output_metric を増分しないはず"
         );
     }
 }

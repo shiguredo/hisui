@@ -48,51 +48,51 @@ fn av1_multi_resolutions() -> hisui::Result<()> {
     Ok(())
 }
 
-/// `AsyncVideoDecoder` の wrap delegation 経路を実 VP9 fixture で検証する
+/// `AsyncVideoDecoder` のラッパーによる委譲経路を実 VP9 フィクスチャで検証する
 ///
 /// 検証対象パス: `AsyncVideoDecoder::handle_input_sample_sync` → `VideoDecoderInner::decode`
-/// → `Initial` → `Libvpx` への遷移 → `LibvpxDecoder::decode` → `sink.emit_ok` → 内部 channel
-/// → `rx.recv` → `next_decoded_frame_async` の全段を 1 frame で踏破することを確認する。
+/// → `Initial` → `Libvpx` への遷移 → `LibvpxDecoder::decode` → `sink.emit_ok` → 内部チャンネル
+/// → `rx.recv` → `next_decoded_frame_async` の全段を 1 フレームで踏破することを確認する。
 ///
-/// これは sink を private 内部から取り出す smoke test (旧 (c) テスト) では検証できなかった
-/// 「inner.decode と sink.emit_ok の繋ぎ込み」の正常性回帰検出となる。
+/// これはシンクを private 内部から取り出すスモークテスト (旧 (c) テスト) では検証できなかった
+/// 「`inner.decode` と `sink.emit_ok` の繋ぎ込み」の正常性回帰検出となる。
 #[tokio::test(flavor = "multi_thread")]
 async fn async_video_decoder_processes_real_vp9_frame_via_wrap_delegation() -> hisui::Result<()> {
     use hisui::MediaFrame;
     use hisui::decoder::AsyncVideoDecoder;
 
-    // 既存 vp9_multi_resolutions と同じ fixture を 1 frame だけ使う
+    // 既存 `vp9_multi_resolutions` と同じフィクスチャを 1 フレームだけ使う
     let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
     let first_frame = reader
         .next()
-        .expect("少なくとも 1 frame 含まれているはず")?;
+        .expect("少なくとも 1 フレーム含まれているはず")?;
 
     let options = VideoDecoderOptions::default();
     let stats = hisui::stats::Stats::new();
     let mut decoder = AsyncVideoDecoder::new(options, stats);
 
-    // wrap delegation: handle_input_sample_sync 経由で inner.decode → sink.emit_ok を実行する
+    // ラッパーによる委譲: `handle_input_sample_sync` 経由で `inner.decode` → `sink.emit_ok` を実行する
     decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
-    // EOS で inner.finish() 経由を踏ませて未排出フレームをすべて吐かせる
+    // EOS で `inner.finish()` 経由を踏ませて未排出フレームをすべて吐かせる
     decoder.handle_input_sample_sync(None)?;
 
-    // wrap delegation: rx.recv 経由で正常 frame を取得できることを確認する
+    // ラッパーによる委譲: `rx.recv` 経由で正常フレームを取得できることを確認する
     match decoder.next_decoded_frame_async().await {
         Some(Ok(frame)) => {
-            let size = frame.size().expect("VP9 fixture は size を持つはず");
-            assert_eq!(size.width, 640, "fixture 解像度と一致するはず");
-            assert_eq!(size.height, 480, "fixture 解像度と一致するはず");
+            let size = frame.size().expect("VP9 フィクスチャは size を持つはず");
+            assert_eq!(size.width, 640, "フィクスチャ解像度と一致するはず");
+            assert_eq!(size.height, 480, "フィクスチャ解像度と一致するはず");
         }
-        other => panic!("正常 frame (Some(Ok(_))) を期待したが {other:?} を受信した"),
+        other => panic!("正常フレーム (Some(Ok(_))) を期待したが {other:?} を受信した"),
     }
     Ok(())
 }
 
-/// `poll_output_sync` の Ok(Ok(frame)) 分岐 ((1)) を実 VP9 fixture で踏破する
+/// `poll_output_sync` の `Ok(Ok(frame))` 分岐 ((1)) を実 VP9 フィクスチャで踏破する
 ///
-/// 同期 wrap (`VideoDecoder::poll_output`) が `AsyncVideoDecoder::poll_output_sync` に delegate
-/// する経路の正常性回帰検出。 上の `next_decoded_frame_async` 版と同じ frame 入力で、
-/// 取り出し API だけ `poll_output_sync` (同期 try_recv 経由) に切り替えて検証する。
+/// 同期ラッパー (`VideoDecoder::poll_output`) が `AsyncVideoDecoder::poll_output_sync` に委譲する
+/// 経路の正常性回帰検出。 上の `next_decoded_frame_async` 版と同じフレーム入力で、
+/// 取り出し API だけ `poll_output_sync` (同期 `try_recv` 経由) に切り替えて検証する。
 #[tokio::test(flavor = "multi_thread")]
 async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegation()
 -> hisui::Result<()> {
@@ -102,34 +102,34 @@ async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegat
     let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
     let first_frame = reader
         .next()
-        .expect("少なくとも 1 frame 含まれているはず")?;
+        .expect("少なくとも 1 フレーム含まれているはず")?;
 
     let options = VideoDecoderOptions::default();
     let stats = hisui::stats::Stats::new();
     let mut decoder = AsyncVideoDecoder::new(options, stats);
 
-    // wrap delegation: handle_input_sample_sync 経由で inner.decode → sink.emit_ok を実行する
+    // ラッパーによる委譲: `handle_input_sample_sync` 経由で `inner.decode` → `sink.emit_ok` を実行する
     decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
-    // EOS で inner.finish() → flush を踏ませる
-    // (Nvcodec は callback が別 thread から非同期に呼ばれるため、 ここで flush 待ち合わせしないと
-    //  直後の poll_output_sync で channel が空のまま Pending が返ってしまう。
-    //  Libvpx 等の同期 inner では既に sink.emit_ok 済なので EOS は no-op に近い)
+    // EOS で `inner.finish()` → フラッシュを踏ませる
+    // (Nvcodec はコールバックが別スレッドから非同期に呼ばれるため、 ここでフラッシュ待ち合わせしないと
+    //  直後の `poll_output_sync` でチャンネルが空のまま `Pending` が返ってしまう。
+    //  Libvpx 等の同期内部デコーダーでは既に `sink.emit_ok` 済なので EOS はほぼ no-op)
     decoder.handle_input_sample_sync(None)?;
 
-    // poll_output_sync の Ok(Ok(frame)) 分岐: try_recv で frame を取り出して Processed を返す
+    // `poll_output_sync` の `Ok(Ok(frame))` 分岐: `try_recv` でフレームを取り出して `Processed` を返す
     let output = decoder.poll_output_sync()?;
     assert!(
         matches!(output, DecoderRunOutput::Processed(_)),
-        "実 VP9 fixture から Processed を期待した (poll_output_sync 経由)"
+        "実 VP9 フィクスチャから Processed を期待した (poll_output_sync 経由)"
     );
     Ok(())
 }
 
-/// メトリクス二重計上禁止の回帰検出: 1 frame 入力 → `total_input` が 1 inc、
-/// 1 frame 出力 → `total_output` が 1 inc されることを wrap delegation 全段で確認する
+/// メトリクス二重計上禁止の回帰検出: 1 フレーム入力 → `total_input` が 1 増分、
+/// 1 フレーム出力 → `total_output` が 1 増分されることをラッパーによる委譲経路の全段で確認する
 ///
 /// issue 0066 設計動機 (`OutputSink` で send と inc を物理的に強制ペアリング) が
-/// 「emit_ok 経路で metric の add(2) 等の二重計上が混入しても検出されない」状態にならないよう、
+/// 「emit_ok 経路でメトリクスの `add(2)` 等の二重計上が混入しても検出されない」状態にならないよう、
 /// 量的検証を end-to-end で担保する。
 #[tokio::test(flavor = "multi_thread")]
 async fn async_video_decoder_metrics_increment_once_per_frame_via_wrap_delegation()
@@ -140,36 +140,36 @@ async fn async_video_decoder_metrics_increment_once_per_frame_via_wrap_delegatio
     let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
     let first_frame = reader
         .next()
-        .expect("少なくとも 1 frame 含まれているはず")?;
+        .expect("少なくとも 1 フレーム含まれているはず")?;
 
-    // metric handle を先に取得しておく
-    // (Stats::counter は同 name に同 Arc を返す get_or_insert_entry なので、
-    //  ここで取った counter と decoder 内部の counter は同じ Arc を共有する)
+    // メトリクスのハンドルを先に取得しておく
+    // (`Stats::counter` は同名に対して同一の `Arc` を返す `get_or_insert_entry` なので、
+    //  ここで取ったカウンターとデコーダー内部のカウンターは同じ `Arc` を共有する)
     let mut stats = hisui::stats::Stats::new();
     let total_input = stats.counter("total_input_video_frame_count");
     let total_output = stats.counter("total_output_video_frame_count");
 
     let mut decoder = AsyncVideoDecoder::new(VideoDecoderOptions::default(), stats);
 
-    // 1 frame 入力 → wrap delegation 経由で inner.decode → sink.emit_ok まで実行する
+    // 1 フレーム入力 → ラッパーによる委譲経路で `inner.decode` → `sink.emit_ok` まで実行する
     decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
-    // 1 frame 出力取得 → rx.recv で取り出す
+    // 1 フレーム出力取得 → `rx.recv` で取り出す
     let _output = decoder
         .next_decoded_frame_async()
         .await
-        .expect("frame が emit されているはず")?;
+        .expect("フレームが emit されているはず")?;
 
-    // 二重計上禁止契約: 入力 1 frame = total_input +1
+    // 二重計上禁止契約: 入力 1 フレーム = `total_input` を 1 増分
     assert_eq!(
         total_input.get(),
         1,
-        "1 frame 入力で total_input が 1 inc されるはず (二重計上禁止)"
+        "1 フレーム入力で total_input が 1 増分されるはず (二重計上禁止)"
     );
-    // 二重計上禁止契約: 出力 1 frame = total_output +1 (OutputSink::emit_ok 経由で物理ペアリング)
+    // 二重計上禁止契約: 出力 1 フレーム = `total_output` を 1 増分 (`OutputSink::emit_ok` 経由で物理ペアリング)
     assert_eq!(
         total_output.get(),
         1,
-        "1 frame 出力で total_output が 1 inc されるはず (二重計上禁止)"
+        "1 フレーム出力で total_output が 1 増分されるはず (二重計上禁止)"
     );
 
     Ok(())

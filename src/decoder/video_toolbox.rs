@@ -134,8 +134,9 @@ impl VideoToolboxDecoder {
                         return Ok(());
                     }
 
-                    // sink を引き継ぐ (元の AsyncVideoDecoder の rx に届き続ける必要があるため)。
-                    // 未消費 frame は Sender 経由で即時 emit 済みのため、 reinitialize で喪失するリスクはない。
+                    // シンクを引き継ぐ (元の `AsyncVideoDecoder` の受信側 `rx` に届き続ける必要があるため)。
+                    // 未消費フレームは送信側 (`Sender`) 経由で即時に emit 済のため、
+                    // 再初期化で喪失するリスクはない。
                     let sink = self.sink.clone();
                     *self = Self::new_h265(frame, sink)?;
                 }
@@ -175,7 +176,7 @@ impl VideoToolboxDecoder {
             return Ok(());
         }
 
-        // sink を引き継ぐ (上記 H264/H265 経路と同じ理由)
+        // シンクを引き継ぐ (上記 H264/H265 経路と同じ理由)
         let sink = self.sink.clone();
         *self = constructor(frame, sink)?;
         Ok(())

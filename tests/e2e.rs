@@ -1356,8 +1356,8 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     }
 
     // 映像をデコードをして中身を確認する
-    // (デコーダーは出力フレームを sink 経由で内部 channel へ流すため、
-    //  外側から rx で受け取る形に変わった点に注意)
+    // (デコーダーは出力フレームをシンク経由で内部チャンネルへ流すため、
+    //  外側から受信側 (`rx`) で受け取る形に変わった点に注意)
     let check_decoded_frames = |rx: &mut tokio::sync::mpsc::UnboundedReceiver<
         hisui::Result<hisui::VideoFrame>,
     >|
@@ -1577,8 +1577,8 @@ fn simple_split_archive() -> noargs::Result<()> {
 
     // 映像をデコードをして中身を確認する
     // 時系列順に R -> G -> B の色変化を確認
-    // (デコーダーは出力フレームを sink 経由で内部 channel へ流すため、
-    //  外側から rx で受け取る形に変わった点に注意)
+    // (デコーダーは出力フレームをシンク経由で内部チャンネルへ流すため、
+    //  外側から受信側 (`rx`) で受け取る形に変わった点に注意)
     let check_decoded_frames =
         |rx: &mut tokio::sync::mpsc::UnboundedReceiver<hisui::Result<hisui::VideoFrame>>,
          frame_index: &mut usize|
@@ -1726,8 +1726,8 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     }
 
     // 映像をデコードをして中身を確認する
-    // (デコーダーは出力フレームを sink 経由で内部 channel へ流すため、
-    //  外側から rx で受け取る形に変わった点に注意)
+    // (デコーダーは出力フレームをシンク経由で内部チャンネルへ流すため、
+    //  外側から受信側 (`rx`) で受け取る形に変わった点に注意)
     let check_decoded_frames = |rx: &mut tokio::sync::mpsc::UnboundedReceiver<
         hisui::Result<hisui::VideoFrame>,
     >|
@@ -1839,8 +1839,8 @@ fn two_regions() -> noargs::Result<()> {
     assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 映像をデコードをして中身を確認する
-    // (デコーダーは出力フレームを sink 経由で内部 channel へ流すため、
-    //  外側から rx で受け取る形に変わった点に注意)
+    // (デコーダーは出力フレームをシンク経由で内部チャンネルへ流すため、
+    //  外側から受信側 (`rx`) で受け取る形に変わった点に注意)
     let check_decoded_frames = |rx: &mut tokio::sync::mpsc::UnboundedReceiver<
         hisui::Result<hisui::VideoFrame>,
     >|
