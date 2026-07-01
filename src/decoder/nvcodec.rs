@@ -44,7 +44,7 @@ fn handle_decode_callback(
 
 /// NV12 フォーマットのデコード済みフレームを I420 に変換して `VideoFrame` を構築する
 ///
-/// `decoded.user_data()` に入力フレーム (stripped) が含まれており、 変換後の frame にペアリングする。
+/// `decoded.user_data()` に入力フレームが含まれており、 変換後のフレームにペアリングする。
 fn convert_nv12_to_i420(
     decoded: shiguredo_nvcodec::DecodedFrame<VideoFrame>,
 ) -> crate::Result<VideoFrame> {
@@ -219,7 +219,8 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        // 入力フレーム (stripped 済) を `UserData` として渡す。
+        // 入力フレームを `to_stripped()` で軽量化 (raw data と sample_entry を落として
+        // format / keyframe / size / timestamp のみ保持) したものを `UserData` として渡す。
         // shiguredo_nvcodec 側で `pending_user_data` が FIFO 管理され、 コールバック時に
         // `DecodedFrame<VideoFrame>` として自動的にペアリングされて返ってくる。
         // Err 時の `pending_user_data.clear()` も shiguredo_nvcodec 側で自動実行される。
