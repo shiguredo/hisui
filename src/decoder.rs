@@ -462,12 +462,15 @@ impl AsyncVideoDecoder {
         }
     }
 
-    /// 非同期入力 API (新規)。
-    ///
-    /// `None` 返却は `tx` が drop された場合のみ (構造体不変条件違反 = バグ、 `OutputSink::emit_*`
-    /// 側の `unreachable!()` で既に検出されているはず)。
-    pub async fn next_decoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>> {
-        self.output_rx.recv().await
+    /// デコード済みフレームを非同期に取得する。
+    pub async fn next_decoded_frame_async(&mut self) -> crate::Result<VideoFrame> {
+        // `recv().await` が `None` を返すのは全ての送信側が drop された場合のみで、
+        // 構造体不変条件違反 = バグ (`OutputSink::emit_*` 側の `unreachable!()` で既に
+        // 検出されているはず)。 通常運用では起こらないため、 ここでも `unreachable!()` で潰す。
+        let Some(result) = self.output_rx.recv().await else {
+            unreachable!("decoder output channel closed unexpectedly (bug)");
+        };
+        result
     }
 
     /// engine 選択ロジック本体 (既存 `VideoDecoder::get_engines` のロジックを移植)。
@@ -787,7 +790,6 @@ impl VideoDecoderInner {
     ) -> crate::Result<()> {
         match self {
             Self::Initial { options, sink } => {
-                // OutputSink / VideoDecoderOptions ともに Clone は cheap (内部 Arc bump のみ)。
                 let options = options.clone();
                 let sink = sink.clone();
                 self.initialize_decoder(frame, codec_metric, engine_metric, options, sink)?;
