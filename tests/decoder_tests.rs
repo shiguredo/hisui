@@ -53,9 +53,6 @@ fn av1_multi_resolutions() -> hisui::Result<()> {
 /// 検証対象パス: `AsyncVideoDecoder::handle_input_sample_sync` → `VideoDecoderInner::decode`
 /// → `Initial` → `Libvpx` への遷移 → `LibvpxDecoder::decode` → `sink.emit_ok` → 内部チャンネル
 /// → `rx.recv` → `next_decoded_frame_async` の全段を 1 フレームで踏破することを確認する。
-///
-/// これはシンクを private 内部から取り出すスモークテスト (旧 (c) テスト) では検証できなかった
-/// 「`inner.decode` と `sink.emit_ok` の繋ぎ込み」の正常性回帰検出となる。
 #[tokio::test(flavor = "multi_thread")]
 async fn async_video_decoder_processes_real_vp9_frame_via_wrap_delegation() -> hisui::Result<()> {
     use hisui::MediaFrame;
@@ -106,10 +103,8 @@ async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegat
 
     // ラッパーによる委譲: `handle_input_sample_sync` 経由で `inner.decode` → `sink.emit_ok` を実行する
     decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
-    // EOS で `inner.finish()` → フラッシュを踏ませる
-    // (Nvcodec はコールバックが別スレッドから非同期に呼ばれるため、 ここでフラッシュ待ち合わせしないと
-    //  直後の `poll_output_sync` でチャンネルが空のまま `Pending` が返ってしまう。
-    //  Libvpx 等の同期内部デコーダーでは既に `sink.emit_ok` 済なので EOS はほぼ no-op)
+    // EOS で `inner.finish()` を経由してフラッシュを踏ませ、 非同期な内部デコーダーの
+    // コールバック完了を待ち合わせる (`poll_output_sync` が `Pending` を返さないようにするため)。
     decoder.handle_input_sample_sync(None)?;
 
     // `poll_output_sync` の `Ok(Ok(frame))` 分岐: `try_recv` でフレームを取り出して `Processed` を返す

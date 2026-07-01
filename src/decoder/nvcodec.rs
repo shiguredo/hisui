@@ -219,11 +219,8 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        // 入力フレームを `to_stripped()` で軽量化 (raw data と sample_entry を落として
-        // format / keyframe / size / timestamp のみ保持) したものを `UserData` として渡す。
-        // shiguredo_nvcodec 側で `pending_user_data` が FIFO 管理され、 コールバック時に
-        // `DecodedFrame<VideoFrame>` として自動的にペアリングされて返ってくる。
-        // Err 時の `pending_user_data.clear()` も shiguredo_nvcodec 側で自動実行される。
+        // 入力フレームを軽量化した VideoFrame を `UserData` として渡す。
+        // shiguredo_nvcodec が `pending_user_data` を FIFO 管理し、 Err 時の clear まで自動で行う。
         self.inner.decode(&data, frame.to_stripped())?;
         Ok(())
     }
@@ -232,11 +229,9 @@ impl NvcodecDecoder {
     ///
     /// `shiguredo_nvcodec::Decoder::flush()` の戻り時点でコールバックはすべて同期的に呼び切られている
     /// 前提であり、 残フレームおよびエラーのシンクへの emit はそのコールバック内で完了するため、
-    /// ここでは追加処理不要。
-    ///
-    /// **重要**: コールバック内で発生した `Err` は `sink.emit_err()` 経由で内部チャンネルに積まれており、
-    /// `finish()` の戻り値からは検出できない。 利用側は `finish()` の直後に `poll_output_sync` の
-    /// `try_recv` ループ (= `drain_video_decoder_output` 経由) で残物を全て吸い出すこと。
+    /// ここでは追加処理不要。 コールバック内で発生した `Err` は `sink.emit_err()` 経由で内部
+    /// チャンネルに積まれ、 `finish()` の戻り値からは検出できないため、 利用側は `finish()` の直後に
+    /// `poll_output_sync` の `try_recv` ループで残物を全て吸い出すこと。
     pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.flush()?;
         Ok(())

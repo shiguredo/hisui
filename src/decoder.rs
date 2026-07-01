@@ -334,9 +334,13 @@ pub type DecoderOutputReceiver = tokio::sync::mpsc::UnboundedReceiver<crate::Res
 
 /// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`output_rx`) に流すためのシンク。
 ///
-/// 出力フレーム送信とメトリクス計上を物理的に強制ペアリングする役割を持つ。
-/// 単なる mpsc の送信側 (`DecoderOutputSender`) と区別するため
-/// 「Sender」ではなく「Sink」と命名している (送信 + 計上の集約役という一段上の抽象)。
+/// 出力フレーム (`emit_ok`) 送信時に `total_output_metric` の増分を物理的に強制ペアリングする。
+/// エラー (`emit_err`) 送信時はメトリクスを増分しない (出力フレーム数の意味論を汚さないため)。
+///
+/// `unreachable!()` 検出契約: シンクと `output_rx` は `AsyncVideoDecoder` 内で同居するため、
+/// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
+/// 同じ理由で `poll_output_sync` の `Disconnected` 分岐と `next_decoded_frame_async` の
+/// `None` 返却も同様に `unreachable!()` で潰す。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
     tx: DecoderOutputSender,
@@ -351,22 +355,17 @@ impl OutputSink {
         }
     }
 
-    /// 出力フレームを 1 件送信して `total_output_video_frame_count_metric` を 1 だけ増分する。
+    /// 出力フレームを 1 件送信して `total_output_metric` を 1 だけ増分する。
     pub fn emit_ok(&self, frame: VideoFrame) {
-        // 送信失敗 (= 受信側が drop された) は構造体不変条件違反 = バグ。
-        // `AsyncVideoDecoder` 内でシンクと受信側は同居するため通常時には起こらない
-        // (`poll_output_sync` の `Disconnected` 分岐と同じく `unreachable!()` で
-        //  release ビルドも含めて即時 panic 検出する)。
         if self.tx.send(Ok(frame)).is_err() {
             unreachable!("decoder output sink receiver dropped before sink (bug)");
         }
-        // 増分は送信成功後に行うことで「送信できなかったフレームをカウントする」嘘を物理的に防ぐ。
+        // 送信成功後に増分することで「送信できなかったフレームをカウントする」嘘を物理的に防ぐ。
         self.total_output_metric.inc();
     }
 
     /// エラーを 1 件送信する (メトリクスは増分しない)。
     pub fn emit_err(&self, err: crate::Error) {
-        // 送信失敗時の扱いは `emit_ok` と同じ (構造上到達不能なバグとして即時 panic)。
         if self.tx.send(Err(err)).is_err() {
             unreachable!("decoder output sink receiver dropped before sink (bug)");
         }
@@ -375,9 +374,6 @@ impl OutputSink {
 
 /// 内部チャンネルベースの非同期映像デコーダー
 ///
-/// 内部デコーダーは出力フレームをシンク経由で内部チャンネル (`output_rx`) に emit する。
-/// シンク自体は `VideoDecoderInner::Initial` バリアント内に保持し、 `Initial` から実バリアントへの
-/// 遷移時に `sink.clone()` を実内部デコーダーのコンストラクタへ渡す。
 /// 同期ラッパー (`VideoDecoder`) からは `handle_input_sample_sync` / `poll_output_sync` 経由で
 /// 同期 API として利用し、 直接利用するときは `next_decoded_frame_async` で非同期に取得する。
 #[derive(Debug)]
@@ -419,9 +415,6 @@ impl AsyncVideoDecoder {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
             self.total_input_video_frame_count_metric.inc();
-            // `VideoDecoderInner` の各バリアントは内部にシンクを内包する設計のため、
-            // ここではシンクを引数で渡さない (`Initial` 遷移時に `Initial` バリアント内のシンクを
-            // `initialize_decoder` 経由で実内部デコーダーのコンストラクタへ `clone` 渡し)。
             self.inner
                 .decode(&frame, &self.codec_metric, &self.engine_metric)?;
         } else {
@@ -441,20 +434,15 @@ impl AsyncVideoDecoder {
             Ok(Err(e)) => Err(e),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                 if self.eos {
-                    // 同期内部デコーダーのシンクへの emit はすべて `handle_input_sample_sync` 内で
-                    // 完了し、 非同期な内部デコーダーも `finish()` がフラッシュ待ち合わせ済のため、
-                    // `eos` に至った時点でチャンネル内の残物はない。
+                    // `handle_input_sample_sync(None)` 経由で同期・非同期どちらの内部デコーダーも
+                    // フラッシュ完了しているため、 `eos` 時点でチャンネル内の残物はない。
                     Ok(DecoderRunOutput::Finished)
                 } else {
                     Ok(DecoderRunOutput::Pending)
                 }
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                // シンク (= `tx`) は `inner` (`Initial` バリアント内、 もしくは実内部デコーダー内)
-                // で生存しており、 さらに `OutputSink::clone` で配布された複製も生存しているため、
-                // `AsyncVideoDecoder` 自身が生きている間はすべての `tx` が drop される経路はない。
-                // したがって `Disconnected` は構造上到達不能な不変条件違反 (= バグ) であり、
-                // `Err` で静かに覆い隠さず即時 panic で検出する。
+                // `OutputSink` の同居不変条件により構造上到達不能 (詳細は `OutputSink` の docstring 参照)。
                 unreachable!(
                     "decoder output channel disconnected unexpectedly (sink dropped before rx)"
                 )
@@ -464,16 +452,14 @@ impl AsyncVideoDecoder {
 
     /// デコード済みフレームを非同期に取得する。
     pub async fn next_decoded_frame_async(&mut self) -> crate::Result<VideoFrame> {
-        // `recv().await` が `None` を返すのは全ての送信側が drop された場合のみで、
-        // 構造体不変条件違反 = バグ (`OutputSink::emit_*` 側の `unreachable!()` で既に
-        // 検出されているはず)。 通常運用では起こらないため、 ここでも `unreachable!()` で潰す。
+        // `OutputSink` の同居不変条件により `None` 返却は構造上到達不能。
         let Some(result) = self.output_rx.recv().await else {
             unreachable!("decoder output channel closed unexpectedly (bug)");
         };
         result
     }
 
-    /// engine 選択ロジック本体 (既存 `VideoDecoder::get_engines` のロジックを移植)。
+    /// codec とライブラリの利用可否に応じて候補となる engine のリストを返す。
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
         let mut engines = Vec::new();
         match codec {
@@ -537,8 +523,7 @@ impl AsyncVideoDecoder {
 
 /// 同期 API を提供する映像デコーダー (`AsyncVideoDecoder` の薄いラッパー)。
 ///
-/// 既存の外部 API (`new`, `handle_input_sample`, `poll_output`, `run`, `handle_input_message`,
-/// `get_engines`) の挙動は維持する。 内部では `AsyncVideoDecoder` に委譲する。
+/// 内部では `AsyncVideoDecoder` に委譲する。
 #[derive(Debug)]
 pub struct VideoDecoder {
     inner_decoder: AsyncVideoDecoder,
@@ -651,7 +636,6 @@ pub fn drain_video_decoder_output(
 enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,
-        // `Initial` から実バリアントへの遷移時に内部デコーダーのコンストラクタへ `clone` を渡す。
         sink: OutputSink,
     },
     Libvpx(LibvpxDecoder),
@@ -858,7 +842,7 @@ mod tests {
 
         assert!(
             matches!(decoder.inner_decoder.inner, VideoDecoderInner::Libvpx(_)),
-            "expected Libvpx decoder, got {:?}",
+            "Libvpx デコーダーを期待したが {:?} を得た",
             std::mem::discriminant(&decoder.inner_decoder.inner)
         );
     }
@@ -882,7 +866,7 @@ mod tests {
 
         assert!(
             matches!(decoder.inner_decoder.inner, VideoDecoderInner::Dav1d(_)),
-            "expected Dav1d decoder, got {:?}",
+            "Dav1d デコーダーを期待したが {:?} を得た",
             std::mem::discriminant(&decoder.inner_decoder.inner)
         );
     }
@@ -920,7 +904,7 @@ mod tests {
         let is_valid = matches!(decoder.inner_decoder.inner, VideoDecoderInner::Libvpx(_));
         assert!(
             is_valid,
-            "expected Libvpx or VideoToolbox decoder, got {:?}",
+            "Libvpx または VideoToolbox デコーダーを期待したが {:?} を得た",
             std::mem::discriminant(&decoder.inner_decoder.inner)
         );
     }
