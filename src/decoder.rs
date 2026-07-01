@@ -1048,4 +1048,36 @@ mod tests {
             "Empty + eos==false で Pending を期待した"
         );
     }
+
+    /// `poll_output_sync` の Ok(Err(_)) 分岐: 非同期な内部デコーダーのコールバックが
+    /// `sink.emit_err()` 経由でチャンネルに流したエラーが、 同期経路で `Err` として返却されることを検証する。
+    ///
+    /// この経路は `VideoDecoder::run` の drain ループが Nvcodec の非同期エラーを拾い上げる
+    /// 唯一の同期契約であり、 silent に潰れる形の改修 (例: `Err(e) => Ok(Pending)`) が
+    /// 混入しても integration test では実 Err ケースを再現しにくいため、 単体テストで担保する。
+    #[test]
+    fn poll_output_sync_returns_err_when_emit_err_received() {
+        let mut decoder =
+            AsyncVideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
+
+        // Initial バリアント内のシンクを取り出してチャンネルに Err を流す
+        let sink = match &decoder.inner {
+            VideoDecoderInner::Initial { sink, .. } => sink.clone(),
+            _ => panic!("初期状態は Initial バリアントが期待される"),
+        };
+        sink.emit_err(crate::Error::new("test callback error"));
+
+        match decoder.poll_output_sync() {
+            Err(e) => {
+                let msg = e.display().to_string();
+                assert!(
+                    msg.contains("test callback error"),
+                    "予期したエラーメッセージが含まれていない: {msg}"
+                );
+            }
+            Ok(DecoderRunOutput::Processed(_)) => panic!("Err を期待したが Processed を受信した"),
+            Ok(DecoderRunOutput::Pending) => panic!("Err を期待したが Pending を受信した"),
+            Ok(DecoderRunOutput::Finished) => panic!("Err を期待したが Finished を受信した"),
+        }
+    }
 }
