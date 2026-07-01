@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-26
-- Completed:
+- Completed: 2026-07-01
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-add-async-video-decoder
 - Polished: 2026-06-29
