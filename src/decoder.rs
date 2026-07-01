@@ -383,12 +383,17 @@ impl OutputSink {
 /// 乖離する可能性がある (エラー時の warm-up 中止経路等で発生し得る)。
 #[derive(Debug)]
 pub struct AsyncVideoDecoder {
-    inner: VideoDecoderInner,
-    output_rx: DecoderOutputReceiver,
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     eos: bool,
+
+    // 以下 2 フィールドの宣言順は drop 順を意図的に制御している (Rust 言語仕様で drop 順 = 宣言順)。
+    // `inner` を `output_rx` より先に drop することで、 非同期な内部デコーダー (Nvcodec) の
+    // worker drop 中にコールバックが `sink.emit_ok` → `tx.send` した際に `output_rx` が
+    // まだ alive で send が成功する。 逆順にすると `emit_ok` の `unreachable!()` が発火する。
+    inner: VideoDecoderInner,
+    output_rx: DecoderOutputReceiver,
 }
 
 impl AsyncVideoDecoder {
@@ -402,12 +407,12 @@ impl AsyncVideoDecoder {
         let (tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
         let sink = OutputSink::new(tx, total_output_metric);
         Self {
-            inner: VideoDecoderInner::Initial { options, sink },
-            output_rx,
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
             eos: false,
+            inner: VideoDecoderInner::Initial { options, sink },
+            output_rx,
         }
     }
 
