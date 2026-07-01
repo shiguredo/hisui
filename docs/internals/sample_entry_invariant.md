@@ -21,6 +21,8 @@ Hisui のメディアパイプラインでは、`AudioFrame` / `VideoFrame` の 
 生フォーマット（`format.codec_name()` が `None` を返すフレーム）は不変条件の対象外であり、`sample_entry: None` が許容される。
 具体的には音声側で `I16Be`、映像側で `I420` / `I420A` 等。
 
+`TextFrame` (`MediaFrame::Text` バリアントの中身) も本不変条件の対象外。TextFrame は MP4 等の container に書き出すことを想定せず、`sample_entry` フィールド自体を持たない。
+
 ## 適用範囲（入力側全経路）
 
 不変条件は writer の上流に位置する **すべての入力経路** で確立する必要がある。
