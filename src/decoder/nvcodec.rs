@@ -1,6 +1,6 @@
 use std::borrow::Cow;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+
+use tokio::sync::mpsc;
 
 use super::{DecodeConfig, OutputSink};
 use crate::video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
@@ -9,54 +9,42 @@ use crate::video::h265::{
 };
 use crate::video::{VideoFormat, VideoFrame};
 
-/// 本スレッド側 (`decode()` 呼出側) が要素を追加し、 CUDA ワーカースレッドから呼ばれる
-/// コールバック側が取り出す FIFO キュー。 ロック保持区間は **`push_back` / `pop_front` のみ** に限定し、
-/// 重い処理 (NV12→I420 変換等) はロック解放後に実行する。
-///
-/// `tokio::sync::mpsc` や `std::sync::mpsc` ではなく `Arc<Mutex<VecDeque>>` を採用しているのは、
-/// mpsc の `Receiver::try_recv` が `&mut self` を要求するため、 `Fn` であるコールバッククロージャから
-/// 呼ぶには結局 `Arc<Mutex<Receiver>>` が必要となり、 コード的なメリットがないため。
-type InputQueue = Arc<Mutex<VecDeque<VideoFrame>>>;
+/// `NvcodecDecoder::decode()` 呼出側から NVDEC コールバック側に入力フレームを橋渡しする
+/// tokio mpsc の送信側。 コールバックは対応する `UnboundedReceiver` を `FnMut` クロージャに
+/// move で取り込んで `try_recv` で `&mut` アクセスする。
+type InputSender = mpsc::UnboundedSender<VideoFrame>;
 
 #[derive(Debug)]
 pub struct NvcodecDecoder {
     inner: shiguredo_nvcodec::Decoder<
         shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
     >,
-    // `decode()` で追加し、 コールバックで取り出す FIFO キュー
-    input_queue: InputQueue,
+    // `decode()` で送信し、 コールバックで受信する FIFO キュー
+    input_tx: InputSender,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
 }
 
 /// CUDA ワーカースレッドから呼ばれるコールバックの本体を共有クロージャ化したもの。
 ///
-/// `input_queue` の `Mutex` ホールドスコープは **`pop_front()` のみ** に限定し、
-/// NV12→I420 変換はロック解放後に実行する (本スレッド側の次回 `decode()` の `push_back` を
-/// 不必要にブロックしないため)。
+/// `UnboundedReceiver` を `FnMut` クロージャに move で取り込むことで、
+/// クロージャ実行時に `&mut input_rx.try_recv()` を Mutex なしで呼べる。
 fn build_handler(
-    input_queue: InputQueue,
+    mut input_rx: mpsc::UnboundedReceiver<VideoFrame>,
     sink: OutputSink,
 ) -> shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error> {
     shiguredo_nvcodec::FnDecodeHandler::new(move |result| {
-        handle_decode_callback(&input_queue, &sink, result);
+        handle_decode_callback(&mut input_rx, &sink, result);
     })
 }
 
 fn handle_decode_callback(
-    input_queue: &InputQueue,
+    input_rx: &mut mpsc::UnboundedReceiver<VideoFrame>,
     sink: &OutputSink,
     result: std::result::Result<shiguredo_nvcodec::DecodedFrame<()>, shiguredo_nvcodec::Error>,
 ) {
     match result {
         Ok(nv12_frame) => {
-            // ロック保持は `pop_front` のみ。 libyuv 変換はロック解放後に実行する。
-            let input_frame = {
-                let mut q = input_queue
-                    .lock()
-                    .expect("nvcodec input queue lock poisoned");
-                q.pop_front()
-            };
-            let Some(input_frame) = input_frame else {
+            let Ok(input_frame) = input_rx.try_recv() else {
                 sink.emit_err(crate::Error::new(
                     "decoded frame produced without input frame",
                 ));
@@ -68,8 +56,8 @@ fn handle_decode_callback(
             }
         }
         Err(err) => {
-            clear_input_queue_and_emit_err(
-                input_queue,
+            clear_input_rx_and_emit_err(
+                input_rx,
                 sink,
                 crate::Error::new(format!("nvcodec decode error: {err}")),
             );
@@ -77,19 +65,18 @@ fn handle_decode_callback(
     }
 }
 
-/// コールバックの `Err` 分岐共通処理: `input_queue` をクリアして `sink` に `Err` を流す。
+/// コールバックの `Err` 分岐共通処理: `input_rx` の残物をすべて drain して `sink` に `Err` を流す。
 ///
 /// `shiguredo_nvcodec` 側は `drain_frames` の `Err` 時に `pending_user_data.clear()` を行うため、
-/// hisui 側の `input_queue` も同じタイミングでクリアして残骸を残さない
+/// hisui 側の受信キューも同じタイミングでクリアして残骸を残さない
 /// (残しておくと後続の `decode` で入力フレームと NV12 フレームのタイムスタンプ入れ違いという
 ///  静かなバグを生む)。
-fn clear_input_queue_and_emit_err(input_queue: &InputQueue, sink: &OutputSink, err: crate::Error) {
-    {
-        let mut q = input_queue
-            .lock()
-            .expect("nvcodec input queue lock poisoned");
-        q.clear();
-    }
+fn clear_input_rx_and_emit_err(
+    input_rx: &mut mpsc::UnboundedReceiver<VideoFrame>,
+    sink: &OutputSink,
+    err: crate::Error,
+) {
+    while input_rx.try_recv().is_ok() {}
     sink.emit_err(err);
 }
 
@@ -147,11 +134,11 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(H264) decoder");
         let mut config = params.nvcodec_h264.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::H264;
-        let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink);
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let handler = build_handler(input_rx, sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue,
+            input_tx,
             parameter_sets: None,
         })
     }
@@ -160,11 +147,11 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(H265) decoder");
         let mut config = params.nvcodec_h265.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Hevc;
-        let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink);
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let handler = build_handler(input_rx, sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue,
+            input_tx,
             parameter_sets: None,
         })
     }
@@ -173,11 +160,11 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(AV1) decoder");
         let mut config = params.nvcodec_av1.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Av1;
-        let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink);
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let handler = build_handler(input_rx, sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue,
+            input_tx,
             parameter_sets: None,
         })
     }
@@ -186,11 +173,11 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(VP8) decoder");
         let mut config = params.nvcodec_vp8.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp8;
-        let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink);
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let handler = build_handler(input_rx, sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue,
+            input_tx,
             parameter_sets: None,
         })
     }
@@ -199,11 +186,11 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(VP9) decoder");
         let mut config = params.nvcodec_vp9.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp9;
-        let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let handler = build_handler(input_queue.clone(), sink);
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let handler = build_handler(input_rx, sink);
         Ok(Self {
             inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_queue,
+            input_tx,
             parameter_sets: None,
         })
     }
@@ -224,7 +211,7 @@ impl NvcodecDecoder {
             )));
         }
 
-        // サンプルエントリーからパラメータセットを抽出してキャッシュ (本スレッド側のみ更新)
+        // サンプルエントリーからパラメータセットを抽出してキャッシュ
         if self.parameter_sets.is_none()
             && let Some(sample_entry) = &frame.sample_entry
         {
@@ -282,13 +269,11 @@ impl NvcodecDecoder {
         };
 
         self.inner.decode(&data, ())?;
-        // `input_queue` のロック保持は `push_back` のみに限定する。
-        {
-            let mut q = self
-                .input_queue
-                .lock()
-                .expect("nvcodec input queue lock poisoned");
-            q.push_back(frame.to_stripped());
+        // `input_tx.send` の失敗は Receiver が drop された場合のみ = 構造上到達不能 (Receiver は
+        // NvcodecDecoder の inner が保持するコールバッククロージャに move 済で、 NvcodecDecoder が
+        // 生きている間は必ず生存する)。 万一の bug 検出のため `unreachable!()` で即時 panic させる。
+        if self.input_tx.send(frame.to_stripped()).is_err() {
+            unreachable!("nvcodec input receiver dropped before sender (bug)");
         }
         Ok(())
     }
@@ -404,34 +389,34 @@ mod tests {
         }
     }
 
-    /// コールバックの `Err` 分岐に相当する `clear_input_queue_and_emit_err` が
-    /// (1) `input_queue` の残骸を完全クリアし、 (2) `sink` 経由で `Err` を受信側へ流す
+    /// コールバックの `Err` 分岐に相当する `clear_input_rx_and_emit_err` が
+    /// (1) `input_rx` の残物をすべて drain し、 (2) `sink` 経由で `Err` を受信側へ流す
     /// ことを検証する。
     ///
     /// これにより `shiguredo_nvcodec` 側の `pending_user_data.clear()` と整合させた
     /// 静かなタイムスタンプ入れ違いバグの回帰検出を担保する。
     #[test]
-    fn clear_input_queue_and_emit_err_clears_queue_and_sends_error() {
-        // `input_queue` に「コールバック `Err` 発生時点で残ってしまうはずだった」残骸を 2 件追加する
-        let input_queue: InputQueue = Arc::new(Mutex::new(VecDeque::from(vec![
-            make_dummy_video_frame(),
-            make_dummy_video_frame(),
-        ])));
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    fn clear_input_rx_and_emit_err_drains_queue_and_sends_error() {
+        // `input_rx` に「コールバック `Err` 発生時点で残ってしまうはずだった」残骸を 2 件流し込む
+        let (input_tx, mut input_rx) = mpsc::unbounded_channel::<VideoFrame>();
+        input_tx.send(make_dummy_video_frame()).expect("送信できる");
+        input_tx.send(make_dummy_video_frame()).expect("送信できる");
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let mut stats = Stats::new();
         let counter = stats.counter("test_total_output");
         let sink = OutputSink::new(tx, counter.clone());
 
-        clear_input_queue_and_emit_err(
-            &input_queue,
+        clear_input_rx_and_emit_err(
+            &mut input_rx,
             &sink,
             crate::Error::new("test nvcodec callback error"),
         );
 
-        // (1) `input_queue` の残骸が完全クリアされている
+        // (1) `input_rx` に残骸が残っていない (Empty か Disconnected を返す)
         assert!(
-            input_queue.lock().expect("lock").is_empty(),
-            "コールバック Err 後に input_queue がクリアされているはず (タイムスタンプ入れ違いバグ防止)"
+            input_rx.try_recv().is_err(),
+            "コールバック Err 後に input_rx がクリアされているはず (タイムスタンプ入れ違いバグ防止)"
         );
         // (2) `sink` 経由で `Err` が受信側に届いている
         match rx.try_recv() {
