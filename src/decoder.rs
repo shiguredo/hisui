@@ -332,6 +332,8 @@ pub type DecoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<
 /// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`rx`) に流すためのシンク。
 ///
 /// 出力フレーム送信とメトリクス計上を物理的に強制ペアリングする役割を持つ。
+/// 単なる mpsc の送信側 (`DecoderOutputSender`) と区別するため
+/// 「Sender」ではなく「Sink」と命名している (送信 + 計上の集約役という一段上の抽象)。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
     tx: DecoderOutputSender,
