@@ -12,6 +12,10 @@ use crate::video::{VideoFormat, VideoFrame};
 /// 本スレッド側 (`decode()` 呼出側) が要素を追加し、 CUDA ワーカースレッドから呼ばれる
 /// コールバック側が取り出す FIFO キュー。 ロック保持区間は **`push_back` / `pop_front` のみ** に限定し、
 /// 重い処理 (NV12→I420 変換等) はロック解放後に実行する。
+///
+/// `tokio::sync::mpsc` や `std::sync::mpsc` ではなく `Arc<Mutex<VecDeque>>` を採用しているのは、
+/// mpsc の `Receiver::try_recv` が `&mut self` を要求するため、 `Fn` であるコールバッククロージャから
+/// 呼ぶには結局 `Arc<Mutex<Receiver>>` が必要となり、 コード的なメリットがないため。
 type InputQueue = Arc<Mutex<VecDeque<VideoFrame>>>;
 
 #[derive(Debug)]
