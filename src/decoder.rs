@@ -376,6 +376,11 @@ impl OutputSink {
 ///
 /// 同期ラッパー (`VideoDecoder`) からは `handle_input_sample_sync` / `poll_output_sync` 経由で
 /// 同期 API として利用し、 直接利用するときは `next_decoded_frame_async` で非同期に取得する。
+///
+/// **注意**: 非同期な内部デコーダー (Nvcodec 等) 使用時、 `AsyncVideoDecoder` を drop する前に
+/// EOS + drain (`handle_input_sample_sync(None)` + `poll_output_sync` ループ) を完走させないと、
+/// コールバックが drop 中に emit した残物とメトリクス (`total_output_video_frame_count`) が
+/// 乖離する可能性がある (エラー時の warm-up 中止経路等で発生し得る)。
 #[derive(Debug)]
 pub struct AsyncVideoDecoder {
     inner: VideoDecoderInner,
