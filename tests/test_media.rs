@@ -1,5 +1,3 @@
-//! src/media.rs の integration テスト。
-//!
 //! MediaFrame の Text バリアント関連 API を確認する。
 
 use std::time::Duration;

@@ -21,10 +21,15 @@ impl MediaFrame {
         Self::Video(Arc::new(frame))
     }
 
+    /// TextFrame を Arc に包んで Text バリアントを返す。`timestamp()` は `TextFrame::start` を返す。
     pub fn new_text(frame: TextFrame) -> Self {
         Self::Text(Arc::new(frame))
     }
 
+    /// バリアントごとに以下を返す:
+    /// - Audio: `AudioFrame::timestamp`
+    /// - Video: `VideoFrame::timestamp`
+    /// - Text: `TextFrame::start` (`end` ではない)
     pub fn timestamp(&self) -> Duration {
         match self {
             Self::Audio(x) => x.timestamp,
@@ -33,8 +38,8 @@ impl MediaFrame {
         }
     }
 
-    /// バリアント名を文字列で返す ("audio" / "video" / "text")。
-    /// エラーメッセージで実バリアント名を埋め込むために使う。
+    /// エラーメッセージで実バリアント名を埋め込むための内部識別子を返す ("audio" / "video" / "text")。
+    /// codec 名や外部プロトコルフィールドとは独立した文字列。
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Audio(_) => "audio",

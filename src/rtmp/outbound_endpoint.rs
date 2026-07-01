@@ -401,8 +401,6 @@ impl RtmpPlayServer {
         let frame = match sample {
             MediaFrame::Audio(audio) => ClientMediaFrame::Audio(audio),
             MediaFrame::Video(video) => ClientMediaFrame::Video(video),
-            // RTMP 外部送信は audio / video のみ対応。ClientMediaFrame には Text バリアントを足さない方針なので、
-            // Text 流入は MediaFrame 段階で弾く。
             MediaFrame::Text(_) => {
                 return Err(Error::new(format!(
                     "expected audio or video sample, but got {kind} sample"

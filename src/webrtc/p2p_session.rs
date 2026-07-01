@@ -1322,7 +1322,6 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                     sess.stats.total_unsubscribed_audio_frame_count.inc();
                 }
             }
-            // p2p session は audio / video のみ転送する。text track は subscribe しない設計のため流入想定なし
             crate::MediaFrame::Text(_) => {
                 tracing::warn!("unexpected text frame on track {track_id}");
             }

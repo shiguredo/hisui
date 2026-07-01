@@ -1,5 +1,3 @@
-//! src/text.rs の integration テスト。
-//!
 //! TextFrame の構築と Clone を確認する。
 
 use std::time::Duration;

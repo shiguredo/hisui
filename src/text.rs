@@ -11,8 +11,8 @@ pub struct TextFrame {
     pub text: String,
     /// ISO 639-1 (2 文字小文字) の言語コード ("ja" 等)。検出失敗時や言語推定なしの場合は None
     pub language: Option<String>,
-    /// Whisper の no_speech_prob (幻覚指標、0.0 - 1.0)。Whisper 以外の生成元では None
+    /// 発話がない確率 (0.0 - 1.0、Whisper 由来の幻覚指標)。指標を提供しない生成元では None
     pub no_speech_prob: Option<f32>,
-    /// Whisper の平均 log probability (信頼度目安)。Whisper 以外の生成元では None
+    /// 平均 log probability (信頼度目安、Whisper 由来)。指標を提供しない生成元では None
     pub avg_logprob: Option<f32>,
 }

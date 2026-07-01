@@ -124,7 +124,6 @@ impl SoraPublisher {
                                 tracing::debug!("unsupported video format: {}, expected I420", frame.format);
                             }
                         }
-                        // video track 想定の subscribe なので Audio / Text 等の他バリアントは無視する
                         crate::Message::Media(_) => {}
                         crate::Message::Eos => {
                             tracing::info!("video track EOS received");
@@ -147,7 +146,6 @@ impl SoraPublisher {
                                 tracing::debug!("unsupported audio format: {}, expected I16Be", frame.format);
                             }
                         }
-                        // audio track 想定の subscribe なので Video / Text 等の他バリアントは無視する
                         crate::Message::Media(_) => {}
                         crate::Message::Eos => {
                             tracing::info!("audio track EOS received");
