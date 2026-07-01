@@ -74,10 +74,14 @@ async fn async_video_decoder_processes_real_vp9_frame_via_wrap_delegation() -> h
     decoder.handle_input_sample_sync(None)?;
 
     // ラッパーによる委譲: `rx.recv` 経由で正常フレームを取得できることを確認する
-    let frame = decoder.next_decoded_frame_async().await?;
-    let size = frame.size().expect("VP9 フィクスチャは size を持つはず");
-    assert_eq!(size.width, 640, "フィクスチャ解像度と一致するはず");
-    assert_eq!(size.height, 480, "フィクスチャ解像度と一致するはず");
+    match decoder.next_decoded_frame_async().await {
+        Some(Ok(frame)) => {
+            let size = frame.size().expect("VP9 フィクスチャは size を持つはず");
+            assert_eq!(size.width, 640, "フィクスチャ解像度と一致するはず");
+            assert_eq!(size.height, 480, "フィクスチャ解像度と一致するはず");
+        }
+        other => panic!("正常フレーム (Some(Ok(_))) を期待したが {other:?} を受信した"),
+    }
     Ok(())
 }
 
@@ -145,7 +149,10 @@ async fn async_video_decoder_metrics_increment_once_per_frame_via_wrap_delegatio
     // 1 フレーム入力 → ラッパーによる委譲経路で `inner.decode` → `sink.emit_ok` まで実行する
     decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
     // 1 フレーム出力取得 → `rx.recv` で取り出す
-    let _output = decoder.next_decoded_frame_async().await?;
+    let _output = decoder
+        .next_decoded_frame_async()
+        .await
+        .expect("フレームが emit されているはず")?;
 
     // 二重計上禁止契約: 入力 1 フレーム = `total_input` を 1 増分
     assert_eq!(

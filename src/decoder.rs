@@ -451,12 +451,16 @@ impl AsyncVideoDecoder {
     }
 
     /// デコード済みフレームを非同期に取得する。
-    pub async fn next_decoded_frame_async(&mut self) -> crate::Result<VideoFrame> {
-        // `OutputSink` の同居不変条件により `None` 返却は構造上到達不能。
-        let Some(result) = self.output_rx.recv().await else {
-            unreachable!("decoder output channel closed unexpectedly (bug)");
-        };
-        result
+    ///
+    /// - `Some(Ok(frame))`: 正常フレーム
+    /// - `Some(Err(e))`: 内部デコーダーからのエラー
+    /// - `None`: 全ての送信側が drop された
+    ///
+    /// 現状の実装では EOS 経路で sink を drop しないため `None` は構造上到達しないが、
+    /// 将来 EOS を非同期経路で通知する形が必要になった際に `None` を EOS シグナルとして
+    /// 活用できるよう `Option` を維持している。
+    pub async fn next_decoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>> {
+        self.output_rx.recv().await
     }
 
     /// codec とライブラリの利用可否に応じて候補となる engine のリストを返す。
