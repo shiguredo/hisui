@@ -1,7 +1,5 @@
 use std::borrow::Cow;
 
-use tokio::sync::mpsc;
-
 use super::{DecodeConfig, OutputSink};
 use crate::video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
 use crate::video::h265::{
@@ -9,80 +7,49 @@ use crate::video::h265::{
 };
 use crate::video::{VideoFormat, VideoFrame};
 
-/// `NvcodecDecoder::decode()` 呼出側から NVDEC コールバック側に入力フレームを橋渡しする
-/// tokio mpsc の送信側。
-type InputSender = mpsc::UnboundedSender<VideoFrame>;
-
 #[derive(Debug)]
 pub struct NvcodecDecoder {
     inner: shiguredo_nvcodec::Decoder<
-        shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
+        shiguredo_nvcodec::FnDecodeHandler<VideoFrame, shiguredo_nvcodec::Error>,
     >,
-    // `decode()` で送信し、 コールバックで受信する FIFO キュー
-    input_tx: InputSender,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
 }
 
 /// CUDA ワーカースレッドから呼ばれるコールバックの本体を共有クロージャ化したもの。
 fn build_handler(
-    mut input_rx: mpsc::UnboundedReceiver<VideoFrame>,
     sink: OutputSink,
-) -> shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error> {
+) -> shiguredo_nvcodec::FnDecodeHandler<VideoFrame, shiguredo_nvcodec::Error> {
     shiguredo_nvcodec::FnDecodeHandler::new(move |result| {
-        handle_decode_callback(&mut input_rx, &sink, result);
+        handle_decode_callback(&sink, result);
     })
 }
 
 fn handle_decode_callback(
-    input_rx: &mut mpsc::UnboundedReceiver<VideoFrame>,
     sink: &OutputSink,
-    result: std::result::Result<shiguredo_nvcodec::DecodedFrame<()>, shiguredo_nvcodec::Error>,
+    result: std::result::Result<
+        shiguredo_nvcodec::DecodedFrame<VideoFrame>,
+        shiguredo_nvcodec::Error,
+    >,
 ) {
     match result {
-        Ok(nv12_frame) => {
-            let Ok(input_frame) = input_rx.try_recv() else {
-                sink.emit_err(crate::Error::new(
-                    "decoded frame produced without input frame",
-                ));
-                return;
-            };
-            match convert_nv12_to_i420(input_frame, nv12_frame) {
-                Ok(frame) => sink.emit_ok(frame),
-                Err(err) => sink.emit_err(err),
-            }
-        }
+        Ok(decoded) => match convert_nv12_to_i420(decoded) {
+            Ok(frame) => sink.emit_ok(frame),
+            Err(err) => sink.emit_err(err),
+        },
         Err(err) => {
-            clear_input_rx_and_emit_err(
-                input_rx,
-                sink,
-                crate::Error::new(format!("nvcodec decode error: {err}")),
-            );
+            sink.emit_err(crate::Error::new(format!("nvcodec decode error: {err}")));
         }
     }
 }
 
-/// コールバックの `Err` 分岐共通処理: `input_rx` の残物をすべて drain して `sink` に `Err` を流す。
-///
-/// `shiguredo_nvcodec` 側は `drain_frames` の `Err` 時に `pending_user_data.clear()` を行うため、
-/// hisui 側の受信キューも同じタイミングでクリアして残骸を残さない
-/// (残しておくと後続の `decode` で入力フレームと NV12 フレームのタイムスタンプ入れ違いという
-///  静かなバグを生む)。
-fn clear_input_rx_and_emit_err(
-    input_rx: &mut mpsc::UnboundedReceiver<VideoFrame>,
-    sink: &OutputSink,
-    err: crate::Error,
-) {
-    while input_rx.try_recv().is_ok() {}
-    sink.emit_err(err);
-}
-
 /// NV12 フォーマットのデコード済みフレームを I420 に変換して `VideoFrame` を構築する
+///
+/// `decoded.user_data()` に入力フレーム (stripped) が含まれており、 変換後の frame にペアリングする。
 fn convert_nv12_to_i420(
-    input_frame: VideoFrame,
-    nv12_frame: shiguredo_nvcodec::DecodedFrame<()>,
+    decoded: shiguredo_nvcodec::DecodedFrame<VideoFrame>,
 ) -> crate::Result<VideoFrame> {
-    let width = nv12_frame.width();
-    let height = nv12_frame.height();
+    let width = decoded.width();
+    let height = decoded.height();
 
     let y_size = width * height;
     let uv_width = width.div_ceil(2);
@@ -95,10 +62,10 @@ fn convert_nv12_to_i420(
     let (u_plane, v_plane) = rest.split_at_mut(uv_size);
 
     let src = shiguredo_libyuv::Nv12Image {
-        y: nv12_frame.y_plane(),
-        y_stride: nv12_frame.y_stride(),
-        uv: nv12_frame.uv_plane(),
-        uv_stride: nv12_frame.uv_stride(),
+        y: decoded.y_plane(),
+        y_stride: decoded.y_stride(),
+        uv: decoded.uv_plane(),
+        uv_stride: decoded.uv_stride(),
     };
     let mut dst = shiguredo_libyuv::I420ImageMut {
         y: y_plane,
@@ -111,6 +78,9 @@ fn convert_nv12_to_i420(
 
     let size = shiguredo_libyuv::ImageSize::new(width, height);
     shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size)?;
+
+    // `decoded` の借用終了後、 `into_parts` で入力フレームを取り出す
+    let (_nv12_data, input_frame) = decoded.into_parts();
 
     Ok(VideoFrame::new_i420(
         input_frame,
@@ -130,11 +100,8 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(H264) decoder");
         let mut config = params.nvcodec_h264.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::H264;
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
-        let handler = build_handler(input_rx, sink);
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_tx,
+            inner: shiguredo_nvcodec::Decoder::new(config, build_handler(sink))?,
             parameter_sets: None,
         })
     }
@@ -143,11 +110,8 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(H265) decoder");
         let mut config = params.nvcodec_h265.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Hevc;
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
-        let handler = build_handler(input_rx, sink);
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_tx,
+            inner: shiguredo_nvcodec::Decoder::new(config, build_handler(sink))?,
             parameter_sets: None,
         })
     }
@@ -156,11 +120,8 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(AV1) decoder");
         let mut config = params.nvcodec_av1.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Av1;
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
-        let handler = build_handler(input_rx, sink);
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_tx,
+            inner: shiguredo_nvcodec::Decoder::new(config, build_handler(sink))?,
             parameter_sets: None,
         })
     }
@@ -169,11 +130,8 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(VP8) decoder");
         let mut config = params.nvcodec_vp8.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp8;
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
-        let handler = build_handler(input_rx, sink);
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_tx,
+            inner: shiguredo_nvcodec::Decoder::new(config, build_handler(sink))?,
             parameter_sets: None,
         })
     }
@@ -182,11 +140,8 @@ impl NvcodecDecoder {
         tracing::debug!("create nvcodec(VP9) decoder");
         let mut config = params.nvcodec_vp9.clone();
         config.codec = shiguredo_nvcodec::DecoderCodec::Vp9;
-        let (input_tx, input_rx) = mpsc::unbounded_channel();
-        let handler = build_handler(input_rx, sink);
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new(config, handler)?,
-            input_tx,
+            inner: shiguredo_nvcodec::Decoder::new(config, build_handler(sink))?,
             parameter_sets: None,
         })
     }
@@ -264,13 +219,11 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        self.inner.decode(&data, ())?;
-        // `input_tx.send` の失敗は Receiver が drop された場合のみ = 構造上到達不能 (Receiver は
-        // NvcodecDecoder の inner が保持するコールバッククロージャに move 済で、 NvcodecDecoder が
-        // 生きている間は必ず生存する)。 万一の bug 検出のため `unreachable!()` で即時 panic させる。
-        if self.input_tx.send(frame.to_stripped()).is_err() {
-            unreachable!("nvcodec input receiver dropped before sender (bug)");
-        }
+        // 入力フレーム (stripped 済) を `UserData` として渡す。
+        // shiguredo_nvcodec 側で `pending_user_data` が FIFO 管理され、 コールバック時に
+        // `DecodedFrame<VideoFrame>` として自動的にペアリングされて返ってくる。
+        // Err 時の `pending_user_data.clear()` も shiguredo_nvcodec 側で自動実行される。
+        self.inner.decode(&data, frame.to_stripped())?;
         Ok(())
     }
 
@@ -363,72 +316,5 @@ fn contains_parameter_sets(data: &[u8], format: VideoFormat) -> bool {
             false
         }
         _ => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::stats::Stats;
-    use crate::video::VideoFormat;
-
-    /// テスト用 `VideoFrame` を 1 件生成する (データ・フォーマットは適当な値)
-    fn make_dummy_video_frame() -> VideoFrame {
-        VideoFrame {
-            data: vec![0x00],
-            format: VideoFormat::H264,
-            keyframe: true,
-            size: None,
-            timestamp: std::time::Duration::ZERO,
-            sample_entry: None,
-        }
-    }
-
-    /// コールバックの `Err` 分岐に相当する `clear_input_rx_and_emit_err` が
-    /// (1) `input_rx` の残物をすべて drain し、 (2) `sink` 経由で `Err` を受信側へ流す
-    /// ことを検証する。
-    ///
-    /// これにより `shiguredo_nvcodec` 側の `pending_user_data.clear()` と整合させた
-    /// 静かなタイムスタンプ入れ違いバグの回帰検出を担保する。
-    #[test]
-    fn clear_input_rx_and_emit_err_drains_queue_and_sends_error() {
-        // `input_rx` に「コールバック `Err` 発生時点で残ってしまうはずだった」残骸を 2 件流し込む
-        let (input_tx, mut input_rx) = mpsc::unbounded_channel::<VideoFrame>();
-        input_tx.send(make_dummy_video_frame()).expect("送信できる");
-        input_tx.send(make_dummy_video_frame()).expect("送信できる");
-
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut stats = Stats::new();
-        let counter = stats.counter("test_total_output");
-        let sink = OutputSink::new(tx, counter.clone());
-
-        clear_input_rx_and_emit_err(
-            &mut input_rx,
-            &sink,
-            crate::Error::new("test nvcodec callback error"),
-        );
-
-        // (1) `input_rx` に残骸が残っていない (Empty か Disconnected を返す)
-        assert!(
-            input_rx.try_recv().is_err(),
-            "コールバック Err 後に input_rx がクリアされているはず (タイムスタンプ入れ違いバグ防止)"
-        );
-        // (2) `sink` 経由で `Err` が受信側に届いている
-        match rx.try_recv() {
-            Ok(Err(e)) => {
-                let msg = e.display().to_string();
-                assert!(
-                    msg.contains("test nvcodec callback error"),
-                    "予期したエラーメッセージが含まれていない: {msg}"
-                );
-            }
-            other => panic!("Ok(Err(_)) を期待したが {other:?} を受信した"),
-        }
-        // `emit_err` はカウンターを増分しない (二重計上禁止契約)
-        assert_eq!(
-            counter.get(),
-            0,
-            "Err 経路は total_output_metric を増分しないはず"
-        );
     }
 }
