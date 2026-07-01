@@ -24,9 +24,8 @@ pub struct NvcodecDecoder {
         shiguredo_nvcodec::FnDecodeHandler<(), shiguredo_nvcodec::Error>,
     >,
     // `decode()` で追加し、 コールバックで取り出す FIFO キュー
-    // (コールバック側で I420 変換とシンクへの emit を行うため `Arc<Mutex<VecDeque>>` 化している)
     input_queue: InputQueue,
-    parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ (本スレッド側のみが更新する)
+    parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
 }
 
 /// CUDA ワーカースレッドから呼ばれるコールバックの本体を共有クロージャ化したもの。
