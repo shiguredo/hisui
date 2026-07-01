@@ -326,10 +326,13 @@ pub struct VideoDecoderOptions {
     pub engines: Option<Vec<EngineName>>,
 }
 
-/// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`rx`) に流すための送信側の型エイリアス
+/// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`output_rx`) に流すための送信側の型エイリアス
 pub type DecoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
 
-/// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`rx`) に流すためのシンク。
+/// `AsyncVideoDecoder` 内部で内部デコーダーからの出力フレーム / エラーを受け取る受信側の型エイリアス
+pub type DecoderOutputReceiver = tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>;
+
+/// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`output_rx`) に流すためのシンク。
 ///
 /// 出力フレーム送信とメトリクス計上を物理的に強制ペアリングする役割を持つ。
 /// 単なる mpsc の送信側 (`DecoderOutputSender`) と区別するため
@@ -372,7 +375,7 @@ impl OutputSink {
 
 /// 内部チャンネルベースの非同期映像デコーダー
 ///
-/// 内部デコーダーは出力フレームをシンク経由で内部チャンネル (`rx`) に emit する。
+/// 内部デコーダーは出力フレームをシンク経由で内部チャンネル (`output_rx`) に emit する。
 /// シンク自体は `VideoDecoderInner::Initial` バリアント内に保持し、 `Initial` から実バリアントへの
 /// 遷移時に `sink.clone()` を実内部デコーダーのコンストラクタへ渡す。
 /// 同期ラッパー (`VideoDecoder`) からは `handle_input_sample_sync` / `poll_output_sync` 経由で
@@ -380,7 +383,7 @@ impl OutputSink {
 #[derive(Debug)]
 pub struct AsyncVideoDecoder {
     inner: VideoDecoderInner,
-    rx: tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>,
+    output_rx: DecoderOutputReceiver,
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
@@ -395,11 +398,11 @@ impl AsyncVideoDecoder {
             compose_stats.counter("total_input_video_frame_count");
         let total_output_metric = compose_stats.counter("total_output_video_frame_count");
         compose_stats.flag("error").set(false);
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
         let sink = OutputSink::new(tx, total_output_metric);
         Self {
             inner: VideoDecoderInner::Initial { options, sink },
-            rx,
+            output_rx,
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
@@ -410,8 +413,8 @@ impl AsyncVideoDecoder {
     /// 同期ラッパー (`VideoDecoder`) から呼ぶ同期入力 API。
     ///
     /// `inner.decode()` / `inner.finish()` 内で発生した同期 `Err` は `?` 直返しで同期返却する。
-    /// Nvcodec のコールバックからの `Err` は `sink.emit_err()` 経由でチャンネルに流れ、 後続の
-    /// `poll_output_sync` の `try_recv` で受信される。
+    /// 内部デコーダーのコールバック等で非同期に発生した `Err` は `sink.emit_err()` 経由で
+    /// チャンネルに流れ、 後続の `poll_output_sync` の `try_recv` で受信される。
     pub fn handle_input_sample_sync(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
@@ -433,13 +436,13 @@ impl AsyncVideoDecoder {
     /// 既存 `poll_output()` の戻り値型と意味論を完全に維持する。 `try_recv` の `Empty` /
     /// `Disconnected` を `eos` と組み合わせて判定する。
     pub fn poll_output_sync(&mut self) -> Result<DecoderRunOutput> {
-        match self.rx.try_recv() {
+        match self.output_rx.try_recv() {
             Ok(Ok(frame)) => Ok(DecoderRunOutput::Processed(MediaFrame::video(frame))),
             Ok(Err(e)) => Err(e),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                 if self.eos {
                     // 同期内部デコーダーのシンクへの emit はすべて `handle_input_sample_sync` 内で
-                    // 完了し、 Nvcodec も `finish()` がフラッシュ待ち合わせ済のため、
+                    // 完了し、 非同期な内部デコーダーも `finish()` がフラッシュ待ち合わせ済のため、
                     // `eos` に至った時点でチャンネル内の残物はない。
                     Ok(DecoderRunOutput::Finished)
                 } else {
@@ -447,9 +450,8 @@ impl AsyncVideoDecoder {
                 }
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                // シンク (= `tx`) は `inner` (`Initial` バリアント内、 もしくは実内部デコーダーの
-                // `sink` フィールド、 もしくは `NvcodecDecoder` のコールバッククロージャ) 内で
-                // 生存しており、 さらに `OutputSink::clone` で配布された複製も生存しているため、
+                // シンク (= `tx`) は `inner` (`Initial` バリアント内、 もしくは実内部デコーダー内)
+                // で生存しており、 さらに `OutputSink::clone` で配布された複製も生存しているため、
                 // `AsyncVideoDecoder` 自身が生きている間はすべての `tx` が drop される経路はない。
                 // したがって `Disconnected` は構造上到達不能な不変条件違反 (= バグ) であり、
                 // `Err` で静かに覆い隠さず即時 panic で検出する。
@@ -465,7 +467,7 @@ impl AsyncVideoDecoder {
     /// `None` 返却は `tx` が drop された場合のみ (構造体不変条件違反 = バグ、 `OutputSink::emit_*`
     /// 側の `unreachable!()` で既に検出されているはず)。
     pub async fn next_decoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>> {
-        self.rx.recv().await
+        self.output_rx.recv().await
     }
 
     /// engine 選択ロジック本体 (既存 `VideoDecoder::get_engines` のロジックを移植)。
