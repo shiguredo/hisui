@@ -128,7 +128,7 @@ async fn async_video_decoder_poll_output_sync_returns_processed_via_wrap_delegat
 /// メトリクス二重計上禁止の回帰検出: 1 フレーム入力 → `total_input` が 1 増分、
 /// 1 フレーム出力 → `total_output` が 1 増分されることをラッパーによる委譲経路の全段で確認する
 ///
-/// issue 0066 設計動機 (`OutputSink` で send と inc を物理的に強制ペアリング) が
+/// `OutputSink` が送信と増分を物理的に強制ペアリングする契約が
 /// 「emit_ok 経路でメトリクスの `add(2)` 等の二重計上が混入しても検出されない」状態にならないよう、
 /// 量的検証を end-to-end で担保する。
 #[tokio::test(flavor = "multi_thread")]

@@ -10,8 +10,7 @@ use crate::video::h265::{
 use crate::video::{VideoFormat, VideoFrame};
 
 /// `NvcodecDecoder::decode()` 呼出側から NVDEC コールバック側に入力フレームを橋渡しする
-/// tokio mpsc の送信側。 コールバックは対応する `UnboundedReceiver` を `FnMut` クロージャに
-/// move で取り込んで `try_recv` で `&mut` アクセスする。
+/// tokio mpsc の送信側。
 type InputSender = mpsc::UnboundedSender<VideoFrame>;
 
 #[derive(Debug)]
@@ -25,9 +24,6 @@ pub struct NvcodecDecoder {
 }
 
 /// CUDA ワーカースレッドから呼ばれるコールバックの本体を共有クロージャ化したもの。
-///
-/// `UnboundedReceiver` を `FnMut` クロージャに move で取り込むことで、
-/// クロージャ実行時に `&mut input_rx.try_recv()` を Mutex なしで呼べる。
 fn build_handler(
     mut input_rx: mpsc::UnboundedReceiver<VideoFrame>,
     sink: OutputSink,
@@ -287,7 +283,6 @@ impl NvcodecDecoder {
     /// **重要**: コールバック内で発生した `Err` は `sink.emit_err()` 経由で内部チャンネルに積まれており、
     /// `finish()` の戻り値からは検出できない。 利用側は `finish()` の直後に `poll_output_sync` の
     /// `try_recv` ループ (= `drain_video_decoder_output` 経由) で残物を全て吸い出すこと。
-    /// 旧実装 (`error_slot` 同期取り出し) との挙動互換は `VideoDecoder::run` の排出ループで担保される。
     pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.flush()?;
         Ok(())
@@ -429,7 +424,7 @@ mod tests {
             }
             other => panic!("Ok(Err(_)) を期待したが {other:?} を受信した"),
         }
-        // `emit_err` はカウンターを増分しない (R-4 の二重計上禁止契約)
+        // `emit_err` はカウンターを増分しない (二重計上禁止契約)
         assert_eq!(
             counter.get(),
             0,

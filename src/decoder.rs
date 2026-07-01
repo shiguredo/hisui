@@ -442,9 +442,8 @@ impl AsyncVideoDecoder {
             Ok(Err(e)) => Err(e),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                 if self.eos {
-                    // 既存実装は `eos` で即 `Finished` を返していた。 ラッパー構造では同期内部
-                    // デコーダーのシンクへの emit はすべて `handle_input_sample_sync` 内で完了し、
-                    // Nvcodec も `finish()` がフラッシュ待ち合わせ済のため、
+                    // 同期内部デコーダーのシンクへの emit はすべて `handle_input_sample_sync` 内で
+                    // 完了し、 Nvcodec も `finish()` がフラッシュ待ち合わせ済のため、
                     // `eos` に至った時点でチャンネル内の残物はない。
                     Ok(DecoderRunOutput::Finished)
                 } else {
@@ -968,7 +967,7 @@ mod tests {
 
     /// `emit_err` はエラーを受信側 (`rx`) に送信するが、 `total_output_metric` は増分しない
     ///
-    /// (issue 0066 設計動機「emit_ok だけがカウンターを増分する」契約の回帰検出。
+    /// (「emit_ok だけがカウンターを増分する」契約の回帰検出。
     /// この契約が崩れるとメトリクス二重計上 / 不正計上の温床になる)
     #[test]
     fn output_sink_emit_err_sends_error_without_incrementing_metric() {
@@ -1024,7 +1023,7 @@ mod tests {
     ///
     /// (構造体不変条件: シンクと受信側は `AsyncVideoDecoder` 内で同居するため、
     /// 通常運用ではこの状況に到達しない。 万一シンクと受信側の所有関係を将来変更してしまった場合に
-    /// 静かに失敗させず即時 panic でバグを検出する R-3 方針の回帰検出)
+    /// 静かに失敗させず即時 panic でバグを検出する)
     #[test]
     #[should_panic(expected = "decoder output sink receiver dropped before sink")]
     fn output_sink_emit_ok_panics_when_receiver_dropped() {
