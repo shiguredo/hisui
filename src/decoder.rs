@@ -331,11 +331,7 @@ pub type DecoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<
 
 /// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`rx`) に流すためのシンク。
 ///
-/// 内部デコーダーはこの `OutputSink` を 1 個だけ持てば良く、 出力フレーム送信とメトリクス計上を
-/// 物理的に強制ペアリングする。
-/// `tests/e2e.rs` 等の統合テスト (= 別クレート) から内部デコーダーを直接構築する経路があるため
-/// `pub` で公開する。 フィールドは private に保ち、 構築は `OutputSink::new` 経由に統一する
-/// (別クレートからは構造体リテラルで構築不可)。
+/// 出力フレーム送信とメトリクス計上を物理的に強制ペアリングする役割を持つ。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
     tx: DecoderOutputSender,
@@ -343,7 +339,6 @@ pub struct OutputSink {
 }
 
 impl OutputSink {
-    /// 別クレートからも構築できる公開コンストラクタ
     pub fn new(tx: DecoderOutputSender, total_output_metric: crate::stats::StatsCounter) -> Self {
         Self {
             tx,
@@ -352,22 +347,21 @@ impl OutputSink {
     }
 
     /// 出力フレームを 1 件送信して `total_output_video_frame_count_metric` を 1 だけ増分する。
-    ///
-    /// `tx.send` 失敗 (= 受信側が drop された) は構造体不変条件違反 = バグのため `unreachable!()`
-    /// で release ビルドも含めて即時 panic で検出する (`AsyncVideoDecoder` 内でシンクと受信側は
-    /// 同居するため通常時には起こらない。 `poll_output_sync` の `Disconnected` 分岐と同じ方針)。
-    /// 増分は送信成功後に行うことで「送信できなかったフレームをカウントする」嘘を物理的に防ぐ。
     pub fn emit_ok(&self, frame: VideoFrame) {
+        // 送信失敗 (= 受信側が drop された) は構造体不変条件違反 = バグ。
+        // `AsyncVideoDecoder` 内でシンクと受信側は同居するため通常時には起こらない
+        // (`poll_output_sync` の `Disconnected` 分岐と同じく `unreachable!()` で
+        //  release ビルドも含めて即時 panic 検出する)。
         if self.tx.send(Ok(frame)).is_err() {
             unreachable!("decoder output sink receiver dropped before sink (bug)");
         }
+        // 増分は送信成功後に行うことで「送信できなかったフレームをカウントする」嘘を物理的に防ぐ。
         self.total_output_metric.inc();
     }
 
     /// エラーを 1 件送信する (メトリクスは増分しない)。
-    ///
-    /// `tx.send` 失敗時の扱いは `emit_ok` と同じ (`unreachable!()` で即時 panic)。
     pub fn emit_err(&self, err: crate::Error) {
+        // 送信失敗時の扱いは `emit_ok` と同じ (構造上到達不能なバグとして即時 panic)。
         if self.tx.send(Err(err)).is_err() {
             unreachable!("decoder output sink receiver dropped before sink (bug)");
         }
