@@ -76,33 +76,29 @@ fn vad_gate_returns_no_segment_for_zero_fill() {
     );
 }
 
-/// 512 サンプル zero-fill を 3 回 SileroVad::chunk_probability に流すと、返る確率が全て閾値 (0.5)
-/// 未満かつ 3 回とも等しい (state / context が初期状態でゼロ入力なので結果は決定的)。
+/// 512 サンプル zero-fill を 3 回 SileroVad::chunk_probability に流すと、返る確率がいずれも
+/// 閾値 (0.5) 未満に収まる。
+///
+/// Silero VAD v5 は LSTM state を推論間で持ち回すため、同じ入力でも 2 回目以降の確率は
+/// 1 回目と一致しない (state が更新されるため)。「決定的に同一値」を assert してはいけない。
 #[test]
-fn silero_vad_zero_input_is_deterministic_and_below_threshold() {
+fn silero_vad_zero_input_stays_below_threshold() {
     let Some(model_path) =
-        resolve_model_path_or_skip("silero_vad_zero_input_is_deterministic_and_below_threshold")
+        resolve_model_path_or_skip("silero_vad_zero_input_stays_below_threshold")
     else {
         return;
     };
     let mut silero = SileroVad::load(&model_path, Device::Cpu).expect("Silero VAD ロード");
     let chunk = vec![0.0f32; 512];
-    let p1 = silero
-        .chunk_probability(&chunk)
-        .expect("chunk_probability は Ok");
-    let p2 = silero
-        .chunk_probability(&chunk)
-        .expect("chunk_probability は Ok");
-    let p3 = silero
-        .chunk_probability(&chunk)
-        .expect("chunk_probability は Ok");
-    assert!(p1 < 0.5, "無音チャンクの確率は閾値 0.5 未満のはず: {p1}");
-    assert!(p2 < 0.5, "無音チャンクの確率は閾値 0.5 未満のはず: {p2}");
-    assert!(p3 < 0.5, "無音チャンクの確率は閾値 0.5 未満のはず: {p3}");
-    // reset していないので state / context は更新されているが、入力がゼロならモデル出力も 3 回目までは
-    // 決定的に同一値のはず (数値的な同一性を確認する)。
-    assert_eq!(p1, p2, "同一 zero 入力で 2 回目の確率は同じ想定");
-    assert_eq!(p2, p3, "同一 zero 入力で 3 回目の確率は同じ想定");
+    for i in 0..3 {
+        let probability = silero
+            .chunk_probability(&chunk)
+            .expect("chunk_probability は Ok");
+        assert!(
+            probability < 0.5,
+            "{i} 回目の無音チャンクの確率は閾値 0.5 未満のはず: {probability}"
+        );
+    }
 }
 
 /// パス不在で SileroVad::load が Err を返す。
