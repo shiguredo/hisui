@@ -1568,8 +1568,9 @@ fn spawn_video_decoder_task(
     sender: TrackSender,
 ) -> VideoDecoderTask {
     let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
-    // 初期値は任意 (最初の video sample 到達で handle_video_sample が必ず send で上書きする)。
-    // 起動直後に task 側が borrow する経路がないため未初期化状態は発生しない
+    // discard_mode の初期値は任意 (最初の video sample 到達で handle_video_sample が必ず
+    // send(true/false) で上書きするため)。 起動直後は task 側が borrow する経路がないため
+    // 未初期化状態は発生しない
     let (discard_mode_tx, discard_mode_rx) = tokio::sync::watch::channel(true);
     stats.set_default_label("component", "video_decoder");
     let join_handle = tokio::spawn(async move {
