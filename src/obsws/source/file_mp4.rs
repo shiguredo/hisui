@@ -27,6 +27,7 @@ impl Mp4FileSource {
             loop_playback: self.loop_playback,
             audio_track_id: self.audio_track_id.clone(),
             video_track_id: self.video_track_id.clone(),
+            video_decoder_options: None,
         };
 
         let mut reader = Mp4FileReader::new(&self.path, options)?;

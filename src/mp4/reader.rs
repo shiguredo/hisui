@@ -207,6 +207,11 @@ pub struct Mp4FileReaderOptions {
     pub loop_playback: bool,
     pub audio_track_id: Option<TrackId>,
     pub video_track_id: Option<TrackId>,
+    // video decoder task の生成に使う options。
+    // None の場合は video decoder を扱わない (video_track_id が None の場合と組み合わせて使う)。
+    // openh264_lib は Mp4FileSource::create_reader が ProcessorHandle を持たないため、
+    // Mp4FileReader::run 内で handle.config() から補完する想定。
+    pub video_decoder_options: Option<crate::decoder::VideoDecoderOptions>,
 }
 
 /// 再生制御 (seek / 一時停止 / ループ等) に対応した MP4 reader。
