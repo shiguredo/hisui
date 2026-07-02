@@ -1399,6 +1399,17 @@ impl Mp4FileReader {
     }
 }
 
+impl Drop for Mp4FileReader {
+    /// run が Err で早期 return する経路や panic 解放時に video decoder task が leak しないよう
+    /// abort する。 正常経路では send_eos_to_tracks / recreate_decoders 内で take 済みのため
+    /// ここでは何もしない (Option::take 経由で二重 abort も回避される)。
+    fn drop(&mut self) {
+        if let Some(task) = self.video_decoder_task.take() {
+            task.join_handle.abort();
+        }
+    }
+}
+
 /// デコーダーの出力を drain して捨てる（warm-up 中の内部バッファ蓄積を防ぐ）
 fn discard_decoder_output(decoder: &mut crate::decoder::AudioDecoder) -> Result<()> {
     while let crate::decoder::DecoderRunOutput::Processed(_) = decoder.poll_output()? {}
