@@ -49,6 +49,7 @@ impl SpeechSegment {
 /// - `Idle`: 開始直後 or 直前 SpeechSegment 確定直後 (発話・無音のいずれもカウントしていない)。
 /// - `InSpeech`: 直近チャンクが閾値超えで、発話区間として集約中。
 /// - `Trailing`: 発話後の無音を数え始めており、`min_silence_ms` 到達で確定候補となる。
+#[derive(Debug, PartialEq)]
 enum State {
     Idle,
     InSpeech(SpeechInProgress),
@@ -59,7 +60,7 @@ enum State {
 }
 
 /// 集約中の発話状態。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct SpeechInProgress {
     start_sample: u64,
     last_speech_end_sample: u64,
@@ -103,12 +104,26 @@ impl VadGate {
     pub fn feed(&mut self, samples: &[f32]) -> crate::Result<Vec<SpeechSegment>> {
         self.buffer.push(samples);
         let mut results = Vec::new();
+        let transition = TransitionConfig {
+            threshold: self.config.threshold,
+            min_silence_samples: ms_to_samples(self.config.min_silence_ms),
+            min_speech_samples: ms_to_samples(self.config.min_speech_ms),
+            chunk_samples: CHUNK_SAMPLES.get() as u64,
+        };
         while let Some(chunk) = self.buffer.take_chunk() {
             let probability = self.silero.chunk_probability(&chunk)?;
             let chunk_start = self.sample_count;
-            let chunk_end = self.sample_count + CHUNK_SAMPLES.get() as u64;
+            let chunk_end = self.sample_count + transition.chunk_samples;
             self.sample_count = chunk_end;
-            self.advance_state(probability, chunk_start, chunk_end, &mut results);
+            let current = std::mem::replace(&mut self.state, State::Idle);
+            self.state = advance_state(
+                current,
+                probability,
+                chunk_start,
+                chunk_end,
+                &transition,
+                &mut results,
+            );
         }
         Ok(results)
     }
@@ -118,11 +133,12 @@ impl VadGate {
     /// 発話中の場合、`min_speech_ms` を満たしていれば SpeechSegment として確定、満たしていなければ破棄する。
     pub fn flush(&mut self) -> crate::Result<Vec<SpeechSegment>> {
         let mut results = Vec::new();
+        let min_speech_samples = ms_to_samples(self.config.min_speech_ms);
         let state = std::mem::replace(&mut self.state, State::Idle);
         match state {
             State::Idle => {}
             State::InSpeech(speech) | State::Trailing { speech, .. } => {
-                if let Some(segment) = self.finalize_speech(&speech) {
+                if let Some(segment) = finalize_speech(&speech, min_speech_samples) {
                     results.push(segment);
                 }
             }
@@ -139,91 +155,296 @@ impl VadGate {
         self.sample_count = 0;
         self.state = State::Idle;
     }
+}
 
-    /// 1 チャンクぶんの確率を受けて内部状態を進める。
-    fn advance_state(
-        &mut self,
-        probability: f32,
-        chunk_start: u64,
-        chunk_end: u64,
-        results: &mut Vec<SpeechSegment>,
-    ) {
-        let is_speech = probability >= self.config.threshold;
-        let min_silence_samples = ms_to_samples(self.config.min_silence_ms);
+/// `advance_state` に渡す閾値・サンプル数のパラメタ束。
+///
+/// `advance_state` の引数を減らして clippy::too_many_arguments を回避する目的で導入している。
+/// VadGate::feed から `VadConfig` と `CHUNK_SAMPLES` を展開して組み立てる。
+struct TransitionConfig {
+    threshold: f32,
+    min_silence_samples: u64,
+    min_speech_samples: u64,
+    chunk_samples: u64,
+}
 
-        let current = std::mem::replace(&mut self.state, State::Idle);
-        self.state = match current {
-            State::Idle => {
-                if is_speech {
-                    State::InSpeech(SpeechInProgress {
-                        start_sample: chunk_start,
-                        last_speech_end_sample: chunk_end,
-                        max_probability: probability,
-                    })
-                } else {
-                    State::Idle
+/// 1 チャンクぶんの確率と現在状態から次状態を計算する pure function。
+///
+/// SileroVad 非依存 (probability を数値として受け取る) にすることで、状態遷移の単体テストを
+/// 決定論的に行えるようにしている。
+fn advance_state(
+    state: State,
+    probability: f32,
+    chunk_start: u64,
+    chunk_end: u64,
+    config: &TransitionConfig,
+    results: &mut Vec<SpeechSegment>,
+) -> State {
+    let is_speech = probability >= config.threshold;
+
+    match state {
+        State::Idle => {
+            if is_speech {
+                State::InSpeech(SpeechInProgress {
+                    start_sample: chunk_start,
+                    last_speech_end_sample: chunk_end,
+                    max_probability: probability,
+                })
+            } else {
+                State::Idle
+            }
+        }
+        State::InSpeech(mut speech) => {
+            if is_speech {
+                speech.last_speech_end_sample = chunk_end;
+                if probability > speech.max_probability {
+                    speech.max_probability = probability;
+                }
+                State::InSpeech(speech)
+            } else {
+                State::Trailing {
+                    speech,
+                    silence_samples: config.chunk_samples,
                 }
             }
-            State::InSpeech(mut speech) => {
-                if is_speech {
-                    speech.last_speech_end_sample = chunk_end;
-                    if probability > speech.max_probability {
-                        speech.max_probability = probability;
+        }
+        State::Trailing {
+            mut speech,
+            silence_samples,
+        } => {
+            if is_speech {
+                speech.last_speech_end_sample = chunk_end;
+                if probability > speech.max_probability {
+                    speech.max_probability = probability;
+                }
+                State::InSpeech(speech)
+            } else {
+                let silence_samples = silence_samples + config.chunk_samples;
+                if silence_samples >= config.min_silence_samples {
+                    if let Some(segment) = finalize_speech(&speech, config.min_speech_samples) {
+                        results.push(segment);
                     }
-                    State::InSpeech(speech)
+                    State::Idle
                 } else {
                     State::Trailing {
                         speech,
-                        silence_samples: CHUNK_SAMPLES.get() as u64,
+                        silence_samples,
                     }
                 }
             }
-            State::Trailing {
-                mut speech,
-                silence_samples,
-            } => {
-                if is_speech {
-                    speech.last_speech_end_sample = chunk_end;
-                    if probability > speech.max_probability {
-                        speech.max_probability = probability;
-                    }
-                    State::InSpeech(speech)
-                } else {
-                    let silence_samples = silence_samples + CHUNK_SAMPLES.get() as u64;
-                    if silence_samples >= min_silence_samples {
-                        if let Some(segment) = self.finalize_speech(&speech) {
-                            results.push(segment);
-                        }
-                        State::Idle
-                    } else {
-                        State::Trailing {
-                            speech,
-                            silence_samples,
-                        }
-                    }
-                }
-            }
-        };
-    }
-
-    /// 集約中の発話状態から `min_speech_ms` 到達分だけを SpeechSegment として確定する。
-    ///
-    /// 未達なら None を返す (破棄)。
-    fn finalize_speech(&self, speech: &SpeechInProgress) -> Option<SpeechSegment> {
-        let min_speech_samples = ms_to_samples(self.config.min_speech_ms);
-        let length = speech.last_speech_end_sample - speech.start_sample;
-        if length < min_speech_samples {
-            return None;
         }
-        Some(SpeechSegment {
-            start_sample: speech.start_sample,
-            end_sample: speech.last_speech_end_sample,
-            max_probability: speech.max_probability,
-        })
     }
+}
+
+/// 集約中の発話状態から `min_speech_samples` 以上の長さのぶんだけを SpeechSegment として確定する。
+///
+/// 未達なら None を返す (破棄)。
+fn finalize_speech(speech: &SpeechInProgress, min_speech_samples: u64) -> Option<SpeechSegment> {
+    let length = speech.last_speech_end_sample - speech.start_sample;
+    if length < min_speech_samples {
+        return None;
+    }
+    Some(SpeechSegment {
+        start_sample: speech.start_sample,
+        end_sample: speech.last_speech_end_sample,
+        max_probability: speech.max_probability,
+    })
 }
 
 /// ミリ秒を 16 kHz サンプル数に変換する。
 fn ms_to_samples(ms: u32) -> u64 {
     u64::from(ms) * SAMPLE_RATE_HZ / 1000
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// テスト用 1 チャンクのサンプル数 (実装の CHUNK_SAMPLES と同じ)。
+    const CHUNK: u64 = 512;
+
+    /// テスト用の閾値。
+    const THRESHOLD: f32 = 0.5;
+
+    /// テスト用の min_silence_samples (3 チャンク分)。
+    /// 「shorter than 3 chunks は未達 / 3 チャンク以上で到達」の境界を試せる大きさに設定。
+    const MIN_SILENCE: u64 = 3 * CHUNK;
+
+    /// テスト用の min_speech_samples (3 チャンク分)。
+    /// 「1 チャンクだけの発話は min_speech 未達 / 3 チャンクぶんは到達」を試せる大きさに設定。
+    const MIN_SPEECH: u64 = 3 * CHUNK;
+
+    /// SpeechInProgress を組み立てる補助関数。
+    fn speech(start: u64, last_end: u64, max_prob: f32) -> SpeechInProgress {
+        SpeechInProgress {
+            start_sample: start,
+            last_speech_end_sample: last_end,
+            max_probability: max_prob,
+        }
+    }
+
+    /// advance_state を固定パラメタで呼び出す補助関数。
+    fn step(state: State, probability: f32, chunk_start: u64) -> (State, Vec<SpeechSegment>) {
+        let chunk_end = chunk_start + CHUNK;
+        let mut results = Vec::new();
+        let config = TransitionConfig {
+            threshold: THRESHOLD,
+            min_silence_samples: MIN_SILENCE,
+            min_speech_samples: MIN_SPEECH,
+            chunk_samples: CHUNK,
+        };
+        let next = advance_state(
+            state,
+            probability,
+            chunk_start,
+            chunk_end,
+            &config,
+            &mut results,
+        );
+        (next, results)
+    }
+
+    /// Idle 状態で probability < threshold なら Idle のまま、確定 segment は無し。
+    #[test]
+    fn idle_stays_idle_on_silence() {
+        let (next, results) = step(State::Idle, 0.2, 0);
+        assert_eq!(next, State::Idle);
+        assert!(results.is_empty(), "無音のみでは segment は生成されない");
+    }
+
+    /// Idle 状態で probability >= threshold なら InSpeech に遷移し、開始位置と max_prob が記録される。
+    #[test]
+    fn idle_transitions_to_in_speech_on_speech_start() {
+        let (next, results) = step(State::Idle, 0.9, 0);
+        assert_eq!(next, State::InSpeech(speech(0, CHUNK, 0.9)));
+        assert!(
+            results.is_empty(),
+            "発話開始直後は segment がまだ確定しない"
+        );
+    }
+
+    /// InSpeech 継続で last_speech_end_sample と max_probability が正しく更新される。
+    #[test]
+    fn in_speech_updates_last_end_and_tracks_max_probability() {
+        // 1 チャンク目: max = 0.7、last_end = CHUNK
+        let state = State::InSpeech(speech(0, CHUNK, 0.7));
+        // 2 チャンク目 (probability 0.85 > 0.7) で max 更新
+        let (next, results) = step(state, 0.85, CHUNK);
+        assert_eq!(next, State::InSpeech(speech(0, 2 * CHUNK, 0.85)));
+        assert!(results.is_empty());
+
+        // 3 チャンク目 (probability 0.6 < 0.85) は last_end のみ更新、max はそのまま
+        let (next, results) = step(next, 0.6, 2 * CHUNK);
+        assert_eq!(next, State::InSpeech(speech(0, 3 * CHUNK, 0.85)));
+        assert!(results.is_empty());
+    }
+
+    /// InSpeech から probability < threshold で Trailing に遷移する (silence_samples = 1 chunk)。
+    #[test]
+    fn in_speech_transitions_to_trailing_on_silence_chunk() {
+        let state = State::InSpeech(speech(0, CHUNK, 0.9));
+        let (next, results) = step(state, 0.2, CHUNK);
+        assert_eq!(
+            next,
+            State::Trailing {
+                speech: speech(0, CHUNK, 0.9),
+                silence_samples: CHUNK,
+            }
+        );
+        assert!(
+            results.is_empty(),
+            "min_silence 未達では segment は確定しない"
+        );
+    }
+
+    /// Trailing 中に probability >= threshold で InSpeech に復帰し、silence カウントはリセットされる。
+    #[test]
+    fn trailing_returns_to_in_speech_on_speech_resume() {
+        let state = State::Trailing {
+            speech: speech(0, CHUNK, 0.7),
+            silence_samples: CHUNK,
+        };
+        // probability = 0.8 > 0.7 で max 更新、last_end も更新
+        let (next, results) = step(state, 0.8, 2 * CHUNK);
+        assert_eq!(next, State::InSpeech(speech(0, 3 * CHUNK, 0.8)));
+        assert!(results.is_empty());
+    }
+
+    /// Trailing 中に無音を追加しても min_silence 未達なら Trailing 継続 (silence_samples が加算)。
+    #[test]
+    fn trailing_accumulates_silence_when_min_silence_not_reached() {
+        let state = State::Trailing {
+            speech: speech(0, CHUNK, 0.9),
+            silence_samples: CHUNK, // 1 chunk 蓄積済み
+        };
+        // 追加 1 chunk = 2 * CHUNK < MIN_SILENCE(3 * CHUNK) → Trailing 継続
+        let (next, results) = step(state, 0.2, 2 * CHUNK);
+        assert_eq!(
+            next,
+            State::Trailing {
+                speech: speech(0, CHUNK, 0.9),
+                silence_samples: 2 * CHUNK,
+            }
+        );
+        assert!(results.is_empty());
+    }
+
+    /// Trailing 中に min_silence 到達 + 発話長が min_speech 到達で SpeechSegment が確定し Idle に戻る。
+    #[test]
+    fn trailing_finalizes_segment_when_min_silence_reached_and_min_speech_met() {
+        // 発話は 3 chunks 分あり: length = 3 * CHUNK = MIN_SPEECH → 到達
+        let state = State::Trailing {
+            speech: speech(0, 3 * CHUNK, 0.85),
+            silence_samples: 2 * CHUNK, // 2 chunks 蓄積済み
+        };
+        // 追加 1 chunk = 3 * CHUNK = MIN_SILENCE → 到達
+        let (next, results) = step(state, 0.2, 5 * CHUNK);
+        assert_eq!(next, State::Idle);
+        assert_eq!(results.len(), 1, "segment が 1 つ確定するはず");
+        assert_eq!(
+            results[0],
+            SpeechSegment {
+                start_sample: 0,
+                end_sample: 3 * CHUNK,
+                max_probability: 0.85,
+            }
+        );
+    }
+
+    /// Trailing 中に min_silence 到達だが発話長が min_speech 未達なら segment は破棄され Idle に戻る。
+    #[test]
+    fn trailing_drops_segment_when_min_silence_reached_but_min_speech_not_met() {
+        // 発話は 1 chunk 分のみ: length = CHUNK < MIN_SPEECH(3 * CHUNK) → 未達で破棄
+        let state = State::Trailing {
+            speech: speech(0, CHUNK, 0.9),
+            silence_samples: 2 * CHUNK,
+        };
+        let (next, results) = step(state, 0.2, 3 * CHUNK);
+        assert_eq!(next, State::Idle);
+        assert!(
+            results.is_empty(),
+            "短すぎる発話は min_speech 未達で破棄される"
+        );
+    }
+
+    /// finalize_speech は length < min_speech_samples なら None を返す (破棄)。
+    #[test]
+    fn finalize_speech_returns_none_when_min_speech_not_met() {
+        let s = speech(0, CHUNK, 0.9);
+        assert_eq!(finalize_speech(&s, MIN_SPEECH), None);
+    }
+
+    /// finalize_speech は length >= min_speech_samples なら SpeechSegment を返す。
+    #[test]
+    fn finalize_speech_returns_segment_when_min_speech_met() {
+        let s = speech(0, 3 * CHUNK, 0.85);
+        assert_eq!(
+            finalize_speech(&s, MIN_SPEECH),
+            Some(SpeechSegment {
+                start_sample: 0,
+                end_sample: 3 * CHUNK,
+                max_probability: 0.85,
+            })
+        );
+    }
 }
