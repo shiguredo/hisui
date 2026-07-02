@@ -4,6 +4,7 @@
 //! 512 サンプル境界で `SileroVad::chunk_probability` を実行し、閾値ゲート + `min_silence_ms` /
 //! `min_speech_ms` の集約ロジックで発話区間 `SpeechSegment` (16 kHz サンプル通し番号) を確定して返す。
 
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use super::buffer::AudioChunkBuffer;
@@ -11,7 +12,7 @@ use super::config::VadConfig;
 use super::silero_vad::SileroVad;
 
 /// Silero VAD の 1 チャンクのサンプル数。`SileroVad::chunk_probability` が要求する固定値と一致させる。
-const CHUNK_SAMPLES: usize = 512;
+const CHUNK_SAMPLES: NonZeroUsize = NonZeroUsize::new(512).expect("CHUNK_SAMPLES > 0");
 
 /// VadGate が動作するサンプルレート (Silero VAD v5 の 16 kHz)。
 const SAMPLE_RATE_HZ: u64 = 16000;
@@ -100,7 +101,7 @@ impl VadGate {
         while let Some(chunk) = self.buffer.take_chunk() {
             let probability = self.silero.chunk_probability(&chunk)?;
             let chunk_start = self.sample_count;
-            let chunk_end = self.sample_count + CHUNK_SAMPLES as u64;
+            let chunk_end = self.sample_count + CHUNK_SAMPLES.get() as u64;
             self.sample_count = chunk_end;
             self.advance_state(probability, chunk_start, chunk_end, &mut results);
         }
@@ -168,7 +169,7 @@ impl VadGate {
                 } else {
                     State::Trailing {
                         speech,
-                        silence_samples: CHUNK_SAMPLES as u64,
+                        silence_samples: CHUNK_SAMPLES.get() as u64,
                     }
                 }
             }
@@ -183,7 +184,7 @@ impl VadGate {
                     }
                     State::InSpeech(speech)
                 } else {
-                    let silence_samples = silence_samples + CHUNK_SAMPLES as u64;
+                    let silence_samples = silence_samples + CHUNK_SAMPLES.get() as u64;
                     if silence_samples >= min_silence_samples {
                         if let Some(segment) = self.finalize_speech(&speech) {
                             results.push(segment);

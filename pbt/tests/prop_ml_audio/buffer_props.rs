@@ -1,11 +1,18 @@
 //! `src/ml/audio/buffer.rs` の `AudioChunkBuffer` に対する PBT。
 
+use std::num::NonZeroUsize;
+
 use hisui::ml::audio::AudioChunkBuffer;
 use proptest::prelude::*;
 
 /// 任意の f32 PCM を生成する Strategy。
 fn arb_pcm(max_len: usize) -> impl Strategy<Value = Vec<f32>> {
     prop::collection::vec(any::<f32>(), 0..max_len)
+}
+
+/// PBT 内で `NonZeroUsize` を組み立てる補助関数 (0 を渡すとテスト失敗)。
+fn nz(n: usize) -> NonZeroUsize {
+    NonZeroUsize::new(n).expect("chunk_samples must be > 0")
 }
 
 proptest! {
@@ -15,7 +22,7 @@ proptest! {
         chunk_samples in 1usize..64,
         pushes in prop::collection::vec(arb_pcm(128), 0..8),
     ) {
-        let mut buf = AudioChunkBuffer::new(chunk_samples);
+        let mut buf = AudioChunkBuffer::new(nz(chunk_samples));
         let mut total_pushed = 0usize;
         for pcm in &pushes {
             buf.push(pcm);
@@ -37,7 +44,7 @@ proptest! {
         left in arb_pcm(64),
         right in arb_pcm(64),
     ) {
-        let mut buf = AudioChunkBuffer::new(chunk_samples);
+        let mut buf = AudioChunkBuffer::new(nz(chunk_samples));
         // まとめ push して取り出した結果。
         buf.push(&left);
         buf.push(&right);
@@ -48,7 +55,7 @@ proptest! {
         let remaining_combined = buf.remaining();
 
         // 分けて push (途中で 1 チャンクだけ take) しても、最終的な連結順序が変わらない。
-        let mut buf = AudioChunkBuffer::new(chunk_samples);
+        let mut buf = AudioChunkBuffer::new(nz(chunk_samples));
         buf.push(&left);
         let mut split_output = Vec::new();
         if let Some(chunk) = buf.take_chunk() {
@@ -70,7 +77,7 @@ proptest! {
         chunk_samples in 2usize..32,
         short_pcm in arb_pcm(32),
     ) {
-        let mut buf = AudioChunkBuffer::new(chunk_samples);
+        let mut buf = AudioChunkBuffer::new(nz(chunk_samples));
         // chunk_samples 未満だけを push する。
         let truncated: Vec<f32> = short_pcm.into_iter().take(chunk_samples - 1).collect();
         let pushed_len = truncated.len();
