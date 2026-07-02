@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use hisui::ml::audio::SpeechSegment;
+use hisui::ml::audio::vad::SpeechSegment;
 use proptest::prelude::*;
 
 proptest! {

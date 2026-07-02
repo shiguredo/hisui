@@ -11,7 +11,9 @@
 use std::path::{Path, PathBuf};
 
 use candle_core::Device;
-use hisui::ml::audio::{SileroVad, VadConfig, VadGate};
+use hisui::ml::audio::config::VadConfig;
+use hisui::ml::audio::silero_vad::SileroVad;
+use hisui::ml::audio::vad::VadGate;
 
 /// モデル配置ディレクトリを環境変数から解決する。未設定なら `ml-models` を返す。
 fn ml_models_dir() -> PathBuf {

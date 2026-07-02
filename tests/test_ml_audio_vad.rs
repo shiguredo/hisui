@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use hisui::ml::audio::SpeechSegment;
+use hisui::ml::audio::vad::SpeechSegment;
 
 /// `SpeechSegment::start_time` / `end_time` は 16 kHz サンプル通し番号を丸め誤差ゼロで Duration に変換する。
 #[test]

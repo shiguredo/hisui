@@ -2,7 +2,7 @@
 
 use std::num::NonZeroUsize;
 
-use hisui::ml::audio::AudioChunkBuffer;
+use hisui::ml::audio::buffer::AudioChunkBuffer;
 use proptest::prelude::*;
 
 /// VAD 経路の正規化 PCM 相当の `[-1.0, 1.0]` 範囲の f32 サンプル列を生成する Strategy。

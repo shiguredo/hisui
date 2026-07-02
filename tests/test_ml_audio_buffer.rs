@@ -4,7 +4,7 @@
 
 use std::num::NonZeroUsize;
 
-use hisui::ml::audio::AudioChunkBuffer;
+use hisui::ml::audio::buffer::AudioChunkBuffer;
 
 /// テスト内で `NonZeroUsize` を組み立てる補助関数 (0 を渡すとテスト失敗)。
 fn nz(n: usize) -> NonZeroUsize {

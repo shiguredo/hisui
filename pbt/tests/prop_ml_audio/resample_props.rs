@@ -1,7 +1,7 @@
 //! `src/ml/audio/resample.rs` に対する PBT。
 
 use hisui::audio::{Channels, SampleRate};
-use hisui::ml::audio::resample_to_16k_mono;
+use hisui::ml::audio::resample::resample_to_16k_mono;
 use proptest::prelude::*;
 
 /// サポート対象のサンプルレート。
