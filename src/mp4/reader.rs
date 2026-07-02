@@ -1507,6 +1507,106 @@ impl TrackSender {
     }
 }
 
+#[allow(dead_code)]
+enum DecoderInput {
+    Media(crate::MediaFrame),
+    Eos,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+struct VideoDecoderTask {
+    input_tx: tokio::sync::mpsc::UnboundedSender<DecoderInput>,
+    discard_mode_tx: tokio::sync::watch::Sender<bool>,
+    join_handle: tokio::task::JoinHandle<crate::Result<()>>,
+}
+
+impl VideoDecoderTask {
+    #[allow(dead_code)]
+    async fn shutdown(self) -> crate::Result<()> {
+        let _ = self.input_tx.send(DecoderInput::Eos);
+        match self.join_handle.await {
+            Ok(result) => result,
+            Err(e) => Err(crate::Error::new(format!(
+                "video decoder task join failed: {e}"
+            ))),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn abort(self) {
+        self.join_handle.abort();
+    }
+}
+
+#[allow(dead_code)]
+fn spawn_video_decoder_task(
+    options: crate::decoder::VideoDecoderOptions,
+    mut stats: crate::stats::Stats,
+    sender: TrackSender,
+) -> VideoDecoderTask {
+    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
+    // Seek 直後などで warm-up 突入の可能性があるため安全側 (discard=true) で初期化する。
+    // 通常再生開始時は handle_video_sample の初回判定で warm-up 不要が確定した時点で false に切り替わる
+    let (discard_mode_tx, discard_mode_rx) = tokio::sync::watch::channel(true);
+    stats.set_default_label("component", "video_decoder");
+    let join_handle = tokio::spawn(async move {
+        video_decoder_loop(options, stats, input_rx, discard_mode_rx, sender).await
+    });
+    VideoDecoderTask {
+        input_tx,
+        discard_mode_tx,
+        join_handle,
+    }
+}
+
+#[allow(dead_code)]
+async fn video_decoder_loop(
+    options: crate::decoder::VideoDecoderOptions,
+    stats: crate::stats::Stats,
+    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<DecoderInput>,
+    discard_mode_rx: tokio::sync::watch::Receiver<bool>,
+    mut sender: TrackSender,
+) -> crate::Result<()> {
+    let mut decoder = crate::decoder::AsyncVideoDecoder::new(options, stats);
+    loop {
+        let input = match input_rx.recv().await {
+            Some(input) => input,
+            // main が VideoDecoderTask を drop する経路 (通常は shutdown 経由で EOS 送信済み)
+            None => return Ok(()),
+        };
+        let is_eos = matches!(input, DecoderInput::Eos);
+        match input {
+            DecoderInput::Media(sample) => decoder.handle_input_sample_sync(Some(sample))?,
+            DecoderInput::Eos => decoder.handle_input_sample_sync(None)?,
+        }
+        // Openh264 は 1 サンプル入力で 0-2 frame を吐き出しうる (keyframe 時の flush 経路) ため、
+        // Pending / Finished に達するまで内側 loop で drain する
+        loop {
+            match decoder.poll_output_sync()? {
+                crate::decoder::DecoderRunOutput::Processed(sample) => {
+                    // watch::Ref<'_, bool> は `*` deref 直後に drop され await を跨がない
+                    if !*discard_mode_rx.borrow() && !sender.send_media(sample).await {
+                        return Ok(());
+                    }
+                }
+                crate::decoder::DecoderRunOutput::Pending => break,
+                crate::decoder::DecoderRunOutput::Finished => {
+                    sender.send_eos();
+                    return Ok(());
+                }
+            }
+        }
+        // handle_input_sample_sync(None) 後は poll_output_sync が必ず Finished を返す
+        // 不変条件のため到達不能。 実装者の誤解防止で防御コードとして残す
+        if is_eos {
+            return Err(crate::Error::new(
+                "video decoder task still pending after EOS",
+            ));
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ReaderState {
     path: PathBuf,
