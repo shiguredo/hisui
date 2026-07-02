@@ -1,154 +1,325 @@
-# Mp4FileReader を AsyncVideoDecoder に移行して mp4 reader の関数 4 つを async fn 化する
+# Mp4FileReader の video decoder 経路を AsyncVideoDecoder に移行して mp4 reader を async fn 化する
 
 - Priority: Medium
 - Created: 2026-07-02
 - Completed:
 - Model: Claude Opus 4.7
-- Branch: feature/change-mp4-reader-async-video-decoder
-- Polished:
+- Branch: feature/refactor-mp4-reader-async-video-decoder
+- Polished: 2026-07-02
+- Reporter: @sile
+- Decision Owner: @sile
 
 ## 目的
 
-closed issue 0066 で `AsyncVideoDecoder` が追加され、 同期 `VideoDecoder` は wrap 構造で挙動維持されている状態。 本 issue は使用側移行のうち `src/mp4/reader.rs` と、 その `set_video_decoder` を経由して decoder を注入する `src/obsws/source/file_mp4.rs` を `AsyncVideoDecoder` ベースに切り替える。
+closed issue 0066 で `AsyncVideoDecoder` が追加された状態から、 `src/mp4/reader.rs` の **video decoder 経路** と、 その `set_video_decoder` を経由して decoder を注入する `src/obsws/source/file_mp4.rs` を `AsyncVideoDecoder` ベースに切り替える。
 
-これに伴い以下が発生する:
+**audio decoder はスコープ外**。 `AsyncAudioDecoder` が未整備のため、 `audio_decoder: Option<AudioDecoder>` 経路 (`handle_audio_sample` / `flush_decoders` の audio 側 / `recreate_decoders` の audio 側 / `Mp4FileReader::set_audio_decoder`) は同期のまま維持する。
 
-- `Mp4FileReader` の 4 関数 (`flush_decoders` / `reset_for_restart` / `apply_seek` / `recreate_decoders`) の async fn 化
-- 呼出元 16 箇所への `.await` 追従 (open issue 0068 起票時の見積 15 箇所から再カウント済み)
-- `TrackSender` (SYN/ACK 背圧 `MAX_NOACKED_COUNT=100`) の decoder task への移譲、 または `TrackSender` は main task 側で維持しつつ decoder task から `TrackPublisher::send_media` する形態のどちらかを確定
-- warm-up 経路 (`discard_video_decoder_output`) の意味論を保った再設計
-- `loop_playback` 時の decoder ライフサイクル (loop 継続 / `MediaLoopAction::Restart` / Seek / `reset_for_restart` の 4 経路) 管理の確定
-- `Mp4FileReader::set_video_decoder` (`:318`) 廃止 + `Mp4FileReaderOptions` への decoder 生成情報吸収
+video 側の変更は次のとおり:
+
+- `Mp4FileReader` の 5 関数 (`flush_decoders` / `reset_for_restart` / `apply_seek` / `recreate_decoders` / `send_eos_to_tracks`) を async fn 化
+- 呼出元 18 箇所への `.await` 追従 (推奨案 §3 の詳細参照)
+- `TrackSender` を decoder task に move し SYN/ACK 背圧を有効化 (推奨案 §2)
+- warm-up 経路の意味論を `watch::channel<bool>` で保った上で `discard_video_decoder_output` 廃止 (推奨案 §1)
+- `loop_playback` 5 経路 (継続 / Restart / Seek / reset_for_restart / Stop) 別の decoder task ライフサイクル管理 (推奨案 §3)
+- `Mp4FileReader::set_video_decoder` 廃止 + `Mp4FileReaderOptions` への `video_decoder_options: Option<VideoDecoderOptions>` 追加
+
+Branch prefix は `feature/refactor-` を採用する (兄弟 issue 0068 / 0072 / 0073 と整合、 外部プロトコルへの後方互換破壊なし)。
 
 ## 優先度根拠
 
 Medium。
 
-- closed issue 0066 で採用された「wrap 段階的移行方針 (δ)」を、 closed issue 0057 §3 「中途半端な 2 系統共存を残さない」原則と整合させるには最終的に全使用側の移行が必須。 本 issue はその最重量部分
-- 本 issue 単独では外部挙動 (再生タイミング / 出力) は不変。 内部リファクタ相当で緊急性はないが、 open issue 0072 (inbound endpoint spawn pattern 化) / open issue 0073 (最終クリーンアップ) の後続作業が本 issue の完了を待つ
-- 実装難所 (async 化波及、 背圧移譲、 warm-up 経路、 ループライフサイクル) が複数集中しており、 open issue 0068 に同居させると polish しきれない事情から分割された
+- closed issue 0066 の wrap 段階的移行方針 (δ) を closed issue 0057 §3 「中途半端な 2 系統共存を残さない」原則と整合させるには全使用側の移行が必要
+- 本 issue 単独では外部挙動 (再生タイミング / 出力) は不変。 内部リファクタ相当で緊急性なし
+- 後続の open issue 0073 (最終クリーンアップ) が本 issue 完了を待つ (open issue 0072 は互いに独立)
 
 ## 現状
 
-`src/mp4/reader.rs` (2336 行) は同期 pull pattern で `VideoDecoder` を扱っており、 本 issue で書き換える対象箇所は以下:
+`src/mp4/reader.rs` (2336 行) の video 経路が同期 pull pattern。 書き換え対象は以下:
 
-### 同期関数の async fn 化 (4 関数)
+### 同期関数の async fn 化 (5 関数、 呼出元 18 箇所)
 
-| 関数 | 定義位置 | 直接の呼出元 |
-|------|----------|---------------|
-| `flush_decoders` | `:1274` 付近 | `:339, :350` (2 箇所) |
-| `reset_for_restart` | `:1340` 付近 | `:378, :383` (2 箇所) |
-| `apply_seek` | `:638` 付近 | `:465, :479, :484, :498, :503, :523, :528` (7 箇所) |
-| `recreate_decoders` | `:1350` 付近 | `:475, :494, :519, :645, :1346` (5 箇所、 `:1346` は `reset_for_restart` の内部呼出) |
+| 関数 | 定義位置 | 呼出元 |
+|------|----------|--------|
+| `flush_decoders` | `:1274` | `:339, :350` (2 箇所) |
+| `reset_for_restart` | `:1340` | `:378, :383` (2 箇所) |
+| `apply_seek` | `:638` | `:465, :479, :484, :498, :503, :523, :528` (7 箇所) |
+| `recreate_decoders` | `:1350` | `:475, :494, :519, :645, :1346` (5 箇所) |
+| `send_eos_to_tracks` | `:1292` | `:341, :389` (2 箇所) |
 
-合計 16 呼出元すべてに `.await` を付与する。 `run` / `run_loop` は既に async fn なので自然に伝播する。 `recreate_decoders` の内部呼出 (`:645` = `apply_seek` 内、 `:1346` = `reset_for_restart` 内) は関数側 async 化で自動的に awaitable になる。
+### VideoDecoder 直叩き箇所 (video 側 7 箇所)
 
-### VideoDecoder 直叩き箇所
+| API | 呼出位置 |
+|-----|----------|
+| `decoder.handle_input_sample(Some(...))` | `:1195, :1233, :1279, :1285` (4 箇所) |
+| `crate::decoder::drain_video_decoder_output(decoder, ...)` | `:1236, :1286` (2 箇所) |
+| `discard_video_decoder_output(decoder)` | `:1199` (定義は module-private helper `:1388`) |
 
-| API | 呼出位置 | 個数 |
-|-----|----------|------|
-| `decoder.handle_input_sample(Some(...))` | `:1195, :1233, :1279, :1285` | 4 箇所 |
-| `crate::decoder::drain_video_decoder_output(decoder, ...)` | `:1236, :1286` | 2 箇所 |
-| `discard_video_decoder_output(decoder)` | `:1199` | 1 箇所 (定義は `:1388` の module-private helper) |
+`:1195` の `handle_input_sample` と `:1199` の `discard_video_decoder_output` は同一 if ブロック (`suppress_publish=true`、 warm-up 中) 内でペア動作。
 
-`drain_video_decoder_output` は `AsyncVideoDecoder` 側へ移行するため直接呼出は消える (decoder task が `output_tx` へ直接流すか、 non-blocking で `poll_output` を回す形に置換)。 `discard_video_decoder_output` は warm-up 経路の意味論 (`suppress_publish=true` 中の出力を捨てる) を保った上で mp4/reader.rs 内で完結して削除される。
+audio 側の直叩き (`handle_audio_sample` `:1067` 内 / `flush_decoders` の audio 側 / `discard_decoder_output` `:1104` / `drain_audio_decoder_output` `:1138`) は削除しない。
+
+### video_sender field 削除の副次修正 (2 箇所)
+
+`Mp4FileReader.video_sender: Option<TrackSender>` (`:221`) を削除すると以下の判定条件も修正必要:
+
+- `:327` の `if self.audio_sender.is_none() && self.video_sender.is_none()` → `if self.audio_sender.is_none() && !self.has_video_track()` に変更
+- `:448` の `ReaderState::open(&self.path, self.audio_sender.is_some(), self.video_sender.is_some())?` → `has_video_track()` 判定に変更
+
+ただし `has_video_track()` (`:308`) は `self.options.video_track_id.is_some()` を判定するが、 現状 `build_track_senders` (`:428` 付近) で `self.options.video_track_id.take()` して消費している。 この take を「clone に変える」または「別 field `video_publish_enabled: bool` を build 前に保存する」いずれかで対応 (推奨案 §4 参照)。
 
 ### TrackSender SYN/ACK 背圧
 
 - `MAX_NOACKED_COUNT: u64 = 100` (`:24`)
-- `struct TrackSender` 定義 (`:1446` 付近)
-- `if self.noacked_sent > MAX_NOACKED_COUNT` の ACK 待ちロジック (`:1463`)
-- `Mp4FileReader.video_sender: Option<TrackSender>` field 宣言 (`:221`)
-- `send_eos_to_tracks` (`:1292` 付近) が `video_sender.send_eos()` を呼ぶ
+- `struct TrackSender` (`:1446`)、 `send_video(&mut self, frame: VideoFrame) -> bool` (`:1481`)、 `send_eos(&mut self)` (`:1490`)
+- 現状 decoder あり経路では `TrackPublisher` (`sender.sender`) を `drain_video_decoder_output` に直接渡しており、 `TrackSender::send_video` の `prepare_send().await` バイパス = 背圧なし。 decoder なし経路 (`sender.send_video` `:1241` 付近) は背圧あり
+- 本 issue で `TrackSender::send_media(sample: MediaFrame) -> bool` を新設し、 decoder task 内で `sample` (MediaFrame) をそのまま流せるようにする。 `send_media` は内部で `MediaFrame::Video(arc)` を受けて `TrackPublisher::send_media(sample)` に委譲する形。 これにより背圧を有効化しつつ骨子コードの型整合も保つ
 
-decoder あり経路 (`drain_video_decoder_output(decoder, &mut sender.sender)` `:1236, :1286`) では `sender.sender` (= `TrackPublisher`) を直接渡していて `TrackSender::send_video` の `prepare_send().await` はバイパスされ、 現状 SYN/ACK 背圧が効いていない。 decoder なし経路の `sender.send_video` 経路 (`:1241` 付近) は背圧あり。 本 issue で decoder あり経路も背圧を有効化するか、 現状の非対称を温存するかを設計方針で確定する。
+### loop_playback の decoder ライフサイクル発火点
 
-### loop_playback ライフサイクル
+`run_loop` (`:438` 定義、 while 本体 `:465-533`) と `wait_for_restart_command` 経路で 5 種類:
 
-`Mp4FileReader::run_loop` (`:465-533` 付近) 内で `recreate_decoders` を呼ぶ経路は 4 種類:
-
-1. `run_loop` 内側の EOF 到達で loop 継続時: 現状は decoder を再生成しない (継続)
-2. `MediaLoopAction::Restart` (`:475, :494, :519`): `recreate_decoders` を明示的に呼出
-3. `MediaLoopAction::Seek` / `OffsetSeek` (`:479, :484, :498, :503, :523, :528`): `apply_seek` 経由で `recreate_decoders` (`:645`)
-4. `wait_for_restart_command` 経路 (`:378, :383`): `reset_for_restart` 経由で `recreate_decoders` (`:1346`)
-
-現状の同期実装は `recreate_decoders` (`:1350`) 内で `self.video_decoder = Some(decoder)` と単純上書きし、 前 decoder は暗黙 drop で終了する。 spawn pattern 化後の前 decoder task の始末 (継続使い回し / EOS 送信 + `JoinHandle::await` + 新規 spawn / abort) を経路ごとに確定する。
-
-### set_video_decoder 廃止と obsws/source/file_mp4.rs 連動
-
-- `Mp4FileReader::set_video_decoder(&mut self, decoder: crate::decoder::VideoDecoder)` (`:318`) は同期 fn
-- 現状の呼出元は `src/obsws/source/file_mp4.rs:61` の 1 箇所のみ (`:54` で `VideoDecoder::new` してから `reader.set_video_decoder(decoder)`)
-- 本 issue で `set_video_decoder` を削除する場合、 `Mp4FileReaderOptions` に `decoder_options: Option<VideoDecoderOptions>` / `openh264_lib: Option<Openh264Library>` / `enable_video_decoder: bool` のいずれか等を追加して decoder 生成情報を吸収する必要がある
+1. **loop 継続 (EOF `continue`)**: `:544`。 `recreate_decoders` 呼ばず decoder 継続 (次 loop 先頭はキーフレーム保証)
+2. **`MediaLoopAction::Restart`**: `:475, :494, :519` で `recreate_decoders`
+3. **`MediaLoopAction::Seek` / `OffsetSeek`**: `apply_seek` (`:465, :479, :484, :498, :503, :523, :528`) 経由、 その中で `recreate_decoders` (`:645`)
+4. **`reset_for_restart` 経由** (`wait_for_restart_command` の `WaitResult::Play` / `Restart`): `:378, :383` で `reset_for_restart`、 その中で `recreate_decoders` (`:1346`)
+5. **`MediaLoopAction::Stop`**: `RunLoopResult::Stopped` で run_loop を抜けて待機。 decoder 保持継続
 
 ### AsyncVideoDecoder の現状 API
 
-`src/decoder.rs` (0066 完了時点) が提供する API:
+`src/decoder.rs` (0066 完了時点):
 
 - `pub struct AsyncVideoDecoder` (`:385`)
-- `pub fn AsyncVideoDecoder::new(options, stats) -> Self` (`:400`)
+- `pub fn new(options: VideoDecoderOptions, stats: Stats) -> Self` (`:400`)
 - `pub fn handle_input_sample_sync(&mut self, Option<MediaFrame>) -> Result<()>` (`:424`)
 - `pub fn poll_output_sync(&mut self) -> Result<DecoderRunOutput>` (`:441`)
 - `pub async fn next_decoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>>` (`:472`)
 
-`handle_input_message` (Message enum の dispatch) と `run` (`ProcessorHandle` ベースの実行ループ) は同期 wrap の `VideoDecoder` にのみ存在し、 `AsyncVideoDecoder` 側には未実装。 本 issue の spawn pattern 実装で必要になれば、 spawn クロージャ内で自前で `Message::Media / Eos / Syn(_)` を `handle_input_sample_sync(Some/None/() ) ` に dispatch する形で構築する (もしくは open issue 0068 で `AsyncVideoDecoder::handle_input_message` / `AsyncVideoDecoder::run` の追加を先行させる可能性あり。 open issue 0068 の polish で確定させる)。
+open issue 0068 (polished 2026-07-02) で `AsyncVideoDecoder::run` の追加が確定、 `handle_input_message` は追加しないことが確定。
 
-### 既存テスト影響
+本 issue の decoder task は `AsyncVideoDecoder::run` を再利用せず自前 loop を組む。 理由:
 
-- `src/mp4/reader.rs` 内の `#[cfg(test)] mod tests` (`:1785-2106` 付近) に `reset_for_restart_preserves_timestamp_continuity` などの回帰テストがあり、 async fn 化に伴い `#[test]` → `#[tokio::test]` への昇格と `.await` 追記が必要
-- `ProcessorHandle` を渡す関数のテスト内利用 (現状はコメントで「`ProcessorHandle` なしで呼べない」旨が記載されている箇所あり) は、 モック / スタブ禁止規約下で実 pipeline 起動を要する。 テスト内での `ProcessorHandle` 準備コストが実装コストに反映される点に留意
+- warm-up 中の discard 制御 (`discard_mode_tx`) が 0068 の `run` にはない
+- `TrackSender::send_media` (背圧あり) を task 側で呼ぶ (0068 の `run` は `TrackPublisher::send_media` を直接呼び背圧なし)
+- Stop 経路 (経路 5) で task を継続保持する制御 (0068 の `run` は Finished / PipelineClosed で終了)
+
+### 既存テスト
+
+- `src/mp4/reader.rs:1697-2336` の `#[cfg(test)] mod tests`
+- **既存テスト内で `apply_seek` / `flush_decoders` / `recreate_decoders` / `reset_for_restart` を直接呼ぶテストは存在しない** (テスト内コメント `:1801-1803, :2068, :2106` で「`ProcessorHandle` / `ReaderState` が必要なので直接呼ばず内部状態だけ手動設定」と明記)。 したがって async fn 化に伴う既存テストの `#[tokio::test]` 化は不要 (0 件)
+- 新規に「decoder task の生存 / 死亡 / EOS シーケンス / warm-up mode 遷移」の統合テストを追加する場合は実 pipeline 経由で書く
 
 ## 設計方針
 
-### 未確定論点 (polish で確定させる)
+### 決定事項 (実装で覆さない)
 
-以下は本 issue 起票時点で意図的に選択肢を残している。 `/polish-issue 71` 段階で 1 案に絞り込む:
+- `AsyncVideoDecoder` は 0066 導入分を利用 (再設計しない)
+- decoder ライフサイクルは spawn pattern。 main task 内で `.await` 直呼出はしない
+- audio decoder は同期のまま維持
+- `AsyncVideoDecoder::run` / `handle_input_message` は本 issue で追加しない (自前 dispatch)
+- Nvcodec feature 有効時と無効時で挙動差分なし
 
-1. **warm-up 経路 (`discard_video_decoder_output`) の再設計方針**
-    - A: decoder task に flush モード制御チャネル追加 (`suppress_publish` を伝えて出力を task 内で捨てる)
-    - B: warm-up 中は decoder task を落とし、 warm-up 明けに再起動 (task 再生成コスト増)
-    - C: main task 側で出力先を切り替える (task から常に流し、 main が publish するか捨てるかを選ぶ)
-    - D: warm-up 中は decoder に入力せず demuxer 側でフレームを捨てる (デコーダー内部状態が回復しないため keyframe まで待つ必要がある)
-2. **`TrackSender` (SYN/ACK 背圧) の移譲先**
-    - a: main task 側で維持 (`sender.send_video(...)` を main が呼ぶ、 decoder task は `TrackPublisher` を持たず main への channel だけ持つ)
-    - b: decoder task 側に move (task 内で `sender.send_video(...).await` を呼ぶ、 main task は `TrackSender` を持たない)
-    - decoder あり経路で現状効いていない背圧を本 issue で有効化するか温存するかも同時に確定
-3. **`loop_playback` 4 経路別 decoder task ライフサイクル**
-    - 経路 1 (loop 継続): 継続使い回し (現状挙動)
-    - 経路 2-4 (Restart / Seek / reset_for_restart): 前 task へ EOS 送信 → `JoinHandle::await` → 新 spawn の順序を確定
-    - タイムスタンプ連続性 (`reset_for_restart_preserves_timestamp_continuity` テスト) を担保する order を明示
-4. **`set_video_decoder` 廃止後の options 注入方式**
-    - `Mp4FileReaderOptions` に何を追加するか (`decoder_options` / `openh264_lib` / `enable_video_decoder` bool flag の組合せ)
-    - `src/obsws/source/file_mp4.rs:54-61` の呼出構造をどう置換するか
-5. **decoder task 入力 channel の bounded/unbounded と型**
-    - `tokio::sync::mpsc::channel::<Message>(N)` の `N` (bounded 採用時) を何にするか、 `unbounded_channel` を使うか
-    - decoder 内部 channel (0066 で unbounded 確定) との整合。 main → decoder task 間の背圧をどう定義するか
-    - `Message` (`crate::Message`、 `Media / Eos / Syn`) をそのまま流すか、 decoder 専用の enum (`Media / Eos` のみ) を新設するか
+### 推奨案 §1: warm-up 経路 → **case A (task 内 discard mode 制御)**
 
-### 決定事項 (polish で覆さない前提)
+- decoder task が `watch::Receiver<bool>` (discard_mode) を保持
+- `handle_video_sample` の suppress_publish 判定 (`:1041` 付近) で `warmup_target` の状態遷移が起きた際に main が `discard_mode_tx.send(true/false)` を呼ぶ
+- 新 task 起動時の初期値: `discard_mode = true` で spawn する (Seek 直後などは warm-up 突入する可能性があるため、 誤って publish しないよう安全側)。 通常再生開始時は `handle_video_sample` の初回呼出で warm-up 不要と判定した時点で `discard_mode_tx.send(false)` に切り替わる
+- discard_mode の実際の発火タイミング (毎 sample か遷移点か) と audio 側 warm-up との整合は **実装段階で確定**する (残懸念、 §「残懸念」参照)
 
-- `AsyncVideoDecoder` は 0066 で導入済みのものを利用 (再設計しない)
-- 各 inner (`Libvpx / Openh264 / Dav1d / VideoToolbox / Nvcodec`) は 0066 で `OutputSink` (`UnboundedSender<crate::Result<VideoFrame>>` + `total_output_metric: StatsCounter` のペアリング構造体) 内包に統一済み
-- decoder 内部 channel は unbounded (0066 確定)
-- decoder ライフサイクルは spawn pattern (`tokio::spawn(async move { ... })`) で管理する。 `AsyncVideoDecoder` を main task 内で `.await` 直呼出はしない (mp4 reader 全体の pull ループの block を避けるため)
+### 推奨案 §2: TrackSender → **case b (decoder task に move、 背圧有効化)**
 
-### shiguredo-rust 規約整合
+- `Mp4FileReader.video_sender` field 削除
+- 本 issue で `TrackSender::send_media(&mut self, sample: MediaFrame) -> bool` を新設 (`TrackPublisher::send_media` に委譲する薄いラッパ、 内部で SYN/ACK 背圧を効かせる)
+- decoder task 生成時に `TrackSender` を move、 task 内で `sender.send_media(sample).await` を呼ぶ
+- `TrackSender` は現状 `Send + Sync` (`sender: TrackPublisher` と `Ack: mpsc::Receiver<()>` の組合せ、 いずれも Send)
+- audio_sender は main で維持 (audio 側は同期のまま)
 
-- モック / スタブ不使用 (テストは実 decoder + tokio channel + 実 `ProcessorHandle`)
-- `#[non_exhaustive]` 不使用
-- 新規 trait 追加なし
-- 既存の error 型 (`crate::Error`) を維持
+### 推奨案 §3: loop_playback 5 経路別ライフサイクル
+
+| 経路 | 前 task の始末 | 新 task |
+|------|---------------|---------|
+| 1. loop 継続 | そのまま継続 | 生成しない |
+| 2. `MediaLoopAction::Restart` | EOS 送信 → `JoinHandle::await` | `recreate_decoders` 内で新 spawn |
+| 3. `MediaLoopAction::Seek` / `OffsetSeek` | `JoinHandle::abort()` (残フレーム破棄) | `apply_seek` 内で新 spawn |
+| 4. `reset_for_restart` 経由 | EOS 送信 → `JoinHandle::await` | `recreate_decoders` 内で新 spawn |
+| 5. `MediaLoopAction::Stop` | そのまま継続保持 | 生成しない (次の Play/Restart で経路 4 に合流) |
+
+`base_offset` 更新順序は現状実装を維持 (経路別):
+
+- `reset_for_restart` (`:1342-1346`): `base_offset` 更新 → 前 task EOS+join → 新 task spawn (`recreate_decoders`)
+- `apply_seek` (`:645-662`): 前 task abort → 新 task spawn (`recreate_decoders`) → `base_offset` 更新
+
+`reset_for_restart_preserves_timestamp_continuity` テストは `base_offset` 更新順序を検証しており、 現状順序を保つことで通る。
+
+Seek 時に abort を採用する理由: EOS+drain 待ちすると seek 前フレームが post-seek 位置で publish される可能性があるため、 即時終了で破棄。 新 task 起動時に `TrackSender` を再作成する race (初回 SYN 待ち) が warm-up 明けの最初の publish で発生し得るが、 これは既存の decoder なし経路が既に持っている挙動と同じ扱いで許容 (残懸念参照)。
+
+### 推奨案 §4: Mp4FileReaderOptions への注入方式
+
+`Mp4FileReaderOptions` (`:203`) に以下を追加:
+
+```rust
+pub struct Mp4FileReaderOptions {
+    // 既存 field
+    pub video_decoder_options: Option<VideoDecoderOptions>,
+}
+```
+
+- `None` の場合: video decoder task は spawn しない。 raw video publish 経路 (現状の `sender.send_video` 直呼出) は本 issue で削除する (呼出元は `obsws/source/file_mp4.rs` のみで、 常に video decoder を設定しているため raw publish は使われていない)
+- `Some(options)`: `Mp4FileReader::run` の冒頭で `spawn_video_decoder_task(options.clone(), ...)` を呼ぶ (`take` ではなく `clone`。 `recreate_decoders` で複数回参照するため)
+- `openh264_lib` は `VideoDecoderOptions.openh264_lib` (`decoder.rs:324`) に含まれるが、 `Mp4FileSource::create_reader` (`obsws/source/file_mp4.rs:21-36`) は `ProcessorHandle` を持たないため options 構築時に `openh264_lib` を埋め込めない。 対処: `openh264_lib` を除いた `VideoDecoderOptions` を `create_reader` で構築し、 `Mp4FileReader::run` 内で `handle.config().openh264_lib.clone()` を merge して補完する
+- `Mp4FileReaderOptions` の struct literal を全 field 明示している呼出元 (`obsws/source/file_mp4.rs:25-30`) は `video_decoder_options: Some(VideoDecoderOptions::default())` の明示または `..Default::default()` 追加が必要 (`#[non_exhaustive]` は付けない)
+- `has_video_track()` の判定を build_track_senders 後も維持するため、 `build_track_senders` は `video_track_id.take()` ではなく `clone()` に変更 (副次修正)
+
+### 推奨案 §5: decoder task 入力 channel → unbounded + 専用 enum
+
+- `tokio::sync::mpsc::unbounded_channel::<DecoderInput>()`
+- 型: `enum DecoderInput { Media(MediaFrame), Eos }` (`MediaFrame::Video(Arc<VideoFrame>)` をそのまま流す、 二重変換を避ける)
+- `crate::Message` (Media / Eos / Syn) は使わない (Syn は mp4 reader レベルで無視)
+- 背圧は下流 SYN/ACK (推奨案 §2) が担う
+
+### spawn pattern の骨子
+
+```rust
+struct VideoDecoderTask {
+    input_tx: tokio::sync::mpsc::UnboundedSender<DecoderInput>,
+    discard_mode_tx: tokio::sync::watch::Sender<bool>,
+    join_handle: tokio::task::JoinHandle<crate::Result<()>>,
+}
+
+impl VideoDecoderTask {
+    async fn shutdown(self) -> crate::Result<()> {
+        let _ = self.input_tx.send(DecoderInput::Eos);
+        // JoinHandle::await の Err は panic の場合 JoinError::is_panic() で判定可能。
+        // 呼出側は shutdown 経路で warn 握り潰し、 panic は明示的に log。
+        match self.join_handle.await {
+            Ok(result) => result,
+            Err(e) => Err(crate::Error::new(format!("video decoder task join failed: {e}"))),
+        }
+    }
+    fn abort(self) {
+        self.join_handle.abort();
+    }
+}
+
+pub struct Mp4FileReader {
+    // 削除: video_sender: Option<TrackSender> (task に move)
+    // 削除: video_decoder: Option<VideoDecoder>
+    video_decoder_task: Option<VideoDecoderTask>,
+    // audio_sender / audio_decoder は現状維持
+}
+```
+
+decoder task の loop 本体骨子 (0068 の骨子と同型、 warm-up mode / TrackSender / Stop 経路のみ mp4 特有):
+
+```rust
+async fn video_decoder_loop(
+    options: VideoDecoderOptions,
+    stats: crate::stats::Stats,
+    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<DecoderInput>,
+    discard_mode_rx: tokio::sync::watch::Receiver<bool>,
+    mut sender: TrackSender,
+) -> crate::Result<()> {
+    let mut decoder = AsyncVideoDecoder::new(options, stats);
+    loop {
+        let input = match input_rx.recv().await {
+            Some(input) => input,
+            None => {
+                // main が VideoDecoderTask を drop (通常経路の shutdown の途中 or 緊急停止)。
+                // shutdown 経路なら EOS が事前に送られていて Finished で早期 return 済み。
+                // 到達時は緊急経路のため send_eos は呼ばず終了する
+                return Ok(());
+            }
+        };
+        let is_eos = matches!(input, DecoderInput::Eos);
+        match input {
+            DecoderInput::Media(sample) => decoder.handle_input_sample_sync(Some(sample))?,
+            DecoderInput::Eos => decoder.handle_input_sample_sync(None)?,
+        }
+        // Openh264 は 1 サンプル入力で 0-2 frame 出力する (closed/0066 参照) ため、
+        // Pending / Finished に達するまで内側 loop で drain する必要がある
+        loop {
+            match decoder.poll_output_sync()? {
+                DecoderRunOutput::Processed(sample) => {
+                    // Ref<'_, bool> は `*` deref 直後に drop され await を跨がない
+                    if !*discard_mode_rx.borrow() {
+                        if !sender.send_media(sample).await {
+                            return Ok(());
+                        }
+                    }
+                }
+                DecoderRunOutput::Pending => break,
+                DecoderRunOutput::Finished => {
+                    sender.send_eos();
+                    return Ok(());
+                }
+            }
+        }
+        // handle_input_sample_sync(None) 後は poll_output_sync が必ず Finished を返す
+        // 不変条件のため到達不能 (0068 の骨子 :169 参照)
+        if is_eos {
+            return Err(crate::Error::new("video decoder task still pending after EOS"));
+        }
+    }
+}
+```
+
+`spawn_video_decoder_task` は decoder task を生成して `VideoDecoderTask` を返す。 spawn の際に `stats.set_default_label("component", "video_decoder")` を実行してから `AsyncVideoDecoder::new` を呼ぶ (現状 `recreate_decoders` の `:1368` と同じ処理)。
+
+### エラーパス
+
+- **decoder task の panic**: `JoinHandle::await` の Err が `JoinError::is_panic()` なら `error!` log、 上位 (`Mp4FileReader::run`) は `crate::Error` を返して pipeline 停止
+- **`sender.send_media` 失敗 (pipeline closed)**: task 内で `return Ok(())`。 main の次回 `input_tx.send` が Err → main が停止を検知
+- **`poll_output_sync` の Err (Nvcodec 非同期 callback エラー)**: `?` で伝搬、 task が `Err(e)` で終了。 上位経路と同じ扱い
+- **Err 経路で `send_eos` を呼ばない**: 下流は `TrackPublisher` drop 時の subscriber close (`Message::Eos` と `SubscriberTx drop` の両方) で終了検知する既存契約に依拠
+- **loop 継続中に task 死亡**: main が `input_tx.send` 失敗で検知
+- **`recreate_decoders` 中の hung**: EOS 送信後の drain で SYN/ACK 背圧により無制限に await する可能性あり (subscribers 側で drain が正常進行している前提)。 timeout は付けない
+- **`Mp4FileReader::run` の緊急停止 (Err/panic) で task leak**: 実装段階で `Drop` トレイト実装で `task.abort()` を追加するかは prototype で確定 (残懸念)
+
+### send_eos_to_tracks の変更
+
+現状 (`:1292` 定義、 呼出 `:341, :389` の 2 箇所) は同期 fn で audio + video 両方に `send_eos()`。 変更:
+
+```rust
+async fn send_eos_to_tracks(&mut self) {
+    if let Some(sender) = self.audio_sender.as_mut() {
+        sender.send_eos();
+    }
+    // video 側は decoder task の shutdown 内で send_eos が呼ばれる
+    if let Some(task) = self.video_decoder_task.take() {
+        if let Err(e) = task.shutdown().await {
+            tracing::warn!("video decoder task shutdown failed: {e}");
+        }
+    }
+}
+```
+
+呼出元 2 箇所 (`:341`, `:389`) に `.await` を付与。
+
+### recreate_decoders の signature
+
+- `async fn recreate_decoders(&mut self, handle: &ProcessorHandle)` (Result は返さない、 現状維持)
+- audio 側: 現状通り `AudioDecoder::new` の Err を `tracing::warn` で握り潰し
+- video 側: `self.options.video_decoder_options.as_ref().cloned()` (take ではない) で options を取得、 `openh264_lib` を `handle.config()` から merge、 前 task を経路別に始末 (推奨案 §3)、 `spawn_video_decoder_task` で新 task 生成
+- 前 task の join Err は `tracing::warn` で握り潰し進行
 
 ## 完了条件
 
 - `Mp4FileReader::set_video_decoder` (`:318`) が削除されている
-- `Mp4FileReader` の 4 関数 (`flush_decoders` / `reset_for_restart` / `apply_seek` / `recreate_decoders`) が async fn 化されている
-- 上記 4 関数への 16 呼出元すべてに `.await` が付与されている
-- `handle_input_sample` 4 箇所 / `drain_video_decoder_output` 2 箇所 / `discard_video_decoder_output` 1 箇所の VideoDecoder 直叩きが、 `AsyncVideoDecoder` ベースの spawn pattern 経路に置換されている
-- warm-up (`suppress_publish=true`) 時の decoder 出力 discard 意味論が維持されている (回帰テストで確認)
-- SYN/ACK 背圧の扱いが設計方針 §2 で確定した通りに実装されている
-- `loop_playback` の 4 経路すべてで decoder のライフサイクルが期待どおり動作 (`reset_for_restart_preserves_timestamp_continuity` を含む既存テストが通る)
-- `src/obsws/source/file_mp4.rs` の `set_video_decoder` 呼出が消え、 `Mp4FileReaderOptions` 経由の注入に置換されている
-- `Mp4FileReader::tests` の async 化追従 (`#[tokio::test]` 化と `.await` 付与) が完了している
+- 5 関数 (`flush_decoders` / `reset_for_restart` / `apply_seek` / `recreate_decoders` / `send_eos_to_tracks`) が async fn 化されている
+- 上記 5 関数への 18 呼出元すべてに `.await` が付与されている
+- video 側 7 直叩き箇所 (`handle_input_sample` 4 / `drain_video_decoder_output` 2 / `discard_video_decoder_output` 1) が decoder task 経路に置換されている
+- `Mp4FileReader.video_sender` field が削除され、 `:327, :448` の判定条件が `has_video_track()` ベースに修正されている
+- `build_track_senders` が `video_track_id.take()` から `clone()` に変更されている
+- warm-up (`suppress_publish=true`) 時の出力 discard 意味論が維持
+- SYN/ACK 背圧 (`MAX_NOACKED_COUNT=100`) が decoder あり経路でも有効
+- `TrackSender::send_media(sample: MediaFrame) -> bool` が新設されている
+- `loop_playback` 5 経路 (推奨案 §3) で decoder task ライフサイクルが期待通り動作 (`reset_for_restart_preserves_timestamp_continuity` を含む既存テストが通る)
+- `send_eos_to_tracks` の video 側責任が decoder task に移り、 二重 EOS 送信がない
+- `Mp4FileReaderOptions.video_decoder_options: Option<VideoDecoderOptions>` が追加され、 `obsws/source/file_mp4.rs:25-30` の struct literal が更新されている
+- `obsws/source/file_mp4.rs:54, :61` の `VideoDecoder::new` + `set_video_decoder(decoder)` が削除
+- `set_audio_decoder` 呼出 (`obsws/source/file_mp4.rs:49`) は残っている
+- 既存 `Mp4FileReader::tests` は `#[test]` のまま (async 化影響を受ける既存テストなし)
 - `cargo fmt --all --check`
 - `cargo check --workspace`
 - `cargo check --workspace --no-default-features`
@@ -161,28 +332,48 @@ decoder あり経路 (`drain_video_decoder_output(decoder, &mut sender.sender)` 
 
 ## 解決方法
 
-実装着手時の推奨手順 (詳細は polish で確定):
+**準備段階**
 
-1. 設計方針 §「未確定論点」の 5 論点を実装着手前に polish で確定させる
-2. `Mp4FileReaderOptions` を拡張 (`set_video_decoder` 廃止後の注入先を確保)
-3. `recreate_decoders` を async fn 化して spawn pattern を導入 (decoder task の生成 / join / EOS 送信のヘルパを合わせて実装)
-4. `apply_seek` / `flush_decoders` / `reset_for_restart` を async fn 化し、 呼出元 16 箇所へ `.await` を付与
-5. `handle_input_sample` / `drain_video_decoder_output` / `discard_video_decoder_output` 各呼出を decoder task 経路に置換 (warm-up 経路の意味論も同時に反映)
-6. `TrackSender` SYN/ACK 背圧を §「未確定論点」§2 の確定案に沿って移譲 or 温存
-7. `src/obsws/source/file_mp4.rs` の呼出を `Mp4FileReaderOptions` 経由に置換
-8. `Mp4FileReader::tests` を async 化して回帰テストを走らせる
-9. `cargo fmt` / `cargo check` (default + `--no-default-features`) / `cargo clippy` / `cargo test` を完了条件全項目で通す
+1. `Mp4FileReaderOptions` に `video_decoder_options: Option<VideoDecoderOptions>` field 追加。 全 field 明示している `obsws/source/file_mp4.rs:25-30` に `..Default::default()` 追加 (または `video_decoder_options: None` 明示)
+2. `TrackSender::send_media(&mut self, sample: MediaFrame) -> bool` を新設
+3. `enum DecoderInput { Media(MediaFrame), Eos }` と `struct VideoDecoderTask` / `spawn_video_decoder_task` / `video_decoder_loop` を追加 (未使用のため `#[allow(dead_code)]` で警告抑制)
+4. `obsws/source/file_mp4.rs` の Options 構築で `video_decoder_options: Some(VideoDecoderOptions::default())` を設定 (この時点では `set_video_decoder` も呼ばれ続けるので両経路併存)
 
-各 step で `cargo check` を通せる中間状態を保つ (`AsyncVideoDecoder::handle_input_message` / `run` が未実装なら、 spawn クロージャ内で `Message` を自前 dispatch する形で回避する)。
+**移行段階 (同一 commit)**
+
+5. 以下を同時実施:
+    - `Mp4FileReader::set_video_decoder` 削除
+    - `video_decoder` field を `video_decoder_task: Option<VideoDecoderTask>` に置換
+    - `video_sender` field 削除、 `:327, :448` の判定条件修正、 `build_track_senders` の `video_track_id` を `take` から `clone` に変更
+    - 5 関数の async fn 化と 18 呼出元への `.await` 付与
+    - video 側 7 直叩きを task 経路に置換、 `discard_video_decoder_output` 削除
+    - `send_eos_to_tracks` を推奨案どおり修正
+    - `Mp4FileReader::run` 内で `handle.config().openh264_lib` を merge して初回 task spawn
+    - `obsws/source/file_mp4.rs:54, :61` の `VideoDecoder::new` + `set_video_decoder(decoder)` を削除
+
+**仕上げ段階**
+
+6. `cargo fmt / check / clippy / test` を default + `--no-default-features` の両方で通す
 
 ## CHANGES.md について
 
-内部リファクタにつき記載不要。 `Mp4FileReader` は library として外部公開していない (hisui は bin crate)。 API 変更の影響は crate 内利用箇所 (obsws / mixer / writer / subcommand 階層) のみ。
+内部リファクタにつき記載不要。 影響は crate 内 (`obsws/source/file_mp4.rs` 1 ファイル) のみ。
+
+## 残懸念 (実装段階で prototype して確定させる項目)
+
+以下は polish で 1 案に絞りきれず、 実装で試行錯誤しないと最適解が見えない性質のため、 実装段階で確定させる:
+
+1. **`flush_decoders` の意味論**: 現状の「EOS は送らない」契約と `DecoderInput::Eos` 送信の非対称。 (a) `DecoderInput::Flush` を新設 (task 側は flush 後に再開)、 (b) `flush_decoders` を廃止して `send_eos_to_tracks` に統合、 (c) 現状呼出元 2 箇所 (`:339, :350`) はどちらも直後に `send_eos_to_tracks` が呼ばれるので (b) が現実的
+2. **`discard_mode` 切替タイミング**: (a) 毎 sample 判定 + 変化時のみ send、 (b) 毎 sample 無条件 send (watch は最新値以外破棄)、 (c) 遷移点のみ send。 audio 側の warm-up 判定との整合も含めて決定
+3. **`apply_seek` の TrackSender 再作成 race**: 経路 3 で abort 後の新 task 起動で `TrackSender::new` の初回 SYN 待ちが発生。 warm-up 明けの最初の publish で待ちが顕在化するが、 lazy engine 初期化と併せた実測で許容可能か判定
+4. **`Mp4FileReader::drop` 時の task leak 対策**: `Drop` trait 実装で `task.abort()` を呼ぶか、 `Mp4FileReader::run` の末尾で必ず `shutdown().await` を呼ぶかを実装で確定
+5. **`AsyncVideoDecoder` の `Send` 実装確認**: 0066 で暗黙前提だが、 `tokio::spawn` で move する時点で Send 要件を明示的に確認 (Nvcodec / VideoToolbox 系 inner の `Send` 実装)
 
 ## 関連
 
-- closed/0066 (`feature/refactor-add-async-video-decoder`): 親 issue。 `AsyncVideoDecoder` を導入し `VideoDecoder` を wrap 構造に切り替えた
-- open/0068 (`feature/refactor-migrate-video-decoder-users-to-async`): 兄弟 issue。 `src/subcommand_inspect.rs` / `src/sora/recording_subcommand_compose.rs` / `src/sora/recording_subcommand_vmaf.rs` の単純 call site 置換 3 ファイルを扱う。 0068 の polish 過程で本 issue が分離された
-- open/0072 予定: RTMP / RTSP / SRT inbound endpoint (`src/rtmp/inbound_endpoint.rs` / `src/rtsp/subscriber.rs` / `src/srt/inbound_endpoint.rs`) の spawn pattern 化。 本 issue と互いに独立
-- open/0073 予定: 最終クリーンアップ (同期 `VideoDecoder` 削除 + `AsyncVideoDecoder` を `VideoDecoder` にリネーム)。 0068 / 0071 / 0072 の全完了を待つ
-- closed/0057 §3 (`feature/refactor-callback-friendly-codec-interface`): 設計判断の親 issue。 採用案 C 「中途半端な 2 系統共存を残さない」原則との整合は 0073 で最終達成される
+- closed/0066 (`feature/refactor-add-async-video-decoder`): 親 issue。 `AsyncVideoDecoder` を導入
+- open/0068 (`feature/refactor-migrate-video-decoder-users-to-async`, polished 2026-07-02): 兄弟 issue。 subcommand_inspect + sora の 4 call site 単純置換。 `AsyncVideoDecoder::run` を追加するが本 issue は再利用しない
+- open/0072 (`feature/refactor-inbound-endpoint-async-video-decoder`): 兄弟 issue。 inbound endpoint spawn pattern 化。 本 issue の `VideoDecoderTask` struct は 0072 でも参照実装として利用可能 (共通化は 0073 で検討)
+- open/0073 (`feature/refactor-remove-sync-video-decoder-and-rename`): 最終クリーンアップ。 本 issue 完了を待つ
+- closed/0057 §3: 設計判断の親 issue。 §3 分割表への 0071 / 0072 / 0073 行追加は 0073 完了時にまとめて対応
+- audio 側の async 化 (`AsyncAudioDecoder` 追加 + `Mp4FileReader` の audio 経路移行) は本 issue スコープ外。 将来別 issue で扱う
