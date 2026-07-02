@@ -1039,7 +1039,11 @@ mod tests {
     fn poll_output_sync_returns_finished_when_eos_and_channel_empty() {
         let mut decoder =
             AsyncVideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
-        // EOS で eos=true に遷移させる (inner は Initial のまま、 channel も空)
+        // EOS で eos=true に遷移させる (inner は Initial のまま、 channel も空)。
+        // Initial バリアントの `finish()` は no-op (実バックエンド未初期化のため
+        // フラッシュ対象が存在しない) なので、 EOS を受けても sink には何も emit されず、
+        // `output_rx` は Empty のまま、 `self.eos = true` だけがセットされる。
+        // したがって直後の `poll_output_sync` は Empty + eos==true 分岐に確定で入る。
         decoder
             .handle_input_sample_sync(None)
             .expect("EOS は Initial でも Ok");
