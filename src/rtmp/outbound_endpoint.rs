@@ -240,9 +240,10 @@ fn handle_audio_message(
                 .map_err(|e| Error::new(format!("failed to send audio frame: {e}")))?;
             Ok(false)
         }
-        Message::Media(MediaFrame::Video(_)) => Err(Error::new(format!(
-            "expected an audio sample on track {}, but got a video sample",
-            track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
+        Message::Media(other) => Err(Error::new(format!(
+            "expected audio sample on track {}, but got {} sample",
+            track_id.as_ref().map(|id| id.get()).unwrap_or("<none>"),
+            other.kind_name()
         ))),
         Message::Eos => Ok(true),
         Message::Syn(_) => Ok(false),
@@ -266,9 +267,10 @@ fn handle_video_message(
                 .map_err(|e| Error::new(format!("failed to send video frame: {e}")))?;
             Ok(false)
         }
-        Message::Media(MediaFrame::Audio(_)) => Err(Error::new(format!(
-            "expected a video sample on track {}, but got an audio sample",
-            track_id.as_ref().map(|id| id.get()).unwrap_or("<none>")
+        Message::Media(other) => Err(Error::new(format!(
+            "expected video sample on track {}, but got {} sample",
+            track_id.as_ref().map(|id| id.get()).unwrap_or("<none>"),
+            other.kind_name()
         ))),
         Message::Eos => Ok(true),
         Message::Syn(_) => Ok(false),
@@ -398,6 +400,12 @@ impl RtmpPlayServer {
         let frame = match sample {
             MediaFrame::Audio(audio) => ClientMediaFrame::Audio(audio),
             MediaFrame::Video(video) => ClientMediaFrame::Video(video),
+            other => {
+                return Err(Error::new(format!(
+                    "expected audio or video sample, but got {} sample",
+                    other.kind_name()
+                )));
+            }
         };
 
         // NOTE: RtmpClientHandler が閉じたら削除したいので retain を使っている

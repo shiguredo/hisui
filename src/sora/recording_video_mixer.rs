@@ -599,9 +599,10 @@ impl VideoMixer {
             Message::Media(MediaFrame::Video(sample)) => {
                 self.handle_input_sample(track_id, Some(MediaFrame::Video(sample)))
             }
-            Message::Media(MediaFrame::Audio(_)) => Err(Error::new(format!(
-                "expected a video sample on track {}, but got an audio sample",
-                track_id.get()
+            Message::Media(other) => Err(Error::new(format!(
+                "expected video sample on track {}, but got {} sample",
+                track_id.get(),
+                other.kind_name()
             ))),
             Message::Eos => self.handle_input_sample(track_id, None),
             Message::Syn(_) => Ok(()),

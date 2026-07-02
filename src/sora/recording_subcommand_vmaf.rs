@@ -831,10 +831,11 @@ impl FrameCountLimiter {
                         break;
                     }
                 }
-                Message::Media(MediaFrame::Audio(_)) => {
+                Message::Media(other) => {
                     return Err(Error::new(format!(
-                        "expected a video sample on track {}, but got an audio sample",
-                        input_track_id.get()
+                        "expected video sample on track {}, but got {} sample",
+                        input_track_id.get(),
+                        other.kind_name()
                     )));
                 }
                 Message::Eos => {
@@ -873,10 +874,11 @@ impl ProgressBar {
                 Message::Media(MediaFrame::Video(_)) => {
                     self.bar.inc(1);
                 }
-                Message::Media(MediaFrame::Audio(_)) => {
+                Message::Media(other) => {
                     return Err(Error::new(format!(
-                        "expected a video sample on track {}, but got an audio sample",
-                        input_track_id.get()
+                        "expected video sample on track {}, but got {} sample",
+                        input_track_id.get(),
+                        other.kind_name()
                     )));
                 }
                 Message::Eos => {

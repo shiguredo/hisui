@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-24
-- Completed:
+- Completed: 2026-07-02
 - Model: Opus 4.7
 - Branch: feature/add-media-frame-text-variant
 - Polished: 2026-06-30

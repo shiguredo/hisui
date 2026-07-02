@@ -494,14 +494,7 @@ impl OutputPrinter {
     fn handle_audio_encoded_sample(&mut self, message: crate::Message) -> Result<()> {
         match message {
             crate::Message::Media(media_sample) => {
-                let audio_data = match media_sample {
-                    crate::MediaFrame::Audio(sample) => sample,
-                    crate::MediaFrame::Video(_) => {
-                        return Err(Error::new(
-                            "expected an audio sample, but got a video sample",
-                        ));
-                    }
-                };
+                let audio_data = media_sample.expect_audio()?;
                 if self.audio_codec.is_none() {
                     self.audio_codec = audio_data.format.codec_name();
                 }
@@ -528,14 +521,7 @@ impl OutputPrinter {
     fn handle_video_encoded_sample(&mut self, message: crate::Message) -> Result<()> {
         match message {
             crate::Message::Media(media_sample) => {
-                let video_frame = match media_sample {
-                    crate::MediaFrame::Video(sample) => sample,
-                    crate::MediaFrame::Audio(_) => {
-                        return Err(Error::new(
-                            "expected a video sample, but got an audio sample",
-                        ));
-                    }
-                };
+                let video_frame = media_sample.expect_video()?;
                 if self.video_codec.is_none() {
                     self.video_codec = video_frame.format.codec_name();
                 }
@@ -566,14 +552,7 @@ impl OutputPrinter {
     fn handle_audio_decoded_sample(&mut self, message: crate::Message) -> Result<()> {
         match message {
             crate::Message::Media(media_sample) => {
-                let audio_data = match media_sample {
-                    crate::MediaFrame::Audio(sample) => sample,
-                    crate::MediaFrame::Video(_) => {
-                        return Err(Error::new(
-                            "expected an audio sample, but got a video sample",
-                        ));
-                    }
-                };
+                let audio_data = media_sample.expect_audio()?;
                 self.pending_audio_decoded_data_sizes
                     .push_back(audio_data.data.len());
                 self.try_apply_pending_audio_decoded_data_sizes();
@@ -589,14 +568,7 @@ impl OutputPrinter {
     fn handle_video_decoded_sample(&mut self, message: crate::Message) -> Result<()> {
         match message {
             crate::Message::Media(media_sample) => {
-                let video_frame = match media_sample {
-                    crate::MediaFrame::Video(sample) => sample,
-                    crate::MediaFrame::Audio(_) => {
-                        return Err(Error::new(
-                            "expected a video sample, but got an audio sample",
-                        ));
-                    }
-                };
+                let video_frame = media_sample.expect_video()?;
                 self.pending_video_decoded_infos
                     .push_back(DecodedVideoInfo {
                         decoded_data_size: video_frame.data.len(),

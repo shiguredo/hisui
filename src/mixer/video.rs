@@ -766,10 +766,13 @@ fn spawn_input_receiver(
                             received_at: mixer_start.elapsed(),
                         });
                     }
-                    MediaFrame::Audio(_) => {
+                    other => {
                         let _ = event_tx.send(TrackEvent::Error {
                             track_id: track_id.clone(),
-                            reason: "expected a video sample, but got an audio sample".to_owned(),
+                            reason: format!(
+                                "expected video sample, but got {} sample",
+                                other.kind_name()
+                            ),
                         });
                         break;
                     }

@@ -818,9 +818,12 @@ fn spawn_input_receiver(
                             track_id: task_track_id.clone(),
                             frame,
                         },
-                        Message::Media(MediaFrame::Video(_)) => TrackEvent::Error {
+                        Message::Media(other) => TrackEvent::Error {
                             track_id: task_track_id.clone(),
-                            message: "expected audio sample, got video sample".to_owned(),
+                            message: format!(
+                                "expected audio sample, but got {} sample",
+                                other.kind_name()
+                            ),
                         },
                         Message::Eos => {
                             let _ = event_tx.send(TrackEvent::Eos {

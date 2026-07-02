@@ -318,6 +318,7 @@ struct P2pSessionStats {
     total_unsupported_audio_format_count: crate::stats::StatsCounter,
     total_unsubscribed_audio_frame_count: crate::stats::StatsCounter,
     input_audio_format: crate::stats::StatsString,
+    total_unexpected_text_frame_count: crate::stats::StatsCounter,
 }
 
 impl P2pSessionStats {
@@ -339,6 +340,7 @@ impl P2pSessionStats {
             total_unsubscribed_audio_frame_count: stats
                 .counter("total_unsubscribed_audio_frame_count"),
             input_audio_format: stats.string("input_audio_format"),
+            total_unexpected_text_frame_count: stats.counter("total_unexpected_text_frame_count"),
         }
     }
 }
@@ -1321,6 +1323,9 @@ fn handle_track_message(sess: &mut Session, track_id: &crate::TrackId, message: 
                 } else {
                     sess.stats.total_unsubscribed_audio_frame_count.inc();
                 }
+            }
+            crate::MediaFrame::Text(_) => {
+                sess.stats.total_unexpected_text_frame_count.inc();
             }
         },
         crate::Message::Eos => {

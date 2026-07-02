@@ -38,6 +38,7 @@ pub mod subcommand_server;
 pub mod tune;
 
 pub mod tcp;
+pub mod text;
 pub mod timestamp;
 pub mod types;
 pub mod video;
@@ -53,6 +54,7 @@ pub use media_pipeline::{
     PipelineTerminated, ProcessorHandle, ProcessorId, ProcessorMetadata, PublishTrackError,
     RegisterProcessorError, Syn, TrackId, TrackPublisher,
 };
+pub use text::TextFrame;
 pub use video::VideoFrame;
 
 pub type Result<T> = std::result::Result<T, Error>;
