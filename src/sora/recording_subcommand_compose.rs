@@ -11,7 +11,7 @@ use shiguredo_openh264::Openh264Library;
 use crate::{
     Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, Result,
     TrackId,
-    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
+    decoder::{AsyncVideoDecoder, AudioDecoder, VideoDecoderOptions},
     encoder::{AudioEncoder, VideoEncoder},
     mp4::writer::Mp4Writer,
     sora::recording_layout::{DEFAULT_LAYOUT_JSON, Layout},
@@ -460,7 +460,7 @@ async fn setup_pipeline(
             decoder_processor_id,
             decoder_metadata,
             move |handle| {
-                let decoder = VideoDecoder::new(decoder_options_for_decoder, handle.stats());
+                let decoder = AsyncVideoDecoder::new(decoder_options_for_decoder, handle.stats());
                 decoder.run(
                     handle,
                     reader_output_track_id_for_decoder.clone(),
