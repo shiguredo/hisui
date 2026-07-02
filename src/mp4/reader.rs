@@ -1492,6 +1492,16 @@ impl TrackSender {
         ok
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn send_media(&mut self, sample: crate::MediaFrame) -> bool {
+        self.prepare_send().await;
+        let ok = self.sender.send_media(sample);
+        if ok {
+            self.noacked_sent += 1;
+        }
+        ok
+    }
+
     pub(crate) fn send_eos(&mut self) {
         let _ = self.sender.send_eos();
     }
