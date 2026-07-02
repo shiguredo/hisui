@@ -22,9 +22,6 @@ impl Mp4FileSource {
         &self,
         event_ctx: Option<MediaEventContext>,
     ) -> Result<(Mp4FileReader, Option<MediaInputHandle>)> {
-        // video_decoder_options を Some で明示することで、 video_track_id が設定されている場合に
-        // Mp4FileReader::run 内で video decoder task が spawn される (openh264_lib は run 内で
-        // handle.config() から補完される)。
         let video_decoder_options = self
             .video_track_id
             .is_some()
@@ -43,8 +40,7 @@ impl Mp4FileSource {
         Ok((reader, media_handle))
     }
 
-    /// reader にデコーダーを設定して起動する。
-    /// video decoder は Mp4FileReaderOptions.video_decoder_options 経由で reader 内部で spawn される。
+    /// reader にデコーダーを設定して起動する
     pub async fn run_reader(mut reader: Mp4FileReader, processor: ProcessorHandle) -> Result<()> {
         if reader.has_audio_track() {
             let mut decoder_stats = processor.stats();

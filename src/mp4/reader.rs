@@ -207,10 +207,6 @@ pub struct Mp4FileReaderOptions {
     pub loop_playback: bool,
     pub audio_track_id: Option<TrackId>,
     pub video_track_id: Option<TrackId>,
-    // video decoder task の生成に使う options。
-    // None の場合は video decoder を扱わない (video_track_id が None の場合と組み合わせて使う)。
-    // openh264_lib は Mp4FileSource::create_reader が ProcessorHandle を持たないため、
-    // Mp4FileReader::run 内で handle.config() から補完する想定。
     pub video_decoder_options: Option<crate::decoder::VideoDecoderOptions>,
 }
 
@@ -224,10 +220,6 @@ pub struct Mp4FileReader {
     options: Mp4FileReaderOptions,
     audio_sender: Option<TrackSender>,
     audio_decoder: Option<crate::decoder::AudioDecoder>,
-    // spawn pattern で video decoder を扱う task。
-    // TrackSender は task に move し SYN/ACK 背圧を task 側で担う。
-    // seek/restart/reset_for_restart 時のライフサイクル管理は send_eos_to_tracks / apply_seek /
-    // reset_for_restart の各経路で行う。
     video_decoder_task: Option<VideoDecoderTask>,
     base_offset: Duration,
     last_emitted_end: Duration,
@@ -325,13 +317,12 @@ impl Mp4FileReader {
         let loop_enabled = self.resolve_loop_enabled();
         self.audio_sender = self.build_audio_sender(&handle).await?;
 
-        // video decoder task の初回 spawn。 video_decoder_options が None なら decoder 経路を作らない
         if let (Some(track_id), Some(mut video_options)) = (
             self.options.video_track_id.clone(),
             self.options.video_decoder_options.clone(),
         ) {
-            // openh264_lib は Mp4FileSource::create_reader が ProcessorHandle を持たないため
-            // options に埋め込めない。 ここで handle.config() から補完する
+            // openh264_lib は呼出側 (Mp4FileSource::create_reader) が ProcessorHandle を持たず
+            // options に埋め込めないため、 未設定なら handle.config() から補完する
             if video_options.openh264_lib.is_none() {
                 video_options.openh264_lib = handle.config().openh264_lib.clone();
             }
@@ -1288,9 +1279,6 @@ impl Mp4FileReader {
     }
 
     /// デコーダーの残りのフレームを flush する。EOS は送らない。
-    ///
-    /// video 側は decoder task が入力の連続性で残フレームを吐き出すため、 ここでは何もしない。
-    /// 最終的な shutdown (残 flush + send_eos) は send_eos_to_tracks で task.shutdown() が担う。
     fn flush_decoders(&mut self) -> Result<()> {
         if let Some(decoder) = self.audio_decoder.as_mut()
             && let Some(sender) = self.audio_sender.as_mut()
@@ -1302,8 +1290,6 @@ impl Mp4FileReader {
     }
 
     /// トラックに EOS を送信する。
-    ///
-    /// video 側は decoder task を shutdown することで task 内から send_eos が送られる。
     async fn send_eos_to_tracks(&mut self) {
         if let Some(sender) = self.audio_sender.as_mut() {
             sender.send_eos();
@@ -1364,9 +1350,6 @@ impl Mp4FileReader {
     }
 
     /// デコーダーを再生成する。
-    ///
-    /// video decoder は spawn pattern で task 内に閉じているため、 ここでは何もしない。
-    /// seek/restart 時の decoder 内部状態は task が入力の連続性 (keyframe から流し直し) で吸収する。
     fn recreate_decoders(&mut self, handle: &ProcessorHandle) {
         if self.audio_decoder.is_some() {
             let mut decoder_stats = handle.stats();
@@ -1533,8 +1516,8 @@ fn spawn_video_decoder_task(
     sender: TrackSender,
 ) -> VideoDecoderTask {
     let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
-    // Seek 直後などで warm-up 突入の可能性があるため安全側 (discard=true) で初期化する。
-    // 通常再生開始時は handle_video_sample の初回判定で warm-up 不要が確定した時点で false に切り替わる
+    // 初期値は任意 (最初の video sample 到達で handle_video_sample が必ず send で上書きする)。
+    // 起動直後に task 側が borrow する経路がないため未初期化状態は発生しない
     let (discard_mode_tx, discard_mode_rx) = tokio::sync::watch::channel(true);
     stats.set_default_label("component", "video_decoder");
     let join_handle = tokio::spawn(async move {
@@ -1566,12 +1549,10 @@ async fn video_decoder_loop(
             DecoderInput::Media(sample) => decoder.handle_input_sample_sync(Some(sample))?,
             DecoderInput::Eos => decoder.handle_input_sample_sync(None)?,
         }
-        // Openh264 は 1 サンプル入力で 0-2 frame を吐き出しうる (keyframe 時の flush 経路) ため、
-        // Pending / Finished に達するまで内側 loop で drain する
+        // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending / Finished まで drain する
         loop {
             match decoder.poll_output_sync()? {
                 crate::decoder::DecoderRunOutput::Processed(sample) => {
-                    // watch::Ref<'_, bool> は `*` deref 直後に drop され await を跨がない
                     if !*discard_mode_rx.borrow() && !sender.send_media(sample).await {
                         return Ok(());
                     }
@@ -1583,12 +1564,10 @@ async fn video_decoder_loop(
                 }
             }
         }
-        // handle_input_sample_sync(None) 後は poll_output_sync が必ず Finished を返す
-        // 不変条件のため到達不能。 実装者の誤解防止で防御コードとして残す
+        // AsyncVideoDecoder::poll_output_sync が Empty + eos==true を Finished に射影するため到達不能。
+        // 将来 poll_output_sync の実装が変わった時の防御として残す (エラー文言は VideoDecoder::run と揃える)
         if is_eos {
-            return Err(crate::Error::new(
-                "video decoder task still pending after EOS",
-            ));
+            return Err(crate::Error::new("video decoder still pending after EOS"));
         }
     }
 }
