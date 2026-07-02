@@ -5,9 +5,13 @@ use std::num::NonZeroUsize;
 use hisui::ml::audio::AudioChunkBuffer;
 use proptest::prelude::*;
 
-/// 任意の f32 PCM を生成する Strategy。
+/// VAD 経路の正規化 PCM 相当の `[-1.0, 1.0]` 範囲の f32 サンプル列を生成する Strategy。
+///
+/// `any::<f32>()` にすると NaN / Inf が混入し、`Vec<f32>::PartialEq` が要素ごとに `f32::eq` で
+/// 比較するため NaN == NaN が false になって順序保存アサーションが seed 依存で失敗する。
+/// AudioChunkBuffer 自体は値の意味に関与しないため、VAD 相当の有限範囲で十分。
 fn arb_pcm(max_len: usize) -> impl Strategy<Value = Vec<f32>> {
-    prop::collection::vec(any::<f32>(), 0..max_len)
+    prop::collection::vec(-1.0f32..1.0f32, 0..max_len)
 }
 
 /// PBT 内で `NonZeroUsize` を組み立てる補助関数 (0 を渡すとテスト失敗)。
