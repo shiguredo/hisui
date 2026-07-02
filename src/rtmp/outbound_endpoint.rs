@@ -397,13 +397,13 @@ impl RtmpPlayServer {
     }
 
     async fn handle_media_sample(&mut self, sample: MediaFrame) -> crate::Result<()> {
-        let kind = sample.kind_name();
         let frame = match sample {
             MediaFrame::Audio(audio) => ClientMediaFrame::Audio(audio),
             MediaFrame::Video(video) => ClientMediaFrame::Video(video),
-            MediaFrame::Text(_) => {
+            other => {
                 return Err(Error::new(format!(
-                    "expected audio or video sample, but got {kind} sample"
+                    "expected audio or video sample, but got {} sample",
+                    other.kind_name()
                 )));
             }
         };

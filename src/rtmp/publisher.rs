@@ -355,12 +355,12 @@ impl RtmpPublishRunner {
     }
 
     fn handle_media_sample(&mut self, sample: MediaFrame) -> crate::Result<()> {
-        let kind = sample.kind_name();
         match sample {
             MediaFrame::Audio(audio) => self.handle_audio_sample(audio),
             MediaFrame::Video(video) => self.handle_video_sample(video),
-            MediaFrame::Text(_) => Err(Error::new(format!(
-                "expected audio or video sample, but got {kind} sample"
+            other => Err(Error::new(format!(
+                "expected audio or video sample, but got {} sample",
+                other.kind_name()
             ))),
         }
     }
