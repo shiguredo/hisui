@@ -1356,8 +1356,12 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
     }
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
-        while let Some(decoded) = decoder.next_decoded_frame() {
+    let check_decoded_frames = |rx: &mut tokio::sync::mpsc::UnboundedReceiver<
+        hisui::Result<hisui::VideoFrame>,
+    >|
+     -> hisui::Result<()> {
+        while let Ok(result) = rx.try_recv() {
+            let decoded = result?;
             // 画像が赤一色かどうかの確認する（ただし、右と下の枠線は黒色になる）
             let (y_plane, u_plane, v_plane) = decoded
                 .as_yuv_planes()
@@ -1396,13 +1400,17 @@ fn odd_resolution_single_source() -> noargs::Result<()> {
         Ok(())
     };
 
-    let mut decoder = LibvpxDecoder::new_vp9()?;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut stats = hisui::stats::Stats::new();
+    let test_metric = stats.counter("test_total_output");
+    let sink = hisui::decoder::OutputSink::new(tx, test_metric);
+    let mut decoder = LibvpxDecoder::new_vp9(sink)?;
     for frame in video_samples {
         decoder.decode(&frame)?;
-        check_decoded_frames(&mut decoder)?;
+        check_decoded_frames(&mut rx)?;
     }
     decoder.finish()?;
-    check_decoded_frames(&mut decoder)?;
+    check_decoded_frames(&mut rx)?;
 
     Ok(())
 }
@@ -1568,8 +1576,11 @@ fn simple_split_archive() -> noargs::Result<()> {
     // 映像をデコードをして中身を確認する
     // 時系列順に R -> G -> B の色変化を確認
     let check_decoded_frames =
-        |decoder: &mut LibvpxDecoder, frame_index: &mut usize| -> hisui::Result<()> {
-            while let Some(decoded) = decoder.next_decoded_frame() {
+        |rx: &mut tokio::sync::mpsc::UnboundedReceiver<hisui::Result<hisui::VideoFrame>>,
+         frame_index: &mut usize|
+         -> hisui::Result<()> {
+            while let Ok(result) = rx.try_recv() {
+                let decoded = result?;
                 // Y成分だけを確認して色の変化を検証
                 let (y_plane, _u_plane, v_plane) = decoded
                     .as_yuv_planes()
@@ -1613,14 +1624,18 @@ fn simple_split_archive() -> noargs::Result<()> {
             Ok(())
         };
 
-    let mut decoder = LibvpxDecoder::new_vp9()?;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut stats = hisui::stats::Stats::new();
+    let test_metric = stats.counter("test_total_output");
+    let sink = hisui::decoder::OutputSink::new(tx, test_metric);
+    let mut decoder = LibvpxDecoder::new_vp9(sink)?;
     let mut frame_index = 0;
     for frame in video_samples {
         decoder.decode(&frame)?;
-        check_decoded_frames(&mut decoder, &mut frame_index)?;
+        check_decoded_frames(&mut rx, &mut frame_index)?;
     }
     decoder.finish()?;
-    check_decoded_frames(&mut decoder, &mut frame_index)?;
+    check_decoded_frames(&mut rx, &mut frame_index)?;
 
     // 全フレームが処理されたことを確認
     assert_eq!(frame_index, 75);
@@ -1707,8 +1722,12 @@ fn multi_sources_single_column() -> noargs::Result<()> {
     }
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
-        while let Some(decoded) = decoder.next_decoded_frame() {
+    let check_decoded_frames = |rx: &mut tokio::sync::mpsc::UnboundedReceiver<
+        hisui::Result<hisui::VideoFrame>,
+    >|
+     -> hisui::Result<()> {
+        while let Ok(result) = rx.try_recv() {
+            let decoded = result?;
             // 完全なチェックは面倒なので Y 成分だけを確認する
             let (y_plane, _u_plane, _v_plane) = decoded
                 .as_yuv_planes()
@@ -1739,13 +1758,17 @@ fn multi_sources_single_column() -> noargs::Result<()> {
         Ok(())
     };
 
-    let mut decoder = LibvpxDecoder::new_vp9()?;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut stats = hisui::stats::Stats::new();
+    let test_metric = stats.counter("test_total_output");
+    let sink = hisui::decoder::OutputSink::new(tx, test_metric);
+    let mut decoder = LibvpxDecoder::new_vp9(sink)?;
     for frame in video_samples {
         decoder.decode(&frame)?;
-        check_decoded_frames(&mut decoder)?;
+        check_decoded_frames(&mut rx)?;
     }
     decoder.finish()?;
-    check_decoded_frames(&mut decoder)?;
+    check_decoded_frames(&mut rx)?;
 
     Ok(())
 }
@@ -1810,8 +1833,12 @@ fn two_regions() -> noargs::Result<()> {
     assert_eq!(video_stats.total_track_duration, Duration::from_secs(1));
 
     // 映像をデコードをして中身を確認する
-    let check_decoded_frames = |decoder: &mut LibvpxDecoder| -> hisui::Result<()> {
-        while let Some(decoded) = decoder.next_decoded_frame() {
+    let check_decoded_frames = |rx: &mut tokio::sync::mpsc::UnboundedReceiver<
+        hisui::Result<hisui::VideoFrame>,
+    >|
+     -> hisui::Result<()> {
+        while let Ok(result) = rx.try_recv() {
+            let decoded = result?;
             // 完全なチェックは面倒なので Y 成分だけを確認する
             let (y_plane, _u_plane, _v_plane) = decoded
                 .as_yuv_planes()
@@ -1842,13 +1869,17 @@ fn two_regions() -> noargs::Result<()> {
         Ok(())
     };
 
-    let mut decoder = LibvpxDecoder::new_vp9()?;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut stats = hisui::stats::Stats::new();
+    let test_metric = stats.counter("test_total_output");
+    let sink = hisui::decoder::OutputSink::new(tx, test_metric);
+    let mut decoder = LibvpxDecoder::new_vp9(sink)?;
     for frame in video_samples {
         decoder.decode(&frame)?;
-        check_decoded_frames(&mut decoder)?;
+        check_decoded_frames(&mut rx)?;
     }
     decoder.finish()?;
-    check_decoded_frames(&mut decoder)?;
+    check_decoded_frames(&mut rx)?;
 
     Ok(())
 }

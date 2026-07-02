@@ -326,109 +326,154 @@ pub struct VideoDecoderOptions {
     pub engines: Option<Vec<EngineName>>,
 }
 
+/// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`output_rx`) に流すための送信側の型エイリアス
+pub type DecoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
+
+/// `AsyncVideoDecoder` 内部で内部デコーダーからの出力フレーム / エラーを受け取る受信側の型エイリアス
+pub type DecoderOutputReceiver = tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>;
+
+/// 内部デコーダーが出力フレーム / エラーを `AsyncVideoDecoder` 内の受信側 (`output_rx`) に流すためのシンク。
+///
+/// 出力フレーム (`emit_ok`) 送信時に `total_output_metric` の増分を物理的に強制ペアリングする。
+/// エラー (`emit_err`) 送信時はメトリクスを増分しない (出力フレーム数の意味論を汚さないため)。
+///
+/// `unreachable!()` 検出契約: シンクと `output_rx` は `AsyncVideoDecoder` 内で同居するため、
+/// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
+/// 同じ理由で `poll_output_sync` の `Disconnected` 分岐と `next_decoded_frame_async` の
+/// `None` 返却も同様に `unreachable!()` で潰す。
+#[derive(Debug, Clone)]
+pub struct OutputSink {
+    tx: DecoderOutputSender,
+    total_output_metric: crate::stats::StatsCounter,
+}
+
+impl OutputSink {
+    pub fn new(tx: DecoderOutputSender, total_output_metric: crate::stats::StatsCounter) -> Self {
+        Self {
+            tx,
+            total_output_metric,
+        }
+    }
+
+    /// 出力フレームを 1 件送信して `total_output_metric` を 1 だけ増分する。
+    pub fn emit_ok(&self, frame: VideoFrame) {
+        if self.tx.send(Ok(frame)).is_err() {
+            unreachable!("decoder output sink receiver dropped before sink (bug)");
+        }
+        // 送信成功後に増分することで「送信できなかったフレームをカウントする」嘘を物理的に防ぐ。
+        self.total_output_metric.inc();
+    }
+
+    /// エラーを 1 件送信する (メトリクスは増分しない)。
+    pub fn emit_err(&self, err: crate::Error) {
+        if self.tx.send(Err(err)).is_err() {
+            unreachable!("decoder output sink receiver dropped before sink (bug)");
+        }
+    }
+}
+
+/// 内部チャンネルベースの非同期映像デコーダー
+///
+/// 同期ラッパー (`VideoDecoder`) からは `handle_input_sample_sync` / `poll_output_sync` 経由で
+/// 同期 API として利用し、 直接利用するときは `next_decoded_frame_async` で非同期に取得する。
+///
+/// **注意**: 非同期な内部デコーダー (Nvcodec 等) 使用時、 `AsyncVideoDecoder` を drop する前に
+/// EOS + drain (`handle_input_sample_sync(None)` + `poll_output_sync` ループ) を完走させないと、
+/// コールバックが drop 中に emit した残物とメトリクス (`total_output_video_frame_count`) が
+/// 乖離する可能性がある (エラー時の warm-up 中止経路等で発生し得る)。
 #[derive(Debug)]
-pub struct VideoDecoder {
+pub struct AsyncVideoDecoder {
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
-    total_output_video_frame_count_metric: crate::stats::StatsCounter,
-    decoded: VecDeque<VideoFrame>,
     eos: bool,
+
+    // 以下 2 フィールドの宣言順は drop 順を意図的に制御している (Rust 言語仕様で drop 順 = 宣言順)。
+    // `inner` を `output_rx` より先に drop することで、 非同期な内部デコーダー (Nvcodec) の
+    // worker drop 中にコールバックが `sink.emit_ok` → `tx.send` した際に `output_rx` が
+    // まだ alive で send が成功する。 逆順にすると `emit_ok` の `unreachable!()` が発火する。
     inner: VideoDecoderInner,
+    output_rx: DecoderOutputReceiver,
 }
 
-impl VideoDecoder {
+impl AsyncVideoDecoder {
     pub fn new(options: VideoDecoderOptions, mut compose_stats: crate::stats::Stats) -> Self {
         let engine_metric = compose_stats.string("engine");
         let codec_metric = compose_stats.string("codec");
         let total_input_video_frame_count_metric =
             compose_stats.counter("total_input_video_frame_count");
-        let total_output_video_frame_count_metric =
-            compose_stats.counter("total_output_video_frame_count");
+        let total_output_metric = compose_stats.counter("total_output_video_frame_count");
         compose_stats.flag("error").set(false);
+        let (tx, output_rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = OutputSink::new(tx, total_output_metric);
         Self {
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
-            total_output_video_frame_count_metric,
-            decoded: VecDeque::new(),
             eos: false,
-            inner: VideoDecoderInner::new(options),
+            inner: VideoDecoderInner::Initial { options, sink },
+            output_rx,
         }
     }
 
-    pub async fn run(
-        mut self,
-        handle: ProcessorHandle,
-        input_track_id: TrackId,
-        output_track_id: TrackId,
-    ) -> Result<()> {
-        let mut input_rx = handle.subscribe_track(input_track_id);
-        let mut output_tx = handle.publish_track(output_track_id).await?;
-        handle.notify_ready();
-        handle.wait_subscribers_ready().await?;
-
-        loop {
-            let message = input_rx.recv().await;
-            let is_eos = matches!(message, Message::Eos);
-
-            self.handle_input_message(message)?;
-
-            match drain_video_decoder_output(&mut self, &mut output_tx)? {
-                DrainResult::PipelineClosed | DrainResult::Finished => {
-                    output_tx.send_eos();
-                    break;
-                }
-                DrainResult::Pending => {}
-            }
-
-            if is_eos {
-                return Err(Error::new("video decoder still pending after EOS"));
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn handle_input_message(&mut self, message: Message) -> Result<()> {
-        match message {
-            Message::Media(sample) => self.handle_input_sample(Some(sample)),
-            Message::Eos => self.handle_input_sample(None),
-            Message::Syn(_) => Ok(()),
-        }
-    }
-
-    pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
+    /// 同期ラッパー (`VideoDecoder`) から呼ぶ同期入力 API。
+    ///
+    /// `inner.decode()` / `inner.finish()` 内で発生した同期 `Err` は `?` 直返しで同期返却する。
+    /// 内部デコーダーのコールバック等で非同期に発生した `Err` は `sink.emit_err()` 経由で
+    /// チャンネルに流れ、 後続の `poll_output_sync` の `try_recv` で受信される。
+    pub fn handle_input_sample_sync(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
-
             self.total_input_video_frame_count_metric.inc();
-
             self.inner
                 .decode(&frame, &self.codec_metric, &self.engine_metric)?;
         } else {
             self.eos = true;
             self.inner.finish()?;
-        };
-
-        while let Some(frame) = self.inner.next_decoded_frame() {
-            self.total_output_video_frame_count_metric.inc();
-            self.decoded.push_back(frame);
         }
-
         Ok(())
     }
 
-    pub fn poll_output(&mut self) -> Result<DecoderRunOutput> {
-        if let Some(frame) = self.decoded.pop_front() {
-            Ok(DecoderRunOutput::Processed(MediaFrame::video(frame)))
-        } else if self.eos {
-            Ok(DecoderRunOutput::Finished)
-        } else {
-            Ok(DecoderRunOutput::Pending)
+    /// 同期ラッパー (`VideoDecoder`) から呼ぶ同期 poll。
+    ///
+    /// 既存 `poll_output()` の戻り値型と意味論を完全に維持する。 `try_recv` の `Empty` /
+    /// `Disconnected` を `eos` と組み合わせて判定する。
+    pub fn poll_output_sync(&mut self) -> Result<DecoderRunOutput> {
+        match self.output_rx.try_recv() {
+            Ok(Ok(frame)) => Ok(DecoderRunOutput::Processed(MediaFrame::video(frame))),
+            Ok(Err(e)) => Err(e),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                if self.eos {
+                    // `handle_input_sample_sync(None)` 経由で同期・非同期どちらの内部デコーダーも
+                    // フラッシュ完了しているため、 `eos` 時点でチャンネル内の残物はない。
+                    Ok(DecoderRunOutput::Finished)
+                } else {
+                    Ok(DecoderRunOutput::Pending)
+                }
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                // `OutputSink` の同居不変条件により構造上到達不能 (詳細は `OutputSink` の docstring 参照)。
+                unreachable!(
+                    "decoder output channel disconnected unexpectedly (sink dropped before rx)"
+                )
+            }
         }
     }
 
+    /// デコード済みフレームを非同期に取得する。
+    ///
+    /// - `Some(Ok(frame))`: 正常フレーム
+    /// - `Some(Err(e))`: 内部デコーダーからのエラー
+    /// - `None`: 全ての送信側が drop された
+    ///
+    /// 現状の実装では EOS 経路で sink を drop しないため `None` は構造上到達しないが、
+    /// 将来 EOS を非同期経路で通知する形が必要になった際に `None` を EOS シグナルとして
+    /// 活用できるよう `Option` を維持している。
+    pub async fn next_decoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>> {
+        self.output_rx.recv().await
+    }
+
+    /// codec とライブラリの利用可否に応じて候補となる engine のリストを返す。
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
         let mut engines = Vec::new();
         match codec {
@@ -490,6 +535,75 @@ impl VideoDecoder {
     }
 }
 
+/// 同期 API を提供する映像デコーダー (`AsyncVideoDecoder` の薄いラッパー)。
+///
+/// 内部では `AsyncVideoDecoder` に委譲する。
+#[derive(Debug)]
+pub struct VideoDecoder {
+    inner_decoder: AsyncVideoDecoder,
+}
+
+impl VideoDecoder {
+    pub fn new(options: VideoDecoderOptions, compose_stats: crate::stats::Stats) -> Self {
+        Self {
+            inner_decoder: AsyncVideoDecoder::new(options, compose_stats),
+        }
+    }
+
+    pub async fn run(
+        mut self,
+        handle: ProcessorHandle,
+        input_track_id: TrackId,
+        output_track_id: TrackId,
+    ) -> Result<()> {
+        let mut input_rx = handle.subscribe_track(input_track_id);
+        let mut output_tx = handle.publish_track(output_track_id).await?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
+
+        loop {
+            let message = input_rx.recv().await;
+            let is_eos = matches!(message, Message::Eos);
+
+            self.handle_input_message(message)?;
+
+            match drain_video_decoder_output(&mut self, &mut output_tx)? {
+                DrainResult::PipelineClosed | DrainResult::Finished => {
+                    output_tx.send_eos();
+                    break;
+                }
+                DrainResult::Pending => {}
+            }
+
+            if is_eos {
+                return Err(Error::new("video decoder still pending after EOS"));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn handle_input_message(&mut self, message: Message) -> Result<()> {
+        match message {
+            Message::Media(sample) => self.handle_input_sample(Some(sample)),
+            Message::Eos => self.handle_input_sample(None),
+            Message::Syn(_) => Ok(()),
+        }
+    }
+
+    pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
+        self.inner_decoder.handle_input_sample_sync(sample)
+    }
+
+    pub fn poll_output(&mut self) -> Result<DecoderRunOutput> {
+        self.inner_decoder.poll_output_sync()
+    }
+
+    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
+        AsyncVideoDecoder::get_engines(codec, is_openh264_available)
+    }
+}
+
 pub fn drain_audio_decoder_output(
     decoder: &mut AudioDecoder,
     output_tx: &mut crate::TrackPublisher,
@@ -536,6 +650,7 @@ pub fn drain_video_decoder_output(
 enum VideoDecoderInner {
     Initial {
         options: VideoDecoderOptions,
+        sink: OutputSink,
     },
     Libvpx(LibvpxDecoder),
     Openh264(Openh264Decoder),
@@ -547,17 +662,13 @@ enum VideoDecoderInner {
 }
 
 impl VideoDecoderInner {
-    fn new(options: VideoDecoderOptions) -> Self {
-        // [NOTE] 最初の映像フレームが来た時点で実際のデコーダーに切り替わる
-        Self::Initial { options }
-    }
-
     fn initialize_decoder(
         &mut self,
         frame: &VideoFrame,
         codec_metric: &crate::stats::StatsString,
         engine_metric: &crate::stats::StatsString,
         options: VideoDecoderOptions,
+        sink: OutputSink,
     ) -> crate::Result<()> {
         let codec = frame.format.codec_name().ok_or_else(|| {
             crate::Error::new(format!("unexpected video format: {:?}", frame.format))
@@ -595,45 +706,47 @@ impl VideoDecoderInner {
         match (engine, codec) {
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H264) => {
-                *self = NvcodecDecoder::new_h264(&options.decode_params).map(Self::Nvcodec)?;
+                *self =
+                    NvcodecDecoder::new_h264(&options.decode_params, sink).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H265) => {
-                *self = NvcodecDecoder::new_h265(&options.decode_params).map(Self::Nvcodec)?;
+                *self =
+                    NvcodecDecoder::new_h265(&options.decode_params, sink).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Vp8) => {
-                *self = NvcodecDecoder::new_vp8(&options.decode_params).map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_vp8(&options.decode_params, sink).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Vp9) => {
-                *self = NvcodecDecoder::new_vp9(&options.decode_params).map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_vp9(&options.decode_params, sink).map(Self::Nvcodec)?;
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Av1) => {
-                *self = NvcodecDecoder::new_av1(&options.decode_params).map(Self::Nvcodec)?;
+                *self = NvcodecDecoder::new_av1(&options.decode_params, sink).map(Self::Nvcodec)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H264) => {
-                *self = VideoToolboxDecoder::new_h264(frame)
+                *self = VideoToolboxDecoder::new_h264(frame, sink)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
-                *self = VideoToolboxDecoder::new_h265(frame)
+                *self = VideoToolboxDecoder::new_h265(frame, sink)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::Vp9) => {
-                *self = VideoToolboxDecoder::new_vp9(frame)
+                *self = VideoToolboxDecoder::new_vp9(frame, sink)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::Av1) => {
-                *self = VideoToolboxDecoder::new_av1(frame)
+                *self = VideoToolboxDecoder::new_av1(frame, sink)
                     .map(Box::new)
                     .map(Self::VideoToolbox)?;
             }
@@ -641,16 +754,16 @@ impl VideoDecoderInner {
                 let lib = options.openh264_lib.ok_or_else(|| {
                     crate::Error::new("OpenH264 library is required for H.264 decoding")
                 })?;
-                *self = Openh264Decoder::new(lib.clone()).map(Self::Openh264)?;
+                *self = Openh264Decoder::new(lib.clone(), sink).map(Self::Openh264)?;
             }
             (Some(EngineName::Libvpx), CodecName::Vp8) => {
-                *self = LibvpxDecoder::new_vp8().map(Self::Libvpx)?;
+                *self = LibvpxDecoder::new_vp8(sink).map(Self::Libvpx)?;
             }
             (Some(EngineName::Libvpx), CodecName::Vp9) => {
-                *self = LibvpxDecoder::new_vp9().map(Self::Libvpx)?;
+                *self = LibvpxDecoder::new_vp9(sink).map(Self::Libvpx)?;
             }
             (Some(EngineName::Dav1d), CodecName::Av1) => {
-                *self = Dav1dDecoder::new().map(Self::Dav1d)?;
+                *self = Dav1dDecoder::new(sink).map(Self::Dav1d)?;
             }
             _ => {
                 return Err(crate::Error::new(format!(
@@ -674,9 +787,10 @@ impl VideoDecoderInner {
         engine_metric: &crate::stats::StatsString,
     ) -> crate::Result<()> {
         match self {
-            Self::Initial { options } => {
+            Self::Initial { options, sink } => {
                 let options = options.clone();
-                self.initialize_decoder(frame, codec_metric, engine_metric, options)?;
+                let sink = sink.clone();
+                self.initialize_decoder(frame, codec_metric, engine_metric, options, sink)?;
                 self.decode(frame, codec_metric, engine_metric)
             }
             Self::Libvpx(decoder) => decoder.decode(frame),
@@ -701,19 +815,6 @@ impl VideoDecoderInner {
             Self::Nvcodec(decoder) => decoder.finish()?,
         }
         Ok(())
-    }
-
-    fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        match self {
-            Self::Initial { .. } => None,
-            Self::Libvpx(decoder) => decoder.next_decoded_frame(),
-            Self::Openh264(decoder) => decoder.next_decoded_frame(),
-            Self::Dav1d(decoder) => decoder.next_decoded_frame(),
-            #[cfg(target_os = "macos")]
-            Self::VideoToolbox(decoder) => decoder.next_decoded_frame(),
-            #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(decoder) => decoder.next_decoded_frame(),
-        }
     }
 }
 
@@ -754,9 +855,9 @@ mod tests {
         let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
 
         assert!(
-            matches!(decoder.inner, VideoDecoderInner::Libvpx(_)),
-            "expected Libvpx decoder, got {:?}",
-            std::mem::discriminant(&decoder.inner)
+            matches!(decoder.inner_decoder.inner, VideoDecoderInner::Libvpx(_)),
+            "Libvpx デコーダーを期待したが {:?} を得た",
+            std::mem::discriminant(&decoder.inner_decoder.inner)
         );
     }
 
@@ -778,9 +879,9 @@ mod tests {
         let _ = decoder.handle_input_sample(Some(MediaFrame::video(frame)));
 
         assert!(
-            matches!(decoder.inner, VideoDecoderInner::Dav1d(_)),
-            "expected Dav1d decoder, got {:?}",
-            std::mem::discriminant(&decoder.inner)
+            matches!(decoder.inner_decoder.inner, VideoDecoderInner::Dav1d(_)),
+            "Dav1d デコーダーを期待したが {:?} を得た",
+            std::mem::discriminant(&decoder.inner_decoder.inner)
         );
     }
 
@@ -808,14 +909,193 @@ mod tests {
         // どちらが選ばれるかは実行環境の VP9 ハードウェアデコード対応状況に依存するため、
         // ここでは「いずれかの有効なエンジンが選択されること」のみを検証する。
         #[cfg(target_os = "macos")]
-        let is_valid = matches!(decoder.inner, VideoDecoderInner::Libvpx(_))
-            || matches!(decoder.inner, VideoDecoderInner::VideoToolbox(_));
+        let is_valid = matches!(decoder.inner_decoder.inner, VideoDecoderInner::Libvpx(_))
+            || matches!(
+                decoder.inner_decoder.inner,
+                VideoDecoderInner::VideoToolbox(_)
+            );
         #[cfg(not(target_os = "macos"))]
-        let is_valid = matches!(decoder.inner, VideoDecoderInner::Libvpx(_));
+        let is_valid = matches!(decoder.inner_decoder.inner, VideoDecoderInner::Libvpx(_));
         assert!(
             is_valid,
-            "expected Libvpx or VideoToolbox decoder, got {:?}",
-            std::mem::discriminant(&decoder.inner)
+            "Libvpx または VideoToolbox デコーダーを期待したが {:?} を得た",
+            std::mem::discriminant(&decoder.inner_decoder.inner)
         );
+    }
+
+    /// テスト用の最小 `VideoFrame` を作る (data は任意のバイト列、 timestamp は 0)
+    fn make_test_video_frame(data: Vec<u8>) -> VideoFrame {
+        VideoFrame {
+            data,
+            format: VideoFormat::Vp9,
+            keyframe: true,
+            size: None,
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        }
+    }
+
+    /// `emit_ok` はフレームを受信側 (`rx`) に送信し、 `total_output_metric` を 1 増分する
+    #[test]
+    fn output_sink_emit_ok_sends_frame_and_increments_metric() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats = crate::stats::Stats::new();
+        let counter = stats.counter("test_total_output");
+        let sink = OutputSink::new(tx, counter.clone());
+
+        let frame = make_test_video_frame(vec![1, 2, 3]);
+        sink.emit_ok(frame);
+
+        match rx.try_recv() {
+            Ok(Ok(received)) => {
+                assert_eq!(
+                    received.data,
+                    vec![1, 2, 3],
+                    "送信したフレームと一致するはず"
+                );
+            }
+            other => panic!("Ok(Ok(_)) を期待したが {other:?} を受信した"),
+        }
+        assert_eq!(
+            counter.get(),
+            1,
+            "emit_ok を 1 回呼ぶとカウンターが 1 増分されるはず"
+        );
+    }
+
+    /// `emit_err` はエラーを受信側 (`rx`) に送信するが、 `total_output_metric` は増分しない
+    ///
+    /// (「emit_ok だけがカウンターを増分する」契約の回帰検出。
+    /// この契約が崩れるとメトリクス二重計上 / 不正計上の温床になる)
+    #[test]
+    fn output_sink_emit_err_sends_error_without_incrementing_metric() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats = crate::stats::Stats::new();
+        let counter = stats.counter("test_total_output");
+        let sink = OutputSink::new(tx, counter.clone());
+
+        sink.emit_err(crate::Error::new("test sink error"));
+
+        match rx.try_recv() {
+            Ok(Err(e)) => {
+                let msg = e.display().to_string();
+                assert!(
+                    msg.contains("test sink error"),
+                    "送信したエラーメッセージが含まれているはず: {msg}"
+                );
+            }
+            other => panic!("Ok(Err(_)) を期待したが {other:?} を受信した"),
+        }
+        assert_eq!(counter.get(), 0, "emit_err はカウンターを増分しないはず");
+    }
+
+    /// `OutputSink::clone()` で複製した 2 つのシンクから emit しても、 同一の受信側 (`rx`) で受信できる
+    ///
+    /// (`NvcodecDecoder` の `build_handler` が `sink.clone()` をコールバッククロージャに move する
+    /// 設計の不変条件を回帰検出する)
+    #[test]
+    fn output_sink_clone_shares_channel() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats = crate::stats::Stats::new();
+        let counter = stats.counter("test_total_output");
+        let sink_a = OutputSink::new(tx, counter.clone());
+        let sink_b = sink_a.clone();
+
+        sink_a.emit_ok(make_test_video_frame(vec![0xAA]));
+        sink_b.emit_ok(make_test_video_frame(vec![0xBB]));
+
+        let first = rx.try_recv().expect("1 件目を受信できるはず");
+        let second = rx.try_recv().expect("2 件目を受信できるはず");
+        let first = first.expect("Ok のはず");
+        let second = second.expect("Ok のはず");
+        assert_eq!(first.data, vec![0xAA], "FIFO 順で sink_a 由来が先");
+        assert_eq!(second.data, vec![0xBB], "FIFO 順で sink_b 由来が後");
+        assert_eq!(
+            counter.get(),
+            2,
+            "2 つの sink (clone でも同一 metric を共有) から各 1 回 emit_ok で合計 2 inc"
+        );
+    }
+
+    /// 受信側 `rx` を先に drop した後の `emit_ok` は `unreachable!()` で panic する
+    ///
+    /// (構造体不変条件: シンクと受信側は `AsyncVideoDecoder` 内で同居するため、
+    /// 通常運用ではこの状況に到達しない。 万一シンクと受信側の所有関係を将来変更してしまった場合に
+    /// 静かに失敗させず即時 panic でバグを検出する)
+    #[test]
+    #[should_panic(expected = "decoder output sink receiver dropped before sink")]
+    fn output_sink_emit_ok_panics_when_receiver_dropped() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut stats = crate::stats::Stats::new();
+        let counter = stats.counter("test_total_output");
+        let sink = OutputSink::new(tx, counter);
+        drop(rx); // rx を先に drop する
+
+        sink.emit_ok(make_test_video_frame(vec![1, 2, 3]));
+    }
+
+    /// `poll_output_sync` の Empty + eos==true 分岐: EOS 受信後で channel 空なら `Finished` を返す
+    #[test]
+    fn poll_output_sync_returns_finished_when_eos_and_channel_empty() {
+        let mut decoder =
+            AsyncVideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
+        // EOS で eos=true に遷移させる (inner は Initial のまま、 channel も空)。
+        // Initial バリアントの `finish()` は no-op (実バックエンド未初期化のため
+        // フラッシュ対象が存在しない) なので、 EOS を受けても sink には何も emit されず、
+        // `output_rx` は Empty のまま、 `self.eos = true` だけがセットされる。
+        // したがって直後の `poll_output_sync` は Empty + eos==true 分岐に確定で入る。
+        decoder
+            .handle_input_sample_sync(None)
+            .expect("EOS は Initial でも Ok");
+
+        assert!(
+            matches!(decoder.poll_output_sync(), Ok(DecoderRunOutput::Finished)),
+            "Empty + eos==true で Finished を期待した"
+        );
+    }
+
+    /// `poll_output_sync` の Empty + eos==false 分岐: 初期状態 (channel 空、 eos 未設定) なら `Pending` を返す
+    #[test]
+    fn poll_output_sync_returns_pending_when_not_eos_and_channel_empty() {
+        let mut decoder =
+            AsyncVideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
+        // handle_input_sample_sync を一度も呼ばない (eos=false、 channel 空)
+
+        assert!(
+            matches!(decoder.poll_output_sync(), Ok(DecoderRunOutput::Pending)),
+            "Empty + eos==false で Pending を期待した"
+        );
+    }
+
+    /// `poll_output_sync` の Ok(Err(_)) 分岐: 非同期な内部デコーダーのコールバックが
+    /// `sink.emit_err()` 経由でチャンネルに流したエラーが、 同期経路で `Err` として返却されることを検証する。
+    ///
+    /// この経路は `VideoDecoder::run` の drain ループが Nvcodec の非同期エラーを拾い上げる
+    /// 唯一の同期契約であり、 silent に潰れる形の改修 (例: `Err(e) => Ok(Pending)`) が
+    /// 混入しても integration test では実 Err ケースを再現しにくいため、 単体テストで担保する。
+    #[test]
+    fn poll_output_sync_returns_err_when_emit_err_received() {
+        let mut decoder =
+            AsyncVideoDecoder::new(VideoDecoderOptions::default(), crate::stats::Stats::new());
+
+        // Initial バリアント内のシンクを取り出してチャンネルに Err を流す
+        let sink = match &decoder.inner {
+            VideoDecoderInner::Initial { sink, .. } => sink.clone(),
+            _ => panic!("初期状態は Initial バリアントが期待される"),
+        };
+        sink.emit_err(crate::Error::new("test callback error"));
+
+        match decoder.poll_output_sync() {
+            Err(e) => {
+                let msg = e.display().to_string();
+                assert!(
+                    msg.contains("test callback error"),
+                    "予期したエラーメッセージが含まれていない: {msg}"
+                );
+            }
+            Ok(DecoderRunOutput::Processed(_)) => panic!("Err を期待したが Processed を受信した"),
+            Ok(DecoderRunOutput::Pending) => panic!("Err を期待したが Pending を受信した"),
+            Ok(DecoderRunOutput::Finished) => panic!("Err を期待したが Finished を受信した"),
+        }
     }
 }

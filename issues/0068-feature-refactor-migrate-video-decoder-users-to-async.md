@@ -27,7 +27,7 @@ Medium。
 issue 0066 完了直後の状態を前提とする (0066 未完時点では本 issue は着手しない)。0066 完了時点では:
 
 - `AsyncVideoDecoder` が `src/decoder.rs` に新規追加されており、`recv().await` で `Result<VideoFrame>` を受け取れる
-- 既存 `VideoDecoder` (同期) は内部実装が `tokio::sync::mpsc::UnboundedReceiver` ベースに切り替わっているが、外部 API (`next_decoded_frame()` / `poll_output()` / `drain_video_decoder_output` / `discard_video_decoder_output`) は挙動不変で全使用側が引き続き同期 pull で動いている
+- 既存 `VideoDecoder` (同期) は内部に `AsyncVideoDecoder` を保持する wrap 構造に切り替わっており、出力は内部 channel 経由で受け取るが、外部 API (`poll_output()` / `drain_video_decoder_output` / `discard_video_decoder_output`) は挙動不変で全使用側が引き続き同期 pull で動いている
 - 各 inner (`Libvpx` / `Openh264` / `Dav1d` / `VideoToolbox` / `Nvcodec`) は同期 fn コンストラクタで `tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>` を内包する形に変更済み
 
 本 issue で書き換える対象 (9 ファイル + 最終クリーンアップ):
@@ -42,7 +42,7 @@ issue 0066 完了直後の状態を前提とする (0066 未完時点では本 i
 | 6 | `src/rtsp/subscriber.rs` | 同上 (構造体 `:64, :238`、`handle_input_sample` `:657`、`drain_video_decoder_output` `:662`) |
 | 7 | `src/srt/inbound_endpoint.rs` | 同上 (構造体 `:169, :406`、`handle_input_sample` `:441`、`drain_video_decoder_output` `:445`) |
 | 8 | `src/obsws/source/file_mp4.rs` | `VideoDecoder::new` (`:54`) + `reader.set_video_decoder(decoder)` (`:61`) の注入パターン。mp4 reader 改修 (#4) と連動して廃止 |
-| 9 | 最終クリーンアップ | 同期 `VideoDecoder` 構造体と関連 API (`next_decoded_frame` / `poll_output` / `drain_video_decoder_output` / `discard_video_decoder_output` / `Mp4FileReader::set_video_decoder`) をコードベースから完全削除、`AsyncVideoDecoder` を `VideoDecoder` にリネーム |
+| 9 | 最終クリーンアップ | 同期 `VideoDecoder` 構造体と関連 API (`poll_output` / `drain_video_decoder_output` / `discard_video_decoder_output` / `Mp4FileReader::set_video_decoder`) をコードベースから完全削除、`AsyncVideoDecoder` を `VideoDecoder` にリネーム |
 
 ## 設計方針
 
@@ -113,8 +113,7 @@ RTMP / RTSP / SRT inbound endpoint 3 ファイルは構造が似ているため�
 
 - 上記「現状」§の 9 項目すべてが完了している
 - 同期 `VideoDecoder` 構造体および関連同期 API がコードベースから完全に削除されている:
-  - `VideoDecoder` (旧、同期 pull 型)
-  - `VideoDecoder::next_decoded_frame()`
+  - `VideoDecoder` (旧、`AsyncVideoDecoder` の wrap 型)
   - `VideoDecoder::poll_output()`
   - `drain_video_decoder_output` ヘルパ
   - `discard_video_decoder_output` ヘルパ

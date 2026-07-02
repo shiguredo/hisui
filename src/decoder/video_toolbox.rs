@@ -1,5 +1,6 @@
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
+use super::OutputSink;
 use crate::{
     video::h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, NALU_HEADER_LENGTH},
     video::h265::{H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS},
@@ -9,7 +10,7 @@ use crate::{
 #[derive(Debug)]
 pub struct VideoToolboxDecoder {
     inner: shiguredo_video_toolbox::Decoder,
-    decoded: Option<VideoFrame>,
+    sink: OutputSink,
 
     // デコーダーの再初期化が必要かどうかの判定に使うフィールド
     //
@@ -22,7 +23,7 @@ pub struct VideoToolboxDecoder {
 }
 
 impl VideoToolboxDecoder {
-    pub fn new_h264(frame: &VideoFrame) -> crate::Result<Self> {
+    pub fn new_h264(frame: &VideoFrame, sink: OutputSink) -> crate::Result<Self> {
         let (sps, pps) = get_h264_sps_pps(frame)?;
         tracing::debug!("Initialize H.264 decoder: sps={sps:?}, pps={pps:?}");
 
@@ -37,7 +38,7 @@ impl VideoToolboxDecoder {
             })?;
         Ok(Self {
             inner,
-            decoded: None,
+            sink,
             vps: Vec::new(),
             sps,
             pps,
@@ -45,7 +46,7 @@ impl VideoToolboxDecoder {
         })
     }
 
-    pub fn new_h265(frame: &VideoFrame) -> crate::Result<Self> {
+    pub fn new_h265(frame: &VideoFrame, sink: OutputSink) -> crate::Result<Self> {
         let (vps, sps, pps) = get_h265_vps_sps_pps(frame)?;
         tracing::debug!("Initialize H.265 decoder: vps={vps:?}, sps={sps:?}, pps={pps:?}");
 
@@ -61,7 +62,7 @@ impl VideoToolboxDecoder {
             })?;
         Ok(Self {
             inner,
-            decoded: None,
+            sink,
             vps: vps.to_vec(),
             sps: sps.to_vec(),
             pps: pps.to_vec(),
@@ -69,23 +70,25 @@ impl VideoToolboxDecoder {
         })
     }
 
-    pub fn new_vp9(frame: &VideoFrame) -> crate::Result<Self> {
+    pub fn new_vp9(frame: &VideoFrame, sink: OutputSink) -> crate::Result<Self> {
         let (width, height) = get_frame_resolution(frame, "VP9")?;
         tracing::debug!("Initialize VP9 decoder: width={width}, height={height}");
         Self::new_raw_codec(
             shiguredo_video_toolbox::DecoderCodec::Vp9 { width, height },
             width,
             height,
+            sink,
         )
     }
 
-    pub fn new_av1(frame: &VideoFrame) -> crate::Result<Self> {
+    pub fn new_av1(frame: &VideoFrame, sink: OutputSink) -> crate::Result<Self> {
         let (width, height) = get_frame_resolution(frame, "AV1")?;
         tracing::debug!("Initialize AV1 decoder: width={width}, height={height}");
         Self::new_raw_codec(
             shiguredo_video_toolbox::DecoderCodec::Av1 { width, height },
             width,
             height,
+            sink,
         )
     }
 
@@ -94,6 +97,7 @@ impl VideoToolboxDecoder {
         codec: shiguredo_video_toolbox::DecoderCodec<'_>,
         width: u32,
         height: u32,
+        sink: OutputSink,
     ) -> crate::Result<Self> {
         let inner =
             shiguredo_video_toolbox::Decoder::new(shiguredo_video_toolbox::DecoderConfig {
@@ -102,7 +106,7 @@ impl VideoToolboxDecoder {
             })?;
         Ok(Self {
             inner,
-            decoded: None,
+            sink,
             vps: Vec::new(),
             sps: Vec::new(),
             pps: Vec::new(),
@@ -130,12 +134,11 @@ impl VideoToolboxDecoder {
                         return Ok(());
                     }
 
-                    if self.decoded.is_some() {
-                        return Err(crate::Error::new(
-                            "cannot reinitialize decoder while decoded frame is pending",
-                        ));
-                    }
-                    *self = Self::new_h265(frame)?;
+                    // シンクを引き継ぐ (元の `AsyncVideoDecoder` の受信側 `rx` に届き続ける必要があるため)。
+                    // 未消費フレームは送信側 (`Sender`) 経由で即時に emit 済のため、
+                    // 再初期化で喪失するリスクはない。
+                    let sink = self.sink.clone();
+                    *self = Self::new_h265(frame, sink)?;
                 }
             }
             VideoFormat::H264 | VideoFormat::H264AnnexB => {
@@ -145,12 +148,8 @@ impl VideoToolboxDecoder {
                         return Ok(());
                     }
 
-                    if self.decoded.is_some() {
-                        return Err(crate::Error::new(
-                            "cannot reinitialize decoder while decoded frame is pending",
-                        ));
-                    }
-                    *self = Self::new_h264(frame)?;
+                    let sink = self.sink.clone();
+                    *self = Self::new_h264(frame, sink)?;
                 }
             }
             VideoFormat::Vp9 => {
@@ -170,20 +169,16 @@ impl VideoToolboxDecoder {
         &mut self,
         frame: &VideoFrame,
         codec_name: &str,
-        constructor: fn(&VideoFrame) -> crate::Result<Self>,
+        constructor: fn(&VideoFrame, OutputSink) -> crate::Result<Self>,
     ) -> crate::Result<()> {
         let (new_width, new_height) = get_frame_resolution(frame, codec_name)?;
         if Some((new_width, new_height)) == self.resolution {
             return Ok(());
         }
 
-        if self.decoded.is_some() {
-            return Err(crate::Error::new(
-                "cannot reinitialize decoder while decoded frame is pending",
-            ));
-        }
-
-        *self = constructor(frame)?;
+        // シンクを引き継ぐ (上記 H264/H265 経路と同じ理由)
+        let sink = self.sink.clone();
+        *self = constructor(frame, sink)?;
         Ok(())
     }
 
@@ -227,7 +222,7 @@ impl VideoToolboxDecoder {
             ));
         };
 
-        self.decoded = Some(VideoFrame::new_i420(
+        self.sink.emit_ok(VideoFrame::new_i420(
             frame.to_stripped(),
             decoded.width(),
             decoded.height(),
@@ -239,10 +234,6 @@ impl VideoToolboxDecoder {
             decoded.v_stride(),
         ));
         Ok(())
-    }
-
-    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        self.decoded.take()
     }
 }
 

@@ -3,21 +3,22 @@ use std::collections::VecDeque;
 use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 use shiguredo_openh264::Openh264Library;
 
+use super::OutputSink;
 use crate::video::{VideoFormat, VideoFrame};
 
 #[derive(Debug)]
 pub struct Openh264Decoder {
     inner: shiguredo_openh264::Decoder,
     input_queue: VecDeque<VideoFrame>,
-    output_queue: VecDeque<VideoFrame>,
+    sink: OutputSink,
 }
 
 impl Openh264Decoder {
-    pub fn new(lib: Openh264Library) -> crate::Result<Self> {
+    pub fn new(lib: Openh264Library, sink: OutputSink) -> crate::Result<Self> {
         Ok(Self {
             inner: shiguredo_openh264::Decoder::new(lib)?,
             input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
+            sink,
         })
     }
 
@@ -53,7 +54,7 @@ impl Openh264Decoder {
             .pop_front()
             .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
         let output_frame = Self::to_rgb_frame(input_frame, decoded)?;
-        self.output_queue.push_back(output_frame);
+        self.sink.emit_ok(output_frame);
         Ok(())
     }
 
@@ -66,7 +67,7 @@ impl Openh264Decoder {
             .pop_front()
             .ok_or_else(|| crate::Error::new("decoded frame produced without input frame"))?;
         let output_frame = Self::to_rgb_frame(input_frame, decoded)?;
-        self.output_queue.push_back(output_frame);
+        self.sink.emit_ok(output_frame);
         Ok(())
     }
 
@@ -85,10 +86,6 @@ impl Openh264Decoder {
             frame.u_stride(),
             frame.v_stride(),
         ))
-    }
-
-    pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
     }
 }
 

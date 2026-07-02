@@ -48,6 +48,156 @@ fn av1_multi_resolutions() -> hisui::Result<()> {
     Ok(())
 }
 
+/// `AsyncVideoDecoder::next_decoded_frame_async` の非同期取り出し経路を実 VP9 フィクスチャで検証する
+///
+/// 検証対象パス: `AsyncVideoDecoder::handle_input_sample_sync` → `VideoDecoderInner::decode`
+/// → `Initial` → `Libvpx` への遷移 → `LibvpxDecoder::decode` → `sink.emit_ok` → 内部チャンネル
+/// → `rx.recv` → `next_decoded_frame_async` の全段を 1 フレームで踏破することを確認する。
+/// `VideoDecoder` 経由の同期ラップ経路は別テスト (`_via_wrap_delegation`) が担当する。
+#[tokio::test(flavor = "multi_thread")]
+async fn async_video_decoder_processes_real_vp9_frame_via_next_decoded_frame_async()
+-> hisui::Result<()> {
+    use hisui::MediaFrame;
+    use hisui::decoder::AsyncVideoDecoder;
+
+    // 既存 `vp9_multi_resolutions` と同じフィクスチャを 1 フレームだけ使う
+    let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
+    let first_frame = reader
+        .next()
+        .expect("少なくとも 1 フレーム含まれているはず")?;
+
+    let options = VideoDecoderOptions::default();
+    let stats = hisui::stats::Stats::new();
+    let mut decoder = AsyncVideoDecoder::new(options, stats);
+
+    // 非同期経路: `handle_input_sample_sync` 経由で `inner.decode` → `sink.emit_ok` を実行する
+    decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
+    // EOS で `inner.finish()` 経由を踏ませて未排出フレームをすべて吐かせる
+    decoder.handle_input_sample_sync(None)?;
+
+    // 非同期取り出し: `rx.recv` 経由で正常フレームを取得できることを確認する
+    match decoder.next_decoded_frame_async().await {
+        Some(Ok(frame)) => {
+            let size = frame.size().expect("VP9 フィクスチャは size を持つはず");
+            assert_eq!(size.width, 640, "フィクスチャ解像度と一致するはず");
+            assert_eq!(size.height, 480, "フィクスチャ解像度と一致するはず");
+        }
+        other => panic!("正常フレーム (Some(Ok(_))) を期待したが {other:?} を受信した"),
+    }
+    Ok(())
+}
+
+/// `VideoDecoder::poll_output` の同期ラップ経路を実 VP9 フィクスチャで踏破する
+///
+/// 検証対象パス: `VideoDecoder::handle_input_sample` → `AsyncVideoDecoder::handle_input_sample_sync`
+/// → `VideoDecoderInner::decode` → `sink.emit_ok` → 内部チャンネル →
+/// `VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync` の全段を実際に踏む。
+/// wrap 側 (`VideoDecoder`) が同期 API をそのまま `AsyncVideoDecoder` に委譲していることを、
+/// 上位 API 呼び出しだけで検出できるようにする回帰テスト。
+#[test]
+fn video_decoder_poll_output_returns_processed_via_wrap_delegation() -> hisui::Result<()> {
+    use hisui::MediaFrame;
+    use hisui::decoder::DecoderRunOutput;
+
+    let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
+    let first_frame = reader
+        .next()
+        .expect("少なくとも 1 フレーム含まれているはず")?;
+
+    let options = VideoDecoderOptions::default();
+    let stats = hisui::stats::Stats::new();
+    let mut decoder = VideoDecoder::new(options, stats);
+
+    // wrap 経路: `VideoDecoder::handle_input_sample` → 内部 `AsyncVideoDecoder` に委譲される
+    decoder.handle_input_sample(Some(MediaFrame::video(first_frame)))?;
+    // EOS で `inner.finish()` を経由してフラッシュを踏ませ、 非同期な内部デコーダーの
+    // コールバック完了を待ち合わせる (`poll_output` が `Pending` を返さないようにするため)。
+    decoder.handle_input_sample(None)?;
+
+    // wrap 経路: `VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync` に委譲
+    let output = decoder.poll_output()?;
+    assert!(
+        matches!(output, DecoderRunOutput::Processed(_)),
+        "実 VP9 フィクスチャから Processed を期待した (VideoDecoder::poll_output 経由)"
+    );
+    Ok(())
+}
+
+/// メトリクス二重計上禁止の回帰検出: N フレーム入力 → `total_input` が N 増分、
+/// N フレーム出力 → `total_output` が N 増分されることを `VideoDecoder` の wrap 経路で確認する
+///
+/// `OutputSink` が送信と増分を物理的に強制ペアリングする契約が
+/// 「emit_ok 経路でメトリクスの `add(2)` 等の二重計上が混入しても検出されない」状態にならないよう、
+/// 量的検証を wrap 経路経由 (`VideoDecoder::handle_input_sample` / `poll_output`) の
+/// end-to-end で担保する。
+///
+/// N=1 では「1 呼び出しで k 倍増分」型 (`add(k)` 直接乗算) の混入は検出できるが、
+/// 「k フレーム目だけ倍増する」「(N-1) フレーム目までは正しく (N) フレーム目で +2」等の
+/// 累積 off-by-one 系バグは検出範囲外になるため、 複数フレーム (N=3) で assert する。
+#[test]
+fn video_decoder_metrics_increment_by_input_count_via_wrap_delegation() -> hisui::Result<()> {
+    use hisui::MediaFrame;
+    use hisui::decoder::DecoderRunOutput;
+
+    const FRAME_COUNT: u64 = 3;
+
+    let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
+    let frames: Vec<_> = (0..FRAME_COUNT)
+        .map(|i| {
+            reader.next().unwrap_or_else(|| {
+                panic!("フレーム {i} が読めるはず (フィクスチャは十分な長さを持つ)")
+            })
+        })
+        .collect::<hisui::Result<Vec<_>>>()?;
+
+    // メトリクスのハンドルを先に取得しておく
+    // (`Stats::counter` は同名に対して同一の `Arc` を返す `get_or_insert_entry` なので、
+    //  ここで取ったカウンターとデコーダー内部のカウンターは同じ `Arc` を共有する)
+    let mut stats = hisui::stats::Stats::new();
+    let total_input = stats.counter("total_input_video_frame_count");
+    let total_output = stats.counter("total_output_video_frame_count");
+
+    let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
+
+    // N フレーム入力 → wrap 経路 (`VideoDecoder::handle_input_sample`) 経由で
+    // 内部 `AsyncVideoDecoder::handle_input_sample_sync` → `inner.decode` → `sink.emit_ok` まで実行する
+    for frame in frames {
+        decoder.handle_input_sample(Some(MediaFrame::video(frame)))?;
+    }
+    // EOS でフラッシュを踏ませて、 非同期な内部デコーダーのコールバック完了と
+    // 未排出フレームの吐き出しを待ち合わせる
+    decoder.handle_input_sample(None)?;
+
+    // 全出力を wrap 経路 (`VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync`) で取り出す
+    let mut processed = 0u64;
+    loop {
+        match decoder.poll_output()? {
+            DecoderRunOutput::Processed(_) => processed += 1,
+            DecoderRunOutput::Finished => break,
+            DecoderRunOutput::Pending => panic!("EOS 後に Pending は想定外 (フラッシュ済み前提)"),
+        }
+    }
+    assert_eq!(
+        processed, FRAME_COUNT,
+        "入力と同数のフレームが出力されるはず (N={FRAME_COUNT})"
+    );
+
+    // 二重計上禁止契約: 入力 N フレーム = `total_input` を N 増分 (add(k) 混入等を検出)
+    assert_eq!(
+        total_input.get(),
+        FRAME_COUNT,
+        "N フレーム入力で total_input が N 増分されるはず (二重計上禁止)"
+    );
+    // 二重計上禁止契約: 出力 N フレーム = `total_output` を N 増分 (`OutputSink::emit_ok` 経由で物理ペアリング)
+    assert_eq!(
+        total_output.get(),
+        FRAME_COUNT,
+        "N フレーム出力で total_output が N 増分されるはず (二重計上禁止)"
+    );
+
+    Ok(())
+}
+
 fn multi_resolutions_test<I>(reader0: I, reader1: I) -> hisui::Result<()>
 where
     I: Iterator<Item = hisui::Result<VideoFrame>>,
