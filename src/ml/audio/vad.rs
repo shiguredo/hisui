@@ -95,6 +95,11 @@ impl VadGate {
     /// - 発話継続中や `min_silence_ms` 未達の区間は Self 内に保持し、次の `feed` または `flush` で確定する。
     /// - 512 サンプル境界に満たない残余は Self 内 buffer に貯めて次の feed に持ち越す。
     /// - 1 回の feed で複数 SpeechSegment を返し得る (feed 内で発話 → 無音 → 発話が複数回起きた場合)。
+    ///
+    /// `SileroVad::chunk_probability` が Err を返した場合、内部 buffer から drain 済みの 1 チャンクぶんの
+    /// PCM は失われ、通し番号 (`sample_count`) も進まない。この状態のまま `feed` / `flush` を続けると
+    /// SpeechSegment の通し番号が本来より 512 サンプルぶん前にずれる。Err を受け取った呼び出し側は
+    /// `reset` して作り直すこと (candle 内部エラーは通常運用では発生しない前提)。
     pub fn feed(&mut self, samples: &[f32]) -> crate::Result<Vec<SpeechSegment>> {
         self.buffer.push(samples);
         let mut results = Vec::new();
