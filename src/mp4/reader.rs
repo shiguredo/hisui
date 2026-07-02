@@ -349,7 +349,7 @@ impl Mp4FileReader {
             self.last_realtime_timestamp = None;
             let result = self.run_loop(loop_enabled, &handle).await?;
             if matches!(result, RunLoopResult::Eof) {
-                self.flush_decoders()?;
+                self.flush_audio_decoder()?;
             }
             self.send_eos_to_tracks().await?;
             return Ok(());
@@ -360,7 +360,7 @@ impl Mp4FileReader {
             let result = self.run_loop(loop_enabled, &handle).await?;
             match result {
                 RunLoopResult::Eof => {
-                    self.flush_decoders()?;
+                    self.flush_audio_decoder()?;
                     self.stopped_at_zero = false;
                     self.update_playback_status(
                         MediaPlaybackState::Ended,
@@ -1281,8 +1281,8 @@ impl Mp4FileReader {
         timestamp
     }
 
-    /// デコーダーの残りのフレームを flush する。EOS は送らない。
-    fn flush_decoders(&mut self) -> Result<()> {
+    /// audio decoder の残りのフレームを flush する。EOS は送らない。
+    fn flush_audio_decoder(&mut self) -> Result<()> {
         if let Some(decoder) = self.audio_decoder.as_mut()
             && let Some(sender) = self.audio_sender.as_mut()
         {
