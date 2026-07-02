@@ -1,8 +1,8 @@
 //! Silero VAD による発話区間検出のゲート。
 //!
 //! `VadGate::feed` に 16 kHz f32 モノラル PCM を任意長ずつ渡すと、内部の `AudioChunkBuffer` に貯めて
-//! 512 サンプル境界で `SileroVad::chunk_probability` を実行し、閾値ゲート + `min_silence_ms` /
-//! `min_speech_ms` の集約ロジックで発話区間 `SpeechSegment` (16 kHz サンプル通し番号) を確定して返す。
+//! 512 サンプル境界で `SileroVad::chunk_probability` を実行し、閾値ゲート + `min_silence` /
+//! `min_speech` の集約ロジックで発話区間 `SpeechSegment` (16 kHz サンプル通し番号) を確定して返す。
 
 use std::num::NonZeroUsize;
 use std::time::Duration;
@@ -13,9 +13,6 @@ use super::silero_vad::SileroVad;
 
 /// Silero VAD の 1 チャンクのサンプル数。`SileroVad::chunk_probability` が要求する固定値と一致させる。
 const CHUNK_SAMPLES: NonZeroUsize = NonZeroUsize::new(512).expect("CHUNK_SAMPLES > 0");
-
-/// VadGate が動作するサンプルレート (Silero VAD v5 の 16 kHz)。
-const SAMPLE_RATE_HZ: u64 = 16000;
 
 /// 検出された発話区間。
 ///
@@ -48,7 +45,7 @@ impl SpeechSegment {
 ///
 /// - `Idle`: 開始直後 or 直前 SpeechSegment 確定直後 (発話・無音のいずれもカウントしていない)。
 /// - `InSpeech`: 直近チャンクが閾値超えで、発話区間として集約中。
-/// - `Trailing`: 発話後の無音を数え始めており、`min_silence_ms` 到達で確定候補となる。
+/// - `Trailing`: 発話後の無音を数え始めており、`min_silence` 到達で確定候補となる。
 #[derive(Debug, PartialEq)]
 enum State {
     Idle,
@@ -93,7 +90,7 @@ impl VadGate {
 
     /// 16 kHz f32 モノラル PCM を任意長受け取り、確定した SpeechSegment を start_sample 昇順で返す。
     ///
-    /// - 発話継続中や `min_silence_ms` 未達の区間は Self 内に保持し、次の `feed` または `flush` で確定する。
+    /// - 発話継続中や `min_silence` 未達の区間は Self 内に保持し、次の `feed` または `flush` で確定する。
     /// - 512 サンプル境界に満たない残余は Self 内 buffer に貯めて次の feed に持ち越す。
     /// - 1 回の feed で複数 SpeechSegment を返し得る (feed 内で発話 → 無音 → 発話が複数回起きた場合)。
     ///
@@ -106,8 +103,8 @@ impl VadGate {
         let mut results = Vec::new();
         let transition = TransitionConfig {
             threshold: self.config.threshold,
-            min_silence_samples: ms_to_samples(self.config.min_silence_ms),
-            min_speech_samples: ms_to_samples(self.config.min_speech_ms),
+            min_silence_samples: duration_to_samples(self.config.min_silence),
+            min_speech_samples: duration_to_samples(self.config.min_speech),
             chunk_samples: CHUNK_SAMPLES.get() as u64,
         };
         while let Some(chunk) = self.buffer.take_chunk() {
@@ -130,10 +127,10 @@ impl VadGate {
 
     /// 現在確定していない segment を強制確定して返す (ストリーム終端で呼ぶ)。
     ///
-    /// 発話中の場合、`min_speech_ms` を満たしていれば SpeechSegment として確定、満たしていなければ破棄する。
+    /// 発話中の場合、`min_speech` を満たしていれば SpeechSegment として確定、満たしていなければ破棄する。
     pub fn flush(&mut self) -> crate::Result<Vec<SpeechSegment>> {
         let mut results = Vec::new();
-        let min_speech_samples = ms_to_samples(self.config.min_speech_ms);
+        let min_speech_samples = duration_to_samples(self.config.min_speech);
         let state = std::mem::replace(&mut self.state, State::Idle);
         match state {
             State::Idle => {}
@@ -251,9 +248,13 @@ fn finalize_speech(speech: &SpeechInProgress, min_speech_samples: u64) -> Option
     })
 }
 
-/// ミリ秒を 16 kHz サンプル数に変換する。
-fn ms_to_samples(ms: u32) -> u64 {
-    u64::from(ms) * SAMPLE_RATE_HZ / 1000
+/// Duration を 16 kHz サンプル数に変換する。
+///
+/// 1 サンプル = 62_500 ns (16 kHz は 1_000_000_000 の約数) なので丸め誤差はない。
+/// Duration が `u64::MAX / 1000 秒` (実用上の想定音声長を遥かに超える) を超えると
+/// `as u64` cast で切り捨てが発生するが、通常運用では発生しない前提。
+fn duration_to_samples(d: Duration) -> u64 {
+    (d.as_nanos() as u64) / 62_500
 }
 
 #[cfg(test)]
