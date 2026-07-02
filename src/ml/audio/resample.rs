@@ -101,7 +101,7 @@ fn polyphase_resample(input: &[f32], src_hz: u32, dst_hz: u32) -> Vec<f32> {
 
     let n_taps_per_phase = BASE_TAPS;
     let n_taps = l * n_taps_per_phase;
-    let proto = prototype_filter(n_taps, l);
+    let proto = prototype_filter(n_taps, l, m);
 
     // サブフィルタに分解: subfilters[phase][k] = proto[k * l + phase]。
     let mut subfilters: Vec<Vec<f32>> = Vec::with_capacity(l);
@@ -145,11 +145,12 @@ fn polyphase_resample(input: &[f32], src_hz: u32, dst_hz: u32) -> Vec<f32> {
 /// Kaiser 窓を掛けた低域通過 FIR のプロトタイプフィルタを生成する。
 ///
 /// - タップ数 `n_taps`
-/// - 正規化カットオフ `fc = 0.5 / upsample_factor` (アップサンプル後の Nyquist から見た 16 kHz 相当の 8 kHz)
+/// - 正規化カットオフ `fc = 0.5 / max(upsample_factor, downsample_factor)`
+///   (アップサンプル後の Nyquist とダウンサンプル後の Nyquist のうち低い方に合わせて反エイリアシング)
 /// - Kaiser 窓 β = `KAISER_BETA`
 /// - polyphase 分解時に downsample で `1/L` になる分を先取りしてゲイン `L` を乗じておく
-fn prototype_filter(n_taps: usize, upsample_factor: usize) -> Vec<f32> {
-    let fc = 0.5f32 / upsample_factor as f32;
+fn prototype_filter(n_taps: usize, upsample_factor: usize, downsample_factor: usize) -> Vec<f32> {
+    let fc = 0.5f32 / upsample_factor.max(downsample_factor) as f32;
     let window = kaiser_window(n_taps);
     let center = (n_taps as f32 - 1.0) * 0.5;
 
