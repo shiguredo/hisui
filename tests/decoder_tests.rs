@@ -123,22 +123,32 @@ fn video_decoder_poll_output_returns_processed_via_wrap_delegation() -> hisui::R
     Ok(())
 }
 
-/// メトリクス二重計上禁止の回帰検出: 1 フレーム入力 → `total_input` が 1 増分、
-/// 1 フレーム出力 → `total_output` が 1 増分されることを `VideoDecoder` の wrap 経路で確認する
+/// メトリクス二重計上禁止の回帰検出: N フレーム入力 → `total_input` が N 増分、
+/// N フレーム出力 → `total_output` が N 増分されることを `VideoDecoder` の wrap 経路で確認する
 ///
 /// `OutputSink` が送信と増分を物理的に強制ペアリングする契約が
 /// 「emit_ok 経路でメトリクスの `add(2)` 等の二重計上が混入しても検出されない」状態にならないよう、
 /// 量的検証を wrap 経路経由 (`VideoDecoder::handle_input_sample` / `poll_output`) の
 /// end-to-end で担保する。
+///
+/// N=1 では「1 呼び出しで k 倍増分」型 (`add(k)` 直接乗算) の混入は検出できるが、
+/// 「k フレーム目だけ倍増する」「(N-1) フレーム目までは正しく (N) フレーム目で +2」等の
+/// 累積 off-by-one 系バグは検出範囲外になるため、 複数フレーム (N=3) で assert する。
 #[test]
-fn video_decoder_metrics_increment_once_per_frame_via_wrap_delegation() -> hisui::Result<()> {
+fn video_decoder_metrics_increment_by_input_count_via_wrap_delegation() -> hisui::Result<()> {
     use hisui::MediaFrame;
     use hisui::decoder::DecoderRunOutput;
 
+    const FRAME_COUNT: u64 = 3;
+
     let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
-    let first_frame = reader
-        .next()
-        .expect("少なくとも 1 フレーム含まれているはず")?;
+    let frames: Vec<_> = (0..FRAME_COUNT)
+        .map(|i| {
+            reader.next().unwrap_or_else(|| {
+                panic!("フレーム {i} が読めるはず (フィクスチャは十分な長さを持つ)")
+            })
+        })
+        .collect::<hisui::Result<Vec<_>>>()?;
 
     // メトリクスのハンドルを先に取得しておく
     // (`Stats::counter` は同名に対して同一の `Arc` を返す `get_or_insert_entry` なので、
@@ -149,31 +159,40 @@ fn video_decoder_metrics_increment_once_per_frame_via_wrap_delegation() -> hisui
 
     let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
 
-    // 1 フレーム入力 → wrap 経路 (`VideoDecoder::handle_input_sample`) 経由で
+    // N フレーム入力 → wrap 経路 (`VideoDecoder::handle_input_sample`) 経由で
     // 内部 `AsyncVideoDecoder::handle_input_sample_sync` → `inner.decode` → `sink.emit_ok` まで実行する
-    decoder.handle_input_sample(Some(MediaFrame::video(first_frame)))?;
-    // EOS でフラッシュを踏ませて、非同期な内部デコーダーのコールバック完了を待ち合わせる
+    for frame in frames {
+        decoder.handle_input_sample(Some(MediaFrame::video(frame)))?;
+    }
+    // EOS でフラッシュを踏ませて、 非同期な内部デコーダーのコールバック完了と
+    // 未排出フレームの吐き出しを待ち合わせる
     decoder.handle_input_sample(None)?;
 
-    // 1 フレーム出力取得 → wrap 経路 (`VideoDecoder::poll_output`) 経由で
-    // 内部 `AsyncVideoDecoder::poll_output_sync` → `try_recv` でフレームを取り出す
-    let output = decoder.poll_output()?;
-    assert!(
-        matches!(output, DecoderRunOutput::Processed(_)),
-        "実 VP9 フィクスチャから Processed を期待した (VideoDecoder::poll_output 経由)"
+    // 全出力を wrap 経路 (`VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync`) で取り出す
+    let mut processed = 0u64;
+    loop {
+        match decoder.poll_output()? {
+            DecoderRunOutput::Processed(_) => processed += 1,
+            DecoderRunOutput::Finished => break,
+            DecoderRunOutput::Pending => panic!("EOS 後に Pending は想定外 (フラッシュ済み前提)"),
+        }
+    }
+    assert_eq!(
+        processed, FRAME_COUNT,
+        "入力と同数のフレームが出力されるはず (N={FRAME_COUNT})"
     );
 
-    // 二重計上禁止契約: 入力 1 フレーム = `total_input` を 1 増分
+    // 二重計上禁止契約: 入力 N フレーム = `total_input` を N 増分 (add(k) 混入等を検出)
     assert_eq!(
         total_input.get(),
-        1,
-        "1 フレーム入力で total_input が 1 増分されるはず (二重計上禁止)"
+        FRAME_COUNT,
+        "N フレーム入力で total_input が N 増分されるはず (二重計上禁止)"
     );
-    // 二重計上禁止契約: 出力 1 フレーム = `total_output` を 1 増分 (`OutputSink::emit_ok` 経由で物理ペアリング)
+    // 二重計上禁止契約: 出力 N フレーム = `total_output` を N 増分 (`OutputSink::emit_ok` 経由で物理ペアリング)
     assert_eq!(
         total_output.get(),
-        1,
-        "1 フレーム出力で total_output が 1 増分されるはず (二重計上禁止)"
+        FRAME_COUNT,
+        "N フレーム出力で total_output が N 増分されるはず (二重計上禁止)"
     );
 
     Ok(())
