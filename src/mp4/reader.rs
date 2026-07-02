@@ -223,9 +223,12 @@ pub struct Mp4FileReader {
     path: PathBuf,
     options: Mp4FileReaderOptions,
     audio_sender: Option<TrackSender>,
-    video_sender: Option<TrackSender>,
     audio_decoder: Option<crate::decoder::AudioDecoder>,
-    video_decoder: Option<crate::decoder::VideoDecoder>,
+    // spawn pattern で video decoder を扱う task。
+    // TrackSender は task に move し SYN/ACK 背圧を task 側で担う。
+    // seek/restart/reset_for_restart 時のライフサイクル管理は send_eos_to_tracks / apply_seek /
+    // reset_for_restart の各経路で行う。
+    video_decoder_task: Option<VideoDecoderTask>,
     base_offset: Duration,
     last_emitted_end: Duration,
     start_instant: tokio::time::Instant,
@@ -276,9 +279,8 @@ impl Mp4FileReader {
             path: path.to_path_buf(),
             options,
             audio_sender: None,
-            video_sender: None,
             audio_decoder: None,
-            video_decoder: None,
+            video_decoder_task: None,
             base_offset: Duration::ZERO,
             last_emitted_end: Duration::ZERO,
             start_instant: tokio::time::Instant::now(),
@@ -319,17 +321,32 @@ impl Mp4FileReader {
         self.audio_decoder = Some(decoder);
     }
 
-    /// デコーダーを設定する。設定された場合、encoded frame を decode してから送信する。
-    pub fn set_video_decoder(&mut self, decoder: crate::decoder::VideoDecoder) {
-        self.video_decoder = Some(decoder);
-    }
-
     pub async fn run(mut self, handle: ProcessorHandle) -> Result<()> {
         let loop_enabled = self.resolve_loop_enabled();
-        (self.audio_sender, self.video_sender) = self.build_track_senders(&handle).await?;
+        self.audio_sender = self.build_audio_sender(&handle).await?;
+
+        // video decoder task の初回 spawn。 video_decoder_options が None なら decoder 経路を作らない
+        if let (Some(track_id), Some(mut video_options)) = (
+            self.options.video_track_id.clone(),
+            self.options.video_decoder_options.clone(),
+        ) {
+            // openh264_lib は Mp4FileSource::create_reader が ProcessorHandle を持たないため
+            // options に埋め込めない。 ここで handle.config() から補完する
+            if video_options.openh264_lib.is_none() {
+                video_options.openh264_lib = handle.config().openh264_lib.clone();
+            }
+            let sender = handle.publish_track(track_id).await?;
+            let stats = handle.stats();
+            self.video_decoder_task = Some(spawn_video_decoder_task(
+                video_options,
+                stats,
+                TrackSender::new(sender),
+            ));
+        }
+
         handle.notify_ready();
 
-        if self.audio_sender.is_none() && self.video_sender.is_none() {
+        if self.audio_sender.is_none() && self.video_decoder_task.is_none() {
             return Ok(());
         }
 
@@ -343,7 +360,7 @@ impl Mp4FileReader {
             if matches!(result, RunLoopResult::Eof) {
                 self.flush_decoders()?;
             }
-            self.send_eos_to_tracks();
+            self.send_eos_to_tracks().await;
             return Ok(());
         }
 
@@ -391,7 +408,7 @@ impl Mp4FileReader {
             }
         }
 
-        self.send_eos_to_tracks();
+        self.send_eos_to_tracks().await;
         Ok(())
     }
 
@@ -419,25 +436,17 @@ impl Mp4FileReader {
         loop_enabled
     }
 
-    async fn build_track_senders(
+    async fn build_audio_sender(
         &mut self,
         handle: &ProcessorHandle,
-    ) -> Result<(Option<TrackSender>, Option<TrackSender>)> {
+    ) -> Result<Option<TrackSender>> {
         let audio_sender = if let Some(track_id) = self.options.audio_track_id.take() {
             let sender = handle.publish_track(track_id).await?;
             Some(TrackSender::new(sender))
         } else {
             None
         };
-
-        let video_sender = if let Some(track_id) = self.options.video_track_id.take() {
-            let sender = handle.publish_track(track_id).await?;
-            Some(TrackSender::new(sender))
-        } else {
-            None
-        };
-
-        Ok((audio_sender, video_sender))
+        Ok(audio_sender)
     }
 
     async fn run_loop(
@@ -450,7 +459,7 @@ impl Mp4FileReader {
             let mut state = ReaderState::open(
                 &self.path,
                 self.audio_sender.is_some(),
-                self.video_sender.is_some(),
+                self.has_video_track(),
             )?;
             if state.audio_track_id.is_none() && state.video_track_id.is_none() {
                 break;
@@ -1183,9 +1192,10 @@ impl Mp4FileReader {
             calculate_timestamps(context.timescale, context.timestamp, context.duration);
         let effective_timestamp = self.base_offset + timestamp;
 
-        // warm-up 中はデコーダーに入力して出力を捨てる。publish や realtime sleep はスキップする
+        // warm-up 中は decoder task に入力して出力を捨てる。publish や realtime sleep はスキップする
         if suppress_publish {
-            if let Some(decoder) = self.video_decoder.as_mut() {
+            if let Some(task) = self.video_decoder_task.as_ref() {
+                let _ = task.discard_mode_tx.send(true);
                 let frame = VideoFrame {
                     data,
                     format: state.video_format,
@@ -1197,11 +1207,15 @@ impl Mp4FileReader {
                     timestamp: Duration::ZERO,
                     sample_entry: state.last_video_sample_entry.clone(),
                 };
-                decoder.handle_input_sample(Some(crate::MediaFrame::Video(
-                    std::sync::Arc::new(frame),
-                )))?;
-                // デコーダーの出力を drain して捨てる（内部バッファの蓄積を防ぐ）
-                discard_video_decoder_output(decoder)?;
+                if task
+                    .input_tx
+                    .send(DecoderInput::Media(crate::MediaFrame::Video(
+                        std::sync::Arc::new(frame),
+                    )))
+                    .is_err()
+                {
+                    return Ok(SampleProcessingResult::PipelineClosed);
+                }
             }
             return Ok(SampleProcessingResult::Continue);
         }
@@ -1233,17 +1247,15 @@ impl Mp4FileReader {
             sample_entry: state.last_video_sample_entry.clone(),
         };
 
-        if let Some(sender) = self.video_sender.as_mut() {
-            if let Some(decoder) = self.video_decoder.as_mut() {
-                decoder.handle_input_sample(Some(crate::MediaFrame::Video(
+        if let Some(task) = self.video_decoder_task.as_ref() {
+            let _ = task.discard_mode_tx.send(false);
+            if task
+                .input_tx
+                .send(DecoderInput::Media(crate::MediaFrame::Video(
                     std::sync::Arc::new(video_frame),
-                )))?;
-                if crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?
-                    == crate::decoder::DrainResult::PipelineClosed
-                {
-                    return Ok(SampleProcessingResult::PipelineClosed);
-                }
-            } else if !sender.send_video(video_frame).await {
+                )))
+                .is_err()
+            {
                 return Ok(SampleProcessingResult::PipelineClosed);
             }
             self.emitted_in_loop = true;
@@ -1276,30 +1288,30 @@ impl Mp4FileReader {
     }
 
     /// デコーダーの残りのフレームを flush する。EOS は送らない。
+    ///
+    /// video 側は decoder task が入力の連続性で残フレームを吐き出すため、 ここでは何もしない。
+    /// 最終的な shutdown (残 flush + send_eos) は send_eos_to_tracks で task.shutdown() が担う。
     fn flush_decoders(&mut self) -> Result<()> {
-        // EOS flush 中に pipeline が閉じるのは正常な停止シーケンスなので、DrainResult は無視する。
         if let Some(decoder) = self.audio_decoder.as_mut()
             && let Some(sender) = self.audio_sender.as_mut()
         {
             decoder.handle_input_sample(None)?;
             let _ = crate::decoder::drain_audio_decoder_output(decoder, &mut sender.sender)?;
         }
-        if let Some(decoder) = self.video_decoder.as_mut()
-            && let Some(sender) = self.video_sender.as_mut()
-        {
-            decoder.handle_input_sample(None)?;
-            let _ = crate::decoder::drain_video_decoder_output(decoder, &mut sender.sender)?;
-        }
         Ok(())
     }
 
-    /// トラックに EOS を送信する
-    fn send_eos_to_tracks(&mut self) {
+    /// トラックに EOS を送信する。
+    ///
+    /// video 側は decoder task を shutdown することで task 内から send_eos が送られる。
+    async fn send_eos_to_tracks(&mut self) {
         if let Some(sender) = self.audio_sender.as_mut() {
             sender.send_eos();
         }
-        if let Some(sender) = self.video_sender.as_mut() {
-            sender.send_eos();
+        if let Some(task) = self.video_decoder_task.take()
+            && let Err(e) = task.shutdown().await
+        {
+            tracing::warn!("video decoder task shutdown failed: {}", e.display());
         }
     }
 
@@ -1351,7 +1363,10 @@ impl Mp4FileReader {
         self.recreate_decoders(handle);
     }
 
-    /// デコーダーを再生成する
+    /// デコーダーを再生成する。
+    ///
+    /// video decoder は spawn pattern で task 内に閉じているため、 ここでは何もしない。
+    /// seek/restart 時の decoder 内部状態は task が入力の連続性 (keyframe から流し直し) で吸収する。
     fn recreate_decoders(&mut self, handle: &ProcessorHandle) {
         if self.audio_decoder.is_some() {
             let mut decoder_stats = handle.stats();
@@ -1368,29 +1383,11 @@ impl Mp4FileReader {
                 }
             }
         }
-        if self.video_decoder.is_some() {
-            let mut decoder_stats = handle.stats();
-            decoder_stats.set_default_label("component", "video_decoder");
-            let decoder = crate::decoder::VideoDecoder::new(
-                crate::decoder::VideoDecoderOptions {
-                    openh264_lib: handle.config().openh264_lib.clone(),
-                    ..Default::default()
-                },
-                decoder_stats,
-            );
-            self.video_decoder = Some(decoder);
-        }
     }
 }
 
 /// デコーダーの出力を drain して捨てる（warm-up 中の内部バッファ蓄積を防ぐ）
 fn discard_decoder_output(decoder: &mut crate::decoder::AudioDecoder) -> Result<()> {
-    while let crate::decoder::DecoderRunOutput::Processed(_) = decoder.poll_output()? {}
-    Ok(())
-}
-
-/// デコーダーの出力を drain して捨てる（warm-up 中の内部バッファ蓄積を防ぐ）
-fn discard_video_decoder_output(decoder: &mut crate::decoder::VideoDecoder) -> Result<()> {
     while let crate::decoder::DecoderRunOutput::Processed(_) = decoder.poll_output()? {}
     Ok(())
 }
@@ -1492,7 +1489,6 @@ impl TrackSender {
         ok
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn send_media(&mut self, sample: crate::MediaFrame) -> bool {
         self.prepare_send().await;
         let ok = self.sender.send_media(sample);
@@ -1507,13 +1503,11 @@ impl TrackSender {
     }
 }
 
-#[allow(dead_code)]
 enum DecoderInput {
     Media(crate::MediaFrame),
     Eos,
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 struct VideoDecoderTask {
     input_tx: tokio::sync::mpsc::UnboundedSender<DecoderInput>,
@@ -1522,7 +1516,6 @@ struct VideoDecoderTask {
 }
 
 impl VideoDecoderTask {
-    #[allow(dead_code)]
     async fn shutdown(self) -> crate::Result<()> {
         let _ = self.input_tx.send(DecoderInput::Eos);
         match self.join_handle.await {
@@ -1532,14 +1525,8 @@ impl VideoDecoderTask {
             ))),
         }
     }
-
-    #[allow(dead_code)]
-    fn abort(self) {
-        self.join_handle.abort();
-    }
 }
 
-#[allow(dead_code)]
 fn spawn_video_decoder_task(
     options: crate::decoder::VideoDecoderOptions,
     mut stats: crate::stats::Stats,
@@ -1560,7 +1547,6 @@ fn spawn_video_decoder_task(
     }
 }
 
-#[allow(dead_code)]
 async fn video_decoder_loop(
     options: crate::decoder::VideoDecoderOptions,
     stats: crate::stats::Stats,

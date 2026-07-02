@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions};
+use crate::decoder::{AudioDecoder, VideoDecoderOptions};
 use crate::mp4::reader::{
     MediaEventContext, MediaInputHandle, Mp4FileReader, Mp4FileReaderOptions,
 };
@@ -22,12 +22,19 @@ impl Mp4FileSource {
         &self,
         event_ctx: Option<MediaEventContext>,
     ) -> Result<(Mp4FileReader, Option<MediaInputHandle>)> {
+        // video_decoder_options を Some で明示することで、 video_track_id が設定されている場合に
+        // Mp4FileReader::run 内で video decoder task が spawn される (openh264_lib は run 内で
+        // handle.config() から補完される)。
+        let video_decoder_options = self
+            .video_track_id
+            .is_some()
+            .then(VideoDecoderOptions::default);
         let options = Mp4FileReaderOptions {
             realtime: true,
             loop_playback: self.loop_playback,
             audio_track_id: self.audio_track_id.clone(),
             video_track_id: self.video_track_id.clone(),
-            video_decoder_options: None,
+            video_decoder_options,
         };
 
         let mut reader = Mp4FileReader::new(&self.path, options)?;
@@ -36,9 +43,9 @@ impl Mp4FileSource {
         Ok((reader, media_handle))
     }
 
-    /// reader にデコーダーを設定して起動する
+    /// reader にデコーダーを設定して起動する。
+    /// video decoder は Mp4FileReaderOptions.video_decoder_options 経由で reader 内部で spawn される。
     pub async fn run_reader(mut reader: Mp4FileReader, processor: ProcessorHandle) -> Result<()> {
-        // デコーダーを生成して reader に設定する
         if reader.has_audio_track() {
             let mut decoder_stats = processor.stats();
             decoder_stats.set_default_label("component", "audio_decoder");
@@ -49,20 +56,7 @@ impl Mp4FileSource {
             )?;
             reader.set_audio_decoder(decoder);
         }
-        if reader.has_video_track() {
-            let mut decoder_stats = processor.stats();
-            decoder_stats.set_default_label("component", "video_decoder");
-            let decoder = VideoDecoder::new(
-                VideoDecoderOptions {
-                    openh264_lib: processor.config().openh264_lib.clone(),
-                    ..Default::default()
-                },
-                decoder_stats,
-            );
-            reader.set_video_decoder(decoder);
-        }
 
-        // raw トラックに直接パブリッシュし、reader 内でデコードしてから送信する
         reader.run(processor).await
     }
 
