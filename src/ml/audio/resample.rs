@@ -170,7 +170,7 @@ fn kaiser_window(n_taps: usize) -> Vec<f32> {
 /// f32 で計算すると `I0(8.6) ≈ 895` オーダーでの相対精度が仮数部長 (~1e-7) に律速されて
 /// SciPy 等の参照値と一致しない。内部を f64 で計算してから f32 に丸めることで、Kaiser 窓
 /// 設計時の相対誤差を 1e-6 未満に抑える。
-pub fn bessel_i0(x: f32) -> f32 {
+fn bessel_i0(x: f32) -> f32 {
     let x = f64::from(x);
     let half_sq = (x * 0.5).powi(2);
     let mut sum = 1.0f64;
@@ -188,4 +188,34 @@ pub fn bessel_i0(x: f32) -> f32 {
 /// 32 bit 符号無し整数の最大公約数。
 fn gcd(a: u32, b: u32) -> u32 {
     if b == 0 { a } else { gcd(b, a % b) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Bessel I0 の代表値を SciPy / WolframAlpha の参照値と相対誤差 1e-6 未満で一致することを確認する。
+    #[test]
+    fn bessel_i0_matches_reference_values() {
+        // I0(0) = 1 (定義から厳密)
+        assert_eq!(bessel_i0(0.0), 1.0);
+
+        // I0(1) ≈ 1.2660658 (WolframAlpha: BesselI[0, 1] を f32 精度に丸めた値)
+        let expected_at_1 = 1.266_065_8_f32;
+        let got = bessel_i0(1.0);
+        let rel_err = ((got - expected_at_1) / expected_at_1).abs();
+        assert!(
+            rel_err < 1e-6,
+            "bessel_i0(1.0) の相対誤差 {rel_err} が 1e-6 を超えた (got={got}, expected={expected_at_1})"
+        );
+
+        // I0(8.6) ≈ 750.4612 (級数展開 sum (x/2)^(2n)/(n!)^2 の Python 手計算値、f32 精度に丸め)
+        let expected_at_86 = 750.461_2_f32;
+        let got = bessel_i0(8.6);
+        let rel_err = ((got - expected_at_86) / expected_at_86).abs();
+        assert!(
+            rel_err < 1e-6,
+            "bessel_i0(8.6) の相対誤差 {rel_err} が 1e-6 を超えた (got={got}, expected={expected_at_86})"
+        );
+    }
 }

@@ -3,32 +3,7 @@
 #![cfg(feature = "candle")]
 
 use hisui::audio::{Channels, SampleRate};
-use hisui::ml::audio::resample::{bessel_i0, resample_to_16k_mono};
-
-/// Bessel I0 の代表値を SciPy / WolframAlpha の参照値と相対誤差 1e-6 未満で一致することを確認する。
-#[test]
-fn bessel_i0_matches_reference_values() {
-    // I0(0) = 1 (定義から厳密)
-    assert_eq!(bessel_i0(0.0), 1.0);
-
-    // I0(1) ≈ 1.2660658 (WolframAlpha: BesselI[0, 1] を f32 精度に丸めた値)
-    let expected_at_1 = 1.266_065_8_f32;
-    let got = bessel_i0(1.0);
-    let rel_err = ((got - expected_at_1) / expected_at_1).abs();
-    assert!(
-        rel_err < 1e-6,
-        "bessel_i0(1.0) の相対誤差 {rel_err} が 1e-6 を超えた (got={got}, expected={expected_at_1})"
-    );
-
-    // I0(8.6) ≈ 750.4612 (級数展開 sum (x/2)^(2n)/(n!)^2 の Python 手計算値、f32 精度に丸め)
-    let expected_at_86 = 750.461_2_f32;
-    let got = bessel_i0(8.6);
-    let rel_err = ((got - expected_at_86) / expected_at_86).abs();
-    assert!(
-        rel_err < 1e-6,
-        "bessel_i0(8.6) の相対誤差 {rel_err} が 1e-6 を超えた (got={got}, expected={expected_at_86})"
-    );
-}
+use hisui::ml::audio::resample::resample_to_16k_mono;
 
 /// 空スライスは `Ok(vec![])` を返す。
 #[test]
