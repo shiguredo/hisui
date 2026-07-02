@@ -7,6 +7,8 @@
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use crate::probability::Probability;
+
 use super::buffer::AudioChunkBuffer;
 use super::config::VadConfig;
 use super::silero_vad::SileroVad;
@@ -159,7 +161,7 @@ impl VadGate {
 /// `advance_state` の引数を減らして clippy::too_many_arguments を回避する目的で導入している。
 /// VadGate::feed から `VadConfig` と `CHUNK_SAMPLES` を展開して組み立てる。
 struct TransitionConfig {
-    threshold: f32,
+    threshold: Probability,
     min_silence_samples: u64,
     min_speech_samples: u64,
     chunk_samples: u64,
@@ -177,7 +179,7 @@ fn advance_state(
     config: &TransitionConfig,
     results: &mut Vec<SpeechSegment>,
 ) -> State {
-    let is_speech = probability >= config.threshold;
+    let is_speech = probability >= config.threshold.get();
 
     match state {
         State::Idle => {
@@ -267,6 +269,13 @@ mod tests {
     /// テスト用の閾値。
     const THRESHOLD: f32 = 0.5;
 
+    /// `THRESHOLD` を `Probability` にラップした値。`Probability::new` が const fn なので
+    /// const 文脈で組み立てられる。
+    const THRESHOLD_PROB: Probability = match Probability::new(THRESHOLD) {
+        Some(p) => p,
+        None => unreachable!(),
+    };
+
     /// テスト用の min_silence_samples (3 チャンク分)。
     /// 「shorter than 3 chunks は未達 / 3 チャンク以上で到達」の境界を試せる大きさに設定。
     const MIN_SILENCE: u64 = 3 * CHUNK;
@@ -289,7 +298,7 @@ mod tests {
         let chunk_end = chunk_start + CHUNK;
         let mut results = Vec::new();
         let config = TransitionConfig {
-            threshold: THRESHOLD,
+            threshold: THRESHOLD_PROB,
             min_silence_samples: MIN_SILENCE,
             min_speech_samples: MIN_SPEECH,
             chunk_samples: CHUNK,
