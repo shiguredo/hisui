@@ -1203,9 +1203,7 @@ impl Mp4FileReader {
                 };
                 if task
                     .input_tx
-                    .send(DecoderInput::Media(crate::MediaFrame::Video(
-                        std::sync::Arc::new(frame),
-                    )))
+                    .send(DecoderInput::Media(crate::MediaFrame::new_video(frame)))
                     .is_err()
                 {
                     return Ok(SampleProcessingResult::PipelineClosed);
@@ -1245,8 +1243,8 @@ impl Mp4FileReader {
             let _ = task.discard_mode_tx.send(false);
             if task
                 .input_tx
-                .send(DecoderInput::Media(crate::MediaFrame::Video(
-                    std::sync::Arc::new(video_frame),
+                .send(DecoderInput::Media(crate::MediaFrame::new_video(
+                    video_frame,
                 )))
                 .is_err()
             {
