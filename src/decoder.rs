@@ -473,14 +473,6 @@ impl AsyncVideoDecoder {
         self.output_rx.recv().await
     }
 
-    /// processor モデル用の decode ループ。
-    ///
-    /// 現状は wrap 側 `VideoDecoder::run` と行動等価 (closed issue 0073 で wrap が消えた後は本経路のみに一本化される):
-    ///
-    /// - `Message::Media` / `Message::Eos` を `handle_input_sample_sync` に dispatch する
-    /// - 内部出力 channel を `poll_output_sync` の内側 loop で drain して `output_tx.send_media` に流す
-    /// - `send_media` が false (subscriber 全 drop = pipeline closed) または `Finished` 到達で `send_eos` を送って return
-    /// - EOS 入力後に Pending が続いた場合は "video decoder still pending after EOS" で Err (構造上到達不能な防御コード)
     pub async fn run(
         mut self,
         handle: ProcessorHandle,
@@ -496,24 +488,15 @@ impl AsyncVideoDecoder {
             let message = input_rx.recv().await;
             let is_eos = matches!(message, Message::Eos);
 
-            // wrap 側 `VideoDecoder::handle_input_message` と同等の dispatch を自前展開する。
-            // `AsyncVideoDecoder::handle_input_message` は追加しない (closed issue 0073 で wrap 側が消える)。
-            // `Syn` は decoder が track 同期に関与しないため無視する (wrap 側と同挙動)。
             match message {
                 Message::Media(sample) => self.handle_input_sample_sync(Some(sample))?,
                 Message::Eos => self.handle_input_sample_sync(None)?,
                 Message::Syn(_) => {}
             }
 
-            // 内部 channel に溜まった分をすべて吐き出す (try_recv ベースで非ブロッキング)。
-            // Openh264 は 1 サンプル入力で 0〜2 frame 出力する (closed issue 0066 参照) ため、
-            // Pending / Finished に達するまで内側で loop する必要がある。
             loop {
                 match self.poll_output_sync()? {
                     DecoderRunOutput::Processed(sample) => {
-                        // `send_media` が false = subscriber 全 drop = pipeline closed。
-                        // 続く `send_eos` は実質 no-op (subscriber がいない) で
-                        // wrap 側 `DrainResult::PipelineClosed` 経路と等価。
                         if !output_tx.send_media(sample) {
                             output_tx.send_eos();
                             return Ok(());
@@ -527,10 +510,6 @@ impl AsyncVideoDecoder {
                 }
             }
 
-            // wrap 側と同じ防御コード。 `handle_input_sample_sync(None)` で `self.eos = true` にした後、
-            // 上の内側 loop で `poll_output_sync` は必ず Finished を返して return する不変条件のため、
-            // この Err 分岐は AsyncVideoDecoder の構造上到達不能。 実装者が意味を誤解して
-            // 削除しないよう wrap 側 `VideoDecoder::run` と挙動を揃えて残す。
             if is_eos {
                 return Err(Error::new("video decoder still pending after EOS"));
             }
