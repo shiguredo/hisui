@@ -122,6 +122,14 @@ pub fn drain_video_decoder_output(decoder: &mut VideoDecoder, output_tx: &mut Tr
     - option A は 1 段階、 option B は 2 段階だが中間状態で cargo check を通せる
 3. **完了検証手段**
     - `grep -rn '\bAsyncVideoDecoder\b' src/ tests/ pbt/ fuzz/ examples/` の 0 件を CI にどう組み込むか (現状 CI にこの種の grep チェックはない)
+4. **spawn pattern 抽象の共通化**
+    - 0068 (subcommand_inspect / sora)、 0071 (mp4 reader)、 0072 (inbound endpoint) の 3 使用側で、 spawn pattern (task 生成 / input channel / shutdown / TrackSender 回収 / panic 伝搬) の共通化余地が生じている
+    - 0071 実装で `struct VideoDecoderTask` + `enum DecoderInput { Media, Eos }` + `spawn_video_decoder_task(options, stats, sender)` + `video_decoder_loop` を mp4 reader 内 module-private で導入 (`src/mp4/reader.rs`)。 shutdown 経由の `(TrackSender, Result<()>)` 回収 / discard_mode 制御 / panic の error! log + Err 伝搬まで実装済み
+    - option a: 本 issue のリネームと合わせて **汎用 `VideoDecoderTask` core** を `crate::decoder` mod 直下に切り出す。 mp4 特有の `discard_mode_tx` (warm-up 経路制御) は上位 layer (`Mp4VideoDecoderTask` 相当) で扱い、 inbound endpoint / 0068 の subcommand_inspect 系は core をそのまま利用。 その際 0068 で追加した `VideoDecoder::run` (旧 `AsyncVideoDecoder::run`、 processor モデル用) は Task ベースに書き直して廃止する検討をする
+    - option b: 共通化しない。 0068 の `run` は残し、 mp4/reader.rs / 0072 inbound endpoint はそれぞれ独自実装のまま維持する
+    - option c: decoder を別 processor として MediaPipeline に登録する形 (0066 以前および 0068 の processor モデル相当) に戻す。 使用側の spawn pattern 重複が解消されて全体設計の一貫性が上がる (`tokio::spawn` は MediaPipeline が担い、 lifecycle 管理も pipeline 側に集約される)。 ただし現状の pipeline は subscribe / `notify_ready` の multi-hop 伝播 (mp4 reader → decoder processor → mixer などの chain で subscribe_ready が段階的に伝わる仕組み) を想定しておらず、 race condition が煩雑だった経緯がある。 別 issue で pipeline 側の multi-hop 対応 (subscribe chain の ready 伝播、 shutdown 順序保証) を先に実装する必要があり、 本 issue 単独では完結しない
+    - 判定材料: (1) 0072 完了時点で mp4/reader.rs (`VideoDecoderTask` + `video_decoder_loop`) と inbound endpoint 側の実装を突き合わせて「本当に共通で使える範囲」を確認する、 (2) MediaPipeline の multi-hop 対応の実現可能性と実装コストを見積もる (option c を選ぶ前提条件)
+    - 実装コスト: option a は core 抽出 + mp4 layer 化 + 0068 の run 書換の 3 段階、 差分規模は core 約 100 行 + 使用側書換。 option c は pipeline 側の改修が別 issue として先行するため本 issue の範囲では実質困難
 
 ### shiguredo-rust 規約整合
 
