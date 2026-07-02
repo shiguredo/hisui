@@ -351,7 +351,7 @@ impl Mp4FileReader {
             if matches!(result, RunLoopResult::Eof) {
                 self.flush_decoders()?;
             }
-            self.send_eos_to_tracks().await;
+            self.send_eos_to_tracks().await?;
             return Ok(());
         }
 
@@ -388,18 +388,18 @@ impl Mp4FileReader {
             match self.wait_for_restart_command().await {
                 WaitResult::Play => {
                     // pending_seek を維持したまま再開
-                    self.reset_for_restart(&handle).await;
+                    self.reset_for_restart(&handle).await?;
                 }
                 WaitResult::Restart => {
                     // 先頭再生: seek 状態をクリア
                     self.clear_seek_state();
-                    self.reset_for_restart(&handle).await;
+                    self.reset_for_restart(&handle).await?;
                 }
                 WaitResult::Closed => break,
             }
         }
 
-        self.send_eos_to_tracks().await;
+        self.send_eos_to_tracks().await?;
         Ok(())
     }
 
@@ -477,7 +477,7 @@ impl Mp4FileReader {
                     MediaLoopAction::Continue => {}
                     MediaLoopAction::Stop => return Ok(RunLoopResult::Stopped),
                     MediaLoopAction::Restart => {
-                        self.recreate_decoders(handle).await;
+                        self.recreate_decoders(handle).await?;
                         continue 'outer;
                     }
                     MediaLoopAction::Seek(position) => {
@@ -496,7 +496,7 @@ impl Mp4FileReader {
                         MediaLoopAction::Continue => {}
                         MediaLoopAction::Stop => return Ok(RunLoopResult::Stopped),
                         MediaLoopAction::Restart => {
-                            self.recreate_decoders(handle).await;
+                            self.recreate_decoders(handle).await?;
                             continue 'outer;
                         }
                         MediaLoopAction::Seek(position) => {
@@ -521,7 +521,7 @@ impl Mp4FileReader {
                         MediaLoopAction::Continue => {}
                         MediaLoopAction::Stop => return Ok(RunLoopResult::Stopped),
                         MediaLoopAction::Restart => {
-                            self.recreate_decoders(handle).await;
+                            self.recreate_decoders(handle).await?;
                             continue 'outer;
                         }
                         MediaLoopAction::Seek(position) => {
@@ -548,7 +548,7 @@ impl Mp4FileReader {
                 self.send_media_event(MediaInputEvent::PlaybackStarted);
                 // 前 loop の decoder buffer 内フレームが次 loop 先頭の keyframe → finish() 契約で
                 // emit されないよう、 loop 継続前に task を discard 付き shutdown → 再 spawn する
-                self.recreate_decoders(handle).await;
+                self.recreate_decoders(handle).await?;
                 continue;
             }
             break;
@@ -650,7 +650,7 @@ impl Mp4FileReader {
         handle: &ProcessorHandle,
     ) -> Result<()> {
         // デコーダーの残留状態を捨ててから seek する
-        self.recreate_decoders(handle).await;
+        self.recreate_decoders(handle).await?;
 
         // duration が取得済みなら上限を clamp する
         let position = self.clamp_position(position);
@@ -1293,21 +1293,18 @@ impl Mp4FileReader {
     }
 
     /// トラックに EOS を送信する。
-    async fn send_eos_to_tracks(&mut self) {
+    ///
+    /// video decoder task の shutdown 経路で panic (`is_panic()`) または task 内で
+    /// 発生した decoder エラーが検出された場合は Err で伝搬する。
+    async fn send_eos_to_tracks(&mut self) -> Result<()> {
         if let Some(sender) = self.audio_sender.as_mut() {
             sender.send_eos();
         }
         if let Some(task) = self.video_decoder_task.take() {
-            match task.shutdown().await {
-                Ok((_sender, Ok(()))) => {}
-                Ok((_sender, Err(e))) => {
-                    tracing::warn!("video decoder task exited with error: {}", e.display());
-                }
-                Err(e) => {
-                    tracing::warn!("video decoder task shutdown failed: {}", e.display());
-                }
-            }
+            let (_sender, task_result) = task.shutdown().await?;
+            task_result?;
         }
+        Ok(())
     }
 
     /// Ended / Stopped 状態で Play / Restart コマンドを待つ。
@@ -1349,13 +1346,14 @@ impl Mp4FileReader {
     }
 
     /// 再生状態とデコーダーをリセットして再生可能にする
-    async fn reset_for_restart(&mut self, handle: &ProcessorHandle) {
+    async fn reset_for_restart(&mut self, handle: &ProcessorHandle) -> Result<()> {
         // timestamp の連続性を維持するため、base_offset を last_emitted_end に進める
         self.base_offset = self.last_emitted_end;
         self.is_paused = false;
         self.pause_started_at = None;
         self.logical_cursor = None;
-        self.recreate_decoders(handle).await;
+        self.recreate_decoders(handle).await?;
+        Ok(())
     }
 
     /// デコーダーを再生成する。
@@ -1364,7 +1362,9 @@ impl Mp4FileReader {
     /// 新セッション位置で emit しうる。 これを防ぐため前 task を discard_mode=true で shutdown し、
     /// 回収した TrackSender で新 task を spawn する。 shutdown 中に発生する Finished は task 側で
     /// send_eos を skip するため subscriber は EOS を受信しない (継続再生に必要)。
-    async fn recreate_decoders(&mut self, handle: &ProcessorHandle) {
+    ///
+    /// task の panic または task 内で発生した decoder エラーは Err で上位に伝搬する。
+    async fn recreate_decoders(&mut self, handle: &ProcessorHandle) -> Result<()> {
         if self.audio_decoder.is_some() {
             let mut decoder_stats = handle.stats();
             decoder_stats.set_default_label("component", "audio_decoder");
@@ -1382,34 +1382,20 @@ impl Mp4FileReader {
         }
         if let Some(task) = self.video_decoder_task.take() {
             let _ = task.discard_mode_tx.send(true);
-            match task.shutdown().await {
-                Ok((sender, task_result)) => {
-                    if let Err(e) = task_result {
-                        tracing::warn!(
-                            "video decoder task exited with error before respawn: {}",
-                            e.display()
-                        );
-                    }
-                    let mut video_options = self
-                        .options
-                        .video_decoder_options
-                        .clone()
-                        .unwrap_or_default();
-                    if video_options.openh264_lib.is_none() {
-                        video_options.openh264_lib = handle.config().openh264_lib.clone();
-                    }
-                    let stats = handle.stats();
-                    self.video_decoder_task =
-                        Some(spawn_video_decoder_task(video_options, stats, sender));
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "failed to shutdown video decoder task for respawn: {}",
-                        e.display()
-                    );
-                }
+            let (sender, task_result) = task.shutdown().await?;
+            task_result?;
+            let mut video_options = self
+                .options
+                .video_decoder_options
+                .clone()
+                .unwrap_or_default();
+            if video_options.openh264_lib.is_none() {
+                video_options.openh264_lib = handle.config().openh264_lib.clone();
             }
+            let stats = handle.stats();
+            self.video_decoder_task = Some(spawn_video_decoder_task(video_options, stats, sender));
         }
+        Ok(())
     }
 }
 
@@ -1544,7 +1530,8 @@ struct VideoDecoderTask {
 
 impl VideoDecoderTask {
     /// EOS 送信 → task 完了待ち → (TrackSender, task 内 Result) を回収する。
-    /// task が panic した場合は TrackSender は失われ、 panic 情報を Err として返す。
+    /// task が panic した場合は TrackSender は失われ、 panic 情報を error! log に記録した
+    /// 上で Err として返す。
     ///
     /// Seek/Restart 経路で「send_eos を発火せずに shutdown する」場合は、 呼出前に
     /// `discard_mode_tx.send(true)` を発火してから shutdown する。 task 側で
@@ -1553,6 +1540,12 @@ impl VideoDecoderTask {
         let _ = self.input_tx.send(DecoderInput::Eos);
         match self.join_handle.await {
             Ok(result) => Ok(result),
+            Err(e) if e.is_panic() => {
+                tracing::error!("video decoder task panicked: {e}");
+                Err(crate::Error::new(format!(
+                    "video decoder task panicked: {e}"
+                )))
+            }
             Err(e) => Err(crate::Error::new(format!(
                 "video decoder task join failed: {e}"
             ))),
@@ -1632,10 +1625,9 @@ async fn run_video_decoder_loop(
                 }
             }
         }
-        // AsyncVideoDecoder::poll_output_sync が Empty + eos==true を Finished に射影するため到達不能。
-        // 将来 poll_output_sync の実装が変わった時の防御として残す (エラー文言は VideoDecoder::run と揃える)
+        // AsyncVideoDecoder::poll_output_sync が Empty + eos==true を Finished に射影するため到達不能
         if is_eos {
-            return Err(crate::Error::new("video decoder still pending after EOS"));
+            unreachable!("video decoder still pending after EOS");
         }
     }
 }
