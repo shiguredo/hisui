@@ -127,6 +127,82 @@ mod tests {
         Ok(())
     }
 
+    /// loop_playback 継続経路 (EOF → base_offset 更新 → 次 loop) で video decoder task が
+    /// 再 spawn される (F2 対応) ことを regression 検知する。 前 loop の残 buffer が新 loop
+    /// 先頭 keyframe → finish() 契約で emit されると timestamp が逆行するため、
+    /// 一定時間受信したフレームのタイムスタンプが monotonic increasing であることを検証する。
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mp4_file_source_loop_playback_maintains_timestamp_order() -> Result<()> {
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
+        let handle = pipeline.handle();
+        let pipeline_task = tokio::spawn(pipeline.run());
+        {
+            let handle = handle;
+            let video_track_id = TrackId::new("mp4_file_source_loop_test_video");
+            let subscriber = handle
+                .register_processor(
+                    ProcessorId::new("test_loop_subscriber"),
+                    ProcessorMetadata::new("test_loop_subscriber"),
+                )
+                .await?;
+            let mut rx = subscriber.subscribe_track(video_track_id.clone());
+            subscriber.notify_ready();
+            assert!(
+                handle
+                    .trigger_start()
+                    .await
+                    .expect("trigger_start must succeed")
+            );
+
+            let source = Mp4FileSource {
+                path: PathBuf::from("testdata/archive-red-320x320-av1.mp4"),
+                loop_playback: true,
+                audio_track_id: None,
+                video_track_id: Some(video_track_id.clone()),
+            };
+            handle
+                .spawn_processor(
+                    ProcessorId::new("loop_source"),
+                    ProcessorMetadata::new("mp4_file_source"),
+                    |handle| source.run(handle),
+                )
+                .await?;
+
+            // 短い fixture で 2 loop 分程度受信して timestamp の monotonic を検証する
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut last_timestamp: Option<std::time::Duration> = None;
+            let mut received = 0usize;
+            while tokio::time::Instant::now() < deadline {
+                let msg = match tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+                    .await
+                {
+                    Ok(msg) => msg,
+                    Err(_) => break,
+                };
+                match msg {
+                    crate::Message::Media(MediaFrame::Video(frame)) => {
+                        let ts = frame.timestamp;
+                        if let Some(last) = last_timestamp {
+                            assert!(
+                                ts >= last,
+                                "video フレームのタイムスタンプが逆行しました: {ts:?} < {last:?}"
+                            );
+                        }
+                        last_timestamp = Some(ts);
+                        received += 1;
+                    }
+                    crate::Message::Eos => break,
+                    _ => {}
+                }
+            }
+            assert!(received > 0, "少なくとも 1 フレーム以上受信されるはず");
+        }
+
+        pipeline_task.abort();
+
+        Ok(())
+    }
+
     #[test]
     fn mp4_file_source_h264_decode_smoke() -> Result<()> {
         let openh264_lib = if let Ok(path) = std::env::var("OPENH264_PATH") {
