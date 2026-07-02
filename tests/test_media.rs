@@ -61,6 +61,28 @@ fn timestamp_returns_start_for_text() {
     assert_eq!(media.timestamp(), Duration::from_secs(1));
 }
 
+/// MediaFrame::timestamp() は Audio 入力で AudioFrame::timestamp を返す。
+#[test]
+fn timestamp_returns_timestamp_for_audio() {
+    let audio_frame = AudioFrame {
+        timestamp: Duration::from_millis(500),
+        ..make_audio_frame()
+    };
+    let media = MediaFrame::new_audio(audio_frame);
+    assert_eq!(media.timestamp(), Duration::from_millis(500));
+}
+
+/// MediaFrame::timestamp() は Video 入力で VideoFrame::timestamp を返す。
+#[test]
+fn timestamp_returns_timestamp_for_video() {
+    let video_frame = VideoFrame {
+        timestamp: Duration::from_millis(700),
+        ..make_video_frame()
+    };
+    let media = MediaFrame::new_video(video_frame);
+    assert_eq!(media.timestamp(), Duration::from_millis(700));
+}
+
 /// MediaFrame::kind_name() は各バリアントに対応する文字列を返す。
 #[test]
 fn kind_name_returns_variant_name() {
@@ -73,57 +95,49 @@ fn kind_name_returns_variant_name() {
     assert_eq!(text.kind_name(), "text");
 }
 
-/// expect_text は Text 入力で Ok、Audio / Video 入力で kind_name を含む Err を返す。
+/// expect_text は Text 入力で Ok、Audio / Video 入力で厳密なエラーメッセージの Err を返す。
 #[test]
 fn expect_text_succeeds_only_for_text() {
     let text = MediaFrame::new_text(make_text_frame());
     assert!(text.expect_text().is_ok());
 
     let audio = MediaFrame::new_audio(make_audio_frame());
-    let err = audio
+    let msg = audio
         .expect_text()
-        .expect_err("Audio 入力では Err になる想定");
-    let msg = err.display().to_string();
-    assert!(
-        msg.contains("audio"),
-        "エラーメッセージに実バリアント名 'audio' を含むこと: {msg}"
-    );
+        .expect_err("Audio 入力では Err になる想定")
+        .display()
+        .to_string();
+    assert_eq!(msg, "expected text sample, but got audio sample");
 
     let video = MediaFrame::new_video(make_video_frame());
-    let err = video
+    let msg = video
         .expect_text()
-        .expect_err("Video 入力では Err になる想定");
-    let msg = err.display().to_string();
-    assert!(
-        msg.contains("video"),
-        "エラーメッセージに実バリアント名 'video' を含むこと: {msg}"
-    );
+        .expect_err("Video 入力では Err になる想定")
+        .display()
+        .to_string();
+    assert_eq!(msg, "expected text sample, but got video sample");
 }
 
-/// expect_audio は Text 入力で "text" を含む Err を返す。
+/// expect_audio は Text 入力で厳密なエラーメッセージの Err を返す。
 #[test]
-fn expect_audio_error_includes_text_kind() {
+fn expect_audio_returns_text_kind_error() {
     let text = MediaFrame::new_text(make_text_frame());
-    let err = text
+    let msg = text
         .expect_audio()
-        .expect_err("Text 入力では Err になる想定");
-    let msg = err.display().to_string();
-    assert!(
-        msg.contains("text"),
-        "エラーメッセージに実バリアント名 'text' を含むこと: {msg}"
-    );
+        .expect_err("Text 入力では Err になる想定")
+        .display()
+        .to_string();
+    assert_eq!(msg, "expected audio sample, but got text sample");
 }
 
-/// expect_video は Text 入力で "text" を含む Err を返す。
+/// expect_video は Text 入力で厳密なエラーメッセージの Err を返す。
 #[test]
-fn expect_video_error_includes_text_kind() {
+fn expect_video_returns_text_kind_error() {
     let text = MediaFrame::new_text(make_text_frame());
-    let err = text
+    let msg = text
         .expect_video()
-        .expect_err("Text 入力では Err になる想定");
-    let msg = err.display().to_string();
-    assert!(
-        msg.contains("text"),
-        "エラーメッセージに実バリアント名 'text' を含むこと: {msg}"
-    );
+        .expect_err("Text 入力では Err になる想定")
+        .display()
+        .to_string();
+    assert_eq!(msg, "expected video sample, but got text sample");
 }
