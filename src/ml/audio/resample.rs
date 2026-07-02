@@ -5,7 +5,7 @@
 //! Kaiser 窓の設計に必要な第 0 種変形 Bessel 関数 `I0` は Rust std / libm に存在しないため
 //! `bessel_i0` に級数展開の自前実装を置く。
 
-use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
+use crate::audio::{Channels, SampleRate};
 use crate::error::Error;
 
 /// 変換先サンプルレート (Hz)。
@@ -58,31 +58,6 @@ pub fn resample_to_16k_mono(
     }
 
     Ok(polyphase_resample(&mono, src, DST_HZ))
-}
-
-/// `AudioFrame` (`AudioFormat::I16Be` 前提) を 16 kHz モノラル f32 に変換する。
-///
-/// I16Be のバイト列を `i16::from_be_bytes` で復号し、`/ 32768.0` で `[-1.0, 1.0)` に正規化してから
-/// `resample_to_16k_mono` に渡す。`I16Be` 以外のフォーマットは `Err`。
-pub fn audio_frame_to_16k_mono(frame: &AudioFrame) -> crate::Result<Vec<f32>> {
-    if frame.format != AudioFormat::I16Be {
-        return Err(Error::new(format!(
-            "audio_frame_to_16k_mono expects I16Be format, got {}",
-            frame.format
-        )));
-    }
-    if !frame.data.len().is_multiple_of(2) {
-        return Err(Error::new(format!(
-            "I16Be data length must be even, got {}",
-            frame.data.len()
-        )));
-    }
-    let samples: Vec<f32> = frame
-        .data
-        .chunks_exact(2)
-        .map(|c| f32::from(i16::from_be_bytes([c[0], c[1]])) / 32768.0)
-        .collect();
-    resample_to_16k_mono(&samples, frame.sample_rate, frame.channels)
 }
 
 /// polyphase FIR による rational resampler。
