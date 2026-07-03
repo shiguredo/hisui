@@ -607,29 +607,54 @@ async fn video_decoder_loop(
 mod tests {
     use super::*;
 
-    /// spawn 直後に shutdown().await が Ok(()) を返すことを検証する smoke test。
+    /// shutdown().await が Ok(()) を返し、 かつ task が Finished 分岐で
+    /// output_tx.send_eos() を発火して subscriber に Message::Eos を届けることを検証する。
+    /// send_eos の呼出が Finished 分岐から消失した regression を catch する。
     #[tokio::test]
-    async fn spawn_then_shutdown_returns_ok() -> crate::Result<()> {
+    async fn shutdown_delivers_eos_to_subscriber() -> crate::Result<()> {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
         let pipeline_handle = pipeline.handle();
         let _pipeline_task = tokio::spawn(async move { pipeline.run().await });
 
-        let processor_handle = pipeline_handle
+        let publisher_handle = pipeline_handle
             .register_processor(
-                crate::ProcessorId::new("rtmp_task_smoke_test"),
-                crate::ProcessorMetadata::new("rtmp_task_smoke_test"),
+                crate::ProcessorId::new("rtmp_task_smoke_publisher"),
+                crate::ProcessorMetadata::new("rtmp_task_smoke_publisher"),
             )
             .await
-            .expect("register processor");
-        let track_id = crate::TrackId::new("rtmp_task_smoke_test_video");
-        let output_tx = processor_handle.publish_track(track_id).await?;
+            .expect("register publisher processor");
+        let subscriber_handle = pipeline_handle
+            .register_processor(
+                crate::ProcessorId::new("rtmp_task_smoke_subscriber"),
+                crate::ProcessorMetadata::new("rtmp_task_smoke_subscriber"),
+            )
+            .await
+            .expect("register subscriber processor");
+        let track_id = crate::TrackId::new("rtmp_task_smoke_video");
+
+        // publish 前に subscribe しておき、 publish_track が pending_subscribers を拾えるようにする。
+        let mut rx = subscriber_handle.subscribe_track(track_id.clone());
+        subscriber_handle.notify_ready();
+
+        let output_tx = publisher_handle.publish_track(track_id).await?;
+        publisher_handle.notify_ready();
+        // wait_subscribers_ready は初期 processor 群の準備完了を待つため trigger_start が必要。
+        pipeline_handle.trigger_start().await?;
+        publisher_handle.wait_subscribers_ready().await?;
 
         let task = spawn_video_decoder_task(
             crate::decoder::VideoDecoderOptions::default(),
-            processor_handle.stats(),
+            publisher_handle.stats(),
             output_tx,
         );
 
-        task.shutdown().await
+        task.shutdown().await?;
+
+        match rx.recv().await {
+            crate::Message::Eos => Ok(()),
+            other => Err(crate::Error::new(format!(
+                "Message::Eos を期待したが {other:?} を受信した"
+            ))),
+        }
     }
 }
