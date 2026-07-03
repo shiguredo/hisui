@@ -145,9 +145,13 @@ impl VadGate {
         Ok(results)
     }
 
-    /// 通し番号を 0 に戻し、`SileroVad::reset` を呼ぶ。別 track / 別ストリーム切り替え時に使う。
+    /// 通し番号を 0 に戻し、buffer の残余を捨て、`SileroVad::reset` を呼んで state / context を
+    /// 初期値に戻す。
     ///
-    /// buffer の残余サンプルは破棄する (別 track の PCM と混ぜないため)。
+    /// 同一 track 内で発話境界を強制的に fresh にしたいとき (例: 長時間ストリームの論理区切り) の
+    /// 高速リセット用。track / 話者を切り替える場合は
+    /// `VadGate::new(model.new_instance(), config)` で別インスタンスを作るのが基本方針
+    /// (別 track の SileroVad state を持ち込まないため)。
     pub fn reset(&mut self) {
         self.silero.reset();
         self.buffer = AudioChunkBuffer::new(CHUNK_SAMPLES);

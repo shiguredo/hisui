@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use candle_core::Device;
 use hisui::ml::audio::config::VadConfig;
-use hisui::ml::audio::silero_vad::SileroVad;
+use hisui::ml::audio::silero_vad::SileroVadModel;
 use hisui::ml::audio::vad::VadGate;
 
 /// モデル配置ディレクトリを環境変数から解決する。未設定なら `ml-models` を返す。
@@ -44,13 +44,14 @@ fn resolve_model_path_or_skip(test_name: &str) -> Option<PathBuf> {
     None
 }
 
-/// SileroVad::load が成功する (モデル配置済み環境限定)。
+/// SileroVadModel::load が成功する (モデル配置済み環境限定)。
 #[test]
-fn silero_vad_load_succeeds() {
-    let Some(model_path) = resolve_model_path_or_skip("silero_vad_load_succeeds") else {
+fn silero_vad_model_load_succeeds() {
+    let Some(model_path) = resolve_model_path_or_skip("silero_vad_model_load_succeeds") else {
         return;
     };
-    SileroVad::load(&model_path, Device::Cpu).expect("Silero VAD モデルのロードは成功する想定");
+    SileroVadModel::load(&model_path, Device::Cpu)
+        .expect("Silero VAD モデルのロードは成功する想定");
 }
 
 /// 3 秒の zero-fill を VadGate に流すと SpeechSegment が空 Vec で返る。
@@ -60,8 +61,8 @@ fn vad_gate_returns_no_segment_for_zero_fill() {
     else {
         return;
     };
-    let silero = SileroVad::load(&model_path, Device::Cpu).expect("Silero VAD ロード");
-    let mut gate = VadGate::new(silero, VadConfig::default());
+    let model = SileroVadModel::load(&model_path, Device::Cpu).expect("Silero VAD ロード");
+    let mut gate = VadGate::new(model.new_instance(), VadConfig::default());
 
     // 3 秒 = 48000 サンプル @ 16 kHz の zero-fill。
     let pcm = vec![0.0f32; 48000];
@@ -90,7 +91,8 @@ fn silero_vad_zero_input_stays_below_threshold() {
     else {
         return;
     };
-    let mut silero = SileroVad::load(&model_path, Device::Cpu).expect("Silero VAD ロード");
+    let model = SileroVadModel::load(&model_path, Device::Cpu).expect("Silero VAD ロード");
+    let mut silero = model.new_instance();
     let chunk = vec![0.0f32; 512];
     for i in 0..3 {
         let probability = silero
@@ -103,13 +105,74 @@ fn silero_vad_zero_input_stays_below_threshold() {
     }
 }
 
-/// パス不在で SileroVad::load が Err を返す。
+/// 同じモデルから `new_instance` で作った独立したインスタンスは、同一入力に対して 1 回目の推論結果が
+/// 一致する (両者とも初期 state から始まるため決定的に同値)。
+#[test]
+fn independent_instances_produce_identical_first_probability() {
+    let Some(model_path) =
+        resolve_model_path_or_skip("independent_instances_produce_identical_first_probability")
+    else {
+        return;
+    };
+    let model = SileroVadModel::load(&model_path, Device::Cpu).expect("Silero VAD ロード");
+    let mut vad_a = model.new_instance();
+    let mut vad_b = model.new_instance();
+
+    let chunk = vec![0.0f32; 512];
+    let prob_a = vad_a
+        .chunk_probability(&chunk)
+        .expect("A: chunk_probability は Ok");
+    let prob_b = vad_b
+        .chunk_probability(&chunk)
+        .expect("B: chunk_probability は Ok");
+    assert_eq!(
+        prob_a, prob_b,
+        "独立インスタンスは初期 state から始まるので 1 回目の確率は一致するはず"
+    );
+}
+
+/// A の state を進めた後でも、独立している B は影響を受けない (state 分離の検証)。
+#[test]
+fn instances_do_not_share_state() {
+    let Some(model_path) = resolve_model_path_or_skip("instances_do_not_share_state") else {
+        return;
+    };
+    let model = SileroVadModel::load(&model_path, Device::Cpu).expect("Silero VAD ロード");
+    let mut vad_a = model.new_instance();
+    let mut vad_b = model.new_instance();
+
+    let chunk = vec![0.0f32; 512];
+
+    // A を 5 チャンクぶん進めて state を変える。
+    for _ in 0..5 {
+        vad_a
+            .chunk_probability(&chunk)
+            .expect("A: chunk_probability は Ok");
+    }
+
+    // B は初期 state のままなので、1 回目 (=独立に作ったばかりの結果) は
+    // 前テストで確認した「初期 state での確率」と一致する。改めて別の fresh インスタンスと比較する。
+    let prob_b_first = vad_b
+        .chunk_probability(&chunk)
+        .expect("B: chunk_probability は Ok");
+    let mut vad_c = model.new_instance();
+    let prob_c_first = vad_c
+        .chunk_probability(&chunk)
+        .expect("C: chunk_probability は Ok");
+    assert_eq!(
+        prob_b_first, prob_c_first,
+        "A の state 変化は B に伝わっていないはず"
+    );
+}
+
+/// パス不在で SileroVadModel::load が Err を返す。
 ///
 /// このケースはモデル配置に依存しないため、常時実行する。
 #[test]
-fn silero_vad_load_returns_err_for_missing_path() {
+fn silero_vad_model_load_returns_err_for_missing_path() {
     let missing = Path::new("/nonexistent/silero-vad/model.onnx");
-    let err = SileroVad::load(missing, Device::Cpu).expect_err("存在しないパスは Err を返す想定");
+    let err =
+        SileroVadModel::load(missing, Device::Cpu).expect_err("存在しないパスは Err を返す想定");
     let msg = err.display().to_string();
     assert!(
         msg.contains("not found") || msg.contains("silero VAD"),
@@ -117,12 +180,12 @@ fn silero_vad_load_returns_err_for_missing_path() {
     );
 }
 
-/// 非 ONNX バイト列で SileroVad::load が Err を返す。
+/// 非 ONNX バイト列で SileroVadModel::load が Err を返す。
 ///
 /// magic bytes を持たない 32 byte を tempfile に書いて load すると、candle-onnx が ONNX として
 /// パースできず Err になる。
 #[test]
-fn silero_vad_load_returns_err_for_non_onnx_bytes() {
+fn silero_vad_model_load_returns_err_for_non_onnx_bytes() {
     let dir = std::env::temp_dir().join(format!(
         "hisui_test_silero_vad_bad_bytes_{}",
         std::process::id()
@@ -132,7 +195,8 @@ fn silero_vad_load_returns_err_for_non_onnx_bytes() {
     let bad_bytes = b"NOT_ONNX_FILE_HEADER_DATA_XXXXXX"; // 32 byte、非 protobuf
     std::fs::write(&path, bad_bytes).expect("bad bytes 書き込み");
 
-    let err = SileroVad::load(&path, Device::Cpu).expect_err("非 ONNX バイト列は Err を返す想定");
+    let err =
+        SileroVadModel::load(&path, Device::Cpu).expect_err("非 ONNX バイト列は Err を返す想定");
 
     // 後片付け。
     let _ = std::fs::remove_file(&path);

@@ -1,12 +1,24 @@
 //! Silero VAD v5 ONNX モデルのロードと 512 サンプル単発推論。
 //!
-//! 入力チャンクは 16 kHz モノラル f32 の 512 サンプル固定。ONNX 入力は
-//! `input: [1, 576]` = 前フレーム末尾 64 サンプル (context) + 新規 512 サンプル (chunk) を cat したもの。
-//! state は `[2, 1, 128]` f32、sr は `[]` i64 = 16000。
-//! 推論のたびに state は ONNX 出力 (`stateN`) で置き換え、context は新規 chunk の末尾 64 サンプルで置き換える。
+//! `SileroVadModel` は ONNX のパース結果と初期 state / context を保持する immutable な型で、
+//! プロセス起動時に 1 回だけロードする (`SileroVadModel::load`)。実際の推論と可変 state は
+//! `SileroVadModel::new_instance` で得られる `SileroVad` が担う。
+//!
+//! リアルタイムに複数 track (複数話者) の音声が interleave で流れる用途では、track ごとに
+//! `new_instance` で独立した `SileroVad` を作って持つこと。1 つの `SileroVad` を複数 track で
+//! 使い回すと LSTM state が混ざり、track 境界前後の判定精度が劣化する。
+//!
+//! ONNX 入力の内訳:
+//! - `input`: `[1, 576]` = 前フレーム末尾 64 サンプル (context) + 新規 512 サンプル (chunk) を cat
+//! - `state`: `[2, 1, 128]` f32
+//! - `sr`: `[]` i64 = 16000
+//!
+//! 推論のたびに state は ONNX 出力 (`stateN`) で置き換え、context は新規 chunk の末尾 64 サンプルで
+//! 置き換える。
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use candle_core::{DType, Device, Tensor};
 use candle_onnx::onnx::ModelProto;
@@ -22,30 +34,28 @@ const CONTEXT_SIZE: usize = 64;
 /// Silero VAD v5 が推論に要求するサンプルレート。
 const SAMPLE_RATE_HZ: i64 = 16000;
 
-/// Silero VAD v5 ONNX モデルの単発推論器。
+/// Silero VAD v5 ONNX モデルの immutable な本体。
 ///
-/// `chunk_probability` を呼ぶたびに ONNX の出力 (発話確率 / 次 state) を受け取り、次呼び出しに向けて
-/// `state` と `context` を更新する。ストリーム切り替え時は `reset` で両者を初期値に戻す。
+/// ONNX パース + 初期 Tensor 生成 (~100 ms オーダー) は `load` で 1 回だけ払う。
+/// 1 プロセスで 1 個持てば十分で、複数の推論インスタンスは `new_instance` から生成する。
 #[derive(Debug)]
-pub struct SileroVad {
+pub struct SileroVadModel {
     model: ModelProto,
     device: Device,
-    /// 初期 state を保持しておき reset で使い回す (Tensor::clone は失敗しない)。
     initial_state: Tensor,
-    /// 初期 context を保持しておき reset で使い回す。
     initial_context: Tensor,
-    state: Tensor,
-    context: Tensor,
     sample_rate: Tensor,
     output_name: String,
     state_output_name: String,
 }
 
-impl SileroVad {
-    /// ONNX モデルを開いて state / context / sr を device 上で初期化する。
+impl SileroVadModel {
+    /// ONNX モデルを開き、初期 state / context / sample rate テンソルを device 上に生成する。
     ///
     /// パス不在・ONNX パースエラー・テンソル生成失敗はいずれも `Err` として返す (フォールバックしない)。
-    pub fn load<P: AsRef<Path>>(model_path: P, device: Device) -> crate::Result<Self> {
+    /// 戻り値は `Arc` で共有できる形にする (複数 track 間でモデルを共有し `new_instance` で
+    /// インスタンスを派生させるため)。
+    pub fn load<P: AsRef<Path>>(model_path: P, device: Device) -> crate::Result<Arc<Self>> {
         let path = model_path.as_ref();
         if !path.is_file() {
             return Err(Error::new(format!(
@@ -77,19 +87,43 @@ impl SileroVad {
         let initial_context = Tensor::zeros((1, CONTEXT_SIZE), DType::F32, &device)?;
         let sample_rate = Tensor::new(SAMPLE_RATE_HZ, &device)?;
 
-        Ok(Self {
+        Ok(Arc::new(Self {
             model,
             device,
-            state: initial_state.clone(),
-            context: initial_context.clone(),
             initial_state,
             initial_context,
             sample_rate,
             output_name,
             state_output_name,
-        })
+        }))
     }
 
+    /// 新しい推論インスタンスを生成する。state / context は初期値 (ゼロテンソル) から始まる。
+    ///
+    /// track / 話者ごとに個別に持つのが基本方針。複数 track が interleave で流れるリアルタイム
+    /// 用途でも、それぞれ独立した `SileroVad` を持てば LSTM state が混ざらない。
+    pub fn new_instance(self: &Arc<Self>) -> SileroVad {
+        SileroVad {
+            state: self.initial_state.clone(),
+            context: self.initial_context.clone(),
+            model: Arc::clone(self),
+        }
+    }
+}
+
+/// Silero VAD v5 ONNX モデルの推論インスタンス。
+///
+/// 1 つの `SileroVad` は 1 系統の音声ストリーム (1 track / 1 話者) を担当する。track / 話者境界では
+/// 新しい `SileroVadModel::new_instance` で別インスタンスを作る (state を混ぜない)。同一 track 内の
+/// 論理的な発話境界で state を fresh にしたいだけなら `reset` を使う (別インスタンスを作るより軽い)。
+#[derive(Debug)]
+pub struct SileroVad {
+    model: Arc<SileroVadModel>,
+    state: Tensor,
+    context: Tensor,
+}
+
+impl SileroVad {
     /// 512 サンプル (32 ms @ 16 kHz) ちょうどの chunk を受けて発話確率 (0.0 - 1.0) を返す。
     ///
     /// 実装順序:
@@ -106,23 +140,26 @@ impl SileroVad {
             )));
         }
 
-        let chunk_tensor = Tensor::from_slice(chunk, (1, FRAME_SIZE), &self.device)?;
+        let chunk_tensor = Tensor::from_slice(chunk, (1, FRAME_SIZE), &self.model.device)?;
         let input = Tensor::cat(&[&self.context, &chunk_tensor], 1)?;
 
         let inputs = HashMap::from([
             ("input".to_string(), input),
-            ("sr".to_string(), self.sample_rate.clone()),
+            ("sr".to_string(), self.model.sample_rate.clone()),
             ("state".to_string(), self.state.clone()),
         ]);
-        let outputs = candle_onnx::simple_eval(&self.model, inputs)?;
+        let outputs = candle_onnx::simple_eval(&self.model.model, inputs)?;
 
-        let speech = outputs
-            .get(&self.output_name)
-            .ok_or_else(|| Error::new(format!("silero VAD missing output {}", self.output_name)))?;
-        let new_state = outputs.get(&self.state_output_name).ok_or_else(|| {
+        let speech = outputs.get(&self.model.output_name).ok_or_else(|| {
+            Error::new(format!(
+                "silero VAD missing output {}",
+                self.model.output_name
+            ))
+        })?;
+        let new_state = outputs.get(&self.model.state_output_name).ok_or_else(|| {
             Error::new(format!(
                 "silero VAD missing state output {}",
-                self.state_output_name
+                self.model.state_output_name
             ))
         })?;
 
@@ -137,7 +174,7 @@ impl SileroVad {
         self.context = Tensor::from_slice(
             &chunk[FRAME_SIZE - CONTEXT_SIZE..],
             (1, CONTEXT_SIZE),
-            &self.device,
+            &self.model.device,
         )?;
 
         Ok(probability[0])
@@ -145,9 +182,11 @@ impl SileroVad {
 
     /// state と context を初期値 (ゼロテンソル) にリセットする。
     ///
-    /// 別 track / 別ストリーム切り替え時に呼ぶ。`Tensor::clone` は shallow copy で失敗しない。
+    /// 同一 track 内の論理的な発話境界で state を fresh にしたいときの高速リセット用。
+    /// track / 話者を切り替える用途では `SileroVadModel::new_instance` で別インスタンスを
+    /// 作ること (別 track の state を誤って持ち込まないため)。
     pub fn reset(&mut self) {
-        self.state = self.initial_state.clone();
-        self.context = self.initial_context.clone();
+        self.state = self.model.initial_state.clone();
+        self.context = self.model.initial_context.clone();
     }
 }
