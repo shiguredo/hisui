@@ -574,7 +574,7 @@ mod err_path {
 
         /// pic_order_cnt_type の境界 + 巨大値で Err 値域を検証する
         ///
-        /// `value=u32::MAX` のとき `PbtSpsBitWriter::write_ue` 内の `value.checked_add(1).expect(...)` で
+        /// `value=u32::MAX` のとき `SpsBitWriter::write_ue` 内の `value.checked_add(1).expect(...)` で
         /// panic するため、本 PBT では実用範囲 (上限 100_000) のスイープで境界 (≤2: Ok / ≥3: Err) を検証する。
         #[test]
         fn prop_h264_sample_entry_pic_order_cnt_type_boundary(
