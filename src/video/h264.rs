@@ -139,7 +139,7 @@ pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
     // RBSP trailing bits は parse_sps が pic_width_in_mbs_minus1 以降を読み終えるまで不要なため省略する
     let raw = w.into_bytes();
     // 先頭 1 バイトは NAL header で走査対象外。以降を ISO/IEC 14496-10 7.4.1.2.3 の EBSP 形式に変換する。
-    let mut out = Vec::with_capacity(raw.len() + raw.len() / 2 + 1);
+    let mut out = Vec::new();
     out.push(raw[0]);
     for &b in &raw[1..] {
         let n = out.len();
