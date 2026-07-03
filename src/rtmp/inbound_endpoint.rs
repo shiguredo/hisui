@@ -510,7 +510,13 @@ struct VideoDecoderTask {
 }
 
 impl VideoDecoderTask {
-    #[allow(dead_code)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "shutdown はテストからのみ呼ばれる (本番経路は Drop 経由 abort)"
+        )
+    )]
     async fn shutdown(mut self) -> crate::Result<()> {
         let _ = self.input_tx.send(DecoderInput::Eos);
         let handle = self
