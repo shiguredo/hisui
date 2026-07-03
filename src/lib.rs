@@ -20,6 +20,7 @@ pub mod mixer;
 pub mod ml;
 pub mod mp4;
 pub mod obsws;
+pub mod probability;
 pub mod progress;
 pub mod scaler;
 pub mod srt;

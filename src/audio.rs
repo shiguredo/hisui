@@ -1,6 +1,7 @@
 pub mod aac;
 pub mod converter;
 pub mod opus;
+pub mod resample;
 
 use std::time::Duration;
 
