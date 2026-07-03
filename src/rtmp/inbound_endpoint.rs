@@ -512,3 +512,114 @@ impl RtmpPublisherHandler {
         Ok(())
     }
 }
+
+// video decoder task の spawn pattern (issue 0072)。
+// 0071 の `src/mp4/reader.rs:1528-1643` を参照実装として写経したもので、
+// warm-up 制御 (`discard_mode_tx`) と `TrackSender` は本 endpoint では不要のため落としてある。
+// 共通化 (`src/decoder/task.rs` 等への切り出し) は open issue 0073 で最終判断する。
+
+#[allow(dead_code)]
+enum DecoderInput {
+    Media(crate::MediaFrame),
+    Eos,
+}
+
+// Drop trait と shutdown(self) を共存させるため join_handle を Option で保持し
+// take() で move する。 直接 JoinHandle を持つと Drop 実装型の partial move が
+// E0509 で禁止される。
+#[derive(Debug)]
+#[allow(dead_code)]
+struct VideoDecoderTask {
+    input_tx: tokio::sync::mpsc::UnboundedSender<DecoderInput>,
+    join_handle: Option<tokio::task::JoinHandle<crate::Result<()>>>,
+}
+
+impl VideoDecoderTask {
+    #[allow(dead_code)]
+    async fn shutdown(mut self) -> crate::Result<()> {
+        let _ = self.input_tx.send(DecoderInput::Eos);
+        let handle = self
+            .join_handle
+            .take()
+            .expect("join_handle is Some until shutdown/Drop consumes it");
+        match handle.await {
+            Ok(result) => result,
+            Err(e) if e.is_panic() => {
+                tracing::error!("video decoder task panicked: {e}");
+                Err(crate::Error::new(format!(
+                    "video decoder task panicked: {e}"
+                )))
+            }
+            Err(e) => Err(crate::Error::new(format!(
+                "video decoder task join failed: {e}"
+            ))),
+        }
+    }
+}
+
+impl Drop for VideoDecoderTask {
+    fn drop(&mut self) {
+        // 早期 return / panic unwind 経路で task が leak しないよう abort する。
+        // shutdown() が先に呼ばれていれば take 済みで None のため何もしない。
+        if let Some(handle) = self.join_handle.take() {
+            handle.abort();
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn spawn_video_decoder_task(
+    options: crate::decoder::VideoDecoderOptions,
+    mut stats: crate::stats::Stats,
+    output_tx: crate::TrackPublisher,
+) -> VideoDecoderTask {
+    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel::<DecoderInput>();
+    stats.set_default_label("component", "video_decoder");
+    let join_handle =
+        tokio::spawn(async move { video_decoder_loop(options, stats, input_rx, output_tx).await });
+    VideoDecoderTask {
+        input_tx,
+        join_handle: Some(join_handle),
+    }
+}
+
+#[allow(dead_code)]
+async fn video_decoder_loop(
+    options: crate::decoder::VideoDecoderOptions,
+    stats: crate::stats::Stats,
+    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<DecoderInput>,
+    mut output_tx: crate::TrackPublisher,
+) -> crate::Result<()> {
+    let mut decoder = crate::decoder::AsyncVideoDecoder::new(options, stats);
+    loop {
+        let input = match input_rx.recv().await {
+            Some(input) => input,
+            // main が VideoDecoderTask を drop する経路 (通常は shutdown 経由で EOS 送信済み)。
+            None => return Ok(()),
+        };
+        let is_eos = matches!(input, DecoderInput::Eos);
+        match input {
+            DecoderInput::Media(sample) => decoder.handle_input_sample_sync(Some(sample))?,
+            DecoderInput::Eos => decoder.handle_input_sample_sync(None)?,
+        }
+        // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending / Finished まで drain する。
+        loop {
+            match decoder.poll_output_sync()? {
+                crate::decoder::DecoderRunOutput::Processed(sample) => {
+                    if !output_tx.send_media(sample) {
+                        return Ok(());
+                    }
+                }
+                crate::decoder::DecoderRunOutput::Pending => break,
+                crate::decoder::DecoderRunOutput::Finished => {
+                    let _ = output_tx.send_eos();
+                    return Ok(());
+                }
+            }
+        }
+        // AsyncVideoDecoder::poll_output_sync が Empty + eos==true を Finished に射影するため到達不能。
+        if is_eos {
+            unreachable!("video decoder still pending after EOS");
+        }
+    }
+}
