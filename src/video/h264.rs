@@ -137,15 +137,25 @@ pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
         w.write_ue(b);
     }
     // RBSP trailing bits は parse_sps が pic_width_in_mbs_minus1 以降を読み終えるまで不要なため省略する
-    let raw = w.into_bytes();
-    // 先頭 1 バイトは NAL header で走査対象外。以降を ISO/IEC 14496-10 7.4.1.2.3 の EBSP 形式に変換する。
+    rbsp_to_ebsp(&w.into_bytes())
+}
+
+/// 生 RBSP バイト列 (NAL header 1 バイト + payload) を ISO/IEC 14496-10 7.4.1.2.3 の EBSP 形式に変換する。
+///
+/// NAL header は先頭 1 バイトとして走査対象外で出力にそのまま流し、以降の payload に対して
+/// emulation prevention byte (0x03) を挿入する。挿入判定は出力ストリームベースで行い、
+/// 出力の直前 2 バイトが 0x00 0x00 で次入力バイトが 0x00..=0x03 のとき 0x03 を挿入する。
+///
+/// `rbsp_from_sps_nalu` の厳密な逆写像として動作するため、
+/// `0x00 0x00 0x00 0x00 0x03` のような跨ぎパターンでも `rbsp_from_sps_nalu` で元の RBSP に復元できる。
+fn rbsp_to_ebsp(raw: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    out.push(raw[0]);
-    for &b in &raw[1..] {
+    let Some((&first, rest)) = raw.split_first() else {
+        return out;
+    };
+    out.push(first);
+    for &b in rest {
         let n = out.len();
-        // 出力の直前 2 バイトが 0x00 0x00 で次バイトが 0x00..=0x03 のとき 0x03 を挿入する。
-        // 出力ストリームベースで判定することで rbsp_from_sps_nalu の逆写像として成立し、
-        // 0x00 0x00 0x00 0x00 0x03 のような跨ぎパターンでも RBSP に復元できる。
         if n >= 2 && out[n - 2] == 0x00 && out[n - 1] == 0x00 && b <= 0x03 {
             out.push(0x03);
         }
@@ -1060,6 +1070,79 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn rbsp_to_ebsp_inserts_emulation_prevention_byte() {
+        // 直前 2 バイトが 0x00 0x00 で次バイトが 0x00..=0x03 の 4 パターンで 0x03 が挿入されること。
+        // 先頭 1 バイトの NAL header 0x67 は挿入対象外で素通しされる。
+        for &b in &[0x00u8, 0x01, 0x02, 0x03] {
+            let raw = [0x67, 0x00, 0x00, b];
+            let ebsp = rbsp_to_ebsp(&raw);
+            assert_eq!(
+                ebsp,
+                [0x67, 0x00, 0x00, 0x03, b],
+                "0x00 0x00 の直後が {b:#04x} なら 0x03 が挿入されるべき"
+            );
+        }
+    }
+
+    #[test]
+    fn rbsp_to_ebsp_keeps_payload_intact_when_third_byte_exceeds_0x03() {
+        // 0x00 0x00 の直後が 0x04 以上のバイトなら挿入せず素通しすること。
+        for &b in &[0x04u8, 0x10, 0x7f, 0xff] {
+            let raw = [0x67, 0x00, 0x00, b];
+            let ebsp = rbsp_to_ebsp(&raw);
+            assert_eq!(
+                ebsp,
+                [0x67, 0x00, 0x00, b],
+                "0x00 0x00 の直後が {b:#04x} なら変換しないはず"
+            );
+        }
+    }
+
+    #[test]
+    fn rbsp_to_ebsp_handles_bridging_zero_pattern() {
+        // 生 RBSP `0x00 0x00 0x00 0x00 0x03` は 2 箇所 (bytes[1..3] と bytes[3..5]) にトリガが跨がる。
+        // 出力ストリームベースの判定なので、挿入した 0x03 の直後を新たな走査基準に取り込み、
+        // 2 箇所とも emulation prevention byte を挿入することで rbsp_from_sps_nalu が
+        // 元の RBSP を復元できる形にする。入力ベースの i += 3 走査ではこれが破綻するため
+        // 明示的に検証する。
+        let raw = [0x67, 0x00, 0x00, 0x00, 0x00, 0x03];
+        let ebsp = rbsp_to_ebsp(&raw);
+        assert_eq!(
+            ebsp,
+            [0x67, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x03],
+            "跨ぎパターンで 2 箇所に 0x03 が挿入されるべき"
+        );
+    }
+
+    #[test]
+    fn rbsp_to_ebsp_round_trips_through_rbsp_from_sps_nalu() {
+        // rbsp_to_ebsp と rbsp_from_sps_nalu が互いに逆写像であることを、
+        // 挿入トリガ 4 種・非挿入 1 種・跨ぎパターン・複雑な実データ相当の 7 ケースで確認する。
+        // rbsp_from_sps_nalu は NAL header を除いた payload 部の RBSP を返すため、raw[1..] と比較する。
+        let cases: &[&[u8]] = &[
+            &[0x67, 0x00, 0x00, 0x00],
+            &[0x67, 0x00, 0x00, 0x01],
+            &[0x67, 0x00, 0x00, 0x02],
+            &[0x67, 0x00, 0x00, 0x03],
+            &[0x67, 0x00, 0x00, 0x04],
+            &[0x67, 0x00, 0x00, 0x00, 0x00, 0x03],
+            &[
+                0x67, 0x42, 0x00, 0x00, 0xE4, 0x40, 0x01, 0x00, 0x00, 0x03, 0x44, 0xA0,
+            ],
+        ];
+        for raw in cases {
+            let ebsp = rbsp_to_ebsp(raw);
+            let restored =
+                rbsp_from_sps_nalu(&ebsp).expect("EBSP から RBSP への復元が成功すること");
+            assert_eq!(
+                restored,
+                &raw[1..],
+                "rbsp_to_ebsp と rbsp_from_sps_nalu の round-trip で元の RBSP に戻るべき: raw={raw:02x?}"
+            );
+        }
+    }
+
+    #[test]
     fn skip_scaling_list_rejects_next_scale_overflow() {
         // scaling_list の next_scale 計算式 `last_scale + delta_scale + 256` で
         // i32 オーバーフローが起きた場合に Err を返すこと。
@@ -1604,14 +1687,15 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn h264_sample_entry_from_sps_pps_lists_handles_sps_with_embedded_emulation_prevention_pattern()
-    {
+    fn h264_sample_entry_from_sps_pps_lists_parses_ebsp_form_sps() {
         // build_sps_for_pbt が emulation prevention byte を挿入せず生 RBSP をそのまま返していると、
         // 生成される SPS に偶発的に発生する 0x00 0x00 0x03 パターンが rbsp_from_sps_nalu で
         // 除去されて RBSP が 1 バイト縮み、後段の bit reader が末尾を超えて枯渇する。
         // 本パラメタは生 SPS のバイト位置 7-9 にちょうど 0x00 0x00 0x03 が現れる組み合わせで、
-        // emulation prevention byte が正しく挿入されて h264_sample_entry_from_sps_pps_lists が
-        // Ok を返し frame_size と avcC が投入値を反映することを検証する。
+        // build_sps_for_pbt が emulation prevention byte を挿入した EBSP を返し、
+        // h264_sample_entry_from_sps_pps_lists がその EBSP を Ok で解釈できることを検証する。
+        // avc_level_indication / profile_compatibility は 0 の入力に対して 0 が返る自明な検証で
+        // 回帰検出力が薄いため本テストでは見ず、代表点として frame_size と avc_profile_indication のみ確認する。
         let params = SpsBuildParams {
             profile_idc: 66,
             constraint_set_flags: 0,
@@ -1629,30 +1713,25 @@ pub(crate) mod tests {
             frame_cropping: None,
         };
         let sps = build_sps_for_pbt(params);
+        // build_sps_for_pbt 側で 0x03 が挿入されたことを直接確認する (少なめ挿入バグの再発検知)
+        assert!(
+            sps.windows(3).any(|w| w == [0x00, 0x00, 0x03]),
+            "build_sps_for_pbt が返す EBSP に emulation prevention byte が含まれるべき: {sps:02x?}"
+        );
         let (entry, frame_size) =
             h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()])
-                .expect("投入パラメタから組み立てた SPS のパースが Ok を返すこと");
-        // frame_size は投入パラメタの raw_width / raw_height と一致する (cropping なし)
+                .expect("EBSP 形式の SPS のパースが Ok を返すこと");
         assert_eq!(
             (frame_size.width, frame_size.height),
-            (32768usize, 53536usize),
+            (32768, 53536),
             "frame_size が投入パラメタの raw_width / raw_height と一致すること"
         );
         let SampleEntry::Avc1(avc1) = entry else {
             panic!("Avc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
         };
-        // avcC フィールドが投入パラメタの profile_idc / level_idc / constraint_set_flags と一致する
         assert_eq!(
             avc1.avcc_box.avc_profile_indication, 66,
             "avc_profile_indication が投入パラメタの profile_idc と一致すること"
-        );
-        assert_eq!(
-            avc1.avcc_box.avc_level_indication, 0,
-            "avc_level_indication が投入パラメタの level_idc と一致すること"
-        );
-        assert_eq!(
-            avc1.avcc_box.profile_compatibility, 0,
-            "profile_compatibility が投入パラメタの constraint_set_flags と一致すること"
         );
     }
 
