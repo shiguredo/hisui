@@ -62,7 +62,9 @@ pub fn resample_to_mono(
                 pcm.len()
             )));
         }
-        pcm.chunks_exact(2).map(|c| (c[0] + c[1]) * 0.5).collect()
+        // 事前に偶数長を検証しているので `as_chunks::<2>` の余りは常に空。
+        let (chunks, _) = pcm.as_chunks::<2>();
+        chunks.iter().map(|&[l, r]| (l + r) * 0.5).collect()
     } else {
         return Err(Error::new(format!(
             "unsupported channel count for resample_to_mono: {}",
