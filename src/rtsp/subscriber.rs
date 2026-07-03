@@ -284,7 +284,7 @@ struct SelectedTracks {
 #[derive(Debug)]
 /// subscriber の audio 側出力先とデコーダー、 および video 側 decoder task への入力チャネル
 /// (`input_tx.clone()`) をまとめた構造体。 video 側の `TrackPublisher` は endpoint 寿命の
-/// decoder task に move されているため、 context には保持しない (issue 0072)。
+/// decoder task に move されているため、 context には保持しない。
 struct RtspOutputContext<'a> {
     audio_track_tx: &'a mut Option<TrackPublisher>,
     audio_decoder: &'a mut Option<crate::decoder::AudioDecoder>,
@@ -704,7 +704,6 @@ impl RtspSessionRunner {
                 stats.add_input_video_frame_count();
                 stats.set_last_input_video_timestamp(timestamp);
                 if let Some(tx) = output.video_decoder_input_tx.as_ref() {
-                    // decoder task の同期 unbounded_channel::send を経由して投入する。
                     // Err (task 死亡) は Fatal 相当 (task の再 spawn 経路を持たない設計)。
                     tx.send(DecoderInput::Media(crate::MediaFrame::new_video(
                         video_frame,
@@ -1475,10 +1474,7 @@ fn resolve_rtsp_url(base_url: &str, control: &str) -> crate::Result<String> {
     Ok(resolved)
 }
 
-// video decoder task の spawn pattern (issue 0072)。
-// 0071 の `src/mp4/reader.rs:1528-1643` を参照実装として写経したもので、
-// warm-up 制御 (`discard_mode_tx`) と `TrackSender` は本 endpoint では不要のため落としてある。
-// 共通化 (`src/decoder/task.rs` 等への切り出し) は open issue 0073 で最終判断する。
+// video decoder task の spawn pattern。
 
 enum DecoderInput {
     Media(crate::MediaFrame),
@@ -2713,10 +2709,7 @@ mod tests {
         );
     }
 
-    /// spawn_video_decoder_task 直後の shutdown().await が Ok(()) を返す smoke test。
-    /// Eos 受信 → Initial の handle_input_sample_sync(None) → poll_output_sync が Finished →
-    /// output_tx.send_eos() → task が Ok(()) で return する経路を検証する。
-    /// pipeline closed / panic 経路は残懸念 §2 に従い workspace の cargo test で担保する。
+    /// spawn 直後に shutdown().await が Ok(()) を返すことを検証する smoke test。
     #[tokio::test]
     async fn spawn_then_shutdown_returns_ok() -> crate::Result<()> {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;

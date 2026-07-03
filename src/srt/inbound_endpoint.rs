@@ -184,7 +184,7 @@ impl SrtInboundEndpoint {
 
         // video decoder task を endpoint 寿命で保持する。 publish_track で得た TrackPublisher を
         // task 内に move し、 process_polled_events クロージャには input_tx.clone() を借用で渡す。
-        // reset_connection_state 経路では task を継続保持し (RTSP と同型)、 endpoint 停止経路の
+        // reset_connection_state 経路では task を継続保持し、 endpoint 停止経路の
         // `?` 早期 return で VideoDecoderTask::Drop 経由 abort される。
         let video_decoder_task = if let Some(track_id) = &self.output_video_track_id {
             let output_tx = handle.publish_track(track_id.clone()).await?;
@@ -499,8 +499,7 @@ fn publish_samples(
                 stats.add_input_video_frame_count();
                 stats.set_last_input_video_timestamp(timestamp);
                 if let Some(tx) = video_decoder_input_tx.as_ref() {
-                    // UnboundedSender::send は同期・非ブロッキング。 Err (task 死亡) は fatal
-                    // として endpoint 停止に流れる。
+                    // Err (task 死亡) は fatal として endpoint 停止に流れる。
                     tx.send(DecoderInput::Media(crate::MediaFrame::new_video(frame)))
                         .map_err(|_| {
                             crate::Error::new("video decoder task terminated unexpectedly")
@@ -1079,10 +1078,7 @@ fn parse_adts_header(data: &[u8]) -> crate::Result<AdtsHeader> {
     })
 }
 
-// video decoder task の spawn pattern (issue 0072)。
-// 0071 の `src/mp4/reader.rs:1528-1643` を参照実装として写経したもので、
-// warm-up 制御 (`discard_mode_tx`) と `TrackSender` は本 endpoint では不要のため落としてある。
-// 共通化 (`src/decoder/task.rs` 等への切り出し) は open issue 0073 で最終判断する。
+// video decoder task の spawn pattern。
 
 enum DecoderInput {
     Media(crate::MediaFrame),
@@ -1099,9 +1095,6 @@ struct VideoDecoderTask {
 }
 
 impl VideoDecoderTask {
-    // 本 endpoint 実装では task lifecycle は endpoint 寿命に一致し、 明示的な shutdown は
-    // 呼ばれない (Drop 経由で abort する)。 shutdown() は unit test でのみ使うため
-    // #[allow(dead_code)] で警告抑制する。
     #[allow(dead_code)]
     async fn shutdown(mut self) -> crate::Result<()> {
         let _ = self.input_tx.send(DecoderInput::Eos);
@@ -1700,10 +1693,7 @@ mod tests {
         Ok(())
     }
 
-    /// spawn_video_decoder_task 直後の shutdown().await が Ok(()) を返す smoke test。
-    /// Eos 受信 → Initial の handle_input_sample_sync(None) → poll_output_sync が Finished →
-    /// output_tx.send_eos() → task が Ok(()) で return する経路を検証する。
-    /// pipeline closed / panic 経路は残懸念 §2 に従い workspace の cargo test で担保する。
+    /// spawn 直後に shutdown().await が Ok(()) を返すことを検証する smoke test。
     #[tokio::test]
     async fn spawn_then_shutdown_returns_ok() -> crate::Result<()> {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
