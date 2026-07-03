@@ -69,6 +69,9 @@ pub struct SpsBuildParams {
 /// 戻り値は `h264_sample_entry_from_sps_pps_lists` の `sps_list[0]` にそのまま投入できる。
 /// `raw_width` / `raw_height` は **16 の正の倍数** であること (= `>= 16` かつ `% 16 == 0`)。
 /// 0 を渡すと `raw_width / 16 - 1` が u32 underflow して panic する。
+///
+/// 戻り値は ISO/IEC 14496-10 7.4.1.2.3 に従う EBSP 形式 (emulation prevention byte 込み) で、
+/// `h264_sample_entry_from_sps_pps_lists` の入力契約 (本ファイルの docstring 参照) と対称な形式となる。
 pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
     let mut w = SpsBitWriter::new();
     // NAL ヘッダ: forbidden_zero_bit=0, nal_ref_idc=3 (binary 011), nal_unit_type=7 (binary 00111) → 0x67
@@ -134,7 +137,26 @@ pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
         w.write_ue(b);
     }
     // RBSP trailing bits は parse_sps が pic_width_in_mbs_minus1 以降を読み終えるまで不要なため省略する
-    w.into_bytes()
+    let raw = w.into_bytes();
+    // raw は NAL header 1 バイト + 生 RBSP payload (trailing bits なし)。
+    // 先頭で NAL header の 8 ビットを無条件に書いているため raw.len() >= 1 が保証される。
+    // 最悪ケースでは raw.len() の約 1/2 が emulation prevention byte として挿入され得るため、
+    // 近似の初期容量として raw.len() + raw.len() / 2 + 1 を使う (超えたら動的拡張に任せる)。
+    let mut out = Vec::with_capacity(raw.len() + raw.len() / 2 + 1);
+    out.push(raw[0]);
+    for &b in &raw[1..] {
+        let n = out.len();
+        // Rust の && 短絡評価に依存: n >= 2 のときのみ out[n - 2] / out[n - 1] にアクセスする。
+        // 出力の直前 2 バイトが 0x00 0x00 で次バイトが 0x00..=0x03 のとき emulation prevention byte を挿入する。
+        // 出力ストリームベースにする理由: 入力ベースで単純に i += 3 する走査では
+        // 0x00 0x00 0x00 0x00 0x03 のような跨ぎパターンで 2 個目の 0x00 0x00 0x03 を検出できず、
+        // rbsp_from_sps_nalu を通したときに元の RBSP に戻せなくなるため。
+        if n >= 2 && out[n - 2] == 0x00 && out[n - 1] == 0x00 && b <= 0x03 {
+            out.push(0x03);
+        }
+        out.push(b);
+    }
+    out
 }
 
 /// SPS バイト列の組み立てに使う Exp-Golomb 書き込みヘルパー (仕様 9.1 / 9.1.1)
@@ -1584,6 +1606,58 @@ pub(crate) mod tests {
         };
         assert_eq!(avc1.visual.width, 1920);
         assert_eq!(avc1.visual.height, 1080);
+    }
+
+    #[test]
+    fn h264_sample_entry_from_sps_pps_lists_handles_sps_with_embedded_emulation_prevention_pattern()
+    {
+        // issue 0077 の Minimal failing input を直接投入する回帰防止テスト。
+        // build_sps_for_pbt が emulation prevention byte を挿入していなかったバグ
+        // (rbsp_from_sps_nalu で 0x03 除去による 1 バイト消失 → bit reader exhausted) の再発防止として、
+        // 当該パラメタで h264_sample_entry_from_sps_pps_lists が Ok を返し、
+        // frame_size と avcC フィールドが Minimal input の値と一致することを検証する。
+        let params = SpsBuildParams {
+            profile_idc: 66,
+            constraint_set_flags: 0,
+            level_idc: 0,
+            chroma_format_idc: 0,
+            bit_depth_luma_minus8: 0,
+            bit_depth_chroma_minus8: 0,
+            raw_width: 32768,
+            raw_height: 53536,
+            frame_mbs_only_flag: true,
+            seq_scaling_matrix_present_flag: false,
+            pic_order_cnt_type: 0,
+            log2_max_pic_order_cnt_lsb_minus4: 3,
+            num_ref_frames_in_pic_order_cnt_cycle: 0,
+            frame_cropping: None,
+        };
+        let sps = build_sps_for_pbt(params);
+        let (entry, frame_size) =
+            h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()])
+                .expect("Minimal failing input のパースが Ok を返すこと");
+        // frame_size は Minimal input の raw_width / raw_height と一致する (cropping なし)
+        assert_eq!(
+            (frame_size.width, frame_size.height),
+            (32768usize, 53536usize),
+            "frame_size が Minimal input の raw_width / raw_height と一致すること"
+        );
+        let SampleEntry::Avc1(avc1) = entry else {
+            panic!("Avc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
+        };
+        // avcC フィールドが Minimal input の profile_idc / level_idc / constraint_set_flags と一致する
+        assert_eq!(
+            avc1.avcc_box.avc_profile_indication, 66,
+            "avc_profile_indication が Minimal input の profile_idc と一致すること"
+        );
+        assert_eq!(
+            avc1.avcc_box.avc_level_indication, 0,
+            "avc_level_indication が Minimal input の level_idc と一致すること"
+        );
+        assert_eq!(
+            avc1.avcc_box.profile_compatibility, 0,
+            "profile_compatibility が Minimal input の constraint_set_flags と一致すること"
+        );
     }
 
     // avcC バイト列をテスト用に構築するヘルパー (lengthSizeMinusOne = 3 固定)。
