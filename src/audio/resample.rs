@@ -81,6 +81,11 @@ pub fn resample_to_mono(
 ///
 /// `L / M` を gcd で簡約してから、長さ `L * BASE_TAPS` のプロトタイプフィルタを Kaiser 窓で設計し、
 /// `L` 個のサブフィルタに分解して出力を生成する。
+///
+/// n_taps ループが 3 段 (`kaiser_window` / `prototype_filter` / subfilters 分解) に分かれているのは
+/// 責務分離のため意図的。呼び出しは 1 セッション数回オーダー・生成コストは n_taps=20480 (22.05k→16k)
+/// でも 100-500 μs 程度なので現状は融合していない。頻度が上がって最適化が必要になったら、
+/// ループ融合より (src, dst) → subfilters のキャッシュ化を先に検討すること (2 回目以降 0 コスト)。
 fn polyphase_resample(input: &[f32], src_hz: u32, dst_hz: u32) -> Vec<f32> {
     let g = gcd(dst_hz, src_hz);
     let l = (dst_hz / g) as usize;
