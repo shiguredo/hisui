@@ -162,7 +162,7 @@ jobs:
       - name: Cache Silero VAD ONNX model
         # scripts/download_ml_models.py の TARGETS["silero-vad"][0].expected_sha256 と同じ値を key にする。
         # SHA256 が更新されたら key ミスマッチで再取得される (script 側と手動同期する)。
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ml-models/silero-vad
           key: silero-vad-a4a068cd6cf1ea8355b84327595838ca748ec29a25bc91fc82e6c299ccdc5808
