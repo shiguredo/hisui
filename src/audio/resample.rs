@@ -1,18 +1,27 @@
-//! 任意サンプルレート・任意チャンネル数の PCM を 16 kHz モノラル f32 に変換する。
+//! 任意サンプルレート・任意チャンネル数の PCM を、指定サンプルレートのモノラル f32 に変換する。
 //!
 //! polyphase FIR (Kaiser 窓、β = 8.6) で 8000 / 16000 / 22050 / 24000 / 32000 / 44100 / 48000 Hz
-//! から 16 kHz に変換する。ステレオはチャンネル平均でモノラルにダウンミックスする。
+//! 間の変換をサポートする。ステレオはチャンネル平均でモノラルにダウンミックスする。
 //! Kaiser 窓の設計に必要な第 0 種変形 Bessel 関数 `I0` は Rust std / libm に存在しないため
 //! `bessel_i0` に級数展開の自前実装を置く。
+//!
+//! # `audio::converter` との使い分け
+//!
+//! `audio::converter::AudioConverter` にも別のリサンプラが同梱されている。以下の性格が異なる。
+//!
+//! - `converter`: i16 interleaved 前提、線形補間、ストリーミング (フレーム境界で prev 持ち回し)、
+//!   同一チャンネル数の interleaved 出力。mixer / encoder への入力揃えに使う。
+//! - 本モジュール `resample_to_mono`: f32 前提、polyphase FIR (高品質)、バッチ (1 バッファ完結、
+//!   prev 持ち回し不要)、モノラル固定出力。ML 前処理・オフライン高品質変換に使う。
+//!
+//! リアルタイム / interleaved / i16 が必要なら `converter` を、バッチ / 高品質 / f32 mono が
+//! 必要なら本モジュールを選ぶ。
 
 use crate::audio::{Channels, SampleRate};
 use crate::error::Error;
 
-/// 変換先サンプルレート (Hz)。
-const DST_HZ: u32 = 16000;
-
-/// 対応する変換元サンプルレート一覧。
-const SUPPORTED_SRC_HZ: &[u32] = &[8000, 16000, 22050, 24000, 32000, 44100, 48000];
+/// 対応するサンプルレート一覧 (src / dst 両方に共通)。
+const SUPPORTED_HZ: &[u32] = &[8000, 16000, 22050, 24000, 32000, 44100, 48000];
 
 /// polyphase FIR のプロトタイプフィルタ長のベースタップ数。
 const BASE_TAPS: usize = 64;
@@ -20,18 +29,26 @@ const BASE_TAPS: usize = 64;
 /// Kaiser 窓の β パラメータ。60 dB の阻止帯域減衰を目安に選択。
 const KAISER_BETA: f32 = 8.6;
 
-/// 任意サンプルレート・任意チャンネル数の PCM を 16 kHz モノラル f32 に変換する。
+/// 任意サンプルレート・任意チャンネル数の PCM を、指定サンプルレートのモノラル f32 に変換する。
 ///
 /// 空スライスは `Ok(vec![])` を返す。ステレオはチャンネル平均でダウンミックスする。
-pub fn resample_to_16k_mono(
+/// `src_hz` / `dst_hz` はいずれも `SUPPORTED_HZ` に含まれる必要がある。
+pub fn resample_to_mono(
     pcm: &[f32],
     src_hz: SampleRate,
+    dst_hz: SampleRate,
     channels: Channels,
 ) -> crate::Result<Vec<f32>> {
     let src = src_hz.get();
-    if !SUPPORTED_SRC_HZ.contains(&src) {
+    let dst = dst_hz.get();
+    if !SUPPORTED_HZ.contains(&src) {
         return Err(Error::new(format!(
-            "unsupported source sample rate for resample_to_16k_mono: {src} Hz (supported: {SUPPORTED_SRC_HZ:?})"
+            "unsupported source sample rate for resample_to_mono: {src} Hz (supported: {SUPPORTED_HZ:?})"
+        )));
+    }
+    if !SUPPORTED_HZ.contains(&dst) {
+        return Err(Error::new(format!(
+            "unsupported destination sample rate for resample_to_mono: {dst} Hz (supported: {SUPPORTED_HZ:?})"
         )));
     }
 
@@ -48,7 +65,7 @@ pub fn resample_to_16k_mono(
         pcm.chunks_exact(2).map(|c| (c[0] + c[1]) * 0.5).collect()
     } else {
         return Err(Error::new(format!(
-            "unsupported channel count for resample_to_16k_mono: {}",
+            "unsupported channel count for resample_to_mono: {}",
             channels.get()
         )));
     };
@@ -57,7 +74,7 @@ pub fn resample_to_16k_mono(
         return Ok(Vec::new());
     }
 
-    Ok(polyphase_resample(&mono, src, DST_HZ))
+    Ok(polyphase_resample(&mono, src, dst))
 }
 
 /// polyphase FIR による rational resampler。
