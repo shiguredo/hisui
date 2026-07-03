@@ -1,6 +1,6 @@
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
-    decoder::{VideoDecoder, VideoDecoderOptions},
+    decoder::{AsyncVideoDecoder, VideoDecoder, VideoDecoderOptions},
     sora::recording_mp4_reader::Mp4VideoReader,
     video::VideoFrame,
 };
@@ -230,7 +230,29 @@ where
         input_frames.push(input_frame?);
         red_count += 1;
     }
-    output_frames.extend(decode_video_frames_with_pipeline(input_frames, options)?);
+    // wrap 版と async 版の両方で decode を走らせ、 出力の byte-wise 等価性を検査したうえで
+    // wrap 版出力を後段の色素検査に使う。 async 版が同じ出力を返すことで wrap 経路と直接経路の
+    // 行動等価性を実 pipeline 上で担保する。
+    let wrap_output = decode_video_frames_with_pipeline(input_frames.clone(), options.clone())?;
+    let async_output = decode_video_frames_with_async_pipeline(input_frames, options)?;
+
+    assert_eq!(
+        wrap_output.len(),
+        async_output.len(),
+        "wrap 版と async 版のフレーム数が一致すること"
+    );
+    for (i, (w, a)) in wrap_output.iter().zip(async_output.iter()).enumerate() {
+        let (wy, wu, wv) = w
+            .as_yuv_planes()
+            .ok_or_else(|| hisui::Error::new("wrap 版 output に YUV planes がない"))?;
+        let (ay, au, av) = a
+            .as_yuv_planes()
+            .ok_or_else(|| hisui::Error::new("async 版 output に YUV planes がない"))?;
+        assert!(wy == ay, "frame {i}: Y plane が wrap 版と async 版で不一致");
+        assert!(wu == au, "frame {i}: U plane が wrap 版と async 版で不一致");
+        assert!(wv == av, "frame {i}: V plane が wrap 版と async 版で不一致");
+    }
+    output_frames.extend(wrap_output);
 
     // デコード結果を確認する
     for output_frame in output_frames {
@@ -317,6 +339,79 @@ fn decode_video_frames_with_pipeline(
         .await?;
         let decoder_task = tokio::spawn(async move {
             let decoder = VideoDecoder::new(options, decoder_handle.stats());
+            decoder
+                .run(
+                    decoder_handle,
+                    TrackId::new(VIDEO_INPUT_TRACK_ID),
+                    TrackId::new(VIDEO_OUTPUT_TRACK_ID),
+                )
+                .await
+        });
+
+        let sink_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_video_sink"),
+            ProcessorMetadata::new("decoder_test_video_sink"),
+        )
+        .await?;
+        let sink_task = tokio::spawn(async move {
+            collect_video_frames(sink_handle, TrackId::new(VIDEO_OUTPUT_TRACK_ID)).await
+        });
+
+        pipeline_handle
+            .trigger_start()
+            .await
+            .map_err(|_| hisui::Error::new("failed to trigger start: pipeline has terminated"))?;
+
+        let output_frames = await_video_pipeline_tasks(
+            source_task,
+            decoder_task,
+            sink_task,
+            pipeline_handle,
+            &mut pipeline_task,
+        )
+        .await?;
+        Ok(output_frames)
+    })
+}
+
+fn decode_video_frames_with_async_pipeline(
+    input_frames: Vec<VideoFrame>,
+    options: VideoDecoderOptions,
+) -> hisui::Result<Vec<VideoFrame>> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
+        let pipeline_handle = pipeline.handle();
+        let mut pipeline_task = tokio::spawn(async move {
+            pipeline.run().await;
+        });
+
+        let source_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_video_source"),
+            ProcessorMetadata::new("decoder_test_video_source"),
+        )
+        .await?;
+        let source_task = tokio::spawn(async move {
+            run_video_source(
+                source_handle,
+                input_frames,
+                TrackId::new(VIDEO_INPUT_TRACK_ID),
+            )
+            .await
+        });
+
+        let decoder_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("decoder_test_video_decoder"),
+            ProcessorMetadata::new("video_decoder"),
+        )
+        .await?;
+        let decoder_task = tokio::spawn(async move {
+            let decoder = AsyncVideoDecoder::new(options, decoder_handle.stats());
             decoder
                 .run(
                     decoder_handle,

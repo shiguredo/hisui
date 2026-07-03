@@ -473,6 +473,49 @@ impl AsyncVideoDecoder {
         self.output_rx.recv().await
     }
 
+    pub async fn run(
+        mut self,
+        handle: ProcessorHandle,
+        input_track_id: TrackId,
+        output_track_id: TrackId,
+    ) -> Result<()> {
+        let mut input_rx = handle.subscribe_track(input_track_id);
+        let mut output_tx = handle.publish_track(output_track_id).await?;
+        handle.notify_ready();
+        handle.wait_subscribers_ready().await?;
+
+        loop {
+            let message = input_rx.recv().await;
+            let is_eos = matches!(message, Message::Eos);
+
+            match message {
+                Message::Media(sample) => self.handle_input_sample_sync(Some(sample))?,
+                Message::Eos => self.handle_input_sample_sync(None)?,
+                Message::Syn(_) => {}
+            }
+
+            loop {
+                match self.poll_output_sync()? {
+                    DecoderRunOutput::Processed(sample) => {
+                        if !output_tx.send_media(sample) {
+                            output_tx.send_eos();
+                            return Ok(());
+                        }
+                    }
+                    DecoderRunOutput::Pending => break,
+                    DecoderRunOutput::Finished => {
+                        output_tx.send_eos();
+                        return Ok(());
+                    }
+                }
+            }
+
+            if is_eos {
+                return Err(Error::new("video decoder still pending after EOS"));
+            }
+        }
+    }
+
     /// codec とライブラリの利用可否に応じて候補となる engine のリストを返す。
     pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
         let mut engines = Vec::new();

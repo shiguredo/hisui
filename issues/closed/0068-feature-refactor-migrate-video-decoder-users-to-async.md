@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-29
-- Completed:
+- Completed: 2026-07-03
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-migrate-video-decoder-users-to-async
 - Polished: 2026-07-02
@@ -204,7 +204,7 @@ impl AsyncVideoDecoder {
 - `tests/e2e.rs` の `compose` シナリオが `src/sora/recording_subcommand_compose.rs:463` の call site を実行
 - `tests/e2e.rs` の `vmaf` シナリオが `src/sora/recording_subcommand_vmaf.rs:362, :480` の 2 call site を実行
 
-`poll_output_sync` の 3 分岐 (`Processed` / `Pending` / `Finished`) と `emit_err` 経由の Err 分岐は既に unit test 済み (`decoder.rs:1039-1099`) なので、 `AsyncVideoDecoder::run` は分岐選択の薄いラッパとみなせる。 doctest は不要 (call site そのものが `spawn_processor` の使用側 example)。
+`poll_output_sync` の 3 分岐 (`Processed` / `Pending` / `Finished`) と `emit_err` 経由の Err 分岐は既に unit test 済み (`decoder.rs:1082-1143`) なので、 `AsyncVideoDecoder::run` は分岐選択の薄いラッパとみなせる。 doctest は不要 (call site そのものが `spawn_processor` の使用側 example)。
 
 ## 完了条件
 
