@@ -71,7 +71,7 @@ pub struct SpsBuildParams {
 /// 0 を渡すと `raw_width / 16 - 1` が u32 underflow して panic する。
 ///
 /// 戻り値は ISO/IEC 14496-10 7.4.1.2.3 に従う EBSP 形式 (emulation prevention byte 込み) で、
-/// `h264_sample_entry_from_sps_pps_lists` の入力契約 (本ファイルの docstring 参照) と対称な形式となる。
+/// `h264_sample_entry_from_sps_pps_lists` の入力契約と対称な形式となる。
 pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
     let mut w = SpsBitWriter::new();
     // NAL ヘッダ: forbidden_zero_bit=0, nal_ref_idc=3 (binary 011), nal_unit_type=7 (binary 00111) → 0x67
@@ -138,19 +138,14 @@ pub fn build_sps_for_pbt(params: SpsBuildParams) -> Vec<u8> {
     }
     // RBSP trailing bits は parse_sps が pic_width_in_mbs_minus1 以降を読み終えるまで不要なため省略する
     let raw = w.into_bytes();
-    // raw は NAL header 1 バイト + 生 RBSP payload (trailing bits なし)。
-    // 先頭で NAL header の 8 ビットを無条件に書いているため raw.len() >= 1 が保証される。
-    // 最悪ケースでは raw.len() の約 1/2 が emulation prevention byte として挿入され得るため、
-    // 近似の初期容量として raw.len() + raw.len() / 2 + 1 を使う (超えたら動的拡張に任せる)。
+    // 先頭 1 バイトは NAL header で走査対象外。以降を ISO/IEC 14496-10 7.4.1.2.3 の EBSP 形式に変換する。
     let mut out = Vec::with_capacity(raw.len() + raw.len() / 2 + 1);
     out.push(raw[0]);
     for &b in &raw[1..] {
         let n = out.len();
-        // Rust の && 短絡評価に依存: n >= 2 のときのみ out[n - 2] / out[n - 1] にアクセスする。
-        // 出力の直前 2 バイトが 0x00 0x00 で次バイトが 0x00..=0x03 のとき emulation prevention byte を挿入する。
-        // 出力ストリームベースにする理由: 入力ベースで単純に i += 3 する走査では
-        // 0x00 0x00 0x00 0x00 0x03 のような跨ぎパターンで 2 個目の 0x00 0x00 0x03 を検出できず、
-        // rbsp_from_sps_nalu を通したときに元の RBSP に戻せなくなるため。
+        // 出力の直前 2 バイトが 0x00 0x00 で次バイトが 0x00..=0x03 のとき 0x03 を挿入する。
+        // 出力ストリームベースで判定することで rbsp_from_sps_nalu の逆写像として成立し、
+        // 0x00 0x00 0x00 0x00 0x03 のような跨ぎパターンでも RBSP に復元できる。
         if n >= 2 && out[n - 2] == 0x00 && out[n - 1] == 0x00 && b <= 0x03 {
             out.push(0x03);
         }
@@ -1611,11 +1606,12 @@ pub(crate) mod tests {
     #[test]
     fn h264_sample_entry_from_sps_pps_lists_handles_sps_with_embedded_emulation_prevention_pattern()
     {
-        // issue 0077 の Minimal failing input を直接投入する回帰防止テスト。
-        // build_sps_for_pbt が emulation prevention byte を挿入していなかったバグ
-        // (rbsp_from_sps_nalu で 0x03 除去による 1 バイト消失 → bit reader exhausted) の再発防止として、
-        // 当該パラメタで h264_sample_entry_from_sps_pps_lists が Ok を返し、
-        // frame_size と avcC フィールドが Minimal input の値と一致することを検証する。
+        // build_sps_for_pbt が emulation prevention byte を挿入せず生 RBSP をそのまま返していると、
+        // 生成される SPS に偶発的に発生する 0x00 0x00 0x03 パターンが rbsp_from_sps_nalu で
+        // 除去されて RBSP が 1 バイト縮み、後段の bit reader が末尾を超えて枯渇する。
+        // 本パラメタは生 SPS のバイト位置 7-9 にちょうど 0x00 0x00 0x03 が現れる組み合わせで、
+        // emulation prevention byte が正しく挿入されて h264_sample_entry_from_sps_pps_lists が
+        // Ok を返し frame_size と avcC が投入値を反映することを検証する。
         let params = SpsBuildParams {
             profile_idc: 66,
             constraint_set_flags: 0,
@@ -1635,28 +1631,28 @@ pub(crate) mod tests {
         let sps = build_sps_for_pbt(params);
         let (entry, frame_size) =
             h264_sample_entry_from_sps_pps_lists(vec![sps], vec![PPS_NAL.to_vec()])
-                .expect("Minimal failing input のパースが Ok を返すこと");
-        // frame_size は Minimal input の raw_width / raw_height と一致する (cropping なし)
+                .expect("投入パラメタから組み立てた SPS のパースが Ok を返すこと");
+        // frame_size は投入パラメタの raw_width / raw_height と一致する (cropping なし)
         assert_eq!(
             (frame_size.width, frame_size.height),
             (32768usize, 53536usize),
-            "frame_size が Minimal input の raw_width / raw_height と一致すること"
+            "frame_size が投入パラメタの raw_width / raw_height と一致すること"
         );
         let SampleEntry::Avc1(avc1) = entry else {
             panic!("Avc1 SampleEntry を期待したが他の variant が返った: {entry:?}");
         };
-        // avcC フィールドが Minimal input の profile_idc / level_idc / constraint_set_flags と一致する
+        // avcC フィールドが投入パラメタの profile_idc / level_idc / constraint_set_flags と一致する
         assert_eq!(
             avc1.avcc_box.avc_profile_indication, 66,
-            "avc_profile_indication が Minimal input の profile_idc と一致すること"
+            "avc_profile_indication が投入パラメタの profile_idc と一致すること"
         );
         assert_eq!(
             avc1.avcc_box.avc_level_indication, 0,
-            "avc_level_indication が Minimal input の level_idc と一致すること"
+            "avc_level_indication が投入パラメタの level_idc と一致すること"
         );
         assert_eq!(
             avc1.avcc_box.profile_compatibility, 0,
-            "profile_compatibility が Minimal input の constraint_set_flags と一致すること"
+            "profile_compatibility が投入パラメタの constraint_set_flags と一致すること"
         );
     }
 
