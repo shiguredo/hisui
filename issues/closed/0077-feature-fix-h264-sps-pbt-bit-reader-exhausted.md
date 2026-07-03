@@ -2,7 +2,7 @@
 
 - Priority: High
 - Created: 2026-07-03
-- Completed:
+- Completed: 2026-07-03
 - Model: Opus 4.7
 - Branch: feature/fix-h264-sps-pbt-bit-reader-exhausted
 - Polished: 2026-07-03
@@ -132,12 +132,19 @@ SpsBuildParams {
 
 ## 解決方法
 
-「設計方針」節の 3 点を次の順に実装する。
+`build_sps_for_pbt` に emulation prevention byte 挿入を追加して返り値契約を EBSP 形式に揃えた。
 
-1. `build_sps_for_pbt` (`src/video/h264.rs:72-138`) の末尾 `w.into_bytes()` を、設計方針 1 の Rust コード (EBSP 変換ループ) に差し替える。
-2. `build_sps_for_pbt` の docstring 末尾に、設計方針 2 の 1 段落を追加する。
-3. `src/video/h264.rs::tests` の `h264_sample_entry_from_sps_pps_lists` 単体テスト群末尾に、Minimal failing input を投入する `#[test]` を追加する (`frame_size` と avcC フィールドの一致まで検証)。
-4. `cargo test -p pbt --test prop_h264_sps` を 3 回連続実行し、`ok_path::` 全 5 テスト・`err_path::` 全 7 テストが pass することを確認する。加えて `cargo test -p hisui --lib video::h264` および `cargo test --workspace` を通す。
+- `build_sps_for_pbt` (`src/video/h264.rs`) の末尾 `w.into_bytes()` の後に、生 RBSP バイト列を EBSP 形式に変換するループを追加した。実装は出力ストリームベースで、出力の直前 2 バイトが 0x00 0x00 で次入力バイトが 0x00..=0x03 のとき 0x03 を挿入する。`0x00 0x00 0x00 0x00 0x03` のような跨ぎパターンでも `rbsp_from_sps_nalu` で元の RBSP に復元できる。
+- `build_sps_for_pbt` の docstring に返り値が ISO/IEC 14496-10 7.4.1.2.3 の EBSP 形式である旨を明記した。
+- EBSP 変換ロジックはレビュー指摘を受けて `rbsp_to_ebsp` 関数として切り出し、`rbsp_from_sps_nalu` の逆写像として単独でテスト可能な形に整理した。
+- 単体テストを 5 件追加した:
+  - `rbsp_to_ebsp_inserts_emulation_prevention_byte`: 0x00 0x00 の直後が 0x00..=0x03 の 4 パターンで 0x03 が挿入されること
+  - `rbsp_to_ebsp_keeps_payload_intact_when_third_byte_exceeds_0x03`: 0x04 以上は非挿入で素通しされること
+  - `rbsp_to_ebsp_handles_bridging_zero_pattern`: 跨ぎパターン `0x00 0x00 0x00 0x00 0x03` で 2 箇所に 0x03 が挿入されること
+  - `rbsp_to_ebsp_round_trips_through_rbsp_from_sps_nalu`: 7 ケースで `rbsp_from_sps_nalu` との round-trip が元の RBSP に一致すること
+  - `h264_sample_entry_from_sps_pps_lists_parses_ebsp_form_sps`: Minimal failing input を投入して EBSP に 0x03 が含まれること・parse が Ok を返すこと・frame_size と avc_profile_indication が投入値と一致することを検証
+- `pbt/tests/prop_h264_sps.proptest-regressions` の既存 seed 行を維持し、shrink 済みの Minimal failing input が引き続き pass することを proptest 経路の回帰防止とした。
+- `cargo test -p pbt --test prop_h264_sps` を 3 回連続で pass、`cargo test -p hisui --lib video::h264` と `cargo test --workspace` も pass することを確認した。CHANGES.md への追記は不要 (cfg(test) と PBT からのみ呼ばれるテストヘルパの修正で利用者から見える挙動は変わらない)。
 
 ## 参考
 
