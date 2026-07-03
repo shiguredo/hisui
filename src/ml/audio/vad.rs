@@ -18,7 +18,7 @@ const CHUNK_SAMPLES: NonZeroUsize = NonZeroUsize::new(512).expect("CHUNK_SAMPLES
 
 /// 検出された発話区間。
 ///
-/// `start_sample` / `end_sample` は `VadGate::new` / `reset` からの 16 kHz サンプル通し番号
+/// `start_sample` / `end_sample` は `VadGate::new` からの 16 kHz サンプル通し番号
 /// (inclusive start、exclusive end、Rust Range 慣習)。呼び出し側が `feed` に流し込んだ 16 kHz PCM を
 /// 全区間保持し、`start_sample..end_sample` で slice する責務を負う (VadGate は PCM を保持しない)。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,7 +74,7 @@ pub struct VadGate {
     silero: SileroVad,
     buffer: AudioChunkBuffer,
     config: VadConfig,
-    /// `VadGate::new` / `reset` 以降に処理した 16 kHz サンプル数の累計。
+    /// `VadGate::new` 以降に処理した 16 kHz サンプル数の累計。
     sample_count: u64,
     state: State,
 }
@@ -99,7 +99,8 @@ impl VadGate {
     /// `SileroVad::chunk_probability` が Err を返した場合、内部 buffer から drain 済みの 1 チャンクぶんの
     /// PCM は失われ、通し番号 (`sample_count`) も進まない。この状態のまま `feed` / `flush` を続けると
     /// SpeechSegment の通し番号が本来より 512 サンプルぶん前にずれる。Err を受け取った呼び出し側は
-    /// `reset` して作り直すこと (candle 内部エラーは通常運用では発生しない前提)。
+    /// VadGate を捨て、`VadGate::new(model.new_instance(), config)` で作り直すこと
+    /// (candle 内部エラーは通常運用では発生しない前提)。
     pub fn feed(&mut self, samples: &[f32]) -> crate::Result<Vec<SpeechSegment>> {
         self.buffer.push(samples);
         let mut results = Vec::new();
@@ -143,20 +144,6 @@ impl VadGate {
             }
         }
         Ok(results)
-    }
-
-    /// 通し番号を 0 に戻し、buffer の残余を捨て、`SileroVad::reset` を呼んで state / context を
-    /// 初期値に戻す。
-    ///
-    /// 同一 track 内で発話境界を強制的に fresh にしたいとき (例: 長時間ストリームの論理区切り) の
-    /// 高速リセット用。track / 話者を切り替える場合は
-    /// `VadGate::new(model.new_instance(), config)` で別インスタンスを作るのが基本方針
-    /// (別 track の SileroVad state を持ち込まないため)。
-    pub fn reset(&mut self) {
-        self.silero.reset();
-        self.buffer = AudioChunkBuffer::new(CHUNK_SAMPLES);
-        self.sample_count = 0;
-        self.state = State::Idle;
     }
 }
 

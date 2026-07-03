@@ -113,9 +113,8 @@ impl SileroVadModel {
 
 /// Silero VAD v5 ONNX モデルの推論インスタンス。
 ///
-/// 1 つの `SileroVad` は 1 系統の音声ストリーム (1 track / 1 話者) を担当する。track / 話者境界では
-/// 新しい `SileroVadModel::new_instance` で別インスタンスを作る (state を混ぜない)。同一 track 内の
-/// 論理的な発話境界で state を fresh にしたいだけなら `reset` を使う (別インスタンスを作るより軽い)。
+/// 1 つの `SileroVad` は 1 系統の音声ストリーム (1 track / 1 話者) を担当する。track / 話者境界を
+/// 跨ぐときは常に `SileroVadModel::new_instance` で別インスタンスを作ること (state を混ぜない)。
 #[derive(Debug)]
 pub struct SileroVad {
     model: Arc<SileroVadModel>,
@@ -178,15 +177,5 @@ impl SileroVad {
         )?;
 
         Ok(probability[0])
-    }
-
-    /// state と context を初期値 (ゼロテンソル) にリセットする。
-    ///
-    /// 同一 track 内の論理的な発話境界で state を fresh にしたいときの高速リセット用。
-    /// track / 話者を切り替える用途では `SileroVadModel::new_instance` で別インスタンスを
-    /// 作ること (別 track の state を誤って持ち込まないため)。
-    pub fn reset(&mut self) {
-        self.state = self.model.initial_state.clone();
-        self.context = self.model.initial_context.clone();
     }
 }
