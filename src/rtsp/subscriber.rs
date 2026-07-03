@@ -91,29 +91,27 @@ impl RtspSubscriber {
         } else {
             None
         };
-        let mut video_track_tx = if let Some(track_id) = &self.output_video_track_id {
-            Some(handle.publish_track(track_id.clone()).await?)
-        } else {
-            None
-        };
 
         let stats = RtspSubscriberStats::new(handle.stats());
         stats.set_connected(false);
 
-        // デコーダーを生成する
-        let mut video_decoder = if want_video {
-            let mut decoder_stats = handle.stats();
-            decoder_stats.set_default_label("component", "video_decoder");
-            Some(crate::decoder::VideoDecoder::new(
-                crate::decoder::VideoDecoderOptions {
-                    openh264_lib: handle.config().openh264_lib.clone(),
-                    ..Default::default()
-                },
-                decoder_stats,
-            ))
+        // video decoder task を endpoint 寿命で保持する。 publish_track で得た TrackPublisher を
+        // task 内に move し、 session ループには input_tx.clone() を借用経由で渡す。
+        // Ok / Retryable 経路では task を継続保持し、 Fatal 経路のみ shutdown().await する。
+        let video_decoder_task = if let Some(track_id) = &self.output_video_track_id {
+            let output_tx = handle.publish_track(track_id.clone()).await?;
+            let options = crate::decoder::VideoDecoderOptions {
+                openh264_lib: handle.config().openh264_lib.clone(),
+                ..Default::default()
+            };
+            Some(spawn_video_decoder_task(options, handle.stats(), output_tx))
         } else {
             None
         };
+        let mut video_decoder_input_tx = video_decoder_task
+            .as_ref()
+            .map(|task| task.input_tx.clone());
+
         let mut audio_decoder = if want_audio {
             let mut decoder_stats = handle.stats();
             decoder_stats.set_default_label("component", "audio_decoder");
@@ -136,9 +134,8 @@ impl RtspSubscriber {
             let connection_offset = started_at.elapsed();
             let mut output = RtspOutputContext {
                 audio_track_tx: &mut audio_track_tx,
-                video_track_tx: &mut video_track_tx,
                 audio_decoder: &mut audio_decoder,
-                video_decoder: &mut video_decoder,
+                video_decoder_input_tx: &mut video_decoder_input_tx,
             };
             let session_result = run_rtsp_session(
                 &parsed_url,
@@ -156,7 +153,19 @@ impl RtspSubscriber {
                     reconnect_backoff.reset();
                     tracing::warn!("RTSP session closed; reconnecting");
                 }
-                Err(SessionError::Fatal(e)) => return Err(e),
+                Err(SessionError::Fatal(e)) => {
+                    // Fatal は endpoint 停止 = pipeline 停止のため、 decoder task を shutdown して
+                    // 下流の永久 hang を防ぐ。 shutdown の Err は warn で握り潰して Fatal を優先する。
+                    if let Some(task) = video_decoder_task
+                        && let Err(shutdown_err) = task.shutdown().await
+                    {
+                        tracing::warn!(
+                            "video decoder task shutdown failed: {}",
+                            shutdown_err.display()
+                        );
+                    }
+                    return Err(e);
+                }
                 Err(SessionError::Retryable(e)) => {
                     stats.set_connected(false);
                     tracing::warn!("RTSP session disconnected: {}", e.display());
@@ -273,12 +282,13 @@ struct SelectedTracks {
 }
 
 #[derive(Debug)]
-/// subscriber の出力先（トラック sender）とデコーダーをまとめた構造体
+/// subscriber の audio 側出力先とデコーダー、 および video 側 decoder task への入力チャネル
+/// (`input_tx.clone()`) をまとめた構造体。 video 側の `TrackPublisher` は endpoint 寿命の
+/// decoder task に move されているため、 context には保持しない (issue 0072)。
 struct RtspOutputContext<'a> {
     audio_track_tx: &'a mut Option<TrackPublisher>,
-    video_track_tx: &'a mut Option<TrackPublisher>,
     audio_decoder: &'a mut Option<crate::decoder::AudioDecoder>,
-    video_decoder: &'a mut Option<crate::decoder::VideoDecoder>,
+    video_decoder_input_tx: &'a mut Option<tokio::sync::mpsc::UnboundedSender<DecoderInput>>,
 }
 
 struct RtspSessionRunner {
@@ -693,23 +703,17 @@ impl RtspSessionRunner {
                 };
                 stats.add_input_video_frame_count();
                 stats.set_last_input_video_timestamp(timestamp);
-                if let Some(decoder) = output.video_decoder.as_mut()
-                    && let Some(tx) = output.video_track_tx.as_mut()
-                {
-                    decoder
-                        .handle_input_sample(Some(crate::MediaFrame::Video(std::sync::Arc::new(
-                            video_frame,
-                        ))))
-                        .map_err(SessionError::Fatal)?;
-                    // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
-                    if crate::decoder::drain_video_decoder_output(decoder, tx)
-                        .map_err(SessionError::Fatal)?
-                        == crate::decoder::DrainResult::PipelineClosed
-                    {
-                        return Err(SessionError::Fatal(Error::new(
-                            "video track pipeline closed",
-                        )));
-                    }
+                if let Some(tx) = output.video_decoder_input_tx.as_ref() {
+                    // decoder task の同期 unbounded_channel::send を経由して投入する。
+                    // Err (task 死亡) は Fatal 相当 (task の再 spawn 経路を持たない設計)。
+                    tx.send(DecoderInput::Media(crate::MediaFrame::new_video(
+                        video_frame,
+                    )))
+                    .map_err(|_| {
+                        SessionError::Fatal(Error::new(
+                            "video decoder task terminated unexpectedly",
+                        ))
+                    })?;
                 }
             }
             return Ok(());
@@ -1476,7 +1480,6 @@ fn resolve_rtsp_url(base_url: &str, control: &str) -> crate::Result<String> {
 // warm-up 制御 (`discard_mode_tx`) と `TrackSender` は本 endpoint では不要のため落としてある。
 // 共通化 (`src/decoder/task.rs` 等への切り出し) は open issue 0073 で最終判断する。
 
-#[allow(dead_code)]
 enum DecoderInput {
     Media(crate::MediaFrame),
     Eos,
@@ -1486,14 +1489,12 @@ enum DecoderInput {
 // take() で move する。 直接 JoinHandle を持つと Drop 実装型の partial move が
 // E0509 で禁止される。
 #[derive(Debug)]
-#[allow(dead_code)]
 struct VideoDecoderTask {
     input_tx: tokio::sync::mpsc::UnboundedSender<DecoderInput>,
     join_handle: Option<tokio::task::JoinHandle<crate::Result<()>>>,
 }
 
 impl VideoDecoderTask {
-    #[allow(dead_code)]
     async fn shutdown(mut self) -> crate::Result<()> {
         let _ = self.input_tx.send(DecoderInput::Eos);
         let handle = self
@@ -1525,7 +1526,6 @@ impl Drop for VideoDecoderTask {
     }
 }
 
-#[allow(dead_code)]
 fn spawn_video_decoder_task(
     options: crate::decoder::VideoDecoderOptions,
     mut stats: crate::stats::Stats,
@@ -1541,7 +1541,6 @@ fn spawn_video_decoder_task(
     }
 }
 
-#[allow(dead_code)]
 async fn video_decoder_loop(
     options: crate::decoder::VideoDecoderOptions,
     stats: crate::stats::Stats,
@@ -1782,13 +1781,12 @@ mod tests {
         let root_stats = crate::stats::Stats::new();
         let stats = RtspSubscriberStats::new(root_stats.clone());
         let mut audio_track_tx = None;
-        let mut video_track_tx = None;
+        let mut video_decoder_input_tx = None;
 
         let mut output = RtspOutputContext {
             audio_track_tx: &mut audio_track_tx,
-            video_track_tx: &mut video_track_tx,
             audio_decoder: &mut None,
-            video_decoder: &mut None,
+            video_decoder_input_tx: &mut video_decoder_input_tx,
         };
         let result = run_rtsp_session(
             &parsed_url,
@@ -1821,13 +1819,12 @@ mod tests {
         let root_stats = crate::stats::Stats::new();
         let stats = RtspSubscriberStats::new(root_stats.clone());
         let mut audio_track_tx = None;
-        let mut video_track_tx = None;
+        let mut video_decoder_input_tx = None;
 
         let mut output = RtspOutputContext {
             audio_track_tx: &mut audio_track_tx,
-            video_track_tx: &mut video_track_tx,
             audio_decoder: &mut None,
-            video_decoder: &mut None,
+            video_decoder_input_tx: &mut video_decoder_input_tx,
         };
         let result = run_rtsp_session(
             &parsed_url,
@@ -1866,13 +1863,12 @@ mod tests {
         let root_stats = crate::stats::Stats::new();
         let stats = RtspSubscriberStats::new(root_stats.clone());
         let mut audio_track_tx = None;
-        let mut video_track_tx = None;
+        let mut video_decoder_input_tx = None;
 
         let mut output = RtspOutputContext {
             audio_track_tx: &mut audio_track_tx,
-            video_track_tx: &mut video_track_tx,
             audio_decoder: &mut None,
-            video_decoder: &mut None,
+            video_decoder_input_tx: &mut video_decoder_input_tx,
         };
         let result = run_rtsp_session(
             &parsed_url,
@@ -2715,5 +2711,34 @@ mod tests {
             display.contains("forbidden_zero_bit"),
             "エラーメッセージに `forbidden_zero_bit` が含まれること（実際: {display}）"
         );
+    }
+
+    /// spawn_video_decoder_task 直後の shutdown().await が Ok(()) を返す smoke test。
+    /// Eos 受信 → Initial の handle_input_sample_sync(None) → poll_output_sync が Finished →
+    /// output_tx.send_eos() → task が Ok(()) で return する経路を検証する。
+    /// pipeline closed / panic 経路は残懸念 §2 に従い workspace の cargo test で担保する。
+    #[tokio::test]
+    async fn spawn_then_shutdown_returns_ok() -> crate::Result<()> {
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
+        let pipeline_handle = pipeline.handle();
+        let _pipeline_task = tokio::spawn(async move { pipeline.run().await });
+
+        let processor_handle = pipeline_handle
+            .register_processor(
+                crate::ProcessorId::new("rtsp_task_smoke_test"),
+                crate::ProcessorMetadata::new("rtsp_task_smoke_test"),
+            )
+            .await
+            .expect("register processor");
+        let track_id = crate::TrackId::new("rtsp_task_smoke_test_video");
+        let output_tx = processor_handle.publish_track(track_id).await?;
+
+        let task = spawn_video_decoder_task(
+            crate::decoder::VideoDecoderOptions::default(),
+            processor_handle.stats(),
+            output_tx,
+        );
+
+        task.shutdown().await
     }
 }
