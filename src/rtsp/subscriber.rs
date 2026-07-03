@@ -1527,7 +1527,7 @@ fn spawn_video_decoder_task(
     mut stats: crate::stats::Stats,
     output_tx: crate::TrackPublisher,
 ) -> VideoDecoderTask {
-    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel::<DecoderInput>();
+    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
     stats.set_default_label("component", "video_decoder");
     let join_handle =
         tokio::spawn(async move { video_decoder_loop(options, stats, input_rx, output_tx).await });
