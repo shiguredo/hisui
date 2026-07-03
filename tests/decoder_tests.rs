@@ -375,9 +375,6 @@ fn decode_video_frames_with_pipeline(
     })
 }
 
-// wrap 版 (`decode_video_frames_with_pipeline`) と対になる async 版。 decoder task の
-// `VideoDecoder::new + .run(...)` を `AsyncVideoDecoder::new + .run(...)` に置換した以外は
-// 同一構造で、 wrap 経路と直接経路の行動等価性を実 pipeline で検査するために使う。
 fn decode_video_frames_with_async_pipeline(
     input_frames: Vec<VideoFrame>,
     options: VideoDecoderOptions,
