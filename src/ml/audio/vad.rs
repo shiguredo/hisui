@@ -25,7 +25,7 @@ const CHUNK_SAMPLES: NonZeroUsize = NonZeroUsize::new(512).expect("CHUNK_SAMPLES
 pub struct SpeechSegment {
     pub start_sample: u64,
     pub end_sample: u64,
-    pub max_probability: f32,
+    pub max_probability: Probability,
 }
 
 impl SpeechSegment {
@@ -63,7 +63,7 @@ enum State {
 struct SpeechInProgress {
     start_sample: u64,
     last_speech_end_sample: u64,
-    max_probability: f32,
+    max_probability: Probability,
 }
 
 /// Silero VAD ラッパー。発話区間の集約を担う。
@@ -164,13 +164,13 @@ struct TransitionConfig {
 /// 決定論的に行えるようにしている。
 fn advance_state(
     state: State,
-    probability: f32,
+    probability: Probability,
     chunk_start: u64,
     chunk_end: u64,
     config: &TransitionConfig,
     results: &mut Vec<SpeechSegment>,
 ) -> State {
-    let is_speech = probability >= config.threshold.get();
+    let is_speech = probability >= config.threshold;
 
     match state {
         State::Idle => {
@@ -275,16 +275,21 @@ mod tests {
     /// 「1 チャンクだけの発話は min_speech 未達 / 3 チャンクぶんは到達」を試せる大きさに設定。
     const MIN_SPEECH: u64 = 3 * CHUNK;
 
-    /// SpeechInProgress を組み立てる補助関数。
+    /// f32 リテラルを `Probability` に変換するテスト用ヘルパー ([0.0, 1.0] 前提)。
+    fn prob(v: f32) -> Probability {
+        Probability::new(v).expect("テスト値は [0.0, 1.0] 前提")
+    }
+
+    /// SpeechInProgress を組み立てる補助関数。`max_prob` は [0.0, 1.0] であること。
     fn speech(start: u64, last_end: u64, max_prob: f32) -> SpeechInProgress {
         SpeechInProgress {
             start_sample: start,
             last_speech_end_sample: last_end,
-            max_probability: max_prob,
+            max_probability: prob(max_prob),
         }
     }
 
-    /// advance_state を固定パラメタで呼び出す補助関数。
+    /// advance_state を固定パラメタで呼び出す補助関数。`probability` は [0.0, 1.0] であること。
     fn step(state: State, probability: f32, chunk_start: u64) -> (State, Vec<SpeechSegment>) {
         let chunk_end = chunk_start + CHUNK;
         let mut results = Vec::new();
@@ -296,7 +301,7 @@ mod tests {
         };
         let next = advance_state(
             state,
-            probability,
+            prob(probability),
             chunk_start,
             chunk_end,
             &config,
@@ -407,7 +412,7 @@ mod tests {
             SpeechSegment {
                 start_sample: 0,
                 end_sample: 3 * CHUNK,
-                max_probability: 0.85,
+                max_probability: prob(0.85),
             }
         );
     }
@@ -444,7 +449,7 @@ mod tests {
             Some(SpeechSegment {
                 start_sample: 0,
                 end_sample: 3 * CHUNK,
-                max_probability: 0.85,
+                max_probability: prob(0.85),
             })
         );
     }

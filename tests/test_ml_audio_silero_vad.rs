@@ -99,8 +99,9 @@ fn silero_vad_zero_input_stays_below_threshold() {
             .chunk_probability(&chunk)
             .expect("chunk_probability は Ok");
         assert!(
-            probability < 0.5,
-            "{i} 回目の無音チャンクの確率は閾値 0.5 未満のはず: {probability}"
+            probability.get() < 0.5,
+            "{i} 回目の無音チャンクの確率は閾値 0.5 未満のはず: {:?}",
+            probability
         );
     }
 }

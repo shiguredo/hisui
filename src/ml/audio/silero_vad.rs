@@ -24,6 +24,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_onnx::onnx::ModelProto;
 
 use crate::error::Error;
+use crate::probability::Probability;
 
 /// Silero VAD v5 が要求する 1 フレームのサンプル数。
 const FRAME_SIZE: usize = 512;
@@ -130,8 +131,8 @@ impl SileroVad {
     /// 2. ONNX を推論し発話確率と次 state を得る
     /// 3. `state` を新しい state で置換、`context` を **新規 chunk の末尾 64 サンプル** で置換する
     ///    (context は ONNX 出力ではなく chunk 由来である点に注意)
-    /// 4. 発話確率を返す
-    pub fn chunk_probability(&mut self, chunk: &[f32]) -> crate::Result<f32> {
+    /// 4. 発話確率を返す (数値誤差で `[0.0, 1.0]` を超えた場合は `Err`)
+    pub fn chunk_probability(&mut self, chunk: &[f32]) -> crate::Result<Probability> {
         if chunk.len() != FRAME_SIZE {
             return Err(Error::new(format!(
                 "silero VAD requires a chunk of {FRAME_SIZE} samples, got {}",
@@ -168,6 +169,12 @@ impl SileroVad {
                 "silero VAD speech output is empty after flatten",
             ));
         }
+        let raw = probability[0];
+        let prob = Probability::new(raw).ok_or_else(|| {
+            Error::new(format!(
+                "silero VAD produced probability out of [0.0, 1.0] range: {raw}"
+            ))
+        })?;
 
         self.state = new_state.clone();
         self.context = Tensor::from_slice(
@@ -176,6 +183,6 @@ impl SileroVad {
             &self.model.device,
         )?;
 
-        Ok(probability[0])
+        Ok(prob)
     }
 }

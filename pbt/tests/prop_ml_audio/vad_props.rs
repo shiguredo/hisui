@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use hisui::ml::audio::vad::SpeechSegment;
+use hisui::probability::Probability;
 use proptest::prelude::*;
 
 proptest! {
@@ -17,7 +18,7 @@ proptest! {
         let seg = SpeechSegment {
             start_sample: start,
             end_sample: end,
-            max_probability: 0.0,
+            max_probability: Probability::new(0.0).expect("0.0 は有効"),
         };
         prop_assert_eq!(seg.start_time(), Duration::from_nanos(start * 62_500));
         prop_assert_eq!(seg.end_time(), Duration::from_nanos(end * 62_500));
