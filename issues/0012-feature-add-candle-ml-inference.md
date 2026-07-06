@@ -20,16 +20,15 @@
 | 0059 | candle feature 追加と ML モデル取得スクリプト | Cargo.toml の candle feature 追加、device 検出骨格、scripts/download_ml_models.py、ci.yml に test-candle 骨格 | - |
 | 0060 | MediaFrame::Text バリアントを追加する | MediaFrame::Text(Arc<TextFrame>) 新設、既存 match 箇所への Text ブランチ追加 | - |
 | 0061 | Silero VAD と音声前処理ライブラリを実装する | Silero VAD ライブラリ (candle-onnx)、リサンプル、buffer、PBT | 0059 |
-| 0062 | Whisper 文字起こしエンジンと TranscriptionService/Processor を実装する | Whisper ライブラリ、ワーカープール、MediaPipeline processor | 0059, 0060, 0061 |
-| 0063 | hisui -x transcribe 実験的サブコマンドを追加する | subcommand_transcribe (WAV/MP4 入力 → JSON LINE 出力)、--experimental(-x) フラグ復活、ドキュメント、CHANGES.md エントリ、test-candle CI で実推論有効化 | 0062 |
+| 0062 | Whisper 文字起こしエンジンと TranscriptionService/Processor を実装する | Whisper ライブラリ、ワーカープール、MediaPipeline processor、testdata 実音声追加、test-candle CI へ whisper-tiny 追加 (integration テスト実推論) | 0059, 0060, 0061 |
+| 0063 | hisui -x transcribe 実験的サブコマンドを追加する | subcommand_transcribe (WAV/MP4 入力 → JSON LINE 出力)、--experimental(-x) フラグ復活、ドキュメント、CHANGES.md エントリ、e2e テストへの実推論組込 | 0062 |
 
 ### 依存関係
 
 ```
-0059 ─┐
-       ├──→ 0061 ─┐
-0060 ─┘            ├──→ 0062 ──→ 0063
-                   ┘
+0059 ──→ 0061 ─┐
+               ├──→ 0062 ──→ 0063
+0060 ──────────┘
 ```
 
 - 0059 と 0060 は互いに独立で並行可能
@@ -53,7 +52,7 @@
 
 ### Whisper モデル管理
 
-- ワーカープール方式: TranscriptionService が M 個の WhisperModel を保持し、N 個の TranscriptionProcessor が推論キューに発話区間を投入する
+- ワーカープール方式: TranscriptionService が M 個の WhisperPipeline を保持し、N 個の TranscriptionProcessor が推論キューに発話区間を投入する
 - デフォルト M = 1、CLI / 設定で可変
 - モデルは差し替え可能 (CLI 引数で tiny / base / small / medium / large 等を指定)
 - 実用想定は small 以上 (ウェブ会議用途、日本語含む)。tiny は動作確認・デモ用
