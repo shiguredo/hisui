@@ -65,11 +65,7 @@ impl TranscriptionService {
         request: TranscriptRequest,
     ) -> oneshot::Receiver<crate::Result<TranscriptResult>> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let fallback_reply_tx = Some(reply_tx);
-        let job = Job {
-            request,
-            reply_tx: fallback_reply_tx.expect("reply_tx is present"),
-        };
+        let job = Job { request, reply_tx };
         if let Err(err) = self.tx.send(job).await {
             let _ = err.0.reply_tx.send(Err(crate::Error::new(
                 "transcription worker queue is closed",
