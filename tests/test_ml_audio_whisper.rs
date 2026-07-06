@@ -27,6 +27,7 @@ use hisui::{
 
 const INPUT_TRACK_ID: &str = "transcription_input";
 const OUTPUT_TRACK_ID: &str = "transcription_output";
+const TARGET_SAMPLE_RATE: usize = 16_000;
 
 /// モデル配置ディレクトリを環境変数から解決する。未設定なら `ml-models` を返す。
 fn ml_models_dir() -> PathBuf {
@@ -230,8 +231,9 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
         Device::Cpu,
         1,
     )?);
-    let input_frames =
+    let mut input_frames =
         load_pcm16le_mono_audio_frames("testdata/speech-en-16k-mono-s16le.pcm", 4000)?;
+    input_frames.truncate(2 * TARGET_SAMPLE_RATE / 4000);
 
     let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
     let pipeline_handle = pipeline.handle();
@@ -267,7 +269,7 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
         TranscriptionProcessor::new(
             Arc::clone(&service),
             silero,
-            None,
+            Some("en".to_owned()),
             TrackId::new(INPUT_TRACK_ID),
             TrackId::new(OUTPUT_TRACK_ID),
         )
