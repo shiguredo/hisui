@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-07-02
-- Completed:
+- Completed: 2026-07-06
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-inbound-endpoint-async-video-decoder
 - Polished: 2026-07-03
@@ -459,7 +459,7 @@ decoder への入力構築は `crate::MediaFrame::new_video(video_frame)` を使
 ## 残懸念 (実装段階で prototype して確定させる項目)
 
 1. **`unbounded_channel` の実運用時 OOM 耐性**: 3 endpoint はリアルタイム受信で decoder が上流速度に追いつかないケースは通常運用外だが、 極端な負荷 (低性能 CPU での 4K 入力等) で OOM が起きる可能性はある。 実測回帰があれば bounded + `try_send` + フレームドロップ (change カテゴリの別 issue) に切り替える判断材料になる。 RTSP の再接続時に前 session 由来の残 buffer が input_rx に残る場合の混入挙動、 SRT の `tsbpd_delay` と input_rx バッファの重複遅延も併せて実装後の cargo test 統合実行で観測する。 併せて **SRT 切断 → 再接続時の input_rx 残置** も観測する: 現状同期版では `demuxer.flush_pending()` 経由の残 PES は `reset_connection_state` の前に下流に到達済みだが、 spawn pattern 化後は `input_tx.send` 経由で decoder task の input queue に滞留するため、 `reset_connection_state` で demuxer / `connection_timestamp_offset` をリセットしても、 旧接続の残 frame は task 内で新接続の frame と FIFO で並ぶ (timestamp 非連続で下流に流れる可能性)。 現状同期版と挙動が異なる新規 semantic 変化。 実運用で問題化した場合は input_rx drain API 追加 or 切断時 flush 分の破棄 (挙動変更、 別 issue) で対応
-2. **decoder task lifecycle unit test のスコープ**: `MediaPipeline::new` + `register_processor` + `publish_track` で実 `TrackPublisher` を組めることを実装段階で確認済み。 3 endpoint に `spawn_then_shutdown_returns_ok` を smoke test として追加 (spawn → shutdown Ok 経路のみ)。 以下は smoke test 対象外とし、 pipeline レベルの `cargo test` 統合実行と `AsyncVideoDecoder` docstring (`src/decoder.rs:380-383`) の pre-existing 契約で担保する:
+2. **decoder task lifecycle unit test のスコープ**: `MediaPipeline::new` + `register_processor` + `publish_track` で実 `TrackPublisher` を組めることを実装段階で確認済み。 RTSP / SRT に `spawn_then_shutdown_returns_ok` (spawn → shutdown Ok 経路)、 RTMP に `shutdown_delivers_eos_to_subscriber` (加えて subscriber での `Message::Eos` 受信まで検証、 `send_eos` 消失の regression を catch) を smoke test として追加。 以下は smoke test 対象外とし、 pipeline レベルの `cargo test` 統合実行と `AsyncVideoDecoder` docstring (`src/decoder.rs:380-383`) の pre-existing 契約で担保する:
     - **pipeline closed / panic 経路** (`send_media` false / task panic のシナリオ)
     - **Drop 経路 (abort)**: 本番で最も高頻度に踏まれる経路 (RTSP Fatal 経路以外は明示 shutdown を呼ばず Drop で abort する) だが、 `JoinHandle::abort()` は cooperative キャンセルで timing-sensitive、 flaky test の温床になりやすい。 Drop の `Option::take` semantics は 0071 (`Mp4FileReader::Drop`) で先行検証済み。 Nvcodec 使用時のメトリクス乖離リスクは `AsyncVideoDecoder` docstring で明示された pre-existing 契約で、 endpoint 停止 = プロセス停止直前でしか発火せず観測性への影響は最小限
 3. **RTSP Ok/Retryable 経路での task 死亡の early detection**: reconnect backoff (最大 5 秒) 中に task が dead になると、 次 session の初 RTP 到達まで検知が遅れる。 実運用で問題化するかは実測次第。 早期検知が必要な場合は select! に `join_handle` 監視を追加する (別 issue の候補)
