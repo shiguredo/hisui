@@ -178,7 +178,9 @@ jobs:
       - name: Download Whisper tiny model
         run: uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny
       - run: cargo clippy --features candle --all-targets -p hisui -- --deny warnings
-      - run: cargo test --features candle -p hisui
+      # candle の実推論はマルチスレッドで全コアを使うため、テストを並列実行するとコアを奪い合って
+      # 各推論が極端に遅くなり、テスト内のタイムアウトに達する。直列実行して 1 テストずつ全コアを使わせる。
+      - run: cargo test --features candle -p hisui -- --test-threads=1
 
   test-fuzz:
     # libFuzzer ベースの fuzz target がビルド + 短時間実行で動くことだけ確認するジョブ

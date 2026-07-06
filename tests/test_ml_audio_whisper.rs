@@ -29,6 +29,10 @@ const INPUT_TRACK_ID: &str = "transcription_input";
 const OUTPUT_TRACK_ID: &str = "transcription_output";
 const TARGET_SAMPLE_RATE: usize = 16_000;
 
+/// 各パイプラインタスクの完了待ちの上限。CPU 実推論は 1 チャンクあたり数十秒かかり得るため、
+/// 遅い CI ランナーでも誤ってタイムアウトしないよう十分な余裕を持たせる。
+const TASK_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// モデル配置ディレクトリを環境変数から解決する。未設定なら `ml-models` を返す。
 fn ml_models_dir() -> PathBuf {
     std::env::var("HISUI_ML_MODELS_DIR")
@@ -286,13 +290,13 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
         .await
         .map_err(|_| hisui::Error::new("failed to trigger start: pipeline has terminated"))?;
 
-    tokio::time::timeout(Duration::from_secs(90), source_task)
+    tokio::time::timeout(TASK_TIMEOUT, source_task)
         .await
         .expect("source_task timeout")??;
-    tokio::time::timeout(Duration::from_secs(90), processor_task)
+    tokio::time::timeout(TASK_TIMEOUT, processor_task)
         .await
         .expect("processor_task timeout")??;
-    let text_frames = tokio::time::timeout(Duration::from_secs(90), sink_task)
+    let text_frames = tokio::time::timeout(TASK_TIMEOUT, sink_task)
         .await
         .expect("sink_task timeout")??;
 
