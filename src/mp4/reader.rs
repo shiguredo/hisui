@@ -1592,14 +1592,14 @@ async fn video_decoder_loop(
 ) -> (TrackSender, crate::Result<()>) {
     let mut sender = sender;
     let mut input_rx = input_rx;
-    let mut decoder = crate::decoder::AsyncVideoDecoder::new(options, stats);
+    let mut decoder = crate::decoder::VideoDecoder::new(options, stats);
     let result =
         run_video_decoder_loop(&mut decoder, &mut input_rx, &discard_mode_rx, &mut sender).await;
     (sender, result)
 }
 
 async fn run_video_decoder_loop(
-    decoder: &mut crate::decoder::AsyncVideoDecoder,
+    decoder: &mut crate::decoder::VideoDecoder,
     input_rx: &mut tokio::sync::mpsc::UnboundedReceiver<DecoderInput>,
     discard_mode_rx: &tokio::sync::watch::Receiver<bool>,
     sender: &mut TrackSender,
@@ -1612,12 +1612,12 @@ async fn run_video_decoder_loop(
         };
         let is_eos = matches!(input, DecoderInput::Eos);
         match input {
-            DecoderInput::Media(sample) => decoder.handle_input_sample_sync(Some(sample))?,
-            DecoderInput::Eos => decoder.handle_input_sample_sync(None)?,
+            DecoderInput::Media(sample) => decoder.handle_input_sample(Some(sample))?,
+            DecoderInput::Eos => decoder.handle_input_sample(None)?,
         }
         // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending / Finished まで drain する
         loop {
-            match decoder.poll_output_sync()? {
+            match decoder.poll_output()? {
                 crate::decoder::DecoderRunOutput::Processed(sample) => {
                     if !*discard_mode_rx.borrow() && !sender.send_media(sample).await {
                         return Ok(());
@@ -1635,7 +1635,7 @@ async fn run_video_decoder_loop(
                 }
             }
         }
-        // AsyncVideoDecoder::poll_output_sync が Empty + eos==true を Finished に射影するため到達不能
+        // VideoDecoder::poll_output が Empty + eos==true を Finished に射影するため到達不能
         if is_eos {
             unreachable!("video decoder still pending after EOS");
         }
