@@ -72,6 +72,13 @@ TranscriptionProcessor (1 個 = 1 入力 audio track = 1 出力 text track)
 - 各 Processor は自身の入力 track ID と出力 track ID を持ち、Service にリクエストを投げて oneshot::Receiver で結果を待つ
 - 結果が来たら publish_track で流す
 
+### 順序保証・VAD・終端・エラーの方針
+
+- 順序保証: 複数の入力 track (複数 Processor) 間での結果の順序保証はしない。単一 Processor 内では submit した順に oneshot::Receiver を FIFO で待って publish するため、1 つの text track 内では TextFrame が start 順に流れる (M > 1 でも自然に保証される)
+- VAD: Silero VAD あり前提とする。VAD なし (固定長分割等) のパスは本 issue では実装しない
+- 終端 (フラッシュ): 入力 audio track の終端を検知したら、VAD バッファに残っている末尾の発話区間を flush して最後の推論を submit し、pending の推論結果をすべて受け取って publish し切ってから出力 text track を終了する
+- エラー: 推論失敗 (推論エラー、Service との通信断等) 時は該当 Processor をエラーで終了させる (processor ごと落とす)。区間スキップや backoff retry などの細かいケアは、将来必要になった場合に processor 共通の仕組みとして検討する (本 issue のスコープ外)
+
 ### MediaFrame::Text 出力フォーマット
 
 0060 で定義した TextFrame の各フィールド (start / end / text / language / no_speech_prob / avg_logprob) を Whisper の出力から埋める。
