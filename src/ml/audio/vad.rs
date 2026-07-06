@@ -145,6 +145,17 @@ impl VadGate {
         }
         Ok(results)
     }
+
+    /// 現時点で呼び出し側が保持し続ける必要がある最小サンプル番号を返す。
+    ///
+    /// - `Idle`: これまでに消費済みの範囲はもう参照しないため `sample_count`
+    /// - `InSpeech` / `Trailing`: 進行中の発話開始位置より前は不要
+    pub fn min_required_sample(&self) -> u64 {
+        match &self.state {
+            State::Idle => self.sample_count,
+            State::InSpeech(speech) | State::Trailing { speech, .. } => speech.start_sample,
+        }
+    }
 }
 
 /// `advance_state` に渡す閾値・サンプル数のパラメタ束。

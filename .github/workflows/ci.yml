@@ -138,8 +138,8 @@ jobs:
       - run: cargo test -p hisui
 
   test-candle:
-    # 本 job は candle feature 有効ビルドの妥当性と最小デバイステスト、および Silero VAD integration テスト
-    # (実 ONNX モデルロード + 無音判定 + エラーパス) を検証する。
+    # 本 job は candle feature 有効ビルドの妥当性と、Silero VAD / Whisper の integration テスト
+    # (実モデルロード + 実推論 + エラーパス) を検証する。
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -166,8 +166,17 @@ jobs:
         with:
           path: ml-models/silero-vad
           key: silero-vad-a4a068cd6cf1ea8355b84327595838ca748ec29a25bc91fc82e6c299ccdc5808
+      - name: Cache Whisper tiny model
+        # scripts/download_ml_models.py の TARGETS["whisper-tiny"][2].expected_sha256 と同じ値を key にする。
+        # config / tokenizer だけの更新を無効化したいときは key にサフィックスを足して運用する。
+        uses: actions/cache@v4
+        with:
+          path: ml-models/whisper-tiny
+          key: whisper-tiny-7ebd0e69e78190ffe1438491fa05cc1f5c1aa3a4c4db3bc1723adbb551ea2395
       - name: Download Silero VAD ONNX model
         run: uv run scripts/download_ml_models.py --dest ml-models/ silero-vad
+      - name: Download Whisper tiny model
+        run: uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny
       - run: cargo clippy --features candle --all-targets -p hisui -- --deny warnings
       - run: cargo test --features candle -p hisui
 
