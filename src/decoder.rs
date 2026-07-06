@@ -49,7 +49,7 @@ pub enum DecoderRunOutput {
     Finished,
 }
 
-/// `drain_*_decoder_output()` の結果
+/// `drain_audio_decoder_output()` の結果
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrainResult {
     /// デコーダーの出力バッファが空になった（継続可能）
@@ -339,8 +339,9 @@ pub type DecoderOutputReceiver = tokio::sync::mpsc::UnboundedReceiver<crate::Res
 ///
 /// `unreachable!()` 検出契約: シンクと `output_rx` は `VideoDecoder` 内で同居するため、
 /// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
-/// 同じ理由で `poll_output` の `Disconnected` 分岐と `next_decoded_frame` の
-/// `None` 返却も同様に `unreachable!()` で潰す。
+/// 同じ理由で `poll_output` の `Disconnected` 分岐は `unreachable!()` で潰す
+/// (`next_decoded_frame` の `None` 返却も構造上起こらないが、 こちらは `Option` を
+/// そのまま返す)。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
     tx: DecoderOutputSender,
@@ -437,8 +438,9 @@ impl VideoDecoder {
 
     /// decoder task loop / `run` から呼ぶ同期 poll。
     ///
-    /// `try_recv` の `Empty` / `Disconnected` を `eos` と組み合わせて
-    /// `Processed` / `Pending` / `Finished` に射影する。
+    /// `try_recv` の結果を射影する: `Ok(Ok)` → `Processed`、 `Ok(Err)` → `Err`、
+    /// `Empty` は `eos` と組み合わせて `Finished` (eos) / `Pending` (非 eos)、
+    /// `Disconnected` は構造上到達不能で `unreachable!()`。
     pub fn poll_output(&mut self) -> Result<DecoderRunOutput> {
         match self.output_rx.try_recv() {
             Ok(Ok(frame)) => Ok(DecoderRunOutput::Processed(MediaFrame::video(frame))),
@@ -477,8 +479,7 @@ impl VideoDecoder {
     /// processor モデル (`ProcessorHandle` + subscribe / publish) 用の駆動 API。
     ///
     /// 入力トラックを subscribe し、 `handle_input_sample` / `poll_output` の drain ループで
-    /// デコード結果を出力トラックへ流す。 subcommand_inspect / sora の recording subcommand が
-    /// `spawn_processor` 経由で利用する。
+    /// デコード結果を出力トラックへ流す。
     pub async fn run(
         mut self,
         handle: ProcessorHandle,

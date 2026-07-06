@@ -68,7 +68,7 @@ async fn video_decoder_processes_real_vp9_frame_via_next_decoded_frame() -> hisu
     let stats = hisui::stats::Stats::new();
     let mut decoder = VideoDecoder::new(options, stats);
 
-    // 非同期経路: `handle_input_sample` 経由で `inner.decode` → `sink.emit_ok` を実行する
+    // 同期入力: `handle_input_sample` 経由で `inner.decode` → `sink.emit_ok` を実行する
     decoder.handle_input_sample(Some(MediaFrame::video(first_frame)))?;
     // EOS で `inner.finish()` 経由を踏ませて未排出フレームをすべて吐かせる
     decoder.handle_input_sample(None)?;
@@ -90,7 +90,7 @@ async fn video_decoder_processes_real_vp9_frame_via_next_decoded_frame() -> hisu
 /// 検証対象パス: `VideoDecoder::handle_input_sample` → `VideoDecoderInner::decode`
 /// → `sink.emit_ok` → 内部チャンネル → `VideoDecoder::poll_output` の全段を実際に踏む。
 /// 非同期 recv 経路 (`next_decoded_frame`) を使う別テストに対し、 同期 poll 経路を
-/// 上位 API 呼び出しだけで検出できるようにする回帰テスト。
+/// 上位 API 呼び出しだけで踏破する回帰テスト。
 #[test]
 fn video_decoder_poll_output_returns_processed() -> hisui::Result<()> {
     use hisui::MediaFrame;
@@ -211,7 +211,6 @@ where
     };
 
     // デコードする
-    let mut output_frames = Vec::new();
     let mut blue_count = 0;
     let mut red_count = 0;
     let mut input_frames = Vec::new();
@@ -227,8 +226,7 @@ where
         red_count += 1;
     }
     // 実 pipeline 上でデコードし、 出力フレームを後段の色素検査に使う。
-    let decoded = decode_video_frames_with_pipeline(input_frames, options)?;
-    output_frames.extend(decoded);
+    let output_frames = decode_video_frames_with_pipeline(input_frames, options)?;
 
     // デコード結果を確認する
     for output_frame in output_frames {
