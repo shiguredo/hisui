@@ -160,20 +160,26 @@ impl RtmpInboundEndpoint {
         endpoint_stats.set_listening(true);
         let server_started_at = tokio::time::Instant::now();
 
-        // デコーダーを生成する
-        let mut video_decoder = if output_video_track_id.is_some() {
-            let mut decoder_stats = handle.stats();
-            decoder_stats.set_default_label("component", "video_decoder");
-            Some(crate::decoder::VideoDecoder::new(
-                crate::decoder::VideoDecoderOptions {
-                    openh264_lib: handle.config().openh264_lib.clone(),
-                    ..Default::default()
-                },
-                decoder_stats,
-            ))
+        // video decoder task を endpoint 寿命で保持し、 accept ループから input_tx を clone して
+        // handler に渡す。 現状同期版が接続跨ぎで decoder を保持する挙動を踏襲するため、
+        // publish_track で得た TrackPublisher を task 内に move する形にする。
+        let video_decoder_task = if let Some(track_id) = &output_video_track_id {
+            let output_tx = handle.publish_track(track_id.clone()).await?;
+            let options = crate::decoder::VideoDecoderOptions {
+                openh264_lib: handle.config().openh264_lib.clone(),
+                ..Default::default()
+            };
+            Some(spawn_video_decoder_task(options, handle.stats(), output_tx))
         } else {
             None
         };
+
+        let mut audio_track_tx = if let Some(track_id) = &output_audio_track_id {
+            Some(handle.publish_track(track_id.clone()).await?)
+        } else {
+            None
+        };
+
         let mut audio_decoder = if output_audio_track_id.is_some() {
             let mut decoder_stats = handle.stats();
             decoder_stats.set_default_label("component", "audio_decoder");
@@ -188,18 +194,6 @@ impl RtmpInboundEndpoint {
 
         handle.notify_ready();
         handle.wait_subscribers_ready().await?;
-
-        let mut video_track_tx = if let Some(track_id) = &output_video_track_id {
-            Some(handle.publish_track(track_id.clone()).await?)
-        } else {
-            None
-        };
-
-        let mut audio_track_tx = if let Some(track_id) = &output_audio_track_id {
-            Some(handle.publish_track(track_id.clone()).await?)
-        } else {
-            None
-        };
 
         loop {
             match listener.accept().await {
@@ -217,14 +211,15 @@ impl RtmpInboundEndpoint {
                             if tls_acceptor.is_some() {
                                 tracing::debug!("TLS handshake successful with {peer_addr}");
                             }
+                            let video_decoder_input_tx =
+                                video_decoder_task.as_ref().map(|t| t.input_tx.clone());
                             let Ok(mut handler) = RtmpPublisherHandler::new(
                                 tls_stream,
                                 expected_app,
                                 expected_stream_name,
                                 timestamp_offset,
-                                video_track_tx.take(),
+                                video_decoder_input_tx,
                                 audio_track_tx.take(),
-                                video_decoder.take(),
                                 audio_decoder.take(),
                                 endpoint_stats,
                             )
@@ -240,15 +235,11 @@ impl RtmpInboundEndpoint {
                             if let Err(e) = handler.run().await {
                                 tracing::error!("RTMP publisher handler error: {}", e.display());
                             }
-                            let (
-                                restored_video_track_tx,
-                                restored_audio_track_tx,
-                                restored_video_decoder,
-                                restored_audio_decoder,
-                            ) = handler.into_parts();
-                            video_track_tx = restored_video_track_tx;
+                            let RtmpPublisherHandlerAudioParts {
+                                audio_track_tx: restored_audio_track_tx,
+                                audio_decoder: restored_audio_decoder,
+                            } = handler.into_parts();
                             audio_track_tx = restored_audio_track_tx;
-                            video_decoder = restored_video_decoder;
                             audio_decoder = restored_audio_decoder;
                             tracing::debug!("RTMP publisher disconnected: {peer_addr}");
                         }
@@ -299,11 +290,17 @@ struct RtmpPublisherHandler {
     expected_app: String,
     expected_stream_name: String,
     frame_handler: crate::rtmp::frame::RtmpIncomingFrameHandler,
-    video_track_tx: Option<crate::TrackPublisher>,
+    video_decoder_input_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::MediaFrame>>,
     audio_track_tx: Option<crate::TrackPublisher>,
-    video_decoder: Option<crate::decoder::VideoDecoder>,
     audio_decoder: Option<crate::decoder::AudioDecoder>,
     stats: RtmpInboundEndpointStats,
+}
+
+/// `RtmpPublisherHandler::into_parts` が返す audio 側の回収要素。
+/// tuple 順序ミスによる audio / video 誤配線を避けるため named struct にする。
+struct RtmpPublisherHandlerAudioParts {
+    audio_track_tx: Option<crate::TrackPublisher>,
+    audio_decoder: Option<crate::decoder::AudioDecoder>,
 }
 
 impl RtmpPublisherHandler {
@@ -316,9 +313,8 @@ impl RtmpPublisherHandler {
         expected_app: String,
         expected_stream_name: String,
         timestamp_offset: std::time::Duration,
-        video_track_tx: Option<crate::TrackPublisher>,
+        video_decoder_input_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::MediaFrame>>,
         audio_track_tx: Option<crate::TrackPublisher>,
-        video_decoder: Option<crate::decoder::VideoDecoder>,
         audio_decoder: Option<crate::decoder::AudioDecoder>,
         stats: RtmpInboundEndpointStats,
     ) -> crate::Result<Self> {
@@ -329,9 +325,8 @@ impl RtmpPublisherHandler {
             expected_app,
             expected_stream_name,
             frame_handler: crate::rtmp::frame::RtmpIncomingFrameHandler::new(timestamp_offset)?,
-            video_track_tx,
+            video_decoder_input_tx,
             audio_track_tx,
-            video_decoder,
             audio_decoder,
             stats,
         })
@@ -364,20 +359,11 @@ impl RtmpPublisherHandler {
         Ok(())
     }
 
-    fn into_parts(
-        self,
-    ) -> (
-        Option<crate::TrackPublisher>,
-        Option<crate::TrackPublisher>,
-        Option<crate::decoder::VideoDecoder>,
-        Option<crate::decoder::AudioDecoder>,
-    ) {
-        (
-            self.video_track_tx,
-            self.audio_track_tx,
-            self.video_decoder,
-            self.audio_decoder,
-        )
+    fn into_parts(self) -> RtmpPublisherHandlerAudioParts {
+        RtmpPublisherHandlerAudioParts {
+            audio_track_tx: self.audio_track_tx,
+            audio_decoder: self.audio_decoder,
+        }
     }
 
     /// RTMP イベントを処理する
@@ -458,11 +444,10 @@ impl RtmpPublisherHandler {
 
     /// ビデオフレームを処理する
     ///
-    /// エンコード済みフレームをデコードし、raw フレームを出力トラックに送信する。
+    /// エンコード済みフレームを decoder task の入力チャネルに投入する。
     async fn handle_video_frame(&mut self, frame: shiguredo_rtmp::VideoFrame) -> crate::Result<()> {
         if let Some(video_frame) = self.frame_handler.process_video_frame(frame)?
-            && let Some(decoder) = &mut self.video_decoder
-            && let Some(tx) = &mut self.video_track_tx
+            && let Some(tx) = self.video_decoder_input_tx.as_ref()
         {
             if let Some(codec) = video_frame.format.codec_name() {
                 self.stats.set_video_codec(codec);
@@ -470,15 +455,8 @@ impl RtmpPublisherHandler {
             self.stats.add_input_video_frame_count();
             self.stats
                 .set_last_input_video_timestamp(video_frame.timestamp);
-            decoder.handle_input_sample(Some(crate::MediaFrame::Video(std::sync::Arc::new(
-                video_frame,
-            ))))?;
-            // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
-            if crate::decoder::drain_video_decoder_output(decoder, tx)?
-                == crate::decoder::DrainResult::PipelineClosed
-            {
-                return Err(crate::Error::new("video track pipeline closed"));
-            }
+            tx.send(crate::MediaFrame::new_video(video_frame))
+                .map_err(|_| crate::Error::new("video decoder task terminated unexpectedly"))?;
         }
         Ok(())
     }
@@ -509,6 +487,112 @@ impl RtmpPublisherHandler {
             self.stream.write_all(send_data).await?;
             self.connection.advance_send_buf(send_data.len());
         }
+        Ok(())
+    }
+}
+
+// video decoder task の spawn pattern。
+// 本 endpoint は graceful stop (EOS 送信 → flush) の本番経路を持たないため、
+// endpoint 停止時は Drop の abort で task を止める。
+
+#[derive(Debug)]
+struct VideoDecoderTask {
+    input_tx: tokio::sync::mpsc::UnboundedSender<crate::MediaFrame>,
+    join_handle: tokio::task::JoinHandle<crate::Result<()>>,
+}
+
+impl Drop for VideoDecoderTask {
+    fn drop(&mut self) {
+        // endpoint 停止 / panic unwind 経路で task が leak しないよう abort する。
+        self.join_handle.abort();
+    }
+}
+
+fn spawn_video_decoder_task(
+    options: crate::decoder::VideoDecoderOptions,
+    mut stats: crate::stats::Stats,
+    output_tx: crate::TrackPublisher,
+) -> VideoDecoderTask {
+    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
+    stats.set_default_label("component", "video_decoder");
+    let join_handle =
+        tokio::spawn(async move { video_decoder_loop(options, stats, input_rx, output_tx).await });
+    VideoDecoderTask {
+        input_tx,
+        join_handle,
+    }
+}
+
+async fn video_decoder_loop(
+    options: crate::decoder::VideoDecoderOptions,
+    stats: crate::stats::Stats,
+    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<crate::MediaFrame>,
+    mut output_tx: crate::TrackPublisher,
+) -> crate::Result<()> {
+    let mut decoder = crate::decoder::AsyncVideoDecoder::new(options, stats);
+    loop {
+        let Some(sample) = input_rx.recv().await else {
+            // main が VideoDecoderTask を drop した経路 (通常は Drop の abort が先に task を止める)。
+            return Ok(());
+        };
+        decoder.handle_input_sample_sync(Some(sample))?;
+        // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending まで drain する。
+        loop {
+            match decoder.poll_output_sync()? {
+                crate::decoder::DecoderRunOutput::Processed(sample) => {
+                    if !output_tx.send_media(sample) {
+                        return Ok(());
+                    }
+                }
+                crate::decoder::DecoderRunOutput::Pending => break,
+                // Finished は EOS 入力後にのみ返るため、 EOS 入力を持たない本 endpoint では到達しない。
+                crate::decoder::DecoderRunOutput::Finished => {
+                    let _ = output_tx.send_eos();
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 本番の停止経路と同じく task を drop すると、 Drop impl の abort 経由で
+    /// task が終了して leak しないことを検証する。
+    #[tokio::test]
+    async fn drop_aborts_task() -> crate::Result<()> {
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
+        let pipeline_handle = pipeline.handle();
+        let _pipeline_task = tokio::spawn(async move { pipeline.run().await });
+
+        let processor_handle = pipeline_handle
+            .register_processor(
+                crate::ProcessorId::new("rtmp_task_smoke_test"),
+                crate::ProcessorMetadata::new("rtmp_task_smoke_test"),
+            )
+            .await
+            .expect("processor を登録できるはず");
+        let track_id = crate::TrackId::new("rtmp_task_smoke_test_video");
+        let output_tx = processor_handle.publish_track(track_id).await?;
+
+        let task = spawn_video_decoder_task(
+            crate::decoder::VideoDecoderOptions::default(),
+            processor_handle.stats(),
+            output_tx,
+        );
+        let abort_handle = task.join_handle.abort_handle();
+
+        drop(task);
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !abort_handle.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| crate::Error::new("task が終了せずタイムアウトした"))?;
         Ok(())
     }
 }

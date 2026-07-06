@@ -129,6 +129,7 @@ pub fn drain_video_decoder_output(decoder: &mut VideoDecoder, output_tx: &mut Tr
     - option b: 共通化しない。 0068 の `run` は残し、 mp4/reader.rs / 0072 inbound endpoint はそれぞれ独自実装のまま維持する
     - option c: decoder を別 processor として MediaPipeline に登録する形 (0066 以前および 0068 の processor モデル相当) に戻す。 使用側の spawn pattern 重複が解消されて全体設計の一貫性が上がる (`tokio::spawn` は MediaPipeline が担い、 lifecycle 管理も pipeline 側に集約される)。 ただし現状の pipeline は subscribe / `notify_ready` の multi-hop 伝播 (mp4 reader → decoder processor → mixer などの chain で subscribe_ready が段階的に伝わる仕組み) を想定しておらず、 race condition が煩雑だった経緯がある。 別 issue で pipeline 側の multi-hop 対応 (subscribe chain の ready 伝播、 shutdown 順序保証) を先に実装する必要があり、 本 issue 単独では完結しない
     - 判定材料: (1) 0072 完了時点で mp4/reader.rs (`VideoDecoderTask` + `video_decoder_loop`) と inbound endpoint 側の実装を突き合わせて「本当に共通で使える範囲」を確認する、 (2) MediaPipeline の multi-hop 対応の実現可能性と実装コストを見積もる (option c を選ぶ前提条件)
+    - 0072 完了後の実態: 3 endpoint の骨子は 2 系統に分岐している。 **RTSP** は graceful stop あり (`enum DecoderInput { Media, Eos }` + `shutdown`、 Fatal 経路で decoder flush → 正規の `send_eos` を届けるために本番使用)。 **RTMP / SRT** は graceful stop の本番経路がなく `UnboundedSender<MediaFrame>` 直送 + Drop abort のみの簡素版 (YAGNI で shutdown / Eos variant を削除済み)。 共通化する場合は「graceful stop あり系 (mp4 reader / RTSP)」と「簡素系 (RTMP / SRT)」の差を core でどう吸収するかが論点に加わる
     - 実装コスト: option a は core 抽出 + mp4 layer 化 + 0068 の run 書換の 3 段階、 差分規模は core 約 100 行 + 使用側書換。 option c は pipeline 側の改修が別 issue として先行するため本 issue の範囲では実質困難
 
 ### shiguredo-rust 規約整合

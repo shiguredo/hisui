@@ -182,11 +182,24 @@ impl SrtInboundEndpoint {
 
         let mut demuxer = SrtTsDemuxer::new()?;
 
-        let mut video_track_tx = if let Some(track_id) = &self.output_video_track_id {
-            Some(handle.publish_track(track_id.clone()).await?)
+        // video decoder task を endpoint 寿命で保持する。 publish_track で得た TrackPublisher を
+        // task 内に move し、 process_polled_events クロージャには input_tx.clone() を借用で渡す。
+        // reset_connection_state 経路では task を継続保持し、 endpoint 停止経路の
+        // `?` 早期 return で VideoDecoderTask::Drop 経由 abort される。
+        let video_decoder_task = if let Some(track_id) = &self.output_video_track_id {
+            let output_tx = handle.publish_track(track_id.clone()).await?;
+            let options = crate::decoder::VideoDecoderOptions {
+                openh264_lib: handle.config().openh264_lib.clone(),
+                ..Default::default()
+            };
+            Some(spawn_video_decoder_task(options, handle.stats(), output_tx))
         } else {
             None
         };
+        let mut video_decoder_input_tx = video_decoder_task
+            .as_ref()
+            .map(|task| task.input_tx.clone());
+
         let mut audio_track_tx = if let Some(track_id) = &self.output_audio_track_id {
             Some(handle.publish_track(track_id.clone()).await?)
         } else {
@@ -197,20 +210,6 @@ impl SrtInboundEndpoint {
         stats.set_listening(true);
         stats.set_connected(false);
 
-        // デコーダーを生成する
-        let mut video_decoder = if self.output_video_track_id.is_some() {
-            let mut decoder_stats = handle.stats();
-            decoder_stats.set_default_label("component", "video_decoder");
-            Some(crate::decoder::VideoDecoder::new(
-                crate::decoder::VideoDecoderOptions {
-                    openh264_lib: handle.config().openh264_lib.clone(),
-                    ..Default::default()
-                },
-                decoder_stats,
-            ))
-        } else {
-            None
-        };
         let mut audio_decoder = if self.output_audio_track_id.is_some() {
             let mut decoder_stats = handle.stats();
             decoder_stats.set_default_label("component", "audio_decoder");
@@ -236,9 +235,8 @@ impl SrtInboundEndpoint {
                         publish_samples(
                             samples,
                             &mut audio_track_tx,
-                            &mut video_track_tx,
+                            &mut video_decoder_input_tx,
                             &mut audio_decoder,
-                            &mut video_decoder,
                             &stats,
                             connection_timestamp_offset,
                         )?;
@@ -248,9 +246,8 @@ impl SrtInboundEndpoint {
                         publish_samples(
                             flushed_samples,
                             &mut audio_track_tx,
-                            &mut video_track_tx,
+                            &mut video_decoder_input_tx,
                             &mut audio_decoder,
-                            &mut video_decoder,
                             &stats,
                             connection_timestamp_offset,
                         )?;
@@ -468,9 +465,8 @@ fn pseudo_random_u32() -> crate::Result<u32> {
 fn publish_samples(
     samples: Vec<TsSample>,
     audio_track_tx: &mut Option<crate::media_pipeline::TrackPublisher>,
-    video_track_tx: &mut Option<crate::media_pipeline::TrackPublisher>,
+    video_decoder_input_tx: &mut Option<tokio::sync::mpsc::UnboundedSender<crate::MediaFrame>>,
     audio_decoder: &mut Option<crate::decoder::AudioDecoder>,
-    video_decoder: &mut Option<crate::decoder::VideoDecoder>,
     stats: &SrtInboundEndpointStats,
     connection_timestamp_offset: Duration,
 ) -> crate::Result<()> {
@@ -496,24 +492,17 @@ fn publish_samples(
                     }
                 }
             }
-            TsSample::Video(mut frame) => {
-                frame.timestamp = frame.timestamp.saturating_add(connection_timestamp_offset);
-                let timestamp = frame.timestamp;
+            TsSample::Video(frame) => {
+                let timestamp = frame.timestamp.saturating_add(connection_timestamp_offset);
+                let frame = crate::VideoFrame { timestamp, ..frame };
                 stats.set_video_codec(crate::types::CodecName::H264);
                 stats.add_input_video_frame_count();
                 stats.set_last_input_video_timestamp(timestamp);
-                if let Some(decoder) = video_decoder
-                    && let Some(tx) = video_track_tx
-                {
-                    decoder.handle_input_sample(Some(crate::MediaFrame::Video(
-                        std::sync::Arc::new(frame),
-                    )))?;
-                    // Finished は EOS 入力時にしか発生しないため、通常フレーム処理中は Pending のみ返る
-                    if crate::decoder::drain_video_decoder_output(decoder, tx)?
-                        == crate::decoder::DrainResult::PipelineClosed
-                    {
-                        return Err(crate::Error::new("video track pipeline closed"));
-                    }
+                if let Some(tx) = video_decoder_input_tx.as_ref() {
+                    // Err (task 死亡) は fatal として endpoint 停止に流れる。
+                    tx.send(crate::MediaFrame::new_video(frame)).map_err(|_| {
+                        crate::Error::new("video decoder task terminated unexpectedly")
+                    })?;
                 }
             }
         }
@@ -1088,6 +1077,70 @@ fn parse_adts_header(data: &[u8]) -> crate::Result<AdtsHeader> {
     })
 }
 
+// video decoder task の spawn pattern。
+// 本 endpoint は graceful stop (EOS 送信 → flush) の本番経路を持たないため、
+// endpoint 停止時は Drop の abort で task を止める。
+
+#[derive(Debug)]
+struct VideoDecoderTask {
+    input_tx: tokio::sync::mpsc::UnboundedSender<crate::MediaFrame>,
+    join_handle: tokio::task::JoinHandle<crate::Result<()>>,
+}
+
+impl Drop for VideoDecoderTask {
+    fn drop(&mut self) {
+        // endpoint 停止 / panic unwind 経路で task が leak しないよう abort する。
+        self.join_handle.abort();
+    }
+}
+
+fn spawn_video_decoder_task(
+    options: crate::decoder::VideoDecoderOptions,
+    mut stats: crate::stats::Stats,
+    output_tx: crate::TrackPublisher,
+) -> VideoDecoderTask {
+    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
+    stats.set_default_label("component", "video_decoder");
+    let join_handle =
+        tokio::spawn(async move { video_decoder_loop(options, stats, input_rx, output_tx).await });
+    VideoDecoderTask {
+        input_tx,
+        join_handle,
+    }
+}
+
+async fn video_decoder_loop(
+    options: crate::decoder::VideoDecoderOptions,
+    stats: crate::stats::Stats,
+    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<crate::MediaFrame>,
+    mut output_tx: crate::TrackPublisher,
+) -> crate::Result<()> {
+    let mut decoder = crate::decoder::AsyncVideoDecoder::new(options, stats);
+    loop {
+        let Some(sample) = input_rx.recv().await else {
+            // main が VideoDecoderTask を drop した経路 (通常は Drop の abort が先に task を止める)。
+            return Ok(());
+        };
+        decoder.handle_input_sample_sync(Some(sample))?;
+        // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending まで drain する。
+        loop {
+            match decoder.poll_output_sync()? {
+                crate::decoder::DecoderRunOutput::Processed(sample) => {
+                    if !output_tx.send_media(sample) {
+                        return Ok(());
+                    }
+                }
+                crate::decoder::DecoderRunOutput::Pending => break,
+                // Finished は EOS 入力後にのみ返るため、 EOS 入力を持たない本 endpoint では到達しない。
+                crate::decoder::DecoderRunOutput::Finished => {
+                    let _ = output_tx.send_eos();
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1596,6 +1649,43 @@ mod tests {
             "mid-stream SPS 変化で sample_entry が初期と異なる値に更新されていること"
         );
 
+        Ok(())
+    }
+
+    /// 本番の停止経路と同じく task を drop すると、 Drop impl の abort 経由で
+    /// task が終了して leak しないことを検証する。
+    #[tokio::test]
+    async fn drop_aborts_task() -> crate::Result<()> {
+        let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
+        let pipeline_handle = pipeline.handle();
+        let _pipeline_task = tokio::spawn(async move { pipeline.run().await });
+
+        let processor_handle = pipeline_handle
+            .register_processor(
+                crate::ProcessorId::new("srt_task_smoke_test"),
+                crate::ProcessorMetadata::new("srt_task_smoke_test"),
+            )
+            .await
+            .expect("processor を登録できるはず");
+        let track_id = crate::TrackId::new("srt_task_smoke_test_video");
+        let output_tx = processor_handle.publish_track(track_id).await?;
+
+        let task = spawn_video_decoder_task(
+            crate::decoder::VideoDecoderOptions::default(),
+            processor_handle.stats(),
+            output_tx,
+        );
+        let abort_handle = task.join_handle.abort_handle();
+
+        drop(task);
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !abort_handle.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| crate::Error::new("task が終了せずタイムアウトした"))?;
         Ok(())
     }
 }
