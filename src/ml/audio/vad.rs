@@ -151,10 +151,7 @@ impl VadGate {
     /// - `Idle`: これまでに消費済みの範囲はもう参照しないため `sample_count`
     /// - `InSpeech` / `Trailing`: 進行中の発話開始位置より前は不要
     pub fn min_required_sample(&self) -> u64 {
-        match &self.state {
-            State::Idle => self.sample_count,
-            State::InSpeech(speech) | State::Trailing { speech, .. } => speech.start_sample,
-        }
+        min_required_sample_of(&self.state, self.sample_count)
     }
 }
 
@@ -250,6 +247,18 @@ fn finalize_speech(speech: &SpeechInProgress, min_speech_samples: u64) -> Option
         end_sample: speech.last_speech_end_sample,
         max_probability: speech.max_probability,
     })
+}
+
+/// `VadGate::min_required_sample` の本体。現在状態と累計サンプル数から、呼び出し側が保持し続ける
+/// 必要がある最小サンプル番号を計算する pure function。
+///
+/// メソッドから切り出すことで、実 `SileroVad` を要する `VadGate` を組み立てずに `State` を直接
+/// 構築して単体テストできるようにしている (`advance_state` / `finalize_speech` と同じ方針)。
+fn min_required_sample_of(state: &State, sample_count: u64) -> u64 {
+    match state {
+        State::Idle => sample_count,
+        State::InSpeech(speech) | State::Trailing { speech, .. } => speech.start_sample,
+    }
 }
 
 /// Duration を 16 kHz サンプル数に変換する。
@@ -463,5 +472,29 @@ mod tests {
                 max_probability: prob(0.85),
             })
         );
+    }
+
+    /// Idle 状態では、消費済み範囲はもう参照しないため sample_count が最小保持位置になる。
+    #[test]
+    fn min_required_sample_of_returns_sample_count_when_idle() {
+        assert_eq!(min_required_sample_of(&State::Idle, 10 * CHUNK), 10 * CHUNK);
+    }
+
+    /// InSpeech 状態では、sample_count が発話開始より進んでいても、進行中の発話開始位置が
+    /// 最小保持位置になる (開始位置より前は捨ててよい)。
+    #[test]
+    fn min_required_sample_of_returns_speech_start_when_in_speech() {
+        let state = State::InSpeech(speech(3 * CHUNK, 5 * CHUNK, 0.9));
+        assert_eq!(min_required_sample_of(&state, 5 * CHUNK), 3 * CHUNK);
+    }
+
+    /// Trailing 状態でも、無音カウント中の発話開始位置が最小保持位置になる。
+    #[test]
+    fn min_required_sample_of_returns_speech_start_when_trailing() {
+        let state = State::Trailing {
+            speech: speech(3 * CHUNK, 5 * CHUNK, 0.9),
+            silence_samples: 2 * CHUNK,
+        };
+        assert_eq!(min_required_sample_of(&state, 7 * CHUNK), 3 * CHUNK);
     }
 }
