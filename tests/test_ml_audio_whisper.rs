@@ -132,6 +132,17 @@ fn load_pcm16le_mono_audio_frames(
         .collect())
 }
 
+/// ひらがな・カタカナ・CJK 統合漢字のいずれかなら true。
+///
+/// 日本語 fixture の文字起こしが日本語表記になっているかを緩く検証するためのヘルパー。厳密な文字列
+/// 一致はモデル・浮動小数点の環境差で脆いため、表記の種類だけを見る。
+fn is_japanese_char(c: char) -> bool {
+    let code = c as u32;
+    (0x3040..=0x309F).contains(&code) // ひらがな
+        || (0x30A0..=0x30FF).contains(&code) // カタカナ
+        || (0x4E00..=0x9FFF).contains(&code) // CJK 統合漢字
+}
+
 #[test]
 fn whisper_pipeline_transcribes_english_fixture() {
     let Some(model_dir) =
@@ -148,9 +159,15 @@ fn whisper_pipeline_transcribes_english_fixture() {
         .expect("Whisper 推論は成功する想定");
 
     assert!(!result.text.is_empty(), "文字起こし結果は空でないこと");
+    // 厳密な文字列一致はモデル・環境依存で脆いため、英語表記の内容が得られたことだけを緩く検証する。
+    let ascii_letters = result
+        .text
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic())
+        .count();
     assert!(
-        result.text.trim().chars().count() >= 2,
-        "極端に短すぎない文字起こしが得られること: {}",
+        ascii_letters >= 3,
+        "英語 fixture の文字起こしは英字を十分に含むこと: {}",
         result.text
     );
     assert!(
@@ -182,9 +199,11 @@ fn whisper_pipeline_transcribes_japanese_fixture() {
         .expect("Whisper 推論は成功する想定");
 
     assert!(!result.text.is_empty(), "文字起こし結果は空でないこと");
+    // 厳密な文字列一致はモデル・環境依存で脆いため、日本語表記の内容が得られたことだけを緩く検証する。
+    let japanese_chars = result.text.chars().filter(|c| is_japanese_char(*c)).count();
     assert!(
-        result.text.trim().chars().count() >= 2,
-        "極端に短すぎない文字起こしが得られること: {}",
+        japanese_chars >= 3,
+        "日本語 fixture の文字起こしは日本語文字を十分に含むこと: {}",
         result.text
     );
     assert!(
