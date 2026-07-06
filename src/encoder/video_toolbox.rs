@@ -273,29 +273,15 @@ mod tests {
         Ok(())
     }
 
-    /// 実行環境で VideoToolbox の圧縮セッションを作れない場合は環境依存としてスキップする。
-    fn should_skip_video_toolbox_test(err: &crate::Error) -> bool {
-        err.display()
-            .contains("VTCompressionSessionCreate() failed: status=-12903")
-    }
-
     #[test]
     fn video_toolbox_h264_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        let encoder = match VideoToolboxEncoder::new_h264(&options()) {
-            Ok(encoder) => encoder,
-            Err(err) if should_skip_video_toolbox_test(&err) => return Ok(()),
-            Err(err) => return Err(err),
-        };
+        let encoder = VideoToolboxEncoder::new_h264(&options())?;
         assert_every_output_frame_has_sample_entry(encoder)
     }
 
     #[test]
     fn video_toolbox_h265_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        let encoder = match VideoToolboxEncoder::new_h265(&options()) {
-            Ok(encoder) => encoder,
-            Err(err) if should_skip_video_toolbox_test(&err) => return Ok(()),
-            Err(err) => return Err(err),
-        };
+        let encoder = VideoToolboxEncoder::new_h265(&options())?;
         assert_every_output_frame_has_sample_entry(encoder)
     }
 }

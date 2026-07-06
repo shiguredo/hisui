@@ -297,20 +297,9 @@ fn aac_decode() -> hisui::Result<()> {
     for input_data in reader {
         input_samples.push(input_data?);
     }
-    let decoded_count = match decode_audio_count_with_pipeline(input_samples) {
-        Ok(decoded_count) => decoded_count,
-        Err(err) if should_skip_audio_toolbox_aac_test(&err) => return Ok(()),
-        Err(err) => return Err(err),
-    };
+    let decoded_count = decode_audio_count_with_pipeline(input_samples)?;
     assert!(decoded_count > 0, "Should decode at least one audio frame");
     Ok(())
-}
-
-/// 実行環境で AudioToolbox の AAC デコーダーを初期化できない場合は環境依存としてスキップする。
-#[cfg(any(target_os = "macos", feature = "fdk-aac"))]
-fn should_skip_audio_toolbox_aac_test(err: &hisui::Error) -> bool {
-    err.display()
-        .contains("AudioConverterNew() failed: status=1718449215")
 }
 
 fn decode_video_frames_with_pipeline(

@@ -1770,18 +1770,14 @@ mod tests {
 
     #[tokio::test]
     async fn run_rtsp_session_disconnects_after_requesting_audio_and_video() {
-        let server = match TestRtspServer::spawn(TestRtspServerOptions {
+        let server = TestRtspServer::spawn(TestRtspServerOptions {
             require_basic_auth: false,
             with_audio: true,
             unsupported_video_codec: false,
             require_session_header: true,
         })
         .await
-        {
-            Ok(server) => server,
-            Err(err) if should_skip_rtsp_server_test(&err) => return,
-            Err(err) => panic!("must start test RTSP server: {err}"),
-        };
+        .expect("must start test RTSP server");
         let parsed_url = parse_rtsp_input_url(&server.input_url).expect("must parse input URL");
         let root_stats = crate::stats::Stats::new();
         let stats = RtspSubscriberStats::new(root_stats.clone());
@@ -1812,18 +1808,14 @@ mod tests {
 
     #[tokio::test]
     async fn run_rtsp_session_handles_basic_auth_challenge() {
-        let server = match TestRtspServer::spawn(TestRtspServerOptions {
+        let server = TestRtspServer::spawn(TestRtspServerOptions {
             require_basic_auth: true,
             with_audio: false,
             unsupported_video_codec: false,
             require_session_header: true,
         })
         .await
-        {
-            Ok(server) => server,
-            Err(err) if should_skip_rtsp_server_test(&err) => return,
-            Err(err) => panic!("must start test RTSP server: {err}"),
-        };
+        .expect("must start test RTSP server");
         let parsed_url = parse_rtsp_input_url(&server.input_url).expect("must parse input URL");
         let root_stats = crate::stats::Stats::new();
         let stats = RtspSubscriberStats::new(root_stats.clone());
@@ -1860,18 +1852,14 @@ mod tests {
             "failed to find supported H264 video track in SDP"
         );
 
-        let server = match TestRtspServer::spawn(TestRtspServerOptions {
+        let server = TestRtspServer::spawn(TestRtspServerOptions {
             require_basic_auth: false,
             with_audio: false,
             unsupported_video_codec: true,
             require_session_header: false,
         })
         .await
-        {
-            Ok(server) => server,
-            Err(err) if should_skip_rtsp_server_test(&err) => return,
-            Err(err) => panic!("must start test RTSP server: {err}"),
-        };
+        .expect("must start test RTSP server");
         let parsed_url = parse_rtsp_input_url(&server.input_url).expect("must parse input URL");
         let root_stats = crate::stats::Stats::new();
         let stats = RtspSubscriberStats::new(root_stats.clone());
@@ -1919,11 +1907,6 @@ mod tests {
     struct TestRtspServer {
         input_url: String,
         join_handle: tokio::task::JoinHandle<io::Result<()>>,
-    }
-
-    /// sandbox 制限などで loopback bind が拒否される環境では統合テストをスキップする。
-    fn should_skip_rtsp_server_test(err: &io::Error) -> bool {
-        err.kind() == io::ErrorKind::PermissionDenied
     }
 
     impl TestRtspServer {
