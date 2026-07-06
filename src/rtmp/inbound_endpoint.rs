@@ -290,7 +290,7 @@ struct RtmpPublisherHandler {
     expected_app: String,
     expected_stream_name: String,
     frame_handler: crate::rtmp::frame::RtmpIncomingFrameHandler,
-    video_decoder_input_tx: Option<tokio::sync::mpsc::UnboundedSender<DecoderInput>>,
+    video_decoder_input_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::MediaFrame>>,
     audio_track_tx: Option<crate::TrackPublisher>,
     audio_decoder: Option<crate::decoder::AudioDecoder>,
     stats: RtmpInboundEndpointStats,
@@ -313,7 +313,7 @@ impl RtmpPublisherHandler {
         expected_app: String,
         expected_stream_name: String,
         timestamp_offset: std::time::Duration,
-        video_decoder_input_tx: Option<tokio::sync::mpsc::UnboundedSender<DecoderInput>>,
+        video_decoder_input_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::MediaFrame>>,
         audio_track_tx: Option<crate::TrackPublisher>,
         audio_decoder: Option<crate::decoder::AudioDecoder>,
         stats: RtmpInboundEndpointStats,
@@ -455,10 +455,8 @@ impl RtmpPublisherHandler {
             self.stats.add_input_video_frame_count();
             self.stats
                 .set_last_input_video_timestamp(video_frame.timestamp);
-            tx.send(DecoderInput::Media(crate::MediaFrame::new_video(
-                video_frame,
-            )))
-            .map_err(|_| crate::Error::new("video decoder task terminated unexpectedly"))?;
+            tx.send(crate::MediaFrame::new_video(video_frame))
+                .map_err(|_| crate::Error::new("video decoder task terminated unexpectedly"))?;
         }
         Ok(())
     }
@@ -494,57 +492,19 @@ impl RtmpPublisherHandler {
 }
 
 // video decoder task の spawn pattern。
+// 本 endpoint は graceful stop (EOS 送信 → flush) の本番経路を持たないため、
+// endpoint 停止時は Drop の abort で task を止める。
 
-enum DecoderInput {
-    Media(crate::MediaFrame),
-    Eos,
-}
-
-// Drop trait と shutdown(self) を共存させるため join_handle を Option で保持し
-// take() で move する。 直接 JoinHandle を持つと Drop 実装型の partial move が
-// E0509 で禁止される。
 #[derive(Debug)]
 struct VideoDecoderTask {
-    input_tx: tokio::sync::mpsc::UnboundedSender<DecoderInput>,
-    join_handle: Option<tokio::task::JoinHandle<crate::Result<()>>>,
-}
-
-impl VideoDecoderTask {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "shutdown はテストからのみ呼ばれる (本番経路は Drop 経由 abort)"
-        )
-    )]
-    async fn shutdown(mut self) -> crate::Result<()> {
-        let _ = self.input_tx.send(DecoderInput::Eos);
-        let handle = self
-            .join_handle
-            .take()
-            .expect("join_handle is Some until shutdown/Drop consumes it");
-        match handle.await {
-            Ok(result) => result,
-            Err(e) if e.is_panic() => {
-                tracing::error!("video decoder task panicked: {e}");
-                Err(crate::Error::new(format!(
-                    "video decoder task panicked: {e}"
-                )))
-            }
-            Err(e) => Err(crate::Error::new(format!(
-                "video decoder task join failed: {e}"
-            ))),
-        }
-    }
+    input_tx: tokio::sync::mpsc::UnboundedSender<crate::MediaFrame>,
+    join_handle: tokio::task::JoinHandle<crate::Result<()>>,
 }
 
 impl Drop for VideoDecoderTask {
     fn drop(&mut self) {
-        // 早期 return / panic unwind 経路で task が leak しないよう abort する。
-        // shutdown() が先に呼ばれていれば take 済みで None のため何もしない。
-        if let Some(handle) = self.join_handle.take() {
-            handle.abort();
-        }
+        // endpoint 停止 / panic unwind 経路で task が leak しないよう abort する。
+        self.join_handle.abort();
     }
 }
 
@@ -559,29 +519,24 @@ fn spawn_video_decoder_task(
         tokio::spawn(async move { video_decoder_loop(options, stats, input_rx, output_tx).await });
     VideoDecoderTask {
         input_tx,
-        join_handle: Some(join_handle),
+        join_handle,
     }
 }
 
 async fn video_decoder_loop(
     options: crate::decoder::VideoDecoderOptions,
     stats: crate::stats::Stats,
-    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<DecoderInput>,
+    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<crate::MediaFrame>,
     mut output_tx: crate::TrackPublisher,
 ) -> crate::Result<()> {
     let mut decoder = crate::decoder::AsyncVideoDecoder::new(options, stats);
     loop {
-        let input = match input_rx.recv().await {
-            Some(input) => input,
-            // main が VideoDecoderTask を drop する経路 (通常は shutdown 経由で EOS 送信済み)。
-            None => return Ok(()),
+        let Some(sample) = input_rx.recv().await else {
+            // main が VideoDecoderTask を drop した経路 (通常は Drop の abort が先に task を止める)。
+            return Ok(());
         };
-        let is_eos = matches!(input, DecoderInput::Eos);
-        match input {
-            DecoderInput::Media(sample) => decoder.handle_input_sample_sync(Some(sample))?,
-            DecoderInput::Eos => decoder.handle_input_sample_sync(None)?,
-        }
-        // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending / Finished まで drain する。
+        decoder.handle_input_sample_sync(Some(sample))?;
+        // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending まで drain する。
         loop {
             match decoder.poll_output_sync()? {
                 crate::decoder::DecoderRunOutput::Processed(sample) => {
@@ -590,15 +545,12 @@ async fn video_decoder_loop(
                     }
                 }
                 crate::decoder::DecoderRunOutput::Pending => break,
+                // Finished は EOS 入力後にのみ返るため、 EOS 入力を持たない本 endpoint では到達しない。
                 crate::decoder::DecoderRunOutput::Finished => {
                     let _ = output_tx.send_eos();
                     return Ok(());
                 }
             }
-        }
-        // AsyncVideoDecoder::poll_output_sync が Empty + eos==true を Finished に射影するため到達不能。
-        if is_eos {
-            unreachable!("video decoder still pending after EOS");
         }
     }
 }
@@ -607,54 +559,40 @@ async fn video_decoder_loop(
 mod tests {
     use super::*;
 
-    /// shutdown().await が Ok(()) を返し、 かつ task が Finished 分岐で
-    /// output_tx.send_eos() を発火して subscriber に Message::Eos を届けることを検証する。
-    /// send_eos の呼出が Finished 分岐から消失した regression を catch する。
+    /// 本番の停止経路と同じく task を drop すると、 Drop impl の abort 経由で
+    /// task が終了して leak しないことを検証する。
     #[tokio::test]
-    async fn shutdown_delivers_eos_to_subscriber() -> crate::Result<()> {
+    async fn drop_aborts_task() -> crate::Result<()> {
         let pipeline = crate::MediaPipeline::new(Default::default(), Default::default())?;
         let pipeline_handle = pipeline.handle();
         let _pipeline_task = tokio::spawn(async move { pipeline.run().await });
 
-        let publisher_handle = pipeline_handle
+        let processor_handle = pipeline_handle
             .register_processor(
-                crate::ProcessorId::new("rtmp_task_smoke_publisher"),
-                crate::ProcessorMetadata::new("rtmp_task_smoke_publisher"),
+                crate::ProcessorId::new("rtmp_task_smoke_test"),
+                crate::ProcessorMetadata::new("rtmp_task_smoke_test"),
             )
             .await
-            .expect("register publisher processor");
-        let subscriber_handle = pipeline_handle
-            .register_processor(
-                crate::ProcessorId::new("rtmp_task_smoke_subscriber"),
-                crate::ProcessorMetadata::new("rtmp_task_smoke_subscriber"),
-            )
-            .await
-            .expect("register subscriber processor");
-        let track_id = crate::TrackId::new("rtmp_task_smoke_video");
-
-        // publish 前に subscribe しておき、 publish_track が pending_subscribers を拾えるようにする。
-        let mut rx = subscriber_handle.subscribe_track(track_id.clone());
-        subscriber_handle.notify_ready();
-
-        let output_tx = publisher_handle.publish_track(track_id).await?;
-        publisher_handle.notify_ready();
-        // wait_subscribers_ready は初期 processor 群の準備完了を待つため trigger_start が必要。
-        pipeline_handle.trigger_start().await?;
-        publisher_handle.wait_subscribers_ready().await?;
+            .expect("processor を登録できるはず");
+        let track_id = crate::TrackId::new("rtmp_task_smoke_test_video");
+        let output_tx = processor_handle.publish_track(track_id).await?;
 
         let task = spawn_video_decoder_task(
             crate::decoder::VideoDecoderOptions::default(),
-            publisher_handle.stats(),
+            processor_handle.stats(),
             output_tx,
         );
+        let abort_handle = task.join_handle.abort_handle();
 
-        task.shutdown().await?;
+        drop(task);
 
-        match rx.recv().await {
-            crate::Message::Eos => Ok(()),
-            other => Err(crate::Error::new(format!(
-                "Message::Eos を期待したが {other:?} を受信した"
-            ))),
-        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !abort_handle.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| crate::Error::new("task が終了せずタイムアウトした"))?;
+        Ok(())
     }
 }
