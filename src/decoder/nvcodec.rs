@@ -231,7 +231,7 @@ impl NvcodecDecoder {
     /// 前提であり、 残フレームおよびエラーのシンクへの emit はそのコールバック内で完了するため、
     /// ここでは追加処理不要。 コールバック内で発生した `Err` は `sink.emit_err()` 経由で内部
     /// チャンネルに積まれ、 `finish()` の戻り値からは検出できないため、 利用側は `finish()` の直後に
-    /// `poll_output_sync` の `try_recv` ループで残物を全て吸い出すこと。
+    /// `poll_output` の `try_recv` ループで残物を全て吸い出すこと。
     pub fn finish(&mut self) -> crate::Result<()> {
         self.inner.flush()?;
         Ok(())

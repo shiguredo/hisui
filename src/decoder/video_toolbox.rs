@@ -134,7 +134,7 @@ impl VideoToolboxDecoder {
                         return Ok(());
                     }
 
-                    // シンクを引き継ぐ (元の `AsyncVideoDecoder` の受信側 `rx` に届き続ける必要があるため)。
+                    // シンクを引き継ぐ (元の `VideoDecoder` の受信側 `rx` に届き続ける必要があるため)。
                     // 未消費フレームは送信側 (`Sender`) 経由で即時に emit 済のため、
                     // 再初期化で喪失するリスクはない。
                     let sink = self.sink.clone();

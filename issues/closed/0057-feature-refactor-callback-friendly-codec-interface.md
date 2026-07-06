@@ -345,13 +345,16 @@ async fn test_nvcodec_encoder_to_receiver_e2e() {
 
 実装着手段階で encoder 側 / decoder 側の 2 分割に絞った。decoder が encoder より単純 (RPC keyframe 経路なし / `flush()` 強制同期化なし / sample_entry 不変条件なし / メトリクス計上が `total_output_video_frame_count_metric` のみ) なので、より単純な decoder で C 形式 interface パターンを先行確立し、encoder で複雑な要件 (RPC / flush 撤廃 / メトリクス重 / `error_slot` 廃止) を解く流れにする。
 
-依存順序: **`0066 → 0067`**
+依存順序: **`0066 → {0068 / 0071 / 0072} → 0073`** (encoder 系列は `0066 → 0067` で独立)
 
 | ID | 範囲 | 推定 LOC | 依存先 | 後方互換影響 |
 |----|------|----------|---------|---------------|
-| open/0066 (`feature/refactor-add-async-video-decoder`) | `AsyncVideoDecoder` 新規追加 + 既存 `VideoDecoder` の wrap 化 + 全 inner (Libvpx/Openh264/Dav1d/VideoToolbox/Nvcodec) の Sender 化 (`OutputSink` 経由)、既存外部 API 維持 | 千行前後 | なし | 内部 API のみ |
-| open/0068 (`feature/refactor-migrate-video-decoder-users-to-async`) | 0066 完了後に各使用側を `AsyncVideoDecoder` に移行 + 最終クリーンアップ (同期 `VideoDecoder` 削除 + `AsyncVideoDecoder` を `VideoDecoder` にリネーム) | 千行台 | 0066 | 内部 API のみ |
-| open/0067 (`feature/refactor-video-encoder-sender-interface`) | VideoEncoder + 全 inner (Libvpx/Openh264/SvtAv1/VideoToolbox/Nvcodec) を Sender 出力に統一、`NvcodecEncoder` の `flush()` 強制撤廃、`error_slot` 廃止、メトリクス計上の `run()` 受信側移植、RPC keyframe 経路維持 | 千行台 | 内部 API のみ |
+| closed/0066 (`feature/refactor-add-async-video-decoder`) | `AsyncVideoDecoder` 新規追加 + 既存 `VideoDecoder` の wrap 化 + 全 inner (Libvpx/Openh264/Dav1d/VideoToolbox/Nvcodec) の Sender 化 (`OutputSink` 経由)、既存外部 API 維持 | 千行前後 | なし | 内部 API のみ |
+| closed/0068 (`feature/refactor-migrate-video-decoder-users-to-async`) | subcommand_inspect / sora の processor 経路を `AsyncVideoDecoder` に移行 + `AsyncVideoDecoder::run` 追加 | +147/-9 | 0066 | 内部 API のみ |
+| closed/0071 (`feature/refactor-mp4-reader-async-video-decoder`) | mp4 reader の video decoder 経路を decoder task (spawn pattern) 化 + `set_video_decoder` / `discard_video_decoder_output` 削除 | +324/-107 | 0066 | 内部 API のみ |
+| closed/0072 (`feature/refactor-inbound-endpoint-async-video-decoder`) | RTMP / RTSP / SRT inbound endpoint の video decoder 経路を spawn pattern 化 | +483/-150 | 0066 | 内部 API のみ |
+| open/0073 (`feature/refactor-remove-sync-video-decoder-and-rename`) | 同期 wrap `VideoDecoder` 削除 + `AsyncVideoDecoder` を `VideoDecoder` にリネーム | +109/-294 | 0068 / 0071 / 0072 | 内部 API のみ |
+| open/0067 (`feature/refactor-video-encoder-sender-interface`) | VideoEncoder + 全 inner (Libvpx/Openh264/SvtAv1/VideoToolbox/Nvcodec) を Sender 出力に統一、`NvcodecEncoder` の `flush()` 強制撤廃、`error_slot` 廃止、メトリクス計上の `run()` 受信側移植、RPC keyframe 経路維持 | 千行台 | 0066 | 内部 API のみ |
 
 備考:
 
@@ -359,7 +362,7 @@ async fn test_nvcodec_encoder_to_receiver_e2e() {
 - 0066 を先に置く理由: 単純な題材で C 形式の interface が成立可能かを実装可否検証する。困難なら採用案 C を再検討 (案 A への後退) する弾力性ポイント
 - 0067 は 0066 完了後に着手し、0066 で確定した Sender 型 / enum dispatch 形式を踏襲する
 - 各 inner ごとに分割しない理由: `VideoEncoderInner` / `VideoDecoderInner` enum dispatch は全 variant 揃って初めて C 形式になるため、途中段階で adapter を挟むのは捨てコードになる (Premature Optimization)。1 PR 内で全 variant をまとめて書き換える方がコードベース全体の単純性に貢献する
-- **方針 (δ) について**: 0066 polish 後の Decision Owner 判断で「2 系統共存を意図的に許容し 0068 で最終解消する派生」を採用。0066 + 0068 で採用案 C の長所 5 項目を分担達成 (詳細は open/0066 §設計方針)
+- **方針 (δ) について**: 0066 polish 後の Decision Owner 判断で「2 系統共存を意図的に許容し 0068 / 0071 / 0072 / 0073 で最終解消する派生」を採用。0066 + 0068 で採用案 C の長所の大半を分担達成し、残る (v)「ホップ数上限 1」は 0071 / 0072 / 0073 のクリーンアップ (drain 経路・wrap 型の除去) で最終達成 (詳細は closed/0066 §設計方針)
 
 ## CHANGES.md について
 

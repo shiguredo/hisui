@@ -11,7 +11,7 @@ use shiguredo_vmaf::{BuiltinModel, Context, ContextConfig, Model, Picture, Pooli
 
 use crate::{
     Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, Result, TrackId,
-    decoder::{AsyncVideoDecoder, VideoDecoderOptions},
+    decoder::{VideoDecoder, VideoDecoderOptions},
     encoder::VideoEncoder,
     media::MediaFrame,
     sora::recording_layout::Layout,
@@ -359,7 +359,7 @@ async fn setup_vmaf_pipeline(
             decoder_processor_id,
             crate::ProcessorMetadata::new(decoder_processor_type),
             move |handle| {
-                let decoder = AsyncVideoDecoder::new(decoder_options_for_decoder, handle.stats());
+                let decoder = VideoDecoder::new(decoder_options_for_decoder, handle.stats());
                 decoder.run(
                     handle,
                     reader_output_track_id.clone(),
@@ -477,7 +477,7 @@ async fn setup_vmaf_pipeline(
         decoded_decoder_processor_id,
         crate::ProcessorMetadata::new(decoded_decoder_processor_type),
         move |handle| {
-            let decoder = AsyncVideoDecoder::new(decoder_options, handle.stats());
+            let decoder = VideoDecoder::new(decoder_options, handle.stats());
             decoder.run(
                 handle,
                 encoder_output_track_id_for_decoder.clone(),

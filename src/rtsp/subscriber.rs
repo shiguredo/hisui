@@ -1548,7 +1548,7 @@ async fn video_decoder_loop(
     mut input_rx: tokio::sync::mpsc::UnboundedReceiver<DecoderInput>,
     mut output_tx: crate::TrackPublisher,
 ) -> crate::Result<()> {
-    let mut decoder = crate::decoder::AsyncVideoDecoder::new(options, stats);
+    let mut decoder = crate::decoder::VideoDecoder::new(options, stats);
     loop {
         let input = match input_rx.recv().await {
             Some(input) => input,
@@ -1557,12 +1557,12 @@ async fn video_decoder_loop(
         };
         let is_eos = matches!(input, DecoderInput::Eos);
         match input {
-            DecoderInput::Media(sample) => decoder.handle_input_sample_sync(Some(sample))?,
-            DecoderInput::Eos => decoder.handle_input_sample_sync(None)?,
+            DecoderInput::Media(sample) => decoder.handle_input_sample(Some(sample))?,
+            DecoderInput::Eos => decoder.handle_input_sample(None)?,
         }
         // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending / Finished まで drain する。
         loop {
-            match decoder.poll_output_sync()? {
+            match decoder.poll_output()? {
                 crate::decoder::DecoderRunOutput::Processed(sample) => {
                     if !output_tx.send_media(sample) {
                         return Ok(());
@@ -1575,7 +1575,7 @@ async fn video_decoder_loop(
                 }
             }
         }
-        // AsyncVideoDecoder::poll_output_sync が Empty + eos==true を Finished に射影するため到達不能。
+        // VideoDecoder::poll_output が Empty + eos==true を Finished に射影するため到達不能。
         if is_eos {
             unreachable!("video decoder still pending after EOS");
         }

@@ -1,6 +1,6 @@
 use hisui::{
     MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
-    decoder::{AsyncVideoDecoder, VideoDecoder, VideoDecoderOptions},
+    decoder::{VideoDecoder, VideoDecoderOptions},
     sora::recording_mp4_reader::Mp4VideoReader,
     video::VideoFrame,
 };
@@ -48,17 +48,15 @@ fn av1_multi_resolutions() -> hisui::Result<()> {
     Ok(())
 }
 
-/// `AsyncVideoDecoder::next_decoded_frame_async` の非同期取り出し経路を実 VP9 フィクスチャで検証する
+/// `VideoDecoder::next_decoded_frame` の非同期取り出し経路を実 VP9 フィクスチャで検証する
 ///
-/// 検証対象パス: `AsyncVideoDecoder::handle_input_sample_sync` → `VideoDecoderInner::decode`
+/// 検証対象パス: `VideoDecoder::handle_input_sample` → `VideoDecoderInner::decode`
 /// → `Initial` → `Libvpx` への遷移 → `LibvpxDecoder::decode` → `sink.emit_ok` → 内部チャンネル
-/// → `rx.recv` → `next_decoded_frame_async` の全段を 1 フレームで踏破することを確認する。
-/// `VideoDecoder` 経由の同期ラップ経路は別テスト (`_via_wrap_delegation`) が担当する。
+/// → `rx.recv` → `next_decoded_frame` の全段を 1 フレームで踏破することを確認する。
+/// 同期 poll 経路 (`poll_output`) は別テスト (`video_decoder_poll_output_returns_processed`) が担当する。
 #[tokio::test(flavor = "multi_thread")]
-async fn async_video_decoder_processes_real_vp9_frame_via_next_decoded_frame_async()
--> hisui::Result<()> {
+async fn video_decoder_processes_real_vp9_frame_via_next_decoded_frame() -> hisui::Result<()> {
     use hisui::MediaFrame;
-    use hisui::decoder::AsyncVideoDecoder;
 
     // 既存 `vp9_multi_resolutions` と同じフィクスチャを 1 フレームだけ使う
     let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
@@ -68,15 +66,15 @@ async fn async_video_decoder_processes_real_vp9_frame_via_next_decoded_frame_asy
 
     let options = VideoDecoderOptions::default();
     let stats = hisui::stats::Stats::new();
-    let mut decoder = AsyncVideoDecoder::new(options, stats);
+    let mut decoder = VideoDecoder::new(options, stats);
 
-    // 非同期経路: `handle_input_sample_sync` 経由で `inner.decode` → `sink.emit_ok` を実行する
-    decoder.handle_input_sample_sync(Some(MediaFrame::video(first_frame)))?;
+    // 同期入力: `handle_input_sample` 経由で `inner.decode` → `sink.emit_ok` を実行する
+    decoder.handle_input_sample(Some(MediaFrame::video(first_frame)))?;
     // EOS で `inner.finish()` 経由を踏ませて未排出フレームをすべて吐かせる
-    decoder.handle_input_sample_sync(None)?;
+    decoder.handle_input_sample(None)?;
 
     // 非同期取り出し: `rx.recv` 経由で正常フレームを取得できることを確認する
-    match decoder.next_decoded_frame_async().await {
+    match decoder.next_decoded_frame().await {
         Some(Ok(frame)) => {
             let size = frame.size().expect("VP9 フィクスチャは size を持つはず");
             assert_eq!(size.width, 640, "フィクスチャ解像度と一致するはず");
@@ -87,15 +85,14 @@ async fn async_video_decoder_processes_real_vp9_frame_via_next_decoded_frame_asy
     Ok(())
 }
 
-/// `VideoDecoder::poll_output` の同期ラップ経路を実 VP9 フィクスチャで踏破する
+/// `VideoDecoder::poll_output` の同期取り出し経路を実 VP9 フィクスチャで踏破する
 ///
-/// 検証対象パス: `VideoDecoder::handle_input_sample` → `AsyncVideoDecoder::handle_input_sample_sync`
-/// → `VideoDecoderInner::decode` → `sink.emit_ok` → 内部チャンネル →
-/// `VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync` の全段を実際に踏む。
-/// wrap 側 (`VideoDecoder`) が同期 API をそのまま `AsyncVideoDecoder` に委譲していることを、
-/// 上位 API 呼び出しだけで検出できるようにする回帰テスト。
+/// 検証対象パス: `VideoDecoder::handle_input_sample` → `VideoDecoderInner::decode`
+/// → `sink.emit_ok` → 内部チャンネル → `VideoDecoder::poll_output` の全段を実際に踏む。
+/// 非同期 recv 経路 (`next_decoded_frame`) を使う別テストに対し、 同期 poll 経路を
+/// 上位 API 呼び出しだけで踏破する回帰テスト。
 #[test]
-fn video_decoder_poll_output_returns_processed_via_wrap_delegation() -> hisui::Result<()> {
+fn video_decoder_poll_output_returns_processed() -> hisui::Result<()> {
     use hisui::MediaFrame;
     use hisui::decoder::DecoderRunOutput;
 
@@ -108,13 +105,13 @@ fn video_decoder_poll_output_returns_processed_via_wrap_delegation() -> hisui::R
     let stats = hisui::stats::Stats::new();
     let mut decoder = VideoDecoder::new(options, stats);
 
-    // wrap 経路: `VideoDecoder::handle_input_sample` → 内部 `AsyncVideoDecoder` に委譲される
+    // 同期入力: `VideoDecoder::handle_input_sample` で `inner.decode` → `sink.emit_ok` を実行する
     decoder.handle_input_sample(Some(MediaFrame::video(first_frame)))?;
     // EOS で `inner.finish()` を経由してフラッシュを踏ませ、 非同期な内部デコーダーの
     // コールバック完了を待ち合わせる (`poll_output` が `Pending` を返さないようにするため)。
     decoder.handle_input_sample(None)?;
 
-    // wrap 経路: `VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync` に委譲
+    // 同期取り出し: `VideoDecoder::poll_output` で内部チャンネルから 1 件受信する
     let output = decoder.poll_output()?;
     assert!(
         matches!(output, DecoderRunOutput::Processed(_)),
@@ -124,18 +121,18 @@ fn video_decoder_poll_output_returns_processed_via_wrap_delegation() -> hisui::R
 }
 
 /// メトリクス二重計上禁止の回帰検出: N フレーム入力 → `total_input` が N 増分、
-/// N フレーム出力 → `total_output` が N 増分されることを `VideoDecoder` の wrap 経路で確認する
+/// N フレーム出力 → `total_output` が N 増分されることを確認する
 ///
 /// `OutputSink` が送信と増分を物理的に強制ペアリングする契約が
 /// 「emit_ok 経路でメトリクスの `add(2)` 等の二重計上が混入しても検出されない」状態にならないよう、
-/// 量的検証を wrap 経路経由 (`VideoDecoder::handle_input_sample` / `poll_output`) の
+/// 量的検証を `VideoDecoder::handle_input_sample` / `poll_output` の
 /// end-to-end で担保する。
 ///
 /// N=1 では「1 呼び出しで k 倍増分」型 (`add(k)` 直接乗算) の混入は検出できるが、
 /// 「k フレーム目だけ倍増する」「(N-1) フレーム目までは正しく (N) フレーム目で +2」等の
 /// 累積 off-by-one 系バグは検出範囲外になるため、 複数フレーム (N=3) で assert する。
 #[test]
-fn video_decoder_metrics_increment_by_input_count_via_wrap_delegation() -> hisui::Result<()> {
+fn video_decoder_metrics_increment_by_input_count() -> hisui::Result<()> {
     use hisui::MediaFrame;
     use hisui::decoder::DecoderRunOutput;
 
@@ -159,8 +156,7 @@ fn video_decoder_metrics_increment_by_input_count_via_wrap_delegation() -> hisui
 
     let mut decoder = VideoDecoder::new(VideoDecoderOptions::default(), stats);
 
-    // N フレーム入力 → wrap 経路 (`VideoDecoder::handle_input_sample`) 経由で
-    // 内部 `AsyncVideoDecoder::handle_input_sample_sync` → `inner.decode` → `sink.emit_ok` まで実行する
+    // N フレーム入力 → `VideoDecoder::handle_input_sample` → `inner.decode` → `sink.emit_ok` まで実行する
     for frame in frames {
         decoder.handle_input_sample(Some(MediaFrame::video(frame)))?;
     }
@@ -168,7 +164,7 @@ fn video_decoder_metrics_increment_by_input_count_via_wrap_delegation() -> hisui
     // 未排出フレームの吐き出しを待ち合わせる
     decoder.handle_input_sample(None)?;
 
-    // 全出力を wrap 経路 (`VideoDecoder::poll_output` → `AsyncVideoDecoder::poll_output_sync`) で取り出す
+    // 全出力を `VideoDecoder::poll_output` で取り出す
     let mut processed = 0u64;
     loop {
         match decoder.poll_output()? {
@@ -215,7 +211,6 @@ where
     };
 
     // デコードする
-    let mut output_frames = Vec::new();
     let mut blue_count = 0;
     let mut red_count = 0;
     let mut input_frames = Vec::new();
@@ -230,29 +225,8 @@ where
         input_frames.push(input_frame?);
         red_count += 1;
     }
-    // wrap 版と async 版の両方で decode を走らせ、 出力の byte-wise 等価性を検査したうえで
-    // wrap 版出力を後段の色素検査に使う。 async 版が同じ出力を返すことで wrap 経路と直接経路の
-    // 行動等価性を実 pipeline 上で担保する。
-    let wrap_output = decode_video_frames_with_pipeline(input_frames.clone(), options.clone())?;
-    let async_output = decode_video_frames_with_async_pipeline(input_frames, options)?;
-
-    assert_eq!(
-        wrap_output.len(),
-        async_output.len(),
-        "wrap 版と async 版のフレーム数が一致すること"
-    );
-    for (i, (w, a)) in wrap_output.iter().zip(async_output.iter()).enumerate() {
-        let (wy, wu, wv) = w
-            .as_yuv_planes()
-            .ok_or_else(|| hisui::Error::new("wrap 版 output に YUV planes がない"))?;
-        let (ay, au, av) = a
-            .as_yuv_planes()
-            .ok_or_else(|| hisui::Error::new("async 版 output に YUV planes がない"))?;
-        assert!(wy == ay, "frame {i}: Y plane が wrap 版と async 版で不一致");
-        assert!(wu == au, "frame {i}: U plane が wrap 版と async 版で不一致");
-        assert!(wv == av, "frame {i}: V plane が wrap 版と async 版で不一致");
-    }
-    output_frames.extend(wrap_output);
+    // 実 pipeline 上でデコードし、 出力フレームを後段の色素検査に使う。
+    let output_frames = decode_video_frames_with_pipeline(input_frames, options)?;
 
     // デコード結果を確認する
     for output_frame in output_frames {
@@ -339,79 +313,6 @@ fn decode_video_frames_with_pipeline(
         .await?;
         let decoder_task = tokio::spawn(async move {
             let decoder = VideoDecoder::new(options, decoder_handle.stats());
-            decoder
-                .run(
-                    decoder_handle,
-                    TrackId::new(VIDEO_INPUT_TRACK_ID),
-                    TrackId::new(VIDEO_OUTPUT_TRACK_ID),
-                )
-                .await
-        });
-
-        let sink_handle = register_processor(
-            &pipeline_handle,
-            ProcessorId::new("decoder_test_video_sink"),
-            ProcessorMetadata::new("decoder_test_video_sink"),
-        )
-        .await?;
-        let sink_task = tokio::spawn(async move {
-            collect_video_frames(sink_handle, TrackId::new(VIDEO_OUTPUT_TRACK_ID)).await
-        });
-
-        pipeline_handle
-            .trigger_start()
-            .await
-            .map_err(|_| hisui::Error::new("failed to trigger start: pipeline has terminated"))?;
-
-        let output_frames = await_video_pipeline_tasks(
-            source_task,
-            decoder_task,
-            sink_task,
-            pipeline_handle,
-            &mut pipeline_task,
-        )
-        .await?;
-        Ok(output_frames)
-    })
-}
-
-fn decode_video_frames_with_async_pipeline(
-    input_frames: Vec<VideoFrame>,
-    options: VideoDecoderOptions,
-) -> hisui::Result<Vec<VideoFrame>> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(async move {
-        let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
-        let pipeline_handle = pipeline.handle();
-        let mut pipeline_task = tokio::spawn(async move {
-            pipeline.run().await;
-        });
-
-        let source_handle = register_processor(
-            &pipeline_handle,
-            ProcessorId::new("decoder_test_video_source"),
-            ProcessorMetadata::new("decoder_test_video_source"),
-        )
-        .await?;
-        let source_task = tokio::spawn(async move {
-            run_video_source(
-                source_handle,
-                input_frames,
-                TrackId::new(VIDEO_INPUT_TRACK_ID),
-            )
-            .await
-        });
-
-        let decoder_handle = register_processor(
-            &pipeline_handle,
-            ProcessorId::new("decoder_test_video_decoder"),
-            ProcessorMetadata::new("video_decoder"),
-        )
-        .await?;
-        let decoder_task = tokio::spawn(async move {
-            let decoder = AsyncVideoDecoder::new(options, decoder_handle.stats());
             decoder
                 .run(
                     decoder_handle,

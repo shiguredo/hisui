@@ -8,7 +8,7 @@ use shiguredo_mp4::demux::Mp4FileKind;
 
 use crate::{
     Error, Result,
-    decoder::{AsyncVideoDecoder, AudioDecoder, VideoDecoderOptions},
+    decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
     mp4::file_kind::detect_mp4_file_kind,
     mp4::sample_reader::{Mp4SampleReader, Mp4SampleReaderOptions},
     types::{CodecName, ContainerFormat},
@@ -212,7 +212,7 @@ async fn setup_pipeline(
             )
             .await?;
 
-        let video_decoder = AsyncVideoDecoder::new(
+        let video_decoder = VideoDecoder::new(
             VideoDecoderOptions {
                 openh264_lib,
                 decode_params: Default::default(),

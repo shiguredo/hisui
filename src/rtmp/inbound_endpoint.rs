@@ -529,16 +529,16 @@ async fn video_decoder_loop(
     mut input_rx: tokio::sync::mpsc::UnboundedReceiver<crate::MediaFrame>,
     mut output_tx: crate::TrackPublisher,
 ) -> crate::Result<()> {
-    let mut decoder = crate::decoder::AsyncVideoDecoder::new(options, stats);
+    let mut decoder = crate::decoder::VideoDecoder::new(options, stats);
     loop {
         let Some(sample) = input_rx.recv().await else {
             // main が VideoDecoderTask を drop した経路 (通常は Drop の abort が先に task を止める)。
             return Ok(());
         };
-        decoder.handle_input_sample_sync(Some(sample))?;
+        decoder.handle_input_sample(Some(sample))?;
         // 1 サンプル入力で 0 個以上のフレームが出力されうるため Pending まで drain する。
         loop {
-            match decoder.poll_output_sync()? {
+            match decoder.poll_output()? {
                 crate::decoder::DecoderRunOutput::Processed(sample) => {
                     if !output_tx.send_media(sample) {
                         return Ok(());
