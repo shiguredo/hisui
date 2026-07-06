@@ -40,6 +40,8 @@ CLI:
 - `--language <code>`: Whisper 言語指定 (省略時 auto detect、`ja` / `en` 等)
 - `--workers <N>`: TranscriptionService のワーカープール並列数 (デフォルト 1)
 - `--vad <kind>`: silero / off (デフォルト silero)
+- Silero VAD モデルパスを渡す口 (例: `--vad-model-dir <path>`) が別途必要 (0062 の `TranscriptionProcessor` 構築で `SileroVadModel::load` に渡す。`--model-dir` は Whisper 専用)。オプション名は本 issue の polish 時に確定する
+- `--vad off` の VAD なしパス (固定長分割等) は 0062 では実装されないため、採用するなら本 issue で実装する (落とす選択も含めて本 issue の polish 時に確定する)
 
 ### 入力ファイル形式
 
@@ -81,9 +83,9 @@ subcommand_transcribe::try_run
 
 ### CI
 
-- 0059 で test-candle job の骨格が追加済み
-- 本 issue で `cargo test --features candle -p hisui` の integration テストと e2e テストに実推論を含める形で組込
-- testdata の音声サンプル (日本語 / 英語の短発話 WAV / MP4、CC0) を追加
+- test-candle job への whisper-tiny モデル追加と integration テストの実推論組込は 0062 で完了済み前提
+- 本 issue では e2e テストに実推論を含める形で組込
+- e2e 用の入力ファイル (日本語 / 英語の短発話 WAV / MP4、CC0) を追加する (0062 が追加する raw PCM とは別に、WAV / MP4 コンテナ入りのものが必要)
 
 ### CHANGES.md エントリ
 
