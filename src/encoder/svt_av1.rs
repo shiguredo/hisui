@@ -123,9 +123,9 @@ mod tests {
         }
     }
 
-    // 全出力フレームに sample_entry が載る不変条件を検証する（issue 0027 の核心）。
+    // 全出力フレームに sample_entry が載る不変条件を検証する。
     // svt_av1 は sample_entry をコンストラクタで確定し全フレームに載せるため、
-    // 旧実装（self.sample_entry.take()）では 2 フレーム目以降が None になっていた。
+    // `self.sample_entry.take()` のような 1 回消費実装だと 2 フレーム目以降が None になる回帰を検出する。
     // svt_av1 は libvpx と同じく feature gate されず常時利用可能なので単体テストで検証する。
     #[test]
     fn svt_av1_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {

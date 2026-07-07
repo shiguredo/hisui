@@ -163,8 +163,9 @@ mod tests {
         }
     }
 
-    // 全出力フレームに sample_entry が載る不変条件を検証する（issue 0027 の核心）。
-    // 旧実装（self.sample_entry.take()）では 2 フレーム目以降が None になっていた。
+    // 全出力フレームに sample_entry が載る不変条件を検証する。
+    // libvpx encoder は sample_entry をコンストラクタで確定し全フレームに載せる設計で、
+    // `self.sample_entry.take()` のような 1 回消費実装だと 2 フレーム目以降が None になる回帰を検出する。
     fn assert_every_output_frame_has_sample_entry(
         mut encoder: LibvpxEncoder,
         mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>,
