@@ -130,6 +130,46 @@ fn build_handler(
 }
 
 impl NvcodecEncoder {
+    /// codec 別 config を受けて、 handler 準備 → Encoder::new →
+    /// sample_entry 確定までの共通シーケンスを実行する。
+    /// make_context は seq_params から HandlerContext を組み立てる責務で、
+    /// codec 別の sample_entry 生成と av1_sequence_header 中身の差分を吸収する。
+    ///
+    /// 遅延スロット詳解: shiguredo_nvcodec::Encoder::new は handler を consume する
+    /// API のため、 sample_entry を確定するために inner が必要 / inner を作るために
+    /// handler が必要という循環がある。 そこで OnceLock を先に確保して handler に
+    /// キャプチャさせ、 Encoder::new 後に get_sequence_params から HandlerContext を
+    /// 確定して set する。 callback (worker スレッド) は encode() 経由でしか発火
+    /// しないため、 encode() 前に set が完了していれば race free に read できる。
+    fn build_encoder(
+        config: shiguredo_nvcodec::EncoderConfig,
+        sink: OutputSink,
+        encoded_format: VideoFormat,
+        make_context: impl FnOnce(Vec<u8>) -> crate::Result<HandlerContext>,
+    ) -> crate::Result<Self> {
+        let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
+        let handler = build_handler(
+            sink,
+            input_queue.clone(),
+            context_slot.clone(),
+            encoded_format,
+        );
+        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
+
+        let seq_params = inner.get_sequence_params()?;
+        context_slot
+            .set(make_context(seq_params)?)
+            .expect("BUG: HandlerContext must not be set before Encoder::new returns");
+
+        Ok(Self {
+            inner,
+            input_queue,
+            encoded_format,
+            force_keyframe_next: false,
+        })
+    }
+
     pub fn new_h264(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
@@ -152,39 +192,15 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec h264 encoder config: {config:?}");
 
-        let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        // callback が読む sample_entry を後入れするための遅延スロット。
-        // shiguredo_nvcodec::Encoder::new は handler を consume する API のため、
-        // sample_entry を確定するために inner が必要 / inner を作るために handler が必要
-        // という循環がある。そこで slot を先に確保して handler にキャプチャさせ、
-        // Encoder::new 後に get_sequence_params から sample_entry を確定して set する。
-        // callback (worker スレッド) は encode() 経由でしか発火しないため、
-        // encode() 前に set が完了していれば race free に read できる。
-        let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
-        let handler = build_handler(
-            sink,
-            input_queue.clone(),
-            context_slot.clone(),
-            VideoFormat::H264,
-        );
-        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
-
-        let seq_params = inner.get_sequence_params()?;
-        let sample_entry =
-            SharedSampleEntry::new(h264::h264_sample_entry_from_annexb(&seq_params)?);
-        // H.264 では av1_sequence_header は callback の分岐 (encoded_format 判定) で参照されないため空 Vec で埋める
-        context_slot
-            .set(HandlerContext {
+        Self::build_encoder(config, sink, VideoFormat::H264, |seq_params| {
+            let sample_entry =
+                SharedSampleEntry::new(h264::h264_sample_entry_from_annexb(&seq_params)?);
+            // H.264 では callback の分岐 (encoded_format 判定) で av1_sequence_header は
+            // 参照されないため空 Vec で埋める。
+            Ok(HandlerContext {
                 sample_entry,
                 av1_sequence_header: Vec::new(),
             })
-            .expect("BUG: HandlerContext must not be set before Encoder::new returns");
-
-        Ok(Self {
-            inner,
-            input_queue,
-            encoded_format: VideoFormat::H264,
-            force_keyframe_next: false,
         })
     }
 
@@ -210,35 +226,16 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec h265 encoder config: {config:?}");
 
-        let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        // new_h264 と同じ遅延確定パターン (詳細はそちらのコメント参照)。
-        let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
-        let handler = build_handler(
-            sink,
-            input_queue.clone(),
-            context_slot.clone(),
-            VideoFormat::H265,
-        );
-        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
-
-        let seq_params = inner.get_sequence_params()?;
-        let sample_entry = SharedSampleEntry::new(h265::h265_sample_entry_from_annexb(
-            &seq_params,
-            options.frame_rate,
-        )?);
-        // H.265 も av1_sequence_header は参照されないため空 Vec で埋める
-        context_slot
-            .set(HandlerContext {
+        Self::build_encoder(config, sink, VideoFormat::H265, |seq_params| {
+            let sample_entry = SharedSampleEntry::new(h265::h265_sample_entry_from_annexb(
+                &seq_params,
+                options.frame_rate,
+            )?);
+            // H.265 も av1_sequence_header は参照されないため空 Vec で埋める。
+            Ok(HandlerContext {
                 sample_entry,
                 av1_sequence_header: Vec::new(),
             })
-            .expect("BUG: HandlerContext must not be set before Encoder::new returns");
-
-        Ok(Self {
-            inner,
-            input_queue,
-            encoded_format: VideoFormat::H265,
-            force_keyframe_next: false,
         })
     }
 
@@ -268,43 +265,24 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec av1 encoder config: {config:?}");
 
-        let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        // new_h264 と同じ遅延確定パターン (詳細はそちらのコメント参照)。
-        let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
-        let handler = build_handler(
-            sink,
-            input_queue.clone(),
-            context_slot.clone(),
-            VideoFormat::Av1,
-        );
-        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
-
-        // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
-        // には以下の記載がある:
-        //   "By default, SPS/PPS and Sequence Header OBU data will be attached to every IDR frame and Key frame for H.264/HEVC and AV1 respectively."
-        //
-        // しかし実際には、AV1の場合、最初のキーフレームにのみ Sequence Header OBU が付与され、
-        // 二番目以降のキーフレームには含まれない。これにより、二番目以降のキーフレームからシークすると、
-        // デコーダが解像度やプロファイルなどの情報を取得できず、映像が再生できない問題が発生する。
-        //
-        // そのため、ここで Sequence Header OBU を get_sequence_params() で取得して保持しておき、
-        // キーフレームのエンコード時に Sequence Header が含まれていない場合は、
-        // hisui 側で明示的に付与するワークアラウンドを実装している。
-        let seq_params = inner.get_sequence_params()?;
-        let sample_entry =
-            SharedSampleEntry::new(av1::av1_sample_entry(width, height, &seq_params));
-        context_slot
-            .set(HandlerContext {
+        Self::build_encoder(config, sink, VideoFormat::Av1, |seq_params| {
+            // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
+            // には以下の記載がある:
+            //   "By default, SPS/PPS and Sequence Header OBU data will be attached to every IDR frame and Key frame for H.264/HEVC and AV1 respectively."
+            //
+            // しかし実際には、AV1 の場合、最初のキーフレームにのみ Sequence Header OBU が付与され、
+            // 二番目以降のキーフレームには含まれない。これにより、二番目以降のキーフレームからシークすると、
+            // デコーダが解像度やプロファイルなどの情報を取得できず、映像が再生できない問題が発生する。
+            //
+            // そのため、ここで Sequence Header OBU を get_sequence_params() で取得して保持しておき、
+            // キーフレームのエンコード時に Sequence Header が含まれていない場合は、
+            // hisui 側で明示的に付与するワークアラウンドを実装している。
+            let sample_entry =
+                SharedSampleEntry::new(av1::av1_sample_entry(width, height, &seq_params));
+            Ok(HandlerContext {
                 sample_entry,
                 av1_sequence_header: seq_params,
             })
-            .expect("BUG: HandlerContext must not be set before Encoder::new returns");
-
-        Ok(Self {
-            inner,
-            input_queue,
-            encoded_format: VideoFormat::Av1,
-            force_keyframe_next: false,
         })
     }
 
