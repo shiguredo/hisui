@@ -747,27 +747,16 @@ async fn wait_processor_tasks(
     processor_tasks: &mut tokio::task::JoinSet<(ProcessorId, Result<()>)>,
 ) -> bool {
     let mut success = true;
-    let mut aborted_remaining = false;
     while let Some(join_result) = processor_tasks.join_next().await {
         match join_result {
             Ok((_processor_id, Ok(()))) => {}
             Ok((processor_id, Err(e))) => {
                 success = false;
                 tracing::error!("processor {} failed: {}", processor_id, e.display());
-                // 1 つでも processor が失敗した時点で compose 全体は失敗なので、
-                // 後続 task が未 publish track や ready 待ちでハングしないよう残りを中断する。
-                if !aborted_remaining {
-                    processor_tasks.abort_all();
-                    aborted_remaining = true;
-                }
             }
             Err(e) => {
                 success = false;
                 tracing::error!("processor task join failed: {e}");
-                if !aborted_remaining {
-                    processor_tasks.abort_all();
-                    aborted_remaining = true;
-                }
             }
         }
     }
