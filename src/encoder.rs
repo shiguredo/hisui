@@ -50,7 +50,7 @@ pub struct AudioEncoder {
     inner: AudioEncoderInner,
 }
 
-pub(crate) enum EncoderRunOutput {
+pub enum EncoderRunOutput {
     Processed(MediaFrame),
     Pending,
     Finished,
@@ -871,11 +871,11 @@ impl VideoEncoder {
         }
     }
 
-    fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
+    pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         self.inner_encoder.handle_input_sample_sync(sample)
     }
 
-    fn poll_output(&mut self) -> Result<EncoderRunOutput> {
+    pub fn poll_output(&mut self) -> Result<EncoderRunOutput> {
         self.inner_encoder.poll_output_sync()
     }
 }
@@ -1044,7 +1044,7 @@ impl VideoEncoderInner {
     }
 }
 
-fn default_video_encode_config_for_rpc() -> EncodeConfig {
+pub fn default_video_encode_config_for_rpc() -> EncodeConfig {
     // server RPC の既定 encode params は、compose 既定値と同じ値を利用する
     crate::sora::recording_layout_encode_params::LayoutEncodeParams::default().config
 }
