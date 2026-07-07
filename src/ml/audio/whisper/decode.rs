@@ -1,9 +1,11 @@
 //! Whisper モデルの重みロードと greedy decode ループ。
 //!
-//! `WhisperModel` は candle の `Whisper` (encoder / decoder / KV cache) の薄いラッパーで、
-//! `WhisperDecoder` が SOT / 言語 / task トークンの組み立てと greedy サンプリングを担う。
-//! タスクは文字起こし (transcribe) 固定で、タイムスタンプトークンは出力しない
-//! (`TextFrame` の時刻は VAD 由来で埋めるため)。
+//! `WhisperDecoder` は candle の `Whisper` (encoder / decoder / KV cache) を保持し、
+//! SOT / 言語 / task トークンの組み立てと greedy サンプリングを担う。タスクは文字起こし
+//! (transcribe) 固定で、タイムスタンプトークンは出力しない (`TextFrame` の時刻は VAD 由来で埋めるため)。
+//!
+//! candle の `Whisper` は KV cache を内部に持つ mutable な状態機のため、複数スレッドで共有せず、
+//! 利用者 (worker) ごとに個別ロードする。
 
 use candle_core::{D, IndexOp, Tensor};
 use candle_nn::{VarBuilder, ops::softmax};
@@ -15,58 +17,6 @@ use tokenizers::Tokenizer;
 
 use crate::Result;
 
-/// Whisper モデル本体 (重み + 設定)。
-///
-/// candle の `Whisper` は KV cache を内部に持つ mutable な状態機のため、
-/// 複数スレッドで共有せず、利用者 (worker) ごとに個別ロードする。
-pub struct WhisperModel {
-    inner: Whisper,
-    config: Config,
-}
-
-impl WhisperModel {
-    /// Hugging Face の safetensors 形式 (拡張子 `.safetensors`) の重みファイルをロードする。
-    pub fn load(
-        weights_path: &std::path::Path,
-        config: Config,
-        device: &candle_core::Device,
-    ) -> Result<Self> {
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, device).map_err(|e| {
-                crate::Error::new(format!("failed to load whisper safetensors weights: {e}"))
-            })?
-        };
-        let inner = Whisper::load(&vb, config.clone())
-            .map_err(|e| crate::Error::new(format!("failed to load whisper model: {e}")))?;
-        Ok(Self { inner, config })
-    }
-
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-
-    pub fn encoder_forward(&mut self, x: &Tensor, flush: bool) -> candle_core::Result<Tensor> {
-        self.inner.encoder.forward(x, flush)
-    }
-
-    pub fn decoder_forward(
-        &mut self,
-        x: &Tensor,
-        xa: &Tensor,
-        flush: bool,
-    ) -> candle_core::Result<Tensor> {
-        self.inner.decoder.forward(x, xa, flush)
-    }
-
-    pub fn decoder_final_linear(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        self.inner.decoder.final_linear(x)
-    }
-
-    pub fn reset_kv_cache(&mut self) {
-        self.inner.reset_kv_cache();
-    }
-}
-
 /// 1 チャンクぶんの decode 結果。
 ///
 /// candle 内部の計算値 (f64) をそのまま保持する。`TextFrame` 向けの f32 変換は上位層で行う。
@@ -76,9 +26,13 @@ pub struct WhisperDecodedChunk {
     pub no_speech_prob: f64,
 }
 
-/// greedy decode の実行機。トークン組み立てと抑制トークンの適用を担う。
+/// Whisper 重みと greedy decode ループを 1 worker 分の状態としてまとめた型。
+///
+/// 内部の `Whisper` は KV cache を持つため 1 スレッド専有。並列化は複数の `WhisperDecoder` を
+/// 個別ロードして worker プールに配る方式で実現する (Silero の `new_instance` 型の共有はしない)。
 pub struct WhisperDecoder {
-    model: WhisperModel,
+    inner: Whisper,
+    config: Config,
     tokenizer: Tokenizer,
     suppress_tokens: Tensor,
     sot_token: u32,
@@ -90,14 +44,25 @@ pub struct WhisperDecoder {
 }
 
 impl WhisperDecoder {
-    pub fn new(
-        model: WhisperModel,
+    /// Hugging Face の safetensors 形式 (拡張子 `.safetensors`) の重みと config・tokenizer から
+    /// `WhisperDecoder` を組み立てる。
+    pub fn load(
+        weights_path: &std::path::Path,
+        config: Config,
         tokenizer: Tokenizer,
         device: &candle_core::Device,
     ) -> Result<Self> {
-        let suppress_tokens: Vec<f32> = (0..model.config().vocab_size as u32)
+        let vb = unsafe {
+            VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, device).map_err(|e| {
+                crate::Error::new(format!("failed to load whisper safetensors weights: {e}"))
+            })?
+        };
+        let inner = Whisper::load(&vb, config.clone())
+            .map_err(|e| crate::Error::new(format!("failed to load whisper model: {e}")))?;
+
+        let suppress_tokens: Vec<f32> = (0..config.vocab_size as u32)
             .map(|i| {
-                if model.config().suppress_tokens.contains(&i) {
+                if config.suppress_tokens.contains(&i) {
                     f32::NEG_INFINITY
                 } else {
                     0.0
@@ -117,7 +82,8 @@ impl WhisperDecoder {
             .ok_or_else(|| crate::Error::new("unable to find any non-speech token"))?;
 
         Ok(Self {
-            model,
+            inner,
+            config,
             tokenizer,
             suppress_tokens,
             sot_token,
@@ -127,6 +93,10 @@ impl WhisperDecoder {
             no_timestamps_token,
             language_token: None,
         })
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 
     pub fn tokenizer(&self) -> &Tokenizer {
@@ -139,7 +109,7 @@ impl WhisperDecoder {
     }
 
     pub fn reset_kv_cache(&mut self) {
-        self.model.reset_kv_cache();
+        self.inner.reset_kv_cache();
     }
 
     /// 1 チャンク (mel) を decode する。
@@ -160,11 +130,12 @@ impl WhisperDecoder {
 
     fn decode_segment(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
         let audio_features = self
-            .model
-            .encoder_forward(mel, true)
+            .inner
+            .encoder
+            .forward(mel, true)
             .map_err(|e| crate::Error::new(format!("whisper encoder: {e}")))?;
 
-        let sample_len = self.model.config().max_target_positions / 2;
+        let sample_len = self.config.max_target_positions / 2;
         let mut sum_logprob = 0f64;
         let mut no_speech_prob = f64::NAN;
         let mut tokens = vec![self.sot_token];
@@ -181,15 +152,17 @@ impl WhisperDecoder {
                 .map_err(|e| crate::Error::new(format!("tokens unsqueeze: {e}")))?;
 
             let ys = self
-                .model
-                .decoder_forward(&tokens_t, &audio_features, i == 0)
+                .inner
+                .decoder
+                .forward(&tokens_t, &audio_features, i == 0)
                 .map_err(|e| crate::Error::new(format!("whisper decoder: {e}")))?;
 
             // 初回 step の SOT 位置の logits から no_speech 確率を取る
             if i == 0 {
                 let logits = self
-                    .model
-                    .decoder_final_linear(&ys.i(..1).map_err(candle_err)?)
+                    .inner
+                    .decoder
+                    .final_linear(&ys.i(..1).map_err(candle_err)?)
                     .map_err(candle_err)?
                     .i(0)
                     .map_err(candle_err)?
@@ -205,8 +178,9 @@ impl WhisperDecoder {
 
             let (_, seq_len, _) = ys.dims3().map_err(candle_err)?;
             let logits = self
-                .model
-                .decoder_final_linear(&ys.i((..1, seq_len - 1..)).map_err(candle_err)?)
+                .inner
+                .decoder
+                .final_linear(&ys.i((..1, seq_len - 1..)).map_err(candle_err)?)
                 .map_err(candle_err)?
                 .i(0)
                 .map_err(candle_err)?
@@ -233,9 +207,7 @@ impl WhisperDecoder {
                 .to_scalar::<f32>()
                 .map_err(candle_err)? as f64;
 
-            if next_token == self.eot_token
-                || tokens.len() > self.model.config().max_target_positions
-            {
+            if next_token == self.eot_token || tokens.len() > self.config.max_target_positions {
                 break;
             }
             sum_logprob += prob.ln();

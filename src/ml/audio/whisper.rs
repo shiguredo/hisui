@@ -9,7 +9,7 @@ use tokenizers::Tokenizer;
 pub mod decode;
 pub mod multilingual;
 
-use decode::{WhisperDecoder, WhisperModel};
+use decode::WhisperDecoder;
 use multilingual::ResolvedLanguage;
 
 /// Whisper の推論結果。
@@ -23,7 +23,6 @@ pub struct WhisperTranscription {
 /// 1 worker 専用の Whisper 推論器。
 pub struct WhisperPipeline {
     decoder: WhisperDecoder,
-    config: Config,
     mel_filters: Vec<f32>,
     candle_device: candle_core::Device,
 }
@@ -39,15 +38,14 @@ impl WhisperPipeline {
         let tokenizer = Tokenizer::from_file(model_dir.join("tokenizer.json"))
             .map_err(|e| crate::Error::new(format!("load tokenizer: {e}")))?;
         let mel_filters = load_mel_filters(config.num_mel_bins)?;
-        let model = WhisperModel::load(
+        let decoder = WhisperDecoder::load(
             &model_dir.join("model.safetensors"),
-            config.clone(),
+            config,
+            tokenizer,
             &candle_device,
         )?;
-        let decoder = WhisperDecoder::new(model, tokenizer, &candle_device)?;
         Ok(Self {
             decoder,
-            config,
             mel_filters,
             candle_device,
         })
@@ -59,7 +57,8 @@ impl WhisperPipeline {
         pcm: &[f32],
         language: &str,
     ) -> crate::Result<WhisperTranscription> {
-        let mel = audio::pcm_to_mel(&self.config, pcm, &self.mel_filters);
+        let config = self.decoder.config();
+        let mel = audio::pcm_to_mel(config, pcm, &self.mel_filters);
         let mel_len = mel.len();
         if mel_len == 0 {
             return Ok(WhisperTranscription {
@@ -70,13 +69,10 @@ impl WhisperPipeline {
             });
         }
 
+        let num_mel_bins = config.num_mel_bins;
         let mel = Tensor::from_vec(
             mel,
-            (
-                1,
-                self.config.num_mel_bins,
-                mel_len / self.config.num_mel_bins,
-            ),
+            (1, num_mel_bins, mel_len / num_mel_bins),
             &self.candle_device,
         )
         .map_err(|e| crate::Error::new(format!("mel tensor: {e}")))?;
@@ -98,7 +94,7 @@ impl WhisperPipeline {
     }
 
     fn resolve_language(&self, language: &str) -> crate::Result<ResolvedLanguage> {
-        if !multilingual::is_multilingual_config(&self.config) {
+        if !multilingual::is_multilingual_config(self.decoder.config()) {
             return Err(crate::Error::new(format!(
                 "language is not supported for non-multilingual whisper model: {language}"
             )));
