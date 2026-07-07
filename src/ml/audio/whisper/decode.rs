@@ -25,7 +25,7 @@ pub struct WhisperModel {
 }
 
 impl WhisperModel {
-    /// safetensors 形式の重みファイルをロードする。
+    /// Hugging Face の safetensors 形式 (拡張子 `.safetensors`) の重みファイルをロードする。
     pub fn load(
         weights_path: &std::path::Path,
         config: Config,
