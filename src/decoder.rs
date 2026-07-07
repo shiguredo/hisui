@@ -327,9 +327,12 @@ pub struct VideoDecoderOptions {
 }
 
 /// 内部デコーダーが出力フレーム / エラーを `VideoDecoder` 内の受信側 (`output_rx`) に流すための送信側の型エイリアス
+///
+/// `OutputSink::new` の公開シグネチャに引数型として露出するため `pub` を維持する
+/// (対する `DecoderOutputReceiver` は crate 外に露出しないため `pub(crate)`)。
 pub type DecoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
 
-/// `VideoDecoder` 内部で内部デコーダーからの出力フレーム / エラーを受け取る受信側の型エイリアス
+/// 内部デコーダーからの出力フレーム / エラーを `VideoDecoder` 内で受け取る受信側の型エイリアス
 pub(crate) type DecoderOutputReceiver =
     tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>;
 
@@ -340,8 +343,7 @@ pub(crate) type DecoderOutputReceiver =
 ///
 /// `unreachable!()` 検出契約: シンクと `output_rx` は `VideoDecoder` 内で同居するため、
 /// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
-/// `poll_output` の `Disconnected` 分岐も、 シンクと `output_rx` の同居不変条件が破れない限り
-/// 到達不能なため `unreachable!()` で潰す。
+/// 同じ不変条件により、 `poll_output` の `Disconnected` 分岐も `unreachable!()` で潰す。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
     tx: DecoderOutputSender,
@@ -373,10 +375,10 @@ impl OutputSink {
     }
 }
 
-/// 内部チャンネルベースの映像デコーダー
+/// `handle_input_sample` / `poll_output` で同期駆動する映像デコーダー
 ///
 /// decoder task loop (mp4 reader / RTSP / RTMP / SRT) および `run` (processor 経路) から
-/// `handle_input_sample` / `poll_output` 経由で同期的に駆動する。
+/// 呼び出す。 内部チャンネルの詳細は `OutputSink` docstring 参照。
 ///
 /// **注意**: 非同期な内部デコーダー (Nvcodec 等) 使用時、 `VideoDecoder` を drop する前に
 /// EOS + drain (`handle_input_sample(None)` + `poll_output` ループ) を完走させないと、

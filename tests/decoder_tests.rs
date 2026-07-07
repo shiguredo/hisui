@@ -48,11 +48,10 @@ fn av1_multi_resolutions() -> hisui::Result<()> {
     Ok(())
 }
 
-/// `VideoDecoder::poll_output` の同期取り出し経路を実 VP9 フィクスチャで踏破する
+/// `VideoDecoder` の公開 API (`handle_input_sample` / `poll_output`) の end-to-end 契約
 ///
-/// 検証対象パス: `VideoDecoder::handle_input_sample` → `VideoDecoderInner::decode`
-/// → `sink.emit_ok` → 内部チャンネル → `VideoDecoder::poll_output` の全段を
-/// `VideoDecoder` の公開 API 呼び出しだけで踏破する回帰テスト。
+/// 実 VP9 フィクスチャで、 内部経路 `VideoDecoderInner::decode` → `sink.emit_ok`
+/// → 内部チャンネル → `poll_output::try_recv` が公開 API 呼び出しだけで踏破可能なことを確認する。
 #[test]
 fn video_decoder_poll_output_returns_processed() -> hisui::Result<()> {
     use hisui::MediaFrame;
