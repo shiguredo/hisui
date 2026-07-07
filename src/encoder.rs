@@ -1193,3 +1193,208 @@ pub async fn create_video_processor_with_params(
         .map_err(|e| crate::Error::new(format!("{e}: {processor_id}")))?;
     Ok(processor_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::encoder::test_helpers::make_encoder_sink_with_counters;
+    use crate::video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize};
+
+    // 圧縮済み VideoFrame を最小限のフィールドで組み立てる。
+    // OutputSink / poll_output_sync の契約テストでは keyframe フラグ以外の値
+    // (sample_entry / size / timestamp 等) は分岐判定に影響しない。
+    fn compressed_video_frame(keyframe: bool) -> VideoFrame {
+        VideoFrame {
+            data: vec![0, 1, 2, 3],
+            format: VideoFormat::H264,
+            keyframe,
+            size: Some(VideoFrameSize {
+                width: 64,
+                height: 64,
+            }),
+            timestamp: Duration::from_millis(0),
+            sample_entry: None,
+        }
+    }
+
+    // ---- R-2: OutputSink 契約テスト ----
+    // encoder 版 OutputSink は decoder 版と異なり keyframe 判定と 2 counter の
+    // 同時 inc を持つ。 既存の sample_entry テストは raw_i420_frame が全入力
+    // keyframe=true (test_helpers::raw_i420_frame) のため keyframe 分岐の
+    // 退行を検出できない。 ここで契約を単独で固定する。
+
+    #[test]
+    fn output_sink_emit_ok_keyframe_increments_both_counters() {
+        // keyframe=true では total_output_metric と total_output_keyframe_metric の両方が +1 する契約。
+        let (sink, mut rx, total, keyframe) = make_encoder_sink_with_counters();
+        sink.emit_ok(compressed_video_frame(true));
+        assert_eq!(total.get(), 1, "total_output_metric が inc されていない");
+        assert_eq!(
+            keyframe.get(),
+            1,
+            "keyframe=true なのに total_output_keyframe_metric が inc されていない"
+        );
+        let received = rx
+            .try_recv()
+            .expect("emit_ok したフレームが rx に届いていない");
+        let frame = received.expect("emit_ok は Ok で送るのに Err が届いた");
+        assert!(frame.keyframe, "受信したフレームの keyframe フラグが false");
+    }
+
+    #[test]
+    fn output_sink_emit_ok_non_keyframe_increments_total_only() {
+        // keyframe=false では total_output_metric のみ +1、 total_output_keyframe_metric は 0 のまま。
+        // 「常に両カウンタを inc する」退行を検出できることが本テストの要点。
+        let (sink, mut rx, total, keyframe) = make_encoder_sink_with_counters();
+        sink.emit_ok(compressed_video_frame(false));
+        assert_eq!(
+            total.get(),
+            1,
+            "total_output_metric は非 keyframe でも inc されるべき"
+        );
+        assert_eq!(
+            keyframe.get(),
+            0,
+            "非 keyframe で total_output_keyframe_metric が誤って inc された"
+        );
+        let received = rx
+            .try_recv()
+            .expect("emit_ok したフレームが rx に届いていない");
+        let frame = received.expect("emit_ok は Ok で送るのに Err が届いた");
+        assert!(!frame.keyframe, "受信したフレームの keyframe フラグが true");
+    }
+
+    #[test]
+    fn output_sink_emit_err_does_not_increment_counters() {
+        // emit_err はメトリクスを一切増分しない
+        // (出力フレーム数 / keyframe 数の意味論をエラーで汚さないため)。
+        let (sink, mut rx, total, keyframe) = make_encoder_sink_with_counters();
+        sink.emit_err(Error::new("test error"));
+        assert_eq!(
+            total.get(),
+            0,
+            "emit_err で total_output_metric が誤って inc された"
+        );
+        assert_eq!(
+            keyframe.get(),
+            0,
+            "emit_err で total_output_keyframe_metric が誤って inc された"
+        );
+        let received = rx
+            .try_recv()
+            .expect("emit_err したエラーが rx に届いていない");
+        assert!(received.is_err(), "emit_err は Err で送るのに Ok が届いた");
+    }
+
+    #[test]
+    fn output_sink_clone_shares_counters_with_original() {
+        // clone した sink は原本と同じ counter インスタンス (Arc 内部) を共有し、
+        // 双方の emit_ok が同一 counter に累積する契約。
+        let (sink, _rx, total, keyframe) = make_encoder_sink_with_counters();
+        let cloned = sink.clone();
+        sink.emit_ok(compressed_video_frame(true));
+        cloned.emit_ok(compressed_video_frame(false));
+        assert_eq!(
+            total.get(),
+            2,
+            "clone した sink の inc が原本と counter を共有していない"
+        );
+        assert_eq!(
+            keyframe.get(),
+            1,
+            "keyframe 1 件 + 非 keyframe 1 件で keyframe counter が 1 でない"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "encoder output sink receiver dropped before sink")]
+    fn output_sink_emit_ok_panics_when_receiver_dropped() {
+        // rx が sink より先に drop されるのは AsyncVideoEncoder の drop 順制御下では
+        // 発生しない構造だが、 万一発生した場合は fail-fast で panic する契約
+        // (unreachable! で「不変条件違反 = バグ」を明示する)。
+        let (sink, rx, _total, _keyframe) = make_encoder_sink_with_counters();
+        drop(rx);
+        sink.emit_ok(compressed_video_frame(true));
+    }
+
+    // ---- R-3: AsyncVideoEncoder::poll_output_sync 分岐テスト ----
+    // inner=None のまま sink 経由で rx にメッセージを流し込んで
+    // poll_output_sync の分岐 (Processed / Err / Pending / Finished) を検証する。
+    // Disconnected 分岐は sink と rx が AsyncVideoEncoder 内で同居する構造上
+    // 通常運用では起きず、 発生時は unreachable! で panic する。 テストで再現する
+    // には sink 側 tx の強制 drop が必要で public API では成立しない。
+    // その契約自体は上記 output_sink_emit_ok_panics_when_receiver_dropped でカバー済み。
+
+    fn new_uninitialized_encoder() -> AsyncVideoEncoder {
+        let options = VideoEncoderOptions {
+            codec: CodecName::Vp8,
+            engines: None,
+            bitrate: 100_000,
+            width: EvenUsize::truncating_new(64),
+            height: EvenUsize::truncating_new(64),
+            frame_rate: FrameRate {
+                numerator: NonZeroUsize::MIN.saturating_add(29),
+                denumerator: NonZeroUsize::MIN,
+            },
+            encode_params: default_video_encode_config_for_rpc(),
+        };
+        AsyncVideoEncoder::new(&options, None, crate::stats::Stats::new())
+            .expect("AsyncVideoEncoder::new が失敗した")
+    }
+
+    #[test]
+    fn poll_output_sync_returns_processed_when_frame_available() {
+        // rx にフレームが届いている場合は Processed(MediaFrame::video(frame)) を返す。
+        let mut encoder = new_uninitialized_encoder();
+        encoder.sink.emit_ok(compressed_video_frame(true));
+        let output = encoder
+            .poll_output_sync()
+            .expect("poll_output_sync が失敗した");
+        assert!(
+            matches!(output, EncoderRunOutput::Processed(_)),
+            "フレーム到達時に Processed が返っていない"
+        );
+    }
+
+    #[test]
+    fn poll_output_sync_propagates_error_from_rx() {
+        // rx に Err が届いている場合はそのまま Err を伝播する (Ok(Err(e)) 分岐)。
+        let mut encoder = new_uninitialized_encoder();
+        encoder.sink.emit_err(Error::new("encoder error"));
+        let result = encoder.poll_output_sync();
+        assert!(
+            result.is_err(),
+            "sink.emit_err の Err が poll_output_sync で伝播されていない"
+        );
+    }
+
+    #[test]
+    fn poll_output_sync_returns_pending_when_empty_and_not_eos() {
+        // rx が空 + eos=false の分岐 (TryRecvError::Empty + !eos)。
+        let mut encoder = new_uninitialized_encoder();
+        assert!(!encoder.eos, "テスト前提: 未初期化 encoder は eos=false");
+        let output = encoder
+            .poll_output_sync()
+            .expect("poll_output_sync が失敗した");
+        assert!(
+            matches!(output, EncoderRunOutput::Pending),
+            "空 rx + eos=false で Pending が返っていない"
+        );
+    }
+
+    #[test]
+    fn poll_output_sync_returns_finished_when_empty_and_eos() {
+        // rx が空 + eos=true の分岐 (TryRecvError::Empty + eos)。
+        let mut encoder = new_uninitialized_encoder();
+        encoder.eos = true;
+        let output = encoder
+            .poll_output_sync()
+            .expect("poll_output_sync が失敗した");
+        assert!(
+            matches!(output, EncoderRunOutput::Finished),
+            "空 rx + eos=true で Finished が返っていない"
+        );
+    }
+}
