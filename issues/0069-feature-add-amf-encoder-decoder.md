@@ -141,3 +141,8 @@ AMF は VP8 / VP9 のハードウェアエンコード・デコードに対応�
 - **AV1 Sequence Header OBU の扱い**: nvcodec 側で「NVENC SDK 13.0 の挙動として二番目以降のキーフレームに Sequence Header が付かない」というワークアラウンドが入っている (`src/encoder/nvcodec.rs:174-198`)。AMF でも同様の挙動があるかは動作確認時に検証する。
 - **feature 無効時のコンパイル**: `feature = "amf"` を無効化した状態でも `cargo build` が通ることを CI で担保する。既存 nvcodec と同じく全ての AMF 参照箇所を `#[cfg(feature = "amf")]` でガードする。
 - **依存 crate の更新頻度**: `shiguredo_amf` の新バージョンが出た場合は、依存を上げた PR 内で `EncoderConfig` のフィールド追加・削除に追従する運用にする (issue 0005 の方針と同じ)。
+
+## 関連
+
+- open/0067 (`feature/refactor-add-async-video-encoder`): VideoEncoder 系の Sender 化 (`AsyncVideoEncoder` 追加 + wrap 化 + inner Sender 化)。 本 issue で追加する AMF encoder は 0067 の Sender 化 API (`OutputSink` / `AsyncVideoEncoder`) を雛形として踏襲するため、 0067 完了後に着手する
+- closed/0066 (`feature/refactor-add-async-video-decoder`) / closed/0073 (`feature/refactor-remove-sync-video-decoder-and-rename`) / closed/0078 (`feature/refactor-remove-unused-next-decoded-frame`): VideoDecoder 系の Sender 化 (完了)。 本 issue で追加する AMF decoder は Sender 化された `VideoDecoder` API を雛形として踏襲する
