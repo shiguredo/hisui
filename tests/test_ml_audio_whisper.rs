@@ -311,13 +311,13 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
 
     tokio::time::timeout(TASK_TIMEOUT, source_task)
         .await
-        .expect("source_task timeout")??;
+        .expect("source_task がタイムアウトした")??;
     tokio::time::timeout(TASK_TIMEOUT, processor_task)
         .await
-        .expect("processor_task timeout")??;
+        .expect("processor_task がタイムアウトした")??;
     let text_frames = tokio::time::timeout(TASK_TIMEOUT, sink_task)
         .await
-        .expect("sink_task timeout")??;
+        .expect("sink_task がタイムアウトした")??;
 
     assert!(
         !text_frames.is_empty(),

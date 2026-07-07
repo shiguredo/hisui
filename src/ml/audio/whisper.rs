@@ -256,8 +256,8 @@ mod tests {
             "decoder_layers": 4,
             "suppress_tokens": [1, 2, 3]
         }"#;
-        let json = nojson::RawJson::parse(text).expect("JSON parse");
-        let config = WhisperConfigFile::try_from(json.value()).expect("config parse");
+        let json = nojson::RawJson::parse(text).expect("JSON をパースできること");
+        let config = WhisperConfigFile::try_from(json.value()).expect("config をパースできること");
         assert_eq!(config.num_mel_bins, 80);
         assert_eq!(config.max_source_positions, 1500);
         assert_eq!(config.suppress_tokens, vec![1, 2, 3]);

@@ -419,11 +419,11 @@ mod tests {
             data: vec![0x80, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xff, 0xff],
             format: AudioFormat::I16Be,
             channels: Channels::STEREO,
-            sample_rate: SampleRate::from_u32(48_000).expect("valid sample rate"),
+            sample_rate: SampleRate::from_u32(48_000).expect("48 kHz は有効"),
             timestamp: Duration::ZERO,
             sample_entry: None,
         };
-        let pcm = normalize_i16be(&frame).expect("normalize must succeed");
+        let pcm = normalize_i16be(&frame).expect("正規化は成功する想定");
         assert_eq!(pcm.len(), 4);
         assert_eq!(pcm[0], -1.0);
         assert_eq!(pcm[1], 0.0);
