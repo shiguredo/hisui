@@ -50,7 +50,7 @@ pub struct AudioEncoder {
     inner: AudioEncoderInner,
 }
 
-enum EncoderRunOutput {
+pub(crate) enum EncoderRunOutput {
     Processed(MediaFrame),
     Pending,
     Finished,
@@ -374,6 +374,63 @@ pub enum VideoEncoderRpcMessage {
     RequestKeyframe,
 }
 
+/// 内部エンコーダーが出力フレーム / エラーを `AsyncVideoEncoder` 内の受信側 (`rx`) に流すための送信側の型エイリアス
+pub type EncoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
+
+/// `AsyncVideoEncoder` 内部で内部エンコーダーからの出力フレーム / エラーを受け取る受信側の型エイリアス
+pub(crate) type EncoderOutputReceiver =
+    tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>;
+
+/// 内部エンコーダーが出力フレーム / エラーを `AsyncVideoEncoder` 内の受信側 (`rx`) に流すためのシンク。
+///
+/// 出力フレーム (`emit_ok`) 送信時に `total_output_metric` の増分と keyframe 判定を物理的に強制ペアリングする。
+/// エラー (`emit_err`) 送信時はメトリクスを増分しない (出力フレーム数 / keyframe 数の意味論を汚さないため)。
+///
+/// `unreachable!()` 検出契約: シンクと `rx` は `AsyncVideoEncoder` 内で同居するため、
+/// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
+#[derive(Debug, Clone)]
+pub struct OutputSink {
+    tx: EncoderOutputSender,
+    total_output_metric: crate::stats::StatsCounter,
+    total_output_keyframe_metric: crate::stats::StatsCounter,
+}
+
+impl OutputSink {
+    pub fn new(
+        tx: EncoderOutputSender,
+        total_output_metric: crate::stats::StatsCounter,
+        total_output_keyframe_metric: crate::stats::StatsCounter,
+    ) -> Self {
+        Self {
+            tx,
+            total_output_metric,
+            total_output_keyframe_metric,
+        }
+    }
+
+    /// 出力フレームを 1 件送信し、 `total_output_metric` と (keyframe の場合) `total_output_keyframe_metric` を増分する。
+    pub fn emit_ok(&self, frame: VideoFrame) {
+        // keyframe フラグは send 前に取り出す。 VideoFrame は data: Vec<u8> を持ち Clone は
+        // 圧縮ペイロード全体の deep copy になるため送信は move。
+        let is_keyframe = frame.keyframe;
+        if self.tx.send(Ok(frame)).is_err() {
+            unreachable!("encoder output sink receiver dropped before sink (bug)");
+        }
+        // 送信成功後に増分することで「送信できなかったフレームをカウントする」嘘を物理的に防ぐ。
+        self.total_output_metric.inc();
+        if is_keyframe {
+            self.total_output_keyframe_metric.inc();
+        }
+    }
+
+    /// エラーを 1 件送信する (メトリクスは増分しない)。
+    pub fn emit_err(&self, err: crate::Error) {
+        if self.tx.send(Err(err)).is_err() {
+            unreachable!("encoder output sink receiver dropped before sink (bug)");
+        }
+    }
+}
+
 /// 上流の video encoder にキーフレーム要求を送る。
 ///
 /// encoder が見つからない場合は debug ログを出して正常終了する（ベストエフォート）。
@@ -423,25 +480,33 @@ pub async fn request_upstream_video_keyframe(
     Ok(())
 }
 
+/// 内部チャンネルベースの映像エンコーダー
+///
+/// decoder task loop や `run` (processor 経路) から `handle_input_sample` / `poll_output`
+/// 経由で同期的に駆動する。 直接利用するときは `next_encoded_frame_async` で非同期に取得する。
 #[derive(Debug)]
-pub struct VideoEncoder {
+pub struct AsyncVideoEncoder {
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
-    total_output_video_frame_count_metric: crate::stats::StatsCounter,
-    total_output_video_keyframe_count_metric: crate::stats::StatsCounter,
     total_video_keyframe_request_count_metric: crate::stats::StatsCounter,
     _error_flag: crate::stats::StatsFlag,
-    encoded: VecDeque<VideoFrame>,
     eos: bool,
     keyframe_request_pending: bool,
-    // 最初のフレームを受信するまで、内部エンコーダは初期化されない
+
+    // 以下 2 フィールドの宣言順は drop 順を意図的に制御している (Rust 言語仕様で drop 順 = 宣言順)。
+    // `inner` を `rx` より先に drop することで、 非同期な内部エンコーダー (Nvcodec) の
+    // worker drop 中にコールバックが `sink.emit_ok` → `tx.send` した際に `rx` が
+    // まだ alive で send が成功する。 逆順にすると `emit_ok` の `unreachable!()` が発火する。
     inner: Option<VideoEncoderInner>,
+    rx: EncoderOutputReceiver,
+
+    sink: OutputSink,
     options: VideoEncoderOptions,
     openh264_lib: Option<Openh264Library>,
 }
 
-impl VideoEncoder {
+impl AsyncVideoEncoder {
     pub fn new(
         options: &VideoEncoderOptions,
         openh264_lib: Option<Openh264Library>,
@@ -459,18 +524,23 @@ impl VideoEncoder {
             compose_stats.counter("total_video_keyframe_request_count");
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = OutputSink::new(
+            tx,
+            total_output_video_frame_count_metric,
+            total_output_video_keyframe_count_metric,
+        );
         Ok(Self {
             engine_metric,
             codec_metric,
             total_input_video_frame_count_metric,
-            total_output_video_frame_count_metric,
-            total_output_video_keyframe_count_metric,
             total_video_keyframe_request_count_metric,
             _error_flag: error_flag,
-            encoded: VecDeque::new(),
             eos: false,
             keyframe_request_pending: false,
             inner: None,
+            rx,
+            sink,
             options: options.clone(),
             openh264_lib,
         })
@@ -505,6 +575,7 @@ impl VideoEncoder {
     /// エンコーダーのインスタンスを生成する
     fn create_inner(&self) -> crate::Result<VideoEncoderInner> {
         let options = &self.options;
+        let sink = self.sink.clone();
         let candidate_engines = options
             .engines
             .clone()
@@ -515,27 +586,27 @@ impl VideoEncoder {
             .copied();
 
         match (engine, options.codec) {
-            (Some(EngineName::Libvpx), CodecName::Vp8) => VideoEncoderInner::new_vp8(options),
-            (Some(EngineName::Libvpx), CodecName::Vp9) => VideoEncoderInner::new_vp9(options),
+            (Some(EngineName::Libvpx), CodecName::Vp8) => VideoEncoderInner::new_vp8(options, sink),
+            (Some(EngineName::Libvpx), CodecName::Vp9) => VideoEncoderInner::new_vp9(options, sink),
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H264) => {
-                VideoEncoderInner::new_nvcodec_h264(options)
+                VideoEncoderInner::new_nvcodec_h264(options, sink)
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::H265) => {
-                VideoEncoderInner::new_nvcodec_h265(options)
+                VideoEncoderInner::new_nvcodec_h265(options, sink)
             }
             #[cfg(feature = "nvcodec")]
             (Some(EngineName::Nvcodec), CodecName::Av1) => {
-                VideoEncoderInner::new_nvcodec_av1(options)
+                VideoEncoderInner::new_nvcodec_av1(options, sink)
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H264) => {
-                VideoEncoderInner::new_video_toolbox_h264(options)
+                VideoEncoderInner::new_video_toolbox_h264(options, sink)
             }
             #[cfg(target_os = "macos")]
             (Some(EngineName::VideoToolbox), CodecName::H265) => {
-                VideoEncoderInner::new_video_toolbox_h265(options)
+                VideoEncoderInner::new_video_toolbox_h265(options, sink)
             }
             (Some(EngineName::Openh264), CodecName::H264) => {
                 let lib = self.openh264_lib.clone().ok_or_else(|| {
@@ -548,9 +619,11 @@ impl VideoEncoder {
                         .to_owned(),
                     )
                 })?;
-                VideoEncoderInner::new_openh264(lib, options)
+                VideoEncoderInner::new_openh264(lib, options, sink)
             }
-            (Some(EngineName::SvtAv1), CodecName::Av1) => VideoEncoderInner::new_svt_av1(options),
+            (Some(EngineName::SvtAv1), CodecName::Av1) => {
+                VideoEncoderInner::new_svt_av1(options, sink)
+            }
             _ => Err(crate::Error::new(format!(
                 "no available encoder for {} codec (candidate encoders: {})",
                 options.codec.as_str(),
@@ -612,6 +685,111 @@ impl VideoEncoder {
         engines
     }
 
+    /// wrap (`VideoEncoder`) の `run` 内 RPC 腕から delegate される同期 RPC ハンドラ。
+    pub(crate) fn handle_rpc_message_sync(&mut self, message: VideoEncoderRpcMessage) {
+        match message {
+            VideoEncoderRpcMessage::RequestKeyframe => {
+                self.total_video_keyframe_request_count_metric.inc();
+                // 複数の keyframe 要求は 1 件に集約して扱う。
+                // RPC 受信時点ではフラグのみ更新し、実際の keyframe 要求適用は
+                // 次の入力フレーム処理時に行う。低フレームレート入力などでは遅延し得るが、
+                // 現状は入力フローと同一タイミングでの適用を意図した設計とする。
+                self.keyframe_request_pending = true;
+            }
+        }
+    }
+
+    /// wrap から呼ぶ同期入力 API
+    pub(crate) fn handle_input_sample_sync(&mut self, sample: Option<MediaFrame>) -> Result<()> {
+        if let Some(sample) = sample {
+            let frame = sample.expect_video()?;
+            let frame = RawVideoFrame::from_video_frame(frame)?;
+            let size = frame.size();
+
+            // 最初のフレームで、解像度を使って初期化する
+            if self.inner.is_none() {
+                self.initialize_inner(size.width, size.height)?;
+            }
+            if self.keyframe_request_pending {
+                if let Some(inner) = self.inner.as_mut() {
+                    inner.request_keyframe();
+                }
+                self.keyframe_request_pending = false;
+            }
+
+            self.total_input_video_frame_count_metric.inc();
+            self.inner.as_mut().expect("infallible").encode(frame)?;
+        } else {
+            self.eos = true;
+            if let Some(inner) = &mut self.inner {
+                inner.finish()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// wrap から呼ぶ同期 poll
+    pub(crate) fn poll_output_sync(&mut self) -> Result<EncoderRunOutput> {
+        match self.rx.try_recv() {
+            Ok(Ok(frame)) => Ok(EncoderRunOutput::Processed(MediaFrame::video(frame))),
+            Ok(Err(e)) => Err(e),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                if self.eos {
+                    Ok(EncoderRunOutput::Finished)
+                } else {
+                    Ok(EncoderRunOutput::Pending)
+                }
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                unreachable!(
+                    "encoder output channel disconnected unexpectedly (sink dropped before rx)"
+                )
+            }
+        }
+    }
+
+    /// エンコード済みフレームを非同期に取得する。
+    ///
+    /// - `Some(Ok(frame))`: 正常フレーム
+    /// - `Some(Err(e))`: 内部エンコーダーからのエラー
+    /// - `None`: 全ての送信側が drop された
+    pub async fn next_encoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>> {
+        self.rx.recv().await
+    }
+}
+
+/// 同期 API を保つ VideoEncoder は `AsyncVideoEncoder` の wrap として動作する。
+///
+/// 既存の外部 API 挙動を維持しつつ、内部は Sender 経由のフレーム受け渡しに移行している。
+/// 将来 `AsyncVideoEncoder` 直接利用への段階移行が完了した時点で本 wrap 型は削除される。
+#[derive(Debug)]
+pub struct VideoEncoder {
+    inner_encoder: AsyncVideoEncoder,
+}
+
+impl VideoEncoder {
+    pub fn new(
+        options: &VideoEncoderOptions,
+        openh264_lib: Option<Openh264Library>,
+        compose_stats: crate::stats::Stats,
+    ) -> crate::Result<Self> {
+        Ok(Self {
+            inner_encoder: AsyncVideoEncoder::new(options, openh264_lib, compose_stats)?,
+        })
+    }
+
+    pub fn name(&self) -> Option<EngineName> {
+        self.inner_encoder.name()
+    }
+
+    pub fn codec(&self) -> Option<CodecName> {
+        self.inner_encoder.codec()
+    }
+
+    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
+        AsyncVideoEncoder::get_engines(codec, is_openh264_available)
+    }
+
     pub async fn run(
         mut self,
         handle: ProcessorHandle,
@@ -661,16 +839,7 @@ impl VideoEncoder {
     }
 
     fn handle_rpc_message(&mut self, message: VideoEncoderRpcMessage) {
-        match message {
-            VideoEncoderRpcMessage::RequestKeyframe => {
-                self.total_video_keyframe_request_count_metric.inc();
-                // 複数の keyframe 要求は 1 件に集約して扱う。
-                // RPC 受信時点ではフラグのみ更新し、実際の keyframe 要求適用は
-                // 次の入力フレーム処理時に行う。低フレームレート入力などでは遅延し得るが、
-                // 現状は入力フローと同一タイミングでの適用を意図した設計とする。
-                self.keyframe_request_pending = true;
-            }
-        }
+        self.inner_encoder.handle_rpc_message_sync(message);
     }
 
     fn handle_input_message(&mut self, message: Message) -> Result<()> {
@@ -682,63 +851,11 @@ impl VideoEncoder {
     }
 
     fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
-        if let Some(sample) = sample {
-            let frame = sample.expect_video()?;
-            let frame = RawVideoFrame::from_video_frame(frame)?;
-            let size = frame.size();
-
-            // 最初のフレームで、解像度を使って初期化する
-            if self.inner.is_none() {
-                self.initialize_inner(size.width, size.height)?;
-            }
-            if self.keyframe_request_pending {
-                if let Some(inner) = self.inner.as_mut() {
-                    inner.request_keyframe();
-                }
-                self.keyframe_request_pending = false;
-            }
-
-            self.total_input_video_frame_count_metric.inc();
-            self.inner.as_mut().expect("infallible").encode(frame)?;
-        } else {
-            self.eos = true;
-            if let Some(inner) = &mut self.inner {
-                inner.finish()?;
-            }
-        }
-
-        self.drain_encoded_frames();
-        Ok(())
-    }
-
-    fn drain_encoded_frames(&mut self) {
-        let Some(mut inner) = self.inner.take() else {
-            return;
-        };
-        while let Some(encoded) = inner.next_encoded_frame() {
-            self.push_encoded_frame_with_metrics(encoded);
-        }
-        self.inner = Some(inner);
-    }
-
-    fn push_encoded_frame_with_metrics(&mut self, encoded: VideoFrame) {
-        self.total_output_video_frame_count_metric.inc();
-        if encoded.keyframe {
-            self.total_output_video_keyframe_count_metric.inc();
-        }
-        // 映像エンコーダは全出力フレームに sample_entry を載せる（issue 0027）ため、
-        // エンコーダ側でのキーフレーム補完は不要になった。
-        self.encoded.push_back(encoded);
+        self.inner_encoder.handle_input_sample_sync(sample)
     }
 
     fn poll_output(&mut self) -> Result<EncoderRunOutput> {
-        if let Some(frame) = self.encoded.pop_front() {
-            Ok(EncoderRunOutput::Processed(MediaFrame::video(frame)))
-        } else if self.eos {
-            Ok(EncoderRunOutput::Finished)
-        } else {
-            Ok(EncoderRunOutput::Pending)
-        }
+        self.inner_encoder.poll_output_sync()
     }
 }
 
@@ -785,53 +902,63 @@ enum VideoEncoderInner {
 }
 
 impl VideoEncoderInner {
-    fn new_vp8(options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = LibvpxEncoder::new_vp8(options)?;
+    fn new_vp8(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
+        let encoder = LibvpxEncoder::new_vp8(options, sink)?;
         Ok(Self::Libvpx(Box::new(encoder)))
     }
 
-    fn new_vp9(options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = LibvpxEncoder::new_vp9(options)?;
+    fn new_vp9(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
+        let encoder = LibvpxEncoder::new_vp9(options, sink)?;
         Ok(Self::Libvpx(Box::new(encoder)))
     }
 
-    fn new_openh264(lib: Openh264Library, options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = Openh264Encoder::new(lib, options)?;
+    fn new_openh264(
+        lib: Openh264Library,
+        options: &VideoEncoderOptions,
+        sink: OutputSink,
+    ) -> crate::Result<Self> {
+        let encoder = Openh264Encoder::new(lib, options, sink)?;
         Ok(Self::Openh264(encoder))
     }
 
-    fn new_svt_av1(options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = SvtAv1Encoder::new(options)?;
+    fn new_svt_av1(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
+        let encoder = SvtAv1Encoder::new(options, sink)?;
         Ok(Self::SvtAv1(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    fn new_video_toolbox_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = VideoToolboxEncoder::new_h264(options)?;
+    fn new_video_toolbox_h264(
+        options: &VideoEncoderOptions,
+        sink: OutputSink,
+    ) -> crate::Result<Self> {
+        let encoder = VideoToolboxEncoder::new_h264(options, sink)?;
         Ok(Self::VideoToolbox(encoder))
     }
 
     #[cfg(target_os = "macos")]
-    fn new_video_toolbox_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = VideoToolboxEncoder::new_h265(options)?;
+    fn new_video_toolbox_h265(
+        options: &VideoEncoderOptions,
+        sink: OutputSink,
+    ) -> crate::Result<Self> {
+        let encoder = VideoToolboxEncoder::new_h265(options, sink)?;
         Ok(Self::VideoToolbox(encoder))
     }
 
     #[cfg(feature = "nvcodec")]
-    fn new_nvcodec_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = NvcodecEncoder::new_h265(options)?;
+    fn new_nvcodec_h265(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
+        let encoder = NvcodecEncoder::new_h265(options, sink)?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
     #[cfg(feature = "nvcodec")]
-    fn new_nvcodec_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = NvcodecEncoder::new_h264(options)?;
+    fn new_nvcodec_h264(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
+        let encoder = NvcodecEncoder::new_h264(options, sink)?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
     #[cfg(feature = "nvcodec")]
-    fn new_nvcodec_av1(options: &VideoEncoderOptions) -> crate::Result<Self> {
-        let encoder = NvcodecEncoder::new_av1(options)?;
+    fn new_nvcodec_av1(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
+        let encoder = NvcodecEncoder::new_av1(options, sink)?;
         Ok(Self::Nvcodec(Box::new(encoder)))
     }
 
@@ -856,18 +983,6 @@ impl VideoEncoderInner {
             Self::VideoToolbox(encoder) => encoder.finish(),
             #[cfg(feature = "nvcodec")]
             Self::Nvcodec(encoder) => encoder.finish(),
-        }
-    }
-
-    fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        match self {
-            Self::Libvpx(encoder) => encoder.next_encoded_frame(),
-            Self::Openh264(encoder) => encoder.next_encoded_frame(),
-            Self::SvtAv1(encoder) => encoder.next_encoded_frame(),
-            #[cfg(target_os = "macos")]
-            Self::VideoToolbox(encoder) => encoder.next_encoded_frame(),
-            #[cfg(feature = "nvcodec")]
-            Self::Nvcodec(encoder) => encoder.next_encoded_frame(),
         }
     }
 

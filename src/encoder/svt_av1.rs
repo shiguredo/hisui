@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::{
-    encoder::VideoEncoderOptions,
+    encoder::{OutputSink, VideoEncoderOptions},
     sample_entry::SharedSampleEntry,
     types::EvenUsize,
     video::av1,
@@ -12,7 +12,7 @@ use crate::{
 pub struct SvtAv1Encoder {
     inner: shiguredo_svt_av1::Encoder,
     input_queue: VecDeque<RawVideoFrame>,
-    output_queue: VecDeque<VideoFrame>,
+    sink: OutputSink,
     // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
     sample_entry: SharedSampleEntry,
     width: EvenUsize,
@@ -21,7 +21,7 @@ pub struct SvtAv1Encoder {
 }
 
 impl SvtAv1Encoder {
-    pub fn new(options: &VideoEncoderOptions) -> crate::Result<Self> {
+    pub fn new(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         let config = shiguredo_svt_av1::EncoderConfig {
@@ -38,7 +38,7 @@ impl SvtAv1Encoder {
         Ok(Self {
             inner,
             input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
+            sink,
             sample_entry: SharedSampleEntry::new(sample_entry),
             width,
             height,
@@ -70,10 +70,6 @@ impl SvtAv1Encoder {
         Ok(())
     }
 
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
-    }
-
     pub fn request_keyframe(&mut self) {
         self.keyframe_request_pending = true;
     }
@@ -86,7 +82,7 @@ impl SvtAv1Encoder {
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
 
-            self.output_queue.push_back(VideoFrame {
+            self.sink.emit_ok(VideoFrame {
                 data: frame.data().to_vec(),
                 format: VideoFormat::Av1,
                 keyframe: frame.is_keyframe(),
@@ -107,7 +103,7 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use super::*;
-    use crate::encoder::test_helpers::raw_i420_frame;
+    use crate::encoder::test_helpers::{make_encoder_sink, raw_i420_frame};
     use crate::types::CodecName;
     use crate::video::FrameRate;
 
@@ -133,7 +129,8 @@ mod tests {
     // svt_av1 は libvpx と同じく feature gate されず常時利用可能なので単体テストで検証する。
     #[test]
     fn svt_av1_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        let mut encoder = SvtAv1Encoder::new(&options())?;
+        let (sink, mut rx) = make_encoder_sink();
+        let mut encoder = SvtAv1Encoder::new(&options(), sink)?;
         // 全フレームに載るのはコンストラクタで確定した同一の sample_entry なので、
         // 実体まで一致することを確認する（is_some だけでは中身の退行を検出できない）。
         let expected = encoder.sample_entry.get().clone();
@@ -141,7 +138,8 @@ mod tests {
         let mut output_count = 0;
         for i in 0..10 {
             encoder.encode(raw_i420_frame(i * 33))?;
-            while let Some(frame) = encoder.next_encoded_frame() {
+            while let Ok(result) = rx.try_recv() {
+                let frame = result?;
                 assert_eq!(
                     frame.sample_entry.as_ref().map(|e| e.get()),
                     Some(&expected),
@@ -151,7 +149,8 @@ mod tests {
             }
         }
         encoder.finish()?;
-        while let Some(frame) = encoder.next_encoded_frame() {
+        while let Ok(result) = rx.try_recv() {
+            let frame = result?;
             assert_eq!(
                 frame.sample_entry.as_ref().map(|e| e.get()),
                 Some(&expected),

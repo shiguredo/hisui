@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::encoder::OutputSink;
 use crate::video::{RawVideoFrame, VideoFormat, VideoFrame, VideoFrameSize};
 
 // 64x64 の I420 グレーフレームを作る。
@@ -24,4 +25,17 @@ pub(crate) fn raw_i420_frame(ts_ms: u64) -> RawVideoFrame {
         sample_entry: None,
     };
     RawVideoFrame::from_i420_video_frame(Arc::new(frame)).expect("有効な I420 フレームのはず")
+}
+
+// テスト用の OutputSink と Receiver を生成する。
+pub(crate) fn make_encoder_sink() -> (
+    OutputSink,
+    tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut stats = crate::stats::Stats::new();
+    let total_output = stats.counter("test_total_output");
+    let total_keyframe = stats.counter("test_total_keyframe");
+    let sink = OutputSink::new(tx, total_output, total_keyframe);
+    (sink, rx)
 }
