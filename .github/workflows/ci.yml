@@ -162,14 +162,14 @@ jobs:
       - name: Cache Silero VAD ONNX model
         # scripts/download_ml_models.py の TARGETS["silero-vad"][0].expected_sha256 と同じ値を key にする。
         # SHA256 が更新されたら key ミスマッチで再取得される (script 側と手動同期する)。
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ml-models/silero-vad
           key: silero-vad-a4a068cd6cf1ea8355b84327595838ca748ec29a25bc91fc82e6c299ccdc5808
       - name: Cache Whisper tiny model
         # scripts/download_ml_models.py の TARGETS["whisper-tiny"][2].expected_sha256 と同じ値を key にする。
         # config / tokenizer だけの更新を無効化したいときは key にサフィックスを足して運用する。
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ml-models/whisper-tiny
           key: whisper-tiny-7ebd0e69e78190ffe1438491fa05cc1f5c1aa3a4c4db3bc1723adbb551ea2395
