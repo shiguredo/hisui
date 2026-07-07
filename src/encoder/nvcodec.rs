@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{
     encoder::{OutputSink, VideoEncoderOptions},
@@ -13,6 +13,21 @@ use crate::{
 
 /// 本スレッドと callback スレッドで共有される入力フレームキュー
 type SharedInputQueue = Arc<Mutex<VecDeque<VideoFrame>>>;
+
+/// callback スレッドが参照する遅延確定コンテキスト。
+/// Encoder::new 後に get_sequence_params() から確定して set() される。
+/// H.264 / H.265 では av1_sequence_header は空 Vec で埋め、
+/// AV1 の分岐でだけ実データが使われる。
+#[derive(Debug)]
+struct HandlerContext {
+    sample_entry: SharedSampleEntry,
+    av1_sequence_header: Vec<u8>,
+}
+
+/// callback にキャプチャさせる HandlerContext の遅延確定スロット。
+/// 書き込みは Encoder::new → get_sequence_params の 1 回のみ、
+/// 以降は callback スレッドから lock-free で read される。
+type HandlerContextSlot = Arc<OnceLock<HandlerContext>>;
 
 #[derive(Debug)]
 pub struct NvcodecEncoder {
@@ -35,15 +50,23 @@ pub struct NvcodecEncoder {
 /// 全出力フレームへ載せる責務を負うため、呼び出し元 struct 側では保持しない
 /// (svt_av1 / openh264 / video_toolbox の同期 handle_encoded 型と異なり、
 /// nvcodec は callback 完結型なので struct フィールドとして再参照する必要がない)。
+///
+/// context_slot は Encoder::new 後に呼び出し元が get_sequence_params() から
+/// sample_entry と av1_sequence_header を確定して set() する遅延確定スロット。
+/// callback は shiguredo_nvcodec の worker スレッドが encode() 投入後にしか
+/// 発火させないため、呼び出し元が最初の encode() より前に set() を完了させれば
+/// callback は必ず set 済みの context を参照する (下記 expect は BUG 検出用)。
 fn build_handler(
     sink: OutputSink,
     input_queue: SharedInputQueue,
-    sample_entry: SharedSampleEntry,
+    context_slot: HandlerContextSlot,
     encoded_format: VideoFormat,
-    av1_sequence_header: Arc<Vec<u8>>,
 ) -> shiguredo_nvcodec::FnEncodeHandler<(), shiguredo_nvcodec::Error> {
     shiguredo_nvcodec::FnEncodeHandler::new(move |result| match result {
         Ok(encoded_frame) => {
+            let context = context_slot
+                .get()
+                .expect("BUG: HandlerContext must be set before first encode() call");
             let input_frame = {
                 let mut queue = input_queue
                     .lock()
@@ -72,11 +95,11 @@ fn build_handler(
                 if keyframe && !has_sequence_header(&data) {
                     tracing::debug!(
                         "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
-                        av1_sequence_header.len(),
+                        context.av1_sequence_header.len(),
                         data.len()
                     );
                     let mut new_data = Vec::new();
-                    new_data.extend_from_slice(&av1_sequence_header);
+                    new_data.extend_from_slice(&context.av1_sequence_header);
                     new_data.extend_from_slice(&data);
                     data = new_data;
                 }
@@ -97,7 +120,7 @@ fn build_handler(
                 keyframe,
                 size: input_frame.size,
                 timestamp: input_frame.timestamp,
-                sample_entry: Some(sample_entry.clone()),
+                sample_entry: Some(context.sample_entry.clone()),
             });
         }
         Err(err) => {
@@ -130,41 +153,32 @@ impl NvcodecEncoder {
         tracing::debug!("nvcodec h264 encoder config: {config:?}");
 
         let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        // sequence params の取得のために一旦 handler なしで inner を作れないため、
-        // handler を先に構築するが、 sequence params は inner から取得する必要がある。
-        // shiguredo_nvcodec::Encoder::new は handler を消費するため、後段で必要な sample_entry
-        // 生成には inner.get_sequence_params() が必要。 したがってまず build_handler を呼び、
-        // その後 inner を new して sequence params → sample entry を作る流れは循環する。
-        // 実装上は「inner を作った後で sample_entry を生成できないと handler にキャプチャできない」
-        // ため、二段階に分ける: 先に sample_entry 相当を保持する Arc を確保して handler に渡し、
-        // inner 生成後に実体を書き込む方式で解決する。
-        //
-        // ただし現状の SharedSampleEntry (Arc 内包) は new 時に確定値を必要とするため、
-        // ここでは inner を一度 handler なしで作れないので、
-        // 「sequence params 取得 → sample_entry 生成 → 別 handler で本番用 inner を作り直す」の
-        // 二重コンストラクトはコスト高。
-        //
-        // 実装単純化のため、 handler を生成した後の sample_entry は Arc に包み、
-        // handler の capture では Arc<Mutex<Option<SharedSampleEntry>>> のような
-        // 遅延確定にすることも可能だが、 現状 shiguredo_nvcodec の API は
-        // handler を new に渡す前提のため、 workaround として「sequence params を取得する
-        // ためだけの一時 handler」を作って捨てる形にする。 これは encode の前なので副作用なし。
-        let (tmp_handler, _tmp_input_queue) = build_tmp_handler_for_seq_params_probe();
-        let tmp_inner = shiguredo_nvcodec::Encoder::new(config.clone(), tmp_handler)?;
-        let seq_params = tmp_inner.get_sequence_params()?;
-        drop(tmp_inner);
-        let sample_entry =
-            SharedSampleEntry::new(h264::h264_sample_entry_from_annexb(&seq_params)?);
-
-        let av1_sequence_header = Arc::new(Vec::new());
+        // callback が読む sample_entry を後入れするための遅延スロット。
+        // shiguredo_nvcodec::Encoder::new は handler を consume する API のため、
+        // sample_entry を確定するために inner が必要 / inner を作るために handler が必要
+        // という循環がある。そこで slot を先に確保して handler にキャプチャさせ、
+        // Encoder::new 後に get_sequence_params から sample_entry を確定して set する。
+        // callback (worker スレッド) は encode() 経由でしか発火しないため、
+        // encode() 前に set が完了していれば race free に read できる。
+        let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
         let handler = build_handler(
             sink,
             input_queue.clone(),
-            sample_entry,
+            context_slot.clone(),
             VideoFormat::H264,
-            av1_sequence_header,
         );
         let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
+
+        let seq_params = inner.get_sequence_params()?;
+        let sample_entry =
+            SharedSampleEntry::new(h264::h264_sample_entry_from_annexb(&seq_params)?);
+        // H.264 では av1_sequence_header は callback の分岐 (encoded_format 判定) で参照されないため空 Vec で埋める
+        context_slot
+            .set(HandlerContext {
+                sample_entry,
+                av1_sequence_header: Vec::new(),
+            })
+            .expect("BUG: HandlerContext must not be set before Encoder::new returns");
 
         Ok(Self {
             inner,
@@ -197,24 +211,28 @@ impl NvcodecEncoder {
         tracing::debug!("nvcodec h265 encoder config: {config:?}");
 
         let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let (tmp_handler, _tmp_input_queue) = build_tmp_handler_for_seq_params_probe();
-        let tmp_inner = shiguredo_nvcodec::Encoder::new(config.clone(), tmp_handler)?;
-        let seq_params = tmp_inner.get_sequence_params()?;
-        drop(tmp_inner);
+        // new_h264 と同じ遅延確定パターン (詳細はそちらのコメント参照)。
+        let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
+        let handler = build_handler(
+            sink,
+            input_queue.clone(),
+            context_slot.clone(),
+            VideoFormat::H265,
+        );
+        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
+
+        let seq_params = inner.get_sequence_params()?;
         let sample_entry = SharedSampleEntry::new(h265::h265_sample_entry_from_annexb(
             &seq_params,
             options.frame_rate,
         )?);
-
-        let av1_sequence_header = Arc::new(Vec::new());
-        let handler = build_handler(
-            sink,
-            input_queue.clone(),
-            sample_entry,
-            VideoFormat::H265,
-            av1_sequence_header,
-        );
-        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
+        // H.265 も av1_sequence_header は参照されないため空 Vec で埋める
+        context_slot
+            .set(HandlerContext {
+                sample_entry,
+                av1_sequence_header: Vec::new(),
+            })
+            .expect("BUG: HandlerContext must not be set before Encoder::new returns");
 
         Ok(Self {
             inner,
@@ -251,8 +269,15 @@ impl NvcodecEncoder {
         tracing::debug!("nvcodec av1 encoder config: {config:?}");
 
         let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let (tmp_handler, _tmp_input_queue) = build_tmp_handler_for_seq_params_probe();
-        let tmp_inner = shiguredo_nvcodec::Encoder::new(config.clone(), tmp_handler)?;
+        // new_h264 と同じ遅延確定パターン (詳細はそちらのコメント参照)。
+        let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
+        let handler = build_handler(
+            sink,
+            input_queue.clone(),
+            context_slot.clone(),
+            VideoFormat::Av1,
+        );
+        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
 
         // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
         // には以下の記載がある:
@@ -265,21 +290,15 @@ impl NvcodecEncoder {
         // そのため、ここで Sequence Header OBU を get_sequence_params() で取得して保持しておき、
         // キーフレームのエンコード時に Sequence Header が含まれていない場合は、
         // hisui 側で明示的に付与するワークアラウンドを実装している。
-        let seq_params = tmp_inner.get_sequence_params()?;
-        drop(tmp_inner);
-
+        let seq_params = inner.get_sequence_params()?;
         let sample_entry =
             SharedSampleEntry::new(av1::av1_sample_entry(width, height, &seq_params));
-
-        let av1_sequence_header = Arc::new(seq_params);
-        let handler = build_handler(
-            sink,
-            input_queue.clone(),
-            sample_entry,
-            VideoFormat::Av1,
-            av1_sequence_header,
-        );
-        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
+        context_slot
+            .set(HandlerContext {
+                sample_entry,
+                av1_sequence_header: seq_params,
+            })
+            .expect("BUG: HandlerContext must not be set before Encoder::new returns");
 
         Ok(Self {
             inner,
@@ -367,18 +386,6 @@ impl NvcodecEncoder {
     pub fn codec(&self) -> CodecName {
         self.encoded_format.codec_name().expect("infallible")
     }
-}
-
-/// sample entry を作るためだけに sequence params を取り出す用途の一時 handler。
-/// callback は空 (Ok も Err も無視) で、 encoder を drop するまで呼ばれない前提。
-fn build_tmp_handler_for_seq_params_probe() -> (
-    shiguredo_nvcodec::FnEncodeHandler<(), shiguredo_nvcodec::Error>,
-    (),
-) {
-    let handler = shiguredo_nvcodec::FnEncodeHandler::new(move |_result| {
-        // 一時的な probe 用 handler なので何もしない
-    });
-    (handler, ())
 }
 
 /// AV1 ペイロードの先頭に Sequence Header OBU が含まれているかチェック
