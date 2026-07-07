@@ -74,10 +74,15 @@ fn video_decoder_poll_output_returns_processed() -> hisui::Result<()> {
 
     // 同期取り出し: `VideoDecoder::poll_output` で内部チャンネルから 1 件受信する
     let output = decoder.poll_output()?;
-    assert!(
-        matches!(output, DecoderRunOutput::Processed(_)),
-        "実 VP9 フィクスチャから Processed を期待した (VideoDecoder::poll_output 経由)"
-    );
+    let DecoderRunOutput::Processed(sample) = output else {
+        panic!("実 VP9 フィクスチャから Processed を期待した (VideoDecoder::poll_output 経由)");
+    };
+    // 直接同期経路 (`handle_input_sample` + `poll_output`) を通ったフレームが
+    // 実 VP9 フィクスチャの解像度で復元されることを確認する。
+    let frame = sample.expect_video()?;
+    let size = frame.size().expect("VP9 フィクスチャは size を持つはず");
+    assert_eq!(size.width, 640, "フィクスチャ解像度と一致するはず");
+    assert_eq!(size.height, 480, "フィクスチャ解像度と一致するはず");
     Ok(())
 }
 
