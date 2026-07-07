@@ -48,49 +48,11 @@ fn av1_multi_resolutions() -> hisui::Result<()> {
     Ok(())
 }
 
-/// `VideoDecoder::next_decoded_frame` の非同期取り出し経路を実 VP9 フィクスチャで検証する
-///
-/// 検証対象パス: `VideoDecoder::handle_input_sample` → `VideoDecoderInner::decode`
-/// → `Initial` → `Libvpx` への遷移 → `LibvpxDecoder::decode` → `sink.emit_ok` → 内部チャンネル
-/// → `rx.recv` → `next_decoded_frame` の全段を 1 フレームで踏破することを確認する。
-/// 同期 poll 経路 (`poll_output`) は別テスト (`video_decoder_poll_output_returns_processed`) が担当する。
-#[tokio::test(flavor = "multi_thread")]
-async fn video_decoder_processes_real_vp9_frame_via_next_decoded_frame() -> hisui::Result<()> {
-    use hisui::MediaFrame;
-
-    // 既存 `vp9_multi_resolutions` と同じフィクスチャを 1 フレームだけ使う
-    let mut reader = Mp4VideoReader::new("testdata/archive-blue-640x480-vp9.mp4")?;
-    let first_frame = reader
-        .next()
-        .expect("少なくとも 1 フレーム含まれているはず")?;
-
-    let options = VideoDecoderOptions::default();
-    let stats = hisui::stats::Stats::new();
-    let mut decoder = VideoDecoder::new(options, stats);
-
-    // 同期入力: `handle_input_sample` 経由で `inner.decode` → `sink.emit_ok` を実行する
-    decoder.handle_input_sample(Some(MediaFrame::video(first_frame)))?;
-    // EOS で `inner.finish()` 経由を踏ませて未排出フレームをすべて吐かせる
-    decoder.handle_input_sample(None)?;
-
-    // 非同期取り出し: `rx.recv` 経由で正常フレームを取得できることを確認する
-    match decoder.next_decoded_frame().await {
-        Some(Ok(frame)) => {
-            let size = frame.size().expect("VP9 フィクスチャは size を持つはず");
-            assert_eq!(size.width, 640, "フィクスチャ解像度と一致するはず");
-            assert_eq!(size.height, 480, "フィクスチャ解像度と一致するはず");
-        }
-        other => panic!("正常フレーム (Some(Ok(_))) を期待したが {other:?} を受信した"),
-    }
-    Ok(())
-}
-
 /// `VideoDecoder::poll_output` の同期取り出し経路を実 VP9 フィクスチャで踏破する
 ///
 /// 検証対象パス: `VideoDecoder::handle_input_sample` → `VideoDecoderInner::decode`
-/// → `sink.emit_ok` → 内部チャンネル → `VideoDecoder::poll_output` の全段を実際に踏む。
-/// 非同期 recv 経路 (`next_decoded_frame`) を使う別テストに対し、 同期 poll 経路を
-/// 上位 API 呼び出しだけで踏破する回帰テスト。
+/// → `sink.emit_ok` → 内部チャンネル → `VideoDecoder::poll_output` の全段を
+/// `VideoDecoder` の公開 API 呼び出しだけで踏破する回帰テスト。
 #[test]
 fn video_decoder_poll_output_returns_processed() -> hisui::Result<()> {
     use hisui::MediaFrame;
