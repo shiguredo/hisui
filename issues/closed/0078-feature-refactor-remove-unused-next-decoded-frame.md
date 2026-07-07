@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-07-06
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-07-07
 - Model: Opus 4.8
 - Branch: feature/refactor-remove-unused-next-decoded-frame
 - Polished: 2026-07-07

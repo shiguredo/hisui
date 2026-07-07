@@ -327,10 +327,14 @@ pub struct VideoDecoderOptions {
 }
 
 /// 内部デコーダーが出力フレーム / エラーを `VideoDecoder` 内の受信側 (`output_rx`) に流すための送信側の型エイリアス
+///
+/// `OutputSink::new` の公開シグネチャに引数型として露出するため `pub` を維持する
+/// (対する `DecoderOutputReceiver` は crate 外に露出しないため `pub(crate)`)。
 pub type DecoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
 
-/// `VideoDecoder` 内部で内部デコーダーからの出力フレーム / エラーを受け取る受信側の型エイリアス
-pub type DecoderOutputReceiver = tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>;
+/// 内部デコーダーからの出力フレーム / エラーを `VideoDecoder` 内で受け取る受信側の型エイリアス
+pub(crate) type DecoderOutputReceiver =
+    tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>;
 
 /// 内部デコーダーが出力フレーム / エラーを `VideoDecoder` 内の受信側 (`output_rx`) に流すためのシンク。
 ///
@@ -339,9 +343,7 @@ pub type DecoderOutputReceiver = tokio::sync::mpsc::UnboundedReceiver<crate::Res
 ///
 /// `unreachable!()` 検出契約: シンクと `output_rx` は `VideoDecoder` 内で同居するため、
 /// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
-/// 同じ理由で `poll_output` の `Disconnected` 分岐は `unreachable!()` で潰す
-/// (`next_decoded_frame` の `None` 返却も構造上起こらないが、 こちらは `Option` を
-/// そのまま返す)。
+/// 同じ不変条件により、 `poll_output` の `Disconnected` 分岐も `unreachable!()` で潰す。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
     tx: DecoderOutputSender,
@@ -373,11 +375,10 @@ impl OutputSink {
     }
 }
 
-/// 内部チャンネルベースの映像デコーダー
+/// `handle_input_sample` / `poll_output` で同期駆動する映像デコーダー
 ///
-/// decoder task loop (mp4 reader / RTSP / RTMP / SRT) や `run` (processor 経路) からは
-/// `handle_input_sample` / `poll_output` 経由で同期的に駆動し、 直接利用するときは
-/// `next_decoded_frame` で非同期に取得する。
+/// decoder task loop (mp4 reader / RTSP / RTMP / SRT) および `run` (processor 経路) から
+/// 呼び出す。 内部チャンネルの詳細は `OutputSink` docstring 参照。
 ///
 /// **注意**: 非同期な内部デコーダー (Nvcodec 等) 使用時、 `VideoDecoder` を drop する前に
 /// EOS + drain (`handle_input_sample(None)` + `poll_output` ループ) を完走させないと、
@@ -461,19 +462,6 @@ impl VideoDecoder {
                 )
             }
         }
-    }
-
-    /// デコード済みフレームを非同期に取得する。
-    ///
-    /// - `Some(Ok(frame))`: 正常フレーム
-    /// - `Some(Err(e))`: 内部デコーダーからのエラー
-    /// - `None`: 全ての送信側が drop された
-    ///
-    /// 現状の実装では EOS 経路で sink を drop しないため `None` は構造上到達しないが、
-    /// 将来 EOS を非同期経路で通知する形が必要になった際に `None` を EOS シグナルとして
-    /// 活用できるよう `Option` を維持している。
-    pub async fn next_decoded_frame(&mut self) -> Option<crate::Result<VideoFrame>> {
-        self.output_rx.recv().await
     }
 
     /// processor モデル (`ProcessorHandle` + subscribe / publish) 用の駆動 API。
