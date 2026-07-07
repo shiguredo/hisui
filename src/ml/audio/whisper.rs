@@ -9,7 +9,7 @@ use tokenizers::Tokenizer;
 pub mod decode;
 pub mod multilingual;
 
-use decode::{Decoder, WhisperModel};
+use decode::{WhisperDecoder, WhisperModel};
 use multilingual::ResolvedLanguage;
 
 /// Whisper の推論結果。
@@ -22,7 +22,7 @@ pub struct WhisperTranscription {
 
 /// 1 worker 専用の Whisper 推論器。
 pub struct WhisperPipeline {
-    decoder: Decoder,
+    decoder: WhisperDecoder,
     config: Config,
     mel_filters: Vec<f32>,
     candle_device: candle_core::Device,
@@ -44,7 +44,7 @@ impl WhisperPipeline {
             config.clone(),
             &candle_device,
         )?;
-        let decoder = Decoder::new(model, tokenizer, &candle_device)?;
+        let decoder = WhisperDecoder::new(model, tokenizer, &candle_device)?;
         Ok(Self {
             decoder,
             config,

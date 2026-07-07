@@ -1,7 +1,7 @@
 //! Whisper モデルの重みロードと greedy decode ループ。
 //!
 //! `WhisperModel` は candle の `Whisper` (encoder / decoder / KV cache) の薄いラッパーで、
-//! `Decoder` が SOT / 言語 / task トークンの組み立てと greedy サンプリングを担う。
+//! `WhisperDecoder` が SOT / 言語 / task トークンの組み立てと greedy サンプリングを担う。
 //! タスクは文字起こし (transcribe) 固定で、タイムスタンプトークンは出力しない
 //! (`TextFrame` の時刻は VAD 由来で埋めるため)。
 
@@ -66,14 +66,14 @@ impl WhisperModel {
 /// 1 チャンクぶんの decode 結果。
 ///
 /// candle 内部の計算値 (f64) をそのまま保持する。`TextFrame` 向けの f32 変換は上位層で行う。
-pub struct DecodingResult {
+pub struct WhisperDecodedChunk {
     pub text: String,
     pub avg_logprob: f64,
     pub no_speech_prob: f64,
 }
 
 /// greedy decode の実行機。トークン組み立てと抑制トークンの適用を担う。
-pub struct Decoder {
+pub struct WhisperDecoder {
     model: WhisperModel,
     tokenizer: Tokenizer,
     suppress_tokens: Tensor,
@@ -85,7 +85,7 @@ pub struct Decoder {
     language_token: Option<u32>,
 }
 
-impl Decoder {
+impl WhisperDecoder {
     pub fn new(
         model: WhisperModel,
         tokenizer: Tokenizer,
@@ -142,10 +142,10 @@ impl Decoder {
     ///
     /// no_speech ガード: `no_speech_prob > 0.6` かつ `avg_logprob < -1.0` の場合は
     /// 幻覚の可能性が高いため text を空にして返す (品質指標はそのまま返す)。
-    pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<DecodingResult> {
+    pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
         let dr = self.decode_segment(mel)?;
         if dr.no_speech_prob > m::NO_SPEECH_THRESHOLD && dr.avg_logprob < m::LOGPROB_THRESHOLD {
-            return Ok(DecodingResult {
+            return Ok(WhisperDecodedChunk {
                 text: String::new(),
                 avg_logprob: dr.avg_logprob,
                 no_speech_prob: dr.no_speech_prob,
@@ -154,7 +154,7 @@ impl Decoder {
         Ok(dr)
     }
 
-    fn decode_segment(&mut self, mel: &Tensor) -> Result<DecodingResult> {
+    fn decode_segment(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
         let audio_features = self
             .model
             .encoder_forward(mel, true)
@@ -243,7 +243,7 @@ impl Decoder {
             .map_err(|e| crate::Error::new(format!("tokenizer decode: {e}")))?;
         let avg_logprob = sum_logprob / tokens.len().max(1) as f64;
 
-        Ok(DecodingResult {
+        Ok(WhisperDecodedChunk {
             text,
             avg_logprob,
             no_speech_prob,
