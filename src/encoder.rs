@@ -482,8 +482,18 @@ pub async fn request_upstream_video_keyframe(
 
 /// 内部チャンネルベースの映像エンコーダー
 ///
-/// decoder task loop や `run` (processor 経路) から `handle_input_sample` / `poll_output`
-/// 経由で同期的に駆動する。 直接利用するときは `next_encoded_frame_async` で非同期に取得する。
+/// エンコーダー本体で、`VideoEncoder` (wrap) の `run` (processor 経路) から
+/// `handle_input_sample_sync` / `poll_output_sync` / `handle_rpc_message_sync` 等の
+/// `_sync` 付き内部 API 経由で同期駆動される。 wrap 側は同名の非 `_sync` API
+/// (`handle_input_sample` / `poll_output`) を露出し、 内部で本 struct の `_sync` 版に
+/// delegate する。 直接利用するときは `next_encoded_frame_async` で非同期に取得する。
+///
+/// **注意**: 非同期な内部エンコーダー (Nvcodec 等) 使用時、 `AsyncVideoEncoder` を
+/// drop する前に必ずエンコード結果を drain し切ること。 drop 順は「`inner` を先に
+/// drop → callback スレッドが `sink.emit_ok` した最後の 1 フレームが `rx` に届く
+/// → その後 `rx` を drop」で成立するが、 未 drain の状態で drop すると
+/// `total_output_video_frame_count` メトリクスが実際の出力数より少ない値のまま
+/// 観測される (メトリクスは inner 内で inc されるが、 未回収の frame は下流には流れない)。
 #[derive(Debug)]
 pub struct AsyncVideoEncoder {
     engine_metric: crate::stats::StatsString,
@@ -495,12 +505,18 @@ pub struct AsyncVideoEncoder {
     keyframe_request_pending: bool,
 
     // 以下 2 フィールドの宣言順は drop 順を意図的に制御している (Rust 言語仕様で drop 順 = 宣言順)。
-    // `inner` を `rx` より先に drop することで、 非同期な内部エンコーダー (Nvcodec) の
-    // worker drop 中にコールバックが `sink.emit_ok` → `tx.send` した際に `rx` が
-    // まだ alive で send が成功する。 逆順にすると `emit_ok` の `unreachable!()` が発火する。
+    // `inner` を `rx` より先に drop することで、 非同期な内部エンコーダー
+    // (Nvcodec 等の callback 完結型 inner) の worker drop 中にコールバックが
+    // `sink.emit_ok` → `tx.send` した際に `rx` がまだ alive で send が成功する。
+    // 逆順にすると `emit_ok` の `unreachable!()` が発火する。 なお `inner` が
+    // `None` (未初期化 = 最初のフレームが未到達) のケースでは callback 経路が動いて
+    // いないため、 この順序制約は自動的に満たされる。
     inner: Option<VideoEncoderInner>,
     rx: EncoderOutputReceiver,
 
+    // 下記 `sink` は新規 inner 生成用テンプレートで、 実際に emit する sink は
+    // `create_inner` で inner に clone して渡されるため、 上記 drop 順制約とは無関係
+    // (drop 順の意味論を持つのは inner が保持する clone の方)。
     sink: OutputSink,
     options: VideoEncoderOptions,
     openh264_lib: Option<Openh264Library>,
@@ -686,6 +702,11 @@ impl AsyncVideoEncoder {
     }
 
     /// wrap (`VideoEncoder`) の `run` 内 RPC 腕から delegate される同期 RPC ハンドラ。
+    ///
+    /// 現状扱う RPC は `RequestKeyframe` のみで、 受信時に
+    /// `total_video_keyframe_request_count` メトリクスを inc し、
+    /// `keyframe_request_pending` フラグを立てる (実際の keyframe 要求適用は次の
+    /// `handle_input_sample_sync` 呼び出し時に inner へ伝播する)。
     pub(crate) fn handle_rpc_message_sync(&mut self, message: VideoEncoderRpcMessage) {
         match message {
             VideoEncoderRpcMessage::RequestKeyframe => {
