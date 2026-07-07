@@ -32,8 +32,9 @@ impl WhisperModel {
         device: &candle_core::Device,
     ) -> Result<Self> {
         let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, device)
-                .map_err(|e| crate::Error::new(format!("failed to mmap whisper weights: {e}")))?
+            VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, device).map_err(|e| {
+                crate::Error::new(format!("failed to load whisper safetensors weights: {e}"))
+            })?
         };
         let inner = Whisper::load(&vb, config.clone())
             .map_err(|e| crate::Error::new(format!("failed to load whisper model: {e}")))?;
