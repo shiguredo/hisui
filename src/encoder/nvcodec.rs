@@ -22,10 +22,7 @@ pub struct NvcodecEncoder {
     // 本スレッドで encode() 直後に push_back し、callback スレッドで pop_front する。
     // Mutex ホールドスコープは push_back / pop_front のみに限定する。
     input_queue: SharedInputQueue,
-    // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
-    sample_entry: SharedSampleEntry,
     encoded_format: VideoFormat,
-    av1_sequence_header: Arc<Vec<u8>>,
     force_keyframe_next: bool,
 }
 
@@ -33,6 +30,11 @@ pub struct NvcodecEncoder {
 ///
 /// callback スレッドで input_queue から pop → Annex B → MP4 変換 (H.264/H.265) または
 /// Sequence Header OBU 付与 (AV1) → sink.emit_ok までを一貫して実施する。
+///
+/// sample_entry と av1_sequence_header は本関数の move クロージャがキャプチャして
+/// 全出力フレームへ載せる責務を負うため、呼び出し元 struct 側では保持しない
+/// (svt_av1 / openh264 / video_toolbox の同期 handle_encoded 型と異なり、
+/// nvcodec は callback 完結型なので struct フィールドとして再参照する必要がない)。
 fn build_handler(
     sink: OutputSink,
     input_queue: SharedInputQueue,
@@ -158,18 +160,16 @@ impl NvcodecEncoder {
         let handler = build_handler(
             sink,
             input_queue.clone(),
-            sample_entry.clone(),
+            sample_entry,
             VideoFormat::H264,
-            av1_sequence_header.clone(),
+            av1_sequence_header,
         );
         let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
 
         Ok(Self {
             inner,
             input_queue,
-            sample_entry,
             encoded_format: VideoFormat::H264,
-            av1_sequence_header,
             force_keyframe_next: false,
         })
     }
@@ -210,18 +210,16 @@ impl NvcodecEncoder {
         let handler = build_handler(
             sink,
             input_queue.clone(),
-            sample_entry.clone(),
+            sample_entry,
             VideoFormat::H265,
-            av1_sequence_header.clone(),
+            av1_sequence_header,
         );
         let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
 
         Ok(Self {
             inner,
             input_queue,
-            sample_entry,
             encoded_format: VideoFormat::H265,
-            av1_sequence_header,
             force_keyframe_next: false,
         })
     }
@@ -277,18 +275,16 @@ impl NvcodecEncoder {
         let handler = build_handler(
             sink,
             input_queue.clone(),
-            sample_entry.clone(),
+            sample_entry,
             VideoFormat::Av1,
-            av1_sequence_header.clone(),
+            av1_sequence_header,
         );
         let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
 
         Ok(Self {
             inner,
             input_queue,
-            sample_entry,
             encoded_format: VideoFormat::Av1,
-            av1_sequence_header,
             force_keyframe_next: false,
         })
     }
