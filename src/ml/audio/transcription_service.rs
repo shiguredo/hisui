@@ -11,8 +11,8 @@ use super::whisper::{WhisperPipeline, WhisperTranscription};
 pub struct TranscriptRequest {
     /// 16 kHz mono f32 PCM (最大 30 秒)。
     pub pcm: Vec<f32>,
-    /// ISO 639-1 言語コード。None なら自動検出またはモデル既定。
-    pub language: Option<String>,
+    /// ISO 639-1 言語コード (多言語モデルで必須)。
+    pub language: String,
 }
 
 /// 文字起こし結果。
@@ -111,7 +111,7 @@ fn transcribe_job(
         language,
         no_speech_prob,
         avg_logprob,
-    } = pipeline.transcribe_pcm16k(&request.pcm, request.language.as_deref())?;
+    } = pipeline.transcribe_pcm16k(&request.pcm, &request.language)?;
     Ok(TranscriptResult {
         text,
         language,

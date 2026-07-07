@@ -30,7 +30,6 @@ struct QueuedChunk {
 struct PendingTranscript {
     start: Duration,
     end: Duration,
-    is_language_probe: bool,
     result_task: JoinHandle<crate::Result<TranscriptResult>>,
 }
 
@@ -38,7 +37,7 @@ struct PendingTranscript {
 pub struct TranscriptionProcessor {
     service: Arc<TranscriptionService>,
     silero: Arc<SileroVadModel>,
-    language: Option<String>,
+    language: String,
     input_track_id: TrackId,
     output_track_id: TrackId,
 }
@@ -47,7 +46,7 @@ impl TranscriptionProcessor {
     pub fn new(
         service: Arc<TranscriptionService>,
         silero: Arc<SileroVadModel>,
-        language: Option<String>,
+        language: String,
         input_track_id: TrackId,
         output_track_id: TrackId,
     ) -> Self {
@@ -108,9 +107,7 @@ impl TranscriptionProcessor {
 struct ProcessorState {
     service: Arc<TranscriptionService>,
     vad: VadGate,
-    language_resolved: bool,
-    cached_language: Option<String>,
-    language_probe_in_flight: bool,
+    language: String,
     input_sample_rate: Option<SampleRate>,
     input_channels: Option<Channels>,
     base_offset: Option<Duration>,
@@ -118,21 +115,18 @@ struct ProcessorState {
     retained_pcm16k: Vec<f32>,
     retained_start_sample: u64,
     pending: VecDeque<PendingTranscript>,
-    queued_before_language: VecDeque<QueuedChunk>,
 }
 
 impl ProcessorState {
     fn new(
         service: Arc<TranscriptionService>,
         silero: Arc<SileroVadModel>,
-        language: Option<String>,
+        language: String,
     ) -> Self {
         Self {
             service,
             vad: VadGate::new(silero.new_instance(), VadConfig::default()),
-            language_resolved: language.is_some(),
-            cached_language: language,
-            language_probe_in_flight: false,
+            language,
             input_sample_rate: None,
             input_channels: None,
             base_offset: None,
@@ -140,7 +134,6 @@ impl ProcessorState {
             retained_pcm16k: Vec::new(),
             retained_start_sample: 0,
             pending: VecDeque::new(),
-            queued_before_language: VecDeque::new(),
         }
     }
 
@@ -211,7 +204,6 @@ impl ProcessorState {
         for segment in self.vad.flush()? {
             self.queue_segment(segment).await?;
         }
-        self.flush_language_waiting_queue().await?;
         Ok(())
     }
 
@@ -232,36 +224,15 @@ impl ProcessorState {
         let relative_end = usize::try_from(segment.end_sample - self.retained_start_sample)?;
         let segment_pcm = &self.retained_pcm16k[relative_start..relative_end];
         for chunk in split_segment_pcm(segment.start_sample, segment_pcm) {
-            if self.language_resolved {
-                self.submit_chunk(chunk, false).await?;
-            } else if self.language_probe_in_flight {
-                self.queued_before_language.push_back(chunk);
-            } else {
-                self.language_probe_in_flight = true;
-                self.submit_chunk(chunk, true).await?;
-            }
+            self.submit_chunk(chunk).await?;
         }
         Ok(())
     }
 
-    async fn flush_language_waiting_queue(&mut self) -> crate::Result<()> {
-        if !self.language_resolved {
-            return Ok(());
-        }
-        while let Some(chunk) = self.queued_before_language.pop_front() {
-            self.submit_chunk(chunk, false).await?;
-        }
-        Ok(())
-    }
-
-    async fn submit_chunk(
-        &mut self,
-        chunk: QueuedChunk,
-        is_language_probe: bool,
-    ) -> crate::Result<()> {
+    async fn submit_chunk(&mut self, chunk: QueuedChunk) -> crate::Result<()> {
         let request = TranscriptRequest {
             pcm: chunk.pcm,
-            language: self.cached_language.clone(),
+            language: self.language.clone(),
         };
         let start = self.segment_time(chunk.start_sample)?;
         let end = self.segment_time(chunk.end_sample)?;
@@ -274,7 +245,6 @@ impl ProcessorState {
         self.pending.push_back(PendingTranscript {
             start,
             end,
-            is_language_probe,
             result_task: task,
         });
         Ok(())
@@ -286,13 +256,6 @@ impl ProcessorState {
         output_tx: &mut crate::TrackPublisher,
     ) -> crate::Result<()> {
         let result = pending.result_task.await??;
-        if pending.is_language_probe {
-            self.language_probe_in_flight = false;
-            self.language_resolved = true;
-            self.cached_language = result.language.clone();
-            self.flush_language_waiting_queue().await?;
-        }
-
         if result.text.is_empty() {
             return Ok(());
         }

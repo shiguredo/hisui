@@ -134,10 +134,6 @@ impl Decoder {
         self.language_token = language_token;
     }
 
-    pub fn model_mut(&mut self) -> &mut WhisperModel {
-        &mut self.model
-    }
-
     pub fn reset_kv_cache(&mut self) {
         self.model.reset_kv_cache();
     }

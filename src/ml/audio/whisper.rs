@@ -7,7 +7,7 @@ use candle_transformers::models::whisper::{Config, audio};
 use tokenizers::Tokenizer;
 
 use super::decode::{Decoder, WhisperModel};
-use super::multilingual::{self, DetectedLanguage};
+use super::multilingual::{self, ResolvedLanguage};
 
 /// Whisper の推論結果。
 pub struct WhisperTranscription {
@@ -54,7 +54,7 @@ impl WhisperPipeline {
     pub fn transcribe_pcm16k(
         &mut self,
         pcm: &[f32],
-        language: Option<&str>,
+        language: &str,
     ) -> crate::Result<WhisperTranscription> {
         let mel = audio::pcm_to_mel(&self.config, pcm, &self.mel_filters);
         let mel_len = mel.len();
@@ -79,48 +79,32 @@ impl WhisperPipeline {
         .map_err(|e| crate::Error::new(format!("mel tensor: {e}")))?;
         let mel = narrow_mel_for_encoder(&mel)?;
 
-        let detected_language = self.resolve_language(&mel, language)?;
+        let resolved_language = self.resolve_language(language)?;
         self.decoder
-            .set_language_token(detected_language.as_ref().map(|lang| lang.token_id));
+            .set_language_token(Some(resolved_language.token_id));
         self.decoder.reset_kv_cache();
         let result = self.decoder.decode_chunk(&mel)?;
         self.decoder.reset_kv_cache();
 
         Ok(WhisperTranscription {
             text: result.text.trim().to_owned(),
-            language: detected_language.map(|lang| lang.code),
+            language: Some(resolved_language.code),
             no_speech_prob: result.no_speech_prob as f32,
             avg_logprob: result.avg_logprob as f32,
         })
     }
 
-    fn resolve_language(
-        &mut self,
-        mel: &Tensor,
-        language: Option<&str>,
-    ) -> crate::Result<Option<DetectedLanguage>> {
+    fn resolve_language(&self, language: &str) -> crate::Result<ResolvedLanguage> {
         if !multilingual::is_multilingual_config(&self.config) {
-            if let Some(language) = language {
-                return Err(crate::Error::new(format!(
-                    "language override is not supported for non-multilingual whisper model: {language}"
-                )));
-            }
-            return Ok(None);
+            return Err(crate::Error::new(format!(
+                "language is not supported for non-multilingual whisper model: {language}"
+            )));
         }
-
-        if let Some(language) = language {
-            let token_id =
-                multilingual::language_token_from_code(self.decoder.tokenizer(), language)?;
-            return Ok(Some(DetectedLanguage {
-                code: language.trim().to_owned(),
-                token_id,
-            }));
-        }
-
-        let tokenizer = self.decoder.tokenizer().clone();
-        let detected = multilingual::detect_language(self.decoder.model_mut(), &tokenizer, mel)?;
-        self.decoder.reset_kv_cache();
-        Ok(Some(detected))
+        let token_id = multilingual::language_token_from_code(self.decoder.tokenizer(), language)?;
+        Ok(ResolvedLanguage {
+            code: language.trim().to_owned(),
+            token_id,
+        })
     }
 }
 

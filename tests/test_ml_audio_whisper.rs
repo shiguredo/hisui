@@ -155,7 +155,7 @@ fn whisper_pipeline_transcribes_english_fixture() {
     let mut pipeline = WhisperPipeline::load(&model_dir, Device::Cpu).expect("Whisper ロード");
 
     let result = pipeline
-        .transcribe_pcm16k(&pcm, None)
+        .transcribe_pcm16k(&pcm, "en")
         .expect("Whisper 推論は成功する想定");
 
     assert!(!result.text.is_empty(), "文字起こし結果は空でないこと");
@@ -195,7 +195,7 @@ fn whisper_pipeline_transcribes_japanese_fixture() {
     let mut pipeline = WhisperPipeline::load(&model_dir, Device::Cpu).expect("Whisper ロード");
 
     let result = pipeline
-        .transcribe_pcm16k(&pcm, None)
+        .transcribe_pcm16k(&pcm, "ja")
         .expect("Whisper 推論は成功する想定");
 
     assert!(!result.text.is_empty(), "文字起こし結果は空でないこと");
@@ -292,7 +292,7 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
         TranscriptionProcessor::new(
             Arc::clone(&service),
             silero,
-            Some("en".to_owned()),
+            "en".to_owned(),
             TrackId::new(INPUT_TRACK_ID),
             TrackId::new(OUTPUT_TRACK_ID),
         )
