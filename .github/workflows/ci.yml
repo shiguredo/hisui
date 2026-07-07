@@ -178,8 +178,9 @@ jobs:
       - name: Download Whisper tiny model
         run: uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny
       - run: cargo clippy --features candle --all-targets -p hisui -- --deny warnings
-      # candle の実推論はマルチスレッドで全コアを使うため、テストを並列実行するとコアを奪い合って
-      # 各推論が極端に遅くなり、テスト内のタイムアウトに達する。直列実行して 1 テストずつ全コアを使わせる。
+      # candle は既定でホストの物理コア数まで並列化するため、テストを並列実行するとコアを奪い合って
+      # 各推論が極端に遅くなり、テスト内のタイムアウトに達する。CI では直列実行に切り替える。
+      # (実運用でスレッド数を絞る場合は RAYON_NUM_THREADS を設定する。)
       - run: cargo test --features candle -p hisui -- --test-threads=1
 
   test-fuzz:
