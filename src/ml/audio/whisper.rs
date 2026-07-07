@@ -6,8 +6,11 @@ use candle_core::Tensor;
 use candle_transformers::models::whisper::{Config, audio};
 use tokenizers::Tokenizer;
 
-use super::decode::{Decoder, WhisperModel};
-use super::multilingual::{self, ResolvedLanguage};
+pub mod decode;
+pub mod multilingual;
+
+use decode::{Decoder, WhisperModel};
+use multilingual::ResolvedLanguage;
 
 /// Whisper の推論結果。
 pub struct WhisperTranscription {

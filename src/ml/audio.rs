@@ -1,7 +1,5 @@
 pub mod buffer;
 pub mod config;
-pub mod decode;
-pub mod multilingual;
 pub mod silero_vad;
 pub mod transcription_processor;
 pub mod transcription_service;
