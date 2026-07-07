@@ -7,7 +7,10 @@
 
 use candle_core::{D, IndexOp, Tensor};
 use candle_nn::{VarBuilder, ops::softmax};
-use candle_transformers::models::whisper::{self as m, Config, model::Whisper};
+use candle_transformers::models::whisper::{
+    Config, DTYPE, EOT_TOKEN, LOGPROB_THRESHOLD, NO_SPEECH_THRESHOLD, NO_SPEECH_TOKENS,
+    NO_TIMESTAMPS_TOKEN, SOT_TOKEN, TRANSCRIBE_TOKEN, model::Whisper,
+};
 use tokenizers::Tokenizer;
 
 use crate::Result;
@@ -29,7 +32,7 @@ impl WhisperModel {
         device: &candle_core::Device,
     ) -> Result<Self> {
         let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[weights_path], m::DTYPE, device)
+            VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, device)
                 .map_err(|e| crate::Error::new(format!("failed to mmap whisper weights: {e}")))?
         };
         let inner = Whisper::load(&vb, config.clone())
@@ -103,11 +106,11 @@ impl WhisperDecoder {
         let suppress_tokens = Tensor::new(suppress_tokens.as_slice(), device)
             .map_err(|e| crate::Error::new(format!("suppress_tokens tensor: {e}")))?;
 
-        let sot_token = token_id(&tokenizer, m::SOT_TOKEN)?;
-        let transcribe_token = token_id(&tokenizer, m::TRANSCRIBE_TOKEN)?;
-        let eot_token = token_id(&tokenizer, m::EOT_TOKEN)?;
-        let no_timestamps_token = token_id(&tokenizer, m::NO_TIMESTAMPS_TOKEN)?;
-        let no_speech_token = m::NO_SPEECH_TOKENS
+        let sot_token = token_id(&tokenizer, SOT_TOKEN)?;
+        let transcribe_token = token_id(&tokenizer, TRANSCRIBE_TOKEN)?;
+        let eot_token = token_id(&tokenizer, EOT_TOKEN)?;
+        let no_timestamps_token = token_id(&tokenizer, NO_TIMESTAMPS_TOKEN)?;
+        let no_speech_token = NO_SPEECH_TOKENS
             .iter()
             .find_map(|token| token_id(&tokenizer, token).ok())
             .ok_or_else(|| crate::Error::new("unable to find any non-speech token"))?;
@@ -144,7 +147,7 @@ impl WhisperDecoder {
     /// 幻覚の可能性が高いため text を空にして返す (品質指標はそのまま返す)。
     pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
         let dr = self.decode_segment(mel)?;
-        if dr.no_speech_prob > m::NO_SPEECH_THRESHOLD && dr.avg_logprob < m::LOGPROB_THRESHOLD {
+        if dr.no_speech_prob > NO_SPEECH_THRESHOLD && dr.avg_logprob < LOGPROB_THRESHOLD {
             return Ok(WhisperDecodedChunk {
                 text: String::new(),
                 avg_logprob: dr.avg_logprob,
