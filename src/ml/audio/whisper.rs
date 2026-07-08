@@ -122,6 +122,19 @@ fn narrow_mel_for_encoder(mel: &Tensor) -> crate::Result<Tensor> {
         .map_err(|e| crate::Error::new(format!("mel narrow: {e}")))
 }
 
+/// Whisper encoder に食わせる mel スペクトログラムを作るための mel filter bank を返す。
+///
+/// candle の `audio::pcm_to_mel` は filter bank を引数で受け取る設計のため、hisui 側で
+/// 事前計算済みのバイナリ (`melfilters.bytes`) を同梱している。中身は OpenAI Whisper
+/// 標準の「80 mel bins × 201 frequency bins」の f32 行列を little-endian で並べたもの
+/// (candle-examples 同梱由来、合計 64320 バイト)。
+///
+/// mel filter は Whisper のアーキテクチャ (16 kHz サンプリング、FFT サイズ 400 等) から
+/// 一意に決まる不変値なので、生成し直したりバージョン管理したりする必要はない。バイナリ
+/// のまま同梱している理由は、Rust 側で `&[f32]` リテラル化するとソースが 3〜4 倍に膨れる
+/// のに、値は数値なので可読性は向上しないため。
+///
+/// 128-bin (large-v3 系) は同梱していないため Err にする。tiny / base / small のみ対応。
 fn load_mel_filters(num_mel_bins: usize) -> crate::Result<Vec<f32>> {
     let mel_bytes = match num_mel_bins {
         80 => include_bytes!("melfilters.bytes").as_slice(),
