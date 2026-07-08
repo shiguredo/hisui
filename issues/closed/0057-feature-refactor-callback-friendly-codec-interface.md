@@ -348,7 +348,7 @@ async fn test_nvcodec_encoder_to_receiver_e2e() {
 依存順序:
 
 - decoder 系列: **`0066 → {0068 / 0071 / 0072} → 0073`** (2026-07-06 完了)
-- encoder 系列: **`0066 → 0067 → {encoder 使用側移行 / encoder wrap 削除 rename / encoder 未使用 API 削除}`** および `0067 → Nvcodec flush 撤廃 perf issue` (perf は refactor 系列と並列)
+- encoder 系列: **`0066 → 0067 → {open/0079 / encoder wrap 削除 rename / encoder 未使用 API 削除}`** および `0067 → open/0080` (perf は refactor 系列と並列)
 
 | ID | 範囲 | 推定 LOC | 依存先 | 後方互換影響 |
 |----|------|----------|---------|---------------|
@@ -357,11 +357,11 @@ async fn test_nvcodec_encoder_to_receiver_e2e() {
 | closed/0071 (`feature/refactor-mp4-reader-async-video-decoder`) | mp4 reader の video decoder 経路を decoder task (spawn pattern) 化 + `set_video_decoder` / `discard_video_decoder_output` 削除 | +324/-107 | 0066 | 内部 API のみ |
 | closed/0072 (`feature/refactor-inbound-endpoint-async-video-decoder`) | RTMP / RTSP / SRT inbound endpoint の video decoder 経路を spawn pattern 化 | +483/-150 | 0066 | 内部 API のみ |
 | closed/0073 (`feature/refactor-remove-sync-video-decoder-and-rename`) | 同期 wrap `VideoDecoder` 削除 + `AsyncVideoDecoder` を `VideoDecoder` にリネーム | +109/-294 | 0068 / 0071 / 0072 | 内部 API のみ |
-| open/0067 (`feature/refactor-add-async-video-encoder`) | `AsyncVideoEncoder` 新規追加 + 既存 `VideoEncoder` の wrap 化 + 全 inner (Libvpx/Openh264/SvtAv1/VideoToolbox/Nvcodec) の Sender 化 (`OutputSink` 経由)、`error_slot` 廃止、メトリクス計上の `OutputSink` ペアリング化、既存外部 API 維持 | 千行前後 | 0066 | 内部 API のみ |
-| (未起票) encoder 使用側移行 refactor issue | compose / recording / vmaf / obsws / list_codecs を `AsyncVideoEncoder` 直接利用に移行 + `AsyncVideoEncoder::run` 追加 | 未推定 | 0067 | 内部 API のみ |
-| (未起票) encoder wrap 削除 + rename refactor issue | 同期 wrap `VideoEncoder` 削除 + `AsyncVideoEncoder` を `VideoEncoder` にリネーム + `_sync` / `_async` サフィックス整理 | 未推定 | encoder 使用側移行 issue | 内部 API のみ |
+| closed/0067 (`feature/refactor-add-async-video-encoder`) | `AsyncVideoEncoder` 新規追加 + 既存 `VideoEncoder` の wrap 化 + 全 inner (Libvpx/Openh264/SvtAv1/VideoToolbox/Nvcodec) の Sender 化 (`OutputSink` 経由)、`error_slot` 廃止、メトリクス計上の `OutputSink` ペアリング化、既存外部 API 維持 | +1025/-401 | 0066 | 内部 API のみ |
+| open/0079 (`feature/refactor-migrate-video-encoder-users-to-async`) | encoder 使用側 4 hit を `AsyncVideoEncoder` に移行 + `AsyncVideoEncoder::run` 追加 | +75/-13 | 0067 | 内部 API のみ |
+| (未起票) encoder wrap 削除 + rename refactor issue | 同期 wrap `VideoEncoder` 削除 + `AsyncVideoEncoder` を `VideoEncoder` にリネーム + `_sync` / `_async` サフィックス整理 | 未推定 | open/0079 | 内部 API のみ |
 | (未起票) encoder 未使用 API 削除 refactor issue | 使用側移行完了後の dead code 削除 + `EncoderOutputReceiver` 可視性整理 | 未推定 | encoder wrap 削除 + rename issue | 内部 API のみ |
-| (未起票) Nvcodec `flush()` 撤廃 + bp 機構 perf issue | NVENC 非同期パイプライン並列性回復 (本 §3 中核動機)。 wall-clock 短縮 15% / p99 改善 5ms 等の実機計測を完了条件に据える | 未推定 | 0067 | 内部 API のみ (perf カテゴリ) |
+| open/0080 (`feature/refactor-nvcodec-encoder-flush-and-backpressure`) | NVENC 非同期パイプライン並列性回復 (flush() 撤廃 + bp 機構)、 wall-clock 短縮 15% / p99 改善 5ms 等の実機計測を完了条件に据える | 未推定 | 0067 | 内部 API のみ (perf カテゴリ) |
 
 備考:
 

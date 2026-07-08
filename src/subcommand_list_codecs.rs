@@ -4,7 +4,7 @@ use shiguredo_openh264::Openh264Library;
 
 use crate::{
     decoder::{AudioDecoder, VideoDecoder},
-    encoder::{AudioEncoder, VideoEncoder},
+    encoder::{AsyncVideoEncoder, AudioEncoder},
     types::{CodecName, EngineName},
 };
 
@@ -85,7 +85,7 @@ fn run_internal(
         codecs.push(CodecInfo {
             name,
             decoders: VideoDecoder::get_engines(name, is_openh264_available),
-            encoders: VideoEncoder::get_engines(name, is_openh264_available),
+            encoders: AsyncVideoEncoder::get_engines(name, is_openh264_available),
         });
     }
 
