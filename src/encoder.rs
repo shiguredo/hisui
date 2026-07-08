@@ -1387,4 +1387,44 @@ mod tests {
             "空 rx + eos=true で Finished が返っていない"
         );
     }
+
+    // ---- I-12: next_encoded_frame_async の pub 契約テスト ----
+    // poll_output_sync 側 (sync 経路) は上記 4 件でカバー済みだが、
+    // pub async fn next_encoded_frame_async は async 経路の入口で、
+    // 現状テストが 0 件。 sink.emit_ok / emit_err の受信が非同期でも
+    // 正しく届くことを固定する (rx が閉じた時の None 分岐は、 sink が
+    // AsyncVideoEncoder 内で field 所有される構造上 public API では
+    // 再現できないため対象外)。
+
+    #[tokio::test]
+    async fn next_encoded_frame_async_returns_frame_after_emit_ok() {
+        // AsyncVideoEncoder が保持する sink 経由で emit_ok したフレームが
+        // next_encoded_frame_async の await で受信できる。
+        let mut encoder = new_uninitialized_encoder();
+        encoder.sink.emit_ok(compressed_video_frame(true));
+        let received = encoder
+            .next_encoded_frame_async()
+            .await
+            .expect("emit_ok したフレームが next_encoded_frame_async で受信できない (None)")
+            .expect("emit_ok は Ok で送るのに next_encoded_frame_async に Err が届いた");
+        assert!(
+            received.keyframe,
+            "受信したフレームの keyframe フラグが false"
+        );
+    }
+
+    #[tokio::test]
+    async fn next_encoded_frame_async_propagates_error_from_emit_err() {
+        // sink.emit_err で送ったエラーは next_encoded_frame_async で Some(Err) として届く。
+        let mut encoder = new_uninitialized_encoder();
+        encoder.sink.emit_err(Error::new("async test error"));
+        let received = encoder
+            .next_encoded_frame_async()
+            .await
+            .expect("emit_err したエラーが next_encoded_frame_async で受信できない (None)");
+        assert!(
+            received.is_err(),
+            "emit_err は Err で送るのに next_encoded_frame_async に Ok が届いた"
+        );
+    }
 }
