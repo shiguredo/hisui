@@ -88,8 +88,8 @@ impl WhisperPipeline {
         Ok(WhisperTranscription {
             text: result.text.trim().to_owned(),
             language: Some(resolved_language.code),
-            no_speech_prob: result.no_speech_prob as f32,
-            avg_logprob: result.avg_logprob as f32,
+            no_speech_prob: result.no_speech_prob.get() as f32,
+            avg_logprob: result.avg_logprob.get() as f32,
         })
     }
 

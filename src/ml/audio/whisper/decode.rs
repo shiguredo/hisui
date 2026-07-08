@@ -16,14 +16,16 @@ use candle_transformers::models::whisper::{
 use tokenizers::Tokenizer;
 
 use crate::Result;
+use crate::probability::{LogProbability, Probability};
 
 /// 1 チャンクぶんの decode 結果。
 ///
-/// candle 内部の計算値 (f64) をそのまま保持する。`TextFrame` 向けの f32 変換は上位層で行う。
+/// 品質指標は candle 内部と同じ f64 精度の `LogProbability` / `Probability` で保持する。
+/// `TextFrame` 向けの f32 変換は上位層で行う。
 pub struct WhisperDecodedChunk {
     pub text: String,
-    pub avg_logprob: f64,
-    pub no_speech_prob: f64,
+    pub avg_logprob: LogProbability,
+    pub no_speech_prob: Probability,
 }
 
 /// Whisper 重みと greedy decode ループを 1 worker 分の状態としてまとめた型。
@@ -118,7 +120,8 @@ impl WhisperDecoder {
     /// 幻覚の可能性が高いため text を空にして返す (品質指標はそのまま返す)。
     pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
         let dr = self.decode_segment(mel)?;
-        if dr.no_speech_prob > NO_SPEECH_THRESHOLD && dr.avg_logprob < LOGPROB_THRESHOLD {
+        if dr.no_speech_prob.get() > NO_SPEECH_THRESHOLD && dr.avg_logprob.get() < LOGPROB_THRESHOLD
+        {
             return Ok(WhisperDecodedChunk {
                 text: String::new(),
                 avg_logprob: dr.avg_logprob,
@@ -137,7 +140,7 @@ impl WhisperDecoder {
 
         let sample_len = self.config.max_target_positions / 2;
         let mut sum_logprob = 0f64;
-        let mut no_speech_prob = f64::NAN;
+        let mut no_speech_prob_raw: Option<f64> = None;
         let mut tokens = vec![self.sot_token];
         if let Some(language_token) = self.language_token {
             tokens.push(language_token);
@@ -168,12 +171,14 @@ impl WhisperDecoder {
                     .map_err(candle_err)?
                     .i(0)
                     .map_err(candle_err)?;
-                no_speech_prob = softmax(&logits, 0)
-                    .map_err(candle_err)?
-                    .i(self.no_speech_token as usize)
-                    .map_err(candle_err)?
-                    .to_scalar::<f32>()
-                    .map_err(candle_err)? as f64;
+                no_speech_prob_raw = Some(f64::from(
+                    softmax(&logits, 0)
+                        .map_err(candle_err)?
+                        .i(self.no_speech_token as usize)
+                        .map_err(candle_err)?
+                        .to_scalar::<f32>()
+                        .map_err(candle_err)?,
+                ));
             }
 
             let (_, seq_len, _) = ys.dims3().map_err(candle_err)?;
@@ -217,7 +222,22 @@ impl WhisperDecoder {
             .tokenizer
             .decode(&tokens, true)
             .map_err(|e| crate::Error::new(format!("tokenizer decode: {e}")))?;
-        let avg_logprob = sum_logprob / tokens.len().max(1) as f64;
+        let avg_logprob_raw = sum_logprob / tokens.len().max(1) as f64;
+        let avg_logprob = LogProbability::new(avg_logprob_raw).ok_or_else(|| {
+            crate::Error::new(format!(
+                "whisper produced non-log-probability avg_logprob: {avg_logprob_raw}"
+            ))
+        })?;
+        // no_speech_prob は初回 step (i == 0) で必ず 1 回だけ設定される。sample_len == 0 の
+        // 不正 config でループに入らなかった場合のみ None のまま抜ける。
+        let no_speech_prob_raw = no_speech_prob_raw.ok_or_else(|| {
+            crate::Error::new("whisper decode: sample_len == 0 (invalid max_target_positions)")
+        })?;
+        let no_speech_prob = Probability::new(no_speech_prob_raw).ok_or_else(|| {
+            crate::Error::new(format!(
+                "whisper produced out-of-range no_speech_prob: {no_speech_prob_raw}"
+            ))
+        })?;
 
         Ok(WhisperDecodedChunk {
             text,
