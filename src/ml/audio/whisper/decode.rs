@@ -172,7 +172,11 @@ impl WhisperDecoder {
         self.language_token = language_token;
     }
 
-    /// 1 チャンク (mel) を decode する。
+    /// 1 チャンク (mel スペクトログラム) を decode する。
+    ///
+    /// `mel` は PCM を「時間 × mel bins」の 2D テンソルに変換したもの (Whisper encoder が
+    /// 直接受け付ける入力形式)。上位層で `candle_transformers::models::whisper::audio::pcm_to_mel`
+    /// 等で生成する。
     ///
     /// Whisper decoder が持つ KV (attention key/value) キャッシュは開始時と終了時に本関数内で
     /// クリアするため、呼び出し側は状態管理不要 (前回リクエストの残り state が漏れない)。
