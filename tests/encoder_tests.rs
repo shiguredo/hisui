@@ -5,8 +5,7 @@ use hisui::{
     MediaFrame, MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     VideoFrame,
     encoder::{
-        AsyncVideoEncoder, EncoderRunOutput, VideoEncoder, VideoEncoderOptions,
-        default_video_encode_config_for_rpc,
+        EncoderRunOutput, VideoEncoder, VideoEncoderOptions, default_video_encode_config_for_rpc,
     },
     types::{CodecName, EvenUsize},
     video::{FrameRate, VideoFormat, VideoFrameSize},
@@ -195,18 +194,18 @@ fn video_encoder_keyframe_metric_increments_only_for_keyframes() -> hisui::Resul
     Ok(())
 }
 
-/// `AsyncVideoEncoder::run` (processor 経路) の end-to-end 契約
+/// `VideoEncoder::run` (processor 経路) の end-to-end 契約
 ///
-/// source → `AsyncVideoEncoder::run` → sink の 3 processor async pipeline を組み、
+/// source → `VideoEncoder::run` → sink の 3 processor pipeline を組み、
 /// 実 I420 入力を VP8 に圧縮した出力が sink に届くことを確認する。
 /// 使用側 (`recording_subcommand_compose.rs:577` 等) と同じ `spawn_processor` 経路の
 /// 挙動を最低 1 経路担保する。
 #[test]
-fn video_encoder_run_processes_i420_via_async_pipeline() -> hisui::Result<()> {
+fn video_encoder_run_processes_i420_via_pipeline() -> hisui::Result<()> {
     const FRAME_COUNT: u64 = 3;
     let input_frames: Vec<VideoFrame> =
         (0..FRAME_COUNT).map(|i| i420_video_frame(i * 33)).collect();
-    let output_frames = encode_video_frames_with_async_pipeline(input_frames, vp8_options())?;
+    let output_frames = encode_video_frames_with_pipeline(input_frames, vp8_options())?;
     assert_eq!(
         output_frames.len() as u64,
         FRAME_COUNT,
@@ -226,7 +225,7 @@ fn video_encoder_run_processes_i420_via_async_pipeline() -> hisui::Result<()> {
     Ok(())
 }
 
-fn encode_video_frames_with_async_pipeline(
+fn encode_video_frames_with_pipeline(
     input_frames: Vec<VideoFrame>,
     options: VideoEncoderOptions,
 ) -> hisui::Result<Vec<VideoFrame>> {
@@ -262,7 +261,7 @@ fn encode_video_frames_with_async_pipeline(
         )
         .await?;
         let encoder_task = tokio::spawn(async move {
-            let encoder = AsyncVideoEncoder::new(&options, None, encoder_handle.stats())?;
+            let encoder = VideoEncoder::new(&options, None, encoder_handle.stats())?;
             encoder
                 .run(
                     encoder_handle,

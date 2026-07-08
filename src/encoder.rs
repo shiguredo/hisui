@@ -364,19 +364,19 @@ pub enum VideoEncoderRpcMessage {
     RequestKeyframe,
 }
 
-/// 内部エンコーダーが出力フレーム / エラーを `AsyncVideoEncoder` 内の受信側 (`rx`) に流すための送信側の型エイリアス
+/// 内部エンコーダーが出力フレーム / エラーを `VideoEncoder` 内の受信側 (`rx`) に流すための送信側の型エイリアス
 pub type EncoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
 
-/// `AsyncVideoEncoder` 内部で内部エンコーダーからの出力フレーム / エラーを受け取る受信側の型エイリアス
+/// `VideoEncoder` 内部で内部エンコーダーからの出力フレーム / エラーを受け取る受信側の型エイリアス
 pub(crate) type EncoderOutputReceiver =
     tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>;
 
-/// 内部エンコーダーが出力フレーム / エラーを `AsyncVideoEncoder` 内の受信側 (`rx`) に流すためのシンク。
+/// 内部エンコーダーが出力フレーム / エラーを `VideoEncoder` 内の受信側 (`rx`) に流すためのシンク。
 ///
 /// 出力フレーム (`emit_ok`) 送信時に `total_output_metric` の増分と keyframe 判定を物理的に強制ペアリングする。
 /// エラー (`emit_err`) 送信時はメトリクスを増分しない (出力フレーム数 / keyframe 数の意味論を汚さないため)。
 ///
-/// `unreachable!()` 検出契約: シンクと `rx` は `AsyncVideoEncoder` 内で同居するため、
+/// `unreachable!()` 検出契約: シンクと `rx` は `VideoEncoder` 内で同居するため、
 /// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
@@ -460,18 +460,18 @@ pub async fn request_upstream_video_keyframe(
 
 /// 内部チャンネルベースの映像エンコーダー
 ///
-/// processor 経路 (`run`) からは `handle_input_sample_sync` / `poll_output_sync` /
-/// `handle_rpc_message_sync` 等の `_sync` 付き内部 API 経由で同期駆動する。 pull 型で
-/// 直接利用するときは `next_encoded_frame_async` で非同期に取得する。
+/// processor 経路 (`run`) からは `handle_input_sample` / `poll_output` /
+/// `handle_rpc_message` 経由で同期駆動する。 pull 型で直接利用するときは
+/// `next_encoded_frame` で非同期に取得する。
 ///
-/// **注意**: 非同期な内部エンコーダー (Nvcodec 等) 使用時、 `AsyncVideoEncoder` を
+/// **注意**: 非同期な内部エンコーダー (Nvcodec 等) 使用時、 `VideoEncoder` を
 /// drop する前に必ずエンコード結果を drain し切ること。 drop 順は「`inner` を先に
 /// drop → callback スレッドが `sink.emit_ok` した最後の 1 フレームが `rx` に届く
 /// → その後 `rx` を drop」で成立するが、 未 drain の状態で drop すると
 /// `total_output_video_frame_count` メトリクスが実際の出力数より少ない値のまま
 /// 観測される (メトリクスは inner 内で inc されるが、 未回収の frame は下流には流れない)。
 #[derive(Debug)]
-pub struct AsyncVideoEncoder {
+pub struct VideoEncoder {
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
@@ -497,7 +497,7 @@ pub struct AsyncVideoEncoder {
     openh264_lib: Option<Openh264Library>,
 }
 
-impl AsyncVideoEncoder {
+impl VideoEncoder {
     pub fn new(
         options: &VideoEncoderOptions,
         openh264_lib: Option<Openh264Library>,
@@ -680,8 +680,8 @@ impl AsyncVideoEncoder {
     /// 現状扱う RPC は `RequestKeyframe` のみで、 受信時に
     /// `total_video_keyframe_request_count` メトリクスを inc し、
     /// `keyframe_request_pending` フラグを立てる (実際の keyframe 要求適用は次の
-    /// `handle_input_sample_sync` 呼び出し時に inner へ伝播する)。
-    pub(crate) fn handle_rpc_message_sync(&mut self, message: VideoEncoderRpcMessage) {
+    /// `handle_input_sample` 呼び出し時に inner へ伝播する)。
+    pub(crate) fn handle_rpc_message(&mut self, message: VideoEncoderRpcMessage) {
         match message {
             VideoEncoderRpcMessage::RequestKeyframe => {
                 self.total_video_keyframe_request_count_metric.inc();
@@ -694,8 +694,8 @@ impl AsyncVideoEncoder {
         }
     }
 
-    /// wrap から呼ぶ同期入力 API
-    pub(crate) fn handle_input_sample_sync(&mut self, sample: Option<MediaFrame>) -> Result<()> {
+    /// processor 経路 (`run`) から呼ぶ同期入力 API
+    pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
             let frame = RawVideoFrame::from_video_frame(frame)?;
@@ -723,8 +723,8 @@ impl AsyncVideoEncoder {
         Ok(())
     }
 
-    /// wrap から呼ぶ同期 poll
-    pub(crate) fn poll_output_sync(&mut self) -> Result<EncoderRunOutput> {
+    /// processor 経路 (`run`) から呼ぶ同期 poll
+    pub fn poll_output(&mut self) -> Result<EncoderRunOutput> {
         match self.rx.try_recv() {
             Ok(Ok(frame)) => Ok(EncoderRunOutput::Processed(MediaFrame::video(frame))),
             Ok(Err(e)) => Err(e),
@@ -748,16 +748,16 @@ impl AsyncVideoEncoder {
     /// - `Some(Ok(frame))`: 正常フレーム
     /// - `Some(Err(e))`: 内部エンコーダーからのエラー
     /// - `None`: 全ての送信側が drop された
-    pub async fn next_encoded_frame_async(&mut self) -> Option<crate::Result<VideoFrame>> {
+    pub async fn next_encoded_frame(&mut self) -> Option<crate::Result<VideoFrame>> {
         self.rx.recv().await
     }
 
     /// processor モデル (`ProcessorHandle` + subscribe / publish) 用の駆動 API。
     ///
-    /// 入力トラックを subscribe し、 `_sync` API の drain ループでエンコード結果を
-    /// 出力トラックへ流す。 上流からの keyframe 要求 RPC を受け取るため、
-    /// `register_rpc_sender` で unbounded channel を登録した上で入力と RPC の 2 腕
-    /// `tokio::select!` を回す。
+    /// 入力トラックを subscribe し、 `handle_input_sample` / `poll_output` の drain
+    /// ループでエンコード結果を出力トラックへ流す。 上流からの keyframe 要求 RPC を
+    /// 受け取るため、 `register_rpc_sender` で unbounded channel を登録した上で入力と
+    /// RPC の 2 腕 `tokio::select!` を回す。
     pub async fn run(
         mut self,
         handle: ProcessorHandle,
@@ -780,12 +780,12 @@ impl AsyncVideoEncoder {
                 message = input_rx.recv() => {
                     let is_eos = matches!(message, Message::Eos);
                     match message {
-                        Message::Media(sample) => self.handle_input_sample_sync(Some(sample))?,
-                        Message::Eos => self.handle_input_sample_sync(None)?,
+                        Message::Media(sample) => self.handle_input_sample(Some(sample))?,
+                        Message::Eos => self.handle_input_sample(None)?,
                         Message::Syn(_) => {}
                     }
                     loop {
-                        match self.poll_output_sync()? {
+                        match self.poll_output()? {
                             EncoderRunOutput::Processed(sample) => {
                                 if !output_tx.send_media(sample) {
                                     output_tx.send_eos();
@@ -810,130 +810,8 @@ impl AsyncVideoEncoder {
                         rpc_rx_enabled = false;
                         continue;
                     };
-                    self.handle_rpc_message_sync(rpc_message);
-                }
-            }
-        }
-    }
-}
-
-/// 同期 API を保つ VideoEncoder は `AsyncVideoEncoder` の wrap として動作する。
-///
-/// 既存の外部 API 挙動を維持しつつ、内部は Sender 経由のフレーム受け渡しに移行している。
-/// 将来 `AsyncVideoEncoder` 直接利用への段階移行が完了した時点で本 wrap 型は削除される。
-#[derive(Debug)]
-pub struct VideoEncoder {
-    inner_encoder: AsyncVideoEncoder,
-}
-
-impl VideoEncoder {
-    pub fn new(
-        options: &VideoEncoderOptions,
-        openh264_lib: Option<Openh264Library>,
-        compose_stats: crate::stats::Stats,
-    ) -> crate::Result<Self> {
-        Ok(Self {
-            inner_encoder: AsyncVideoEncoder::new(options, openh264_lib, compose_stats)?,
-        })
-    }
-
-    pub fn name(&self) -> Option<EngineName> {
-        self.inner_encoder.name()
-    }
-
-    pub fn codec(&self) -> Option<CodecName> {
-        self.inner_encoder.codec()
-    }
-
-    pub fn get_engines(codec: CodecName, is_openh264_available: bool) -> Vec<EngineName> {
-        AsyncVideoEncoder::get_engines(codec, is_openh264_available)
-    }
-
-    pub async fn run(
-        mut self,
-        handle: ProcessorHandle,
-        input_track_id: TrackId,
-        output_track_id: TrackId,
-    ) -> Result<()> {
-        let mut input_rx = handle.subscribe_track(input_track_id);
-        let mut output_tx = handle.publish_track(output_track_id).await?;
-        let (rpc_tx, mut rpc_rx) = tokio::sync::mpsc::unbounded_channel();
-        handle
-            .register_rpc_sender(rpc_tx)
-            .await
-            .map_err(|e| Error::new(format!("failed to register video encoder RPC sender: {e}")))?;
-        handle.notify_ready();
-        handle.wait_subscribers_ready().await?;
-        let mut rpc_rx_enabled = true;
-
-        loop {
-            tokio::select! {
-                message = input_rx.recv() => {
-                    let is_eos = matches!(message, Message::Eos);
-                    self.handle_input_message(message)?;
-
-                    let finished = drain_video_encoder_output(&mut self, &mut output_tx)?;
-                    if finished {
-                        output_tx.send_eos();
-                        break;
-                    }
-
-                    if is_eos {
-                        return Err(Error::new("video encoder still pending after EOS"));
-                    }
-                }
-                rpc_message = recv_video_encoder_rpc_message_or_pending(
-                    rpc_rx_enabled.then_some(&mut rpc_rx)
-                ) => {
-                    let Some(rpc_message) = rpc_message else {
-                        rpc_rx_enabled = false;
-                        continue;
-                    };
                     self.handle_rpc_message(rpc_message);
                 }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn handle_rpc_message(&mut self, message: VideoEncoderRpcMessage) {
-        self.inner_encoder.handle_rpc_message_sync(message);
-    }
-
-    fn handle_input_message(&mut self, message: Message) -> Result<()> {
-        match message {
-            Message::Media(sample) => self.handle_input_sample(Some(sample)),
-            Message::Eos => self.handle_input_sample(None),
-            Message::Syn(_) => Ok(()),
-        }
-    }
-
-    pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
-        self.inner_encoder.handle_input_sample_sync(sample)
-    }
-
-    pub fn poll_output(&mut self) -> Result<EncoderRunOutput> {
-        self.inner_encoder.poll_output_sync()
-    }
-}
-
-fn drain_video_encoder_output(
-    encoder: &mut VideoEncoder,
-    output_tx: &mut crate::TrackPublisher,
-) -> Result<bool> {
-    loop {
-        match encoder.poll_output()? {
-            EncoderRunOutput::Processed(sample) => {
-                if !output_tx.send_media(sample) {
-                    return Ok(true);
-                }
-            }
-            EncoderRunOutput::Pending => {
-                return Ok(false);
-            }
-            EncoderRunOutput::Finished => {
-                return Ok(true);
             }
         }
     }
@@ -1223,7 +1101,7 @@ pub async fn create_video_processor_with_params(
             crate::ProcessorMetadata::new(crate::media_pipeline::PROCESSOR_TYPE_VIDEO_ENCODER),
             move |h| async move {
                 let encoder =
-                    AsyncVideoEncoder::new(&options, h.config().openh264_lib.clone(), h.stats())?;
+                    VideoEncoder::new(&options, h.config().openh264_lib.clone(), h.stats())?;
                 encoder.run(h, input_track_id, output_track_id).await
             },
         )
@@ -1241,7 +1119,7 @@ mod tests {
     use crate::video::{FrameRate, VideoFormat, VideoFrame, VideoFrameSize};
 
     // 圧縮済み VideoFrame を最小限のフィールドで組み立てる。
-    // OutputSink / poll_output_sync の契約テストでは keyframe フラグ以外の値
+    // OutputSink / poll_output の契約テストでは keyframe フラグ以外の値
     // (sample_entry / size / timestamp 等) は分岐判定に影響しない。
     fn compressed_video_frame(keyframe: bool) -> VideoFrame {
         VideoFrame {
@@ -1349,7 +1227,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "encoder output sink receiver dropped before sink")]
     fn output_sink_emit_ok_panics_when_receiver_dropped() {
-        // rx が sink より先に drop されるのは AsyncVideoEncoder の drop 順制御下では
+        // rx が sink より先に drop されるのは VideoEncoder の drop 順制御下では
         // 発生しない構造だが、 万一発生した場合は fail-fast で panic する契約
         // (unreachable! で「不変条件違反 = バグ」を明示する)。
         let (sink, rx, _total, _keyframe) = make_encoder_sink_with_counters();
@@ -1357,15 +1235,15 @@ mod tests {
         sink.emit_ok(compressed_video_frame(true));
     }
 
-    // ---- R-3: AsyncVideoEncoder::poll_output_sync 分岐テスト ----
+    // ---- R-3: VideoEncoder::poll_output 分岐テスト ----
     // inner=None のまま sink 経由で rx にメッセージを流し込んで
-    // poll_output_sync の分岐 (Processed / Err / Pending / Finished) を検証する。
-    // Disconnected 分岐は sink と rx が AsyncVideoEncoder 内で同居する構造上
+    // poll_output の分岐 (Processed / Err / Pending / Finished) を検証する。
+    // Disconnected 分岐は sink と rx が VideoEncoder 内で同居する構造上
     // 通常運用では起きず、 発生時は unreachable! で panic する。 テストで再現する
     // には sink 側 tx の強制 drop が必要で public API では成立しない。
     // その契約自体は上記 output_sink_emit_ok_panics_when_receiver_dropped でカバー済み。
 
-    fn new_uninitialized_encoder() -> AsyncVideoEncoder {
+    fn new_uninitialized_encoder() -> VideoEncoder {
         let options = VideoEncoderOptions {
             codec: CodecName::Vp8,
             engines: None,
@@ -1378,18 +1256,16 @@ mod tests {
             },
             encode_params: default_video_encode_config_for_rpc(),
         };
-        AsyncVideoEncoder::new(&options, None, crate::stats::Stats::new())
-            .expect("AsyncVideoEncoder::new が失敗した")
+        VideoEncoder::new(&options, None, crate::stats::Stats::new())
+            .expect("VideoEncoder::new が失敗した")
     }
 
     #[test]
-    fn poll_output_sync_returns_processed_when_frame_available() {
+    fn poll_output_returns_processed_when_frame_available() {
         // rx にフレームが届いている場合は Processed(MediaFrame::video(frame)) を返す。
         let mut encoder = new_uninitialized_encoder();
         encoder.sink.emit_ok(compressed_video_frame(true));
-        let output = encoder
-            .poll_output_sync()
-            .expect("poll_output_sync が失敗した");
+        let output = encoder.poll_output().expect("poll_output が失敗した");
         assert!(
             matches!(output, EncoderRunOutput::Processed(_)),
             "フレーム到達時に Processed が返っていない"
@@ -1397,25 +1273,23 @@ mod tests {
     }
 
     #[test]
-    fn poll_output_sync_propagates_error_from_rx() {
+    fn poll_output_propagates_error_from_rx() {
         // rx に Err が届いている場合はそのまま Err を伝播する (Ok(Err(e)) 分岐)。
         let mut encoder = new_uninitialized_encoder();
         encoder.sink.emit_err(Error::new("encoder error"));
-        let result = encoder.poll_output_sync();
+        let result = encoder.poll_output();
         assert!(
             result.is_err(),
-            "sink.emit_err の Err が poll_output_sync で伝播されていない"
+            "sink.emit_err の Err が poll_output で伝播されていない"
         );
     }
 
     #[test]
-    fn poll_output_sync_returns_pending_when_empty_and_not_eos() {
+    fn poll_output_returns_pending_when_empty_and_not_eos() {
         // rx が空 + eos=false の分岐 (TryRecvError::Empty + !eos)。
         let mut encoder = new_uninitialized_encoder();
         assert!(!encoder.eos, "テスト前提: 未初期化 encoder は eos=false");
-        let output = encoder
-            .poll_output_sync()
-            .expect("poll_output_sync が失敗した");
+        let output = encoder.poll_output().expect("poll_output が失敗した");
         assert!(
             matches!(output, EncoderRunOutput::Pending),
             "空 rx + eos=false で Pending が返っていない"
@@ -1423,38 +1297,36 @@ mod tests {
     }
 
     #[test]
-    fn poll_output_sync_returns_finished_when_empty_and_eos() {
+    fn poll_output_returns_finished_when_empty_and_eos() {
         // rx が空 + eos=true の分岐 (TryRecvError::Empty + eos)。
         let mut encoder = new_uninitialized_encoder();
         encoder.eos = true;
-        let output = encoder
-            .poll_output_sync()
-            .expect("poll_output_sync が失敗した");
+        let output = encoder.poll_output().expect("poll_output が失敗した");
         assert!(
             matches!(output, EncoderRunOutput::Finished),
             "空 rx + eos=true で Finished が返っていない"
         );
     }
 
-    // ---- I-12: next_encoded_frame_async の pub 契約テスト ----
-    // poll_output_sync 側 (sync 経路) は上記 4 件でカバー済みだが、
-    // pub async fn next_encoded_frame_async は async 経路の入口で、
+    // ---- I-12: next_encoded_frame の pub 契約テスト ----
+    // poll_output 側 (sync 経路) は上記 4 件でカバー済みだが、
+    // pub async fn next_encoded_frame は async 経路の入口で、
     // 現状テストが 0 件。 sink.emit_ok / emit_err の受信が非同期でも
     // 正しく届くことを固定する (rx が閉じた時の None 分岐は、 sink が
-    // AsyncVideoEncoder 内で field 所有される構造上 public API では
+    // VideoEncoder 内で field 所有される構造上 public API では
     // 再現できないため対象外)。
 
     #[tokio::test]
-    async fn next_encoded_frame_async_returns_frame_after_emit_ok() {
-        // AsyncVideoEncoder が保持する sink 経由で emit_ok したフレームが
-        // next_encoded_frame_async の await で受信できる。
+    async fn next_encoded_frame_returns_frame_after_emit_ok() {
+        // VideoEncoder が保持する sink 経由で emit_ok したフレームが
+        // next_encoded_frame の await で受信できる。
         let mut encoder = new_uninitialized_encoder();
         encoder.sink.emit_ok(compressed_video_frame(true));
         let received = encoder
-            .next_encoded_frame_async()
+            .next_encoded_frame()
             .await
-            .expect("emit_ok したフレームが next_encoded_frame_async で受信できない (None)")
-            .expect("emit_ok は Ok で送るのに next_encoded_frame_async に Err が届いた");
+            .expect("emit_ok したフレームが next_encoded_frame で受信できない (None)")
+            .expect("emit_ok は Ok で送るのに next_encoded_frame に Err が届いた");
         assert!(
             received.keyframe,
             "受信したフレームの keyframe フラグが false"
@@ -1462,17 +1334,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn next_encoded_frame_async_propagates_error_from_emit_err() {
-        // sink.emit_err で送ったエラーは next_encoded_frame_async で Some(Err) として届く。
+    async fn next_encoded_frame_propagates_error_from_emit_err() {
+        // sink.emit_err で送ったエラーは next_encoded_frame で Some(Err) として届く。
         let mut encoder = new_uninitialized_encoder();
         encoder.sink.emit_err(Error::new("async test error"));
         let received = encoder
-            .next_encoded_frame_async()
+            .next_encoded_frame()
             .await
-            .expect("emit_err したエラーが next_encoded_frame_async で受信できない (None)");
+            .expect("emit_err したエラーが next_encoded_frame で受信できない (None)");
         assert!(
             received.is_err(),
-            "emit_err は Err で送るのに next_encoded_frame_async に Ok が届いた"
+            "emit_err は Err で送るのに next_encoded_frame に Ok が届いた"
         );
     }
 }
