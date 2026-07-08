@@ -13,6 +13,7 @@ use decode::WhisperDecoder;
 use multilingual::ResolvedLanguage;
 
 /// Whisper の推論結果。
+#[derive(Debug)]
 pub struct WhisperTranscription {
     pub text: String,
     pub language: Option<String>,
@@ -29,6 +30,7 @@ impl WhisperTranscription {
 }
 
 /// 1 worker 専用の Whisper 推論器。
+#[derive(Debug)]
 pub struct WhisperPipeline {
     decoder: WhisperDecoder,
     mel_filters: Vec<f32>,
@@ -176,6 +178,7 @@ pub fn validate_model_dir(model_dir: &Path) -> crate::Result<PathBuf> {
 }
 
 /// Hugging Face `config.json` から読み取る Whisper 設定。
+#[derive(Debug)]
 struct WhisperConfigFile {
     num_mel_bins: usize,
     max_source_positions: usize,

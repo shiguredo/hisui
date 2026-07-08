@@ -70,6 +70,7 @@ struct SpeechInProgress {
 ///
 /// 1 つの `VadGate` は 1 つの track に紐付ける (`SileroVad` の内部 state / context と `VadGate` の
 /// 通し番号を別 track と混ぜると意味を失うため)。
+#[derive(Debug)]
 pub struct VadGate {
     silero: SileroVad,
     buffer: AudioChunkBuffer,
@@ -159,6 +160,7 @@ impl VadGate {
 ///
 /// `advance_state` の引数を減らして clippy::too_many_arguments を回避する目的で導入している。
 /// VadGate::feed から `VadConfig` と `CHUNK_SAMPLES` を展開して組み立てる。
+#[derive(Debug)]
 struct TransitionConfig {
     threshold: Probability,
     min_silence_samples: u64,

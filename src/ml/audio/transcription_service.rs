@@ -8,6 +8,7 @@ use tokio::sync::{mpsc, oneshot};
 use super::whisper::{WhisperPipeline, WhisperTranscription};
 
 /// 文字起こしリクエスト。
+#[derive(Debug)]
 pub struct TranscriptRequest {
     /// 16 kHz mono f32 PCM (最大 30 秒)。
     pub pcm: Vec<f32>,
@@ -16,6 +17,7 @@ pub struct TranscriptRequest {
 }
 
 /// 文字起こし結果。
+#[derive(Debug)]
 pub struct TranscriptResult {
     pub text: String,
     pub language: Option<String>,
@@ -31,6 +33,7 @@ impl TranscriptResult {
     }
 }
 
+#[derive(Debug)]
 struct Job {
     request: TranscriptRequest,
     reply_tx: oneshot::Sender<crate::Result<TranscriptResult>>,
@@ -41,6 +44,7 @@ struct Job {
 /// candle CPU 推論は既定でホスト物理コア数まで並列化するため、hisui 側で worker を複数持つと
 /// per-decode の並列度がコア競合で相殺される。実効スループットは「1 worker + `RAYON_NUM_THREADS`
 /// を絞らない」で頭打ちになるので、pool 化は行わない (将来並列化が必要になれば復活させる)。
+#[derive(Debug)]
 pub struct TranscriptionService {
     tx: mpsc::Sender<Job>,
 }

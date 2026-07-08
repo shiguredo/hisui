@@ -21,12 +21,14 @@ const TARGET_SAMPLE_RATE: u32 = 16_000;
 const MAX_TRANSCRIPT_SAMPLES: usize = 30 * TARGET_SAMPLE_RATE as usize;
 const MIN_TRANSCRIPT_SAMPLES: usize = 160;
 
+#[derive(Debug)]
 struct QueuedChunk {
     start_sample: u64,
     end_sample: u64,
     pcm: Vec<f32>,
 }
 
+#[derive(Debug)]
 struct PendingTranscript {
     start: Duration,
     end: Duration,
@@ -34,6 +36,7 @@ struct PendingTranscript {
 }
 
 /// 1 audio track を 1 text track に変換する processor。
+#[derive(Debug)]
 pub struct TranscriptionProcessor {
     service: Arc<TranscriptionService>,
     silero: Arc<SileroVadModel>,
@@ -104,6 +107,7 @@ impl TranscriptionProcessor {
     }
 }
 
+#[derive(Debug)]
 struct ProcessorState {
     service: Arc<TranscriptionService>,
     vad: VadGate,

@@ -7,6 +7,7 @@ use super::decode::{TokenId, token_id};
 use crate::Result;
 
 /// 解決された言語 (指定された ISO 639-1 コードと、対応する Whisper の言語トークン)。
+#[derive(Debug)]
 pub struct ResolvedLanguage {
     pub code: String,
     pub token_id: TokenId,

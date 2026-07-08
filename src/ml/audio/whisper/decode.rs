@@ -41,6 +41,7 @@ impl TokenId {
 ///
 /// 品質指標は candle 内部と同じ f64 精度の `LogProbability` / `Probability` で保持する。
 /// `TextFrame` 向けの f32 変換は上位層で行う。
+#[derive(Debug)]
 pub struct WhisperDecodedChunk {
     pub text: String,
     pub avg_logprob: LogProbability,
@@ -64,6 +65,7 @@ impl WhisperDecodedChunk {
 /// リクエストごとに変わらないため、ロード時に一度だけ tokenizer から引いて保持する。
 /// 言語トークンは per-request に変わるため本構造体には含めず、`WhisperDecoder.language_token` で
 /// 別に持つ。
+#[derive(Debug)]
 struct ProtocolTokens {
     /// SOT (start-of-transcript)。decode 対象トークン列の先頭に積む。
     sot: TokenId,
@@ -106,6 +108,7 @@ impl ProtocolTokens {
 ///
 /// 内部の `Whisper` は KV cache を持つため 1 スレッド専有。並列化は複数の `WhisperDecoder` を
 /// 個別ロードして worker プールに配る方式で実現する (Silero の `new_instance` 型の共有はしない)。
+#[derive(Debug)]
 pub struct WhisperDecoder {
     inner: Whisper,
     config: Config,
