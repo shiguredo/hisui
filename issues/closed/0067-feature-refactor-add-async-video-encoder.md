@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-26
-- Completed:
+- Completed: 2026-07-08
 - Model: Claude Opus 4.7
 - Branch: feature/refactor-add-async-video-encoder
 - Polished: 2026-07-07
@@ -586,3 +586,34 @@ pub(crate) fn make_encoder_sink() -> (crate::encoder::OutputSink, tokio::sync::m
 - closed/0027 (`feature/refactor-video-sample-entry-all-frames`) / closed/0030 (`feature/refactor-encoded-frame-sample-entry-invariant`) / closed/0051 (`feature/refactor-remove-writer-sample-entry-fallback`): sample_entry 不変条件の系列 (全出力フレームに sample_entry を載せる + 圧縮フレームの sample_entry は必ず Some)。 本 issue の OutputSink 経由経路でも inner 側で維持責任を保つ
 - closed/0054 (`feature/refactor-encoder-defer-output-until-sample-entry-ready`): エンコーダーで sample_entry 未確定時の出力を Err 化する fail-fast 整備。 Openh264 / VideoToolbox の fail-fast Err は本 issue でも `encode()` の Err 直返しで維持
 - open/0069 (`feature/add-amf-encoder-decoder`) / open/0070 (`feature/add-vpl-encoder-decoder`): 本 issue 完了後に着手 (Sender 化 API 確定後の雛形踏襲のため)
+
+## 解決方法
+
+### 実装内容
+
+`feature/refactor-add-async-video-encoder` ブランチで 13 コミット。 主要な変更は `src/encoder.rs` と `src/encoder/{libvpx,openh264,svt_av1,video_toolbox,nvcodec,test_helpers}.rs`、 追加 `tests/encoder_tests.rs`。 既存 pub API 挙動は維持し、 使用側 (`src/sora/` / `src/obsws/` / `src/subcommand_list_codecs.rs` / compose / recording / vmaf) は無変更。
+
+主要な実装ステップ:
+
+1. **AsyncVideoEncoder 新規追加 + VideoEncoder wrap 化**: 同期 API (`handle_input_message` / `handle_input_sample` / `poll_output` / `run`) は wrap の delegate として維持
+2. **OutputSink 導入**: 送信と 2 個の metric inc (total / keyframe) を物理ペアリング。 struct literal で構築を強制 (同型 counter 2 個の位置引数取り違え防止)
+3. **各 inner を OutputSink 経由に**: libvpx / openh264 / svt_av1 / video_toolbox / nvcodec を Sender ベースに書き換え
+4. **NvcodecEncoder は callback 完結型で実装**: shiguredo_nvcodec の callback 経由で `emit_ok`。 sample_entry / av1_sequence_header は `Arc<OnceLock<HandlerContext>>` で遅延確定 (Encoder::new が handler を consume する API 制約への対応)。 3 コンストラクタの共通シーケンスは `Self::build_encoder` に抽出
+5. **量的契約テスト**: `OutputSink` 契約 5 件 + `poll_output_sync` 分岐 4 件 + `next_encoded_frame_async` 2 件を unit test に、 encoder 版 integration test 3 件 (Processed / metric N 増分 / keyframe metric) を `tests/encoder_tests.rs` に追加し、 decoder 側 `tests/decoder_tests.rs` と対称化
+
+### レビュー対応
+
+`/review-diff-code` で「重要 7 件・改善 14 件・削除候補 3 件」を検出し、 以下を反映した:
+
+- **重要 R-1〜R-6 対応済み**: Nvcodec 二重 GPU セッション化解消 (OnceLock 遅延確定)、 OutputSink 契約テスト、 poll_output_sync 分岐テスト、 docstring 補強、 3 コンストラクタ共通シーケンス抽出、 integration test 新設
+- **重要 R-7 は将来対応**: `OutputSink` 型名の decoder / encoder 重複は use 衝突発生時に rename する (レビュア判断)
+- **改善 9 件対応**: `HandlerContext.av1_sequence_header` を `Option<Vec<u8>>` 化、 `OutputSink::new` を廃止し struct literal 化、 svt_av1 test helper 抽出、 `next_encoded_frame_async` テスト追加、 常に false 固定の未使用 `_error_flag` 削除、 コメント補強 (docstring / drop 順 / rpc handler)
+- **改善-任意 4 件は本 PR では対応せず**: fail-fast Err 経路統一 / `create_inner` 分岐肥大 / drop 順テスト / 環境変数未設定時スキップ扱い
+- **削除候補**: `probe` 用の tmp_inner / 手 workaround コメント / broken window (テストコメント内の旧 issue 番号) をそれぞれ吸収
+
+### 派生 issue
+
+本 issue 完了後に対応する後続:
+
+- open/0079 (`feature/refactor-migrate-video-encoder-users-to-async`): 使用側移行
+- open/0080 (`feature/refactor-nvcodec-encoder-flush-and-backpressure`): NvcodecEncoder の `flush()` 撤廃 + backpressure 機構

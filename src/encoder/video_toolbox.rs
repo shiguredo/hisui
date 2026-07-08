@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::{
-    encoder::VideoEncoderOptions,
+    encoder::{OutputSink, VideoEncoderOptions},
     sample_entry::SharedSampleEntry,
     types::{CodecName, EvenUsize},
     video::h264,
@@ -13,7 +13,7 @@ use crate::{
 pub struct VideoToolboxEncoder {
     inner: shiguredo_video_toolbox::Encoder,
     input_queue: VecDeque<RawVideoFrame>,
-    output_queue: VecDeque<VideoFrame>,
+    sink: OutputSink,
     // 最初の出力フレームの SPS/PPS から確定するサンプルエントリー。確定後は全フレームに載せる。
     sample_entry: Option<SharedSampleEntry>,
     width: EvenUsize,
@@ -24,7 +24,7 @@ pub struct VideoToolboxEncoder {
 }
 
 impl VideoToolboxEncoder {
-    pub fn new_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
+    pub fn new_h264(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         let mut config = options.encode_params.video_toolbox_h264.clone();
@@ -54,7 +54,7 @@ impl VideoToolboxEncoder {
         Ok(Self {
             inner,
             input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
+            sink,
             sample_entry: None,
             width,
             height,
@@ -64,7 +64,7 @@ impl VideoToolboxEncoder {
         })
     }
 
-    pub fn new_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
+    pub fn new_h265(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         let mut config = options.encode_params.video_toolbox_h265.clone();
@@ -94,7 +94,7 @@ impl VideoToolboxEncoder {
         Ok(Self {
             inner,
             input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
+            sink,
             sample_entry: None,
             width,
             height,
@@ -141,10 +141,6 @@ impl VideoToolboxEncoder {
         self.inner.finish()?;
         self.handle_encoded()?;
         Ok(())
-    }
-
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
     }
 
     pub fn request_keyframe(&mut self) {
@@ -203,7 +199,7 @@ impl VideoToolboxEncoder {
                 self.sample_entry = Some(SharedSampleEntry::new(sample_entry));
             }
 
-            self.output_queue.push_back(VideoFrame {
+            self.sink.emit_ok(VideoFrame {
                 data: frame.data,
                 format: self.format,
                 keyframe: frame.keyframe,
@@ -224,7 +220,7 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use super::*;
-    use crate::encoder::test_helpers::raw_i420_frame;
+    use crate::encoder::test_helpers::{make_encoder_sink, raw_i420_frame};
 
     fn options() -> VideoEncoderOptions {
         VideoEncoderOptions {
@@ -245,11 +241,13 @@ mod tests {
     // VideoToolbox は最初の keyframe で SPS/PPS が確定し、以降は保持値を伝播する。
     fn assert_every_output_frame_has_sample_entry(
         mut encoder: VideoToolboxEncoder,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>,
     ) -> crate::Result<()> {
         let mut output_count = 0;
         for i in 0..10u64 {
             encoder.encode(raw_i420_frame(i * 33))?;
-            while let Some(frame) = encoder.next_encoded_frame() {
+            while let Ok(result) = rx.try_recv() {
+                let frame = result?;
                 assert!(
                     frame.sample_entry.is_some(),
                     "出力フレームに sample_entry が載っていない（フレーム番号: {output_count}）"
@@ -258,7 +256,8 @@ mod tests {
             }
         }
         encoder.finish()?;
-        while let Some(frame) = encoder.next_encoded_frame() {
+        while let Ok(result) = rx.try_recv() {
+            let frame = result?;
             assert!(
                 frame.sample_entry.is_some(),
                 "finish 後の出力フレームに sample_entry が載っていない"
@@ -275,13 +274,15 @@ mod tests {
 
     #[test]
     fn video_toolbox_h264_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        let encoder = VideoToolboxEncoder::new_h264(&options())?;
-        assert_every_output_frame_has_sample_entry(encoder)
+        let (sink, rx) = make_encoder_sink();
+        let encoder = VideoToolboxEncoder::new_h264(&options(), sink)?;
+        assert_every_output_frame_has_sample_entry(encoder, rx)
     }
 
     #[test]
     fn video_toolbox_h265_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        let encoder = VideoToolboxEncoder::new_h265(&options())?;
-        assert_every_output_frame_has_sample_entry(encoder)
+        let (sink, rx) = make_encoder_sink();
+        let encoder = VideoToolboxEncoder::new_h265(&options(), sink)?;
+        assert_every_output_frame_has_sample_entry(encoder, rx)
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    encoder::VideoEncoderOptions,
+    encoder::{OutputSink, VideoEncoderOptions},
     sample_entry::SharedSampleEntry,
     video::h264::{self, H264_NALU_TYPE_SEI, H264AnnexBNalUnits},
     video::{RawVideoFrame, VideoFormat, VideoFrame},
@@ -8,7 +8,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Openh264Encoder {
     inner: shiguredo_openh264::Encoder,
-    encoded: Option<VideoFrame>,
+    sink: OutputSink,
     force_idr_pending: bool,
     // 最後に確定したサンプルエントリー。SPS/PPS を含むフレームで更新し、全出力フレームに載せる。
     // openh264 はキーフレーム要求等で SPS/PPS がストリーム途中で変わりうるため、最新値に追従する。
@@ -19,6 +19,7 @@ impl Openh264Encoder {
     pub fn new(
         lib: shiguredo_openh264::Openh264Library,
         options: &VideoEncoderOptions,
+        sink: OutputSink,
     ) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
@@ -33,7 +34,7 @@ impl Openh264Encoder {
         let inner = shiguredo_openh264::Encoder::new(lib, config)?;
         Ok(Self {
             inner,
-            encoded: None,
+            sink,
             force_idr_pending: false,
             last_sample_entry: None,
         })
@@ -98,7 +99,7 @@ impl Openh264Encoder {
             self.force_idr_pending = false;
         }
 
-        self.encoded = Some(VideoFrame {
+        self.sink.emit_ok(VideoFrame {
             data,
             format: VideoFormat::H264,
             keyframe: is_keyframe,
@@ -115,10 +116,6 @@ impl Openh264Encoder {
         Ok(())
     }
 
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        self.encoded.take()
-    }
-
     pub fn request_keyframe(&mut self) {
         self.force_idr_pending = true;
     }
@@ -129,7 +126,7 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use super::*;
-    use crate::encoder::test_helpers::raw_i420_frame;
+    use crate::encoder::test_helpers::{make_encoder_sink, raw_i420_frame};
     use crate::types::{CodecName, EvenUsize};
     use crate::video::FrameRate;
 
@@ -163,11 +160,13 @@ mod tests {
     // 全フレームに伝播させる。2 フレーム目以降でも Some になることを確認する。
     fn assert_every_output_frame_has_sample_entry(
         mut encoder: Openh264Encoder,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>,
     ) -> crate::Result<()> {
         let mut output_count = 0;
         for i in 0..10u64 {
             encoder.encode(raw_i420_frame(i * 33))?;
-            while let Some(frame) = encoder.next_encoded_frame() {
+            while let Ok(result) = rx.try_recv() {
+                let frame = result?;
                 assert!(
                     frame.sample_entry.is_some(),
                     "出力フレームに sample_entry が載っていない（フレーム番号: {output_count}）"
@@ -176,7 +175,8 @@ mod tests {
             }
         }
         encoder.finish()?;
-        while let Some(frame) = encoder.next_encoded_frame() {
+        while let Ok(result) = rx.try_recv() {
+            let frame = result?;
             assert!(
                 frame.sample_entry.is_some(),
                 "finish 後の出力フレームに sample_entry が載っていない"
@@ -215,7 +215,8 @@ mod tests {
             eprintln!("OPENH264_PATH が未設定のためスキップ");
             return Ok(());
         };
-        assert_every_output_frame_has_sample_entry(Openh264Encoder::new(lib, &options())?)
+        let (sink, rx) = make_encoder_sink();
+        assert_every_output_frame_has_sample_entry(Openh264Encoder::new(lib, &options(), sink)?, rx)
     }
 
     #[test]
@@ -225,12 +226,14 @@ mod tests {
             eprintln!("OPENH264_PATH が未設定のためスキップ");
             return Ok(());
         };
-        let mut encoder = Openh264Encoder::new(lib, &options())?;
+        let (sink, mut rx) = make_encoder_sink();
+        let mut encoder = Openh264Encoder::new(lib, &options(), sink)?;
 
         // 数フレームエンコードして初期状態を確定させる。最初の出力フレームで sample_entry が確定する。
         for i in 0..3u64 {
             encoder.encode(raw_i420_frame(i * 33))?;
-            while let Some(frame) = encoder.next_encoded_frame() {
+            while let Ok(result) = rx.try_recv() {
+                let frame = result?;
                 assert_carries_latest_sample_entry(&encoder, &frame);
             }
         }
@@ -240,7 +243,8 @@ mod tests {
         encoder.request_keyframe();
         for i in 3..8u64 {
             encoder.encode(raw_i420_frame(i * 33))?;
-            while let Some(frame) = encoder.next_encoded_frame() {
+            while let Ok(result) = rx.try_recv() {
+                let frame = result?;
                 assert_carries_latest_sample_entry(&encoder, &frame);
             }
         }

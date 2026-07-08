@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{
-    encoder::VideoEncoderOptions,
+    encoder::{OutputSink, VideoEncoderOptions},
     sample_entry::SharedSampleEntry,
     types::CodecName,
     video::av1,
@@ -11,58 +11,172 @@ use crate::{
     video::{RawVideoFrame, VideoFormat, VideoFrame},
 };
 
-/// エンコード完了を受け取る共有キューとエラー保持用スロット
-type EncodedQueue = Arc<Mutex<VecDeque<shiguredo_nvcodec::EncodedFrame<()>>>>;
-type ErrorSlot = Arc<Mutex<Option<crate::Error>>>;
+/// 本スレッドと callback スレッドで共有される入力フレームキュー
+type SharedInputQueue = Arc<Mutex<VecDeque<VideoFrame>>>;
+
+/// callback スレッドが参照する遅延確定コンテキスト。
+/// Encoder::new 後に get_sequence_params() から確定して set() される。
+/// av1_sequence_header は AV1 の keyframe に Sequence Header OBU を付与する用途で、
+/// H.264 / H.265 では意味を持たないため None にする (「AV1 のときだけ実データを持つ」を型で明示する)。
+#[derive(Debug)]
+struct HandlerContext {
+    sample_entry: SharedSampleEntry,
+    av1_sequence_header: Option<Vec<u8>>,
+}
+
+/// callback にキャプチャさせる HandlerContext の遅延確定スロット。
+/// 書き込みは Encoder::new → get_sequence_params の 1 回のみ、
+/// 以降は callback スレッドから lock-free で read される。
+type HandlerContextSlot = Arc<OnceLock<HandlerContext>>;
 
 #[derive(Debug)]
 pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder<
         shiguredo_nvcodec::FnEncodeHandler<(), shiguredo_nvcodec::Error>,
     >,
-    input_queue: VecDeque<VideoFrame>,
-    output_queue: VecDeque<VideoFrame>,
-    // エンコード完了は別スレッドからコールバックで通知されるため、共有キュー越しに本スレッド側へ受け渡してから処理する。
-    encoded_queue: EncodedQueue,
-    error_slot: ErrorSlot,
-    // 全出力フレームに載せるサンプルエントリー。Arc 共有なので毎フレームの clone は安価。
-    sample_entry: SharedSampleEntry,
+    // 本スレッドで encode() 直後に push_back し、callback スレッドで pop_front する。
+    // Mutex ホールドスコープは push_back / pop_front のみに限定する。
+    input_queue: SharedInputQueue,
     encoded_format: VideoFormat,
-    av1_sequence_header: Vec<u8>,
     force_keyframe_next: bool,
 }
 
-/// shiguredo_nvcodec::Encoder の生成に必要な共有状態とハンドラを構築する
-fn build_handler() -> (
-    shiguredo_nvcodec::FnEncodeHandler<(), shiguredo_nvcodec::Error>,
-    EncodedQueue,
-    ErrorSlot,
-) {
-    let encoded_queue: EncodedQueue = Arc::new(Mutex::new(VecDeque::new()));
-    let error_slot: ErrorSlot = Arc::new(Mutex::new(None));
-    let queue_for_handler = encoded_queue.clone();
-    let error_for_handler = error_slot.clone();
-    let handler = shiguredo_nvcodec::FnEncodeHandler::new(move |result| match result {
-        Ok(frame) => {
-            let mut queue = queue_for_handler
-                .lock()
-                .expect("nvcodec encoded queue lock poisoned");
-            queue.push_back(frame);
+/// shiguredo_nvcodec::Encoder の生成に必要なハンドラを構築する。
+///
+/// callback スレッドで input_queue から pop → Annex B → MP4 変換 (H.264/H.265) または
+/// Sequence Header OBU 付与 (AV1) → sink.emit_ok までを一貫して実施する。
+///
+/// sample_entry と av1_sequence_header は本関数の move クロージャがキャプチャして
+/// 全出力フレームへ載せる責務を負うため、呼び出し元 struct 側では保持しない
+/// (svt_av1 / openh264 / video_toolbox の同期 handle_encoded 型と異なり、
+/// nvcodec は callback 完結型なので struct フィールドとして再参照する必要がない)。
+///
+/// context_slot は Encoder::new 後に呼び出し元が get_sequence_params() から
+/// sample_entry と av1_sequence_header を確定して set() する遅延確定スロット。
+/// callback は shiguredo_nvcodec の worker スレッドが encode() 投入後にしか
+/// 発火させないため、呼び出し元が最初の encode() より前に set() を完了させれば
+/// callback は必ず set 済みの context を参照する (下記 expect は BUG 検出用)。
+fn build_handler(
+    sink: OutputSink,
+    input_queue: SharedInputQueue,
+    context_slot: HandlerContextSlot,
+    encoded_format: VideoFormat,
+) -> shiguredo_nvcodec::FnEncodeHandler<(), shiguredo_nvcodec::Error> {
+    shiguredo_nvcodec::FnEncodeHandler::new(move |result| match result {
+        Ok(encoded_frame) => {
+            let context = context_slot
+                .get()
+                .expect("BUG: HandlerContext must be set before first encode() call");
+            let input_frame = {
+                let mut queue = input_queue
+                    .lock()
+                    .expect("nvcodec input queue lock poisoned");
+                queue.pop_front()
+            };
+            let Some(input_frame) = input_frame else {
+                sink.emit_err(crate::Error::new(
+                    "encoded frame produced without input frame",
+                ));
+                return;
+            };
+
+            // キーフレーム判定
+            let keyframe = matches!(
+                encoded_frame.picture_type(),
+                shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
+            );
+
+            // AV1 の場合は変換不要だが、キーフレームに Sequence Header が含まれていない場合は付与
+            // H.264/H.265 の場合は Annex B から MP4 形式に変換
+            let frame_data = if encoded_format == VideoFormat::Av1 {
+                let (mut data, _) = encoded_frame.into_parts();
+
+                // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与
+                if keyframe && !has_sequence_header(&data) {
+                    // encoded_format == Av1 の分岐に入るのは new_av1 経路のみで、
+                    // そこでは make_context が Some(seq_params) を確定して slot に set する契約。
+                    let av1_sequence_header = context
+                        .av1_sequence_header
+                        .as_deref()
+                        .expect("BUG: AV1 encoder must have av1_sequence_header set");
+                    tracing::debug!(
+                        "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
+                        av1_sequence_header.len(),
+                        data.len()
+                    );
+                    let mut new_data = Vec::new();
+                    new_data.extend_from_slice(av1_sequence_header);
+                    new_data.extend_from_slice(&data);
+                    data = new_data;
+                }
+                data
+            } else {
+                match convert_annexb_to_mp4(encoded_frame.data()) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        sink.emit_err(e);
+                        return;
+                    }
+                }
+            };
+
+            sink.emit_ok(VideoFrame {
+                data: frame_data,
+                format: encoded_format,
+                keyframe,
+                size: input_frame.size,
+                timestamp: input_frame.timestamp,
+                sample_entry: Some(context.sample_entry.clone()),
+            });
         }
         Err(err) => {
-            let mut slot = error_for_handler
-                .lock()
-                .expect("nvcodec error slot lock poisoned");
-            if slot.is_none() {
-                *slot = Some(crate::Error::new(format!("nvcodec encode error: {err}")));
-            }
+            sink.emit_err(crate::Error::new(format!("nvcodec encode error: {err}")));
         }
-    });
-    (handler, encoded_queue, error_slot)
+    })
 }
 
 impl NvcodecEncoder {
-    pub fn new_h264(options: &VideoEncoderOptions) -> crate::Result<Self> {
+    /// codec 別 config を受けて、 handler 準備 → Encoder::new →
+    /// sample_entry 確定までの共通シーケンスを実行する。
+    /// make_context は seq_params から HandlerContext を組み立てる責務で、
+    /// codec 別の sample_entry 生成と av1_sequence_header 中身の差分を吸収する。
+    ///
+    /// 遅延スロット詳解: shiguredo_nvcodec::Encoder::new は handler を consume する
+    /// API のため、 sample_entry を確定するために inner が必要 / inner を作るために
+    /// handler が必要という循環がある。 そこで OnceLock を先に確保して handler に
+    /// キャプチャさせ、 Encoder::new 後に get_sequence_params から HandlerContext を
+    /// 確定して set する。 callback (worker スレッド) は encode() 経由でしか発火
+    /// しないため、 encode() 前に set が完了していれば race free に read できる。
+    fn build_encoder(
+        config: shiguredo_nvcodec::EncoderConfig,
+        sink: OutputSink,
+        encoded_format: VideoFormat,
+        make_context: impl FnOnce(Vec<u8>) -> crate::Result<HandlerContext>,
+    ) -> crate::Result<Self> {
+        let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
+        let handler = build_handler(
+            sink,
+            input_queue.clone(),
+            context_slot.clone(),
+            encoded_format,
+        );
+        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
+
+        let seq_params = inner.get_sequence_params()?;
+        context_slot
+            .set(make_context(seq_params)?)
+            .expect("BUG: HandlerContext must not be set before Encoder::new returns");
+
+        Ok(Self {
+            inner,
+            input_queue,
+            encoded_format,
+            force_keyframe_next: false,
+        })
+    }
+
+    pub fn new_h264(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         tracing::debug!("create nvcodec(H264) encoder: {}x{}", width, height);
@@ -84,25 +198,19 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec h264 encoder config: {config:?}");
 
-        let (handler, encoded_queue, error_slot) = build_handler();
-        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
-        let seq_params = inner.get_sequence_params()?;
-        let sample_entry = h264::h264_sample_entry_from_annexb(&seq_params)?;
-
-        Ok(Self {
-            inner,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            encoded_queue,
-            error_slot,
-            sample_entry: SharedSampleEntry::new(sample_entry),
-            encoded_format: VideoFormat::H264,
-            av1_sequence_header: Vec::new(),
-            force_keyframe_next: false,
+        Self::build_encoder(config, sink, VideoFormat::H264, |seq_params| {
+            let sample_entry =
+                SharedSampleEntry::new(h264::h264_sample_entry_from_annexb(&seq_params)?);
+            // H.264 では callback の分岐 (encoded_format 判定) で av1_sequence_header は
+            // 参照されないため None にする。
+            Ok(HandlerContext {
+                sample_entry,
+                av1_sequence_header: None,
+            })
         })
     }
 
-    pub fn new_h265(options: &VideoEncoderOptions) -> crate::Result<Self> {
+    pub fn new_h265(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         tracing::debug!("create nvcodec(H265) encoder: {}x{}", width, height);
@@ -124,25 +232,20 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec h265 encoder config: {config:?}");
 
-        let (handler, encoded_queue, error_slot) = build_handler();
-        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
-        let seq_params = inner.get_sequence_params()?;
-        let sample_entry = h265::h265_sample_entry_from_annexb(&seq_params, options.frame_rate)?;
-
-        Ok(Self {
-            inner,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            encoded_queue,
-            error_slot,
-            sample_entry: SharedSampleEntry::new(sample_entry),
-            encoded_format: VideoFormat::H265,
-            av1_sequence_header: Vec::new(),
-            force_keyframe_next: false,
+        Self::build_encoder(config, sink, VideoFormat::H265, |seq_params| {
+            let sample_entry = SharedSampleEntry::new(h265::h265_sample_entry_from_annexb(
+                &seq_params,
+                options.frame_rate,
+            )?);
+            // H.265 も av1_sequence_header は参照されないため None にする。
+            Ok(HandlerContext {
+                sample_entry,
+                av1_sequence_header: None,
+            })
         })
     }
 
-    pub fn new_av1(options: &VideoEncoderOptions) -> crate::Result<Self> {
+    pub fn new_av1(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width;
         let height = options.height;
         tracing::debug!(
@@ -168,34 +271,24 @@ impl NvcodecEncoder {
         config.average_bitrate = Some(options.bitrate as u32);
         tracing::debug!("nvcodec av1 encoder config: {config:?}");
 
-        let (handler, encoded_queue, error_slot) = build_handler();
-        let inner = shiguredo_nvcodec::Encoder::new(config, handler)?;
-
-        // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
-        // には以下の記載がある:
-        //   "By default, SPS/PPS and Sequence Header OBU data will be attached to every IDR frame and Key frame for H.264/HEVC and AV1 respectively."
-        //
-        // しかし実際には、AV1の場合、最初のキーフレームにのみ Sequence Header OBU が付与され、
-        // 二番目以降のキーフレームには含まれない。これにより、二番目以降のキーフレームからシークすると、
-        // デコーダが解像度やプロファイルなどの情報を取得できず、映像が再生できない問題が発生する。
-        //
-        // そのため、ここで Sequence Header OBU を get_sequence_params() で取得して保持しておき、
-        // キーフレームのエンコード時に Sequence Header が含まれていない場合は、
-        // hisui 側で明示的に付与するワークアラウンドを実装している。
-        let seq_params = inner.get_sequence_params()?;
-
-        let sample_entry = av1::av1_sample_entry(width, height, &seq_params);
-
-        Ok(Self {
-            inner,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            encoded_queue,
-            error_slot,
-            sample_entry: SharedSampleEntry::new(sample_entry),
-            encoded_format: VideoFormat::Av1,
-            av1_sequence_header: seq_params,
-            force_keyframe_next: false,
+        Self::build_encoder(config, sink, VideoFormat::Av1, |seq_params| {
+            // NVENC SDK 13.0 のドキュメント (https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvenc-video-encoder-api-prog-guide/index.html#retrieving-sequence-parameters)
+            // には以下の記載がある:
+            //   "By default, SPS/PPS and Sequence Header OBU data will be attached to every IDR frame and Key frame for H.264/HEVC and AV1 respectively."
+            //
+            // しかし実際には、AV1 の場合、最初のキーフレームにのみ Sequence Header OBU が付与され、
+            // 二番目以降のキーフレームには含まれない。これにより、二番目以降のキーフレームからシークすると、
+            // デコーダが解像度やプロファイルなどの情報を取得できず、映像が再生できない問題が発生する。
+            //
+            // そのため、ここで Sequence Header OBU を get_sequence_params() で取得して保持しておき、
+            // キーフレームのエンコード時に Sequence Header が含まれていない場合は、
+            // hisui 側で明示的に付与するワークアラウンドを実装している。
+            let sample_entry =
+                SharedSampleEntry::new(av1::av1_sample_entry(width, height, &seq_params));
+            Ok(HandlerContext {
+                sample_entry,
+                av1_sequence_header: Some(seq_params),
+            })
         })
     }
 
@@ -238,6 +331,16 @@ impl NvcodecEncoder {
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
+        // 順序保証: callback で pop する前に必ず push_back する。
+        // flush() は callback 完了までブロックするため、push が先行することが担保される。
+        {
+            let mut queue = self
+                .input_queue
+                .lock()
+                .expect("nvcodec input queue lock poisoned");
+            queue.push_back(video_frame.to_stripped());
+        }
+
         // エンコード実行
         let encode_options = shiguredo_nvcodec::EncodeOptions {
             force_intra: self.force_keyframe_next,
@@ -246,13 +349,11 @@ impl NvcodecEncoder {
         };
         self.force_keyframe_next = false;
         self.inner.encode(&nv12_data, &encode_options, ())?;
-        self.input_queue.push_back(video_frame.to_stripped());
         // shiguredo_nvcodec のエンコーダーは内部の worker スレッドで非同期にエンコードし、
         // encode() は即時 return する。上位パイプラインは同期 pull 型で、上位側でペース制御
         // しないと内部キューが溢れて encode() が "encoder buffer is full" で失敗するため、
         // 投入直後に flush() で 1 フレーム分の完了を待って同期動作させる。
         self.inner.flush()?;
-        self.handle_encoded_frames()?;
         Ok(())
     }
 
@@ -263,113 +364,40 @@ impl NvcodecEncoder {
     pub fn finish(&mut self) -> crate::Result<()> {
         // flush で in-flight 完了を待ち合わせる
         self.inner.flush()?;
-        self.handle_encoded_frames()?;
         Ok(())
-    }
-
-    fn handle_encoded_frames(&mut self) -> crate::Result<()> {
-        // ハンドラ側で記録されたエラーがあれば最優先で返す
-        if let Some(err) = self
-            .error_slot
-            .lock()
-            .expect("nvcodec error slot lock poisoned")
-            .take()
-        {
-            return Err(err);
-        }
-        loop {
-            let encoded_frame = {
-                let mut queue = self
-                    .encoded_queue
-                    .lock()
-                    .expect("nvcodec encoded queue lock poisoned");
-                queue.pop_front()
-            };
-            let Some(encoded_frame) = encoded_frame else {
-                break;
-            };
-            let input_frame = self
-                .input_queue
-                .pop_front()
-                .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
-
-            // キーフレーム判定
-            let keyframe = matches!(
-                encoded_frame.picture_type(),
-                shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
-            );
-
-            // AV1 の場合は変換不要だが、キーフレームに Sequence Header が含まれていない場合は付与
-            // H.264/H.265 の場合は Annex B から MP4 形式に変換
-            let frame_data = if self.encoded_format == VideoFormat::Av1 {
-                let (mut data, _) = encoded_frame.into_parts();
-
-                // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与
-                if keyframe && !self.has_sequence_header(&data) {
-                    tracing::debug!(
-                        "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
-                        self.av1_sequence_header.len(),
-                        data.len()
-                    );
-                    let mut new_data =
-                        Vec::with_capacity(self.av1_sequence_header.len() + data.len());
-                    new_data.extend_from_slice(&self.av1_sequence_header);
-                    new_data.extend_from_slice(&data);
-                    data = new_data;
-                }
-                data
-            } else {
-                convert_annexb_to_mp4(encoded_frame.data())?
-            };
-
-            // VideoFrame を作成
-            self.output_queue.push_back(VideoFrame {
-                data: frame_data,
-                format: self.encoded_format,
-                keyframe,
-                size: input_frame.size,
-                timestamp: input_frame.timestamp,
-                sample_entry: Some(self.sample_entry.clone()),
-            });
-        }
-        Ok(())
-    }
-
-    /// AV1 ペイロードの先頭に Sequence Header OBU が含まれているかチェック
-    fn has_sequence_header(&self, data: &[u8]) -> bool {
-        // 最低限 OBU Header の 1 バイトが必要
-        if data.is_empty() {
-            return false;
-        }
-
-        // 先頭の OBU Header を解析
-        // obu_header のビット構成（LSB 基準）:
-        //   - bit 7: obu_forbidden_bit (常に0)
-        //   - bit 6-3: obu_type
-        //   - bit 2: obu_extension_flag
-        //   - bit 1: obu_has_size_field
-        //   - bit 0: obu_reserved_1bit
-        let obu_header = data[0];
-        let obu_has_extension = (obu_header & 0b0000_0100) != 0;
-
-        // OBU Extension が存在する場合は 2 バイト目も必要
-        if obu_has_extension && data.len() < 2 {
-            return false;
-        }
-
-        let obu_type = (obu_header >> 3) & 0x0F;
-
-        // 先頭が Sequence Header (type=1) なら true
-        obu_type == 1
-    }
-
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
     }
 
     pub fn codec(&self) -> CodecName {
         self.encoded_format.codec_name().expect("infallible")
     }
+}
+
+/// AV1 ペイロードの先頭に Sequence Header OBU が含まれているかチェック
+fn has_sequence_header(data: &[u8]) -> bool {
+    // 最低限 OBU Header の 1 バイトが必要
+    if data.is_empty() {
+        return false;
+    }
+
+    // 先頭の OBU Header を解析
+    // obu_header のビット構成（LSB 基準）:
+    //   - bit 7: obu_forbidden_bit (常に0)
+    //   - bit 6-3: obu_type
+    //   - bit 2: obu_extension_flag
+    //   - bit 1: obu_has_size_field
+    //   - bit 0: obu_reserved_1bit
+    let obu_header = data[0];
+    let obu_has_extension = (obu_header & 0b0000_0100) != 0;
+
+    // OBU Extension が存在する場合は 2 バイト目も必要
+    if obu_has_extension && data.len() < 2 {
+        return false;
+    }
+
+    let obu_type = (obu_header >> 3) & 0x0F;
+
+    // 先頭が Sequence Header (type=1) なら true
+    obu_type == 1
 }
 
 /// Annex B 形式から MP4 形式への変換

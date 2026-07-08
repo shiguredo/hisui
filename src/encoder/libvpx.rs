@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::{
-    encoder::VideoEncoderOptions,
+    encoder::{OutputSink, VideoEncoderOptions},
     sample_entry::SharedSampleEntry,
     types::CodecName,
     video::{
@@ -23,11 +23,11 @@ pub struct LibvpxEncoder {
     sample_entry: SharedSampleEntry,
     keyframe_request_pending: bool,
     input_queue: VecDeque<RawVideoFrame>,
-    output_queue: VecDeque<VideoFrame>,
+    sink: OutputSink,
 }
 
 impl LibvpxEncoder {
-    pub fn new_vp8(options: &VideoEncoderOptions) -> crate::Result<Self> {
+    pub fn new_vp8(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         let config = shiguredo_libvpx::EncoderConfig {
@@ -48,11 +48,11 @@ impl LibvpxEncoder {
             sample_entry: SharedSampleEntry::new(sample_entry),
             keyframe_request_pending: false,
             input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
+            sink,
         })
     }
 
-    pub fn new_vp9(options: &VideoEncoderOptions) -> crate::Result<Self> {
+    pub fn new_vp9(options: &VideoEncoderOptions, sink: OutputSink) -> crate::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
         let config = shiguredo_libvpx::EncoderConfig {
@@ -73,7 +73,7 @@ impl LibvpxEncoder {
             sample_entry: SharedSampleEntry::new(sample_entry),
             keyframe_request_pending: false,
             input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
+            sink,
         })
     }
 
@@ -117,7 +117,7 @@ impl LibvpxEncoder {
                 .input_queue
                 .pop_front()
                 .ok_or_else(|| crate::Error::new("encoded frame produced without input frame"))?;
-            self.output_queue.push_back(VideoFrame {
+            self.sink.emit_ok(VideoFrame {
                 sample_entry: Some(self.sample_entry.clone()),
                 data: frame.data().to_vec(),
                 format: self.format,
@@ -133,10 +133,6 @@ impl LibvpxEncoder {
         Ok(())
     }
 
-    pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
-    }
-
     pub fn request_keyframe(&mut self) {
         self.keyframe_request_pending = true;
     }
@@ -147,7 +143,7 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use super::*;
-    use crate::encoder::test_helpers::raw_i420_frame;
+    use crate::encoder::test_helpers::{make_encoder_sink, raw_i420_frame};
     use crate::types::EvenUsize;
     use crate::video::FrameRate;
 
@@ -167,13 +163,18 @@ mod tests {
         }
     }
 
-    // 全出力フレームに sample_entry が載る不変条件を検証する（issue 0027 の核心）。
-    // 旧実装（self.sample_entry.take()）では 2 フレーム目以降が None になっていた。
-    fn assert_every_output_frame_has_sample_entry(mut encoder: LibvpxEncoder) -> crate::Result<()> {
+    // 全出力フレームに sample_entry が載る不変条件を検証する。
+    // libvpx encoder は sample_entry をコンストラクタで確定し全フレームに載せる設計で、
+    // `self.sample_entry.take()` のような 1 回消費実装だと 2 フレーム目以降が None になる回帰を検出する。
+    fn assert_every_output_frame_has_sample_entry(
+        mut encoder: LibvpxEncoder,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>,
+    ) -> crate::Result<()> {
         let mut output_count = 0;
         for i in 0..10 {
             encoder.encode(raw_i420_frame(i * 33))?;
-            while let Some(frame) = encoder.next_encoded_frame() {
+            while let Ok(result) = rx.try_recv() {
+                let frame = result?;
                 assert!(
                     frame.sample_entry.is_some(),
                     "出力フレームに sample_entry が載っていない"
@@ -182,7 +183,8 @@ mod tests {
             }
         }
         encoder.finish()?;
-        while let Some(frame) = encoder.next_encoded_frame() {
+        while let Ok(result) = rx.try_recv() {
+            let frame = result?;
             assert!(
                 frame.sample_entry.is_some(),
                 "finish 後の出力フレームに sample_entry が載っていない"
@@ -199,11 +201,13 @@ mod tests {
 
     #[test]
     fn libvpx_vp8_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp8(&options())?)
+        let (sink, rx) = make_encoder_sink();
+        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp8(&options(), sink)?, rx)
     }
 
     #[test]
     fn libvpx_vp9_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp9(&options())?)
+        let (sink, rx) = make_encoder_sink();
+        assert_every_output_frame_has_sample_entry(LibvpxEncoder::new_vp9(&options(), sink)?, rx)
     }
 }
