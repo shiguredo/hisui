@@ -28,6 +28,49 @@ pub struct WhisperDecodedChunk {
     pub no_speech_prob: Probability,
 }
 
+/// Whisper プロトコルで固定されている特殊トークンの一式。
+///
+/// リクエストごとに変わらないため、ロード時に一度だけ tokenizer から引いて保持する。
+/// 言語トークンは per-request に変わるため本構造体には含めず、`WhisperDecoder.language_token` で
+/// 別に持つ。
+struct ProtocolTokens {
+    /// SOT (start-of-transcript)。decode 対象トークン列の先頭に積む。
+    sot: u32,
+    /// タスクを「文字起こし」に固定するトークン (`translate` ではなく `transcribe` を選ぶ)。
+    transcribe: u32,
+    /// EOT (end-of-transcript)。このトークンが出た時点で decode ループを終える。
+    eot: u32,
+    /// no_speech トークン。初回 step の logits からこのトークンの確率を取り出し、
+    /// 「発話がない確率 (幻覚判定用)」として上位層に返す。
+    no_speech: u32,
+    /// タイムスタンプトークンの出力を抑止するトークン (時刻は VAD 由来で埋めるため不要)。
+    no_timestamps: u32,
+}
+
+impl ProtocolTokens {
+    /// tokenizer から Whisper の 5 個の固定特殊トークンを一括で引いて構築する。
+    ///
+    /// `no_speech` は `NO_SPEECH_TOKENS` の候補 (`<|nospeech|>` / `<|nocaptions|>` 等) のうち
+    /// tokenizer に存在する最初のものを採る。1 つも見つからなければ Err。
+    fn from_tokenizer(tokenizer: &Tokenizer) -> Result<Self> {
+        let sot = token_id(tokenizer, SOT_TOKEN)?;
+        let transcribe = token_id(tokenizer, TRANSCRIBE_TOKEN)?;
+        let eot = token_id(tokenizer, EOT_TOKEN)?;
+        let no_timestamps = token_id(tokenizer, NO_TIMESTAMPS_TOKEN)?;
+        let no_speech = NO_SPEECH_TOKENS
+            .iter()
+            .find_map(|token| token_id(tokenizer, token).ok())
+            .ok_or_else(|| crate::Error::new("unable to find any non-speech token"))?;
+        Ok(Self {
+            sot,
+            transcribe,
+            eot,
+            no_speech,
+            no_timestamps,
+        })
+    }
+}
+
 /// Whisper 重みと greedy decode ループを 1 worker 分の状態としてまとめた型。
 ///
 /// 内部の `Whisper` は KV cache を持つため 1 スレッド専有。並列化は複数の `WhisperDecoder` を
@@ -37,11 +80,9 @@ pub struct WhisperDecoder {
     config: Config,
     tokenizer: Tokenizer,
     suppress_tokens: Tensor,
-    sot_token: u32,
-    transcribe_token: u32,
-    eot_token: u32,
-    no_speech_token: u32,
-    no_timestamps_token: u32,
+    /// Whisper プロトコルの固定特殊トークン (SOT / transcribe / EOT / no_speech / no_timestamps)。
+    protocol_tokens: ProtocolTokens,
+    /// 現リクエストで使う言語トークン。多言語モデルでは `Some`、非多言語モデルでは `None`。
     language_token: Option<u32>,
 }
 
@@ -74,25 +115,14 @@ impl WhisperDecoder {
         let suppress_tokens = Tensor::new(suppress_tokens.as_slice(), device)
             .map_err(|e| crate::Error::new(format!("suppress_tokens tensor: {e}")))?;
 
-        let sot_token = token_id(&tokenizer, SOT_TOKEN)?;
-        let transcribe_token = token_id(&tokenizer, TRANSCRIBE_TOKEN)?;
-        let eot_token = token_id(&tokenizer, EOT_TOKEN)?;
-        let no_timestamps_token = token_id(&tokenizer, NO_TIMESTAMPS_TOKEN)?;
-        let no_speech_token = NO_SPEECH_TOKENS
-            .iter()
-            .find_map(|token| token_id(&tokenizer, token).ok())
-            .ok_or_else(|| crate::Error::new("unable to find any non-speech token"))?;
+        let protocol_tokens = ProtocolTokens::from_tokenizer(&tokenizer)?;
 
         Ok(Self {
             inner,
             config,
             tokenizer,
             suppress_tokens,
-            sot_token,
-            transcribe_token,
-            eot_token,
-            no_speech_token,
-            no_timestamps_token,
+            protocol_tokens,
             language_token: None,
         })
     }
@@ -141,12 +171,12 @@ impl WhisperDecoder {
         let sample_len = self.config.max_target_positions / 2;
         let mut sum_logprob = 0f64;
         let mut no_speech_prob_raw: Option<f64> = None;
-        let mut tokens = vec![self.sot_token];
+        let mut tokens = vec![self.protocol_tokens.sot];
         if let Some(language_token) = self.language_token {
             tokens.push(language_token);
         }
-        tokens.push(self.transcribe_token);
-        tokens.push(self.no_timestamps_token);
+        tokens.push(self.protocol_tokens.transcribe);
+        tokens.push(self.protocol_tokens.no_timestamps);
 
         for i in 0..sample_len {
             let tokens_t = Tensor::new(tokens.as_slice(), mel.device())
@@ -174,7 +204,7 @@ impl WhisperDecoder {
                 no_speech_prob_raw = Some(f64::from(
                     softmax(&logits, 0)
                         .map_err(candle_err)?
-                        .i(self.no_speech_token as usize)
+                        .i(self.protocol_tokens.no_speech as usize)
                         .map_err(candle_err)?
                         .to_scalar::<f32>()
                         .map_err(candle_err)?,
@@ -212,7 +242,9 @@ impl WhisperDecoder {
                 .to_scalar::<f32>()
                 .map_err(candle_err)? as f64;
 
-            if next_token == self.eot_token || tokens.len() > self.config.max_target_positions {
+            if next_token == self.protocol_tokens.eot
+                || tokens.len() > self.config.max_target_positions
+            {
                 break;
             }
             sum_logprob += prob.ln();
