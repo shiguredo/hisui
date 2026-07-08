@@ -16,12 +16,12 @@ type SharedInputQueue = Arc<Mutex<VecDeque<VideoFrame>>>;
 
 /// callback スレッドが参照する遅延確定コンテキスト。
 /// Encoder::new 後に get_sequence_params() から確定して set() される。
-/// H.264 / H.265 では av1_sequence_header は空 Vec で埋め、
-/// AV1 の分岐でだけ実データが使われる。
+/// av1_sequence_header は AV1 の keyframe に Sequence Header OBU を付与する用途で、
+/// H.264 / H.265 では意味を持たないため None にする (「AV1 のときだけ実データを持つ」を型で明示する)。
 #[derive(Debug)]
 struct HandlerContext {
     sample_entry: SharedSampleEntry,
-    av1_sequence_header: Vec<u8>,
+    av1_sequence_header: Option<Vec<u8>>,
 }
 
 /// callback にキャプチャさせる HandlerContext の遅延確定スロット。
@@ -93,13 +93,19 @@ fn build_handler(
 
                 // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与
                 if keyframe && !has_sequence_header(&data) {
+                    // encoded_format == Av1 の分岐に入るのは new_av1 経路のみで、
+                    // そこでは make_context が Some(seq_params) を確定して slot に set する契約。
+                    let av1_sequence_header = context
+                        .av1_sequence_header
+                        .as_deref()
+                        .expect("BUG: AV1 encoder must have av1_sequence_header set");
                     tracing::debug!(
                         "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
-                        context.av1_sequence_header.len(),
+                        av1_sequence_header.len(),
                         data.len()
                     );
                     let mut new_data = Vec::new();
-                    new_data.extend_from_slice(&context.av1_sequence_header);
+                    new_data.extend_from_slice(av1_sequence_header);
                     new_data.extend_from_slice(&data);
                     data = new_data;
                 }
@@ -196,10 +202,10 @@ impl NvcodecEncoder {
             let sample_entry =
                 SharedSampleEntry::new(h264::h264_sample_entry_from_annexb(&seq_params)?);
             // H.264 では callback の分岐 (encoded_format 判定) で av1_sequence_header は
-            // 参照されないため空 Vec で埋める。
+            // 参照されないため None にする。
             Ok(HandlerContext {
                 sample_entry,
-                av1_sequence_header: Vec::new(),
+                av1_sequence_header: None,
             })
         })
     }
@@ -231,10 +237,10 @@ impl NvcodecEncoder {
                 &seq_params,
                 options.frame_rate,
             )?);
-            // H.265 も av1_sequence_header は参照されないため空 Vec で埋める。
+            // H.265 も av1_sequence_header は参照されないため None にする。
             Ok(HandlerContext {
                 sample_entry,
-                av1_sequence_header: Vec::new(),
+                av1_sequence_header: None,
             })
         })
     }
@@ -281,7 +287,7 @@ impl NvcodecEncoder {
                 SharedSampleEntry::new(av1::av1_sample_entry(width, height, &seq_params));
             Ok(HandlerContext {
                 sample_entry,
-                av1_sequence_header: seq_params,
+                av1_sequence_header: Some(seq_params),
             })
         })
     }
