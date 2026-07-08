@@ -278,7 +278,7 @@ mod tests {
     const CHUNK: u64 = 512;
 
     /// テスト用の閾値。
-    const THRESHOLD: f32 = 0.5;
+    const THRESHOLD: f64 = 0.5;
 
     /// `THRESHOLD` を `Probability` にラップした値。`Probability::new` が const fn なので
     /// const 文脈で組み立てられる。
@@ -295,13 +295,13 @@ mod tests {
     /// 「1 チャンクだけの発話は min_speech 未達 / 3 チャンクぶんは到達」を試せる大きさに設定。
     const MIN_SPEECH: u64 = 3 * CHUNK;
 
-    /// f32 リテラルを `Probability` に変換するテスト用ヘルパー ([0.0, 1.0] 前提)。
-    fn prob(v: f32) -> Probability {
+    /// f64 リテラルを `Probability` に変換するテスト用ヘルパー ([0.0, 1.0] 前提)。
+    fn prob(v: f64) -> Probability {
         Probability::new(v).expect("テスト値は [0.0, 1.0] 前提")
     }
 
     /// SpeechInProgress を組み立てる補助関数。`max_prob` は [0.0, 1.0] であること。
-    fn speech(start: u64, last_end: u64, max_prob: f32) -> SpeechInProgress {
+    fn speech(start: u64, last_end: u64, max_prob: f64) -> SpeechInProgress {
         SpeechInProgress {
             start_sample: start,
             last_speech_end_sample: last_end,
@@ -310,7 +310,7 @@ mod tests {
     }
 
     /// advance_state を固定パラメタで呼び出す補助関数。`probability` は [0.0, 1.0] であること。
-    fn step(state: State, probability: f32, chunk_start: u64) -> (State, Vec<SpeechSegment>) {
+    fn step(state: State, probability: f64, chunk_start: u64) -> (State, Vec<SpeechSegment>) {
         let chunk_end = chunk_start + CHUNK;
         let mut results = Vec::new();
         let config = TransitionConfig {

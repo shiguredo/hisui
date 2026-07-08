@@ -3,16 +3,18 @@
 /// `[0.0, 1.0]` の範囲内であることが型で保証された確率値。
 ///
 /// - コンストラクタ `new` は範囲外 (負値、1.0 超、NaN、Inf) のとき `None` を返す
-/// - `get` で内部の `f32` を取り出せる (比較演算や外部 API に渡すときに使う)
+/// - `get` で内部の `f64` を取り出せる (比較演算や外部 API に渡すときに使う)
 /// - VAD の閾値・発話確率、YOLO の confidence、CLIP の類似度など、確率的な指標を型で表す
+/// - 内部型を f64 にしてある理由は、ML 推論エンジンが accumulator に f64 を採ることが多く、
+///   境界で narrowing しないほうが素直に扱えるため。呼び出し側で f32 が要れば `get() as f32` する
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Probability(f32);
+pub struct Probability(f64);
 
 impl Probability {
     /// `[0.0, 1.0]` の範囲内なら `Some` を返す。NaN・Inf・範囲外はすべて `None`。
     ///
     /// NaN は `>= 0.0` と `<= 1.0` の両方が false になるため、自然に弾かれる。
-    pub const fn new(v: f32) -> Option<Self> {
+    pub const fn new(v: f64) -> Option<Self> {
         if v >= 0.0 && v <= 1.0 {
             Some(Self(v))
         } else {
@@ -20,20 +22,20 @@ impl Probability {
         }
     }
 
-    /// 内部の `f32` を取り出す。
-    pub const fn get(self) -> f32 {
+    /// 内部の `f64` を取り出す。
+    pub const fn get(self) -> f64 {
         self.0
     }
 }
 
 // `[0.0, 1.0]` の有限値のみを許容するため、Probability には全順序が定義できる。
-// f32 は NaN のため `Eq` / `Ord` を実装しないが、Probability は NaN を排除しているので impl できる。
+// f64 は NaN のため `Eq` / `Ord` を実装しないが、Probability は NaN を排除しているので impl できる。
 // `PartialOrd` は `Ord::cmp` に委譲して両者の整合性 (clippy::derive_ord_xor_partial_ord) を保つ。
 impl Eq for Probability {}
 
 impl Ord for Probability {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Probability は有限値のみを許容するため `f32::partial_cmp` は必ず `Some` を返す。
+        // Probability は有限値のみを許容するため `f64::partial_cmp` は必ず `Some` を返す。
         self.0
             .partial_cmp(&other.0)
             .expect("Probability は有限値のみを許容するので全順序")
@@ -64,14 +66,14 @@ mod tests {
     fn new_rejects_out_of_range_values() {
         assert_eq!(Probability::new(-0.0001), None);
         assert_eq!(Probability::new(1.0001), None);
-        assert_eq!(Probability::new(f32::NAN), None);
-        assert_eq!(Probability::new(f32::INFINITY), None);
-        assert_eq!(Probability::new(f32::NEG_INFINITY), None);
+        assert_eq!(Probability::new(f64::NAN), None);
+        assert_eq!(Probability::new(f64::INFINITY), None);
+        assert_eq!(Probability::new(f64::NEG_INFINITY), None);
     }
 
-    /// PartialOrd は内部 f32 の比較と一致する。
+    /// PartialOrd は内部 f64 の比較と一致する。
     #[test]
-    fn partial_ord_matches_inner_f32() {
+    fn partial_ord_matches_inner_f64() {
         let low = Probability::new(0.3).expect("有効");
         let mid = Probability::new(0.5).expect("有効");
         let high = Probability::new(0.7).expect("有効");
