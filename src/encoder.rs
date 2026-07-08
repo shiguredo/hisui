@@ -460,12 +460,9 @@ pub async fn request_upstream_video_keyframe(
 
 /// 内部チャンネルベースの映像エンコーダー
 ///
-/// エンコーダー本体で、 processor 経路 (`AsyncVideoEncoder::run` および wrap 型
-/// `VideoEncoder` の同名メソッド) から `handle_input_sample_sync` / `poll_output_sync` /
-/// `handle_rpc_message_sync` 等の `_sync` 付き内部 API 経由で同期駆動される。 wrap 側は
-/// 同名の非 `_sync` API (`handle_input_sample` / `poll_output`) を露出し、 内部で本
-/// struct の `_sync` 版に delegate する。 直接利用するときは `next_encoded_frame_async`
-/// で非同期に取得する。
+/// processor 経路 (`run`) からは `handle_input_sample_sync` / `poll_output_sync` /
+/// `handle_rpc_message_sync` 等の `_sync` 付き内部 API 経由で同期駆動する。 pull 型で
+/// 直接利用するときは `next_encoded_frame_async` で非同期に取得する。
 ///
 /// **注意**: 非同期な内部エンコーダー (Nvcodec 等) 使用時、 `AsyncVideoEncoder` を
 /// drop する前に必ずエンコード結果を drain し切ること。 drop 順は「`inner` を先に
@@ -678,8 +675,7 @@ impl AsyncVideoEncoder {
         engines
     }
 
-    /// processor 経路 (`AsyncVideoEncoder::run` および wrap 型 `VideoEncoder` の同名
-    /// メソッド) の RPC 腕から呼び出される同期 RPC ハンドラ。
+    /// processor 経路 (`run`) の RPC 腕から呼び出される同期 RPC ハンドラ。
     ///
     /// 現状扱う RPC は `RequestKeyframe` のみで、 受信時に
     /// `total_video_keyframe_request_count` メトリクスを inc し、
@@ -756,10 +752,12 @@ impl AsyncVideoEncoder {
         self.rx.recv().await
     }
 
-    /// processor モデル (`ProcessorHandle` + subscribe / publish) で `AsyncVideoEncoder` を
-    /// 駆動する。 wrap 型 `VideoEncoder` の同名メソッドの 2 腕 `tokio::select!` (入力 + RPC) を
-    /// wrap を介さず自身の `_sync` API (`handle_input_sample_sync` / `poll_output_sync` /
-    /// `handle_rpc_message_sync`) を直接呼ぶ形に書き直したもの。 挙動は wrap 側と完全一致。
+    /// processor モデル (`ProcessorHandle` + subscribe / publish) 用の駆動 API。
+    ///
+    /// 入力トラックを subscribe し、 `_sync` API の drain ループでエンコード結果を
+    /// 出力トラックへ流す。 上流からの keyframe 要求 RPC を受け取るため、
+    /// `register_rpc_sender` で unbounded channel を登録した上で入力と RPC の 2 腕
+    /// `tokio::select!` を回す。
     pub async fn run(
         mut self,
         handle: ProcessorHandle,
@@ -768,12 +766,6 @@ impl AsyncVideoEncoder {
     ) -> Result<()> {
         let mut input_rx = handle.subscribe_track(input_track_id);
         let mut output_tx = handle.publish_track(output_track_id).await?;
-        // register_rpc_sender は subscribe / publish の後、 notify_ready / wait_subscribers_ready
-        // の前に呼ぶ (wrap 側と同順序)。 削ると上流 `request_upstream_video_keyframe` が
-        // Err を返して各下流 (sora_publisher / mp4/hybrid_writer / mp4/writer / rtmp/outbound_endpoint
-        // / hls/writer / dash/writer の 6 site) で warn ログ + keyframe 未到達 degrade になる。
-        // RegisterProcessorRpcSenderError は crate::Error への From 実装がないため .map_err で
-        // 明示的に変換する (PublishTrackError / PipelineTerminated は From 実装があるので ? のみで足りる)。
         let (rpc_tx, mut rpc_rx) = tokio::sync::mpsc::unbounded_channel();
         handle
             .register_rpc_sender(rpc_tx)
@@ -790,14 +782,8 @@ impl AsyncVideoEncoder {
                     match message {
                         Message::Media(sample) => self.handle_input_sample_sync(Some(sample))?,
                         Message::Eos => self.handle_input_sample_sync(None)?,
-                        // Syn は末端到達確認用の制御メッセージ。 encoder は track 同期に関与しない
-                        // ため、 何もせず drop するのみ (下流に転送しない)。 drop 契機で `Syn` 内部の
-                        // `Sender<()>` が破棄され、 送信側の `Ack.rx.recv()` が完了する。
                         Message::Syn(_) => {}
                     }
-                    // 1 サンプル入力で 0〜N frame 出力する inner に対応するため Pending / Finished
-                    // まで drain する。 N は inner ごとに異なる (Openh264 / VideoToolbox は 0〜2、
-                    // Nvcodec は callback 経路で任意数)。
                     loop {
                         match self.poll_output_sync()? {
                             EncoderRunOutput::Processed(sample) => {
@@ -813,10 +799,6 @@ impl AsyncVideoEncoder {
                             }
                         }
                     }
-                    // wrap 側と挙動一致の防御コード。 handle_input_sample_sync(None) で
-                    // self.eos = true にした後、 上の内側 loop で poll_output_sync の Empty 分岐が
-                    // self.eos を見て Finished を返す実装のため実行時到達不能だが、 wrap 側と
-                    // 挙動を揃えて残す。
                     if is_eos {
                         return Err(Error::new("video encoder still pending after EOS"));
                     }
@@ -824,10 +806,6 @@ impl AsyncVideoEncoder {
                 rpc_message = recv_video_encoder_rpc_message_or_pending(
                     rpc_rx_enabled.then_some(&mut rpc_rx)
                 ) => {
-                    // rpc_rx の disconnect (None 受信) は wrap 側と同じく flag off で吸収し、
-                    // std::future::pending() 化することで tokio::select! の RPC 腕をロックしない
-                    // ようにする。 break にすると入力腕まで抜けて eos 未処理で return する経路が
-                    // 増えるため flag off + continue を維持する。
                     let Some(rpc_message) = rpc_message else {
                         rpc_rx_enabled = false;
                         continue;
