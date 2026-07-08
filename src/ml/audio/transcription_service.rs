@@ -1,7 +1,6 @@
-//! Whisper ワーカープール。
+//! Whisper 推論を単一の blocking worker で受け付けるサービス。
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use candle_transformers::models::whisper::{LOGPROB_THRESHOLD, NO_SPEECH_THRESHOLD};
 use tokio::sync::{mpsc, oneshot};
@@ -37,34 +36,21 @@ struct Job {
     reply_tx: oneshot::Sender<crate::Result<TranscriptResult>>,
 }
 
-/// Whisper モデルを M 個持つワーカープール。
+/// Whisper 推論を単一の blocking worker で処理するサービス。
+///
+/// candle CPU 推論は既定でホスト物理コア数まで並列化するため、hisui 側で worker を複数持つと
+/// per-decode の並列度がコア競合で相殺される。実効スループットは「1 worker + `RAYON_NUM_THREADS`
+/// を絞らない」で頭打ちになるので、pool 化は行わない (将来並列化が必要になれば復活させる)。
 pub struct TranscriptionService {
     tx: mpsc::Sender<Job>,
 }
 
 impl TranscriptionService {
-    pub fn new<P: AsRef<Path>>(
-        model_dir: P,
-        device: candle_core::Device,
-        workers: usize,
-    ) -> crate::Result<Self> {
-        if workers == 0 {
-            return Err(crate::Error::new(
-                "transcription workers must be greater than zero",
-            ));
-        }
-
+    pub fn new<P: AsRef<Path>>(model_dir: P, device: candle_core::Device) -> crate::Result<Self> {
         let model_dir = model_dir.as_ref().to_path_buf();
-        let pipelines = (0..workers)
-            .map(|_| WhisperPipeline::load(&model_dir, device.clone()))
-            .collect::<crate::Result<Vec<_>>>()?;
-        let (tx, rx) = mpsc::channel(workers * 2);
-        let shared_rx = Arc::new(Mutex::new(rx));
-
-        for pipeline in pipelines {
-            spawn_worker(Arc::clone(&shared_rx), pipeline, model_dir.clone());
-        }
-
+        let pipeline = WhisperPipeline::load(&model_dir, device)?;
+        let (tx, rx) = mpsc::channel(2);
+        spawn_worker(rx, pipeline, model_dir);
         Ok(Self { tx })
     }
 
@@ -84,22 +70,9 @@ impl TranscriptionService {
     }
 }
 
-fn spawn_worker(
-    shared_rx: Arc<Mutex<mpsc::Receiver<Job>>>,
-    mut pipeline: WhisperPipeline,
-    model_dir: PathBuf,
-) {
+fn spawn_worker(mut rx: mpsc::Receiver<Job>, mut pipeline: WhisperPipeline, model_dir: PathBuf) {
     tokio::task::spawn_blocking(move || {
-        loop {
-            let job = {
-                let mut rx = shared_rx
-                    .lock()
-                    .expect("transcription worker receiver mutex must not be poisoned");
-                rx.blocking_recv()
-            };
-            let Some(job) = job else {
-                break;
-            };
+        while let Some(job) = rx.blocking_recv() {
             let result = transcribe_job(&mut pipeline, job.request).map_err(|e| {
                 e.with_context(format!(
                     "transcription worker failed for model {}",

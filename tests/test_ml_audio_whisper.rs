@@ -222,11 +222,11 @@ fn whisper_pipeline_transcribes_japanese_fixture() {
 /// 不在ディレクトリでは TranscriptionService::new が Err を返す。
 #[tokio::test(flavor = "current_thread")]
 async fn transcription_service_returns_err_for_missing_model_dir() {
-    let err =
-        match TranscriptionService::new(Path::new("/nonexistent/whisper-model"), Device::Cpu, 1) {
-            Ok(_) => panic!("不在モデルディレクトリは Err を返す想定"),
-            Err(err) => err,
-        };
+    let err = match TranscriptionService::new(Path::new("/nonexistent/whisper-model"), Device::Cpu)
+    {
+        Ok(_) => panic!("不在モデルディレクトリは Err を返す想定"),
+        Err(err) => err,
+    };
     let message = err.display();
     assert!(
         message.contains("missing") || message.contains("model directory"),
@@ -249,11 +249,7 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
     };
 
     let silero = SileroVadModel::load(&silero_model_path, Device::Cpu).expect("Silero ロード");
-    let service = Arc::new(TranscriptionService::new(
-        &whisper_model_dir,
-        Device::Cpu,
-        1,
-    )?);
+    let service = Arc::new(TranscriptionService::new(&whisper_model_dir, Device::Cpu)?);
     let mut input_frames =
         load_pcm16le_mono_audio_frames("testdata/speech-en-16k-mono-s16le.pcm", 4000)?;
     input_frames.truncate(2 * TARGET_SAMPLE_RATE / 4000);
