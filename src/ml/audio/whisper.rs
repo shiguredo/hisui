@@ -39,7 +39,7 @@ impl WhisperPipeline {
             .map_err(|e| crate::Error::new(format!("load tokenizer: {e}")))?;
         let mel_filters = load_mel_filters(config.num_mel_bins)?;
         let decoder = WhisperDecoder::load(
-            &model_dir.join("model.safetensors"),
+            model_dir.join("model.safetensors"),
             config,
             tokenizer,
             &candle_device,

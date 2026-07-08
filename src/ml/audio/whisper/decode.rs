@@ -7,6 +7,8 @@
 //! candle の `Whisper` は KV cache を内部に持つ mutable な状態機のため、複数スレッドで共有せず、
 //! 利用者 (worker) ごとに個別ロードする。
 
+use std::path::Path;
+
 use candle_core::{D, IndexOp, Tensor};
 use candle_nn::{VarBuilder, ops::softmax};
 use candle_transformers::models::whisper::{
@@ -89,12 +91,13 @@ pub struct WhisperDecoder {
 impl WhisperDecoder {
     /// Hugging Face の safetensors 形式 (拡張子 `.safetensors`) の重みと config・tokenizer から
     /// `WhisperDecoder` を組み立てる。
-    pub fn load(
-        weights_path: &std::path::Path,
+    pub fn load<P: AsRef<Path>>(
+        weights_path: P,
         config: Config,
         tokenizer: Tokenizer,
         device: &candle_core::Device,
     ) -> Result<Self> {
+        let weights_path = weights_path.as_ref();
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, device).map_err(|e| {
                 crate::Error::new(format!("failed to load whisper safetensors weights: {e}"))
