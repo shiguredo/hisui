@@ -249,6 +249,8 @@ RPC keyframe 経路 (`register_rpc_sender` → `handle_rpc_message_sync` → 次
 
 上記 3 手段いずれも成立せず、 かつ本 issue のスコープでは対応が難しいと判断した場合は、 本 issue の実装 PR 完了時に issue 本文 §テスト戦略末尾に「残懸念: RPC 経路の回帰は既存 e2e では検出できない (根拠 = 手段 1 で発火せず / 手段 2 で assert 追加のスコープ超え / 手段 3 は integration test 化コスト超過、 のいずれか)」を追記して close する (残懸念は close 時に必ず 1 文で明記、 別 issue 化はしない)。 wrap 削除 + rename issue の起票時 (別 Decision Owner の可能性あり) に、 起票者が本 issue の残懸念記述を確認し、 必要と判断すれば起票 issue の完了条件に組み込む。 本 issue から起票 issue の完了条件を先に指定しない。
 
+**残懸念**: RPC 経路の回帰は既存 e2e では検出できない (根拠 = 手段 2 の `total_video_keyframe_request_count` メトリクス assert が既存 e2e に 0 件 (`rg 'total_video_keyframe_request_count' tests/` 実測済み)、 手段 3 の新規 integration test は `register_rpc_sender` の実 pipeline 依存とモック禁止規約により実質 e2e 相当のコストで本 issue の refactor スコープ超過。 手段 1 の RUST_LOG 目視での発火経路は compose 経路の `mp4/writer.rs:859` 経由でコード上明確に存在するが、 発火時の実測は本 issue では未実施。 vmaf 経路は mp4 / hls / dash / rtmp / sora_publisher writer 群を pipeline に含まないため RPC keyframe 経路自体を触らない)。 wrap 削除 + rename issue の起票時に、 起票者が本項を確認して必要と判断すれば起票 issue の完了条件に組み込む。
+
 ## 完了条件
 
 - `pub async fn run(mut self, handle: ProcessorHandle, input_track_id: TrackId, output_track_id: TrackId) -> Result<()>` が `src/encoder.rs` の既存 `impl AsyncVideoEncoder` (`:502-756`) 内に追加され、 §「### 決定事項 (実装で覆さない)」に列挙した 3 要素を含む docstring が付与されている (docstring 内に issue 番号を含めない)
