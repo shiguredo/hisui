@@ -50,6 +50,11 @@ pub(crate) fn make_encoder_sink_with_counters() -> (
     let total_output = stats.counter("test_total_output");
     let total_keyframe = stats.counter("test_total_keyframe");
     // counter は Arc 内部の Clone なので、 sink 側と外部観測側で同一インスタンスを共有する。
-    let sink = OutputSink::new(tx, total_output.clone(), total_keyframe.clone());
+    // struct literal で field 名指定にして、 同型 StatsCounter 2 個の取り違えバグを防ぐ。
+    let sink = OutputSink {
+        tx,
+        total_output_metric: total_output.clone(),
+        total_output_keyframe_metric: total_keyframe.clone(),
+    };
     (sink, rx, total_output, total_keyframe)
 }

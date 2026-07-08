@@ -396,18 +396,6 @@ pub struct OutputSink {
 }
 
 impl OutputSink {
-    pub fn new(
-        tx: EncoderOutputSender,
-        total_output_metric: crate::stats::StatsCounter,
-        total_output_keyframe_metric: crate::stats::StatsCounter,
-    ) -> Self {
-        Self {
-            tx,
-            total_output_metric,
-            total_output_keyframe_metric,
-        }
-    }
-
     /// 出力フレームを 1 件送信し、 `total_output_metric` と (keyframe の場合) `total_output_keyframe_metric` を増分する。
     pub fn emit_ok(&self, frame: VideoFrame) {
         // keyframe フラグは send 前に取り出す。 VideoFrame は data: Vec<u8> を持ち Clone は
@@ -541,11 +529,13 @@ impl AsyncVideoEncoder {
         let error_flag = compose_stats.flag("error");
         error_flag.set(false);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let sink = OutputSink::new(
+        // 同型 StatsCounter が 2 個並ぶため、 位置引数の new より field 名指定の struct literal で
+        // total と keyframe の取り違えバグを防ぐ (回避先は encoder モジュール内の 3 箇所に限定される)。
+        let sink = OutputSink {
             tx,
-            total_output_video_frame_count_metric,
-            total_output_video_keyframe_count_metric,
-        );
+            total_output_metric: total_output_video_frame_count_metric,
+            total_output_keyframe_metric: total_output_video_keyframe_count_metric,
+        };
         Ok(Self {
             engine_metric,
             codec_metric,
