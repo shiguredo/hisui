@@ -12,7 +12,7 @@ use shiguredo_vmaf::{BuiltinModel, Context, ContextConfig, Model, Picture, Pooli
 use crate::{
     Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, Result, TrackId,
     decoder::{VideoDecoder, VideoDecoderOptions},
-    encoder::VideoEncoder,
+    encoder::AsyncVideoEncoder,
     media::MediaFrame,
     sora::recording_layout::Layout,
     sora::recording_reader::VideoReader,
@@ -453,7 +453,7 @@ async fn setup_vmaf_pipeline(
         crate::ProcessorMetadata::new(encoder_processor_type),
         move |handle| async move {
             let encoder =
-                VideoEncoder::new(&encoder_options, openh264_lib_for_encoder, handle.stats())?;
+                AsyncVideoEncoder::new(&encoder_options, openh264_lib_for_encoder, handle.stats())?;
             encoder
                 .run(
                     handle,
