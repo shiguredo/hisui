@@ -378,6 +378,7 @@ pub(crate) type EncoderOutputReceiver =
 ///
 /// `unreachable!()` 検出契約: シンクと `rx` は `VideoEncoder` 内で同居するため、
 /// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
+/// 同じ不変条件により、 `poll_output` の `Disconnected` 分岐も `unreachable!()` で潰す。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
     tx: EncoderOutputSender,
@@ -458,18 +459,17 @@ pub async fn request_upstream_video_keyframe(
     Ok(())
 }
 
-/// 内部チャンネルベースの映像エンコーダー
+/// `handle_input_sample` / `poll_output` で同期駆動する映像エンコーダー
 ///
-/// processor 経路 (`run`) からは `handle_input_sample` / `poll_output` /
-/// `handle_rpc_message` 経由で同期駆動する。 pull 型で直接利用するときは
-/// `next_encoded_frame` で非同期に取得する。
+/// processor 経路 (`run`) および integration test から呼び出す。 内部チャンネルの詳細は
+/// `OutputSink` docstring 参照。
 ///
-/// **注意**: 非同期な内部エンコーダー (Nvcodec 等) 使用時、 `VideoEncoder` を
-/// drop する前に必ずエンコード結果を drain し切ること。 drop 順は「`inner` を先に
-/// drop → callback スレッドが `sink.emit_ok` した最後の 1 フレームが `rx` に届く
-/// → その後 `rx` を drop」で成立するが、 未 drain の状態で drop すると
-/// `total_output_video_frame_count` メトリクスが実際の出力数より少ない値のまま
-/// 観測される (メトリクスは inner 内で inc されるが、 未回収の frame は下流には流れない)。
+/// **注意**: 非同期な内部エンコーダー (Nvcodec 等) 使用時、 `VideoEncoder` を drop する前に
+/// エンコード結果を drain し切ること。 drop 順は「`inner` を先に drop → callback スレッドが
+/// `sink.emit_ok` した最後の 1 フレームが `rx` に届く → その後 `rx` を drop」で成立するが、
+/// 未 drain の状態で drop すると `total_output_video_frame_count` メトリクスが実際の
+/// 出力数より少ない値のまま観測される (メトリクスは inner 内で inc されるが、 未回収の
+/// frame は下流には流れない)。
 #[derive(Debug)]
 pub struct VideoEncoder {
     engine_metric: crate::stats::StatsString,
@@ -694,7 +694,11 @@ impl VideoEncoder {
         }
     }
 
-    /// processor 経路 (`run`) から呼ぶ同期入力 API
+    /// processor 経路 (`run`) および integration test から呼ぶ同期入力 API。
+    ///
+    /// `inner.encode()` / `inner.finish()` 内で発生した同期 `Err` は `?` 直返しで同期返却する。
+    /// 内部エンコーダーのコールバック等で非同期に発生した `Err` は `sink.emit_err()` 経由で
+    /// チャンネルに流れ、 後続の `poll_output` の `try_recv` で受信される。
     pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
@@ -723,7 +727,11 @@ impl VideoEncoder {
         Ok(())
     }
 
-    /// processor 経路 (`run`) から呼ぶ同期 poll
+    /// processor 経路 (`run`) および integration test から呼ぶ同期 poll。
+    ///
+    /// `try_recv` の結果を射影する: `Ok(Ok)` → `Processed`、 `Ok(Err)` → `Err`、
+    /// `Empty` は `eos` と組み合わせて `Finished` (eos) / `Pending` (非 eos)、
+    /// `Disconnected` は構造上到達不能で `unreachable!()`。
     pub fn poll_output(&mut self) -> Result<EncoderRunOutput> {
         match self.rx.try_recv() {
             Ok(Ok(frame)) => Ok(EncoderRunOutput::Processed(MediaFrame::video(frame))),
@@ -817,6 +825,10 @@ impl VideoEncoder {
     }
 }
 
+/// `VideoEncoder::run` の 2 腕 `tokio::select!` から呼ぶ RPC 受信 helper。
+///
+/// `rpc_rx` が `Some` なら受信を待ち、 `None` なら `std::future::pending()` に落ちて
+/// select! の RPC 腕を実質無効化する (disconnect 後の入力腕優先を維持するため)。
 async fn recv_video_encoder_rpc_message_or_pending(
     rpc_rx: Option<&mut tokio::sync::mpsc::UnboundedReceiver<VideoEncoderRpcMessage>>,
 ) -> Option<VideoEncoderRpcMessage> {
@@ -1135,7 +1147,7 @@ mod tests {
         }
     }
 
-    // ---- R-2: OutputSink 契約テスト ----
+    // ---- OutputSink 契約テスト ----
     // encoder 版 OutputSink は decoder 版と異なり keyframe 判定と 2 counter の
     // 同時 inc を持つ。 既存の sample_entry テストは raw_i420_frame が全入力
     // keyframe=true (test_helpers::raw_i420_frame) のため keyframe 分岐の
@@ -1235,7 +1247,7 @@ mod tests {
         sink.emit_ok(compressed_video_frame(true));
     }
 
-    // ---- R-3: VideoEncoder::poll_output 分岐テスト ----
+    // ---- VideoEncoder::poll_output 分岐テスト ----
     // inner=None のまま sink 経由で rx にメッセージを流し込んで
     // poll_output の分岐 (Processed / Err / Pending / Finished) を検証する。
     // Disconnected 分岐は sink と rx が VideoEncoder 内で同居する構造上
@@ -1308,13 +1320,11 @@ mod tests {
         );
     }
 
-    // ---- I-12: next_encoded_frame の pub 契約テスト ----
-    // poll_output 側 (sync 経路) は上記 4 件でカバー済みだが、
-    // pub async fn next_encoded_frame は async 経路の入口で、
-    // 現状テストが 0 件。 sink.emit_ok / emit_err の受信が非同期でも
-    // 正しく届くことを固定する (rx が閉じた時の None 分岐は、 sink が
-    // VideoEncoder 内で field 所有される構造上 public API では
-    // 再現できないため対象外)。
+    // ---- next_encoded_frame の pub 契約テスト ----
+    // pub async fn next_encoded_frame の async 経路について、
+    // sink.emit_ok / emit_err の受信が非同期でも正しく届くことを固定する
+    // (rx が閉じた時の None 分岐は、 sink が VideoEncoder 内で field 所有される
+    // 構造上 public API では再現できないため対象外)。
 
     #[tokio::test]
     async fn next_encoded_frame_returns_frame_after_emit_ok() {
