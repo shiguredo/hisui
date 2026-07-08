@@ -256,7 +256,7 @@ impl ProcessorState {
         output_tx: &mut crate::TrackPublisher,
     ) -> crate::Result<()> {
         let result = pending.result_task.await??;
-        if result.text.is_empty() {
+        if result.is_likely_no_speech() || result.text.is_empty() {
             return Ok(());
         }
 

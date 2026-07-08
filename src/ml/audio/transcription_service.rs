@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use candle_transformers::models::whisper::{LOGPROB_THRESHOLD, NO_SPEECH_THRESHOLD};
 use tokio::sync::{mpsc, oneshot};
 
 use super::whisper::{WhisperPipeline, WhisperTranscription};
@@ -21,6 +22,14 @@ pub struct TranscriptResult {
     pub language: Option<String>,
     pub no_speech_prob: f32,
     pub avg_logprob: f32,
+}
+
+impl TranscriptResult {
+    /// 詳細は `crate::ml::audio::whisper::decode::WhisperDecodedChunk::is_likely_no_speech` を参照。
+    pub fn is_likely_no_speech(&self) -> bool {
+        f64::from(self.no_speech_prob) > NO_SPEECH_THRESHOLD
+            && f64::from(self.avg_logprob) < LOGPROB_THRESHOLD
+    }
 }
 
 struct Job {

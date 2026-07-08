@@ -30,6 +30,18 @@ pub struct WhisperDecodedChunk {
     pub no_speech_prob: Probability,
 }
 
+impl WhisperDecodedChunk {
+    /// 「発話がない (hallucination の可能性が高い)」と判定できるかを返す。
+    ///
+    /// candle の閾値 `NO_SPEECH_THRESHOLD` (= 0.6) を `no_speech_prob` が上回り、かつ
+    /// `LOGPROB_THRESHOLD` (= -1.0) を `avg_logprob` が下回ったときに真。閾値を独自に
+    /// 調整したい場合は `no_speech_prob` / `avg_logprob` を直接見て判定する。
+    pub fn is_likely_no_speech(&self) -> bool {
+        self.no_speech_prob.get() > NO_SPEECH_THRESHOLD
+            && self.avg_logprob.get() < LOGPROB_THRESHOLD
+    }
+}
+
 /// Whisper プロトコルで固定されている特殊トークンの一式。
 ///
 /// リクエストごとに変わらないため、ロード時に一度だけ tokenizer から引いて保持する。
@@ -149,22 +161,9 @@ impl WhisperDecoder {
 
     /// 1 チャンク (mel) を decode する。
     ///
-    /// no_speech ガード: `no_speech_prob > 0.6` かつ `avg_logprob < -1.0` の場合は
-    /// 幻覚の可能性が高いため text を空にして返す (品質指標はそのまま返す)。
+    /// hallucination の可能性がある結果もそのまま返す (text を空にしない)。呼び出し側は
+    /// `WhisperDecodedChunk::is_likely_no_speech` で判定し、必要に応じて破棄する。
     pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
-        let dr = self.decode_segment(mel)?;
-        if dr.no_speech_prob.get() > NO_SPEECH_THRESHOLD && dr.avg_logprob.get() < LOGPROB_THRESHOLD
-        {
-            return Ok(WhisperDecodedChunk {
-                text: String::new(),
-                avg_logprob: dr.avg_logprob,
-                no_speech_prob: dr.no_speech_prob,
-            });
-        }
-        Ok(dr)
-    }
-
-    fn decode_segment(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
         let audio_features = self
             .inner
             .encoder

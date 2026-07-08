@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use candle_core::Tensor;
-use candle_transformers::models::whisper::{Config, audio};
+use candle_transformers::models::whisper::{Config, LOGPROB_THRESHOLD, NO_SPEECH_THRESHOLD, audio};
 use tokenizers::Tokenizer;
 
 pub mod decode;
@@ -18,6 +18,14 @@ pub struct WhisperTranscription {
     pub language: Option<String>,
     pub no_speech_prob: f32,
     pub avg_logprob: f32,
+}
+
+impl WhisperTranscription {
+    /// 詳細は `WhisperDecodedChunk::is_likely_no_speech` を参照。
+    pub fn is_likely_no_speech(&self) -> bool {
+        f64::from(self.no_speech_prob) > NO_SPEECH_THRESHOLD
+            && f64::from(self.avg_logprob) < LOGPROB_THRESHOLD
+    }
 }
 
 /// 1 worker 専用の Whisper 推論器。
