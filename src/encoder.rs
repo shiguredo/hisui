@@ -43,7 +43,6 @@ use crate::{
 #[derive(Debug)]
 pub struct AudioEncoder {
     total_audio_data_count_metric: crate::stats::StatsCounter,
-    _error_flag: crate::stats::StatsFlag,
     encoded: VecDeque<AudioFrame>,
     eos: bool,
     converter: AudioConverter,
@@ -94,11 +93,8 @@ impl AudioEncoder {
             .set(EngineName::Opus.as_str());
         compose_stats.string("codec").set(CodecName::Opus.as_str());
         let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
-        let error_flag = compose_stats.flag("error");
-        error_flag.set(false);
         Ok(Self {
             total_audio_data_count_metric,
-            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             converter: default_audio_converter(),
@@ -117,11 +113,8 @@ impl AudioEncoder {
             .set(EngineName::FdkAac.as_str());
         compose_stats.string("codec").set(CodecName::Aac.as_str());
         let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
-        let error_flag = compose_stats.flag("error");
-        error_flag.set(false);
         Ok(Self {
             total_audio_data_count_metric,
-            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             converter: default_audio_converter(),
@@ -139,11 +132,8 @@ impl AudioEncoder {
             .set(EngineName::AudioToolbox.as_str());
         compose_stats.string("codec").set(CodecName::Aac.as_str());
         let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
-        let error_flag = compose_stats.flag("error");
-        error_flag.set(false);
         Ok(Self {
             total_audio_data_count_metric,
-            _error_flag: error_flag,
             encoded: VecDeque::new(),
             eos: false,
             converter: default_audio_converter(),
@@ -488,7 +478,6 @@ pub struct AsyncVideoEncoder {
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_video_keyframe_request_count_metric: crate::stats::StatsCounter,
-    _error_flag: crate::stats::StatsFlag,
     eos: bool,
     keyframe_request_pending: bool,
 
@@ -526,8 +515,6 @@ impl AsyncVideoEncoder {
             compose_stats.counter("total_output_video_keyframe_count");
         let total_video_keyframe_request_count_metric =
             compose_stats.counter("total_video_keyframe_request_count");
-        let error_flag = compose_stats.flag("error");
-        error_flag.set(false);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         // 同型 StatsCounter が 2 個並ぶため、 位置引数の new より field 名指定の struct literal で
         // total と keyframe の取り違えバグを防ぐ (回避先は encoder モジュール内の 3 箇所に限定される)。
@@ -541,7 +528,6 @@ impl AsyncVideoEncoder {
             codec_metric,
             total_input_video_frame_count_metric,
             total_video_keyframe_request_count_metric,
-            _error_flag: error_flag,
             eos: false,
             keyframe_request_pending: false,
             inner: None,
