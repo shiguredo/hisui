@@ -20,6 +20,23 @@ use tokenizers::Tokenizer;
 use crate::Result;
 use crate::probability::{LogProbability, Probability};
 
+/// Whisper tokenizer が扱うトークンの ID (語彙インデックス)。
+///
+/// 生の `u32` (テンソル indexing や他の数値) と型で分離する。生の値が要る箇所は
+/// `get()` で取り出す。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenId(u32);
+
+impl TokenId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
 /// 1 チャンクぶんの decode 結果。
 ///
 /// 品質指標は candle 内部と同じ f64 精度の `LogProbability` / `Probability` で保持する。
@@ -49,16 +66,16 @@ impl WhisperDecodedChunk {
 /// 別に持つ。
 struct ProtocolTokens {
     /// SOT (start-of-transcript)。decode 対象トークン列の先頭に積む。
-    sot: u32,
+    sot: TokenId,
     /// タスクを「文字起こし」に固定するトークン (`translate` ではなく `transcribe` を選ぶ)。
-    transcribe: u32,
+    transcribe: TokenId,
     /// EOT (end-of-transcript)。このトークンが出た時点で decode ループを終える。
-    eot: u32,
+    eot: TokenId,
     /// no_speech トークン。初回 step の logits からこのトークンの確率を取り出し、
     /// 「発話がない確率 (幻覚判定用)」として上位層に返す。
-    no_speech: u32,
+    no_speech: TokenId,
     /// タイムスタンプトークンの出力を抑止するトークン (時刻は VAD 由来で埋めるため不要)。
-    no_timestamps: u32,
+    no_timestamps: TokenId,
 }
 
 impl ProtocolTokens {
@@ -97,7 +114,7 @@ pub struct WhisperDecoder {
     /// Whisper プロトコルの固定特殊トークン (SOT / transcribe / EOT / no_speech / no_timestamps)。
     protocol_tokens: ProtocolTokens,
     /// 現リクエストで使う言語トークン。多言語モデルでは `Some`、非多言語モデルでは `None`。
-    language_token: Option<u32>,
+    language_token: Option<TokenId>,
 }
 
 impl WhisperDecoder {
@@ -151,7 +168,7 @@ impl WhisperDecoder {
     }
 
     /// リクエスト単位で言語トークンを設定する。None は言語トークンなし (非多言語モデル)。
-    pub fn set_language_token(&mut self, language_token: Option<u32>) {
+    pub fn set_language_token(&mut self, language_token: Option<TokenId>) {
         self.language_token = language_token;
     }
 
@@ -203,7 +220,7 @@ impl WhisperDecoder {
 
     /// decode ループ開始時のプレフィックストークン列を組み立てる。
     /// 順序は SOT → (言語トークンがあれば) → transcribe → no_timestamps。
-    fn build_prefix_tokens(&self) -> Vec<u32> {
+    fn build_prefix_tokens(&self) -> Vec<TokenId> {
         let mut tokens = vec![self.protocol_tokens.sot];
         if let Some(language_token) = self.language_token {
             tokens.push(language_token);
@@ -217,13 +234,13 @@ impl WhisperDecoder {
     fn read_no_speech_prob(&self, ys: &Tensor) -> candle_core::Result<f64> {
         let logits = self.inner.decoder.final_linear(&ys.i(..1)?)?.i(0)?.i(0)?;
         let prob = softmax(&logits, 0)?
-            .i(self.protocol_tokens.no_speech as usize)?
+            .i(self.protocol_tokens.no_speech.get() as usize)?
             .to_scalar::<f32>()?;
         Ok(f64::from(prob))
     }
 
     /// 現ステップの logits に suppress_tokens を足して argmax、選ばれたトークンとその確率を返す。
-    fn greedy_step(&self, ys: &Tensor) -> candle_core::Result<(u32, f64)> {
+    fn greedy_step(&self, ys: &Tensor) -> candle_core::Result<(TokenId, f64)> {
         let (_, seq_len, _) = ys.dims3()?;
         let logits = self
             .inner
@@ -239,12 +256,12 @@ impl WhisperDecoder {
             .iter()
             .enumerate()
             .max_by(|(_, u), (_, v)| u.total_cmp(v))
-            .map(|(i, _)| i as u32)
+            .map(|(i, _)| TokenId::new(i as u32))
             .expect("logits must not be empty");
 
         let prob = f64::from(
             softmax(&logits, D::Minus1)?
-                .i(next_token as usize)?
+                .i(next_token.get() as usize)?
                 .to_scalar::<f32>()?,
         );
         Ok((next_token, prob))
@@ -254,13 +271,14 @@ impl WhisperDecoder {
     /// text 復元、`avg_logprob` / `no_speech_prob` の型付き変換 (範囲外・NaN は Err) を担う。
     fn finalize_chunk(
         &self,
-        tokens: Vec<u32>,
+        tokens: Vec<TokenId>,
         sum_logprob: f64,
         no_speech_prob_raw: Option<f64>,
     ) -> Result<WhisperDecodedChunk> {
+        let raw_tokens: Vec<u32> = tokens.iter().map(|t| t.get()).collect();
         let text = self
             .tokenizer
-            .decode(&tokens, true)
+            .decode(&raw_tokens, true)
             .map_err(|e| crate::Error::new(format!("tokenizer decode: {e}")))?;
         let avg_logprob_raw = sum_logprob / tokens.len().max(1) as f64;
         let avg_logprob = LogProbability::new(avg_logprob_raw).ok_or_else(|| {
@@ -287,10 +305,10 @@ impl WhisperDecoder {
 }
 
 /// トークン文字列をトークン ID に変換する。
-pub fn token_id(tokenizer: &Tokenizer, token: &str) -> Result<u32> {
+pub fn token_id(tokenizer: &Tokenizer, token: &str) -> Result<TokenId> {
     match tokenizer.token_to_id(token) {
         None => Err(crate::Error::new(format!("no token-id for {token}"))),
-        Some(id) => Ok(id),
+        Some(id) => Ok(TokenId::new(id)),
     }
 }
 
@@ -299,8 +317,9 @@ fn candle_err(e: candle_core::Error) -> crate::Error {
 }
 
 /// decode ループで毎ステップ作る「1 × N」形の tokens tensor を組む。
-fn tokens_tensor(tokens: &[u32], device: &candle_core::Device) -> Result<Tensor> {
-    Tensor::new(tokens, device)
+fn tokens_tensor(tokens: &[TokenId], device: &candle_core::Device) -> Result<Tensor> {
+    let raw: Vec<u32> = tokens.iter().map(|t| t.get()).collect();
+    Tensor::new(raw.as_slice(), device)
         .map_err(|e| crate::Error::new(format!("tokens tensor: {e}")))?
         .unsqueeze(0)
         .map_err(|e| crate::Error::new(format!("tokens unsqueeze: {e}")))
