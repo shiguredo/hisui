@@ -55,17 +55,16 @@ PoC からの移植対象は `whisper.rs` / `decode.rs` / `multilingual.rs` / `m
   - Processor 側: `SpeechSegment` の PCM を最大 30 秒 (480,000 サンプル @16 kHz) ごとに分割してから submit する。分割された各チャンクは独立の TextFrame になる。160 サンプル (10 ms) 未満の端数チャンクは捨てる (mel は最低 1500 フレーム生成されるため Err にはならないが、ほぼ全パディングの窓に encode / decode を 1 回費やす無駄になる上、10 ms 未満の音声に文字起こし価値がない)。分割は純関数として実装する
 - 0061 申し送りの「`AudioChunkBuffer::new(30 * 16000)` 流用」は採らない (可変長 SpeechSegment の slice 分割には固定長 pull 型 buffer が合わないため)
 
-### TranscriptionService (ワーカープール)
+### TranscriptionService
 
 ```
 TranscriptionService
-  ├ new(model_dir, device, workers) で M 個の WhisperPipeline をロード (デフォルト M = 1)
-  ├ 推論キュー: tokio::sync::mpsc の bounded channel (容量 M * 2)
-  └ M 個の worker (tokio::task::spawn_blocking で常駐、キューから取って推論)
+  ├ new(model_dir, device) で 1 個の WhisperPipeline をロード
+  ├ 推論キュー: tokio::sync::mpsc の bounded channel (容量 2)
+  └ 1 個の worker (tokio::task::spawn_blocking で常駐、キューから取って推論)
 ```
 
-- モデル個別ロードの理由: Whisper は KV cache が mutable な内部状態のため、Arc + Mutex 共有では直列化されるだけで M > 1 の意味がない
-- tokio mpsc の Receiver は single-consumer のため、M 個の worker は `Arc<std::sync::Mutex<Receiver>>` を共有し、lock を保持したまま `blocking_recv` で待ってリクエスト取得後すぐ解放する (推論は lock 外で M 並行。blocking スレッドなので std Mutex でよい)
+- 単一 worker とする理由: candle CPU 推論は既定でホスト物理コア数まで並列化するため、 hisui 側で worker を複数持つと per-decode の並列度がコア競合で相殺される。実効スループットは「1 worker + `RAYON_NUM_THREADS` を絞らない」で頭打ちになるので pool 化はしない。将来 GPU 複数枚 / 極小 decode で並列化する余地が出たら復活を検討する
 - 投入 API (確定):
 
 ```rust
