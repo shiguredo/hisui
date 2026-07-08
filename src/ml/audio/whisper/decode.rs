@@ -172,15 +172,15 @@ impl WhisperDecoder {
         self.language_token = language_token;
     }
 
-    pub fn reset_kv_cache(&mut self) {
-        self.inner.reset_kv_cache();
-    }
-
     /// 1 チャンク (mel) を decode する。
+    ///
+    /// Whisper decoder が持つ KV (attention key/value) キャッシュは開始時と終了時に本関数内で
+    /// クリアするため、呼び出し側は状態管理不要 (前回リクエストの残り state が漏れない)。
     ///
     /// hallucination の可能性がある結果もそのまま返す (text を空にしない)。呼び出し側は
     /// `WhisperDecodedChunk::is_likely_no_speech` で判定し、必要に応じて破棄する。
     pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
+        self.inner.reset_kv_cache();
         let audio_features = self
             .inner
             .encoder
@@ -215,7 +215,9 @@ impl WhisperDecoder {
             sum_logprob += prob.ln();
         }
 
-        self.finalize_chunk(tokens, sum_logprob, no_speech_prob_raw)
+        let result = self.finalize_chunk(tokens, sum_logprob, no_speech_prob_raw);
+        self.inner.reset_kv_cache();
+        result
     }
 
     /// decode ループ開始時のプレフィックストークン列を組み立てる。

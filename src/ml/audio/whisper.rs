@@ -89,9 +89,7 @@ impl WhisperPipeline {
         let resolved_language = self.resolve_language(language)?;
         self.decoder
             .set_language_token(Some(resolved_language.token_id));
-        self.decoder.reset_kv_cache();
         let result = self.decoder.decode_chunk(&mel)?;
-        self.decoder.reset_kv_cache();
 
         Ok(WhisperTranscription {
             text: result.text.trim().to_owned(),
