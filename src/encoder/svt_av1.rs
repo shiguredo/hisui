@@ -124,15 +124,14 @@ mod tests {
     }
 
     // 全出力フレームに sample_entry が載る不変条件を検証する。
-    // svt_av1 は sample_entry をコンストラクタで確定し全フレームに載せるため、
+    // svt_av1 は sample_entry をコンストラクタで確定し全フレームに載せる設計で、
     // `self.sample_entry.take()` のような 1 回消費実装だと 2 フレーム目以降が None になる回帰を検出する。
-    // svt_av1 は libvpx と同じく feature gate されず常時利用可能なので単体テストで検証する。
-    #[test]
-    fn svt_av1_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
-        let (sink, mut rx) = make_encoder_sink();
-        let mut encoder = SvtAv1Encoder::new(&options(), sink)?;
-        // 全フレームに載るのはコンストラクタで確定した同一の sample_entry なので、
-        // 実体まで一致することを確認する（is_some だけでは中身の退行を検出できない）。
+    // 全フレームに載るのはコンストラクタで確定した同一の sample_entry なので、
+    // 実体まで一致することを確認する (is_some だけでは中身の退行を検出できない)。
+    fn assert_every_output_frame_has_sample_entry(
+        mut encoder: SvtAv1Encoder,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::Result<VideoFrame>>,
+    ) -> crate::Result<()> {
         let expected = encoder.sample_entry.get().clone();
 
         let mut output_count = 0;
@@ -164,5 +163,13 @@ mod tests {
             "出力フレーム数が少なすぎる: {output_count}"
         );
         Ok(())
+    }
+
+    // svt_av1 は libvpx と同じく feature gate されず常時利用可能なので単体テストで検証する。
+    #[test]
+    fn svt_av1_sets_sample_entry_on_every_output_frame() -> crate::Result<()> {
+        let (sink, rx) = make_encoder_sink();
+        let encoder = SvtAv1Encoder::new(&options(), sink)?;
+        assert_every_output_frame_has_sample_entry(encoder, rx)
     }
 }
