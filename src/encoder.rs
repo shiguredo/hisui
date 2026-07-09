@@ -365,7 +365,10 @@ pub enum VideoEncoderRpcMessage {
 }
 
 /// 内部エンコーダーが出力フレーム / エラーを `VideoEncoder` 内の受信側 (`rx`) に流すための送信側の型エイリアス
-pub type EncoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
+///
+/// crate 外から `OutputSink` インスタンスを構築する経路がないため `pub(crate)`。
+/// (対する decoder 側 `DecoderOutputSender` は `OutputSink::new` の公開シグネチャに引数型として露出するため `pub` 維持)。
+pub(crate) type EncoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
 
 /// `VideoEncoder` 内部で内部エンコーダーからの出力フレーム / エラーを受け取る受信側の型エイリアス
 pub(crate) type EncoderOutputReceiver =
@@ -749,15 +752,6 @@ impl VideoEncoder {
                 )
             }
         }
-    }
-
-    /// エンコード済みフレームを非同期に取得する。
-    ///
-    /// - `Some(Ok(frame))`: 正常フレーム
-    /// - `Some(Err(e))`: 内部エンコーダーからのエラー
-    /// - `None`: 全ての送信側が drop された
-    pub async fn next_encoded_frame(&mut self) -> Option<crate::Result<VideoFrame>> {
-        self.rx.recv().await
     }
 
     /// processor モデル (`ProcessorHandle` + subscribe / publish) 用の駆動 API。
@@ -1317,44 +1311,6 @@ mod tests {
         assert!(
             matches!(output, EncoderRunOutput::Finished),
             "空 rx + eos=true で Finished が返っていない"
-        );
-    }
-
-    // ---- next_encoded_frame の pub 契約テスト ----
-    // pub async fn next_encoded_frame の async 経路について、
-    // sink.emit_ok / emit_err の受信が非同期でも正しく届くことを固定する
-    // (rx が閉じた時の None 分岐は、 sink が VideoEncoder 内で field 所有される
-    // 構造上 public API では再現できないため対象外)。
-
-    #[tokio::test]
-    async fn next_encoded_frame_returns_frame_after_emit_ok() {
-        // VideoEncoder が保持する sink 経由で emit_ok したフレームが
-        // next_encoded_frame の await で受信できる。
-        let mut encoder = new_uninitialized_encoder();
-        encoder.sink.emit_ok(compressed_video_frame(true));
-        let received = encoder
-            .next_encoded_frame()
-            .await
-            .expect("emit_ok したフレームが next_encoded_frame で受信できない (None)")
-            .expect("emit_ok は Ok で送るのに next_encoded_frame に Err が届いた");
-        assert!(
-            received.keyframe,
-            "受信したフレームの keyframe フラグが false"
-        );
-    }
-
-    #[tokio::test]
-    async fn next_encoded_frame_propagates_error_from_emit_err() {
-        // sink.emit_err で送ったエラーは next_encoded_frame で Some(Err) として届く。
-        let mut encoder = new_uninitialized_encoder();
-        encoder.sink.emit_err(Error::new("async test error"));
-        let received = encoder
-            .next_encoded_frame()
-            .await
-            .expect("emit_err したエラーが next_encoded_frame で受信できない (None)");
-        assert!(
-            received.is_err(),
-            "emit_err は Err で送るのに next_encoded_frame に Ok が届いた"
         );
     }
 }
