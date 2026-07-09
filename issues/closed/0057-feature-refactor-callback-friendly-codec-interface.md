@@ -348,7 +348,7 @@ async fn test_nvcodec_encoder_to_receiver_e2e() {
 依存順序:
 
 - decoder 系列: **`0066 → {0068 / 0071 / 0072} → 0073`** (2026-07-06 完了)
-- encoder 系列: **`0066 → 0067 → {closed/0079 / closed/0083 / encoder 未使用 API 削除}`** および `0067 → open/0080` (perf は refactor 系列と並列)
+- encoder 系列: **`0066 → 0067 → closed/0079 → closed/0083 → 未起票 encoder 未使用 API 削除`** および `0067 → open/0080` (perf は refactor 系列と並列)
 
 | ID | 範囲 | 推定 LOC | 依存先 | 後方互換影響 |
 |----|------|----------|---------|---------------|
