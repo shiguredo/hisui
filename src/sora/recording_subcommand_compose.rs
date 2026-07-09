@@ -12,7 +12,7 @@ use crate::{
     Error, MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, Result,
     TrackId,
     decoder::{AudioDecoder, VideoDecoder, VideoDecoderOptions},
-    encoder::{AsyncVideoEncoder, AudioEncoder},
+    encoder::{AudioEncoder, VideoEncoder},
     mp4::writer::Mp4Writer,
     sora::recording_layout::{DEFAULT_LAYOUT_JSON, Layout},
     sora::recording_mixer_audio::AudioMixer,
@@ -574,7 +574,7 @@ async fn setup_pipeline(
         video_encoder_processor_id,
         video_encoder_metadata,
         move |handle| async move {
-            let encoder = AsyncVideoEncoder::new(
+            let encoder = VideoEncoder::new(
                 &video_encoder_options,
                 openh264_lib_for_encoder,
                 handle.stats(),
