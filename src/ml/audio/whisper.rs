@@ -81,11 +81,17 @@ impl WhisperPipeline {
         let mel = audio::pcm_to_mel(config, pcm, &self.mel_filters);
         let mel_len = mel.len();
         if mel_len == 0 {
+            // 空 mel は入力 PCM が極端に短いなどの縁ケース (candle の pcm_to_mel は
+            // 通常 N_FRAMES ぶんに padding するため実務上ほぼ到達しない)。
+            // 「発話が観測されなかった」を表す値で埋める:
+            //   - no_speech_prob = 1.0 (発話なしの最大確信)
+            //   - avg_logprob = -∞ (トークンが生成されていない = 対数確率の下限)
+            //   - language = None (音声から言語を検出する対象が無かった)
             return Ok(WhisperTranscript {
                 text: String::new(),
                 language: None,
                 no_speech_prob: Probability::ONE,
-                avg_logprob: LogProbability::ZERO,
+                avg_logprob: LogProbability::NEG_INFINITY,
             });
         }
 
