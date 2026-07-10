@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use hisui::TextFrame;
+use hisui::{LanguageCode, TextFrame};
 
 /// TextFrame の全フィールドが期待通り構築できる。
 #[test]
@@ -11,7 +11,7 @@ fn text_frame_construction() {
         start: Duration::from_millis(500),
         end: Duration::from_millis(2500),
         text: "こんにちは".to_owned(),
-        language: Some("ja".to_owned()),
+        language: Some(LanguageCode::new("ja")),
         no_speech_prob: Some(0.05),
         avg_logprob: Some(-0.3),
     };
@@ -19,7 +19,7 @@ fn text_frame_construction() {
     assert_eq!(frame.start, Duration::from_millis(500));
     assert_eq!(frame.end, Duration::from_millis(2500));
     assert_eq!(frame.text, "こんにちは");
-    assert_eq!(frame.language.as_deref(), Some("ja"));
+    assert_eq!(frame.language.as_ref().map(LanguageCode::get), Some("ja"));
     assert_eq!(frame.no_speech_prob, Some(0.05));
     assert_eq!(frame.avg_logprob, Some(-0.3));
 }

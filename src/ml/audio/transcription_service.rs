@@ -6,6 +6,7 @@ use candle_transformers::models::whisper::{LOGPROB_THRESHOLD, NO_SPEECH_THRESHOL
 use tokio::sync::{mpsc, oneshot};
 
 use super::whisper::{WhisperPipeline, WhisperTranscription};
+use crate::text::LanguageCode;
 
 /// 文字起こしリクエスト。
 #[derive(Debug)]
@@ -13,14 +14,14 @@ pub struct TranscriptRequest {
     /// 16 kHz mono f32 PCM (最大 30 秒)。
     pub pcm: Vec<f32>,
     /// ISO 639-1 言語コード (多言語モデルで必須)。
-    pub language: String,
+    pub language: LanguageCode,
 }
 
 /// 文字起こし結果。
 #[derive(Debug)]
 pub struct TranscriptResult {
     pub text: String,
-    pub language: Option<String>,
+    pub language: Option<LanguageCode>,
     pub no_speech_prob: f32,
     pub avg_logprob: f32,
 }

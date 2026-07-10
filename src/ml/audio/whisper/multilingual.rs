@@ -5,11 +5,12 @@ use tokenizers::Tokenizer;
 
 use super::decode::{TokenId, token_id};
 use crate::Result;
+use crate::text::LanguageCode;
 
 /// 解決された言語 (指定された ISO 639-1 コードと、対応する Whisper の言語トークン)。
 #[derive(Debug)]
 pub struct ResolvedLanguage {
-    pub code: String,
+    pub code: LanguageCode,
     pub token_id: TokenId,
 }
 
@@ -24,8 +25,8 @@ pub fn is_multilingual_config(config: &Config) -> bool {
 }
 
 /// ISO 639-1 言語コードを Whisper の言語トークン ID に変換する。
-pub fn language_token_from_code(tokenizer: &Tokenizer, code: &str) -> Result<TokenId> {
-    let code = code.trim();
+pub fn language_token_from_code(tokenizer: &Tokenizer, code: &LanguageCode) -> Result<TokenId> {
+    let code = code.get().trim();
     let token = if code.starts_with("<|") {
         code.to_owned()
     } else {

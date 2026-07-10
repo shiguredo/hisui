@@ -12,11 +12,13 @@ pub mod multilingual;
 use decode::WhisperDecoder;
 use multilingual::ResolvedLanguage;
 
+use crate::text::LanguageCode;
+
 /// Whisper の推論結果。
 #[derive(Debug)]
 pub struct WhisperTranscription {
     pub text: String,
-    pub language: Option<String>,
+    pub language: Option<LanguageCode>,
     pub no_speech_prob: f32,
     pub avg_logprob: f32,
 }
@@ -65,7 +67,7 @@ impl WhisperPipeline {
     pub fn transcribe_pcm16k(
         &mut self,
         pcm: &[f32],
-        language: &str,
+        language: &LanguageCode,
     ) -> crate::Result<WhisperTranscription> {
         let config = self.decoder.config();
         let mel = audio::pcm_to_mel(config, pcm, &self.mel_filters);
@@ -101,7 +103,7 @@ impl WhisperPipeline {
         })
     }
 
-    fn resolve_language(&self, language: &str) -> crate::Result<ResolvedLanguage> {
+    fn resolve_language(&self, language: &LanguageCode) -> crate::Result<ResolvedLanguage> {
         if !multilingual::is_multilingual_config(self.decoder.config()) {
             return Err(crate::Error::new(format!(
                 "language is not supported for non-multilingual whisper model: {language}"
@@ -109,7 +111,7 @@ impl WhisperPipeline {
         }
         let token_id = multilingual::language_token_from_code(self.decoder.tokenizer(), language)?;
         Ok(ResolvedLanguage {
-            code: language.trim().to_owned(),
+            code: LanguageCode::new(language.get().trim()),
             token_id,
         })
     }

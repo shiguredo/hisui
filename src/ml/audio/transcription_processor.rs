@@ -14,7 +14,7 @@ use crate::ml::audio::transcription_service::{
     TranscriptRequest, TranscriptResult, TranscriptionService,
 };
 use crate::ml::audio::vad::{SpeechSegment, VadGate};
-use crate::text::TextFrame;
+use crate::text::{LanguageCode, TextFrame};
 use crate::{Message, ProcessorHandle, TrackId};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -40,7 +40,7 @@ struct PendingTranscript {
 pub struct TranscriptionProcessor {
     service: Arc<TranscriptionService>,
     silero: Arc<SileroVadModel>,
-    language: String,
+    language: LanguageCode,
     input_track_id: TrackId,
     output_track_id: TrackId,
 }
@@ -49,7 +49,7 @@ impl TranscriptionProcessor {
     pub fn new(
         service: Arc<TranscriptionService>,
         silero: Arc<SileroVadModel>,
-        language: String,
+        language: LanguageCode,
         input_track_id: TrackId,
         output_track_id: TrackId,
     ) -> Self {
@@ -111,7 +111,7 @@ impl TranscriptionProcessor {
 struct ProcessorState {
     service: Arc<TranscriptionService>,
     vad: VadGate,
-    language: String,
+    language: LanguageCode,
     input_sample_rate: Option<SampleRate>,
     input_channels: Option<Channels>,
     base_offset: Option<Duration>,
@@ -125,7 +125,7 @@ impl ProcessorState {
     fn new(
         service: Arc<TranscriptionService>,
         silero: Arc<SileroVadModel>,
-        language: String,
+        language: LanguageCode,
     ) -> Self {
         Self {
             service,

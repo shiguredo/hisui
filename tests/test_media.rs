@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use hisui::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
 use hisui::video::{VideoFormat, VideoFrame};
-use hisui::{MediaFrame, TextFrame};
+use hisui::{LanguageCode, MediaFrame, TextFrame};
 
 /// テスト用の AudioFrame を作るヘルパー。
 fn make_audio_frame() -> AudioFrame {
@@ -36,7 +36,7 @@ fn make_text_frame() -> TextFrame {
         start: Duration::from_secs(1),
         end: Duration::from_secs(5),
         text: "こんにちは".to_owned(),
-        language: Some("ja".to_owned()),
+        language: Some(LanguageCode::new("ja")),
         no_speech_prob: Some(0.1),
         avg_logprob: Some(-0.5),
     }

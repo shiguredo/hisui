@@ -22,7 +22,8 @@ use hisui::ml::audio::transcription_processor::TranscriptionProcessor;
 use hisui::ml::audio::transcription_service::TranscriptionService;
 use hisui::ml::audio::whisper::WhisperPipeline;
 use hisui::{
-    MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TextFrame, TrackId,
+    LanguageCode, MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata,
+    TextFrame, TrackId,
 };
 
 const INPUT_TRACK_ID: &str = "transcription_input";
@@ -155,7 +156,7 @@ fn whisper_pipeline_transcribes_english_fixture() {
     let mut pipeline = WhisperPipeline::load(&model_dir, Device::Cpu).expect("Whisper ロード");
 
     let result = pipeline
-        .transcribe_pcm16k(&pcm, "en")
+        .transcribe_pcm16k(&pcm, &LanguageCode::new("en"))
         .expect("Whisper 推論は成功する想定");
 
     assert!(!result.text.is_empty(), "文字起こし結果は空でないこと");
@@ -180,7 +181,7 @@ fn whisper_pipeline_transcribes_english_fixture() {
         "avg_logprob は極端に低くない想定: {}",
         result.avg_logprob
     );
-    assert_eq!(result.language.as_deref(), Some("en"));
+    assert_eq!(result.language.as_ref().map(LanguageCode::get), Some("en"));
 }
 
 #[test]
@@ -195,7 +196,7 @@ fn whisper_pipeline_transcribes_japanese_fixture() {
     let mut pipeline = WhisperPipeline::load(&model_dir, Device::Cpu).expect("Whisper ロード");
 
     let result = pipeline
-        .transcribe_pcm16k(&pcm, "ja")
+        .transcribe_pcm16k(&pcm, &LanguageCode::new("ja"))
         .expect("Whisper 推論は成功する想定");
 
     assert!(!result.text.is_empty(), "文字起こし結果は空でないこと");
@@ -216,7 +217,7 @@ fn whisper_pipeline_transcribes_japanese_fixture() {
         "avg_logprob は極端に低くない想定: {}",
         result.avg_logprob
     );
-    assert_eq!(result.language.as_deref(), Some("ja"));
+    assert_eq!(result.language.as_ref().map(LanguageCode::get), Some("ja"));
 }
 
 /// 不在ディレクトリでは TranscriptionService::new が Err を返す。
@@ -288,7 +289,7 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
         TranscriptionProcessor::new(
             Arc::clone(&service),
             silero,
-            "en".to_owned(),
+            LanguageCode::new("en"),
             TrackId::new(INPUT_TRACK_ID),
             TrackId::new(OUTPUT_TRACK_ID),
         )
