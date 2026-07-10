@@ -269,8 +269,8 @@ impl ProcessorState {
             end: pending.end,
             text: result.text,
             language: result.language,
-            no_speech_prob: Some(result.no_speech_prob),
-            avg_logprob: Some(result.avg_logprob),
+            no_speech_prob: Some(result.no_speech_prob.get() as f32),
+            avg_logprob: Some(result.avg_logprob.get() as f32),
         };
         if !output_tx.send_media(MediaFrame::new_text(frame)) {
             return Err(crate::Error::new(

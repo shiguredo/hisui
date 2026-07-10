@@ -12,6 +12,7 @@ pub mod multilingual;
 use decode::WhisperDecoder;
 use multilingual::ResolvedLanguage;
 
+use crate::probability::{LogProbability, Probability};
 use crate::text::LanguageCode;
 
 /// Whisper の推論結果。
@@ -19,15 +20,15 @@ use crate::text::LanguageCode;
 pub struct WhisperTranscription {
     pub text: String,
     pub language: Option<LanguageCode>,
-    pub no_speech_prob: f32,
-    pub avg_logprob: f32,
+    pub no_speech_prob: Probability,
+    pub avg_logprob: LogProbability,
 }
 
 impl WhisperTranscription {
     /// 詳細は `WhisperDecodedChunk::is_likely_no_speech` を参照。
     pub fn is_likely_no_speech(&self) -> bool {
-        f64::from(self.no_speech_prob) > NO_SPEECH_THRESHOLD
-            && f64::from(self.avg_logprob) < LOGPROB_THRESHOLD
+        self.no_speech_prob.get() > NO_SPEECH_THRESHOLD
+            && self.avg_logprob.get() < LOGPROB_THRESHOLD
     }
 }
 
@@ -76,8 +77,8 @@ impl WhisperPipeline {
             return Ok(WhisperTranscription {
                 text: String::new(),
                 language: None,
-                no_speech_prob: 1.0,
-                avg_logprob: 0.0,
+                no_speech_prob: Probability::new(1.0).expect("1.0 is a valid probability"),
+                avg_logprob: LogProbability::new(0.0).expect("0.0 is a valid log-probability"),
             });
         }
 
@@ -98,8 +99,8 @@ impl WhisperPipeline {
         Ok(WhisperTranscription {
             text: result.text.trim().to_owned(),
             language: Some(resolved_language.code),
-            no_speech_prob: result.no_speech_prob.get() as f32,
-            avg_logprob: result.avg_logprob.get() as f32,
+            no_speech_prob: result.no_speech_prob,
+            avg_logprob: result.avg_logprob,
         })
     }
 

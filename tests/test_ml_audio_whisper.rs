@@ -172,14 +172,14 @@ fn whisper_pipeline_transcribes_english_fixture() {
         result.text
     );
     assert!(
-        result.no_speech_prob < 0.5,
+        result.no_speech_prob.get() < 0.5,
         "発話 fixture なので no_speech_prob は 0.5 未満の想定: {}",
-        result.no_speech_prob
+        result.no_speech_prob.get()
     );
     assert!(
-        result.avg_logprob > -1.5,
+        result.avg_logprob.get() > -1.5,
         "avg_logprob は極端に低くない想定: {}",
-        result.avg_logprob
+        result.avg_logprob.get()
     );
     assert_eq!(result.language.as_ref().map(LanguageCode::get), Some("en"));
 }
@@ -208,14 +208,14 @@ fn whisper_pipeline_transcribes_japanese_fixture() {
         result.text
     );
     assert!(
-        result.no_speech_prob < 0.5,
+        result.no_speech_prob.get() < 0.5,
         "発話 fixture なので no_speech_prob は 0.5 未満の想定: {}",
-        result.no_speech_prob
+        result.no_speech_prob.get()
     );
     assert!(
-        result.avg_logprob > -1.5,
+        result.avg_logprob.get() > -1.5,
         "avg_logprob は極端に低くない想定: {}",
-        result.avg_logprob
+        result.avg_logprob.get()
     );
     assert_eq!(result.language.as_ref().map(LanguageCode::get), Some("ja"));
 }

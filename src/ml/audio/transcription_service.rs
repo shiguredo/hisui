@@ -6,6 +6,7 @@ use candle_transformers::models::whisper::{LOGPROB_THRESHOLD, NO_SPEECH_THRESHOL
 use tokio::sync::{mpsc, oneshot};
 
 use super::whisper::{WhisperPipeline, WhisperTranscription};
+use crate::probability::{LogProbability, Probability};
 use crate::text::LanguageCode;
 
 /// 文字起こしリクエスト。
@@ -22,15 +23,15 @@ pub struct TranscriptRequest {
 pub struct TranscriptResult {
     pub text: String,
     pub language: Option<LanguageCode>,
-    pub no_speech_prob: f32,
-    pub avg_logprob: f32,
+    pub no_speech_prob: Probability,
+    pub avg_logprob: LogProbability,
 }
 
 impl TranscriptResult {
     /// 詳細は `crate::ml::audio::whisper::decode::WhisperDecodedChunk::is_likely_no_speech` を参照。
     pub fn is_likely_no_speech(&self) -> bool {
-        f64::from(self.no_speech_prob) > NO_SPEECH_THRESHOLD
-            && f64::from(self.avg_logprob) < LOGPROB_THRESHOLD
+        self.no_speech_prob.get() > NO_SPEECH_THRESHOLD
+            && self.avg_logprob.get() < LOGPROB_THRESHOLD
     }
 }
 
