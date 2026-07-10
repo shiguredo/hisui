@@ -11,6 +11,11 @@
 pub struct Probability(f64);
 
 impl Probability {
+    /// 確率 0 (不可能事象)。
+    pub const ZERO: Self = Self(0.0);
+    /// 確率 1 (確実な事象)。
+    pub const ONE: Self = Self(1.0);
+
     /// `[0.0, 1.0]` の範囲内なら `Some` を返す。NaN・Inf・範囲外はすべて `None`。
     ///
     /// NaN は `>= 0.0` と `<= 1.0` の両方が false になるため、自然に弾かれる。
@@ -59,6 +64,11 @@ impl PartialOrd for Probability {
 pub struct LogProbability(f64);
 
 impl LogProbability {
+    /// log(1) = 0 (対数領域での最大値、確実な事象を表す)。
+    pub const ZERO: Self = Self(0.0);
+    /// log(0) = -∞ (対数領域での最小値、不可能事象を表す)。
+    pub const NEG_INFINITY: Self = Self(f64::NEG_INFINITY);
+
     /// `(-∞, 0]` の範囲内なら `Some` を返す。NaN と正の値は `None`。`-∞` は許容する。
     ///
     /// NaN は `<= 0.0` が false になるため、自然に弾かれる。

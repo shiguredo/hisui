@@ -80,8 +80,8 @@ impl WhisperPipeline {
             return Ok(WhisperTranscription {
                 text: String::new(),
                 language: None,
-                no_speech_prob: Probability::new(1.0).expect("1.0 is a valid probability"),
-                avg_logprob: LogProbability::new(0.0).expect("0.0 is a valid log-probability"),
+                no_speech_prob: Probability::ONE,
+                avg_logprob: LogProbability::ZERO,
             });
         }
 
