@@ -35,6 +35,13 @@ struct PendingTranscript {
     result_task: JoinHandle<crate::Result<TranscriptResult>>,
 }
 
+/// `publish_text_result` の結果。 pipeline が閉じている場合は上位 loop が正常終了する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PublishOutcome {
+    Published,
+    PipelineClosed,
+}
+
 /// 1 audio track を 1 text track に変換する processor。
 #[derive(Debug)]
 pub struct TranscriptionProcessor {
@@ -69,20 +76,16 @@ impl TranscriptionProcessor {
         handle.wait_subscribers_ready().await?;
 
         let mut state = ProcessorState::new(self.service, self.silero, self.language);
-        let mut eos_received = false;
 
         loop {
-            if eos_received {
-                while let Some(pending) = state.pending.pop_front() {
-                    state.publish_completed(pending, &mut output_tx).await?;
-                }
-                output_tx.send_eos();
-                return Ok(());
-            }
-
+            // pending が空の間は input のみ待つ。 EOS 到達時は handle_message 内で
+            // pending をドレインしてから true を返すので、ここで別途ドレインは不要。
             if state.pending.is_empty() {
                 let message = input_rx.recv().await;
-                eos_received = state.handle_message(message, &mut output_tx).await?;
+                if state.handle_message(message, &mut output_tx).await? {
+                    output_tx.send_eos();
+                    return Ok(());
+                }
                 continue;
             }
 
@@ -93,14 +96,28 @@ impl TranscriptionProcessor {
                 .result_task;
             tokio::select! {
                 message = input_rx.recv() => {
-                    eos_received = state.handle_message(message, &mut output_tx).await?;
+                    if state.handle_message(message, &mut output_tx).await? {
+                        output_tx.send_eos();
+                        return Ok(());
+                    }
                 }
                 result = pending_result => {
-                    let mut pending = state.pending.pop_front().expect("pending queue head exists");
-                    pending.result_task = tokio::spawn(async move {
-                        result.map_err(crate::Error::from)?
-                    });
-                    state.publish_completed(pending, &mut output_tx).await?;
+                    // JoinHandle は既に解決済みなので、追加の spawn で包み直さず
+                    // 直接 publish_text_result に流す。 JoinError は crate::Error に、
+                    // 内側の crate::Result はそのまま伝播させる。
+                    let pending = state.pending.pop_front().expect("pending queue head exists");
+                    let outcome = publish_text_result(
+                        pending.start,
+                        pending.end,
+                        result??,
+                        &mut output_tx,
+                    );
+                    if matches!(outcome, PublishOutcome::PipelineClosed) {
+                        // AsyncVideoDecoder 等と同じく pipeline クローズは
+                        // 正常終了扱いとする (Err にしない)。
+                        output_tx.send_eos();
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -155,7 +172,15 @@ impl ProcessorState {
             Message::Eos => {
                 self.flush_end_of_stream().await?;
                 while let Some(pending) = self.pending.pop_front() {
-                    self.publish_completed(pending, output_tx).await?;
+                    if matches!(
+                        self.publish_completed(pending, output_tx).await?,
+                        PublishOutcome::PipelineClosed,
+                    ) {
+                        // 下流がクローズしたので残りは publish せず捨てる。
+                        // 呼び出し元 (run) がこの後 send_eos を呼ぶ。
+                        self.pending.clear();
+                        break;
+                    }
                 }
                 Ok(true)
             }
@@ -258,26 +283,14 @@ impl ProcessorState {
         &mut self,
         pending: PendingTranscript,
         output_tx: &mut crate::TrackPublisher,
-    ) -> crate::Result<()> {
+    ) -> crate::Result<PublishOutcome> {
         let result = pending.result_task.await??;
-        if result.is_likely_no_speech() || result.text.is_empty() {
-            return Ok(());
-        }
-
-        let frame = TextFrame {
-            start: pending.start,
-            end: pending.end,
-            text: result.text,
-            language: result.language,
-            no_speech_prob: Some(result.no_speech_prob.get() as f32),
-            avg_logprob: Some(result.avg_logprob.get() as f32),
-        };
-        if !output_tx.send_media(MediaFrame::new_text(frame)) {
-            return Err(crate::Error::new(
-                "failed to publish text frame because pipeline is closed",
-            ));
-        }
-        Ok(())
+        Ok(publish_text_result(
+            pending.start,
+            pending.end,
+            result,
+            output_tx,
+        ))
     }
 
     fn drop_consumed_pcm(&mut self) {
@@ -336,6 +349,36 @@ impl ProcessorState {
             .base_offset
             .ok_or_else(|| crate::Error::new("base offset is not initialized"))?;
         Ok(base + duration_from_16k_samples(sample))
+    }
+}
+
+/// 解決済み `TranscriptResult` を text track に流す。
+///
+/// 無音判定 (`is_likely_no_speech`) と空テキストは publish しない (`Published` を返す)。
+/// `send_media` が false を返した場合 (下流の receiver がクローズ済み) は
+/// `PipelineClosed` を返し、呼び出し元に正常終了処理を任せる。
+fn publish_text_result(
+    start: Duration,
+    end: Duration,
+    result: TranscriptResult,
+    output_tx: &mut crate::TrackPublisher,
+) -> PublishOutcome {
+    if result.is_likely_no_speech() || result.text.is_empty() {
+        return PublishOutcome::Published;
+    }
+
+    let frame = TextFrame {
+        start,
+        end,
+        text: result.text,
+        language: result.language,
+        no_speech_prob: Some(result.no_speech_prob.get() as f32),
+        avg_logprob: Some(result.avg_logprob.get() as f32),
+    };
+    if output_tx.send_media(MediaFrame::new_text(frame)) {
+        PublishOutcome::Published
+    } else {
+        PublishOutcome::PipelineClosed
     }
 }
 
