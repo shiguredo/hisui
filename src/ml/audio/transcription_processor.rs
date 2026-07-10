@@ -248,8 +248,37 @@ impl ProcessorState {
     }
 
     async fn queue_segment(&mut self, segment: SpeechSegment) -> crate::Result<()> {
-        let relative_start = usize::try_from(segment.start_sample - self.retained_start_sample)?;
-        let relative_end = usize::try_from(segment.end_sample - self.retained_start_sample)?;
+        // VAD の invariant では segment.start_sample / end_sample は retained 範囲内に
+        // 収まるが、万一崩れたときに slice out-of-range panic ではなく Err で拾えるように
+        // ガードする。 メッセージには不変条件破りの原因追跡に必要な実値を残す。
+        let relative_start = segment
+            .start_sample
+            .checked_sub(self.retained_start_sample)
+            .ok_or_else(|| {
+                crate::Error::new(format!(
+                    "segment start_sample {} is before retained_start_sample {}",
+                    segment.start_sample, self.retained_start_sample,
+                ))
+            })?;
+        let relative_end = segment
+            .end_sample
+            .checked_sub(self.retained_start_sample)
+            .ok_or_else(|| {
+                crate::Error::new(format!(
+                    "segment end_sample {} is before retained_start_sample {}",
+                    segment.end_sample, self.retained_start_sample,
+                ))
+            })?;
+        let relative_start = usize::try_from(relative_start)?;
+        let relative_end = usize::try_from(relative_end)?;
+        if relative_end > self.retained_pcm16k.len() {
+            return Err(crate::Error::new(format!(
+                "segment end_sample {} exceeds retained PCM range: retained_start_sample={}, retained_len={}",
+                segment.end_sample,
+                self.retained_start_sample,
+                self.retained_pcm16k.len(),
+            )));
+        }
         let segment_pcm = &self.retained_pcm16k[relative_start..relative_end];
         for chunk in split_segment_pcm(segment.start_sample, segment_pcm) {
             self.submit_chunk(chunk).await?;
