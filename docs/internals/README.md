@@ -15,4 +15,4 @@
 - [`/bootstrap` の仕組み](bootstrap.md)
 - [processor ID / track ID の命名規則](processor_id.md)
 - [`sample_entry` 不変条件と入力経路の責務](sample_entry_invariant.md)
-- [`ml/audio` のモデル型と worker 配分](ml_models.md)
+- [`ml/audio` のモデル型設計](ml_models.md)
