@@ -208,10 +208,10 @@ impl WhisperDecoder {
                 .map_err(|e| crate::Error::new(format!("whisper decoder: {e}")))?;
 
             if i == 0 {
-                no_speech_prob_raw = Some(self.read_no_speech_prob(&ys).map_err(candle_err)?);
+                no_speech_prob_raw = Some(self.read_no_speech_prob(&ys)?);
             }
 
-            let (next_token, prob) = self.greedy_step(&ys).map_err(candle_err)?;
+            let (next_token, prob) = self.greedy_step(&ys)?;
             tokens.push(next_token);
 
             if next_token == self.protocol_tokens.eot
@@ -319,10 +319,6 @@ pub fn token_id(tokenizer: &Tokenizer, token: &str) -> Result<TokenId> {
         None => Err(crate::Error::new(format!("no token-id for {token}"))),
         Some(id) => Ok(TokenId::new(id)),
     }
-}
-
-fn candle_err(e: candle_core::Error) -> crate::Error {
-    crate::Error::new(format!("candle error: {e}"))
 }
 
 /// decode ループで毎ステップ作る「1 × N」形の tokens tensor を組む。
