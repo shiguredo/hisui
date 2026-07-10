@@ -121,7 +121,13 @@ impl WhisperPipeline {
     }
 }
 
-/// mel の時間軸を最大 3000 フレームに切り詰める。
+/// mel の時間軸を最大 3000 フレームに切り詰める (Whisper encoder の入力長上限)。
+///
+/// Whisper encoder は mel を内部の conv 層で 1/2 に downsample してから
+/// `max_source_positions = 1500` の positional embedding を加えるため、 mel 側は
+/// `1500 × 2 = 3000` フレーム (= 30 秒相当) が上限。 candle の `pcm_to_mel` は末尾に
+/// パディングを足す都合で mel フレーム数が 3000 を超えることがあるため、ここで明示的に
+/// narrow して encoder の入力長を安全側に揃える。
 fn narrow_mel_for_encoder(mel: &Tensor) -> crate::Result<Tensor> {
     let (_batch, _bins, seq_len) = mel
         .dims3()
