@@ -1,13 +1,6 @@
 //! Whisper 実推論と TranscriptionProcessor の integration テスト。
 //!
-//! 実音声 fixture の出所:
-//! - `testdata/speech-en-16k-mono-s16le.pcm`
-//!   - Mozilla Common Voice (CC0) clip ID: `common_voice_en_100540`
-//! - `testdata/speech-ja-16k-mono-s16le.pcm`
-//!   - Mozilla Common Voice (CC0) clip ID: `common_voice_ja_19486650`
-//!
-//! 変換手順:
-//! - `ffmpeg -i INPUT.mp3 -ac 1 -ar 16000 -f s16le OUTPUT.pcm`
+//! 実音声テストデータの出所・ライセンスは `testdata/README.md` を参照する。
 
 #![cfg(feature = "candle")]
 
