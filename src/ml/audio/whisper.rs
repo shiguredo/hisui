@@ -189,57 +189,22 @@ pub fn validate_model_dir(model_dir: &Path) -> crate::Result<PathBuf> {
     Ok(model_dir.to_path_buf())
 }
 
-/// Hugging Face `config.json` から読み取る Whisper 設定。
-#[derive(Debug)]
-struct WhisperConfigFile {
-    num_mel_bins: usize,
-    max_source_positions: usize,
-    d_model: usize,
-    encoder_attention_heads: usize,
-    encoder_layers: usize,
-    vocab_size: usize,
-    max_target_positions: usize,
-    decoder_attention_heads: usize,
-    decoder_layers: usize,
-    suppress_tokens: Vec<u32>,
-}
-
-impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for WhisperConfigFile {
-    type Error = nojson::JsonParseError;
-
-    fn try_from(
-        value: nojson::RawJsonValue<'text, 'raw>,
-    ) -> std::result::Result<Self, Self::Error> {
-        Ok(Self {
-            num_mel_bins: parse_required_usize(value, "num_mel_bins")?,
-            max_source_positions: parse_required_usize(value, "max_source_positions")?,
-            d_model: parse_required_usize(value, "d_model")?,
-            encoder_attention_heads: parse_required_usize(value, "encoder_attention_heads")?,
-            encoder_layers: parse_required_usize(value, "encoder_layers")?,
-            vocab_size: parse_required_usize(value, "vocab_size")?,
-            max_target_positions: parse_required_usize(value, "max_target_positions")?,
-            decoder_attention_heads: parse_required_usize(value, "decoder_attention_heads")?,
-            decoder_layers: parse_required_usize(value, "decoder_layers")?,
-            suppress_tokens: parse_optional_u32_array(value, "suppress_tokens")?,
-        })
-    }
-}
-
-impl From<WhisperConfigFile> for Config {
-    fn from(file: WhisperConfigFile) -> Self {
-        Self {
-            num_mel_bins: file.num_mel_bins,
-            max_source_positions: file.max_source_positions,
-            d_model: file.d_model,
-            encoder_attention_heads: file.encoder_attention_heads,
-            encoder_layers: file.encoder_layers,
-            vocab_size: file.vocab_size,
-            max_target_positions: file.max_target_positions,
-            decoder_attention_heads: file.decoder_attention_heads,
-            decoder_layers: file.decoder_layers,
-            suppress_tokens: file.suppress_tokens,
-        }
-    }
+/// Hugging Face `config.json` の RawJsonValue を candle の `Config` にパースする。
+fn parse_whisper_config(
+    value: nojson::RawJsonValue<'_, '_>,
+) -> std::result::Result<Config, nojson::JsonParseError> {
+    Ok(Config {
+        num_mel_bins: parse_required_usize(value, "num_mel_bins")?,
+        max_source_positions: parse_required_usize(value, "max_source_positions")?,
+        d_model: parse_required_usize(value, "d_model")?,
+        encoder_attention_heads: parse_required_usize(value, "encoder_attention_heads")?,
+        encoder_layers: parse_required_usize(value, "encoder_layers")?,
+        vocab_size: parse_required_usize(value, "vocab_size")?,
+        max_target_positions: parse_required_usize(value, "max_target_positions")?,
+        decoder_attention_heads: parse_required_usize(value, "decoder_attention_heads")?,
+        decoder_layers: parse_required_usize(value, "decoder_layers")?,
+        suppress_tokens: parse_optional_u32_array(value, "suppress_tokens")?,
+    })
 }
 
 fn parse_required_usize(
@@ -265,9 +230,8 @@ fn load_whisper_config(path: &Path) -> crate::Result<Config> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| crate::Error::new(format!("read {}: {e}", path.display())))?;
     let json = nojson::RawJson::parse(&text)?;
-    let file = WhisperConfigFile::try_from(json.value())
-        .map_err(|e| crate::Error::new(format!("parse {}: {e}", path.display())))?;
-    Ok(file.into())
+    parse_whisper_config(json.value())
+        .map_err(|e| crate::Error::new(format!("parse {}: {e}", path.display())))
 }
 
 #[cfg(test)]
@@ -290,7 +254,7 @@ mod tests {
             "suppress_tokens": [1, 2, 3]
         }"#;
         let json = nojson::RawJson::parse(text).expect("JSON をパースできること");
-        let config = WhisperConfigFile::try_from(json.value()).expect("config をパースできること");
+        let config = parse_whisper_config(json.value()).expect("config をパースできること");
         assert_eq!(config.num_mel_bins, 80);
         assert_eq!(config.max_source_positions, 1500);
         assert_eq!(config.suppress_tokens, vec![1, 2, 3]);
