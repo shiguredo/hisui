@@ -32,7 +32,10 @@ impl WhisperTranscription {
     }
 }
 
-/// 1 worker 専用の Whisper 推論器。
+/// `WhisperDecoder` に mel フィルタと言語解決を載せた PCM 入力の入口。
+///
+/// 内部の `WhisperDecoder` は KV cache を持つ可変状態のため、 `&mut self` を要求し、
+/// 複数スレッドで共有しない (共有する場合はロックが必要で、その場合は直列化される)。
 #[derive(Debug)]
 pub struct WhisperPipeline {
     decoder: WhisperDecoder,

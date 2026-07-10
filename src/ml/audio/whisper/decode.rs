@@ -104,10 +104,10 @@ impl ProtocolTokens {
     }
 }
 
-/// Whisper 重みと greedy decode ループを 1 worker 分の状態としてまとめた型。
+/// Whisper 重みと greedy decode ループをまとめた型。
 ///
-/// 内部の `Whisper` は KV cache を持つため 1 スレッド専有。並列化は複数の `WhisperDecoder` を
-/// 個別ロードして worker プールに配る方式で実現する (Silero の `new_instance` 型の共有はしない)。
+/// 内部の `Whisper` は KV cache を持つ可変状態のため `&mut self` を要求し、複数スレッドで
+/// 共有できない (Silero の `new_instance` 型の共有もしない)。
 #[derive(Debug)]
 pub struct WhisperDecoder {
     inner: Whisper,
