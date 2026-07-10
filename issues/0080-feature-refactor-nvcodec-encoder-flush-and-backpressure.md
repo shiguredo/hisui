@@ -228,7 +228,7 @@ drop(guard);
   - (iii) timeout 経路で待機継続
   - (iv) 順序が FIFO で保持される
   - (v) **Err 経路でも pop + notify で in-flight が解放される** (F1 デッドロック回帰の防止)
-- **テスト同期パターン** (flaky 回避のため Pacer API 設計時点で確定): (a) 書き手が wait に入った状態を保証するため `std::sync::Barrier` を使う (もしくは `AtomicBool` + `spin_loop_hint` で確認)、 (b) pop 側は `std::thread::spawn` で別スレッド化、 (c) timeout 経路検証は `Instant::now()` で min 経過を assert (`thread::sleep(50ms)` の素朴待ちは禁止)、 (d) callback スレッド模擬は Pacer 単独で完結できるよう `pop()` API を用意する
+- **テスト同期パターン** (flaky 回避のため Pacer API 設計時点で確定): (a) 書き手が wait に入った状態を保証するため `std::sync::Barrier` を使う、 (b) pop 側は `std::thread::spawn` で別スレッド化、 (c) timeout 経路検証は `Instant::now()` で min 経過を assert、 (d) callback スレッド模擬は Pacer 単独で完結できるよう `pop()` API を用意する。 Barrier 通過後の「書き手が push_wait 内 `wait_timeout` に到達するまでの gap」を埋めるための短時間 `thread::sleep` は許容する (waiter count を production コードに露出するテスト用 API 追加は overengineering と判定)
 - integration test は実機必須のため CI 化困難 (§実機計測 §担当参照)
 
 ### 実機計測
