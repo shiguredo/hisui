@@ -366,7 +366,7 @@ pub enum VideoEncoderRpcMessage {
 
 /// 内部エンコーダーが出力フレーム / エラーを `VideoEncoder` 内の受信側 (`rx`) に流すための送信側の型エイリアス
 ///
-/// crate 外から `OutputSink` インスタンスを構築する経路がないため `pub(crate)`。
+/// crate 外から `OutputSink` インスタンスを構築する経路がないため `pub(crate)` に引き下げる
 /// (対する decoder 側 `DecoderOutputSender` は `OutputSink::new` の公開シグネチャに引数型として露出するため `pub` 維持)。
 pub(crate) type EncoderOutputSender = tokio::sync::mpsc::UnboundedSender<crate::Result<VideoFrame>>;
 
