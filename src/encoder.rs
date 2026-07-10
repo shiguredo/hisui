@@ -470,7 +470,7 @@ pub async fn request_upstream_video_keyframe(
 ///
 /// **注意**: 非同期な内部エンコーダー (Nvcodec 等) 使用時、 `VideoEncoder` を drop する前に
 /// エンコード結果を drain し切ること。 drop 順は「`inner` を先に drop → callback スレッドが
-/// `sink.emit_ok` した最後の 1 フレームが `rx` に届く → その後 `rx` を drop」で成立するが、
+/// `sink.emit_ok` した残 in-flight フレームが `rx` に届く → その後 `rx` を drop」で成立するが、
 /// 未 drain の状態で drop すると `total_output_video_frame_count` メトリクスが実際の
 /// 出力数より少ない値のまま観測される (メトリクスは inner 内で inc されるが、 未回収の
 /// frame は下流には流れない)。

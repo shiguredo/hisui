@@ -79,8 +79,6 @@ fn build_handler(
             let context = context_slot
                 .get()
                 .expect("BUG: HandlerContext must be set before first encode() call");
-            // Pacer.pop() は Mutex ホールドスコープを内部で最小化し、
-            // lock 解放後に notify_one する契約 (書き手の push_wait を起こす)。
             let input_frame = input_queue.pop();
             let Some(input_frame) = input_frame else {
                 sink.emit_err(crate::Error::new(
@@ -139,9 +137,7 @@ fn build_handler(
             });
         }
         Err(err) => {
-            // Err 分岐でも Pacer.pop() を呼ぶことで書き手の push_wait を必ず起こす
-            // (bp N > 1 で Err が発生すると in-flight が飽和し、
-            // pop なしだと encode() が Condvar wait でデッドロックする)。
+            // Err でも pop で書き手を起こす (でないと bp N > 1 でデッドロック)。
             input_queue.pop();
             sink.emit_err(crate::Error::new(format!("nvcodec encode error: {err}")));
         }
@@ -344,13 +340,9 @@ impl NvcodecEncoder {
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
-        // 順序保証: callback で pop する前に必ず push_wait する。
-        // Mutex 排他 + VecDeque FIFO + shiguredo_nvcodec 内部 worker の FIFO 処理により、
-        // 「push_wait → encode → callback pop」の因果順序が担保される。
-        //
-        // bp: Pacer.push_wait はキュー長が INPUT_QUEUE_LIMIT 未満になるまで待って push する。
-        // これにより GPU 側の投入並列度を N に制限し、
-        // shiguredo_nvcodec 内部の "encoder buffer is full" エラーを未然に防ぐ。
+        // Pacer が bp と FIFO 順序を担保 (契約詳細は Pacer docstring 参照)。
+        // 「push_wait → encode → callback pop」の因果順序は shiguredo_nvcodec 2026.2.0
+        // の worker FIFO 実装 (crate `encode.rs:1554`) に依存し、 crate 更新時は再確認する。
         self.input_queue.push_wait(video_frame.to_stripped());
 
         // エンコード実行
@@ -361,9 +353,6 @@ impl NvcodecEncoder {
         };
         self.force_keyframe_next = false;
         self.inner.encode(&nv12_data, &encode_options, ())?;
-        // flush() は撤廃済み。 encode() は即時 return し、
-        // GPU 側の非同期パイプライン並列性が回復する。
-        // 完了フレームは callback → sink.emit_ok 経路で非同期に上位 rx に届く。
         Ok(())
     }
 

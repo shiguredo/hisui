@@ -1,5 +1,3 @@
-//! 内部キュー上限で書き手をセルフペーシングする薄い型
-//!
 //! nvcodec のような callback 完結型 inner で「上位からの投入 (`push_wait`) を
 //! callback スレッドの完了 (`pop` + notify) と協調させる」ための最小 API を提供する。
 //! feature 非依存で default feature の cargo test でも単体テストが走る。
@@ -34,6 +32,10 @@ use std::time::Duration;
 /// - `Mutex` / `Condvar` の poison は `.expect(...)` で panic させる (方針)。
 ///   callback スレッドの panic は encoder プロセス全体を止める前提で、
 ///   `Pacer` 単体では回復を試みない。
+///
+/// Send / Sync:
+///
+/// - `T: Send` なら auto trait で `Pacer<T>: Send + Sync` になる。
 #[derive(Debug)]
 pub struct Pacer<T> {
     queue: Mutex<VecDeque<T>>,
@@ -66,7 +68,6 @@ impl<T> Pacer<T> {
             guard = new_guard;
         }
         guard.push_back(item);
-        // guard は scope 終了で drop される。 caller が Mutex 外で副作用を実行可能。
     }
 
     /// FIFO 順に 1 件取り出し、 lock 解放後に `notify_one` する。
@@ -106,15 +107,6 @@ mod tests {
     use std::sync::{Arc, Barrier};
     use std::thread;
     use std::time::Instant;
-
-    // Pacer の bp 契約テスト:
-    // (i)   len() >= limit で push_wait が block する
-    // (ii)  callback 側 pop で書き手の push_wait が起こされる
-    // (iii) wait_timeout 経路で待機継続 (spurious wakeup 対策と safety net)
-    // (iv)  FIFO 順で保持される
-    // (v)   Err 経路でも pop で書き手が解放される
-    //       (Pacer 側は Some/None に関係なく notify する契約なので、
-    //        nvcodec の callback Err 分岐でも pop を呼びさえすればデッドロックしない)
 
     /// (i) len() >= limit で push_wait が block することを確認する。
     #[test]
