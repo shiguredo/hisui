@@ -12,8 +12,8 @@ use std::path::Path;
 use candle_core::{D, IndexOp, Tensor};
 use candle_nn::{VarBuilder, ops::softmax};
 use candle_transformers::models::whisper::{
-    Config, DTYPE, EOT_TOKEN, LOGPROB_THRESHOLD, NO_SPEECH_THRESHOLD, NO_SPEECH_TOKENS,
-    NO_TIMESTAMPS_TOKEN, SOT_TOKEN, TRANSCRIBE_TOKEN, model::Whisper,
+    Config, DTYPE, EOT_TOKEN, NO_SPEECH_TOKENS, NO_TIMESTAMPS_TOKEN, SOT_TOKEN, TRANSCRIBE_TOKEN,
+    model::Whisper,
 };
 use tokenizers::Tokenizer;
 
@@ -46,18 +46,6 @@ pub struct WhisperDecodedChunk {
     pub text: String,
     pub avg_logprob: LogProbability,
     pub no_speech_prob: Probability,
-}
-
-impl WhisperDecodedChunk {
-    /// 「発話がない (hallucination の可能性が高い)」と判定できるかを返す。
-    ///
-    /// candle の閾値 `NO_SPEECH_THRESHOLD` (= 0.6) を `no_speech_prob` が上回り、かつ
-    /// `LOGPROB_THRESHOLD` (= -1.0) を `avg_logprob` が下回ったときに真。閾値を独自に
-    /// 調整したい場合は `no_speech_prob` / `avg_logprob` を直接見て判定する。
-    pub fn is_likely_no_speech(&self) -> bool {
-        self.no_speech_prob.get() > NO_SPEECH_THRESHOLD
-            && self.avg_logprob.get() < LOGPROB_THRESHOLD
-    }
 }
 
 /// Whisper プロトコルで固定されている特殊トークンの一式。
@@ -185,7 +173,8 @@ impl WhisperDecoder {
     /// クリアするため、呼び出し側は状態管理不要 (前回リクエストの残り state が漏れない)。
     ///
     /// hallucination の可能性がある結果もそのまま返す (text を空にしない)。呼び出し側は
-    /// `WhisperDecodedChunk::is_likely_no_speech` で判定し、必要に応じて破棄する。
+    /// `no_speech_prob` と `avg_logprob` を見て破棄判定する。閾値の詳細は
+    /// `WhisperTranscript::is_likely_no_speech` を参照。
     pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
         self.inner.reset_kv_cache();
         let audio_features = self

@@ -25,7 +25,11 @@ pub struct WhisperTranscript {
 }
 
 impl WhisperTranscript {
-    /// 詳細は `WhisperDecodedChunk::is_likely_no_speech` を参照。
+    /// 「発話がない (hallucination の可能性が高い)」と判定できるかを返す。
+    ///
+    /// candle の閾値 `NO_SPEECH_THRESHOLD` (= 0.6) を `no_speech_prob` が上回り、かつ
+    /// `LOGPROB_THRESHOLD` (= -1.0) を `avg_logprob` が下回ったときに真。閾値を独自に
+    /// 調整したい場合は `no_speech_prob` / `avg_logprob` を直接見て判定する。
     pub fn is_likely_no_speech(&self) -> bool {
         self.no_speech_prob.get() > NO_SPEECH_THRESHOLD
             && self.avg_logprob.get() < LOGPROB_THRESHOLD
