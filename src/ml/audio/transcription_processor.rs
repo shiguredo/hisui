@@ -167,7 +167,7 @@ impl ProcessorState {
         self.ensure_audio_format(frame)?;
         self.base_offset.get_or_insert(frame.timestamp);
         self.remember_audio_layout(frame)?;
-        let normalized = normalize_i16be(frame)?;
+        let normalized = frame.samples_i16()?.map(|s| f32::from(s) / 32768.0);
         self.input_buffer.extend(normalized);
 
         let samples_per_second =
@@ -339,23 +339,6 @@ impl ProcessorState {
     }
 }
 
-fn normalize_i16be(frame: &AudioFrame) -> crate::Result<Vec<f32>> {
-    let bytes_per_sample = 2usize;
-    let channels = usize::from(frame.channels.get());
-    if !frame.data.len().is_multiple_of(bytes_per_sample * channels) {
-        return Err(crate::Error::new(format!(
-            "I16Be payload length is not aligned to channels: len={}, channels={}",
-            frame.data.len(),
-            frame.channels.get()
-        )));
-    }
-    Ok(frame
-        .data
-        .chunks_exact(2)
-        .map(|chunk| i16::from_be_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
-        .collect())
-}
-
 fn split_segment_pcm(start_sample: u64, pcm: &[f32]) -> Vec<QueuedChunk> {
     let mut chunks = Vec::new();
     let mut offset = 0usize;
@@ -414,25 +397,6 @@ mod tests {
         let chunks = split_segment_pcm(0, &pcm);
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].pcm.len(), MAX_TRANSCRIPT_SAMPLES);
-    }
-
-    /// I16Be を [-1.0, 1.0) の f32 に正規化する。
-    #[test]
-    fn normalize_i16be_converts_big_endian_samples() {
-        let frame = AudioFrame {
-            data: vec![0x80, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xff, 0xff],
-            format: AudioFormat::I16Be,
-            channels: Channels::STEREO,
-            sample_rate: SampleRate::from_u32(48_000).expect("48 kHz は有効"),
-            timestamp: Duration::ZERO,
-            sample_entry: None,
-        };
-        let pcm = normalize_i16be(&frame).expect("正規化は成功する想定");
-        assert_eq!(pcm.len(), 4);
-        assert_eq!(pcm[0], -1.0);
-        assert_eq!(pcm[1], 0.0);
-        assert!((pcm[2] - (32767.0 / 32768.0)).abs() < f32::EPSILON);
-        assert!((pcm[3] - (-1.0 / 32768.0)).abs() < f32::EPSILON);
     }
 
     /// 16 kHz サンプル番号から track 時刻へ丸め誤差なく写像できる。
