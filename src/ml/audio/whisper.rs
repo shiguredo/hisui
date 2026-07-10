@@ -17,14 +17,14 @@ use crate::text::LanguageCode;
 
 /// Whisper の推論結果。
 #[derive(Debug)]
-pub struct WhisperTranscription {
+pub struct WhisperTranscript {
     pub text: String,
     pub language: Option<LanguageCode>,
     pub no_speech_prob: Probability,
     pub avg_logprob: LogProbability,
 }
 
-impl WhisperTranscription {
+impl WhisperTranscript {
     /// 詳細は `WhisperDecodedChunk::is_likely_no_speech` を参照。
     pub fn is_likely_no_speech(&self) -> bool {
         self.no_speech_prob.get() > NO_SPEECH_THRESHOLD
@@ -72,12 +72,12 @@ impl WhisperPipeline {
         &mut self,
         pcm: &[f32],
         language: &LanguageCode,
-    ) -> crate::Result<WhisperTranscription> {
+    ) -> crate::Result<WhisperTranscript> {
         let config = self.decoder.config();
         let mel = audio::pcm_to_mel(config, pcm, &self.mel_filters);
         let mel_len = mel.len();
         if mel_len == 0 {
-            return Ok(WhisperTranscription {
+            return Ok(WhisperTranscript {
                 text: String::new(),
                 language: None,
                 no_speech_prob: Probability::ONE,
@@ -99,7 +99,7 @@ impl WhisperPipeline {
             .set_language_token(Some(resolved_language.token_id));
         let result = self.decoder.decode_chunk(&mel)?;
 
-        Ok(WhisperTranscription {
+        Ok(WhisperTranscript {
             text: result.text.trim().to_owned(),
             language: Some(resolved_language.code),
             no_speech_prob: result.no_speech_prob,

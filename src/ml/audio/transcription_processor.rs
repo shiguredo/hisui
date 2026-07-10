@@ -10,10 +10,9 @@ use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate, resample::resa
 use crate::media::MediaFrame;
 use crate::ml::audio::config::VadConfig;
 use crate::ml::audio::silero_vad::SileroVadModel;
-use crate::ml::audio::transcription_service::{
-    TranscriptRequest, TranscriptResult, TranscriptionService,
-};
+use crate::ml::audio::transcription_service::{TranscriptRequest, TranscriptionService};
 use crate::ml::audio::vad::{SpeechSegment, VadGate};
+use crate::ml::audio::whisper::WhisperTranscript;
 use crate::text::{LanguageCode, TextFrame};
 use crate::{Message, ProcessorHandle, TrackId};
 
@@ -32,10 +31,10 @@ struct QueuedChunk {
 struct PendingTranscript {
     start: Duration,
     end: Duration,
-    result_task: JoinHandle<crate::Result<TranscriptResult>>,
+    result_task: JoinHandle<crate::Result<WhisperTranscript>>,
 }
 
-/// `publish_text_result` の結果。 pipeline が閉じている場合は上位 loop が正常終了する。
+/// `publish_transcript` の結果。 pipeline が閉じている場合は上位 loop が正常終了する。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PublishOutcome {
     Published,
@@ -103,10 +102,10 @@ impl TranscriptionProcessor {
                 }
                 result = pending_result => {
                     // JoinHandle は既に解決済みなので、追加の spawn で包み直さず
-                    // 直接 publish_text_result に流す。 JoinError は crate::Error に、
+                    // 直接 publish_transcript に流す。 JoinError は crate::Error に、
                     // 内側の crate::Result はそのまま伝播させる。
                     let pending = state.pending.pop_front().expect("pending queue head exists");
-                    let outcome = publish_text_result(
+                    let outcome = publish_transcript(
                         pending.start,
                         pending.end,
                         result??,
@@ -284,11 +283,11 @@ impl ProcessorState {
         pending: PendingTranscript,
         output_tx: &mut crate::TrackPublisher,
     ) -> crate::Result<PublishOutcome> {
-        let result = pending.result_task.await??;
-        Ok(publish_text_result(
+        let transcript = pending.result_task.await??;
+        Ok(publish_transcript(
             pending.start,
             pending.end,
-            result,
+            transcript,
             output_tx,
         ))
     }
@@ -352,28 +351,28 @@ impl ProcessorState {
     }
 }
 
-/// 解決済み `TranscriptResult` を text track に流す。
+/// 解決済み `WhisperTranscript` を text track に流す。
 ///
 /// 無音判定 (`is_likely_no_speech`) と空テキストは publish しない (`Published` を返す)。
 /// `send_media` が false を返した場合 (下流の receiver がクローズ済み) は
 /// `PipelineClosed` を返し、呼び出し元に正常終了処理を任せる。
-fn publish_text_result(
+fn publish_transcript(
     start: Duration,
     end: Duration,
-    result: TranscriptResult,
+    transcript: WhisperTranscript,
     output_tx: &mut crate::TrackPublisher,
 ) -> PublishOutcome {
-    if result.is_likely_no_speech() || result.text.is_empty() {
+    if transcript.is_likely_no_speech() || transcript.text.is_empty() {
         return PublishOutcome::Published;
     }
 
     let frame = TextFrame {
         start,
         end,
-        text: result.text,
-        language: result.language,
-        no_speech_prob: Some(result.no_speech_prob.get() as f32),
-        avg_logprob: Some(result.avg_logprob.get() as f32),
+        text: transcript.text,
+        language: transcript.language,
+        no_speech_prob: Some(transcript.no_speech_prob.get() as f32),
+        avg_logprob: Some(transcript.avg_logprob.get() as f32),
     };
     if output_tx.send_media(MediaFrame::new_text(frame)) {
         PublishOutcome::Published

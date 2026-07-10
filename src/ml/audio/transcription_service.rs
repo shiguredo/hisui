@@ -2,11 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use candle_transformers::models::whisper::{LOGPROB_THRESHOLD, NO_SPEECH_THRESHOLD};
 use tokio::sync::{mpsc, oneshot};
 
-use super::whisper::{WhisperPipeline, WhisperTranscription};
-use crate::probability::{LogProbability, Probability};
+use super::whisper::{WhisperPipeline, WhisperTranscript};
 use crate::text::LanguageCode;
 
 /// 文字起こしリクエスト。
@@ -18,27 +16,10 @@ pub struct TranscriptRequest {
     pub language: LanguageCode,
 }
 
-/// 文字起こし結果。
-#[derive(Debug)]
-pub struct TranscriptResult {
-    pub text: String,
-    pub language: Option<LanguageCode>,
-    pub no_speech_prob: Probability,
-    pub avg_logprob: LogProbability,
-}
-
-impl TranscriptResult {
-    /// 詳細は `crate::ml::audio::whisper::decode::WhisperDecodedChunk::is_likely_no_speech` を参照。
-    pub fn is_likely_no_speech(&self) -> bool {
-        self.no_speech_prob.get() > NO_SPEECH_THRESHOLD
-            && self.avg_logprob.get() < LOGPROB_THRESHOLD
-    }
-}
-
 #[derive(Debug)]
 struct Job {
     request: TranscriptRequest,
-    reply_tx: oneshot::Sender<crate::Result<TranscriptResult>>,
+    reply_tx: oneshot::Sender<crate::Result<WhisperTranscript>>,
 }
 
 /// Whisper 推論を単一の blocking worker で処理するサービス。
@@ -64,7 +45,7 @@ impl TranscriptionService {
     pub async fn submit(
         &self,
         request: TranscriptRequest,
-    ) -> oneshot::Receiver<crate::Result<TranscriptResult>> {
+    ) -> oneshot::Receiver<crate::Result<WhisperTranscript>> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let job = Job { request, reply_tx };
         if let Err(err) = self.tx.send(job).await {
@@ -79,31 +60,15 @@ impl TranscriptionService {
 fn spawn_worker(mut rx: mpsc::Receiver<Job>, mut pipeline: WhisperPipeline, model_dir: PathBuf) {
     tokio::task::spawn_blocking(move || {
         while let Some(job) = rx.blocking_recv() {
-            let result = transcribe_job(&mut pipeline, job.request).map_err(|e| {
-                e.with_context(format!(
-                    "transcription worker failed for model {}",
-                    model_dir.display()
-                ))
-            });
+            let result = pipeline
+                .transcribe_pcm16k(&job.request.pcm, &job.request.language)
+                .map_err(|e| {
+                    e.with_context(format!(
+                        "transcription worker failed for model {}",
+                        model_dir.display()
+                    ))
+                });
             let _ = job.reply_tx.send(result);
         }
     });
-}
-
-fn transcribe_job(
-    pipeline: &mut WhisperPipeline,
-    request: TranscriptRequest,
-) -> crate::Result<TranscriptResult> {
-    let WhisperTranscription {
-        text,
-        language,
-        no_speech_prob,
-        avg_logprob,
-    } = pipeline.transcribe_pcm16k(&request.pcm, &request.language)?;
-    Ok(TranscriptResult {
-        text,
-        language,
-        no_speech_prob,
-        avg_logprob,
-    })
 }
