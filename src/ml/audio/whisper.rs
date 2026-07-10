@@ -259,4 +259,86 @@ mod tests {
         assert_eq!(config.max_source_positions, 1500);
         assert_eq!(config.suppress_tokens, vec![1, 2, 3]);
     }
+
+    /// 必須フィールドが欠けているとき parse_whisper_config は Err を返す。
+    #[test]
+    fn parse_whisper_config_rejects_missing_required_field() {
+        // num_mel_bins を抜いた config
+        let text = r#"{
+            "max_source_positions": 1500,
+            "d_model": 384,
+            "encoder_attention_heads": 6,
+            "encoder_layers": 4,
+            "vocab_size": 51864,
+            "max_target_positions": 448,
+            "decoder_attention_heads": 6,
+            "decoder_layers": 4
+        }"#;
+        let json = nojson::RawJson::parse(text).expect("JSON をパースできること");
+        assert!(
+            parse_whisper_config(json.value()).is_err(),
+            "必須フィールド欠落は Err のはず"
+        );
+    }
+
+    /// 必須フィールドが負値のとき parse_whisper_config は Err を返す (usize 変換失敗)。
+    #[test]
+    fn parse_whisper_config_rejects_negative_required_field() {
+        let text = r#"{
+            "num_mel_bins": -1,
+            "max_source_positions": 1500,
+            "d_model": 384,
+            "encoder_attention_heads": 6,
+            "encoder_layers": 4,
+            "vocab_size": 51864,
+            "max_target_positions": 448,
+            "decoder_attention_heads": 6,
+            "decoder_layers": 4
+        }"#;
+        let json = nojson::RawJson::parse(text).expect("JSON をパースできること");
+        assert!(
+            parse_whisper_config(json.value()).is_err(),
+            "負値は Err のはず"
+        );
+    }
+
+    /// 必須フィールドが整数でないとき parse_whisper_config は Err を返す。
+    #[test]
+    fn parse_whisper_config_rejects_non_integer_required_field() {
+        let text = r#"{
+            "num_mel_bins": "eighty",
+            "max_source_positions": 1500,
+            "d_model": 384,
+            "encoder_attention_heads": 6,
+            "encoder_layers": 4,
+            "vocab_size": 51864,
+            "max_target_positions": 448,
+            "decoder_attention_heads": 6,
+            "decoder_layers": 4
+        }"#;
+        let json = nojson::RawJson::parse(text).expect("JSON をパースできること");
+        assert!(
+            parse_whisper_config(json.value()).is_err(),
+            "非整数値は Err のはず"
+        );
+    }
+
+    /// suppress_tokens が省略されているとき parse_whisper_config は空 Vec で成功する。
+    #[test]
+    fn parse_whisper_config_defaults_missing_suppress_tokens_to_empty() {
+        let text = r#"{
+            "num_mel_bins": 80,
+            "max_source_positions": 1500,
+            "d_model": 384,
+            "encoder_attention_heads": 6,
+            "encoder_layers": 4,
+            "vocab_size": 51864,
+            "max_target_positions": 448,
+            "decoder_attention_heads": 6,
+            "decoder_layers": 4
+        }"#;
+        let json = nojson::RawJson::parse(text).expect("JSON をパースできること");
+        let config = parse_whisper_config(json.value()).expect("suppress_tokens 省略は Ok のはず");
+        assert!(config.suppress_tokens.is_empty(), "省略時は空 Vec が入る");
+    }
 }
