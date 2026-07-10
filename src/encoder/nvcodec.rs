@@ -1,8 +1,7 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use crate::{
-    encoder::{OutputSink, VideoEncoderOptions},
+    encoder::{OutputSink, VideoEncoderOptions, pacer::Pacer},
     sample_entry::SharedSampleEntry,
     types::CodecName,
     video::av1,
@@ -11,8 +10,21 @@ use crate::{
     video::{RawVideoFrame, VideoFormat, VideoFrame},
 };
 
+/// 内部キュー上限 (bp 機構の閾値)。
+///
+/// shiguredo_nvcodec 内部の `n_encoder_buffer = frame_interval_p + 3`
+/// (現状 hisui は `frame_interval_p: 1` 固定なので 4) を超えると
+/// `"encoder buffer is full"` エラー (crate 内 `encode.rs:1572`) で
+/// `encode()` が失敗するため、 上限はそれ未満に設定する。
+/// 実機計測で 2 / 3 を比較して確定する暫定値。
+const INPUT_QUEUE_LIMIT: usize = 3;
+
 /// 本スレッドと callback スレッドで共有される入力フレームキュー
-type SharedInputQueue = Arc<Mutex<VecDeque<VideoFrame>>>;
+///
+/// `Pacer` が内部キュー上限で書き手 (`encode()`) をセルフペーシングし、
+/// callback スレッドが `pop` で通知することで NVENC 内部 pending キュー溢れを防ぐ
+/// (`Pacer` docstring 参照)。
+type SharedInputQueue = Arc<Pacer<VideoFrame>>;
 
 /// callback スレッドが参照する遅延確定コンテキスト。
 /// Encoder::new 後に get_sequence_params() から確定して set() される。
@@ -34,8 +46,8 @@ pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder<
         shiguredo_nvcodec::FnEncodeHandler<(), shiguredo_nvcodec::Error>,
     >,
-    // 本スレッドで encode() 直後に push_back し、callback スレッドで pop_front する。
-    // Mutex ホールドスコープは push_back / pop_front のみに限定する。
+    // 本スレッドで `encode()` 直前に `push_wait` し、 callback スレッドで `pop` する。
+    // Mutex ホールドスコープは `Pacer` 内部で最小化されている。
     input_queue: SharedInputQueue,
     encoded_format: VideoFormat,
     force_keyframe_next: bool,
@@ -67,12 +79,9 @@ fn build_handler(
             let context = context_slot
                 .get()
                 .expect("BUG: HandlerContext must be set before first encode() call");
-            let input_frame = {
-                let mut queue = input_queue
-                    .lock()
-                    .expect("nvcodec input queue lock poisoned");
-                queue.pop_front()
-            };
+            // Pacer.pop() は Mutex ホールドスコープを内部で最小化し、
+            // lock 解放後に notify_one する契約 (書き手の push_wait を起こす)。
+            let input_frame = input_queue.pop();
             let Some(input_frame) = input_frame else {
                 sink.emit_err(crate::Error::new(
                     "encoded frame produced without input frame",
@@ -130,6 +139,10 @@ fn build_handler(
             });
         }
         Err(err) => {
+            // Err 分岐でも Pacer.pop() を呼ぶことで書き手の push_wait を必ず起こす
+            // (bp N > 1 で Err が発生すると in-flight が飽和し、
+            // pop なしだと encode() が Condvar wait でデッドロックする)。
+            input_queue.pop();
             sink.emit_err(crate::Error::new(format!("nvcodec encode error: {err}")));
         }
     })
@@ -153,7 +166,7 @@ impl NvcodecEncoder {
         encoded_format: VideoFormat,
         make_context: impl FnOnce(Vec<u8>) -> crate::Result<HandlerContext>,
     ) -> crate::Result<Self> {
-        let input_queue: SharedInputQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let input_queue: SharedInputQueue = Arc::new(Pacer::new(INPUT_QUEUE_LIMIT));
         let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
         let handler = build_handler(
             sink,
@@ -331,15 +344,14 @@ impl NvcodecEncoder {
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
-        // 順序保証: callback で pop する前に必ず push_back する。
-        // flush() は callback 完了までブロックするため、push が先行することが担保される。
-        {
-            let mut queue = self
-                .input_queue
-                .lock()
-                .expect("nvcodec input queue lock poisoned");
-            queue.push_back(video_frame.to_stripped());
-        }
+        // 順序保証: callback で pop する前に必ず push_wait する。
+        // Mutex 排他 + VecDeque FIFO + shiguredo_nvcodec 内部 worker の FIFO 処理により、
+        // 「push_wait → encode → callback pop」の因果順序が担保される。
+        //
+        // bp: Pacer.push_wait はキュー長が INPUT_QUEUE_LIMIT 未満になるまで待って push する。
+        // これにより GPU 側の投入並列度を N に制限し、
+        // shiguredo_nvcodec 内部の "encoder buffer is full" エラーを未然に防ぐ。
+        self.input_queue.push_wait(video_frame.to_stripped());
 
         // エンコード実行
         let encode_options = shiguredo_nvcodec::EncodeOptions {
@@ -349,11 +361,9 @@ impl NvcodecEncoder {
         };
         self.force_keyframe_next = false;
         self.inner.encode(&nv12_data, &encode_options, ())?;
-        // shiguredo_nvcodec のエンコーダーは内部の worker スレッドで非同期にエンコードし、
-        // encode() は即時 return する。上位パイプラインは同期 pull 型で、上位側でペース制御
-        // しないと内部キューが溢れて encode() が "encoder buffer is full" で失敗するため、
-        // 投入直後に flush() で 1 フレーム分の完了を待って同期動作させる。
-        self.inner.flush()?;
+        // flush() は撤廃済み。 encode() は即時 return し、
+        // GPU 側の非同期パイプライン並列性が回復する。
+        // 完了フレームは callback → sink.emit_ok 経路で非同期に上位 rx に届く。
         Ok(())
     }
 

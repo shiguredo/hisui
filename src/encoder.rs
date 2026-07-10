@@ -7,6 +7,7 @@ pub mod libvpx;
 pub mod nvcodec;
 pub mod openh264;
 pub mod opus;
+pub mod pacer;
 pub mod svt_av1;
 #[cfg(target_os = "macos")]
 pub mod video_toolbox;
