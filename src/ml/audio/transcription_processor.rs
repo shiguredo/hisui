@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::task::JoinHandle;
+use tokio::sync::oneshot;
 
 use crate::audio::{AudioFormat, AudioFrame, Channels, SampleRate, resample::resample_to_mono};
 use crate::media::MediaFrame;
@@ -31,7 +31,7 @@ struct QueuedChunk {
 struct PendingTranscript {
     start: Duration,
     end: Duration,
-    result_task: JoinHandle<crate::Result<WhisperTranscript>>,
+    result_rx: oneshot::Receiver<crate::Result<WhisperTranscript>>,
 }
 
 /// `publish_transcript` の結果。 pipeline が閉じている場合は上位 loop が正常終了する。
@@ -92,7 +92,7 @@ impl TranscriptionProcessor {
                 .pending
                 .front_mut()
                 .expect("pending queue must not be empty")
-                .result_task;
+                .result_rx;
             tokio::select! {
                 message = input_rx.recv() => {
                     if state.handle_message(message, &mut output_tx).await? {
@@ -101,14 +101,20 @@ impl TranscriptionProcessor {
                     }
                 }
                 result = pending_result => {
-                    // JoinHandle は既に解決済みなので、追加の spawn で包み直さず
-                    // 直接 publish_transcript に流す。 JoinError は crate::Error に、
+                    // oneshot::Receiver は Unpin なので &mut Receiver を直接 await して
+                    // 結果を受け取る。 RecvError (channel クローズ) は crate::Error に、
                     // 内側の crate::Result はそのまま伝播させる。
                     let pending = state.pending.pop_front().expect("pending queue head exists");
+                    let transcript = result
+                        .map_err(|e| {
+                            crate::Error::new(format!(
+                                "transcription result channel closed: {e}"
+                            ))
+                        })??;
                     let outcome = publish_transcript(
                         pending.start,
                         pending.end,
-                        result??,
+                        transcript,
                         &mut output_tx,
                     );
                     if matches!(outcome, PublishOutcome::PipelineClosed) {
@@ -293,16 +299,11 @@ impl ProcessorState {
         };
         let start = self.segment_time(chunk.start_sample)?;
         let end = self.segment_time(chunk.end_sample)?;
-        let rx = self.service.submit(request).await;
-        let task = tokio::spawn(async move {
-            rx.await.map_err(|e| {
-                crate::Error::new(format!("transcription result channel closed: {e}"))
-            })?
-        });
+        let result_rx = self.service.submit(request).await;
         self.pending.push_back(PendingTranscript {
             start,
             end,
-            result_task: task,
+            result_rx,
         });
         Ok(())
     }
@@ -312,7 +313,9 @@ impl ProcessorState {
         pending: PendingTranscript,
         output_tx: &mut crate::TrackPublisher,
     ) -> crate::Result<PublishOutcome> {
-        let transcript = pending.result_task.await??;
+        let transcript = pending.result_rx.await.map_err(|e| {
+            crate::Error::new(format!("transcription result channel closed: {e}"))
+        })??;
         Ok(publish_transcript(
             pending.start,
             pending.end,
