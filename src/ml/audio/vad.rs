@@ -70,6 +70,7 @@ struct SpeechInProgress {
 ///
 /// 1 つの `VadGate` は 1 つの track に紐付ける (`SileroVad` の内部 state / context と `VadGate` の
 /// 通し番号を別 track と混ぜると意味を失うため)。
+#[derive(Debug)]
 pub struct VadGate {
     silero: SileroVad,
     buffer: AudioChunkBuffer,
@@ -145,12 +146,21 @@ impl VadGate {
         }
         Ok(results)
     }
+
+    /// 現時点で呼び出し側が保持し続ける必要がある最小サンプル番号を返す。
+    ///
+    /// - `Idle`: これまでに消費済みの範囲はもう参照しないため `sample_count`
+    /// - `InSpeech` / `Trailing`: 進行中の発話開始位置より前は不要
+    pub fn min_required_sample(&self) -> u64 {
+        min_required_sample_of(&self.state, self.sample_count)
+    }
 }
 
 /// `advance_state` に渡す閾値・サンプル数のパラメタ束。
 ///
 /// `advance_state` の引数を減らして clippy::too_many_arguments を回避する目的で導入している。
 /// VadGate::feed から `VadConfig` と `CHUNK_SAMPLES` を展開して組み立てる。
+#[derive(Debug)]
 struct TransitionConfig {
     threshold: Probability,
     min_silence_samples: u64,
@@ -241,6 +251,18 @@ fn finalize_speech(speech: &SpeechInProgress, min_speech_samples: u64) -> Option
     })
 }
 
+/// `VadGate::min_required_sample` の本体。現在状態と累計サンプル数から、呼び出し側が保持し続ける
+/// 必要がある最小サンプル番号を計算する pure function。
+///
+/// メソッドから切り出すことで、実 `SileroVad` を要する `VadGate` を組み立てずに `State` を直接
+/// 構築して単体テストできるようにしている (`advance_state` / `finalize_speech` と同じ方針)。
+fn min_required_sample_of(state: &State, sample_count: u64) -> u64 {
+    match state {
+        State::Idle => sample_count,
+        State::InSpeech(speech) | State::Trailing { speech, .. } => speech.start_sample,
+    }
+}
+
 /// Duration を 16 kHz サンプル数に変換する。
 ///
 /// 1 サンプル = 62_500 ns (16 kHz は 1_000_000_000 の約数) なので丸め誤差はない。
@@ -258,7 +280,7 @@ mod tests {
     const CHUNK: u64 = 512;
 
     /// テスト用の閾値。
-    const THRESHOLD: f32 = 0.5;
+    const THRESHOLD: f64 = 0.5;
 
     /// `THRESHOLD` を `Probability` にラップした値。`Probability::new` が const fn なので
     /// const 文脈で組み立てられる。
@@ -275,13 +297,13 @@ mod tests {
     /// 「1 チャンクだけの発話は min_speech 未達 / 3 チャンクぶんは到達」を試せる大きさに設定。
     const MIN_SPEECH: u64 = 3 * CHUNK;
 
-    /// f32 リテラルを `Probability` に変換するテスト用ヘルパー ([0.0, 1.0] 前提)。
-    fn prob(v: f32) -> Probability {
+    /// f64 リテラルを `Probability` に変換するテスト用ヘルパー ([0.0, 1.0] 前提)。
+    fn prob(v: f64) -> Probability {
         Probability::new(v).expect("テスト値は [0.0, 1.0] 前提")
     }
 
     /// SpeechInProgress を組み立てる補助関数。`max_prob` は [0.0, 1.0] であること。
-    fn speech(start: u64, last_end: u64, max_prob: f32) -> SpeechInProgress {
+    fn speech(start: u64, last_end: u64, max_prob: f64) -> SpeechInProgress {
         SpeechInProgress {
             start_sample: start,
             last_speech_end_sample: last_end,
@@ -290,7 +312,7 @@ mod tests {
     }
 
     /// advance_state を固定パラメタで呼び出す補助関数。`probability` は [0.0, 1.0] であること。
-    fn step(state: State, probability: f32, chunk_start: u64) -> (State, Vec<SpeechSegment>) {
+    fn step(state: State, probability: f64, chunk_start: u64) -> (State, Vec<SpeechSegment>) {
         let chunk_end = chunk_start + CHUNK;
         let mut results = Vec::new();
         let config = TransitionConfig {
@@ -452,5 +474,29 @@ mod tests {
                 max_probability: prob(0.85),
             })
         );
+    }
+
+    /// Idle 状態では、消費済み範囲はもう参照しないため sample_count が最小保持位置になる。
+    #[test]
+    fn min_required_sample_of_returns_sample_count_when_idle() {
+        assert_eq!(min_required_sample_of(&State::Idle, 10 * CHUNK), 10 * CHUNK);
+    }
+
+    /// InSpeech 状態では、sample_count が発話開始より進んでいても、進行中の発話開始位置が
+    /// 最小保持位置になる (開始位置より前は捨ててよい)。
+    #[test]
+    fn min_required_sample_of_returns_speech_start_when_in_speech() {
+        let state = State::InSpeech(speech(3 * CHUNK, 5 * CHUNK, 0.9));
+        assert_eq!(min_required_sample_of(&state, 5 * CHUNK), 3 * CHUNK);
+    }
+
+    /// Trailing 状態でも、無音カウント中の発話開始位置が最小保持位置になる。
+    #[test]
+    fn min_required_sample_of_returns_speech_start_when_trailing() {
+        let state = State::Trailing {
+            speech: speech(3 * CHUNK, 5 * CHUNK, 0.9),
+            silence_samples: 2 * CHUNK,
+        };
+        assert_eq!(min_required_sample_of(&state, 7 * CHUNK), 3 * CHUNK);
     }
 }

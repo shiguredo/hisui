@@ -44,6 +44,21 @@ fn resolve_model_path_or_skip(test_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// testdata の raw PCM を f32 モノラルへ展開する。
+fn load_pcm16le_mono_f32(path: &Path) -> hisui::Result<Vec<f32>> {
+    let bytes = std::fs::read(path)?;
+    if !bytes.len().is_multiple_of(2) {
+        return Err(hisui::Error::new(format!(
+            "PCM fixture must have even byte length: {}",
+            path.display()
+        )));
+    }
+    Ok(bytes
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
+        .collect())
+}
+
 /// SileroVadModel::load が成功する (モデル配置済み環境限定)。
 #[test]
 fn silero_vad_model_load_succeeds() {
@@ -104,6 +119,27 @@ fn silero_vad_zero_input_stays_below_threshold() {
             probability
         );
     }
+}
+
+/// 実発話音声では少なくとも 1 つの SpeechSegment が検出される。
+#[test]
+fn vad_gate_detects_speech_from_real_fixture() {
+    let Some(model_path) = resolve_model_path_or_skip("vad_gate_detects_speech_from_real_fixture")
+    else {
+        return;
+    };
+    let model = SileroVadModel::load(&model_path, Device::Cpu).expect("Silero VAD ロード");
+    let mut gate = VadGate::new(model.new_instance(), VadConfig::default());
+    let pcm = load_pcm16le_mono_f32(Path::new("testdata/speech-en-16k-mono-s16le.pcm"))
+        .expect("英語実音声 fixture を読めること");
+
+    let mut segments = gate.feed(&pcm).expect("feed は成功する想定");
+    segments.extend(gate.flush().expect("flush は成功する想定"));
+
+    assert!(
+        !segments.is_empty(),
+        "実発話音声では少なくとも 1 つの SpeechSegment が検出されるはず"
+    );
 }
 
 /// 同じモデルから `new_instance` で作った独立したインスタンスは、同一入力に対して 1 回目の推論結果が

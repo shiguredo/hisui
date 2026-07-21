@@ -169,7 +169,7 @@ impl SileroVad {
                 "silero VAD speech output is empty after flatten",
             ));
         }
-        let raw = probability[0];
+        let raw = f64::from(probability[0]);
         let prob = Probability::new(raw).ok_or_else(|| {
             Error::new(format!(
                 "silero VAD produced probability out of [0.0, 1.0] range: {raw}"

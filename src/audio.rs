@@ -143,6 +143,32 @@ impl AudioFrame {
         });
         Ok(samples)
     }
+
+    /// I16Be フォーマットの音声サンプルを i16 の iterator として返す (channels 非依存)。
+    ///
+    /// interleave 順 (stereo なら L, R, L, R, ...)。 mono / stereo のどちらでも使える。
+    /// `data.len()` が channels に対応するサンプル境界 (mono なら 2 バイト、 stereo なら 4 バイト)
+    /// で揃っていない場合は Err を返す (upstream の破損サインを silent に潰さない)。
+    pub fn samples_i16(&self) -> crate::Result<impl '_ + Iterator<Item = i16>> {
+        if self.format != AudioFormat::I16Be {
+            return Err(crate::Error::new(format!(
+                "expected I16Be format, got {}",
+                self.format
+            )));
+        }
+        let bytes_per_frame = 2 * usize::from(self.channels.get());
+        if !self.data.len().is_multiple_of(bytes_per_frame) {
+            return Err(crate::Error::new(format!(
+                "I16Be payload length is not aligned to channels: len={}, channels={}",
+                self.data.len(),
+                self.channels.get()
+            )));
+        }
+        Ok(self
+            .data
+            .chunks_exact(2)
+            .map(|c| i16::from_be_bytes([c[0], c[1]])))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,7 +219,9 @@ pub fn mono_to_stereo(mono_samples: &[i16]) -> Vec<i16> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Channels, SampleRate};
+    use std::time::Duration;
+
+    use super::{AudioFormat, AudioFrame, Channels, SampleRate};
 
     #[test]
     fn channels_constants_are_valid() {
@@ -265,6 +293,91 @@ mod tests {
                 .expect("must be valid")
                 .as_u16()
                 .is_err()
+        );
+    }
+
+    /// I16Be mono の代表バイト境界値 (i16::MIN / 0 / i16::MAX) を samples_i16 が正しくデコードする。
+    #[test]
+    fn samples_i16_decodes_mono_big_endian_bytes() {
+        let frame = AudioFrame {
+            data: vec![0x80, 0x00, 0x00, 0x00, 0x7f, 0xff],
+            format: AudioFormat::I16Be,
+            channels: Channels::MONO,
+            sample_rate: SampleRate::from_u32(16_000).expect("16 kHz は有効"),
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+        let samples: Vec<i16> = frame
+            .samples_i16()
+            .expect("I16Be mono は samples_i16 が成功する")
+            .collect();
+        assert_eq!(samples, vec![i16::MIN, 0, i16::MAX]);
+    }
+
+    /// I16Be の代表的なバイト境界値 (最小 / 0 / 最大 / -1) を samples_i16 が正しくデコードする。
+    #[test]
+    fn samples_i16_decodes_big_endian_bytes() {
+        let frame = AudioFrame {
+            data: vec![0x80, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xff, 0xff],
+            format: AudioFormat::I16Be,
+            channels: Channels::STEREO,
+            sample_rate: SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+        let samples: Vec<i16> = frame
+            .samples_i16()
+            .expect("I16Be は samples_i16 が成功する")
+            .collect();
+        assert_eq!(samples, vec![i16::MIN, 0, i16::MAX, -1]);
+    }
+
+    /// I16Be 以外のフォーマットでは samples_i16 は Err を返す。
+    #[test]
+    fn samples_i16_rejects_non_i16be_format() {
+        let frame = AudioFrame {
+            data: vec![0x00, 0x00],
+            format: AudioFormat::Opus,
+            channels: Channels::MONO,
+            sample_rate: SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+        assert!(frame.samples_i16().is_err(), "非 I16Be は Err のはず");
+    }
+
+    /// mono で data.len() が奇数だと samples_i16 は Err を返す (upstream 破損サインの検出)。
+    #[test]
+    fn samples_i16_rejects_mono_with_odd_byte_length() {
+        let frame = AudioFrame {
+            data: vec![0x00, 0x01, 0xff],
+            format: AudioFormat::I16Be,
+            channels: Channels::MONO,
+            sample_rate: SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+        assert!(
+            frame.samples_i16().is_err(),
+            "mono で 3 バイト (奇数) は Err のはず"
+        );
+    }
+
+    /// stereo で data.len() が 4 の倍数でないと samples_i16 は Err を返す
+    /// (LR ペアで切れないサインを silent に潰さない)。
+    #[test]
+    fn samples_i16_rejects_stereo_with_misaligned_length() {
+        let frame = AudioFrame {
+            data: vec![0x00, 0x01, 0x00, 0x02, 0x00, 0x03],
+            format: AudioFormat::I16Be,
+            channels: Channels::STEREO,
+            sample_rate: SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+        assert!(
+            frame.samples_i16().is_err(),
+            "stereo で 6 バイト (4 の倍数でない) は Err のはず"
         );
     }
 }

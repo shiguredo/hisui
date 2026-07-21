@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use hisui::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
+use hisui::text::LanguageCode;
 use hisui::video::{VideoFormat, VideoFrame};
 use hisui::{MediaFrame, TextFrame};
 use proptest::prelude::*;
@@ -26,7 +27,7 @@ fn arb_text_frame() -> impl Strategy<Value = TextFrame> {
         arb_duration(),
         arb_duration(),
         any::<String>(),
-        proptest::option::of(any::<String>()),
+        proptest::option::of(any::<String>().prop_map(LanguageCode::new)),
         proptest::option::of(arb_finite_f32()),
         proptest::option::of(arb_finite_f32()),
     )

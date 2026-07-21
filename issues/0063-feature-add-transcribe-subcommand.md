@@ -37,8 +37,8 @@ CLI:
 
 - 位置引数: `<input>` (WAV または MP4 ファイル)
 - `--model-dir <path>` (必須): Whisper モデルディレクトリ (例: `./ml-models/whisper-tiny/`)
-- `--language <code>`: Whisper 言語指定 (省略時 auto detect、`ja` / `en` 等)
-- `--workers <N>`: TranscriptionService のワーカープール並列数 (デフォルト 1)
+- `--language <code>` (必須): Whisper 言語指定 (`ja` / `en` 等)。0062 で自動検出は削除済み
+- `--transcribe-threads <N>`: 1 推論あたりの candle CPU スレッド数 (デフォルト 1)。 encoder / decoder とリアルタイム同居させる場合に絞るためのオプション。サブコマンド起動直後 (WhisperPipeline ロードより前) に `std::env::set_var("RAYON_NUM_THREADS", ...)` を叩いて candle の rayon プール初期化前に反映させる (`OnceLock` なので初期化後は変更不可)。 0062 の TranscriptionService は単一 worker のため、この値が candle 全体の並列度になる
 - `--vad <kind>`: silero / off (デフォルト silero)
 - Silero VAD モデルパスを渡す口 (例: `--vad-model-dir <path>`) が別途必要 (0062 の `TranscriptionProcessor` 構築で `SileroVadModel::load` に渡す。`--model-dir` は Whisper 専用)。オプション名は本 issue の polish 時に確定する
 - `--vad off` の VAD なしパス (固定長分割等) は 0062 では実装されないため、採用するなら本 issue で実装する (落とす選択も含めて本 issue の polish 時に確定する)
