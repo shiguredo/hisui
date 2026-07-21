@@ -6,8 +6,9 @@
 use std::time::Duration;
 
 use hisui::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
+use hisui::text::LanguageCode;
 use hisui::video::{VideoFormat, VideoFrame};
-use hisui::{LanguageCode, MediaFrame, TextFrame};
+use hisui::{MediaFrame, TextFrame};
 use proptest::prelude::*;
 
 /// 任意の Duration を生成する。

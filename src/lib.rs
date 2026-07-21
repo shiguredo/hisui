@@ -55,7 +55,7 @@ pub use media_pipeline::{
     PipelineTerminated, ProcessorHandle, ProcessorId, ProcessorMetadata, PublishTrackError,
     RegisterProcessorError, Syn, TrackId, TrackPublisher,
 };
-pub use text::{LanguageCode, TextFrame};
+pub use text::TextFrame;
 pub use video::VideoFrame;
 
 pub type Result<T> = std::result::Result<T, Error>;

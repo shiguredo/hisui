@@ -14,9 +14,9 @@ use hisui::ml::audio::silero_vad::SileroVadModel;
 use hisui::ml::audio::transcription_processor::TranscriptionProcessor;
 use hisui::ml::audio::transcription_service::TranscriptionService;
 use hisui::ml::audio::whisper::WhisperPipeline;
+use hisui::text::LanguageCode;
 use hisui::{
-    LanguageCode, MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata,
-    TextFrame, TrackId,
+    MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TextFrame, TrackId,
 };
 
 const INPUT_TRACK_ID: &str = "transcription_input";

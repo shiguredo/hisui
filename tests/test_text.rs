@@ -2,7 +2,8 @@
 
 use std::time::Duration;
 
-use hisui::{LanguageCode, TextFrame};
+use hisui::TextFrame;
+use hisui::text::LanguageCode;
 
 /// TextFrame の全フィールドが期待通り構築できる。
 #[test]

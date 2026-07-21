@@ -3,8 +3,9 @@
 use std::time::Duration;
 
 use hisui::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
+use hisui::text::LanguageCode;
 use hisui::video::{VideoFormat, VideoFrame};
-use hisui::{LanguageCode, MediaFrame, TextFrame};
+use hisui::{MediaFrame, TextFrame};
 
 /// テスト用の AudioFrame を作るヘルパー。
 fn make_audio_frame() -> AudioFrame {
