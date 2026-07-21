@@ -479,6 +479,10 @@ pub struct VideoEncoder {
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_video_keyframe_request_count_metric: crate::stats::StatsCounter,
+    // `run()` の input 腕で `in_flight` が `IN_FLIGHT_LIMIT` に到達した回数。
+    // in-flight バックプレッシャーが実際に発動して上流を止めた outcome を計測する
+    // (バックプレッシャーが「効いた」回数を示すためチューニングの根拠に使える)。
+    total_video_encoder_backpressure_count_metric: crate::stats::StatsCounter,
     eos: bool,
     keyframe_request_pending: bool,
 
@@ -525,6 +529,8 @@ impl VideoEncoder {
             compose_stats.counter("total_output_video_keyframe_count");
         let total_video_keyframe_request_count_metric =
             compose_stats.counter("total_video_keyframe_request_count");
+        let total_video_encoder_backpressure_count_metric =
+            compose_stats.counter("total_video_encoder_backpressure_count");
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         // 同型 StatsCounter が 2 個並ぶため、 位置引数の new より field 名指定の struct literal で
         // total と keyframe の取り違えバグを防ぐ (回避先は encoder モジュール内の 3 箇所に限定される)。
@@ -538,6 +544,7 @@ impl VideoEncoder {
             codec_metric,
             total_input_video_frame_count_metric,
             total_video_keyframe_request_count_metric,
+            total_video_encoder_backpressure_count_metric,
             eos: false,
             keyframe_request_pending: false,
             inner: None,
@@ -832,6 +839,11 @@ impl VideoEncoder {
                         Message::Media(sample) => {
                             self.handle_input_sample(Some(sample))?;
                             in_flight += 1;
+                            if in_flight == Self::IN_FLIGHT_LIMIT {
+                                // LIMIT 到達で次 iter の input 腕 guard が false になる
+                                // (実際に上流を止めた瞬間)
+                                self.total_video_encoder_backpressure_count_metric.inc();
+                            }
                         }
                         Message::Eos => {
                             self.handle_input_sample(None)?;
