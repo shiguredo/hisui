@@ -225,6 +225,97 @@ fn video_encoder_run_processes_i420_via_pipeline() -> hisui::Result<()> {
     Ok(())
 }
 
+/// `VideoEncoder::run` の `Message::Syn` drop → 上流の `Ack.await` 復帰の契約
+///
+/// `TrackPublisher::send_syn` の Ack は subscriber (encoder) が Syn を drop した瞬間に
+/// 復帰する。 `VideoEncoder::run` は 3 腕 `tokio::select!` の input 腕で `Message::Syn(_)`
+/// を即 drop するため、 source が `send_syn` した Ack が 5 秒以内に復帰することを確認する。
+/// 万一 Syn 経路 (input 腕 guard の設計変更等) が壊れると本テストが timeout する。
+#[test]
+fn video_encoder_run_drops_syn_and_releases_ack() -> hisui::Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
+        let pipeline_handle = pipeline.handle();
+        let mut pipeline_task = tokio::spawn(async move {
+            pipeline.run().await;
+        });
+
+        let source_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("encoder_test_syn_source"),
+            ProcessorMetadata::new("encoder_test_syn_source"),
+        )
+        .await?;
+        let source_task = tokio::spawn(async move {
+            let mut tx = source_handle
+                .publish_track(TrackId::new(VIDEO_INPUT_TRACK_ID))
+                .await?;
+            source_handle.notify_ready();
+            source_handle.wait_subscribers_ready().await?;
+
+            // encoder が Syn を drop する → Ack が復帰することを 5 秒 timeout で検証
+            let ack = tx.send_syn();
+            tokio::time::timeout(Duration::from_secs(5), ack)
+                .await
+                .map_err(|_| {
+                    hisui::Error::new(
+                        "Ack did not resolve within 5 seconds after send_syn (Syn drop broken?)",
+                    )
+                })?;
+
+            // Ack 復帰後は既存経路と同じく EOS で終了
+            tx.send_eos();
+            hisui::Result::Ok(())
+        });
+
+        let encoder_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("encoder_test_syn_encoder"),
+            ProcessorMetadata::new("video_encoder"),
+        )
+        .await?;
+        let encoder_task = tokio::spawn(async move {
+            let encoder = VideoEncoder::new(&vp8_options(), None, encoder_handle.stats())?;
+            encoder
+                .run(
+                    encoder_handle,
+                    TrackId::new(VIDEO_INPUT_TRACK_ID),
+                    TrackId::new(VIDEO_OUTPUT_TRACK_ID),
+                )
+                .await
+        });
+
+        // sink は encoder 出力を drain して pipeline を終了させる
+        let sink_handle = register_processor(
+            &pipeline_handle,
+            ProcessorId::new("encoder_test_syn_sink"),
+            ProcessorMetadata::new("encoder_test_syn_sink"),
+        )
+        .await?;
+        let sink_task = tokio::spawn(async move {
+            collect_video_frames(sink_handle, TrackId::new(VIDEO_OUTPUT_TRACK_ID)).await
+        });
+
+        pipeline_handle
+            .trigger_start()
+            .await
+            .map_err(|_| hisui::Error::new("failed to trigger start: pipeline has terminated"))?;
+
+        let _output_frames = await_video_pipeline_tasks(
+            source_task,
+            encoder_task,
+            sink_task,
+            pipeline_handle,
+            &mut pipeline_task,
+        )
+        .await?;
+        Ok(())
+    })
+}
+
 fn encode_video_frames_with_pipeline(
     input_frames: Vec<VideoFrame>,
     options: VideoEncoderOptions,
