@@ -49,8 +49,7 @@ pub struct WhisperDecodedChunk {
 /// Whisper プロトコルで固定されている特殊トークンの一式。
 ///
 /// リクエストごとに変わらないため、ロード時に一度だけ tokenizer から引いて保持する。
-/// 言語トークンは per-request に変わるため本構造体には含めず、`WhisperDecoder.language_token` で
-/// 別に持つ。
+/// 言語トークンは per-request に変わるため本構造体には含めず、`decode_chunk` の引数で受ける。
 #[derive(Debug)]
 struct ProtocolTokens {
     /// SOT (start-of-transcript)。decode 対象トークン列の先頭に積む。
@@ -101,9 +100,8 @@ pub struct WhisperDecoder {
     tokenizer: Tokenizer,
     suppress_tokens: Tensor,
     /// Whisper プロトコルの固定特殊トークン (SOT / transcribe / EOT / no_speech / no_timestamps)。
+    /// リクエスト間で変わる言語トークンは state に持たず、`decode_chunk` の引数で受ける。
     protocol_tokens: ProtocolTokens,
-    /// 現リクエストで使う言語トークン。多言語モデルでは `Some`、非多言語モデルでは `None`。
-    language_token: Option<TokenId>,
 }
 
 impl WhisperDecoder {
@@ -147,7 +145,6 @@ impl WhisperDecoder {
             tokenizer,
             suppress_tokens,
             protocol_tokens,
-            language_token: None,
         })
     }
 
@@ -159,16 +156,13 @@ impl WhisperDecoder {
         &self.tokenizer
     }
 
-    /// リクエスト単位で言語トークンを設定する。None は言語トークンなし (非多言語モデル)。
-    pub fn set_language_token(&mut self, language_token: Option<TokenId>) {
-        self.language_token = language_token;
-    }
-
     /// 1 チャンク (mel スペクトログラム) を decode する。
     ///
     /// `mel` は PCM を「時間 × mel bins」の 2D テンソルに変換したもの (Whisper encoder が
     /// 直接受け付ける入力形式)。上位層で `candle_transformers::models::whisper::audio::pcm_to_mel`
     /// 等で生成する。
+    /// `language_token` は多言語モデルなら `Some(<言語トークン>)`、非多言語モデルなら `None` を
+    /// 渡す。 リクエスト単位で完結させるため、呼び出し間で state に残さない。
     ///
     /// Whisper decoder が持つ KV (attention key/value) キャッシュは開始時と終了時に本関数内で
     /// クリアするため、呼び出し側は状態管理不要 (前回リクエストの残り state が漏れない)。
@@ -176,7 +170,11 @@ impl WhisperDecoder {
     /// hallucination の可能性がある結果もそのまま返す (text を空にしない)。 破棄判定は
     /// `no_speech_prob` と `avg_logprob` を見て呼び出し側の責務で行う (層としては本関数は
     /// 上位型 `WhisperTranscript` を知らない)。
-    pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
+    pub fn decode_chunk(
+        &mut self,
+        mel: &Tensor,
+        language_token: Option<TokenId>,
+    ) -> Result<WhisperDecodedChunk> {
         // 前回リクエストの残 state を持ち込まないため、関数入口で全 block の KV cache を
         // クリアする。 これが本命のリセットで、下記の `encoder.forward(..., true)` と
         // 初回 `decoder.forward(..., i == 0)` の flush 引数は defensive な冗長指定
@@ -191,7 +189,7 @@ impl WhisperDecoder {
         let sample_len = self.config.max_target_positions / 2;
         let mut sum_logprob = 0f64;
         let mut no_speech_prob_raw: Option<f64> = None;
-        let mut tokens = self.build_prefix_tokens();
+        let mut tokens = self.build_prefix_tokens(language_token);
         // `avg_logprob` の分母を「生成トークン数 (EOT 含む)」にするため、プレフィックス
         // (SOT / 言語 / transcribe / no_timestamps) の個数をここで固定して控えておく。
         let prefix_len = tokens.len();
@@ -230,9 +228,9 @@ impl WhisperDecoder {
 
     /// decode ループ開始時のプレフィックストークン列を組み立てる。
     /// 順序は SOT → (言語トークンがあれば) → transcribe → no_timestamps。
-    fn build_prefix_tokens(&self) -> Vec<TokenId> {
+    fn build_prefix_tokens(&self, language_token: Option<TokenId>) -> Vec<TokenId> {
         let mut tokens = vec![self.protocol_tokens.sot];
-        if let Some(language_token) = self.language_token {
+        if let Some(language_token) = language_token {
             tokens.push(language_token);
         }
         tokens.push(self.protocol_tokens.transcribe);

@@ -106,9 +106,9 @@ impl WhisperPipeline {
         let mel = narrow_mel_for_encoder(&mel)?;
 
         let resolved_language = self.resolve_language(language)?;
-        self.decoder
-            .set_language_token(Some(resolved_language.token_id));
-        let result = self.decoder.decode_chunk(&mel)?;
+        let result = self
+            .decoder
+            .decode_chunk(&mel, Some(resolved_language.token_id))?;
 
         Ok(WhisperTranscript {
             text: result.text.trim().to_owned(),
