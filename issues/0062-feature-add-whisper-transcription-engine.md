@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-24
-- Completed:
+- Completed: 2026-07-21
 - Model: Opus 4.7
 - Branch: feature/add-whisper-transcription-engine
 - Polished: 2026-07-06
@@ -194,4 +194,13 @@ subscribe_track(audio_track_id)
 
 ## 解決方法
 
-PoC (PR #246、`origin/feature/try-candle`) の `whisper.rs` / `decode.rs` / `multilingual.rs` / `melfilters.bytes` を設計方針に合わせて移植・改修し、`TranscriptionService` / `TranscriptionProcessor` を新規実装する。
+PoC (PR #246、`origin/feature/try-candle`) の `whisper.rs` / `decode.rs` / `multilingual.rs` / `melfilters.bytes` を設計方針に沿って移植・改修し、`WhisperPipeline` / `WhisperDecoder` として整理した。 加えて以下を実装した。
+
+- `TranscriptionService` (`src/ml/audio/transcription_service.rs`): async 側から blocking Whisper 推論に橋渡しする単一 blocking worker + bounded mpsc queue (容量 2) + oneshot 応答による橋渡し。 pool 化しない理由 (candle のコア競合) はコード内 doc に明記。
+- `TranscriptionProcessor` (`src/ml/audio/transcription_processor.rs`): 1 音声 track → 1 text track の processor。 I16Be の f32 正規化 / 16 kHz mono resample / Silero VAD 発話区間検出 / 最大 30 秒分割 / FIFO publish / 幻覚判定 skip / EOS ドレインを担う。
+- 共通型の拡張: `Probability` の内部型を f32 → f64 に変更、`LogProbability` / `LanguageCode` を追加、`AudioFrame::samples_i16` (channels 非依存 iterator) と `VadGate::min_required_sample` を追加した。
+- 実音声テストデータ: Common Voice の CC0 短発話 (ja / en) を 16 kHz mono raw PCM に変換して `testdata/` に同梱。 出所と ffmpeg 変換コマンドは `testdata/README.md` に集約。
+- CI: `test-candle` job に whisper-tiny モデルのキャッシュ + ダウンロードステップを追加。 candle のコア競合を避けるためテストは `--test-threads=1` で直列化。
+- 内部設計ドキュメント: 全体像と登場人物を `docs/internals/transcription.md`、モデル型分割の判断基準を `docs/internals/ml_models.md` にまとめた。
+
+`avg_logprob` の計算式を openai/whisper の定義 (プレフィックス除去後の生成トークン数 (EOT 含む) で平均、EOT ステップも sum に加算) に合わせ、`LOGPROB_THRESHOLD = -1.0` の幻覚棄却が想定通り効くようにした。 言語トークンは decoder の state に持たず `decode_chunk` の引数で毎回受ける形にし、リクエスト間の state 汚染を根絶した。
