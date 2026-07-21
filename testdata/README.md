@@ -11,3 +11,8 @@
 - **ライセンス**: **CC0** (Common Voice のクリップライセンス)
 - **形式**: 16 kHz mono / signed 16-bit little-endian raw PCM (Common Voice の mp3 を 16 kHz
   mono raw PCM にダウンサンプリング・変換したもの)
+- **変換コマンド** (ffmpeg):
+  ```
+  ffmpeg -i common_voice_en_100540.mp3 -ac 1 -ar 16000 -f s16le speech-en-16k-mono-s16le.pcm
+  ffmpeg -i common_voice_ja_19486650.mp3 -ac 1 -ar 16000 -f s16le speech-ja-16k-mono-s16le.pcm
+  ```

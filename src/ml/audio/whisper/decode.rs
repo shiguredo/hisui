@@ -2,10 +2,8 @@
 //!
 //! `WhisperDecoder` は candle の `Whisper` (encoder / decoder / KV cache) を保持し、
 //! SOT / 言語 / task トークンの組み立てと greedy サンプリングを担う。タスクは文字起こし
-//! (transcribe) 固定で、タイムスタンプトークンは出力しない (`TextFrame` の時刻は VAD 由来で埋めるため)。
-//!
-//! candle の `Whisper` は KV cache を内部に持つ mutable な状態機のため、複数スレッドで共有せず、
-//! 利用者 (worker) ごとに個別ロードする。
+//! (transcribe) 固定で、タイムスタンプトークンは出力しない (`TextFrame` の時刻は VAD 由来で
+//! 埋めるため)。共有可否・可変性の詳細は [`WhisperDecoder`] の doc を参照。
 
 use std::path::Path;
 
@@ -118,6 +116,9 @@ impl WhisperDecoder {
         device: &candle_core::Device,
     ) -> Result<Self> {
         let weights_path = weights_path.as_ref();
+        // SAFETY: `from_mmaped_safetensors` は mmap 中にモデルファイルが外部から書き換え
+        // られないことを利用者側で保証する必要がある。 hisui はモデルディレクトリを起動時に
+        // 1 度ロードして参照するだけで、プロセス中に上書きしないため前提を満たす。
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_path], DTYPE, device).map_err(|e| {
                 crate::Error::new(format!("failed to load whisper safetensors weights: {e}"))
@@ -172,10 +173,14 @@ impl WhisperDecoder {
     /// Whisper decoder が持つ KV (attention key/value) キャッシュは開始時と終了時に本関数内で
     /// クリアするため、呼び出し側は状態管理不要 (前回リクエストの残り state が漏れない)。
     ///
-    /// hallucination の可能性がある結果もそのまま返す (text を空にしない)。呼び出し側は
-    /// `no_speech_prob` と `avg_logprob` を見て破棄判定する。閾値の詳細は
-    /// `WhisperTranscript::is_likely_no_speech` を参照。
+    /// hallucination の可能性がある結果もそのまま返す (text を空にしない)。 破棄判定は
+    /// `no_speech_prob` と `avg_logprob` を見て呼び出し側の責務で行う (層としては本関数は
+    /// 上位型 `WhisperTranscript` を知らない)。
     pub fn decode_chunk(&mut self, mel: &Tensor) -> Result<WhisperDecodedChunk> {
+        // 前回リクエストの残 state を持ち込まないため、関数入口で全 block の KV cache を
+        // クリアする。 これが本命のリセットで、下記の `encoder.forward(..., true)` と
+        // 初回 `decoder.forward(..., i == 0)` の flush 引数は defensive な冗長指定
+        // (encoder は self-attn のため実質 no-op、decoder は i == 0 の初回のみ効く)。
         self.inner.reset_kv_cache();
         let audio_features = self
             .inner

@@ -38,8 +38,8 @@ impl WhisperTranscript {
 
 /// `WhisperDecoder` に mel フィルタと言語解決を載せた PCM 入力の入口。
 ///
-/// 内部の `WhisperDecoder` は KV cache を持つ可変状態のため、 `&mut self` を要求し、
-/// 複数スレッドで共有しない (共有する場合はロックが必要で、その場合は直列化される)。
+/// 共有可否と `&mut self` を要求する理由は内部の [`WhisperDecoder`] に従う (本型は
+/// 薄いラッパで、複数スレッド共有不可の性質を decoder から引き継ぐ)。
 #[derive(Debug)]
 pub struct WhisperPipeline {
     decoder: WhisperDecoder,
@@ -81,9 +81,10 @@ impl WhisperPipeline {
         let mel = audio::pcm_to_mel(config, pcm, &self.mel_filters);
         let mel_len = mel.len();
         if mel_len == 0 {
-            // 空 mel は入力 PCM が極端に短いなどの縁ケース (candle の pcm_to_mel は
-            // 通常 N_FRAMES ぶんに padding するため実務上ほぼ到達しない)。
-            // 「発話が観測されなかった」を表す値で埋める:
+            // defensive 分岐: candle の pcm_to_mel は空 PCM でも必ず 1500 frames に
+            // パディングして返すため、現状の実装ではここには到達しない。 上流仕様が
+            // 変わって空 mel を返しうる場合に備え、「発話が観測されなかった」ことを
+            // 表す値で埋める:
             //   - no_speech_prob = 1.0 (発話なしの最大確信)
             //   - avg_logprob = -∞ (トークンが生成されていない = 対数確率の下限)
             //   - language = None (音声から言語を検出する対象が無かった)

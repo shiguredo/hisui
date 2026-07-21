@@ -4,34 +4,26 @@
 
 `src/ml/audio/` の下には現在 2 種類の ML モデルが載っている: **Silero VAD** (発話区間検出) と
 **Whisper** (音声文字起こし)。両者はモデル内部が持つ可変状態の性質が違うため、 Rust 側の型分割方針も
-異なる。本ドキュメントはその違いと背景、および将来 ml モデルを増やすときの判断基準を整理する。
+異なる。本ドキュメントは違いと将来 ml モデルを増やすときの判断基準だけをまとめる (型ごとの詳細は
+本体コードの module doc / 型 doc を参照する)。
 
 ## Silero VAD: 共有ハブ + 派生インスタンス
 
-- **`SileroVadModel`** (immutable): ONNX グラフのパース結果と初期テンソルを保持する。 1 プロセスで
-  1 回だけ `load` し、 `Arc<SileroVadModel>` で共有する。
-- **`SileroVad`** (可変): LSTM state と 64 サンプルの context を持つ推論インスタンス。 track /
-  話者ごとに `SileroVadModel::new_instance()` で独立に派生させる。
-- モデル本体は immutable なので共有可能。可変状態はインスタンス側に閉じているため、 track 境界で
-  state が混ざらない。
+- 本体 `SileroVadModel` は immutable、推論インスタンス `SileroVad` が LSTM state を持つ
+- 1 プロセスで 1 回だけ `load` し、`Arc<SileroVadModel>` から `new_instance()` で track / 話者ごとに
+  独立インスタンスを派生させる (state / context が track 境界で混ざらないようにする)
+- 詳細は `src/ml/audio/silero_vad.rs` 冒頭の module doc を参照
 
 ## Whisper: 単一インスタンス + 非同期橋渡し
 
-- **`WhisperDecoder`** (`whisper/decode.rs`): candle の `Whisper` (encoder / decoder / KV cache)、
-  tokenizer 、 greedy decode 用トークン ID 群を 1 型にまとめた推論器。
-- **`WhisperPipeline`** (`whisper.rs`): モデルディレクトリからの `config.json` /
-  `tokenizer.json` / `model.safetensors` ロードと mel フィルタ・言語トークン解決を
-  `WhisperDecoder` の周りに載せた層。
-- Silero のような共有ハブ + 派生インスタンス方式は採らない。 candle の `Whisper` 型は KV cache が
-  mutable な内部状態のため、 `Arc<Mutex<...>>` 越しの共有は直列化されて並列度が上がらない。
-- **`TranscriptionService`** (`transcription_service.rs`): 1 個の `WhisperPipeline` を保持する
-  blocking worker と、 async 側から blocking 推論を呼ぶための channel + oneshot による橋渡し。
-  async な `TranscriptionProcessor` から `submit(request)` された `TranscriptRequest` を bounded
-  channel (backpressure) で受け、 worker が `spawn_blocking` の中で
-  `WhisperPipeline::transcribe_pcm16k` を直列に実行する。
-- candle CPU 推論は既定でホスト物理コア数まで並列化されるため、 hisui 側で worker を複数持っても
-  per-decode の並列度がコア競合で相殺される。実効スループットは「1 worker +
-  `RAYON_NUM_THREADS` を絞らない」で頭打ちになるので pool 化はしない。
+- 本体 `WhisperDecoder` は KV cache を持つ mutable な状態機。 `Arc<Mutex<...>>` 越しの共有は
+  直列化されて並列度が消えるため、Silero 型の共有ハブは採らない
+- `WhisperPipeline` (mel filter + config + language 解決) が decoder を薄くラップし、
+  `TranscriptionService` が 1 個の pipeline を blocking worker で保持して async 側と
+  channel + oneshot で橋渡しする
+- worker を複数持たない理由、KV cache の詳細、`spawn_blocking` の使い方は
+  `src/ml/audio/whisper.rs` / `src/ml/audio/whisper/decode.rs` /
+  `src/ml/audio/transcription_service.rs` の doc を参照
 
 ## 判断基準 (新しい ml モデルを足すとき)
 

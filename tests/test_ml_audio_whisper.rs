@@ -288,6 +288,9 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
         )
         .run(processor_handle),
     );
+    // TranscriptionProcessor が Arc<TranscriptionService> を保持するため、テスト側の
+    // 余分な参照を早期に drop する。 これで processor 終了時に mpsc::Sender が確定的に
+    // 閉じ、worker タスクが blocking_recv から抜けて join できる。
     drop(service);
     let sink_task = tokio::spawn(collect_text_frames(
         sink_handle,

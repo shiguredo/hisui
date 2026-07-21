@@ -432,6 +432,10 @@ fn split_segment_pcm(start_sample: u64, pcm: &[f32]) -> Vec<QueuedChunk> {
     chunks
 }
 
+/// 16 kHz サンプル通し番号を `Duration` に丸め誤差ゼロで写像する。
+///
+/// 1 サンプル = 62_500 ns (16000 は 1_000_000_000 の約数)。
+/// `u64::MAX / 62_500 ≈ 9370 年`ぶんまでオーバーフロー無しに扱える。
 fn duration_from_16k_samples(samples: u64) -> Duration {
     Duration::from_nanos(samples * 62_500)
 }
