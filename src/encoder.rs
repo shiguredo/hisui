@@ -490,7 +490,10 @@ pub struct VideoEncoder {
     // `None` (未初期化 = 最初のフレームが未到達) のケースでは callback 経路が動いて
     // いないため、 この順序制約は自動的に満たされる。
     inner: Option<VideoEncoderInner>,
-    rx: EncoderOutputReceiver,
+    // `run()` の 3 腕 `tokio::select!` で `input_rx.recv()` の入力腕と `rx.recv().await` の
+    // 出力腕を並置するため、`run()` 冒頭で `take()` して local に move する必要がある。
+    // integration test 経路では `run()` を経由しないため `Some` のまま保たれる。
+    rx: Option<EncoderOutputReceiver>,
 
     // 下記 `sink` は新規 inner 生成用テンプレートで、 実際に emit する sink は
     // `create_inner` で inner に clone して渡されるため、 上記 drop 順制約とは無関係
@@ -532,7 +535,7 @@ impl VideoEncoder {
             eos: false,
             keyframe_request_pending: false,
             inner: None,
-            rx,
+            rx: Some(rx),
             sink,
             options: options.clone(),
             openh264_lib,
@@ -736,7 +739,11 @@ impl VideoEncoder {
     /// `Empty` は `eos` と組み合わせて `Finished` (eos) / `Pending` (非 eos)、
     /// `Disconnected` は構造上到達不能で `unreachable!()`。
     pub fn poll_output(&mut self) -> Result<EncoderRunOutput> {
-        match self.rx.try_recv() {
+        let rx = self
+            .rx
+            .as_mut()
+            .expect("BUG: rx must be Some when poll_output is called (run() has taken rx)");
+        match rx.try_recv() {
             Ok(Ok(frame)) => Ok(EncoderRunOutput::Processed(MediaFrame::video(frame))),
             Ok(Err(e)) => Err(e),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
