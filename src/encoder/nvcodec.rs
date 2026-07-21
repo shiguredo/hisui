@@ -130,6 +130,14 @@ fn build_handler(
             });
         }
         Err(err) => {
+            // 順序保証のため Ok 分岐と対称に pop_front する。
+            // Err 時は input frame 情報を使わないので pop 結果は捨てる。
+            {
+                let mut queue = input_queue
+                    .lock()
+                    .expect("nvcodec input queue lock poisoned");
+                queue.pop_front();
+            }
             sink.emit_err(crate::Error::new(format!("nvcodec encode error: {err}")));
         }
     })
