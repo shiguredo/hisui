@@ -352,4 +352,131 @@ mod tests {
         let config = parse_whisper_config(json.value()).expect("suppress_tokens 省略は Ok のはず");
         assert!(config.suppress_tokens.is_empty(), "省略時は空 Vec が入る");
     }
+
+    /// no_speech_prob > 0.6 かつ avg_logprob < -1.0 で is_likely_no_speech は true。
+    #[test]
+    fn is_likely_no_speech_true_when_both_thresholds_exceeded() {
+        let transcript = WhisperTranscript {
+            text: String::new(),
+            language: None,
+            no_speech_prob: Probability::new(0.7).expect("有効"),
+            avg_logprob: LogProbability::new(-1.5).expect("有効"),
+        };
+        assert!(
+            transcript.is_likely_no_speech(),
+            "両閾値を超えたら true のはず"
+        );
+    }
+
+    /// no_speech_prob = 0.6 ちょうどは `>` 比較で false (境界の取り違え検出)。
+    #[test]
+    fn is_likely_no_speech_false_at_no_speech_boundary() {
+        let transcript = WhisperTranscript {
+            text: String::new(),
+            language: None,
+            no_speech_prob: Probability::new(0.6).expect("有効"),
+            avg_logprob: LogProbability::new(-1.5).expect("有効"),
+        };
+        assert!(
+            !transcript.is_likely_no_speech(),
+            "no_speech_prob = 0.6 ちょうどは `>` 比較で false のはず"
+        );
+    }
+
+    /// avg_logprob = -1.0 ちょうどは `<` 比較で false (境界の取り違え検出)。
+    #[test]
+    fn is_likely_no_speech_false_at_logprob_boundary() {
+        let transcript = WhisperTranscript {
+            text: String::new(),
+            language: None,
+            no_speech_prob: Probability::new(0.7).expect("有効"),
+            avg_logprob: LogProbability::new(-1.0).expect("有効"),
+        };
+        assert!(
+            !transcript.is_likely_no_speech(),
+            "avg_logprob = -1.0 ちょうどは `<` 比較で false のはず"
+        );
+    }
+
+    /// no_speech_prob だけ閾値超えでは false (両条件を AND で要求)。
+    #[test]
+    fn is_likely_no_speech_false_when_only_no_speech_exceeded() {
+        let transcript = WhisperTranscript {
+            text: String::new(),
+            language: None,
+            no_speech_prob: Probability::new(0.9).expect("有効"),
+            avg_logprob: LogProbability::new(-0.5).expect("有効"),
+        };
+        assert!(
+            !transcript.is_likely_no_speech(),
+            "no_speech_prob だけ閾値超えでは false のはず"
+        );
+    }
+
+    /// tempdir を作るヘルパ (tests/test_ml_audio_silero_vad.rs の非 ONNX テストと同じ流儀)。
+    fn make_tempdir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "hisui_test_whisper_model_dir_{label}_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("tempdir 作成");
+        dir
+    }
+
+    /// 3 ファイル (config.json / tokenizer.json / model.safetensors) が揃った
+    /// ディレクトリは Ok を返す。
+    #[test]
+    fn validate_model_dir_accepts_complete_directory() {
+        let dir = make_tempdir("complete");
+        for name in ["config.json", "tokenizer.json", "model.safetensors"] {
+            std::fs::write(dir.join(name), b"").expect("空ファイル書き込み");
+        }
+        let result = validate_model_dir(&dir);
+        for name in ["config.json", "tokenizer.json", "model.safetensors"] {
+            let _ = std::fs::remove_file(dir.join(name));
+        }
+        let _ = std::fs::remove_dir(&dir);
+        result.expect("3 ファイル揃っていれば Ok のはず");
+    }
+
+    /// config.json だけ欠落しているディレクトリは Err、メッセージに欠落名を含む。
+    #[test]
+    fn validate_model_dir_rejects_missing_config_json() {
+        assert_missing_file_is_err("config.json");
+    }
+
+    /// tokenizer.json だけ欠落しているディレクトリは Err、メッセージに欠落名を含む。
+    #[test]
+    fn validate_model_dir_rejects_missing_tokenizer_json() {
+        assert_missing_file_is_err("tokenizer.json");
+    }
+
+    /// model.safetensors だけ欠落しているディレクトリは Err、メッセージに欠落名を含む。
+    #[test]
+    fn validate_model_dir_rejects_missing_model_safetensors() {
+        assert_missing_file_is_err("model.safetensors");
+    }
+
+    /// 指定ファイルだけを欠落させた tempdir を作り、validate_model_dir が Err を返し
+    /// エラーメッセージに欠落ファイル名を含むことを検証する共通ヘルパ。
+    fn assert_missing_file_is_err(missing_name: &str) {
+        let dir = make_tempdir(&format!("missing_{}", missing_name.replace('.', "_")));
+        for name in ["config.json", "tokenizer.json", "model.safetensors"] {
+            if name == missing_name {
+                continue;
+            }
+            std::fs::write(dir.join(name), b"").expect("空ファイル書き込み");
+        }
+        let result = validate_model_dir(&dir);
+        for name in ["config.json", "tokenizer.json", "model.safetensors"] {
+            let _ = std::fs::remove_file(dir.join(name));
+        }
+        let _ = std::fs::remove_dir(&dir);
+        let err = result.expect_err("欠落があれば Err のはず");
+        let message = err.display().to_string();
+        assert!(
+            message.contains(missing_name),
+            "エラーメッセージに欠落ファイル名 {missing_name} が含まれるべき: {message}"
+        );
+    }
 }

@@ -40,3 +40,32 @@ pub struct TextFrame {
     /// 平均 log probability (信頼度目安、Whisper 由来)。指標を提供しない生成元では None
     pub avg_logprob: Option<f32>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// new に &str / String のどちらを渡しても get で同じ内容が取り出せる。
+    #[test]
+    fn new_accepts_str_and_string_and_get_returns_it() {
+        let from_str = LanguageCode::new("ja");
+        assert_eq!(from_str.get(), "ja");
+
+        let from_string = LanguageCode::new(String::from("en"));
+        assert_eq!(from_string.get(), "en");
+    }
+
+    /// Display は内部文字列をそのまま出力する (前後に装飾を付けない)。
+    #[test]
+    fn display_writes_inner_string_verbatim() {
+        let code = LanguageCode::new("haw");
+        assert_eq!(format!("{code}"), "haw");
+    }
+
+    /// PartialEq は内部文字列で比較する (同一文字列で真、異なる文字列で偽)。
+    #[test]
+    fn partial_eq_compares_inner_string() {
+        assert_eq!(LanguageCode::new("ja"), LanguageCode::new("ja"));
+        assert_ne!(LanguageCode::new("ja"), LanguageCode::new("en"));
+    }
+}

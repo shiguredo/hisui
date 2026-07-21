@@ -296,6 +296,24 @@ mod tests {
         );
     }
 
+    /// I16Be mono の代表バイト境界値 (i16::MIN / 0 / i16::MAX) を samples_i16 が正しくデコードする。
+    #[test]
+    fn samples_i16_decodes_mono_big_endian_bytes() {
+        let frame = AudioFrame {
+            data: vec![0x80, 0x00, 0x00, 0x00, 0x7f, 0xff],
+            format: AudioFormat::I16Be,
+            channels: Channels::MONO,
+            sample_rate: SampleRate::from_u32(16_000).expect("16 kHz は有効"),
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        };
+        let samples: Vec<i16> = frame
+            .samples_i16()
+            .expect("I16Be mono は samples_i16 が成功する")
+            .collect();
+        assert_eq!(samples, vec![i16::MIN, 0, i16::MAX]);
+    }
+
     /// I16Be の代表的なバイト境界値 (最小 / 0 / 最大 / -1) を samples_i16 が正しくデコードする。
     #[test]
     fn samples_i16_decodes_big_endian_bytes() {

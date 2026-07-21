@@ -398,22 +398,34 @@ fn publish_transcript(
     transcript: WhisperTranscript,
     output_tx: &mut crate::TrackPublisher,
 ) -> PublishOutcome {
-    if transcript.is_likely_no_speech() || transcript.text.is_empty() {
+    if !should_publish(&transcript) {
         return PublishOutcome::Published;
     }
 
-    let frame = TextFrame {
+    let frame = build_text_frame(start, end, transcript);
+    if output_tx.send_media(MediaFrame::new_text(frame)) {
+        PublishOutcome::Published
+    } else {
+        PublishOutcome::PipelineClosed
+    }
+}
+
+/// `WhisperTranscript` を text track に流すべきか判定する (副作用なしの純関数)。
+///
+/// 無音判定 (`is_likely_no_speech`) が真、または text が空のときは skip 対象。
+fn should_publish(transcript: &WhisperTranscript) -> bool {
+    !transcript.is_likely_no_speech() && !transcript.text.is_empty()
+}
+
+/// `WhisperTranscript` を track 時刻付きの `TextFrame` に組み立てる (副作用なしの純関数)。
+fn build_text_frame(start: Duration, end: Duration, transcript: WhisperTranscript) -> TextFrame {
+    TextFrame {
         start,
         end,
         text: transcript.text,
         language: transcript.language,
         no_speech_prob: Some(transcript.no_speech_prob.get() as f32),
         avg_logprob: Some(transcript.avg_logprob.get() as f32),
-    };
-    if output_tx.send_media(MediaFrame::new_text(frame)) {
-        PublishOutcome::Published
-    } else {
-        PublishOutcome::PipelineClosed
     }
 }
 
@@ -486,5 +498,99 @@ mod tests {
     fn duration_from_16k_samples_maps_exactly() {
         assert_eq!(duration_from_16k_samples(16_000), Duration::from_secs(1));
         assert_eq!(duration_from_16k_samples(1), Duration::from_nanos(62_500));
+    }
+
+    /// 空 pcm は 0 chunks (while ループの入口で即抜ける)。
+    #[test]
+    fn split_segment_pcm_returns_empty_for_empty_pcm() {
+        let chunks = split_segment_pcm(0, &[]);
+        assert!(chunks.is_empty(), "空 pcm は 0 chunks のはず");
+    }
+
+    /// MIN 未満は 0 chunks (先頭で break)。
+    #[test]
+    fn split_segment_pcm_returns_empty_below_min() {
+        let pcm = vec![0.0; MIN_TRANSCRIPT_SAMPLES - 1];
+        let chunks = split_segment_pcm(0, &pcm);
+        assert!(chunks.is_empty(), "MIN 未満は 0 chunks のはず");
+    }
+
+    /// MIN ちょうどで 1 chunk (MIN 長)。
+    #[test]
+    fn split_segment_pcm_yields_one_chunk_at_min() {
+        let pcm = vec![0.0; MIN_TRANSCRIPT_SAMPLES];
+        let chunks = split_segment_pcm(0, &pcm);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].pcm.len(), MIN_TRANSCRIPT_SAMPLES);
+        assert_eq!(chunks[0].start_sample, 0);
+        assert_eq!(chunks[0].end_sample, MIN_TRANSCRIPT_SAMPLES as u64);
+    }
+
+    /// MAX ちょうどで 1 chunk (MAX 長)。
+    #[test]
+    fn split_segment_pcm_yields_one_chunk_at_max() {
+        let pcm = vec![0.0; MAX_TRANSCRIPT_SAMPLES];
+        let chunks = split_segment_pcm(0, &pcm);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].pcm.len(), MAX_TRANSCRIPT_SAMPLES);
+    }
+
+    /// MAX + MIN ちょうどで 2 chunks (MAX + MIN の順)。 末尾がちょうど MIN で
+    /// 破棄されないケースの境界。
+    #[test]
+    fn split_segment_pcm_yields_two_chunks_at_max_plus_min() {
+        let pcm = vec![0.0; MAX_TRANSCRIPT_SAMPLES + MIN_TRANSCRIPT_SAMPLES];
+        let chunks = split_segment_pcm(0, &pcm);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].pcm.len(), MAX_TRANSCRIPT_SAMPLES);
+        assert_eq!(chunks[1].pcm.len(), MIN_TRANSCRIPT_SAMPLES);
+    }
+
+    /// テスト用に `WhisperTranscript` を組み立てるヘルパ。
+    fn make_transcript(text: &str, no_speech: f64, avg_lp: f64) -> WhisperTranscript {
+        WhisperTranscript {
+            text: text.to_owned(),
+            language: Some(LanguageCode::new("en")),
+            no_speech_prob: crate::probability::Probability::new(no_speech).expect("有効な確率"),
+            avg_logprob: crate::probability::LogProbability::new(avg_lp).expect("有効な対数確率"),
+        }
+    }
+
+    /// 非無音・非空 text の transcript は publish 対象。
+    #[test]
+    fn should_publish_returns_true_for_normal_transcript() {
+        let transcript = make_transcript("hello", 0.1, -0.3);
+        assert!(should_publish(&transcript));
+    }
+
+    /// 空テキストは (品質指標が良くても) publish 対象外。
+    #[test]
+    fn should_publish_returns_false_for_empty_text() {
+        let transcript = make_transcript("", 0.1, -0.3);
+        assert!(!should_publish(&transcript));
+    }
+
+    /// 無音判定 (no_speech_prob > 0.6 かつ avg_logprob < -1.0) は publish 対象外。
+    #[test]
+    fn should_publish_returns_false_for_likely_no_speech() {
+        let transcript = make_transcript("hello", 0.7, -1.5);
+        assert!(!should_publish(&transcript));
+    }
+
+    /// build_text_frame は start / end / text / language / 品質指標を透過する。
+    #[test]
+    fn build_text_frame_preserves_all_fields() {
+        let transcript = make_transcript("hello", 0.2, -0.4);
+        let frame = build_text_frame(
+            Duration::from_millis(100),
+            Duration::from_millis(500),
+            transcript,
+        );
+        assert_eq!(frame.start, Duration::from_millis(100));
+        assert_eq!(frame.end, Duration::from_millis(500));
+        assert_eq!(frame.text, "hello");
+        assert_eq!(frame.language.as_ref().map(LanguageCode::get), Some("en"));
+        assert_eq!(frame.no_speech_prob, Some(0.2_f32));
+        assert_eq!(frame.avg_logprob, Some(-0.4_f32));
     }
 }

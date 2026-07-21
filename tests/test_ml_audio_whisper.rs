@@ -213,6 +213,51 @@ fn whisper_pipeline_transcribes_japanese_fixture() {
     assert_eq!(result.language.as_ref().map(LanguageCode::get), Some("ja"));
 }
 
+/// 同じ `WhisperPipeline` に対して英語 → 日本語を連続でリクエストしても、それぞれ
+/// 指定言語で decode され (前回リクエストの言語トークンが残らない)、text が非空に
+/// なる。 KV cache のリセットと言語トークンの per-request 引数化の回帰保護。
+#[test]
+fn whisper_pipeline_handles_language_switch_across_requests() {
+    let Some(model_dir) = resolve_whisper_model_dir_or_skip(
+        "whisper_pipeline_handles_language_switch_across_requests",
+    ) else {
+        return;
+    };
+    let pcm_en = load_pcm16le_mono_f32("testdata/speech-en-16k-mono-s16le.pcm")
+        .expect("英語 PCM fixture を読めること");
+    let pcm_ja = load_pcm16le_mono_f32("testdata/speech-ja-16k-mono-s16le.pcm")
+        .expect("日本語 PCM fixture を読めること");
+    let mut pipeline = WhisperPipeline::load(&model_dir, Device::Cpu).expect("Whisper ロード");
+
+    let en_result = pipeline
+        .transcribe_pcm16k(&pcm_en, &LanguageCode::new("en"))
+        .expect("英語推論は成功する想定");
+    assert_eq!(
+        en_result.language.as_ref().map(LanguageCode::get),
+        Some("en"),
+        "初回リクエストの language は en として返るはず"
+    );
+    assert!(
+        !en_result.text.trim().is_empty(),
+        "初回リクエストの text は非空のはず: {}",
+        en_result.text
+    );
+
+    let ja_result = pipeline
+        .transcribe_pcm16k(&pcm_ja, &LanguageCode::new("ja"))
+        .expect("日本語推論は成功する想定");
+    assert_eq!(
+        ja_result.language.as_ref().map(LanguageCode::get),
+        Some("ja"),
+        "2 回目リクエストで language が ja に切り替わるはず (state 残留がないこと)"
+    );
+    assert!(
+        !ja_result.text.trim().is_empty(),
+        "2 回目リクエストの text も非空のはず: {}",
+        ja_result.text
+    );
+}
+
 /// 不在ディレクトリでは TranscriptionService::new が Err を返す。
 #[tokio::test(flavor = "current_thread")]
 async fn transcription_service_returns_err_for_missing_model_dir() {
@@ -246,6 +291,10 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
     let service = Arc::new(TranscriptionService::new(&whisper_model_dir, Device::Cpu)?);
     let mut input_frames =
         load_pcm16le_mono_audio_frames("testdata/speech-en-16k-mono-s16le.pcm", 4000)?;
+    // pipeline 経路の smoke check として先頭 2 秒 (8 frames × 4000 samples) だけ流す。
+    // CI 実行時間を抑えるための切り詰めで、`vad_gate_detects_speech_from_real_fixture` が
+    // full fixture で VAD 陽性を担保していることが前提 (前提が崩れると本テストは
+    // 空 text_frames で失敗するので、fixture 更新時は両テストをセットで見直す)。
     input_frames.truncate(2 * TARGET_SAMPLE_RATE / 4000);
 
     let pipeline = MediaPipeline::new(Default::default(), Default::default())?;
@@ -316,15 +365,38 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
         !text_frames.is_empty(),
         "少なくとも 1 つの TextFrame が publish されるはず"
     );
+    let non_empty = text_frames
+        .iter()
+        .find(|frame| !frame.text.trim().is_empty())
+        .unwrap_or_else(|| {
+            panic!(
+                "空でない TextFrame が少なくとも 1 つあるはず: {:?}",
+                text_frames
+                    .iter()
+                    .map(|frame| frame.text.as_str())
+                    .collect::<Vec<_>>()
+            )
+        });
+    // pipeline 経由でも直接呼び出しと同じメタ情報が透過されるかを検証する
+    // (language 詰め替え、品質指標の Some 保持、start / end の順序)。
+    assert_eq!(
+        non_empty.language.as_ref().map(LanguageCode::get),
+        Some("en"),
+        "language は入力に指定した en が伝播するはず"
+    );
     assert!(
-        text_frames
-            .iter()
-            .any(|frame| !frame.text.trim().is_empty()),
-        "空でない TextFrame が少なくとも 1 つあるはず: {:?}",
-        text_frames
-            .iter()
-            .map(|frame| frame.text.as_str())
-            .collect::<Vec<_>>()
+        non_empty.no_speech_prob.is_some(),
+        "no_speech_prob は Whisper 由来なので Some のはず"
+    );
+    assert!(
+        non_empty.avg_logprob.is_some(),
+        "avg_logprob は Whisper 由来なので Some のはず"
+    );
+    assert!(
+        non_empty.start <= non_empty.end,
+        "start <= end が成り立つはず: start={:?}, end={:?}",
+        non_empty.start,
+        non_empty.end
     );
 
     drop(pipeline_handle);

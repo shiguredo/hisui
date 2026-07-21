@@ -29,13 +29,22 @@ pub(super) fn language_token_from_code(
     tokenizer: &Tokenizer,
     code: &LanguageCode,
 ) -> Result<TokenId> {
+    let token = build_language_token_string(code);
+    token_id(tokenizer, &token)
+}
+
+/// 言語コードから Whisper 用トークン文字列 (`<|xx|>` 形式) を組み立てる。
+///
+/// 入力 code の前後空白は trim する。 既に `<|` で始まっていれば trim 済みの文字列を
+/// そのまま返し、そうでなければ `<|{code}|>` で包む (二重包みを避ける)。
+/// トークンが tokenizer に存在するかは呼び出し側で検証する。
+fn build_language_token_string(code: &LanguageCode) -> String {
     let code = code.get().trim();
-    let token = if code.starts_with("<|") {
+    if code.starts_with("<|") {
         code.to_owned()
     } else {
         format!("<|{code}|>")
-    };
-    token_id(tokenizer, &token)
+    }
 }
 
 #[cfg(test)]
@@ -84,5 +93,33 @@ mod tests {
             is_multilingual_config(&config_with_vocab_size(51866)),
             "large-v3 系も多言語と判定されるべき"
         );
+    }
+
+    /// 素の言語コードは `<|` と `|>` で包まれる。
+    #[test]
+    fn build_language_token_string_wraps_bare_code() {
+        let token = build_language_token_string(&LanguageCode::new("ja"));
+        assert_eq!(token, "<|ja|>");
+    }
+
+    /// 既に `<|xx|>` 形式で渡された場合は二重包みせずそのまま返す。
+    #[test]
+    fn build_language_token_string_passes_through_wrapped_code() {
+        let token = build_language_token_string(&LanguageCode::new("<|haw|>"));
+        assert_eq!(token, "<|haw|>");
+    }
+
+    /// 前後の空白は trim され、素の場合のみ `<|` と `|>` で包まれる。
+    #[test]
+    fn build_language_token_string_trims_whitespace_before_wrapping() {
+        let token = build_language_token_string(&LanguageCode::new("  en  "));
+        assert_eq!(token, "<|en|>");
+    }
+
+    /// trim 後に `<|` で始まる形式もそのまま返す (前後空白ありでも二重包みしない)。
+    #[test]
+    fn build_language_token_string_trims_whitespace_of_wrapped_code() {
+        let token = build_language_token_string(&LanguageCode::new("  <|zh|>  "));
+        assert_eq!(token, "<|zh|>");
     }
 }
