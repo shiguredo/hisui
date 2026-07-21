@@ -9,9 +9,9 @@ use crate::text::LanguageCode;
 
 /// 解決された言語 (指定された ISO 639-1 コードと、対応する Whisper の言語トークン)。
 #[derive(Debug)]
-pub struct ResolvedLanguage {
-    pub code: LanguageCode,
-    pub token_id: TokenId,
+pub(super) struct ResolvedLanguage {
+    pub(super) code: LanguageCode,
+    pub(super) token_id: TokenId,
 }
 
 /// 多言語 Whisper の語彙数の下限。多言語モデル (tiny/base/small/medium/large-v1/v2) は 51865、
@@ -20,12 +20,15 @@ pub struct ResolvedLanguage {
 const MULTILINGUAL_VOCAB_SIZE: usize = 51865;
 
 /// 多言語モデルなら true。
-pub fn is_multilingual_config(config: &Config) -> bool {
+pub(super) fn is_multilingual_config(config: &Config) -> bool {
     config.vocab_size >= MULTILINGUAL_VOCAB_SIZE
 }
 
 /// ISO 639-1 言語コードを Whisper の言語トークン ID に変換する。
-pub fn language_token_from_code(tokenizer: &Tokenizer, code: &LanguageCode) -> Result<TokenId> {
+pub(super) fn language_token_from_code(
+    tokenizer: &Tokenizer,
+    code: &LanguageCode,
+) -> Result<TokenId> {
     let code = code.get().trim();
     let token = if code.starts_with("<|") {
         code.to_owned()

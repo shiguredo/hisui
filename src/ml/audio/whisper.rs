@@ -187,7 +187,7 @@ fn load_mel_filters(num_mel_bins: usize) -> crate::Result<Vec<f32>> {
 }
 
 /// Hugging Face の Whisper モデルディレクトリを検証する。
-pub fn validate_model_dir(model_dir: &Path) -> crate::Result<PathBuf> {
+fn validate_model_dir(model_dir: &Path) -> crate::Result<PathBuf> {
     for name in ["config.json", "tokenizer.json", "model.safetensors"] {
         let path = model_dir.join(name);
         if !path.is_file() {

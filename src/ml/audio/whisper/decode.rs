@@ -23,14 +23,14 @@ use crate::probability::{LogProbability, Probability};
 /// 生の `u32` (テンソル indexing や他の数値) と型で分離する。生の値が要る箇所は
 /// `get()` で取り出す。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenId(u32);
+pub(super) struct TokenId(u32);
 
 impl TokenId {
-    pub const fn new(id: u32) -> Self {
+    pub(super) const fn new(id: u32) -> Self {
         Self(id)
     }
 
-    pub const fn get(self) -> u32 {
+    pub(super) const fn get(self) -> u32 {
         self.0
     }
 }
@@ -40,10 +40,10 @@ impl TokenId {
 /// 品質指標は candle 内部と同じ f64 精度の `LogProbability` / `Probability` で保持する。
 /// `TextFrame` 向けの f32 変換は上位層で行う。
 #[derive(Debug)]
-pub struct WhisperDecodedChunk {
-    pub text: String,
-    pub avg_logprob: LogProbability,
-    pub no_speech_prob: Probability,
+pub(super) struct WhisperDecodedChunk {
+    pub(super) text: String,
+    pub(super) avg_logprob: LogProbability,
+    pub(super) no_speech_prob: Probability,
 }
 
 /// Whisper プロトコルで固定されている特殊トークンの一式。
@@ -94,7 +94,7 @@ impl ProtocolTokens {
 /// 内部の `Whisper` は KV cache を持つ可変状態のため `&mut self` を要求し、複数スレッドで
 /// 共有できない (Silero の `new_instance` 型の共有もしない)。
 #[derive(Debug)]
-pub struct WhisperDecoder {
+pub(super) struct WhisperDecoder {
     inner: Whisper,
     config: Config,
     tokenizer: Tokenizer,
@@ -107,7 +107,7 @@ pub struct WhisperDecoder {
 impl WhisperDecoder {
     /// Hugging Face の safetensors 形式 (拡張子 `.safetensors`) の重みと config・tokenizer から
     /// `WhisperDecoder` を組み立てる。
-    pub fn load<P: AsRef<Path>>(
+    pub(super) fn load<P: AsRef<Path>>(
         weights_path: P,
         config: Config,
         tokenizer: Tokenizer,
@@ -148,11 +148,11 @@ impl WhisperDecoder {
         })
     }
 
-    pub fn config(&self) -> &Config {
+    pub(super) fn config(&self) -> &Config {
         &self.config
     }
 
-    pub fn tokenizer(&self) -> &Tokenizer {
+    pub(super) fn tokenizer(&self) -> &Tokenizer {
         &self.tokenizer
     }
 
@@ -170,7 +170,7 @@ impl WhisperDecoder {
     /// hallucination の可能性がある結果もそのまま返す (text を空にしない)。 破棄判定は
     /// `no_speech_prob` と `avg_logprob` を見て呼び出し側の責務で行う (層としては本関数は
     /// 上位型 `WhisperTranscript` を知らない)。
-    pub fn decode_chunk(
+    pub(super) fn decode_chunk(
         &mut self,
         mel: &Tensor,
         language_token: Option<TokenId>,
@@ -321,7 +321,7 @@ impl WhisperDecoder {
 }
 
 /// トークン文字列をトークン ID に変換する。
-pub fn token_id(tokenizer: &Tokenizer, token: &str) -> Result<TokenId> {
+pub(super) fn token_id(tokenizer: &Tokenizer, token: &str) -> Result<TokenId> {
     match tokenizer.token_to_id(token) {
         None => Err(crate::Error::new(format!("no token-id for {token}"))),
         Some(id) => Ok(TokenId::new(id)),
