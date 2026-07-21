@@ -833,8 +833,13 @@ impl VideoEncoder {
 
         loop {
             tokio::select! {
-                // input 腕: EOS 未受信 かつ in_flight < LIMIT のときのみ enable
-                message = input_rx.recv(), if !self.eos && in_flight < Self::IN_FLIGHT_LIMIT => {
+                // input 腕: EOS 未受信 かつ (bp 不要 or in_flight < LIMIT) のときのみ enable。
+                // bp 適用可否は encoder 種別依存 (`VideoEncoderInner::requires_backpressure`
+                // docstring 参照)。 self.inner が None (初期化前) は bp 不要と扱う。
+                message = input_rx.recv(), if !self.eos && (
+                    !self.inner.as_ref().map(|i| i.requires_backpressure()).unwrap_or(false)
+                        || in_flight < Self::IN_FLIGHT_LIMIT
+                ) => {
                     match message {
                         Message::Media(sample) => {
                             self.handle_input_sample(Some(sample))?;
@@ -1040,6 +1045,33 @@ impl VideoEncoderInner {
             Self::VideoToolbox(encoder) => encoder.codec(),
             #[cfg(feature = "nvcodec")]
             Self::Nvcodec(encoder) => encoder.codec(),
+        }
+    }
+
+    /// `VideoEncoder::run` の `IN_FLIGHT_LIMIT` guard を適用すべきかを返す。
+    ///
+    /// **本 method は本ブランチ (0085 実装) 内の応急処置**。 本来 in-flight
+    /// バックプレッシャーは全 encoder に一律適用するのが意図された設計
+    /// (LIMIT=3 でリアルタイム性を優先し、 encoder ごとに遅延が増えないようにする)。
+    /// しかし libvpx VP9 / svt_av1 / video_toolbox は `lag_in_frames` /
+    /// `look_ahead_distance` 等の look-ahead で warm-up 型となり、 native default
+    /// の warm-up 数 (VP9=25、 svt_av1=33 相当) が LIMIT=3 を超えるため、 一律 guard
+    /// を適用すると warm-up 中に in_flight が LIMIT に到達して deadlock する。
+    ///
+    /// 応急処置として nvcodec のみ true (guard 有効)、 他 encoder は false
+    /// (guard 無効) にする。 これによって非 nvcodec 経路ではリアルタイム性の
+    /// バックプレッシャーが効かなくなる副作用がある。 本来の対応は「リアルタイム時に
+    /// look_ahead_distance / lag_in_frames 等の encoder パラメータを 0 に強制上書き
+    /// して warm-up を消し、 bp guard は全 encoder で一律有効にする」形で、
+    /// issues/0087 で扱う (0087 完了後に本 method は削除して guard を一律に戻す)。
+    fn requires_backpressure(&self) -> bool {
+        #[cfg(feature = "nvcodec")]
+        {
+            matches!(self, Self::Nvcodec(_))
+        }
+        #[cfg(not(feature = "nvcodec"))]
+        {
+            false
         }
     }
 }
