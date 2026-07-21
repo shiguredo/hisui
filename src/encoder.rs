@@ -489,6 +489,12 @@ pub struct VideoEncoder {
     // 逆順にすると `emit_ok` の `unreachable!()` が発火する。 なお `inner` が
     // `None` (未初期化 = 最初のフレームが未到達) のケースでは callback 経路が動いて
     // いないため、 この順序制約は自動的に満たされる。
+    //
+    // `run()` は冒頭で `self.rx.take()` して `rx` を local に move する
+    // (`tokio::select!` の split-borrow 回避)。 local に move すると return 時に
+    // local が `self.inner` より先に drop されるため、 各 return パスの直前で
+    // `self.inner = None;` を明示呼び出しして `inner` を先に drop してから local
+    // `rx` の drop に進める契約にしている (`run` 内のコメント参照)。
     inner: Option<VideoEncoderInner>,
     // `run()` の 3 腕 `tokio::select!` で `input_rx.recv()` の入力腕と `rx.recv().await` の
     // 出力腕を並置するため、`run()` 冒頭で `take()` して local に move する必要がある。
@@ -761,12 +767,31 @@ impl VideoEncoder {
         }
     }
 
+    /// エンコーダー内部での in-flight フレーム数の上限。
+    ///
+    /// `shiguredo_nvcodec 2026.2.0` の内部 pending キュー上限
+    /// `n_encoder_buffer = frame_interval_p + 3` は `frame_interval_p: 1`
+    /// (`src/sora/recording_encoder_nvcodec_params.rs`) の hisui 設定下で 4。
+    /// `IN_FLIGHT_LIMIT < n_encoder_buffer` を保つことで `"encoder buffer is full"`
+    /// エラーを回避する。
+    ///
+    /// 同期エンコーダー (libvpx / openh264) では `handle_input_sample` 内で
+    /// 出力が同期的に emit されるため in-flight は常に 0-1 で、 この guard は
+    /// 事実上 no-op となる (性能影響なし)。
+    ///
+    /// N=2 と N=3 の実機計測比較は Decision Owner が別途実施予定。
+    const IN_FLIGHT_LIMIT: usize = 3;
+
     /// processor モデル (`ProcessorHandle` + subscribe / publish) 用の駆動 API。
     ///
-    /// 入力トラックを subscribe し、 `handle_input_sample` / `poll_output` の drain
-    /// ループでエンコード結果を出力トラックへ流す。 上流からの keyframe 要求 RPC を
-    /// 受け取るため、 `register_rpc_sender` で unbounded channel を登録した上で入力と
-    /// RPC の 2 腕 `tokio::select!` を回す。
+    /// 入力トラックを subscribe し、 3 腕 `tokio::select!` (input 腕 + output 腕 +
+    /// RPC 腕) でエンコード結果を出力トラックへ流す。 input 腕には `in_flight`
+    /// カウンタと `IN_FLIGHT_LIMIT` の guard を付けて、 nvcodec 等の非同期
+    /// エンコーダーの内部 pending キュー溢れ (buffer full) を防ぐ。
+    ///
+    /// LIMIT 到達時は `input_rx.recv()` が停止し、 上流の Syn/Ack 経路で mixer /
+    /// reader 側の自主ペーシングが自然に停止する (encoder 側で Syn を明示的に
+    /// 保持するコードは書かず、 Syn が queue に留まる → Ack 復帰しない、 を利用する)。
     pub async fn run(
         mut self,
         handle: ProcessorHandle,
@@ -784,34 +809,67 @@ impl VideoEncoder {
         handle.wait_subscribers_ready().await?;
         let mut rpc_rx_enabled = true;
 
+        // `tokio::select!` の input 腕 (`self.handle_input_sample` 呼び出し、 `&mut self`)
+        // と output 腕 (`rx.recv().await`、 `&mut rx`) を並置するため、 `rx` を local に
+        // move する (split-borrow 回避)。
+        //
+        // drop 順制御: struct フィールド宣言順 (`inner` → `rx`) により `inner` が
+        // 先に drop される契約 (VideoEncoder docstring 参照)。 `rx` を local に move
+        // すると return 時に local `rx` が `self.inner` より先に drop されるため、
+        // 各 return パスの直前で `self.inner = None;` を明示呼び出しして `inner` を
+        // 先に drop してから local `rx` の drop に進める。
+        let mut rx = self
+            .rx
+            .take()
+            .expect("BUG: rx must be Some at VideoEncoder::run() entry");
+        let mut in_flight: usize = 0;
+
         loop {
             tokio::select! {
-                message = input_rx.recv() => {
-                    let is_eos = matches!(message, Message::Eos);
+                // input 腕: EOS 未受信 かつ in_flight < LIMIT のときのみ enable
+                message = input_rx.recv(), if !self.eos && in_flight < Self::IN_FLIGHT_LIMIT => {
                     match message {
-                        Message::Media(sample) => self.handle_input_sample(Some(sample))?,
-                        Message::Eos => self.handle_input_sample(None)?,
-                        Message::Syn(_) => {}
-                    }
-                    loop {
-                        match self.poll_output()? {
-                            EncoderRunOutput::Processed(sample) => {
-                                if !output_tx.send_media(sample) {
-                                    output_tx.send_eos();
-                                    return Ok(());
-                                }
-                            }
-                            EncoderRunOutput::Pending => break,
-                            EncoderRunOutput::Finished => {
+                        Message::Media(sample) => {
+                            self.handle_input_sample(Some(sample))?;
+                            in_flight += 1;
+                        }
+                        Message::Eos => {
+                            self.handle_input_sample(None)?;
+                            // 同期エンコーダー (libvpx / openh264) では EOS 到達時点で
+                            // in_flight = 0 が典型。 ここで早期終了しないと、 次 iter で
+                            // input 腕 guard が無効化 (`self.eos = true`)、 output 腕は
+                            // rx 空で pending、 RPC 腕も pending の 3 腕 pending で
+                            // deadlock する。
+                            if in_flight == 0 {
+                                self.inner = None;
                                 output_tx.send_eos();
                                 return Ok(());
                             }
                         }
-                    }
-                    if is_eos {
-                        return Err(Error::new("video encoder still pending after EOS"));
+                        Message::Syn(_) => {}
                     }
                 }
+                // output 腕: 常時 enable、 in-flight を drain
+                result = rx.recv() => {
+                    // sink と rx は VideoEncoder 内で同居するため sink が rx より先に
+                    // drop される経路は構造上到達不能。 現状 poll_output の Disconnected
+                    // 分岐は unreachable! で潰しているが、 ここでは run() の同期 return
+                    // パスに合わせて expect + ? で fail-fast する
+                    let frame = result
+                        .expect("encoder output channel disconnected unexpectedly (sink dropped before rx)")?;
+                    in_flight -= 1;
+                    if !output_tx.send_media(MediaFrame::video(frame)) {
+                        self.inner = None;
+                        output_tx.send_eos();
+                        return Ok(());
+                    }
+                    if self.eos && in_flight == 0 {
+                        self.inner = None;
+                        output_tx.send_eos();
+                        return Ok(());
+                    }
+                }
+                // RPC 腕: 既存 helper 経由で維持
                 rpc_message = recv_video_encoder_rpc_message_or_pending(
                     rpc_rx_enabled.then_some(&mut rpc_rx)
                 ) => {
@@ -826,10 +884,11 @@ impl VideoEncoder {
     }
 }
 
-/// `VideoEncoder::run` の 2 腕 `tokio::select!` から呼ぶ RPC 受信 helper。
+/// `VideoEncoder::run` の 3 腕 `tokio::select!` から呼ぶ RPC 受信 helper。
 ///
 /// `rpc_rx` が `Some` なら受信を待ち、 `None` なら `std::future::pending()` に落ちて
-/// select! の RPC 腕を実質無効化する (disconnect 後の入力腕優先を維持するため)。
+/// select! の RPC 腕を実質無効化する (disconnect 後は入力腕 + 出力腕での drain に
+/// 集中するための省略機構)。
 async fn recv_video_encoder_rpc_message_or_pending(
     rpc_rx: Option<&mut tokio::sync::mpsc::UnboundedReceiver<VideoEncoderRpcMessage>>,
 ) -> Option<VideoEncoderRpcMessage> {
