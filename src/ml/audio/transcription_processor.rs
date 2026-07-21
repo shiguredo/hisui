@@ -178,7 +178,7 @@ impl ProcessorState {
                 self.flush_end_of_stream().await?;
                 while let Some(pending) = self.pending.pop_front() {
                     if matches!(
-                        self.publish_completed(pending, output_tx).await?,
+                        await_and_publish(pending, output_tx).await?,
                         PublishOutcome::PipelineClosed,
                     ) {
                         // 下流がクローズしたので残りは publish せず捨てる。
@@ -308,22 +308,6 @@ impl ProcessorState {
         Ok(())
     }
 
-    async fn publish_completed(
-        &mut self,
-        pending: PendingTranscript,
-        output_tx: &mut crate::TrackPublisher,
-    ) -> crate::Result<PublishOutcome> {
-        let transcript = pending.result_rx.await.map_err(|e| {
-            crate::Error::new(format!("transcription result channel closed: {e}"))
-        })??;
-        Ok(publish_transcript(
-            pending.start,
-            pending.end,
-            transcript,
-            output_tx,
-        ))
-    }
-
     fn drop_consumed_pcm(&mut self) {
         let min_required = self.vad.min_required_sample();
         if min_required <= self.retained_start_sample {
@@ -381,6 +365,26 @@ impl ProcessorState {
             .ok_or_else(|| crate::Error::new("base offset is not initialized"))?;
         Ok(base + duration_from_16k_samples(sample))
     }
+}
+
+/// 先頭 pending の推論結果を待ち、解決した `WhisperTranscript` を text track に流す。
+///
+/// self を触らないため `impl ProcessorState` の外に置く。 oneshot の `RecvError` は
+/// worker crash / panic のサインなので `crate::Error` に包み直して伝播させる。
+async fn await_and_publish(
+    pending: PendingTranscript,
+    output_tx: &mut crate::TrackPublisher,
+) -> crate::Result<PublishOutcome> {
+    let transcript = pending
+        .result_rx
+        .await
+        .map_err(|e| crate::Error::new(format!("transcription result channel closed: {e}")))??;
+    Ok(publish_transcript(
+        pending.start,
+        pending.end,
+        transcript,
+        output_tx,
+    ))
 }
 
 /// 解決済み `WhisperTranscript` を text track に流す。
