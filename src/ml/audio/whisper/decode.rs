@@ -192,6 +192,9 @@ impl WhisperDecoder {
         let mut sum_logprob = 0f64;
         let mut no_speech_prob_raw: Option<f64> = None;
         let mut tokens = self.build_prefix_tokens();
+        // `avg_logprob` の分母を「生成トークン数 (EOT 含む)」にするため、プレフィックス
+        // (SOT / 言語 / transcribe / no_timestamps) の個数をここで固定して控えておく。
+        let prefix_len = tokens.len();
 
         for i in 0..sample_len {
             let tokens_t = tokens_tensor(&tokens, mel.device())?;
@@ -207,16 +210,20 @@ impl WhisperDecoder {
 
             let (next_token, prob) = self.greedy_step(&ys)?;
             tokens.push(next_token);
+            // openai/whisper の GreedyDecoder は EOT 生成ステップも sum に含める
+            // (`sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)` は
+            // 「直前が EOT でなければ加算」なので、EOT を生成したステップ自身は加算対象)。
+            // 定義を一致させるため break 判定より前に加算する。
+            sum_logprob += prob.ln();
 
             if next_token == self.protocol_tokens.eot
                 || tokens.len() > self.config.max_target_positions
             {
                 break;
             }
-            sum_logprob += prob.ln();
         }
 
-        let result = self.finalize_chunk(tokens, sum_logprob, no_speech_prob_raw);
+        let result = self.finalize_chunk(tokens, prefix_len, sum_logprob, no_speech_prob_raw);
         self.inner.reset_kv_cache();
         result
     }
@@ -272,9 +279,16 @@ impl WhisperDecoder {
 
     /// decode ループが確定させたトークン列と累積 logprob から `WhisperDecodedChunk` を組み立てる。
     /// text 復元、`avg_logprob` / `no_speech_prob` の型付き変換 (範囲外・NaN は Err) を担う。
+    ///
+    /// `prefix_len` は decode 前に積んだプレフィックストークン (SOT / 言語 / transcribe /
+    /// no_timestamps) の個数。 `avg_logprob` の分母は openai/whisper と一致させるため
+    /// 「生成トークン数 (EOT 含む)」= `tokens.len() - prefix_len` を採る。
+    /// `sample_len == 0` などで生成が 1 個も無かった場合は `max(1)` で 0 割を回避し、
+    /// `sum_logprob == 0` から `avg_logprob = 0` (= log(1)) を返す。
     fn finalize_chunk(
         &self,
         tokens: Vec<TokenId>,
+        prefix_len: usize,
         sum_logprob: f64,
         no_speech_prob_raw: Option<f64>,
     ) -> Result<WhisperDecodedChunk> {
@@ -283,7 +297,8 @@ impl WhisperDecoder {
             .tokenizer
             .decode(&raw_tokens, true)
             .map_err(|e| crate::Error::new(format!("tokenizer decode: {e}")))?;
-        let avg_logprob_raw = sum_logprob / tokens.len().max(1) as f64;
+        let generated_len = tokens.len().saturating_sub(prefix_len).max(1);
+        let avg_logprob_raw = sum_logprob / generated_len as f64;
         let avg_logprob = LogProbability::new(avg_logprob_raw).ok_or_else(|| {
             crate::Error::new(format!(
                 "whisper produced non-log-probability avg_logprob: {avg_logprob_raw}"
