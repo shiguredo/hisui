@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-07-07
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-07-21
 - Model: Opus 4.7
 - Branch: feature/refactor-nvcodec-encoder-flush-and-backpressure
 - Polished: 2026-07-10
@@ -272,16 +272,54 @@ drop(guard);
 
 ## 解決方法
 
-§完了条件 §コード変更 と §設計方針 §(α) 案の実装ディテール に沿って実装する。 順序依存の要点のみ:
+### 実装した内容
 
-1. bp ロジック用の薄い型 (`struct Pacer` 相当) を feature 非依存で切り出し、 単体テスト (i)-(v) を先に書く。 併せて shiguredo_nvcodec 2026.2.0 の `encode.rs:1572` の Err 分岐が **n_encoder_buffer 超過** のみで発生することを crate source 再読で裏取り (他条件も含む場合は完了条件 §実機計測 §「buffer full が発生しないこと」の担保方法を追加)
-2. `input_queue` を新型に切り替え、 `build_encoder` / `build_handler` / `encode` の 4 箇所を追従
-3. callback Err 分岐に `pop_front + notify_one` を追加 (F1 回帰防止のため単体テスト (v) 通過後に着手)
-4. encode 内 `self.inner.flush()?;` を撤廃し、 push_back 直前に wait を配置
-5. `nvcodec.rs:334-335` のコメントを更新
-6. cargo (default + `--no-default-features` + `--features nvcodec` の check) を通す
-7. Decision Owner が別 GPU マシンで実機計測、 数値を本 issue に追記
-8. CHANGES.md `[UPDATE]` を実測値で更新 (§CHANGES.md について 参照)
+本ブランチ (`feature/refactor-nvcodec-encoder-flush-and-backpressure`) で以下を実装した:
+
+- `src/encoder/pacer.rs` を新設し、`Pacer<T>` (Mutex + Condvar + VecDeque + 上限 N) 型を実装
+- `src/encoder/nvcodec.rs` の `input_queue` を `Arc<Pacer<VideoFrame>>` に変更
+- `NvcodecEncoder::encode` から `self.inner.flush()?;` を撤廃し、直前に `push_wait` (in-flight 上限セルフペーシング) を配置
+- callback の Err 分岐にも `pop` (相当) を追加 (F1 デッドロック回帰防止)
+- 単体テスト (i)-(v) を `pacer.rs` に追加
+
+コミット履歴: `7c137068` / `705d11f0` / `7af05076` (PR #318)
+
+### 不採用として close する理由
+
+実装レビューで以下の設計上の欠陥が判明したため、本 issue の (α) 案は **不採用** として close する。
+
+- `Pacer::push_wait` の `Condvar::wait_timeout(100ms)` は OS スレッドを block する同期 API
+- 呼出元 `VideoEncoder::run` (`src/encoder.rs:764-820`) は `MediaPipelineHandle::spawn_processor` (`src/media_pipeline.rs:622`) 内で `tokio::spawn(async move { ... })` として登録される通常の async task で、`spawn_blocking` ではない
+- したがって `push_wait` は tokio worker thread を最大 100ms 単位で block する
+- compose サブコマンドのデフォルトは `--thread-count 1` (`src/sora/recording_subcommand_compose.rs:80-92` の `.default("1")`) で、単一 worker 上に decoder / mixer / encoder / writer / progress_bar 等の全 processor が同居する
+- 単 pipeline 単一 encoder であっても、encoder の block は同 worker 上の他 processor の進行を止める経路になる
+- 本 issue §設計方針 §tokio runtime worker 同時 block ピーク (L194) の判断根拠 (「単 pipeline 単一 encoder の block は問題化しない」) は暗黙のうちに `worker_threads >= 2` を前提としており、現行のデフォルト値と齟齬
+
+§完了条件 §未達時の close 経路 (L253-257) の「(b) 別 bp 機構の再選定 → 実装は次リビジョンに繰り越す」に該当する。
+
+### 後続 issue と方針変更
+
+後続 issue: **issues/0085** (`feature/refactor-encoder-inflight-backpressure`)
+
+新方針:
+
+- bp 機構を `NvcodecEncoder` レイヤー (Condvar による同期 block) から `VideoEncoder` レイヤー (tokio の async task 内 usize カウンタ) に移す
+- `VideoEncoder::run` の `tokio::select!` に `in_flight: usize` + `IN_FLIGHT_LIMIT` guard を追加し、上限到達時は `input_rx.recv()` を呼ばず上流 Syn/Ack 経路で自然に bp を伝える
+- Mutex / Condvar / async 化はすべて不要 (async task 内ローカル状態で完結)
+- `src/encoder/pacer.rs` は削除、`SharedInputQueue` は `Arc<Mutex<VecDeque<VideoFrame>>>` (Condvar 抜き) に縮小
+
+### 本ブランチと PR #318 の扱い
+
+本ブランチのコード変更 3 コミット (`7c137068` / `705d11f0` / `7af05076`) は develop に取り込まない。 PR #318 は本 close 追記のコミット (追記 + `git mv issues/0080-*.md issues/closed/`) を push した後に **merge せず close する**。
+
+### 引き継ぐ分析資産
+
+本 issue の以下の分析は 0085 の polish で参考にする:
+
+- §現状 §shiguredo_nvcodec 2026.2.0 の実測 (crate 内 pending キュー FIFO、`n_encoder_buffer` 上限、Drop 時 drain 保証)
+- §設計方針 §bp 機構の選定 (β 案 = shiguredo_nvcodec の `max_frames_in_flight` / γ 案 = 上位 bounded channel + `blocking_send` の棄却理由)
+- §設計方針 §VideoEncoder wrapper 側への波及検証 (drop 順制御、メトリクスペアリング、複数 encoder ケース、RPC keyframe 応答性)
+- §完了条件 §テスト の観点 (i)-(v) (in-flight bp の単体テスト共通観点)
 
 ## CHANGES.md について
 
