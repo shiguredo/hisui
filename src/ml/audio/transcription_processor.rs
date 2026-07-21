@@ -194,7 +194,7 @@ impl ProcessorState {
     }
 
     async fn handle_audio_frame(&mut self, frame: &AudioFrame) -> crate::Result<()> {
-        self.ensure_audio_format(frame)?;
+        ensure_audio_format(frame)?;
         self.base_offset.get_or_insert(frame.timestamp);
         self.remember_audio_layout(frame)?;
         let normalized = frame.samples_i16()?.map(|s| f32::from(s) / 32768.0);
@@ -323,39 +323,10 @@ impl ProcessorState {
         self.retained_start_sample = min_required;
     }
 
-    fn ensure_audio_format(&self, frame: &AudioFrame) -> crate::Result<()> {
-        if frame.format != AudioFormat::I16Be {
-            return Err(crate::Error::new(format!(
-                "transcription processor expects I16Be input, got {}",
-                frame.format
-            )));
-        }
-        Ok(())
-    }
-
     fn remember_audio_layout(&mut self, frame: &AudioFrame) -> crate::Result<()> {
-        match self.input_sample_rate {
-            None => self.input_sample_rate = Some(frame.sample_rate),
-            Some(sample_rate) if sample_rate != frame.sample_rate => {
-                return Err(crate::Error::new(format!(
-                    "input sample rate changed during transcription: {} -> {}",
-                    sample_rate.get(),
-                    frame.sample_rate.get()
-                )));
-            }
-            Some(_) => {}
-        }
-        match self.input_channels {
-            None => self.input_channels = Some(frame.channels),
-            Some(channels) if channels != frame.channels => {
-                return Err(crate::Error::new(format!(
-                    "input channel count changed during transcription: {} -> {}",
-                    channels.get(),
-                    frame.channels.get()
-                )));
-            }
-            Some(_) => {}
-        }
+        check_layout_consistency(self.input_sample_rate, self.input_channels, frame)?;
+        self.input_sample_rate = Some(frame.sample_rate);
+        self.input_channels = Some(frame.channels);
         Ok(())
     }
 
@@ -365,6 +336,53 @@ impl ProcessorState {
             .ok_or_else(|| crate::Error::new("base offset is not initialized"))?;
         Ok(base + duration_from_16k_samples(sample))
     }
+}
+
+/// 受信フレームが I16Be フォーマットかを確認する (副作用なしの純関数)。
+///
+/// TranscriptionProcessor は upstream 側で Opus / AAC を decode 済みの I16Be 前提で組む
+/// ため、それ以外のフォーマットは構成ミスとして Err を返す。
+fn ensure_audio_format(frame: &AudioFrame) -> crate::Result<()> {
+    if frame.format != AudioFormat::I16Be {
+        return Err(crate::Error::new(format!(
+            "transcription processor expects I16Be input, got {}",
+            frame.format
+        )));
+    }
+    Ok(())
+}
+
+/// これまでに保持している sample_rate / channels と、新しく受信した frame のそれとの
+/// 矛盾を検出する (副作用なしの純関数)。
+///
+/// 前回値が `None` (未初期化) なら Ok。前回値が `Some` で frame と異なるなら Err。
+/// 実際に代入する責務は `remember_audio_layout` 側 (`&mut self`) に残す。
+fn check_layout_consistency(
+    prev_sample_rate: Option<SampleRate>,
+    prev_channels: Option<Channels>,
+    frame: &AudioFrame,
+) -> crate::Result<()> {
+    match prev_sample_rate {
+        Some(sample_rate) if sample_rate != frame.sample_rate => {
+            return Err(crate::Error::new(format!(
+                "input sample rate changed during transcription: {} -> {}",
+                sample_rate.get(),
+                frame.sample_rate.get()
+            )));
+        }
+        _ => {}
+    }
+    match prev_channels {
+        Some(channels) if channels != frame.channels => {
+            return Err(crate::Error::new(format!(
+                "input channel count changed during transcription: {} -> {}",
+                channels.get(),
+                frame.channels.get()
+            )));
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// 先頭 pending の推論結果を待ち、解決した `WhisperTranscript` を text track に流す。
@@ -592,5 +610,121 @@ mod tests {
         assert_eq!(frame.language.as_ref().map(LanguageCode::get), Some("en"));
         assert_eq!(frame.no_speech_prob, Some(0.2_f32));
         assert_eq!(frame.avg_logprob, Some(-0.4_f32));
+    }
+
+    /// テスト用に指定した format / sample_rate / channels の AudioFrame を組み立てる。
+    /// data は 1 サンプル分の 0x0000 を積んで最低限の valid PCM にする。
+    fn make_audio_frame(
+        format: AudioFormat,
+        sample_rate: SampleRate,
+        channels: Channels,
+    ) -> AudioFrame {
+        let bytes_per_sample = 2 * usize::from(channels.get());
+        AudioFrame {
+            data: vec![0u8; bytes_per_sample],
+            format,
+            channels,
+            sample_rate,
+            timestamp: Duration::ZERO,
+            sample_entry: None,
+        }
+    }
+
+    /// I16Be フォーマットのフレームは ensure_audio_format で Ok。
+    #[test]
+    fn ensure_audio_format_accepts_i16be() {
+        let frame = make_audio_frame(
+            AudioFormat::I16Be,
+            SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            Channels::STEREO,
+        );
+        ensure_audio_format(&frame).expect("I16Be は Ok のはず");
+    }
+
+    /// Opus フォーマットのフレームは Err を返し、メッセージに I16Be の期待を含む。
+    #[test]
+    fn ensure_audio_format_rejects_opus() {
+        let frame = make_audio_frame(
+            AudioFormat::Opus,
+            SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            Channels::STEREO,
+        );
+        let err = ensure_audio_format(&frame).expect_err("Opus は Err のはず");
+        let message = err.display().to_string();
+        assert!(
+            message.contains("I16Be"),
+            "エラーメッセージに I16Be の期待を含むこと: {message}"
+        );
+    }
+
+    /// Aac フォーマットのフレームも Err を返す (I16Be 以外は一律 Err の回帰保護)。
+    #[test]
+    fn ensure_audio_format_rejects_aac() {
+        let frame = make_audio_frame(
+            AudioFormat::Aac,
+            SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            Channels::STEREO,
+        );
+        assert!(ensure_audio_format(&frame).is_err(), "Aac は Err のはず");
+    }
+
+    /// 前回値が未初期化 (None / None) なら check_layout_consistency は Ok。
+    #[test]
+    fn check_layout_consistency_accepts_first_frame() {
+        let frame = make_audio_frame(
+            AudioFormat::I16Be,
+            SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            Channels::STEREO,
+        );
+        check_layout_consistency(None, None, &frame).expect("初回フレームは Ok のはず");
+    }
+
+    /// 前回値と frame の sample_rate / channels が同一なら Ok (継続フレーム)。
+    #[test]
+    fn check_layout_consistency_accepts_matching_layout() {
+        let frame = make_audio_frame(
+            AudioFormat::I16Be,
+            SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            Channels::STEREO,
+        );
+        check_layout_consistency(Some(frame.sample_rate), Some(frame.channels), &frame)
+            .expect("同一レイアウトは Ok のはず");
+    }
+
+    /// sample_rate 変化は Err、メッセージに旧→新の値と "sample rate" を含む。
+    #[test]
+    fn check_layout_consistency_rejects_sample_rate_change() {
+        let frame = make_audio_frame(
+            AudioFormat::I16Be,
+            SampleRate::from_u32(16_000).expect("16 kHz は有効"),
+            Channels::STEREO,
+        );
+        let prev = SampleRate::from_u32(48_000).expect("48 kHz は有効");
+        let err = check_layout_consistency(Some(prev), Some(frame.channels), &frame)
+            .expect_err("sample rate 変化は Err のはず");
+        let message = err.display().to_string();
+        assert!(
+            message.contains("sample rate")
+                && message.contains("48000")
+                && message.contains("16000"),
+            "エラーメッセージに sample rate と旧→新値 (48000 -> 16000) を含むこと: {message}"
+        );
+    }
+
+    /// channels 変化は Err、メッセージに旧→新の値と "channel" を含む。
+    #[test]
+    fn check_layout_consistency_rejects_channels_change() {
+        let frame = make_audio_frame(
+            AudioFormat::I16Be,
+            SampleRate::from_u32(48_000).expect("48 kHz は有効"),
+            Channels::MONO,
+        );
+        let err = check_layout_consistency(Some(frame.sample_rate), Some(Channels::STEREO), &frame)
+            .expect_err("channels 変化は Err のはず");
+        let message = err.display().to_string();
+        assert!(
+            message.contains("channel") && message.contains("2") && message.contains("1"),
+            "エラーメッセージに channel と旧→新値 (2 -> 1) を含むこと: {message}"
+        );
     }
 }
