@@ -340,7 +340,8 @@ impl NvcodecEncoder {
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
         // 順序保証: callback で pop する前に必ず push_back する。
-        // flush() は callback 完了までブロックするため、push が先行することが担保される。
+        // Mutex 排他 + VecDeque FIFO + shiguredo_nvcodec 内部 worker の FIFO 処理により、
+        // 「push_back → encode → callback pop」の因果順序が担保される。
         {
             let mut queue = self
                 .input_queue
@@ -357,11 +358,6 @@ impl NvcodecEncoder {
         };
         self.force_keyframe_next = false;
         self.inner.encode(&nv12_data, &encode_options, ())?;
-        // shiguredo_nvcodec のエンコーダーは内部の worker スレッドで非同期にエンコードし、
-        // encode() は即時 return する。上位パイプラインは同期 pull 型で、上位側でペース制御
-        // しないと内部キューが溢れて encode() が "encoder buffer is full" で失敗するため、
-        // 投入直後に flush() で 1 フレーム分の完了を待って同期動作させる。
-        self.inner.flush()?;
         Ok(())
     }
 
