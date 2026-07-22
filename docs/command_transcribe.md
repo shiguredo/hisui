@@ -43,13 +43,21 @@ Arguments:
   INPUT_FILE 文字起こし対象の MP4 ファイル (.mp4 / .m4a、音声のみの m4a を含む)
 
 Options:
-  -h, --help                     このヘルプメッセージを表示します
-      --experimental, -x         実験的サブコマンドの有効化フラグ (必須)
-      --model-dir <PATH>         Whisper モデルディレクトリ
-      --silero-vad-model <PATH>  Silero VAD の ONNX モデルファイル [env: HISUI_SILERO_VAD_MODEL_PATH]
-      --language <CODE>          Whisper 言語指定 (ISO 639-1、`ja` / `en` 等)
-      --transcribe-threads <N>   candle rayon スレッド数 [env: HISUI_TRANSCRIBE_THREADS]
-      --fdk-aac <PATH>           FDK-AAC の共有ライブラリのパス (feature = "fdk-aac" 有効時のみ) [env: HISUI_FDK_AAC_PATH]
+  -h, --help                    このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
+      --version                 バージョン番号を表示します
+      --verbose                 警告未満のログメッセージも出力します
+      --emit-exit-metrics       プロセス終了時に内部メトリクスを JSON Lines 形式で標準出力へ 1 行出力します [env: HISUI_EMIT_EXIT_METRICS]
+  -x, --experimental            実験的サブコマンドの有効化フラグです
+      --model-dir <PATH>        Whisper モデルディレクトリ (config.json / tokenizer.json / model.safetensors を含む)
+      --silero-vad-model <PATH> Silero VAD の ONNX モデルファイル (silero_vad.onnx) [env: HISUI_SILERO_VAD_MODEL_PATH]
+      --language <CODE>         Whisper 言語指定 (ISO 639-1、`ja` / `en` 等)
+      --transcribe-threads <N>  1 推論あたりの candle rayon スレッド数を上書きします [env: HISUI_TRANSCRIBE_THREADS]
+```
+
+`--features fdk-aac` を有効にしてビルドした場合は、末尾に以下のオプションが追加されます。
+
+```
+      --fdk-aac <PATH>          FDK-AAC の共有ライブラリのパス (AAC in MP4 対応、Linux では指定必須) [env: HISUI_FDK_AAC_PATH]
 ```
 
 `--experimental` (`-x`) が指定されていない状態で `transcribe` を呼ぶと、標準エラーに
