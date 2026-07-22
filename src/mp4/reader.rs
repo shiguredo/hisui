@@ -1038,13 +1038,6 @@ impl Mp4FileReader {
         context: SampleContext,
         handle: &ProcessorHandle,
     ) -> Result<SampleProcessingResult> {
-        // composition_time_offset は未対応
-        if context.composition_time_offset.is_some() {
-            return Err(Error::new(
-                "composition_time_offset is not supported yet".to_owned(),
-            ));
-        }
-
         // warm-up 中かどうかを判定する
         let suppress_publish = if let Some(target) = self.warmup_target {
             let (timestamp, _) =
@@ -1081,6 +1074,16 @@ impl Mp4FileReader {
     ) -> Result<SampleProcessingResult> {
         if !state.is_audio_enabled(context.track_id) {
             return Ok(SampleProcessingResult::Continue);
+        }
+
+        // composition_time_offset (B フレーム由来の CTS オフセット) は未対応。
+        // subscribe 対象の track についてのみチェックする (対象外 track は先の
+        // is_audio_enabled で skip 済みなので、対象外 track の CTS オフセットで
+        // pipeline 全体を落とさない)。
+        if context.composition_time_offset.is_some() {
+            return Err(Error::new(
+                "composition_time_offset is not supported yet".to_owned(),
+            ));
         }
 
         if let Some(entry) = &context.sample_entry {
@@ -1173,6 +1176,16 @@ impl Mp4FileReader {
     ) -> Result<SampleProcessingResult> {
         if !state.is_video_enabled(context.track_id) {
             return Ok(SampleProcessingResult::Continue);
+        }
+
+        // composition_time_offset (B フレーム由来の CTS オフセット) は未対応。
+        // subscribe 対象の track についてのみチェックする (対象外 track は先の
+        // is_video_enabled で skip 済みなので、対象外 track の CTS オフセットで
+        // pipeline 全体を落とさない)。
+        if context.composition_time_offset.is_some() {
+            return Err(Error::new(
+                "composition_time_offset is not supported yet".to_owned(),
+            ));
         }
 
         if let Some(entry) = &context.sample_entry {
