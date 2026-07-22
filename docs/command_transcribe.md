@@ -20,7 +20,7 @@ Whisper で音声を文字起こしして標準出力に JSON LINE (1 行 1 セ�
 Whisper モデル (whisper-tiny) と Silero VAD の ONNX モデルをダウンロードします。
 
 ```console
-$ uv run scripts/download_ml_models.py --dest ml-models whisper-tiny silero-vad
+$ uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny silero-vad
 ```
 
 配置先:
@@ -74,7 +74,7 @@ $ hisui -x transcribe \
     --silero-vad-model ./ml-models/silero-vad/onnx/model.onnx \
     --language en \
     ./sample.mp4
-{"start":0.96,"end":2.272,"text":"The rain swings your bed.","language":"en","no_speech_prob":0.253,"avg_logprob":-1.155}
+{"start":0.96,"end":2.272,"text":"Hello, world.","language":"en","no_speech_prob":0.05,"avg_logprob":-0.3}
 ```
 
 選択された ML device (cuda / metal / cpu) を確認する場合は `--verbose` を併用します
@@ -93,17 +93,17 @@ $ hisui --verbose -x transcribe ...
 | `start`            | number (秒)   | 必須 | セグメント開始時刻 (float、`Duration` を秒に変換)                                          |
 | `end`              | number (秒)   | 必須 | セグメント終了時刻                                                                         |
 | `text`             | string        | 必須 | 文字起こしされたテキスト                                                                   |
-| `language`         | string        | 任意 | 言語コード (`--language` で指定した値が入る想定。 未検出時はキーごと省略)                 |
+| `language`         | string        | 任意 | 言語コード (`--language` で指定した値が入る)。 推論対象がなかった等の異常系ではキーごと省略  |
 | `no_speech_prob`   | number        | 任意 | 発話がない確率 (0.0 - 1.0、Whisper 由来の幻覚指標)                                         |
 | `avg_logprob`      | number        | 任意 | 平均 log probability (信頼度目安、Whisper 由来)                                            |
 
-`no_speech_prob > 0.6` かつ `avg_logprob < -1.0` のセグメントは幻覚判定で publish しません。
+`no_speech_prob > 0.6` かつ `avg_logprob < -1.0` のセグメント、および空テキストのセグメントは publish しません。
 
 ## 制約
 
 - **対応入力は MP4 のみ** (`.mp4` / `.m4a`)。 WAV / WebM / Opus 単体等は本サブコマンドでは扱いません
 - **標準入力 (`-`) は非対応** (MP4 の seek 前提のため)
-- **音声トラックが複数含まれる MP4 では最初に見つかった対応コーデックのトラックのみ** を文字起こしします (残りは silent に無視)
+- **音声トラックが複数含まれる MP4 では最初に見つかった対応コーデックのトラックのみ** を文字起こしします (対応コーデックの 2 つ目以降は silent に無視、非対応コーデックの track は警告ログ付きで skip)
 - **`--emit-exit-metrics` と併用してもメトリクスは出力されません** (transcribe は JSON LINE を stdout に流すため出力が混線する。 併用時は標準エラーに warn ログが 1 度出ます)
 - **出力は JSON LINE のみ**。 MP4 字幕トラック (WVTT 等) としての出力は非対応
 - 大きな MP4 (数時間) を渡した場合の実行時間・メモリの最適化は本サブコマンドでは行いません

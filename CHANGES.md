@@ -64,7 +64,8 @@
   - 実験的機能フラグ `--experimental` (`-x`) を新設し、`transcribe` はこのフラグ指定時のみ有効
   - Whisper モデル (`--model-dir` 必須) と Silero VAD (`--silero-vad-model` 必須) と言語指定 (`--language` 必須) で MP4 (`.mp4` / `.m4a`) の音声を文字起こしし、標準出力に JSON LINE で出力する
   - 対応入力は MP4 のみ (WAV / WebM / Opus 単体等は非対応)。 AAC in MP4 は Linux では `--features fdk-aac` build + `--fdk-aac` 指定が必要
-  - モデル取得は `scripts/download_ml_models.py --dest ml-models whisper-tiny silero-vad`
+  - `--transcribe-threads` (`HISUI_TRANSCRIBE_THREADS`) で 1 推論あたりの candle rayon スレッド数を上書きできる
+  - モデル取得は `scripts/download_ml_models.py --dest ml-models/ whisper-tiny silero-vad`
   - @sile
 - [ADD] obsws 経由でリアルタイム合成映像にテキストオーバーレイを描画できるようにする
   - 起動時 CLI 引数 `--font-search-root` / `--default-font` でフォント探索ルートとデフォルトフォントを指定する (両方未指定なら機能無効として正常起動、片方のみは起動失敗)
