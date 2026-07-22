@@ -16,3 +16,19 @@
   ffmpeg -i common_voice_en_100540.mp3 -ac 1 -ar 16000 -f s16le speech-en-16k-mono-s16le.pcm
   ffmpeg -i common_voice_ja_19486650.mp3 -ac 1 -ar 16000 -f s16le speech-ja-16k-mono-s16le.pcm
   ```
+
+### 派生形式: `e2e/transcribe/speech-en.mp4` / `speech-ja.mp4` (Opus in MP4)
+
+上記の raw PCM から `hisui -x transcribe` の e2e テスト用に生成した Opus in MP4 (音声のみ)。
+出所・クリップ ID・ライセンスは上記のとおり。 Linux CI で `--fdk-aac` を追加せずに扱えるよう
+Opus を採用している。
+
+- **変換コマンド** (ffmpeg、raw PCM から libopus + MP4 コンテナへ再エンコード):
+  ```
+  ffmpeg -f s16le -ar 16000 -ac 1 -i speech-en-16k-mono-s16le.pcm \
+    -c:a libopus -b:a 64k -ar 48000 -movflags +faststart \
+    e2e/transcribe/speech-en.mp4
+  ffmpeg -f s16le -ar 16000 -ac 1 -i speech-ja-16k-mono-s16le.pcm \
+    -c:a libopus -b:a 64k -ar 48000 -movflags +faststart \
+    e2e/transcribe/speech-ja.mp4
+  ```
