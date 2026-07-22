@@ -82,13 +82,6 @@ impl Mp4SampleReader {
         let mut last_video_sample_entry: Option<SharedSampleEntry> = None;
 
         while let Some(sample) = demuxer.next_sample()? {
-            // composition_time_offset (B フレーム由来の CTS オフセット) は未対応
-            if sample.composition_time_offset.is_some() {
-                return Err(crate::Error::new(
-                    "composition_time_offset is not supported yet".to_owned(),
-                ));
-            }
-
             match sample.track_kind {
                 TrackKind::Audio => {
                     let Some(sender) = audio_sender.as_mut() else {
@@ -96,6 +89,14 @@ impl Mp4SampleReader {
                     };
                     if audio_track_id != Some(sample.track_id) {
                         continue;
+                    }
+                    // composition_time_offset (B フレーム由来の CTS オフセット) は未対応。
+                    // subscribe 対象の track についてのみチェックする (対象外 track は続く continue で
+                    // skip されるため、対象外 track の CTS オフセットで pipeline 全体を落とさない)。
+                    if sample.composition_time_offset.is_some() {
+                        return Err(crate::Error::new(
+                            "composition_time_offset is not supported yet".to_owned(),
+                        ));
                     }
                     if let Some(entry) = &sample.sample_entry {
                         (audio_format, audio_channels, audio_sample_rate) =
@@ -124,6 +125,11 @@ impl Mp4SampleReader {
                     };
                     if video_track_id != Some(sample.track_id) {
                         continue;
+                    }
+                    if sample.composition_time_offset.is_some() {
+                        return Err(crate::Error::new(
+                            "composition_time_offset is not supported yet".to_owned(),
+                        ));
                     }
                     if let Some(entry) = &sample.sample_entry {
                         (video_format, video_width, video_height) = video_format_from_entry(entry)?;
