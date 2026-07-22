@@ -29,9 +29,9 @@ Sora が出力した録画ファイル (MP4 または WebM) を合成し MP4 で
 
 ## 今後の Hisui について
 
-Hisui は Sora 向けの Recording Composition Tool から汎用的な Media Pipeline Tool を目指します。
+Hisui は Sora 向けの Recording Composition Tool 部分は `sora-archive-compositor` として別ツールとして独立します。
 
-### Media Pipeline Tool Hisui とは
+### Media Processing Tool Hisui とは
 
 - 現在は Sora の録画ファイルを合成する専用ツール
 - 今後は 映像・音声をパイプラインで自在に処理する汎用的なメディア処理ツール
