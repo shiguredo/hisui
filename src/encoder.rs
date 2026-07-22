@@ -867,10 +867,12 @@ impl VideoEncoder {
                         return Ok(());
                     }
                 }
-                // RPC 分岐: 既存ヘルパー経由で維持
+                // RPC 分岐: EOS 未受信のときのみ有効。 EOS 後は keyframe 要求を受け取っても
+                // handle_input_sample(Some(_)) が呼ばれず keyframe_request_pending が適用されない
+                // ため、 メトリクスだけ inc される spurious inc を防ぐ。
                 rpc_message = recv_video_encoder_rpc_message_or_pending(
                     rpc_rx_enabled.then_some(&mut rpc_rx)
-                ) => {
+                ), if !self.eos => {
                     let Some(rpc_message) = rpc_message else {
                         rpc_rx_enabled = false;
                         continue;
