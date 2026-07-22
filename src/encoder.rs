@@ -476,11 +476,9 @@ pub struct VideoEncoder {
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_video_keyframe_request_count_metric: crate::stats::StatsCounter,
-    // `run()` の input 分岐で `in_flight` が `IN_FLIGHT_LIMIT` に到達した回数を計測する。
-    // `requires_backpressure()` が false のエンコーダー (応急処置期間中の libvpx / svt_av1 /
-    // video_toolbox) では LIMIT 到達しても上流は止まらないため、 このカウンタは
-    // 「LIMIT 到達回数」であって「バックプレッシャー発動回数」ではないことに注意。
-    // nvcodec 経路 (`requires_backpressure() = true`) では両者が一致する。
+    // `run()` の input 分岐でバックプレッシャーガードが `in_flight == IN_FLIGHT_LIMIT`
+    // で実際に上流を止めた回数を計測する outcome metric。 `requires_backpressure()` が
+    // true のエンコーダー (応急処置期間中は nvcodec のみ) でのみ発火する。
     total_video_encoder_backpressure_count_metric: crate::stats::StatsCounter,
     eos: bool,
     keyframe_request_pending: bool,
@@ -815,16 +813,22 @@ impl VideoEncoder {
                 // バックプレッシャー適用可否はエンコーダー種別依存 (`VideoEncoderInner::requires_backpressure`
                 // docstring 参照)。 self.inner が None (初期化前) はバックプレッシャー不要と扱う。
                 message = input_rx.recv(), if !self.eos && (
-                    !self.inner.as_ref().map(|i| i.requires_backpressure()).unwrap_or(false)
+                    !self.inner.as_ref().is_some_and(|i| i.requires_backpressure())
                         || in_flight < Self::IN_FLIGHT_LIMIT
                 ) => {
                     match message {
                         Message::Media(sample) => {
                             self.handle_input_sample(Some(sample))?;
                             in_flight += 1;
-                            if in_flight == Self::IN_FLIGHT_LIMIT {
-                                // LIMIT 到達回数を計測 (実際に上流を止めるかは
-                                // `requires_backpressure()` に従う。 カウンタ docstring 参照)。
+                            // LIMIT 到達でバックプレッシャーガードが実際に上流を止めた瞬間を計測する
+                            // outcome metric。 `requires_backpressure()` が false の経路はガードが
+                            // 無効で上流を止めないため inc しない (カウンタ docstring 参照)。
+                            if in_flight == Self::IN_FLIGHT_LIMIT
+                                && self
+                                    .inner
+                                    .as_ref()
+                                    .is_some_and(|i| i.requires_backpressure())
+                            {
                                 self.total_video_encoder_backpressure_count_metric.inc();
                             }
                         }
