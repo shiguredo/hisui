@@ -141,7 +141,7 @@ def test_transcribe_english_fixture(binary_path: Path) -> None:
         f"英語 fixture の文字起こしは英字を十分含むこと: {[line['text'] for line in lines]}"
     )
 
-    # 品質指標の緩い閾値 (0062 integration test と揃える)
+    # 品質指標の緩い閾値 (Whisper integration test と同じ値)
     for line in lines:
         if "no_speech_prob" in line:
             assert line["no_speech_prob"] < 0.5, (

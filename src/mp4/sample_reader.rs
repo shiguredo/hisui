@@ -1,8 +1,9 @@
-//! inspect 用の前方読み専用 reader
+//! 前方読み専用の軽量 MP4 sample reader
 //!
 //! 通常 MP4 / fMP4 の両方を `Mp4Demuxer` で前方読みし、encoded sample を
-//! `TrackPublisher` へ送出する。シーク・デコード・再生制御は持たない。
-//! デコードは inspect パイプライン側の別 processor が担当する。
+//! `TrackPublisher` へ送出する。 シーク・デコード・再生制御は持たない。
+//! デコードはパイプライン側の別 processor が担当する
+//! (inspect / transcribe サブコマンド等で共有)。
 
 use std::path::{Path, PathBuf};
 
@@ -91,8 +92,8 @@ impl Mp4SampleReader {
                         continue;
                     }
                     // composition_time_offset (B フレーム由来の CTS オフセット) は未対応。
-                    // subscribe 対象の track についてのみチェックする (対象外 track は続く continue で
-                    // skip されるため、対象外 track の CTS オフセットで pipeline 全体を落とさない)。
+                    // subscribe 対象の track についてのみチェックする (対象外 track は先の continue で
+                    // skip 済みなので、対象外 track の CTS オフセットで pipeline 全体を落とさない)。
                     if sample.composition_time_offset.is_some() {
                         return Err(crate::Error::new(
                             "composition_time_offset is not supported yet".to_owned(),
@@ -126,6 +127,9 @@ impl Mp4SampleReader {
                     if video_track_id != Some(sample.track_id) {
                         continue;
                     }
+                    // composition_time_offset (B フレーム由来の CTS オフセット) は未対応。
+                    // subscribe 対象の track についてのみチェックする (対象外 track は先の continue で
+                    // skip 済みなので、対象外 track の CTS オフセットで pipeline 全体を落とさない)。
                     if sample.composition_time_offset.is_some() {
                         return Err(crate::Error::new(
                             "composition_time_offset is not supported yet".to_owned(),

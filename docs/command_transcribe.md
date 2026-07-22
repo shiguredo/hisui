@@ -97,10 +97,10 @@ $ hisui --verbose -x transcribe ...
 - **標準入力 (`-`) は非対応** (MP4 の seek 前提のため)
 - **音声トラックが複数含まれる MP4 では最初に見つかった対応コーデックのトラックのみ** を文字起こしします (残りは silent に無視)
 - **`--emit-exit-metrics` と併用してもメトリクスは出力されません** (transcribe は JSON LINE を stdout に流すため出力が混線する。 併用時は標準エラーに warn ログが 1 度出ます)
+- **出力は JSON LINE のみ**。 MP4 字幕トラック (WVTT 等) としての出力は非対応
 - 大きな MP4 (数時間) を渡した場合の実行時間・メモリの最適化は本サブコマンドでは行いません
 - 実験的機能のため、CLI 仕様と JSON LINE スキーマは将来変更される可能性があります
 
 ## 関連ドキュメント
 
 - 内部設計 (Processor 構成、モデル型設計): [`docs/internals/transcription.md`](internals/transcription.md), [`docs/internals/ml_models.md`](internals/ml_models.md)
-- MP4 字幕トラック出力対応 (WVTT): mp4-rs 側の字幕基盤完了後に別 issue で扱います

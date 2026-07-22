@@ -17,7 +17,7 @@ jobs:
   e2e-test:
     runs-on: ubuntu-24.04
     # candle 系依存の cold build + whisper-tiny CPU 推論 + Opus decode + pytest overhead を
-    # 見込んで 30 分にしている (fdk-aac 単独 build 時代の 20 分から拡張)。
+    # 見込んで 30 分を確保する。
     timeout-minutes: 30
     env:
       OPENH264_VERSION: "2.6.0"
@@ -28,8 +28,6 @@ jobs:
       # silero-vad モデルパスは HISUI_SILERO_VAD_MODEL_PATH の env fallback で hisui に伝わる。
       HISUI_ML_MODELS_DIR: ${{ github.workspace }}/ml-models
       HISUI_SILERO_VAD_MODEL_PATH: ${{ github.workspace }}/ml-models/silero-vad/onnx/model.onnx
-      # CI では integration test の silent skip を無効化する。
-      HISUI_CI: "1"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - run: rustup update stable

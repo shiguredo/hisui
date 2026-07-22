@@ -1,7 +1,7 @@
 //! `hisui -x transcribe` 実験的サブコマンド。
 //!
 //! MP4 (音声のみの m4a を含む) を入力に取り、Whisper で文字起こしした結果を
-//! 標準出力に JSON LINE (1 行 1 セグメント) で流す。 内部は 0062 で実装済みの
+//! 標準出力に JSON LINE (1 行 1 セグメント) で流す。 内部は
 //! `TranscriptionService` / `TranscriptionProcessor` / `MediaFrame::Text` を組み合わせる。
 //!
 //! 実験的機能のため、`--experimental` (`-x`) グローバルフラグが立っている場合のみ有効。
@@ -99,9 +99,11 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
     // RAYON_NUM_THREADS を上書きする。 未指定なら既存の RAYON_NUM_THREADS を respect する
     // (未設定なら candle / rayon の既定 = 論理コア数)。
     if let Some(n) = transcribe_threads {
-        // SAFETY: try_run の実行位置は candle / rayon global pool の初回構築より前。
-        // 他スレッドは main.rs で logger init 済みだが env を触らないため、
-        // set_var による他スレッドとの race は発生しない。
+        // SAFETY: この時点で hisui プロセスにはメインスレッド以外の std::thread が存在しない
+        // (MediaPipeline / tokio runtime が spawn するスレッドは後続の run_internal で起動する)。
+        // そのため set_var が他スレッドの env::var と race することはない。
+        // また candle / rayon の global pool 構築より前なので、書き換えた RAYON_NUM_THREADS が
+        // 初回 build 時に反映される。
         unsafe {
             std::env::set_var("RAYON_NUM_THREADS", n.to_string());
         }
@@ -129,10 +131,10 @@ fn run_internal(
     stats: crate::stats::Stats,
 ) -> crate::Result<()> {
     // Whisper 推論の深いネスト (candle-transformers の Whisper::forward + tokenizer decode 等)
-    // は tokio 既定のスレッドスタック (2 MiB) では短尺入力でも越え得るため明示的に拡張する。
-    // 8 MiB では長尺入力 (10 分程度) で依然として tokio-rt-worker が stack overflow で abort する
-    // ことを実測で確認したため、余裕を持って 32 MiB とする (worker は 1 スレッドで運用するので
-    // 追加確保のコストは小さい)。
+    // は tokio 既定の非同期 worker スタック (2 MiB) では収まらないため、長尺入力にも耐えるよう
+    // 32 MiB を確保する。 tokio 非同期 worker は 1 スレッド構成 (`worker_threads(1)`) なので
+    // 追加確保のコストは小さい (Whisper 推論本体は spawn_blocking 上で動くが、そちら側の
+    // スタックは本設定の影響を受けない: 現時点で不足は観測していない)。
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .thread_stack_size(32 * 1024 * 1024)
@@ -227,7 +229,6 @@ async fn setup_pipeline(
         )
         .await?;
 
-    // Whisper 文字起こし processor (0062 で実装済み)
     let transcription = TranscriptionProcessor::new(
         service,
         silero,
@@ -264,8 +265,9 @@ async fn setup_pipeline(
 ///
 /// `StdoutLock` は `!Send` なので tokio task の await 越しに保持できない。
 /// 1 メッセージ処理内で lock 取得 → writeln + flush → drop する。
-/// stdout の pipe reader が閉じた (BrokenPipe) 場合は Err で早期終了し、
-/// MediaPipeline に processor_failed を伝えて全体を停止させる。
+/// stdout の pipe reader が閉じた (BrokenPipe) 場合は Err を返して早期終了する
+/// (`MediaPipelineHandle::spawn_processor` の共通経路で pipeline 全体が abort し、
+/// 非ゼロ exit につながる)。
 async fn text_stdout_sink(handle: crate::ProcessorHandle) -> crate::Result<()> {
     let mut rx = handle.subscribe_track(crate::TrackId::new(TEXT_TRACK_ID));
     handle.notify_ready();
@@ -278,7 +280,6 @@ async fn text_stdout_sink(handle: crate::ProcessorHandle) -> crate::Result<()> {
                     f.set_indent_size(0);
                     f.value(&*frame)
                 });
-                // StdoutLock は !Send。 1 メッセージ処理内で lock 取得 → writeln → flush → drop。
                 let mut stdout = std::io::stdout().lock();
                 let write_result = writeln!(stdout, "{json}").and_then(|_| stdout.flush());
                 if let Err(e) = write_result {
