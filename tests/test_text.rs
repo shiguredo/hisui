@@ -20,7 +20,10 @@ fn text_frame_construction() {
     assert_eq!(frame.start, Duration::from_millis(500));
     assert_eq!(frame.end, Duration::from_millis(2500));
     assert_eq!(frame.text, "こんにちは");
-    assert_eq!(frame.language.as_ref().map(LanguageCode::get), Some("ja"));
+    assert_eq!(
+        frame.language.as_ref().map(LanguageCode::as_str),
+        Some("ja")
+    );
     assert_eq!(frame.no_speech_prob, Some(0.05));
     assert_eq!(frame.avg_logprob, Some(-0.3));
 }

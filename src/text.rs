@@ -13,7 +13,13 @@ impl LanguageCode {
         Self(code.into())
     }
 
-    pub fn get(&self) -> &str {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for LanguageCode {
+    fn as_ref(&self) -> &str {
         &self.0
     }
 }
@@ -26,7 +32,7 @@ impl std::fmt::Display for LanguageCode {
 
 impl nojson::DisplayJson for LanguageCode {
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
-        f.string(self.get())
+        f.string(self.as_str())
     }
 }
 
@@ -73,14 +79,14 @@ impl nojson::DisplayJson for TextFrame {
 mod tests {
     use super::*;
 
-    /// new に &str / String のどちらを渡しても get で同じ内容が取り出せる。
+    /// new に &str / String のどちらを渡しても as_str で同じ内容が取り出せる。
     #[test]
-    fn new_accepts_str_and_string_and_get_returns_it() {
+    fn new_accepts_str_and_string_and_as_str_returns_it() {
         let from_str = LanguageCode::new("ja");
-        assert_eq!(from_str.get(), "ja");
+        assert_eq!(from_str.as_str(), "ja");
 
         let from_string = LanguageCode::new(String::from("en"));
-        assert_eq!(from_string.get(), "en");
+        assert_eq!(from_string.as_str(), "en");
     }
 
     /// Display は内部文字列をそのまま出力する (前後に装飾を付けない)。

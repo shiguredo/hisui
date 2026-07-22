@@ -607,7 +607,10 @@ mod tests {
         assert_eq!(frame.start, Duration::from_millis(100));
         assert_eq!(frame.end, Duration::from_millis(500));
         assert_eq!(frame.text, "hello");
-        assert_eq!(frame.language.as_ref().map(LanguageCode::get), Some("en"));
+        assert_eq!(
+            frame.language.as_ref().map(LanguageCode::as_str),
+            Some("en")
+        );
         assert_eq!(frame.no_speech_prob, Some(0.2_f32));
         assert_eq!(frame.avg_logprob, Some(-0.4_f32));
     }

@@ -48,9 +48,9 @@ Options:
       --verbose                 警告未満のログメッセージも出力します
       --emit-exit-metrics       プロセス終了時に内部メトリクスを JSON Lines 形式で標準出力へ 1 行出力します [env: HISUI_EMIT_EXIT_METRICS]
   -x, --experimental            実験的サブコマンドの有効化フラグです
-      --model-dir <PATH>        Whisper モデルディレクトリ (config.json / tokenizer.json / model.safetensors を含む)
+      --model-dir <PATH>        Whisper モデルディレクトリ (config.json / tokenizer.json / model.safetensors を含む) [env: HISUI_WHISPER_MODEL_DIR]
       --silero-vad-model <PATH> Silero VAD の ONNX モデルファイル (silero_vad.onnx) [env: HISUI_SILERO_VAD_MODEL_PATH]
-      --language <CODE>         Whisper 言語指定 (ISO 639-1、`ja` / `en` 等)
+      --language <CODE>         Whisper 言語指定 (ISO 639-1、`ja` / `en` 等) [env: HISUI_WHISPER_LANGUAGE]
       --transcribe-threads <N>  1 推論あたりの candle rayon スレッド数を上書きします [env: HISUI_TRANSCRIBE_THREADS]
 ```
 

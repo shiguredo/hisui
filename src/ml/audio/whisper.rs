@@ -126,7 +126,7 @@ impl WhisperPipeline {
         }
         let token_id = multilingual::language_token_from_code(self.decoder.tokenizer(), language)?;
         Ok(ResolvedLanguage {
-            code: LanguageCode::new(language.get().trim()),
+            code: LanguageCode::new(language.as_str().trim()),
             token_id,
         })
     }

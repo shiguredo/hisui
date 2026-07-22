@@ -53,6 +53,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
     let model_dir: PathBuf = noargs::opt("model-dir")
         .ty("PATH")
         .example("./ml-models/whisper-tiny")
+        .env("HISUI_WHISPER_MODEL_DIR")
         .doc("Whisper モデルディレクトリ (config.json / tokenizer.json / model.safetensors を含む)")
         .take(args)
         .then(|a| a.value().parse())?;
@@ -66,6 +67,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
     let language: String = noargs::opt("language")
         .ty("CODE")
         .example("ja")
+        .env("HISUI_WHISPER_LANGUAGE")
         .doc("Whisper 言語指定 (ISO 639-1、`ja` / `en` 等)")
         .take(args)
         .then(|a| a.value().parse())?;
@@ -279,6 +281,9 @@ async fn setup_pipeline(
         .map(shiguredo_fdk_aac::FdkAacLibrary::load)
         .transpose()?;
 
+    // AudioDecoder に渡す stats は pipeline 全体の stats に統合しない (新規 Stats を渡す)。
+    // transcribe は `--emit-exit-metrics` の JSON Lines 出力を stdout に流さない方針なので、
+    // 統合すると emit-exit-metrics の抑止対象外になり JSON LINE 出力と混線する。
     let audio_decoder = AudioDecoder::new(
         #[cfg(feature = "fdk-aac")]
         fdk_aac_lib,
@@ -342,7 +347,7 @@ async fn text_stdout_sink(handle: crate::ProcessorHandle) -> crate::Result<()> {
                 let frame = sample.expect_text()?;
                 let json = nojson::json(|f| {
                     f.set_indent_size(0);
-                    f.value(&*frame)
+                    f.value(&frame)
                 });
                 let mut stdout = std::io::stdout().lock();
                 let write_result = writeln!(stdout, "{json}").and_then(|_| stdout.flush());

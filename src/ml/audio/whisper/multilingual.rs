@@ -39,7 +39,7 @@ pub(super) fn language_token_from_code(
 /// そのまま返し、そうでなければ `<|{code}|>` で包む (二重包みを避ける)。
 /// トークンが tokenizer に存在するかは呼び出し側で検証する。
 fn build_language_token_string(code: &LanguageCode) -> String {
-    let code = code.get().trim();
+    let code = code.as_str().trim();
     if code.starts_with("<|") {
         code.to_owned()
     } else {

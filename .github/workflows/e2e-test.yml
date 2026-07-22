@@ -24,10 +24,9 @@ jobs:
       OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
       HISUI_E2E_CARGO_RUN_ARGS: --release --features candle,fdk-aac
       # transcribe e2e が参照する ML モデル配置。 pytest 側は HISUI_ML_MODELS_DIR から
-      # `${HISUI_ML_MODELS_DIR}/whisper-tiny` を組み立てて --model-dir に渡す。
-      # silero-vad モデルパスは HISUI_SILERO_VAD_MODEL_PATH の env fallback で hisui に伝わる。
+      # `${HISUI_ML_MODELS_DIR}/whisper-tiny` と `${HISUI_ML_MODELS_DIR}/silero-vad/onnx/model.onnx`
+      # を組み立てて --model-dir / --silero-vad-model に渡す。
       HISUI_ML_MODELS_DIR: ${{ github.workspace }}/ml-models
-      HISUI_SILERO_VAD_MODEL_PATH: ${{ github.workspace }}/ml-models/silero-vad/onnx/model.onnx
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - run: rustup update stable
