@@ -36,6 +36,8 @@ pub mod stats;
 pub mod subcommand_inspect;
 pub mod subcommand_list_codecs;
 pub mod subcommand_server;
+#[cfg(feature = "candle")]
+pub mod subcommand_transcribe;
 pub mod tune;
 
 pub mod tcp;
