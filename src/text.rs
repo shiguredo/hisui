@@ -24,6 +24,12 @@ impl std::fmt::Display for LanguageCode {
     }
 }
 
+impl nojson::DisplayJson for LanguageCode {
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.string(self.get())
+    }
+}
+
 /// 文字起こし結果や将来のテキストメタデータを表すフレーム。
 #[derive(Debug, Clone)]
 pub struct TextFrame {
@@ -39,6 +45,28 @@ pub struct TextFrame {
     pub no_speech_prob: Option<f32>,
     /// 平均 log probability (信頼度目安、Whisper 由来)。指標を提供しない生成元では None
     pub avg_logprob: Option<f32>,
+}
+
+impl nojson::DisplayJson for TextFrame {
+    /// `Option` フィールドは `Some` のときのみ member を書く (nojson の `Option<T>: DisplayJson`
+    /// を素通しすると `None` が `null` として出るが、JSON LINE 出力ではキーごと省略したい)。
+    fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
+        f.object(|f| {
+            f.member("start", self.start.as_secs_f64())?;
+            f.member("end", self.end.as_secs_f64())?;
+            f.member("text", &self.text)?;
+            if let Some(v) = &self.language {
+                f.member("language", v)?;
+            }
+            if let Some(v) = self.no_speech_prob {
+                f.member("no_speech_prob", v)?;
+            }
+            if let Some(v) = self.avg_logprob {
+                f.member("avg_logprob", v)?;
+            }
+            Ok(())
+        })
+    }
 }
 
 #[cfg(test)]
@@ -67,5 +95,66 @@ mod tests {
     fn partial_eq_compares_inner_string() {
         assert_eq!(LanguageCode::new("ja"), LanguageCode::new("ja"));
         assert_ne!(LanguageCode::new("ja"), LanguageCode::new("en"));
+    }
+
+    /// LanguageCode の DisplayJson は内部文字列を JSON string として出力する。
+    #[test]
+    fn display_json_writes_language_code_as_json_string() {
+        let code = LanguageCode::new("ja");
+        let json = nojson::json(|f| f.value(&code)).to_string();
+        assert_eq!(json, "\"ja\"");
+    }
+
+    /// TextFrame の DisplayJson は全フィールド Some のときに全キーを含む JSON object を返す。
+    #[test]
+    fn display_json_writes_all_members_when_options_are_some() {
+        let frame = TextFrame {
+            start: Duration::from_millis(500),
+            end: Duration::from_millis(2500),
+            text: "hello".to_owned(),
+            language: Some(LanguageCode::new("en")),
+            no_speech_prob: Some(0.05),
+            avg_logprob: Some(-0.3),
+        };
+        let json = nojson::json(|f| {
+            f.set_indent_size(0);
+            f.value(&frame)
+        })
+        .to_string();
+        assert!(json.contains("\"start\":0.5"), "start: {json}");
+        assert!(json.contains("\"end\":2.5"), "end: {json}");
+        assert!(json.contains("\"text\":\"hello\""), "text: {json}");
+        assert!(json.contains("\"language\":\"en\""), "language: {json}");
+        assert!(
+            json.contains("\"no_speech_prob\":0.05"),
+            "no_speech_prob: {json}"
+        );
+        assert!(json.contains("\"avg_logprob\":-0.3"), "avg_logprob: {json}");
+    }
+
+    /// TextFrame の DisplayJson は Option が None のとき、そのキーごと省略する
+    /// (null を出さない = JSON LINE スキーマの要件)。
+    #[test]
+    fn display_json_omits_none_options() {
+        let frame = TextFrame {
+            start: Duration::ZERO,
+            end: Duration::from_millis(100),
+            text: String::new(),
+            language: None,
+            no_speech_prob: None,
+            avg_logprob: None,
+        };
+        let json = nojson::json(|f| {
+            f.set_indent_size(0);
+            f.value(&frame)
+        })
+        .to_string();
+        assert!(!json.contains("language"), "language 省略: {json}");
+        assert!(
+            !json.contains("no_speech_prob"),
+            "no_speech_prob 省略: {json}"
+        );
+        assert!(!json.contains("avg_logprob"), "avg_logprob 省略: {json}");
+        assert!(!json.contains("null"), "null 非出現: {json}");
     }
 }
