@@ -54,7 +54,11 @@ fn main() -> noargs::Result<()> {
     // サブコマンドで分岐する。
     // transcribe サブコマンドは JSON LINE を stdout に流すため、`--emit-exit-metrics` の
     // stdout 出力と併用すると混線する。 transcribe が matched した場合は下記で silent 抑止する。
+    // candle feature 無効ビルドでは transcribe 分岐が消え書き換えが発生しないため `mut` を付けない。
+    #[cfg(feature = "candle")]
     let mut transcribe_matched = false;
+    #[cfg(not(feature = "candle"))]
+    let transcribe_matched = false;
     let matched = hisui::subcommand_inspect::try_run(&mut args, stats.clone())?
         || hisui::subcommand_list_codecs::try_run(&mut args)?
         || hisui::sora::recording_subcommand_compose::try_run(&mut args, stats.clone())?
