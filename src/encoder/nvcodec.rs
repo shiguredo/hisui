@@ -339,9 +339,9 @@ impl NvcodecEncoder {
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
-        // 順序保証: callback で pop する前に必ず push_back する。
-        // Mutex 排他 + VecDeque FIFO + shiguredo_nvcodec 内部 worker の FIFO 処理により、
-        // 「push_back → encode → callback pop」の因果順序が担保される。
+        // 順序保証: コールバックで pop する前に必ず push_back する。
+        // Mutex 排他 + VecDeque FIFO + shiguredo_nvcodec 内部ワーカーの FIFO 処理により、
+        // 「push_back → encode → コールバック pop」の因果順序が担保される。
         {
             let mut queue = self
                 .input_queue

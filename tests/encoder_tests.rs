@@ -227,10 +227,10 @@ fn video_encoder_run_processes_i420_via_pipeline() -> hisui::Result<()> {
 
 /// `VideoEncoder::run` の `Message::Syn` drop → 上流の `Ack.await` 復帰の契約
 ///
-/// `TrackPublisher::send_syn` の Ack は subscriber (encoder) が Syn を drop した瞬間に
-/// 復帰する。 `VideoEncoder::run` は 3 腕 `tokio::select!` の input 腕で `Message::Syn(_)`
+/// `TrackPublisher::send_syn` の Ack は subscriber (エンコーダー) が Syn を drop した瞬間に
+/// 復帰する。 `VideoEncoder::run` は 3 分岐の `tokio::select!` の input 分岐で `Message::Syn(_)`
 /// を即 drop するため、 source が `send_syn` した Ack が 5 秒以内に復帰することを確認する。
-/// 万一 Syn 経路 (input 腕 guard の設計変更等) が壊れると本テストが timeout する。
+/// 万一 Syn 経路 (input 分岐ガードの設計変更等) が壊れると本テストがタイムアウトする。
 #[test]
 fn video_encoder_run_drops_syn_and_releases_ack() -> hisui::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -256,7 +256,7 @@ fn video_encoder_run_drops_syn_and_releases_ack() -> hisui::Result<()> {
             source_handle.notify_ready();
             source_handle.wait_subscribers_ready().await?;
 
-            // encoder が Syn を drop する → Ack が復帰することを 5 秒 timeout で検証
+            // エンコーダーが Syn を drop する → Ack が復帰することを 5 秒タイムアウトで検証
             let ack = tx.send_syn();
             tokio::time::timeout(Duration::from_secs(5), ack)
                 .await
@@ -288,7 +288,7 @@ fn video_encoder_run_drops_syn_and_releases_ack() -> hisui::Result<()> {
                 .await
         });
 
-        // sink は encoder 出力を drain して pipeline を終了させる
+        // sink はエンコーダー出力を drain して pipeline を終了させる
         let sink_handle = register_processor(
             &pipeline_handle,
             ProcessorId::new("encoder_test_syn_sink"),

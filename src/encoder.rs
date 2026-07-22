@@ -479,7 +479,7 @@ pub struct VideoEncoder {
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_video_keyframe_request_count_metric: crate::stats::StatsCounter,
-    // `run()` の input 腕で `in_flight` が `IN_FLIGHT_LIMIT` に到達した回数。
+    // `run()` の input 分岐で `in_flight` が `IN_FLIGHT_LIMIT` に到達した回数。
     // in-flight バックプレッシャーが実際に発動して上流を止めた outcome を計測する
     // (バックプレッシャーが「効いた」回数を示すためチューニングの根拠に使える)。
     total_video_encoder_backpressure_count_metric: crate::stats::StatsCounter,
@@ -500,8 +500,8 @@ pub struct VideoEncoder {
     // `self.inner = None;` を明示呼び出しして `inner` を先に drop してから local
     // `rx` の drop に進める契約にしている (`run` 内のコメント参照)。
     inner: Option<VideoEncoderInner>,
-    // `run()` の 3 腕 `tokio::select!` で `input_rx.recv()` の入力腕と `rx.recv().await` の
-    // 出力腕を並置するため、`run()` 冒頭で `take()` して local に move する必要がある。
+    // `run()` の 3 分岐 `tokio::select!` で `input_rx.recv()` の入力分岐と `rx.recv().await` の
+    // 出力分岐を並置するため、`run()` 冒頭で `take()` して local に move する必要がある。
     // integration test 経路では `run()` を経由しないため `Some` のまま保たれる。
     rx: Option<EncoderOutputReceiver>,
 
@@ -776,14 +776,14 @@ impl VideoEncoder {
 
     /// エンコーダー内部での in-flight フレーム数の上限。
     ///
-    /// `shiguredo_nvcodec 2026.2.0` の内部 pending キュー上限
+    /// `shiguredo_nvcodec 2026.2.0` の内部ペンディングキュー上限
     /// `n_encoder_buffer = frame_interval_p + 3` は `frame_interval_p: 1`
     /// (`src/sora/recording_encoder_nvcodec_params.rs`) の hisui 設定下で 4。
     /// `IN_FLIGHT_LIMIT < n_encoder_buffer` を保つことで `"encoder buffer is full"`
     /// エラーを回避する。
     ///
     /// 同期エンコーダー (libvpx / openh264) では `handle_input_sample` 内で
-    /// 出力が同期的に emit されるため in-flight は常に 0-1 で、 この guard は
+    /// 出力が同期的に emit されるため in-flight は常に 0-1 で、 このガードは
     /// 事実上 no-op となる (性能影響なし)。
     ///
     /// N=2 と N=3 の実機計測比較は Decision Owner が別途実施予定。
@@ -791,13 +791,13 @@ impl VideoEncoder {
 
     /// processor モデル (`ProcessorHandle` + subscribe / publish) 用の駆動 API。
     ///
-    /// 入力トラックを subscribe し、 3 腕 `tokio::select!` (input 腕 + output 腕 +
-    /// RPC 腕) でエンコード結果を出力トラックへ流す。 input 腕には `in_flight`
-    /// カウンタと `IN_FLIGHT_LIMIT` の guard を付けて、 nvcodec 等の非同期
-    /// エンコーダーの内部 pending キュー溢れ (buffer full) を防ぐ。
+    /// 入力トラックを subscribe し、 3 分岐の `tokio::select!` (input / output / RPC)
+    /// でエンコード結果を出力トラックへ流す。 input 分岐には `in_flight`
+    /// カウンタと `IN_FLIGHT_LIMIT` のガードを付けて、 nvcodec 等の非同期
+    /// エンコーダーの内部ペンディングキュー溢れ (buffer full) を防ぐ。
     ///
     /// LIMIT 到達時は `input_rx.recv()` が停止し、 上流の Syn/Ack 経路で mixer /
-    /// reader 側の自主ペーシングが自然に停止する (encoder 側で Syn を明示的に
+    /// reader 側の自主ペーシングが自然に停止する (エンコーダー側で Syn を明示的に
     /// 保持するコードは書かず、 Syn が queue に留まる → Ack 復帰しない、 を利用する)。
     pub async fn run(
         mut self,
@@ -816,8 +816,8 @@ impl VideoEncoder {
         handle.wait_subscribers_ready().await?;
         let mut rpc_rx_enabled = true;
 
-        // `tokio::select!` の input 腕 (`self.handle_input_sample` 呼び出し、 `&mut self`)
-        // と output 腕 (`rx.recv().await`、 `&mut rx`) を並置するため、 `rx` を local に
+        // `tokio::select!` の input 分岐 (`self.handle_input_sample` 呼び出し、 `&mut self`)
+        // と output 分岐 (`rx.recv().await`、 `&mut rx`) を並置するため、 `rx` を local に
         // move する (split-borrow 回避)。
         //
         // drop 順制御: struct フィールド宣言順 (`inner` → `rx`) により `inner` が
@@ -833,9 +833,9 @@ impl VideoEncoder {
 
         loop {
             tokio::select! {
-                // input 腕: EOS 未受信 かつ (bp 不要 or in_flight < LIMIT) のときのみ enable。
-                // bp 適用可否は encoder 種別依存 (`VideoEncoderInner::requires_backpressure`
-                // docstring 参照)。 self.inner が None (初期化前) は bp 不要と扱う。
+                // input 分岐: EOS 未受信 かつ (バックプレッシャー不要 or in_flight < LIMIT) のときのみ有効。
+                // バックプレッシャー適用可否はエンコーダー種別依存 (`VideoEncoderInner::requires_backpressure`
+                // docstring 参照)。 self.inner が None (初期化前) はバックプレッシャー不要と扱う。
                 message = input_rx.recv(), if !self.eos && (
                     !self.inner.as_ref().map(|i| i.requires_backpressure()).unwrap_or(false)
                         || in_flight < Self::IN_FLIGHT_LIMIT
@@ -845,7 +845,7 @@ impl VideoEncoder {
                             self.handle_input_sample(Some(sample))?;
                             in_flight += 1;
                             if in_flight == Self::IN_FLIGHT_LIMIT {
-                                // LIMIT 到達で次 iter の input 腕 guard が false になる
+                                // LIMIT 到達で次 iter の input 分岐ガードが false になる
                                 // (実際に上流を止めた瞬間)
                                 self.total_video_encoder_backpressure_count_metric.inc();
                             }
@@ -853,10 +853,10 @@ impl VideoEncoder {
                         Message::Eos => {
                             self.handle_input_sample(None)?;
                             // 同期エンコーダー (libvpx / openh264) では EOS 到達時点で
-                            // in_flight = 0 が典型。 ここで早期終了しないと、 次 iter で
-                            // input 腕 guard が無効化 (`self.eos = true`)、 output 腕は
-                            // rx 空で pending、 RPC 腕も pending の 3 腕 pending で
-                            // deadlock する。
+                            // in_flight = 0 が典型。 ここで早期終了しないと、 次イテレーションで
+                            // input 分岐ガードが無効化 (`self.eos = true`)、 output 分岐は
+                            // rx 空で待機、 RPC 分岐も待機の 3 分岐すべてペンディングで
+                            // デッドロックする。
                             if in_flight == 0 {
                                 self.inner = None;
                                 output_tx.send_eos();
@@ -866,7 +866,7 @@ impl VideoEncoder {
                         Message::Syn(_) => {}
                     }
                 }
-                // output 腕: 常時 enable、 in-flight を drain
+                // output 分岐: 常時有効、 in-flight を drain
                 result = rx.recv() => {
                     // sink と rx は VideoEncoder 内で同居するため sink が rx より先に
                     // drop される経路は構造上到達不能。 現状 poll_output の Disconnected
@@ -886,7 +886,7 @@ impl VideoEncoder {
                         return Ok(());
                     }
                 }
-                // RPC 腕: 既存 helper 経由で維持
+                // RPC 分岐: 既存ヘルパー経由で維持
                 rpc_message = recv_video_encoder_rpc_message_or_pending(
                     rpc_rx_enabled.then_some(&mut rpc_rx)
                 ) => {
@@ -901,10 +901,10 @@ impl VideoEncoder {
     }
 }
 
-/// `VideoEncoder::run` の 3 腕 `tokio::select!` から呼ぶ RPC 受信 helper。
+/// `VideoEncoder::run` の 3 分岐 `tokio::select!` から呼ぶ RPC 受信ヘルパー。
 ///
 /// `rpc_rx` が `Some` なら受信を待ち、 `None` なら `std::future::pending()` に落ちて
-/// select! の RPC 腕を実質無効化する (disconnect 後は入力腕 + 出力腕での drain に
+/// select! の RPC 分岐を実質無効化する (disconnect 後は input / output 分岐での drain に
 /// 集中するための省略機構)。
 async fn recv_video_encoder_rpc_message_or_pending(
     rpc_rx: Option<&mut tokio::sync::mpsc::UnboundedReceiver<VideoEncoderRpcMessage>>,
@@ -1048,22 +1048,22 @@ impl VideoEncoderInner {
         }
     }
 
-    /// `VideoEncoder::run` の `IN_FLIGHT_LIMIT` guard を適用すべきかを返す。
+    /// `VideoEncoder::run` の `IN_FLIGHT_LIMIT` ガードを適用すべきかを返す。
     ///
     /// **本 method は本ブランチ (0085 実装) 内の応急処置**。 本来 in-flight
-    /// バックプレッシャーは全 encoder に一律適用するのが意図された設計
-    /// (LIMIT=3 でリアルタイム性を優先し、 encoder ごとに遅延が増えないようにする)。
+    /// バックプレッシャーは全エンコーダーに一律適用するのが意図された設計
+    /// (LIMIT=3 でリアルタイム性を優先し、 エンコーダーごとに遅延が増えないようにする)。
     /// しかし libvpx VP9 / svt_av1 / video_toolbox は `lag_in_frames` /
-    /// `look_ahead_distance` 等の look-ahead で warm-up 型となり、 native default
-    /// の warm-up 数 (VP9=25、 svt_av1=33 相当) が LIMIT=3 を超えるため、 一律 guard
-    /// を適用すると warm-up 中に in_flight が LIMIT に到達して deadlock する。
+    /// `look_ahead_distance` 等の look-ahead でウォームアップ型となり、 native default
+    /// のウォームアップ数 (VP9=25、 svt_av1=33 相当) が LIMIT=3 を超えるため、 一律ガード
+    /// を適用するとウォームアップ中に in_flight が LIMIT に到達してデッドロックする。
     ///
-    /// 応急処置として nvcodec のみ true (guard 有効)、 他 encoder は false
-    /// (guard 無効) にする。 これによって非 nvcodec 経路ではリアルタイム性の
+    /// 応急処置として nvcodec のみ true (ガード有効)、 他エンコーダーは false
+    /// (ガード無効) にする。 これによって非 nvcodec 経路ではリアルタイム性の
     /// バックプレッシャーが効かなくなる副作用がある。 本来の対応は「リアルタイム時に
-    /// look_ahead_distance / lag_in_frames 等の encoder パラメータを 0 に強制上書き
-    /// して warm-up を消し、 bp guard は全 encoder で一律有効にする」形で、
-    /// issues/0087 で扱う (0087 完了後に本 method は削除して guard を一律に戻す)。
+    /// look_ahead_distance / lag_in_frames 等のエンコーダーパラメータを 0 に強制上書き
+    /// してウォームアップを消し、 バックプレッシャーガードは全エンコーダーで一律有効にする」形で、
+    /// issues/0087 で扱う (0087 完了後に本 method は削除してガードを一律に戻す)。
     fn requires_backpressure(&self) -> bool {
         #[cfg(feature = "nvcodec")]
         {
