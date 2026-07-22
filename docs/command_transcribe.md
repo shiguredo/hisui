@@ -53,7 +53,7 @@ Options:
 ```
 
 `--experimental` (`-x`) が指定されていない状態で `transcribe` を呼ぶと、標準エラーに
-「実験的機能です。 `--experimental` (`-x`) フラグを付けて起動してください」を書き出して
+`transcribe subcommand requires --experimental (-x) flag` を書き出して
 非ゼロ exit code で終了します。
 
 ## 実行例

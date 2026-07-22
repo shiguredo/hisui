@@ -196,5 +196,7 @@ def test_transcribe_without_experimental_flag_fails(binary_path: Path) -> None:
     )
     result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False)
     assert result.returncode != 0, "--experimental 無しは非ゼロ exit code で終了するはず"
-    # 標準エラーに日本語メッセージが含まれる
-    assert "実験的機能" in result.stderr, f"stderr に「実験的機能」を含むこと: {result.stderr}"
+    # 標準エラーに英語メッセージが含まれる
+    assert "requires --experimental" in result.stderr, (
+        f"stderr に「requires --experimental」を含むこと: {result.stderr}"
+    )

@@ -42,7 +42,7 @@ pub fn try_run(
     if !experimental && !args.metadata().help_mode {
         return Err(noargs::Error::other(
             args,
-            "実験的機能です。 `--experimental` (`-x`) フラグを付けて起動してください",
+            "transcribe subcommand requires --experimental (-x) flag",
         ));
     }
     run(args, stats)?;
