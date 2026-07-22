@@ -262,7 +262,7 @@ fn video_encoder_run_drops_syn_and_releases_ack() -> hisui::Result<()> {
                 .await
                 .map_err(|_| {
                     hisui::Error::new(
-                        "Ack did not resolve within 5 seconds after send_syn (Syn drop broken?)",
+                        "send_syn 後 5 秒以内に Ack が復帰しない (Syn drop 契約が壊れている可能性)",
                     )
                 })?;
 
@@ -304,7 +304,7 @@ fn video_encoder_run_drops_syn_and_releases_ack() -> hisui::Result<()> {
             .await
             .map_err(|_| hisui::Error::new("failed to trigger start: pipeline has terminated"))?;
 
-        let _output_frames = await_video_pipeline_tasks(
+        let output_frames = await_video_pipeline_tasks(
             source_task,
             encoder_task,
             sink_task,
@@ -312,6 +312,13 @@ fn video_encoder_run_drops_syn_and_releases_ack() -> hisui::Result<()> {
             &mut pipeline_task,
         )
         .await?;
+        // Syn / EOS のみを流したので、 sink 到達フレームは 0 のはず。
+        // 意図せぬフレーム生成 (encoder 側の別バグ混入) を検出する。
+        assert!(
+            output_frames.is_empty(),
+            "Syn / EOS のみで出力フレームは 0 のはずが {} フレーム到達している",
+            output_frames.len()
+        );
         Ok(())
     })
 }
