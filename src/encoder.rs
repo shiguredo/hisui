@@ -467,21 +467,27 @@ pub async fn request_upstream_video_keyframe(
 /// processor 経路 (`run`) および integration test から呼び出す。 内部チャンネルの詳細は
 /// `OutputSink` docstring 参照。
 ///
-/// **注意**: 非同期な内部エンコーダー (Nvcodec 等) 使用時、 `VideoEncoder` を drop する前に
-/// エンコード結果を drain し切ること。 drop 順は「`inner` を先に drop → callback スレッドが
-/// `sink.emit_ok` した最後の 1 フレームが `rx` に届く → その後 `rx` を drop」で成立するが、
-/// 未 drain の状態で drop すると `total_output_video_frame_count` メトリクスが実際の
-/// 出力数より少ない値のまま観測される (メトリクスは inner 内で inc されるが、 未回収の
-/// frame は下流には流れない)。
+/// **drop 順制約**: 非同期な内部エンコーダー (Nvcodec 等) 使用時は「`inner` を先に drop →
+/// callback スレッドが `sink.emit_ok` した最後の 1 フレームが `rx` に届く → その後 `rx` を
+/// drop」の順序で drop する必要がある (詳細は `inner` フィールド脇コメント)。 integration
+/// test 経路では struct フィールド宣言順で自動的にこの順が成立する。 processor 経路 (`run`)
+/// では `rx` を local に move する都合上、 `run` 内の明示 cleanup で同順を維持する
+/// (詳細は `run` 内コメント)。
+///
+/// **未 drain 時の副作用**: 未 drain の状態で drop すると `total_output_video_frame_count`
+/// メトリクスが実際の出力数より少ない値のまま観測される (`OutputSink::emit_ok` は send 成功後に
+/// inc するため、 未回収の frame は下流には流れない)。
 #[derive(Debug)]
 pub struct VideoEncoder {
     engine_metric: crate::stats::StatsString,
     codec_metric: crate::stats::StatsString,
     total_input_video_frame_count_metric: crate::stats::StatsCounter,
     total_video_keyframe_request_count_metric: crate::stats::StatsCounter,
-    // `run()` の input 分岐で `in_flight` が `IN_FLIGHT_LIMIT` に到達した回数。
-    // in-flight バックプレッシャーが実際に発動して上流を止めた outcome を計測する
-    // (バックプレッシャーが「効いた」回数を示すためチューニングの根拠に使える)。
+    // `run()` の input 分岐で `in_flight` が `IN_FLIGHT_LIMIT` に到達した回数を計測する。
+    // `requires_backpressure()` が false のエンコーダー (応急処置期間中の libvpx / svt_av1 /
+    // video_toolbox) では LIMIT 到達しても上流は止まらないため、 このカウンタは
+    // 「LIMIT 到達回数」であって「バックプレッシャー発動回数」ではないことに注意。
+    // nvcodec 経路 (`requires_backpressure() = true`) では両者が一致する。
     total_video_encoder_backpressure_count_metric: crate::stats::StatsCounter,
     eos: bool,
     keyframe_request_pending: bool,
@@ -717,7 +723,8 @@ impl VideoEncoder {
     ///
     /// `inner.encode()` / `inner.finish()` 内で発生した同期 `Err` は `?` 直返しで同期返却する。
     /// 内部エンコーダーのコールバック等で非同期に発生した `Err` は `sink.emit_err()` 経由で
-    /// チャンネルに流れ、 後続の `poll_output` の `try_recv` で受信される。
+    /// チャンネルに流れ、 後続の受信箇所 (processor 経路の `run` 内 `rx.recv().await` または
+    /// integration test 経路の `poll_output` の `try_recv`) で観測される。
     pub fn handle_input_sample(&mut self, sample: Option<MediaFrame>) -> Result<()> {
         if let Some(sample) = sample {
             let frame = sample.expect_video()?;
@@ -782,11 +789,10 @@ impl VideoEncoder {
     /// `IN_FLIGHT_LIMIT < n_encoder_buffer` を保つことで `"encoder buffer is full"`
     /// エラーを回避する。
     ///
-    /// 同期エンコーダー (libvpx / openh264) では `handle_input_sample` 内で
-    /// 出力が同期的に emit されるため in-flight は常に 0-1 で、 このガードは
-    /// 事実上 no-op となる (性能影響なし)。
-    ///
-    /// N=2 と N=3 の実機計測比較は Decision Owner が別途実施予定。
+    /// 本 const は nvcodec を主対象とした暫定値。 実際にガードが有効化されるかは
+    /// `VideoEncoderInner::requires_backpressure` の判定に従う。 同期エンコーダー
+    /// (libvpx / openh264) では `handle_input_sample` 内で出力が同期的に emit されるため
+    /// in-flight は常に 0-1 で、 このガードは事実上 no-op となる (性能影響なし)。
     const IN_FLIGHT_LIMIT: usize = 3;
 
     /// processor モデル (`ProcessorHandle` + subscribe / publish) 用の駆動 API。
@@ -820,11 +826,8 @@ impl VideoEncoder {
         // と output 分岐 (`rx.recv().await`、 `&mut rx`) を並置するため、 `rx` を local に
         // move する (split-borrow 回避)。
         //
-        // drop 順制御: struct フィールド宣言順 (`inner` → `rx`) により `inner` が
-        // 先に drop される契約 (VideoEncoder docstring 参照)。 `rx` を local に move
-        // すると return 時に local `rx` が `self.inner` より先に drop されるため、
-        // 各 return パスの直前で `self.inner = None;` を明示呼び出しして `inner` を
-        // 先に drop してから local `rx` の drop に進める。
+        // drop 順制御: `rx` を local に move する都合上、 各 return パスの直前で
+        // `self.inner = None;` を明示呼び出しする (詳細は `inner` フィールド脇コメント)。
         let mut rx = self
             .rx
             .take()
@@ -845,8 +848,8 @@ impl VideoEncoder {
                             self.handle_input_sample(Some(sample))?;
                             in_flight += 1;
                             if in_flight == Self::IN_FLIGHT_LIMIT {
-                                // LIMIT 到達で次 iter の input 分岐ガードが false になる
-                                // (実際に上流を止めた瞬間)
+                                // LIMIT 到達回数を計測 (実際に上流を止めるかは
+                                // `requires_backpressure()` に従う。 カウンタ docstring 参照)。
                                 self.total_video_encoder_backpressure_count_metric.inc();
                             }
                         }
@@ -854,9 +857,8 @@ impl VideoEncoder {
                             self.handle_input_sample(None)?;
                             // 同期エンコーダー (libvpx / openh264) では EOS 到達時点で
                             // in_flight = 0 が典型。 ここで早期終了しないと、 次イテレーションで
-                            // input 分岐ガードが無効化 (`self.eos = true`)、 output 分岐は
-                            // rx 空で待機、 RPC 分岐も待機の 3 分岐すべてペンディングで
-                            // デッドロックする。
+                            // 入力分岐ガードが無効化 (`self.eos = true`)、 出力分岐は rx 空で
+                            // 待機、 RPC 分岐も待機、 のすべてがペンディングでデッドロックする。
                             if in_flight == 0 {
                                 self.inner = None;
                                 output_tx.send_eos();
@@ -868,10 +870,11 @@ impl VideoEncoder {
                 }
                 // output 分岐: 常時有効、 in-flight を drain
                 result = rx.recv() => {
-                    // sink と rx は VideoEncoder 内で同居するため sink が rx より先に
-                    // drop される経路は構造上到達不能。 現状 poll_output の Disconnected
-                    // 分岐は unreachable! で潰しているが、 ここでは run() の同期 return
-                    // パスに合わせて expect + ? で fail-fast する
+                    // `rx.recv()` の返り値は `Option<Result<VideoFrame>>` で、 `?` で
+                    // Result を伝播したいため Option 側を expect で剥がす (`unreachable!()`
+                    // は `!` 型で Result にならず `?` の伝播先として使えない)。 sink と rx は
+                    // VideoEncoder 内で同居するため sink が rx より先に drop される経路は
+                    // 構造上到達不能で、 到達したらバグの表明として fail-fast する。
                     let frame = result
                         .expect("encoder output channel disconnected unexpectedly (sink dropped before rx)")?;
                     in_flight -= 1;
@@ -1050,20 +1053,19 @@ impl VideoEncoderInner {
 
     /// `VideoEncoder::run` の `IN_FLIGHT_LIMIT` ガードを適用すべきかを返す。
     ///
-    /// **本 method は本ブランチ (0085 実装) 内の応急処置**。 本来 in-flight
-    /// バックプレッシャーは全エンコーダーに一律適用するのが意図された設計
-    /// (LIMIT=3 でリアルタイム性を優先し、 エンコーダーごとに遅延が増えないようにする)。
-    /// しかし libvpx VP9 / svt_av1 / video_toolbox は `lag_in_frames` /
-    /// `look_ahead_distance` 等の look-ahead でウォームアップ型となり、 native default
-    /// のウォームアップ数 (VP9=25、 svt_av1=33 相当) が LIMIT=3 を超えるため、 一律ガード
-    /// を適用するとウォームアップ中に in_flight が LIMIT に到達してデッドロックする。
+    /// **本 method は応急処置**。 本来 in-flight バックプレッシャーは全エンコーダーに
+    /// 一律適用するのが意図された設計 (LIMIT=3 でリアルタイム性を優先し、 エンコーダー
+    /// ごとに遅延が増えないようにする)。 しかし libvpx VP9 / svt_av1 / video_toolbox は
+    /// `lag_in_frames` / `look_ahead_distance` 等の look-ahead でウォームアップ型となり、
+    /// native default のウォームアップ数 (VP9=25、 svt_av1=33 相当) が LIMIT=3 を超えるため、
+    /// 一律ガードを適用するとウォームアップ中に in_flight が LIMIT に到達してデッドロックする。
     ///
     /// 応急処置として nvcodec のみ true (ガード有効)、 他エンコーダーは false
     /// (ガード無効) にする。 これによって非 nvcodec 経路ではリアルタイム性の
     /// バックプレッシャーが効かなくなる副作用がある。 本来の対応は「リアルタイム時に
     /// look_ahead_distance / lag_in_frames 等のエンコーダーパラメータを 0 に強制上書き
-    /// してウォームアップを消し、 バックプレッシャーガードは全エンコーダーで一律有効にする」形で、
-    /// issues/0087 で扱う (0087 完了後に本 method は削除してガードを一律に戻す)。
+    /// してウォームアップを消し、 バックプレッシャーガードは全エンコーダーで一律有効にする」形。
+    /// 該当対応の完了後は本 method を削除してガードを一律に戻す予定。
     fn requires_backpressure(&self) -> bool {
         #[cfg(feature = "nvcodec")]
         {
