@@ -138,6 +138,72 @@ mod tests {
         assert!(json.contains("\"avg_logprob\":-0.3"), "avg_logprob: {json}");
     }
 
+    /// TextFrame の DisplayJson は Option 一部だけが Some のとき、Some キーは残し
+    /// None キーだけを省略する (Option フィールドが独立に判定されていることを担保する)。
+    #[test]
+    fn display_json_omits_only_none_keys_when_options_are_mixed() {
+        let frame = TextFrame {
+            start: Duration::from_millis(200),
+            end: Duration::from_millis(1200),
+            text: "mixed".to_owned(),
+            language: Some(LanguageCode::new("ja")),
+            no_speech_prob: None,
+            avg_logprob: Some(-0.5),
+        };
+        let json = nojson::json(|f| {
+            f.set_indent_size(0);
+            f.value(&frame)
+        })
+        .to_string();
+        assert!(
+            json.contains("\"language\":\"ja\""),
+            "language 残る: {json}"
+        );
+        assert!(
+            !json.contains("no_speech_prob"),
+            "no_speech_prob 省略: {json}"
+        );
+        assert!(
+            json.contains("\"avg_logprob\":-0.5"),
+            "avg_logprob 残る: {json}"
+        );
+        assert!(!json.contains("null"), "null 非出現: {json}");
+    }
+
+    /// TextFrame の DisplayJson は key 順序が start / end / text / language /
+    /// no_speech_prob / avg_logprob 固定 (JSON LINE スキーマ契約の回帰保護)。
+    #[test]
+    fn display_json_preserves_key_order() {
+        let frame = TextFrame {
+            start: Duration::from_millis(500),
+            end: Duration::from_millis(2500),
+            text: "hello".to_owned(),
+            language: Some(LanguageCode::new("en")),
+            no_speech_prob: Some(0.05),
+            avg_logprob: Some(-0.3),
+        };
+        let json = nojson::json(|f| {
+            f.set_indent_size(0);
+            f.value(&frame)
+        })
+        .to_string();
+        let idx = |key: &str| json.find(key).expect(key);
+        assert!(idx("\"start\"") < idx("\"end\""), "start < end: {json}");
+        assert!(idx("\"end\"") < idx("\"text\""), "end < text: {json}");
+        assert!(
+            idx("\"text\"") < idx("\"language\""),
+            "text < language: {json}"
+        );
+        assert!(
+            idx("\"language\"") < idx("\"no_speech_prob\""),
+            "language < no_speech_prob: {json}"
+        );
+        assert!(
+            idx("\"no_speech_prob\"") < idx("\"avg_logprob\""),
+            "no_speech_prob < avg_logprob: {json}"
+        );
+    }
+
     /// TextFrame の DisplayJson は Option が None のとき、そのキーごと省略する
     /// (null を出さない = JSON LINE スキーマの要件)。
     #[test]

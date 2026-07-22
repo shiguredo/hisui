@@ -75,7 +75,17 @@ def _run_transcribe(binary_path: Path, language: str, fixture: str) -> list[dict
         language,
         str(fixture_path),
     )
-    result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False)
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=110,  # `@pytest.mark.timeout(120)` は subprocess を kill しないため明示 timeout する
+        )
+    except subprocess.TimeoutExpired as e:
+        pytest.fail(f"transcribe が timeout した: stderr=\n{e.stderr!r}")
     assert result.returncode == 0, (
         f"transcribe が非ゼロ exit code で終了した: rc={result.returncode}\n"
         f"stderr:\n{result.stderr}"
@@ -92,18 +102,22 @@ def _run_transcribe(binary_path: Path, language: str, fixture: str) -> list[dict
 
 
 def _is_japanese_char(c: str) -> bool:
-    """ひらがな / カタカナ / CJK 統合漢字のいずれかなら True。"""
+    """ひらがな / カタカナ / 半角カナ / CJK 統合漢字 / CJK 拡張 A のいずれかなら True。"""
     code = ord(c)
     return (
         0x3040 <= code <= 0x309F  # ひらがな
         or 0x30A0 <= code <= 0x30FF  # カタカナ
+        or 0xFF61 <= code <= 0xFF9F  # 半角カナ
         or 0x4E00 <= code <= 0x9FFF  # CJK 統合漢字
+        or 0x3400 <= code <= 0x4DBF  # CJK 拡張 A
     )
 
 
 def _assert_common_schema(lines: list[dict], expected_language: str) -> None:
     """全 JSON LINE に共通する制約を検証する。"""
-    prev_end = -1.0
+    # 初回は start >= 0 を検証する (Duration.as_secs_f64() の下限)。
+    # 2 行目以降は start >= 前行の end を検証する (非減少 = 単調増加相当)。
+    prev_end = 0.0
     for i, line in enumerate(lines):
         for key in ("start", "end", "text"):
             assert key in line, f"line {i}: 必須キー {key} が無い: {line}"
@@ -113,7 +127,7 @@ def _assert_common_schema(lines: list[dict], expected_language: str) -> None:
             f"line {i}: start <= end であるべき: start={line['start']}, end={line['end']}"
         )
         assert line["start"] >= prev_end, (
-            f"line {i}: start は非減少 (単調増加相当) であるべき: "
+            f"line {i}: start は 0 以上かつ非減少 (単調増加相当) であるべき: "
             f"start={line['start']}, prev_end={prev_end}"
         )
         prev_end = line["end"]
@@ -178,10 +192,8 @@ def test_transcribe_japanese_fixture(binary_path: Path) -> None:
 @pytest.mark.timeout(60)
 def test_transcribe_without_experimental_flag_fails(binary_path: Path) -> None:
     """`--experimental` (`-x`) 無しで `transcribe` を呼ぶと非ゼロ exit で終了する。"""
-    _skip_if_models_missing()
+    whisper_dir, silero_path = _skip_if_models_missing()
     fixture_path = _fixture_path("speech-en.mp4")
-    whisper_dir = _whisper_model_dir()
-    silero_path = _silero_vad_model()
 
     command, cwd = build_hisui_command(
         binary_path,
