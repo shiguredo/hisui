@@ -43,11 +43,6 @@
   - @sile
 - [CHANGE] indicatif の依存を削除して自前のプログレスバー実装に置き換える
   - @sile
-- [CHANGE] 実験的な `pipeline` サブコマンドを削除する
-  - @sile
-- [CHANGE] コマンドライン引数に `--experimental(-x)` フラグを追加して `pipeline` サブコマンドはこのフラグ指定時にのみ有効になるようにする
-  - `pipeline` サブコマンドは元々実験的機能扱いであったが、実験的機能を扱うためのフラグを追加して、より明確にハンドリングするようにする
-  - @sile
 - [CHANGE] 出力 MP4 ファイルが H.265 ストリームを含む場合は hvc1 ボックスを使用する
   - 今までは H.265 を表現するためには hev1 ボックスを使用していた
   - Apple 系のプレイヤーは hvc1 ボックスしかサポートしておらず、hev1 ボックスでは再生ができなかった
@@ -64,6 +59,12 @@
 - [ADD] ML モデル取得スクリプト `scripts/download_ml_models.py` を追加する
   - Hugging Face から `whisper-tiny` / `silero-vad` のモデルを取得する標準ライブラリのみの Python スクリプト
   - 起動: `uv run scripts/download_ml_models.py --dest <DIR> <TARGET> [<TARGET> ...]`
+  - @sile
+- [ADD] `hisui -x transcribe <input.mp4>` 実験的サブコマンドを追加する
+  - 実験的機能フラグ `--experimental` (`-x`) を新設し、`transcribe` はこのフラグ指定時のみ有効
+  - Whisper モデル (`--model-dir` 必須) と Silero VAD (`--silero-vad-model` 必須) と言語指定 (`--language` 必須) で MP4 (`.mp4` / `.m4a`) の音声を文字起こしし、標準出力に JSON LINE で出力する
+  - 対応入力は MP4 のみ (WAV / WebM / Opus 単体等は非対応)。 AAC in MP4 は Linux では `--features fdk-aac` build + `--fdk-aac` 指定が必要
+  - モデル取得は `scripts/download_ml_models.py --dest ml-models whisper-tiny silero-vad`
   - @sile
 - [ADD] obsws 経由でリアルタイム合成映像にテキストオーバーレイを描画できるようにする
   - 起動時 CLI 引数 `--font-search-root` / `--default-font` でフォント探索ルートとデフォルトフォントを指定する (両方未指定なら機能無効として正常起動、片方のみは起動失敗)
