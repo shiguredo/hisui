@@ -348,7 +348,7 @@ async fn test_nvcodec_encoder_to_receiver_e2e() {
 依存順序:
 
 - decoder 系列: **`0066 → {0068 / 0071 / 0072} → 0073`** (2026-07-06 完了)
-- encoder 系列: **`0066 → 0067 → 0079 → 0083 → 0084`** および `0067 → 0080` (perf は refactor 系列と並列)
+- encoder 系列: **`0066 → 0067 → 0079 → 0083 → 0084`** および `0067 → 0080 → 0085` (perf は refactor 系列と並列)
 
 | ID | 範囲 | 推定 LOC | 依存先 | 後方互換影響 |
 |----|------|----------|---------|---------------|
@@ -361,7 +361,8 @@ async fn test_nvcodec_encoder_to_receiver_e2e() {
 | closed/0079 (`feature/refactor-migrate-video-encoder-users-to-async`) | encoder 使用側 4 hit を `AsyncVideoEncoder` に移行 + `AsyncVideoEncoder::run` 追加 | +75/-13 | 0067 | 内部 API のみ |
 | closed/0083 (`feature/refactor-remove-sync-video-encoder-and-rename`) | 同期 wrap `VideoEncoder` 削除 + `AsyncVideoEncoder` を `VideoEncoder` にリネーム + `_sync` / `_async` サフィックス整理 | +70/-199 | 0079 | 内部 API のみ |
 | closed/0084 (`feature/refactor-remove-unused-next-encoded-frame`) | 未使用の `VideoEncoder::next_encoded_frame` 削除 + `EncoderOutputSender` の pub → pub(crate) 引き下げ | +4/-48 | 0083 | 内部 API のみ |
-| open/0080 (`feature/refactor-nvcodec-encoder-flush-and-backpressure`) | NVENC 非同期パイプライン並列性回復 (flush() 撤廃 + bp 機構)、 wall-clock 短縮 15% / p99 改善 5ms 等の実機計測を完了条件に据える | 未推定 | 0067 | 内部 API のみ (perf カテゴリ) |
+| closed/0080 (`feature/refactor-nvcodec-encoder-flush-and-backpressure`) | NVENC 非同期パイプライン並列性回復 (flush() 撤廃 + nvcodec レイヤーのバックプレッシャー機構) を試みたが tokio worker block 問題で un-merged close。 分析資産は 0085 に継承 | 未推定 | 0067 | 実装なし (un-merged close) |
+| 0085 (`feature/refactor-encoder-inflight-backpressure`) | NVENC 非同期パイプライン並列性回復 (flush() 撤廃 + VideoEncoder レイヤーで in-flight バックプレッシャー導入)、 wall-clock 短縮 15% / p99 改善 5ms 等の実機計測を完了条件に据える | ~50 LOC (本体) | 0067 (0080 は un-merged) | 内部 API のみ (perf カテゴリ) |
 
 備考:
 
