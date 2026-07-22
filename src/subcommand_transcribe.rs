@@ -128,12 +128,14 @@ fn run_internal(
     #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
     stats: crate::stats::Stats,
 ) -> crate::Result<()> {
-    // Whisper 推論の候補ネスト (candle-transformers の Whisper::forward + tokenizer decode 等)
-    // は tokio 既定のスレッドスタック (2 MiB) を短尺入力でも越え得るため、明示的に拡張する。
-    // 長尺入力 (数分程度) を渡すと tokio-rt-worker が stack overflow で abort するのを回避する。
+    // Whisper 推論の深いネスト (candle-transformers の Whisper::forward + tokenizer decode 等)
+    // は tokio 既定のスレッドスタック (2 MiB) では短尺入力でも越え得るため明示的に拡張する。
+    // 8 MiB では長尺入力 (10 分程度) で依然として tokio-rt-worker が stack overflow で abort する
+    // ことを実測で確認したため、余裕を持って 32 MiB とする (worker は 1 スレッドで運用するので
+    // 追加確保のコストは小さい)。
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
-        .thread_stack_size(8 * 1024 * 1024)
+        .thread_stack_size(32 * 1024 * 1024)
         .enable_all()
         .build()
         .map_err(|e| Error::new(e.to_string()))?;
