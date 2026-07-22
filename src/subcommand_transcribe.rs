@@ -142,36 +142,73 @@ fn run_internal(
         .build()
         .map_err(|e| Error::new(e.to_string()))?;
 
+    runtime.block_on(run_transcribe_pipeline(
+        input_file_path,
+        model_dir,
+        silero_vad_model,
+        language,
+        #[cfg(feature = "fdk-aac")]
+        fdk_aac,
+        stats,
+    ))
+}
+
+/// モデル load → pipeline 起動 → setup → trigger_start → 終了待機を async 内で
+/// 一貫して実行する。
+///
+/// pipeline.run() を先に spawn し、setup を await で受ける形にすることで、setup 途中の
+/// Err を呼び出し側に伝えられる (Err なら `shutdown_pipeline` で spawn 済み processor を
+/// 安全に停止してから return する)。
+async fn run_transcribe_pipeline(
+    input_file_path: PathBuf,
+    model_dir: PathBuf,
+    silero_vad_model: PathBuf,
+    language: String,
+    #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
+    stats: crate::stats::Stats,
+) -> crate::Result<()> {
     // `TranscriptionService::new` は内部で `spawn_blocking` を使うので tokio runtime 内で呼ぶ。
     // device は 1 回だけ選び (GPU 初期化のログを二重に出さない) 両者で共有する。
-    let (service, silero) = runtime.block_on(async {
-        let device = select_device();
-        let service = Arc::new(TranscriptionService::new(&model_dir, device.clone())?);
-        let silero = SileroVadModel::load(&silero_vad_model, device)?;
-        crate::Result::Ok((service, silero))
-    })?;
+    let device = select_device();
+    let service = Arc::new(TranscriptionService::new(&model_dir, device.clone())?);
+    let silero = SileroVadModel::load(&silero_vad_model, device)?;
+    let language_code = LanguageCode::new(language);
 
     let pipeline = crate::MediaPipeline::new(Default::default(), stats)?;
     let pipeline_handle = pipeline.handle();
-    let language_code = LanguageCode::new(language);
+    let pipeline_task = tokio::spawn(async move { pipeline.run().await });
 
-    runtime.spawn(async move {
-        if let Err(e) = setup_pipeline(
-            pipeline_handle,
-            input_file_path,
-            #[cfg(feature = "fdk-aac")]
-            fdk_aac,
-            service,
-            silero,
-            language_code,
-        )
-        .await
-        {
-            tracing::error!("pipeline setup failed: {e:?}");
+    if let Err(e) = setup_pipeline(
+        &pipeline_handle,
+        input_file_path,
+        #[cfg(feature = "fdk-aac")]
+        fdk_aac,
+        service,
+        silero,
+        language_code,
+    )
+    .await
+    {
+        if let Err(shutdown_error) = shutdown_pipeline(pipeline_handle, pipeline_task).await {
+            tracing::warn!(
+                "failed to shutdown transcribe pipeline after setup failure: {}",
+                shutdown_error.display()
+            );
         }
-    });
+        return Err(e);
+    }
 
-    let processor_failed = runtime.block_on(pipeline.run());
+    pipeline_handle
+        .trigger_start()
+        .await
+        .map_err(|_| Error::new("failed to trigger start: pipeline has terminated"))?;
+    // ローカルの `pipeline_handle` を drop することで、全 processor 終了後に MediaPipeline
+    // 側の command_rx を空にできる (drop しないと run() の select! が抜けられない)。
+    drop(pipeline_handle);
+
+    let processor_failed = pipeline_task
+        .await
+        .map_err(|e| Error::new(format!("transcribe pipeline task failed: {e}")))?;
     if processor_failed {
         return Err(Error::new(
             "transcribe failed: one or more processors terminated abnormally",
@@ -180,8 +217,40 @@ fn run_internal(
     Ok(())
 }
 
-async fn setup_pipeline(
+/// setup 失敗時に pipeline を安全に停止する helper。
+///
+/// `drop(pipeline_handle)` で `command_tx` が閉じ、spawn 済み processor は
+/// `wait_subscribers_ready` などの pipeline 依存 await が `PipelineTerminated` Err を返して
+/// task 終了する。 pipeline_task はそれらの task drop で command_rx が空になり、
+/// `run()` loop の `else => break` で抜ける。 その完了を数秒だけ待つ。
+async fn shutdown_pipeline(
     pipeline_handle: crate::MediaPipelineHandle,
+    mut pipeline_task: tokio::task::JoinHandle<bool>,
+) -> crate::Result<()> {
+    const SHUTDOWN_TIMEOUT_SECONDS: u64 = 5;
+    drop(pipeline_handle);
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(SHUTDOWN_TIMEOUT_SECONDS),
+        &mut pipeline_task,
+    )
+    .await
+    {
+        Ok(Ok(_processor_failed)) => Ok(()),
+        Ok(Err(e)) => Err(Error::new(format!("transcribe pipeline task failed: {e}"))),
+        Err(_) => {
+            tracing::warn!(
+                "transcribe pipeline shutdown timed out after {SHUTDOWN_TIMEOUT_SECONDS} seconds; aborting pipeline task"
+            );
+            pipeline_task.abort();
+            Err(Error::new(format!(
+                "transcribe pipeline shutdown timed out after {SHUTDOWN_TIMEOUT_SECONDS} seconds"
+            )))
+        }
+    }
+}
+
+async fn setup_pipeline(
+    pipeline_handle: &crate::MediaPipelineHandle,
     input_file_path: PathBuf,
     #[cfg(feature = "fdk-aac")] fdk_aac: Option<PathBuf>,
     service: Arc<TranscriptionService>,
@@ -252,11 +321,6 @@ async fn setup_pipeline(
             text_stdout_sink,
         )
         .await?;
-
-    pipeline_handle
-        .trigger_start()
-        .await
-        .map_err(|_| crate::Error::new("failed to trigger start: pipeline has terminated"))?;
 
     Ok(())
 }
