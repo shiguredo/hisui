@@ -52,17 +52,20 @@ pub fn try_run(
 fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<()> {
     let model_dir: PathBuf = noargs::opt("model-dir")
         .ty("PATH")
+        .example("./ml-models/whisper-tiny")
         .doc("Whisper モデルディレクトリ (config.json / tokenizer.json / model.safetensors を含む)")
         .take(args)
         .then(|a| a.value().parse())?;
     let silero_vad_model: PathBuf = noargs::opt("silero-vad-model")
         .ty("PATH")
+        .example("./ml-models/silero-vad/onnx/model.onnx")
         .env("HISUI_SILERO_VAD_MODEL_PATH")
         .doc("Silero VAD の ONNX モデルファイル (silero_vad.onnx)")
         .take(args)
         .then(|a| a.value().parse())?;
     let language: String = noargs::opt("language")
         .ty("CODE")
+        .example("ja")
         .doc("Whisper 言語指定 (ISO 639-1、`ja` / `en` 等)")
         .take(args)
         .then(|a| a.value().parse())?;
