@@ -379,9 +379,10 @@ pub(crate) type EncoderOutputReceiver =
 /// 出力フレーム (`emit_ok`) 送信時に `total_output_metric` の増分と keyframe 判定を物理的に強制ペアリングする。
 /// エラー (`emit_err`) 送信時はメトリクスを増分しない (出力フレーム数 / keyframe 数の意味論を汚さないため)。
 ///
-/// `unreachable!()` 検出契約: シンクと `rx` は `VideoEncoder` 内で同居するため、
-/// 送信失敗 (受信側 drop) は構造上到達不能な不変条件違反 = バグ。 通常運用では起こらない。
-/// 同じ不変条件により、 `poll_output` の `Disconnected` 分岐も `unreachable!()` で潰す。
+/// `rx` 閉鎖時 (受信側が既に処理を終えているシグナル。 VideoEncoder drop 進行中の残
+/// in-flight callback や drain 断念経路で発生し得る) は静かに破棄する。 この場合
+/// `total_output_metric` は増分されないため、 実際の出力数より少ない値のまま観測される
+/// (VideoEncoder docstring 参照)。
 #[derive(Debug, Clone)]
 pub struct OutputSink {
     tx: EncoderOutputSender,
@@ -395,21 +396,20 @@ impl OutputSink {
         // keyframe フラグは send 前に取り出す。 VideoFrame は data: Vec<u8> を持ち Clone は
         // 圧縮ペイロード全体の deep copy になるため送信は move。
         let is_keyframe = frame.keyframe;
+        // rx 閉鎖時は静かに破棄する。 メトリクスは送信成功時のみ増分することで
+        // 「送信できなかったフレームをカウントする」嘘を物理的に防ぐ。
         if self.tx.send(Ok(frame)).is_err() {
-            unreachable!("encoder output sink receiver dropped before sink (bug)");
+            return;
         }
-        // 送信成功後に増分することで「送信できなかったフレームをカウントする」嘘を物理的に防ぐ。
         self.total_output_metric.inc();
         if is_keyframe {
             self.total_output_keyframe_metric.inc();
         }
     }
 
-    /// エラーを 1 件送信する (メトリクスは増分しない)。
+    /// エラーを 1 件送信する (メトリクスは増分しない)。 rx 閉鎖時は静かに破棄する。
     pub fn emit_err(&self, err: crate::Error) {
-        if self.tx.send(Err(err)).is_err() {
-            unreachable!("encoder output sink receiver dropped before sink (bug)");
-        }
+        let _ = self.tx.send(Err(err));
     }
 }
 
@@ -467,16 +467,9 @@ pub async fn request_upstream_video_keyframe(
 /// processor 経路 (`run`) および integration test から呼び出す。 内部チャンネルの詳細は
 /// `OutputSink` docstring 参照。
 ///
-/// **drop 順制約**: 非同期な内部エンコーダー (Nvcodec 等) 使用時は「`inner` を先に drop →
-/// callback スレッドが `sink.emit_ok` した最後の 1 フレームが `rx` に届く → その後 `rx` を
-/// drop」の順序で drop する必要がある (詳細は `inner` フィールド脇コメント)。 integration
-/// test 経路では struct フィールド宣言順で自動的にこの順が成立する。 processor 経路 (`run`)
-/// では `rx` を local に move する都合上、 `run` 内の明示 cleanup で同順を維持する
-/// (詳細は `run` 内コメント)。
-///
 /// **未 drain 時の副作用**: 未 drain の状態で drop すると `total_output_video_frame_count`
-/// メトリクスが実際の出力数より少ない値のまま観測される (`OutputSink::emit_ok` は send 成功後に
-/// inc するため、 未回収の frame は下流には流れない)。
+/// メトリクスが実際の出力数より少ない値のまま観測される (`OutputSink::emit_ok` は send 成功時のみ
+/// inc し、 rx 閉鎖後の残 in-flight callback は静かに破棄されるため)。
 #[derive(Debug)]
 pub struct VideoEncoder {
     engine_metric: crate::stats::StatsString,
@@ -492,22 +485,9 @@ pub struct VideoEncoder {
     eos: bool,
     keyframe_request_pending: bool,
 
-    // 以下 2 フィールドの宣言順は drop 順を意図的に制御している (Rust 言語仕様で drop 順 = 宣言順)。
-    // `inner` を `rx` より先に drop することで、 非同期な内部エンコーダー
-    // (Nvcodec 等の callback 完結型 inner) の worker drop 中にコールバックが
-    // `sink.emit_ok` → `tx.send` した際に `rx` がまだ alive で send が成功する。
-    // 逆順にすると `emit_ok` の `unreachable!()` が発火する。 なお `inner` が
-    // `None` (未初期化 = 最初のフレームが未到達) のケースでは callback 経路が動いて
-    // いないため、 この順序制約は自動的に満たされる。
-    //
-    // `run()` は冒頭で `self.rx.take()` して `rx` を local に move する
-    // (`tokio::select!` の split-borrow 回避)。 local に move すると return 時に
-    // local が `self.inner` より先に drop されるため、 各 return パスの直前で
-    // `self.inner = None;` を明示呼び出しして `inner` を先に drop してから local
-    // `rx` の drop に進める契約にしている (`run` 内のコメント参照)。
     inner: Option<VideoEncoderInner>,
-    // `run()` の 3 分岐 `tokio::select!` で `input_rx.recv()` の入力分岐と `rx.recv().await` の
-    // 出力分岐を並置するため、`run()` 冒頭で `take()` して local に move する必要がある。
+    // `run()` の 3 分岐 `tokio::select!` で入力分岐と出力分岐を並置するため、
+    // `run()` 冒頭で `take()` して local に move する必要がある (split-borrow 回避)。
     // integration test 経路では `run()` を経由しないため `Some` のまま保たれる。
     rx: Option<EncoderOutputReceiver>,
 
@@ -757,7 +737,7 @@ impl VideoEncoder {
     ///
     /// `try_recv` の結果を射影する: `Ok(Ok)` → `Processed`、 `Ok(Err)` → `Err`、
     /// `Empty` は `eos` と組み合わせて `Finished` (eos) / `Pending` (非 eos)、
-    /// `Disconnected` は構造上到達不能で `unreachable!()`。
+    /// `Disconnected` (sink 側 drop = これ以上フレームは来ない) は `Finished`。
     pub fn poll_output(&mut self) -> Result<EncoderRunOutput> {
         let rx = self
             .rx
@@ -774,9 +754,7 @@ impl VideoEncoder {
                 }
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                unreachable!(
-                    "encoder output channel disconnected unexpectedly (sink dropped before rx)"
-                )
+                Ok(EncoderRunOutput::Finished)
             }
         }
     }
@@ -825,9 +803,6 @@ impl VideoEncoder {
         // `tokio::select!` の input 分岐 (`self.handle_input_sample` 呼び出し、 `&mut self`)
         // と output 分岐 (`rx.recv().await`、 `&mut rx`) を並置するため、 `rx` を local に
         // move する (split-borrow 回避)。
-        //
-        // drop 順制御: `rx` を local に move する都合上、 各 return パスの直前で
-        // `self.inner = None;` を明示呼び出しする (詳細は `inner` フィールド脇コメント)。
         let mut rx = self
             .rx
             .take()
@@ -860,7 +835,6 @@ impl VideoEncoder {
                             // 入力分岐ガードが無効化 (`self.eos = true`)、 出力分岐は rx 空で
                             // 待機、 RPC 分岐も待機、 のすべてがペンディングでデッドロックする。
                             if in_flight == 0 {
-                                self.inner = None;
                                 output_tx.send_eos();
                                 return Ok(());
                             }
@@ -870,21 +844,21 @@ impl VideoEncoder {
                 }
                 // output 分岐: 常時有効、 in-flight を drain
                 result = rx.recv() => {
-                    // `rx.recv()` の返り値は `Option<Result<VideoFrame>>` で、 `?` で
-                    // Result を伝播したいため Option 側を expect で剥がす (`unreachable!()`
-                    // は `!` 型で Result にならず `?` の伝播先として使えない)。 sink と rx は
-                    // VideoEncoder 内で同居するため sink が rx より先に drop される経路は
-                    // 構造上到達不能で、 到達したらバグの表明として fail-fast する。
-                    let frame = result
-                        .expect("encoder output channel disconnected unexpectedly (sink dropped before rx)")?;
+                    // `rx.recv()` が `None` を返すのは sink 側 (inner が保持) が drop された
+                    // ケースで、 「これ以上フレームは来ない」というシグナル。 通常運用では
+                    // inner drop は本 run() の return パス経由でのみ発生するため到達しないが、
+                    // 到達したときは EOS 相当として下流に伝えて終了する。
+                    let Some(result) = result else {
+                        output_tx.send_eos();
+                        return Ok(());
+                    };
+                    let frame = result?;
                     in_flight -= 1;
                     if !output_tx.send_media(MediaFrame::video(frame)) {
-                        self.inner = None;
                         output_tx.send_eos();
                         return Ok(());
                     }
                     if self.eos && in_flight == 0 {
-                        self.inner = None;
                         output_tx.send_eos();
                         return Ok(());
                     }
@@ -1343,23 +1317,32 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "encoder output sink receiver dropped before sink")]
-    fn output_sink_emit_ok_panics_when_receiver_dropped() {
-        // rx が sink より先に drop されるのは VideoEncoder の drop 順制御下では
-        // 発生しない構造だが、 万一発生した場合は fail-fast で panic する契約
-        // (unreachable! で「不変条件違反 = バグ」を明示する)。
-        let (sink, rx, _total, _keyframe) = make_encoder_sink_with_counters();
+    fn output_sink_emit_ok_silently_discards_when_receiver_dropped() {
+        // rx 閉鎖時 (受信側が既に処理を終えているシグナル。 通常運用では
+        // VideoEncoder drop 進行中の残 in-flight callback で発生し得る) は
+        // panic せず静かに破棄する。 送信できなかったフレームはメトリクスも
+        // 増分されない (「送信できなかったフレームをカウントする」嘘の防止)。
+        let (sink, rx, total, keyframe) = make_encoder_sink_with_counters();
         drop(rx);
         sink.emit_ok(compressed_video_frame(true));
+        assert_eq!(
+            total.get(),
+            0,
+            "rx 閉鎖後の emit_ok は total counter を増分してはならない"
+        );
+        assert_eq!(
+            keyframe.get(),
+            0,
+            "rx 閉鎖後の emit_ok は keyframe counter を増分してはならない"
+        );
     }
 
     // ---- VideoEncoder::poll_output 分岐テスト ----
     // inner=None のまま sink 経由で rx にメッセージを流し込んで
     // poll_output の分岐 (Processed / Err / Pending / Finished) を検証する。
-    // Disconnected 分岐は sink と rx が VideoEncoder 内で同居する構造上
-    // 通常運用では起きず、 発生時は unreachable! で panic する。 テストで再現する
-    // には sink 側 tx の強制 drop が必要で public API では成立しない。
-    // その契約自体は上記 output_sink_emit_ok_panics_when_receiver_dropped でカバー済み。
+    // Disconnected 分岐 (sink 側 tx の全 drop) は sink と rx が VideoEncoder 内で
+    // 同居する構造上 public API 経路では成立しないため明示テストは省略する。
+    // 実装側は Disconnected を Finished に射影する (silent drop 契約と対称)。
 
     fn new_uninitialized_encoder() -> VideoEncoder {
         let options = VideoEncoderOptions {
