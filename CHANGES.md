@@ -63,7 +63,7 @@
 - [ADD] `hisui -x transcribe <input.mp4>` 実験的サブコマンドを追加する
   - 実験的機能フラグ `--experimental` (`-x`) を新設し、`transcribe` はこのフラグ指定時のみ有効
   - Whisper モデル (`--model-dir` 必須) と Silero VAD (`--silero-vad-model` 必須) と言語指定 (`--language` 必須) で MP4 (`.mp4` / `.m4a`) の音声を文字起こしし、標準出力に JSON LINE で出力する
-  - 対応入力は MP4 のみ (WAV / WebM / Opus 単体等は非対応)。 AAC in MP4 は Linux では `--features fdk-aac` build + `--fdk-aac` 指定が必要
+  - 対応入力は MP4 のみ
   - `--transcribe-threads` (`HISUI_TRANSCRIBE_THREADS`) で 1 推論あたりの candle rayon スレッド数を上書きできる
   - モデル取得は `scripts/download_ml_models.py --dest ml-models/ whisper-tiny silero-vad`
   - @sile

@@ -84,7 +84,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
     let fdk_aac: Option<PathBuf> = noargs::opt("fdk-aac")
         .ty("PATH")
         .env("HISUI_FDK_AAC_PATH")
-        .doc("FDK-AAC の共有ライブラリのパス (AAC in MP4 対応、Linux では指定必須)")
+        .doc("FDK-AAC の共有ライブラリのパス")
         .take(args)
         .present_and_then(|a| a.value().parse())?;
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")

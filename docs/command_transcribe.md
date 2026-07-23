@@ -9,10 +9,7 @@ Whisper で音声を文字起こしして標準出力に JSON LINE (1 行 1 セ�
 - **`candle` feature を有効化してビルドする**必要があります (`cargo build --release --features candle`)
   - candle feature 無効ビルドでは transcribe サブコマンドは存在しません
   - candle-onnx のビルドには `protoc` (Ubuntu の `protobuf-compiler` 等) が必要です
-- AAC in MP4 入力を扱う場合は、以下のいずれかが必要です:
-  - macOS (AudioToolbox 経由で decode)
-  - `--features fdk-aac` build + 実行時に `--fdk-aac <PATH>` で libfdk-aac 共有ライブラリを指定
-- Opus in MP4 入力は追加要件なしで扱えます
+- AAC を扱う場合の要件は [`docs/build.md`](build.md) を参照してください
 
 ## モデル取得
 
@@ -56,7 +53,7 @@ Options:
 `--features fdk-aac` を有効にしてビルドした場合は、末尾に以下のオプションが追加されます。
 
 ```
-      --fdk-aac <PATH>          FDK-AAC の共有ライブラリのパス (AAC in MP4 対応、Linux では指定必須) [env: HISUI_FDK_AAC_PATH]
+      --fdk-aac <PATH>          FDK-AAC の共有ライブラリのパス [env: HISUI_FDK_AAC_PATH]
 ```
 
 `--experimental` (`-x`) が指定されていない状態で `transcribe` を呼ぶと、標準エラーに
