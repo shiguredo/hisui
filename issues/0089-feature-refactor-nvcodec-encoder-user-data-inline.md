@@ -2,7 +2,7 @@
 
 - Priority: Low
 - Created: 2026-07-22
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-07-23
 - Model: Opus 4.7
 - Branch: feature/refactor-nvcodec-encoder-user-data-inline
 - Polished: 2026-07-23
@@ -190,7 +190,26 @@ crate 側の drain Err 挙動 (`encode.rs:1698-1703` の `pending_user_data.clea
 
 ## 解決方法
 
-polish 完了後に追記する。
+### 実装した内容
+
+本ブランチ (`feature/refactor-nvcodec-encoder-user-data-inline`) で以下を実装した:
+
+- `src/encoder/nvcodec.rs` の `SharedInputQueue = Arc<Mutex<VecDeque<VideoFrame>>>` 型 alias と `NvcodecEncoder::input_queue` フィールドを削除
+- `NvcodecEncoder::inner` の user_data 型を `()` から `VideoFrame` に変更
+- `encode()` の第 3 引数を `video_frame.to_stripped()` に変更し、 hisui 側での push_back を撤廃
+- callback 側で `EncodedFrame::into_parts()` から user_data を取り出して metadata (timestamp / size) を復元
+- callback Err 分岐から `pop_front` 呼び出しを削除 (crate 側の `pending_user_data.clear()` に委譲)
+- 順序保証コメントを削除、 `use std::collections::VecDeque;` と `use std::sync::Mutex` を撤去
+- callback 処理を decoder 側と対称に free fn (`handle_encode_callback` / `convert_encoded_data` / `prepend_av1_sequence_header_if_needed`) に分離、 turbofish `::<VideoFrame, shiguredo_nvcodec::Error>` を削除
+- docstring と冗長コメントを整理し、 遅延確定スロットの説明を `HandlerContextSlot` 型 docstring に集約
+
+コミット履歴: `de9be487` / `3a050cf5` / `7b7e559d`
+
+### 検証結果
+
+- issue §grep 検証 の 8 項目すべて 0 件を確認
+- cargo fmt / check / clippy / test をローカルで実施し、 `default` / `--no-default-features` / `--features nvcodec` の全パターンで pass
+- `cargo test --features nvcodec` の実 GPU 実行は CI の `test-nvidia-video-codec` job で自動実行される
 
 ## CHANGES.md について
 
