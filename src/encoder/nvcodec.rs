@@ -21,8 +21,13 @@ struct HandlerContext {
 }
 
 /// callback にキャプチャさせる HandlerContext の遅延確定スロット。
-/// 書き込みは Encoder::new → get_sequence_params の 1 回のみ、
-/// 以降は callback スレッドから lock-free で read される。
+///
+/// `shiguredo_nvcodec::Encoder::new` は handler を consume する API のため、
+/// sample_entry を確定するために inner が必要 / inner を作るために handler が必要という循環がある。
+/// そこで OnceLock を先に確保して handler にキャプチャさせ、
+/// Encoder::new 後に get_sequence_params から HandlerContext を確定して set する。
+/// callback (worker スレッド) は encode() 経由でしか発火しないため、
+/// encode() 前に set が完了していれば race free に read できる。
 type HandlerContextSlot = Arc<OnceLock<HandlerContext>>;
 
 #[derive(Debug)]
@@ -36,21 +41,9 @@ pub struct NvcodecEncoder {
 
 /// shiguredo_nvcodec::Encoder の生成に必要なハンドラを構築する。
 ///
-/// callback スレッドで `EncodedFrame::into_parts` から user_data (入力フレームの
-/// 軽量 clone) を取り出して metadata (timestamp / size) を復元し、
-/// Annex B → MP4 変換 (H.264/H.265) または Sequence Header OBU 付与 (AV1) を経て
-/// sink.emit_ok までを一貫して実施する。
-///
-/// sample_entry と av1_sequence_header は本関数の move クロージャがキャプチャして
-/// 全出力フレームへ載せる責務を負うため、呼び出し元 struct 側では保持しない
-/// (svt_av1 / openh264 / video_toolbox の同期 handle_encoded 型と異なり、
-/// nvcodec は callback 完結型なので struct フィールドとして再参照する必要がない)。
-///
-/// context_slot は Encoder::new 後に呼び出し元が get_sequence_params() から
-/// sample_entry と av1_sequence_header を確定して set() する遅延確定スロット。
-/// callback は shiguredo_nvcodec の worker スレッドが encode() 投入後にしか
-/// 発火させないため、呼び出し元が最初の encode() より前に set() を完了させれば
-/// callback は必ず set 済みの context を参照する (下記 expect は BUG 検出用)。
+/// callback スレッドで `EncodedFrame::into_parts` から user_data を取り出して
+/// metadata (timestamp / size) を復元し、 Annex B → MP4 変換 (H.264/H.265) または
+/// Sequence Header OBU 付与 (AV1) を経て sink.emit_ok までを一貫して実施する。
 fn build_handler(
     sink: OutputSink,
     context_slot: HandlerContextSlot,
@@ -63,19 +56,15 @@ fn build_handler(
                     .get()
                     .expect("BUG: HandlerContext must be set before first encode() call");
 
-                // キーフレーム判定は into_parts で consume される前に取り出す。
                 let keyframe = matches!(
                     encoded_frame.picture_type(),
                     shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
                 );
-                // AV1 分岐で Sequence Header OBU を先頭に付与するため `mut` で受ける。
-                // input_frame は後段の VideoFrame 復元で size / timestamp を復元するために使う。
                 let (mut data, input_frame) = encoded_frame.into_parts();
 
-                // AV1 の場合は変換不要だが、キーフレームに Sequence Header が含まれていない場合は付与
-                // H.264/H.265 の場合は Annex B から MP4 形式に変換
+                // AV1 はキーフレームに Sequence Header OBU が無ければ先頭に付与、
+                // H.264/H.265 は Annex B から MP4 形式に変換する。
                 let frame_data = if encoded_format == VideoFormat::Av1 {
-                    // AV1 のキーフレームで Sequence Header OBU が含まれていない場合は先頭に付与
                     if keyframe && !has_sequence_header(&data) {
                         // encoded_format == Av1 の分岐に入るのは new_av1 経路のみで、
                         // そこでは make_context が Some(seq_params) を確定して slot に set する契約。
@@ -125,13 +114,6 @@ impl NvcodecEncoder {
     /// sample_entry 確定までの共通シーケンスを実行する。
     /// make_context は seq_params から HandlerContext を組み立てる責務で、
     /// codec 別の sample_entry 生成と av1_sequence_header 中身の差分を吸収する。
-    ///
-    /// 遅延スロット詳解: shiguredo_nvcodec::Encoder::new は handler を consume する
-    /// API のため、 sample_entry を確定するために inner が必要 / inner を作るために
-    /// handler が必要という循環がある。 そこで OnceLock を先に確保して handler に
-    /// キャプチャさせ、 Encoder::new 後に get_sequence_params から HandlerContext を
-    /// 確定して set する。 callback (worker スレッド) は encode() 経由でしか発火
-    /// しないため、 encode() 前に set が完了していれば race free に read できる。
     fn build_encoder(
         config: shiguredo_nvcodec::EncoderConfig,
         sink: OutputSink,
@@ -179,8 +161,6 @@ impl NvcodecEncoder {
         Self::build_encoder(config, sink, VideoFormat::H264, |seq_params| {
             let sample_entry =
                 SharedSampleEntry::new(h264::h264_sample_entry_from_annexb(&seq_params)?);
-            // H.264 では callback の分岐 (encoded_format 判定) で av1_sequence_header は
-            // 参照されないため None にする。
             Ok(HandlerContext {
                 sample_entry,
                 av1_sequence_header: None,
@@ -215,7 +195,6 @@ impl NvcodecEncoder {
                 &seq_params,
                 options.frame_rate,
             )?);
-            // H.265 も av1_sequence_header は参照されないため None にする。
             Ok(HandlerContext {
                 sample_entry,
                 av1_sequence_header: None,
@@ -309,9 +288,8 @@ impl NvcodecEncoder {
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
-        // エンコード実行。 入力フレームの軽量 clone を user_data として渡す。
-        // shiguredo_nvcodec が内部 FIFO で pending user_data を管理し、
-        // callback で `EncodedFrame::into_parts` から取り出せる。
+        // 入力フレームの軽量 clone を user_data として渡す。
+        // callback (build_handler) で EncodedFrame::into_parts から取り出す。
         let encode_options = shiguredo_nvcodec::EncodeOptions {
             force_intra: self.force_keyframe_next,
             force_idr: self.force_keyframe_next,
