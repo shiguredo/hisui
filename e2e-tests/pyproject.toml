@@ -3,15 +3,15 @@ name = "hisui-e2e-tests"
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
-    "pytest",
-    "pytest-timeout",
-    "httpx",
-    "cryptography",
-    "aiohttp",
-    "ruff",
-    "ty",
+  "aiohttp",
+  "cryptography",
+  "httpx",
+  "pytest",
+  "pytest-timeout",
+  "ruff",
+  "ty",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["obsws"]
+testpaths = ["obsws", "transcribe"]
 timeout = 30

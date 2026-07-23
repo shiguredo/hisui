@@ -38,17 +38,37 @@ fn main() -> noargs::Result<()> {
         .take(&mut args)
         .is_present();
 
+    let experimental: bool = noargs::flag("experimental")
+        .short('x')
+        .doc(concat!(
+            "実験的サブコマンドの有効化フラグです\n",
+            "本フラグが指定された場合のみ実験的サブコマンド (transcribe 等) を受け付けます"
+        ))
+        .take(&mut args)
+        .is_present();
+
     // メトリクスレジストリを main 側で 1 つ作り、`MediaPipeline` を持つ各サブコマンドに
     // clone を渡す。
     let stats = hisui::stats::Stats::new();
 
-    // サブコマンドで分岐する
+    // サブコマンドで分岐する。
     let matched = hisui::subcommand_inspect::try_run(&mut args, stats.clone())?
         || hisui::subcommand_list_codecs::try_run(&mut args)?
         || hisui::sora::recording_subcommand_compose::try_run(&mut args, stats.clone())?
         || hisui::sora::recording_subcommand_vmaf::try_run(&mut args, stats.clone())?
         || hisui::sora::recording_subcommand_tune::try_run(&mut args)?
-        || hisui::subcommand_server::try_run(&mut args, stats.clone())?;
+        || hisui::subcommand_server::try_run(&mut args, stats.clone())?
+        || {
+            #[cfg(feature = "candle")]
+            {
+                hisui::subcommand_transcribe::try_run(&mut args, stats.clone(), experimental)?
+            }
+            #[cfg(not(feature = "candle"))]
+            {
+                let _ = experimental;
+                false
+            }
+        };
 
     if emit_exit_metrics && matched && !args.metadata().help_mode {
         hisui::metrics::emit_exit_metrics_to_stdout(&stats);

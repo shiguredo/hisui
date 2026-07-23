@@ -174,7 +174,6 @@ fn whisper_pipeline_transcribes_english_fixture() {
         "avg_logprob は極端に低くない想定: {}",
         result.avg_logprob.get()
     );
-    assert_eq!(result.language.as_ref().map(LanguageCode::get), Some("en"));
 }
 
 #[test]
@@ -210,7 +209,6 @@ fn whisper_pipeline_transcribes_japanese_fixture() {
         "avg_logprob は極端に低くない想定: {}",
         result.avg_logprob.get()
     );
-    assert_eq!(result.language.as_ref().map(LanguageCode::get), Some("ja"));
 }
 
 /// 同じ `WhisperPipeline` に対して英語 → 日本語を連続でリクエストしても、それぞれ
@@ -232,11 +230,6 @@ fn whisper_pipeline_handles_language_switch_across_requests() {
     let en_result = pipeline
         .transcribe_pcm16k(&pcm_en, &LanguageCode::new("en"))
         .expect("英語推論は成功する想定");
-    assert_eq!(
-        en_result.language.as_ref().map(LanguageCode::get),
-        Some("en"),
-        "初回リクエストの language は en として返るはず"
-    );
     assert!(
         !en_result.text.trim().is_empty(),
         "初回リクエストの text は非空のはず: {}",
@@ -246,11 +239,6 @@ fn whisper_pipeline_handles_language_switch_across_requests() {
     let ja_result = pipeline
         .transcribe_pcm16k(&pcm_ja, &LanguageCode::new("ja"))
         .expect("日本語推論は成功する想定");
-    assert_eq!(
-        ja_result.language.as_ref().map(LanguageCode::get),
-        Some("ja"),
-        "2 回目リクエストで language が ja に切り替わるはず (state 残留がないこと)"
-    );
     assert!(
         !ja_result.text.trim().is_empty(),
         "2 回目リクエストの text も非空のはず: {}",
@@ -378,12 +366,7 @@ async fn transcription_processor_publishes_text_frames() -> hisui::Result<()> {
             )
         });
     // pipeline 経由でも直接呼び出しと同じメタ情報が透過されるかを検証する
-    // (language 詰め替え、品質指標の Some 保持、start / end の順序)。
-    assert_eq!(
-        non_empty.language.as_ref().map(LanguageCode::get),
-        Some("en"),
-        "language は入力に指定した en が伝播するはず"
-    );
+    // (品質指標の Some 保持、start / end の順序)。
     assert!(
         non_empty.no_speech_prob.is_some(),
         "no_speech_prob は Whisper 由来なので Some のはず"

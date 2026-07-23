@@ -7,13 +7,6 @@ use super::decode::{TokenId, token_id};
 use crate::Result;
 use crate::text::LanguageCode;
 
-/// 解決された言語 (指定された ISO 639-1 コードと、対応する Whisper の言語トークン)。
-#[derive(Debug)]
-pub(super) struct ResolvedLanguage {
-    pub(super) code: LanguageCode,
-    pub(super) token_id: TokenId,
-}
-
 /// 多言語 Whisper の語彙数の下限。多言語モデル (tiny/base/small/medium/large-v1/v2) は 51865、
 /// large-v3 系は 51866 で、英語専用 (.en) モデルは 51864。言語トークンは多言語語彙にのみ存在する
 /// ため、この値以上を多言語とみなす。
@@ -39,7 +32,7 @@ pub(super) fn language_token_from_code(
 /// そのまま返し、そうでなければ `<|{code}|>` で包む (二重包みを避ける)。
 /// トークンが tokenizer に存在するかは呼び出し側で検証する。
 fn build_language_token_string(code: &LanguageCode) -> String {
-    let code = code.get().trim();
+    let code = code.as_str().trim();
     if code.starts_with("<|") {
         code.to_owned()
     } else {

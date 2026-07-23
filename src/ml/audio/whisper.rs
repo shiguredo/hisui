@@ -9,8 +9,7 @@ use tokenizers::Tokenizer;
 pub mod decode;
 pub mod multilingual;
 
-use decode::WhisperDecoder;
-use multilingual::ResolvedLanguage;
+use decode::{TokenId, WhisperDecoder};
 
 use crate::probability::{LogProbability, Probability};
 use crate::text::LanguageCode;
@@ -19,7 +18,6 @@ use crate::text::LanguageCode;
 #[derive(Debug)]
 pub struct WhisperTranscript {
     pub text: String,
-    pub language: Option<LanguageCode>,
     pub no_speech_prob: Probability,
     pub avg_logprob: LogProbability,
 }
@@ -87,10 +85,8 @@ impl WhisperPipeline {
             // 表す値で埋める:
             //   - no_speech_prob = 1.0 (発話なしの最大確信)
             //   - avg_logprob = -∞ (トークンが生成されていない = 対数確率の下限)
-            //   - language = None (音声から言語を検出する対象が無かった)
             return Ok(WhisperTranscript {
                 text: String::new(),
-                language: None,
                 no_speech_prob: Probability::ONE,
                 avg_logprob: LogProbability::NEG_INFINITY,
             });
@@ -105,30 +101,23 @@ impl WhisperPipeline {
         .map_err(|e| crate::Error::new(format!("mel tensor: {e}")))?;
         let mel = narrow_mel_for_encoder(&mel)?;
 
-        let resolved_language = self.resolve_language(language)?;
-        let result = self
-            .decoder
-            .decode_chunk(&mel, Some(resolved_language.token_id))?;
+        let language_token = self.resolve_language(language)?;
+        let result = self.decoder.decode_chunk(&mel, Some(language_token))?;
 
         Ok(WhisperTranscript {
             text: result.text.trim().to_owned(),
-            language: Some(resolved_language.code),
             no_speech_prob: result.no_speech_prob,
             avg_logprob: result.avg_logprob,
         })
     }
 
-    fn resolve_language(&self, language: &LanguageCode) -> crate::Result<ResolvedLanguage> {
+    fn resolve_language(&self, language: &LanguageCode) -> crate::Result<TokenId> {
         if !multilingual::is_multilingual_config(self.decoder.config()) {
             return Err(crate::Error::new(format!(
                 "language is not supported for non-multilingual whisper model: {language}"
             )));
         }
-        let token_id = multilingual::language_token_from_code(self.decoder.tokenizer(), language)?;
-        Ok(ResolvedLanguage {
-            code: LanguageCode::new(language.get().trim()),
-            token_id,
-        })
+        multilingual::language_token_from_code(self.decoder.tokenizer(), language)
     }
 }
 
@@ -358,7 +347,6 @@ mod tests {
     fn is_likely_no_speech_true_when_both_thresholds_exceeded() {
         let transcript = WhisperTranscript {
             text: String::new(),
-            language: None,
             no_speech_prob: Probability::new(0.7).expect("有効"),
             avg_logprob: LogProbability::new(-1.5).expect("有効"),
         };
@@ -373,7 +361,6 @@ mod tests {
     fn is_likely_no_speech_false_at_no_speech_boundary() {
         let transcript = WhisperTranscript {
             text: String::new(),
-            language: None,
             no_speech_prob: Probability::new(0.6).expect("有効"),
             avg_logprob: LogProbability::new(-1.5).expect("有効"),
         };
@@ -388,7 +375,6 @@ mod tests {
     fn is_likely_no_speech_false_at_logprob_boundary() {
         let transcript = WhisperTranscript {
             text: String::new(),
-            language: None,
             no_speech_prob: Probability::new(0.7).expect("有効"),
             avg_logprob: LogProbability::new(-1.0).expect("有効"),
         };
@@ -403,7 +389,6 @@ mod tests {
     fn is_likely_no_speech_false_when_only_no_speech_exceeded() {
         let transcript = WhisperTranscript {
             text: String::new(),
-            language: None,
             no_speech_prob: Probability::new(0.9).expect("有効"),
             avg_logprob: LogProbability::new(-0.5).expect("有効"),
         };

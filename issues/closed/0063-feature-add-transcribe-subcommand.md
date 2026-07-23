@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-24
-- Completed:
+- Completed: 2026-07-23
 - Model: Opus 4.7
 - Branch: feature/add-transcribe-subcommand
 - Polished: 2026-07-22
@@ -311,3 +311,16 @@ user-facing の Err メッセージは既存 CLI の日本語慣習に沿う。 
 - `e2e-tests/transcribe/test_*.py` (新規、`@pytest.mark.timeout(120)`) + `e2e-tests/pyproject.toml` の `testpaths` 追加
 - `.github/workflows/e2e-test.yml` (candle feature 追加 + `protobuf-compiler` 追加 + model キャッシュ / ダウンロード step + `HISUI_ML_MODELS_DIR` + `HISUI_SILERO_VAD_MODEL_PATH` + `HISUI_CI` env、timeout 30 分)
 - `CHANGES.md` (既存 2 エントリ削除 + `[ADD] hisui -x transcribe` 新設)
+
+### 実装完了時点の追加・変更差分
+
+polish 時点の設計から、実装 / レビュー対応の過程で以下を追加・変更した:
+
+- JSON LINE 出力の各行に `"type":"transcript"` フィールドを付与し、`--emit-exit-metrics` の `"type":"metrics"` 行と JSON LINE stream 上で振り分け可能にした (併用時の silent 抑止は撤去)
+- `TextFrame` / `WhisperTranscript` から `language` フィールドを削除した (`--language` 必須で動的推論がないため出力の language は指定値と同一になり冗長)
+- `--model-dir` / `--language` にも env fallback (`HISUI_WHISPER_MODEL_DIR` / `HISUI_WHISPER_LANGUAGE`) を追加した (既存の `HISUI_SILERO_VAD_MODEL_PATH` / `HISUI_TRANSCRIBE_THREADS` と揃える)
+- `setup_pipeline` の Err を握り潰していた経路を修正し、shutdown_pipeline helper (5 秒 timeout) で pipeline を安全に停止するよう変更した (setup 中の Err で pipeline が hang する経路を解消)
+- `Mp4SampleReader` / `Mp4FileReader` の CTS オフセットチェックを track_kind 判定内に移動した (対象外 track の CTS で pipeline 全体を落とさないようにする)
+- tokio 非同期 worker のスタックサイズを 32 MiB に拡張した (Whisper 推論の深いネストが 2 MiB / 8 MiB のスタックで overflow する実測を反映)
+- `--experimental` 未指定エラーメッセージを英語に統一 (`transcribe subcommand requires --experimental (-x) flag`)
+- e2e テスト補強 (`subprocess.run(timeout=110)` / 半角カナ・CJK 拡張 A / `start >= 0`)、`TextFrame::DisplayJson` の Option ミックス / キー順序テストを追加

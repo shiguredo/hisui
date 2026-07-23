@@ -16,18 +16,24 @@ on:
 jobs:
   e2e-test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # candle 系依存の cold build + whisper-tiny CPU 推論 + Opus decode + pytest overhead を
+    # 見込んで 30 分を確保する。
+    timeout-minutes: 30
     env:
       OPENH264_VERSION: "2.6.0"
       OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
-      HISUI_E2E_CARGO_RUN_ARGS: --release --features fdk-aac
+      HISUI_E2E_CARGO_RUN_ARGS: --release --features candle,fdk-aac
+      # transcribe e2e が参照する ML モデル配置。 pytest 側は HISUI_ML_MODELS_DIR から
+      # `${HISUI_ML_MODELS_DIR}/whisper-tiny` と `${HISUI_ML_MODELS_DIR}/silero-vad/onnx/model.onnx`
+      # を組み立てて --model-dir / --silero-vad-model に渡す。
+      HISUI_ML_MODELS_DIR: ${{ github.workspace }}/ml-models
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - run: rustup update stable
       - name: Install packages to build external dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake libx11-dev libpulse-dev ffmpeg libfdk-aac-dev
+          sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config cmake libx11-dev libpulse-dev ffmpeg libfdk-aac-dev protobuf-compiler
       - uses: shiguredo/github-actions/.github/actions/rust-cache@main
         with:
           os: ubuntu-24.04
@@ -40,9 +46,27 @@ jobs:
           curl -fL -o "${OPENH264_ARCHIVE}" "${OPENH264_URL}"
           bzip2 -d "${OPENH264_ARCHIVE}"
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - name: Cache Silero VAD ONNX model
+        # scripts/download_ml_models.py の TARGETS["silero-vad"][0].expected_sha256 と同じ値を key にする。
+        # SHA256 が更新されたら key ミスマッチで再取得される (script 側と手動同期する)。
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ml-models/silero-vad
+          key: silero-vad-a4a068cd6cf1ea8355b84327595838ca748ec29a25bc91fc82e6c299ccdc5808
+      - name: Cache Whisper tiny model
+        # scripts/download_ml_models.py の TARGETS["whisper-tiny"][2].expected_sha256 と同じ値を key にする。
+        # config / tokenizer だけの更新を無効化したいときは key にサフィックスを足して運用する。
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ml-models/whisper-tiny
+          key: whisper-tiny-7ebd0e69e78190ffe1438491fa05cc1f5c1aa3a4c4db3bc1723adbb551ea2395
+      - name: Download Silero VAD ONNX model
+        run: uv run scripts/download_ml_models.py --dest ml-models/ silero-vad
+      - name: Download Whisper tiny model
+        run: uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny
       - run: cargo build $HISUI_E2E_CARGO_RUN_ARGS
       - run: cargo build --release -p obsws_bootstrap
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - name: Run e2e tests
         env:
           HISUI_OPENH264_PATH: ${{ env.OPENH264_PATH }}
