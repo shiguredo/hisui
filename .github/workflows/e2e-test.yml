@@ -46,7 +46,7 @@ jobs:
           curl -fL -o "${OPENH264_ARCHIVE}" "${OPENH264_URL}"
           bzip2 -d "${OPENH264_ARCHIVE}"
           mv "libopenh264-${OPENH264_VERSION}-linux64.8.so" "${OPENH264_PATH}"
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Cache Silero VAD ONNX model
         # scripts/download_ml_models.py の TARGETS["silero-vad"][0].expected_sha256 と同じ値を key にする。
         # SHA256 が更新されたら key ミスマッチで再取得される (script 側と手動同期する)。
