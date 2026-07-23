@@ -4,7 +4,7 @@
 //! 標準出力に JSON LINE (1 行 1 セグメント) で流す。 内部は
 //! `TranscriptionService` / `TranscriptionProcessor` / `MediaFrame::Text` を組み合わせる。
 //!
-//! 実験的機能のため、`--experimental` (`-x`) グローバルフラグが立っている場合のみ有効。
+//! 実験的機能のため、`--experimental` (`-x`) フラグが立っている場合のみ有効。
 
 use std::io::Write as _;
 use std::num::NonZeroUsize;
