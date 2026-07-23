@@ -20,14 +20,14 @@ struct HandlerContext {
     av1_sequence_header: Option<Vec<u8>>,
 }
 
-/// callback にキャプチャさせる HandlerContext の遅延確定スロット。
+/// コールバックにキャプチャさせる HandlerContext の遅延確定スロット。
 ///
-/// `shiguredo_nvcodec::Encoder::new` は handler を consume する API のため、
+/// `shiguredo_nvcodec::Encoder::new` は handler を消費する API のため、
 /// sample_entry を確定するために inner が必要 / inner を作るために handler が必要という循環がある。
 /// そこで OnceLock を先に確保して handler にキャプチャさせ、
-/// Encoder::new 後に get_sequence_params から HandlerContext を確定して set する。
-/// callback (worker スレッド) は encode() 経由でしか発火しないため、
-/// encode() 前に set が完了していれば race free に read できる。
+/// Encoder::new 後に get_sequence_params から HandlerContext を確定して set() する。
+/// コールバック (ワーカースレッド) は encode() 経由でしか発火しないため、
+/// encode() 前に set() が完了していればデータ競合なく読み取れる。
 type HandlerContextSlot = Arc<OnceLock<HandlerContext>>;
 
 #[derive(Debug)]
@@ -50,11 +50,11 @@ fn build_handler(
     })
 }
 
-/// callback スレッドで発火する処理本体。
+/// コールバックスレッドで発火する処理本体。
 ///
-/// Ok 時: `EncodedFrame::into_parts` から user_data を取り出して metadata (timestamp / size) を復元し、
+/// Ok の場合: `EncodedFrame::into_parts` から user_data を取り出してメタデータ (timestamp / size) を復元し、
 /// Annex B → MP4 変換 (H.264/H.265) または Sequence Header OBU 付与 (AV1) を経て sink.emit_ok する。
-/// Err 時: メッセージを英語で prefix 付けして sink.emit_err する。
+/// Err の場合: メッセージに英語の prefix を付けて sink.emit_err する。
 fn handle_encode_callback(
     sink: &OutputSink,
     context_slot: &HandlerContextSlot,
@@ -108,7 +108,7 @@ fn convert_encoded_data(
 ) -> crate::Result<Vec<u8>> {
     if encoded_format == VideoFormat::Av1 {
         // encoded_format == Av1 の分岐に入るのは new_av1 経路のみで、
-        // そこでは make_context が Some(seq_params) を確定して slot に set する契約。
+        // そこでは make_context が Some(seq_params) を確定して slot に set() する契約。
         let seq_header = context
             .av1_sequence_header
             .as_deref()
@@ -322,7 +322,7 @@ impl NvcodecEncoder {
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size)?;
 
         // 入力フレームの軽量 clone を user_data として渡す。
-        // callback (build_handler) で EncodedFrame::into_parts から取り出す。
+        // コールバック (build_handler) で EncodedFrame::into_parts から取り出す。
         let encode_options = shiguredo_nvcodec::EncodeOptions {
             force_intra: self.force_keyframe_next,
             force_idr: self.force_keyframe_next,
