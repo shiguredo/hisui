@@ -113,7 +113,7 @@ def _is_japanese_char(c: str) -> bool:
     )
 
 
-def _assert_common_schema(lines: list[dict], expected_language: str) -> None:
+def _assert_common_schema(lines: list[dict]) -> None:
     """全 JSON LINE に共通する制約を検証する。"""
     # 初回は start >= 0 を検証する (Duration.as_secs_f64() の下限)。
     # 2 行目以降は start >= 前行の end を検証する (非減少 = 単調増加相当)。
@@ -131,9 +131,6 @@ def _assert_common_schema(lines: list[dict], expected_language: str) -> None:
             f"start={line['start']}, prev_end={prev_end}"
         )
         prev_end = line["end"]
-        assert line.get("language") == expected_language, (
-            f"line {i}: language は {expected_language} であるべき: {line.get('language')}"
-        )
         for key in ("no_speech_prob", "avg_logprob"):
             if key in line:
                 assert isinstance(line[key], (int, float)), f"line {i}: {key} が数値でない"
@@ -143,7 +140,7 @@ def _assert_common_schema(lines: list[dict], expected_language: str) -> None:
 def test_transcribe_english_fixture(binary_path: Path) -> None:
     """英語 fixture (`speech-en.mp4`) を transcribe すると英字を含む JSON LINE が返る。"""
     lines = _run_transcribe(binary_path, "en", "speech-en.mp4")
-    _assert_common_schema(lines, "en")
+    _assert_common_schema(lines)
 
     # 少なくとも 1 行に非空 text + 英字が含まれること
     ascii_letters_total = 0
@@ -171,7 +168,7 @@ def test_transcribe_english_fixture(binary_path: Path) -> None:
 def test_transcribe_japanese_fixture(binary_path: Path) -> None:
     """日本語 fixture (`speech-ja.mp4`) を transcribe すると日本語文字を含む JSON LINE が返る。"""
     lines = _run_transcribe(binary_path, "ja", "speech-ja.mp4")
-    _assert_common_schema(lines, "ja")
+    _assert_common_schema(lines)
 
     # 少なくとも 1 行に非空 text + 日本語文字が含まれること
     japanese_chars_total = 0

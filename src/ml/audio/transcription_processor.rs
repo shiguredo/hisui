@@ -441,7 +441,6 @@ fn build_text_frame(start: Duration, end: Duration, transcript: WhisperTranscrip
         start,
         end,
         text: transcript.text,
-        language: transcript.language,
         no_speech_prob: Some(transcript.no_speech_prob.get() as f32),
         avg_logprob: Some(transcript.avg_logprob.get() as f32),
     }
@@ -568,7 +567,6 @@ mod tests {
     fn make_transcript(text: &str, no_speech: f64, avg_lp: f64) -> WhisperTranscript {
         WhisperTranscript {
             text: text.to_owned(),
-            language: Some(LanguageCode::new("en")),
             no_speech_prob: crate::probability::Probability::new(no_speech).expect("有効な確率"),
             avg_logprob: crate::probability::LogProbability::new(avg_lp).expect("有効な対数確率"),
         }
@@ -595,7 +593,7 @@ mod tests {
         assert!(!should_publish(&transcript));
     }
 
-    /// build_text_frame は start / end / text / language / 品質指標を透過する。
+    /// build_text_frame は start / end / text / 品質指標を透過する。
     #[test]
     fn build_text_frame_preserves_all_fields() {
         let transcript = make_transcript("hello", 0.2, -0.4);
@@ -607,10 +605,6 @@ mod tests {
         assert_eq!(frame.start, Duration::from_millis(100));
         assert_eq!(frame.end, Duration::from_millis(500));
         assert_eq!(frame.text, "hello");
-        assert_eq!(
-            frame.language.as_ref().map(LanguageCode::as_str),
-            Some("en")
-        );
         assert_eq!(frame.no_speech_prob, Some(0.2_f32));
         assert_eq!(frame.avg_logprob, Some(-0.4_f32));
     }

@@ -45,8 +45,6 @@ pub struct TextFrame {
     pub end: Duration,
     /// 文字起こしテキスト等
     pub text: String,
-    /// 言語コード ("ja" 等)。検出失敗時や言語推定なしの場合は None
-    pub language: Option<LanguageCode>,
     /// 発話がない確率 (0.0 - 1.0、Whisper 由来の幻覚指標)。指標を提供しない生成元では None
     pub no_speech_prob: Option<f32>,
     /// 平均 log probability (信頼度目安、Whisper 由来)。指標を提供しない生成元では None
@@ -61,9 +59,6 @@ impl nojson::DisplayJson for TextFrame {
             f.member("start", self.start.as_secs_f64())?;
             f.member("end", self.end.as_secs_f64())?;
             f.member("text", &self.text)?;
-            if let Some(v) = &self.language {
-                f.member("language", v)?;
-            }
             if let Some(v) = self.no_speech_prob {
                 f.member("no_speech_prob", v)?;
             }
@@ -118,7 +113,6 @@ mod tests {
             start: Duration::from_millis(500),
             end: Duration::from_millis(2500),
             text: "hello".to_owned(),
-            language: Some(LanguageCode::new("en")),
             no_speech_prob: Some(0.05),
             avg_logprob: Some(-0.3),
         };
@@ -130,7 +124,6 @@ mod tests {
         assert!(json.contains("\"start\":0.5"), "start: {json}");
         assert!(json.contains("\"end\":2.5"), "end: {json}");
         assert!(json.contains("\"text\":\"hello\""), "text: {json}");
-        assert!(json.contains("\"language\":\"en\""), "language: {json}");
         assert!(
             json.contains("\"no_speech_prob\":0.05"),
             "no_speech_prob: {json}"
@@ -146,7 +139,6 @@ mod tests {
             start: Duration::from_millis(200),
             end: Duration::from_millis(1200),
             text: "mixed".to_owned(),
-            language: Some(LanguageCode::new("ja")),
             no_speech_prob: None,
             avg_logprob: Some(-0.5),
         };
@@ -155,10 +147,6 @@ mod tests {
             f.value(&frame)
         })
         .to_string();
-        assert!(
-            json.contains("\"language\":\"ja\""),
-            "language 残る: {json}"
-        );
         assert!(
             !json.contains("no_speech_prob"),
             "no_speech_prob 省略: {json}"
@@ -170,7 +158,7 @@ mod tests {
         assert!(!json.contains("null"), "null 非出現: {json}");
     }
 
-    /// TextFrame の DisplayJson は key 順序が start / end / text / language /
+    /// TextFrame の DisplayJson は key 順序が start / end / text /
     /// no_speech_prob / avg_logprob 固定 (JSON LINE スキーマ契約の回帰保護)。
     #[test]
     fn display_json_preserves_key_order() {
@@ -178,7 +166,6 @@ mod tests {
             start: Duration::from_millis(500),
             end: Duration::from_millis(2500),
             text: "hello".to_owned(),
-            language: Some(LanguageCode::new("en")),
             no_speech_prob: Some(0.05),
             avg_logprob: Some(-0.3),
         };
@@ -191,12 +178,8 @@ mod tests {
         assert!(idx("\"start\"") < idx("\"end\""), "start < end: {json}");
         assert!(idx("\"end\"") < idx("\"text\""), "end < text: {json}");
         assert!(
-            idx("\"text\"") < idx("\"language\""),
-            "text < language: {json}"
-        );
-        assert!(
-            idx("\"language\"") < idx("\"no_speech_prob\""),
-            "language < no_speech_prob: {json}"
+            idx("\"text\"") < idx("\"no_speech_prob\""),
+            "text < no_speech_prob: {json}"
         );
         assert!(
             idx("\"no_speech_prob\"") < idx("\"avg_logprob\""),
@@ -212,7 +195,6 @@ mod tests {
             start: Duration::ZERO,
             end: Duration::from_millis(100),
             text: String::new(),
-            language: None,
             no_speech_prob: None,
             avg_logprob: None,
         };
@@ -221,7 +203,6 @@ mod tests {
             f.value(&frame)
         })
         .to_string();
-        assert!(!json.contains("language"), "language 省略: {json}");
         assert!(
             !json.contains("no_speech_prob"),
             "no_speech_prob 省略: {json}"

@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use hisui::audio::{AudioFormat, AudioFrame, Channels, SampleRate};
-use hisui::text::LanguageCode;
 use hisui::video::{VideoFormat, VideoFrame};
 use hisui::{MediaFrame, TextFrame};
 
@@ -37,7 +36,6 @@ fn make_text_frame() -> TextFrame {
         start: Duration::from_secs(1),
         end: Duration::from_secs(5),
         text: "こんにちは".to_owned(),
-        language: Some(LanguageCode::new("ja")),
         no_speech_prob: Some(0.1),
         avg_logprob: Some(-0.5),
     }

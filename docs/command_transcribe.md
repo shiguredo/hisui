@@ -70,7 +70,7 @@ $ hisui -x transcribe \
     --silero-vad-model ./ml-models/silero-vad/onnx/model.onnx \
     --language en \
     ./sample.mp4
-{"start":0.96,"end":2.272,"text":"Hello, world.","language":"en","no_speech_prob":0.05,"avg_logprob":-0.3}
+{"start":0.96,"end":2.272,"text":"Hello, world.","no_speech_prob":0.05,"avg_logprob":-0.3}
 ```
 
 選択された ML device (cuda / metal / cpu) を確認する場合は `--verbose` を併用します
@@ -89,7 +89,6 @@ $ hisui --verbose -x transcribe ...
 | `start`            | number (秒)   | 必須 | セグメント開始時刻 (float、`Duration` を秒に変換)                                          |
 | `end`              | number (秒)   | 必須 | セグメント終了時刻                                                                         |
 | `text`             | string        | 必須 | 文字起こしされたテキスト                                                                   |
-| `language`         | string        | 任意 | 言語コード (`--language` で指定した値が入る)。 推論対象がなかった等の異常系ではキーごと省略  |
 | `no_speech_prob`   | number        | 任意 | 発話がない確率 (0.0 - 1.0、Whisper 由来の幻覚指標)                                         |
 | `avg_logprob`      | number        | 任意 | 平均 log probability (信頼度目安、Whisper 由来)                                            |
 
