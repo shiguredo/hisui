@@ -40,73 +40,106 @@ pub struct NvcodecEncoder {
 }
 
 /// shiguredo_nvcodec::Encoder の生成に必要なハンドラを構築する。
-///
-/// callback スレッドで `EncodedFrame::into_parts` から user_data を取り出して
-/// metadata (timestamp / size) を復元し、 Annex B → MP4 変換 (H.264/H.265) または
-/// Sequence Header OBU 付与 (AV1) を経て sink.emit_ok までを一貫して実施する。
 fn build_handler(
     sink: OutputSink,
     context_slot: HandlerContextSlot,
     encoded_format: VideoFormat,
 ) -> shiguredo_nvcodec::FnEncodeHandler<VideoFrame, shiguredo_nvcodec::Error> {
-    shiguredo_nvcodec::FnEncodeHandler::<VideoFrame, shiguredo_nvcodec::Error>::new(move |result| {
-        match result {
-            Ok(encoded_frame) => {
-                let context = context_slot
-                    .get()
-                    .expect("BUG: HandlerContext must be set before first encode() call");
-
-                let keyframe = matches!(
-                    encoded_frame.picture_type(),
-                    shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
-                );
-                let (mut data, input_frame) = encoded_frame.into_parts();
-
-                // AV1 はキーフレームに Sequence Header OBU が無ければ先頭に付与、
-                // H.264/H.265 は Annex B から MP4 形式に変換する。
-                let frame_data = if encoded_format == VideoFormat::Av1 {
-                    if keyframe && !has_sequence_header(&data) {
-                        // encoded_format == Av1 の分岐に入るのは new_av1 経路のみで、
-                        // そこでは make_context が Some(seq_params) を確定して slot に set する契約。
-                        let av1_sequence_header = context
-                            .av1_sequence_header
-                            .as_deref()
-                            .expect("BUG: AV1 encoder must have av1_sequence_header set");
-                        tracing::debug!(
-                            "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
-                            av1_sequence_header.len(),
-                            data.len()
-                        );
-                        let mut new_data = Vec::new();
-                        new_data.extend_from_slice(av1_sequence_header);
-                        new_data.extend_from_slice(&data);
-                        data = new_data;
-                    }
-                    data
-                } else {
-                    match convert_annexb_to_mp4(&data) {
-                        Ok(data) => data,
-                        Err(e) => {
-                            sink.emit_err(e);
-                            return;
-                        }
-                    }
-                };
-
-                sink.emit_ok(VideoFrame {
-                    data: frame_data,
-                    format: encoded_format,
-                    keyframe,
-                    size: input_frame.size,
-                    timestamp: input_frame.timestamp,
-                    sample_entry: Some(context.sample_entry.clone()),
-                });
-            }
-            Err(err) => {
-                sink.emit_err(crate::Error::new(format!("nvcodec encode error: {err}")));
-            }
-        }
+    shiguredo_nvcodec::FnEncodeHandler::new(move |result| {
+        handle_encode_callback(&sink, &context_slot, encoded_format, result);
     })
+}
+
+/// callback スレッドで発火する処理本体。
+///
+/// Ok 時: `EncodedFrame::into_parts` から user_data を取り出して metadata (timestamp / size) を復元し、
+/// Annex B → MP4 変換 (H.264/H.265) または Sequence Header OBU 付与 (AV1) を経て sink.emit_ok する。
+/// Err 時: メッセージを英語で prefix 付けして sink.emit_err する。
+fn handle_encode_callback(
+    sink: &OutputSink,
+    context_slot: &HandlerContextSlot,
+    encoded_format: VideoFormat,
+    result: std::result::Result<
+        shiguredo_nvcodec::EncodedFrame<VideoFrame>,
+        shiguredo_nvcodec::Error,
+    >,
+) {
+    match result {
+        Ok(encoded_frame) => {
+            let context = context_slot
+                .get()
+                .expect("BUG: HandlerContext must be set before first encode() call");
+            let keyframe = matches!(
+                encoded_frame.picture_type(),
+                shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
+            );
+            let (data, input_frame) = encoded_frame.into_parts();
+            let frame_data = match convert_encoded_data(encoded_format, data, keyframe, context) {
+                Ok(d) => d,
+                Err(e) => {
+                    sink.emit_err(e);
+                    return;
+                }
+            };
+            sink.emit_ok(VideoFrame {
+                data: frame_data,
+                format: encoded_format,
+                keyframe,
+                size: input_frame.size,
+                timestamp: input_frame.timestamp,
+                sample_entry: Some(context.sample_entry.clone()),
+            });
+        }
+        Err(err) => {
+            sink.emit_err(crate::Error::new(format!("nvcodec encode error: {err}")));
+        }
+    }
+}
+
+/// エンコード出力フレームを VideoFormat に応じて MP4 に載せる形式へ変換する。
+///
+/// AV1: キーフレームに Sequence Header OBU が欠落している場合のみ先頭に付与する。
+/// H.264 / H.265: Annex B 形式から MP4 形式に変換する。
+fn convert_encoded_data(
+    encoded_format: VideoFormat,
+    data: Vec<u8>,
+    keyframe: bool,
+    context: &HandlerContext,
+) -> crate::Result<Vec<u8>> {
+    if encoded_format == VideoFormat::Av1 {
+        // encoded_format == Av1 の分岐に入るのは new_av1 経路のみで、
+        // そこでは make_context が Some(seq_params) を確定して slot に set する契約。
+        let seq_header = context
+            .av1_sequence_header
+            .as_deref()
+            .expect("BUG: AV1 encoder must have av1_sequence_header set");
+        Ok(prepend_av1_sequence_header_if_needed(
+            data, keyframe, seq_header,
+        ))
+    } else {
+        convert_annexb_to_mp4(&data)
+    }
+}
+
+/// AV1 のキーフレームで Sequence Header OBU が欠落している場合のみ、先頭に付与して返す。
+/// それ以外の場合は data をそのまま返す。
+fn prepend_av1_sequence_header_if_needed(
+    data: Vec<u8>,
+    keyframe: bool,
+    seq_header: &[u8],
+) -> Vec<u8> {
+    if !keyframe || has_sequence_header(&data) {
+        return data;
+    }
+    tracing::debug!(
+        "prepending Sequence Header OBU to AV1 keyframe (seq_header: {} bytes, frame: {} bytes)",
+        seq_header.len(),
+        data.len()
+    );
+    let mut new_data = Vec::with_capacity(seq_header.len() + data.len());
+    new_data.extend_from_slice(seq_header);
+    new_data.extend_from_slice(&data);
+    new_data
 }
 
 impl NvcodecEncoder {
