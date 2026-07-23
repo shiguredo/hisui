@@ -70,7 +70,7 @@ $ hisui -x transcribe \
     --silero-vad-model ./ml-models/silero-vad/onnx/model.onnx \
     --language en \
     ./sample.mp4
-{"start":0.96,"end":2.272,"text":"Hello, world.","no_speech_prob":0.05,"avg_logprob":-0.3}
+{"type":"transcript","start":0.96,"end":2.272,"text":"Hello, world.","no_speech_prob":0.05,"avg_logprob":-0.3}
 ```
 
 選択された ML device (cuda / metal / cpu) を確認する場合は `--verbose` を併用します
@@ -86,6 +86,7 @@ $ hisui --verbose -x transcribe ...
 
 | フィールド        | 型           | 必須 | 意味                                                                                       |
 |--------------------|---------------|------|--------------------------------------------------------------------------------------------|
+| `type`             | string        | 必須 | 常に `"transcript"` (`--emit-exit-metrics` の `"metrics"` 行と区別する)                    |
 | `start`            | number (秒)   | 必須 | セグメント開始時刻 (float、`Duration` を秒に変換)                                          |
 | `end`              | number (秒)   | 必須 | セグメント終了時刻                                                                         |
 | `text`             | string        | 必須 | 文字起こしされたテキスト                                                                   |
@@ -94,12 +95,13 @@ $ hisui --verbose -x transcribe ...
 
 `no_speech_prob > 0.6` かつ `avg_logprob < -1.0` のセグメント、および空テキストのセグメントは publish しません。
 
+`--emit-exit-metrics` を併用した場合、上記の `"type":"transcript"` 行に続いて末尾に `{"type":"metrics", ...}` の 1 行が追加で出力されます。
+
 ## 制約
 
 - **対応入力は MP4 のみ** (`.mp4` / `.m4a`)。 WAV / WebM / Opus 単体等は本サブコマンドでは扱いません
 - **標準入力 (`-`) は非対応** (MP4 の seek 前提のため)
 - **音声トラックが複数含まれる MP4 では最初に見つかった対応コーデックのトラックのみ** を文字起こしします (対応コーデックの 2 つ目以降は silent に無視、非対応コーデックの track は警告ログ付きで skip)
-- **`--emit-exit-metrics` と併用してもメトリクスは出力されません** (transcribe は JSON LINE を stdout に流すため出力が混線する。 併用時は標準エラーに warn ログが 1 度出ます)
 - **出力は JSON LINE のみ**。 MP4 字幕トラック (WVTT 等) としての出力は非対応
 - 実験的機能のため、CLI 仕様と JSON LINE スキーマは将来変更される可能性があります
 

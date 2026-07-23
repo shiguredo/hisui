@@ -52,10 +52,13 @@ pub struct TextFrame {
 }
 
 impl nojson::DisplayJson for TextFrame {
+    /// 先頭に `type = "transcript"` を出し、`--emit-exit-metrics` の
+    /// `type = "metrics"` 行と JSON LINE stream 上で区別できるようにする。
     /// `Option` フィールドは `Some` のときのみ member を書く (nojson の `Option<T>: DisplayJson`
     /// を素通しすると `None` が `null` として出るが、JSON LINE 出力ではキーごと省略したい)。
     fn fmt(&self, f: &mut nojson::JsonFormatter<'_, '_>) -> std::fmt::Result {
         f.object(|f| {
+            f.member("type", "transcript")?;
             f.member("start", self.start.as_secs_f64())?;
             f.member("end", self.end.as_secs_f64())?;
             f.member("text", &self.text)?;
@@ -121,6 +124,7 @@ mod tests {
             f.value(&frame)
         })
         .to_string();
+        assert!(json.contains("\"type\":\"transcript\""), "type: {json}");
         assert!(json.contains("\"start\":0.5"), "start: {json}");
         assert!(json.contains("\"end\":2.5"), "end: {json}");
         assert!(json.contains("\"text\":\"hello\""), "text: {json}");
@@ -158,7 +162,7 @@ mod tests {
         assert!(!json.contains("null"), "null 非出現: {json}");
     }
 
-    /// TextFrame の DisplayJson は key 順序が start / end / text /
+    /// TextFrame の DisplayJson は key 順序が type / start / end / text /
     /// no_speech_prob / avg_logprob 固定 (JSON LINE スキーマ契約の回帰保護)。
     #[test]
     fn display_json_preserves_key_order() {
@@ -175,6 +179,7 @@ mod tests {
         })
         .to_string();
         let idx = |key: &str| json.find(key).expect(key);
+        assert!(idx("\"type\"") < idx("\"start\""), "type < start: {json}");
         assert!(idx("\"start\"") < idx("\"end\""), "start < end: {json}");
         assert!(idx("\"end\"") < idx("\"text\""), "end < text: {json}");
         assert!(

@@ -119,8 +119,11 @@ def _assert_common_schema(lines: list[dict]) -> None:
     # 2 行目以降は start >= 前行の end を検証する (非減少 = 単調増加相当)。
     prev_end = 0.0
     for i, line in enumerate(lines):
-        for key in ("start", "end", "text"):
+        for key in ("type", "start", "end", "text"):
             assert key in line, f"line {i}: 必須キー {key} が無い: {line}"
+        assert line["type"] == "transcript", (
+            f"line {i}: type は transcript のはず: {line['type']}"
+        )
         assert isinstance(line["start"], (int, float)), f"line {i}: start が数値でない"
         assert isinstance(line["end"], (int, float)), f"line {i}: end が数値でない"
         assert line["start"] <= line["end"], (

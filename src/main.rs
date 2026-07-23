@@ -52,13 +52,6 @@ fn main() -> noargs::Result<()> {
     let stats = hisui::stats::Stats::new();
 
     // サブコマンドで分岐する。
-    // transcribe サブコマンドは JSON LINE を stdout に流すため、`--emit-exit-metrics` の
-    // stdout 出力と併用すると混線する。 transcribe が matched した場合は下記で silent 抑止する。
-    // candle feature 無効ビルドでは transcribe 分岐が消え書き換えが発生しないため `mut` を付けない。
-    #[cfg(feature = "candle")]
-    let mut transcribe_matched = false;
-    #[cfg(not(feature = "candle"))]
-    let transcribe_matched = false;
     let matched = hisui::subcommand_inspect::try_run(&mut args, stats.clone())?
         || hisui::subcommand_list_codecs::try_run(&mut args)?
         || hisui::sora::recording_subcommand_compose::try_run(&mut args, stats.clone())?
@@ -68,9 +61,7 @@ fn main() -> noargs::Result<()> {
         || {
             #[cfg(feature = "candle")]
             {
-                transcribe_matched =
-                    hisui::subcommand_transcribe::try_run(&mut args, stats.clone(), experimental)?;
-                transcribe_matched
+                hisui::subcommand_transcribe::try_run(&mut args, stats.clone(), experimental)?
             }
             #[cfg(not(feature = "candle"))]
             {
@@ -80,13 +71,7 @@ fn main() -> noargs::Result<()> {
         };
 
     if emit_exit_metrics && matched && !args.metadata().help_mode {
-        if transcribe_matched {
-            tracing::warn!(
-                "--emit-exit-metrics is ignored for transcribe because JSON LINE output shares stdout"
-            );
-        } else {
-            hisui::metrics::emit_exit_metrics_to_stdout(&stats);
-        }
+        hisui::metrics::emit_exit_metrics_to_stdout(&stats);
     }
 
     if let Some(help) = args.finish()? {
