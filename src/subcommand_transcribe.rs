@@ -1,6 +1,6 @@
 //! `hisui -x transcribe` 実験的サブコマンド。
 //!
-//! MP4 (音声のみの m4a を含む) を入力に取り、Whisper で文字起こしした結果を
+//! MP4 を入力に取り、Whisper で文字起こしした結果を
 //! 標準出力に JSON LINE (1 行 1 セグメント) で流す。 内部は
 //! `TranscriptionService` / `TranscriptionProcessor` / `MediaFrame::Text` を組み合わせる。
 //!
@@ -89,7 +89,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
         .present_and_then(|a| a.value().parse())?;
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
         .example("/path/to/speech.mp4")
-        .doc("文字起こし対象の MP4 ファイル (.mp4 / .m4a、音声のみの m4a を含む)")
+        .doc("文字起こし対象の MP4 ファイル (.mp4 / .m4a)")
         .take(args)
         .then(|a| a.value().parse())?;
 

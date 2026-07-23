@@ -3,7 +3,7 @@
 Whisper と Silero VAD の実モデルを使い、Common Voice の CC0 短発話 (Opus in MP4) を
 文字起こしして、標準出力の JSON LINE のスキーマと語彙を検証する。
 
-環境変数 `HISUI_ML_MODELS_DIR` が model 配置ディレクトリを指す必要がある
+環境変数 `HISUI_ML_MODELS_DIR` がモデル配置ディレクトリを指す必要がある
 (CI では `${{ github.workspace }}/ml-models` を設定する)。 未設定なら pytest.skip する
 (ローカル環境で ML モデル未配置なら実行しない)。
 """

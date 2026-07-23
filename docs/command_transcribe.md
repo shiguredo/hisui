@@ -1,6 +1,6 @@
 # `hisui -x transcribe` コマンド (実験的機能)
 
-`hisui -x transcribe` コマンドは、MP4 (音声のみの m4a を含む) を入力に取り、
+`hisui -x transcribe` コマンドは、MP4 を入力に取り、
 Whisper で音声を文字起こしして標準出力に JSON LINE (1 行 1 セグメント) で
 出力する **実験的サブコマンド** です。 `--experimental` (`-x`) と組み合わせて起動します。
 
@@ -13,7 +13,7 @@ Whisper で音声を文字起こしして標準出力に JSON LINE (1 行 1 セ�
 
 ## モデル取得
 
-Whisper モデル (whisper-tiny) と Silero VAD の ONNX モデルをダウンロードします。
+Whisper モデル (下記は whisper-tiny の例) と Silero VAD の ONNX モデルをダウンロードします。
 
 ```console
 $ uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny silero-vad
@@ -36,7 +36,7 @@ Example:
   $ hisui transcribe --model-dir ./ml-models/whisper-tiny --silero-vad-model ./ml-models/silero-vad/onnx/model.onnx --language ja /path/to/speech.mp4
 
 Arguments:
-  INPUT_FILE 文字起こし対象の MP4 ファイル (.mp4 / .m4a、音声のみの m4a を含む)
+  INPUT_FILE 文字起こし対象の MP4 ファイル (.mp4 / .m4a)
 
 Options:
   -h, --help                    このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
@@ -56,9 +56,7 @@ Options:
       --fdk-aac <PATH>          FDK-AAC の共有ライブラリのパス [env: HISUI_FDK_AAC_PATH]
 ```
 
-`--experimental` (`-x`) が指定されていない状態で `transcribe` を呼ぶと、標準エラーに
-`transcribe subcommand requires --experimental (-x) flag` を書き出して
-非ゼロ exit code で終了します。
+`--experimental` (`-x`) が指定されていない状態で `transcribe` を呼ぶと、非ゼロの終了コードを返します。
 
 ## 実行例
 
@@ -93,18 +91,12 @@ $ hisui --verbose -x transcribe ...
 | `no_speech_prob`   | number        | 任意 | 発話がない確率 (0.0 - 1.0、Whisper 由来の幻覚指標)                                         |
 | `avg_logprob`      | number        | 任意 | 平均 log probability (信頼度目安、Whisper 由来)                                            |
 
-`no_speech_prob > 0.6` かつ `avg_logprob < -1.0` のセグメント、および空テキストのセグメントは publish しません。
+`no_speech_prob > 0.6` かつ `avg_logprob < -1.0` のセグメント、および空テキストのセグメントは出力しません。
 
 `--emit-exit-metrics` を併用した場合、上記の `"type":"transcript"` 行に続いて末尾に `{"type":"metrics", ...}` の 1 行が追加で出力されます。
 
 ## 制約
 
-- **対応入力は MP4 のみ** (`.mp4` / `.m4a`)。 WAV / WebM / Opus 単体等は本サブコマンドでは扱いません
-- **標準入力 (`-`) は非対応** (MP4 の seek 前提のため)
 - **音声トラックが複数含まれる MP4 では最初に見つかった対応コーデックのトラックのみ** を文字起こしします (対応コーデックの 2 つ目以降は silent に無視、非対応コーデックの track は警告ログ付きで skip)
 - **出力は JSON LINE のみ**。 MP4 字幕トラック (WVTT 等) としての出力は非対応
 - 実験的機能のため、CLI 仕様と JSON LINE スキーマは将来変更される可能性があります
-
-## 関連ドキュメント
-
-- 内部設計 (Processor 構成、モデル型設計): [`docs/internals/transcription.md`](internals/transcription.md), [`docs/internals/ml_models.md`](internals/ml_models.md)
