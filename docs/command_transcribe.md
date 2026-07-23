@@ -28,7 +28,7 @@ $ uv run scripts/download_ml_models.py --dest ml-models/ whisper-tiny silero-vad
 
 ```console
 $ hisui -x transcribe -h
-MP4 音声を Whisper で文字起こしします (実験的機能、--experimental (-x) が必須)
+MP4 音声を Whisper で文字起こしします (実験的機能)
 
 Usage: hisui ... transcribe --model-dir <PATH> --silero-vad-model <PATH> --language <CODE> [OPTIONS] INPUT_FILE
 
@@ -47,7 +47,7 @@ Options:
       --model-dir <PATH>        Whisper モデルディレクトリ (config.json / tokenizer.json / model.safetensors を含む) [env: HISUI_WHISPER_MODEL_DIR]
       --silero-vad-model <PATH> Silero VAD の ONNX モデルファイル (silero_vad.onnx) [env: HISUI_SILERO_VAD_MODEL_PATH]
       --language <CODE>         Whisper 言語指定 (ISO 639-1、`ja` / `en` 等) [env: HISUI_WHISPER_LANGUAGE]
-      --transcribe-threads <N>  1 推論あたりの candle rayon スレッド数を上書きします [env: HISUI_TRANSCRIBE_THREADS]
+      --transcribe-threads <N>  1 推論あたりの並列スレッド数を上書きします [env: HISUI_TRANSCRIBE_THREADS]
 ```
 
 `--features fdk-aac` を有効にしてビルドした場合は、末尾に以下のオプションが追加されます。
@@ -71,7 +71,7 @@ $ hisui -x transcribe \
 {"type":"transcript","start":0.96,"end":2.272,"text":"Hello, world.","no_speech_prob":0.05,"avg_logprob":-0.3}
 ```
 
-選択された ML device (cuda / metal / cpu) を確認する場合は `--verbose` を併用します
+選択された ML デバイス (cuda / metal / cpu) を確認する場合は `--verbose` を併用します
 (標準エラーに INFO ログが出力されます)。
 
 ```console
@@ -97,6 +97,6 @@ $ hisui --verbose -x transcribe ...
 
 ## 制約
 
-- **音声トラックが複数含まれる MP4 では最初に見つかった対応コーデックのトラックのみ** を文字起こしします (対応コーデックの 2 つ目以降は silent に無視、非対応コーデックの track は警告ログ付きで skip)
+- **音声トラックが複数含まれる MP4 では最初に見つかった対応コーデックのトラックのみ** を文字起こしします (対応コーデックの 2 つ目以降は警告ログなしで無視、非対応コーデックのトラックは警告ログ付きでスキップ)
 - **出力は JSON LINE のみ**。 MP4 字幕トラック (WVTT 等) としての出力は非対応
 - 実験的機能のため、CLI 仕様と JSON LINE スキーマは将来変更される可能性があります

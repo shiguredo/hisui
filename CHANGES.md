@@ -65,7 +65,7 @@
   - Whisper モデル (`--model-dir` 必須) と Silero VAD (`--silero-vad-model` 必須) と言語指定 (`--language` 必須) で MP4 (`.mp4` / `.m4a`) の音声を文字起こしし、標準出力に JSON LINE で出力する
   - JSON LINE の各行に `"type":"transcript"` が入り、`--emit-exit-metrics` の `"type":"metrics"` 行と併用時に振り分け可能
   - 対応入力は MP4 のみ
-  - `--transcribe-threads` (`HISUI_TRANSCRIBE_THREADS`) で 1 推論あたりの candle rayon スレッド数を上書きできる
+  - `--transcribe-threads` (`HISUI_TRANSCRIBE_THREADS`) で 1 推論あたりの並列スレッド数を上書きできる
   - モデル取得は `scripts/download_ml_models.py --dest ml-models/ whisper-tiny silero-vad`
   - @sile
 - [ADD] obsws 経由でリアルタイム合成映像にテキストオーバーレイを描画できるようにする

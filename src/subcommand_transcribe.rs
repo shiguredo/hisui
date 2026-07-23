@@ -33,7 +33,7 @@ pub fn try_run(
     experimental: bool,
 ) -> noargs::Result<bool> {
     if !noargs::cmd("transcribe")
-        .doc("MP4 音声を Whisper で文字起こしします (実験的機能、--experimental (-x) が必須)")
+        .doc("MP4 音声を Whisper で文字起こしします (実験的機能)")
         .take(args)
         .is_present()
     {
@@ -75,8 +75,8 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
         .ty("N")
         .env("HISUI_TRANSCRIBE_THREADS")
         .doc(concat!(
-            "1 推論あたりの candle rayon スレッド数を上書きします\n",
-            "未指定なら既存の RAYON_NUM_THREADS を尊重し、それも無ければ論理コア数 (rayon の既定)"
+            "1 推論あたりの並列スレッド数を上書きします\n",
+            "未指定なら環境変数 RAYON_NUM_THREADS を尊重し、それも未設定なら論理コア数を使う"
         ))
         .take(args)
         .present_and_then(|a| a.value().parse())?;
