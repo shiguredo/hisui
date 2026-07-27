@@ -909,7 +909,7 @@ fn enumerate_audio_device_property_items(
     match property_name {
         "device_id" => {
             let mut items = Vec::new();
-            for device in device_list.devices() {
+            for device in &device_list {
                 let name = device.name().unwrap_or_else(|_| "Unknown".to_owned());
                 let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
                 items.push(ObswsPropertyItem {
@@ -922,7 +922,7 @@ fn enumerate_audio_device_property_items(
         }
         "sample_rate" => {
             let mut values = BTreeSet::new();
-            for device in device_list.devices() {
+            for device in &device_list {
                 // device_id が指定されている場合はそのデバイスだけフィルタする
                 if let Some(target_id) = device_id {
                     let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
@@ -943,7 +943,7 @@ fn enumerate_audio_device_property_items(
         }
         "channels" => {
             let mut values = BTreeSet::new();
-            for device in device_list.devices() {
+            for device in &device_list {
                 if let Some(target_id) = device_id {
                     let unique_id = device.unique_id().unwrap_or_else(|_| "unknown".to_owned());
                     if unique_id != target_id {

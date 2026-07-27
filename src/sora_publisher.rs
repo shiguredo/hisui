@@ -15,6 +15,12 @@ pub struct SoraPublisher {
     pub input_audio_track_id: TrackId,
 }
 
+/// SoraPublisher は SendOnly 接続で sora_sdk のイベントを利用しないため、
+/// すべてデフォルトの空実装のままにする。
+struct SoraPublisherEventHandler;
+
+impl sora_sdk::SoraConnectionEventHandler for SoraPublisherEventHandler {}
+
 impl SoraPublisher {
     pub async fn run(self, handle: ProcessorHandle) -> crate::Result<()> {
         // video/audio track を購読
@@ -58,6 +64,7 @@ impl SoraPublisher {
             self.signaling_urls.clone(),
             self.channel_id.clone(),
             sora_sdk::Role::SendOnly,
+            SoraPublisherEventHandler,
         )
         .sender_video_track(video_track)
         .sender_audio_track(audio_track);

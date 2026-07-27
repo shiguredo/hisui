@@ -116,13 +116,13 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.11 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.14 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに tokio 1.53.1 を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0 を追加する
+- [ADD] 依存ライブラリに shiguredo_audio_device 2026.2.0 を追加する
   - @sile
 - [ADD] server サブコマンドに `--ui-remote-url` オプションを追加する
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする

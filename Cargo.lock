@@ -2686,9 +2686,9 @@ dependencies = [
 
 [[package]]
 name = "shiguredo_audio_device"
-version = "2026.1.0"
+version = "2026.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c684258d83d7d994b88b2c1daf8f54735a6f0cac052f8962126d7f672d45f60"
+checksum = "3ec3ed86e05d96913cda53dc56cd6ee7745d2a88bb170d643c639c15d6c91f7a"
 dependencies = [
  "bindgen",
  "cc",
@@ -2994,9 +2994,9 @@ dependencies = [
 
 [[package]]
 name = "sora_sdk"
-version = "2026.1.0-canary.11"
+version = "2026.1.0-canary.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aea57abe10189c63deb212960afbbf9229bbc3fcfbbc22f2d939d85a8f3087fe"
+checksum = "aa18619eb0623c4a021972896de8bc46eac6fa9e487713a781711b4ee1fa80ce"
 dependencies = [
  "aws-lc-rs",
  "noflate",

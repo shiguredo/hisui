@@ -1,10 +1,10 @@
 use shiguredo_webrtc::{
-    AudioTrack, AudioTrackSink, RtpTransceiver, VideoSink, VideoSinkWants, VideoTrack,
+    AudioTrack, AudioTrackSink, RtpReceiver, RtpTransceiver, VideoSink, VideoSinkWants, VideoTrack,
 };
 
 /// SoraSubscriber processor から coordinator へ通知するイベント。
 ///
-/// sora_sdk のコールバック（on_track, on_remove_track, on_notify 等）は
+/// sora_sdk のイベントハンドラ ([SoraSubscriberEventHandler]) は
 /// 別スレッドから呼ばれるため、mpsc channel 経由で coordinator に転送する。
 pub enum SoraSourceEvent {
     /// on_track: リモートトラック到着
@@ -63,61 +63,17 @@ impl SoraSubscriber {
             crate::Error::new(format!("failed to create SoraConnectionContext: {e}"))
         })?;
 
-        // コールバック用のクローン
-        let on_track_name = subscriber_name.clone();
-        let on_track_tx = event_tx.clone();
-
-        let on_remove_track_name = subscriber_name.clone();
-        let on_remove_track_tx = event_tx.clone();
-
-        let on_notify_name = subscriber_name.clone();
-        let on_notify_tx = event_tx.clone();
-
-        let on_ws_close_name = subscriber_name.clone();
-        let on_ws_close_tx = event_tx.clone();
-
         // SoraConnection を構築（RecvOnly）
         let mut builder = sora_sdk::SoraConnection::builder(
             context,
             self.signaling_urls.clone(),
             self.channel_id.clone(),
             sora_sdk::Role::RecvOnly,
-        )
-        .on_track(move |transceiver| {
-            let _ = on_track_tx.send(SoraSourceEvent::TrackReceived {
-                subscriber_name: on_track_name.clone(),
-                transceiver,
-            });
-        })
-        .on_remove_track(move |receiver| {
-            let track = receiver.track();
-            let track_id = track.id().unwrap_or_default();
-            let _ = on_remove_track_tx.send(SoraSourceEvent::TrackRemoved {
-                subscriber_name: on_remove_track_name.clone(),
-                track_id,
-            });
-        })
-        .on_notify(move |json| {
-            let _ = on_notify_tx.send(SoraSourceEvent::Notify {
-                subscriber_name: on_notify_name.clone(),
-                json: json.to_owned(),
-            });
-        })
-        .on_websocket_close(move |code, reason| {
-            let _ = on_ws_close_tx.send(SoraSourceEvent::WebSocketClose {
-                subscriber_name: on_ws_close_name.clone(),
-                code,
-                reason: reason.to_owned(),
-            });
-        })
-        .on_signaling_message(move |sig_type, direction, message| {
-            tracing::debug!(
-                "SoraSubscriber signaling: type={:?}, direction={:?}, message={}",
-                sig_type,
-                direction,
-                &message[..message.len().min(200)]
-            );
-        });
+            SoraSubscriberEventHandler {
+                subscriber_name: subscriber_name.clone(),
+                event_tx: event_tx.clone(),
+            },
+        );
 
         if let Some(client_id) = &self.client_id {
             builder = builder.client_id(client_id.clone());
@@ -176,6 +132,65 @@ impl SoraSubscriber {
         connection_task.abort();
 
         Ok(())
+    }
+}
+
+/// sora_sdk のイベントを [SoraSourceEvent] に変換して coordinator へ転送するハンドラ。
+///
+/// 各メソッドは sora_sdk 側のスレッドから直列に呼ばれるため、
+/// ここでは処理をせずに mpsc channel へ流すだけにする。
+struct SoraSubscriberEventHandler {
+    subscriber_name: String,
+    event_tx: tokio::sync::mpsc::UnboundedSender<SoraSourceEvent>,
+}
+
+impl sora_sdk::SoraConnectionEventHandler for SoraSubscriberEventHandler {
+    fn on_track(&mut self, transceiver: RtpTransceiver) {
+        let _ = self.event_tx.send(SoraSourceEvent::TrackReceived {
+            subscriber_name: self.subscriber_name.clone(),
+            transceiver,
+        });
+    }
+
+    fn on_remove_track(&mut self, receiver: RtpReceiver) {
+        let track = receiver.track();
+        let track_id = track.id().unwrap_or_default();
+        let _ = self.event_tx.send(SoraSourceEvent::TrackRemoved {
+            subscriber_name: self.subscriber_name.clone(),
+            track_id,
+        });
+    }
+
+    fn on_notify(&mut self, text: &str) {
+        let _ = self.event_tx.send(SoraSourceEvent::Notify {
+            subscriber_name: self.subscriber_name.clone(),
+            json: text.to_owned(),
+        });
+    }
+
+    fn on_websocket_close(&mut self, code: Option<u16>, reason: &str) {
+        let _ = self.event_tx.send(SoraSourceEvent::WebSocketClose {
+            subscriber_name: self.subscriber_name.clone(),
+            code,
+            reason: reason.to_owned(),
+        });
+    }
+
+    fn on_signaling_message(
+        &mut self,
+        signaling_type: sora_sdk::SignalingType,
+        direction: sora_sdk::SignalingDirection,
+        text: &str,
+    ) {
+        // メッセージが長くなりうるので先頭だけを出力する。
+        // バイト位置で切ると UTF-8 の境界を割る可能性があるため、文字数で切る。
+        let head = text.chars().take(200).collect::<String>();
+        tracing::debug!(
+            "SoraSubscriber signaling: type={:?}, direction={:?}, message={}",
+            signaling_type,
+            direction,
+            head
+        );
     }
 }
 
