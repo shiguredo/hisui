@@ -51,7 +51,7 @@
   - hev1 と hvc1 は仕様や機能的にはほぼ同様なので、単に「より多くのプレイヤーが対応している方」を選択すればいい
     - もし今後 hev1 のみに対応している主要なプレイヤーが見つかった場合には、オプションでどちらのボックスを使用するかを指定可能にすることを検討する
   - @sile
-- [ADD] オプション依存として candle 系ライブラリ (candle-core 0.11.0 / candle-nn 0.11.0 / candle-transformers 0.11.0 / candle-onnx 0.11.0 / tokenizers 0.22.0) を追加する
+- [ADD] オプション依存として candle 系ライブラリ (candle-core 0.11.0 / candle-nn 0.11.0 / candle-transformers 0.11.0 / candle-onnx 0.11.0 / tokenizers 0.23.1) を追加する
   - `candle` / `candle-cuda` / `candle-metal` feature 配下で有効化する
   - candle-onnx のビルドに `protoc` (Ubuntu の `protobuf-compiler` 等) が必要になる
   - 本リリースのバイナリ配布物には含めない (将来の利用者向けサブコマンドが揃うタイミングで再検討する)
@@ -99,7 +99,7 @@
   - S3 出力先にはオブジェクトライフタイム指定（`lifetime_days`）を設定可能
   - `variants` で複数のビットレート/解像度を指定すると adaptive bitrate (ABR) 出力に対応する
   - @sile
-- [ADD] 依存ライブラリに raden 2026.2.0-canary.0 を追加する
+- [ADD] 依存ライブラリに raden 2026.2.0-canary.1 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_s3 2026.1.0-canary.4 を追加する
   - @sile
@@ -120,7 +120,7 @@
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
-- [ADD] 依存ライブラリに tokio 1.52.3 を追加する
+- [ADD] 依存ライブラリに tokio 1.53.1 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_audio_device 2026.1.0 を追加する
   - @sile
@@ -142,7 +142,7 @@
   - @voluntas
 - [ADD] 依存ライブラリに shiguredo_rtsp を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_webrtc 0.150.2 を追加する
+- [ADD] 依存ライブラリに shiguredo_webrtc 0.150.3 を追加する
   - @sile
 - [ADD] `server` サブコマンドで OBS WebSocket 互換 API の基礎機能を追加する
   - `hisui server` で WebSocket サーバーを起動できる
@@ -196,7 +196,7 @@
   - @sile
 - [UPDATE] shiguredo_http11 のバージョンを 2026.6.1 にあげる
   - @voluntas
-- [UPDATE] `libc` 0.2.186 を direct dependency に追加する
+- [UPDATE] `libc` 0.2.189 を direct dependency に追加する
   - `obsws` の `GetStats` でプロセスのメモリ使用量と録画ディレクトリの空き容量を取得するために利用する
   - @sile
 - [UPDATE] Linux ビルドに必要なパッケージに `libpulse-dev` を追加する
@@ -217,9 +217,9 @@
   - @sile
 - [UPDATE] noargs crate のバージョンを 0.4.3 に上げる
   - @sile
-- [UPDATE] rustls crate のバージョンを 0.23.41 に上げる
+- [UPDATE] rustls crate のバージョンを 0.23.42 に上げる
   - @sile
-- [UPDATE] aws-lc-rs crate のバージョンを 1.17.0 に上げる
+- [UPDATE] aws-lc-rs crate のバージョンを 1.17.3 に上げる
   - @sile
 - [UPDATE] MP4 ファイルの読み書きに Mp4FileDemuxer および Mp4FileMuxer を使用する
   - 今までは shiguredo_mp4 の低レベル API を使っていたが、高レベル API に切り替える
@@ -249,9 +249,9 @@
   - @sile
 - [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.5 にあげる
   - @sile
-- [UPDATE] shiguredo_video_device のバージョンを 2026.2.0-canary.2 にあげる
+- [UPDATE] shiguredo_video_device のバージョンを 2026.2.0 にあげる
   - @sile
-- [UPDATE] raw_player のバージョンを 2026.2.0-canary.0 にあげる
+- [UPDATE] raw_player のバージョンを 2026.2.0-canary.1 にあげる
   - @sile
 - [UPDATE] tempfile crate のバージョンを 3.27.0 に上げる
   - @sile
