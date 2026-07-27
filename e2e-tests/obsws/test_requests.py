@@ -4,7 +4,6 @@ import asyncio
 from pathlib import Path
 
 import aiohttp
-
 from helpers import (
     OBSWS_SUBPROTOCOL,
     ObswsServer,

@@ -16,8 +16,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-
 from helpers import ObswsServer, _http_get, _http_request
+
 from hisui_server import reserve_ephemeral_port
 
 
@@ -92,10 +92,10 @@ def _create_self_signed_cert(tmp_path: Path) -> tuple[Path, Path]:
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(
-            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
+            datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)
         )
         .not_valid_after(
-            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)
+            datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=30)
         )
         .add_extension(
             x509.SubjectAlternativeName(
@@ -171,129 +171,137 @@ def test_obsws_http_bootstrap_get_returns_405(binary_path: Path):
 def test_obsws_proxy_root(binary_path: Path):
     """obsws が root への GET を upstream にリバースプロキシすることを確認する"""
 
-    with _UpstreamServer() as upstream:
-        with ObswsServer(
+    with (
+        _UpstreamServer() as upstream,
+        ObswsServer(
             binary_path,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
-        ) as server:
-            status, body, _ = asyncio.run(
-                _http_get(f"http://{server.host}:{server.port}/")
-            )
-            assert status == 200
-            assert body == "Hello, World!"
+        ) as server,
+    ):
+        status, body, _ = asyncio.run(_http_get(f"http://{server.host}:{server.port}/"))
+        assert status == 200
+        assert body == "Hello, World!"
 
 
 def test_obsws_proxy_sub_path(binary_path: Path):
     """obsws がサブパスへの GET を upstream にリバースプロキシすることを確認する"""
 
-    with _UpstreamServer() as upstream:
-        with ObswsServer(
+    with (
+        _UpstreamServer() as upstream,
+        ObswsServer(
             binary_path,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
-        ) as server:
-            status, body, _ = asyncio.run(
-                _http_get(f"http://{server.host}:{server.port}/sub/path")
-            )
-            assert status == 200
-            assert body == "Sub Path"
+        ) as server,
+    ):
+        status, body, _ = asyncio.run(
+            _http_get(f"http://{server.host}:{server.port}/sub/path")
+        )
+        assert status == 200
+        assert body == "Sub Path"
 
 
 def test_obsws_proxy_json(binary_path: Path):
     """obsws が JSON レスポンスの Content-Type を維持することを確認する"""
 
-    with _UpstreamServer() as upstream:
-        with ObswsServer(
+    with (
+        _UpstreamServer() as upstream,
+        ObswsServer(
             binary_path,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
-        ) as server:
-            status, body, headers = asyncio.run(
-                _http_get(f"http://{server.host}:{server.port}/json")
-            )
-            assert status == 200
-            assert body == '{"message":"hello"}'
-            assert "application/json" in headers["Content-Type"]
+        ) as server,
+    ):
+        status, body, headers = asyncio.run(
+            _http_get(f"http://{server.host}:{server.port}/json")
+        )
+        assert status == 200
+        assert body == '{"message":"hello"}'
+        assert "application/json" in headers["Content-Type"]
 
 
 def test_obsws_proxy_ok_endpoint_not_proxied(binary_path: Path):
     """obsws が /.ok を upstream に流さずローカルで返すことを確認する"""
 
-    with _UpstreamServer() as upstream:
-        with ObswsServer(
+    with (
+        _UpstreamServer() as upstream,
+        ObswsServer(
             binary_path,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
-        ) as server:
-            status, _, _ = asyncio.run(
-                _http_get(f"http://{server.host}:{server.port}/.ok")
-            )
-            assert status == 204
+        ) as server,
+    ):
+        status, _, _ = asyncio.run(_http_get(f"http://{server.host}:{server.port}/.ok"))
+        assert status == 204
 
 
 def test_obsws_proxy_post_returns_405(binary_path: Path):
     """obsws が proxy 対象外の POST を 405 で返すことを確認する"""
 
-    with _UpstreamServer() as upstream:
-        with ObswsServer(
+    with (
+        _UpstreamServer() as upstream,
+        ObswsServer(
             binary_path,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
-        ) as server:
-            status, _, _ = asyncio.run(
-                _http_request("POST", f"http://{server.host}:{server.port}/")
-            )
-            assert status == 405
+        ) as server,
+    ):
+        status, _, _ = asyncio.run(
+            _http_request("POST", f"http://{server.host}:{server.port}/")
+        )
+        assert status == 405
 
 
 def test_obsws_proxy_unknown_upstream_path(binary_path: Path):
     """obsws が upstream の 404 をそのまま返すことを確認する"""
 
-    with _UpstreamServer() as upstream:
-        with ObswsServer(
+    with (
+        _UpstreamServer() as upstream,
+        ObswsServer(
             binary_path,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
-        ) as server:
-            status, _, _ = asyncio.run(
-                _http_get(f"http://{server.host}:{server.port}/nonexistent")
-            )
-            assert status == 404
+        ) as server,
+    ):
+        status, _, _ = asyncio.run(
+            _http_get(f"http://{server.host}:{server.port}/nonexistent")
+        )
+        assert status == 404
 
 
 def test_obsws_proxy_client_disconnect_does_not_crash_server(binary_path: Path):
     """obsws が proxy 中の client disconnect 後も継続稼働することを確認する"""
 
-    with _UpstreamServer() as upstream:
-        with ObswsServer(
+    with (
+        _UpstreamServer() as upstream,
+        ObswsServer(
             binary_path,
             ui=True,
             ui_remote_url=f"http://127.0.0.1:{upstream.port}",
             use_env=False,
-        ) as server:
-            rst_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            rst_sock.connect((server.host, server.port))
-            rst_sock.sendall(b"GET /slow HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-            time.sleep(0.1)
-            rst_sock.setsockopt(
-                socket.SOL_SOCKET,
-                socket.SO_LINGER,
-                struct.pack("ii", 1, 0),
-            )
-            rst_sock.close()
+        ) as server,
+    ):
+        rst_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        rst_sock.connect((server.host, server.port))
+        rst_sock.sendall(b"GET /slow HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        time.sleep(0.1)
+        rst_sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_LINGER,
+            struct.pack("ii", 1, 0),
+        )
+        rst_sock.close()
 
-            time.sleep(1.2)
-            status, _, _ = asyncio.run(
-                _http_get(f"http://{server.host}:{server.port}/.ok")
-            )
-            assert status == 204
+        time.sleep(1.2)
+        status, _, _ = asyncio.run(_http_get(f"http://{server.host}:{server.port}/.ok"))
+        assert status == 204
 
 
 def test_obsws_https_ok_endpoint(binary_path: Path, tmp_path: Path):

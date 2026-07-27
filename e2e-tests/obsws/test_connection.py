@@ -5,7 +5,6 @@ from pathlib import Path
 
 import aiohttp
 import pytest
-
 from helpers import (
     ObswsServer,
     _connect_and_exchange_identify,

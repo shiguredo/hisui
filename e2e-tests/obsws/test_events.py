@@ -5,12 +5,11 @@ import json
 from pathlib import Path
 
 import aiohttp
-
 from helpers import (
     OBSWS_EVENT_SUB_INPUTS,
     OBSWS_EVENT_SUB_OUTPUTS,
-    OBSWS_EVENT_SUB_SCENE_ITEMS,
     OBSWS_EVENT_SUB_SCENE_ITEM_TRANSFORM_CHANGED,
+    OBSWS_EVENT_SUB_SCENE_ITEMS,
     OBSWS_EVENT_SUB_SCENES,
     OBSWS_SUBPROTOCOL,
     ObswsServer,
@@ -28,6 +27,7 @@ from helpers import (
     _setup_stream_input_and_service,
     _write_test_png,
 )
+
 from hisui_server import reserve_ephemeral_port
 
 
@@ -1151,7 +1151,7 @@ def test_obsws_remove_scene_item_tail_does_not_send_reindexed_event(
             assert removed_event["d"]["eventData"]["sceneItemId"] == first_scene_item_id
             try:
                 next_msg = await ws.receive(timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await ws.close()
                 return
 

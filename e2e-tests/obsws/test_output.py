@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 
 import aiohttp
-
 from helpers import (
     OBSWS_SUBPROTOCOL,
     ObswsServer,
@@ -26,6 +25,7 @@ from helpers import (
     _wait_process_exit,
     _write_test_png,
 )
+
 from hisui_server import build_hisui_command, reserve_ephemeral_port
 
 RTMP_LISTEN_RECEIVER_STARTUP_WAIT_SEC = 2.0
@@ -2106,7 +2106,9 @@ def test_obsws_emit_exit_metrics_disabled(binary_path: Path, tmp_path: Path):
 def test_emit_exit_metrics_help_mode_outputs_no_metrics(binary_path: Path):
     """--emit-exit-metrics と --help を同時に指定したとき、終了時メトリクスが出力されないことを確認する"""
     cmd, cwd = build_hisui_command(binary_path, "--emit-exit-metrics", "--help")
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10.0)
+    result = subprocess.run(
+        cmd, cwd=cwd, capture_output=True, text=True, timeout=10.0, check=False
+    )
     assert result.returncode == 0, (
         f"--help 指定時に終了コードが非ゼロ: returncode={result.returncode}, "
         f"stdout={result.stdout!r}, stderr={result.stderr!r}"

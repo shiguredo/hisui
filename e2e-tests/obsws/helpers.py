@@ -421,7 +421,7 @@ def _run_ffmpeg_rtmp_push(
             "flv",
             publish_url,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if result.returncode == 0:
             return
         time.sleep(0.2)
@@ -461,7 +461,7 @@ def _run_ffmpeg_srt_push(
             "mpegts",
             publish_url,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if result.returncode == 0:
             return
         time.sleep(0.2)
@@ -564,6 +564,7 @@ def _probe_mp4_with_ffprobe(path: Path) -> str:
             capture_output=True,
             text=True,
             timeout=10.0,
+            check=False,
         )
     except (subprocess.SubprocessError, OSError) as exc:
         return f"ffprobe execution failed: {exc}"
@@ -588,6 +589,7 @@ def _inspect_mp4(
             capture_output=True,
             text=True,
             cwd=cwd,
+            check=False,
         )
         assert result.returncode == 0, (
             f"hisui inspect failed: returncode={result.returncode}, stderr={result.stderr}"
@@ -640,9 +642,11 @@ async def _http_request(
     ssl_context: ssl.SSLContext | bool | None = None,
 ):
     timeout = aiohttp.ClientTimeout(total=10.0)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.request(method, url, ssl=ssl_context) as response:
-            return response.status, await response.text(), response.headers
+    async with (
+        aiohttp.ClientSession(timeout=timeout) as session,
+        session.request(method, url, ssl=ssl_context) as response,
+    ):
+        return response.status, await response.text(), response.headers
 
 
 async def _collect_obsws_metrics_snapshot_async(host: str, port: int) -> str:
@@ -651,7 +655,10 @@ async def _collect_obsws_metrics_snapshot_async(host: str, port: int) -> str:
     try:
         status, body, _ = await _http_get(url)
         return f"[{endpoint}] status={status}\n{body}"
-    except Exception as e:
+    # テスト失敗時の診断情報を集めるための関数なので、
+    # ここで例外を伝播させると本来の失敗原因が隠れてしまう。
+    # そのため想定外の例外もメッセージに変換して返す。
+    except Exception as e:  # noqa: BLE001
         return f"[{endpoint}] failed to fetch metrics: {e}"
 
 
@@ -964,10 +971,10 @@ async def _assert_no_message_within(
 
 def _build_obsws_authentication(password: str, salt: str, challenge: str) -> str:
     secret = base64.b64encode(
-        hashlib.sha256(f"{password}{salt}".encode("utf-8")).digest()
+        hashlib.sha256(f"{password}{salt}".encode()).digest()
     ).decode("utf-8")
     return base64.b64encode(
-        hashlib.sha256(f"{secret}{challenge}".encode("utf-8")).digest()
+        hashlib.sha256(f"{secret}{challenge}".encode()).digest()
     ).decode("utf-8")
 
 

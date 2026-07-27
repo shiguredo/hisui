@@ -7,7 +7,6 @@ from pathlib import Path
 
 import aiohttp
 import pytest
-
 from helpers import (
     OBSWS_SUBPROTOCOL,
     ObswsServer,
@@ -34,6 +33,7 @@ def _ffprobe_json(path: Path) -> dict:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
     except FileNotFoundError:
         pytest.skip("ffprobe not found")

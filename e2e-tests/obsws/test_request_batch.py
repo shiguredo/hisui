@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import aiohttp
-
 from helpers import (
     OBSWS_SUBPROTOCOL,
     ObswsServer,
@@ -14,6 +13,7 @@ from helpers import (
     _send_obsws_request_batch,
     _write_test_png,
 )
+
 from hisui_server import reserve_ephemeral_port
 
 

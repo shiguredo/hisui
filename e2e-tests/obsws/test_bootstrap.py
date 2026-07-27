@@ -8,8 +8,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from helpers import ObswsServer, _collect_obsws_metrics_snapshot, _inspect_mp4
+
 from hisui_server import REPO_ROOT
 
 BOOTSTRAP_TIMEOUT_SECONDS = 60.0
