@@ -72,9 +72,12 @@ hooks = [
 repo = "https://github.com/tombi-toml/tombi-pre-commit"
 rev = "v1.2.4"
 hooks = [
-  # Cargo.lock は自動生成ファイルなので tombi の対象外にする
-  { id = "tombi-lint", exclude = { glob = "**/Cargo.lock" } },
-  { id = "tombi-format", exclude = { glob = "**/Cargo.lock" } },
+  # Cargo.lock と uv.lock は自動生成ファイルなので tombi の対象外にする
+  { id = "tombi-lint", exclude = { glob = ["**/Cargo.lock", "**/uv.lock"] } },
+  {
+    id = "tombi-format",
+    exclude = { glob = ["**/Cargo.lock", "**/uv.lock"] }
+  },
 ]
 
 # プロジェクト固有のローカルフック
