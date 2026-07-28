@@ -61,4 +61,3 @@ pub use text::TextFrame;
 pub use video::VideoFrame;
 
 pub type Result<T> = std::result::Result<T, Error>;
-pub type Failure = Error;
