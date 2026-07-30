@@ -2224,9 +2224,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "raden"
-version = "2026.2.0-canary.1"
+version = "2026.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "828ce5943268977e15d9cca7e8c6cf37afb2a301fefe8fe951e474faea6bfbff"
+checksum = "9203e9211bc62bc01dd320353df6eaf9979a46ab26c029a71306a72a3e51a016"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -2294,9 +2294,9 @@ dependencies = [
 
 [[package]]
 name = "raw_player"
-version = "2026.2.0-canary.1"
+version = "2026.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e11dcdf81799c095d6435f2da4d9153b448afc92d477a055060335bd406b7f6"
+checksum = "eb965dfbf440afb6ea2315bf3cd5e0a5b28f6375a8cce9f02f1296c89d1caf07"
 dependencies = [
  "bindgen",
  "shiguredo_cmake",
@@ -2439,9 +2439,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.42"
+version = "0.23.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c54fcab019b409d04215d3a17cb438fd7fbf192ee61461f20f4fe18704bc138"
+checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -3127,7 +3127,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

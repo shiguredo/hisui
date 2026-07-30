@@ -1,2 +1,19 @@
 onlyBuiltDependencies:
   - esbuild
+
+# vite-plus 0.2 系は vitest を upstream 版でピンし、vite は vite-plus-core に揃える
+overrides:
+  vite: "catalog:"
+  vitest: "catalog:"
+catalog:
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.6
+  vitest: 4.1.10
+  vite-plus: 0.2.6
+  "@vitest/browser-playwright": 4.1.10
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: "*"
+    vitest: "*"

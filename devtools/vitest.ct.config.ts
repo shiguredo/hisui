@@ -1,6 +1,6 @@
 import preactPlugin from "@preact/preset-vite";
 import tailwindcss from "@tailwindcss/vite";
-import { playwright } from "@vitest/browser-playwright";
+import { playwright } from "vite-plus/test/browser-playwright";
 import { defineConfig } from "vite-plus/test/config";
 
 export default defineConfig({

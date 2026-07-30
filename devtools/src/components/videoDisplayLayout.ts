@@ -57,14 +57,22 @@ export function snapPosition(
     const otherCenterY = other.y + other.height / 2;
 
     // X 方向: 自分の左辺 → 相手の左辺・右辺、自分の右辺 → 相手の左辺・右辺、中央同士
-    xCandidates.push([left, otherLeft], [left, otherRight]);
-    xCandidates.push([right, otherLeft], [right, otherRight]);
-    xCandidates.push([centerX, otherCenterX]);
+    xCandidates.push(
+      [left, otherLeft],
+      [left, otherRight],
+      [right, otherLeft],
+      [right, otherRight],
+      [centerX, otherCenterX],
+    );
 
     // Y 方向: 同様
-    yCandidates.push([top, otherTop], [top, otherBottom]);
-    yCandidates.push([bottom, otherTop], [bottom, otherBottom]);
-    yCandidates.push([centerY, otherCenterY]);
+    yCandidates.push(
+      [top, otherTop],
+      [top, otherBottom],
+      [bottom, otherTop],
+      [bottom, otherBottom],
+      [centerY, otherCenterY],
+    );
   }
 
   for (const [selfEdge, targetEdge] of xCandidates) {

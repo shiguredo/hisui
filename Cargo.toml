@@ -59,9 +59,9 @@ mpeg2ts = "=0.6.0"
 noargs = { workspace = true }
 nojson = { workspace = true }
 nopng = "=0.1.1"
-raden = "=2026.2.0-canary.1"
+raden = "=2026.2.0"
 rustls = {
-  version = "=0.23.42",
+  version = "=0.23.43",
   default-features = false,
   features = [
     "aws-lc-rs",
@@ -105,7 +105,7 @@ shiguredo_websocket = { workspace = true }
 
 shiguredo_fdk_aac = { version = "=2026.1.0-canary.1", optional = true }
 
-raw_player = { version = "=2026.2.0-canary.1", optional = true }
+raw_player = { version = "=2026.2.0", optional = true }
 
 # candle (ML 推論)
 candle-core = { version = "=0.11.0", optional = true }
