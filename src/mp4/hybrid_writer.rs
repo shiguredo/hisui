@@ -91,13 +91,18 @@ impl HybridMp4Writer {
         let creation_timestamp = std::time::UNIX_EPOCH.elapsed()?;
 
         // fMP4 フラグメント生成用 muxer
-        let fmp4_muxer =
-            Fmp4SegmentMuxer::with_options(SegmentMuxerOptions { creation_timestamp })?;
+        let fmp4_muxer = Fmp4SegmentMuxer::with_options(SegmentMuxerOptions {
+            // 字幕トラックは未対応のため、トラックメタデータはデフォルト値を使う
+            creation_timestamp,
+            ..Default::default()
+        })?;
 
         // ファイナライズ時の標準 MP4 moov 生成用 muxer
         let mut mp4_muxer = Mp4FileMuxer::with_options(Mp4FileMuxerOptions {
             creation_timestamp,
             reserved_moov_box_size: 0,
+            // 字幕トラックは未対応のため、トラックメタデータはデフォルト値を使う
+            ..Default::default()
         })?;
 
         // ファイルを作成
@@ -155,7 +160,9 @@ impl HybridMp4Writer {
             file: BufWriter::new(file),
             fmp4_muxer,
             initial_recovery_muxer: Some(Fmp4SegmentMuxer::with_options(SegmentMuxerOptions {
+                // 字幕トラックは未対応のため、トラックメタデータはデフォルト値を使う
                 creation_timestamp,
+                ..Default::default()
             })?),
             mp4_muxer,
             mdat_start_offset,

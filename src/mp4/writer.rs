@@ -561,6 +561,8 @@ impl Mp4Writer {
         let muxer_options = Mp4FileMuxerOptions {
             creation_timestamp: std::time::UNIX_EPOCH.elapsed()?,
             reserved_moov_box_size,
+            // 字幕トラックは未対応のため、トラックメタデータはデフォルト値を使う
+            ..Default::default()
         };
         let muxer = Mp4FileMuxer::with_options(muxer_options)?;
 

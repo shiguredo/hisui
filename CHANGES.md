@@ -116,13 +116,13 @@
   - @sile
 - [ADD] `audio_capture_device` input kind を追加してマイクデバイスからの音声キャプチャに対応する
   - @sile
-- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.14 を追加する
+- [ADD] 依存ライブラリに sora_sdk 2026.1.0-canary.16 を追加する
   - @sile
 - [ADD] 依存ライブラリに shiguredo_mpd 2026.1.0-canary.0 を追加する
   - @sile
 - [ADD] 依存ライブラリに tokio 1.53.1 を追加する
   - @sile
-- [ADD] 依存ライブラリに shiguredo_audio_device 2026.2.0 を追加する
+- [ADD] 依存ライブラリに shiguredo_audio_device 2026.3.0 を追加する
   - @sile
 - [ADD] server サブコマンドに `--ui-remote-url` オプションを追加する
   - 指定された場合、ローカルエンドポイント以外への GET リクエストを指定 URL にリバースプロキシする
@@ -182,7 +182,7 @@
   - `shiguredo_video_toolbox::supported_codecs()` を使った実行時のハードウェア対応検出を行う
   - 対応していない環境ではソフトウェアデコーダー (libvpx / dav1d) にフォールバックする
   - @sile
-- [UPDATE] shiguredo_dav1d のバージョンを 2026.2.0-canary.0 にあげる
+- [UPDATE] shiguredo_dav1d のバージョンを 2026.2.0-canary.2 にあげる
   - このバージョンから shiguredo_dav1d crate のリポジトリが <https://github.com/shiguredo/dav1d-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_fdk_aac のバージョンを 2026.1.0-canary.1 にあげる
@@ -233,10 +233,10 @@
 - [UPDATE] shiguredo_nvcodec のバージョンを 2026.2.0 にあげる
   - このバージョンから shiguredo_nvcodec crate のリポジトリが <https://github.com/shiguredo/nvcodec-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libvpx のバージョンを 2026.2.0-canary.0 にあげる
+- [UPDATE] shiguredo_libvpx のバージョンを 2026.2.0-canary.1 にあげる
   - このバージョンから shiguredo_libvpx crate のリポジトリが <https://github.com/shiguredo/libvpx-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_libyuv のバージョンを 2026.2.0-canary.1 にあげる
+- [UPDATE] shiguredo_libyuv のバージョンを 2026.2.0-canary.2 にあげる
   - このバージョンから shiguredo_libyuv crate のリポジトリが <https://github.com/shiguredo/libyuv-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
 - [UPDATE] shiguredo_video_toolbox のバージョンを 2026.1.1 にあげる
@@ -245,11 +245,11 @@
 - [UPDATE] shiguredo_audio_toolbox のバージョンを 2026.2.0-canary.0 にあげる
   - このバージョンから shiguredo_audio_toolbox crate のリポジトリが <https://github.com/shiguredo/audio-toolbox-rs> に独立したので、hisui のワークスペースからは削除されている
   - @sile
-- [UPDATE] shiguredo_mp4 のバージョンを 2026.3.0 にあげる
+- [UPDATE] shiguredo_mp4 のバージョンを 2026.4.0 にあげる
   - @sile
-- [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.5 にあげる
+- [UPDATE] shiguredo_s3 のバージョンを 2026.1.0-canary.6 にあげる
   - @sile
-- [UPDATE] shiguredo_video_device のバージョンを 2026.2.0 にあげる
+- [UPDATE] shiguredo_video_device のバージョンを 2026.3.0 にあげる
   - @sile
 - [UPDATE] raw_player のバージョンを 2026.2.0-canary.1 にあげる
   - @sile
