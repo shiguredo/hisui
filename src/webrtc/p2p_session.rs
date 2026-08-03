@@ -60,6 +60,12 @@ enum PcEvent {
     ObswsEvent(crate::obsws::event::TaggedEvent),
 }
 
+/// in-flight offer 解消後に処理する保留中の bootstrap 操作。
+enum PendingBootstrapOp {
+    Created(crate::obsws::coordinator::BootstrapInputSnapshot),
+    Removed { input_uuid: String },
+}
+
 enum IceObserverEvent {
     Candidate {
         sdp_mid: String,
@@ -237,6 +243,10 @@ struct Session {
     remote_video_tracks: std::collections::HashMap<String, RemoteVideoTrack>,
     /// coordinator handle（webrtc_source の settings 取得・更新用）
     coordinator_handle: crate::obsws::coordinator::ObswsCoordinatorHandle,
+    /// remove_track が失敗した (in-flight offer 中だった) ため、再試行待ちのトラック
+    pending_unsubscribe: Vec<(crate::TrackId, shiguredo_webrtc::RtpSender)>,
+    /// in-flight offer 解消後に処理する保留中の bootstrap 操作
+    pending_bootstrap_ops: std::collections::VecDeque<PendingBootstrapOp>,
 }
 
 impl Drop for Session {
@@ -543,6 +553,7 @@ impl WebRtcP2pSessionManager {
                             break;
                         }
                     }
+                    tracing::warn!("bootstrap event subscription task terminated");
                 });
                 sess.bootstrap_event_abort_handle = Some(bootstrap_task.abort_handle());
 
@@ -664,6 +675,8 @@ async fn bootstrap_internal(
         program_track_ids,
         program_tracks_subscribed: false,
         remote_video_tracks: std::collections::HashMap::new(),
+        pending_unsubscribe: Vec::new(),
+        pending_bootstrap_ops: std::collections::VecDeque::new(),
         coordinator_handle,
     };
 
@@ -854,6 +867,8 @@ async fn handle_answer(sess: &mut Session, sdp: Option<&str>) -> bool {
     }
 
     sess.in_flight_offer = false;
+    // 保留中の bootstrap 操作 (追加・削除) を順番に処理する
+    process_pending_bootstrap_ops(sess).await;
     if sess.pending_renegotiation {
         sess.pending_renegotiation = false;
         if let Err(e) = maybe_send_offer(sess).await {
@@ -911,6 +926,9 @@ async fn handle_client_offer(sess: &mut Session, sdp: Option<&str>) -> bool {
         };
 
     send_dc(sess, &make_answer_json(&answer_sdp));
+
+    // rollback 後に hisui 側の保留中の bootstrap 操作を処理する
+    process_pending_bootstrap_ops(sess).await;
 
     // rollback 後に hisui 側の pending_renegotiation があればチェーン
     if sess.pending_renegotiation {
@@ -1410,6 +1428,24 @@ async fn maybe_send_offer(sess: &mut Session) -> crate::Result<()> {
     }
     sess.pending_renegotiation = false;
 
+    // 保留中のトラック削除を再試行する (in-flight offer 解消後に成功する)
+    let pending_unsubscribe = std::mem::take(&mut sess.pending_unsubscribe);
+    let mut remaining = Vec::new();
+    for (track_id, sender) in pending_unsubscribe {
+        match sess.pc.remove_track(&sender) {
+            Ok(()) => {
+                tracing::info!("pending remove_track succeeded for track: {track_id}");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "pending remove_track failed for track {track_id}: {e:?} (will retry)"
+                );
+                remaining.push((track_id, sender));
+            }
+        }
+    }
+    sess.pending_unsubscribe = remaining;
+
     let offer_sdp = super::sdp::create_offer_sdp(&sess.pc)?;
     super::sdp::set_local_offer(&sess.pc, &offer_sdp)?;
     let offer_sdp =
@@ -1479,13 +1515,18 @@ fn subscribe_track(
 
 /// トラックの購読を解除する
 fn unsubscribe_track(session: &mut Session, track_id: &crate::TrackId) {
-    if let Some(mut subscribed) = session.subscribed_tracks.remove(track_id) {
+    if let Some(subscribed) = session.subscribed_tracks.remove(track_id) {
         subscribed.abort_handle.abort();
-        if !subscribed.sender.set_track(None) {
-            tracing::warn!("set_track(None) failed for track {track_id}");
-        }
+        // in-flight offer 中 (signaling state が have-local-offer) は
+        // RemoveTrackOrError が失敗するため、失敗した場合は保留リストに積み、
+        // answer 受信後の maybe_send_offer で再試行する
         if let Err(e) = session.pc.remove_track(&subscribed.sender) {
-            tracing::warn!("remove_track failed for track {track_id}: {e}");
+            tracing::warn!(
+                "remove_track failed for track {track_id}: {e:?} (will retry after answer)"
+            );
+            session
+                .pending_unsubscribe
+                .push((track_id.clone(), subscribed.sender));
         }
     }
 }
@@ -1495,6 +1536,13 @@ fn subscribe_bootstrap_input(
     session: &mut Session,
     snapshot: &crate::obsws::coordinator::BootstrapInputSnapshot,
 ) {
+    tracing::debug!(
+        "subscribe bootstrap input: uuid={}, name={}, video_track={:?}, audio_track={:?}",
+        snapshot.input_uuid,
+        snapshot.input_name,
+        snapshot.video_track_id,
+        snapshot.audio_track_id
+    );
     // webrtc_source は upstream 専用のため、browser 向け配信（hisui→client）をスキップする
     if snapshot.input_kind == "webrtc_source" {
         session
@@ -1531,6 +1579,22 @@ async fn handle_bootstrap_input_created(
     sess: &mut Session,
     snapshot: crate::obsws::coordinator::BootstrapInputSnapshot,
 ) {
+    // in-flight offer 中 (または既に保留操作がある) はキューに積んで順番に処理する。
+    // removeTrack は signaling state が Stable でないと失敗するため、
+    // renegotiation を直列化してから実行する必要がある。
+    if sess.in_flight_offer || !sess.pending_bootstrap_ops.is_empty() {
+        sess.pending_bootstrap_ops
+            .push_back(PendingBootstrapOp::Created(snapshot));
+        return;
+    }
+    process_bootstrap_input_created(sess, snapshot).await;
+}
+
+/// bootstrap 入力作成時の実際の処理
+async fn process_bootstrap_input_created(
+    sess: &mut Session,
+    snapshot: crate::obsws::coordinator::BootstrapInputSnapshot,
+) {
     // webrtc_source は upstream 専用で hisui→client の配信 track を追加しないため
     // renegotiation offer は不要
     let needs_renegotiation = snapshot.input_kind != "webrtc_source";
@@ -1546,7 +1610,24 @@ async fn handle_bootstrap_input_created(
 
 /// bootstrap 入力削除時のハンドラ
 async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
+    // in-flight offer 中 (または既に保留操作がある) はキューに積んで順番に処理する。
+    // removeTrack は signaling state が Stable でないと失敗するため、
+    // renegotiation を直列化してから実行する必要がある。
+    if sess.in_flight_offer || !sess.pending_bootstrap_ops.is_empty() {
+        sess.pending_bootstrap_ops
+            .push_back(PendingBootstrapOp::Removed {
+                input_uuid: input_uuid.to_owned(),
+            });
+        return;
+    }
+    process_bootstrap_input_removed(sess, input_uuid).await;
+}
+
+/// bootstrap 入力削除時の実際の処理
+async fn process_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
+    tracing::debug!("bootstrap input removed event received: uuid={input_uuid}");
     let Some(entry) = sess.bootstrap_tracks.remove(input_uuid) else {
+        tracing::debug!("bootstrap input not found in session: uuid={input_uuid}");
         return;
     };
 
@@ -1575,6 +1656,26 @@ async fn handle_bootstrap_input_removed(sess: &mut Session, input_uuid: &str) {
             "failed to send renegotiation offer after input removed: {}",
             e.display()
         );
+    }
+}
+
+/// in-flight offer 解消後に保留中の bootstrap 操作を 1 つずつ処理する。
+///
+/// 各操作の処理で offer が送信されて in-flight になったら中断し、
+/// 次の answer 受信時に再開する (renegotiation の直列化)。
+async fn process_pending_bootstrap_ops(sess: &mut Session) {
+    while !sess.in_flight_offer {
+        let Some(op) = sess.pending_bootstrap_ops.pop_front() else {
+            break;
+        };
+        match op {
+            PendingBootstrapOp::Created(snapshot) => {
+                process_bootstrap_input_created(sess, snapshot).await;
+            }
+            PendingBootstrapOp::Removed { input_uuid } => {
+                process_bootstrap_input_removed(sess, &input_uuid).await;
+            }
+        }
     }
 }
 
