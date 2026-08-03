@@ -59,6 +59,11 @@ pub enum ClientEvent {
     TrackAdded {
         track_id: String,
         kind: String,
+        /// トラック専用の映像フレーム受信チャネル。
+        ///
+        /// トラックごとに独立したチャネルを持たせることで、
+        /// 複数トラックが同時にフレームを送っても相互に上書きされない。
+        frame_rx: watch::Receiver<Option<OwnedVideoFrame>>,
     },
     TrackRemoved {
         track_id: String,
@@ -205,6 +210,7 @@ impl PeerConnectionObserverHandler for PcObserverHandler {
 
     fn on_remove_track(&mut self, receiver: RtpReceiver) {
         let track_id = receiver.track().id().unwrap_or_default();
+        tracing::debug!("on_remove_track fired: id={track_id}");
         let _ = self
             .event_tx
             .send(SessionEvent::RemoteTrackRemoved { track_id });
@@ -280,10 +286,7 @@ struct Session {
     ice_candidates: Vec<GatheredIceCandidate>,
     pending_requests: HashMap<String, oneshot::Sender<RequestResponseData>>,
     next_request_id: u64,
-    /// Program トラックを購読済みかどうか
-    program_tracks_subscribed: bool,
     client_event_tx: mpsc::UnboundedSender<ClientEvent>,
-    frame_tx: watch::Sender<Option<OwnedVideoFrame>>,
     video_sinks: HashMap<String, VideoSink>,
 }
 
@@ -393,7 +396,7 @@ impl Session {
 
         // 受け取り時点で既に open の場合、DataChannelStateChange イベントは
         // 観測されない (observer 登録前に状態遷移が完了している) ため、
-        // ここで state を通知して Program トラック購読を開始する
+        // ここで state を通知して UI に反映する
         if label == "obsdc" {
             let state = self
                 .obsdc_dc
@@ -438,37 +441,6 @@ impl Session {
                 label,
                 state: client_state,
             });
-
-        // obsdc が open になったら Program トラックを購読して映像を受信する
-        if label == "obsdc"
-            && client_state == ClientDcState::Open
-            && !self.program_tracks_subscribed
-        {
-            self.subscribe_program_tracks();
-        }
-    }
-
-    /// Program トラックを購読する。
-    ///
-    /// 購読後、サーバーが renegotiation offer を送信し、
-    /// 映像・音声トラックが受信できるようになる。
-    fn subscribe_program_tracks(&mut self) {
-        let request_id = self.next_request_id.to_string();
-        self.next_request_id += 1;
-        let message = serialize_obsdc_message(&crate::obsdc::ClientMessage::Request(RequestData {
-            request_type: "HisuiSubscribeProgramTracks".to_owned(),
-            request_id: request_id.clone(),
-            request_data: None,
-        }));
-        self.add_log(
-            LogCategory::Obsdc,
-            LogLevel::Info,
-            format!("Sent: {message}"),
-        );
-        if let Some(dc) = &self.obsdc_dc {
-            dc.send(message.as_bytes(), false);
-        }
-        self.program_tracks_subscribed = true;
     }
 
     /// signaling メッセージを処理する。true を返した場合はセッションを終了する。
@@ -546,6 +518,21 @@ impl Session {
         );
         if let Some(dc) = &self.signaling_dc {
             dc.send(answer_message.as_bytes(), false);
+        }
+
+        // renegotiation 後のトラック同期を行う。
+        // サーバーが pc.remove_track() した場合、libwebrtc の on_remove_track が
+        // 発火するのが基本だが、環境によっては発火しないため、
+        // offer SDP に含まれない受信トラックも明示的に削除する (フォールバック)。
+        let offer_track_ids = track_ids_from_sdp(sdp);
+        let removed_track_ids: Vec<String> = self
+            .video_sinks
+            .keys()
+            .filter(|track_id| !offer_track_ids.contains(*track_id))
+            .cloned()
+            .collect();
+        for track_id in removed_track_ids {
+            self.handle_remote_track_removed(&track_id);
         }
         Ok(())
     }
@@ -689,11 +676,16 @@ impl Session {
         }
 
         // すべてのビデオトラックに VideoSink を登録する。
-        // サーバーは Program 出力と bootstrap 入力の生トラックの両方を送信するため、
-        // 両方のフレームが UI 側でグリッド表示される。
+        // サーバーは bootstrap 入力の生トラックのみを送信するため、
+        // 受信トラックはそのままグリッド表示される。
+        //
+        // フレーム受信チャネルはトラックごとに独立して作成する。
+        // 全トラックで 1 本のチャネルを共有すると、複数トラックのフレームが
+        // 相互に上書きされ、表示がカクカクするため。
+        let (frame_tx, frame_rx) = watch::channel(None);
         let mut video_track = track.cast_to_video_track();
         let sink_handler = FrameSinkHandler {
-            frame_tx: self.frame_tx.clone(),
+            frame_tx,
             track_id: track_id.clone(),
         };
         let sink = VideoSink::new_with_handler(Box::new(sink_handler));
@@ -704,6 +696,7 @@ impl Session {
         let _ = self.client_event_tx.send(ClientEvent::TrackAdded {
             track_id: track_id.clone(),
             kind: kind.clone(),
+            frame_rx,
         });
     }
 
@@ -714,6 +707,8 @@ impl Session {
             format!("Track removed: id={track_id}"),
         );
         self.video_sinks.remove(track_id);
+        // VideoSink の drop でチャネルの Sender が閉じられ、
+        // UI 側のフレーム受信タスクが終了する
         let _ = self.client_event_tx.send(ClientEvent::TrackRemoved {
             track_id: track_id.to_owned(),
         });
@@ -863,12 +858,26 @@ fn current_timestamp_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// SDP に含まれるトラック ID の集合を抽出する。
+///
+/// `a=msid:<stream_id> <track_id>` 行の 2 つ目のトークンをトラック ID として返す。
+fn track_ids_from_sdp(sdp: &str) -> std::collections::HashSet<String> {
+    let mut track_ids = std::collections::HashSet::new();
+    for line in sdp.lines() {
+        if let Some(rest) = line.strip_prefix("a=msid:")
+            && let Some(track_id) = rest.split_whitespace().nth(1)
+        {
+            track_ids.insert(track_id.to_owned());
+        }
+    }
+    track_ids
+}
+
 /// HTTP Bootstrap から P2P 接続を確立し、セッションとイベント受信チャネルを返す。
 async fn connect_session(
     factory: Arc<PeerConnectionFactory>,
     config: BootstrapConfig,
     client_event_tx: mpsc::UnboundedSender<ClientEvent>,
-    frame_tx: watch::Sender<Option<OwnedVideoFrame>>,
 ) -> crate::Result<(Session, mpsc::UnboundedReceiver<SessionEvent>)> {
     let (session_event_tx, session_event_rx) = mpsc::unbounded_channel::<SessionEvent>();
     let (ice_tx, ice_rx) = mpsc::unbounded_channel::<IceObserverEvent>();
@@ -902,9 +911,7 @@ async fn connect_session(
         ice_candidates: Vec::new(),
         pending_requests: HashMap::new(),
         next_request_id: 1,
-        program_tracks_subscribed: false,
         client_event_tx,
-        frame_tx,
         video_sinks: HashMap::new(),
     };
 
@@ -1023,16 +1030,11 @@ fn add_ice_server(config: &mut PeerConnectionRtcConfiguration, server: &IceServe
 
 /// クライアントを起動する。バックグラウンドスレッドで tokio LocalSet を実行する。
 ///
-/// 戻り値は (操作ハンドル, イベント受信チャネル, 映像フレーム受信チャネル)。
-pub fn spawn_client() -> crate::Result<(
-    P2PClientHandle,
-    mpsc::UnboundedReceiver<ClientEvent>,
-    watch::Receiver<Option<OwnedVideoFrame>>,
-)> {
+/// 戻り値は (操作ハンドル, イベント受信チャネル)。
+/// 映像フレームは `ClientEvent::TrackAdded` の `frame_rx` でトラックごとに受信する。
+pub fn spawn_client() -> crate::Result<(P2PClientHandle, mpsc::UnboundedReceiver<ClientEvent>)> {
     let (command_tx, command_rx) = mpsc::unbounded_channel::<ClientCommand>();
     let (client_event_tx, client_event_rx) = mpsc::unbounded_channel::<ClientEvent>();
-    // watch チャネルは最新のフレームだけを保持する
-    let (frame_tx, frame_rx) = watch::channel(None);
 
     let factory_bundle = crate::webrtc::WebRtcFactoryBundle::new()?;
     let factory = factory_bundle.factory();
@@ -1046,14 +1048,7 @@ pub fn spawn_client() -> crate::Result<(
                 .expect("tokio runtime の作成に失敗しました");
             let local = tokio::task::LocalSet::new();
             local.block_on(&runtime, async move {
-                run_client_loop(
-                    factory_bundle,
-                    factory,
-                    command_rx,
-                    client_event_tx,
-                    frame_tx,
-                )
-                .await;
+                run_client_loop(factory_bundle, factory, command_rx, client_event_tx).await;
             });
         })
         .map_err(|e| crate::Error::new(format!("failed to spawn client thread: {e}")))?;
@@ -1064,7 +1059,6 @@ pub fn spawn_client() -> crate::Result<(
             join_handle: Arc::new(std::sync::Mutex::new(Some(join_handle))),
         },
         client_event_rx,
-        frame_rx,
     ))
 }
 
@@ -1074,7 +1068,6 @@ async fn run_client_loop(
     factory: Arc<PeerConnectionFactory>,
     mut command_rx: mpsc::UnboundedReceiver<ClientCommand>,
     client_event_tx: mpsc::UnboundedSender<ClientEvent>,
-    frame_tx: watch::Sender<Option<OwnedVideoFrame>>,
 ) {
     // コマンド処理中もイベント送信に使えるよう、先にクローンを確保しておく
     let client_event_tx = client_event_tx;
@@ -1097,7 +1090,7 @@ async fn run_client_loop(
                             send_error_log(&client_event_tx, "session already exists");
                             continue;
                         }
-                        match connect_session(factory.clone(), config, event_tx_for_log.clone(), frame_tx.clone()).await {
+                        match connect_session(factory.clone(), config, event_tx_for_log.clone()).await {
                             Ok((sess, rx)) => {
                                 connect_deadline = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
                                 session = Some(sess);

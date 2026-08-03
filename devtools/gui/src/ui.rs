@@ -18,6 +18,27 @@ use hisui_devtools_gui::p2p::{
     LogCategory, LogEntry, LogLevel, OwnedVideoFrame, P2PClientHandle, spawn_client,
 };
 
+/// 映像の移動ドラッグの状態。
+///
+/// `on_drag` で設定し、`on_drag_move` で参照する。
+/// リサイズと別の型にすることで、ドラッグ種別を型で判別する。
+#[derive(Clone)]
+struct VideoMoveState {
+    track_id: String,
+}
+
+/// 映像のリサイズドラッグの状態。
+///
+/// `on_drag` で設定し、`on_drag_move` で参照する。
+/// 移動と別の型にすることで、ドラッグ種別を型で判別する。
+#[derive(Clone)]
+struct VideoResizeState {
+    track_id: String,
+}
+
+/// 映像表示領域に表示するトラックの情報 (位置・サイズ込み)。
+type VideoTileItem = (String, Arc<RenderImage>, gpui::Point<f32>, gpui::Size<f32>);
+
 /// 映像トラックの情報。
 struct TrackInfo {
     track_id: String,
@@ -46,8 +67,18 @@ pub struct DevToolsApp {
     obsdc_dc_state: ClientDcState,
     tracks: Vec<TrackInfo>,
     logs: VecDeque<LogEntry>,
-    /// トラックごとの最新映像フレーム (BGRA)。グリッド表示される。
+    /// ログカテゴリごとの表示/非表示 (true = 表示)
+    log_filter_pc: bool,
+    log_filter_signaling: bool,
+    log_filter_obsdc: bool,
+    /// トラックごとの最新映像フレーム (BGRA)。ドラッグで配置を自由に変更できる。
     videos: std::collections::BTreeMap<String, Arc<RenderImage>>,
+    /// トラックごとの映像表示位置 (ピクセル)
+    video_positions: std::collections::HashMap<String, gpui::Point<f32>>,
+    /// トラックごとの映像表示サイズ (ピクセル)
+    video_sizes: std::collections::HashMap<String, gpui::Size<f32>>,
+    /// ドラッグ中の前回マウス位置
+    drag_prev_mouse: Option<gpui::Point<f32>>,
     last_error: Option<String>,
     /// 接続中かどうか (映像プレースホルダの表示切り替え用)
     connecting: bool,
@@ -72,8 +103,7 @@ pub struct DevToolsApp {
 impl DevToolsApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
         tracing::info!("DevToolsApp::new called");
-        let (client, event_rx, frame_rx) =
-            spawn_client().expect("P2P クライアントの起動に失敗しました");
+        let (client, event_rx) = spawn_client().expect("P2P クライアントの起動に失敗しました");
 
         let mut app = Self {
             client,
@@ -82,7 +112,13 @@ impl DevToolsApp {
             obsdc_dc_state: ClientDcState::NotCreated,
             tracks: Vec::new(),
             logs: VecDeque::new(),
+            log_filter_pc: true,
+            log_filter_signaling: true,
+            log_filter_obsdc: true,
             videos: std::collections::BTreeMap::new(),
+            video_positions: std::collections::HashMap::new(),
+            video_sizes: std::collections::HashMap::new(),
+            drag_prev_mouse: None,
             last_error: None,
             connecting: false,
             current_scene: String::new(),
@@ -95,19 +131,19 @@ impl DevToolsApp {
             probe_input_name: None,
         };
 
-        app.start_event_tasks(cx, event_rx, frame_rx);
+        app.start_event_tasks(cx, event_rx);
         app
     }
 
-    /// クライアントからのイベント・映像フレームを UI に反映するタスクを起動する。
+    /// クライアントからのイベントを UI に反映するタスクを起動する。
     ///
     /// tokio のチャネルは waker ベースで tokio ランタイムが無くても await できるため、
     /// GPUI のフォアグラウンドエグゼキュータ (メインスレッド) 上で受信する。
+    /// 映像フレームは `TrackAdded` でトラックごとに受信タスクを起動する。
     fn start_event_tasks(
         &mut self,
         cx: &mut Context<Self>,
         mut event_rx: tokio::sync::mpsc::UnboundedReceiver<ClientEvent>,
-        mut frame_rx: tokio::sync::watch::Receiver<Option<OwnedVideoFrame>>,
     ) {
         let app = cx.entity();
 
@@ -121,16 +157,26 @@ impl DevToolsApp {
             }
         })
         .detach();
+    }
 
-        // 映像フレーム受信タスク
+    /// トラックの映像フレーム受信タスクを起動する。
+    ///
+    /// トラックごとに独立したチャネルを持つため、複数トラックが同時に
+    /// フレームを送っても相互に上書きされず、それぞれ 30fps で表示できる。
+    fn start_frame_task(
+        &mut self,
+        cx: &mut Context<Self>,
+        track_id: String,
+        mut frame_rx: tokio::sync::watch::Receiver<Option<OwnedVideoFrame>>,
+    ) {
         let frame_app = cx.entity();
         cx.spawn(async move |_weak, cx| {
-            // トラックごとの表示レートを 30fps に制限する。
-            // サーバーは複数の映像トラック (Program 出力 + bootstrap 入力) を
-            // それぞれ 30fps で送信するため、トラック単位で制限しないと
-            // 片方のトラックの表示が間引かれてカクカクする。
-            let mut last_display: std::collections::HashMap<String, std::time::Instant> =
-                std::collections::HashMap::new();
+            // 表示レートを 30fps に制限する。
+            // サーバーは各映像トラックを 30fps で送信するため、
+            // 制限しないと色変換が追いつかずカクカクする。
+            let mut last_display = std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(1))
+                .unwrap_or_else(std::time::Instant::now);
             let mut frame_count: u64 = 0;
             let mut last_log = std::time::Instant::now();
             while frame_rx.changed().await.is_ok() {
@@ -152,26 +198,33 @@ impl DevToolsApp {
                     last_log = std::time::Instant::now();
                     frame_count = 0;
                 }
-                // トラックごとの表示レートを制限する。制限を超えたフレームは
+                // 表示レートを制限する。制限を超えたフレームは
                 // watch チャネルで最新フレームに置き換えられる
-                let track_id = frame.track_id.clone();
-                let last = last_display.entry(track_id.clone()).or_insert_with(|| {
-                    std::time::Instant::now()
-                        .checked_sub(std::time::Duration::from_secs(1))
-                        .unwrap_or_else(std::time::Instant::now)
-                });
-                if last.elapsed() < std::time::Duration::from_millis(33) {
+                if last_display.elapsed() < std::time::Duration::from_millis(33) {
                     continue;
                 }
-                *last = std::time::Instant::now();
+                last_display = std::time::Instant::now();
                 // 色変換はバックグラウンドエグゼキュータで行い、メインスレッドをブロックしない
+                let frame_width = frame.width;
+                let frame_height = frame.height;
                 let render_image = cx
                     .background_executor()
                     .spawn(async move { to_render_image(&frame) })
                     .await;
                 if let Some(render_image) = render_image {
                     let _ = frame_app.update::<_, gpui::AsyncApp>(cx, |app, cx| {
-                        app.videos.insert(track_id, render_image);
+                        // 削除済みトラックのフレームは無視する。
+                        // トラック削除後もサーバーからフレームが届き続けることがあり、
+                        // 映像タイルが復活してしまうのを防ぐ。
+                        if !app.tracks.iter().any(|track| track.track_id == track_id) {
+                            return;
+                        }
+                        // 初回受信時に初期サイズを決定する (幅 480px にアスペクト比でスケール)
+                        app.video_sizes.entry(track_id.clone()).or_insert_with(|| {
+                            let scale = 480.0 / frame_width.max(1) as f32;
+                            gpui::size(480.0, (frame_height as f32 * scale).max(1.0))
+                        });
+                        app.videos.insert(track_id.clone(), render_image);
                         cx.notify();
                     });
                 }
@@ -208,11 +261,23 @@ impl DevToolsApp {
                 "obsdc" => self.obsdc_dc_state = state,
                 _ => {}
             },
-            ClientEvent::TrackAdded { track_id, kind } => {
-                self.tracks.push(TrackInfo { track_id, kind });
+            ClientEvent::TrackAdded {
+                track_id,
+                kind,
+                frame_rx,
+            } => {
+                self.tracks.push(TrackInfo {
+                    track_id: track_id.clone(),
+                    kind,
+                });
+                // トラックごとの映像フレーム受信タスクを起動する
+                self.start_frame_task(cx, track_id, frame_rx);
             }
             ClientEvent::TrackRemoved { track_id } => {
                 self.tracks.retain(|track| track.track_id != track_id);
+                self.videos.remove(&track_id);
+                self.video_positions.remove(&track_id);
+                self.video_sizes.remove(&track_id);
             }
             ClientEvent::CloseReceived { code, reason } => {
                 self.last_error = Some(format!("{code:?}: {reason}"));
@@ -257,6 +322,25 @@ impl DevToolsApp {
         self.logs.push_back(entry);
         if self.logs.len() > 500 {
             self.logs.pop_front();
+        }
+    }
+
+    /// 指定したログカテゴリの表示/非表示を切り替える。
+    fn toggle_log_filter(&mut self, category: LogCategory) {
+        let enabled = match category {
+            LogCategory::Pc => &mut self.log_filter_pc,
+            LogCategory::Signaling => &mut self.log_filter_signaling,
+            LogCategory::Obsdc => &mut self.log_filter_obsdc,
+        };
+        *enabled = !*enabled;
+    }
+
+    /// 指定したログカテゴリが表示対象かどうかを返す。
+    fn is_log_category_visible(&self, category: LogCategory) -> bool {
+        match category {
+            LogCategory::Pc => self.log_filter_pc,
+            LogCategory::Signaling => self.log_filter_signaling,
+            LogCategory::Obsdc => self.log_filter_obsdc,
         }
     }
 
@@ -453,15 +537,17 @@ impl DevToolsApp {
                 let remove_data = build_object_data(&[("inputName", &probe_name)]);
                 let _ = client.send_obsdc_request("RemoveInput", remove_data).await;
             }
-            let _ = app.update::<_, gpui::AsyncApp>(cx, |app, _| {
+            let _ = app.update::<_, gpui::AsyncApp>(cx, |app, cx| {
                 app.camera_loading = false;
+                // ソース一覧を更新して追加結果を反映する
+                app.refresh_sources(cx);
             });
         })
         .detach();
     }
 
     /// 選択中のソースを削除する。
-    fn remove_selected_source(&mut self) {
+    fn remove_selected_source(&mut self, cx: &mut Context<Self>) {
         let Some(index) = self.selected_source else {
             return;
         };
@@ -470,8 +556,16 @@ impl DevToolsApp {
         };
         self.selected_source = None;
         let remove_data = build_object_data(&[("inputName", &source.input_name)]);
-        // レスポンスは不要なので drop する
-        drop(self.client.send_obsdc_request("RemoveInput", remove_data));
+        let client = self.client.clone();
+        let app = cx.entity();
+        // 削除完了後にソース一覧を更新して結果を反映する
+        cx.spawn(async move |_weak, cx| {
+            let _ = client.send_obsdc_request("RemoveInput", remove_data).await;
+            let _ = app.update::<_, gpui::AsyncApp>(cx, |app, cx| {
+                app.refresh_sources(cx);
+            });
+        })
+        .detach();
     }
 
     fn connection_state_text(&self) -> &'static str {
@@ -612,7 +706,12 @@ impl Render for DevToolsApp {
             .iter()
             .map(|track| format!("{}: {}", track.kind, track.track_id).into())
             .collect();
-        let logs = self.logs.iter().map(log_line).collect::<Vec<_>>();
+        let logs = self
+            .logs
+            .iter()
+            .filter(|entry| self.is_log_category_visible(entry.category))
+            .map(log_line)
+            .collect::<Vec<_>>();
 
         div()
             .size_full()
@@ -634,7 +733,7 @@ impl Render for DevToolsApp {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(div().text_sm().child("State:"))
+                            .child(div().text_sm().child("状態:"))
                             .child(
                                 div()
                                     .text_sm()
@@ -673,7 +772,7 @@ impl Render for DevToolsApp {
                                 this.disconnect();
                                 cx.notify();
                             }))
-                            .child("Disconnect")
+                            .child("切断")
                     } else {
                         div()
                             .id("connect-button")
@@ -687,7 +786,7 @@ impl Render for DevToolsApp {
                                 this.connect();
                                 cx.notify();
                             }))
-                            .child("Connect")
+                            .child("接続")
                     }),
             )
             .child(if let Some(error) = error_text {
@@ -715,7 +814,7 @@ impl Render for DevToolsApp {
                                 div()
                                     .text_sm()
                                     .font_weight(gpui::FontWeight::BOLD)
-                                    .child("Connection"),
+                                    .child("接続情報"),
                             )
                             .child(
                                 div()
@@ -724,7 +823,7 @@ impl Render for DevToolsApp {
                                     .gap_1()
                                     .text_xs()
                                     .child(div().child(
-                                        "signaling DataChannel: ".to_string()
+                                        "シグナリング DataChannel: ".to_string()
                                             + Self::dc_state_text(self.signaling_dc_state),
                                     ))
                                     .child(div().child(
@@ -736,10 +835,10 @@ impl Render for DevToolsApp {
                                 div()
                                     .text_sm()
                                     .font_weight(gpui::FontWeight::BOLD)
-                                    .child("Tracks"),
+                                    .child("トラック"),
                             )
                             .child(if tracks.is_empty() {
-                                div().text_xs().child("no tracks")
+                                div().text_xs().child("トラックなし")
                             } else {
                                 div().flex().flex_col().gap_1().text_xs().children(tracks)
                             })
@@ -753,32 +852,105 @@ impl Render for DevToolsApp {
                             .bg(rgb(0x111111))
                             .rounded_md()
                             .overflow_hidden()
-                            .child(video_area(&self.videos, self.connecting).into_any_element()),
+                            .child(
+                                video_area(
+                                    cx.entity(),
+                                    &self.videos,
+                                    &self.video_positions,
+                                    &self.video_sizes,
+                                    self.connecting,
+                                )
+                                .into_any_element(),
+                            ),
                     ),
             )
             .child(
                 // ログ表示
                 div()
-                    .id("logs")
                     .h_48()
                     .border_t_1()
                     .border_color(rgb(0x333333))
-                    .p_2()
-                    .overflow_scroll()
                     .flex()
                     .flex_col()
-                    .gap_1()
-                    .children(logs),
+                    .child(log_filter_bar(self, cx))
+                    .child(
+                        div()
+                            .id("logs")
+                            .flex_1()
+                            .p_2()
+                            .overflow_scroll()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .children(logs),
+                    ),
             )
     }
 }
 
-/// 映像表示領域。トラックごとの最新フレームをグリッド表示する。
+/// ログカテゴリのフィルターバー。
+fn log_filter_bar(app: &DevToolsApp, cx: &mut Context<DevToolsApp>) -> gpui::AnyElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .p_2()
+        .border_b_1()
+        .border_color(rgb(0x333333))
+        .child(
+            div()
+                .text_xs()
+                .text_color(rgb(0x888888))
+                .child("ログフィルター:"),
+        )
+        .child(log_filter_button(app, LogCategory::Pc, cx))
+        .child(log_filter_button(app, LogCategory::Signaling, cx))
+        .child(log_filter_button(app, LogCategory::Obsdc, cx))
+        .into_any_element()
+}
+
+/// ログカテゴリ 1 つの表示/非表示トグルボタン。
+fn log_filter_button(
+    app: &DevToolsApp,
+    category: LogCategory,
+    cx: &mut Context<DevToolsApp>,
+) -> impl IntoElement {
+    let enabled = app.is_log_category_visible(category);
+    div()
+        .id(gpui::ElementId::Name(gpui::SharedString::from(format!(
+            "log-filter-{category}"
+        ))))
+        .px_2()
+        .py_0p5()
+        .rounded_md()
+        .text_xs()
+        .bg(if enabled {
+            rgb(0x2d2d2d)
+        } else {
+            rgb(0x1e1e1e)
+        })
+        .text_color(if enabled {
+            rgb(0xd4d4d4)
+        } else {
+            rgb(0x666666)
+        })
+        .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _window, cx| {
+            this.toggle_log_filter(category);
+            cx.notify();
+        }))
+        .child(category.to_string())
+}
+
+/// 映像表示領域。トラックごとの映像を自由配置で表示する。
 ///
-/// トラック数に応じて列数を変える (1 トラックは 1 列、2 トラックは 2 列)。
-/// 各トラックはアスペクト比を維持してセル内に収める (ObjectFit::Contain)。
+/// 映像はドラッグで移動でき、右下のハンドルでリサイズできる。
+/// 位置・サイズはトラックごとに `video_positions` / `video_sizes` に保持される。
 fn video_area(
+    app: gpui::Entity<DevToolsApp>,
     videos: &std::collections::BTreeMap<String, Arc<RenderImage>>,
+    positions: &std::collections::HashMap<String, gpui::Point<f32>>,
+    sizes: &std::collections::HashMap<String, gpui::Size<f32>>,
     connecting: bool,
 ) -> gpui::AnyElement {
     if videos.is_empty() {
@@ -792,29 +964,149 @@ fn video_area(
                     .text_sm()
                     .text_color(rgb(0x888888))
                     .child(if connecting {
-                        "Connecting..."
+                        "接続中..."
                     } else {
-                        "No video"
+                        "映像なし"
                     }),
             )
             .into_any_element();
     }
+
+    // トラックごとの位置・サイズを収集する
+    let items: Vec<VideoTileItem> = videos
+        .iter()
+        .map(|(track_id, video)| {
+            let position = positions.get(track_id).copied().unwrap_or_default();
+            let size = sizes
+                .get(track_id)
+                .copied()
+                .unwrap_or_else(|| gpui::size(480.0, 270.0));
+            (track_id.clone(), video.clone(), position, size)
+        })
+        .collect();
+
     div()
         .size_full()
-        .flex()
-        .flex_row()
-        .gap_1()
-        .children(videos.iter().map(|(track_id, video)| {
-            div().flex_1().size_full().bg(rgb(0x000000)).child(
-                img(ImageSource::Render(video.clone()))
-                    .size_full()
-                    .object_fit(ObjectFit::Contain)
-                    .id(gpui::ElementId::Name(gpui::SharedString::from(format!(
-                        "video-{track_id}"
-                    )))),
-            )
+        .relative()
+        .overflow_hidden()
+        .bg(rgb(0x000000))
+        .children(items.into_iter().map(|(track_id, video, position, size)| {
+            video_tile(app.clone(), track_id, video, position, size).into_any_element()
         }))
         .into_any_element()
+}
+
+/// 映像トラック 1 枚のタイル。ドラッグで移動、右下のハンドルでリサイズできる。
+fn video_tile(
+    app: gpui::Entity<DevToolsApp>,
+    track_id: String,
+    video: Arc<RenderImage>,
+    position: gpui::Point<f32>,
+    size: gpui::Size<f32>,
+) -> impl IntoElement {
+    let app_for_move = app.clone();
+    let app_for_drag = app_for_move.clone();
+    div()
+        .absolute()
+        .left(gpui::px(position.x))
+        .top(gpui::px(position.y))
+        .w(gpui::px(size.width))
+        .h(gpui::px(size.height))
+        .bg(rgb(0x111111))
+        .overflow_hidden()
+        .id(gpui::ElementId::Name(gpui::SharedString::from(format!(
+            "video-tile-{track_id}"
+        ))))
+        .on_drag(
+            VideoMoveState {
+                track_id: track_id.clone(),
+            },
+            move |_, _offset, window, cx| {
+                // offset は要素 origin からの相対位置のため、
+                // ドラッグ開始位置はウィンドウ座標のマウス位置を記録する
+                app_for_drag.update::<_, gpui::App>(cx, |app, _| {
+                    app.drag_prev_mouse = Some(window.mouse_position().map(f32::from));
+                });
+                cx.new(|_| gpui::EmptyView)
+            },
+        )
+        .on_drag_move({
+            let app = app_for_move.clone();
+            move |event, _window, cx| {
+                let drag: &VideoMoveState = event.drag(cx);
+                let track_id = drag.track_id.clone();
+                // Pixels を f32 に変換する
+                let position = event.event.position.map(f32::from);
+                app.update::<_, gpui::App>(cx, |app, _| {
+                    let prev = app.drag_prev_mouse.unwrap_or(position);
+                    let entry = app.video_positions.entry(track_id).or_default();
+                    entry.x += position.x - prev.x;
+                    entry.y += position.y - prev.y;
+                    app.drag_prev_mouse = Some(position);
+                });
+            }
+        })
+        .child(
+            img(ImageSource::Render(video))
+                .size_full()
+                .object_fit(ObjectFit::Contain)
+                .id(gpui::ElementId::Name(gpui::SharedString::from(format!(
+                    "video-{track_id}"
+                )))),
+        )
+        .child(resize_handle(app, track_id))
+}
+
+/// 映像タイルの右下に表示するリサイズハンドル。ドラッグでサイズを変更できる。
+fn resize_handle(app: gpui::Entity<DevToolsApp>, track_id: String) -> impl IntoElement {
+    let app_for_resize = app.clone();
+    let app_for_drag = app_for_resize.clone();
+    div()
+        .absolute()
+        .right_0()
+        .bottom_0()
+        .w(gpui::px(16.))
+        .h(gpui::px(16.))
+        .bg(rgb(0x2b5a2b))
+        .id(gpui::ElementId::Name(gpui::SharedString::from(format!(
+            "resize-handle-{track_id}"
+        ))))
+        .on_drag(
+            VideoResizeState {
+                track_id: track_id.clone(),
+            },
+            move |_, _offset, window, cx| {
+                // offset は要素 origin からの相対位置のため、
+                // ドラッグ開始位置はウィンドウ座標のマウス位置を記録する
+                app_for_drag.update::<_, gpui::App>(cx, |app, _| {
+                    app.drag_prev_mouse = Some(window.mouse_position().map(f32::from));
+                });
+                cx.new(|_| gpui::EmptyView)
+            },
+        )
+        .on_drag_move({
+            let app = app_for_resize.clone();
+            move |event, _window, cx| {
+                let drag: &VideoResizeState = event.drag(cx);
+                let track_id = drag.track_id.clone();
+                // Pixels を f32 に変換する
+                let position = event.event.position.map(f32::from);
+                app.update::<_, gpui::App>(cx, |app, _| {
+                    let prev = app.drag_prev_mouse.unwrap_or(position);
+                    let entry = app.video_sizes.entry(track_id).or_default();
+                    entry.width += position.x - prev.x;
+                    entry.height += position.y - prev.y;
+                    // 最小サイズを保証する
+                    if entry.width < 80.0 {
+                        entry.width = 80.0;
+                    }
+                    if entry.height < 45.0 {
+                        entry.height = 45.0;
+                    }
+                    app.drag_prev_mouse = Some(position);
+                });
+            }
+        })
 }
 
 /// ソース管理パネル。
@@ -858,7 +1150,7 @@ fn sources_panel(
                     div()
                         .text_sm()
                         .font_weight(gpui::FontWeight::BOLD)
-                        .child("Sources"),
+                        .child("ソース"),
                 )
                 .child(div().flex_1())
                 .child(
@@ -873,7 +1165,7 @@ fn sources_panel(
                             this.refresh_sources(cx);
                             cx.notify();
                         }))
-                        .child("Refresh"),
+                        .child("更新"),
                 )
                 .child(
                     div()
@@ -887,7 +1179,7 @@ fn sources_panel(
                             this.open_camera_dialog(cx);
                             cx.notify();
                         }))
-                        .child("Add Camera"),
+                        .child("カメラ追加"),
                 ),
         )
         .child(if sources.is_empty() {
@@ -895,9 +1187,9 @@ fn sources_panel(
                 .text_xs()
                 .text_color(rgb(0x888888))
                 .child(if is_connected {
-                    "no sources"
+                    "ソースがありません"
                 } else {
-                    "not connected"
+                    "未接続"
                 })
                 .into_any_element()
         } else {
@@ -937,10 +1229,10 @@ fn sources_panel(
                 .rounded_md()
                 .text_xs()
                 .on_click(cx.listener(|this, _: &gpui::ClickEvent, _window, cx| {
-                    this.remove_selected_source();
+                    this.remove_selected_source(cx);
                     cx.notify();
                 }))
-                .child("Remove Source")
+                .child("ソース削除")
                 .into_any_element()
         } else {
             div().into_any_element()
@@ -950,18 +1242,18 @@ fn sources_panel(
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(div().text_xs().text_color(rgb(0x888888)).child("Camera:"))
+                .child(div().text_xs().text_color(rgb(0x888888)).child("カメラ:"))
                 .child(if camera_loading {
                     div()
                         .text_xs()
                         .text_color(rgb(0x888888))
-                        .child("Loading...")
+                        .child("読み込み中...")
                         .into_any_element()
                 } else if camera_names.is_empty() {
                     div()
                         .text_xs()
                         .text_color(rgb(0xd46969))
-                        .child("no camera found")
+                        .child("カメラが見つかりません")
                         .into_any_element()
                 } else {
                     div()
@@ -1010,7 +1302,7 @@ fn sources_panel(
                                     this.close_camera_dialog();
                                     cx.notify();
                                 }))
-                                .child("Cancel"),
+                                .child("キャンセル"),
                         )
                         .child(
                             div()
@@ -1028,7 +1320,7 @@ fn sources_panel(
                                     }
                                     cx.notify();
                                 }))
-                                .child("Add"),
+                                .child("追加"),
                         ),
                 )
                 .into_any_element()
