@@ -11,6 +11,7 @@ license = "Apache-2.0"
 
 [workspace]
 members = [
+  "devtools/gui",
   "examples/camera_record",
   "examples/camera_sora_grid",
   "examples/hls_s3",

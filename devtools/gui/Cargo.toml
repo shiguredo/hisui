@@ -1,0 +1,31 @@
+[package]
+name = "hisui-devtools-gui"
+version = "0.0.0"
+edition = "2024"
+description = "Hisui DevTools native GUI (GPUI)"
+publish = false
+
+[dependencies]
+# NOTE: 通常の依存は突然挙動が変わることが内容に、バージョンは厳密一致で指定している
+# NOTE: examples と共有する依存は [workspace.dependencies] で定義している
+
+# OBS WebSocket 認証 (SHA-256)
+aws-lc-rs = "=1.17.3"
+# base64
+base64ct = { version = "=1.8.3", features = ["alloc"] }
+# GUI フレームワーク (Zed の GPU アクセラレーション UI)
+# runtime_shaders: Metal Toolchain 無しでもビルドできるようにする (実行時にシェーダーをコンパイルする)
+gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
+# GPUI の RenderImage::new に渡す画像データ (image::Frame) 用
+image = "=0.25.1"
+# JSON のパース・生成
+nojson = { workspace = true }
+# I420 から RGBA への色変換
+shiguredo_libyuv = "=2026.2.0-canary.1"
+# WebRTC
+shiguredo_webrtc = { workspace = true }
+# 非同期処理
+tokio = { workspace = true }
+# ログ
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
