@@ -41,6 +41,8 @@ hisui の encoder パラメータは `EncodeConfig::default()` (`src/encoder.rs`
 
 各 encoder は呼出経路 (realtime) を判別する情報を持たず、 統一的な realtime プロファイル定義もない。
 
+なお、 `EncodeConfig::default()` の各値は録画機能 (compose) 削除時に旧既定レイアウト (`layout-examples/compose-default.jsonc`) の値をそのまま引き継いでおり、 リアルタイム用途の観点で最適化されていない。 既定値そのものの見直しも本 issue の対象とする。
+
 0085 応急処置状態 (本 issue で解消対象):
 
 - `src/encoder.rs::VideoEncoderInner::requires_backpressure` が nvcodec のみ true → nvcodec 経路でのみ bp guard 有効
