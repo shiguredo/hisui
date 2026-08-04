@@ -2,6 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-06-08
+- Completed: 2026-08-04
 - Model: Opus 4.8
 - Branch: feature/refactor-generic-vmaf-tune
 - Reporter: @sile
@@ -75,6 +76,10 @@ VMAF による品質評価やパラメータ探索という機能自体は、Sor
 - 汎用化された経路に対するテスト（PBT / 単体テスト）が追加されていること。
 
 ## 解決方法
+
+本 issue は closed とする。
+
+`vmaf` / `tune` サブコマンド自体が Sora 録画機能の削除に伴い削除されたため、汎用化の前提が消滅した。
 
 未確定事項を確定させた上で具体化する。現時点では以下を想定する。
 
