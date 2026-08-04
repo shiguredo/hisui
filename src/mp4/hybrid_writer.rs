@@ -1135,7 +1135,7 @@ mod tests {
         // ファイナライズ済みの標準 MP4 として音声トラックを読み戻し、サンプル数・コーデック・データに加えて、
         // 全フレームに sample_entry が載っていること（エンコード済みフレームは常に sample_entry を持つ不変条件）と、
         // 後続フレームの sample_entry が初回と等価（changed_since=false）であることを検証する。
-        let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
+        let reader = crate::mp4::sync_reader::Mp4AudioReader::new(&output_path)?;
         let read_audio_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(read_audio_samples.len(), audio_frame_count);
         let mut first_audio_entry: Option<&SharedSampleEntry> = None;
@@ -1156,7 +1156,7 @@ mod tests {
         }
 
         // 映像トラックも読み戻し、全フレームに sample_entry が載っていること・初回と等価であることを確認する。
-        let reader = crate::sora::recording_mp4_reader::Mp4VideoReader::new(&output_path)?;
+        let reader = crate::mp4::sync_reader::Mp4VideoReader::new(&output_path)?;
         let read_video_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(read_video_samples.len(), 1);
         let mut first_video_entry: Option<&SharedSampleEntry> = None;
@@ -1239,7 +1239,7 @@ mod tests {
         drop(writer);
 
         // 全 5 音声フレームに sample_entry が載り、初回と等価であることを検証する。
-        let reader = crate::sora::recording_mp4_reader::Mp4AudioReader::new(&output_path)?;
+        let reader = crate::mp4::sync_reader::Mp4AudioReader::new(&output_path)?;
         let read_audio_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(
             read_audio_samples.len(),
@@ -1262,7 +1262,7 @@ mod tests {
         }
 
         // 全 3 映像フレームに sample_entry が載り、初回と等価であることを検証する。
-        let reader = crate::sora::recording_mp4_reader::Mp4VideoReader::new(&output_path)?;
+        let reader = crate::mp4::sync_reader::Mp4VideoReader::new(&output_path)?;
         let read_video_samples = reader.collect::<crate::Result<Vec<_>>>()?;
         assert_eq!(
             read_video_samples.len(),
