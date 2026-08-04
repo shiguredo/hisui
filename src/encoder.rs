@@ -424,7 +424,6 @@ fn default_libvpx_vp9_encode_config() -> shiguredo_libvpx::EncoderConfig {
     vp9_config.tile_rows = Some(1);
     vp9_config.row_mt = false;
     vp9_config.frame_parallel_decoding = false;
-    vp9_config.tune_content = Some(shiguredo_libvpx::ContentType::Default);
     config
 }
 
@@ -1293,19 +1292,13 @@ impl VideoEncoderInner {
     }
 }
 
-pub fn default_video_encode_config_for_rpc() -> EncodeConfig {
-    // server RPC の既定 encode params は、 EncodeConfig の既定値
-    // (旧 compose 既定値をインライン化したもの) を利用する
-    EncodeConfig::default()
-}
-
 /// 指定したキーフレーム間隔（フレーム数）を全エンコーダーに設定した EncodeConfig を生成する。
 /// HLS セグメント分割に必要なキーフレームを確実に得るために使用する。
 pub fn encode_config_with_keyframe_interval(
     keyframe_interval_frames: u32,
     frame_rate: crate::video::FrameRate,
 ) -> EncodeConfig {
-    let mut config = default_video_encode_config_for_rpc();
+    let mut config = EncodeConfig::default();
 
     // キーフレーム間隔を秒に変換（VideoToolbox の duration 指定で使用）
     let keyframe_interval_duration = std::time::Duration::from_secs_f64(
@@ -1427,7 +1420,7 @@ pub async fn create_video_processor_with_params(
         width: crate::types::EvenUsize::ZERO,
         height: crate::types::EvenUsize::ZERO,
         frame_rate,
-        encode_params: encode_params.unwrap_or_else(default_video_encode_config_for_rpc),
+        encode_params: encode_params.unwrap_or_default(),
     };
     handle
         .spawn_processor(
@@ -1597,7 +1590,7 @@ mod tests {
                 numerator: NonZeroUsize::MIN.saturating_add(29),
                 denumerator: NonZeroUsize::MIN,
             },
-            encode_params: default_video_encode_config_for_rpc(),
+            encode_params: EncodeConfig::default(),
         };
         VideoEncoder::new(&options, None, crate::stats::Stats::new())
             .expect("VideoEncoder::new が失敗した")

@@ -342,7 +342,7 @@ impl VideoCodecSpecificInfo {
                 let mut nalus = Vec::new();
                 let mut data = &sample.data[..];
 
-                // NOTE: sora の場合は区切りバイトサイズは 4 に固定
+                // NOTE: H.264 の AVCC 形式では区切りバイトサイズは 4 に固定
                 while data.len() > 4 {
                     let length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
                     data = &data[4..];

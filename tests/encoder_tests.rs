@@ -4,9 +4,7 @@ use std::time::Duration;
 use hisui::{
     MediaFrame, MediaPipeline, Message, ProcessorHandle, ProcessorId, ProcessorMetadata, TrackId,
     VideoFrame,
-    encoder::{
-        EncoderRunOutput, VideoEncoder, VideoEncoderOptions, default_video_encode_config_for_rpc,
-    },
+    encoder::{EncodeConfig, EncoderRunOutput, VideoEncoder, VideoEncoderOptions},
     types::{CodecName, EvenUsize},
     video::{FrameRate, VideoFormat, VideoFrameSize},
 };
@@ -28,7 +26,7 @@ fn vp8_options() -> VideoEncoderOptions {
             numerator: NonZeroUsize::MIN.saturating_add(29),
             denumerator: NonZeroUsize::MIN,
         },
-        encode_params: default_video_encode_config_for_rpc(),
+        encode_params: EncodeConfig::default(),
     }
 }
 
