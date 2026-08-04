@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-05-29
-- Completed:
+- Completed: 2026-08-04
 - Model: Opus 4.7
 - Branch: feature/add-latest-encoder-params
 - Polished: 2026-05-29
@@ -120,6 +120,10 @@ for (key, value) in obj {
 - 既定値変更によって出力されるメディアの品質が変わる可能性があるため、サンプルファイルでの目視確認 (1 ファイル/コーデックの規模で十分) を行ったログを残す。
 
 ## 解決方法
+
+本 issue は closed とする。
+
+対象の JSON パーサー群 (`src/sora/recording_encoder_*_params.rs` / `src/sora/recording_layout_encode_params.rs`) と既定レイアウトは、Sora 録画機能の削除に伴い `src/sora/` ごと削除された。 既定エンコードパラメータは `src/encoder.rs` の `EncodeConfig::default()` に集約されたが、依存 crate の新規パラメーターへの追従は realtime プロファイル設計 (0087) で改めて検討する。
 
 ### 実装ステップ
 
