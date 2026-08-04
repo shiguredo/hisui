@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-07-02
-- Completed:
+- Completed: 2026-08-04
 - Model: Opus 4.7
 - Branch: feature/add-tune-seed-default-params
 - Polished:
@@ -92,6 +92,10 @@ hisui の `tune` サブコマンドは NSGA-II による多目的最適化を行
 - `CHANGES.md` の `## develop` に `[ADD] hisui tune サブコマンドに --seed-params オプションを追加する` を追記すること。
 
 ## 解決方法
+
+本 issue は closed とする。
+
+`tune` サブコマンドと `src/tune/` は Sora 録画機能の削除に伴い削除された。 NSGA-II によるパラメーター探索自体が消えたため、初期集団へのシード投入の前提が消滅した。
 
 ### 実装ステップ
 
