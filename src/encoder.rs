@@ -341,6 +341,243 @@ pub struct EncodeConfig {
     pub nvcodec_av1: shiguredo_nvcodec::EncoderConfig,
 }
 
+impl Default for EncodeConfig {
+    fn default() -> Self {
+        Self {
+            libvpx_vp8: default_libvpx_vp8_encode_config(),
+            libvpx_vp9: default_libvpx_vp9_encode_config(),
+            openh264: default_openh264_encode_config(),
+            svt_av1: default_svt_av1_encode_config(),
+            #[cfg(target_os = "macos")]
+            video_toolbox_h264: default_video_toolbox_h264_encode_config(),
+            #[cfg(target_os = "macos")]
+            video_toolbox_h265: default_video_toolbox_h265_encode_config(),
+            #[cfg(feature = "nvcodec")]
+            nvcodec_h264: default_nvcodec_h264_encode_config(),
+            #[cfg(feature = "nvcodec")]
+            nvcodec_h265: default_nvcodec_h265_encode_config(),
+            #[cfg(feature = "nvcodec")]
+            nvcodec_av1: default_nvcodec_av1_encode_config(),
+        }
+    }
+}
+
+// 以下の各既定値は、 削除した録画機能の既定レイアウト
+// (`layout-examples/compose-default.jsonc` の各 `*_encode_params`) と同じ値に保っている。
+// 値の見直しは issues/0087 で行う予定。
+
+/// 既定の libvpx VP8 エンコード設定を生成する
+fn default_libvpx_vp8_encode_config() -> shiguredo_libvpx::EncoderConfig {
+    let mut config = shiguredo_libvpx::EncoderConfig::new(
+        2,
+        2,
+        shiguredo_libvpx::ImageFormat::I420,
+        shiguredo_libvpx::CodecConfig::Vp8(shiguredo_libvpx::Vp8Config::default()),
+    );
+    config.min_quantizer = 26;
+    config.max_quantizer = 40;
+    config.cq_level = 5;
+    config.cpu_used = Some(1);
+    config.deadline = shiguredo_libvpx::EncodingDeadline::Realtime;
+    config.rate_control = shiguredo_libvpx::RateControlMode::Cbr;
+    config.lag_in_frames = NonZeroUsize::new(6);
+    config.threads = NonZeroUsize::new(1);
+    config.error_resilient = false;
+    config.keyframe_interval = NonZeroUsize::new(300);
+    let shiguredo_libvpx::CodecConfig::Vp8(vp8_config) = &mut config.codec else {
+        unreachable!();
+    };
+    vp8_config.noise_sensitivity = Some(0);
+    vp8_config.static_threshold = Some(957);
+    vp8_config.token_partitions = Some(0);
+    vp8_config.max_intra_bitrate_pct = Some(6668);
+    vp8_config.arnr_config = Some(shiguredo_libvpx::ArnrConfig {
+        max_frames: 1,
+        strength: 4,
+        filter_type: 2,
+    });
+    config
+}
+
+/// 既定の libvpx VP9 エンコード設定を生成する
+fn default_libvpx_vp9_encode_config() -> shiguredo_libvpx::EncoderConfig {
+    let mut config = shiguredo_libvpx::EncoderConfig::new(
+        2,
+        2,
+        shiguredo_libvpx::ImageFormat::I420,
+        shiguredo_libvpx::CodecConfig::Vp9(shiguredo_libvpx::Vp9Config::default()),
+    );
+    config.min_quantizer = 15;
+    config.max_quantizer = 43;
+    config.cq_level = 33;
+    config.cpu_used = Some(9);
+    config.deadline = shiguredo_libvpx::EncodingDeadline::Realtime;
+    config.rate_control = shiguredo_libvpx::RateControlMode::Cq;
+    config.lag_in_frames = NonZeroUsize::new(16);
+    config.threads = NonZeroUsize::new(1);
+    config.error_resilient = false;
+    config.keyframe_interval = NonZeroUsize::new(300);
+    let shiguredo_libvpx::CodecConfig::Vp9(vp9_config) = &mut config.codec else {
+        unreachable!();
+    };
+    vp9_config.aq_mode = Some(3);
+    vp9_config.noise_sensitivity = Some(2);
+    vp9_config.tile_columns = Some(5);
+    vp9_config.tile_rows = Some(1);
+    vp9_config.row_mt = false;
+    vp9_config.frame_parallel_decoding = false;
+    vp9_config.tune_content = Some(shiguredo_libvpx::ContentType::Default);
+    config
+}
+
+/// 既定の OpenH264 エンコード設定を生成する
+fn default_openh264_encode_config() -> shiguredo_openh264::EncoderConfig {
+    let mut config = shiguredo_openh264::EncoderConfig::new(1, 1, 1, 1, 1);
+    config.max_qp = Some(39);
+    config.min_qp = Some(19);
+    config.complexity_mode = Some(shiguredo_openh264::ComplexityMode::Low);
+    config.thread_count = NonZeroUsize::new(1);
+    config.intra_period = Some(300);
+    config.rate_control_mode = Some(shiguredo_openh264::RateControlMode::Timestamp);
+    config.denoise = Some(false);
+    config.background_detection = Some(true);
+    config.adaptive_quantization = Some(false);
+    config.scene_change_detection = Some(false);
+    config.deblocking_filter = Some(false);
+    config
+}
+
+/// 既定の SVT-AV1 エンコード設定を生成する
+fn default_svt_av1_encode_config() -> shiguredo_svt_av1::EncoderConfig {
+    let mut config =
+        shiguredo_svt_av1::EncoderConfig::new(0, 0, shiguredo_svt_av1::ColorFormat::I420);
+    config.enc_mode = 13;
+    config.qp = Some(46);
+    config.min_qp_allowed = Some(12);
+    config.max_qp_allowed = Some(50);
+    config.rate_control_mode = shiguredo_svt_av1::RcMode::Vbr;
+    config.over_shoot_pct = Some(51);
+    config.under_shoot_pct = Some(75);
+    config.intra_period_length = NonZeroUsize::new(300);
+    config.hierarchical_levels = Some(3);
+    config.scene_change_detection = false;
+    config.look_ahead_distance = Some(13);
+    config.enable_dlf_flag = Some(0);
+    config.cdef_level = Some(-1);
+    config.enable_restoration_filtering = Some(0);
+    config.enable_tf = Some(1);
+    config.enable_overlays = Some(false);
+    config.film_grain_denoise_strength = Some(0);
+    config.stat_report = false;
+    config.fast_decode = Some(0);
+    config
+}
+
+#[cfg(target_os = "macos")]
+fn default_video_toolbox_h264_encode_config() -> shiguredo_video_toolbox::EncoderConfig {
+    let mut config = default_video_toolbox_encoder_config(
+        shiguredo_video_toolbox::CodecConfig::H264(shiguredo_video_toolbox::H264EncoderConfig {
+            profile: shiguredo_video_toolbox::H264Profile::Baseline,
+            entropy_mode: shiguredo_video_toolbox::H264EntropyMode::Cavlc,
+        }),
+    );
+    config.prioritize_encoding_speed_over_quality = true;
+    config.max_key_frame_interval = std::num::NonZeroU32::new(300);
+    config.max_frame_delay_count = std::num::NonZeroU32::new(2);
+    config
+}
+
+#[cfg(target_os = "macos")]
+fn default_video_toolbox_h265_encode_config() -> shiguredo_video_toolbox::EncoderConfig {
+    let mut config = default_video_toolbox_encoder_config(
+        shiguredo_video_toolbox::CodecConfig::Hevc(shiguredo_video_toolbox::HevcEncoderConfig {
+            profile: shiguredo_video_toolbox::HevcProfile::Main,
+            allow_open_gop: true,
+        }),
+    );
+    // H.265 ではこれが false だとエラーになるため、常に true を指定する
+    config.prioritize_encoding_speed_over_quality = true;
+    config.max_key_frame_interval = std::num::NonZeroU32::new(300);
+    config.max_frame_delay_count = std::num::NonZeroU32::new(15);
+    config
+}
+
+#[cfg(target_os = "macos")]
+fn default_video_toolbox_encoder_config(
+    codec: shiguredo_video_toolbox::CodecConfig,
+) -> shiguredo_video_toolbox::EncoderConfig {
+    shiguredo_video_toolbox::EncoderConfig {
+        width: 640,
+        height: 480,
+        codec,
+        pixel_format: shiguredo_video_toolbox::PixelFormat::I420,
+        average_bitrate: Some(5_000_000),
+        fps_numerator: 30,
+        fps_denominator: 1,
+        prioritize_encoding_speed_over_quality: false,
+        real_time: false,
+        maximize_power_efficiency: false,
+        allow_frame_reordering: false,
+        allow_temporal_compression: true,
+        max_key_frame_interval: None,
+        max_key_frame_interval_duration: None,
+        max_frame_delay_count: None,
+    }
+}
+
+#[cfg(feature = "nvcodec")]
+fn default_nvcodec_h264_encode_config() -> shiguredo_nvcodec::EncoderConfig {
+    default_nvcodec_encoder_config(shiguredo_nvcodec::CodecConfig::H264(
+        shiguredo_nvcodec::H264EncoderConfig {
+            profile: Some(shiguredo_nvcodec::H264Profile::Main),
+            idr_period: None,
+        },
+    ))
+}
+
+#[cfg(feature = "nvcodec")]
+fn default_nvcodec_h265_encode_config() -> shiguredo_nvcodec::EncoderConfig {
+    default_nvcodec_encoder_config(shiguredo_nvcodec::CodecConfig::Hevc(
+        shiguredo_nvcodec::HevcEncoderConfig {
+            profile: Some(shiguredo_nvcodec::HevcProfile::Main),
+            idr_period: None,
+        },
+    ))
+}
+
+#[cfg(feature = "nvcodec")]
+fn default_nvcodec_av1_encode_config() -> shiguredo_nvcodec::EncoderConfig {
+    default_nvcodec_encoder_config(shiguredo_nvcodec::CodecConfig::Av1(
+        shiguredo_nvcodec::Av1EncoderConfig {
+            profile: Some(shiguredo_nvcodec::Av1Profile::Main),
+            idr_period: None,
+        },
+    ))
+}
+
+#[cfg(feature = "nvcodec")]
+fn default_nvcodec_encoder_config(
+    codec: shiguredo_nvcodec::CodecConfig,
+) -> shiguredo_nvcodec::EncoderConfig {
+    shiguredo_nvcodec::EncoderConfig {
+        codec,
+        width: 640,
+        height: 480,
+        max_encode_width: None,
+        max_encode_height: None,
+        framerate_num: 30,
+        framerate_den: 1,
+        average_bitrate: Some(5_000_000),
+        preset: shiguredo_nvcodec::Preset::P4,
+        tuning_info: shiguredo_nvcodec::TuningInfo::LOW_LATENCY,
+        rate_control_mode: shiguredo_nvcodec::RateControlMode::Vbr,
+        gop_length: Some(300),
+        frame_interval_p: 1,
+        buffer_format: shiguredo_nvcodec::BufferFormat::Nv12,
+        device_id: 0,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoEncoderOptions {
     pub codec: CodecName,
@@ -761,7 +998,7 @@ impl VideoEncoder {
     ///
     /// `shiguredo_nvcodec 2026.2.0` の内部ペンディングキュー上限
     /// `n_encoder_buffer = frame_interval_p + 3` は `frame_interval_p: 1`
-    /// (`src/sora/recording_encoder_nvcodec_params.rs`) の hisui 設定下で 4。
+    /// (hisui の既定 nvcodec エンコード設定) の下で 4。
     /// `IN_FLIGHT_LIMIT < n_encoder_buffer` を保つことで `"encoder buffer is full"`
     /// エラーを回避する。
     ///
@@ -1059,8 +1296,9 @@ impl VideoEncoderInner {
 }
 
 pub fn default_video_encode_config_for_rpc() -> EncodeConfig {
-    // server RPC の既定 encode params は、compose 既定値と同じ値を利用する
-    crate::sora::recording_layout_encode_params::LayoutEncodeParams::default().config
+    // server RPC の既定 encode params は、 EncodeConfig の既定値
+    // (旧 compose 既定値をインライン化したもの) を利用する
+    EncodeConfig::default()
 }
 
 /// 指定したキーフレーム間隔（フレーム数）を全エンコーダーに設定した EncodeConfig を生成する。
