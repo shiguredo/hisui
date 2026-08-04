@@ -894,21 +894,14 @@ impl HybridMp4Writer {
         };
 
         match rpc_message {
-            Mp4WriterRpcMessage::Pause { reply_tx } => {
-                let _ = reply_tx.send(self.core.pause_recording());
-            }
-            Mp4WriterRpcMessage::Resume { reply_tx } => {
-                let _ = reply_tx.send(self.core.resume_recording());
-            }
             Mp4WriterRpcMessage::Finish { reply_tx } => {
                 let _ = reply_tx.send(());
                 *rpc_rx_enabled = false;
                 self.core.input_video_track_id = None;
                 self.core.input_audio_track_id = None;
-                return Ok(true);
+                Ok(true)
             }
         }
-        Ok(false)
     }
 
     fn handle_audio_message(
