@@ -60,7 +60,7 @@ impl<'text, 'raw> TryFrom<nojson::RawJsonValue<'text, 'raw>> for VideoRealtimeMi
             frame_rate: frame_rate.unwrap_or(FrameRate::FPS_30),
             input_tracks,
             output_track_id,
-            // JSON 経由 (compose サブコマンド等) では機能無効固定で構築する。
+            // JSON 経由の構築では機能無効固定で構築する。
             // obsws server 経由の構築では `text_overlay_config` を別途差し込む。
             text_overlay_config: None,
         })
