@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-07-01
-- Completed:
+- Completed: 2026-08-04
 - Model: Opus 4.7
 - Branch: feature/add-vpl-encoder-decoder
 - Polished:
@@ -107,6 +107,10 @@ VPL は他ハードウェアエンジン (nvcodec / amf) と異なり VP9 エン
     - 対応環境: Linux (x86_64) + Intel GPU (第 6 世代 Core 以降)
 
 ## 解決方法
+
+本 issue は closed とする。
+
+VPL 対応は録画レイアウトの JSON パラメーター経由 (`src/sora/recording_encoder_*_params.rs` 等への追加) を前提としていたが、Sora 録画機能の削除に伴い `src/sora/` ごと削除されたため、実装基盤が消滅した。 将来 VPL が必要になった場合は、リアルタイム系のエンコーダー追加として改めて起票する。
 
 ### 実装ステップ
 
