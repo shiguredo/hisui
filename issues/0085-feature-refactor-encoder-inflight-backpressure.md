@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-07-21
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-04
 - Model: Opus 4.7
 - Branch: feature/refactor-encoder-inflight-backpressure
 - Polished: 2026-07-21
@@ -318,7 +318,11 @@ closed/0083 / 0084 と同じ precedent に従い、本 issue の実装 PR に以
 
 ## 解決方法
 
-polish 完了後に追記する。
+実装済み (コミット `f641c454` / `cd96d410`) のため closed とする。
+
+- `NvcodecEncoder::encode` の `flush()` 撤廃と、`VideoEncoder::run` の in-flight バックプレッシャを実装した
+- bp guard は応急処置として nvcodec のみ有効 (`VideoEncoderInner::requires_backpressure`) で、全エンコーダーへの拡張は 0087 で対応する
+- なお、本 issue に記載の compose / vmaf 経路の記述は Sora 録画機能の削除により現状と一致しなくなっているが、実装済みのため参照修正は行わない
 
 ## CHANGES.md について
 
