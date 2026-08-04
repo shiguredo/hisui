@@ -44,7 +44,6 @@ pub mod timestamp;
 pub mod types;
 pub mod video;
 pub mod webrtc;
-pub mod yuv;
 
 pub use audio::AudioFrame;
 pub use error::Error;

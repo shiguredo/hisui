@@ -1,8 +1,7 @@
 use std::{
-    collections::BTreeSet,
     fs::File,
     io::{Read, Seek, SeekFrom},
-    path::{Path, PathBuf},
+    path::Path,
     time::Duration,
 };
 
@@ -11,15 +10,8 @@ use shiguredo_mp4::{TrackKind, boxes::SampleEntry, demux::Mp4FileDemuxer};
 use crate::{
     audio::{AudioFormat, AudioFrame, Channels, SampleRate},
     sample_entry::SharedSampleEntry,
-    types::CodecName,
     video::{VideoFormat, VideoFrame, VideoFrameSize},
 };
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct VideoResolution {
-    pub width: usize,
-    pub height: usize,
-}
 
 #[derive(Debug)]
 pub struct Mp4VideoReader {
@@ -31,13 +23,6 @@ pub struct Mp4VideoReader {
     /// 直近のサンプルエントリーを保持して全フレームに付与する
     /// （`VideoFrame.sample_entry` の不変条件・issue 0030）
     last_sample_entry: Option<SharedSampleEntry>,
-
-    pub current_input_file: Option<PathBuf>,
-    pub codec: Option<CodecName>,
-    pub resolutions: BTreeSet<VideoResolution>,
-    pub total_sample_count: u64,
-    pub total_track_duration: Duration,
-    pub track_duration_offset: Duration,
 }
 
 impl Mp4VideoReader {
@@ -57,29 +42,7 @@ impl Mp4VideoReader {
             width: 0,
             height: 0,
             last_sample_entry: None,
-            current_input_file: Some(path.as_ref().to_path_buf()),
-            codec: None,
-            resolutions: BTreeSet::new(),
-            total_sample_count: 0,
-            total_track_duration: Duration::ZERO,
-            track_duration_offset: Duration::ZERO,
         })
-    }
-
-    pub fn stats(&self) -> &Self {
-        self
-    }
-
-    pub fn stats_mut(&mut self) -> &mut Self {
-        self
-    }
-
-    pub fn inherit_stats_from(&mut self, prev: &Self) {
-        self.codec = prev.codec;
-        self.resolutions = prev.resolutions.clone();
-        self.total_sample_count = prev.total_sample_count;
-        self.total_track_duration = prev.total_track_duration;
-        self.track_duration_offset = prev.track_duration_offset;
     }
 
     fn next_sample(&mut self) -> crate::Result<Option<VideoFrame>> {
@@ -137,20 +100,6 @@ impl Mp4VideoReader {
         // タイムスタンプを計算する
         let timescale = sample.track.timescale.get();
         let timestamp = Duration::from_secs(sample.timestamp) / timescale;
-        let duration = Duration::from_secs(sample.duration as u64) / timescale;
-
-        // 統計値を更新する
-        self.total_sample_count += 1;
-        self.total_track_duration = timestamp + duration;
-        if self.codec.is_none()
-            && let Some(name) = self.format.codec_name()
-        {
-            self.codec = Some(name);
-        }
-        self.resolutions.insert(VideoResolution {
-            width: self.width,
-            height: self.height,
-        });
 
         Ok(Some(VideoFrame {
             sample_entry: self.last_sample_entry.clone(),
@@ -185,12 +134,6 @@ pub struct Mp4AudioReader {
     /// 直近のサンプルエントリーを保持して全フレームに付与する
     /// （`AudioFrame.sample_entry` の不変条件・issue 0030）
     last_sample_entry: Option<SharedSampleEntry>,
-
-    pub current_input_file: Option<PathBuf>,
-    pub codec: Option<CodecName>,
-    pub total_sample_count: u64,
-    pub total_track_duration: Duration,
-    pub track_duration_offset: Duration,
 }
 
 impl Mp4AudioReader {
@@ -216,27 +159,7 @@ impl Mp4AudioReader {
             channels: Channels::STEREO,
             sample_rate: SampleRate::HZ_48000,
             last_sample_entry: None,
-            current_input_file: Some(path.as_ref().to_path_buf()),
-            codec: None,
-            total_sample_count: 0,
-            total_track_duration: Duration::ZERO,
-            track_duration_offset: Duration::ZERO,
         })
-    }
-
-    pub fn stats(&self) -> &Self {
-        self
-    }
-
-    pub fn stats_mut(&mut self) -> &mut Self {
-        self
-    }
-
-    pub fn inherit_stats_from(&mut self, prev: &Self) {
-        self.codec = prev.codec;
-        self.total_sample_count = prev.total_sample_count;
-        self.total_track_duration = prev.total_track_duration;
-        self.track_duration_offset = prev.track_duration_offset;
     }
 
     fn next_sample(&mut self) -> crate::Result<Option<AudioFrame>> {
@@ -290,16 +213,6 @@ impl Mp4AudioReader {
         // タイムスタンプを計算する
         let timescale = sample.track.timescale.get();
         let timestamp = Duration::from_secs(sample.timestamp) / timescale;
-        let duration = Duration::from_secs(sample.duration as u64) / timescale;
-
-        // 統計値を更新する
-        self.total_sample_count += 1;
-        self.total_track_duration = timestamp + duration;
-        if self.codec.is_none()
-            && let Some(name) = self.format.codec_name()
-        {
-            self.codec = Some(name);
-        }
 
         Ok(Some(AudioFrame {
             data,
