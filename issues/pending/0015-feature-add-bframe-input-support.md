@@ -24,7 +24,7 @@
 
 - 読み込み側で composition_time_offset を持つサンプルを明示的にエラーにしている箇所:
   - `src/mp4/reader.rs:1010-1013` — `"composition_time_offset is not supported yet"`。
-  - `src/sora/recording_mp4_reader.rs:93-96` および `:245-248` — 同上 (音声 / 映像 reader)。
+  - `src/mp4/sync_reader.rs` の `Mp4VideoReader::next_sample` および `Mp4AudioReader::next_sample` — 同上 (音声 / 映像 reader)。
   - `src/mp4/reader.rs:1428` / `:1443` — サンプルコンテキストは composition_time_offset を保持はしているが活用していない。
 - 書き込み側は全 writer が常に `composition_time_offset: None` を出力する (`src/mp4/writer.rs` / `hybrid_writer.rs` / `hls/writer.rs` / `dash/writer.rs`)。出力側の B フレーム対応 (CTS を書き出す) は本 issue のスコープ外とし、入力 (読み込み) に絞る。
 - issue 0001 (fMP4 read support) でも、段階 1 / 2 を通じて composition_time_offset は一貫して非対応とし、「前方読みパス全体に関わる横断的な課題のため将来の別 issue」として繰り返し先送りされている。本 issue がその follow-up。
@@ -36,7 +36,7 @@
 - composition_time_offset を使った PTS (表示時刻) の算出と、既存の DTS ベースのタイムスタンプ計算 (`src/timestamp/`) との整合。
 - 前方読み (next_sample) でデコード順に来るサンプルを、合成側が表示順で扱えるようにする方法 (リオーダリングの要否と責務の所在)。
 - decoder (`src/decoder/`) が B フレームを含むストリームを正しく扱えるかの確認。
-- inspect / 録画合成 / OBSWS の各経路で必要範囲が異なるため、issue 0001 の段階分けと同様に段階化するか。
+- inspect / OBSWS の各経路で必要範囲が異なるため、issue 0001 の段階分けと同様に段階化するか。
 
 ## 完了条件
 
