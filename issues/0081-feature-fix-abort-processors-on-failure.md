@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-07-07
-- Completed:
+- Completed: 2026-08-04
 - Model: Opus 4.8
 - Branch: feature/fix-abort-processors-on-failure
 - Polished:
@@ -38,6 +38,10 @@ MediaPipeline 上の複数 processor は publish/subscribe で相互接続され
 - 上記を検証するテストが追加され green である。
 
 ## 解決方法
+
+本 issue は closed とする。
+
+対象の `src/sora/recording_subcommand_compose.rs` / `src/sora/recording_subcommand_vmaf.rs` は Sora 録画機能の削除に伴い削除された。 残存する realtime 経路 (obsws / server) は起動ハンドシェイクの永久ハングを構造的に回避しており、 本 issue の解決方法 (JoinSet の abort_all) の適用対象も存在しない。 同型の起動ハンドシェイク待ち timeout 対策が必要になった場合は、 realtime 経路向けに改めて起票する。
 
 - compose の `wait_processor_tasks` に失敗時の `abort_all()` を追加し、`is_cancelled()` で中断タスクのログを抑制する。
 - vmaf の `wait_processor_tasks` に失敗時の abort を追加し、既存の timeout abort と挙動を揃える。
