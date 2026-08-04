@@ -15,7 +15,7 @@ Example:
   $ hisui inspect /path/to/archive.mp4
 
 Arguments:
-  INPUT_FILE 情報取得対象の録画ファイル(.mp4|.webm)
+  INPUT_FILE 情報取得対象の録画ファイル(.mp4)
 
 Options:
   -h, --help            このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)

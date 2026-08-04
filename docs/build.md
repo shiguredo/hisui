@@ -89,11 +89,11 @@ cargo install hisui --features fdk-aac
 
 ```bash
 # 実行時に共有ライブラリのパスを指定する
-hisui compose --fdk-aac /path/to/libfdk-aac.so ...
+hisui inspect --fdk-aac /path/to/libfdk-aac.so ...
 
 # あるいは環境変数で指定する
 export HISUI_FDK_AAC_PATH=/path/to/libfdk-aac.so
-hisui compose ...
+hisui inspect ...
 ```
 
 なお macOS の場合には Apple Audio Toolbox を用いた AAC エンコードおよびデコードが自動で有効になるため、 FDK-AAC を利用する必要はありません。
@@ -111,14 +111,13 @@ Usage: hisui [OPTIONS] <COMMAND>
 Commands:
   inspect     録画ファイルの情報を取得します
   list-codecs 利用可能なコーデック一覧を表示します
-  compose     録画ファイルの合成を行います
-  vmaf        VMAF を用いた映像エンコード品質の評価を行います
-  tune        映像エンコードパラメーターの調整を行います
   server      OBS WebSocket 互換サーバーコマンド
 
 Options:
-  -h, --help         このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
-      --version      バージョン番号を表示します
-      --verbose      警告未満のログメッセージも出力します
+  -h, --help              このヘルプメッセージを表示します ('--help' なら詳細、'-h' なら簡易版を表示)
+      --version           バージョン番号を表示します
+      --verbose           警告未満のログメッセージも出力します
+      --emit-exit-metrics プロセス終了時に内部メトリクスを JSON Lines 形式で標準出力へ 1 行出力します [env: HISUI_EMIT_EXIT_METRICS]
+  -x, --experimental      実験的サブコマンドの有効化フラグです
 
 ```
