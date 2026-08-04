@@ -43,6 +43,8 @@ hisui の encoder パラメータは `EncodeConfig::default()` (`src/encoder.rs`
 
 なお、 `EncodeConfig::default()` の各値は録画機能 (compose) 削除時に旧既定レイアウト (`layout-examples/compose-default.jsonc`) の値をそのまま引き継いでおり、 リアルタイム用途の観点で最適化されていない。 既定値そのものの見直しも本 issue の対象とする。
 
+また、 既定値を検証するテストは現状存在しない (旧 compose の e2e テスト削除による)。 値の見直し時には、 既定値の回帰を検出するテストの追加を併せて行うこと。
+
 0085 応急処置状態 (本 issue で解消対象):
 
 - `src/encoder.rs::VideoEncoderInner::requires_backpressure` が nvcodec のみ true → nvcodec 経路でのみ bp guard 有効
