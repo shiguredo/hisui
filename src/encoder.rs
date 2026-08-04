@@ -362,9 +362,7 @@ impl Default for EncodeConfig {
     }
 }
 
-// 以下の各既定値は、 削除した録画機能の既定レイアウト
-// (`layout-examples/compose-default.jsonc` の各 `*_encode_params`) と同じ値に保っている。
-// 値の見直しは issues/0087 で行う予定。
+// 以下の各既定値は、 削除した録画機能の既定レイアウトと同じ値に保っている。
 
 /// 既定の libvpx VP8 エンコード設定を生成する
 fn default_libvpx_vp8_encode_config() -> shiguredo_libvpx::EncoderConfig {

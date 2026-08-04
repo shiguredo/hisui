@@ -21,7 +21,7 @@ pub struct Mp4VideoReader {
     width: usize,
     height: usize,
     /// 直近のサンプルエントリーを保持して全フレームに付与する
-    /// （`VideoFrame.sample_entry` の不変条件・issue 0030）
+    /// （`VideoFrame.sample_entry` の不変条件）
     last_sample_entry: Option<SharedSampleEntry>,
 }
 
@@ -84,7 +84,7 @@ impl Mp4VideoReader {
             self.format = format;
             self.width = metadata.width as usize;
             self.height = metadata.height as usize;
-            // 直近のサンプルエントリーを保持して全フレームに付与する（issue 0030）
+            // 直近のサンプルエントリーを保持して全フレームに付与する
             self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry));
         }
 
@@ -132,7 +132,7 @@ pub struct Mp4AudioReader {
     channels: Channels,
     sample_rate: SampleRate,
     /// 直近のサンプルエントリーを保持して全フレームに付与する
-    /// （`AudioFrame.sample_entry` の不変条件・issue 0030）
+    /// （`AudioFrame.sample_entry` の不変条件）
     last_sample_entry: Option<SharedSampleEntry>,
 }
 
@@ -197,7 +197,7 @@ impl Mp4AudioReader {
             self.format = format;
             self.channels = Channels::from_u16(metadata.channelcount)?;
             self.sample_rate = SampleRate::from_u16(metadata.samplerate.integer)?;
-            // 直近のサンプルエントリーを保持して全フレームに付与する（issue 0030）
+            // 直近のサンプルエントリーを保持して全フレームに付与する
             self.last_sample_entry = Some(SharedSampleEntry::new(sample_entry));
         }
 
@@ -330,7 +330,7 @@ fn is_aac_codec(esds_box: &shiguredo_mp4::boxes::EsdsBox) -> bool {
 mod tests {
     use super::*;
 
-    // issue 0030 の不変条件「エンコード済み圧縮フォーマットの VideoFrame は常に sample_entry を持つ」を検証する。
+    // 「エンコード済み圧縮フォーマットの VideoFrame は常に sample_entry を持つ」という不変条件を検証する。
     // H.264 の MP4 ファイルを Mp4VideoReader で読んだとき、全ての映像フレーム（初回・後続を問わず）
     // に sample_entry が載っており、かつ後続フレームの sample_entry が初回フレームと等価
     // （SharedSampleEntry::changed_since が false）であることを確認する。
@@ -359,7 +359,7 @@ mod tests {
         Ok(())
     }
 
-    // issue 0030 の不変条件「エンコード済み圧縮フォーマットの AudioFrame は常に sample_entry を持つ」を検証する。
+    // 「エンコード済み圧縮フォーマットの AudioFrame は常に sample_entry を持つ」という不変条件を検証する。
     // 通常 MP4 の AAC ファイルを Mp4AudioReader で読んだとき、全ての音声フレームに sample_entry が載っており、
     // かつ後続フレームの sample_entry が初回フレームと等価であることを確認する。
     #[test]
