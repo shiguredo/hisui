@@ -241,7 +241,7 @@ fn initialize_mp4_demuxer<R: Read + Seek, P: AsRef<Path>>(
     demuxer: &mut Mp4FileDemuxer,
     path: P,
 ) -> crate::Result<()> {
-    // 念のために（壊れたファイルが渡された時のため）、バッファサイズの上限を 100 MBに設定しておく。
+    // 念のために（壊れたファイルが渡された時のため）、バッファサイズの上限を 100 MB に設定しておく。
     // 正常なファイルの場合には、これは moov ボックスのサイズ上限となるが、
     // 典型的には、100 MB あれば、MP4 ファイル自体としては数百 GB 程度のものを扱えるため、実用上の問題はない想定。
     const MAX_READ_SIZE: usize = 100 * 1024 * 1024;

@@ -103,6 +103,7 @@ video mixer は `mixer_start` を基準に出力時刻を決めます。
 - `next_output_instant()` で次に出すべきフレーム時刻を計算する
 - その時点までに到着済みの input frame を `advance()` で current frame に反映する
 - `compose_frame()` で現在の canvas を生成する
+
 入力 frame 側は source timestamp をそのまま絶対時刻としては使いません。
 初回入力 frame の timestamp と受信経過時間を使って、 realtime 出力向けの相対時刻へ補正します。
 

@@ -50,13 +50,13 @@ Video Decoders:
   ...
 ```
 
-### 録画ファイルの詳細情報を取得
+### MP4 ファイルの詳細情報を取得
 
 ```bash
 docker run --rm \
-  -v $(pwd)/recordings:/recordings \
+  -v $(pwd)/videos:/videos \
   ghcr.io/shiguredo/hisui:latest \
-  inspect /recordings/RECORDING_ID/archive-CONNECTION_ID.mp4
+  inspect /videos/input.mp4
 ```
 
 ## 注意事項
