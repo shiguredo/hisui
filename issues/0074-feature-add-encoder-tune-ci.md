@@ -2,7 +2,7 @@
 
 - Priority: Medium
 - Created: 2026-07-02
-- Completed:
+- Completed: 2026-08-04
 - Model: Opus 4.7
 - Branch: feature/add-encoder-tune-ci
 - Polished:
@@ -91,6 +91,10 @@ hisui には NSGA-II ベースの `tune` サブコマンドが既に実装され
 - CHANGES.md の `## develop` に `[ADD] CI でエンコーダーパラメーター tune を実行する workflow を追加する` を追記。
 
 ## 解決方法
+
+本 issue は closed とする。
+
+`tune` サブコマンドと `src/tune/` は Sora 録画機能の削除に伴い削除された。 録画合成と VMAF 評価が消えたため、パレートフロント収集の前提が消滅した。
 
 ### 実装ステップ
 
