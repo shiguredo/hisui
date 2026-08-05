@@ -140,9 +140,11 @@ impl NvcodecDecoder {
                         return Ok(());
                     }
                     if debug_mode != "B" {
+                        eprintln!("[nvcodec-debug] H265 finish() BEFORE");
                         let t = std::time::Instant::now();
                         self.inner.as_mut().or_fail()?.finish().or_fail()?;
                         eprintln!("[nvcodec-debug] H265 finish() {}ms", t.elapsed().as_millis());
+                        eprintln!("[nvcodec-debug] H265 handle_decoded_frames() BEFORE");
                         let t = std::time::Instant::now();
                         self.handle_decoded_frames().or_fail()?;
                         eprintln!(
@@ -164,6 +166,7 @@ impl NvcodecDecoder {
                             t.elapsed().as_millis()
                         );
                     }
+                    eprintln!("[nvcodec-debug] H265 new_h265() BEFORE (mode={debug_mode})");
                     let t = std::time::Instant::now();
                     self.inner = Some(
                         shiguredo_nvcodec::Decoder::new_h265(self.config.clone()).or_fail()?,
@@ -190,9 +193,11 @@ impl NvcodecDecoder {
                         return Ok(());
                     }
                     if debug_mode != "B" {
+                        eprintln!("[nvcodec-debug] H264 finish() BEFORE");
                         let t = std::time::Instant::now();
                         self.inner.as_mut().or_fail()?.finish().or_fail()?;
                         eprintln!("[nvcodec-debug] H264 finish() {}ms", t.elapsed().as_millis());
+                        eprintln!("[nvcodec-debug] H264 handle_decoded_frames() BEFORE");
                         let t = std::time::Instant::now();
                         self.handle_decoded_frames().or_fail()?;
                         eprintln!(
@@ -210,6 +215,7 @@ impl NvcodecDecoder {
                             t.elapsed().as_millis()
                         );
                     }
+                    eprintln!("[nvcodec-debug] H264 new_h264() BEFORE (mode={debug_mode})");
                     let t = std::time::Instant::now();
                     self.inner = Some(
                         shiguredo_nvcodec::Decoder::new_h264(self.config.clone()).or_fail()?,
@@ -242,6 +248,12 @@ impl NvcodecDecoder {
         )
         .or_fail()?;
 
+        eprintln!(
+            "[nvcodec-debug] decode() enter format={:?} keyframe={} data.len()={}",
+            frame.format,
+            frame.keyframe,
+            frame.data.len()
+        );
         self.reinitialize_if_need(frame).or_fail()?;
 
         // サンプルエントリからパラメータセットを抽出してキャッシュ
