@@ -121,10 +121,11 @@ impl NvcodecDecoder {
                     if vps == self.vps && sps == self.sps && pps == self.pps {
                         return Ok(());
                     }
-                    // 再初期化前に in-flight フレームが残っていないことを確認する
-                    // (VideoDecoder は 1 フレームずつ処理する運用のため、通常は空)
+                    // 現行 Decoder の in-flight フレームを吐き出してから作り直す
+                    // (nvcodec は非同期処理でキーフレーム到来時に前フレームがまだ処理中の場合がある)
+                    self.inner.finish().or_fail()?;
+                    self.handle_decoded_frames().or_fail()?;
                     self.input_queue.is_empty().or_fail()?;
-                    self.output_queue.is_empty().or_fail()?;
 
                     let vps_new = vps.to_vec();
                     let sps_new = sps.to_vec();
@@ -142,8 +143,9 @@ impl NvcodecDecoder {
                     if sps == self.sps && pps == self.pps {
                         return Ok(());
                     }
+                    self.inner.finish().or_fail()?;
+                    self.handle_decoded_frames().or_fail()?;
                     self.input_queue.is_empty().or_fail()?;
-                    self.output_queue.is_empty().or_fail()?;
 
                     self.inner = shiguredo_nvcodec::Decoder::new_h264(self.config.clone())
                         .or_fail()?;
