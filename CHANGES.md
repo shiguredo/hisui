@@ -17,6 +17,10 @@
   - キーフレームで SPS が切り替わる録画ファイル（WebRTC のシミュキャスト / 適応ビットレート録画など）で発生
   - キーフレーム到来時に SPS / PPS の変化を検知して、内部のデコーダーを作り直すようにした
   - @sile
+- [FIX] H.265 の hvc1 sample entry を hev1 として扱えるようにする
+  - hisui が使う shiguredo_mp4 2025.2.0 は hvc1 box に未対応で、hvc1 track の MP4 が読み込めなかった
+  - reader_mp4 で Unknown/hvc1 を検知して hev1 として再パースするヘルパーを追加した
+  - @sile
 
 ## 2025.3.2
 
