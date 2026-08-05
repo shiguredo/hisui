@@ -13,7 +13,7 @@ use crate::video_h265::{
 
 #[derive(Debug)]
 pub struct NvcodecDecoder {
-    inner: shiguredo_nvcodec::Decoder,
+    inner: Option<shiguredo_nvcodec::Decoder>,
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
@@ -32,7 +32,7 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(H264) decoder");
         let config = params.nvcodec_h264.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h264(config.clone()).or_fail()?,
+            inner: Some(shiguredo_nvcodec::Decoder::new_h264(config.clone()).or_fail()?),
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -47,7 +47,7 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(H265) decoder");
         let config = params.nvcodec_h265.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h265(config.clone()).or_fail()?,
+            inner: Some(shiguredo_nvcodec::Decoder::new_h265(config.clone()).or_fail()?),
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -62,7 +62,7 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(AV1) decoder");
         let config = params.nvcodec_av1.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_av1(config.clone()).or_fail()?,
+            inner: Some(shiguredo_nvcodec::Decoder::new_av1(config.clone()).or_fail()?),
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -77,7 +77,7 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(VP8) decoder");
         let config = params.nvcodec_vp8.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp8(config.clone()).or_fail()?,
+            inner: Some(shiguredo_nvcodec::Decoder::new_vp8(config.clone()).or_fail()?),
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -92,7 +92,7 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(VP9) decoder");
         let config = params.nvcodec_vp9.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp9(config.clone()).or_fail()?,
+            inner: Some(shiguredo_nvcodec::Decoder::new_vp9(config.clone()).or_fail()?),
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
@@ -118,6 +118,10 @@ impl NvcodecDecoder {
         //   HISUI_NVCODEC_DEBUG_MODE=A (default): 現在の実装 (finish + 再作成)
         //   HISUI_NVCODEC_DEBUG_MODE=B         : finish() を呼ばずに再作成のみ
         //   HISUI_NVCODEC_DEBUG_MODE=C         : 再初期化を行わない (修正前と同等)
+        //   HISUI_NVCODEC_DEBUG_MODE=D         : finish + 明示 drop 後に再作成
+        //                                        (self.inner = new(...) の semantics だと
+        //                                         「create → 旧 drop」の順で GPU リソースが
+        //                                         一時的に二重確保されるため、その回避)
         let debug_mode =
             std::env::var("HISUI_NVCODEC_DEBUG_MODE").unwrap_or_else(|_| String::from("A"));
 
@@ -137,7 +141,7 @@ impl NvcodecDecoder {
                     }
                     if debug_mode != "B" {
                         let t = std::time::Instant::now();
-                        self.inner.finish().or_fail()?;
+                        self.inner.as_mut().or_fail()?.finish().or_fail()?;
                         eprintln!("[nvcodec-debug] H265 finish() {}ms", t.elapsed().as_millis());
                         let t = std::time::Instant::now();
                         self.handle_decoded_frames().or_fail()?;
@@ -151,9 +155,19 @@ impl NvcodecDecoder {
                     let vps_new = vps.to_vec();
                     let sps_new = sps.to_vec();
                     let pps_new = pps.to_vec();
+                    if debug_mode == "D" {
+                        // 明示的に旧 Decoder を drop してから新規作成する
+                        let t = std::time::Instant::now();
+                        drop(self.inner.take());
+                        eprintln!(
+                            "[nvcodec-debug] H265 drop(prev_inner) {}ms",
+                            t.elapsed().as_millis()
+                        );
+                    }
                     let t = std::time::Instant::now();
-                    self.inner = shiguredo_nvcodec::Decoder::new_h265(self.config.clone())
-                        .or_fail()?;
+                    self.inner = Some(
+                        shiguredo_nvcodec::Decoder::new_h265(self.config.clone()).or_fail()?,
+                    );
                     eprintln!(
                         "[nvcodec-debug] H265 new_h265() {}ms (mode={debug_mode})",
                         t.elapsed().as_millis()
@@ -177,7 +191,7 @@ impl NvcodecDecoder {
                     }
                     if debug_mode != "B" {
                         let t = std::time::Instant::now();
-                        self.inner.finish().or_fail()?;
+                        self.inner.as_mut().or_fail()?.finish().or_fail()?;
                         eprintln!("[nvcodec-debug] H264 finish() {}ms", t.elapsed().as_millis());
                         let t = std::time::Instant::now();
                         self.handle_decoded_frames().or_fail()?;
@@ -188,9 +202,18 @@ impl NvcodecDecoder {
                     }
                     self.input_queue.is_empty().or_fail()?;
 
+                    if debug_mode == "D" {
+                        let t = std::time::Instant::now();
+                        drop(self.inner.take());
+                        eprintln!(
+                            "[nvcodec-debug] H264 drop(prev_inner) {}ms",
+                            t.elapsed().as_millis()
+                        );
+                    }
                     let t = std::time::Instant::now();
-                    self.inner = shiguredo_nvcodec::Decoder::new_h264(self.config.clone())
-                        .or_fail()?;
+                    self.inner = Some(
+                        shiguredo_nvcodec::Decoder::new_h264(self.config.clone()).or_fail()?,
+                    );
                     eprintln!(
                         "[nvcodec-debug] H264 new_h264() {}ms (mode={debug_mode})",
                         t.elapsed().as_millis()
@@ -266,20 +289,20 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        self.inner.decode(&data).or_fail()?;
+        self.inner.as_mut().or_fail()?.decode(&data).or_fail()?;
         self.input_queue.push_back(frame.to_stripped());
         self.handle_decoded_frames().or_fail()?;
         Ok(())
     }
 
     pub fn finish(&mut self) -> orfail::Result<()> {
-        self.inner.finish().or_fail()?;
+        self.inner.as_mut().or_fail()?.finish().or_fail()?;
         self.handle_decoded_frames().or_fail()?;
         Ok(())
     }
 
     fn handle_decoded_frames(&mut self) -> orfail::Result<()> {
-        while let Some(nv12_frame) = self.inner.next_frame().or_fail()? {
+        while let Some(nv12_frame) = self.inner.as_mut().or_fail()?.next_frame().or_fail()? {
             let input_frame = self.input_queue.pop_front().or_fail()?;
 
             // NV12 から I420 への変換
