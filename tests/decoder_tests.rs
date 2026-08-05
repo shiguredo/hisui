@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use hisui::{
     decoder::{VideoDecoder, VideoDecoderOptions},
     media::MediaStreamId,
@@ -213,6 +215,59 @@ fn h264_single_track_resolution_change_test(
         output_frames.push(output_frame);
     }
 
+    assert_expected_resolution_sequence(input_count, &output_frames);
+    Ok(())
+}
+
+// H.265 1 トラック内でキーフレーム毎に解像度が変わる MP4 を、engine を明示指定してデコードする
+//
+// H.265 は openh264 の対応がないため、frame への SPS/PPS prepend は不要
+// (VideoToolbox / nvcodec とも sample_entry の hvcc から VPS/SPS/PPS を取得する)
+fn h265_single_track_resolution_change_test(
+    engines: Option<Vec<EngineName>>,
+) -> orfail::Result<()> {
+    let source_id = SourceId::new("archive-h265-resolution-change");
+    let reader = Mp4VideoReader::new(
+        source_id,
+        "testdata/archive-h265-resolution-change.mp4",
+        Default::default(),
+    )
+    .or_fail()?;
+
+    let options = VideoDecoderOptions {
+        openh264_lib: None,
+        decode_params: Default::default(),
+        engines,
+    };
+
+    let mut decoder = VideoDecoder::new(DECODER_INPUT_STREAM_ID, DECODER_OUTPUT_STREAM_ID, options);
+
+    let mut input_count = 0;
+    for input_frame in reader {
+        let frame = input_frame.or_fail()?;
+        decoder
+            .process_input(MediaProcessorInput::video_frame(
+                DECODER_INPUT_STREAM_ID,
+                frame,
+            ))
+            .or_fail()?;
+        input_count += 1;
+    }
+    decoder
+        .process_input(MediaProcessorInput::eos(DECODER_INPUT_STREAM_ID))
+        .or_fail()?;
+
+    let mut output_frames = Vec::new();
+    while let MediaProcessorOutput::Processed { sample, .. } = decoder.process_output().or_fail()? {
+        let output_frame = sample.expect_video_frame().or_fail()?;
+        output_frames.push(output_frame);
+    }
+
+    assert_expected_resolution_sequence(input_count, &output_frames);
+    Ok(())
+}
+
+fn assert_expected_resolution_sequence(input_count: usize, output_frames: &[Arc<VideoFrame>]) {
     assert_eq!(input_count, 45, "入力フレーム数が想定と異なる");
     assert_eq!(output_frames.len(), 45, "出力フレーム数が想定と異なる");
 
@@ -231,8 +286,6 @@ fn h264_single_track_resolution_change_test(
             "フレーム {i} の解像度が期待値と一致しない"
         );
     }
-
-    Ok(())
 }
 
 #[test]
@@ -263,6 +316,22 @@ fn h264_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
         return Ok(());
     }
     h264_single_track_resolution_change_test(Some(vec![EngineName::Nvcodec]), None).or_fail()
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn h265_single_track_resolution_change_video_toolbox() -> orfail::Result<()> {
+    h265_single_track_resolution_change_test(Some(vec![EngineName::VideoToolbox])).or_fail()
+}
+
+#[test]
+#[cfg(feature = "nvcodec")]
+fn h265_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
+    if !shiguredo_nvcodec::is_cuda_library_available() {
+        eprintln!("skip: CUDA ライブラリが利用できない");
+        return Ok(());
+    }
+    h265_single_track_resolution_change_test(Some(vec![EngineName::Nvcodec])).or_fail()
 }
 
 fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
