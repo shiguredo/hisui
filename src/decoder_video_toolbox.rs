@@ -1,10 +1,9 @@
 use orfail::OrFail;
-use shiguredo_mp4::boxes::{Avc1Box, AvccBox, SampleEntry};
 
 use crate::{
     video::{VideoFormat, VideoFrame},
-    video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, H264AnnexBNalUnits, NALU_HEADER_LENGTH},
-    video_h265::{H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS},
+    video_h264::{H264AnnexBNalUnits, NALU_HEADER_LENGTH, get_h264_sps_pps},
+    video_h265::get_h265_vps_sps_pps,
 };
 
 #[derive(Debug)]
@@ -131,70 +130,3 @@ impl VideoToolboxDecoder {
     }
 }
 
-fn get_h264_sps_pps(frame: &VideoFrame) -> orfail::Result<(Vec<u8>, Vec<u8>)> {
-    matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB).or_fail()?;
-
-    let mut sps = Vec::new();
-    let mut pps = Vec::new();
-    match frame.format {
-        VideoFormat::H264AnnexB => {
-            for nal in H264AnnexBNalUnits::new(&frame.data) {
-                let nal = nal.or_fail()?;
-                match nal.ty {
-                    H264_NALU_TYPE_SPS => sps = nal.data.to_vec(),
-                    H264_NALU_TYPE_PPS => pps = nal.data.to_vec(),
-                    _ => {}
-                }
-            }
-        }
-        VideoFormat::H264 => {
-            let Some(SampleEntry::Avc1(Avc1Box {
-                avcc_box: AvccBox {
-                    sps_list, pps_list, ..
-                },
-                ..
-            })) = &frame.sample_entry
-            else {
-                return Err(orfail::Failure::new(
-                    "missing sample entry for H.264 first frame",
-                ));
-            };
-            sps = sps_list.first().or_fail()?.to_vec();
-            pps = pps_list.first().or_fail()?.to_vec();
-        }
-        _ => unreachable!(),
-    }
-    (!sps.is_empty()).or_fail()?;
-    (!pps.is_empty()).or_fail()?;
-
-    Ok((sps, pps))
-}
-
-fn get_h265_vps_sps_pps(frame: &VideoFrame) -> orfail::Result<(&[u8], &[u8], &[u8])> {
-    matches!(frame.format, VideoFormat::H265).or_fail()?;
-
-    let Some(SampleEntry::Hev1(b)) = &frame.sample_entry else {
-        return Err(orfail::Failure::new("no H.265 sample entry"));
-    };
-
-    let mut vps = &[][..];
-    let mut sps = &[][..];
-    let mut pps = &[][..];
-    for arrays in &b.hvcc_box.nalu_arrays {
-        if arrays.nalus.is_empty() {
-            continue;
-        }
-
-        match arrays.nal_unit_type.get() {
-            H265_NALU_TYPE_VPS => vps = arrays.nalus[0].as_slice(),
-            H265_NALU_TYPE_SPS => sps = arrays.nalus[0].as_slice(),
-            H265_NALU_TYPE_PPS => pps = arrays.nalus[0].as_slice(),
-            _ => {}
-        }
-    }
-    (!vps.is_empty()).or_fail()?;
-    (!sps.is_empty()).or_fail()?;
-    (!pps.is_empty()).or_fail()?;
-
-    Ok((vps, sps, pps))
-}

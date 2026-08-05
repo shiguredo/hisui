@@ -5,9 +5,10 @@ use orfail::OrFail;
 
 use crate::layout_decode_params::LayoutDecodeParams;
 use crate::video::{VideoFormat, VideoFrame};
-use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
+use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS, get_h264_sps_pps};
 use crate::video_h265::{
     H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
+    get_h265_vps_sps_pps,
 };
 
 #[derive(Debug)]
@@ -16,6 +17,14 @@ pub struct NvcodecDecoder {
     input_queue: VecDeque<VideoFrame>,
     output_queue: VecDeque<VideoFrame>,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
+
+    // ストリーム中の解像度変化に追随するため、以下のフィールドを保持する
+    // (upstream shiguredo/nvcodec-rs 2026.2.0 でデコーダー内部での対応が入るため、
+    //  crate 更新後はこの層の再初期化は不要になる)
+    config: shiguredo_nvcodec::DecoderConfig,
+    vps: Vec<u8>,
+    sps: Vec<u8>,
+    pps: Vec<u8>,
 }
 
 impl NvcodecDecoder {
@@ -23,10 +32,14 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(H264) decoder");
         let config = params.nvcodec_h264.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h264(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_h264(config.clone()).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
+            config,
+            vps: Vec::new(),
+            sps: Vec::new(),
+            pps: Vec::new(),
         })
     }
 
@@ -34,10 +47,14 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(H265) decoder");
         let config = params.nvcodec_h265.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h265(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_h265(config.clone()).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
+            config,
+            vps: Vec::new(),
+            sps: Vec::new(),
+            pps: Vec::new(),
         })
     }
 
@@ -45,10 +62,14 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(AV1) decoder");
         let config = params.nvcodec_av1.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_av1(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_av1(config.clone()).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
+            config,
+            vps: Vec::new(),
+            sps: Vec::new(),
+            pps: Vec::new(),
         })
     }
 
@@ -56,10 +77,14 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(VP8) decoder");
         let config = params.nvcodec_vp8.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp8(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_vp8(config.clone()).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
+            config,
+            vps: Vec::new(),
+            sps: Vec::new(),
+            pps: Vec::new(),
         })
     }
 
@@ -67,11 +92,71 @@ impl NvcodecDecoder {
         log::debug!("create nvcodec(VP9) decoder");
         let config = params.nvcodec_vp9.clone();
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp9(config).or_fail()?,
+            inner: shiguredo_nvcodec::Decoder::new_vp9(config.clone()).or_fail()?,
             input_queue: VecDeque::new(),
             output_queue: VecDeque::new(),
             parameter_sets: None,
+            config,
+            vps: Vec::new(),
+            sps: Vec::new(),
+            pps: Vec::new(),
         })
+    }
+
+    // キーフレーム到来時に VPS / SPS / PPS が切り替わっていたら
+    // 内部の shiguredo_nvcodec::Decoder を作り直すことで解像度変化に追随する
+    //
+    // 現行の shiguredo_nvcodec (=2025.2.1) は pfnSequenceCallback で最初のシーケンス以降を
+    // 無視するため、この層で再初期化しないと解像度変化のあるストリームでデコードに失敗する
+    fn reinitialize_if_need(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+        if !frame.keyframe {
+            // 切り替わりが発生するのは必ずキーフレーム
+            return Ok(());
+        }
+
+        match frame.format {
+            VideoFormat::H265 => {
+                // [NOTE] VPS / SPS / PPS が取れない場合は変化なしとみなして何もしない
+                if let Ok((vps, sps, pps)) = get_h265_vps_sps_pps(frame) {
+                    if vps == self.vps && sps == self.sps && pps == self.pps {
+                        return Ok(());
+                    }
+                    // 再初期化前に in-flight フレームが残っていないことを確認する
+                    // (VideoDecoder は 1 フレームずつ処理する運用のため、通常は空)
+                    self.input_queue.is_empty().or_fail()?;
+                    self.output_queue.is_empty().or_fail()?;
+
+                    let vps_new = vps.to_vec();
+                    let sps_new = sps.to_vec();
+                    let pps_new = pps.to_vec();
+                    self.inner = shiguredo_nvcodec::Decoder::new_h265(self.config.clone())
+                        .or_fail()?;
+                    self.vps = vps_new;
+                    self.sps = sps_new;
+                    self.pps = pps_new;
+                    self.parameter_sets = None;
+                }
+            }
+            VideoFormat::H264 | VideoFormat::H264AnnexB => {
+                if let Ok((sps, pps)) = get_h264_sps_pps(frame) {
+                    if sps == self.sps && pps == self.pps {
+                        return Ok(());
+                    }
+                    self.input_queue.is_empty().or_fail()?;
+                    self.output_queue.is_empty().or_fail()?;
+
+                    self.inner = shiguredo_nvcodec::Decoder::new_h264(self.config.clone())
+                        .or_fail()?;
+                    self.sps = sps;
+                    self.pps = pps;
+                    self.parameter_sets = None;
+                }
+            }
+            _ => {
+                // VP8 / VP9 / AV1 は今回対応外
+            }
+        }
+        Ok(())
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
@@ -85,6 +170,8 @@ impl NvcodecDecoder {
                 | VideoFormat::Av1
         )
         .or_fail()?;
+
+        self.reinitialize_if_need(frame).or_fail()?;
 
         // サンプルエントリからパラメータセットを抽出してキャッシュ
         if self.parameter_sets.is_none()
