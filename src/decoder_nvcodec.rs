@@ -31,6 +31,10 @@ impl NvcodecDecoder {
     pub fn new_h264(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(H264) decoder");
         let config = params.nvcodec_h264.clone();
+        eprintln!(
+            "[nvcodec-debug] new_h264 config.max_num_decode_surfaces={} max_display_delay={}",
+            config.max_num_decode_surfaces, config.max_display_delay
+        );
         Ok(Self {
             inner: Some(shiguredo_nvcodec::Decoder::new_h264(config.clone()).or_fail()?),
             input_queue: VecDeque::new(),
