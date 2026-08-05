@@ -114,6 +114,13 @@ impl NvcodecDecoder {
             return Ok(());
         }
 
+        // [DEBUG] 一時的な切り分け用の環境変数
+        //   HISUI_NVCODEC_DEBUG_MODE=A (default): 現在の実装 (finish + 再作成)
+        //   HISUI_NVCODEC_DEBUG_MODE=B         : finish() を呼ばずに再作成のみ
+        //   HISUI_NVCODEC_DEBUG_MODE=C         : 再初期化を行わない (修正前と同等)
+        let debug_mode =
+            std::env::var("HISUI_NVCODEC_DEBUG_MODE").unwrap_or_else(|_| String::from("A"));
+
         match frame.format {
             VideoFormat::H265 => {
                 // [NOTE] VPS / SPS / PPS が取れない場合は変化なしとみなして何もしない
@@ -121,17 +128,36 @@ impl NvcodecDecoder {
                     if vps == self.vps && sps == self.sps && pps == self.pps {
                         return Ok(());
                     }
-                    // 現行 Decoder の in-flight フレームを吐き出してから作り直す
-                    // (nvcodec は非同期処理でキーフレーム到来時に前フレームがまだ処理中の場合がある)
-                    self.inner.finish().or_fail()?;
-                    self.handle_decoded_frames().or_fail()?;
+                    if debug_mode == "C" {
+                        eprintln!("[nvcodec-debug] H265 reinit skipped (mode=C)");
+                        self.vps = vps.to_vec();
+                        self.sps = sps.to_vec();
+                        self.pps = pps.to_vec();
+                        return Ok(());
+                    }
+                    if debug_mode != "B" {
+                        let t = std::time::Instant::now();
+                        self.inner.finish().or_fail()?;
+                        eprintln!("[nvcodec-debug] H265 finish() {}ms", t.elapsed().as_millis());
+                        let t = std::time::Instant::now();
+                        self.handle_decoded_frames().or_fail()?;
+                        eprintln!(
+                            "[nvcodec-debug] H265 handle_decoded_frames() {}ms",
+                            t.elapsed().as_millis()
+                        );
+                    }
                     self.input_queue.is_empty().or_fail()?;
 
                     let vps_new = vps.to_vec();
                     let sps_new = sps.to_vec();
                     let pps_new = pps.to_vec();
+                    let t = std::time::Instant::now();
                     self.inner = shiguredo_nvcodec::Decoder::new_h265(self.config.clone())
                         .or_fail()?;
+                    eprintln!(
+                        "[nvcodec-debug] H265 new_h265() {}ms (mode={debug_mode})",
+                        t.elapsed().as_millis()
+                    );
                     self.vps = vps_new;
                     self.sps = sps_new;
                     self.pps = pps_new;
@@ -143,12 +169,32 @@ impl NvcodecDecoder {
                     if sps == self.sps && pps == self.pps {
                         return Ok(());
                     }
-                    self.inner.finish().or_fail()?;
-                    self.handle_decoded_frames().or_fail()?;
+                    if debug_mode == "C" {
+                        eprintln!("[nvcodec-debug] H264 reinit skipped (mode=C)");
+                        self.sps = sps;
+                        self.pps = pps;
+                        return Ok(());
+                    }
+                    if debug_mode != "B" {
+                        let t = std::time::Instant::now();
+                        self.inner.finish().or_fail()?;
+                        eprintln!("[nvcodec-debug] H264 finish() {}ms", t.elapsed().as_millis());
+                        let t = std::time::Instant::now();
+                        self.handle_decoded_frames().or_fail()?;
+                        eprintln!(
+                            "[nvcodec-debug] H264 handle_decoded_frames() {}ms",
+                            t.elapsed().as_millis()
+                        );
+                    }
                     self.input_queue.is_empty().or_fail()?;
 
+                    let t = std::time::Instant::now();
                     self.inner = shiguredo_nvcodec::Decoder::new_h264(self.config.clone())
                         .or_fail()?;
+                    eprintln!(
+                        "[nvcodec-debug] H264 new_h264() {}ms (mode={debug_mode})",
+                        t.elapsed().as_millis()
+                    );
                     self.sps = sps;
                     self.pps = pps;
                     self.parameter_sets = None;
