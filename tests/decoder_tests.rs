@@ -219,20 +219,15 @@ fn h264_single_track_resolution_change_test(
     Ok(())
 }
 
-// H.265 1 トラック内でキーフレーム毎に解像度が変わる MP4 を、engine を明示指定してデコードする
-//
-// H.265 は openh264 の対応がないため、frame への SPS/PPS prepend は不要
-// (VideoToolbox / nvcodec とも sample_entry の hvcc から VPS/SPS/PPS を取得する)
-fn h265_single_track_resolution_change_test(
+// H.264 以外のコーデック用: 1 トラック内でキーフレーム毎に解像度が変わる MP4 を、engine を
+// 明示指定してデコードする (frame data はそのまま流す、SPS/PPS の prepend は不要)
+fn passthrough_single_track_resolution_change_test(
+    testdata_path: &str,
+    source_id_str: &str,
     engines: Option<Vec<EngineName>>,
 ) -> orfail::Result<()> {
-    let source_id = SourceId::new("archive-h265-resolution-change");
-    let reader = Mp4VideoReader::new(
-        source_id,
-        "testdata/archive-h265-resolution-change.mp4",
-        Default::default(),
-    )
-    .or_fail()?;
+    let source_id = SourceId::new(source_id_str);
+    let reader = Mp4VideoReader::new(source_id, testdata_path, Default::default()).or_fail()?;
 
     let options = VideoDecoderOptions {
         openh264_lib: None,
@@ -321,7 +316,12 @@ fn h264_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
 #[test]
 #[cfg(target_os = "macos")]
 fn h265_single_track_resolution_change_video_toolbox() -> orfail::Result<()> {
-    h265_single_track_resolution_change_test(Some(vec![EngineName::VideoToolbox])).or_fail()
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-h265-resolution-change.mp4",
+        "archive-h265-resolution-change",
+        Some(vec![EngineName::VideoToolbox]),
+    )
+    .or_fail()
 }
 
 #[test]
@@ -331,7 +331,92 @@ fn h265_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
         eprintln!("skip: CUDA ライブラリが利用できない");
         return Ok(());
     }
-    h265_single_track_resolution_change_test(Some(vec![EngineName::Nvcodec])).or_fail()
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-h265-resolution-change.mp4",
+        "archive-h265-resolution-change",
+        Some(vec![EngineName::Nvcodec]),
+    )
+    .or_fail()
+}
+
+#[test]
+#[cfg(feature = "libvpx")]
+fn vp8_single_track_resolution_change_libvpx() -> orfail::Result<()> {
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-vp8-resolution-change.mp4",
+        "archive-vp8-resolution-change",
+        Some(vec![EngineName::Libvpx]),
+    )
+    .or_fail()
+}
+
+#[test]
+#[ignore = "sample_entry ベースの検知では発火せず、hisui 側 state の解像度が固定されるため FAIL する。develop 側で別対応予定"]
+#[cfg(feature = "nvcodec")]
+fn vp8_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
+    if !shiguredo_nvcodec::is_cuda_library_available() {
+        eprintln!("skip: CUDA ライブラリが利用できない");
+        return Ok(());
+    }
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-vp8-resolution-change.mp4",
+        "archive-vp8-resolution-change",
+        Some(vec![EngineName::Nvcodec]),
+    )
+    .or_fail()
+}
+
+#[test]
+#[cfg(feature = "libvpx")]
+fn vp9_single_track_resolution_change_libvpx() -> orfail::Result<()> {
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-vp9-resolution-change.mp4",
+        "archive-vp9-resolution-change",
+        Some(vec![EngineName::Libvpx]),
+    )
+    .or_fail()
+}
+
+#[test]
+#[ignore = "sample_entry ベースの検知では発火せず、cuvidDecodePicture が失敗するため FAIL する。develop 側で別対応予定"]
+#[cfg(feature = "nvcodec")]
+fn vp9_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
+    if !shiguredo_nvcodec::is_cuda_library_available() {
+        eprintln!("skip: CUDA ライブラリが利用できない");
+        return Ok(());
+    }
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-vp9-resolution-change.mp4",
+        "archive-vp9-resolution-change",
+        Some(vec![EngineName::Nvcodec]),
+    )
+    .or_fail()
+}
+
+#[test]
+fn av1_single_track_resolution_change_dav1d() -> orfail::Result<()> {
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-av1-resolution-change.mp4",
+        "archive-av1-resolution-change",
+        Some(vec![EngineName::Dav1d]),
+    )
+    .or_fail()
+}
+
+#[test]
+#[ignore = "sample_entry ベースの検知では発火せず、cuvidDecodePicture が失敗するため FAIL する。develop 側で別対応予定"]
+#[cfg(feature = "nvcodec")]
+fn av1_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
+    if !shiguredo_nvcodec::is_cuda_library_available() {
+        eprintln!("skip: CUDA ライブラリが利用できない");
+        return Ok(());
+    }
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-av1-resolution-change.mp4",
+        "archive-av1-resolution-change",
+        Some(vec![EngineName::Nvcodec]),
+    )
+    .or_fail()
 }
 
 fn prepend_h264_sps_pps(mut frame: VideoFrame) -> MediaProcessorInput {
