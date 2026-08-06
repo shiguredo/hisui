@@ -4,7 +4,7 @@ use shiguredo_mp4::{
     boxes::{Avc1Box, AvccBox, SampleEntry},
 };
 
-use crate::video::{self, VideoFormat, VideoFrame};
+use crate::video;
 
 // H.264 の NAL ユニット前に付与されるサイズのバイト数
 // Sora / Hisui が生成するものは全て 4 バイトなので固定値でいい
@@ -77,49 +77,6 @@ impl<'a> Iterator for H264AnnexBNalUnits<'a> {
 pub struct H264NalUnit<'a> {
     pub ty: u8,
     pub data: &'a [u8],
-}
-
-/// フレームから H.264 の SPS / PPS を取り出す
-///
-/// `VideoFormat::H264AnnexB` の場合は `frame.data` から、`VideoFormat::H264` の場合は
-/// `frame.sample_entry` から取り出す
-pub fn get_h264_sps_pps(frame: &VideoFrame) -> orfail::Result<(Vec<u8>, Vec<u8>)> {
-    matches!(frame.format, VideoFormat::H264 | VideoFormat::H264AnnexB).or_fail()?;
-
-    let mut sps = Vec::new();
-    let mut pps = Vec::new();
-    match frame.format {
-        VideoFormat::H264AnnexB => {
-            for nal in H264AnnexBNalUnits::new(&frame.data) {
-                let nal = nal.or_fail()?;
-                match nal.ty {
-                    H264_NALU_TYPE_SPS => sps = nal.data.to_vec(),
-                    H264_NALU_TYPE_PPS => pps = nal.data.to_vec(),
-                    _ => {}
-                }
-            }
-        }
-        VideoFormat::H264 => {
-            let Some(SampleEntry::Avc1(Avc1Box {
-                avcc_box: AvccBox {
-                    sps_list, pps_list, ..
-                },
-                ..
-            })) = &frame.sample_entry
-            else {
-                return Err(orfail::Failure::new(
-                    "missing sample entry for H.264 first frame",
-                ));
-            };
-            sps = sps_list.first().or_fail()?.to_vec();
-            pps = pps_list.first().or_fail()?.to_vec();
-        }
-        _ => unreachable!(),
-    }
-    (!sps.is_empty()).or_fail()?;
-    (!pps.is_empty()).or_fail()?;
-
-    Ok((sps, pps))
 }
 
 pub fn h264_sample_entry_from_annexb(

@@ -6,7 +6,7 @@ use shiguredo_mp4::{
 
 use crate::{
     types::EvenUsize,
-    video::{self, FrameRate, VideoFormat, VideoFrame},
+    video::{self, FrameRate},
 };
 
 pub type NalUnitArray = Vec<Vec<u8>>;
@@ -104,38 +104,6 @@ pub fn hev1_box_from_hvc1_unknown(unknown: &UnknownBox) -> orfail::Result<Hev1Bo
 
     Hev1Box::decode(&mut &bytes[..])
         .map_err(|e| orfail::Failure::new(format!("failed to reparse hvc1 as hev1: {e}")))
-}
-
-/// フレームから H.265 の VPS / SPS / PPS を取り出す
-///
-/// `frame.sample_entry` (Hev1) の `hvcc_box.nalu_arrays` から取り出す
-pub fn get_h265_vps_sps_pps(frame: &VideoFrame) -> orfail::Result<(&[u8], &[u8], &[u8])> {
-    matches!(frame.format, VideoFormat::H265).or_fail()?;
-
-    let Some(SampleEntry::Hev1(b)) = &frame.sample_entry else {
-        return Err(orfail::Failure::new("no H.265 sample entry"));
-    };
-
-    let mut vps = &[][..];
-    let mut sps = &[][..];
-    let mut pps = &[][..];
-    for arrays in &b.hvcc_box.nalu_arrays {
-        if arrays.nalus.is_empty() {
-            continue;
-        }
-
-        match arrays.nal_unit_type.get() {
-            H265_NALU_TYPE_VPS => vps = arrays.nalus[0].as_slice(),
-            H265_NALU_TYPE_SPS => sps = arrays.nalus[0].as_slice(),
-            H265_NALU_TYPE_PPS => pps = arrays.nalus[0].as_slice(),
-            _ => {}
-        }
-    }
-    (!vps.is_empty()).or_fail()?;
-    (!sps.is_empty()).or_fail()?;
-    (!pps.is_empty()).or_fail()?;
-
-    Ok((vps, sps, pps))
 }
 
 /// Annex B 形式の H.265 データから VPS, SPS, PPS を抽出して sample entry を生成する
