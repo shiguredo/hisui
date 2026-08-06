@@ -325,7 +325,6 @@ fn h265_single_track_resolution_change_video_toolbox() -> orfail::Result<()> {
 }
 
 #[test]
-#[ignore = "shiguredo_nvcodec 2025.2.1 では 2 回目の Decoder 作り直し直後に cuvidCreateDecoder が失敗する。上流側で cuvidReconfigureDecoder 相当の対応が入ったら ignore を外す"]
 #[cfg(feature = "nvcodec")]
 fn h265_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
@@ -352,7 +351,6 @@ fn vp8_single_track_resolution_change_libvpx() -> orfail::Result<()> {
 }
 
 #[test]
-#[ignore = "sample_entry ベースの検知では発火せず、hisui 側 state の解像度が固定されるため FAIL する。develop 側で別対応予定"]
 #[cfg(feature = "nvcodec")]
 fn vp8_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
@@ -379,7 +377,6 @@ fn vp9_single_track_resolution_change_libvpx() -> orfail::Result<()> {
 }
 
 #[test]
-#[ignore = "sample_entry ベースの検知では発火せず、cuvidDecodePicture が失敗するため FAIL する。develop 側で別対応予定"]
 #[cfg(feature = "nvcodec")]
 fn vp9_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
@@ -405,7 +402,6 @@ fn av1_single_track_resolution_change_dav1d() -> orfail::Result<()> {
 }
 
 #[test]
-#[ignore = "sample_entry ベースの検知では発火せず、cuvidDecodePicture が失敗するため FAIL する。develop 側で別対応予定"]
 #[cfg(feature = "nvcodec")]
 fn av1_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
