@@ -93,9 +93,11 @@ impl NvcodecDecoder {
         .or_fail()?;
 
         // サンプルエントリからパラメータセットを抽出してキャッシュ
-        if self.parameter_sets.is_none()
-            && let Some(sample_entry) = &frame.sample_entry
-        {
+        //
+        // reader は sample_entry が変化した frame でのみ Some を返す。
+        // 変化時は毎回取り直すことで、解像度変化などで sample_entry が更新された場合に
+        // 古い VPS / SPS / PPS を frame data に prepend し続けないようにする
+        if let Some(sample_entry) = &frame.sample_entry {
             self.parameter_sets =
                 Some(extract_parameter_sets_annexb(sample_entry, frame.format).or_fail()?);
         }
