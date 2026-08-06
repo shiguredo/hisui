@@ -325,6 +325,7 @@ fn h265_single_track_resolution_change_video_toolbox() -> orfail::Result<()> {
 }
 
 #[test]
+#[ignore = "shiguredo_nvcodec 2025.2.1 では 2 回目の Decoder 作り直し直後に cuvidCreateDecoder が失敗する。上流側で cuvidReconfigureDecoder 相当の対応が入ったら ignore を外す"]
 #[cfg(feature = "nvcodec")]
 fn h265_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
