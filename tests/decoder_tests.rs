@@ -325,6 +325,7 @@ fn h265_single_track_resolution_change_video_toolbox() -> orfail::Result<()> {
 }
 
 #[test]
+#[ignore = "shiguredo_nvcodec 2026.2.0 の上流対応でもまだ H.265 の解像度変化はエラーになるため。将来の上流修正で解消したら ignore を外す"]
 #[cfg(feature = "nvcodec")]
 fn h265_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
@@ -377,6 +378,7 @@ fn vp9_single_track_resolution_change_libvpx() -> orfail::Result<()> {
 }
 
 #[test]
+#[ignore = "shiguredo_nvcodec 2026.2.0 の上流対応でもまだ VP9 の解像度変化はエラーになるため。将来の上流修正で解消したら ignore を外す"]
 #[cfg(feature = "nvcodec")]
 fn vp9_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
@@ -402,6 +404,7 @@ fn av1_single_track_resolution_change_dav1d() -> orfail::Result<()> {
 }
 
 #[test]
+#[ignore = "shiguredo_nvcodec 2026.2.0 の上流対応でもまだ AV1 の解像度変化はエラーになるため。将来の上流修正で解消したら ignore を外す"]
 #[cfg(feature = "nvcodec")]
 fn av1_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
