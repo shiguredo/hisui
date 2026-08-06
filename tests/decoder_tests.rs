@@ -177,7 +177,7 @@ where
 //
 // 期待する解像度シーケンス (15 fps × 3 秒 = 45 フレーム、キーフレームは frame 0 / 15 / 30):
 // - フレーム 0..15  → 320x240
-// - フレーム 15..30 → 160x120
+// - フレーム 15..30 → 224x160
 // - フレーム 30..45 → 320x240
 fn h264_single_track_resolution_change_test(
     engines: Option<Vec<EngineName>>,
@@ -266,9 +266,11 @@ fn assert_expected_resolution_sequence(input_count: usize, output_frames: &[Arc<
     assert_eq!(input_count, 45, "入力フレーム数が想定と異なる");
     assert_eq!(output_frames.len(), 45, "出力フレーム数が想定と異なる");
 
+    // NVDEC のハードウェアデコード最小解像度 (HEVC=144x144 / VP9=128x128 / AV1=128x128) を
+    // 全コーデックで上回るように解像度を選んでいる
     let expected: Vec<(usize, usize)> = (0..15)
         .map(|_| (320, 240))
-        .chain((0..15).map(|_| (160, 120)))
+        .chain((0..15).map(|_| (224, 160)))
         .chain((0..15).map(|_| (320, 240)))
         .collect();
 
@@ -325,7 +327,6 @@ fn h265_single_track_resolution_change_video_toolbox() -> orfail::Result<()> {
 }
 
 #[test]
-#[ignore = "shiguredo_nvcodec 2026.2.0 の上流対応でもまだ H.265 の解像度変化はエラーになるため。将来の上流修正で解消したら ignore を外す"]
 #[cfg(feature = "nvcodec")]
 fn h265_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
@@ -378,7 +379,6 @@ fn vp9_single_track_resolution_change_libvpx() -> orfail::Result<()> {
 }
 
 #[test]
-#[ignore = "shiguredo_nvcodec 2026.2.0 の上流対応でもまだ VP9 の解像度変化はエラーになるため。将来の上流修正で解消したら ignore を外す"]
 #[cfg(feature = "nvcodec")]
 fn vp9_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
@@ -404,7 +404,6 @@ fn av1_single_track_resolution_change_dav1d() -> orfail::Result<()> {
 }
 
 #[test]
-#[ignore = "shiguredo_nvcodec 2026.2.0 の上流対応でもまだ AV1 の解像度変化はエラーになるため。将来の上流修正で解消したら ignore を外す"]
 #[cfg(feature = "nvcodec")]
 fn av1_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
     if !shiguredo_nvcodec::is_cuda_library_available() {
