@@ -225,52 +225,6 @@ jobs:
           mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
       - run: cargo test --no-default-features -p hisui -p shiguredo_openh264
 
-  # NOTE: develop では valgrind チェックを行っていないので hotfix でも一旦停止する
-  # valgrind:
-  #   runs-on: ubuntu-24.04
-  #   timeout-minutes: 20
-  #   env:
-  #     OPENH264_VERSION: "2.6.0"
-  #     OPENH264_PATH: ${{ github.workspace }}/libopenh264.so
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - run: rustup update stable
-  #     - run: rustup default stable
-  #     - name: Install packages to build external dependencies
-  #       run: |
-  #         sudo apt-get update
-  #         sudo apt-get install -y meson ninja-build nasm yasm build-essential autoconf automake libtool pkg-config yasm cmake valgrind libfdk-aac-dev
-  #     - name: Cache cargo
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: |
-  #           ~/.cargo/registry/
-  #           ~/.cargo/git/
-  #           target/
-  #
-  #           # cargo-valgrind 用に bin/ もキャッシュする
-  #           ~/.cargo/bin/
-  #
-  #           # 以下のファイルのタイムスタンプが変わってしまうと build.rs が常に再実行されてしまうのでキャッシュする
-  #           **/build.rs
-  #           **/Cargo.toml
-  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
-  #         restore-keys: |
-  #           # Cargo.toml と build.rs はキャッシュから復元するので、古いものを復元するのを避けるために候補キーに含める
-  #           ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-${{ github.job }}-
-  #           ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/build.rs') }}-
-  #     - name: Download libopenh264 v${{ env.OPENH264_VERSION }}
-  #       run: |
-  #         curl -LO http://ciscobinary.openh264.org/libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
-  #         bzip2 -d libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so.bz2
-  #         mv libopenh264-${{ env.OPENH264_VERSION }}-linux64.8.so ${{ env.OPENH264_PATH }}
-  #     - run: cargo install cargo-valgrind || echo 'already installed'
-  #     - name: Run valgrind tests
-  #       env:
-  #         VALGRINDFLAGS: --track-origins=yes --verbose --num-callers=50 --keep-debuginfo=yes
-  #       # NOTE: SVT-AV1 の v3.1.2 では hisui 側では対処不可能そうなエラーが出ているので、いったん抑制している（TODO: 新バージョンが出たらまた対象に含めること）
-  #       run: cargo valgrind test --workspace --exclude shiguredo_audio_toolbox --exclude shiguredo_video_toolbox --exclude shiguredo_nvcodec --exclude shiguredo_svt_av1 -- --skip simple_single_source_av1
-
   ubuntu-binary:
     name: "Upload Binary for Ubuntu"
     needs: [test]
@@ -398,7 +352,6 @@ jobs:
       - test-openh264
       - ubuntu-binary
       - macos-binary
-      # - valgrind
       - docs_rs
     timeout-minutes: 20
     runs-on: ubuntu-24.04
