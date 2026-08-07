@@ -13,17 +13,15 @@
 
 ## 2025.3.3
 
-- [UPDATE] shiguredo_nvcodec を 2026.2.0 に更新する
+- [UPDATE] shiguredo_nvcodec を 2025.2.1 から 2026.2.0 に更新する
   - コールバックベース API への追従で NvcodecDecoder / NvcodecEncoder の実装を書き換える
-  - workspace 内 crate を削除して crates.io から取得するように変更する
   - @sile
-- [FIX] NVIDIA Video Codec 環境で、1 つの入力ファイル内で解像度が変化する H.264 / H.265 の合成結果が壊れる問題を修正する
-  - キーフレームで SPS が切り替わる録画ファイル（WebRTC のシミュキャスト / 適応ビットレート録画など）で発生
-  - サンプルエントリ更新時に VPS / SPS / PPS を再取得して、次のキーフレームの先頭に付与し直すようにした
+- [FIX] デコードで nvcodec を使用した場合に、解像度が途中で変化する H.264 / H.265 の録画ファイルを適切に扱えない問題を修正する
+  - 解像度の変化に追従できず、合成結果が不正なものとなっていたのを修正した
   - @sile
-- [FIX] H.265 の hvc1 sample entry を hev1 として扱えるようにする
-  - hisui が使う shiguredo_mp4 2025.2.0 は hvc1 box に未対応で、hvc1 track の MP4 が読み込めなかった
-  - reader_mp4 で Unknown/hvc1 を検知して hev1 として再パースするヘルパーを追加した
+- [FIX] MP4 録画ファイルで hvc1 ボックスのサポートを追加する
+  - MP4 で、H.265 ストリームを表現するためには、hev1 ないし hvc1 ボックスが使われるが、2025.3.2 までの hisui は hev1 ボックスのみをサポートしていた
+  - しかし Sora 2026.1.0 以降の録画では hvc1 ボックスがデフォルトで使用されるために、hev1 / hvc1 の両方を扱えるように修正する
   - @sile
 
 ## 2025.3.2
