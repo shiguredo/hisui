@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::sync::mpsc;
 
 use orfail::OrFail;
 
@@ -10,71 +11,82 @@ use crate::video_h265::{
     H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
 };
 
+/// callback で受け取ったフレームと、user_data として渡した入力側メタデータ
+#[derive(Debug)]
+struct DecodedFrameWithMeta {
+    width: usize,
+    height: usize,
+    /// 元データは NV12。
+    nv12_data: Vec<u8>,
+    y_stride: usize,
+    uv_stride: usize,
+    input_frame: VideoFrame,
+}
+
+type NvcodecDecodeHandler =
+    shiguredo_nvcodec::FnDecodeHandler<VideoFrame, shiguredo_nvcodec::Error>;
+
+/// callback スレッドから main スレッドへ送るメッセージ。
+///
+/// Ok / Err を混ぜて単一 channel で流し、`drain_rx()` で受信側が振り分ける。
+/// エラー発生後は上位が即停止する前提のため、エラーメッセージがキュー内のどこにあっても構わない
+type DecodeMessage = Result<DecodedFrameWithMeta, orfail::Failure>;
+
 #[derive(Debug)]
 pub struct NvcodecDecoder {
-    inner: shiguredo_nvcodec::Decoder,
-    input_queue: VecDeque<VideoFrame>,
-    output_queue: VecDeque<VideoFrame>,
+    inner: shiguredo_nvcodec::Decoder<NvcodecDecodeHandler>,
+    rx: mpsc::Receiver<DecodeMessage>,
+    /// `rx` から `drain_rx()` で吸い上げた成功フレームを保持する
+    ok_buffer: VecDeque<DecodedFrameWithMeta>,
+    /// `rx` から吸い上げた初回エラー。以降のエラーは破棄する
+    pending_error: Option<orfail::Failure>,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
 }
 
 impl NvcodecDecoder {
     pub fn new_h264(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(H264) decoder");
-        let config = params.nvcodec_h264.clone();
-        Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h264(config).or_fail()?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            parameter_sets: None,
-        })
+        Self::new_common(params.nvcodec_h264.clone())
     }
 
     pub fn new_h265(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(H265) decoder");
-        let config = params.nvcodec_h265.clone();
-        Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_h265(config).or_fail()?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            parameter_sets: None,
-        })
+        Self::new_common(params.nvcodec_h265.clone())
     }
 
     pub fn new_av1(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(AV1) decoder");
-        let config = params.nvcodec_av1.clone();
-        Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_av1(config).or_fail()?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            parameter_sets: None,
-        })
+        Self::new_common(params.nvcodec_av1.clone())
     }
 
     pub fn new_vp8(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(VP8) decoder");
-        let config = params.nvcodec_vp8.clone();
-        Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp8(config).or_fail()?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
-            parameter_sets: None,
-        })
+        Self::new_common(params.nvcodec_vp8.clone())
     }
 
     pub fn new_vp9(params: &LayoutDecodeParams) -> orfail::Result<Self> {
         log::debug!("create nvcodec(VP9) decoder");
-        let config = params.nvcodec_vp9.clone();
+        Self::new_common(params.nvcodec_vp9.clone())
+    }
+
+    fn new_common(config: shiguredo_nvcodec::DecoderConfig) -> orfail::Result<Self> {
+        let (tx, rx) = mpsc::channel();
+        let handler = shiguredo_nvcodec::FnDecodeHandler::new(move |result| {
+            handle_decode_callback(&tx, result);
+        });
+        let inner = shiguredo_nvcodec::Decoder::new(config, handler).or_fail()?;
         Ok(Self {
-            inner: shiguredo_nvcodec::Decoder::new_vp9(config).or_fail()?,
-            input_queue: VecDeque::new(),
-            output_queue: VecDeque::new(),
+            inner,
+            rx,
+            ok_buffer: VecDeque::new(),
+            pending_error: None,
             parameter_sets: None,
         })
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+        self.take_pending_error()?;
+
         matches!(
             frame.format,
             VideoFormat::H264
@@ -87,9 +99,11 @@ impl NvcodecDecoder {
         .or_fail()?;
 
         // サンプルエントリからパラメータセットを抽出してキャッシュ
-        if self.parameter_sets.is_none()
-            && let Some(sample_entry) = &frame.sample_entry
-        {
+        //
+        // reader は sample_entry が変化した frame でのみ Some を返す。
+        // 変化時は毎回取り直すことで、解像度変化などで sample_entry が更新された場合に
+        // 古い VPS / SPS / PPS を frame data に prepend し続けないようにする
+        if let Some(sample_entry) = &frame.sample_entry {
             self.parameter_sets =
                 Some(extract_parameter_sets_annexb(sample_entry, frame.format).or_fail()?);
         }
@@ -131,76 +145,131 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        self.inner.decode(&data).or_fail()?;
-        self.input_queue.push_back(frame.to_stripped());
-        self.handle_decoded_frames().or_fail()?;
+        self.inner.decode(&data, frame.to_stripped()).or_fail()?;
         Ok(())
     }
 
     pub fn finish(&mut self) -> orfail::Result<()> {
-        self.inner.finish().or_fail()?;
-        self.handle_decoded_frames().or_fail()?;
+        // Decoder::flush() は callback を同期的に呼び切って戻る。
+        self.inner.flush().or_fail()?;
+        self.take_pending_error()?;
         Ok(())
     }
 
-    fn handle_decoded_frames(&mut self) -> orfail::Result<()> {
-        while let Some(nv12_frame) = self.inner.next_frame().or_fail()? {
-            let input_frame = self.input_queue.pop_front().or_fail()?;
+    /// callback スレッドから受け取ったメッセージを `ok_buffer` / `pending_error` に振り分ける
+    fn drain_rx(&mut self) {
+        while let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                Ok(decoded) => self.ok_buffer.push_back(decoded),
+                Err(err) => {
+                    // 初回エラーだけ保持、以降は破棄
+                    self.pending_error.get_or_insert(err);
+                }
+            }
+        }
+    }
 
-            // NV12 から I420 への変換
-            let width = nv12_frame.width();
-            let height = nv12_frame.height();
-
-            // I420 用のバッファを確保
-            let y_size = width * height;
-            let uv_width = width.div_ceil(2);
-            let uv_height = height.div_ceil(2);
-            let uv_size = uv_width * uv_height;
-            let total_size = y_size + uv_size * 2;
-
-            let mut i420_data = vec![0u8; total_size];
-            let (y_plane, rest) = i420_data.split_at_mut(y_size);
-            let (u_plane, v_plane) = rest.split_at_mut(uv_size);
-
-            // libyuv を使って NV12 から I420 に変換
-            let src = shiguredo_libyuv::Nv12Planes {
-                y: nv12_frame.y_plane(),
-                y_stride: nv12_frame.y_stride(),
-                uv: nv12_frame.uv_plane(),
-                uv_stride: nv12_frame.uv_stride(),
-            };
-
-            let mut dst = shiguredo_libyuv::I420PlanesMut {
-                y: y_plane,
-                y_stride: width,
-                u: u_plane,
-                u_stride: uv_width,
-                v: v_plane,
-                v_stride: uv_width,
-            };
-
-            let size = shiguredo_libyuv::ImageSize::new(width, height);
-            shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size).or_fail()?;
-
-            // I420 VideoFrame を作成
-            self.output_queue.push_back(VideoFrame::new_i420(
-                input_frame,
-                width,
-                height,
-                y_plane,
-                u_plane,
-                v_plane,
-                width,
-                uv_width,
-                uv_width,
-            ));
+    /// callback スレッドで発生したエラーがあれば取り出して返す。
+    ///
+    /// `decode()` / `finish()` の冒頭で呼ぶほか、EOS 後の `next_decoded_frame()`
+    /// ドレインで初めて `nv12_to_i420` 失敗が起きた場合の回収のため上位からも呼ぶ
+    pub fn take_pending_error(&mut self) -> orfail::Result<()> {
+        self.drain_rx();
+        if let Some(err) = self.pending_error.take() {
+            return Err(err);
         }
         Ok(())
     }
 
     pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        self.output_queue.pop_front()
+        self.drain_rx();
+        let decoded = self.ok_buffer.pop_front()?;
+
+        // NV12 から I420 への変換
+        let width = decoded.width;
+        let height = decoded.height;
+        let uv_width = width.div_ceil(2);
+        let uv_height = height.div_ceil(2);
+
+        // I420 用のバッファを確保
+        let y_size = width * height;
+        let uv_size = uv_width * uv_height;
+        let total_size = y_size + uv_size * 2;
+
+        let mut i420_data = vec![0u8; total_size];
+        let (y_plane, rest) = i420_data.split_at_mut(y_size);
+        let (u_plane, v_plane) = rest.split_at_mut(uv_size);
+
+        // libyuv を使って NV12 から I420 に変換
+        let (nv12_y, nv12_uv) = decoded.nv12_data.split_at(decoded.y_stride * height);
+        let src = shiguredo_libyuv::Nv12Planes {
+            y: nv12_y,
+            y_stride: decoded.y_stride,
+            uv: nv12_uv,
+            uv_stride: decoded.uv_stride,
+        };
+
+        let mut dst = shiguredo_libyuv::I420PlanesMut {
+            y: y_plane,
+            y_stride: width,
+            u: u_plane,
+            u_stride: uv_width,
+            v: v_plane,
+            v_stride: uv_width,
+        };
+
+        let size = shiguredo_libyuv::ImageSize::new(width, height);
+        if let Err(e) = shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size) {
+            log::error!("libyuv nv12_to_i420 failed: {e}");
+            // 次回 decode() / finish() 呼び出し、または EOS ドレイン後の take_pending_error() で
+            // Err として上位に伝播させる
+            self.pending_error
+                .get_or_insert_with(|| orfail::Failure::new(format!("libyuv nv12_to_i420 failed: {e}")));
+            return None;
+        }
+
+        Some(VideoFrame::new_i420(
+            decoded.input_frame,
+            width,
+            height,
+            y_plane,
+            u_plane,
+            v_plane,
+            width,
+            uv_width,
+            uv_width,
+        ))
     }
+}
+
+/// callback スレッドから呼ばれるコールバック本体
+fn handle_decode_callback(
+    tx: &mpsc::Sender<DecodeMessage>,
+    result: std::result::Result<
+        shiguredo_nvcodec::DecodedFrame<VideoFrame>,
+        shiguredo_nvcodec::Error,
+    >,
+) {
+    let message = match result {
+        Ok(decoded) => {
+            let width = decoded.width();
+            let height = decoded.height();
+            let y_stride = decoded.y_stride();
+            let uv_stride = decoded.uv_stride();
+            let (nv12_data, input_frame) = decoded.into_parts();
+            Ok(DecodedFrameWithMeta {
+                width,
+                height,
+                nv12_data,
+                y_stride,
+                uv_stride,
+                input_frame,
+            })
+        }
+        Err(err) => Err(orfail::Failure::new(format!("nvcodec decode error: {err}"))),
+    };
+    // Receiver drop 時のみ失敗するが、そのタイミングでは Decoder も drop 目前なので無視
+    let _ = tx.send(message);
 }
 
 /// サンプルエントリからパラメータセットを Annex.B 形式で抽出

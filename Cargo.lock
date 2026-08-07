@@ -169,7 +169,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hisui"
-version = "2025.3.2"
+version = "2025.3.3"
 dependencies = [
  "indicatif",
  "log",
@@ -523,11 +523,12 @@ checksum = "531b351cb6aa06e9e8ea5d55367ee1b634120f0d430f65e5a10ab135e151b164"
 
 [[package]]
 name = "shiguredo_nvcodec"
-version = "2025.2.1"
+version = "2026.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab3b51ad8dee83d36d84d7f4c8bddb529523143b3303ff8d861829360cd1462a"
 dependencies = [
  "bindgen",
- "libloading",
- "toml",
+ "shiguredo_toml",
 ]
 
 [[package]]
@@ -556,6 +557,12 @@ dependencies = [
  "log",
  "toml",
 ]
+
+[[package]]
+name = "shiguredo_toml"
+version = "2026.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b475c218cf15d056ed3e48c9e98693135b261b79530881e63b162650b236fdec"
 
 [[package]]
 name = "shiguredo_video_toolbox"

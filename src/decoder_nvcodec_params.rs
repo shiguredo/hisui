@@ -4,104 +4,69 @@ use crate::layout::DEFAULT_LAYOUT_JSON;
 pub fn parse_h264_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
-
-    // デフォルトレイアウトの設定を反映
-    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    let params = JsonObject::new(
-        default
-            .value()
-            .to_member("nvcodec_h264_decode_params")?
-            .required()?,
-    )?;
-    update_decode_params(params, &mut config)?;
-
-    // 実際のレイアウトの設定を反映
-    let params = JsonObject::new(value)?;
-    update_decode_params(params, &mut config)?;
-
-    Ok(config)
+    parse_decode_params(
+        value,
+        "nvcodec_h264_decode_params",
+        shiguredo_nvcodec::DecoderCodec::H264,
+    )
 }
 
 pub fn parse_h265_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
-
-    // デフォルトレイアウトの設定を反映
-    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    let params = JsonObject::new(
-        default
-            .value()
-            .to_member("nvcodec_h265_decode_params")?
-            .required()?,
-    )?;
-    update_decode_params(params, &mut config)?;
-
-    // 実際のレイアウトの設定を反映
-    let params = JsonObject::new(value)?;
-    update_decode_params(params, &mut config)?;
-
-    Ok(config)
+    parse_decode_params(
+        value,
+        "nvcodec_h265_decode_params",
+        shiguredo_nvcodec::DecoderCodec::Hevc,
+    )
 }
 
 pub fn parse_av1_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
-
-    // デフォルトレイアウトの設定を反映
-    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    let params = JsonObject::new(
-        default
-            .value()
-            .to_member("nvcodec_av1_decode_params")?
-            .required()?,
-    )?;
-    update_decode_params(params, &mut config)?;
-
-    // 実際のレイアウトの設定を反映
-    let params = JsonObject::new(value)?;
-    update_decode_params(params, &mut config)?;
-
-    Ok(config)
+    parse_decode_params(
+        value,
+        "nvcodec_av1_decode_params",
+        shiguredo_nvcodec::DecoderCodec::Av1,
+    )
 }
 
 pub fn parse_vp8_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
-
-    // デフォルトレイアウトの設定を反映
-    let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    let params = JsonObject::new(
-        default
-            .value()
-            .to_member("nvcodec_vp8_decode_params")?
-            .required()?,
-    )?;
-    update_decode_params(params, &mut config)?;
-
-    // 実際のレイアウトの設定を反映
-    let params = JsonObject::new(value)?;
-    update_decode_params(params, &mut config)?;
-
-    Ok(config)
+    parse_decode_params(
+        value,
+        "nvcodec_vp8_decode_params",
+        shiguredo_nvcodec::DecoderCodec::Vp8,
+    )
 }
 
 pub fn parse_vp9_decode_params(
     value: nojson::RawJsonValue<'_, '_>,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    let mut config = shiguredo_nvcodec::DecoderConfig::default();
+    parse_decode_params(
+        value,
+        "nvcodec_vp9_decode_params",
+        shiguredo_nvcodec::DecoderCodec::Vp9,
+    )
+}
+
+fn parse_decode_params(
+    value: nojson::RawJsonValue<'_, '_>,
+    default_key: &'static str,
+    codec: shiguredo_nvcodec::DecoderCodec,
+) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
+    let mut config = shiguredo_nvcodec::DecoderConfig {
+        codec,
+        device_id: 0,
+        max_num_decode_surfaces: 20,
+        max_display_delay: 0,
+        surface_format: shiguredo_nvcodec::SurfaceFormat::Nv12,
+    };
 
     // デフォルトレイアウトの設定を反映
     let default = nojson::RawJson::parse_jsonc(DEFAULT_LAYOUT_JSON)?.0;
-    let params = JsonObject::new(
-        default
-            .value()
-            .to_member("nvcodec_vp9_decode_params")?
-            .required()?,
-    )?;
+    let params = JsonObject::new(default.value().to_member(default_key)?.required()?)?;
     update_decode_params(params, &mut config)?;
 
     // 実際のレイアウトの設定を反映

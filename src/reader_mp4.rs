@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fs::File,
     io::{BufReader, Read, Seek, SeekFrom},
     num::NonZeroU32,
@@ -8,7 +9,7 @@ use std::{
 
 use orfail::OrFail;
 use shiguredo_mp4::{
-    Decode, Either,
+    BoxType, Decode, Either,
     aux::SampleTableAccessor,
     boxes::{FtypBox, HdlrBox, IgnoredBox, MoovBox, SampleEntry, StblBox, TrakBox},
 };
@@ -18,6 +19,7 @@ use crate::{
     metadata::SourceId,
     stats::{Mp4AudioReaderStats, Mp4VideoReaderStats, VideoResolution},
     video::{VideoFormat, VideoFrame},
+    video_h265::hev1_box_from_hvc1_unknown,
 };
 
 #[derive(Debug)]
@@ -107,13 +109,25 @@ impl Mp4VideoReaderInner {
         let sample = self.table.get_sample(self.next_sample_index)?;
         self.next_sample_index = self.next_sample_index.checked_add(1)?;
 
-        let sample_entry = sample.chunk().sample_entry();
-        let (metadata, format) = match sample_entry {
-            SampleEntry::Avc1(b) => (&b.visual, VideoFormat::H264),
-            SampleEntry::Hev1(b) => (&b.visual, VideoFormat::H265),
-            SampleEntry::Vp08(b) => (&b.visual, VideoFormat::Vp8),
-            SampleEntry::Vp09(b) => (&b.visual, VideoFormat::Vp9),
-            SampleEntry::Av01(b) => (&b.visual, VideoFormat::Av1),
+        let raw_sample_entry = sample.chunk().sample_entry();
+        // hisui が使う shiguredo_mp4 (=2025.2.0) は hvc1 に未対応で Unknown として parse される
+        // ここで hev1 相当に変換して後続の H.265 処理を共通化する
+        let sample_entry: Cow<SampleEntry> = match raw_sample_entry {
+            SampleEntry::Unknown(b) if b.box_type == BoxType::Normal(*b"hvc1") => {
+                match hev1_box_from_hvc1_unknown(b) {
+                    Ok(hev1) => Cow::Owned(SampleEntry::Hev1(hev1)),
+                    Err(e) => return Some(Err(e)),
+                }
+            }
+            _ => Cow::Borrowed(raw_sample_entry),
+        };
+
+        let (width, height, format) = match sample_entry.as_ref() {
+            SampleEntry::Avc1(b) => (b.visual.width, b.visual.height, VideoFormat::H264),
+            SampleEntry::Hev1(b) => (b.visual.width, b.visual.height, VideoFormat::H265),
+            SampleEntry::Vp08(b) => (b.visual.width, b.visual.height, VideoFormat::Vp8),
+            SampleEntry::Vp09(b) => (b.visual.width, b.visual.height, VideoFormat::Vp9),
+            SampleEntry::Av01(b) => (b.visual.width, b.visual.height, VideoFormat::Av1),
             entry => {
                 return Some(Err(orfail::Failure::new(format!(
                     "unsupported sample entry: {entry:?}"
@@ -136,7 +150,6 @@ impl Mp4VideoReaderInner {
 
         let timestamp = Duration::from_secs(sample.timestamp()) / self.timescale.get();
         let duration = Duration::from_secs(sample.duration() as u64) / self.timescale.get();
-        let resolution = (metadata.width, metadata.height);
 
         self.stats.total_sample_count.add(1);
         self.stats.total_track_duration.set(timestamp + duration);
@@ -146,27 +159,30 @@ impl Mp4VideoReaderInner {
             self.stats.codec.set(name);
         }
         self.stats.resolutions.insert(VideoResolution {
-            width: resolution.0 as usize,
-            height: resolution.1 as usize,
+            width: width as usize,
+            height: height as usize,
         });
+
+        let sample_entry_out = if self
+            .prev_sample_entry
+            .as_ref()
+            .is_none_or(|entry| entry != sample_entry.as_ref())
+        {
+            let owned = sample_entry.into_owned();
+            self.prev_sample_entry = Some(owned.clone());
+            Some(owned)
+        } else {
+            None
+        };
 
         Some(Ok(VideoFrame {
             source_id: Some(self.source_id.clone()),
-            sample_entry: if self
-                .prev_sample_entry
-                .as_ref()
-                .is_none_or(|entry| entry != sample_entry)
-            {
-                self.prev_sample_entry = Some(sample_entry.clone());
-                Some(sample_entry.clone())
-            } else {
-                None
-            },
+            sample_entry: sample_entry_out,
             data,
             format,
             keyframe: sample.is_sync_sample(),
-            width: metadata.width as usize,
-            height: metadata.height as usize,
+            width: width as usize,
+            height: height as usize,
             timestamp,
             duration,
         }))

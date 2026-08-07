@@ -1,5 +1,8 @@
 use orfail::OrFail;
-use shiguredo_mp4::boxes::{Hev1Box, HvccBox, HvccNalUintArray, SampleEntry};
+use shiguredo_mp4::{
+    BoxSize, BoxType, Decode,
+    boxes::{Hev1Box, HvccBox, HvccNalUintArray, SampleEntry, UnknownBox},
+};
 
 use crate::{
     types::EvenUsize,
@@ -74,6 +77,33 @@ fn hvcc_nalu_array(nalu_type: u8, nalus: NalUnitArray) -> HvccNalUintArray {
         nal_unit_type: shiguredo_mp4::Uint::new(nalu_type),
         nalus,
     }
+}
+
+/// hvc1 として parse された [`UnknownBox`] を hev1 として再パースして [`Hev1Box`] を返す
+///
+/// hvc1 と hev1 は box_type が違うだけで payload の構造 (VisualSampleEntry + hvcC + ...) は同じ
+/// hisui が使う shiguredo_mp4 (=2025.2.0) は hvc1 box に対応していないため、
+/// ここで box header を差し替えて hev1 として再パースすることで扱えるようにする
+pub fn hev1_box_from_hvc1_unknown(unknown: &UnknownBox) -> orfail::Result<Hev1Box> {
+    (unknown.box_type == BoxType::Normal(*b"hvc1")).or_fail()?;
+
+    let mut bytes = Vec::with_capacity(16 + unknown.payload.len());
+    match unknown.box_size {
+        BoxSize::U32(size) => {
+            bytes.extend_from_slice(&size.to_be_bytes());
+            bytes.extend_from_slice(b"hev1");
+        }
+        BoxSize::U64(size) => {
+            // size=1 は 64bit largesize が後続することを示す
+            bytes.extend_from_slice(&1u32.to_be_bytes());
+            bytes.extend_from_slice(b"hev1");
+            bytes.extend_from_slice(&size.to_be_bytes());
+        }
+    }
+    bytes.extend_from_slice(&unknown.payload);
+
+    Hev1Box::decode(&mut &bytes[..])
+        .map_err(|e| orfail::Failure::new(format!("failed to reparse hvc1 as hev1: {e}")))
 }
 
 /// Annex B 形式の H.265 データから VPS, SPS, PPS を抽出して sample entry を生成する

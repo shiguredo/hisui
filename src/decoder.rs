@@ -238,6 +238,12 @@ impl MediaProcessor for VideoDecoder {
             self.decoded.push_back(frame);
         }
 
+        if self.eos {
+            // EOS ドレイン中にデコーダー内部で発生したエラー (nvcodec の nv12_to_i420 失敗など)
+            // を上位に伝播させる
+            self.inner.finalize().or_fail()?;
+        }
+
         Ok(())
     }
 
@@ -425,6 +431,20 @@ impl VideoDecoderInner {
             Self::VideoToolbox(decoder) => decoder.next_decoded_frame(),
             #[cfg(feature = "nvcodec")]
             Self::Nvcodec(decoder) => decoder.next_decoded_frame(),
+        }
+    }
+
+    /// EOS ドレイン完了後に、内部で保持している未回収のエラーを Err として返す。
+    ///
+    /// nvcodec デコーダーは `next_decoded_frame()` 内の `nv12_to_i420` 失敗を
+    /// `pending_error` にラッチする設計のため、EOS ドレインだけではエラーを surface できない。
+    /// このメソッドはドレイン完了後にラッチ済みエラーを回収する用途で呼ぶ。
+    /// 他デコーダーは同期経路でエラーを既に伝播しているため no-op
+    fn finalize(&mut self) -> orfail::Result<()> {
+        match self {
+            #[cfg(feature = "nvcodec")]
+            Self::Nvcodec(decoder) => decoder.take_pending_error().or_fail(),
+            _ => Ok(()),
         }
     }
 }
