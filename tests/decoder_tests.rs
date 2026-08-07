@@ -219,8 +219,8 @@ fn h264_single_track_resolution_change_test(
     Ok(())
 }
 
-// H.264 以外のコーデック用: 1 トラック内でキーフレーム毎に解像度が変わる MP4 を、engine を
-// 明示指定してデコードする (frame data はそのまま流す、SPS/PPS の prepend は不要)
+// 1 トラック内でキーフレーム毎に解像度が変わる MP4 を、engine を明示指定してデコードする
+// (frame data はそのまま流す、SPS/PPS の prepend は不要)
 fn passthrough_single_track_resolution_change_test(
     testdata_path: &str,
     source_id_str: &str,
@@ -313,6 +313,25 @@ fn h264_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
         return Ok(());
     }
     h264_single_track_resolution_change_test(Some(vec![EngineName::Nvcodec]), None).or_fail()
+}
+
+// SPS / PPS の prepend なしで nvcodec デコーダーに解像度変化する MP4 を流し、
+// decoder 側でサンプルエントリ更新に伴う parameter_sets キャッシュ更新が働くことを検証する。
+// (`h264_single_track_resolution_change_nvcodec` は prepend 経路を通るため、
+//  この本 hotfix の修正対象パスを実際にはカバーしない)
+#[test]
+#[cfg(feature = "nvcodec")]
+fn h264_single_track_resolution_change_nvcodec_passthrough() -> orfail::Result<()> {
+    if !shiguredo_nvcodec::is_cuda_library_available() {
+        eprintln!("skip: CUDA ライブラリが利用できない");
+        return Ok(());
+    }
+    passthrough_single_track_resolution_change_test(
+        "testdata/archive-h264-resolution-change.mp4",
+        "archive-h264-resolution-change",
+        Some(vec![EngineName::Nvcodec]),
+    )
+    .or_fail()
 }
 
 #[test]
