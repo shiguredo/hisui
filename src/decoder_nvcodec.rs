@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
 
 use orfail::OrFail;
 
@@ -10,16 +10,6 @@ use crate::video_h264::{H264_NALU_TYPE_PPS, H264_NALU_TYPE_SPS};
 use crate::video_h265::{
     H265_NALU_TYPE_PPS, H265_NALU_TYPE_SPS, H265_NALU_TYPE_VPS, NALU_HEADER_LENGTH,
 };
-
-/// callback スレッドからデコード結果を受け取るキュー
-///
-/// エラーは初回のものだけ保持する。次回 `decode()` / `finish()` 呼び出しで
-/// 取り出して Err として上位に伝播することで、以降の失敗は起きない前提
-#[derive(Debug, Default)]
-struct DecodeOutputQueue {
-    ok_frames: VecDeque<DecodedFrameWithMeta>,
-    error: Option<orfail::Failure>,
-}
 
 /// callback で受け取ったフレームと、user_data として渡した入力側メタデータ
 #[derive(Debug)]
@@ -36,10 +26,20 @@ struct DecodedFrameWithMeta {
 type NvcodecDecodeHandler =
     shiguredo_nvcodec::FnDecodeHandler<VideoFrame, shiguredo_nvcodec::Error>;
 
+/// callback スレッドから main スレッドへ送るメッセージ。
+///
+/// Ok / Err を混ぜて単一 channel で流し、`drain_rx()` で受信側が振り分ける。
+/// エラー発生後は上位が即停止する前提のため、エラーメッセージがキュー内のどこにあっても構わない
+type DecodeMessage = Result<DecodedFrameWithMeta, orfail::Failure>;
+
 #[derive(Debug)]
 pub struct NvcodecDecoder {
     inner: shiguredo_nvcodec::Decoder<NvcodecDecodeHandler>,
-    output_queue: Arc<Mutex<DecodeOutputQueue>>,
+    rx: mpsc::Receiver<DecodeMessage>,
+    /// `rx` から `drain_rx()` で吸い上げた成功フレームを保持する
+    ok_buffer: VecDeque<DecodedFrameWithMeta>,
+    /// `rx` から吸い上げた初回エラー。以降のエラーは破棄する
+    pending_error: Option<orfail::Failure>,
     parameter_sets: Option<Vec<u8>>, // VPS/SPS/PPS をキャッシュ
 }
 
@@ -70,15 +70,16 @@ impl NvcodecDecoder {
     }
 
     fn new_common(config: shiguredo_nvcodec::DecoderConfig) -> orfail::Result<Self> {
-        let output_queue: Arc<Mutex<DecodeOutputQueue>> = Arc::new(Mutex::new(Default::default()));
-        let handler_queue = output_queue.clone();
+        let (tx, rx) = mpsc::channel();
         let handler = shiguredo_nvcodec::FnDecodeHandler::new(move |result| {
-            handle_decode_callback(&handler_queue, result);
+            handle_decode_callback(&tx, result);
         });
         let inner = shiguredo_nvcodec::Decoder::new(config, handler).or_fail()?;
         Ok(Self {
             inner,
-            output_queue,
+            rx,
+            ok_buffer: VecDeque::new(),
+            pending_error: None,
             parameter_sets: None,
         })
     }
@@ -155,27 +156,31 @@ impl NvcodecDecoder {
         Ok(())
     }
 
+    /// callback スレッドから受け取ったメッセージを `ok_buffer` / `pending_error` に振り分ける
+    fn drain_rx(&mut self) {
+        while let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                Ok(decoded) => self.ok_buffer.push_back(decoded),
+                Err(err) => {
+                    // 初回エラーだけ保持、以降は破棄
+                    self.pending_error.get_or_insert(err);
+                }
+            }
+        }
+    }
+
     /// callback スレッドで発生したエラーがあれば取り出して返す
-    fn take_pending_error(&self) -> orfail::Result<()> {
-        let error = self
-            .output_queue
-            .lock()
-            .expect("output queue is poisoned")
-            .error
-            .take();
-        if let Some(err) = error {
+    fn take_pending_error(&mut self) -> orfail::Result<()> {
+        self.drain_rx();
+        if let Some(err) = self.pending_error.take() {
             return Err(err);
         }
         Ok(())
     }
 
     pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        let decoded = self
-            .output_queue
-            .lock()
-            .expect("output queue is poisoned")
-            .ok_frames
-            .pop_front()?;
+        self.drain_rx();
+        let decoded = self.ok_buffer.pop_front()?;
 
         // NV12 から I420 への変換
         let width = decoded.width;
@@ -213,13 +218,8 @@ impl NvcodecDecoder {
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         if let Err(e) = shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size) {
             // 次回 decode() / finish() 呼び出しで Err として上位に伝播させる
-            self.output_queue
-                .lock()
-                .expect("output queue is poisoned")
-                .error
-                .get_or_insert_with(|| {
-                    orfail::Failure::new(format!("libyuv nv12_to_i420 failed: {e}"))
-                });
+            self.pending_error
+                .get_or_insert_with(|| orfail::Failure::new(format!("libyuv nv12_to_i420 failed: {e}")));
             return None;
         }
 
@@ -239,42 +239,32 @@ impl NvcodecDecoder {
 
 /// callback スレッドから呼ばれるコールバック本体
 fn handle_decode_callback(
-    output_queue: &Mutex<DecodeOutputQueue>,
+    tx: &mpsc::Sender<DecodeMessage>,
     result: std::result::Result<
         shiguredo_nvcodec::DecodedFrame<VideoFrame>,
         shiguredo_nvcodec::Error,
     >,
 ) {
-    match result {
+    let message = match result {
         Ok(decoded) => {
             let width = decoded.width();
             let height = decoded.height();
             let y_stride = decoded.y_stride();
             let uv_stride = decoded.uv_stride();
             let (nv12_data, input_frame) = decoded.into_parts();
-            output_queue
-                .lock()
-                .expect("output queue is poisoned")
-                .ok_frames
-                .push_back(DecodedFrameWithMeta {
-                    width,
-                    height,
-                    nv12_data,
-                    y_stride,
-                    uv_stride,
-                    input_frame,
-                });
+            Ok(DecodedFrameWithMeta {
+                width,
+                height,
+                nv12_data,
+                y_stride,
+                uv_stride,
+                input_frame,
+            })
         }
-        Err(err) => {
-            output_queue
-                .lock()
-                .expect("output queue is poisoned")
-                .error
-                .get_or_insert_with(|| {
-                    orfail::Failure::new(format!("nvcodec decode error: {err}"))
-                });
-        }
-    }
+        Err(err) => Err(orfail::Failure::new(format!("nvcodec decode error: {err}"))),
+    };
+    // Receiver drop 時のみ失敗するが、そのタイミングでは Decoder も drop 目前なので無視
+    let _ = tx.send(message);
 }
 
 /// サンプルエントリからパラメータセットを Annex.B 形式で抽出

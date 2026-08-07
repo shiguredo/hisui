@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock, mpsc};
 
 use orfail::OrFail;
 use shiguredo_mp4::boxes::SampleEntry;
@@ -10,18 +10,6 @@ use crate::{
     video::{VideoFormat, VideoFrame},
     video_av1, video_h264, video_h265,
 };
-
-/// エンコード結果 (成功したフレーム or エラー) を受け取るためのキュー。
-///
-/// `shiguredo_nvcodec::Encoder` はコールバックベース API のため、
-/// callback スレッドから同期的に取り出し可能な形で結果を蓄積する。
-/// エラーは初回のものだけ保持し、次回 `encode()` / `finish()` 呼び出しで
-/// 取り出して Err として上位に伝播する
-#[derive(Debug, Default)]
-struct EncodeOutputQueue {
-    ok_frames: VecDeque<EncodedFrameWithMeta>,
-    error: Option<orfail::Failure>,
-}
 
 /// callback で受け取った圧縮フレームと、user_data として渡した入力側メタデータ
 #[derive(Debug)]
@@ -47,16 +35,26 @@ type HandlerContextSlot = Arc<OnceLock<HandlerContext>>;
 /// callback スレッドから呼ばれる Handler をラップした型
 type NvcodecHandler = shiguredo_nvcodec::FnEncodeHandler<VideoFrame, shiguredo_nvcodec::Error>;
 
+/// callback スレッドから main スレッドへ送るメッセージ。
+///
+/// Ok / Err を混ぜて単一 channel で流し、`drain_rx()` で受信側が振り分ける。
+/// エラー発生後は上位が即停止する前提のため、エラーメッセージがキュー内のどこにあっても構わない
+type EncodeMessage = Result<EncodedFrameWithMeta, orfail::Failure>;
+
 #[derive(Debug)]
 pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder<NvcodecHandler>,
-    output_queue: Arc<Mutex<EncodeOutputQueue>>,
+    rx: mpsc::Receiver<EncodeMessage>,
+    /// `rx` から `drain_rx()` で吸い上げた成功フレームを保持する
+    ok_buffer: VecDeque<EncodedFrameWithMeta>,
+    /// `rx` から吸い上げた初回エラー。以降のエラーは破棄する
+    pending_error: Option<orfail::Failure>,
     encoded_format: VideoFormat,
     /// 最初の出力フレームに sample_entry を載せるために保持する。一度 take() したら以降は None のまま
     sample_entry: Option<SampleEntry>,
     /// `shiguredo_nvcodec::Encoder` 内でまだ drain されていない frame 数の推定値。
     /// `encode()` の呼び出しで +1、`inner.flush()` の完了で 0 にリセットする。
-    /// `next_encoded_frame()` の pop は NVENC の外 (`output_queue`) の話なのでここでは触らない。
+    /// `next_encoded_frame()` の pop は NVENC の外 (`rx` から吸い上げた buffer) の話なのでここでは触らない。
     in_flight: usize,
 }
 
@@ -156,9 +154,9 @@ impl NvcodecEncoder {
         make_context: impl FnOnce(Vec<u8>) -> orfail::Result<(SampleEntry, HandlerContext)>,
     ) -> orfail::Result<Self> {
         let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
-        let output_queue: Arc<Mutex<EncodeOutputQueue>> = Arc::new(Mutex::new(Default::default()));
+        let (tx, rx) = mpsc::channel();
 
-        let handler = build_handler(output_queue.clone(), context_slot.clone(), encoded_format);
+        let handler = build_handler(tx, context_slot.clone(), encoded_format);
         let inner = shiguredo_nvcodec::Encoder::new(config, handler).or_fail()?;
 
         let seq_params = inner.get_sequence_params().or_fail()?;
@@ -170,7 +168,9 @@ impl NvcodecEncoder {
 
         Ok(Self {
             inner,
-            output_queue,
+            rx,
+            ok_buffer: VecDeque::new(),
+            pending_error: None,
             encoded_format,
             sample_entry: Some(sample_entry),
             in_flight: 0,
@@ -261,27 +261,31 @@ impl NvcodecEncoder {
         Ok(())
     }
 
+    /// callback スレッドから受け取ったメッセージを `ok_buffer` / `pending_error` に振り分ける
+    fn drain_rx(&mut self) {
+        while let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                Ok(encoded) => self.ok_buffer.push_back(encoded),
+                Err(err) => {
+                    // 初回エラーだけ保持、以降は破棄
+                    self.pending_error.get_or_insert(err);
+                }
+            }
+        }
+    }
+
     /// callback スレッドで発生したエラーがあれば取り出して返す
-    fn take_pending_error(&self) -> orfail::Result<()> {
-        let error = self
-            .output_queue
-            .lock()
-            .expect("output queue is poisoned")
-            .error
-            .take();
-        if let Some(err) = error {
+    fn take_pending_error(&mut self) -> orfail::Result<()> {
+        self.drain_rx();
+        if let Some(err) = self.pending_error.take() {
             return Err(err);
         }
         Ok(())
     }
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        let encoded = self
-            .output_queue
-            .lock()
-            .expect("output queue is poisoned")
-            .ok_frames
-            .pop_front()?;
+        self.drain_rx();
+        let encoded = self.ok_buffer.pop_front()?;
         Some(VideoFrame {
             source_id: encoded.input_frame.source_id.clone(),
             data: encoded.data,
@@ -302,18 +306,18 @@ impl NvcodecEncoder {
 
 /// shiguredo_nvcodec::Encoder が消費する handler を構築する
 fn build_handler(
-    output_queue: Arc<Mutex<EncodeOutputQueue>>,
+    tx: mpsc::Sender<EncodeMessage>,
     context_slot: HandlerContextSlot,
     encoded_format: VideoFormat,
 ) -> NvcodecHandler {
     shiguredo_nvcodec::FnEncodeHandler::new(move |result| {
-        handle_encode_callback(&output_queue, &context_slot, encoded_format, result);
+        handle_encode_callback(&tx, &context_slot, encoded_format, result);
     })
 }
 
 /// callback スレッドから呼ばれるコールバック本体
 fn handle_encode_callback(
-    output_queue: &Mutex<EncodeOutputQueue>,
+    tx: &mpsc::Sender<EncodeMessage>,
     context_slot: &OnceLock<HandlerContext>,
     encoded_format: VideoFormat,
     result: std::result::Result<
@@ -321,7 +325,7 @@ fn handle_encode_callback(
         shiguredo_nvcodec::Error,
     >,
 ) {
-    match result {
+    let message = match result {
         Ok(encoded_frame) => {
             let context = context_slot
                 .get()
@@ -331,38 +335,18 @@ fn handle_encode_callback(
                 shiguredo_nvcodec::PictureType::I | shiguredo_nvcodec::PictureType::Idr
             );
             let (data, input_frame) = encoded_frame.into_parts();
-            let frame_data =
-                match convert_encoded_data(encoded_format, data, keyframe, context) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        output_queue
-                            .lock()
-                            .expect("output queue is poisoned")
-                            .error
-                            .get_or_insert(e);
-                        return;
-                    }
-                };
-            output_queue
-                .lock()
-                .expect("output queue is poisoned")
-                .ok_frames
-                .push_back(EncodedFrameWithMeta {
+            convert_encoded_data(encoded_format, data, keyframe, context).map(|frame_data| {
+                EncodedFrameWithMeta {
                     data: frame_data,
                     keyframe,
                     input_frame,
-                });
+                }
+            })
         }
-        Err(err) => {
-            output_queue
-                .lock()
-                .expect("output queue is poisoned")
-                .error
-                .get_or_insert_with(|| {
-                    orfail::Failure::new(format!("nvcodec encode error: {err}"))
-                });
-        }
-    }
+        Err(err) => Err(orfail::Failure::new(format!("nvcodec encode error: {err}"))),
+    };
+    // Receiver drop 時のみ失敗するが、そのタイミングでは Encoder も drop 目前なので無視
+    let _ = tx.send(message);
 }
 
 /// エンコード出力フレームを VideoFormat に応じて MP4 に載せる形式へ変換する
