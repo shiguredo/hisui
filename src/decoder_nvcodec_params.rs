@@ -59,7 +59,7 @@ fn parse_decode_params(
     let mut config = shiguredo_nvcodec::DecoderConfig {
         codec,
         device_id: 0,
-        max_num_decode_surfaces: 4,
+        max_num_decode_surfaces: 20,
         max_display_delay: 0,
         surface_format: shiguredo_nvcodec::SurfaceFormat::Nv12,
     };
