@@ -468,3 +468,81 @@ fn convert_annexb_to_mp4(annexb_data: &[u8]) -> orfail::Result<Vec<u8>> {
 
     Ok(mp4_data)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // AV1 OBU Header の bit 配置:
+    //   - bit 7 (MSB): obu_forbidden_bit
+    //   - bit 6-3:     obu_type (4 bits)
+    //   - bit 2:       obu_extension_flag
+    //   - bit 1:       obu_has_size_field
+    //   - bit 0 (LSB): obu_reserved_1bit
+
+    #[test]
+    fn has_sequence_header_sh() {
+        // obu_type = 1 (Sequence Header)
+        assert!(has_sequence_header(&[0x08]));
+    }
+
+    #[test]
+    fn has_sequence_header_td() {
+        // obu_type = 2 (Temporal Delimiter)
+        assert!(!has_sequence_header(&[0x10]));
+    }
+
+    #[test]
+    fn has_sequence_header_frame_header() {
+        // obu_type = 6 (Frame Header)
+        assert!(!has_sequence_header(&[0x30]));
+    }
+
+    #[test]
+    fn has_sequence_header_empty() {
+        assert!(!has_sequence_header(&[]));
+    }
+
+    #[test]
+    fn convert_annexb_to_mp4_4byte_start_code() {
+        let annexb = [0, 0, 0, 1, 0xAA, 0xBB, 0xCC, 0xDD];
+        let mp4 = convert_annexb_to_mp4(&annexb).expect("should succeed");
+        assert_eq!(mp4, [0, 0, 0, 4, 0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn convert_annexb_to_mp4_3byte_start_code() {
+        let annexb = [0, 0, 1, 0xAA, 0xBB, 0xCC];
+        let mp4 = convert_annexb_to_mp4(&annexb).expect("should succeed");
+        assert_eq!(mp4, [0, 0, 0, 3, 0xAA, 0xBB, 0xCC]);
+    }
+
+    #[test]
+    fn convert_annexb_to_mp4_multiple_nalus() {
+        let annexb = [
+            0, 0, 0, 1, 0xAA, 0xBB, 0xCC, 0xDD, // NALU1
+            0, 0, 0, 1, 0xEE, 0xFF, // NALU2
+        ];
+        let mp4 = convert_annexb_to_mp4(&annexb).expect("should succeed");
+        assert_eq!(
+            mp4,
+            [
+                0, 0, 0, 4, 0xAA, 0xBB, 0xCC, 0xDD, // NALU1
+                0, 0, 0, 2, 0xEE, 0xFF, // NALU2
+            ]
+        );
+    }
+
+    #[test]
+    fn convert_annexb_to_mp4_no_start_code_at_beginning() {
+        let annexb = [0xAA, 0xBB];
+        assert!(convert_annexb_to_mp4(&annexb).is_err());
+    }
+
+    #[test]
+    fn convert_annexb_to_mp4_empty() {
+        let annexb: [u8; 0] = [];
+        let mp4 = convert_annexb_to_mp4(&annexb).expect("should succeed");
+        assert!(mp4.is_empty());
+    }
+}
