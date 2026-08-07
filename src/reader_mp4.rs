@@ -1,12 +1,11 @@
 use std::{
+    borrow::Cow,
     fs::File,
     io::{BufReader, Read, Seek, SeekFrom},
     num::NonZeroU32,
     path::Path,
     time::Duration,
 };
-
-use std::borrow::Cow;
 
 use orfail::OrFail;
 use shiguredo_mp4::{
