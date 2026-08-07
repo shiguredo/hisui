@@ -16,7 +16,7 @@ use crate::video_h265::{
 struct DecodedFrameWithMeta {
     width: usize,
     height: usize,
-    /// 元データは NV12。y_stride == uv_stride == pitch
+    /// 元データは NV12。
     nv12_data: Vec<u8>,
     y_stride: usize,
     uv_stride: usize,
