@@ -56,15 +56,17 @@ pub struct NvcodecEncoder {
     /// `encode()` の呼び出しで +1、`inner.flush()` の完了で 0 にリセットする。
     /// `next_encoded_frame()` の pop は NVENC の外 (`rx` から吸い上げた buffer) の話なのでここでは触らない。
     in_flight: usize,
+    /// `encode()` 送信直前に許容する `in_flight` の上限値。
+    ///
+    /// `shiguredo_nvcodec::Encoder` の worker は内部で `n_encoder_buffer = frame_interval_p + 3` で
+    /// 送信可能な最大 in-flight を管理し、超えた frame を `"encoder buffer is full"` で捨てる。
+    /// この上限に達する前に `inner.flush()` で drain する必要があるため、上限は `n_encoder_buffer - 1`
+    /// (= `frame_interval_p + 2`) にする。`EncoderConfig::frame_interval_p` は encoder ごとに固定なので、
+    /// build 時に算出して保持する
+    in_flight_limit: usize,
 }
 
 impl NvcodecEncoder {
-    /// `shiguredo_nvcodec::Encoder` の `run_worker` は
-    /// `i_to_send - i_got >= n_encoder_buffer` で `"encoder buffer is full"` エラーを返して
-    /// frame を捨てる。`n_encoder_buffer = frame_interval_p + 3 = 4` (frame_interval_p = 1 前提) なので、
-    /// 送信直前の in-flight を 3 以下に保てば buffer full を回避できる。
-    const IN_FLIGHT_LIMIT: usize = 3;
-
     pub fn new_h264(options: &VideoEncoderOptions) -> orfail::Result<Self> {
         let width = options.width.get();
         let height = options.height.get();
@@ -156,6 +158,8 @@ impl NvcodecEncoder {
         let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
         let (tx, rx) = mpsc::channel();
 
+        let in_flight_limit = config.frame_interval_p as usize + 2;
+
         let handler = build_handler(tx, context_slot.clone(), encoded_format);
         let inner = shiguredo_nvcodec::Encoder::new(config, handler).or_fail()?;
 
@@ -174,6 +178,7 @@ impl NvcodecEncoder {
             encoded_format,
             sample_entry: Some(sample_entry),
             in_flight: 0,
+            in_flight_limit,
         })
     }
 
@@ -193,10 +198,10 @@ impl NvcodecEncoder {
 
         (frame.format == VideoFormat::I420).or_fail()?;
 
-        // LIMIT に達したら inner.flush() で全 in-flight を drain してから次の送信に進む
+        // 上限に達したら inner.flush() で全 in-flight を drain してから次の送信に進む
         // (batched flush 方式)。shiguredo_nvcodec は送信直前の in-flight が n_encoder_buffer 未満で
-        // ないと "encoder buffer is full" で frame を捨てるため、送信前に必ず 3 以下に抑える。
-        if self.in_flight >= Self::IN_FLIGHT_LIMIT {
+        // ないと "encoder buffer is full" で frame を捨てるため、送信前に必ず上限以下に抑える。
+        if self.in_flight >= self.in_flight_limit {
             self.inner.flush().or_fail()?;
             self.in_flight = 0;
         }
@@ -252,8 +257,8 @@ impl NvcodecEncoder {
     }
 
     pub fn finish(&mut self) -> orfail::Result<()> {
-        // encode() は LIMIT 到達時のみ flush する batched flush 方式なので、
-        // finish() 時点では in_flight が 0〜LIMIT の範囲を取りうる。
+        // encode() は上限到達時のみ flush する batched flush 方式なので、
+        // finish() 時点では in_flight が 0〜in_flight_limit の範囲を取りうる。
         // 残 in-flight を drain して EOS 前の callback を発火させる。
         self.inner.flush().or_fail()?;
         self.in_flight = 0;
