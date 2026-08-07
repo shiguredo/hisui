@@ -32,12 +32,10 @@ struct EncodedFrameWithMeta {
 
 /// callback スレッドが参照する遅延確定コンテキスト。
 ///
-/// `Encoder::new` は handler を消費する API のため、
-/// `sample_entry` を確定するには inner が必要、inner を作るには handler が必要という循環がある。
-/// そこで `OnceLock` を先に確保して handler にキャプチャさせ、
-/// `Encoder::new` 後に `get_sequence_params()` から `HandlerContext` を確定して `set()` する。
+/// AV1 の `av1_sequence_header` は `Encoder::new` 後の `get_sequence_params()` でしか得られないが、
+/// `Encoder::new` は handler を消費する API のため、handler にはあらかじめ `OnceLock` だけを
+/// キャプチャさせておき、`Encoder::new` の直後に `HandlerContext` を確定して `set()` する。
 struct HandlerContext {
-    sample_entry: Arc<Mutex<Option<SampleEntry>>>,
     /// AV1 のキーフレームに Sequence Header OBU を付与するためのバイト列。
     /// H.264 / H.265 では意味を持たないため `None`
     av1_sequence_header: Option<Vec<u8>>,
@@ -54,9 +52,8 @@ pub struct NvcodecEncoder {
     inner: shiguredo_nvcodec::Encoder<NvcodecHandler>,
     output_queue: Arc<Mutex<EncodeOutputQueue>>,
     encoded_format: VideoFormat,
-    /// 最初の出力フレームに sample_entry を載せるために保持する。
-    /// callback 側と共有するため Arc<Mutex<Option<...>>> で表現し、一度 take() したら以降は None のまま
-    sample_entry: Arc<Mutex<Option<SampleEntry>>>,
+    /// 最初の出力フレームに sample_entry を載せるために保持する。一度 take() したら以降は None のまま
+    sample_entry: Option<SampleEntry>,
     /// `shiguredo_nvcodec::Encoder` 内でまだ drain されていない frame 数の推定値。
     /// `encode()` の呼び出しで +1、`inner.flush()` の完了で 0 にリセットする。
     /// `next_encoded_frame()` の pop は NVENC の外 (`output_queue`) の話なのでここでは触らない。
@@ -82,11 +79,13 @@ impl NvcodecEncoder {
         Self::build_encoder(config, VideoFormat::H264, |seq_params| {
             let entry =
                 video_h264::h264_sample_entry_from_annexb(width, height, &seq_params).or_fail()?;
-            Ok(HandlerContext {
-                sample_entry: Arc::new(Mutex::new(Some(entry))),
-                av1_sequence_header: None,
-                encoded_format: VideoFormat::H264,
-            })
+            Ok((
+                entry,
+                HandlerContext {
+                    av1_sequence_header: None,
+                    encoded_format: VideoFormat::H264,
+                },
+            ))
         })
     }
 
@@ -108,11 +107,13 @@ impl NvcodecEncoder {
                 &seq_params,
             )
             .or_fail()?;
-            Ok(HandlerContext {
-                sample_entry: Arc::new(Mutex::new(Some(entry))),
-                av1_sequence_header: None,
-                encoded_format: VideoFormat::H265,
-            })
+            Ok((
+                entry,
+                HandlerContext {
+                    av1_sequence_header: None,
+                    encoded_format: VideoFormat::H265,
+                },
+            ))
         })
     }
 
@@ -141,11 +142,13 @@ impl NvcodecEncoder {
             // そのため、ここで Sequence Header OBU を get_sequence_params() で取得して保持しておき、
             // キーフレームのエンコード時に Sequence Header が含まれていない場合は明示的に付与する。
             let entry = video_av1::av1_sample_entry(width, height, &seq_params);
-            Ok(HandlerContext {
-                sample_entry: Arc::new(Mutex::new(Some(entry))),
-                av1_sequence_header: Some(seq_params),
-                encoded_format: VideoFormat::Av1,
-            })
+            Ok((
+                entry,
+                HandlerContext {
+                    av1_sequence_header: Some(seq_params),
+                    encoded_format: VideoFormat::Av1,
+                },
+            ))
         })
     }
 
@@ -153,7 +156,7 @@ impl NvcodecEncoder {
     fn build_encoder(
         config: shiguredo_nvcodec::EncoderConfig,
         encoded_format: VideoFormat,
-        make_context: impl FnOnce(Vec<u8>) -> orfail::Result<HandlerContext>,
+        make_context: impl FnOnce(Vec<u8>) -> orfail::Result<(SampleEntry, HandlerContext)>,
     ) -> orfail::Result<Self> {
         let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
         let output_queue: Arc<Mutex<EncodeOutputQueue>> = Arc::new(Mutex::new(Default::default()));
@@ -162,8 +165,7 @@ impl NvcodecEncoder {
         let inner = shiguredo_nvcodec::Encoder::new(config, handler).or_fail()?;
 
         let seq_params = inner.get_sequence_params().or_fail()?;
-        let context = make_context(seq_params).or_fail()?;
-        let sample_entry = context.sample_entry.clone();
+        let (sample_entry, context) = make_context(seq_params).or_fail()?;
         context_slot
             .set(context)
             .ok()
@@ -173,7 +175,7 @@ impl NvcodecEncoder {
             inner,
             output_queue,
             encoded_format,
-            sample_entry,
+            sample_entry: Some(sample_entry),
             in_flight: 0,
         })
     }
@@ -260,14 +262,16 @@ impl NvcodecEncoder {
     }
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        let mut queue = self.output_queue.lock().expect("output queue is poisoned");
-        // エラーは呼び出し側では取り出せないので、ここではとりあえずログに出しつつ捨てる。
-        // (Result を返す next_encoded_frame_result() を用意することも検討したが、
-        //  他の encoder との interface 一致を優先している)
-        while let Some(err) = queue.errors.pop_front() {
-            log::error!("nvcodec encode error: {err}");
-        }
-        let encoded = queue.ok_frames.pop_front()?;
+        let encoded = {
+            let mut queue = self.output_queue.lock().expect("output queue is poisoned");
+            // エラーは呼び出し側では取り出せないので、ここではとりあえずログに出しつつ捨てる。
+            // (Result を返す next_encoded_frame_result() を用意することも検討したが、
+            //  他の encoder との interface 一致を優先している)
+            while let Some(err) = queue.errors.pop_front() {
+                log::error!("nvcodec encode error: {err}");
+            }
+            queue.ok_frames.pop_front()?
+        };
         Some(VideoFrame {
             source_id: encoded.input_frame.source_id.clone(),
             data: encoded.data,
@@ -277,11 +281,7 @@ impl NvcodecEncoder {
             height: encoded.input_frame.height,
             timestamp: encoded.input_frame.timestamp,
             duration: encoded.input_frame.duration,
-            sample_entry: self
-                .sample_entry
-                .lock()
-                .expect("sample entry is poisoned")
-                .take(),
+            sample_entry: self.sample_entry.take(),
         })
     }
 
