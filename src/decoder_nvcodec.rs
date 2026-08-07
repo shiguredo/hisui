@@ -169,8 +169,11 @@ impl NvcodecDecoder {
         }
     }
 
-    /// callback スレッドで発生したエラーがあれば取り出して返す
-    fn take_pending_error(&mut self) -> orfail::Result<()> {
+    /// callback スレッドで発生したエラーがあれば取り出して返す。
+    ///
+    /// `decode()` / `finish()` の冒頭で呼ぶほか、EOS 後の `next_decoded_frame()`
+    /// ドレインで初めて `nv12_to_i420` 失敗が起きた場合の回収のため上位からも呼ぶ
+    pub fn take_pending_error(&mut self) -> orfail::Result<()> {
         self.drain_rx();
         if let Some(err) = self.pending_error.take() {
             return Err(err);
@@ -217,7 +220,9 @@ impl NvcodecDecoder {
 
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         if let Err(e) = shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size) {
-            // 次回 decode() / finish() 呼び出しで Err として上位に伝播させる
+            log::error!("libyuv nv12_to_i420 failed: {e}");
+            // 次回 decode() / finish() 呼び出し、または EOS ドレイン後の take_pending_error() で
+            // Err として上位に伝播させる
             self.pending_error
                 .get_or_insert_with(|| orfail::Failure::new(format!("libyuv nv12_to_i420 failed: {e}")));
             return None;
