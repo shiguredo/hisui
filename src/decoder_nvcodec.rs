@@ -12,10 +12,13 @@ use crate::video_h265::{
 };
 
 /// callback スレッドからデコード結果を受け取るキュー
+///
+/// エラーは初回のものだけ保持する。次回 `decode()` / `finish()` 呼び出しで
+/// 取り出して Err として上位に伝播することで、以降の失敗は起きない前提
 #[derive(Debug, Default)]
 struct DecodeOutputQueue {
     ok_frames: VecDeque<DecodedFrameWithMeta>,
-    errors: VecDeque<orfail::Failure>,
+    error: Option<orfail::Failure>,
 }
 
 /// callback で受け取ったフレームと、user_data として渡した入力側メタデータ
@@ -81,6 +84,8 @@ impl NvcodecDecoder {
     }
 
     pub fn decode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+        self.take_pending_error()?;
+
         matches!(
             frame.format,
             VideoFormat::H264
@@ -146,17 +151,31 @@ impl NvcodecDecoder {
     pub fn finish(&mut self) -> orfail::Result<()> {
         // Decoder::flush() は callback を同期的に呼び切って戻る。
         self.inner.flush().or_fail()?;
+        self.take_pending_error()?;
+        Ok(())
+    }
+
+    /// callback スレッドで発生したエラーがあれば取り出して返す
+    fn take_pending_error(&self) -> orfail::Result<()> {
+        let error = self
+            .output_queue
+            .lock()
+            .expect("output queue is poisoned")
+            .error
+            .take();
+        if let Some(err) = error {
+            return Err(err);
+        }
         Ok(())
     }
 
     pub fn next_decoded_frame(&mut self) -> Option<VideoFrame> {
-        let decoded = {
-            let mut queue = self.output_queue.lock().expect("output queue is poisoned");
-            while let Some(err) = queue.errors.pop_front() {
-                log::error!("nvcodec decode error: {err}");
-            }
-            queue.ok_frames.pop_front()?
-        };
+        let decoded = self
+            .output_queue
+            .lock()
+            .expect("output queue is poisoned")
+            .ok_frames
+            .pop_front()?;
 
         // NV12 から I420 への変換
         let width = decoded.width;
@@ -193,7 +212,14 @@ impl NvcodecDecoder {
 
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         if let Err(e) = shiguredo_libyuv::nv12_to_i420(&src, &mut dst, size) {
-            log::error!("libyuv nv12_to_i420 failed: {e}");
+            // 次回 decode() / finish() 呼び出しで Err として上位に伝播させる
+            self.output_queue
+                .lock()
+                .expect("output queue is poisoned")
+                .error
+                .get_or_insert_with(|| {
+                    orfail::Failure::new(format!("libyuv nv12_to_i420 failed: {e}"))
+                });
             return None;
         }
 
@@ -243,8 +269,10 @@ fn handle_decode_callback(
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .errors
-                .push_back(orfail::Failure::new(format!("nvcodec decode error: {err}")));
+                .error
+                .get_or_insert_with(|| {
+                    orfail::Failure::new(format!("nvcodec decode error: {err}"))
+                });
         }
     }
 }

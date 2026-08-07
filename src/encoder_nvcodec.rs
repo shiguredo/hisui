@@ -14,12 +14,13 @@ use crate::{
 /// エンコード結果 (成功したフレーム or エラー) を受け取るためのキュー。
 ///
 /// `shiguredo_nvcodec::Encoder` はコールバックベース API のため、
-/// callback スレッドから同期的に取り出し可能なキューへ結果を蓄積する。
-/// エラーは次回 `next_encoded_frame()` 呼び出し時に取り出せるように末尾に積む。
+/// callback スレッドから同期的に取り出し可能な形で結果を蓄積する。
+/// エラーは初回のものだけ保持し、次回 `encode()` / `finish()` 呼び出しで
+/// 取り出して Err として上位に伝播する
 #[derive(Debug, Default)]
 struct EncodeOutputQueue {
     ok_frames: VecDeque<EncodedFrameWithMeta>,
-    errors: VecDeque<orfail::Failure>,
+    error: Option<orfail::Failure>,
 }
 
 /// callback で受け取った圧縮フレームと、user_data として渡した入力側メタデータ
@@ -188,6 +189,8 @@ impl NvcodecEncoder {
     }
 
     pub fn encode(&mut self, frame: &VideoFrame) -> orfail::Result<()> {
+        self.take_pending_error()?;
+
         (frame.format == VideoFormat::I420).or_fail()?;
 
         // LIMIT に達したら inner.flush() で全 in-flight を drain してから次の送信に進む
@@ -254,20 +257,31 @@ impl NvcodecEncoder {
         // 残 in-flight を drain して EOS 前の callback を発火させる。
         self.inner.flush().or_fail()?;
         self.in_flight = 0;
+        self.take_pending_error()?;
+        Ok(())
+    }
+
+    /// callback スレッドで発生したエラーがあれば取り出して返す
+    fn take_pending_error(&self) -> orfail::Result<()> {
+        let error = self
+            .output_queue
+            .lock()
+            .expect("output queue is poisoned")
+            .error
+            .take();
+        if let Some(err) = error {
+            return Err(err);
+        }
         Ok(())
     }
 
     pub fn next_encoded_frame(&mut self) -> Option<VideoFrame> {
-        let encoded = {
-            let mut queue = self.output_queue.lock().expect("output queue is poisoned");
-            // エラーは呼び出し側では取り出せないので、ここではとりあえずログに出しつつ捨てる。
-            // (Result を返す next_encoded_frame_result() を用意することも検討したが、
-            //  他の encoder との interface 一致を優先している)
-            while let Some(err) = queue.errors.pop_front() {
-                log::error!("nvcodec encode error: {err}");
-            }
-            queue.ok_frames.pop_front()?
-        };
+        let encoded = self
+            .output_queue
+            .lock()
+            .expect("output queue is poisoned")
+            .ok_frames
+            .pop_front()?;
         Some(VideoFrame {
             source_id: encoded.input_frame.source_id.clone(),
             data: encoded.data,
@@ -324,8 +338,8 @@ fn handle_encode_callback(
                         output_queue
                             .lock()
                             .expect("output queue is poisoned")
-                            .errors
-                            .push_back(e);
+                            .error
+                            .get_or_insert(e);
                         return;
                     }
                 };
@@ -343,8 +357,10 @@ fn handle_encode_callback(
             output_queue
                 .lock()
                 .expect("output queue is poisoned")
-                .errors
-                .push_back(orfail::Failure::new(format!("nvcodec encode error: {err}")));
+                .error
+                .get_or_insert_with(|| {
+                    orfail::Failure::new(format!("nvcodec encode error: {err}"))
+                });
         }
     }
 }
