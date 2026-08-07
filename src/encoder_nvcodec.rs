@@ -39,7 +39,6 @@ struct HandlerContext {
     /// AV1 のキーフレームに Sequence Header OBU を付与するためのバイト列。
     /// H.264 / H.265 では意味を持たないため `None`
     av1_sequence_header: Option<Vec<u8>>,
-    encoded_format: VideoFormat,
 }
 
 type HandlerContextSlot = Arc<OnceLock<HandlerContext>>;
@@ -83,7 +82,6 @@ impl NvcodecEncoder {
                 entry,
                 HandlerContext {
                     av1_sequence_header: None,
-                    encoded_format: VideoFormat::H264,
                 },
             ))
         })
@@ -111,7 +109,6 @@ impl NvcodecEncoder {
                 entry,
                 HandlerContext {
                     av1_sequence_header: None,
-                    encoded_format: VideoFormat::H265,
                 },
             ))
         })
@@ -146,7 +143,6 @@ impl NvcodecEncoder {
                 entry,
                 HandlerContext {
                     av1_sequence_header: Some(seq_params),
-                    encoded_format: VideoFormat::Av1,
                 },
             ))
         })
@@ -161,7 +157,7 @@ impl NvcodecEncoder {
         let context_slot: HandlerContextSlot = Arc::new(OnceLock::new());
         let output_queue: Arc<Mutex<EncodeOutputQueue>> = Arc::new(Mutex::new(Default::default()));
 
-        let handler = build_handler(output_queue.clone(), context_slot.clone());
+        let handler = build_handler(output_queue.clone(), context_slot.clone(), encoded_format);
         let inner = shiguredo_nvcodec::Encoder::new(config, handler).or_fail()?;
 
         let seq_params = inner.get_sequence_params().or_fail()?;
@@ -294,9 +290,10 @@ impl NvcodecEncoder {
 fn build_handler(
     output_queue: Arc<Mutex<EncodeOutputQueue>>,
     context_slot: HandlerContextSlot,
+    encoded_format: VideoFormat,
 ) -> NvcodecHandler {
     shiguredo_nvcodec::FnEncodeHandler::new(move |result| {
-        handle_encode_callback(&output_queue, &context_slot, result);
+        handle_encode_callback(&output_queue, &context_slot, encoded_format, result);
     })
 }
 
@@ -304,6 +301,7 @@ fn build_handler(
 fn handle_encode_callback(
     output_queue: &Mutex<EncodeOutputQueue>,
     context_slot: &OnceLock<HandlerContext>,
+    encoded_format: VideoFormat,
     result: std::result::Result<
         shiguredo_nvcodec::EncodedFrame<VideoFrame>,
         shiguredo_nvcodec::Error,
@@ -320,7 +318,7 @@ fn handle_encode_callback(
             );
             let (data, input_frame) = encoded_frame.into_parts();
             let frame_data =
-                match convert_encoded_data(context.encoded_format, data, keyframe, context) {
+                match convert_encoded_data(encoded_format, data, keyframe, context) {
                     Ok(d) => d,
                     Err(e) => {
                         output_queue
