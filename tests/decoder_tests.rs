@@ -317,8 +317,8 @@ fn h264_single_track_resolution_change_nvcodec() -> orfail::Result<()> {
 
 // SPS / PPS の prepend なしで nvcodec デコーダーに解像度変化する MP4 を流し、
 // decoder 側でサンプルエントリ更新に伴う parameter_sets キャッシュ更新が働くことを検証する。
-// (`h264_single_track_resolution_change_nvcodec` は prepend 経路を通るため、
-//  この本 hotfix の修正対象パスを実際にはカバーしない)
+// (`h264_single_track_resolution_change_nvcodec` は frame data 内に SPS / PPS がある経路を通るため、
+//  サンプルエントリ更新経由の parameter_sets 再取得パスはカバーしない)
 #[test]
 #[cfg(feature = "nvcodec")]
 fn h264_single_track_resolution_change_nvcodec_passthrough() -> orfail::Result<()> {
