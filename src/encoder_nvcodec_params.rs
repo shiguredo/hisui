@@ -80,7 +80,6 @@ fn update_h264_encode_params(
 
     update_common_encode_params(params, config)?;
 
-    // 2026.2.0 で CodecConfig::H264(H264EncoderConfig) にネストされた
     let shiguredo_nvcodec::CodecConfig::H264(codec) = &mut config.codec else {
         // default_h264_encoder_config で H264 として初期化しているので、この分岐は起きない
         unreachable!("nvcodec encoder config is not H.264");
@@ -117,7 +116,6 @@ fn update_h265_encode_params(
 
     update_common_encode_params(params, config)?;
 
-    // 2026.2.0 で CodecConfig::Hevc(HevcEncoderConfig) にネストされた
     let shiguredo_nvcodec::CodecConfig::Hevc(codec) = &mut config.codec else {
         // default_h265_encoder_config で Hevc として初期化しているので、この分岐は起きない
         unreachable!("nvcodec encoder config is not H.265");
@@ -151,7 +149,6 @@ fn update_av1_encode_params(
 
     update_common_encode_params(params, config)?;
 
-    // 2026.2.0 で CodecConfig::Av1(Av1EncoderConfig) にネストされた
     let shiguredo_nvcodec::CodecConfig::Av1(codec) = &mut config.codec else {
         // default_av1_encoder_config で Av1 として初期化しているので、この分岐は起きない
         unreachable!("nvcodec encoder config is not AV1");
@@ -217,7 +214,7 @@ fn update_common_encode_params(
     if let Some(v) = params.get::<u32>("gop_length")? {
         config.gop_length = Some(v);
     }
-    // 2026.2.0 で idr_period は CodecConfig 側にネストされたので、ここでは扱わない
+    // idr_period は codec 別の update_*_encode_params 側で扱う
 
     // デバイス ID
     if let Some(v) = params.get::<i32>("device_id")? {

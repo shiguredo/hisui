@@ -13,7 +13,7 @@ use crate::{
 
 /// エンコード結果 (成功したフレーム or エラー) を受け取るためのキュー。
 ///
-/// 2026.2.0 系の `shiguredo_nvcodec::Encoder` はコールバックベース API になったため、
+/// `shiguredo_nvcodec::Encoder` はコールバックベース API のため、
 /// callback スレッドから同期的に取り出し可能なキューへ結果を蓄積する。
 /// エラーは次回 `next_encoded_frame()` 呼び出し時に取り出せるように末尾に積む。
 #[derive(Debug, Default)]
@@ -182,8 +182,6 @@ impl NvcodecEncoder {
         config: &mut shiguredo_nvcodec::EncoderConfig,
         options: &VideoEncoderOptions,
     ) {
-        // 2026.2.0 で fps_numerator -> framerate_num、fps_denominator -> framerate_den、
-        // target_bitrate -> average_bitrate にリネームされた
         config.width = options.width.get() as u32;
         config.height = options.height.get() as u32;
         config.framerate_num = options.frame_rate.numerator.get() as u32;
@@ -237,7 +235,6 @@ impl NvcodecEncoder {
         let size = shiguredo_libyuv::ImageSize::new(width, height);
         shiguredo_libyuv::i420_to_nv12(&src, &mut dst, size).or_fail()?;
 
-        // 2026.2.0 で encode は user_data (第 3 引数) を受け取るようになった。
         // callback スレッドで input_frame のメタデータを復元するために軽量な to_stripped() を渡す
         let encode_options = shiguredo_nvcodec::EncodeOptions {
             force_intra: false,
@@ -254,7 +251,6 @@ impl NvcodecEncoder {
     }
 
     pub fn finish(&mut self) -> orfail::Result<()> {
-        // 2026.2.0 で finish() は flush() にリネームされた。
         // encode() は LIMIT 到達時のみ flush する batched flush 方式なので、
         // finish() 時点では in_flight が 0〜LIMIT の範囲を取りうる。
         // 残 in-flight を drain して EOS 前の callback を発火させる。

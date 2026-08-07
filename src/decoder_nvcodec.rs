@@ -139,13 +139,11 @@ impl NvcodecDecoder {
             Cow::Owned(data_annexb)
         };
 
-        // 2026.2.0 で decode は user_data (第 2 引数) を受け取るようになった
         self.inner.decode(&data, frame.to_stripped()).or_fail()?;
         Ok(())
     }
 
     pub fn finish(&mut self) -> orfail::Result<()> {
-        // 2026.2.0 で finish() は flush() にリネームされた。
         // Decoder::flush() は callback を同期的に呼び切って戻る。
         self.inner.flush().or_fail()?;
         Ok(())

@@ -13,9 +13,13 @@
 
 ## 2025.3.3
 
+- [UPDATE] shiguredo_nvcodec を 2026.2.0 に更新する
+  - コールバックベース API への追従で NvcodecDecoder / NvcodecEncoder の実装を書き換える
+  - workspace 内 crate を削除して crates.io から取得するように変更する
+  - @sile
 - [FIX] NVIDIA Video Codec 環境で、1 つの入力ファイル内で解像度が変化する H.264 / H.265 の合成結果が壊れる問題を修正する
   - キーフレームで SPS が切り替わる録画ファイル（WebRTC のシミュキャスト / 適応ビットレート録画など）で発生
-  - キーフレーム到来時に SPS / PPS の変化を検知して、内部のデコーダーを作り直すようにした
+  - サンプルエントリ更新時に VPS / SPS / PPS を再取得して、次のキーフレームの先頭に付与し直すようにした
   - @sile
 - [FIX] H.265 の hvc1 sample entry を hev1 として扱えるようにする
   - hisui が使う shiguredo_mp4 2025.2.0 は hvc1 box に未対応で、hvc1 track の MP4 が読み込めなかった

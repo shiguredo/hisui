@@ -56,7 +56,6 @@ fn parse_decode_params(
     default_key: &'static str,
     codec: shiguredo_nvcodec::DecoderCodec,
 ) -> Result<shiguredo_nvcodec::DecoderConfig, nojson::JsonParseError> {
-    // 2026.2.0 で DecoderConfig::default() は撤廃され、codec / surface_format 等を明示的に指定する必要がある
     let mut config = shiguredo_nvcodec::DecoderConfig {
         codec,
         device_id: 0,
