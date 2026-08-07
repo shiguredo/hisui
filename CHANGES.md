@@ -13,7 +13,7 @@
 
 ## 2025.3.3
 
-**リリース日**: TBD
+**リリース日**: 2026-08-07
 
 - [UPDATE] shiguredo_nvcodec を 2025.2.1 から 2026.2.0 に更新する
   - コールバックベース API への追従で NvcodecDecoder / NvcodecEncoder の実装を書き換える
