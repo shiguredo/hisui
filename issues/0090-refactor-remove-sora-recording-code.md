@@ -18,6 +18,7 @@ hisui には録画合成専用の実装が残っている。
 - `src/sora/` 配下の 19 ファイル (約 7900 行) が録画合成専用モジュール (`recording_*`)
 - `src/main.rs` が compose / vmaf / tune の 3 サブコマンドをディスパッチしている
 - `src/tune.rs` と `src/tune/` (nsga2 / storage / rng / json_value) は tune サブコマンド専用
+- `src/webm/` (file_reader / reader) は WebM ファイル読み込み専用、 `src/yuv.rs` は VMAF 評価専用モジュール
 - `src/encoder.rs` の `default_video_encode_config_for_rpc` が `recording_layout_encode_params::LayoutEncodeParams::default()` に依存している (RPC 既定値が録画モジュールに依存)
 - `src/stats.rs` の `as_bool_for_sora_recording_compose` は compose stats JSON 専用
 - 録画専用ドキュメント: `docs/command_compose.md` / `docs/command_tune.md` / `docs/command_vmaf.md` /
@@ -55,7 +56,7 @@ hisui には録画合成専用の実装が残っている。
 
 ## 完了条件
 
-- `src/sora/` が削除され、compose / vmaf / tune サブコマンドが無くなっている
+- `src/sora/` / `src/webm/` / `src/yuv.rs` が削除され、compose / vmaf / tune サブコマンドが無くなっている
 - `src/encoder.rs` の `default_video_encode_config_for_rpc` 等、録画モジュールへの依存が
   すべて解消されている
 - 録画専用ドキュメント・テストデータが削除され、残るドキュメントに録画機能への参照が残っていない
@@ -64,7 +65,7 @@ hisui には録画合成専用の実装が残っている。
 
 ## 解決方法
 
-1. `src/sora/` (19 ファイル) を削除する
+1. `src/sora/` (19 ファイル)、 `src/webm/`、 `src/yuv.rs` を削除する
 2. `src/main.rs` から compose / vmaf / tune のディスパッチを削除する
 3. `src/tune.rs` と `src/tune/` を削除する
 4. `src/encoder.rs` の `default_video_encode_config_for_rpc` を録画モジュール非依存に書き換える
@@ -79,3 +80,6 @@ hisui には録画合成専用の実装が残っている。
 11. `src/sora/` を参照する既存 issue (0005 / 0069 / 0070 / 0074 / 0075 / 0085 / 0087、
     pending の 0015 / 0016 / 0029 等) を確認し、録画機能を対象とするものは closed または
     pending へ整理する
+12. `src/webm` / `src/yuv` 削除で孤児化した関数 (`parse_avcc_sps_pps_lists` /
+    `parse_av1_codec_private` / `parse_opus_head_pre_skip`) とその PBT (`prop_h264_avcc` /
+    `prop_av1`)・ユニットテスト、 pbt の未使用 dev-dependency (nojson) を削除する

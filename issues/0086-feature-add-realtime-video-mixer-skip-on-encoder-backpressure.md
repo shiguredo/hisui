@@ -17,9 +17,9 @@
 
 ### 効果範囲 (0085 応急処置による限定)
 
-本 issue の frame skip が実際に発火する条件は `Ack.await` が SKIP_TIMEOUT を超えて block することだが、 現行 develop の `src/encoder.rs::VideoEncoderInner::requires_backpressure` (`src/encoder.rs:1049-1058`) は応急処置として nvcodec 経路のみ true を返す:
+本 issue の frame skip が実際に発火する条件は `Ack.await` が SKIP_TIMEOUT を超えて block することだが、 現行 develop の `src/encoder.rs` の `VideoEncoderInner::requires_backpressure` は応急処置として nvcodec 経路のみ true を返す:
 
-- **realtime + nvcodec 経路**: encoder が `IN_FLIGHT_LIMIT = 3` (`src/encoder.rs:772`) に到達すると `input_rx.recv()` が停止し、 Syn が queue に留まって `Ack.await` が block する。 本 issue の skip が発火する
+- **realtime + nvcodec 経路**: encoder が `IN_FLIGHT_LIMIT = 3` (`src/encoder.rs`) に到達すると `input_rx.recv()` が停止し、 Syn が queue に留まって `Ack.await` が block する。 本 issue の skip が発火する
 - **realtime + 非 nvcodec 経路 (libvpx / openh264 / svt_av1 / video_toolbox)**: bp guard が実質無効なので `input_rx.recv()` が止まらず Syn は即 consume される。 `Ack.await` は即返り、 本 issue の skip は事実上 no-op
 
 非 nvcodec 経路への波及は issues/0087 で `requires_backpressure` 応急処置を解消したあと成立する。 本 issue 単体では nvcodec 環境の効果検証のみ可能な点を注意する (issues/0087 完了後に非 nvcodec でも効果検証する)。
@@ -65,7 +65,7 @@ hisui default frame_rate は `FrameRate::FPS_30` (`src/mixer/video.rs:60` の `f
 
 ### `crate::Ack` の意味論
 
-`crate::Ack` は `Receiver<()>` の thin wrapper (`src/media_pipeline.rs:1166`)。 Ack が復帰する契機は「対応する Syn の `Sender<()>` clone が全て drop されたこと」(`src/media_pipeline.rs:1168-1177` の `poll_recv` が `Ready(None)` を返す)。 `tokio::time::timeout` で `Ack.await` を打ち切って Receiver を drop しても、 queue に残った Syn は各 subscriber の `Message::Syn(_)` arm で drop されて自然に消化される (encoder 側は `src/encoder.rs:846` で `Message::Syn(_) => {}` で即 drop)。
+`crate::Ack` は `Receiver<()>` の thin wrapper (`src/media_pipeline.rs:1166`)。 Ack が復帰する契機は「対応する Syn の `Sender<()>` clone が全て drop されたこと」(`src/media_pipeline.rs:1168-1177` の `poll_recv` が `Ready(None)` を返す)。 `tokio::time::timeout` で `Ack.await` を打ち切って Receiver を drop しても、 queue に残った Syn は各 subscriber の `Message::Syn(_)` arm で drop されて自然に消化される (encoder 側は `src/encoder.rs` の `Message::Syn(_) => {}` で即 drop)。
 
 pipeline shutdown が SKIP_TIMEOUT 進行中に発生した場合は、 subscriber rx drop で Sender clone が drop され `Ack.await` は Ok で早期復帰する。 その後の `send_syn()` は失敗した subscriber を retain_mut で除去し、 次の `send_video` 失敗経路で mixer が自然終了する。
 
@@ -162,7 +162,7 @@ skip 発火後の tick 進行を精緻に整理する。 skip 発火 tick を N 
 
 新規カウンタ名は `total_encoder_backpressure_skipped_video_frame_count`。 命名軸:
 
-- 既存の `total_video_encoder_backpressure_count` (`src/encoder.rs:517`) と対称 (原因は "encoder backpressure")
+- 既存の `total_video_encoder_backpressure_count` (`src/encoder.rs`) と対称 (原因は "encoder backpressure")
 - 既存の `total_crop_skipped_draw_count` / `total_resize_skipped_draw_count` (`src/mixer/video.rs:337-338`) と対称 (原因 + `_skipped_` + 単位の 3 軸命名)
 - 単位は `video_frame_count` (tick 全体を落とすため `draw_count` ではない)
 - outcome メトリクスの位置付け: skip は「バックプレッシャーに反応した失敗経路」の計測
