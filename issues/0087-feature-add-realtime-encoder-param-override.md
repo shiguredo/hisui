@@ -33,7 +33,7 @@ Medium。 リアルタイム経路の品質確保に必要だが、 依存先 (0
 
 ## 現状
 
-hisui の encoder パラメータは `EncodeConfig::default()` (`src/encoder.rs`) で encoder ごとの既定値をまとめており、 呼出経路による上書きは存在しない:
+hisui の encoder パラメータは `EncodeConfig::default()` (`src/encoder.rs`) で encoder ごとの既定値をまとめており、 呼出経路による品質パラメータの上書きは存在しない (キーフレーム間隔のみ `encode_config_with_keyframe_interval` で上書きされる):
 
 - svt_av1: 既定値で `look_ahead_distance = 13` を指定
 - nvcodec: 既定値で個別設定
@@ -41,7 +41,7 @@ hisui の encoder パラメータは `EncodeConfig::default()` (`src/encoder.rs`
 
 各 encoder は呼出経路 (realtime) を判別する情報を持たず、 統一的な realtime プロファイル定義もない。
 
-なお、 `EncodeConfig::default()` の各値は録画機能 (compose) 削除時に旧既定レイアウト (`layout-examples/compose-default.jsonc`) の値をそのまま引き継いでおり、 リアルタイム用途の観点で最適化されていない。 既定値そのものの見直しも本 issue の対象とする。
+なお、 `EncodeConfig::default()` の各値は録画機能 (compose) 削除時に旧既定レイアウト (当時存在した `layout-examples/compose-default.jsonc`) の値を引き継いだもので、 リアルタイム用途の観点で最適化されていない。 既定値そのものの見直しも本 issue の対象とする。
 
 また、 既定値を検証するテストは現状存在しない (旧 compose の e2e テスト削除による)。 値の見直し時には、 既定値の回帰を検出するテストの追加を併せて行うこと。
 

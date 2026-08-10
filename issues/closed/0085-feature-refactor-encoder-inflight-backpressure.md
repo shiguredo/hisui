@@ -318,7 +318,7 @@ closed/0083 / 0084 と同じ precedent に従い、本 issue の実装 PR に以
 
 ## 解決方法
 
-実装済み (コミット `f641c454` / `cd96d410`) のため closed とする。
+実装は develop に merge 済み (一連の 0085 コミット) のため closed とする。
 
 - `NvcodecEncoder::encode` の `flush()` 撤廃と、`VideoEncoder::run` の in-flight バックプレッシャを実装した
 - bp guard は応急処置として nvcodec のみ有効 (`VideoEncoderInner::requires_backpressure`) で、全エンコーダーへの拡張は 0087 で対応する
