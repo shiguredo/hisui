@@ -260,6 +260,11 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
             }
         }
         VideoFormat::H264 => {
+            // フレームデータ (AVCC 形式) 内の SPS / PPS を優先し、無ければ sample_entry にフォールバックする。
+            // 単一 stsd + ビットストリーム内パラメータセット変化の入力では、キーフレームの
+            // フレームデータ内に in-band の SPS / PPS が含まれるため、sample_entry だけでなく
+            // フレームデータも参照して再初期化を判定する。
+            let in_frame = extract_h264_sps_pps_from_avcc(&frame.data)?;
             let Some(SampleEntry::Avc1(Avc1Box {
                 avcc_box: AvccBox {
                     sps_list, pps_list, ..
@@ -271,14 +276,20 @@ fn get_h264_sps_pps(frame: &VideoFrame) -> crate::Result<(Vec<u8>, Vec<u8>)> {
                     "missing sample entry for H.264 first frame",
                 ));
             };
-            sps = sps_list
-                .first()
-                .ok_or_else(|| crate::Error::new("missing H.264 SPS in sample entry"))?
-                .to_vec();
-            pps = pps_list
-                .first()
-                .ok_or_else(|| crate::Error::new("missing H.264 PPS in sample entry"))?
-                .to_vec();
+            sps = match in_frame.sps {
+                Some(sps) => sps.to_vec(),
+                None => sps_list
+                    .first()
+                    .ok_or_else(|| crate::Error::new("missing H.264 SPS in sample entry"))?
+                    .to_vec(),
+            };
+            pps = match in_frame.pps {
+                Some(pps) => pps.to_vec(),
+                None => pps_list
+                    .first()
+                    .ok_or_else(|| crate::Error::new("missing H.264 PPS in sample entry"))?
+                    .to_vec(),
+            };
         }
         _ => unreachable!(),
     }
@@ -304,6 +315,114 @@ fn get_frame_resolution(frame: &VideoFrame, codec_name: &str) -> crate::Result<(
     Ok((width, height))
 }
 
+/// AVCC 形式のフレームデータから抽出した H.264 の SPS / PPS NALU
+///
+/// フレーム内に該当 NALU が無い場合は `None` となる。
+#[derive(Debug)]
+struct H264SpsPpsFromAvcc<'a> {
+    sps: Option<&'a [u8]>,
+    pps: Option<&'a [u8]>,
+}
+
+/// AVCC 形式のフレームデータから抽出した H.265 の VPS / SPS / PPS NALU
+///
+/// フレーム内に該当 NALU が無い場合はそれぞれ `None` となる。
+#[derive(Debug)]
+struct H265VpsSpsPpsFromAvcc<'a> {
+    vps: Option<&'a [u8]>,
+    sps: Option<&'a [u8]>,
+    pps: Option<&'a [u8]>,
+}
+
+/// AVCC 形式の H.264 フレームデータから SPS / PPS NALU を抽出する
+///
+/// NALU 長プレフィックスは 4 バイト固定 (`NALU_HEADER_LENGTH`) で、
+/// フレーム内に SPS / PPS が無い場合は `None` を返す。
+/// フレームデータが壊れている場合 (長さプレフィックスがデータ末尾を超える) は Err を返す。
+fn extract_h264_sps_pps_from_avcc(data: &[u8]) -> crate::Result<H264SpsPpsFromAvcc<'_>> {
+    let mut sps = None;
+    let mut pps = None;
+    let mut offset = 0;
+    while offset < data.len() {
+        if offset + NALU_HEADER_LENGTH > data.len() {
+            return Err(crate::Error::new(format!(
+                "invalid H264 AVCC payload: NALU length header is truncated (remaining={})",
+                data.len() - offset
+            )));
+        }
+        let nalu_len = u32::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]) as usize;
+        offset += NALU_HEADER_LENGTH;
+
+        if offset + nalu_len > data.len() {
+            return Err(crate::Error::new(format!(
+                "invalid H264 AVCC payload: NALU length {nalu_len} exceeds remaining data {} at offset {}",
+                data.len() - offset,
+                offset
+            )));
+        }
+
+        let nalu = &data[offset..offset + nalu_len];
+        match nalu.first().map(|b| b & 0x1F) {
+            Some(H264_NALU_TYPE_SPS) => sps = Some(nalu),
+            Some(H264_NALU_TYPE_PPS) => pps = Some(nalu),
+            _ => {}
+        }
+        offset += nalu_len;
+    }
+    Ok(H264SpsPpsFromAvcc { sps, pps })
+}
+
+/// AVCC 形式の H.265 フレームデータから VPS / SPS / PPS NALU を抽出する
+///
+/// NALU 長プレフィックスは 4 バイト固定 (`NALU_HEADER_LENGTH`) で、
+/// フレーム内に VPS / SPS / PPS が無い場合はそれぞれ `None` を返す。
+/// フレームデータが壊れている場合 (長さプレフィックスがデータ末尾を超える) は Err を返す。
+fn extract_h265_vps_sps_pps_from_avcc(data: &[u8]) -> crate::Result<H265VpsSpsPpsFromAvcc<'_>> {
+    let mut vps = None;
+    let mut sps = None;
+    let mut pps = None;
+    let mut offset = 0;
+    while offset < data.len() {
+        if offset + NALU_HEADER_LENGTH > data.len() {
+            return Err(crate::Error::new(format!(
+                "invalid H265 AVCC payload: NALU length header is truncated (remaining={})",
+                data.len() - offset
+            )));
+        }
+        let nalu_len = u32::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]) as usize;
+        offset += NALU_HEADER_LENGTH;
+
+        if offset + nalu_len > data.len() {
+            return Err(crate::Error::new(format!(
+                "invalid H265 AVCC payload: NALU length {nalu_len} exceeds remaining data {} at offset {}",
+                data.len() - offset,
+                offset
+            )));
+        }
+
+        let nalu = &data[offset..offset + nalu_len];
+        // H.265 の NAL unit type は NAL ヘッダ第 1 バイトの bit 1-6 (H265AnnexBNalUnits と同じ抽出方法)
+        match nalu.first().map(|b| (b >> 1) & 0x3F) {
+            Some(H265_NALU_TYPE_VPS) => vps = Some(nalu),
+            Some(H265_NALU_TYPE_SPS) => sps = Some(nalu),
+            Some(H265_NALU_TYPE_PPS) => pps = Some(nalu),
+            _ => {}
+        }
+        offset += nalu_len;
+    }
+    Ok(H265VpsSpsPpsFromAvcc { vps, sps, pps })
+}
+
 fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8])> {
     if !matches!(frame.format, VideoFormat::H265) {
         return Err(crate::Error::new(format!(
@@ -311,6 +430,12 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
             frame.format
         )));
     }
+
+    // フレームデータ (AVCC 形式) 内の VPS / SPS / PPS を優先し、無ければ sample_entry に
+    // フォールバックする。hev1 は in-band パラメータセット変化が仕様準拠の正規パターンで、
+    // キーフレームのフレームデータ内に VPS / SPS / PPS が含まれるため、sample_entry だけでなく
+    // フレームデータも参照して再初期化を判定する。
+    let in_frame = extract_h265_vps_sps_pps_from_avcc(&frame.data)?;
 
     let hvcc = match frame.sample_entry.as_ref().map(|e| e.get()) {
         Some(SampleEntry::Hev1(b)) => &b.hvcc_box,
@@ -333,6 +458,17 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
             _ => {}
         }
     }
+
+    if let Some(v) = in_frame.vps {
+        vps = v;
+    }
+    if let Some(s) = in_frame.sps {
+        sps = s;
+    }
+    if let Some(p) = in_frame.pps {
+        pps = p;
+    }
+
     if vps.is_empty() {
         return Err(crate::Error::new("missing H.265 VPS"));
     }
@@ -344,4 +480,257 @@ fn get_h265_vps_sps_pps(frame: &VideoFrame) -> crate::Result<(&[u8], &[u8], &[u8
     }
 
     Ok((vps, sps, pps))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::video::VideoFrameSize;
+
+    // AVCC 形式のフレームデータを構築するヘルパー
+    // 各 NALU を 4 バイト長プレフィックス付きで連結する
+    fn avcc_data(nalus: &[&[u8]]) -> Vec<u8> {
+        let mut data = Vec::new();
+        for nalu in nalus {
+            data.extend_from_slice(&(nalu.len() as u32).to_be_bytes());
+            data.extend_from_slice(nalu);
+        }
+        data
+    }
+
+    // ffmpeg + libx265 で生成した実機 H.265 ストリームから抽出した VPS / SPS / PPS
+    // 生成コマンド: `ffmpeg -f lavfi -i color=c=blue:s=640x480:d=1:r=25 -c:v libx265 -x265-params repeat-headers=1 out.mp4`
+    const H265_VPS_640X480: &[u8] = &[
+        0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00,
+        0x03, 0x00, 0x00, 0x03, 0x00, 0x5a, 0x95, 0x94, 0x09,
+    ];
+    const H265_SPS_640X480: &[u8] = &[
+        0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00, 0x00, 0x03, 0x00, 0x00,
+        0x03, 0x00, 0x5a, 0xa0, 0x05, 0x02, 0x01, 0xe1, 0x65, 0x95, 0x95, 0x29, 0x30, 0xbc, 0x05,
+        0xa0, 0x20, 0x00, 0x00, 0x03, 0x00, 0x20, 0x00, 0x00, 0x03, 0x03, 0x21,
+    ];
+    const H265_PPS_640X480: &[u8] = &[0x44, 0x01, 0xc0, 0x73, 0xc1, 0x89];
+
+    // ffmpeg + libx264 で生成した実機 H.264 ストリームから抽出した SPS / PPS
+    // 生成コマンド: `ffmpeg -f lavfi -i color=c=blue:s=320x240:d=1:r=25 -c:v libx264 -profile:v baseline out.mp4`
+    const H264_SPS_320X240: &[u8] = &crate::video::h264::tests::SPS_320X240;
+    const H264_PPS_320X240: &[u8] = &[0x68, 0xce, 0x06, 0xe2];
+
+    fn make_video_frame(
+        format: VideoFormat,
+        data: Vec<u8>,
+        sample_entry: Option<crate::sample_entry::SharedSampleEntry>,
+    ) -> VideoFrame {
+        VideoFrame {
+            data,
+            format,
+            keyframe: true,
+            size: Some(VideoFrameSize {
+                width: 320,
+                height: 240,
+            }),
+            timestamp: std::time::Duration::ZERO,
+            sample_entry,
+        }
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_extracts_sps_and_pps() -> crate::Result<()> {
+        // SEI が先行するフレームデータから SPS / PPS を抽出できること
+        let data = avcc_data(&[
+            &[0x06, 0x01, 0x02, 0x03],
+            H264_SPS_320X240,
+            H264_PPS_320X240,
+            &[0x65, 0x88, 0x84],
+        ]);
+        let in_frame = extract_h264_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.sps, Some(H264_SPS_320X240), "SPS が抽出されること");
+        assert_eq!(in_frame.pps, Some(H264_PPS_320X240), "PPS が抽出されること");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_returns_none_when_missing() -> crate::Result<()> {
+        // SPS / PPS を含まないフレームデータでは None を返すこと
+        let data = avcc_data(&[&[0x65, 0x88, 0x84]]);
+        let in_frame = extract_h264_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.sps, None, "SPS が無い場合は None");
+        assert_eq!(in_frame.pps, None, "PPS が無い場合は None");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_returns_err_on_truncated_length_header() {
+        // 長さプレフィックスがデータ末尾を超える場合は Err を返すこと
+        let data = vec![0x00, 0x00];
+        assert!(extract_h264_sps_pps_from_avcc(&data).is_err());
+    }
+
+    #[test]
+    fn extract_h264_sps_pps_from_avcc_returns_err_on_truncated_nalu() {
+        // NALU 長がデータ末尾を超える場合は Err を返すこと
+        let data = avcc_data(&[H264_SPS_320X240, &[0x65, 0x88]]);
+        let truncated = [&data[..], &[0xffu8][..]].concat();
+        let mut data = Vec::new();
+        // 本来の SPS 長より大きい NALU 長を持つ不正データを構築する
+        data.extend_from_slice(&(H264_SPS_320X240.len() as u32 + 10).to_be_bytes());
+        data.extend_from_slice(H264_SPS_320X240);
+        assert!(extract_h264_sps_pps_from_avcc(&data).is_err());
+        // 上記の truncated データ自体は末尾 1 バイトが不完全な長さヘッダになる
+        assert!(extract_h264_sps_pps_from_avcc(&truncated).is_err());
+    }
+
+    #[test]
+    fn extract_h265_vps_sps_pps_from_avcc_extracts_vps_sps_pps() -> crate::Result<()> {
+        // SEI が先行するフレームデータから VPS / SPS / PPS を抽出できること
+        let data = avcc_data(&[
+            &[0x4e, 0x01, 0x02, 0x03],
+            H265_VPS_640X480,
+            H265_SPS_640X480,
+            H265_PPS_640X480,
+            &[0x26, 0x01, 0xaf, 0x04],
+        ]);
+        let in_frame = extract_h265_vps_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.vps, Some(H265_VPS_640X480), "VPS が抽出されること");
+        assert_eq!(in_frame.sps, Some(H265_SPS_640X480), "SPS が抽出されること");
+        assert_eq!(in_frame.pps, Some(H265_PPS_640X480), "PPS が抽出されること");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h265_vps_sps_pps_from_avcc_returns_none_when_missing() -> crate::Result<()> {
+        // VPS / SPS / PPS を含まないフレームデータでは None を返すこと
+        let data = avcc_data(&[&[0x26, 0x01, 0xaf, 0x04]]);
+        let in_frame = extract_h265_vps_sps_pps_from_avcc(&data)?;
+        assert_eq!(in_frame.vps, None, "VPS が無い場合は None");
+        assert_eq!(in_frame.sps, None, "SPS が無い場合は None");
+        assert_eq!(in_frame.pps, None, "PPS が無い場合は None");
+        Ok(())
+    }
+
+    #[test]
+    fn extract_h265_vps_sps_pps_from_avcc_returns_err_on_truncated_nalu() {
+        // NALU 長がデータ末尾を超える場合は Err を返すこと
+        let mut data = Vec::new();
+        data.extend_from_slice(&(H265_VPS_640X480.len() as u32 + 10).to_be_bytes());
+        data.extend_from_slice(H265_VPS_640X480);
+        assert!(extract_h265_vps_sps_pps_from_avcc(&data).is_err());
+    }
+
+    #[test]
+    fn get_h264_sps_pps_prefers_sps_pps_in_frame() -> crate::Result<()> {
+        // フレームデータ内の SPS / PPS が sample_entry の avcC より優先されること
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
+            &[
+                &crate::video::h264::tests::SPS_1920X1080_ANNEXB[..],
+                &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2][..],
+            ]
+            .concat(),
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H264,
+            avcc_data(&[H264_SPS_320X240, H264_PPS_320X240, &[0x65, 0x88]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (sps, pps) = get_h264_sps_pps(&frame)?;
+        assert_eq!(sps, H264_SPS_320X240, "フレーム内の SPS が優先されること");
+        assert_eq!(pps, H264_PPS_320X240, "フレーム内の PPS が優先されること");
+        Ok(())
+    }
+
+    #[test]
+    fn get_h264_sps_pps_falls_back_to_sample_entry() -> crate::Result<()> {
+        // フレームデータ内に SPS / PPS が無い場合は sample_entry の avcC にフォールバックすること
+        let sample_entry = crate::video::h264::h264_sample_entry_from_annexb(
+            &[
+                &crate::video::h264::tests::SPS_320X240_ANNEXB[..],
+                &[0, 0, 0, 1, 0x68, 0xce, 0x06, 0xe2][..],
+            ]
+            .concat(),
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H264,
+            avcc_data(&[&[0x65, 0x88]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (sps, pps) = get_h264_sps_pps(&frame)?;
+        assert_eq!(
+            sps,
+            crate::video::h264::tests::SPS_320X240,
+            "sample_entry の SPS にフォールバックすること"
+        );
+        assert_eq!(
+            pps, H264_PPS_320X240,
+            "sample_entry の PPS にフォールバックすること"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_prefers_parameter_sets_in_frame() -> crate::Result<()> {
+        // フレームデータ内の VPS / SPS / PPS が sample_entry の hvcc より優先されること
+        let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
+            &[
+                &[0, 0, 0, 1][..],
+                H265_VPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_SPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_PPS_640X480,
+            ]
+            .concat(),
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H265,
+            avcc_data(&[
+                H265_VPS_640X480,
+                H265_SPS_640X480,
+                H265_PPS_640X480,
+                &[0x26, 0x01],
+            ]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
+        assert_eq!(vps, H265_VPS_640X480, "フレーム内の VPS が優先されること");
+        assert_eq!(sps, H265_SPS_640X480, "フレーム内の SPS が優先されること");
+        assert_eq!(pps, H265_PPS_640X480, "フレーム内の PPS が優先されること");
+        Ok(())
+    }
+
+    #[test]
+    fn get_h265_vps_sps_pps_falls_back_to_sample_entry() -> crate::Result<()> {
+        // フレームデータ内に VPS / SPS / PPS が無い場合は sample_entry の hvcc にフォールバックすること
+        let sample_entry = crate::video::h265::h265_sample_entry_from_annexb(
+            &[
+                &[0, 0, 0, 1][..],
+                H265_VPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_SPS_640X480,
+                &[0, 0, 0, 1][..],
+                H265_PPS_640X480,
+            ]
+            .concat(),
+            crate::video::FrameRate::FPS_30,
+        )?;
+        let frame = make_video_frame(
+            VideoFormat::H265,
+            avcc_data(&[&[0x26, 0x01]]),
+            Some(crate::sample_entry::SharedSampleEntry::new(sample_entry)),
+        );
+        let (vps, sps, pps) = get_h265_vps_sps_pps(&frame)?;
+        assert_eq!(
+            vps, H265_VPS_640X480,
+            "sample_entry の VPS にフォールバックすること"
+        );
+        assert_eq!(
+            sps, H265_SPS_640X480,
+            "sample_entry の SPS にフォールバックすること"
+        );
+        assert_eq!(
+            pps, H265_PPS_640X480,
+            "sample_entry の PPS にフォールバックすること"
+        );
+        Ok(())
+    }
 }
