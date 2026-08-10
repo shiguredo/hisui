@@ -424,6 +424,7 @@ fn default_libvpx_vp9_encode_config() -> shiguredo_libvpx::EncoderConfig {
     vp9_config.tile_rows = Some(1);
     vp9_config.row_mt = false;
     vp9_config.frame_parallel_decoding = false;
+    // tune_content は明示しない (libvpx の既定値をそのまま使用するため)
     config
 }
 
