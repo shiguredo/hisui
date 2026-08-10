@@ -248,16 +248,15 @@ polish 完了後に追記する。
 
 ## スコープ外
 
-- **`MAX_NOACKED_COUNT = 100` の値見直し**: 100 tick batch という値は `src/mp4/reader.rs:24, 1487` と `src/webm/file_reader.rs:8` と `src/obsws/source/color_source.rs:7` と `src/obsws/source/png_file.rs:8` に同名 const で散在する共通 pace 定数 (`src/sora/recording_reader.rs:41, 279` は const 名ではなく literal `100` で書かれている)。 realtime 経路だけ値を下げる or 全 pace 箇所横断で変更するかの判断は本 issue のスコープ外。 別 issue で扱う。 本 issue の frame skip は現状の 100 tick batch 前提で成立する
-- **`recording_video_mixer` の同型対応**: recording (compose) mixer には `send_syn` / Ack 機構がなく (`grep -c send_syn src/sora/recording_video_mixer.rs` が 0 件)、 品質優先で全フレームを保持する要件のため本 issue の対象外
+- **`MAX_NOACKED_COUNT = 100` の値見直し**: 100 tick batch という値は `src/mp4/reader.rs` と `src/mixer/video.rs` と `src/obsws/source/color_source.rs` と `src/obsws/source/png_file.rs` に同名 const で散在する共通 pace 定数。 realtime 経路だけ値を下げる or 全 pace 箇所横断で変更するかの判断は本 issue のスコープ外。 別 issue で扱う。 本 issue の frame skip は現状の 100 tick batch 前提で成立する
 - **`AudioRealtimeMixer` の同型対応**: `src/mixer/audio.rs` は `send_syn` / `Ack.await` を使わない設計 (`grep -c send_syn src/mixer/audio.rs` が 0 件)。 encoder Ack ブロック問題自体が発生しないため本 issue の枠組み自体が非適用。 `tokio::time::interval` + `MissedTickBehavior::Skip` (`src/mixer/audio.rs:516-517`) は tick timer catch-up 遅延の skip 機構であり本 issue の課題とは別種
-- **`webm/file_reader.rs` / `mp4/reader.rs` / `sora/recording_reader.rs` の frame skip 導入**: reader 系は compose / vmaf 経路で使われ、 品質優先が要件のため対象外
+- **`mp4/reader.rs` の frame skip 導入**: reader 系は品質優先が要件のため対象外
 - **encoder 入力 unbounded channel の bounded 化**: `src/media_pipeline.rs:1098` の `subscribe_track` が返す unbounded_channel により、 skip 連続発火時 (encoder が慢性的に catch up しないケース) は 2 回の skip 発火間 (N tick と N+203 tick の間) に送出される 202 tick 分の video + 1 syn がすべて encoder 入力 channel に積み上がり memory を圧迫する。 本 issue の skip は「101 tick 周期の long block 打ち切り」だけを目的とし、 backlog 累積の bounded 化・運用観測 (memory 圧迫、 GC 遅延、 system slowdown 等) は別 issue で扱う
 - **SKIP_TIMEOUT 微調整の判定基準**: 「false-positive skip が N 回/1000 tick 以下」等の quantitative な受け入れ基準は本 issue のスコープ外。 実運用で false-positive skip が観測されたら別 issue で SKIP_TIMEOUT を 2〜3 tick 相当まで拡大するかを検討する
 
 ## 関連
 
-- issues/0085 (`feature/refactor-encoder-inflight-backpressure`): 依存先 (実装 PR は develop に merge 済み、 issue ファイルは open のまま closed 移動待ち)
+- issues/0085 (`feature/refactor-encoder-inflight-backpressure`、 closed): 依存先 (実装は develop に merge 済み)
 - issues/0087 (`feature/add-realtime-encoder-param-override`、 open): 相互補完。 0087 の `IN_FLIGHT_LIMIT` 可変化と `requires_backpressure` 応急処置解消により、 本 issue の効果が全 encoder に波及する
 - closed/0080 (`feature/refactor-nvcodec-encoder-flush-and-backpressure`、 2026-07-21 closed): 0085 の前身。 本 issue の背景理解に参照
 - closed/0057 §3 (`feature/refactor-callback-friendly-codec-interface`、 2026-06-26 決定): 大枠の親 issue

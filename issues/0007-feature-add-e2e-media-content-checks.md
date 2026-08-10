@@ -155,7 +155,7 @@ JSON スキーマ案:
 
 ### 検討手順
 
-1. 既存の `simple_multi_sources` / `two_regions` の fixture を 1 つ選び、現状の合成結果を一度実際に確認する (`cargo run -- compose ...` → 出力を player で確認 or ffprobe / 自前デコードで YUV ダンプ)。
+1. 現状の合成結果を一度実際に確認する (compose は録画機能削除で廃止済みのため、 obsws の record 出力 (mp4_output) で合成 MP4 を生成し、 ffprobe / 自前デコードで YUV ダンプ)。
 2. 上記出力に対して、Q1 の手法 (V1)(V2)(V4) を Rust 側のテストヘルパーで実装し、期待値を JSON で記述してみる pilot を作る。
 3. pilot を libvpx / openh264 / SVT-AV1 / VideoToolbox / NVENC の各エンコーダーで動かして、許容誤差がどの程度必要かを実測する。
 4. 結果を踏まえ、Q2 のスキーマ、Q3 の tolerance、Q5 の実装場所を確定する。

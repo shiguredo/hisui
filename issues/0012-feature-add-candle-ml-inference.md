@@ -78,7 +78,7 @@
 - `hisui -x transcribe <input>` 実験的サブコマンドを新設する
 - `--experimental(-x)` フラグ必須 (過去 pipeline サブコマンドのパターンを復活)
 - 標準出力に JSON LINE で結果書き出し (動作確認用の簡易出力)
-- compose / server (obsws) 統合は本系列の範囲外。別 issue で TranscriptionService / TranscriptionProcessor を再利用する
+- server (obsws) 統合は本系列の範囲外。別 issue で TranscriptionService / TranscriptionProcessor を再利用する
 
 ### モデル取得・配布
 
@@ -115,7 +115,7 @@
 
 ### 本系列の延長
 
-- compose 系統合: Sora アーカイブから字幕付き mp4 を生成する issue
+- Sora アーカイブからの字幕付き MP4 生成 (録画合成は sora-archive-compositor へ移行済みのため、 そちら側での実現を検討する)
 - server (obsws) 系統合: リアルタイム文字起こし + obsws API
 - 多形式入力対応 (WebM / Opus 等)
 - 0014 (ML 結果出力経路) との接続点設計
