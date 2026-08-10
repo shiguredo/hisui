@@ -98,7 +98,7 @@ impl ContainerFormat {
             Ok(Self::Mp4)
         } else {
             Err(crate::Error::new(format!(
-                "unexpected media file extension: {}",
+                "unexpected media file extension: {} (only .mp4 is supported)",
                 path.as_ref().display()
             )))
         }
