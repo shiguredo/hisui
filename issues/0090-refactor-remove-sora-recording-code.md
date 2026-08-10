@@ -1,7 +1,7 @@
 # Sora 録画機能 (compose / vmaf / tune) と関連コードの削除
 
 - Created: 2026-08-03
-- Completed: {YYYY-MM-DD}
+- Completed: 2026-08-10
 - Branch: feature/refactor-remove-sora-recording-code
 - Polished: {YYYY-MM-DD}
 
@@ -83,3 +83,5 @@ hisui には録画合成専用の実装が残っている。
 12. `src/webm` / `src/yuv` 削除で孤児化した関数 (`parse_avcc_sps_pps_lists` /
     `parse_av1_codec_private` / `parse_opus_head_pre_skip`) とその PBT (`prop_h264_avcc` /
     `prop_av1`)・ユニットテスト、 pbt の未使用 dev-dependency (nojson) を削除する
+
+上記 1〜12 をすべて実施し、完了条件を満たしたため本 issue は closed とする。
