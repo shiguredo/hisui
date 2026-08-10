@@ -60,17 +60,17 @@ impl AudioEncoder {
         codec: CodecName,
         bitrate: NonZeroUsize,
         #[cfg(feature = "fdk-aac")] fdk_aac_lib: Option<shiguredo_fdk_aac::FdkAacLibrary>,
-        compose_stats: crate::stats::Stats,
+        stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
         match codec {
             CodecName::Aac => {
                 #[cfg(feature = "fdk-aac")]
                 if let Some(lib) = fdk_aac_lib {
-                    return AudioEncoder::new_fdk_aac(lib, bitrate, compose_stats);
+                    return AudioEncoder::new_fdk_aac(lib, bitrate, stats);
                 }
 
                 #[cfg(target_os = "macos")]
-                return AudioEncoder::new_audio_toolbox_aac(bitrate, compose_stats);
+                return AudioEncoder::new_audio_toolbox_aac(bitrate, stats);
 
                 #[cfg(not(target_os = "macos"))]
                 return Err(crate::Error::new(
@@ -79,20 +79,15 @@ impl AudioEncoder {
                      HISUI_FDK_AAC_PATH environment variable.",
                 ));
             }
-            CodecName::Opus => AudioEncoder::new_opus(bitrate, compose_stats),
+            CodecName::Opus => AudioEncoder::new_opus(bitrate, stats),
             _ => unreachable!(),
         }
     }
 
-    fn new_opus(
-        bitrate: NonZeroUsize,
-        mut compose_stats: crate::stats::Stats,
-    ) -> crate::Result<Self> {
-        compose_stats
-            .string("engine")
-            .set(EngineName::Opus.as_str());
-        compose_stats.string("codec").set(CodecName::Opus.as_str());
-        let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
+    fn new_opus(bitrate: NonZeroUsize, mut stats: crate::stats::Stats) -> crate::Result<Self> {
+        stats.string("engine").set(EngineName::Opus.as_str());
+        stats.string("codec").set(CodecName::Opus.as_str());
+        let total_audio_data_count_metric = stats.counter("total_audio_data_count");
         Ok(Self {
             total_audio_data_count_metric,
             encoded: VecDeque::new(),
@@ -106,13 +101,11 @@ impl AudioEncoder {
     fn new_fdk_aac(
         lib: shiguredo_fdk_aac::FdkAacLibrary,
         bitrate: NonZeroUsize,
-        mut compose_stats: crate::stats::Stats,
+        mut stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
-        compose_stats
-            .string("engine")
-            .set(EngineName::FdkAac.as_str());
-        compose_stats.string("codec").set(CodecName::Aac.as_str());
-        let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
+        stats.string("engine").set(EngineName::FdkAac.as_str());
+        stats.string("codec").set(CodecName::Aac.as_str());
+        let total_audio_data_count_metric = stats.counter("total_audio_data_count");
         Ok(Self {
             total_audio_data_count_metric,
             encoded: VecDeque::new(),
@@ -125,13 +118,13 @@ impl AudioEncoder {
     #[cfg(target_os = "macos")]
     fn new_audio_toolbox_aac(
         bitrate: NonZeroUsize,
-        mut compose_stats: crate::stats::Stats,
+        mut stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
-        compose_stats
+        stats
             .string("engine")
             .set(EngineName::AudioToolbox.as_str());
-        compose_stats.string("codec").set(CodecName::Aac.as_str());
-        let total_audio_data_count_metric = compose_stats.counter("total_audio_data_count");
+        stats.string("codec").set(CodecName::Aac.as_str());
+        let total_audio_data_count_metric = stats.counter("total_audio_data_count");
         Ok(Self {
             total_audio_data_count_metric,
             encoded: VecDeque::new(),
@@ -362,7 +355,8 @@ impl Default for EncodeConfig {
     }
 }
 
-// 以下の各既定値は、 削除した録画機能の既定レイアウトと同じ値に保っている。
+// 以下の各既定値は、削除した録画機能の既定レイアウト (旧 `layout-examples/compose-default.jsonc`)
+// と同じ値に保っている。
 
 /// 既定の libvpx VP8 エンコード設定を生成する
 fn default_libvpx_vp8_encode_config() -> shiguredo_libvpx::EncoderConfig {
@@ -736,20 +730,18 @@ impl VideoEncoder {
     pub fn new(
         options: &VideoEncoderOptions,
         openh264_lib: Option<Openh264Library>,
-        mut compose_stats: crate::stats::Stats,
+        mut stats: crate::stats::Stats,
     ) -> crate::Result<Self> {
-        let engine_metric = compose_stats.string("engine");
-        let codec_metric = compose_stats.string("codec");
-        let total_input_video_frame_count_metric =
-            compose_stats.counter("total_input_video_frame_count");
-        let total_output_video_frame_count_metric =
-            compose_stats.counter("total_output_video_frame_count");
+        let engine_metric = stats.string("engine");
+        let codec_metric = stats.string("codec");
+        let total_input_video_frame_count_metric = stats.counter("total_input_video_frame_count");
+        let total_output_video_frame_count_metric = stats.counter("total_output_video_frame_count");
         let total_output_video_keyframe_count_metric =
-            compose_stats.counter("total_output_video_keyframe_count");
+            stats.counter("total_output_video_keyframe_count");
         let total_video_keyframe_request_count_metric =
-            compose_stats.counter("total_video_keyframe_request_count");
+            stats.counter("total_video_keyframe_request_count");
         let total_video_encoder_backpressure_count_metric =
-            compose_stats.counter("total_video_encoder_backpressure_count");
+            stats.counter("total_video_encoder_backpressure_count");
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         // 同型 StatsCounter が 2 個並ぶため、 位置引数の new より field 名指定の struct literal で
         // total と keyframe の取り違えバグを防ぐ (回避先は encoder モジュール内の 3 箇所に限定される)。
