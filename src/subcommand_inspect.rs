@@ -24,7 +24,7 @@ const VIDEO_DECODED_TRACK_ID: &str = "video_decoded";
 
 pub fn try_run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result<bool> {
     if !noargs::cmd("inspect")
-        .doc("録画ファイルの情報を取得します")
+        .doc("MP4 ファイルの情報を取得します")
         .take(args)
         .is_present()
     {
@@ -54,7 +54,7 @@ fn run(args: &mut noargs::RawArgs, stats: crate::stats::Stats) -> noargs::Result
         .present_and_then(|a| a.value().parse())?;
     let input_file_path: PathBuf = noargs::arg("INPUT_FILE")
         .example("/path/to/archive.mp4")
-        .doc("情報取得対象の録画ファイル(.mp4)")
+        .doc("情報取得対象の MP4 ファイル(.mp4)")
         .take(args)
         .then(|a| a.value().parse())?;
 

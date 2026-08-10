@@ -109,7 +109,7 @@ Recording Composition Tool Hisui
 Usage: hisui [OPTIONS] <COMMAND>
 
 Commands:
-  inspect     録画ファイルの情報を取得します
+  inspect     MP4 ファイルの情報を取得します
   list-codecs 利用可能なコーデック一覧を表示します
   server      OBS WebSocket 互換サーバーコマンド
 
