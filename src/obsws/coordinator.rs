@@ -1118,11 +1118,8 @@ impl ObswsCoordinator {
                     &run.writer_processor_id,
                     "total_video_sample_count",
                 );
-                let skipped_frames = crate::obsws::response::find_output_counter_metric(
-                    &entries,
-                    &run.writer_processor_id,
-                    "total_keyframe_wait_dropped_video_frame_count",
-                );
+                // 録画出力 (Mp4Writer) はキーフレーム待ちによる drop 経路を持たないため常に 0 になる
+                let skipped_frames = 0;
                 // record の outputBytes は録画ファイルサイズ
                 let output_bytes = run.output_path.metadata().map(|m| m.len()).unwrap_or(0);
                 (output_bytes, skipped_frames, total_frames)

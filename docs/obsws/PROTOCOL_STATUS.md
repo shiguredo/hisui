@@ -355,7 +355,7 @@ NOTE: `--state-file` 指定時、scene item の作成・削除・有効/無効�
   - [x] `outputBytes`: 出力バイト数を返す
     - NOTE: 現在の録画ファイルサイズを返す
   - [x] `outputSkippedFrames`: 出力スキップフレーム数を返す
-    - NOTE: keyframe 待機中に drop した映像フレーム数を返す
+    - NOTE: MP4 writer は keyframe 待ちによる drop 経路を持たないため常に 0 を返す
   - [x] `outputTotalFrames`: 出力総フレーム数を返す
     - NOTE: MP4 writer の `total_video_sample_count` を返す
   - [x] `outputPath`: 録画ファイルパスを返す
